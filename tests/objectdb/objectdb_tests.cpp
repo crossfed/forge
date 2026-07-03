@@ -992,6 +992,76 @@ BOOST_AUTO_TEST_CASE(objectdb_single_writer_cancelled_wait_does_not_acquire_gate
    }());
 }
 
+BOOST_AUTO_TEST_CASE(objectdb_single_writer_cancelled_armed_wait_does_not_acquire_gate) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   auto driver = memory_driver{};
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = make_store(driver);
+      auto first = co_await store.begin_transaction();
+
+      auto second_waiting = std::make_shared<std::atomic_bool>(false);
+      auto second_started = std::make_shared<std::atomic_bool>(false);
+      auto second_cancelled = std::make_shared<std::atomic_bool>(false);
+      auto second_finished = std::make_shared<std::atomic_bool>(false);
+      auto second_error = std::make_shared<std::exception_ptr>();
+      const auto executor = co_await boost::asio::this_coro::executor;
+      auto cancellation = std::make_shared<boost::asio::cancellation_signal>();
+
+      boost::asio::co_spawn(
+         executor,
+         [store, second_waiting, second_started, second_cancelled, second_finished, second_error]() mutable
+            -> boost::asio::awaitable<void> {
+            try {
+               co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::enable_total_cancellation{});
+               second_waiting->store(true, std::memory_order_release);
+               auto second = co_await store.begin_transaction();
+               second_started->store(true, std::memory_order_release);
+               co_await second.rollback();
+            } catch (const boost::system::system_error& error) {
+               if (error.code() == boost::asio::error::operation_aborted) {
+                  second_cancelled->store(true, std::memory_order_release);
+               } else {
+                  *second_error = std::current_exception();
+               }
+            } catch (...) {
+               *second_error = std::current_exception();
+            }
+            second_finished->store(true, std::memory_order_release);
+            co_return;
+         },
+         boost::asio::bind_cancellation_slot(cancellation->slot(), boost::asio::detached));
+
+      auto timer = boost::asio::steady_timer{executor};
+      while (!second_waiting->load(std::memory_order_acquire)) {
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+
+      timer.expires_after(std::chrono::milliseconds{50});
+      co_await timer.async_wait(boost::asio::use_awaitable);
+
+      cancellation->emit(boost::asio::cancellation_type::all);
+      co_await first.rollback();
+
+      timer.expires_after(std::chrono::milliseconds{50});
+      co_await timer.async_wait(boost::asio::use_awaitable);
+
+      if (*second_error) {
+         std::rethrow_exception(*second_error);
+      }
+      BOOST_CHECK(second_finished->load(std::memory_order_acquire));
+      BOOST_CHECK(second_cancelled->load(std::memory_order_acquire));
+      BOOST_CHECK(!second_started->load(std::memory_order_acquire));
+      BOOST_CHECK(!driver.overlapping_writes());
+
+      auto third = co_await store.begin_transaction();
+      co_await third.rollback();
+      BOOST_CHECK(!driver.overlapping_writes());
+
+      co_return;
+   }());
+}
+
 BOOST_AUTO_TEST_CASE(objectdb_single_writer_early_cancelled_wait_does_not_need_rescue) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
    auto driver = memory_driver{};

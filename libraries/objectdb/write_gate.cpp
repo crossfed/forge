@@ -4,8 +4,10 @@ module;
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/cancellation_state.hpp>
 #include <boost/asio/cancellation_type.hpp>
+#include <boost/asio/dispatch.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <boost/asio/strand.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/system/error_code.hpp>
@@ -32,8 +34,10 @@ enum class wait_state : std::uint8_t {
 
 struct write_gate::waiter {
    explicit waiter(boost::asio::any_io_executor executor)
-       : timer{std::move(executor), boost::asio::steady_timer::time_point::max()} {}
+       : strand{boost::asio::make_strand(std::move(executor))},
+         timer{strand, boost::asio::steady_timer::time_point::max()} {}
 
+   boost::asio::strand<boost::asio::any_io_executor> strand;
    boost::asio::steady_timer timer;
    wait_state state = wait_state::queued;
 };
@@ -94,11 +98,34 @@ boost::asio::awaitable<write_gate::ticket> write_gate::acquire() {
          throw boost::system::system_error{boost::asio::error::operation_aborted};
       }
 
+      auto switch_error = boost::system::error_code{};
+      co_await boost::asio::dispatch(waiter->strand,
+                                     boost::asio::redirect_error(boost::asio::use_awaitable, switch_error));
+      if (switch_error) {
+         cancel(waiter);
+         if (slot.is_connected()) {
+            slot.clear();
+         }
+         throw boost::system::system_error{switch_error};
+      }
+      if (cancellation.cancelled() != boost::asio::cancellation_type::none) {
+         cancel(waiter);
+         if (slot.is_connected()) {
+            slot.clear();
+         }
+         throw boost::system::system_error{boost::asio::error::operation_aborted};
+      }
+
       auto error = boost::system::error_code{};
       co_await waiter->timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
 
+      const auto cancelled_after_wait = cancellation.cancelled() != boost::asio::cancellation_type::none;
       if (slot.is_connected()) {
          slot.clear();
+      }
+      if (cancelled_after_wait) {
+         cancel(waiter);
+         throw boost::system::system_error{boost::asio::error::operation_aborted};
       }
 
       auto throw_error = boost::system::error_code{};
@@ -172,12 +199,14 @@ void write_gate::release_one() noexcept {
 }
 
 void write_gate::wake(const std::shared_ptr<write_gate::waiter>& waiter) noexcept {
-   try {
-      waiter->timer.expires_at(boost::asio::steady_timer::time_point::min());
-      waiter->timer.cancel();
-   } catch (...) {
-      // Wake-up is best-effort; gate cleanup paths must remain noexcept.
-   }
+   boost::asio::dispatch(waiter->strand, [waiter] {
+      try {
+         waiter->timer.expires_at(boost::asio::steady_timer::time_point::min());
+         waiter->timer.cancel();
+      } catch (...) {
+         // Wake-up is best-effort; gate cleanup paths must remain noexcept.
+      }
+   });
 }
 
 } // namespace forge::objectdb::detail
