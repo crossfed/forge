@@ -422,6 +422,7 @@ set(
    forge_plugins_p2p_pubsub
    forge_plugins_http_server
    forge_plugins_log_otlp
+   forge_plugins_db_objectdb
    forge_plugins
 )
 
@@ -511,6 +512,7 @@ install(
              plugins/p2p/pubsub/include/forge
              plugins/http/server/include/forge
              plugins/log/otlp/include/forge
+             plugins/db/objectdb/include/forge
    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT dev EXCLUDE_FROM_ALL
 )
 

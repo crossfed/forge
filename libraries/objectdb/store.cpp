@@ -20,6 +20,7 @@ module;
 
 module forge.objectdb.store;
 
+import forge.objectdb.driver;
 import forge.objectdb.exceptions;
 
 #include "details/store_impl.hxx"
@@ -28,6 +29,22 @@ namespace forge::objectdb {
 
 store::store(begin_fn write, begin_fn read, options value)
     : impl_{std::make_shared<impl>(std::move(write), std::move(read), value)} {}
+
+store::store(std::shared_ptr<driver> value, options settings)
+    : store(
+         [value]() -> boost::asio::awaitable<std::unique_ptr<session>> {
+            if (!value) {
+               FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "objectdb driver is null");
+            }
+            co_return co_await value->begin_transaction();
+         },
+         [value]() -> boost::asio::awaitable<std::unique_ptr<session>> {
+            if (!value) {
+               FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "objectdb driver is null");
+            }
+            co_return co_await value->begin_read();
+         },
+         settings) {}
 
 void store::add_interceptor(std::shared_ptr<interceptor> value) {
    if (value) {

@@ -35,6 +35,7 @@ import forge.asio.blocking;
 import forge.crypto.hex;
 import forge.ids.object_id;
 import forge.objectdb.cursor;
+import forge.objectdb.driver;
 import forge.objectdb.exceptions;
 import forge.objectdb.hooks;
 import forge.objectdb.index;
@@ -421,8 +422,20 @@ class invalid_session final : public forge::objectdb::session {
    }
 };
 
-class memory_driver {
+class memory_driver : public forge::objectdb::driver {
  public:
+   boost::asio::awaitable<std::unique_ptr<forge::objectdb::session>> begin_transaction() override {
+      co_return std::make_unique<memory_session>(state_);
+   }
+
+   boost::asio::awaitable<std::unique_ptr<forge::objectdb::session>> begin_read() override {
+      co_return std::make_unique<memory_snapshot_session>(state_);
+   }
+
+   boost::asio::awaitable<void> flush(bool) override {
+      co_return;
+   }
+
    [[nodiscard]] forge::objectdb::session_factory<memory_session> session_factory() const {
       return forge::objectdb::session_factory<memory_session>{
          [state = state_]() -> boost::asio::awaitable<std::unique_ptr<memory_session>> {
@@ -611,6 +624,19 @@ BOOST_AUTO_TEST_CASE(objectdb_store_registers_objects_and_rejects_duplicate_regi
 
    BOOST_CHECK_NO_THROW(store.register_object<account_object>());
    BOOST_CHECK_THROW(store.register_object<account_object>(), forge::objectdb::exceptions::invalid_descriptor);
+}
+
+BOOST_AUTO_TEST_CASE(objectdb_store_accepts_owner_driver) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   auto store = forge::objectdb::store{driver};
+   store.register_object<account_object>();
+
+   forge::asio::blocking::run(runtime, [&store]() -> boost::asio::awaitable<void> {
+      co_await store.insert(make_account(42, "alice", 100, 3));
+      auto loaded = co_await store.get(account::id_type{42});
+      BOOST_CHECK_EQUAL(loaded.name, "alice");
+   }());
 }
 
 BOOST_AUTO_TEST_CASE(objectdb_store_direct_api_autocommits_and_reads_indexes) {
@@ -1380,7 +1406,7 @@ BOOST_AUTO_TEST_CASE(objectdb_rocksdb_driver_persists_objects_indexes_pages_and_
       co_await tx.insert(make_account(42, "alice", 100, 3));
       co_await tx.insert(make_account(43, "bob", 50, 3));
       co_await tx.commit();
-      driver.flush();
+      co_await driver.flush();
 
       co_return;
    }());

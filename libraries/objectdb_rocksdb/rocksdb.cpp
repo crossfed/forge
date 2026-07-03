@@ -146,6 +146,14 @@ driver::driver(config value)
       family_{std::move(value.family)},
       write_{value.write} {}
 
+boost::asio::awaitable<std::unique_ptr<forge::objectdb::session>> driver::begin_transaction() {
+   co_return std::make_unique<session>(store_->begin(write_), family_);
+}
+
+boost::asio::awaitable<std::unique_ptr<forge::objectdb::session>> driver::begin_read() {
+   co_return std::make_unique<snapshot_session>(store_->begin_snapshot(), family_);
+}
+
 forge::objectdb::session_factory<session> driver::session_factory() const {
    return forge::objectdb::session_factory<session>{
       [store = store_, family = family_, write = write_]() -> boost::asio::awaitable<std::unique_ptr<session>> {
@@ -160,8 +168,9 @@ forge::objectdb::session_factory<snapshot_session> driver::snapshot_factory() co
       }};
 }
 
-void driver::flush(bool sync) {
+boost::asio::awaitable<void> driver::flush(bool sync) {
    store_->flush_wal(sync);
+   co_return;
 }
 
 } // namespace forge::objectdb::rocksdb
