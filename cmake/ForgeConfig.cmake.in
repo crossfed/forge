@@ -14,6 +14,7 @@ set(
 	   variant
 	   raw
 	   ids
+   chain
    objectdb
    objectdb_rocksdb
    json
@@ -77,6 +78,11 @@ macro(_forge_add_component component)
 	      elseif("${component}" STREQUAL "ids")
 	         _forge_add_component(raw)
 	         _forge_add_component(variant)
+      elseif("${component}" STREQUAL "chain")
+         _forge_add_component(raw)
+         _forge_add_component(variant)
+         _forge_add_component(json)
+         _forge_add_component(crypto)
       elseif("${component}" STREQUAL "objectdb")
          _forge_add_component(exceptions)
          _forge_add_component(ids)

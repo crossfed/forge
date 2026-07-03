@@ -124,6 +124,19 @@ class service_node {
 - Split libraries when dependencies, ownership or public surfaces diverge.
   Do not hide reverse imports or target cycles behind umbrella targets.
 
+## Chain Library Boundary
+
+- `forge::chain` is the FORGE-owned chain value, wire-format and signing-rule
+  primitive layer.
+- `forge::chain` may contain deterministic protocol records, raw-compatible
+  serialization, ABI/system payload shapes, transaction and block id helpers,
+  digest/preimage helpers and compatibility fixtures.
+- `forge::chain` must not contain controller, state, execution, consensus, P2P
+  sync, node lifecycle, plugin APIs, runtime config, key custody or product
+  policy.
+- Product blockchains may build runtime layers on top of `forge::chain`, but
+  downstream product names and assumptions must not enter its public API.
+
 ## Namespace And Target Naming
 
 FORGE uses deterministic namespace, target and module naming. Replace `::` with
