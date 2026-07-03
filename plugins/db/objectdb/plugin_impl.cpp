@@ -50,6 +50,11 @@ void plugin::impl::configure(config value) {
    }
 
    auto lock = std::scoped_lock{mutex};
+   const auto state = current.load();
+   if (state == phase::started || state == phase::stopping || state == phase::stopped) {
+      FORGE_THROW_EXCEPTION(exceptions::stopped, "objectdb plugin cannot be configured after startup or stop");
+   }
+
    settings = std::move(value);
    enabled = true;
    stores = std::move(configured);

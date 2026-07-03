@@ -362,6 +362,33 @@ BOOST_AUTO_TEST_CASE(objectdb_plugin_rejects_duplicate_configured_store_names) {
       objectdb_plugin::exceptions::invalid_config);
 }
 
+BOOST_AUTO_TEST_CASE(objectdb_plugin_rejects_configure_after_stop_or_shutdown) {
+   auto runtime = forge::asio::runtime{};
+   auto document = forge::config::document{};
+
+   {
+      auto plugin = objectdb_plugin::plugin{};
+      plugin.request_stop();
+
+      BOOST_CHECK_THROW(
+         forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.objectdb"})),
+         objectdb_plugin::exceptions::stopped);
+      BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, plugin.startup()),
+                        objectdb_plugin::exceptions::startup_failed);
+   }
+
+   {
+      auto plugin = objectdb_plugin::plugin{};
+      forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.objectdb"}));
+      forge::asio::blocking::run(runtime, plugin.startup());
+      forge::asio::blocking::run(runtime, plugin.shutdown());
+
+      BOOST_CHECK_THROW(
+         forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.objectdb"})),
+         objectdb_plugin::exceptions::stopped);
+   }
+}
+
 BOOST_AUTO_TEST_CASE(objectdb_plugin_custom_driver_store_handle_reads_writes_flushes_and_stops) {
    auto driver = std::make_shared<memory_driver>();
    auto app = make_app({}, driver);
