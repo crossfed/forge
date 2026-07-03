@@ -16,7 +16,7 @@ class driver {
 
    virtual boost::asio::awaitable<std::unique_ptr<session>> begin_transaction() = 0;
    virtual boost::asio::awaitable<std::unique_ptr<session>> begin_read() = 0;
-   virtual boost::asio::awaitable<void> flush(bool sync) = 0;
+   virtual boost::asio::awaitable<void> async_flush(bool sync) = 0;
 };
 
 } // namespace forge::objectdb

@@ -168,9 +168,13 @@ forge::objectdb::session_factory<snapshot_session> driver::snapshot_factory() co
       }};
 }
 
-boost::asio::awaitable<void> driver::flush(bool sync) {
-   store_->flush_wal(sync);
+boost::asio::awaitable<void> driver::async_flush(bool sync) {
+   flush(sync);
    co_return;
+}
+
+void driver::flush(bool sync) {
+   store_->flush_wal(sync);
 }
 
 } // namespace forge::objectdb::rocksdb

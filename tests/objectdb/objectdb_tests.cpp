@@ -432,7 +432,7 @@ class memory_driver : public forge::objectdb::driver {
       co_return std::make_unique<memory_snapshot_session>(state_);
    }
 
-   boost::asio::awaitable<void> flush(bool) override {
+   boost::asio::awaitable<void> async_flush(bool) override {
       co_return;
    }
 
@@ -1406,7 +1406,9 @@ BOOST_AUTO_TEST_CASE(objectdb_rocksdb_driver_persists_objects_indexes_pages_and_
       co_await tx.insert(make_account(42, "alice", 100, 3));
       co_await tx.insert(make_account(43, "bob", 50, 3));
       co_await tx.commit();
-      co_await driver.flush();
+      driver.flush();
+      driver.flush(false);
+      co_await driver.async_flush(true);
 
       co_return;
    }());

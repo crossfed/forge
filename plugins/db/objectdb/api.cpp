@@ -20,6 +20,13 @@ import forge.plugins.db.objectdb.types;
 #include "details/plugin_impl.hxx"
 
 namespace forge::plugins::db::objectdb {
+namespace {
+
+[[nodiscard]] bool can_access_started_store(phase value) noexcept {
+   return value == phase::started || value == phase::stopping;
+}
+
+} // namespace
 
 class plugin::api_impl::handle_state final : public store_handle_state {
  public:
@@ -36,7 +43,7 @@ class plugin::api_impl::handle_state final : public store_handle_state {
       }
 
       const auto record = owner->require_store(name_);
-      if (owner->current.load() != phase::started || record->store == nullptr || !record->started) {
+      if (!can_access_started_store(owner->current.load()) || record->store == nullptr || !record->started) {
          FORGE_THROW_EXCEPTION(exceptions::stopped, "objectdb store is not started",
                                forge::exceptions::ctx("store", name_));
       }
@@ -50,7 +57,7 @@ class plugin::api_impl::handle_state final : public store_handle_state {
       }
 
       const auto record = owner->require_store(name_);
-      if (owner->current.load() != phase::started || record->driver == nullptr || !record->started) {
+      if (!can_access_started_store(owner->current.load()) || record->driver == nullptr || !record->started) {
          FORGE_THROW_EXCEPTION(exceptions::stopped, "objectdb store is not started",
                                forge::exceptions::ctx("store", name_));
       }
@@ -79,13 +86,13 @@ boost::asio::awaitable<store_handle> plugin::api_impl::store(std::string name) {
 
 boost::asio::awaitable<void> plugin::api_impl::flush(std::string name, bool sync) {
    auto state = std::make_shared<handle_state>(owner_, std::move(name));
-   co_await state->require_driver()->flush(sync);
+   co_await state->require_driver()->async_flush(sync);
 }
 
 boost::asio::awaitable<void> plugin::api_impl::flush_all(bool sync) {
    for (const auto& item : owner_->current_status().stores) {
       auto state = std::make_shared<handle_state>(owner_, item.name);
-      co_await state->require_driver()->flush(sync);
+      co_await state->require_driver()->async_flush(sync);
    }
 }
 

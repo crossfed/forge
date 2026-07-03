@@ -71,7 +71,9 @@ class driver : public forge::objectdb::driver {
 
    boost::asio::awaitable<std::unique_ptr<forge::objectdb::session>> begin_transaction() override;
    boost::asio::awaitable<std::unique_ptr<forge::objectdb::session>> begin_read() override;
-   boost::asio::awaitable<void> flush(bool sync = true) override;
+   boost::asio::awaitable<void> async_flush(bool sync) override;
+
+   void flush(bool sync = true);
 
    [[nodiscard]] forge::objectdb::session_factory<session> session_factory() const;
    [[nodiscard]] forge::objectdb::session_factory<snapshot_session> snapshot_factory() const;

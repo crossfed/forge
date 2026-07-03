@@ -172,7 +172,7 @@ class memory_driver final : public forge::objectdb::driver {
       co_return std::make_unique<memory_session>(state_, false);
    }
 
-   boost::asio::awaitable<void> flush(bool) override {
+   boost::asio::awaitable<void> async_flush(bool) override {
       ++state_->flush_calls;
       co_return;
    }
@@ -397,6 +397,44 @@ BOOST_AUTO_TEST_CASE(objectdb_plugin_custom_driver_store_handle_reads_writes_flu
 
    forge::asio::blocking::run(app->runtime(), app->shutdown());
    BOOST_CHECK_THROW(forge::asio::blocking::run(app->runtime(), handle.find(account::id_type{42})),
+                     objectdb_plugin::exceptions::stopped);
+}
+
+BOOST_AUTO_TEST_CASE(objectdb_plugin_store_handle_remains_valid_during_dependent_shutdown) {
+   auto runtime = forge::asio::runtime{};
+   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto apis = forge::api::registry{};
+   auto signals = forge::app::signal_bus{};
+   auto events = forge::app::event_bus{};
+   auto plugin = objectdb_plugin::plugin{};
+   auto driver = std::make_shared<memory_driver>();
+
+   auto document = forge::config::document{};
+   forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.objectdb"}));
+   auto provider = forge::api::installer{apis};
+   forge::asio::blocking::run(runtime, plugin.provide(provider));
+   auto context = forge::app::plugin_context{scheduler, apis, signals, events};
+   forge::asio::blocking::run(runtime, plugin.initialize(context));
+
+   auto api = apis.get<objectdb_plugin::api>(objectdb_plugin::api::ref());
+   forge::asio::blocking::run(runtime, api->add_store("shutdown", driver));
+   forge::asio::blocking::run(runtime, plugin.startup());
+
+   auto handle = forge::asio::blocking::run(runtime, api->store("shutdown"));
+   handle.register_object<account_object>();
+   forge::asio::blocking::run(runtime, handle.insert(make_account(9, "startup", 1)));
+
+   plugin.request_stop();
+
+   forge::asio::blocking::run(runtime, handle.replace(make_account(9, "shutdown", 77)));
+   forge::asio::blocking::run(runtime, api->flush("shutdown", true));
+   const auto loaded = forge::asio::blocking::run(
+      runtime, handle.get<account_object>(forge::ids::object_id{.space = 1, .type = 7, .instance = 9}));
+   BOOST_TEST(loaded.balance == 77U);
+   BOOST_TEST(driver->flush_calls() == 1U);
+
+   forge::asio::blocking::run(runtime, plugin.shutdown());
+   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, handle.find(account::id_type{9})),
                      objectdb_plugin::exceptions::stopped);
 }
 
