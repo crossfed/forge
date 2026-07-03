@@ -16,6 +16,5 @@ target_link_libraries(
       forge_compression
       forge_raw
       forge_variant
-      forge_json
       forge_crypto
 )

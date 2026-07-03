@@ -163,6 +163,12 @@ BOOST_AUTO_TEST_CASE(name_symbol_and_asset_match_spring_fixtures) {
    BOOST_TEST(pack_hex(token) == expected(spring::asset_raw));
 }
 
+BOOST_AUTO_TEST_CASE(name_rejects_high_valued_thirteenth_character) {
+   BOOST_CHECK_NO_THROW((void)protocol::make_name("abcdefghijklj"));
+   BOOST_CHECK_THROW(protocol::make_name("abcdefghijklk"), std::invalid_argument);
+   BOOST_CHECK_THROW(protocol::make_name("abcdefghijklz"), std::invalid_argument);
+}
+
 BOOST_AUTO_TEST_CASE(asset_variant_text_preserves_precision) {
    auto variant = forge::variant{};
 
@@ -174,6 +180,40 @@ BOOST_AUTO_TEST_CASE(asset_variant_text_preserves_precision) {
 
    protocol::to_variant(protocol::asset{-42, protocol::make_symbol("SYS", 4)}, variant);
    BOOST_TEST(variant.as_string() == "-0.0042 SYS");
+}
+
+BOOST_AUTO_TEST_CASE(symbol_and_asset_variant_parse_canonical_text) {
+   auto symbol = protocol::symbol{};
+   protocol::from_variant(forge::variant{"4,SYS"}, symbol);
+   BOOST_TEST(symbol.raw() == protocol::make_symbol("SYS", 4).raw());
+
+   auto asset = protocol::asset{};
+   protocol::from_variant(forge::variant{"0.0042 SYS"}, asset);
+   const auto fractional_asset = protocol::asset{42, protocol::make_symbol("SYS", 4)};
+   BOOST_TEST(asset.amount == fractional_asset.amount);
+   BOOST_TEST(asset.sym.raw() == fractional_asset.sym.raw());
+
+   protocol::from_variant(forge::variant{"42 SYS"}, asset);
+   const auto whole_asset = protocol::asset{42, protocol::make_symbol("SYS", 0)};
+   BOOST_TEST(asset.amount == whole_asset.amount);
+   BOOST_TEST(asset.sym.raw() == whole_asset.sym.raw());
+
+   protocol::from_variant(forge::variant{"-0.0042 SYS"}, asset);
+   const auto negative_asset = protocol::asset{-42, protocol::make_symbol("SYS", 4)};
+   BOOST_TEST(asset.amount == negative_asset.amount);
+   BOOST_TEST(asset.sym.raw() == negative_asset.sym.raw());
+}
+
+BOOST_AUTO_TEST_CASE(asset_variant_parse_rejects_invalid_text) {
+   auto asset = protocol::asset{};
+
+   BOOST_CHECK_THROW(protocol::from_variant(forge::variant{"0.0042"}, asset), std::invalid_argument);
+   BOOST_CHECK_THROW(protocol::from_variant(forge::variant{"0.0042 sys"}, asset), std::invalid_argument);
+   BOOST_CHECK_THROW(protocol::from_variant(forge::variant{"0. SYS"}, asset), std::invalid_argument);
+   BOOST_CHECK_THROW(protocol::from_variant(forge::variant{".0042 SYS"}, asset), std::invalid_argument);
+   BOOST_CHECK_THROW(protocol::from_variant(forge::variant{"0.0042 SYS extra"}, asset), std::invalid_argument);
+   BOOST_CHECK_THROW(protocol::from_variant(forge::variant{"+1 SYS"}, asset), std::invalid_argument);
+   BOOST_CHECK_THROW(protocol::from_variant(forge::variant{"9223372036854775808 SYS"}, asset), std::invalid_argument);
 }
 
 BOOST_AUTO_TEST_CASE(action_transaction_and_signed_transaction_match_spring_fixtures) {
