@@ -42,9 +42,9 @@ boost::asio::awaitable<forge::objectdb::record_page> session::scan_page(forge::o
       family_,
       forge::rocksdb::scan_request{
          .prefix = range.prefix.empty() ? range.begin.bytes() : range.prefix.bytes(),
-         .lower_bound = range.begin.bytes(),
          .cursor = request.after ? request.after->boundary.bytes() : std::vector<std::byte>{},
          .limit = request.limit,
+         .lower_bound = range.begin.bytes(),
       });
 
    auto result = forge::objectdb::record_page{};
@@ -104,9 +104,9 @@ boost::asio::awaitable<forge::objectdb::record_page> snapshot_session::scan_page
       family_,
       forge::rocksdb::scan_request{
          .prefix = range.prefix.empty() ? range.begin.bytes() : range.prefix.bytes(),
-         .lower_bound = range.begin.bytes(),
          .cursor = request.after ? request.after->boundary.bytes() : std::vector<std::byte>{},
          .limit = request.limit,
+         .lower_bound = range.begin.bytes(),
       });
 
    auto result = forge::objectdb::record_page{};
