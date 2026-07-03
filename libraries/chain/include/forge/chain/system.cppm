@@ -26,7 +26,6 @@ struct newaccount {
    forge::chain::authority owner;
    forge::chain::authority active;
 
-   static account_name get_account();
    static action_name get_name();
 };
 
@@ -36,7 +35,6 @@ struct setcode {
    std::uint8_t vmversion = 0;
    bytes code;
 
-   static account_name get_account();
    static action_name get_name();
 };
 
@@ -44,7 +42,6 @@ struct setabi {
    account_name account;
    bytes abi;
 
-   static account_name get_account();
    static action_name get_name();
 };
 
@@ -54,7 +51,6 @@ struct updateauth {
    permission_name parent;
    forge::chain::authority auth;
 
-   static account_name get_account();
    static action_name get_name();
 };
 
@@ -62,7 +58,6 @@ struct deleteauth {
    account_name account;
    permission_name permission;
 
-   static account_name get_account();
    static action_name get_name();
 };
 
@@ -72,7 +67,6 @@ struct linkauth {
    action_name type;
    permission_name requirement;
 
-   static account_name get_account();
    static action_name get_name();
 };
 
@@ -81,7 +75,6 @@ struct unlinkauth {
    account_name code;
    action_name type;
 
-   static account_name get_account();
    static action_name get_name();
 };
 
@@ -89,7 +82,6 @@ struct canceldelay {
    permission_level canceling_auth;
    transaction_id trx_id;
 
-   static account_name get_account();
    static action_name get_name();
 };
 
@@ -97,7 +89,6 @@ struct onerror {
    uint128_t sender_id = 0;
    bytes sent_trx;
 
-   static account_name get_account();
    static action_name get_name();
 };
 
