@@ -168,6 +168,25 @@ std::shared_ptr<managed_store> plugin::impl::require_store(const std::string& na
    return record;
 }
 
+plugin::impl::opened_store plugin::impl::require_open_store(const std::string& name) const {
+   auto lock = std::scoped_lock{mutex};
+   const auto found = stores.find(name);
+   if (found == stores.end()) {
+      FORGE_THROW_EXCEPTION(exceptions::unknown_store, "objectdb store is not registered",
+                            forge::exceptions::ctx("store", name));
+   }
+
+   const auto& record = found->second;
+   const auto state = current.load();
+   if ((state != phase::started && state != phase::stopping) || record->store == nullptr || record->driver == nullptr ||
+       !record->started) {
+      FORGE_THROW_EXCEPTION(exceptions::stopped, "objectdb store is not started",
+                            forge::exceptions::ctx("store", name));
+   }
+
+   return opened_store{.store = record->store, .driver = record->driver};
+}
+
 status plugin::impl::current_status() const {
    auto out = status{};
    auto lock = std::scoped_lock{mutex};

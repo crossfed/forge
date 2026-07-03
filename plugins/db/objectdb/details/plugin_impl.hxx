@@ -23,6 +23,11 @@ struct managed_store {
 };
 
 struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
+   struct opened_store {
+      std::shared_ptr<forge::objectdb::store> store;
+      std::shared_ptr<forge::objectdb::driver> driver;
+   };
+
    mutable std::mutex mutex;
    config settings;
    std::unordered_map<std::string, std::shared_ptr<managed_store>> stores;
@@ -40,6 +45,7 @@ struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
                   forge::objectdb::store::options options);
    [[nodiscard]] std::shared_ptr<managed_store> find_store(const std::string& name) const;
    [[nodiscard]] std::shared_ptr<managed_store> require_store(const std::string& name) const;
+   [[nodiscard]] opened_store require_open_store(const std::string& name) const;
    [[nodiscard]] status current_status() const;
 
  private:

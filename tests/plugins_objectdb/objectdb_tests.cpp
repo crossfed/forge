@@ -5,14 +5,17 @@
 #include <forge/objectdb/macros.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <filesystem>
 #include <map>
 #include <memory>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -435,6 +438,64 @@ BOOST_AUTO_TEST_CASE(objectdb_plugin_store_handle_remains_valid_during_dependent
 
    forge::asio::blocking::run(runtime, plugin.shutdown());
    BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, handle.find(account::id_type{9})),
+                     objectdb_plugin::exceptions::stopped);
+}
+
+BOOST_AUTO_TEST_CASE(objectdb_plugin_store_handle_concurrent_close_is_snapshot_safe) {
+   auto runtime = forge::asio::runtime{};
+   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto apis = forge::api::registry{};
+   auto signals = forge::app::signal_bus{};
+   auto events = forge::app::event_bus{};
+   auto plugin = objectdb_plugin::plugin{};
+   auto driver = std::make_shared<memory_driver>();
+
+   auto document = forge::config::document{};
+   forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.objectdb"}));
+   auto provider = forge::api::installer{apis};
+   forge::asio::blocking::run(runtime, plugin.provide(provider));
+   auto context = forge::app::plugin_context{scheduler, apis, signals, events};
+   forge::asio::blocking::run(runtime, plugin.initialize(context));
+
+   auto api = apis.get<objectdb_plugin::api>(objectdb_plugin::api::ref());
+   forge::asio::blocking::run(runtime, api->add_store("shutdown", driver));
+   forge::asio::blocking::run(runtime, plugin.startup());
+
+   auto handle = forge::asio::blocking::run(runtime, api->store("shutdown"));
+   handle.register_object<account_object>();
+   forge::asio::blocking::run(runtime, handle.insert(make_account(10, "close-race", 1)));
+
+   plugin.request_stop();
+
+   auto done = std::atomic_bool{false};
+   auto closer_error = std::exception_ptr{};
+   auto closer = std::thread{[&] {
+      try {
+         forge::asio::blocking::run(runtime, plugin.shutdown());
+      } catch (...) {
+         closer_error = std::current_exception();
+      }
+      done.store(true, std::memory_order_release);
+   }};
+
+   auto successes = std::size_t{0};
+   auto stopped = std::size_t{0};
+   do {
+      try {
+         (void)forge::asio::blocking::run(runtime, handle.find(account::id_type{10}));
+         ++successes;
+      } catch (const objectdb_plugin::exceptions::stopped&) {
+         ++stopped;
+      }
+   } while (!done.load(std::memory_order_acquire));
+
+   closer.join();
+   if (closer_error) {
+      std::rethrow_exception(closer_error);
+   }
+
+   BOOST_TEST(successes + stopped > 0U);
+   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, handle.find(account::id_type{10})),
                      objectdb_plugin::exceptions::stopped);
 }
 

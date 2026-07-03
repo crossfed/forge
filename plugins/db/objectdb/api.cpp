@@ -20,13 +20,6 @@ import forge.plugins.db.objectdb.types;
 #include "details/plugin_impl.hxx"
 
 namespace forge::plugins::db::objectdb {
-namespace {
-
-[[nodiscard]] bool can_access_started_store(phase value) noexcept {
-   return value == phase::started || value == phase::stopping;
-}
-
-} // namespace
 
 class plugin::api_impl::handle_state final : public store_handle_state {
  public:
@@ -42,12 +35,7 @@ class plugin::api_impl::handle_state final : public store_handle_state {
          FORGE_THROW_EXCEPTION(exceptions::stopped, "objectdb plugin is stopped");
       }
 
-      const auto record = owner->require_store(name_);
-      if (!can_access_started_store(owner->current.load()) || record->store == nullptr || !record->started) {
-         FORGE_THROW_EXCEPTION(exceptions::stopped, "objectdb store is not started",
-                               forge::exceptions::ctx("store", name_));
-      }
-      return record->store;
+      return owner->require_open_store(name_).store;
    }
 
    [[nodiscard]] std::shared_ptr<forge::objectdb::driver> require_driver() const override {
@@ -56,12 +44,7 @@ class plugin::api_impl::handle_state final : public store_handle_state {
          FORGE_THROW_EXCEPTION(exceptions::stopped, "objectdb plugin is stopped");
       }
 
-      const auto record = owner->require_store(name_);
-      if (!can_access_started_store(owner->current.load()) || record->driver == nullptr || !record->started) {
-         FORGE_THROW_EXCEPTION(exceptions::stopped, "objectdb store is not started",
-                               forge::exceptions::ctx("store", name_));
-      }
-      return record->driver;
+      return owner->require_open_store(name_).driver;
    }
 
  private:
