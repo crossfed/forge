@@ -105,25 +105,59 @@ void plugin::impl::add_store(std::string name,
 }
 
 void plugin::impl::start() {
-   auto configured = std::vector<store_config>{};
+   struct pending_open {
+      std::string name;
+      store_config config;
+      std::shared_ptr<forge::objectdb::driver> driver;
+   };
+
+   auto pending = std::vector<pending_open>{};
    {
       auto lock = std::scoped_lock{mutex};
       if (!enabled) {
          current.store(phase::started);
          return;
       }
-      configured = settings.stores;
+
+      const auto state = current.load();
+      if (state == phase::stopping || state == phase::stopped) {
+         FORGE_THROW_EXCEPTION(exceptions::stopped, "objectdb plugin is stopping");
+      }
+
+      for (const auto& item : settings.stores) {
+         const auto found = stores.find(item.name);
+         if (found == stores.end()) {
+            FORGE_THROW_EXCEPTION(exceptions::startup_failed, "objectdb configured store is not registered",
+                                  forge::exceptions::ctx("store", item.name));
+         }
+         if (!found->second->driver) {
+            pending.push_back(pending_open{.name = item.name, .config = item});
+         }
+      }
    }
 
-   for (const auto& item : configured) {
-      auto record = require_store(item.name);
-      if (!record->driver) {
-         record->driver = detail::make_configured_driver(item);
-      }
+   for (auto& item : pending) {
+      item.driver = detail::make_configured_driver(item.config);
    }
 
    {
       auto lock = std::scoped_lock{mutex};
+      const auto state = current.load();
+      if (state == phase::stopping || state == phase::stopped) {
+         FORGE_THROW_EXCEPTION(exceptions::stopped, "objectdb plugin is stopping");
+      }
+
+      for (auto& item : pending) {
+         const auto found = stores.find(item.name);
+         if (found == stores.end()) {
+            FORGE_THROW_EXCEPTION(exceptions::startup_failed, "objectdb configured store is not registered",
+                                  forge::exceptions::ctx("store", item.name));
+         }
+         if (!found->second->driver) {
+            found->second->driver = std::move(item.driver);
+         }
+      }
+
       for (auto& [name, record] : stores) {
          if (!record->driver) {
             FORGE_THROW_EXCEPTION(exceptions::startup_failed, "objectdb store has no driver",

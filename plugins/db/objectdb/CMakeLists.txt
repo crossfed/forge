@@ -3,7 +3,7 @@ add_library(
    plugin.cpp
    config.cpp
    plugin_impl.cpp
-   handle.cpp
+   api_handle_impl.cpp
    api.cpp
 )
 forge_target_modules_at(forge_plugins_db_objectdb plugins/db/objectdb)
