@@ -76,7 +76,33 @@ struct action_result_def {
 template <typename T>
 struct may_not_exist {
    T value{};
+   bool present = true;
 };
+
+template <typename Stream, typename T>
+Stream& operator<<(Stream& stream, const may_not_exist<T>& value) {
+   if (value.present) {
+      forge::raw::pack(stream, value.value);
+   }
+   return stream;
+}
+
+template <typename Stream, typename T>
+Stream& operator>>(Stream& stream, may_not_exist<T>& value) {
+   if constexpr (requires { stream.remaining(); }) {
+      if (stream.remaining()) {
+         forge::raw::unpack(stream, value.value);
+         value.present = true;
+      } else {
+         value.value = T{};
+         value.present = false;
+      }
+   } else {
+      forge::raw::unpack(stream, value.value);
+      value.present = true;
+   }
+   return stream;
+}
 
 struct abi_def {
    std::string version;
@@ -97,7 +123,9 @@ export namespace forge::raw {
 
 template <typename Stream, typename T>
 void pack(Stream& stream, const forge::chain::may_not_exist<T>& value) {
-   forge::raw::pack(stream, value.value);
+   if (value.present) {
+      forge::raw::pack(stream, value.value);
+   }
 }
 
 template <typename Stream, typename T>
@@ -105,9 +133,14 @@ void unpack(Stream& stream, forge::chain::may_not_exist<T>& value) {
    if constexpr (requires { stream.remaining(); }) {
       if (stream.remaining()) {
          forge::raw::unpack(stream, value.value);
+         value.present = true;
+      } else {
+         value.value = T{};
+         value.present = false;
       }
    } else {
       forge::raw::unpack(stream, value.value);
+      value.present = true;
    }
 }
 

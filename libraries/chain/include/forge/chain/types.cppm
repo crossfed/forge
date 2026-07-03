@@ -33,7 +33,6 @@ using checksum160 = forge::crypto::ripemd160;
 using transaction_id = checksum;
 using digest = checksum;
 using public_key = forge::crypto::asymmetric::public_key;
-using private_key = forge::crypto::asymmetric::private_key;
 using signature = forge::crypto::asymmetric::signature;
 using weight = std::uint16_t;
 using block_num = std::uint32_t;

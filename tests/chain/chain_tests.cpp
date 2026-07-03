@@ -287,6 +287,21 @@ BOOST_AUTO_TEST_CASE(abi_and_system_actions_match_spring_fixtures) {
    BOOST_TEST(pack_hex(setabi) == expected(spring::setabi_raw));
 }
 
+BOOST_AUTO_TEST_CASE(legacy_abi_roundtrip_preserves_absent_extension_fields) {
+   constexpr auto empty_optional_vector_hex_size = std::size_t{2};
+   const auto legacy_hex = std::string{spring::abi_raw.substr(
+      0,
+      spring::abi_raw.size() - 2U * empty_optional_vector_hex_size
+   )};
+   const auto legacy_bytes = unhex(legacy_hex);
+
+   const auto unpacked = forge::raw::unpack<protocol::abi_def>(legacy_bytes);
+
+   BOOST_TEST(!unpacked.variants.present);
+   BOOST_TEST(!unpacked.action_results.present);
+   BOOST_TEST(pack_hex(unpacked) == legacy_hex);
+}
+
 BOOST_AUTO_TEST_CASE(block_header_receipt_and_signed_block_match_spring_fixtures) {
    const auto header = make_reference_block_header();
 
