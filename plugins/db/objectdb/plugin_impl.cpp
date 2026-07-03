@@ -171,6 +171,10 @@ void plugin::impl::start() {
 }
 
 void plugin::impl::request_stop() noexcept {
+   auto lock = std::scoped_lock{mutex};
+   if (current.load() == phase::stopped) {
+      return;
+   }
    current.store(phase::stopping);
 }
 
