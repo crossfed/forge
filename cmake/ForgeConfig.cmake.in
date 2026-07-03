@@ -14,6 +14,7 @@ set(
 	   variant
 	   raw
 	   ids
+   compression
    chain
    objectdb
    objectdb_rocksdb
@@ -78,7 +79,10 @@ macro(_forge_add_component component)
 	      elseif("${component}" STREQUAL "ids")
 	         _forge_add_component(raw)
 	         _forge_add_component(variant)
+      elseif("${component}" STREQUAL "compression")
+         _forge_add_component(exceptions)
       elseif("${component}" STREQUAL "chain")
+         _forge_add_component(compression)
          _forge_add_component(raw)
          _forge_add_component(variant)
          _forge_add_component(json)
@@ -328,6 +332,9 @@ endif()
 if("program_options" IN_LIST _FORGE_COMPONENTS)
    list(APPEND _FORGE_BOOST_COMPONENTS program_options)
 endif()
+if("compression" IN_LIST _FORGE_COMPONENTS)
+   list(APPEND _FORGE_BOOST_COMPONENTS iostreams)
+endif()
 if(_FORGE_BOOST_COMPONENTS)
    list(REMOVE_DUPLICATES _FORGE_BOOST_COMPONENTS)
    _forge_require_package(Boost 1.90 CONFIG COMPONENTS ${_FORGE_BOOST_COMPONENTS})
@@ -364,6 +371,10 @@ endif()
 
 if("quic" IN_LIST _FORGE_COMPONENTS OR "p2p" IN_LIST _FORGE_COMPONENTS)
    _forge_require_package(Ngtcp2)
+endif()
+
+if("compression" IN_LIST _FORGE_COMPONENTS)
+   _forge_require_package(ZLIB)
 endif()
 
 if(Forge_BUILT_WITH_ROCKSDB)

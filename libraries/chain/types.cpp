@@ -31,6 +31,37 @@ std::uint8_t symbol_index(char value) {
    return static_cast<std::uint8_t>(found);
 }
 
+std::string format_asset_amount(std::int64_t amount, std::uint8_t precision) {
+   const auto negative = amount < 0;
+   const auto magnitude = negative
+      ? std::uint64_t{0} - static_cast<std::uint64_t>(amount)
+      : static_cast<std::uint64_t>(amount);
+
+   auto digits = std::to_string(magnitude);
+   auto result = std::string{};
+   if (negative) {
+      result.push_back('-');
+   }
+
+   if (precision == 0) {
+      result += digits;
+      return result;
+   }
+
+   if (digits.size() <= precision) {
+      result += "0.";
+      result.append(static_cast<std::size_t>(precision) - digits.size(), '0');
+      result += digits;
+      return result;
+   }
+
+   const auto decimal_position = digits.size() - precision;
+   result += digits.substr(0, decimal_position);
+   result.push_back('.');
+   result += digits.substr(decimal_position);
+   return result;
+}
+
 } // namespace
 
 [[noreturn]] void fail_invalid_argument(const char* message) {
@@ -120,21 +151,6 @@ std::string to_string(const symbol& value) {
    return std::to_string(value.precision()) + "," + to_string(value.code());
 }
 
-symbol core_symbol() {
-   return make_symbol("SYS", 4);
-}
-
-asset to_core_asset(std::uint64_t amount) {
-   return asset{static_cast<std::int64_t>(amount), core_symbol()};
-}
-
-std::uint64_t from_core_asset(const asset& value) {
-   if (value.sym != core_symbol() || value.amount < 0) {
-      fail_invalid_argument("asset is not a non-negative core asset");
-   }
-   return static_cast<std::uint64_t>(value.amount);
-}
-
 void to_variant(const name& value, forge::variant& variant) {
    variant = to_string(value);
 }
@@ -160,7 +176,7 @@ void from_variant(const forge::variant&, symbol&) {
 }
 
 void to_variant(const asset& value, forge::variant& variant) {
-   variant = std::to_string(value.amount) + " " + to_string(value.sym.code());
+   variant = format_asset_amount(value.amount, value.sym.precision()) + " " + to_string(value.sym.code());
 }
 
 void from_variant(const forge::variant&, asset&) {

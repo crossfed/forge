@@ -13,6 +13,7 @@ target_include_directories(forge_chain PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
 
 target_link_libraries(
    forge_chain PUBLIC
+      forge_compression
       forge_raw
       forge_variant
       forge_json

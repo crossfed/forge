@@ -85,16 +85,8 @@ struct packed_transaction {
    bytes packed_trx;
 
    [[nodiscard]] digest packed_digest() const;
-   [[nodiscard]] const transaction_id& id() const {
-      return trx_id;
-   }
-   [[nodiscard]] const signed_transaction& get_signed_transaction() const {
-      return unpacked_trx;
-   }
-
- private:
-   signed_transaction unpacked_trx;
-   transaction_id trx_id;
+   [[nodiscard]] transaction_id id() const;
+   [[nodiscard]] signed_transaction get_signed_transaction() const;
 };
 
 std::vector<char> pack_transaction(const transaction& value);

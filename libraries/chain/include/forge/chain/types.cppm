@@ -135,10 +135,6 @@ symbol_code make_symbol_code(std::string_view code);
 symbol make_symbol(std::string_view code, std::uint8_t precision);
 std::string to_string(const symbol_code& value);
 std::string to_string(const symbol& value);
-symbol core_symbol();
-
-asset to_core_asset(std::uint64_t amount);
-std::uint64_t from_core_asset(const asset& value);
 
 void to_variant(const name& value, forge::variant& variant);
 void from_variant(const forge::variant& variant, name& value);

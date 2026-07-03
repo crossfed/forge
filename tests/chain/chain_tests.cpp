@@ -12,7 +12,9 @@
 import forge.crypto.asymmetric;
 import forge.crypto.secp256k1;
 import forge.crypto.sha256;
+import forge.compression.exceptions;
 import forge.raw.raw;
+import forge.variant.value;
 import forge.chain.abi;
 import forge.chain.block;
 import forge.chain.types;
@@ -42,6 +44,16 @@ std::string hex(const std::vector<char>& bytes) {
       reinterpret_cast<const std::uint8_t*>(bytes.data()),
       bytes.size(),
    });
+}
+
+std::vector<char> unhex(std::string_view value) {
+   auto out = std::vector<char>{};
+   out.reserve(value.size() / 2);
+   for (auto index = std::size_t{0}; index < value.size(); index += 2) {
+      const auto byte = std::string{value.substr(index, 2)};
+      out.push_back(static_cast<char>(std::stoi(byte, nullptr, 16)));
+   }
+   return out;
 }
 
 template <typename T>
@@ -151,6 +163,19 @@ BOOST_AUTO_TEST_CASE(name_symbol_and_asset_match_spring_fixtures) {
    BOOST_TEST(pack_hex(token) == expected(spring::asset_raw));
 }
 
+BOOST_AUTO_TEST_CASE(asset_variant_text_preserves_precision) {
+   auto variant = forge::variant{};
+
+   protocol::to_variant(protocol::asset{42, protocol::make_symbol("SYS", 4)}, variant);
+   BOOST_TEST(variant.as_string() == "0.0042 SYS");
+
+   protocol::to_variant(protocol::asset{42, protocol::make_symbol("SYS", 0)}, variant);
+   BOOST_TEST(variant.as_string() == "42 SYS");
+
+   protocol::to_variant(protocol::asset{-42, protocol::make_symbol("SYS", 4)}, variant);
+   BOOST_TEST(variant.as_string() == "-0.0042 SYS");
+}
+
 BOOST_AUTO_TEST_CASE(action_transaction_and_signed_transaction_match_spring_fixtures) {
    const auto action = make_setabi_action();
    BOOST_TEST(pack_hex(action) == expected(spring::action_raw));
@@ -167,6 +192,34 @@ BOOST_AUTO_TEST_CASE(action_transaction_and_signed_transaction_match_spring_fixt
    BOOST_TEST(pack_hex(packed) == expected(spring::packed_transaction_raw));
    BOOST_TEST(packed.id().str() == expected(spring::transaction_id));
    BOOST_TEST(packed.packed_digest().str() == expected(spring::packed_transaction_digest));
+}
+
+BOOST_AUTO_TEST_CASE(zlib_packed_transaction_matches_spring_and_unpacks_from_wire) {
+   const auto signed_trx = make_reference_signed_transaction();
+   const auto packed = protocol::packed_transaction{
+      signed_trx,
+      protocol::packed_transaction::compression::zlib};
+
+   BOOST_TEST(pack_hex(packed) == expected(spring::packed_transaction_zlib_raw));
+   BOOST_TEST(packed.id().str() == expected(spring::transaction_id));
+   BOOST_TEST(packed.packed_digest().str() == expected(spring::packed_transaction_zlib_digest));
+   BOOST_TEST(pack_hex(packed.get_signed_transaction()) == expected(spring::signed_transaction_raw));
+
+   const auto unpacked = forge::raw::unpack<protocol::packed_transaction>(
+      unhex(spring::packed_transaction_zlib_raw));
+   BOOST_TEST(unpacked.id().str() == expected(spring::transaction_id));
+   BOOST_TEST(unpacked.packed_digest().str() == expected(spring::packed_transaction_zlib_digest));
+   BOOST_TEST(pack_hex(unpacked.get_signed_transaction()) == expected(spring::signed_transaction_raw));
+}
+
+BOOST_AUTO_TEST_CASE(packed_transaction_unknown_compression_is_typed_failure) {
+   auto packed = protocol::packed_transaction{make_reference_signed_transaction()};
+   packed.compression = static_cast<decltype(packed.compression)>(0xff);
+
+   BOOST_CHECK_THROW(
+      (void)packed.get_signed_transaction(),
+      forge::compression::exceptions::invalid_input
+   );
 }
 
 BOOST_AUTO_TEST_CASE(transaction_signature_preimage_digest_and_spring_signature_are_compatible) {

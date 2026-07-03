@@ -1,5 +1,6 @@
 module;
 
+#include <forge/exceptions/macros.hpp>
 #include <forge/raw/serialization.hpp>
 
 #include <algorithm>
@@ -14,6 +15,7 @@ module;
 
 module forge.chain.transaction;
 
+import forge.compression.zlib;
 import forge.crypto.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
@@ -29,10 +31,58 @@ import forge.variant.described;
 namespace forge::chain {
 namespace {
 
+using packed_compression = decltype(std::declval<const packed_transaction&>().compression);
+
+[[noreturn]] void fail_unknown_compression() {
+   FORGE_THROW_EXCEPTION(forge::compression::exceptions::invalid_input, "unknown packed transaction compression");
+}
+
 template <typename T>
 void append_raw(std::vector<char>& out, const T& value) {
    auto bytes = forge::raw::pack(value);
    out.insert(out.end(), bytes.begin(), bytes.end());
+}
+
+std::vector<char> maybe_compress(std::vector<char> value, packed_compression selected_compression) {
+   switch (selected_compression) {
+      case packed_compression::none:
+         return value;
+      case packed_compression::zlib:
+         return forge::compression::zlib_compress(value, forge::compression::zlib_level::best_compression);
+   }
+   fail_unknown_compression();
+}
+
+std::vector<char> maybe_decompress(const std::vector<char>& value, packed_compression selected_compression) {
+   switch (selected_compression) {
+      case packed_compression::none:
+         return value;
+      case packed_compression::zlib:
+         return forge::compression::zlib_decompress(value);
+   }
+   fail_unknown_compression();
+}
+
+bytes pack_context_free_data(const std::vector<bytes>& value, packed_compression selected_compression) {
+   if (value.empty()) {
+      return {};
+   }
+   return maybe_compress(forge::raw::pack(value), selected_compression);
+}
+
+std::vector<bytes> unpack_context_free_data(const bytes& value, packed_compression selected_compression) {
+   if (value.empty()) {
+      return {};
+   }
+   return forge::raw::unpack<std::vector<bytes>>(maybe_decompress(value, selected_compression));
+}
+
+bytes pack_transaction_payload(const transaction& value, packed_compression selected_compression) {
+   return maybe_compress(forge::raw::pack(value), selected_compression);
+}
+
+transaction unpack_transaction_payload(const bytes& value, packed_compression selected_compression) {
+   return forge::raw::unpack<transaction>(maybe_decompress(value, selected_compression));
 }
 
 } // namespace
@@ -73,28 +123,28 @@ digest signature_digest(const chain_id& chain_id, const transaction& value, cons
    return forge::crypto::sha256::hash(preimage.data(), static_cast<std::uint32_t>(preimage.size()));
 }
 
-packed_transaction::packed_transaction(const signed_transaction& value, enum compression selected_compression)
+packed_transaction::packed_transaction(const signed_transaction& value, packed_compression selected_compression)
     : signatures(value.signatures)
     , compression(selected_compression)
-    , unpacked_trx(value)
-    , trx_id(value.id()) {
-   if (compression != compression::none) {
-      fail_invalid_argument("chain zlib packed_transaction is deferred");
-   }
-   packed_trx = forge::raw::pack(static_cast<const transaction&>(value));
-   packed_context_free_data = forge::raw::pack(value.context_free_data);
+    , packed_context_free_data(pack_context_free_data(value.context_free_data, selected_compression))
+    , packed_trx(pack_transaction_payload(static_cast<const transaction&>(value), selected_compression)) {}
+
+packed_transaction::packed_transaction(signed_transaction&& value, packed_compression selected_compression)
+    : signatures(value.signatures)
+    , compression(selected_compression)
+    , packed_context_free_data(pack_context_free_data(value.context_free_data, selected_compression))
+    , packed_trx(pack_transaction_payload(static_cast<const transaction&>(value), selected_compression)) {}
+
+transaction_id packed_transaction::id() const {
+   return calculate_transaction_id(unpack_transaction_payload(packed_trx, compression));
 }
 
-packed_transaction::packed_transaction(signed_transaction&& value, enum compression selected_compression)
-    : signatures(value.signatures)
-    , compression(selected_compression)
-    , unpacked_trx(std::move(value))
-    , trx_id(unpacked_trx.id()) {
-   if (compression != compression::none) {
-      fail_invalid_argument("chain zlib packed_transaction is deferred");
-   }
-   packed_trx = forge::raw::pack(static_cast<const transaction&>(unpacked_trx));
-   packed_context_free_data = forge::raw::pack(unpacked_trx.context_free_data);
+signed_transaction packed_transaction::get_signed_transaction() const {
+   auto out = signed_transaction{};
+   static_cast<transaction&>(out) = unpack_transaction_payload(packed_trx, compression);
+   out.signatures = signatures;
+   out.context_free_data = unpack_context_free_data(packed_context_free_data, compression);
+   return out;
 }
 
 digest packed_transaction::packed_digest() const {

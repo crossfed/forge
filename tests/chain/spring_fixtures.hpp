@@ -48,6 +48,13 @@ inline constexpr std::string_view packed_transaction_raw =
    "24000000000100ddccbbaa00000000010000000000ea305500000000b863b2c20002010200";
 inline constexpr std::string_view packed_transaction_digest =
    "1182f6b15748ddaf28b7147331d1fe7405cb91e5c9cd9000c2dd1be54e7b3457";
+inline constexpr std::string_view packed_transaction_zlib_raw =
+   "01001f011b3864db72d4b002d340597753013c7029a44a9beb04844b9198bd25c01bf301"
+   "ef88c86fbe403f3bf9dadeb84149638aa8e7cbcaff3cc6c4a5f21b9d2e997f010c78da"
+   "6364626601000018000b2578da636060606064b87b66f72a06300b045e198482a81dc99b"
+   "0e3130313231000080dd0714";
+inline constexpr std::string_view packed_transaction_zlib_digest =
+   "9d027ef57715f727af699f68970bbfdfb51316b5a63f4b9a35c1755a2dc92744";
 
 inline constexpr std::string_view abi_raw =
    "0e656f73696f3a3a6162692f312e32010c6163636f756e745f6e616d65046e616d6500"

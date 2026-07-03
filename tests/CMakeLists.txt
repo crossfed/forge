@@ -90,6 +90,14 @@ target_link_libraries(test_forge_chain forge_chain forge Boost::included_unit_te
 add_test(NAME test_forge_chain COMMAND test_forge_chain WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
+   test_forge_compression
+   unit/main.cpp
+   compression/zlib_tests.cpp
+)
+target_link_libraries(test_forge_compression forge_compression forge Boost::included_unit_test_framework)
+add_test(NAME test_forge_compression COMMAND test_forge_compression WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(
    test_forge_objectdb
    unit/main.cpp
    objectdb/objectdb_tests.cpp
@@ -477,6 +485,17 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
+   test_forge_package_compression_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_compression_component
+      ${CMAKE_BINARY_DIR}/forge-package-compression-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_compression_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
    test_forge_package_chain_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
@@ -772,6 +791,17 @@ add_test(
       --test-command forge_package_ids_component
 )
 set_tests_properties(test_forge_package_ids_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_compression_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_compression_component
+      ${CMAKE_BINARY_DIR}/forge-package-compression-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_compression_component
+)
+set_tests_properties(test_forge_package_compression_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_chain_component
    COMMAND ${CMAKE_CTEST_COMMAND}
