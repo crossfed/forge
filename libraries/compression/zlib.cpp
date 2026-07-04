@@ -2,11 +2,15 @@ module;
 
 #include <forge/exceptions/macros.hpp>
 
-#include <zlib.h>
+#include <boost/iostreams/device/back_inserter.hpp>
+#include <boost/iostreams/filter/zlib.hpp>
+#include <boost/iostreams/filtering_stream.hpp>
+#include <boost/iostreams/operations.hpp>
 
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <ios>
 #include <limits>
 #include <span>
 #include <string>
@@ -21,147 +25,96 @@ namespace {
 
 constexpr auto chunk_size = std::size_t{16 * 1024};
 
-std::string zlib_message(const z_stream& stream, int code) {
-   if (stream.msg != nullptr) {
-      return stream.msg;
-   }
-   return "zlib error " + std::to_string(code);
+int to_boost_level(zlib_level level) {
+   return static_cast<int>(level);
 }
 
-class zlib_stream {
- public:
-   enum class mode {
-      deflate,
-      inflate,
-   };
+std::streamsize to_stream_size(std::size_t value) {
+   const auto max = static_cast<std::size_t>(std::numeric_limits<std::streamsize>::max());
+   return static_cast<std::streamsize>(std::min(value, max));
+}
 
-   explicit zlib_stream(mode selected_mode, int level = Z_DEFAULT_COMPRESSION)
-       : selected_mode_{selected_mode} {
-      const auto result = selected_mode_ == mode::deflate ? deflateInit(&stream_, level)
-                                                          : inflateInit(&stream_);
-      if (result != Z_OK) {
-         FORGE_THROW_EXCEPTION(exceptions::backend_error, zlib_message(stream_, result));
-      }
-      initialized_ = true;
-   }
-
-   zlib_stream(const zlib_stream&) = delete;
-   zlib_stream& operator=(const zlib_stream&) = delete;
-
-   ~zlib_stream() {
-      if (!initialized_) {
-         return;
-      }
-      if (selected_mode_ == mode::deflate) {
-         deflateEnd(&stream_);
-      } else {
-         inflateEnd(&stream_);
-      }
-   }
-
-   z_stream& get() {
-      return stream_;
-   }
-
- private:
-   mode selected_mode_;
-   z_stream stream_{};
-   bool initialized_ = false;
-};
-
-uInt next_input_size(std::size_t remaining) {
-   return static_cast<uInt>(std::min<std::size_t>(remaining, std::numeric_limits<uInt>::max()));
+boost::iostreams::zlib_params make_params(zlib_level level) {
+   auto params = boost::iostreams::zlib_params{};
+   params.level = to_boost_level(level);
+   return params;
 }
 
 } // namespace
 
 std::vector<char> zlib_compress(std::span<const char> input, zlib_level level) {
-   auto stream_owner = zlib_stream{zlib_stream::mode::deflate, static_cast<int>(level)};
-   auto& stream = stream_owner.get();
-   auto out = std::vector<char>{};
-   auto buffer = std::array<unsigned char, chunk_size>{};
+   try {
+      auto out = std::vector<char>{};
+      auto stream = boost::iostreams::filtering_ostream{};
+      stream.push(boost::iostreams::zlib_compressor{make_params(level)});
+      stream.push(boost::iostreams::back_insert_device(out));
 
-   const auto* input_ptr = reinterpret_cast<const unsigned char*>(input.data());
-   auto remaining = input.size();
-   auto result = Z_OK;
-   do {
-      const auto available = next_input_size(remaining);
-      stream.next_in = const_cast<unsigned char*>(input_ptr);
-      stream.avail_in = available;
-      input_ptr += available;
-      remaining -= available;
+      auto* data = input.data();
+      auto remaining = input.size();
+      while (remaining > 0) {
+         const auto size = to_stream_size(remaining);
+         boost::iostreams::write(stream, data, size);
+         data += size;
+         remaining -= static_cast<std::size_t>(size);
+      }
 
-      const auto flush = remaining == 0 ? Z_FINISH : Z_NO_FLUSH;
-      do {
-         stream.next_out = buffer.data();
-         stream.avail_out = static_cast<uInt>(buffer.size());
-         result = deflate(&stream, flush);
-         if (result == Z_STREAM_ERROR) {
-            FORGE_THROW_EXCEPTION(exceptions::backend_error, zlib_message(stream, result));
-         }
-
-         const auto produced = buffer.size() - stream.avail_out;
-         out.insert(out.end(),
-                    reinterpret_cast<const char*>(buffer.data()),
-                    reinterpret_cast<const char*>(buffer.data()) + produced);
-      } while (stream.avail_out == 0);
-   } while (result != Z_STREAM_END);
-
-   return out;
+      boost::iostreams::close(stream);
+      return out;
+   } catch (const boost::iostreams::zlib_error& error) {
+      FORGE_THROW_EXCEPTION(exceptions::backend_error, error.what());
+   } catch (const std::ios_base::failure& error) {
+      FORGE_THROW_EXCEPTION(exceptions::backend_error, error.what());
+   }
 }
 
 std::vector<char> zlib_decompress(std::span<const char> input, zlib_limits limits) {
-   auto stream_owner = zlib_stream{zlib_stream::mode::inflate};
-   auto& stream = stream_owner.get();
-   auto out = std::vector<char>{};
-   auto buffer = std::array<unsigned char, chunk_size>{};
+   try {
+      auto decompressor = boost::iostreams::zlib_decompressor{};
+      auto out = std::vector<char>{};
+      auto buffer = std::array<char, chunk_size>{};
+      auto* input_next = input.data();
+      const auto* input_end = input.data() + input.size();
 
-   const auto* input_ptr = reinterpret_cast<const unsigned char*>(input.data());
-   auto remaining = input.size();
-   auto loaded_all_input = false;
+      while (true) {
+         const auto at_limit = out.size() >= limits.max_output_size;
+         const auto capacity = at_limit ? std::size_t{1}
+                                        : std::min(buffer.size(), limits.max_output_size - out.size());
 
-   while (true) {
-      if (stream.avail_in == 0 && remaining > 0) {
-         const auto available = next_input_size(remaining);
-         stream.next_in = const_cast<unsigned char*>(input_ptr);
-         stream.avail_in = available;
-         input_ptr += available;
-         remaining -= available;
-      }
-      loaded_all_input = remaining == 0;
-
-      const auto at_limit = out.size() >= limits.max_output_size;
-      const auto capacity = at_limit ? std::size_t{1}
-                                     : std::min(buffer.size(), limits.max_output_size - out.size());
-      stream.next_out = buffer.data();
-      stream.avail_out = static_cast<uInt>(capacity);
-
-      const auto result = inflate(&stream, Z_NO_FLUSH);
-      const auto produced = capacity - stream.avail_out;
-      if (produced > 0) {
-         if (at_limit || out.size() + produced > limits.max_output_size) {
-            FORGE_THROW_EXCEPTION(exceptions::output_limit, "zlib decompressed output exceeds configured limit");
+         auto* output_next = buffer.data();
+         auto* output_end = buffer.data() + capacity;
+         const auto* before_input = input_next;
+         const auto keep_going = decompressor.filter().filter(input_next,
+                                                               input_end,
+                                                               output_next,
+                                                               output_end,
+                                                               false);
+         const auto produced = static_cast<std::size_t>(output_next - buffer.data());
+         if (produced > 0) {
+            if (at_limit || out.size() + produced > limits.max_output_size) {
+               FORGE_THROW_EXCEPTION(exceptions::output_limit, "zlib decompressed output exceeds configured limit");
+            }
+            out.insert(out.end(), buffer.data(), buffer.data() + produced);
          }
-         out.insert(out.end(),
-                    reinterpret_cast<const char*>(buffer.data()),
-                    reinterpret_cast<const char*>(buffer.data()) + produced);
-      }
 
-      if (result == Z_STREAM_END) {
-         if (stream.avail_in != 0 || remaining != 0) {
-            FORGE_THROW_EXCEPTION(exceptions::invalid_input, "zlib stream has trailing input");
+         if (!keep_going) {
+            if (input_next != input_end) {
+               FORGE_THROW_EXCEPTION(exceptions::invalid_input, "zlib stream has trailing input");
+            }
+            return out;
          }
-         return out;
+
+         if (produced == 0 && input_next == before_input) {
+            FORGE_THROW_EXCEPTION(exceptions::invalid_input, "zlib stream ended before a complete payload");
+         }
       }
-      if (result == Z_OK) {
-         continue;
-      }
-      if (result == Z_BUF_ERROR && loaded_all_input) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_input, zlib_message(stream, result));
-      }
-      if (result != Z_BUF_ERROR) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_input, zlib_message(stream, result));
-      }
+   } catch (const exceptions::invalid_input&) {
+      throw;
+   } catch (const exceptions::output_limit&) {
+      throw;
+   } catch (const boost::iostreams::zlib_error& error) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_input, error.what());
+   } catch (const std::ios_base::failure& error) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_input, error.what());
    }
 }
 
