@@ -295,29 +295,27 @@ BOOST_AUTO_TEST_CASE(abi_and_system_actions_match_spring_fixtures) {
    BOOST_TEST(pack_hex(setabi) == expected(spring::setabi_raw));
 }
 
-BOOST_AUTO_TEST_CASE(legacy_abi_roundtrip_preserves_absent_extension_fields) {
+BOOST_AUTO_TEST_CASE(legacy_abi_unpack_normalizes_tail_fields_on_pack) {
    const auto legacy_hex = legacy_abi_hex();
    const auto legacy_bytes = unhex(legacy_hex);
 
    const auto unpacked = forge::raw::unpack<protocol::abi_def>(legacy_bytes);
 
-   BOOST_TEST(!unpacked.variants.present);
-   BOOST_TEST(!unpacked.action_results.present);
-   BOOST_TEST(pack_hex(unpacked) == legacy_hex);
+   BOOST_TEST(unpacked.variants.value.empty());
+   BOOST_TEST(unpacked.action_results.value.empty());
+   BOOST_TEST(pack_hex(unpacked) == expected(spring::abi_raw));
 }
 
-BOOST_AUTO_TEST_CASE(may_not_exist_variant_null_marks_field_absent) {
-   auto absent = protocol::may_not_exist<std::vector<protocol::variant_def>>{};
-   absent.present = false;
+BOOST_AUTO_TEST_CASE(may_not_exist_variant_conversion_uses_value) {
+   auto value = protocol::may_not_exist<std::vector<protocol::variant_def>>{};
 
    auto encoded = forge::variant{};
-   protocol::to_variant(absent, encoded);
+   protocol::to_variant(value, encoded);
 
    auto decoded = protocol::may_not_exist<std::vector<protocol::variant_def>>{};
    protocol::from_variant(encoded, decoded);
 
-   BOOST_TEST(encoded.is_null());
-   BOOST_TEST(!decoded.present);
+   BOOST_TEST(encoded.get_array().empty());
    BOOST_TEST(decoded.value.empty());
 }
 
@@ -363,7 +361,7 @@ BOOST_AUTO_TEST_CASE(abi_variant_roundtrip_preserves_wire_compatibility) {
    BOOST_TEST(pack_hex(decoded) == expected(spring::abi_raw));
 }
 
-BOOST_AUTO_TEST_CASE(legacy_abi_variant_roundtrip_omits_absent_extension_fields) {
+BOOST_AUTO_TEST_CASE(legacy_abi_variant_conversion_uses_empty_tail_fields) {
    const auto legacy_hex = legacy_abi_hex();
    const auto unpacked = forge::raw::unpack<protocol::abi_def>(unhex(legacy_hex));
 
@@ -371,15 +369,17 @@ BOOST_AUTO_TEST_CASE(legacy_abi_variant_roundtrip_omits_absent_extension_fields)
    protocol::to_variant(unpacked, encoded);
 
    const auto& object = encoded.get_object();
-   BOOST_TEST(!object.contains("variants"));
-   BOOST_TEST(!object.contains("action_results"));
+   BOOST_TEST(object.contains("variants"));
+   BOOST_TEST(object.contains("action_results"));
+   BOOST_TEST(object["variants"].get_array().empty());
+   BOOST_TEST(object["action_results"].get_array().empty());
 
    auto decoded = protocol::abi_def{};
    protocol::from_variant(encoded, decoded);
 
-   BOOST_TEST(!decoded.variants.present);
-   BOOST_TEST(!decoded.action_results.present);
-   BOOST_TEST(pack_hex(decoded) == legacy_hex);
+   BOOST_TEST(decoded.variants.value.empty());
+   BOOST_TEST(decoded.action_results.value.empty());
+   BOOST_TEST(pack_hex(decoded) == expected(spring::abi_raw));
 }
 
 BOOST_AUTO_TEST_CASE(block_header_receipt_and_signed_block_match_spring_fixtures) {

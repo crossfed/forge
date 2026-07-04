@@ -77,14 +77,11 @@ struct action_result_def {
 template <typename T>
 struct may_not_exist {
    T value{};
-   bool present = true;
 };
 
 template <typename Stream, typename T>
 Stream& operator<<(Stream& stream, const may_not_exist<T>& value) {
-   if (value.present) {
-      forge::raw::pack(stream, value.value);
-   }
+   forge::raw::pack(stream, value.value);
    return stream;
 }
 
@@ -93,36 +90,23 @@ Stream& operator>>(Stream& stream, may_not_exist<T>& value) {
    if constexpr (requires { stream.remaining(); }) {
       if (stream.remaining()) {
          forge::raw::unpack(stream, value.value);
-         value.present = true;
       } else {
          value.value = T{};
-         value.present = false;
       }
    } else {
       forge::raw::unpack(stream, value.value);
-      value.present = true;
    }
    return stream;
 }
 
 template <typename T>
 void to_variant(const may_not_exist<T>& value, forge::variant& variant) {
-   if (value.present) {
-      forge::to_variant(value.value, variant);
-   } else {
-      variant = forge::variant{};
-   }
+   forge::to_variant(value.value, variant);
 }
 
 template <typename T>
 void from_variant(const forge::variant& variant, may_not_exist<T>& value) {
-   if (variant.is_null()) {
-      value.value = T{};
-      value.present = false;
-   } else {
-      forge::from_variant(variant, value.value);
-      value.present = true;
-   }
+   forge::from_variant(variant, value.value);
 }
 
 struct abi_def {
@@ -144,9 +128,7 @@ export namespace forge::raw {
 
 template <typename Stream, typename T>
 void pack(Stream& stream, const forge::chain::may_not_exist<T>& value) {
-   if (value.present) {
-      forge::raw::pack(stream, value.value);
-   }
+   forge::raw::pack(stream, value.value);
 }
 
 template <typename Stream, typename T>
@@ -154,48 +136,15 @@ void unpack(Stream& stream, forge::chain::may_not_exist<T>& value) {
    if constexpr (requires { stream.remaining(); }) {
       if (stream.remaining()) {
          forge::raw::unpack(stream, value.value);
-         value.present = true;
       } else {
          value.value = T{};
-         value.present = false;
       }
    } else {
       forge::raw::unpack(stream, value.value);
-      value.present = true;
    }
 }
 
 } // namespace forge::raw
-
-namespace forge::chain::detail {
-
-template <typename T>
-void add_abi_variant_field(forge::mutable_variant_object& object, const char* name, const T& value) {
-   auto field = forge::variant{};
-   forge::to_variant(value, field);
-   object.set(name, field);
-}
-
-template <typename T>
-void read_abi_variant_field(const forge::variant_object& object, const char* name, T& value) {
-   const auto itr = object.find(name);
-   if (itr != object.end()) {
-      forge::from_variant(itr->value(), value);
-   }
-}
-
-template <typename T>
-void read_abi_optional_tail(const forge::variant_object& object, const char* name, forge::chain::may_not_exist<T>& value) {
-   const auto itr = object.find(name);
-   if (itr != object.end()) {
-      forge::chain::from_variant(itr->value(), value);
-   } else {
-      value.value = T{};
-      value.present = false;
-   }
-}
-
-} // namespace forge::chain::detail
 
 export namespace forge::chain {
    BOOST_DESCRIBE_STRUCT(type_def, (), (new_type_name, type))
@@ -210,36 +159,11 @@ export namespace forge::chain {
    BOOST_DESCRIBE_STRUCT(abi_def, (), (version, types, structs, actions, tables, ricardian_clauses, error_messages, abi_extensions, variants, action_results))
 
    inline void to_variant(const abi_def& value, forge::variant& variant) {
-      auto object = forge::mutable_variant_object{};
-      detail::add_abi_variant_field(object, "version", value.version);
-      detail::add_abi_variant_field(object, "types", value.types);
-      detail::add_abi_variant_field(object, "structs", value.structs);
-      detail::add_abi_variant_field(object, "actions", value.actions);
-      detail::add_abi_variant_field(object, "tables", value.tables);
-      detail::add_abi_variant_field(object, "ricardian_clauses", value.ricardian_clauses);
-      detail::add_abi_variant_field(object, "error_messages", value.error_messages);
-      detail::add_abi_variant_field(object, "abi_extensions", value.abi_extensions);
-      if (value.variants.present) {
-         detail::add_abi_variant_field(object, "variants", value.variants.value);
-      }
-      if (value.action_results.present) {
-         detail::add_abi_variant_field(object, "action_results", value.action_results.value);
-      }
-      variant = object;
+      forge::to_variant(value, variant);
    }
 
    inline void from_variant(const forge::variant& variant, abi_def& value) {
-      const auto& object = variant.get_object();
-      detail::read_abi_variant_field(object, "version", value.version);
-      detail::read_abi_variant_field(object, "types", value.types);
-      detail::read_abi_variant_field(object, "structs", value.structs);
-      detail::read_abi_variant_field(object, "actions", value.actions);
-      detail::read_abi_variant_field(object, "tables", value.tables);
-      detail::read_abi_variant_field(object, "ricardian_clauses", value.ricardian_clauses);
-      detail::read_abi_variant_field(object, "error_messages", value.error_messages);
-      detail::read_abi_variant_field(object, "abi_extensions", value.abi_extensions);
-      detail::read_abi_optional_tail(object, "variants", value.variants);
-      detail::read_abi_optional_tail(object, "action_results", value.action_results);
+      forge::from_variant(variant, value);
    }
 }
 
