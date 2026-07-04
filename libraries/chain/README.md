@@ -57,15 +57,15 @@ import forge.chain.transaction;
 import forge.chain.types;
 import forge.raw.raw;
 
-auto action = forge::chain::action{
-   .account = forge::chain::make_name("mychain"),
-   .name = forge::chain::setabi::get_name(),
-   .authorization = {},
-   .data = forge::raw::pack(forge::chain::setabi{
-      .account = forge::chain::make_name("alice"),
-      .abi = {},
-   }),
-};
+auto system_account = forge::chain::make_name("mychain");
+auto action = forge::chain::action{};
+action.account = system_account;
+action.name = forge::chain::setabi::get_name();
+action.authorization = {};
+action.data = forge::raw::pack(forge::chain::setabi{
+   .account = forge::chain::make_name("alice"),
+   .abi = {},
+});
 ```
 
 ### Calculate A Transaction Digest
@@ -84,7 +84,7 @@ import forge.chain.transaction;
 
 auto packed = forge::chain::packed_transaction{
    signed_transaction,
-   forge::chain::compression::none,
+   forge::chain::packed_transaction::compression::none,
 };
 
 auto unpacked = packed.get_signed_transaction();

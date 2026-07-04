@@ -50,6 +50,17 @@ BOOST_AUTO_TEST_CASE(zlib_rejects_invalid_input) {
    );
 }
 
+BOOST_AUTO_TEST_CASE(zlib_rejects_trailing_input_after_stream) {
+   const auto input = bytes("forge compression zlib payload");
+   auto compressed = compression::zlib_compress(input, compression::zlib_level::best_compression);
+   compressed.push_back('x');
+
+   BOOST_CHECK_THROW(
+      compression::zlib_decompress(compressed),
+      compression::exceptions::invalid_input
+   );
+}
+
 BOOST_AUTO_TEST_CASE(zlib_enforces_output_limit) {
    auto input = std::vector<char>(4096, char{'x'});
    const auto compressed = compression::zlib_compress(input, compression::zlib_level::best_compression);

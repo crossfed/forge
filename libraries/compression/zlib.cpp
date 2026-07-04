@@ -148,6 +148,9 @@ std::vector<char> zlib_decompress(std::span<const char> input, zlib_limits limit
       }
 
       if (result == Z_STREAM_END) {
+         if (stream.avail_in != 0 || remaining != 0) {
+            FORGE_THROW_EXCEPTION(exceptions::invalid_input, "zlib stream has trailing input");
+         }
          return out;
       }
       if (result == Z_OK) {
