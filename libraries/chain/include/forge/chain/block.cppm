@@ -83,7 +83,7 @@ struct signed_block : signed_block_header {
 };
 
 struct producer_confirmation {
-   block_id block_id;
+   ::forge::chain::block_id block_id;
    digest block_digest;
    account_name producer;
    signature sig;
