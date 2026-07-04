@@ -15,6 +15,7 @@ import forge.crypto.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
 import forge.variant.value;
+import forge.variant.containers;
 import forge.variant.described;
 
 export namespace forge::chain {
@@ -47,7 +48,7 @@ struct action_def {
 
 struct table_def {
    table_name name;
-   type_name index;
+   type_name index_type;
    std::vector<field_name> key_names;
    std::vector<type_name> key_types;
    type_name type;
@@ -70,7 +71,7 @@ struct variant_def {
 
 struct action_result_def {
    action_name name;
-   type_name result;
+   type_name result_type;
 };
 
 template <typename T>
@@ -102,6 +103,26 @@ Stream& operator>>(Stream& stream, may_not_exist<T>& value) {
       value.present = true;
    }
    return stream;
+}
+
+template <typename T>
+void to_variant(const may_not_exist<T>& value, forge::variant& variant) {
+   if (value.present) {
+      forge::to_variant(value.value, variant);
+   } else {
+      variant = forge::variant{};
+   }
+}
+
+template <typename T>
+void from_variant(const forge::variant& variant, may_not_exist<T>& value) {
+   if (variant.is_null()) {
+      value.value = T{};
+      value.present = false;
+   } else {
+      forge::from_variant(variant, value.value);
+      value.present = true;
+   }
 }
 
 struct abi_def {
@@ -146,17 +167,80 @@ void unpack(Stream& stream, forge::chain::may_not_exist<T>& value) {
 
 } // namespace forge::raw
 
+namespace forge::chain::detail {
+
+template <typename T>
+void add_abi_variant_field(forge::mutable_variant_object& object, const char* name, const T& value) {
+   auto field = forge::variant{};
+   forge::to_variant(value, field);
+   object.set(name, field);
+}
+
+template <typename T>
+void read_abi_variant_field(const forge::variant_object& object, const char* name, T& value) {
+   const auto itr = object.find(name);
+   if (itr != object.end()) {
+      forge::from_variant(itr->value(), value);
+   }
+}
+
+template <typename T>
+void read_abi_optional_tail(const forge::variant_object& object, const char* name, forge::chain::may_not_exist<T>& value) {
+   const auto itr = object.find(name);
+   if (itr != object.end()) {
+      forge::chain::from_variant(itr->value(), value);
+   } else {
+      value.value = T{};
+      value.present = false;
+   }
+}
+
+} // namespace forge::chain::detail
+
 export namespace forge::chain {
-BOOST_DESCRIBE_STRUCT(type_def, (), (new_type_name, type))
-BOOST_DESCRIBE_STRUCT(field_def, (), (name, type))
-BOOST_DESCRIBE_STRUCT(struct_def, (), (name, base, fields))
-BOOST_DESCRIBE_STRUCT(action_def, (), (name, type, ricardian_contract))
-BOOST_DESCRIBE_STRUCT(table_def, (), (name, index, key_names, key_types, type))
-BOOST_DESCRIBE_STRUCT(clause_pair, (), (id, body))
-BOOST_DESCRIBE_STRUCT(error_message, (), (error_code, error_msg))
-BOOST_DESCRIBE_STRUCT(variant_def, (), (name, types))
-BOOST_DESCRIBE_STRUCT(action_result_def, (), (name, result))
-BOOST_DESCRIBE_STRUCT(abi_def, (), (version, types, structs, actions, tables, ricardian_clauses, error_messages, abi_extensions, variants, action_results))
+   BOOST_DESCRIBE_STRUCT(type_def, (), (new_type_name, type))
+   BOOST_DESCRIBE_STRUCT(field_def, (), (name, type))
+   BOOST_DESCRIBE_STRUCT(struct_def, (), (name, base, fields))
+   BOOST_DESCRIBE_STRUCT(action_def, (), (name, type, ricardian_contract))
+   BOOST_DESCRIBE_STRUCT(table_def, (), (name, index_type, key_names, key_types, type))
+   BOOST_DESCRIBE_STRUCT(clause_pair, (), (id, body))
+   BOOST_DESCRIBE_STRUCT(error_message, (), (error_code, error_msg))
+   BOOST_DESCRIBE_STRUCT(variant_def, (), (name, types))
+   BOOST_DESCRIBE_STRUCT(action_result_def, (), (name, result_type))
+   BOOST_DESCRIBE_STRUCT(abi_def, (), (version, types, structs, actions, tables, ricardian_clauses, error_messages, abi_extensions, variants, action_results))
+
+   inline void to_variant(const abi_def& value, forge::variant& variant) {
+      auto object = forge::mutable_variant_object{};
+      detail::add_abi_variant_field(object, "version", value.version);
+      detail::add_abi_variant_field(object, "types", value.types);
+      detail::add_abi_variant_field(object, "structs", value.structs);
+      detail::add_abi_variant_field(object, "actions", value.actions);
+      detail::add_abi_variant_field(object, "tables", value.tables);
+      detail::add_abi_variant_field(object, "ricardian_clauses", value.ricardian_clauses);
+      detail::add_abi_variant_field(object, "error_messages", value.error_messages);
+      detail::add_abi_variant_field(object, "abi_extensions", value.abi_extensions);
+      if (value.variants.present) {
+         detail::add_abi_variant_field(object, "variants", value.variants.value);
+      }
+      if (value.action_results.present) {
+         detail::add_abi_variant_field(object, "action_results", value.action_results.value);
+      }
+      variant = object;
+   }
+
+   inline void from_variant(const forge::variant& variant, abi_def& value) {
+      const auto& object = variant.get_object();
+      detail::read_abi_variant_field(object, "version", value.version);
+      detail::read_abi_variant_field(object, "types", value.types);
+      detail::read_abi_variant_field(object, "structs", value.structs);
+      detail::read_abi_variant_field(object, "actions", value.actions);
+      detail::read_abi_variant_field(object, "tables", value.tables);
+      detail::read_abi_variant_field(object, "ricardian_clauses", value.ricardian_clauses);
+      detail::read_abi_variant_field(object, "error_messages", value.error_messages);
+      detail::read_abi_variant_field(object, "abi_extensions", value.abi_extensions);
+      detail::read_abi_optional_tail(object, "variants", value.variants);
+      detail::read_abi_optional_tail(object, "action_results", value.action_results);
+   }
 }
 
 export namespace forge::raw {

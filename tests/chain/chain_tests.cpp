@@ -113,6 +113,14 @@ protocol::abi_def make_reference_abi() {
    };
 }
 
+std::string legacy_abi_hex() {
+   constexpr auto empty_optional_vector_hex_size = std::size_t{2};
+   return std::string{spring::abi_raw.substr(
+      0,
+      spring::abi_raw.size() - 2U * empty_optional_vector_hex_size
+   )};
+}
+
 protocol::block_header make_reference_block_header() {
    protocol::block_header header;
    header.timestamp = protocol::block_timestamp{1};
@@ -288,11 +296,7 @@ BOOST_AUTO_TEST_CASE(abi_and_system_actions_match_spring_fixtures) {
 }
 
 BOOST_AUTO_TEST_CASE(legacy_abi_roundtrip_preserves_absent_extension_fields) {
-   constexpr auto empty_optional_vector_hex_size = std::size_t{2};
-   const auto legacy_hex = std::string{spring::abi_raw.substr(
-      0,
-      spring::abi_raw.size() - 2U * empty_optional_vector_hex_size
-   )};
+   const auto legacy_hex = legacy_abi_hex();
    const auto legacy_bytes = unhex(legacy_hex);
 
    const auto unpacked = forge::raw::unpack<protocol::abi_def>(legacy_bytes);
@@ -300,6 +304,82 @@ BOOST_AUTO_TEST_CASE(legacy_abi_roundtrip_preserves_absent_extension_fields) {
    BOOST_TEST(!unpacked.variants.present);
    BOOST_TEST(!unpacked.action_results.present);
    BOOST_TEST(pack_hex(unpacked) == legacy_hex);
+}
+
+BOOST_AUTO_TEST_CASE(may_not_exist_variant_null_marks_field_absent) {
+   auto absent = protocol::may_not_exist<std::vector<protocol::variant_def>>{};
+   absent.present = false;
+
+   auto encoded = forge::variant{};
+   protocol::to_variant(absent, encoded);
+
+   auto decoded = protocol::may_not_exist<std::vector<protocol::variant_def>>{};
+   protocol::from_variant(encoded, decoded);
+
+   BOOST_TEST(encoded.is_null());
+   BOOST_TEST(!decoded.present);
+   BOOST_TEST(decoded.value.empty());
+}
+
+BOOST_AUTO_TEST_CASE(abi_variant_schema_uses_spring_field_names) {
+   auto abi = protocol::abi_def{};
+   abi.version = "eosio::abi/1.2";
+   abi.tables = {protocol::table_def{
+      .name = protocol::make_name("accounts"),
+      .index_type = "i64",
+      .key_names = {"owner"},
+      .key_types = {"name"},
+      .type = "account",
+   }};
+   abi.action_results.value = {protocol::action_result_def{
+      .name = protocol::make_name("get"),
+      .result_type = "account",
+   }};
+
+   auto encoded = forge::variant{};
+   protocol::to_variant(abi, encoded);
+
+   const auto& object = encoded.get_object();
+   const auto& table = object["tables"].get_array().front().get_object();
+   BOOST_TEST(table.contains("index_type"));
+   BOOST_TEST(!table.contains("index"));
+   BOOST_TEST(table["index_type"].as_string() == "i64");
+
+   const auto& action_result = object["action_results"].get_array().front().get_object();
+   BOOST_TEST(action_result.contains("result_type"));
+   BOOST_TEST(!action_result.contains("result"));
+   BOOST_TEST(action_result["result_type"].as_string() == "account");
+}
+
+BOOST_AUTO_TEST_CASE(abi_variant_roundtrip_preserves_wire_compatibility) {
+   const auto reference = make_reference_abi();
+
+   auto encoded = forge::variant{};
+   protocol::to_variant(reference, encoded);
+
+   auto decoded = protocol::abi_def{};
+   protocol::from_variant(encoded, decoded);
+
+   BOOST_TEST(pack_hex(decoded) == expected(spring::abi_raw));
+}
+
+BOOST_AUTO_TEST_CASE(legacy_abi_variant_roundtrip_omits_absent_extension_fields) {
+   const auto legacy_hex = legacy_abi_hex();
+   const auto unpacked = forge::raw::unpack<protocol::abi_def>(unhex(legacy_hex));
+
+   auto encoded = forge::variant{};
+   protocol::to_variant(unpacked, encoded);
+
+   const auto& object = encoded.get_object();
+   BOOST_TEST(!object.contains("variants"));
+   BOOST_TEST(!object.contains("action_results"));
+
+   auto decoded = protocol::abi_def{};
+   protocol::from_variant(encoded, decoded);
+
+   BOOST_TEST(!decoded.variants.present);
+   BOOST_TEST(!decoded.action_results.present);
+   BOOST_TEST(pack_hex(decoded) == legacy_hex);
 }
 
 BOOST_AUTO_TEST_CASE(block_header_receipt_and_signed_block_match_spring_fixtures) {
