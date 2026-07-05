@@ -326,6 +326,18 @@ target_link_libraries(test_forge_plugins forge Boost::included_unit_test_framewo
 add_test(NAME test_forge_plugins COMMAND test_forge_plugins WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
+   test_forge_plugins_objectdb
+   unit/main.cpp
+   plugins_objectdb/objectdb_tests.cpp
+)
+target_link_libraries(test_forge_plugins_objectdb forge_plugins_db_objectdb forge Boost::included_unit_test_framework)
+target_compile_definitions(test_forge_plugins_objectdb PRIVATE FORGE_HAS_ROCKSDB=$<BOOL:${FORGE_HAS_ROCKSDB}>)
+if(FORGE_HAS_ROCKSDB)
+   target_link_libraries(test_forge_plugins_objectdb forge_objectdb_rocksdb)
+endif()
+add_test(NAME test_forge_plugins_objectdb COMMAND test_forge_plugins_objectdb WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(
    test_forge_crypto_secrets
    unit/main.cpp
    plugins/crypto/secrets_tests.cpp
@@ -607,6 +619,17 @@ add_custom_target(
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
       --test-command forge_package_plugins_log_otlp
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_plugins_db_objectdb
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_db_objectdb
+      ${CMAKE_BINARY_DIR}/forge-package-plugins-db-objectdb
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_plugins_db_objectdb
    DEPENDS test_forge_package_install
 )
 if(FORGE_HAS_ROCKSDB)
@@ -916,6 +939,17 @@ add_test(
       --test-command forge_package_plugins_log_otlp
 )
 set_tests_properties(test_forge_package_plugins_log_otlp PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_plugins_db_objectdb
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_db_objectdb
+      ${CMAKE_BINARY_DIR}/forge-package-plugins-db-objectdb
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_plugins_db_objectdb
+)
+set_tests_properties(test_forge_package_plugins_db_objectdb PROPERTIES DEPENDS test_forge_package_install)
 if(FORGE_HAS_ROCKSDB)
    add_test(
       NAME test_forge_package_objectdb_rocksdb_component

@@ -42,9 +42,9 @@ boost::asio::awaitable<forge::objectdb::record_page> session::scan_page(forge::o
       family_,
       forge::rocksdb::scan_request{
          .prefix = range.prefix.empty() ? range.begin.bytes() : range.prefix.bytes(),
-         .lower_bound = range.begin.bytes(),
          .cursor = request.after ? request.after->boundary.bytes() : std::vector<std::byte>{},
          .limit = request.limit,
+         .lower_bound = range.begin.bytes(),
       });
 
    auto result = forge::objectdb::record_page{};
@@ -104,9 +104,9 @@ boost::asio::awaitable<forge::objectdb::record_page> snapshot_session::scan_page
       family_,
       forge::rocksdb::scan_request{
          .prefix = range.prefix.empty() ? range.begin.bytes() : range.prefix.bytes(),
-         .lower_bound = range.begin.bytes(),
          .cursor = request.after ? request.after->boundary.bytes() : std::vector<std::byte>{},
          .limit = request.limit,
+         .lower_bound = range.begin.bytes(),
       });
 
    auto result = forge::objectdb::record_page{};
@@ -146,6 +146,14 @@ driver::driver(config value)
       family_{std::move(value.family)},
       write_{value.write} {}
 
+boost::asio::awaitable<std::unique_ptr<forge::objectdb::session>> driver::begin_transaction() {
+   co_return std::make_unique<session>(store_->begin(write_), family_);
+}
+
+boost::asio::awaitable<std::unique_ptr<forge::objectdb::session>> driver::begin_read() {
+   co_return std::make_unique<snapshot_session>(store_->begin_snapshot(), family_);
+}
+
 forge::objectdb::session_factory<session> driver::session_factory() const {
    return forge::objectdb::session_factory<session>{
       [store = store_, family = family_, write = write_]() -> boost::asio::awaitable<std::unique_ptr<session>> {
@@ -158,6 +166,11 @@ forge::objectdb::session_factory<snapshot_session> driver::snapshot_factory() co
       [store = store_, family = family_]() -> boost::asio::awaitable<std::unique_ptr<snapshot_session>> {
          co_return std::make_unique<snapshot_session>(store->begin_snapshot(), family);
       }};
+}
+
+boost::asio::awaitable<void> driver::async_flush(bool sync) {
+   flush(sync);
+   co_return;
 }
 
 void driver::flush(bool sync) {

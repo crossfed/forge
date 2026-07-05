@@ -16,6 +16,7 @@ export module forge.objectdb.store;
 
 import forge.ids.object_id;
 import forge.objectdb.cursor;
+import forge.objectdb.driver;
 import forge.objectdb.exceptions;
 import forge.objectdb.hooks;
 import forge.objectdb.index;
@@ -41,6 +42,11 @@ class store {
    template <session_model Session>
    explicit store(session_factory<Session> factory)
        : store(std::move(factory), options{}) {}
+
+   explicit store(std::shared_ptr<driver> value)
+       : store(std::move(value), options{}) {}
+
+   store(std::shared_ptr<driver> value, options settings);
 
    template <session_model Session>
    store(session_factory<Session> factory, options value)

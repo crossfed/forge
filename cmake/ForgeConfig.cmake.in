@@ -50,6 +50,7 @@ set(
    plugins_p2p_pubsub
    plugins_http_server
    plugins_log_otlp
+   plugins_db_objectdb
    plugins_db_rocksdb
    plugins
    tui
@@ -251,6 +252,15 @@ macro(_forge_add_component component)
          _forge_add_component(log)
          _forge_add_component(otlp)
          _forge_add_component(http)
+      elseif("${component}" STREQUAL "plugins_db_objectdb")
+         _forge_add_component(app)
+         _forge_add_component(api)
+         _forge_add_component(config)
+         _forge_add_component(schema)
+         _forge_add_component(objectdb)
+         if(Forge_BUILT_WITH_ROCKSDB)
+            _forge_add_component(objectdb_rocksdb)
+         endif()
       elseif("${component}" STREQUAL "plugins_db_rocksdb")
          if(NOT Forge_BUILT_WITH_ROCKSDB)
             set(Forge_plugins_db_rocksdb_FOUND FALSE)
@@ -274,6 +284,7 @@ macro(_forge_add_component component)
          _forge_add_component(plugins_p2p_pubsub)
          _forge_add_component(plugins_http_server)
          _forge_add_component(plugins_log_otlp)
+         _forge_add_component(plugins_db_objectdb)
          if(Forge_BUILT_WITH_ROCKSDB)
             _forge_add_component(plugins_db_rocksdb)
          endif()
@@ -377,7 +388,7 @@ if("compression" IN_LIST _FORGE_COMPONENTS)
 endif()
 
 if(Forge_BUILT_WITH_ROCKSDB)
-   if("rocksdb" IN_LIST _FORGE_COMPONENTS OR "objectdb_rocksdb" IN_LIST _FORGE_COMPONENTS OR "p2p" IN_LIST _FORGE_COMPONENTS OR "plugins_db_rocksdb" IN_LIST _FORGE_COMPONENTS)
+   if("rocksdb" IN_LIST _FORGE_COMPONENTS OR "objectdb_rocksdb" IN_LIST _FORGE_COMPONENTS OR "p2p" IN_LIST _FORGE_COMPONENTS OR "plugins_db_rocksdb" IN_LIST _FORGE_COMPONENTS OR "plugins_db_objectdb" IN_LIST _FORGE_COMPONENTS)
       _forge_require_package(RocksDB)
    endif()
 endif()

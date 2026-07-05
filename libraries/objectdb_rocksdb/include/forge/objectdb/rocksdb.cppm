@@ -11,6 +11,7 @@ module;
 
 export module forge.objectdb.rocksdb;
 
+import forge.objectdb.driver;
 import forge.objectdb.store;
 import forge.objectdb.cursor;
 import forge.objectdb.exceptions;
@@ -64,14 +65,18 @@ class snapshot_session final : public forge::objectdb::session {
    forge::rocksdb::family family_;
 };
 
-class driver {
+class driver : public forge::objectdb::driver {
  public:
    explicit driver(config value);
 
-   [[nodiscard]] forge::objectdb::session_factory<session> session_factory() const;
-   [[nodiscard]] forge::objectdb::session_factory<snapshot_session> snapshot_factory() const;
+   boost::asio::awaitable<std::unique_ptr<forge::objectdb::session>> begin_transaction() override;
+   boost::asio::awaitable<std::unique_ptr<forge::objectdb::session>> begin_read() override;
+   boost::asio::awaitable<void> async_flush(bool sync) override;
 
    void flush(bool sync = true);
+
+   [[nodiscard]] forge::objectdb::session_factory<session> session_factory() const;
+   [[nodiscard]] forge::objectdb::session_factory<snapshot_session> snapshot_factory() const;
 
  private:
    std::shared_ptr<forge::rocksdb::store> store_;
