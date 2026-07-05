@@ -50,8 +50,9 @@ co_await http->publish<object_api>();
 | [`forge::plugins::db::objectdb`](db/objectdb/README.md) | `forge_plugins_db_objectdb` | `plugins.db.objectdb` | Owns configured named ObjectDB stores and exposes lifecycle-safe store handles. |
 | [`forge::plugins::db::rocksdb`](db/rocksdb/README.md) | `forge_plugins_db_rocksdb` | `plugins.db.rocksdb` | Provides a local RocksDB TransactionDB service for infrastructure plugins that need durable key/value state. |
 
-The aggregate target `forge_plugins` and package component `plugins` are
-convenience dependencies. Prefer focused targets/components in small consumers:
+The interface aggregate target `forge_plugins` and package component `plugins`
+are convenience dependencies. Prefer focused targets/components in small
+consumers:
 
 ```cmake
 find_package(Forge REQUIRED COMPONENTS plugins_http_server)
