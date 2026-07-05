@@ -22,6 +22,7 @@ target_link_libraries(
       forge_api
       forge_config
       forge_schema
+      forge_db
       forge_objectdb
       forge_exceptions
       Boost::asio
@@ -32,6 +33,6 @@ target_compile_definitions(
       FORGE_PLUGINS_DB_OBJECTDB_HAS_ROCKSDB=$<BOOL:${FORGE_HAS_ROCKSDB}>
 )
 
-if(TARGET forge_objectdb_rocksdb)
-   target_link_libraries(forge_plugins_db_objectdb PRIVATE forge_objectdb_rocksdb)
+if(TARGET forge_db_rocksdb)
+   target_link_libraries(forge_plugins_db_objectdb PRIVATE forge_db_rocksdb)
 endif()

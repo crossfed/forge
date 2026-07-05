@@ -167,6 +167,39 @@ void throw_if_error(const ::rocksdb::Status& status, std::string_view context) {
    return native;
 }
 
+::rocksdb::CompressionType to_native_compression(compression_type value) {
+   switch (value) {
+      case compression_type::none:
+         return ::rocksdb::kNoCompression;
+      case compression_type::snappy:
+         return ::rocksdb::kSnappyCompression;
+      case compression_type::zlib:
+         return ::rocksdb::kZlibCompression;
+      case compression_type::bzip2:
+         return ::rocksdb::kBZip2Compression;
+      case compression_type::lz4:
+         return ::rocksdb::kLZ4Compression;
+      case compression_type::lz4hc:
+         return ::rocksdb::kLZ4HCCompression;
+      case compression_type::xpress:
+         return ::rocksdb::kXpressCompression;
+      case compression_type::zstd:
+         return ::rocksdb::kZSTD;
+   }
+   return ::rocksdb::kNoCompression;
+}
+
+::rocksdb::ColumnFamilyOptions to_native_options(const column_family_config& value) {
+   auto native = ::rocksdb::ColumnFamilyOptions{};
+   native.enable_blob_files = value.blobs.enable_blob_files;
+   native.min_blob_size = value.blobs.min_blob_size;
+   native.blob_file_size = value.blobs.blob_file_size;
+   native.blob_compression_type = to_native_compression(value.blobs.blob_compression_type);
+   native.enable_blob_garbage_collection = value.blobs.enable_blob_garbage_collection;
+   native.blob_garbage_collection_age_cutoff = value.blobs.blob_garbage_collection_age_cutoff;
+   return native;
+}
+
 } // namespace forge::rocksdb::detail
 
 namespace forge::rocksdb {
@@ -176,10 +209,23 @@ store::impl::impl(config value) : settings{std::move(value)} {
       FORGE_THROW_EXCEPTION(exceptions::invalid_argument, "RocksDB path must not be empty");
    }
 
-   auto names = settings.column_families;
-   names.erase(std::remove_if(names.begin(), names.end(), [](const std::string& value) {
-      return value == "default";
-   }), names.end());
+   auto family_options = std::unordered_map<std::string, column_family_config>{};
+   for (auto family : settings.column_families) {
+      if (family.name.empty()) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_argument, "RocksDB column family name must not be empty");
+      }
+      family_options.emplace(family.name, std::move(family));
+   }
+   family_options.try_emplace("default", column_family_config{"default"});
+
+   auto names = std::vector<std::string>{};
+   names.reserve(family_options.size());
+   for (const auto& [name, options] : family_options) {
+      static_cast<void>(options);
+      if (name != "default") {
+         names.push_back(name);
+      }
+   }
    std::ranges::sort(names);
    names.erase(std::unique(names.begin(), names.end()), names.end());
    names.insert(names.begin(), "default");
@@ -199,6 +245,7 @@ store::impl::impl(config value) : settings{std::move(value)} {
       for (const auto& name : existing_names) {
          if (std::find(names.begin(), names.end(), name) == names.end()) {
             names.push_back(name);
+            family_options.try_emplace(name, column_family_config{name});
          }
       }
    } else if (!settings.create_if_missing && !list_status.IsIOError()) {
@@ -208,7 +255,7 @@ store::impl::impl(config value) : settings{std::move(value)} {
    std::vector<::rocksdb::ColumnFamilyDescriptor> descriptors;
    descriptors.reserve(names.size());
    for (const auto& name : names) {
-      descriptors.emplace_back(name, ::rocksdb::ColumnFamilyOptions{});
+      descriptors.emplace_back(name, detail::to_native_options(family_options.at(name)));
    }
 
    std::vector<::rocksdb::ColumnFamilyHandle*> opened_handles;

@@ -27,6 +27,7 @@
 #include <stdexcept>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -35,19 +36,19 @@ import forge.asio.blocking;
 import forge.crypto.hex;
 import forge.ids.object_id;
 import forge.objectdb.cursor;
-import forge.objectdb.driver;
 import forge.objectdb.exceptions;
 import forge.objectdb.hooks;
 import forge.objectdb.index;
 import forge.objectdb.object;
 import forge.objectdb.record;
-import forge.objectdb.session;
+import forge.db.driver;
+import forge.db.record;
 import forge.objectdb.store;
 import forge.objectdb.transaction;
 import forge.raw.raw;
 
 #if FORGE_HAS_ROCKSDB
-import forge.objectdb.rocksdb;
+import forge.db.rocksdb;
 #endif
 
 namespace objectdb_tests {
@@ -108,7 +109,7 @@ struct memory_state {
    bool overlapping_writes = false;
 };
 
-class memory_session final : public forge::objectdb::session {
+class memory_session final : public forge::db::session {
  public:
    explicit memory_session(std::shared_ptr<memory_state> state) : state_{std::move(state)}, working_{state_->records} {
       ++state_->active_writes;
@@ -121,11 +122,11 @@ class memory_session final : public forge::objectdb::session {
       finish();
    }
 
-   [[nodiscard]] forge::objectdb::capabilities capabilities() const noexcept override {
-      return forge::objectdb::capabilities{.snapshot_reads = false, .writes = true};
+   [[nodiscard]] forge::db::capabilities capabilities() const noexcept override {
+      return forge::db::capabilities{.snapshot_reads = false, .writes = true};
    }
 
-   boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(forge::objectdb::record_key key) override {
+   boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(forge::db::family, forge::objectdb::record_key key) override {
       const auto found = working_.find(key);
       if (found == working_.end()) {
          co_return std::nullopt;
@@ -133,17 +134,17 @@ class memory_session final : public forge::objectdb::session {
       co_return found->second;
    }
 
-   boost::asio::awaitable<void> put(forge::objectdb::record_key key, std::vector<std::byte> value) override {
+   boost::asio::awaitable<void> put(forge::db::family, forge::objectdb::record_key key, std::vector<std::byte> value) override {
       working_[std::move(key)] = std::move(value);
       co_return;
    }
 
-   boost::asio::awaitable<void> erase(forge::objectdb::record_key key) override {
+   boost::asio::awaitable<void> erase(forge::db::family, forge::objectdb::record_key key) override {
       working_.erase(key);
       co_return;
    }
 
-   boost::asio::awaitable<forge::objectdb::record_page> scan_page(forge::objectdb::record_range range,
+   boost::asio::awaitable<forge::objectdb::record_page> scan_page(forge::db::family, forge::objectdb::record_range range,
                                                                   forge::objectdb::page_request request) override {
       forge::objectdb::validate_page_request(request);
       ++state_->scan_calls;
@@ -168,7 +169,7 @@ class memory_session final : public forge::objectdb::session {
       }
 
       if (current != working_.end() && (!range.has_end || current->first.bytes() < range.end.bytes())) {
-         result.next = std::move(last_returned);
+         result.next = forge::objectdb::cursor{.boundary = std::move(*last_returned)};
       }
 
       co_return result;
@@ -203,7 +204,7 @@ class memory_session final : public forge::objectdb::session {
    bool closed_ = false;
 };
 
-class drop_sensitive_session final : public forge::objectdb::session {
+class drop_sensitive_session final : public forge::db::session {
  public:
    explicit drop_sensitive_session(std::shared_ptr<memory_state> state) : state_{std::move(state)} {
       ++state_->active_writes;
@@ -218,23 +219,23 @@ class drop_sensitive_session final : public forge::objectdb::session {
       }
    }
 
-   [[nodiscard]] forge::objectdb::capabilities capabilities() const noexcept override {
-      return forge::objectdb::capabilities{.snapshot_reads = false, .writes = true};
+   [[nodiscard]] forge::db::capabilities capabilities() const noexcept override {
+      return forge::db::capabilities{.snapshot_reads = false, .writes = true};
    }
 
-   boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(forge::objectdb::record_key) override {
+   boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(forge::db::family, forge::objectdb::record_key) override {
       co_return std::nullopt;
    }
 
-   boost::asio::awaitable<void> put(forge::objectdb::record_key, std::vector<std::byte>) override {
+   boost::asio::awaitable<void> put(forge::db::family, forge::objectdb::record_key, std::vector<std::byte>) override {
       co_return;
    }
 
-   boost::asio::awaitable<void> erase(forge::objectdb::record_key) override {
+   boost::asio::awaitable<void> erase(forge::db::family, forge::objectdb::record_key) override {
       co_return;
    }
 
-   boost::asio::awaitable<forge::objectdb::record_page> scan_page(forge::objectdb::record_range,
+   boost::asio::awaitable<forge::objectdb::record_page> scan_page(forge::db::family, forge::objectdb::record_range,
                                                                   forge::objectdb::page_request) override {
       co_return forge::objectdb::record_page{};
    }
@@ -262,7 +263,7 @@ class drop_sensitive_session final : public forge::objectdb::session {
    bool closed_ = false;
 };
 
-class throwing_rollback_session final : public forge::objectdb::session {
+class throwing_rollback_session final : public forge::db::session {
  public:
    explicit throwing_rollback_session(std::shared_ptr<memory_state> state) : state_{std::move(state)} {
       ++state_->active_writes;
@@ -277,23 +278,23 @@ class throwing_rollback_session final : public forge::objectdb::session {
       }
    }
 
-   [[nodiscard]] forge::objectdb::capabilities capabilities() const noexcept override {
-      return forge::objectdb::capabilities{.snapshot_reads = false, .writes = true};
+   [[nodiscard]] forge::db::capabilities capabilities() const noexcept override {
+      return forge::db::capabilities{.snapshot_reads = false, .writes = true};
    }
 
-   boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(forge::objectdb::record_key) override {
+   boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(forge::db::family, forge::objectdb::record_key) override {
       co_return std::nullopt;
    }
 
-   boost::asio::awaitable<void> put(forge::objectdb::record_key, std::vector<std::byte>) override {
+   boost::asio::awaitable<void> put(forge::db::family, forge::objectdb::record_key, std::vector<std::byte>) override {
       co_return;
    }
 
-   boost::asio::awaitable<void> erase(forge::objectdb::record_key) override {
+   boost::asio::awaitable<void> erase(forge::db::family, forge::objectdb::record_key) override {
       co_return;
    }
 
-   boost::asio::awaitable<forge::objectdb::record_page> scan_page(forge::objectdb::record_range,
+   boost::asio::awaitable<forge::objectdb::record_page> scan_page(forge::db::family, forge::objectdb::record_range,
                                                                   forge::objectdb::page_request) override {
       co_return forge::objectdb::record_page{};
    }
@@ -321,16 +322,16 @@ class throwing_rollback_session final : public forge::objectdb::session {
    bool closed_ = false;
 };
 
-class memory_snapshot_session final : public forge::objectdb::session {
+class memory_snapshot_session final : public forge::db::session {
  public:
    explicit memory_snapshot_session(std::shared_ptr<memory_state> state)
        : state_{std::move(state)}, snapshot_{state_->records} {}
 
-   [[nodiscard]] forge::objectdb::capabilities capabilities() const noexcept override {
-      return forge::objectdb::capabilities{.snapshot_reads = true, .writes = false};
+   [[nodiscard]] forge::db::capabilities capabilities() const noexcept override {
+      return forge::db::capabilities{.snapshot_reads = true, .writes = false};
    }
 
-   boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(forge::objectdb::record_key key) override {
+   boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(forge::db::family, forge::objectdb::record_key key) override {
       const auto found = snapshot_.find(key);
       if (found == snapshot_.end()) {
          co_return std::nullopt;
@@ -338,15 +339,15 @@ class memory_snapshot_session final : public forge::objectdb::session {
       co_return found->second;
    }
 
-   boost::asio::awaitable<void> put(forge::objectdb::record_key, std::vector<std::byte>) override {
+   boost::asio::awaitable<void> put(forge::db::family, forge::objectdb::record_key, std::vector<std::byte>) override {
       FORGE_THROW_EXCEPTION(forge::objectdb::exceptions::unsupported_operation, "memory snapshot is read-only");
    }
 
-   boost::asio::awaitable<void> erase(forge::objectdb::record_key) override {
+   boost::asio::awaitable<void> erase(forge::db::family, forge::objectdb::record_key) override {
       FORGE_THROW_EXCEPTION(forge::objectdb::exceptions::unsupported_operation, "memory snapshot is read-only");
    }
 
-   boost::asio::awaitable<forge::objectdb::record_page> scan_page(forge::objectdb::record_range range,
+   boost::asio::awaitable<forge::objectdb::record_page> scan_page(forge::db::family, forge::objectdb::record_range range,
                                                                   forge::objectdb::page_request request) override {
       forge::objectdb::validate_page_request(request);
       ++state_->scan_calls;
@@ -371,7 +372,7 @@ class memory_snapshot_session final : public forge::objectdb::session {
       }
 
       if (current != snapshot_.end() && (!range.has_end || current->first.bytes() < range.end.bytes())) {
-         result.next = std::move(last_returned);
+         result.next = forge::objectdb::cursor{.boundary = std::move(*last_returned)};
       }
 
       co_return result;
@@ -390,25 +391,25 @@ class memory_snapshot_session final : public forge::objectdb::session {
    std::map<forge::objectdb::record_key, std::vector<std::byte>, byte_less> snapshot_;
 };
 
-class invalid_session final : public forge::objectdb::session {
+class invalid_session final : public forge::db::session {
  public:
-   [[nodiscard]] forge::objectdb::capabilities capabilities() const noexcept override {
-      return forge::objectdb::capabilities{.snapshot_reads = false, .writes = false};
+   [[nodiscard]] forge::db::capabilities capabilities() const noexcept override {
+      return forge::db::capabilities{.snapshot_reads = false, .writes = false};
    }
 
-   boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(forge::objectdb::record_key) override {
+   boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(forge::db::family, forge::objectdb::record_key) override {
       co_return std::nullopt;
    }
 
-   boost::asio::awaitable<void> put(forge::objectdb::record_key, std::vector<std::byte>) override {
+   boost::asio::awaitable<void> put(forge::db::family, forge::objectdb::record_key, std::vector<std::byte>) override {
       co_return;
    }
 
-   boost::asio::awaitable<void> erase(forge::objectdb::record_key) override {
+   boost::asio::awaitable<void> erase(forge::db::family, forge::objectdb::record_key) override {
       co_return;
    }
 
-   boost::asio::awaitable<forge::objectdb::record_page> scan_page(forge::objectdb::record_range,
+   boost::asio::awaitable<forge::objectdb::record_page> scan_page(forge::db::family, forge::objectdb::record_range,
                                                                   forge::objectdb::page_request) override {
       co_return forge::objectdb::record_page{};
    }
@@ -422,32 +423,10 @@ class invalid_session final : public forge::objectdb::session {
    }
 };
 
-class memory_driver : public forge::objectdb::driver {
+class memory_driver : public forge::db::driver {
  public:
-   boost::asio::awaitable<std::unique_ptr<forge::objectdb::session>> begin_transaction() override {
-      co_return std::make_unique<memory_session>(state_);
-   }
-
-   boost::asio::awaitable<std::unique_ptr<forge::objectdb::session>> begin_read() override {
-      co_return std::make_unique<memory_snapshot_session>(state_);
-   }
-
    boost::asio::awaitable<void> async_flush(bool) override {
       co_return;
-   }
-
-   [[nodiscard]] forge::objectdb::session_factory<memory_session> session_factory() const {
-      return forge::objectdb::session_factory<memory_session>{
-         [state = state_]() -> boost::asio::awaitable<std::unique_ptr<memory_session>> {
-            co_return std::make_unique<memory_session>(state);
-         }};
-   }
-
-   [[nodiscard]] forge::objectdb::session_factory<memory_snapshot_session> snapshot_factory() const {
-      return forge::objectdb::session_factory<memory_snapshot_session>{
-         [state = state_]() -> boost::asio::awaitable<std::unique_ptr<memory_snapshot_session>> {
-            co_return std::make_unique<memory_snapshot_session>(state);
-         }};
    }
 
    [[nodiscard]] std::size_t scan_calls() const noexcept {
@@ -472,17 +451,22 @@ class memory_driver : public forge::objectdb::driver {
    }
 
  private:
+   boost::asio::awaitable<std::unique_ptr<forge::db::session>> open_transaction() override {
+      co_return std::make_unique<memory_session>(state_);
+   }
+
+   boost::asio::awaitable<std::unique_ptr<forge::db::session>> open_snapshot() override {
+      co_return std::make_unique<memory_snapshot_session>(state_);
+   }
+
    std::shared_ptr<memory_state> state_ = std::make_shared<memory_state>();
 };
 
 template <typename Session>
-class session_driver {
+class session_driver : public forge::db::driver {
  public:
-   [[nodiscard]] forge::objectdb::session_factory<Session> session_factory() const {
-      return forge::objectdb::session_factory<Session>{
-         [state = state_]() -> boost::asio::awaitable<std::unique_ptr<Session>> {
-            co_return std::make_unique<Session>(state);
-         }};
+   boost::asio::awaitable<void> async_flush(bool) override {
+      co_return;
    }
 
    [[nodiscard]] std::size_t active_writes() const noexcept {
@@ -502,6 +486,18 @@ class session_driver {
    }
 
  private:
+   boost::asio::awaitable<std::unique_ptr<forge::db::session>> open_transaction() override {
+      if constexpr (std::is_constructible_v<Session, std::shared_ptr<memory_state>>) {
+         co_return std::make_unique<Session>(state_);
+      } else {
+         co_return std::make_unique<Session>();
+      }
+   }
+
+   boost::asio::awaitable<std::unique_ptr<forge::db::session>> open_snapshot() override {
+      co_return std::make_unique<invalid_session>();
+   }
+
    std::shared_ptr<memory_state> state_ = std::make_shared<memory_state>();
 };
 
@@ -549,8 +545,8 @@ std::string hex(const std::vector<std::byte>& bytes) {
    return value;
 }
 
-[[nodiscard]] forge::objectdb::store make_store(const memory_driver& driver) {
-   auto store = forge::objectdb::store{driver.session_factory(), driver.snapshot_factory()};
+[[nodiscard]] forge::objectdb::store make_store(const std::shared_ptr<memory_driver>& driver) {
+   auto store = forge::objectdb::store{driver};
    store.register_object<account_object>();
    return store;
 }
@@ -593,34 +589,34 @@ BOOST_AUTO_TEST_CASE(objectdb_descriptor_derives_type_from_base_object_id) {
 
 BOOST_AUTO_TEST_CASE(objectdb_store_materializes_object_record_key_from_base_id) {
    auto runtime = forge::asio::runtime{};
-   auto driver = memory_driver{};
+   auto driver = std::make_shared<memory_driver>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto store = make_store(driver);
       co_await store.insert(make_account(42, "alice", 100, 3));
       co_return;
    }());
 
-   const auto keys = driver.keys();
+   const auto keys = driver->keys();
    BOOST_REQUIRE(!keys.empty());
    BOOST_CHECK_EQUAL(hex(keys.front().bytes()), "10010007000000000000002a");
 }
 
 BOOST_AUTO_TEST_CASE(objectdb_store_materializes_tuple_composite_index_key) {
    auto runtime = forge::asio::runtime{};
-   auto driver = memory_driver{};
+   auto driver = std::make_shared<memory_driver>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto store = make_store(driver);
       co_await store.insert(make_account(42, "alice", 100, 3));
       co_return;
    }());
 
-   const auto keys = driver.keys();
+   const auto keys = driver->keys();
    BOOST_REQUIRE_EQUAL(keys.size(), 4U);
    BOOST_CHECK_EQUAL(hex(keys[2].bytes()), "2101000700000002000000030000000000000064000000000000002a");
 }
 
 BOOST_AUTO_TEST_CASE(objectdb_store_registers_objects_and_rejects_duplicate_registration) {
-   auto store = forge::objectdb::store{memory_driver{}.session_factory()};
+   auto store = forge::objectdb::store{std::make_shared<memory_driver>()};
 
    BOOST_CHECK_NO_THROW(store.register_object<account_object>());
    BOOST_CHECK_THROW(store.register_object<account_object>(), forge::objectdb::exceptions::invalid_descriptor);
@@ -641,7 +637,7 @@ BOOST_AUTO_TEST_CASE(objectdb_store_accepts_owner_driver) {
 
 BOOST_AUTO_TEST_CASE(objectdb_store_direct_api_autocommits_and_reads_indexes) {
    auto runtime = forge::asio::runtime{};
-   auto driver = memory_driver{};
+   auto driver = std::make_shared<memory_driver>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto store = make_store(driver);
 
@@ -672,7 +668,7 @@ BOOST_AUTO_TEST_CASE(objectdb_store_direct_api_autocommits_and_reads_indexes) {
 
 BOOST_AUTO_TEST_CASE(objectdb_transaction_groups_mutations_and_requires_commit) {
    auto runtime = forge::asio::runtime{};
-   auto driver = memory_driver{};
+   auto driver = std::make_shared<memory_driver>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto store = make_store(driver);
 
@@ -688,7 +684,7 @@ BOOST_AUTO_TEST_CASE(objectdb_transaction_groups_mutations_and_requires_commit) 
 
 BOOST_AUTO_TEST_CASE(objectdb_transaction_destruction_discards_uncommitted_changes) {
    auto runtime = forge::asio::runtime{};
-   auto driver = memory_driver{};
+   auto driver = std::make_shared<memory_driver>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto store = make_store(driver);
 
@@ -704,9 +700,9 @@ BOOST_AUTO_TEST_CASE(objectdb_transaction_destruction_discards_uncommitted_chang
 
 BOOST_AUTO_TEST_CASE(objectdb_dropped_transaction_invokes_backend_rollback) {
    auto runtime = forge::asio::runtime{};
-   auto driver = session_driver<drop_sensitive_session>{};
+   auto driver = std::make_shared<session_driver<drop_sensitive_session>>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
-      auto store = forge::objectdb::store{driver.session_factory()};
+      auto store = forge::objectdb::store{driver};
       store.register_object<account_object>();
 
       {
@@ -714,23 +710,23 @@ BOOST_AUTO_TEST_CASE(objectdb_dropped_transaction_invokes_backend_rollback) {
       }
 
       auto next = co_await store.begin_transaction();
-      BOOST_CHECK_EQUAL(driver.rollback_calls(), 1U);
-      BOOST_CHECK_EQUAL(driver.destroyed_without_finish(), 0U);
-      BOOST_CHECK(!driver.overlapping_writes());
-      BOOST_CHECK_EQUAL(driver.active_writes(), 1U);
+      BOOST_CHECK_EQUAL(driver->rollback_calls(), 1U);
+      BOOST_CHECK_EQUAL(driver->destroyed_without_finish(), 0U);
+      BOOST_CHECK(!driver->overlapping_writes());
+      BOOST_CHECK_EQUAL(driver->active_writes(), 1U);
 
       co_await next.rollback();
-      BOOST_CHECK_EQUAL(driver.rollback_calls(), 2U);
-      BOOST_CHECK_EQUAL(driver.active_writes(), 0U);
+      BOOST_CHECK_EQUAL(driver->rollback_calls(), 2U);
+      BOOST_CHECK_EQUAL(driver->active_writes(), 0U);
       co_return;
    }());
 }
 
 BOOST_AUTO_TEST_CASE(objectdb_dropped_transaction_releases_writer_after_rollback_failure) {
    auto runtime = forge::asio::runtime{};
-   auto driver = session_driver<throwing_rollback_session>{};
+   auto driver = std::make_shared<session_driver<throwing_rollback_session>>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
-      auto store = forge::objectdb::store{driver.session_factory()};
+      auto store = forge::objectdb::store{driver};
       store.register_object<account_object>();
 
       {
@@ -738,22 +734,22 @@ BOOST_AUTO_TEST_CASE(objectdb_dropped_transaction_releases_writer_after_rollback
       }
 
       auto next = co_await store.begin_transaction();
-      BOOST_CHECK_EQUAL(driver.rollback_calls(), 1U);
-      BOOST_CHECK_EQUAL(driver.destroyed_without_finish(), 0U);
-      BOOST_CHECK(!driver.overlapping_writes());
-      BOOST_CHECK_EQUAL(driver.active_writes(), 1U);
+      BOOST_CHECK_EQUAL(driver->rollback_calls(), 1U);
+      BOOST_CHECK_EQUAL(driver->destroyed_without_finish(), 0U);
+      BOOST_CHECK(!driver->overlapping_writes());
+      BOOST_CHECK_EQUAL(driver->active_writes(), 1U);
 
       co_await next.commit();
-      BOOST_CHECK_EQUAL(driver.active_writes(), 0U);
+      BOOST_CHECK_EQUAL(driver->active_writes(), 0U);
       co_return;
    }());
 }
 
 BOOST_AUTO_TEST_CASE(objectdb_explicit_rollback_failure_releases_writer_lane) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
-   auto driver = session_driver<throwing_rollback_session>{};
+   auto driver = std::make_shared<session_driver<throwing_rollback_session>>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
-      auto store = forge::objectdb::store{driver.session_factory()};
+      auto store = forge::objectdb::store{driver};
       store.register_object<account_object>();
 
       auto tx = co_await store.begin_transaction();
@@ -765,8 +761,8 @@ BOOST_AUTO_TEST_CASE(objectdb_explicit_rollback_failure_releases_writer_lane) {
       }
 
       BOOST_REQUIRE(rollback_error);
-      BOOST_CHECK_EQUAL(driver.rollback_calls(), 1U);
-      BOOST_CHECK_EQUAL(driver.destroyed_without_finish(), 0U);
+      BOOST_CHECK_EQUAL(driver->rollback_calls(), 1U);
+      BOOST_CHECK_EQUAL(driver->destroyed_without_finish(), 0U);
 
       auto second_started = std::make_shared<bool>(false);
       auto second_cancelled = std::make_shared<bool>(false);
@@ -811,8 +807,8 @@ BOOST_AUTO_TEST_CASE(objectdb_explicit_rollback_failure_releases_writer_lane) {
       BOOST_CHECK(*second_finished);
       BOOST_CHECK(*second_started);
       BOOST_CHECK(!*second_cancelled);
-      BOOST_CHECK(!driver.overlapping_writes());
-      BOOST_CHECK_EQUAL(driver.active_writes(), 0U);
+      BOOST_CHECK(!driver->overlapping_writes());
+      BOOST_CHECK_EQUAL(driver->active_writes(), 0U);
 
       co_return;
    }());
@@ -820,17 +816,14 @@ BOOST_AUTO_TEST_CASE(objectdb_explicit_rollback_failure_releases_writer_lane) {
 
 BOOST_AUTO_TEST_CASE(objectdb_begin_read_requires_snapshot_capability) {
    auto runtime = forge::asio::runtime{};
-   auto driver = memory_driver{};
+   auto driver = std::make_shared<session_driver<memory_session>>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
-      auto store = forge::objectdb::store{driver.session_factory()};
+      auto store = forge::objectdb::store{driver};
       store.register_object<account_object>();
 
       BOOST_CHECK_THROW((void)(co_await store.begin_read()), forge::objectdb::exceptions::unsupported_operation);
 
-      auto invalid = forge::objectdb::session_factory<invalid_session>{
-         []() -> boost::asio::awaitable<std::unique_ptr<invalid_session>> {
-            co_return std::make_unique<invalid_session>();
-         }};
+      auto invalid = std::make_shared<session_driver<invalid_session>>();
       auto invalid_store = forge::objectdb::store{invalid};
       invalid_store.register_object<account_object>();
       BOOST_CHECK_THROW((void)(co_await invalid_store.begin_transaction()),
@@ -842,7 +835,7 @@ BOOST_AUTO_TEST_CASE(objectdb_begin_read_requires_snapshot_capability) {
 
 BOOST_AUTO_TEST_CASE(objectdb_memory_snapshot_preserves_old_state_across_writes) {
    auto runtime = forge::asio::runtime{};
-   auto driver = memory_driver{};
+   auto driver = std::make_shared<memory_driver>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto store = make_store(driver);
 
@@ -868,7 +861,7 @@ BOOST_AUTO_TEST_CASE(objectdb_memory_snapshot_preserves_old_state_across_writes)
 
 BOOST_AUTO_TEST_CASE(objectdb_store_stream_uses_one_snapshot_across_pages) {
    auto runtime = forge::asio::runtime{};
-   auto driver = memory_driver{};
+   auto driver = std::make_shared<memory_driver>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto store = make_store(driver);
 
@@ -901,7 +894,7 @@ BOOST_AUTO_TEST_CASE(objectdb_store_stream_uses_one_snapshot_across_pages) {
 
 BOOST_AUTO_TEST_CASE(objectdb_single_writer_serializes_concurrent_transactions) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
-   auto driver = memory_driver{};
+   auto driver = std::make_shared<memory_driver>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto store = make_store(driver);
       auto first = co_await store.begin_transaction();
@@ -927,7 +920,7 @@ BOOST_AUTO_TEST_CASE(objectdb_single_writer_serializes_concurrent_transactions) 
       co_await timer.async_wait(boost::asio::use_awaitable);
 
       BOOST_CHECK(!*second_started);
-      BOOST_CHECK(!driver.overlapping_writes());
+      BOOST_CHECK(!driver->overlapping_writes());
 
       co_await first.rollback();
 
@@ -938,7 +931,7 @@ BOOST_AUTO_TEST_CASE(objectdb_single_writer_serializes_concurrent_transactions) 
          std::rethrow_exception(*second_error);
       }
       BOOST_CHECK(*second_started);
-      BOOST_CHECK(!driver.overlapping_writes());
+      BOOST_CHECK(!driver->overlapping_writes());
 
       co_return;
    }());
@@ -946,7 +939,7 @@ BOOST_AUTO_TEST_CASE(objectdb_single_writer_serializes_concurrent_transactions) 
 
 BOOST_AUTO_TEST_CASE(objectdb_single_writer_cancelled_wait_does_not_acquire_gate) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
-   auto driver = memory_driver{};
+   auto driver = std::make_shared<memory_driver>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto store = make_store(driver);
       auto first = std::make_shared<std::optional<forge::objectdb::transaction>>(co_await store.begin_transaction());
@@ -961,14 +954,10 @@ BOOST_AUTO_TEST_CASE(objectdb_single_writer_cancelled_wait_does_not_acquire_gate
 
       boost::asio::co_spawn(
          executor,
-         [store, first, second_waiting, second_started, second_cancelled, second_finished, second_error]() mutable
+         [store, second_waiting, second_started, second_cancelled, second_finished, second_error]() mutable
             -> boost::asio::awaitable<void> {
             try {
-               co_await boost::asio::this_coro::reset_cancellation_state(
-                  [first](boost::asio::cancellation_type type) {
-                     first->reset();
-                     return type;
-                  });
+               co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::enable_total_cancellation{});
                *second_waiting = true;
                auto second = co_await store.begin_transaction();
                *second_started = true;
@@ -997,6 +986,7 @@ BOOST_AUTO_TEST_CASE(objectdb_single_writer_cancelled_wait_does_not_acquire_gate
       co_await timer.async_wait(boost::asio::use_awaitable);
 
       cancellation->emit(boost::asio::cancellation_type::all);
+      first->reset();
 
       timer.expires_after(std::chrono::milliseconds{50});
       co_await timer.async_wait(boost::asio::use_awaitable);
@@ -1008,11 +998,11 @@ BOOST_AUTO_TEST_CASE(objectdb_single_writer_cancelled_wait_does_not_acquire_gate
       BOOST_CHECK(*second_cancelled);
       BOOST_CHECK(!*second_started);
       BOOST_CHECK(!first->has_value());
-      BOOST_CHECK(!driver.overlapping_writes());
+      BOOST_CHECK(!driver->overlapping_writes());
 
       auto third = co_await store.begin_transaction();
       co_await third.rollback();
-      BOOST_CHECK(!driver.overlapping_writes());
+      BOOST_CHECK(!driver->overlapping_writes());
 
       co_return;
    }());
@@ -1020,7 +1010,7 @@ BOOST_AUTO_TEST_CASE(objectdb_single_writer_cancelled_wait_does_not_acquire_gate
 
 BOOST_AUTO_TEST_CASE(objectdb_single_writer_cancelled_armed_wait_does_not_acquire_gate) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
-   auto driver = memory_driver{};
+   auto driver = std::make_shared<memory_driver>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto store = make_store(driver);
       auto first = co_await store.begin_transaction();
@@ -1078,11 +1068,11 @@ BOOST_AUTO_TEST_CASE(objectdb_single_writer_cancelled_armed_wait_does_not_acquir
       BOOST_CHECK(second_finished->load(std::memory_order_acquire));
       BOOST_CHECK(second_cancelled->load(std::memory_order_acquire));
       BOOST_CHECK(!second_started->load(std::memory_order_acquire));
-      BOOST_CHECK(!driver.overlapping_writes());
+      BOOST_CHECK(!driver->overlapping_writes());
 
       auto third = co_await store.begin_transaction();
       co_await third.rollback();
-      BOOST_CHECK(!driver.overlapping_writes());
+      BOOST_CHECK(!driver->overlapping_writes());
 
       co_return;
    }());
@@ -1090,7 +1080,7 @@ BOOST_AUTO_TEST_CASE(objectdb_single_writer_cancelled_armed_wait_does_not_acquir
 
 BOOST_AUTO_TEST_CASE(objectdb_single_writer_early_cancelled_wait_does_not_need_rescue) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
-   auto driver = memory_driver{};
+   auto driver = std::make_shared<memory_driver>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto store = make_store(driver);
       auto first = co_await store.begin_transaction();
@@ -1158,13 +1148,13 @@ BOOST_AUTO_TEST_CASE(objectdb_single_writer_early_cancelled_wait_does_not_need_r
       BOOST_CHECK(second_finished->load(std::memory_order_acquire));
       BOOST_CHECK(second_cancelled->load(std::memory_order_acquire));
       BOOST_CHECK(!second_started->load(std::memory_order_acquire));
-      BOOST_CHECK(!driver.overlapping_writes());
+      BOOST_CHECK(!driver->overlapping_writes());
 
       co_await first.rollback();
 
       auto third = co_await store.begin_transaction();
       co_await third.rollback();
-      BOOST_CHECK(!driver.overlapping_writes());
+      BOOST_CHECK(!driver->overlapping_writes());
 
       co_return;
    }());
@@ -1172,7 +1162,7 @@ BOOST_AUTO_TEST_CASE(objectdb_single_writer_early_cancelled_wait_does_not_need_r
 
 BOOST_AUTO_TEST_CASE(objectdb_single_writer_precancelled_wait_does_not_hang) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
-   auto driver = memory_driver{};
+   auto driver = std::make_shared<memory_driver>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto store = make_store(driver);
       auto first = co_await store.begin_transaction();
@@ -1247,13 +1237,13 @@ BOOST_AUTO_TEST_CASE(objectdb_single_writer_precancelled_wait_does_not_hang) {
       BOOST_CHECK(second_finished->load(std::memory_order_acquire));
       BOOST_CHECK(second_cancelled->load(std::memory_order_acquire));
       BOOST_CHECK(!second_started->load(std::memory_order_acquire));
-      BOOST_CHECK(!driver.overlapping_writes());
+      BOOST_CHECK(!driver->overlapping_writes());
 
       co_await first.rollback();
 
       auto third = co_await store.begin_transaction();
       co_await third.rollback();
-      BOOST_CHECK(!driver.overlapping_writes());
+      BOOST_CHECK(!driver->overlapping_writes());
 
       co_return;
    }());
@@ -1261,7 +1251,7 @@ BOOST_AUTO_TEST_CASE(objectdb_single_writer_precancelled_wait_does_not_hang) {
 
 BOOST_AUTO_TEST_CASE(objectdb_session_runtime_object_id_requires_explicit_object_model) {
    auto runtime = forge::asio::runtime{};
-   auto driver = memory_driver{};
+   auto driver = std::make_shared<memory_driver>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto store = make_store(driver);
 
@@ -1279,7 +1269,7 @@ BOOST_AUTO_TEST_CASE(objectdb_session_runtime_object_id_requires_explicit_object
 
 BOOST_AUTO_TEST_CASE(objectdb_modify_updates_secondary_indexes_and_unique_constraints) {
    auto runtime = forge::asio::runtime{};
-   auto driver = memory_driver{};
+   auto driver = std::make_shared<memory_driver>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto store = make_store(driver);
 
@@ -1305,7 +1295,7 @@ BOOST_AUTO_TEST_CASE(objectdb_modify_updates_secondary_indexes_and_unique_constr
 
 BOOST_AUTO_TEST_CASE(objectdb_index_supports_mapper_keys_tuple_prefix_stream_and_for_each) {
    auto runtime = forge::asio::runtime{};
-   auto driver = memory_driver{};
+   auto driver = std::make_shared<memory_driver>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto store = make_store(driver);
 
@@ -1343,12 +1333,12 @@ BOOST_AUTO_TEST_CASE(objectdb_index_supports_mapper_keys_tuple_prefix_stream_and
       co_return;
    }());
 
-   BOOST_CHECK_GE(driver.scan_calls(), 2U);
+   BOOST_CHECK_GE(driver->scan_calls(), 2U);
 }
 
 BOOST_AUTO_TEST_CASE(objectdb_direct_mutation_rolls_back_when_interceptor_vetoes) {
    auto runtime = forge::asio::runtime{};
-   auto driver = memory_driver{};
+   auto driver = std::make_shared<memory_driver>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto store = make_store(driver);
       auto veto = std::make_shared<veto_interceptor>();
@@ -1358,7 +1348,7 @@ BOOST_AUTO_TEST_CASE(objectdb_direct_mutation_rolls_back_when_interceptor_vetoes
                         forge::objectdb::exceptions::duplicate_object);
       BOOST_CHECK_EQUAL(veto->calls, 1U);
       BOOST_CHECK(!(co_await store.find(account::id_type{42})).has_value());
-      BOOST_CHECK_EQUAL(driver.record_count(), 0U);
+      BOOST_CHECK_EQUAL(driver->record_count(), 0U);
 
       co_return;
    }());
@@ -1366,7 +1356,7 @@ BOOST_AUTO_TEST_CASE(objectdb_direct_mutation_rolls_back_when_interceptor_vetoes
 
 BOOST_AUTO_TEST_CASE(objectdb_observer_runs_after_commit_only) {
    auto runtime = forge::asio::runtime{};
-   auto driver = memory_driver{};
+   auto driver = std::make_shared<memory_driver>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto store = make_store(driver);
       auto observer = std::make_shared<counting_observer>();
@@ -1391,31 +1381,37 @@ BOOST_AUTO_TEST_CASE(objectdb_observer_runs_after_commit_only) {
 }
 
 #if FORGE_HAS_ROCKSDB
-BOOST_AUTO_TEST_CASE(objectdb_rocksdb_driver_persists_objects_indexes_pages_and_streams) {
+BOOST_AUTO_TEST_CASE(objectdb_db_rocksdb_driver_persists_objects_indexes_pages_and_streams) {
    const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
    const auto root = std::filesystem::temp_directory_path() / ("forge_objectdb_driver_" + std::to_string(nonce));
    std::filesystem::remove_all(root);
 
    auto runtime = forge::asio::runtime{};
    forge::asio::blocking::run(runtime, [root]() -> boost::asio::awaitable<void> {
-      auto driver = forge::objectdb::rocksdb::driver{forge::objectdb::rocksdb::config{.path = (root / "store").string()}};
-      auto store = forge::objectdb::store{driver.session_factory(), driver.snapshot_factory()};
+      auto driver = std::make_shared<forge::db::rocksdb::driver>(forge::db::rocksdb::config{
+         .path = (root / "store").string(),
+         .families = {"objectdb"},
+      });
+      auto store = forge::objectdb::store{driver};
       store.register_object<account_object>();
 
       auto tx = co_await store.begin_transaction();
       co_await tx.insert(make_account(42, "alice", 100, 3));
       co_await tx.insert(make_account(43, "bob", 50, 3));
       co_await tx.commit();
-      driver.flush();
-      driver.flush(false);
-      co_await driver.async_flush(true);
+      driver->flush();
+      driver->flush(false);
+      co_await driver->async_flush(true);
 
       co_return;
    }());
 
    forge::asio::blocking::run(runtime, [root]() -> boost::asio::awaitable<void> {
-      auto driver = forge::objectdb::rocksdb::driver{forge::objectdb::rocksdb::config{.path = (root / "store").string()}};
-      auto store = forge::objectdb::store{driver.session_factory(), driver.snapshot_factory()};
+      auto driver = std::make_shared<forge::db::rocksdb::driver>(forge::db::rocksdb::config{
+         .path = (root / "store").string(),
+         .families = {"objectdb"},
+      });
+      auto store = forge::objectdb::store{driver};
       store.register_object<account_object>();
 
       BOOST_CHECK_EQUAL((co_await store.get(account::id_type{42})).name, "alice");
@@ -1446,15 +1442,18 @@ BOOST_AUTO_TEST_CASE(objectdb_rocksdb_driver_persists_objects_indexes_pages_and_
    std::filesystem::remove_all(root);
 }
 
-BOOST_AUTO_TEST_CASE(objectdb_rocksdb_driver_rolls_back_uncommitted_transaction) {
+BOOST_AUTO_TEST_CASE(objectdb_db_rocksdb_driver_rolls_back_uncommitted_transaction) {
    const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
    const auto root = std::filesystem::temp_directory_path() / ("forge_objectdb_rollback_" + std::to_string(nonce));
    std::filesystem::remove_all(root);
 
    auto runtime = forge::asio::runtime{};
    forge::asio::blocking::run(runtime, [root]() -> boost::asio::awaitable<void> {
-      auto driver = forge::objectdb::rocksdb::driver{forge::objectdb::rocksdb::config{.path = (root / "store").string()}};
-      auto store = forge::objectdb::store{driver.session_factory(), driver.snapshot_factory()};
+      auto driver = std::make_shared<forge::db::rocksdb::driver>(forge::db::rocksdb::config{
+         .path = (root / "store").string(),
+         .families = {"objectdb"},
+      });
+      auto store = forge::objectdb::store{driver};
       store.register_object<account_object>();
 
       {
@@ -1469,15 +1468,18 @@ BOOST_AUTO_TEST_CASE(objectdb_rocksdb_driver_rolls_back_uncommitted_transaction)
    std::filesystem::remove_all(root);
 }
 
-BOOST_AUTO_TEST_CASE(objectdb_rocksdb_snapshot_preserves_old_state_across_writes) {
+BOOST_AUTO_TEST_CASE(objectdb_db_rocksdb_snapshot_preserves_old_state_across_writes) {
    const auto nonce = std::chrono::steady_clock::now().time_since_epoch().count();
    const auto root = std::filesystem::temp_directory_path() / ("forge_objectdb_snapshot_" + std::to_string(nonce));
    std::filesystem::remove_all(root);
 
    auto runtime = forge::asio::runtime{};
    forge::asio::blocking::run(runtime, [root]() -> boost::asio::awaitable<void> {
-      auto driver = forge::objectdb::rocksdb::driver{forge::objectdb::rocksdb::config{.path = (root / "store").string()}};
-      auto store = forge::objectdb::store{driver.session_factory(), driver.snapshot_factory()};
+      auto driver = std::make_shared<forge::db::rocksdb::driver>(forge::db::rocksdb::config{
+         .path = (root / "store").string(),
+         .families = {"objectdb"},
+      });
+      auto store = forge::objectdb::store{driver};
       store.register_object<account_object>();
 
       co_await store.insert(make_account(42, "alice", 100, 3));

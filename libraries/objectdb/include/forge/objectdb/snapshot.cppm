@@ -16,12 +16,13 @@ module;
 export module forge.objectdb.snapshot;
 
 import forge.ids.object_id;
+import forge.db.record;
+import forge.db.snapshot;
 import forge.objectdb.cursor;
 import forge.objectdb.exceptions;
 import forge.objectdb.index;
 import forge.objectdb.object;
 import forge.objectdb.record;
-import forge.objectdb.session;
 import forge.raw.raw;
 
 export namespace forge::objectdb {
@@ -31,7 +32,7 @@ class snapshot {
    using ensure_registered_fn = std::function<void(forge::ids::object_id, std::type_index)>;
 
    snapshot() = default;
-   snapshot(std::unique_ptr<session> active, ensure_registered_fn ensure);
+   snapshot(forge::db::snapshot active, forge::db::family family, ensure_registered_fn ensure);
 
    template <forge::ids::typed_id_like Id>
    boost::asio::awaitable<typename object_index_for_id_t<Id>::value_type> get(Id id);
@@ -51,9 +52,9 @@ class snapshot {
  private:
    class access;
 
-   [[nodiscard]] session& active_session() const;
-
    void ensure_registered_type(forge::ids::object_id type, std::type_index model) const;
+   boost::asio::awaitable<std::optional<std::vector<std::byte>>> get_record(record_key key) const;
+   boost::asio::awaitable<record_page> scan_records(record_range range, page_request request) const;
 
    struct impl;
    std::shared_ptr<impl> impl_;
@@ -67,8 +68,12 @@ class snapshot::access {
  public:
    explicit access(const snapshot& owner) : owner_{owner} {}
 
-   [[nodiscard]] session& active_session() const {
-      return owner_.active_session();
+   boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(record_key key) const {
+      co_return co_await owner_.get_record(std::move(key));
+   }
+
+   boost::asio::awaitable<record_page> scan_page(record_range range, page_request request) const {
+      co_return co_await owner_.scan_records(std::move(range), std::move(request));
    }
 
    template <object_model Object>
@@ -145,7 +150,7 @@ boost::asio::awaitable<std::optional<typename Object::value_type>> read_snapshot
    view.template ensure_registered<Object>();
    const auto typed = typed_id_from<Object>(id);
    const auto key = object_record_key<Object>(typed);
-   const auto bytes = co_await view.active_session().get(key);
+   const auto bytes = co_await view.get(key);
    if (!bytes.has_value()) {
       co_return std::nullopt;
    }
@@ -157,11 +162,11 @@ boost::asio::awaitable<object_page<typename Object::value_type>> page_snapshot_o
                                                                                        record_range range,
                                                                                        page_request request) {
    view.template ensure_registered<Object>();
-   validate_page_request(request);
+   forge::objectdb::validate_page_request(request);
 
-   auto records = co_await view.active_session().scan_page(std::move(range), std::move(request));
+   auto records = co_await view.scan_page(std::move(range), std::move(request));
    auto out = object_page<typename Object::value_type>{};
-   out.next = std::move(records.next).transform([](record_key key) { return cursor{.boundary = std::move(key)}; });
+   out.next = std::move(records.next);
 
    for (const auto& entry : records.entries) {
       const auto id = unpack_value<id_type_of<Object>>(entry.value);

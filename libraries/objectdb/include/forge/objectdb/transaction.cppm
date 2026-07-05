@@ -22,13 +22,14 @@ module;
 export module forge.objectdb.transaction;
 
 import forge.ids.object_id;
+import forge.db.record;
+import forge.db.transaction;
 import forge.objectdb.cursor;
 import forge.objectdb.exceptions;
 import forge.objectdb.hooks;
 import forge.objectdb.index;
 import forge.objectdb.object;
 import forge.objectdb.record;
-import forge.objectdb.session;
 import forge.raw.raw;
 
 export namespace forge::objectdb {
@@ -39,17 +40,24 @@ class transaction {
    using release_fn = std::function<void()>;
 
    transaction() = default;
-   transaction(std::unique_ptr<session> active,
+   transaction(forge::db::transaction&& active,
+               forge::db::family family,
                ensure_registered_fn ensure,
                std::vector<std::shared_ptr<interceptor>> interceptors,
                std::vector<std::shared_ptr<observer>> observers,
                release_fn release);
-   transaction(std::unique_ptr<session> active,
+   transaction(forge::db::transaction&& active,
+               forge::db::family family,
                ensure_registered_fn ensure,
                std::vector<std::shared_ptr<interceptor>> interceptors,
                std::vector<std::shared_ptr<observer>> observers,
                release_fn release,
                boost::asio::any_io_executor cleanup_executor);
+   transaction(forge::db::transaction& active,
+               forge::db::family family,
+               ensure_registered_fn ensure,
+               std::vector<std::shared_ptr<interceptor>> interceptors,
+               std::vector<std::shared_ptr<observer>> observers);
 
    template <forge::ids::typed_id_like Id>
    boost::asio::awaitable<typename object_index_for_id_t<Id>::value_type> get(Id id);
@@ -81,17 +89,23 @@ class transaction {
    template <object_model Object, typename Tag>
    [[nodiscard]] index_view<Object, Tag> index() const;
 
+   [[nodiscard]] forge::db::transaction& db_transaction() const;
+
    boost::asio::awaitable<void> commit();
    boost::asio::awaitable<void> rollback();
 
  private:
    class access;
 
-   [[nodiscard]] session& active_session() const;
    [[nodiscard]] change_set& changes() const;
+   [[nodiscard]] forge::db::transaction& active_transaction() const;
 
    void ensure_registered_type(forge::ids::object_id type, std::type_index model) const;
    boost::asio::awaitable<void> before_mutation(const object_mutation& mutation) const;
+   boost::asio::awaitable<std::optional<std::vector<std::byte>>> get_record(record_key key) const;
+   boost::asio::awaitable<void> put_record(record_key key, std::vector<std::byte> value) const;
+   boost::asio::awaitable<void> erase_record(record_key key) const;
+   boost::asio::awaitable<record_page> scan_records(record_range range, page_request request) const;
 
    struct impl;
    std::shared_ptr<impl> impl_;
@@ -105,8 +119,20 @@ class transaction::access {
  public:
    explicit access(const transaction& owner) : owner_{owner} {}
 
-   [[nodiscard]] session& active_session() const {
-      return owner_.active_session();
+   boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(record_key key) const {
+      co_return co_await owner_.get_record(std::move(key));
+   }
+
+   boost::asio::awaitable<void> put(record_key key, std::vector<std::byte> value) const {
+      co_await owner_.put_record(std::move(key), std::move(value));
+   }
+
+   boost::asio::awaitable<void> erase(record_key key) const {
+      co_await owner_.erase_record(std::move(key));
+   }
+
+   boost::asio::awaitable<record_page> scan_page(record_range range, page_request request) const {
+      co_return co_await owner_.scan_records(std::move(range), std::move(request));
    }
 
    [[nodiscard]] change_set& changes() const {
@@ -333,7 +359,7 @@ boost::asio::awaitable<std::optional<typename Object::value_type>> read_transact
    tx.template ensure_registered<Object>();
    const auto typed = typed_id_from<Object>(id);
    const auto key = object_record_key<Object>(typed);
-   const auto bytes = co_await tx.active_session().get(key);
+   const auto bytes = co_await tx.get(key);
    if (!bytes.has_value()) {
       co_return std::nullopt;
    }
@@ -345,11 +371,11 @@ boost::asio::awaitable<object_page<typename Object::value_type>> page_transactio
                                                                                           record_range range,
                                                                                           page_request request) {
    tx.template ensure_registered<Object>();
-   validate_page_request(request);
+   forge::objectdb::validate_page_request(request);
 
-   auto records = co_await tx.active_session().scan_page(std::move(range), std::move(request));
+   auto records = co_await tx.scan_page(std::move(range), std::move(request));
    auto out = object_page<typename Object::value_type>{};
-   out.next = std::move(records.next).transform([](record_key key) { return cursor{.boundary = std::move(key)}; });
+   out.next = std::move(records.next);
 
    for (const auto& entry : records.entries) {
       const auto id = unpack_value<id_type_of<Object>>(entry.value);
@@ -370,7 +396,7 @@ boost::asio::awaitable<void> verify_unique_indexes(Access tx, const typename Obj
       using index = std::tuple_element_t<Index, indexes>;
       if constexpr (index::kind == index_kind::secondary_unique) {
          const auto key = index_entry_key<Object, typename index::tag_type>(value);
-         const auto existing = co_await tx.active_session().get(key);
+         const auto existing = co_await tx.get(key);
          if (existing.has_value()) {
             const auto existing_id = unpack_value<id_type_of<Object>>(*existing);
             if (existing_id != value.id) {
@@ -390,7 +416,7 @@ boost::asio::awaitable<void> write_secondary_indexes(Access tx, const typename O
       using index = std::tuple_element_t<Index, indexes>;
       if constexpr (secondary_index<index>) {
          const auto key = index_entry_key<Object, typename index::tag_type>(value);
-         co_await tx.active_session().put(key, pack_value(value.id));
+         co_await tx.put(key, pack_value(value.id));
       }
       co_await write_secondary_indexes<Object, Access, Index + 1>(tx, value);
    }
@@ -404,7 +430,7 @@ boost::asio::awaitable<void> remove_secondary_indexes(Access tx, const typename 
       using index = std::tuple_element_t<Index, indexes>;
       if constexpr (secondary_index<index>) {
          const auto key = index_entry_key<Object, typename index::tag_type>(value);
-         co_await tx.active_session().erase(key);
+         co_await tx.erase(key);
       }
       co_await remove_secondary_indexes<Object, Access, Index + 1>(tx, value);
    }
@@ -417,7 +443,7 @@ boost::asio::awaitable<void> insert_object(Access tx, Value value) {
    tx.template ensure_registered<object_model_type>();
 
    const auto object_key = object_record_key<object_model_type>(value.id);
-   if ((co_await tx.active_session().get(object_key)).has_value()) {
+   if ((co_await tx.get(object_key)).has_value()) {
       FORGE_THROW_EXCEPTION(exceptions::duplicate_object, "objectdb object id already exists");
    }
 
@@ -429,7 +455,7 @@ boost::asio::awaitable<void> insert_object(Access tx, Value value) {
    };
    co_await tx.before_mutation(mutation);
    co_await verify_unique_indexes<object_model_type>(tx, value);
-   co_await tx.active_session().put(object_key, std::move(after));
+   co_await tx.put(object_key, std::move(after));
    co_await write_secondary_indexes<object_model_type>(tx, value);
    tx.changes().mutations.push_back(std::move(mutation));
    co_return;
@@ -456,7 +482,7 @@ boost::asio::awaitable<void> replace_object(Access tx, Value value, mutation_kin
    co_await tx.before_mutation(mutation);
    co_await verify_unique_indexes<object_model_type>(tx, value);
    co_await remove_secondary_indexes<object_model_type>(tx, *existing);
-   co_await tx.active_session().put(object_record_key<object_model_type>(value.id), std::move(after));
+   co_await tx.put(object_record_key<object_model_type>(value.id), std::move(after));
    co_await write_secondary_indexes<object_model_type>(tx, value);
    tx.changes().mutations.push_back(std::move(mutation));
    co_return;
@@ -479,7 +505,7 @@ boost::asio::awaitable<void> erase_object(Access tx, forge::ids::object_id id) {
    };
    co_await tx.before_mutation(mutation);
    co_await remove_secondary_indexes<Object>(tx, *existing);
-   co_await tx.active_session().erase(object_record_key<Object>(typed));
+   co_await tx.erase(object_record_key<Object>(typed));
    tx.changes().mutations.push_back(std::move(mutation));
    co_return;
 }

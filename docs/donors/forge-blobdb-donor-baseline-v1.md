@@ -22,10 +22,10 @@ namespace semantics -- those belong to products.
   names only. Families cannot be tuned; all open with default options. There is
   **no** blob-file / value-log / KV-separation support anywhere in
   `forge::rocksdb`.
-- `forge::objectdb::rocksdb::config` maps objectdb onto a single named family
-  (`family = "objectdb"`). objectdb is a typed-object / secondary-index /
-  transaction / snapshot database -- the right home for **metadata**, the wrong
-  home for large opaque bytes.
+- `forge::db::rocksdb::config` maps shared `forge::db` families onto RocksDB
+  column families. objectdb is a typed-object / secondary-index / transaction /
+  snapshot database -- the right home for **metadata**, the wrong home for large
+  opaque bytes.
 - There is no blob primitive. Large immutable content-addressed payloads
   (Storlane erasure pieces / block bytes, blockchain block bodies, artifacts)
   have no shared Forge component, so each product would reinvent value-log
@@ -100,8 +100,9 @@ default-options families are unchanged; schema parses per-family options.
 
 ### Backend neutrality
 
-Driver abstraction like `forge::objectdb::driver`. Planned backends:
-- `forge::blobdb::rocksdb` -- over a blob-configured `forge::rocksdb` family
+Driver abstraction is now shared as `forge::db::driver`. Planned/current
+backends:
+- `forge::db::rocksdb` -- over blob-configured `forge::rocksdb` families
   (KV-separation). Good default for small/medium and mixed blobs.
 - `forge::blobdb::fs` (later) -- loose content-addressed files on disk
   (Git/IPFS-flat-fs style). Often superior for very large immutable payloads:

@@ -11,7 +11,6 @@ import forge.ids.object_id;
 import forge.objectdb.index;
 import forge.objectdb.object;
 import forge.objectdb.record;
-import forge.objectdb.session;
 import forge.objectdb.store;
 
 struct account : forge::objectdb::object<account, 1, 7> {

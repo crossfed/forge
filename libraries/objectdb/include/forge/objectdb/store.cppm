@@ -3,6 +3,7 @@ module;
 #include <boost/asio/awaitable.hpp>
 #include <forge/exceptions/macros.hpp>
 
+#include <concepts>
 #include <cstdint>
 #include <exception>
 #include <functional>
@@ -15,14 +16,15 @@ module;
 export module forge.objectdb.store;
 
 import forge.ids.object_id;
+import forge.db.driver;
+import forge.db.record;
+import forge.db.transaction;
 import forge.objectdb.cursor;
-import forge.objectdb.driver;
 import forge.objectdb.exceptions;
 import forge.objectdb.hooks;
 import forge.objectdb.index;
 import forge.objectdb.object;
 import forge.objectdb.record;
-import forge.objectdb.session;
 import forge.objectdb.snapshot;
 import forge.objectdb.transaction;
 
@@ -35,37 +37,20 @@ enum class write_policy : std::uint8_t {
 
 class store {
  public:
+   struct config {
+      forge::db::family family{"objectdb"};
+   };
+
    struct options {
       write_policy writes = write_policy::single_writer;
    };
 
-   template <session_model Session>
-   explicit store(session_factory<Session> factory)
-       : store(std::move(factory), options{}) {}
-
-   explicit store(std::shared_ptr<driver> value)
+   explicit store(std::shared_ptr<forge::db::driver> value)
        : store(std::move(value), options{}) {}
 
-   store(std::shared_ptr<driver> value, options settings);
-
-   template <session_model Session>
-   store(session_factory<Session> factory, options value)
-       : store(factory, factory, value) {}
-
-   template <session_model WriteSession, session_model ReadSession>
-   store(session_factory<WriteSession> write, session_factory<ReadSession> read)
-       : store(std::move(write), std::move(read), options{}) {}
-
-   template <session_model WriteSession, session_model ReadSession>
-   store(session_factory<WriteSession> write, session_factory<ReadSession> read, options value)
-       : store(
-            [write = std::move(write)]() mutable -> boost::asio::awaitable<std::unique_ptr<session>> {
-               co_return co_await write.begin();
-            },
-            [read = std::move(read)]() mutable -> boost::asio::awaitable<std::unique_ptr<session>> {
-               co_return co_await read.begin();
-            },
-            value) {}
+   store(std::shared_ptr<forge::db::driver> value, options settings);
+   store(std::shared_ptr<forge::db::driver> value, config settings);
+   store(std::shared_ptr<forge::db::driver> value, config settings, options runtime);
 
    template <object_model Object>
    void register_object();
@@ -75,6 +60,15 @@ class store {
 
    boost::asio::awaitable<transaction> begin_transaction();
    boost::asio::awaitable<snapshot> begin_read();
+   [[nodiscard]] transaction join(forge::db::transaction& active);
+
+   template <typename SharedTransaction>
+      requires requires(SharedTransaction& active) {
+         { active.db_transaction() } -> std::same_as<forge::db::transaction&>;
+      }
+   [[nodiscard]] transaction join(SharedTransaction& active) {
+      return join(active.db_transaction());
+   }
 
    template <forge::ids::typed_id_like Id>
    boost::asio::awaitable<typename object_index_for_id_t<Id>::value_type> get(Id id);
@@ -109,10 +103,6 @@ class store {
  private:
    friend class transaction;
    friend class snapshot;
-
-   using begin_fn = std::function<boost::asio::awaitable<std::unique_ptr<session>>()>;
-
-   store(begin_fn write, begin_fn read, options value);
 
    void register_object_type(forge::ids::object_id type, std::type_index model);
    void ensure_registered_type(forge::ids::object_id type, std::type_index model) const;

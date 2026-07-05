@@ -4,9 +4,7 @@ module;
 
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/this_coro.hpp>
-#include <boost/asio/steady_timer.hpp>
 
-#include <deque>
 #include <exception>
 #include <functional>
 #include <map>
@@ -20,31 +18,22 @@ module;
 
 module forge.objectdb.store;
 
-import forge.objectdb.driver;
+import forge.db.driver;
+import forge.db.exceptions;
 import forge.objectdb.exceptions;
 
 #include "details/store_impl.hxx"
 
 namespace forge::objectdb {
 
-store::store(begin_fn write, begin_fn read, options value)
-    : impl_{std::make_shared<impl>(std::move(write), std::move(read), value)} {}
+store::store(std::shared_ptr<forge::db::driver> value, options settings)
+    : store(std::move(value), config{}, settings) {}
 
-store::store(std::shared_ptr<driver> value, options settings)
-    : store(
-         [value]() -> boost::asio::awaitable<std::unique_ptr<session>> {
-            if (!value) {
-               FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "objectdb driver is null");
-            }
-            co_return co_await value->begin_transaction();
-         },
-         [value]() -> boost::asio::awaitable<std::unique_ptr<session>> {
-            if (!value) {
-               FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "objectdb driver is null");
-            }
-            co_return co_await value->begin_read();
-         },
-         settings) {}
+store::store(std::shared_ptr<forge::db::driver> value, config settings)
+    : store(std::move(value), std::move(settings), options{}) {}
+
+store::store(std::shared_ptr<forge::db::driver> value, config settings, options runtime)
+    : impl_{std::make_shared<impl>(std::move(value), std::move(settings), runtime)} {}
 
 void store::add_interceptor(std::shared_ptr<interceptor> value) {
    if (value) {
@@ -64,15 +53,22 @@ boost::asio::awaitable<transaction> store::begin_transaction() {
    if (impl_->settings.writes == write_policy::single_writer) {
       ticket.emplace(co_await impl_->write_gate->acquire());
    }
-   auto active = co_await impl_->open_write_session();
+
+   auto active = forge::db::transaction{};
+   try {
+      active = co_await impl_->open_write_transaction();
+   } catch (const forge::db::exceptions::unsupported_operation&) {
+      FORGE_THROW_EXCEPTION(exceptions::unsupported_operation, "objectdb driver does not support writes");
+   }
    auto release = transaction::release_fn{};
    if (ticket.has_value()) {
-      auto owned_ticket =
-         std::make_shared<std::optional<detail::write_gate::ticket>>(std::move(ticket));
+      auto owned_ticket = std::make_shared<std::optional<detail::write_gate::ticket>>(std::move(ticket));
       release = [owned_ticket]() mutable { owned_ticket->reset(); };
    }
+
    co_return transaction{
       std::move(active),
+      impl_->config.family,
       [impl = impl_](forge::ids::object_id type, std::type_index model) {
          impl->ensure_registered_type(type, model);
       },
@@ -83,12 +79,29 @@ boost::asio::awaitable<transaction> store::begin_transaction() {
 }
 
 boost::asio::awaitable<snapshot> store::begin_read() {
-   auto active = co_await impl_->open_read_session();
+   auto active = forge::db::snapshot{};
+   try {
+      active = co_await impl_->open_read_snapshot();
+   } catch (const forge::db::exceptions::unsupported_operation&) {
+      FORGE_THROW_EXCEPTION(exceptions::unsupported_operation, "objectdb driver does not support snapshot reads");
+   }
    co_return snapshot{
       std::move(active),
+      impl_->config.family,
       [impl = impl_](forge::ids::object_id type, std::type_index model) {
          impl->ensure_registered_type(type, model);
       }};
+}
+
+transaction store::join(forge::db::transaction& active) {
+   return transaction{
+      active,
+      impl_->config.family,
+      [impl = impl_](forge::ids::object_id type, std::type_index model) {
+         impl->ensure_registered_type(type, model);
+      },
+      impl_->interceptors,
+      impl_->observers};
 }
 
 void store::register_object_type(forge::ids::object_id type, std::type_index model) {
