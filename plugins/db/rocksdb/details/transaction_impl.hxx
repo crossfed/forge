@@ -1,11 +1,17 @@
 #pragma once
 
+#include "transaction_owner.hxx"
+
 namespace forge::plugins::db::rocksdb {
 
-class native_transaction final : public transaction {
+struct native_transaction_state;
+
+class native_transaction final : public transaction, public native_transaction_control {
  public:
-   native_transaction(forge::rocksdb::transaction transaction, forge::asio::task_scheduler& scheduler);
+   native_transaction(forge::rocksdb::transaction transaction, std::shared_ptr<native_transaction_owner> owner);
    ~native_transaction() override;
+
+   void release_native() noexcept override;
 
    boost::asio::awaitable<std::optional<std::vector<std::byte>>>
    get(family column_family, std::vector<std::byte> key, read_options options) override;
@@ -20,10 +26,7 @@ class native_transaction final : public transaction {
    boost::asio::awaitable<void> rollback() override;
 
  private:
-   forge::asio::task_scheduler* scheduler_ = nullptr;
-   forge::rocksdb::transaction transaction_;
-   std::mutex mutex_;
-   bool completed_ = false;
+   std::shared_ptr<native_transaction_state> state_;
 };
 
 } // namespace forge::plugins::db::rocksdb

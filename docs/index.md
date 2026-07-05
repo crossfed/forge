@@ -49,7 +49,7 @@ Each library guide must be useful without reading source first:
 - [objectdb](../libraries/objectdb/README.md)
 - [json](../libraries/json/README.md)
 - [yaml](../libraries/yaml/README.md)
-- `xml` — planned in [iterations/forge-xml-http-api-codec-v1.md](iterations/forge-xml-http-api-codec-v1.md)
+- [xml](../libraries/xml/README.md)
 - [schema](../libraries/schema/README.md)
 - [config](../libraries/config/README.md)
 - [program_options](../libraries/program_options/README.md)
