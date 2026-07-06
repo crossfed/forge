@@ -54,14 +54,15 @@ scan_result read_scan_page(std::unique_ptr<::rocksdb::Iterator> iterator, scan_r
    if (request.limit == 0) {
       return result;
    }
+   const auto has_cursor = request.has_cursor || !request.cursor.empty();
    if (!request.lower_bound.empty() && !starts_with(request.lower_bound, request.prefix)) {
       return result;
    }
-   if (!request.cursor.empty() && !starts_with(request.cursor, request.prefix)) {
+   if (has_cursor && !starts_with(request.cursor, request.prefix)) {
       return result;
    }
 
-   if (request.cursor.empty()) {
+   if (!has_cursor) {
       iterator->Seek(to_slice(request.lower_bound.empty() ? request.prefix : request.lower_bound));
    } else {
       iterator->Seek(to_slice(request.cursor));
@@ -86,6 +87,7 @@ scan_result read_scan_page(std::unique_ptr<::rocksdb::Iterator> iterator, scan_r
             const auto next_key = bytes_from_slice(iterator->key());
             if (starts_with(next_key, request.prefix)) {
                result.next_cursor = std::move(cursor);
+               result.has_next_cursor = true;
             }
          }
          break;

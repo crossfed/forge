@@ -47,7 +47,7 @@ forge::db::record_page to_record_page(forge::rocksdb::scan_result scan,
    }
 
    if (!stopped_at_range_end && last_returned.has_value()
-       && (has_more_in_range || (!range.has_end && !scan.next_cursor.empty()))) {
+       && (has_more_in_range || (!range.has_end && scan.has_next_cursor))) {
       result.next = forge::db::cursor{.boundary = std::move(*last_returned)};
    }
    return result;
@@ -66,6 +66,7 @@ forge::rocksdb::scan_request make_scan_request(const forge::db::record_range& ra
       .limit = limit,
       .options = {},
       .lower_bound = range.begin.bytes(),
+      .has_cursor = request.after.has_value(),
    };
 }
 

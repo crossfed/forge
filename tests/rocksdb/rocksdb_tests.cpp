@@ -122,6 +122,28 @@ BOOST_AUTO_TEST_CASE(rocksdb_store_scan_page_bounds_prefix_with_cursor) {
    BOOST_TEST(to_string(bounded.entries[1].value) == "3");
 }
 
+BOOST_AUTO_TEST_CASE(rocksdb_store_scan_page_resumes_after_empty_key_cursor) {
+   const auto root = root_guard{};
+   auto db = store{config_for(root.root / "store")};
+   const auto data = family{"data"};
+
+   db.put(data, {}, to_bytes("empty"));
+   db.put(data, make_key("next"), to_bytes("next"));
+
+   const auto first = db.scan_page(data, scan_request{.limit = 1});
+   BOOST_REQUIRE_EQUAL(first.entries.size(), 1U);
+   BOOST_CHECK(first.entries.front().key.empty());
+   BOOST_CHECK(to_string(first.entries.front().value) == "empty");
+   BOOST_CHECK(first.has_next_cursor);
+   BOOST_CHECK(first.next_cursor.empty());
+
+   const auto second = db.scan_page(data, scan_request{.cursor = first.next_cursor, .limit = 1, .has_cursor = true});
+   BOOST_REQUIRE_EQUAL(second.entries.size(), 1U);
+   BOOST_CHECK(to_string(second.entries.front().key) == "next");
+   BOOST_CHECK(to_string(second.entries.front().value) == "next");
+   BOOST_CHECK(!second.has_next_cursor);
+}
+
 BOOST_AUTO_TEST_CASE(rocksdb_blob_options_preserve_native_file_size_default) {
    BOOST_CHECK_EQUAL(forge::rocksdb::blob_options{}.blob_file_size, default_blob_file_size);
 

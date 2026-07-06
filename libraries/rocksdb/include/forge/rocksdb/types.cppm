@@ -107,11 +107,13 @@ struct scan_request {
    std::uint64_t limit = 0;
    read_options options;
    std::vector<std::byte> lower_bound;
+   bool has_cursor = false;
 };
 
 struct scan_result {
    std::vector<entry> entries;
    std::vector<std::byte> next_cursor;
+   bool has_next_cursor = false;
 };
 
 struct operation {
@@ -166,8 +168,8 @@ BOOST_DESCRIBE_STRUCT(column_family_config, (), (name, blobs))
 BOOST_DESCRIBE_STRUCT(read_options, (), (verify_checksums, fill_cache))
 BOOST_DESCRIBE_STRUCT(write_options, (), (sync, disable_wal))
 BOOST_DESCRIBE_STRUCT(entry, (), (key, value))
-BOOST_DESCRIBE_STRUCT(scan_request, (), (prefix, cursor, limit, options, lower_bound))
-BOOST_DESCRIBE_STRUCT(scan_result, (), (entries, next_cursor))
+BOOST_DESCRIBE_STRUCT(scan_request, (), (prefix, cursor, limit, options, lower_bound, has_cursor))
+BOOST_DESCRIBE_STRUCT(scan_result, (), (entries, next_cursor, has_next_cursor))
 
 } // namespace forge::rocksdb
 

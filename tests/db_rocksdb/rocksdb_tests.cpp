@@ -39,6 +39,10 @@ forge::db::record_key key(std::string text_value) {
    return forge::db::record_key{bytes(std::move(text_value))};
 }
 
+forge::db::record_key empty_key() {
+   return forge::db::record_key{std::vector<std::byte>{}};
+}
+
 forge::db::rocksdb::config config_for(const std::filesystem::path& path) {
    auto blob_family = forge::rocksdb::column_family_config{"blobdb.data"};
    blob_family.blobs.enable_blob_files = true;
@@ -208,6 +212,44 @@ BOOST_AUTO_TEST_CASE(db_rocksdb_snapshot_scan_does_not_emit_cursor_at_range_end)
       BOOST_CHECK_EQUAL(text(page.entries[0].value), "a");
       BOOST_CHECK_EQUAL(text(page.entries[1].value), "b");
       BOOST_CHECK(!page.next.has_value());
+      co_return;
+   }());
+
+   std::filesystem::remove_all(root);
+}
+
+BOOST_AUTO_TEST_CASE(db_rocksdb_snapshot_scan_preserves_empty_key_cursor) {
+   const auto root = make_test_root("forge_db_rocksdb_empty_cursor");
+   auto runtime = forge::asio::runtime{};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto driver = forge::db::rocksdb::driver{config_for(root / "store")};
+      const auto objects = forge::db::family{"objectdb"};
+
+      auto seed = co_await driver.begin_transaction();
+      co_await seed.put(objects, empty_key(), bytes("empty"));
+      co_await seed.put(objects, key("next"), bytes("next"));
+      co_await seed.commit();
+
+      auto snapshot = co_await driver.begin_read();
+      auto first = co_await snapshot.scan_page(
+         objects,
+         forge::db::record_range{.begin = empty_key(), .end = key("z")},
+         forge::db::page_request{.limit = 1});
+      BOOST_REQUIRE_EQUAL(first.entries.size(), 1U);
+      BOOST_CHECK(first.entries.front().key.empty());
+      BOOST_CHECK_EQUAL(text(first.entries.front().value), "empty");
+      BOOST_REQUIRE(first.next.has_value());
+      BOOST_CHECK(first.next->boundary.empty());
+
+      auto second = co_await snapshot.scan_page(
+         objects,
+         forge::db::record_range{.begin = empty_key(), .end = key("z")},
+         forge::db::page_request{.after = first.next, .limit = 1});
+      BOOST_REQUIRE_EQUAL(second.entries.size(), 1U);
+      BOOST_CHECK_EQUAL(text(second.entries.front().key.bytes()), "next");
+      BOOST_CHECK_EQUAL(text(second.entries.front().value), "next");
+      BOOST_CHECK(!second.next.has_value());
       co_return;
    }());
 
