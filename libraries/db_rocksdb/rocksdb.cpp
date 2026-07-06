@@ -31,17 +31,23 @@ forge::db::record_page to_record_page(forge::rocksdb::scan_result scan,
    auto result = forge::db::record_page{};
    auto last_returned = std::optional<forge::db::record_key>{};
    auto stopped_at_range_end = false;
+   auto has_more_in_range = false;
    for (auto& entry : scan.entries) {
       auto key = forge::db::record_key{std::move(entry.key)};
       if (range.has_end && !(key.bytes() < range.end.bytes())) {
          stopped_at_range_end = true;
          break;
       }
+      if (result.entries.size() >= request.limit) {
+         has_more_in_range = true;
+         break;
+      }
       last_returned = key;
       result.entries.push_back(forge::db::record_entry{.key = std::move(key), .value = std::move(entry.value)});
    }
 
-   if (!stopped_at_range_end && !scan.next_cursor.empty() && last_returned.has_value()) {
+   if (!stopped_at_range_end && last_returned.has_value()
+       && (has_more_in_range || (!range.has_end && !scan.next_cursor.empty()))) {
       result.next = forge::db::cursor{.boundary = std::move(*last_returned)};
    }
    return result;
@@ -49,10 +55,15 @@ forge::db::record_page to_record_page(forge::rocksdb::scan_result scan,
 
 forge::rocksdb::scan_request make_scan_request(const forge::db::record_range& range,
                                                const forge::db::page_request& request) {
+   auto limit = request.limit;
+   if (range.has_end && limit > 0) {
+      ++limit;
+   }
+
    return forge::rocksdb::scan_request{
       .prefix = range.prefix.bytes(),
       .cursor = request.after ? request.after->boundary.bytes() : std::vector<std::byte>{},
-      .limit = request.limit,
+      .limit = limit,
       .options = {},
       .lower_bound = range.begin.bytes(),
    };
