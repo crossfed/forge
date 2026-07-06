@@ -147,6 +147,44 @@ BOOST_AUTO_TEST_CASE(db_rocksdb_snapshot_preserves_old_records_and_scan_pages) {
    std::filesystem::remove_all(root);
 }
 
+BOOST_AUTO_TEST_CASE(db_rocksdb_snapshot_scans_prefixless_half_open_ranges) {
+   const auto root = make_test_root("forge_db_rocksdb_range");
+   auto runtime = forge::asio::runtime{};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto driver = forge::db::rocksdb::driver{config_for(root / "store")};
+      const auto objects = forge::db::family{"objectdb"};
+
+      auto seed = co_await driver.begin_transaction();
+      for (const auto* value : {"a", "aa", "b", "y", "z"}) {
+         co_await seed.put(objects, key(value), bytes(value));
+      }
+      co_await seed.commit();
+
+      auto snapshot = co_await driver.begin_read();
+      auto first = co_await snapshot.scan_page(
+         objects,
+         forge::db::record_range{.begin = key("a"), .end = key("z")},
+         forge::db::page_request{.limit = 3});
+      BOOST_REQUIRE_EQUAL(first.entries.size(), 3U);
+      BOOST_CHECK_EQUAL(text(first.entries[0].value), "a");
+      BOOST_CHECK_EQUAL(text(first.entries[1].value), "aa");
+      BOOST_CHECK_EQUAL(text(first.entries[2].value), "b");
+      BOOST_REQUIRE(first.next.has_value());
+
+      auto second = co_await snapshot.scan_page(
+         objects,
+         forge::db::record_range{.begin = key("a"), .end = key("z")},
+         forge::db::page_request{.after = first.next, .limit = 3});
+      BOOST_REQUIRE_EQUAL(second.entries.size(), 1U);
+      BOOST_CHECK_EQUAL(text(second.entries.front().value), "y");
+      BOOST_CHECK(!second.next.has_value());
+      co_return;
+   }());
+
+   std::filesystem::remove_all(root);
+}
+
 BOOST_AUTO_TEST_CASE(db_rocksdb_blob_enabled_family_roundtrips_large_values) {
    const auto root = make_test_root("forge_db_rocksdb_blob");
    auto runtime = forge::asio::runtime{};

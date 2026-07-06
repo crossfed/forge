@@ -50,7 +50,7 @@ forge::db::record_page to_record_page(forge::rocksdb::scan_result scan,
 forge::rocksdb::scan_request make_scan_request(const forge::db::record_range& range,
                                                const forge::db::page_request& request) {
    return forge::rocksdb::scan_request{
-      .prefix = range.prefix.empty() ? range.begin.bytes() : range.prefix.bytes(),
+      .prefix = range.prefix.bytes(),
       .cursor = request.after ? request.after->boundary.bytes() : std::vector<std::byte>{},
       .limit = request.limit,
       .options = {},

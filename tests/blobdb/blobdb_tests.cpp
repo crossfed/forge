@@ -251,6 +251,31 @@ BOOST_AUTO_TEST_CASE(blobdb_refs_and_collection_are_explicit_mechanisms) {
    }());
 }
 
+BOOST_AUTO_TEST_CASE(blobdb_ref_keys_do_not_alias_variable_length_digests) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   auto blobs = forge::blobdb::store{driver};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto short_digest = forge::blobdb::digest{std::vector<std::byte>{std::byte{0x01}}};
+      const auto long_digest =
+         forge::blobdb::digest{std::vector<std::byte>{std::byte{0x01}, std::byte{0x00}, std::byte{0x02}}};
+
+      co_await blobs.put(short_digest, bytes("short"));
+      co_await blobs.put(long_digest, bytes("long"));
+      co_await blobs.retain(long_digest, forge::blobdb::owner_ref{"doc:long"});
+
+      BOOST_CHECK_EQUAL(co_await blobs.ref_count(short_digest), 0U);
+      BOOST_CHECK_EQUAL(co_await blobs.ref_count(long_digest), 1U);
+
+      auto collected = co_await blobs.collect_unreferenced({.limit = 10});
+      BOOST_CHECK_EQUAL(collected.removed, 1U);
+      BOOST_CHECK(!(co_await blobs.has(short_digest)));
+      BOOST_CHECK(co_await blobs.has(long_digest));
+      co_return;
+   }());
+}
+
 BOOST_AUTO_TEST_CASE(blobdb_join_shares_commit_boundary_with_objectdb_metadata) {
    auto runtime = forge::asio::runtime{};
    auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
