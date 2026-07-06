@@ -15,7 +15,7 @@ import forge.api.binding;
 import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.config.component;
-import forge.objectdb.driver;
+import forge.db.driver;
 import forge.objectdb.store;
 
 #include "details/plugin_impl.hxx"

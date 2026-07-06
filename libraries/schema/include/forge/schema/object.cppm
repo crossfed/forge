@@ -260,6 +260,7 @@ template <typename T> struct field_rule {
    std::function<void(T&)> apply_default;
    std::function<void(T&, const std::any&)> assign_any;
    std::function<std::any(const std::any&)> normalize_default;
+   std::function<input_value(const std::any&)> default_input;
    std::function<void(T&, const input_value&, std::string_view, std::vector<diagnostic>&)> assign_input;
    std::function<std::any(const T&)> read_any;
    std::function<std::optional<std::any>(const T&)> read_validation_any;
@@ -310,6 +311,27 @@ template <typename T> class object_schema {
             return to_default_any(cast_any_to<item_type>(value));
          } else {
             return to_default_any(cast_any_to<member_type>(value));
+         }
+      };
+      rule.default_input = [](const std::any& value) -> input_value {
+         if (!value.has_value()) {
+            return {};
+         }
+         if constexpr (is_optional<member_type>::value) {
+            using item_type = typename is_optional<member_type>::value_type;
+            if (value.type() == typeid(member_type)) {
+               const auto optional_value = std::any_cast<member_type>(value);
+               if (!optional_value) {
+                  return {};
+               }
+               return to_input_value(*optional_value);
+            }
+            return to_input_value(cast_any_to<item_type>(value));
+         } else {
+            if (value.type() == typeid(member_type)) {
+               return to_input_value(std::any_cast<member_type>(value));
+            }
+            return to_input_value(cast_any_to<member_type>(value));
          }
       };
       rule.assign_input = [](T& object, const input_value& value, std::string_view path,
@@ -875,6 +897,12 @@ template <typename T>
    const auto nested_rules = rules<T>::define();
    for (std::size_t i = 0; i < values->size(); ++i) {
       const auto item_path = append_index(path, i);
+      if constexpr (std::constructible_from<T, std::string>) {
+         if (const auto* text = std::get_if<std::string>(&(*values)[i].storage)) {
+            output.emplace_back(*text);
+            continue;
+         }
+      }
       const auto* object = (*values)[i].as_object();
       if (!object) {
          diagnostics.push_back(make_path_error(item_path, "config.type", "list entry is not an object"));

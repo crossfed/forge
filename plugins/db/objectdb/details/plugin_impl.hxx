@@ -17,7 +17,7 @@ struct managed_store {
    std::string path;
    std::string family;
    forge::objectdb::store::options options;
-   std::shared_ptr<forge::objectdb::driver> driver;
+   std::shared_ptr<forge::db::driver> driver;
    std::shared_ptr<forge::objectdb::store> store;
    bool started = false;
 };
@@ -25,7 +25,7 @@ struct managed_store {
 struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
    struct opened_store {
       std::shared_ptr<forge::objectdb::store> store;
-      std::shared_ptr<forge::objectdb::driver> driver;
+      std::shared_ptr<forge::db::driver> driver;
    };
 
    mutable std::mutex mutex;
@@ -41,7 +41,7 @@ struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
    void close();
 
    void add_store(std::string name,
-                  std::shared_ptr<forge::objectdb::driver> driver,
+                  std::shared_ptr<forge::db::driver> driver,
                   forge::objectdb::store::options options);
    [[nodiscard]] std::shared_ptr<managed_store> find_store(const std::string& name) const;
    [[nodiscard]] std::shared_ptr<managed_store> require_store(const std::string& name) const;
@@ -60,7 +60,7 @@ class plugin::api_impl final : public api {
 
    boost::asio::awaitable<void>
    add_store(std::string name,
-             std::shared_ptr<forge::objectdb::driver> driver,
+             std::shared_ptr<forge::db::driver> driver,
              forge::objectdb::store::options options) override;
    boost::asio::awaitable<store_handle> store(std::string name) override;
    boost::asio::awaitable<void> flush(std::string name, bool sync) override;
@@ -85,7 +85,7 @@ static void request_stop(const std::shared_ptr<plugin::impl>& impl) noexcept;
 static boost::asio::awaitable<void> shutdown(const std::shared_ptr<plugin::impl>& impl);
 };
 
-[[nodiscard]] std::shared_ptr<forge::objectdb::driver> make_configured_driver(const store_config& value);
+[[nodiscard]] std::shared_ptr<forge::db::driver> make_configured_driver(const store_config& value);
 
 } // namespace detail
 

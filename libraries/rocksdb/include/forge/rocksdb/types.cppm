@@ -29,9 +29,41 @@ enum class status_code {
    unknown,
 };
 
+enum class compression_type {
+   none,
+   snappy,
+   zlib,
+   bzip2,
+   lz4,
+   lz4hc,
+   xpress,
+   zstd,
+};
+
+inline constexpr std::uint64_t default_blob_file_size = 256ULL * 1024ULL * 1024ULL;
+
+struct blob_options {
+   bool enable_blob_files = false;
+   std::uint64_t min_blob_size = 0;
+   std::uint64_t blob_file_size = default_blob_file_size;
+   compression_type blob_compression_type = compression_type::none;
+   bool enable_blob_garbage_collection = false;
+   double blob_garbage_collection_age_cutoff = 0.25;
+};
+
+struct column_family_config {
+   column_family_config() = default;
+
+   column_family_config(std::string value) : name{std::move(value)} {}
+   column_family_config(const char* value) : name{value == nullptr ? std::string{} : std::string{value}} {}
+
+   std::string name = "default";
+   blob_options blobs;
+};
+
 struct config {
    std::string path;
-   std::vector<std::string> column_families;
+   std::vector<column_family_config> column_families;
    bool create_if_missing = true;
    bool create_missing_column_families = true;
 };
@@ -75,11 +107,13 @@ struct scan_request {
    std::uint64_t limit = 0;
    read_options options;
    std::vector<std::byte> lower_bound;
+   bool has_cursor = false;
 };
 
 struct scan_result {
    std::vector<entry> entries;
    std::vector<std::byte> next_cursor;
+   bool has_next_cursor = false;
 };
 
 struct operation {
@@ -121,15 +155,66 @@ export namespace forge::rocksdb {
 
 BOOST_DESCRIBE_STRUCT(config, (), (path, column_families, create_if_missing, create_missing_column_families))
 
+BOOST_DESCRIBE_ENUM(compression_type, none, snappy, zlib, bzip2, lz4, lz4hc, xpress, zstd)
+BOOST_DESCRIBE_STRUCT(blob_options,
+                      (),
+                      (enable_blob_files,
+                       min_blob_size,
+                       blob_file_size,
+                       blob_compression_type,
+                       enable_blob_garbage_collection,
+                       blob_garbage_collection_age_cutoff))
+BOOST_DESCRIBE_STRUCT(column_family_config, (), (name, blobs))
 BOOST_DESCRIBE_STRUCT(read_options, (), (verify_checksums, fill_cache))
 BOOST_DESCRIBE_STRUCT(write_options, (), (sync, disable_wal))
 BOOST_DESCRIBE_STRUCT(entry, (), (key, value))
-BOOST_DESCRIBE_STRUCT(scan_request, (), (prefix, cursor, limit, options, lower_bound))
-BOOST_DESCRIBE_STRUCT(scan_result, (), (entries, next_cursor))
+BOOST_DESCRIBE_STRUCT(scan_request, (), (prefix, cursor, limit, options, lower_bound, has_cursor))
+BOOST_DESCRIBE_STRUCT(scan_result, (), (entries, next_cursor, has_next_cursor))
 
 } // namespace forge::rocksdb
 
 namespace rocksdb_schema = ::forge::rocksdb;
+
+export template <> struct forge::schema::rules<rocksdb_schema::blob_options> {
+   [[nodiscard]] static forge::schema::object_schema<rocksdb_schema::blob_options> define() {
+      auto schema = forge::schema::object<rocksdb_schema::blob_options>();
+      schema.field<&rocksdb_schema::blob_options::enable_blob_files>("enable-blob-files")
+         .default_value(false)
+         .description("Store large values in RocksDB blob files for this column family");
+      schema.field<&rocksdb_schema::blob_options::min_blob_size>("min-blob-size")
+         .default_value(std::uint64_t{0})
+         .description("Minimum value size that RocksDB may place into blob files");
+      schema.field<&rocksdb_schema::blob_options::blob_file_size>("blob-file-size")
+         .default_value(rocksdb_schema::default_blob_file_size)
+         .description("Target RocksDB blob file size for this column family");
+      schema.field<&rocksdb_schema::blob_options::blob_compression_type>("blob-compression-type")
+         .default_value(rocksdb_schema::compression_type::none)
+         .description("Compression used for RocksDB blob files");
+      schema.field<&rocksdb_schema::blob_options::enable_blob_garbage_collection>("enable-blob-garbage-collection")
+         .default_value(false)
+         .description("Enable RocksDB blob-file garbage collection for this column family");
+      schema.field<&rocksdb_schema::blob_options::blob_garbage_collection_age_cutoff>(
+         "blob-garbage-collection-age-cutoff")
+         .default_value(0.25)
+         .range(0.0, 1.0)
+         .description("RocksDB blob garbage collection age cutoff");
+      return schema;
+   }
+};
+
+export template <> struct forge::schema::rules<rocksdb_schema::column_family_config> {
+   [[nodiscard]] static forge::schema::object_schema<rocksdb_schema::column_family_config> define() {
+      auto schema = forge::schema::object<rocksdb_schema::column_family_config>();
+      schema.field<&rocksdb_schema::column_family_config::name>("name")
+         .required()
+         .non_empty()
+         .description("RocksDB column family name");
+      schema.field<&rocksdb_schema::column_family_config::blobs>("blobs")
+         .default_value(rocksdb_schema::blob_options{})
+         .description("Optional RocksDB BlobDB settings for this column family");
+      return schema;
+   }
+};
 
 export template <> struct forge::schema::rules<rocksdb_schema::config> {
    [[nodiscard]] static forge::schema::object_schema<rocksdb_schema::config> define() {
@@ -139,8 +224,8 @@ export template <> struct forge::schema::rules<rocksdb_schema::config> {
          .non_empty()
          .description("RocksDB TransactionDB path; required when the rocksdb backend is enabled");
       schema.field<&rocksdb_schema::config::column_families>("column-families")
-         .default_value(std::vector<std::string>{})
-         .each_non_empty()
+         .items<rocksdb_schema::column_family_config>()
+         .default_value(std::vector<rocksdb_schema::column_family_config>{})
          .description("RocksDB column families to open in addition to default");
       schema.field<&rocksdb_schema::config::create_if_missing>("create-if-missing")
          .default_value(true)

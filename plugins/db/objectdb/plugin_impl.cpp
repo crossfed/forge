@@ -20,14 +20,15 @@ import forge.api.binding;
 import forge.app.plugin_context;
 import forge.config.component;
 import forge.config.decode;
+import forge.db.driver;
+import forge.db.record;
 import forge.exceptions;
-import forge.objectdb.driver;
 import forge.objectdb.store;
 import forge.plugins.db.objectdb.exceptions;
 import forge.plugins.db.objectdb.types;
 
 #if FORGE_PLUGINS_DB_OBJECTDB_HAS_ROCKSDB
-import forge.objectdb.rocksdb;
+import forge.db.rocksdb;
 #endif
 
 #include "details/plugin_impl.hxx"
@@ -87,7 +88,7 @@ void plugin::impl::reject_duplicate_name(const std::string& name) const {
 }
 
 void plugin::impl::add_store(std::string name,
-                             std::shared_ptr<forge::objectdb::driver> driver,
+                             std::shared_ptr<forge::db::driver> driver,
                              forge::objectdb::store::options options) {
    if (name.empty()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_argument, "objectdb store name must not be empty");
@@ -100,6 +101,7 @@ void plugin::impl::add_store(std::string name,
    auto record = std::make_shared<managed_store>();
    record->name = std::move(name);
    record->driver_name = "custom";
+   record->family = "objectdb";
    record->options = options;
    record->driver = std::move(driver);
 
@@ -113,7 +115,7 @@ void plugin::impl::start() {
    struct pending_open {
       std::string name;
       store_config config;
-      std::shared_ptr<forge::objectdb::driver> driver;
+      std::shared_ptr<forge::db::driver> driver;
    };
 
    auto pending = std::vector<pending_open>{};
@@ -168,7 +170,10 @@ void plugin::impl::start() {
             FORGE_THROW_EXCEPTION(exceptions::startup_failed, "objectdb store has no driver",
                                   forge::exceptions::ctx("store", name));
          }
-         record->store = std::make_shared<forge::objectdb::store>(record->driver, record->options);
+         record->store = std::make_shared<forge::objectdb::store>(
+            record->driver,
+            forge::objectdb::store::config{.family = forge::db::family{record->family}},
+            record->options);
          record->started = true;
       }
       current.store(phase::started);
@@ -301,13 +306,13 @@ boost::asio::awaitable<void> lifecycle::shutdown(const std::shared_ptr<plugin::i
    co_return;
 }
 
-std::shared_ptr<forge::objectdb::driver> make_configured_driver(const store_config& value) {
+std::shared_ptr<forge::db::driver> make_configured_driver(const store_config& value) {
    if (value.driver == "rocksdb") {
 #if FORGE_PLUGINS_DB_OBJECTDB_HAS_ROCKSDB
-      return std::make_shared<forge::objectdb::rocksdb::driver>(
-         forge::objectdb::rocksdb::config{
+      return std::make_shared<forge::db::rocksdb::driver>(
+         forge::db::rocksdb::config{
             .path = value.path,
-            .family = value.family,
+            .families = {value.family},
             .create_if_missing = value.create_if_missing,
             .create_missing_column_families = value.create_missing_column_families,
          });

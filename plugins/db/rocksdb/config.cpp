@@ -45,6 +45,11 @@ void validate_config(const config& value) {
    if (value.path.empty()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_config, "rocksdb path must not be empty");
    }
+   for (const auto& family : value.column_families) {
+      if (family.name.empty()) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_config, "rocksdb column family name must not be empty");
+      }
+   }
 }
 
 } // namespace forge::plugins::db::rocksdb::detail

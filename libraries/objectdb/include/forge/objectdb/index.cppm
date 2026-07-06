@@ -583,7 +583,7 @@ class index_stream {
        : query_{std::move(query)}, range_{std::move(range)}, page_size_{options.page_size} {}
 
    boost::asio::awaitable<std::optional<T>> next() {
-      validate_page_request(page_request{.limit = page_size_});
+      forge::objectdb::validate_page_request(page_request{.limit = page_size_});
       if (offset_ < current_.items.size()) {
          co_return current_.items[offset_++];
       }
