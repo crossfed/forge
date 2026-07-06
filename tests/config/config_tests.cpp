@@ -56,6 +56,17 @@ struct defaulted_nested_signer_config {
    std::vector<nested_key_config> keys;
 };
 
+struct string_shorthand_item_config {
+   string_shorthand_item_config() = default;
+   explicit string_shorthand_item_config(std::string value) : name{value} {}
+
+   std::string name;
+};
+
+struct string_shorthand_list_config {
+   std::vector<string_shorthand_item_config> items;
+};
+
 enum class scalar_test_mode : std::uint8_t {
    fast_mode = 1,
    safe_mode = 2,
@@ -70,6 +81,8 @@ BOOST_DESCRIBE_STRUCT(optional_default_config, (), (wrapped_port, raw_port))
 BOOST_DESCRIBE_STRUCT(nested_key_config, (), (id, private_key, input_profile, purposes))
 BOOST_DESCRIBE_STRUCT(nested_signer_config, (), (keys, default_output_profile))
 BOOST_DESCRIBE_STRUCT(defaulted_nested_signer_config, (), (keys))
+BOOST_DESCRIBE_STRUCT(string_shorthand_item_config, (), (name))
+BOOST_DESCRIBE_STRUCT(string_shorthand_list_config, (), (items))
 
 template <> struct forge::schema::rules<http_config> {
    [[nodiscard]] static forge::schema::object_schema<http_config> define() {
@@ -139,6 +152,22 @@ template <> struct forge::schema::rules<defaulted_nested_signer_config> {
             .input_profile = "forge",
             .purposes = {"storage.receipt"},
          }});
+      return schema;
+   }
+};
+
+template <> struct forge::schema::rules<string_shorthand_item_config> {
+   [[nodiscard]] static forge::schema::object_schema<string_shorthand_item_config> define() {
+      auto schema = forge::schema::object<string_shorthand_item_config>();
+      schema.field<&string_shorthand_item_config::name>("name").non_empty();
+      return schema;
+   }
+};
+
+template <> struct forge::schema::rules<string_shorthand_list_config> {
+   [[nodiscard]] static forge::schema::object_schema<string_shorthand_list_config> define() {
+      auto schema = forge::schema::object<string_shorthand_list_config>();
+      schema.field<&string_shorthand_list_config::items>("items").items<string_shorthand_item_config>();
       return schema;
    }
 };
@@ -400,6 +429,15 @@ BOOST_AUTO_TEST_CASE(config_nested_object_list_validators_report_stable_diagnost
    BOOST_TEST(has_diagnostic(decoded.diagnostics.entries, "plugins.crypto.signer.keys[0].purposes[0]",
                              "schema.non_empty"));
    BOOST_TEST(has_diagnostic(decoded.diagnostics.entries, "plugins.crypto.signer.keys", "schema.unique"));
+}
+
+BOOST_AUTO_TEST_CASE(config_string_shorthand_object_list_entries_run_nested_validation) {
+   auto doc = forge::config::document{};
+   doc.set("test.items", forge::config::value::array_type{forge::config::value{""}});
+
+   const auto decoded = forge::config::decode<string_shorthand_list_config>(doc, "test");
+   BOOST_TEST(!decoded.ok());
+   BOOST_TEST(has_diagnostic(decoded.diagnostics.entries, "test.items[0].name", "schema.non_empty"));
 }
 
 BOOST_AUTO_TEST_CASE(config_formats_full_decode_diagnostics) {

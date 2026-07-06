@@ -899,7 +899,10 @@ template <typename T>
       const auto item_path = append_index(path, i);
       if constexpr (std::constructible_from<T, std::string>) {
          if (const auto* text = std::get_if<std::string>(&(*values)[i].storage)) {
-            output.emplace_back(*text);
+            auto item = T{*text};
+            auto nested = nested_rules.validate(item, item_path);
+            diagnostics.insert(diagnostics.end(), nested.begin(), nested.end());
+            output.push_back(std::move(item));
             continue;
          }
       }
