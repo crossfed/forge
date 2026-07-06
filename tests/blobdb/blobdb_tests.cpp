@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -53,6 +54,8 @@ bool starts_with(const forge::db::record_key& value, const forge::db::record_key
 
 struct memory_state {
    family_map records;
+   bool fail_commit = false;
+   std::size_t rollback_calls = 0;
 };
 
 class memory_session final : public forge::db::session {
@@ -127,6 +130,9 @@ class memory_session final : public forge::db::session {
    }
 
    boost::asio::awaitable<void> commit() override {
+      if (state_->fail_commit) {
+         throw std::runtime_error{"blobdb test commit failure"};
+      }
       if (writable_) {
          state_->records = std::move(working_);
       }
@@ -134,6 +140,7 @@ class memory_session final : public forge::db::session {
    }
 
    boost::asio::awaitable<void> rollback() override {
+      ++state_->rollback_calls;
       co_return;
    }
 
@@ -281,6 +288,24 @@ BOOST_AUTO_TEST_CASE(blobdb_joined_transaction_does_not_own_commit) {
       auto blob_tx = blobs.join(db_tx);
       BOOST_CHECK_THROW(co_await blob_tx.commit(), forge::blobdb::exceptions::unsupported_operation);
       co_await db_tx.rollback();
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(blobdb_direct_mutation_commit_failure_rolls_back) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   state->fail_commit = true;
+   auto driver = std::make_shared<memory_driver>(state);
+   auto blobs = forge::blobdb::store{driver, forge::blobdb::store::config{.digest_hasher = std::make_shared<first_byte_hasher>()}};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      BOOST_CHECK_THROW(co_await blobs.put(bytes("alpha")), std::runtime_error);
+      BOOST_CHECK_EQUAL(state->rollback_calls, 1U);
+
+      state->fail_commit = false;
+      const auto id = co_await blobs.put(bytes("beta"));
+      BOOST_CHECK(co_await blobs.has(id));
       co_return;
    }());
 }

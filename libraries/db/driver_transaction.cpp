@@ -148,13 +148,14 @@ boost::asio::awaitable<void> transaction::commit() {
       co_return;
    }
 
+   co_await impl_->active->commit();
+
    auto active_session = std::move(impl_->active);
    auto after_commit_hooks = std::move(impl_->after_commit_hooks);
    impl_->after_rollback_hooks.clear();
    impl_->closed = true;
    impl_->committed = true;
 
-   co_await active_session->commit();
    active_session.reset();
    for (auto& hook : after_commit_hooks) {
       if (hook) {

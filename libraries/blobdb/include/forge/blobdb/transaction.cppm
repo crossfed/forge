@@ -11,8 +11,8 @@ module;
 export module forge.blobdb.transaction;
 
 import forge.blobdb.types;
+import forge.db.driver;
 import forge.db.record;
-import forge.db.transaction;
 
 export namespace forge::blobdb {
 

@@ -7,9 +7,6 @@ module;
 
 module forge.db.driver;
 
-import forge.db.snapshot;
-import forge.db.transaction;
-
 namespace forge::db {
 
 boost::asio::awaitable<transaction> driver::begin_transaction() {

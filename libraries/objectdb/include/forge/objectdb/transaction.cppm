@@ -22,8 +22,8 @@ module;
 export module forge.objectdb.transaction;
 
 import forge.ids.object_id;
+import forge.db.driver;
 import forge.db.record;
-import forge.db.transaction;
 import forge.objectdb.cursor;
 import forge.objectdb.exceptions;
 import forge.objectdb.hooks;

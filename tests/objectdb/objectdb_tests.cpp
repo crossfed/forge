@@ -322,6 +322,66 @@ class throwing_rollback_session final : public forge::db::session {
    bool closed_ = false;
 };
 
+class throwing_commit_session final : public forge::db::session {
+ public:
+   explicit throwing_commit_session(std::shared_ptr<memory_state> state) : state_{std::move(state)} {
+      ++state_->active_writes;
+      if (state_->active_writes > 1) {
+         state_->overlapping_writes = true;
+      }
+   }
+
+   ~throwing_commit_session() override {
+      if (!closed_) {
+         ++state_->destroyed_without_finish;
+      }
+   }
+
+   [[nodiscard]] forge::db::capabilities capabilities() const noexcept override {
+      return forge::db::capabilities{.snapshot_reads = false, .writes = true};
+   }
+
+   boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(forge::db::family,
+                                                                     forge::objectdb::record_key) override {
+      co_return std::nullopt;
+   }
+
+   boost::asio::awaitable<void> put(forge::db::family, forge::objectdb::record_key, std::vector<std::byte>) override {
+      co_return;
+   }
+
+   boost::asio::awaitable<void> erase(forge::db::family, forge::objectdb::record_key) override {
+      co_return;
+   }
+
+   boost::asio::awaitable<forge::objectdb::record_page> scan_page(forge::db::family,
+                                                                  forge::objectdb::record_range,
+                                                                  forge::objectdb::page_request) override {
+      co_return forge::objectdb::record_page{};
+   }
+
+   boost::asio::awaitable<void> commit() override {
+      throw std::runtime_error{"objectdb test commit failure"};
+   }
+
+   boost::asio::awaitable<void> rollback() override {
+      ++state_->rollback_calls;
+      finish();
+      co_return;
+   }
+
+ private:
+   void finish() noexcept {
+      if (!closed_) {
+         closed_ = true;
+         --state_->active_writes;
+      }
+   }
+
+   std::shared_ptr<memory_state> state_;
+   bool closed_ = false;
+};
+
 class memory_snapshot_session final : public forge::db::session {
  public:
    explicit memory_snapshot_session(std::shared_ptr<memory_state> state)
@@ -810,6 +870,28 @@ BOOST_AUTO_TEST_CASE(objectdb_explicit_rollback_failure_releases_writer_lane) {
       BOOST_CHECK(!driver->overlapping_writes());
       BOOST_CHECK_EQUAL(driver->active_writes(), 0U);
 
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(objectdb_direct_mutation_commit_failure_rolls_back_and_releases_writer) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<session_driver<throwing_commit_session>>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = forge::objectdb::store{driver};
+      store.register_object<account_object>();
+
+      BOOST_CHECK_THROW(co_await store.insert(make_account(91, "failed", 1, 1)), std::runtime_error);
+      BOOST_CHECK_EQUAL(driver->rollback_calls(), 1U);
+      BOOST_CHECK_EQUAL(driver->destroyed_without_finish(), 0U);
+      BOOST_CHECK(!driver->overlapping_writes());
+      BOOST_CHECK_EQUAL(driver->active_writes(), 0U);
+
+      auto next = co_await store.begin_transaction();
+      BOOST_CHECK_EQUAL(driver->active_writes(), 1U);
+      co_await next.rollback();
+      BOOST_CHECK_EQUAL(driver->rollback_calls(), 2U);
+      BOOST_CHECK_EQUAL(driver->active_writes(), 0U);
       co_return;
    }());
 }

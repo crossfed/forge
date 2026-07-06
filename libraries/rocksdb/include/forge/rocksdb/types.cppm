@@ -40,10 +40,12 @@ enum class compression_type {
    zstd,
 };
 
+inline constexpr std::uint64_t default_blob_file_size = 256ULL * 1024ULL * 1024ULL;
+
 struct blob_options {
    bool enable_blob_files = false;
    std::uint64_t min_blob_size = 0;
-   std::uint64_t blob_file_size = 0;
+   std::uint64_t blob_file_size = default_blob_file_size;
    compression_type blob_compression_type = compression_type::none;
    bool enable_blob_garbage_collection = false;
    double blob_garbage_collection_age_cutoff = 0.25;
@@ -181,7 +183,7 @@ export template <> struct forge::schema::rules<rocksdb_schema::blob_options> {
          .default_value(std::uint64_t{0})
          .description("Minimum value size that RocksDB may place into blob files");
       schema.field<&rocksdb_schema::blob_options::blob_file_size>("blob-file-size")
-         .default_value(std::uint64_t{0})
+         .default_value(rocksdb_schema::default_blob_file_size)
          .description("Target RocksDB blob file size for this column family");
       schema.field<&rocksdb_schema::blob_options::blob_compression_type>("blob-compression-type")
          .default_value(rocksdb_schema::compression_type::none)

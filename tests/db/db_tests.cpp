@@ -6,6 +6,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -14,7 +15,6 @@ import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.db.driver;
 import forge.db.record;
-import forge.db.transaction;
 
 namespace {
 
@@ -47,6 +47,8 @@ bool starts_with(const forge::db::record_key& value, const forge::db::record_key
 
 struct memory_state {
    family_map records;
+   bool fail_commit = false;
+   std::size_t rollback_calls = 0;
 };
 
 class memory_session final : public forge::db::session {
@@ -122,6 +124,9 @@ class memory_session final : public forge::db::session {
    }
 
    boost::asio::awaitable<void> commit() override {
+      if (state_->fail_commit) {
+         throw std::runtime_error{"db test commit failure"};
+      }
       if (writable_) {
          state_->records = std::move(working_);
       }
@@ -129,6 +134,7 @@ class memory_session final : public forge::db::session {
    }
 
    boost::asio::awaitable<void> rollback() override {
+      ++state_->rollback_calls;
       co_return;
    }
 
@@ -277,6 +283,37 @@ BOOST_AUTO_TEST_CASE(db_transaction_participant_hooks_follow_commit_and_rollback
 
       BOOST_CHECK_EQUAL(commits, 1U);
       BOOST_CHECK_EQUAL(rollbacks, 1U);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_commit_failure_preserves_rollback_state) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   state->fail_commit = true;
+   auto driver = std::make_shared<memory_driver>(state);
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto meta = forge::db::family{"meta"};
+      auto rolled_back = false;
+
+      auto tx = co_await driver->begin_transaction();
+      tx.after_rollback([&]() {
+         rolled_back = true;
+      });
+      co_await tx.put(meta, key("a"), bytes("pending"));
+
+      BOOST_CHECK_THROW(co_await tx.commit(), std::runtime_error);
+      BOOST_CHECK(tx.active());
+
+      co_await tx.rollback();
+      BOOST_CHECK(!tx.active());
+      BOOST_CHECK(rolled_back);
+      BOOST_CHECK_EQUAL(state->rollback_calls, 1U);
+
+      state->fail_commit = false;
+      auto read = co_await driver->begin_read();
+      BOOST_CHECK(!(co_await read.get(meta, key("a"))).has_value());
       co_return;
    }());
 }

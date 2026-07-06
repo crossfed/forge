@@ -16,8 +16,8 @@ module;
 export module forge.objectdb.snapshot;
 
 import forge.ids.object_id;
+import forge.db.driver;
 import forge.db.record;
-import forge.db.snapshot;
 import forge.objectdb.cursor;
 import forge.objectdb.exceptions;
 import forge.objectdb.index;

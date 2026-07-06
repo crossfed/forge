@@ -12,7 +12,6 @@ import forge.asio.runtime;
 import forge.db.driver;
 import forge.db.record;
 import forge.db.rocksdb;
-import forge.db.transaction;
 import forge.rocksdb.types;
 
 namespace {
