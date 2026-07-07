@@ -18,14 +18,19 @@
 import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.blobdb.exceptions;
+import forge.blobdb.ref;
 import forge.blobdb.store;
 import forge.blobdb.types;
+import forge.crypto.sha256;
 import forge.db.driver;
 import forge.db.record;
 import forge.ids.object_id;
 import forge.objectdb.index;
 import forge.objectdb.object;
 import forge.objectdb.store;
+import forge.raw.raw;
+import forge.variant.exceptions;
+import forge.variant.value;
 
 namespace {
 
@@ -208,6 +213,76 @@ document make_document(std::uint64_t instance, forge::blobdb::digest digest) {
 FORGE_OBJECTDB_OBJECT(document_object)
 
 BOOST_AUTO_TEST_SUITE(blobdb_test_suite)
+
+BOOST_AUTO_TEST_CASE(blobdb_ref_defaults_to_sha256_and_variant_uses_text_form) {
+   using ref_type = forge::blobdb::ref<>;
+
+   auto value = ref_type{
+      .digest = forge::crypto::sha256::hash("blobdb-ref"),
+      .size = 12345,
+   };
+
+   auto encoded = forge::variant{};
+   forge::to_variant(value, encoded);
+
+   const auto expected = value.digest.str() + ":12345";
+   BOOST_CHECK(encoded.is_string());
+   BOOST_CHECK_EQUAL(encoded.get_string(), expected);
+
+   auto decoded = ref_type{};
+   forge::from_variant(encoded, decoded);
+   BOOST_CHECK(decoded.digest == value.digest);
+   BOOST_CHECK_EQUAL(decoded.size, value.size);
+
+   auto defaults = ref_type{};
+   BOOST_CHECK(defaults.digest.empty());
+   BOOST_CHECK_EQUAL(defaults.size, 0U);
+}
+
+BOOST_AUTO_TEST_CASE(blobdb_ref_variant_rejects_invalid_text_form) {
+   auto decoded = forge::blobdb::ref<>{};
+
+   BOOST_CHECK_THROW(forge::from_variant(forge::variant{"missing-colon"}, decoded), forge::variant_exceptions::decode_error);
+   BOOST_CHECK_THROW(forge::from_variant(forge::variant{":1"}, decoded), forge::variant_exceptions::decode_error);
+   BOOST_CHECK_THROW(forge::from_variant(forge::variant{std::string(64, '0') + ":"}, decoded),
+                     forge::variant_exceptions::decode_error);
+   BOOST_CHECK_THROW(forge::from_variant(forge::variant{std::string(64, 'z') + ":1"}, decoded),
+                     forge::variant_exceptions::decode_error);
+   BOOST_CHECK_THROW(forge::from_variant(forge::variant{std::string(64, '0') + ":12x"}, decoded),
+                     forge::variant_exceptions::decode_error);
+   BOOST_CHECK_THROW(forge::from_variant(forge::variant{std::string(64, '0') + ":18446744073709551616"}, decoded),
+                     forge::variant_exceptions::decode_error);
+}
+
+BOOST_AUTO_TEST_CASE(blobdb_ref_raw_roundtrip_is_compact_binary) {
+   auto value = forge::blobdb::ref<>{
+      .digest = forge::crypto::sha256::hash("blobdb-raw-ref"),
+      .size = 777,
+   };
+
+   const auto packed = forge::raw::pack(value);
+   BOOST_CHECK_EQUAL(packed.size(), value.digest.data_size() + sizeof(std::uint64_t));
+
+   const auto decoded = forge::raw::unpack<forge::blobdb::ref<>>(packed);
+   BOOST_CHECK(decoded.digest == value.digest);
+   BOOST_CHECK_EQUAL(decoded.size, value.size);
+}
+
+BOOST_AUTO_TEST_CASE(blobdb_ref_supports_blobdb_digest_text_roundtrip) {
+   auto value = forge::blobdb::ref<forge::blobdb::digest>{
+      .digest = forge::blobdb::digest{bytes("\xde\xad")},
+      .size = 7,
+   };
+
+   auto encoded = forge::variant{};
+   forge::to_variant(value, encoded);
+   BOOST_CHECK_EQUAL(encoded.get_string(), "dead:7");
+
+   auto decoded = forge::blobdb::ref<forge::blobdb::digest>{};
+   forge::from_variant(encoded, decoded);
+   BOOST_CHECK(decoded.digest == value.digest);
+   BOOST_CHECK_EQUAL(decoded.size, value.size);
+}
 
 BOOST_AUTO_TEST_CASE(blobdb_put_get_verify_and_digest_modes_work) {
    auto runtime = forge::asio::runtime{};

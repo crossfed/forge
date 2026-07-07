@@ -10,6 +10,9 @@ target_include_directories(forge_blobdb PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
 target_link_libraries(
    forge_blobdb PUBLIC
       Boost::asio
+      forge_crypto
       forge_db
       forge_exceptions
+      forge_raw
+      forge_variant
 )
