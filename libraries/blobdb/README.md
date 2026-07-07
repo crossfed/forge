@@ -59,8 +59,9 @@ conversion and a stable algorithm id.
 
 Variant/JSON-friendly conversion is a string in the form `<digest-text>:<size>`,
 for example `<sha256-hex>:1234`. Binary raw serialization stays compact and
-typed: digest bytes followed by the `uint64` size. It does not serialize through
-the text form.
+typed: fixed-size digests are encoded as digest bytes followed by the `uint64`
+size; variable-size digests add a binary `uint32` digest length before the digest
+bytes. It does not serialize through the text form.
 
 BlobDB private keys include the digest algorithm id and digest bytes, so two
 algorithms that produce the same bytes do not collide in data or ref records.

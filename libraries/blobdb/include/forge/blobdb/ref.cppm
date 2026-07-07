@@ -18,9 +18,15 @@ export module forge.blobdb.ref;
 import forge.blobdb.types;
 import forge.crypto.hex;
 import forge.crypto.sha256;
+import forge.raw.exceptions;
 import forge.raw.raw;
 import forge.variant.exceptions;
 import forge.variant.value;
+
+export namespace forge::blobdb {
+template <typename Digest>
+struct digest_traits;
+}
 
 namespace forge::blobdb::detail {
 
@@ -53,15 +59,17 @@ inline void require_hex_text(std::string_view text, std::size_t expected_size) {
    return value;
 }
 
+template <typename Digest>
+concept fixed_size_digest = requires {
+   { digest_traits<Digest>::byte_size } -> std::convertible_to<std::size_t>;
+};
+
 } // namespace forge::blobdb::detail
 
 export namespace forge::blobdb {
 
 template <typename Digest>
 struct hash;
-
-template <typename Digest>
-struct digest_traits;
 
 template <>
 struct hash<forge::crypto::sha256> {
@@ -74,6 +82,7 @@ struct hash<forge::crypto::sha256> {
 template <>
 struct digest_traits<forge::crypto::sha256> {
    static constexpr auto algorithm = std::string_view{"sha256"};
+   static constexpr auto byte_size = std::size_t{32U};
 
    [[nodiscard]] static std::vector<std::byte> to_bytes(const forge::crypto::sha256& value) {
       const auto* begin = reinterpret_cast<const std::byte*>(value.data());
@@ -118,14 +127,39 @@ struct ref {
 
    template <typename Stream>
    friend Stream& operator<<(Stream& stream, const ref& value) {
-      forge::raw::pack(stream, value.digest);
+      const auto digest_bytes = digest_traits<Digest>::to_bytes(value.digest);
+      if constexpr (detail::fixed_size_digest<Digest>) {
+         if (digest_bytes.size() != digest_traits<Digest>::byte_size) {
+            FORGE_THROW_EXCEPTION(forge::raw::exceptions::codec_error, "blobdb ref digest has invalid fixed size");
+         }
+      } else {
+         forge::raw::pack(stream, static_cast<std::uint32_t>(digest_bytes.size()));
+      }
+      if (!digest_bytes.empty()) {
+         stream.write(reinterpret_cast<const char*>(digest_bytes.data()), digest_bytes.size());
+      }
       forge::raw::pack(stream, value.size);
       return stream;
    }
 
    template <typename Stream>
    friend Stream& operator>>(Stream& stream, ref& value) {
-      forge::raw::unpack(stream, value.digest);
+      auto digest_size = std::size_t{};
+      if constexpr (detail::fixed_size_digest<Digest>) {
+         digest_size = digest_traits<Digest>::byte_size;
+      } else {
+         auto encoded_size = std::uint32_t{};
+         forge::raw::unpack(stream, encoded_size);
+         digest_size = encoded_size;
+      }
+      if (stream.remaining() < digest_size + sizeof(std::uint64_t)) {
+         FORGE_THROW_EXCEPTION(forge::raw::exceptions::codec_error, "blobdb ref raw payload is truncated");
+      }
+      auto digest_bytes = std::vector<std::byte>(digest_size);
+      if (!digest_bytes.empty()) {
+         stream.read(reinterpret_cast<char*>(digest_bytes.data()), digest_bytes.size());
+      }
+      value.digest = digest_traits<Digest>::from_bytes(digest_bytes);
       forge::raw::unpack(stream, value.size);
       return stream;
    }

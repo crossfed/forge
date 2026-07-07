@@ -307,6 +307,20 @@ BOOST_AUTO_TEST_CASE(blobdb_ref_raw_roundtrip_is_compact_binary) {
    BOOST_CHECK_EQUAL(decoded.size, value.size);
 }
 
+BOOST_AUTO_TEST_CASE(blobdb_ref_raw_uses_digest_traits_for_custom_digest) {
+   auto value = forge::blobdb::ref<toy_digest>{
+      .digest = toy_digest{bytes("\xde\xad")},
+      .size = 777,
+   };
+
+   const auto packed = forge::raw::pack(value);
+   BOOST_CHECK_EQUAL(packed.size(), sizeof(std::uint32_t) + value.digest.bytes.size() + sizeof(std::uint64_t));
+
+   const auto decoded = forge::raw::unpack<forge::blobdb::ref<toy_digest>>(packed);
+   BOOST_CHECK(decoded.digest == value.digest);
+   BOOST_CHECK_EQUAL(decoded.size, value.size);
+}
+
 BOOST_AUTO_TEST_CASE(blobdb_ref_supports_custom_digest_text_roundtrip) {
    auto value = forge::blobdb::ref<toy_digest>{
       .digest = toy_digest{bytes("\xde\xad")},
