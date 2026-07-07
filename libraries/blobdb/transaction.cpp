@@ -10,6 +10,7 @@ module;
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -25,8 +26,11 @@ namespace forge::blobdb {
 
 namespace {
 
-void require_digest(const digest& id) {
-   if (id.empty()) {
+void require_encoded_ref(const std::string& algorithm, const std::vector<std::byte>& digest) {
+   if (algorithm.empty()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_config, "blob digest algorithm must not be empty");
+   }
+   if (digest.empty()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_config, "blob digest must not be empty");
    }
 }
@@ -37,12 +41,12 @@ void require_owner(const owner_ref& owner) {
    }
 }
 
-digest digest_from_data_key(const forge::db::record_key& key) {
-   const auto& bytes = key.bytes();
-   if (bytes.size() < 2U || bytes.front() != static_cast<std::byte>(0x10U)) {
+detail::encoded_ref ref_from_data_key(const forge::db::record_key& key) {
+   auto value = detail::ref_from_data_key(key);
+   if (!value.has_value()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_config, "blobdb data key is malformed");
    }
-   return digest{std::vector<std::byte>{bytes.begin() + 1, bytes.end()}};
+   return std::move(*value);
 }
 
 } // namespace
@@ -50,32 +54,20 @@ digest digest_from_data_key(const forge::db::record_key& key) {
 transaction::impl::impl(owned_tag,
                         forge::db::transaction active_value,
                         forge::db::family data,
-                        forge::db::family refs,
-                        std::shared_ptr<hasher> value_hasher,
-                        bool verify_writes,
-                        bool verify_reads) noexcept
+                        forge::db::family refs) noexcept
     : owned{std::move(active_value)},
       active{&*owned},
       data_family{std::move(data)},
       refs_family{std::move(refs)},
-      digest_hasher{std::move(value_hasher)},
-      verify_on_write{verify_writes},
-      verify_on_read{verify_reads},
       owns_commit{true} {}
 
 transaction::impl::impl(borrowed_tag,
                         forge::db::transaction& active_value,
                         forge::db::family data,
-                        forge::db::family refs,
-                        std::shared_ptr<hasher> value_hasher,
-                        bool verify_writes,
-                        bool verify_reads) noexcept
+                        forge::db::family refs) noexcept
     : active{&active_value},
       data_family{std::move(data)},
-      refs_family{std::move(refs)},
-      digest_hasher{std::move(value_hasher)},
-      verify_on_write{verify_writes},
-      verify_on_read{verify_reads} {}
+      refs_family{std::move(refs)} {}
 
 forge::db::transaction& transaction::impl::transaction() {
    if (active == nullptr || !active->active()) {
@@ -86,33 +78,21 @@ forge::db::transaction& transaction::impl::transaction() {
 
 transaction::transaction(forge::db::transaction&& active,
                          forge::db::family data_family,
-                         forge::db::family refs_family,
-                         std::shared_ptr<hasher> digest_hasher,
-                         bool verify_writes,
-                         bool verify_reads)
+                         forge::db::family refs_family)
     : impl_{std::make_shared<impl>(
          impl::owned_tag{},
          std::move(active),
          std::move(data_family),
-         std::move(refs_family),
-         std::move(digest_hasher),
-         verify_writes,
-         verify_reads)} {}
+         std::move(refs_family))} {}
 
 transaction::transaction(forge::db::transaction& active,
                          forge::db::family data_family,
-                         forge::db::family refs_family,
-                         std::shared_ptr<hasher> digest_hasher,
-                         bool verify_writes,
-                         bool verify_reads)
+                         forge::db::family refs_family)
     : impl_{std::make_shared<impl>(
          impl::borrowed_tag{},
          active,
          std::move(data_family),
-         std::move(refs_family),
-         std::move(digest_hasher),
-         verify_writes,
-         verify_reads)} {}
+         std::move(refs_family))} {}
 
 forge::db::transaction& transaction::db_transaction() const {
    if (!impl_) {
@@ -121,88 +101,83 @@ forge::db::transaction& transaction::db_transaction() const {
    return impl_->transaction();
 }
 
-boost::asio::awaitable<digest> transaction::put(std::vector<std::byte> bytes) {
-   if (!impl_ || !impl_->digest_hasher) {
-      FORGE_THROW_EXCEPTION(exceptions::unsupported_operation, "blobdb hasher is required for digest-from-bytes put");
-   }
-   auto id = impl_->digest_hasher->hash(bytes);
-   co_await put(id, std::move(bytes));
-   co_return id;
+boost::asio::awaitable<sha256_ref> transaction::put(std::vector<std::byte> payload) {
+   co_return co_await put_as<digest>(std::move(payload));
 }
 
-boost::asio::awaitable<void> transaction::put(digest id, std::vector<std::byte> bytes) {
-   require_digest(id);
-   if (impl_->verify_on_write && impl_->digest_hasher) {
-      const auto actual = impl_->digest_hasher->hash(bytes);
-      if (actual != id) {
-         FORGE_THROW_EXCEPTION(exceptions::digest_mismatch, "blob digest does not match payload on write");
-      }
-   }
-   co_await impl_->transaction().put(impl_->data_family, detail::data_key(id), std::move(bytes));
+boost::asio::awaitable<void> transaction::put_encoded(std::string algorithm,
+                                                      std::vector<std::byte> digest,
+                                                      std::uint64_t,
+                                                      std::vector<std::byte> payload) {
+   require_encoded_ref(algorithm, digest);
+   co_await impl_->transaction().put(impl_->data_family, detail::data_key(algorithm, digest), std::move(payload));
 }
 
-boost::asio::awaitable<std::vector<std::byte>> transaction::get(digest id) {
-   require_digest(id);
-   auto bytes = co_await impl_->transaction().get(impl_->data_family, detail::data_key(id));
+boost::asio::awaitable<std::vector<std::byte>> transaction::get_encoded(std::string algorithm,
+                                                                        std::vector<std::byte> digest,
+                                                                        std::uint64_t size) {
+   require_encoded_ref(algorithm, digest);
+   auto bytes = co_await impl_->transaction().get(impl_->data_family, detail::data_key(algorithm, digest));
    if (!bytes.has_value()) {
       FORGE_THROW_EXCEPTION(exceptions::not_found, "blob was not found");
    }
-   if (impl_->verify_on_read && impl_->digest_hasher) {
-      const auto actual = impl_->digest_hasher->hash(*bytes);
-      if (actual != id) {
-         FORGE_THROW_EXCEPTION(exceptions::digest_mismatch, "blob digest does not match payload on read");
-      }
+   if (bytes->size() != size) {
+      FORGE_THROW_EXCEPTION(exceptions::digest_mismatch, "blob size does not match reference");
    }
    co_return *bytes;
 }
 
-boost::asio::awaitable<bool> transaction::has(digest id) {
-   require_digest(id);
-   co_return (co_await impl_->transaction().get(impl_->data_family, detail::data_key(id))).has_value();
+boost::asio::awaitable<bool> transaction::has_encoded(std::string algorithm, std::vector<std::byte> digest) {
+   require_encoded_ref(algorithm, digest);
+   co_return (co_await impl_->transaction().get(impl_->data_family, detail::data_key(algorithm, digest))).has_value();
 }
 
-boost::asio::awaitable<stat> transaction::stat_blob(digest id) {
-   require_digest(id);
-   auto bytes = co_await impl_->transaction().get(impl_->data_family, detail::data_key(id));
+boost::asio::awaitable<stat> transaction::stat_blob_encoded(std::string algorithm,
+                                                            std::vector<std::byte> digest,
+                                                            std::uint64_t size) {
+   require_encoded_ref(algorithm, digest);
+   auto bytes = co_await impl_->transaction().get(impl_->data_family, detail::data_key(algorithm, digest));
    if (!bytes.has_value()) {
       FORGE_THROW_EXCEPTION(exceptions::not_found, "blob was not found");
    }
+   if (bytes->size() != size) {
+      FORGE_THROW_EXCEPTION(exceptions::digest_mismatch, "blob size does not match reference");
+   }
    co_return stat{
-      .id = std::move(id),
       .size = static_cast<std::uint64_t>(bytes->size()),
-      .refs = co_await ref_count(id),
+      .refs = co_await ref_count_encoded(std::move(algorithm), std::move(digest)),
    };
 }
 
-boost::asio::awaitable<void> transaction::erase(digest id) {
-   require_digest(id);
-   co_await impl_->transaction().erase(impl_->data_family, detail::data_key(id));
+boost::asio::awaitable<void> transaction::erase_encoded(std::string algorithm, std::vector<std::byte> digest) {
+   require_encoded_ref(algorithm, digest);
+   co_await impl_->transaction().erase(impl_->data_family, detail::data_key(algorithm, digest));
 }
 
-boost::asio::awaitable<void> transaction::verify(digest id) {
-   static_cast<void>(co_await get(std::move(id)));
-}
-
-boost::asio::awaitable<void> transaction::retain(digest id, owner_ref owner) {
-   require_digest(id);
+boost::asio::awaitable<void> transaction::retain_encoded(std::string algorithm,
+                                                         std::vector<std::byte> digest,
+                                                         owner_ref owner) {
+   require_encoded_ref(algorithm, digest);
    require_owner(owner);
    co_await impl_->transaction().put(
       impl_->refs_family,
-      detail::ref_key(id, owner),
+      detail::ref_key(algorithm, digest, owner),
       std::vector<std::byte>{static_cast<std::byte>(1U)});
 }
 
-boost::asio::awaitable<void> transaction::release(digest id, owner_ref owner) {
-   require_digest(id);
+boost::asio::awaitable<void> transaction::release_encoded(std::string algorithm,
+                                                          std::vector<std::byte> digest,
+                                                          owner_ref owner) {
+   require_encoded_ref(algorithm, digest);
    require_owner(owner);
-   co_await impl_->transaction().erase(impl_->refs_family, detail::ref_key(id, owner));
+   co_await impl_->transaction().erase(impl_->refs_family, detail::ref_key(algorithm, digest, owner));
 }
 
-boost::asio::awaitable<std::uint64_t> transaction::ref_count(digest id) {
-   require_digest(id);
+boost::asio::awaitable<std::uint64_t> transaction::ref_count_encoded(std::string algorithm, std::vector<std::byte> digest) {
+   require_encoded_ref(algorithm, digest);
    auto count = std::uint64_t{};
    auto request = forge::db::page_request{.limit = 100};
-   const auto prefix = detail::ref_prefix(id);
+   const auto prefix = detail::ref_prefix(algorithm, digest);
    while (true) {
       auto page = co_await impl_->transaction().scan_page(
          impl_->refs_family,
@@ -231,9 +206,9 @@ boost::asio::awaitable<collect_result> transaction::collect_unreferenced(collect
          forge::db::record_range{.begin = prefix, .prefix = prefix, .has_end = false},
          request);
       for (const auto& entry : page.entries) {
-         auto id = digest_from_data_key(entry.key);
-         if ((co_await ref_count(id)) == 0) {
-            co_await erase(std::move(id));
+         auto key_ref = ref_from_data_key(entry.key);
+         if ((co_await ref_count_encoded(key_ref.algorithm, key_ref.digest)) == 0) {
+            co_await erase_encoded(std::move(key_ref.algorithm), std::move(key_ref.digest));
             ++result.removed;
             if (result.removed >= options.limit) {
                break;

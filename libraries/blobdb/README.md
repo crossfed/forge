@@ -5,8 +5,8 @@
 
 It owns blob mechanisms: put/get/has/stat/erase/verify, explicit
 retain/release/ref counts and bounded collection of unreferenced blobs. It does
-not own runtime GC scheduling, disk-pressure policy, hash choice, encryption,
-erasure coding, manifests or product namespaces.
+not own runtime GC scheduling, disk-pressure policy, encryption, erasure coding,
+manifests or product namespaces.
 
 ## Store
 
@@ -17,14 +17,27 @@ forge::blobdb::store blobs{
    driver,
    forge::blobdb::store::config{
       .data_family = forge::db::family{"blobdb.data"},
-      .refs_family = forge::db::family{"blobdb.refs"},
-      .digest_hasher = product_hasher
+      .refs_family = forge::db::family{"blobdb.refs"}
    }};
 ```
 
-The product supplies a hasher when it wants `put(bytes) -> digest`. The explicit
-`put(digest, bytes)` path is always available and may verify the digest when a
-hasher is configured.
+The default `put(bytes)` path uses `forge::crypto::sha256` and returns
+`forge::blobdb::sha256_ref`:
+
+```cpp
+auto content = co_await blobs.put(payload);
+// content.digest == forge::blobdb::hash<forge::blobdb::digest>{}(payload)
+// content.size   == payload.size()
+```
+
+Alternative digest algorithms do not require a templated store. Provide
+`forge::blobdb::hash<Digest>` and `forge::blobdb::digest_traits<Digest>`, then
+use the thin typed wrappers:
+
+```cpp
+auto content = co_await blobs.put_as<product_digest>(payload);
+co_await blobs.verify(content);
+```
 
 ## References
 
@@ -33,20 +46,24 @@ when they need to store both the content digest and the blob size:
 
 ```cpp
 forge::blobdb::sha256_ref value{
-   .digest = forge::crypto::sha256::hash(payload),
+   .digest = forge::blobdb::hash<forge::blobdb::digest>{}(payload),
    .size = payload.size()
 };
 ```
 
-`sha256_ref` is an alias for `ref<forge::crypto::sha256>`. Other digest types can
-participate by specializing `forge::blobdb::digest_traits<Digest>` with byte and
-text conversion functions. The current byte-oriented `forge::blobdb::digest`
-also has a traits specialization for compatibility with the storage engine.
+`forge::blobdb::digest` is the default digest type and aliases
+`forge::crypto::sha256`. `sha256_ref` is an alias for `ref<digest>`. Other digest
+types can participate by specializing `forge::blobdb::hash<Digest>` and
+`forge::blobdb::digest_traits<Digest>` with hashing, byte conversion, text
+conversion and a stable algorithm id.
 
 Variant/JSON-friendly conversion is a string in the form `<digest-text>:<size>`,
 for example `<sha256-hex>:1234`. Binary raw serialization stays compact and
 typed: digest bytes followed by the `uint64` size. It does not serialize through
 the text form.
+
+BlobDB private keys include the digest algorithm id and digest bytes, so two
+algorithms that produce the same bytes do not collide in data or ref records.
 
 ## Shared Transactions
 

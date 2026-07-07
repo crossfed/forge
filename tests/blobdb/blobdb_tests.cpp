@@ -21,6 +21,7 @@ import forge.blobdb.exceptions;
 import forge.blobdb.ref;
 import forge.blobdb.store;
 import forge.blobdb.types;
+import forge.crypto.hex;
 import forge.crypto.sha256;
 import forge.db.driver;
 import forge.db.record;
@@ -176,20 +177,17 @@ class memory_driver final : public forge::db::driver {
    std::shared_ptr<memory_state> state_;
 };
 
-class first_byte_hasher final : public forge::blobdb::hasher {
- public:
-   forge::blobdb::digest hash(std::span<const std::byte> payload) const override {
-      auto value = std::vector<std::byte>{std::byte{0x42}};
-      value.push_back(payload.empty() ? std::byte{0} : payload.front());
-      value.push_back(static_cast<std::byte>(payload.size() & 0xffU));
-      return forge::blobdb::digest{std::move(value)};
-   }
+struct toy_digest {
+   std::vector<std::byte> bytes;
+
+   bool operator==(const toy_digest&) const = default;
+   auto operator<=>(const toy_digest&) const = default;
 };
 
 struct by_id;
 
 struct document : forge::objectdb::object<document, 3, 9> {
-   forge::blobdb::digest blob;
+   forge::blobdb::sha256_ref blob;
    std::string title;
 
    bool operator==(const document&) const = default;
@@ -200,15 +198,56 @@ BOOST_DESCRIBE_STRUCT(document, (forge::objectdb::object<document, 3, 9>), (blob
 using document_object =
    forge::objectdb::object_index<document, forge::objectdb::indexed_by<forge::objectdb::primary_unique<by_id>>>;
 
-document make_document(std::uint64_t instance, forge::blobdb::digest digest) {
+document make_document(std::uint64_t instance, forge::blobdb::sha256_ref ref) {
    auto value = document{};
    value.id = document::id_type{instance};
-   value.blob = std::move(digest);
+   value.blob = std::move(ref);
    value.title = "doc";
    return value;
 }
 
 } // namespace
+
+namespace forge::blobdb {
+
+template <>
+struct hash<toy_digest> {
+   [[nodiscard]] toy_digest operator()(std::span<const std::byte> payload) const {
+      return toy_digest{std::vector<std::byte>{payload.begin(), payload.end()}};
+   }
+};
+
+template <>
+struct digest_traits<toy_digest> {
+   static constexpr auto algorithm = std::string_view{"toy"};
+
+   [[nodiscard]] static std::vector<std::byte> to_bytes(const toy_digest& value) {
+      return value.bytes;
+   }
+
+   [[nodiscard]] static toy_digest from_bytes(std::span<const std::byte> value) {
+      return toy_digest{std::vector<std::byte>{value.begin(), value.end()}};
+   }
+
+   [[nodiscard]] static std::string text(const toy_digest& value) {
+      return forge::crypto::to_hex(
+         reinterpret_cast<const std::uint8_t*>(value.bytes.data()),
+         static_cast<std::uint32_t>(value.bytes.size()));
+   }
+
+   [[nodiscard]] static toy_digest from_text(std::string_view value) {
+      auto decoded = std::vector<std::uint8_t>(value.size() / 2U);
+      forge::crypto::from_hex(std::string{value}, decoded.data(), decoded.size());
+      auto bytes = std::vector<std::byte>{};
+      bytes.reserve(decoded.size());
+      for (const auto byte : decoded) {
+         bytes.push_back(static_cast<std::byte>(byte));
+      }
+      return toy_digest{std::move(bytes)};
+   }
+};
+
+} // namespace forge::blobdb
 
 FORGE_OBJECTDB_OBJECT(document_object)
 
@@ -218,7 +257,7 @@ BOOST_AUTO_TEST_CASE(blobdb_ref_defaults_to_sha256_and_variant_uses_text_form) {
    using ref_type = forge::blobdb::ref<>;
 
    auto value = ref_type{
-      .digest = forge::crypto::sha256::hash("blobdb-ref"),
+      .digest = forge::blobdb::hash<forge::blobdb::digest>{}(bytes("blobdb-ref")),
       .size = 12345,
    };
 
@@ -256,7 +295,7 @@ BOOST_AUTO_TEST_CASE(blobdb_ref_variant_rejects_invalid_text_form) {
 
 BOOST_AUTO_TEST_CASE(blobdb_ref_raw_roundtrip_is_compact_binary) {
    auto value = forge::blobdb::ref<>{
-      .digest = forge::crypto::sha256::hash("blobdb-raw-ref"),
+      .digest = forge::blobdb::hash<forge::blobdb::digest>{}(bytes("blobdb-raw-ref")),
       .size = 777,
    };
 
@@ -268,9 +307,9 @@ BOOST_AUTO_TEST_CASE(blobdb_ref_raw_roundtrip_is_compact_binary) {
    BOOST_CHECK_EQUAL(decoded.size, value.size);
 }
 
-BOOST_AUTO_TEST_CASE(blobdb_ref_supports_blobdb_digest_text_roundtrip) {
-   auto value = forge::blobdb::ref<forge::blobdb::digest>{
-      .digest = forge::blobdb::digest{bytes("\xde\xad")},
+BOOST_AUTO_TEST_CASE(blobdb_ref_supports_custom_digest_text_roundtrip) {
+   auto value = forge::blobdb::ref<toy_digest>{
+      .digest = toy_digest{bytes("\xde\xad")},
       .size = 7,
    };
 
@@ -278,26 +317,46 @@ BOOST_AUTO_TEST_CASE(blobdb_ref_supports_blobdb_digest_text_roundtrip) {
    forge::to_variant(value, encoded);
    BOOST_CHECK_EQUAL(encoded.get_string(), "dead:7");
 
-   auto decoded = forge::blobdb::ref<forge::blobdb::digest>{};
+   auto decoded = forge::blobdb::ref<toy_digest>{};
    forge::from_variant(encoded, decoded);
    BOOST_CHECK(decoded.digest == value.digest);
    BOOST_CHECK_EQUAL(decoded.size, value.size);
 }
 
-BOOST_AUTO_TEST_CASE(blobdb_put_get_verify_and_digest_modes_work) {
+BOOST_AUTO_TEST_CASE(blobdb_put_returns_sha256_ref_and_default_operations_use_refs) {
    auto runtime = forge::asio::runtime{};
    auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
-   auto settings = forge::blobdb::store::config{.digest_hasher = std::make_shared<first_byte_hasher>()};
-   auto blobs = forge::blobdb::store{driver, settings};
+   auto blobs = forge::blobdb::store{driver};
 
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
-      auto id = co_await blobs.put(bytes("alpha"));
-      BOOST_CHECK(co_await blobs.has(id));
-      BOOST_CHECK_EQUAL(text(co_await blobs.get(id)), "alpha");
-      co_await blobs.verify(id);
+      auto ref = co_await blobs.put(bytes("alpha"));
+      BOOST_CHECK(ref.digest == forge::blobdb::hash<forge::blobdb::digest>{}(bytes("alpha")));
+      BOOST_CHECK_EQUAL(ref.size, 5U);
+      BOOST_CHECK(co_await blobs.has(ref));
+      BOOST_CHECK_EQUAL(text(co_await blobs.get(ref)), "alpha");
+      co_await blobs.verify(ref);
 
-      BOOST_CHECK_THROW(co_await blobs.put(forge::blobdb::digest{bytes("wrong")}, bytes("alpha")),
+      auto wrong = ref;
+      wrong.digest = forge::blobdb::hash<forge::blobdb::digest>{}(bytes("wrong"));
+      BOOST_CHECK_THROW(co_await blobs.put(wrong, bytes("alpha")),
                         forge::blobdb::exceptions::digest_mismatch);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(blobdb_put_as_supports_custom_digest_without_templated_store) {
+   static_assert(forge::blobdb::digest_algorithm<toy_digest>);
+
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   auto blobs = forge::blobdb::store{driver};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto ref = co_await blobs.put_as<toy_digest>(bytes("alpha"));
+      BOOST_CHECK(ref.digest == forge::blobdb::hash<toy_digest>{}(bytes("alpha")));
+      BOOST_CHECK_EQUAL(ref.size, 5U);
+      BOOST_CHECK(co_await blobs.has(ref));
+      BOOST_CHECK_EQUAL(text(co_await blobs.get(ref)), "alpha");
       co_return;
    }());
 }
@@ -305,7 +364,7 @@ BOOST_AUTO_TEST_CASE(blobdb_put_get_verify_and_digest_modes_work) {
 BOOST_AUTO_TEST_CASE(blobdb_refs_and_collection_are_explicit_mechanisms) {
    auto runtime = forge::asio::runtime{};
    auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
-   auto blobs = forge::blobdb::store{driver, forge::blobdb::store::config{.digest_hasher = std::make_shared<first_byte_hasher>()}};
+   auto blobs = forge::blobdb::store{driver};
 
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       const auto kept = co_await blobs.put(bytes("kept"));
@@ -332,21 +391,22 @@ BOOST_AUTO_TEST_CASE(blobdb_ref_keys_do_not_alias_variable_length_digests) {
    auto blobs = forge::blobdb::store{driver};
 
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
-      const auto short_digest = forge::blobdb::digest{std::vector<std::byte>{std::byte{0x01}}};
-      const auto long_digest =
-         forge::blobdb::digest{std::vector<std::byte>{std::byte{0x01}, std::byte{0x00}, std::byte{0x02}}};
+      const auto short_payload = std::vector<std::byte>{std::byte{0x01}};
+      const auto long_payload = std::vector<std::byte>{std::byte{0x01}, std::byte{0x00}, std::byte{0x02}};
+      const auto short_ref = forge::blobdb::ref<toy_digest>{.digest = toy_digest{short_payload}, .size = short_payload.size()};
+      const auto long_ref = forge::blobdb::ref<toy_digest>{.digest = toy_digest{long_payload}, .size = long_payload.size()};
 
-      co_await blobs.put(short_digest, bytes("short"));
-      co_await blobs.put(long_digest, bytes("long"));
-      co_await blobs.retain(long_digest, forge::blobdb::owner_ref{"doc:long"});
+      co_await blobs.put(short_ref, short_payload);
+      co_await blobs.put(long_ref, long_payload);
+      co_await blobs.retain(long_ref, forge::blobdb::owner_ref{"doc:long"});
 
-      BOOST_CHECK_EQUAL(co_await blobs.ref_count(short_digest), 0U);
-      BOOST_CHECK_EQUAL(co_await blobs.ref_count(long_digest), 1U);
+      BOOST_CHECK_EQUAL(co_await blobs.ref_count(short_ref), 0U);
+      BOOST_CHECK_EQUAL(co_await blobs.ref_count(long_ref), 1U);
 
       auto collected = co_await blobs.collect_unreferenced({.limit = 10});
       BOOST_CHECK_EQUAL(collected.removed, 1U);
-      BOOST_CHECK(!(co_await blobs.has(short_digest)));
-      BOOST_CHECK(co_await blobs.has(long_digest));
+      BOOST_CHECK(!(co_await blobs.has(short_ref)));
+      BOOST_CHECK(co_await blobs.has(long_ref));
       co_return;
    }());
 }
@@ -356,7 +416,7 @@ BOOST_AUTO_TEST_CASE(blobdb_join_shares_commit_boundary_with_objectdb_metadata) 
    auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
    auto objects = forge::objectdb::store{driver};
    objects.register_object<document_object>();
-   auto blobs = forge::blobdb::store{driver, forge::blobdb::store::config{.digest_hasher = std::make_shared<first_byte_hasher>()}};
+   auto blobs = forge::blobdb::store{driver};
 
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       auto db_tx = co_await driver->begin_transaction();
@@ -381,7 +441,7 @@ BOOST_AUTO_TEST_CASE(blobdb_join_shares_commit_boundary_with_objectdb_metadata) 
 BOOST_AUTO_TEST_CASE(blobdb_joined_transaction_does_not_own_commit) {
    auto runtime = forge::asio::runtime{};
    auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
-   auto blobs = forge::blobdb::store{driver, forge::blobdb::store::config{.digest_hasher = std::make_shared<first_byte_hasher>()}};
+   auto blobs = forge::blobdb::store{driver};
 
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       auto db_tx = co_await driver->begin_transaction();
@@ -397,7 +457,7 @@ BOOST_AUTO_TEST_CASE(blobdb_direct_mutation_commit_failure_rolls_back) {
    auto state = std::make_shared<memory_state>();
    state->fail_commit = true;
    auto driver = std::make_shared<memory_driver>(state);
-   auto blobs = forge::blobdb::store{driver, forge::blobdb::store::config{.digest_hasher = std::make_shared<first_byte_hasher>()}};
+   auto blobs = forge::blobdb::store{driver};
 
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       BOOST_CHECK_THROW(co_await blobs.put(bytes("alpha")), std::runtime_error);
