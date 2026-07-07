@@ -15,7 +15,7 @@ target_link_libraries(
       Forge::forge_plugins_p2p_node
       Forge::forge_plugins_crypto_secrets
       Forge::forge_plugins_log_otlp
-      Forge::forge_plugins_db_objectdb
+      Forge::forge_plugins_db_object
 )
 if(TARGET Forge::forge_plugins_db_rocksdb)
    target_link_libraries(forge_package_plugins_component PRIVATE Forge::forge_plugins_db_rocksdb)

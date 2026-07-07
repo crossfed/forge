@@ -1,11 +1,11 @@
 # Forge Object Database Donor Baseline
 
 This note records the serious donor systems and database classes that should
-shape a future `forge::objectdb` library. The goal is not to copy one object
+shape a future `forge::db::object` library. The goal is not to copy one object
 database, but to combine proven patterns for identifiers, ordered keys, indexes,
 transactions, snapshots, cursors, concurrency and recovery.
 
-`forge::objectdb` is not implemented by this note. It must remain a neutral
+`forge::db::object` is not implemented by this note. It must remain a neutral
 library of primitives and algorithms. It must not become a RocksDB backend,
 runtime plugin, blockchain database, FUSE database or product policy layer.
 
@@ -18,7 +18,7 @@ Forge now owns `forge::ids` as the canonical ID foundation:
 - raw serialization and variant conversion compatible with the
   Storlane/BitShares-style identity model.
 
-A future `forge::objectdb` must reuse `forge::ids`. It must not introduce a
+A future `forge::db::object` must reuse `forge::ids`. It must not introduce a
 parallel fake object identifier.
 
 ## Database Classes
@@ -36,7 +36,7 @@ Examples: RocksDB, Pebble, FoundationDB storage layer.
 Forge status:
 
 - `forge::rocksdb` already wraps one concrete ordered backend.
-- `forge::objectdb` must not expose backend methods such as `get`, `put`,
+- `forge::db::object` must not expose backend methods such as `get`, `put`,
   `erase`, `begin`, `commit` or `rollback` in its first primitive layer.
 
 ### Object Store
@@ -49,7 +49,7 @@ Examples: BitShares/Graphene object model, Storlane `ids`.
 Forge direction:
 
 - object identity comes from `forge::ids`;
-- object metadata and type descriptors may live in `forge::objectdb`;
+- object metadata and type descriptors may live in `forge::db::object`;
 - object storage remains storage-neutral.
 
 ### Indexed Object Database
@@ -107,8 +107,8 @@ local branch state.
 
 Forge direction:
 
-- these semantics stay outside `forge::objectdb`;
-- `forge::objectdb` may supply reusable components, but products own their
+- these semantics stay outside `forge::db::object`;
+- `forge::db::object` may supply reusable components, but products own their
   invariants.
 
 ### Query Database
@@ -137,7 +137,7 @@ Accepted:
 Rejected:
 
 - product-specific Storlane IDs or downstream object spaces inside Forge;
-- a second object ID model inside `forge::objectdb`.
+- a second object ID model inside `forge::db::object`.
 
 ### Graphene / BitShares / Chainbase
 
@@ -172,7 +172,7 @@ Accepted:
 Rejected:
 
 - embedding controller, WASM, fork database, block log, resource limits or
-  authorization policy into `forge::objectdb`;
+  authorization policy into `forge::db::object`;
 - making Forge object database a blockchain runtime.
 
 ### PostgreSQL
@@ -226,7 +226,7 @@ Important boundary:
 
 Rejected:
 
-- native `rocksdb::*` types in `forge::objectdb`;
+- native `rocksdb::*` types in `forge::db::object`;
 - treating RocksDB TransactionDB as the objectdb API;
 - leaking backend status or lifecycle into object/index primitives.
 
@@ -296,7 +296,7 @@ database.
 - `forge::plugins::db::rocksdb`: app/plugin lifecycle and management API over
   `forge::rocksdb`.
 
-### Future `forge::objectdb` Primitive Candidates
+### Future `forge::db::object` Primitive Candidates
 
 - `object_traits` and object type metadata;
 - object record wrappers over described value types;
@@ -309,7 +309,7 @@ database.
 - storage-neutral records and mutation records;
 - primitive validation errors.
 
-### Future `forge::objectdb::store`
+### Future `forge::db::object::store`
 
 The reusable object database engine should be named `store`, not `database`.
 The term "object database" remains the architecture class, but the C++ owner
@@ -318,13 +318,13 @@ already provided storage context.
 
 Preferred vocabulary:
 
-- `forge::objectdb::store`: reusable object/index engine;
+- `forge::db::object::store`: reusable object/index engine;
 - `store.register_object<T>()`: direct object descriptor registration, matching
   donor `add_index<T>()` patterns;
-- `forge::objectdb::transaction`: staged object mutations and index maintenance
+- `forge::db::object::transaction`: staged object mutations and index maintenance
   over a shared `forge::db::transaction`;
-- `forge::objectdb::snapshot`: stable read visibility;
-- `forge::objectdb::cursor` / `forge::objectdb::page`: paginated reads;
+- `forge::db::object::snapshot`: stable read visibility;
+- `forge::db::object::cursor` / `forge::db::object::page`: paginated reads;
 - `forge::rocksdb::store`: physical ordered key/value backend.
 
 Reasoning:
@@ -335,7 +335,7 @@ Reasoning:
   explicit storage/transaction context.
 - Different products should define different object schemas, not different
   object database engines.
-- `forge::objectdb::store` and `forge::rocksdb::store` are not ambiguous
+- `forge::db::object::store` and `forge::rocksdb::store` are not ambiguous
   because their namespaces carry different layers: object/index engine versus
   physical ordered key/value backend.
 - A catalog/migration layer is still expected later, but it should be designed
@@ -414,8 +414,8 @@ The next implementation pass should still be primitives-first:
 2. Add ordered key and descriptor primitives.
 3. Prove byte-stable keys with golden tests.
 4. Add cursor/page primitives before any scan algorithm.
-5. Keep backend, runtime, plugin and product semantics out of `forge::objectdb`.
+5. Keep backend, runtime, plugin and product semantics out of `forge::db::object`.
 
 If a proposed type needs a storage engine, scheduler, plugin lifecycle, FUSE
 callback, blockchain replay rule or SQL planner to make sense, it does not
-belong in the first `forge::objectdb` primitive layer.
+belong in the first `forge::db::object` primitive layer.

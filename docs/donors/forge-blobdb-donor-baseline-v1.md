@@ -4,17 +4,17 @@ This note is the donor baseline and work scope for two related changes:
 
 1. Extend `forge::rocksdb` so column families carry per-family options,
    including RocksDB's native blob-file (KV-separation) settings.
-2. Add a new neutral library `forge::blobdb`: a content-addressed blob store,
-   sibling to `forge::objectdb`, so products stop hand-rolling large-immutable
+2. Add a new neutral library `forge::db::blob`: a content-addressed blob store,
+   sibling to `forge::db::object`, so products stop hand-rolling large-immutable
    payload storage.
 
-Like `forge::objectdb`, `forge::blobdb` must remain a **neutral library of
+Like `forge::db::object`, `forge::db::blob` must remain a **neutral library of
 primitives**. It must not become a RocksDB engine, a runtime plugin, a
 blockchain database, a FUSE database, or a product policy layer. It must not
 own a hash algorithm choice, erasure coding, encryption, chunking, manifest or
 namespace semantics -- those belong to products.
 
-`forge::blobdb` is not implemented by this note.
+`forge::db::blob` is not implemented by this note.
 
 ## Current State (starting point)
 
@@ -40,22 +40,22 @@ stat/size; streaming reads for large values.
 
 It does **not** own:
 - object identity, typed records, secondary indexes, transaction/snapshot
-  object semantics -- that is `forge::objectdb` (blobs are addressed by a
+  object semantics -- that is `forge::db::object` (blobs are addressed by a
   content digest, **not** by `forge::ids::object_id`);
 - ordered key/value mechanics, transactions, column families -- that is
   `forge::rocksdb`;
 - which hash function, erasure scheme, encryption, chunk sizing, dedup policy,
   manifest structure -- that is the **product**.
 
-Keep the classes separate, exactly as the `forge::objectdb` baseline does.
+Keep the classes separate, exactly as the `forge::db::object` baseline does.
 
 ## Non-Goals / Discipline
 
 - **Do not hand-roll a value-log or blob GC engine.** Lean on RocksDB BlobDB
   (WiscKey-style KV-separation), which already provides blob files, blob GC and
   crash recovery. A from-scratch value-log is the one true wheel here -- do not
-  build it. `forge::blobdb` is a **thin** abstraction over proven backends.
-- **Mechanism, not policy.** `forge::blobdb` exposes content-addressed
+  build it. `forge::db::blob` is a **thin** abstraction over proven backends.
+- **Mechanism, not policy.** `forge::db::blob` exposes content-addressed
   put/get/pin/gc; the product injects the hash function and owns erasure /
   encryption / chunking / dedup.
 - **Minimal first slice**, then grow -- mirror the objectdb incremental
@@ -63,8 +63,8 @@ Keep the classes separate, exactly as the `forge::objectdb` baseline does.
 - Follow the `create-library` skill for file layout (public `.cppm` under
   `include/forge/blobdb/`, private `details/*.hxx`, impl `.cpp` at unit root).
 - Backend binding libraries mirror objectdb naming:
-  `forge::blobdb::rocksdb` (lib `blobdb_rocksdb`), later
-  `forge::blobdb::fs` (lib `blobdb_fs`).
+  `forge::db::blob::rocksdb` (lib `blobdb_rocksdb`), later
+  `forge::db::blob::fs` (lib `blobdb_fs`).
 
 ---
 
@@ -89,14 +89,14 @@ write-amplification (repeated compaction of immutable payload).
 **Discipline.** This is **exposing** RocksDB BlobDB, not building one.
 `forge::rocksdb` stays the neutral ordered-KV + blob substrate -- it must not
 gain content-addressing, pin semantics or GC policy (those live in
-`forge::blobdb`).
+`forge::db::blob`).
 
 **Tests.** A blob-configured family round-trips large values; blob GC runs;
 default-options families are unchanged; schema parses per-family options.
 
 ---
 
-## Work Item 2 -- `forge::blobdb` library
+## Work Item 2 -- `forge::db::blob` library
 
 ### Backend neutrality
 
@@ -104,7 +104,7 @@ Driver abstraction is now shared as `forge::db::driver`. Planned/current
 backends:
 - `forge::db::rocksdb` -- over blob-configured `forge::rocksdb` families
   (KV-separation). Good default for small/medium and mixed blobs.
-- `forge::blobdb::fs` (later) -- loose content-addressed files on disk
+- `forge::db::blob::fs` (later) -- loose content-addressed files on disk
   (Git/IPFS-flat-fs style). Often superior for very large immutable payloads:
   direct sendfile/mmap, OS page cache, trivial P2P serving.
 - remote / object-store (later).
@@ -115,7 +115,7 @@ the library over a bare rocksdb helper.
 ### API shape (first slice = minimal)
 
 Keys are opaque content digests (bytes), not `forge::ids`. The hash function is
-**injected by the product** -- `forge::blobdb` does not choose SHA-256.
+**injected by the product** -- `forge::db::blob` does not choose SHA-256.
 
 - `put(digest, bytes)` with verify-on-write, or `put(bytes)` using an injected
   hasher -> returns digest. Content-addressed writes are idempotent.
@@ -137,12 +137,12 @@ Pin/refcount is the mechanism under both durable piece retention and
 reserved-cache pinning in downstream products -- keep it a neutral primitive,
 let products define what a "pin owner" means.
 
-### Composition with `forge::objectdb`
+### Composition with `forge::db::object`
 
 The intended product pattern:
-- Metadata lives in `forge::objectdb` as typed objects; an object carries a
+- Metadata lives in `forge::db::object` as typed objects; an object carries a
   **content-digest reference** (`blob_ref`) to its payload.
-- The payload bytes live in `forge::blobdb`.
+- The payload bytes live in `forge::db::blob`.
 - Both can sit on one `forge::rocksdb` store (object family + blob family), so a
   write can be **cross-family atomic** (write blob, commit the referencing
   object). Alternatively use blob-then-reference ordering: because
@@ -181,7 +181,7 @@ Use with care:
 
 Rejected:
 - Git object types (blob/tree/commit/tag), refs, and Git's specific hash;
-  `forge::blobdb` stores opaque bytes only.
+  `forge::db::blob` stores opaque bytes only.
 
 ### RocksDB BlobDB / WiscKey
 
@@ -220,10 +220,10 @@ Rejected:
 
 - `forge::rocksdb` -- ordered KV + column families + **blob files (engine)** +
   transactions/snapshots. Neutral substrate. No content-addressing.
-- `forge::blobdb` -- **content-addressed** blob mechanism: put/get/has/erase,
+- `forge::db::blob` -- **content-addressed** blob mechanism: put/get/has/erase,
   verify, pin/refcount, GC. Backend-neutral. No hash choice, no erasure, no
   encryption, no chunking.
-- `forge::objectdb` -- typed objects, secondary indexes, transactions,
+- `forge::db::object` -- typed objects, secondary indexes, transactions,
   snapshots. Holds metadata; references blobs by digest.
 - **Product** -- chooses hash function, erasure/encryption/chunking/dedup,
   manifest and namespace semantics, GC and retention policy, pin ownership.
@@ -232,11 +232,11 @@ Rejected:
 
 1. `forge::rocksdb`: per-family options struct + blob settings + schema + tests.
 2. Commit this note as `docs/donors/forge-blobdb-donor-baseline-v1.md`.
-3. `forge::blobdb` skeleton per `create-library`: `driver`, `store`,
+3. `forge::db::blob` skeleton per `create-library`: `driver`, `store`,
    `digest`/`blob_ref` types, exceptions; first-slice API
    (put/get/has/erase + verify).
-4. `forge::blobdb::rocksdb` driver over a blob-configured family + tests.
-5. Second slice: pin/refcount + `gc()`; `forge::blobdb::fs` backend.
+4. `forge::db::blob::rocksdb` driver over a blob-configured family + tests.
+5. Second slice: pin/refcount + `gc()`; `forge::db::blob::fs` backend.
 
 Keep every layer neutral. No Storlane / blockchain / product policy inside
-`forge::rocksdb` or `forge::blobdb`.
+`forge::rocksdb` or `forge::db::blob`.
