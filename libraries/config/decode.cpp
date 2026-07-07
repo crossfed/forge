@@ -67,6 +67,40 @@ schema::input_value to_schema_value(const value& input) {
    return schema::input_value{};
 }
 
+value from_schema_value(const schema::input_value& input) {
+   if (const auto* bool_value = std::get_if<bool>(&input.storage)) {
+      return value{*bool_value};
+   }
+   if (const auto* signed_value = std::get_if<std::int64_t>(&input.storage)) {
+      return value{*signed_value};
+   }
+   if (const auto* unsigned_value = std::get_if<std::uint64_t>(&input.storage)) {
+      return value{*unsigned_value};
+   }
+   if (const auto* floating_value = std::get_if<double>(&input.storage)) {
+      return value{*floating_value};
+   }
+   if (const auto* string_value = std::get_if<std::string>(&input.storage)) {
+      return value{*string_value};
+   }
+   if (const auto* array_value = input.as_array()) {
+      auto out = value::array_type{};
+      out.reserve(array_value->size());
+      for (const auto& item : *array_value) {
+         out.push_back(from_schema_value(item));
+      }
+      return value{std::move(out)};
+   }
+   if (const auto* object_value = input.as_object()) {
+      auto out = value::object_type{};
+      for (const auto& [name, item] : *object_value) {
+         out.emplace(name, from_schema_value(item));
+      }
+      return value{std::move(out)};
+   }
+   return value{};
+}
+
 std::any value_to_any(const value& input, schema::value_kind kind) {
    switch (kind) {
    case schema::value_kind::boolean:

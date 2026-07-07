@@ -25,6 +25,7 @@ export namespace forge::config {
 
 [[nodiscard]] bool parse_bool_text(std::string text, bool& output);
 [[nodiscard]] schema::input_value to_schema_value(const value& input);
+[[nodiscard]] value from_schema_value(const schema::input_value& input);
 [[nodiscard]] std::any value_to_any(const value& input, schema::value_kind kind);
 [[nodiscard]] value any_to_value(schema::value_kind kind, const std::any& input);
 
@@ -38,7 +39,9 @@ template <typename T> [[nodiscard]] component_descriptor describe_component(std:
           .kind = field.kind,
           .required = field.required,
           .has_default = field.has_default,
-          .default_value = field.has_default ? any_to_value(field.kind, field.default_value) : value{},
+          .default_value = field.has_default && field.default_input
+                              ? from_schema_value(field.default_input(field.default_value))
+                              : field.has_default ? any_to_value(field.kind, field.default_value) : value{},
           .secret = field.secret,
           .deprecated = field.deprecated,
           .deprecated_message = field.deprecated_message,
@@ -161,7 +164,9 @@ template <typename T> [[nodiscard]] document defaults_for(std::string_view secti
          field_path += ".";
       }
       field_path += field.name;
-      output.set(std::move(field_path), any_to_value(field.kind, field.default_value));
+      output.set(std::move(field_path),
+                 field.default_input ? from_schema_value(field.default_input(field.default_value))
+                                     : any_to_value(field.kind, field.default_value));
    }
    return output;
 }

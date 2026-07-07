@@ -13,6 +13,7 @@ target_include_directories(forge_objectdb PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
 target_link_libraries(
    forge_objectdb PUBLIC
       Boost::asio
+      forge_db
       forge_exceptions
       forge_ids
       forge_raw

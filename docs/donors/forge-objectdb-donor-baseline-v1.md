@@ -321,7 +321,8 @@ Preferred vocabulary:
 - `forge::objectdb::store`: reusable object/index engine;
 - `store.register_object<T>()`: direct object descriptor registration, matching
   donor `add_index<T>()` patterns;
-- `forge::objectdb::session`: staged object mutations and index maintenance;
+- `forge::objectdb::transaction`: staged object mutations and index maintenance
+  over a shared `forge::db::transaction`;
 - `forge::objectdb::snapshot`: stable read visibility;
 - `forge::objectdb::cursor` / `forge::objectdb::page`: paginated reads;
 - `forge::rocksdb::store`: physical ordered key/value backend.

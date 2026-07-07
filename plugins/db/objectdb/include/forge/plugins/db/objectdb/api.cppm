@@ -14,9 +14,9 @@ export import forge.plugins.db.objectdb.exceptions;
 export import forge.plugins.db.objectdb.types;
 
 import forge.api.binding;
+import forge.db.driver;
 import forge.ids.object_id;
 import forge.objectdb.cursor;
-import forge.objectdb.driver;
 import forge.objectdb.hooks;
 import forge.objectdb.index;
 import forge.objectdb.object;
@@ -33,7 +33,7 @@ class store_handle_state {
 
    [[nodiscard]] virtual std::string name() const = 0;
    [[nodiscard]] virtual std::shared_ptr<forge::objectdb::store> require_store() const = 0;
-   [[nodiscard]] virtual std::shared_ptr<forge::objectdb::driver> require_driver() const = 0;
+   [[nodiscard]] virtual std::shared_ptr<forge::db::driver> require_driver() const = 0;
 };
 
 class store_handle {
@@ -146,7 +146,7 @@ class api : public forge::api::contract<api, forge::api::surface::local> {
 
    virtual boost::asio::awaitable<void>
    add_store(std::string name,
-             std::shared_ptr<forge::objectdb::driver> driver,
+             std::shared_ptr<forge::db::driver> driver,
              forge::objectdb::store::options options = {}) = 0;
    virtual boost::asio::awaitable<store_handle> store(std::string name) = 0;
    virtual boost::asio::awaitable<void> flush(std::string name, bool sync = true) = 0;

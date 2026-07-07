@@ -44,5 +44,5 @@ auto loaded = co_await witness.get(witness_id{42});
 ```
 
 Use `add_store(name, driver, options)` during setup when an application provides
-its own `forge::objectdb::driver`. After startup, new stores are rejected so
+its own `forge::db::driver`. After startup, new stores are rejected so
 handles stay tied to the plugin lifecycle.

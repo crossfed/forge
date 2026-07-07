@@ -143,9 +143,15 @@ BOOST_AUTO_TEST_CASE(rocksdb_rejects_empty_path_and_empty_column_family) {
       document.set(
          "plugins.db.rocksdb.column-families",
          forge::config::value::array_type{forge::config::value{"meta"}, forge::config::value{""}});
-      BOOST_CHECK_THROW(
-         forge::asio::blocking::run(runtime, instance.configure(forge::config::component_view{document, "plugins.db.rocksdb"})),
-         exceptions::invalid_config);
+      try {
+         forge::asio::blocking::run(runtime,
+                                    instance.configure(forge::config::component_view{document, "plugins.db.rocksdb"}));
+         BOOST_FAIL("expected invalid RocksDB config");
+      } catch (const exceptions::invalid_config& error) {
+         const auto message = std::string{error.what()};
+         BOOST_TEST(message.find("plugins.db.rocksdb.column-families[1].name schema.non_empty")
+                    != std::string::npos);
+      }
    }
 }
 

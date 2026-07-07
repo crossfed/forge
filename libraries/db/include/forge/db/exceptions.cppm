@@ -1,0 +1,28 @@
+module;
+
+#include <cstdint>
+#include <forge/exceptions/macros.hpp>
+
+export module forge.db.exceptions;
+
+export import forge.exceptions;
+
+export namespace forge::db::exceptions {
+
+enum class code : std::uint16_t {
+   invalid_descriptor = 1,
+   invalid_cursor = 2,
+   not_found = 3,
+   transaction_closed = 4,
+   unsupported_operation = 5,
+};
+
+FORGE_DECLARE_EXCEPTION_CATEGORY(code, "forge.db")
+
+using invalid_descriptor = forge::exceptions::coded_exception<code, code::invalid_descriptor>;
+using invalid_cursor = forge::exceptions::coded_exception<code, code::invalid_cursor>;
+using not_found = forge::exceptions::coded_exception<code, code::not_found>;
+using transaction_closed = forge::exceptions::coded_exception<code, code::transaction_closed>;
+using unsupported_operation = forge::exceptions::coded_exception<code, code::unsupported_operation>;
+
+} // namespace forge::db::exceptions
