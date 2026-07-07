@@ -90,12 +90,12 @@ target_link_libraries(test_forge_chain forge_chain forge Boost::included_unit_te
 add_test(NAME test_forge_chain COMMAND test_forge_chain WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
-   test_forge_db
+   test_forge_db_core
    unit/main.cpp
-   db/db_tests.cpp
+   db_core/db_tests.cpp
 )
-target_link_libraries(test_forge_db forge_db forge Boost::included_unit_test_framework)
-add_test(NAME test_forge_db COMMAND test_forge_db WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+target_link_libraries(test_forge_db_core forge_db_core forge Boost::included_unit_test_framework)
+add_test(NAME test_forge_db_core COMMAND test_forge_db_core WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
    test_forge_compression
@@ -122,7 +122,7 @@ add_executable(
    unit/main.cpp
    db_blob/db_blob_tests.cpp
 )
-target_link_libraries(test_forge_db_blob forge_db_blob forge_db_object forge_db forge Boost::included_unit_test_framework)
+target_link_libraries(test_forge_db_blob forge_db_blob forge_db_object forge_db_core forge Boost::included_unit_test_framework)
 add_test(NAME test_forge_db_blob COMMAND test_forge_db_blob WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 if(FORGE_HAS_ROCKSDB)
@@ -131,7 +131,7 @@ if(FORGE_HAS_ROCKSDB)
       unit/main.cpp
       db_rocksdb/rocksdb_tests.cpp
    )
-   target_link_libraries(test_forge_db_rocksdb forge_db_rocksdb forge_rocksdb forge_db forge Boost::included_unit_test_framework)
+   target_link_libraries(test_forge_db_rocksdb forge_db_rocksdb forge_rocksdb forge_db_core forge Boost::included_unit_test_framework)
    add_test(NAME test_forge_db_rocksdb COMMAND test_forge_db_rocksdb WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 endif()
 
@@ -545,14 +545,14 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
-   test_forge_package_db_component
+   test_forge_package_db_core_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
-      ${CMAKE_CURRENT_SOURCE_DIR}/package_db_component
-      ${CMAKE_BINARY_DIR}/forge-package-db-component
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_db_core_component
+      ${CMAKE_BINARY_DIR}/forge-package-db-core-component
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
-      --test-command forge_package_db_component
+      --test-command forge_package_db_core_component
    DEPENDS test_forge_package_install
 )
 add_custom_target(
@@ -885,16 +885,16 @@ add_test(
 )
 set_tests_properties(test_forge_package_chain_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
-   NAME test_forge_package_db_component
+   NAME test_forge_package_db_core_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
-      ${CMAKE_CURRENT_SOURCE_DIR}/package_db_component
-      ${CMAKE_BINARY_DIR}/forge-package-db-component
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_db_core_component
+      ${CMAKE_BINARY_DIR}/forge-package-db-core-component
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
-      --test-command forge_package_db_component
+      --test-command forge_package_db_core_component
 )
-set_tests_properties(test_forge_package_db_component PROPERTIES DEPENDS test_forge_package_install)
+set_tests_properties(test_forge_package_db_core_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_db_object_component
    COMMAND ${CMAKE_CTEST_COMMAND}

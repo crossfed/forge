@@ -100,7 +100,7 @@ default-options families are unchanged; schema parses per-family options.
 
 ### Backend neutrality
 
-Driver abstraction is now shared as `forge::db::driver`. Planned/current
+Driver abstraction is now shared as `forge::db::core::driver`. Planned/current
 backends:
 - `forge::db::rocksdb` -- over blob-configured `forge::rocksdb` families
   (KV-separation). Good default for small/medium and mixed blobs.

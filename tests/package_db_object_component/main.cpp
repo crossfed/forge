@@ -8,9 +8,9 @@
 #include <forge/db/object/macros.hpp>
 
 import forge.ids.object_id;
+import forge.db.core.record;
 import forge.db.object.index;
 import forge.db.object.object;
-import forge.db.object.record;
 import forge.db.object.store;
 
 struct account : forge::db::object::object<account, 1, 7> {
@@ -35,6 +35,6 @@ int main() {
    static_assert(std::same_as<forge::ids::type_for_id_t<account::id_type>, account_object>);
    static_assert(std::same_as<forge::db::object::object_index_for_id_t<account::id_type>, account_object>);
    constexpr auto type = forge::db::object::object_id_of<account_object>::value;
-   const auto key = forge::db::object::record_key{std::vector<std::byte>{std::byte{0x01}}};
+   const auto key = forge::db::core::record_key{std::vector<std::byte>{std::byte{0x01}}};
    return type.space == 1 && type.type == 7 && !key.empty() ? 0 : 1;
 }

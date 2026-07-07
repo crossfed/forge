@@ -22,7 +22,7 @@ target_link_libraries(
       forge_api
       forge_config
       forge_schema
-      forge_db
+      forge_db_core
       forge_db_object
       forge_exceptions
       Boost::asio

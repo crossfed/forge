@@ -13,7 +13,7 @@ import forge.db.object.hooks;
 import forge.db.object.snapshot;
 import forge.db.object.store;
 import forge.db.object.transaction;
-import forge.db.driver;
+import forge.db.core.driver;
 import forge.plugins.db.object.exceptions;
 import forge.plugins.db.object.types;
 
@@ -38,7 +38,7 @@ class plugin::api_impl::handle_state final : public store_handle_state {
       return owner->require_open_store(name_).store;
    }
 
-   [[nodiscard]] std::shared_ptr<forge::db::driver> require_driver() const override {
+   [[nodiscard]] std::shared_ptr<forge::db::core::driver> require_driver() const override {
       const auto owner = owner_.lock();
       if (!owner) {
          FORGE_THROW_EXCEPTION(exceptions::stopped, "db object plugin is stopped");
@@ -56,7 +56,7 @@ plugin::api_impl::api_impl(std::shared_ptr<impl> owner) : owner_{std::move(owner
 
 boost::asio::awaitable<void>
 plugin::api_impl::add_store(std::string name,
-                            std::shared_ptr<forge::db::driver> driver,
+                            std::shared_ptr<forge::db::core::driver> driver,
                             forge::db::object::store::options options) {
    owner_->add_store(std::move(name), std::move(driver), options);
    co_return;

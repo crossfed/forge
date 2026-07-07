@@ -23,8 +23,8 @@ import forge.db.blob.store;
 import forge.db.blob.types;
 import forge.crypto.hex;
 import forge.crypto.sha256;
-import forge.db.driver;
-import forge.db.record;
+import forge.db.core.driver;
+import forge.db.core.record;
 import forge.ids.object_id;
 import forge.db.object.index;
 import forge.db.object.object;
@@ -35,7 +35,7 @@ import forge.variant.value;
 
 namespace {
 
-using record_map = std::map<forge::db::record_key, std::vector<std::byte>>;
+using record_map = std::map<forge::db::core::record_key, std::vector<std::byte>>;
 using family_map = std::map<std::string, record_map>;
 
 std::vector<std::byte> bytes(std::string text) {
@@ -50,7 +50,7 @@ std::string text(const std::vector<std::byte>& bytes_value) {
       reinterpret_cast<const char*>(bytes_value.data() + bytes_value.size())};
 }
 
-bool starts_with(const forge::db::record_key& value, const forge::db::record_key& prefix) {
+bool starts_with(const forge::db::core::record_key& value, const forge::db::core::record_key& prefix) {
    const auto& bytes_value = value.bytes();
    const auto& prefix_value = prefix.bytes();
    return prefix_value.empty() ||
@@ -64,17 +64,17 @@ struct memory_state {
    std::size_t rollback_calls = 0;
 };
 
-class memory_session final : public forge::db::session {
+class memory_session final : public forge::db::core::session {
  public:
    memory_session(std::shared_ptr<memory_state> state, bool snapshot, bool writable)
        : state_{std::move(state)}, working_{state_->records}, snapshot_{snapshot}, writable_{writable} {}
 
-   [[nodiscard]] forge::db::capabilities capabilities() const noexcept override {
-      return forge::db::capabilities{.snapshot_reads = snapshot_, .writes = writable_};
+   [[nodiscard]] forge::db::core::capabilities capabilities() const noexcept override {
+      return forge::db::core::capabilities{.snapshot_reads = snapshot_, .writes = writable_};
    }
 
-   boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(forge::db::family family,
-                                                                     forge::db::record_key key) override {
+   boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(forge::db::core::family family,
+                                                                     forge::db::core::record_key key) override {
       const auto family_found = working_.find(family.name);
       if (family_found == working_.end()) {
          co_return std::nullopt;
@@ -86,23 +86,23 @@ class memory_session final : public forge::db::session {
       co_return found->second;
    }
 
-   boost::asio::awaitable<void> put(forge::db::family family,
-                                    forge::db::record_key key,
+   boost::asio::awaitable<void> put(forge::db::core::family family,
+                                    forge::db::core::record_key key,
                                     std::vector<std::byte> value) override {
       working_[family.name][std::move(key)] = std::move(value);
       co_return;
    }
 
-   boost::asio::awaitable<void> erase(forge::db::family family, forge::db::record_key key) override {
+   boost::asio::awaitable<void> erase(forge::db::core::family family, forge::db::core::record_key key) override {
       working_[family.name].erase(key);
       co_return;
    }
 
-   boost::asio::awaitable<forge::db::record_page> scan_page(forge::db::family family,
-                                                            forge::db::record_range range,
-                                                            forge::db::page_request request) override {
-      forge::db::validate_page_request(request);
-      auto result = forge::db::record_page{};
+   boost::asio::awaitable<forge::db::core::record_page> scan_page(forge::db::core::family family,
+                                                            forge::db::core::record_range range,
+                                                            forge::db::core::page_request request) override {
+      forge::db::core::validate_page_request(request);
+      auto result = forge::db::core::record_page{};
       const auto family_found = working_.find(family.name);
       if (family_found == working_.end()) {
          co_return result;
@@ -113,7 +113,7 @@ class memory_session final : public forge::db::session {
          ++current;
       }
 
-      auto last = std::optional<forge::db::record_key>{};
+      auto last = std::optional<forge::db::core::record_key>{};
       while (current != family_found->second.end()) {
          if (!starts_with(current->first, range.prefix)) {
             break;
@@ -121,7 +121,7 @@ class memory_session final : public forge::db::session {
          if (range.has_end && !(current->first.bytes() < range.end.bytes())) {
             break;
          }
-         result.entries.push_back(forge::db::record_entry{.key = current->first, .value = current->second});
+         result.entries.push_back(forge::db::core::record_entry{.key = current->first, .value = current->second});
          last = current->first;
          ++current;
          if (result.entries.size() == request.limit) {
@@ -130,7 +130,7 @@ class memory_session final : public forge::db::session {
       }
       if (last && current != family_found->second.end() && starts_with(current->first, range.prefix) &&
           (!range.has_end || current->first.bytes() < range.end.bytes())) {
-         result.next = forge::db::cursor{.boundary = *last};
+         result.next = forge::db::core::cursor{.boundary = *last};
       }
       co_return result;
    }
@@ -157,7 +157,7 @@ class memory_session final : public forge::db::session {
    bool writable_ = false;
 };
 
-class memory_driver final : public forge::db::driver {
+class memory_driver final : public forge::db::core::driver {
  public:
    explicit memory_driver(std::shared_ptr<memory_state> state) : state_{std::move(state)} {}
 
@@ -166,11 +166,11 @@ class memory_driver final : public forge::db::driver {
    }
 
  private:
-   boost::asio::awaitable<std::unique_ptr<forge::db::session>> open_transaction() override {
+   boost::asio::awaitable<std::unique_ptr<forge::db::core::session>> open_transaction() override {
       co_return std::make_unique<memory_session>(state_, false, true);
    }
 
-   boost::asio::awaitable<std::unique_ptr<forge::db::session>> open_snapshot() override {
+   boost::asio::awaitable<std::unique_ptr<forge::db::core::session>> open_snapshot() override {
       co_return std::make_unique<memory_session>(state_, true, false);
    }
 

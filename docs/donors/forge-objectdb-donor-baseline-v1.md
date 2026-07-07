@@ -322,9 +322,9 @@ Preferred vocabulary:
 - `store.register_object<T>()`: direct object descriptor registration, matching
   donor `add_index<T>()` patterns;
 - `forge::db::object::transaction`: staged object mutations and index maintenance
-  over a shared `forge::db::transaction`;
+  over a shared `forge::db::core::transaction`;
 - `forge::db::object::snapshot`: stable read visibility;
-- `forge::db::object::cursor` / `forge::db::object::page`: paginated reads;
+- `forge::db::core::cursor` / `forge::db::core::page_request`: paginated reads;
 - `forge::rocksdb::store`: physical ordered key/value backend.
 
 Reasoning:

@@ -206,10 +206,10 @@ set(
 	   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/ids/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/compression/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/chain/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db_rocksdb/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db_object/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db_blob/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/core/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/rocksdb/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/object/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/blob/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/json/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/config/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/yaml/include"
@@ -357,8 +357,6 @@ add_subdirectory(libraries/ids)
 add_subdirectory(libraries/compression)
 add_subdirectory(libraries/chain)
 add_subdirectory(libraries/db)
-add_subdirectory(libraries/db_object)
-add_subdirectory(libraries/db_blob)
 add_subdirectory(libraries/config)
 add_subdirectory(libraries/json)
 add_subdirectory(libraries/yaml)
@@ -376,7 +374,6 @@ add_subdirectory(libraries/http_api)
 add_subdirectory(libraries/otlp)
 if(FORGE_HAS_ROCKSDB)
    add_subdirectory(libraries/rocksdb)
-   add_subdirectory(libraries/db_rocksdb)
 endif()
 add_subdirectory(libraries/websocket)
 add_subdirectory(libraries/transport)
@@ -402,7 +399,7 @@ set(
 	   forge_ids
    forge_compression
    forge_chain
-   forge_db
+   forge_db_core
    forge_db_object
    forge_db_blob
    forge_config
@@ -496,9 +493,9 @@ install(
 	             libraries/ids/include/forge
              libraries/compression/include/forge
              libraries/chain/include/forge
-             libraries/db/include/forge
-             libraries/db_object/include/forge
-             libraries/db_blob/include/forge
+             libraries/db/core/include/forge
+             libraries/db/object/include/forge
+             libraries/db/blob/include/forge
              libraries/json/include/forge
              libraries/config/include/forge
              libraries/yaml/include/forge
@@ -543,7 +540,7 @@ endif()
 
 if(TARGET forge_db_rocksdb)
    install(
-      DIRECTORY libraries/db_rocksdb/include/forge
+      DIRECTORY libraries/db/rocksdb/include/forge
       DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT dev EXCLUDE_FROM_ALL
    )
 endif()

@@ -20,15 +20,15 @@ import forge.api.binding;
 import forge.app.plugin_context;
 import forge.config.component;
 import forge.config.decode;
-import forge.db.driver;
-import forge.db.record;
+import forge.db.core.driver;
+import forge.db.core.record;
 import forge.exceptions;
 import forge.db.object.store;
 import forge.plugins.db.object.exceptions;
 import forge.plugins.db.object.types;
 
 #if FORGE_PLUGINS_DB_OBJECT_HAS_ROCKSDB
-import forge.db.rocksdb;
+import forge.db.rocksdb.driver;
 #endif
 
 #include "details/plugin_impl.hxx"
@@ -88,7 +88,7 @@ void plugin::impl::reject_duplicate_name(const std::string& name) const {
 }
 
 void plugin::impl::add_store(std::string name,
-                             std::shared_ptr<forge::db::driver> driver,
+                             std::shared_ptr<forge::db::core::driver> driver,
                              forge::db::object::store::options options) {
    if (name.empty()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_argument, "db object store name must not be empty");
@@ -115,7 +115,7 @@ void plugin::impl::start() {
    struct pending_open {
       std::string name;
       store_config config;
-      std::shared_ptr<forge::db::driver> driver;
+      std::shared_ptr<forge::db::core::driver> driver;
    };
 
    auto pending = std::vector<pending_open>{};
@@ -172,7 +172,7 @@ void plugin::impl::start() {
          }
          record->store = std::make_shared<forge::db::object::store>(
             record->driver,
-            forge::db::object::store::config{.family = forge::db::family{record->family}},
+            forge::db::object::store::config{.family = forge::db::core::family{record->family}},
             record->options);
          record->started = true;
       }
@@ -306,7 +306,7 @@ boost::asio::awaitable<void> lifecycle::shutdown(const std::shared_ptr<plugin::i
    co_return;
 }
 
-std::shared_ptr<forge::db::driver> make_configured_driver(const store_config& value) {
+std::shared_ptr<forge::db::core::driver> make_configured_driver(const store_config& value) {
    if (value.driver == "rocksdb") {
 #if FORGE_PLUGINS_DB_OBJECT_HAS_ROCKSDB
       return std::make_shared<forge::db::rocksdb::driver>(

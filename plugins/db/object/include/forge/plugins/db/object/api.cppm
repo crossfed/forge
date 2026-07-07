@@ -14,13 +14,12 @@ export import forge.plugins.db.object.exceptions;
 export import forge.plugins.db.object.types;
 
 import forge.api.binding;
-import forge.db.driver;
+import forge.db.core.driver;
+import forge.db.core.record;
 import forge.ids.object_id;
-import forge.db.object.cursor;
 import forge.db.object.hooks;
 import forge.db.object.index;
 import forge.db.object.object;
-import forge.db.object.record;
 import forge.db.object.snapshot;
 import forge.db.object.store;
 import forge.db.object.transaction;
@@ -33,7 +32,7 @@ class store_handle_state {
 
    [[nodiscard]] virtual std::string name() const = 0;
    [[nodiscard]] virtual std::shared_ptr<forge::db::object::store> require_store() const = 0;
-   [[nodiscard]] virtual std::shared_ptr<forge::db::driver> require_driver() const = 0;
+   [[nodiscard]] virtual std::shared_ptr<forge::db::core::driver> require_driver() const = 0;
 };
 
 class store_handle {
@@ -109,8 +108,8 @@ class store_handle {
       auto state = state_;
       using value_type = typename Object::value_type;
       return forge::db::object::index_view<Object, Tag>{
-         [state](forge::db::object::record_range range,
-                 forge::db::object::page_request request) mutable
+         [state](forge::db::core::record_range range,
+                 forge::db::core::page_request request) mutable
             -> boost::asio::awaitable<forge::db::object::object_page<value_type>> {
             auto handle = store_handle{state};
             auto view = handle.require_store()->template index<Object, Tag>();
@@ -118,8 +117,8 @@ class store_handle {
          },
          [state]() mutable -> forge::db::object::index_page_query<value_type> {
             auto active = std::make_shared<std::optional<forge::db::object::snapshot>>();
-            return [state = std::move(state), active](forge::db::object::record_range range,
-                                                      forge::db::object::page_request request) mutable
+            return [state = std::move(state), active](forge::db::core::record_range range,
+                                                      forge::db::core::page_request request) mutable
                       -> boost::asio::awaitable<forge::db::object::object_page<value_type>> {
                auto handle = store_handle{state};
                if (!active->has_value()) {
@@ -146,7 +145,7 @@ class api : public forge::api::contract<api, forge::api::surface::local> {
 
    virtual boost::asio::awaitable<void>
    add_store(std::string name,
-             std::shared_ptr<forge::db::driver> driver,
+             std::shared_ptr<forge::db::core::driver> driver,
              forge::db::object::store::options options = {}) = 0;
    virtual boost::asio::awaitable<store_handle> store(std::string name) = 0;
    virtual boost::asio::awaitable<void> flush(std::string name, bool sync = true) = 0;

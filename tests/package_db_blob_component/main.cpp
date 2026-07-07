@@ -6,13 +6,13 @@ import forge.db.blob.ref;
 import forge.db.blob.store;
 import forge.db.blob.types;
 import forge.crypto.sha256;
-import forge.db.record;
+import forge.db.core.record;
 import forge.variant.value;
 
 int main() {
    auto cfg = forge::db::blob::store::config{};
-   cfg.data_family = forge::db::family{"blobdb.data"};
-   cfg.refs_family = forge::db::family{"blobdb.refs"};
+   cfg.data_family = forge::db::core::family{"blobdb.data"};
+   cfg.refs_family = forge::db::core::family{"blobdb.refs"};
    auto payload = std::string{"package-db-blob-ref"};
    auto bytes = std::vector<std::byte>{
       reinterpret_cast<const std::byte*>(payload.data()),
