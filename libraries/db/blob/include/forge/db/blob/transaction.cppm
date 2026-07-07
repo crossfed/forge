@@ -86,7 +86,7 @@ class transaction {
 
    template <digest_algorithm Digest>
    boost::asio::awaitable<bool> has(ref<Digest> value) {
-      co_return co_await has_encoded(detail::algorithm_id<Digest>(), detail::digest_bytes(value));
+      co_return co_await has_encoded(detail::algorithm_id<Digest>(), detail::digest_bytes(value), value.size);
    }
 
    template <digest_algorithm Digest>
@@ -132,7 +132,7 @@ class transaction {
    boost::asio::awaitable<std::vector<std::byte>> get_encoded(std::string algorithm,
                                                               std::vector<std::byte> digest,
                                                               std::uint64_t size);
-   boost::asio::awaitable<bool> has_encoded(std::string algorithm, std::vector<std::byte> digest);
+   boost::asio::awaitable<bool> has_encoded(std::string algorithm, std::vector<std::byte> digest, std::uint64_t size);
    boost::asio::awaitable<stat> stat_blob_encoded(std::string algorithm,
                                                   std::vector<std::byte> digest,
                                                   std::uint64_t size);

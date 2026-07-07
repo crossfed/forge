@@ -45,7 +45,7 @@ class store {
    boost::asio::awaitable<ref<Digest>> put_as(std::vector<std::byte> payload) {
       auto active = co_await begin_transaction();
       auto error = std::exception_ptr{};
-      auto value = ref<Digest>{};
+      auto value = std::optional<ref<Digest>>{};
       try {
          value = co_await active.template put_as<Digest>(std::move(payload));
          co_await active.commit();
@@ -56,7 +56,7 @@ class store {
          co_await active.rollback();
          std::rethrow_exception(error);
       }
-      co_return value;
+      co_return std::move(*value);
    }
 
    template <digest_algorithm Digest>

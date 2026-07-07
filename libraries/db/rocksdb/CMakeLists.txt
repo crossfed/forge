@@ -1,6 +1,6 @@
 add_library(
    forge_db_rocksdb STATIC
-   rocksdb.cpp
+   driver.cpp
 )
 forge_target_modules_at(forge_db_rocksdb db/rocksdb)
 

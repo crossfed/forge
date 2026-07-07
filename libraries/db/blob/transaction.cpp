@@ -127,9 +127,12 @@ boost::asio::awaitable<std::vector<std::byte>> transaction::get_encoded(std::str
    co_return *bytes;
 }
 
-boost::asio::awaitable<bool> transaction::has_encoded(std::string algorithm, std::vector<std::byte> digest) {
+boost::asio::awaitable<bool> transaction::has_encoded(std::string algorithm,
+                                                      std::vector<std::byte> digest,
+                                                      std::uint64_t size) {
    require_encoded_ref(algorithm, digest);
-   co_return (co_await impl_->transaction().get(impl_->data_family, detail::data_key(algorithm, digest))).has_value();
+   auto bytes = co_await impl_->transaction().get(impl_->data_family, detail::data_key(algorithm, digest));
+   co_return bytes.has_value() && bytes->size() == size;
 }
 
 boost::asio::awaitable<stat> transaction::stat_blob_encoded(std::string algorithm,

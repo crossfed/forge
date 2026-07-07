@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -29,6 +30,8 @@ import forge.ids.object_id;
 import forge.db.object.index;
 import forge.db.object.object;
 import forge.db.object.store;
+import forge.raw.datastream;
+import forge.raw.exceptions;
 import forge.raw.raw;
 import forge.variant.exceptions;
 import forge.variant.value;
@@ -184,6 +187,16 @@ struct toy_digest {
    auto operator<=>(const toy_digest&) const = default;
 };
 
+struct strict_digest {
+   std::vector<std::byte> bytes;
+
+   strict_digest() = delete;
+   explicit strict_digest(std::vector<std::byte> value) : bytes{std::move(value)} {}
+
+   bool operator==(const strict_digest&) const = default;
+   auto operator<=>(const strict_digest&) const = default;
+};
+
 struct by_id;
 
 struct document : forge::db::object::object<document, 3, 9> {
@@ -244,6 +257,43 @@ struct digest_traits<toy_digest> {
          bytes.push_back(static_cast<std::byte>(byte));
       }
       return toy_digest{std::move(bytes)};
+   }
+};
+
+template <>
+struct hash<strict_digest> {
+   [[nodiscard]] strict_digest operator()(std::span<const std::byte> payload) const {
+      return strict_digest{std::vector<std::byte>{payload.begin(), payload.end()}};
+   }
+};
+
+template <>
+struct digest_traits<strict_digest> {
+   static constexpr auto algorithm = std::string_view{"strict"};
+
+   [[nodiscard]] static std::vector<std::byte> to_bytes(const strict_digest& value) {
+      return value.bytes;
+   }
+
+   [[nodiscard]] static strict_digest from_bytes(std::span<const std::byte> value) {
+      return strict_digest{std::vector<std::byte>{value.begin(), value.end()}};
+   }
+
+   [[nodiscard]] static std::string text(const strict_digest& value) {
+      return forge::crypto::to_hex(
+         reinterpret_cast<const std::uint8_t*>(value.bytes.data()),
+         static_cast<std::uint32_t>(value.bytes.size()));
+   }
+
+   [[nodiscard]] static strict_digest from_text(std::string_view value) {
+      auto decoded = std::vector<std::uint8_t>(value.size() / 2U);
+      forge::crypto::from_hex(std::string{value}, decoded.data(), decoded.size());
+      auto bytes = std::vector<std::byte>{};
+      bytes.reserve(decoded.size());
+      for (const auto byte : decoded) {
+         bytes.push_back(static_cast<std::byte>(byte));
+      }
+      return strict_digest{std::move(bytes)};
    }
 };
 
@@ -321,6 +371,36 @@ BOOST_AUTO_TEST_CASE(db_blob_ref_raw_uses_digest_traits_for_custom_digest) {
    BOOST_CHECK_EQUAL(decoded.size, value.size);
 }
 
+BOOST_AUTO_TEST_CASE(db_blob_ref_raw_roundtrip_supports_streambuf_datastream) {
+   auto value = forge::db::blob::ref<>{
+      .digest = forge::db::blob::hash<forge::db::blob::digest>{}(bytes("db-blob-streambuf-ref")),
+      .size = 888,
+   };
+   const auto packed = forge::raw::pack(value);
+   const auto packed_text = std::string{reinterpret_cast<const char*>(packed.data()), packed.size()};
+
+   auto stream = forge::datastream<std::stringbuf>{packed_text, std::ios_base::in};
+   auto decoded = forge::db::blob::ref<>{};
+   stream >> decoded;
+
+   BOOST_CHECK(decoded.digest == value.digest);
+   BOOST_CHECK_EQUAL(decoded.size, value.size);
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_ref_raw_rejects_truncated_streambuf_payload) {
+   auto value = forge::db::blob::ref<>{
+      .digest = forge::db::blob::hash<forge::db::blob::digest>{}(bytes("db-blob-truncated-ref")),
+      .size = 999,
+   };
+   auto packed = forge::raw::pack(value);
+   packed.pop_back();
+   const auto packed_text = std::string{reinterpret_cast<const char*>(packed.data()), packed.size()};
+
+   auto stream = forge::datastream<std::stringbuf>{packed_text, std::ios_base::in};
+   auto decoded = forge::db::blob::ref<>{};
+   BOOST_CHECK_THROW(stream >> decoded, forge::raw::exceptions::codec_error);
+}
+
 BOOST_AUTO_TEST_CASE(db_blob_ref_supports_custom_digest_text_roundtrip) {
    auto value = forge::db::blob::ref<toy_digest>{
       .digest = toy_digest{bytes("\xde\xad")},
@@ -350,6 +430,13 @@ BOOST_AUTO_TEST_CASE(db_blob_put_returns_default_ref_and_default_operations_use_
       BOOST_CHECK_EQUAL(text(co_await blobs.get(ref)), "alpha");
       co_await blobs.verify(ref);
 
+      auto wrong_size = ref;
+      wrong_size.size = ref.size + 1U;
+      BOOST_CHECK(!(co_await blobs.has(wrong_size)));
+      BOOST_CHECK_THROW(co_await blobs.stat_blob(wrong_size), forge::db::blob::exceptions::digest_mismatch);
+      BOOST_CHECK_THROW(co_await blobs.get(wrong_size), forge::db::blob::exceptions::digest_mismatch);
+      BOOST_CHECK_THROW(co_await blobs.verify(wrong_size), forge::db::blob::exceptions::digest_mismatch);
+
       auto wrong = ref;
       wrong.digest = forge::db::blob::hash<forge::db::blob::digest>{}(bytes("wrong"));
       BOOST_CHECK_THROW(co_await blobs.put(wrong, bytes("alpha")),
@@ -360,6 +447,8 @@ BOOST_AUTO_TEST_CASE(db_blob_put_returns_default_ref_and_default_operations_use_
 
 BOOST_AUTO_TEST_CASE(db_blob_put_as_supports_custom_digest_without_templated_store) {
    static_assert(forge::db::blob::digest_algorithm<toy_digest>);
+   static_assert(forge::db::blob::digest_algorithm<strict_digest>);
+   static_assert(!std::default_initializable<strict_digest>);
 
    auto runtime = forge::asio::runtime{};
    auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
@@ -371,6 +460,12 @@ BOOST_AUTO_TEST_CASE(db_blob_put_as_supports_custom_digest_without_templated_sto
       BOOST_CHECK_EQUAL(ref.size, 5U);
       BOOST_CHECK(co_await blobs.has(ref));
       BOOST_CHECK_EQUAL(text(co_await blobs.get(ref)), "alpha");
+
+      auto strict_ref = co_await blobs.put_as<strict_digest>(bytes("bravo"));
+      BOOST_CHECK(strict_ref.digest == forge::db::blob::hash<strict_digest>{}(bytes("bravo")));
+      BOOST_CHECK_EQUAL(strict_ref.size, 5U);
+      BOOST_CHECK(co_await blobs.has(strict_ref));
+      BOOST_CHECK_EQUAL(text(co_await blobs.get(strict_ref)), "bravo");
       co_return;
    }());
 }

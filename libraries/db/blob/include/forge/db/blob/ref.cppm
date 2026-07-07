@@ -11,6 +11,7 @@ module;
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <type_traits>
 #include <vector>
 
 export module forge.db.blob.ref;
@@ -63,6 +64,29 @@ template <typename Digest>
 concept fixed_size_digest = requires {
    { digest_traits<Digest>::byte_size } -> std::convertible_to<std::size_t>;
 };
+
+template <typename Stream>
+void read_exact(Stream& stream, char* data, std::size_t size) {
+   if (size == 0U) {
+      return;
+   }
+   if constexpr (std::same_as<decltype(stream.read(data, size)), bool>) {
+      if (!stream.read(data, size)) {
+         FORGE_THROW_EXCEPTION(forge::raw::exceptions::codec_error, "db blob ref raw payload is truncated");
+      }
+   } else {
+      const auto read = stream.read(data, size);
+      if (static_cast<std::size_t>(read) != size) {
+         FORGE_THROW_EXCEPTION(forge::raw::exceptions::codec_error, "db blob ref raw payload is truncated");
+      }
+   }
+}
+
+template <typename Stream, typename Value>
+void read_scalar(Stream& stream, Value& value) {
+   static_assert(std::is_trivially_copyable_v<Value>);
+   read_exact(stream, reinterpret_cast<char*>(&value), sizeof(value));
+}
 
 } // namespace forge::db::blob::detail
 
@@ -149,18 +173,15 @@ struct ref {
          digest_size = digest_traits<Digest>::byte_size;
       } else {
          auto encoded_size = std::uint32_t{};
-         forge::raw::unpack(stream, encoded_size);
+         detail::read_scalar(stream, encoded_size);
          digest_size = encoded_size;
-      }
-      if (stream.remaining() < digest_size + sizeof(std::uint64_t)) {
-         FORGE_THROW_EXCEPTION(forge::raw::exceptions::codec_error, "db blob ref raw payload is truncated");
       }
       auto digest_bytes = std::vector<std::byte>(digest_size);
       if (!digest_bytes.empty()) {
-         stream.read(reinterpret_cast<char*>(digest_bytes.data()), digest_bytes.size());
+         detail::read_exact(stream, reinterpret_cast<char*>(digest_bytes.data()), digest_bytes.size());
       }
       value.digest = digest_traits<Digest>::from_bytes(digest_bytes);
-      forge::raw::unpack(stream, value.size);
+      detail::read_scalar(stream, value.size);
       return stream;
    }
 };
