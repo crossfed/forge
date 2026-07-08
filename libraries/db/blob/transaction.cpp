@@ -185,9 +185,17 @@ boost::asio::awaitable<void> transaction::retain_encoded(std::string algorithm,
 
 boost::asio::awaitable<void> transaction::release_encoded(std::string algorithm,
                                                           std::vector<std::byte> digest,
+                                                          std::uint64_t size,
                                                           owner_ref owner) {
    require_encoded_ref(algorithm, digest);
    require_owner(owner);
+   auto bytes = co_await impl_->transaction().get(impl_->data_family, detail::data_key(algorithm, digest));
+   if (!bytes.has_value()) {
+      co_return;
+   }
+   if (bytes->size() != size) {
+      FORGE_THROW_EXCEPTION(exceptions::digest_mismatch, "blob size does not match reference");
+   }
    co_await impl_->transaction().erase(impl_->refs_family, detail::ref_key(algorithm, digest, owner));
 }
 

@@ -111,7 +111,7 @@ class transaction {
 
    template <digest_algorithm Digest>
    boost::asio::awaitable<void> release(ref<Digest> value, owner_ref owner) {
-      co_await release_encoded(detail::algorithm_id<Digest>(), detail::digest_bytes(value), std::move(owner));
+      co_await release_encoded(detail::algorithm_id<Digest>(), detail::digest_bytes(value), value.size, std::move(owner));
    }
 
    template <digest_algorithm Digest>
@@ -139,7 +139,10 @@ class transaction {
    boost::asio::awaitable<void> erase_encoded(std::string algorithm, std::vector<std::byte> digest, std::uint64_t size);
    boost::asio::awaitable<void> erase_stored_encoded(std::string algorithm, std::vector<std::byte> digest);
    boost::asio::awaitable<void> retain_encoded(std::string algorithm, std::vector<std::byte> digest, owner_ref owner);
-   boost::asio::awaitable<void> release_encoded(std::string algorithm, std::vector<std::byte> digest, owner_ref owner);
+   boost::asio::awaitable<void> release_encoded(std::string algorithm,
+                                                std::vector<std::byte> digest,
+                                                std::uint64_t size,
+                                                owner_ref owner);
    boost::asio::awaitable<std::uint64_t> ref_count_encoded(std::string algorithm, std::vector<std::byte> digest);
 
    struct impl;
