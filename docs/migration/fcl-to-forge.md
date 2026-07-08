@@ -9,16 +9,16 @@ rename with no compatibility aliases.
 | --- | --- |
 | `namespace fcl` | `namespace forge` |
 | `fcl::api` | `forge::api` |
-| `import fcl.api.binding` | `import forge.api.binding` |
-| `#include <fcl/api/macros.hpp>` | `#include <forge/api/macros.hpp>` |
+| `import fcl.api.binding` | `import forge.api.core.binding` |
+| `#include <fcl/api/macros.hpp>` | `#include <forge/api/core/macros.hpp>` |
 | `FCL_API` | `FORGE_API` |
 | `FCL_API_METHOD` | `FORGE_API_METHOD` |
 | `FCL_HTTP_API` | `FORGE_HTTP_API` |
 | `FCL_THROW_EXCEPTION` | `FORGE_THROW_EXCEPTION` |
 | `FCL_ASSERT` | `FORGE_ASSERT` |
 | `fcl_core` | `forge_core` |
-| `fcl_http_api` | `forge_http_api` |
-| `fcl_transport_api` | `forge_transport_api` |
+| `fcl_api_http` | `forge_api_http` |
+| `fcl_api_transport` | `forge_api_transport` |
 | `fcl_plugins_crypto_signer` | `forge_plugins_crypto_signer` |
 | `FCL::fcl_core` | `Forge::forge_core` |
 | `find_package(FCL CONFIG REQUIRED)` | `find_package(Forge CONFIG REQUIRED)` |

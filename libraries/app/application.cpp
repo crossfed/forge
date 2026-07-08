@@ -13,15 +13,15 @@ module forge.app.application;
 
 import forge.config.component;
 import forge.config.document;
-import forge.api.exceptions;
-import forge.api.types;
-import forge.api.descriptor;
-import forge.api.error_projection;
-import forge.api.handle;
-import forge.api.connection;
-import forge.api.registry;
-import forge.api.binding;
-import forge.api.dispatcher;
+import forge.api.core.exceptions;
+import forge.api.core.types;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.core.handle;
+import forge.api.core.connection;
+import forge.api.core.registry;
+import forge.api.core.binding;
+import forge.api.core.dispatcher;
 import forge.exceptions;
 import forge.app.events;
 import forge.app.signals;
@@ -83,7 +83,7 @@ boost::asio::awaitable<void> application_runtime::configure(const config::docume
    }
 }
 
-boost::asio::awaitable<void> application_runtime::provide(forge::api::provider& provider) {
+boost::asio::awaitable<void> application_runtime::provide(forge::api::core::provider& provider) {
    if (state_ != application_state::created) {
       throw std::logic_error{"app runtime must provide APIs before initialize"};
    }

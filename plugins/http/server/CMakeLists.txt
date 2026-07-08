@@ -20,11 +20,11 @@ target_include_directories(forge_plugins_http_server PRIVATE ${CMAKE_CURRENT_SOU
 target_link_libraries(
    forge_plugins_http_server PUBLIC
       forge_app
-      forge_api
+      forge_api_core
       forge_config
       forge_schema
       forge_net_http
-      forge_http_api
+      forge_api_http
       forge_asio
       forge_exceptions
       Boost::asio

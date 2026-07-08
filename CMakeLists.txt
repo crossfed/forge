@@ -216,8 +216,9 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/xml/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/program_options/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/env/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/transport_api/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/core/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/http/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/transport/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/log/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/otlp/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/rocksdb/include"
@@ -225,7 +226,6 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/multiformats/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/asio/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/http/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/http_api/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/websocket/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/transport/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/tcp/include"
@@ -366,12 +366,10 @@ add_subdirectory(libraries/xml)
 add_subdirectory(libraries/program_options)
 add_subdirectory(libraries/env)
 add_subdirectory(libraries/api)
-add_subdirectory(libraries/transport_api)
 add_subdirectory(libraries/log)
 add_subdirectory(libraries/crypto)
 add_subdirectory(libraries/multiformats)
 add_subdirectory(libraries/asio)
-add_subdirectory(libraries/http_api)
 add_subdirectory(libraries/otlp)
 if(FORGE_HAS_ROCKSDB)
    add_subdirectory(libraries/rocksdb)
@@ -404,15 +402,15 @@ set(
    forge_xml
    forge_program_options
    forge_env
-   forge_api
-   forge_transport_api
+   forge_api_core
+   forge_api_transport
    forge_log
    forge_otlp
    forge_crypto
    forge_multiformats
    forge_asio
    forge_net_http
-   forge_http_api
+   forge_api_http
    forge_net_websocket
    forge_net_transport
    forge_net_tcp
@@ -498,15 +496,15 @@ install(
              libraries/xml/include/forge
              libraries/program_options/include/forge
              libraries/env/include/forge
-             libraries/api/include/forge
-             libraries/transport_api/include/forge
+             libraries/api/core/include/forge
+             libraries/api/http/include/forge
+             libraries/api/transport/include/forge
              libraries/log/include/forge
              libraries/otlp/include/forge
              libraries/crypto/include/forge
              libraries/multiformats/include/forge
              libraries/asio/include/forge
              libraries/net/http/include/forge
-             libraries/http_api/include/forge
              libraries/net/websocket/include/forge
              libraries/net/transport/include/forge
              libraries/net/tcp/include/forge

@@ -10,15 +10,15 @@ module;
 
 export module forge.net.websocket.api;
 
-import forge.api.exceptions;
-import forge.api.types;
-import forge.api.descriptor;
-import forge.api.error_projection;
-import forge.api.handle;
-import forge.api.connection;
-import forge.api.registry;
-import forge.api.binding;
-import forge.api.dispatcher;
+import forge.api.core.exceptions;
+import forge.api.core.types;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.core.handle;
+import forge.api.core.connection;
+import forge.api.core.registry;
+import forge.api.core.binding;
+import forge.api.core.dispatcher;
 import forge.raw.raw;
 import forge.net.websocket.connection;
 import forge.net.websocket.exceptions;
@@ -31,7 +31,7 @@ struct api_backpressure_options {
 
 class api_binding {
  public:
-   api_binding(forge::api::binding_plan plan, forge::api::codec_id codec, std::size_t max_frame_size,
+   api_binding(forge::api::core::binding_plan plan, forge::api::core::codec_id codec, std::size_t max_frame_size,
                api_backpressure_options backpressure)
        : plan_{std::move(plan)}, codec_{std::move(codec)}, max_frame_size_{max_frame_size},
          backpressure_{backpressure} {}
@@ -45,7 +45,7 @@ class api_binding {
       co_await accept(std::move(connection));
    }
 
-   [[nodiscard]] const forge::api::codec_id& codec() const noexcept {
+   [[nodiscard]] const forge::api::core::codec_id& codec() const noexcept {
       return codec_;
    }
 
@@ -63,13 +63,13 @@ class api_binding {
          FORGE_THROW_EXCEPTION(forge::net::websocket::exceptions::closed, "websocket API binding received null connection");
       }
       if (plan_.local == nullptr) {
-         FORGE_THROW_EXCEPTION(forge::api::exceptions::incompatible_version, "websocket API binding has no local registry");
+         FORGE_THROW_EXCEPTION(forge::api::core::exceptions::incompatible_version, "websocket API binding has no local registry");
       }
       auto plan = plan_;
       auto codec = codec_;
       auto max_frame_size = max_frame_size_;
-      auto dispatcher = std::make_shared<forge::api::frame_dispatcher>(
-          std::move(plan), forge::api::dispatch_options{.codec = codec, .max_inflight = backpressure_.max_inflight});
+      auto dispatcher = std::make_shared<forge::api::core::frame_dispatcher>(
+          std::move(plan), forge::api::core::dispatch_options{.codec = codec, .max_inflight = backpressure_.max_inflight});
       connection->on_message(
           [dispatcher = std::move(dispatcher), max_frame_size](
               forge::net::websocket::connection& connection_value, std::string message)
@@ -77,31 +77,31 @@ class api_binding {
              if (message.size() > max_frame_size) {
                 FORGE_THROW_EXCEPTION(forge::net::websocket::exceptions::frame_too_large, "websocket API frame is too large");
              }
-             auto request_bytes = forge::api::bytes{message.begin(), message.end()};
-             auto request = forge::raw::unpack<forge::api::frame>(request_bytes);
+             auto request_bytes = forge::api::core::bytes{message.begin(), message.end()};
+             auto request = forge::raw::unpack<forge::api::core::frame>(request_bytes);
              auto responses = co_await dispatcher->dispatch(std::move(request));
              for (const auto& response : responses) {
-                auto response_bytes = forge::api::bytes{};
+                auto response_bytes = forge::api::core::bytes{};
                 forge::raw::pack(response_bytes, response);
                 co_await connection_value.send(std::string{response_bytes.begin(), response_bytes.end()});
              }
           });
    }
 
-   forge::api::binding_plan plan_;
-   forge::api::codec_id codec_;
+   forge::api::core::binding_plan plan_;
+   forge::api::core::codec_id codec_;
    std::size_t max_frame_size_ = 1024 * 1024;
    api_backpressure_options backpressure_{};
 };
 
 class api_builder {
  public:
-   api_builder& use(forge::api::binding_plan plan) {
+   api_builder& use(forge::api::core::binding_plan plan) {
       plan_ = std::move(plan);
       return *this;
    }
 
-   api_builder& codec(forge::api::codec_id value) {
+   api_builder& codec(forge::api::core::codec_id value) {
       codec_ = std::move(value);
       return *this;
    }
@@ -121,8 +121,8 @@ class api_builder {
    }
 
  private:
-   forge::api::binding_plan plan_;
-   forge::api::codec_id codec_{.value = "forge.raw"};
+   forge::api::core::binding_plan plan_;
+   forge::api::core::codec_id codec_{.value = "forge.raw"};
    std::size_t max_frame_size_ = 1024 * 1024;
    api_backpressure_options backpressure_{};
 };

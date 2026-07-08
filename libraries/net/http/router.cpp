@@ -14,15 +14,15 @@ module;
 
 module forge.net.http.router;
 
-import forge.api.exceptions;
-import forge.api.types;
-import forge.api.descriptor;
-import forge.api.error_projection;
-import forge.api.handle;
-import forge.api.connection;
-import forge.api.registry;
-import forge.api.binding;
-import forge.api.dispatcher;
+import forge.api.core.exceptions;
+import forge.api.core.types;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.core.handle;
+import forge.api.core.connection;
+import forge.api.core.registry;
+import forge.api.core.binding;
+import forge.api.core.dispatcher;
 import forge.net.http.exceptions;
 import forge.net.http.middleware;
 import forge.net.http.stream;
@@ -81,9 +81,9 @@ status http_status_for(const forge::exceptions::base& error) {
    return status::internal_server_error;
 }
 
-forge::api::error_payload http_error_payload(const forge::exceptions::base& error) {
+forge::api::core::error_payload http_error_payload(const forge::exceptions::base& error) {
    if (std::string_view{error.code().category().name()} == "forge.net.http") {
-      return forge::api::error_payload{
+      return forge::api::core::error_payload{
           .error = http_error_name(error.code().value()),
           .message = error.message().empty() ? http_error_name(error.code().value()) : error.message(),
           .retryable = error.code().value() == 429 || error.code().value() == 503 || error.code().value() == 504,
@@ -95,7 +95,7 @@ forge::api::error_payload http_error_payload(const forge::exceptions::base& erro
       };
    }
 
-   return forge::api::error_payload{
+   return forge::api::core::error_payload{
        .error = "internal",
        .message = "internal error",
        .retryable = false,
@@ -137,12 +137,12 @@ void restore_stream_transfer_framing(response& value, const stream_transfer_fram
    }
 }
 
-std::string encode_error_payload(const forge::api::error_payload& payload) {
+std::string encode_error_payload(const forge::api::core::error_payload& payload) {
    auto encoded = forge::json::write(payload);
    if (encoded.ok()) {
       return std::move(encoded.text);
    }
-   return forge::json::write(forge::api::make_internal_error_payload()).text;
+   return forge::json::write(forge::api::core::make_internal_error_payload()).text;
 }
 
 response make_exception_response(const request& request, const forge::exceptions::base& error) {
@@ -331,7 +331,7 @@ boost::asio::awaitable<response> router::handle(route_context& context) const {
       co_return make_exception_response(context.request, error);
    } catch (const std::exception&) {
       co_return make_text_response(context.request, status::internal_server_error,
-                                   encode_error_payload(forge::api::error_payload{
+                                   encode_error_payload(forge::api::core::error_payload{
                                        .error = "internal",
                                        .message = "internal error",
                                        .identity =
@@ -407,7 +407,7 @@ boost::asio::awaitable<stream_response> router::handle_stream(stream_request& re
       co_return stream_response::buffered(make_exception_response(context.request, error));
    } catch (const std::exception&) {
       co_return stream_response::buffered(make_text_response(context.request, status::internal_server_error,
-                                                            encode_error_payload(forge::api::error_payload{
+                                                            encode_error_payload(forge::api::core::error_payload{
                                                                 .error = "internal",
                                                                 .message = "internal error",
                                                                 .identity =

@@ -36,7 +36,7 @@ and GossipSub/pubsub.
 
 Target: `forge_net_p2p`.
 
-Dependencies: `forge_api`, `forge_asio`, `forge_net_transport`, `forge_net_tcp`, `forge_net_quic`,
+Dependencies: `forge_api_core`, `forge_asio`, `forge_net_transport`, `forge_net_tcp`, `forge_net_quic`,
 `forge_net_yamux`, `forge_multiformats`, Boost.Asio and RocksDB.
 
 Foundation compatibility modules below P2P live in `forge_multiformats`:
@@ -66,7 +66,7 @@ Future transports must plug into the same multiaddr and transport session
 boundary, not fork P2P core.
 
 `forge_net_transport` is the stream/session substrate for `forge_net_p2p`; it is not an API
-or RPC layer. API-over-transport lives in `forge.transport.api`, where QUIC/P2P
+or RPC layer. API-over-transport lives in `forge.api.transport`, where QUIC/P2P
 bindings share frame serve-loop logic without putting `forge::api` into
 `forge_net_transport`.
 
@@ -175,7 +175,7 @@ node.register_protocol_handler(forge::net::p2p::protocol_id{.value = "/example/1
 ### Publish Typed APIs Above P2P
 
 Application protocols that need request/response, typed errors and idempotent
-operation receipts should expose an `forge_api` contract and mount it through the
+operation receipts should expose an `forge_api_core` contract and mount it through the
 P2P API binding or `forge::plugins::p2p::resolver`. P2P opens the stream and
 enforces peer/path policy; API dispatch owns method calls and error projection;
 the application handler owns authorization and durable state.
@@ -186,7 +186,7 @@ the application handler owns authorization and durable state.
 The binding path uses `multistream-select` and the same direct, hole-punch and
 relay path manager as ordinary P2P protocol streams; it must not reintroduce an
 FORGE-only hello envelope into direct QUIC sessions. Once a protocol stream is
-open, frame serving delegates to `forge.transport.api`; P2P keeps only P2P policy:
+open, frame serving delegates to `forge.api.transport`; P2P keeps only P2P policy:
 protocol id, known-peer checks and discovery scope.
 
 ### Connect And Open A Protocol Stream
@@ -274,7 +274,7 @@ identity extension and invalid envelopes are correctness failures.
   `node` in application plugins. Use typed request/receipt APIs for synchronous
   operations and a focused higher-level service for durable asynchronous work.
 - Do not define a new P2P-only API error payload. API protocols use
-  `forge::api::error_payload` in `forge::api::frame` error responses.
+  `forge::api::core::error_payload` in `forge::api::core::frame` error responses.
 - Do not let protocol handler exceptions disappear in detached tasks. Expected
   application failures should be typed exceptions and unexpected failures should
   be counted/diagnosed.

@@ -8,7 +8,7 @@ module;
 
 module forge.plugins.log.otlp.plugin;
 
-import forge.api.registry;
+import forge.api.core.registry;
 import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.config.component;
@@ -49,7 +49,7 @@ boost::asio::awaitable<void> plugin::configure(forge::config::component_view vie
    co_return;
 }
 
-boost::asio::awaitable<void> plugin::provide(forge::api::provider& provider) {
+boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provider) {
    provider.install<api>(std::make_shared<management_api>(impl_));
    co_return;
 }

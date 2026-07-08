@@ -17,7 +17,7 @@ plugins, telemetry and compatibility layers должны быть пригодн
 - `forge_raw` byte compatibility for retained old FC wire layouts.
 - Typed `forge_exceptions` categories plus redacted context instead of old
   exception hierarchy.
-- Neutral `forge_api` contracts for in-process plugin APIs and transport API
+- Neutral `forge_api_core` contracts for in-process plugin APIs and transport API
   bindings.
 - `forge_plugins` aggregate plus focused `forge_plugins_<family>_<name>` targets for shared
   lifecycle-owned components such as P2P nodes, with narrow local APIs for
@@ -35,7 +35,7 @@ plugins, telemetry and compatibility layers должны быть пригодн
   plugin flows for typed service composition.
 - OTLP log export and crash-spool resend as opt-in observability adapters.
 - Planned XML codec API backed by a private lightweight XML backend, followed by
-  multi-codec `forge_http_api` binding for XML request/response/error bodies.
+  multi-codec `forge_api_http` binding for XML request/response/error bodies.
 
 ## Library Families
 
@@ -79,8 +79,8 @@ cmake --build build/forge-debug -j 1 \
   --target forge test_forge test_forge_exceptions test_forge_raw test_forge_json test_forge_crypto \
   test_forge_multiformats test_forge_asio test_forge_transport test_forge_tcp test_forge_stcp \
   test_forge_yamux test_forge_quic test_forge_app test_forge_schema test_forge_config \
-  test_forge_yaml test_forge_program_options test_forge_env test_forge_api \
-  test_forge_transport_api test_forge_http_websocket test_forge_quic_p2p \
+  test_forge_yaml test_forge_program_options test_forge_env test_forge_api_core \
+  test_forge_api_transport test_forge_http_websocket test_forge_quic_p2p \
   test_forge_plugins test_forge_otlp test_forge_tui
 
 ctest --test-dir build/forge-debug --output-on-failure
@@ -108,7 +108,7 @@ Security gates:
 - Keep library READMEs aligned with public modules and actual targets.
 - Keep donor traceability updated when compatibility behavior changes.
 - Land XML support before downstream S3-compatible APIs, then extend
-  `forge_http_api` instead of allowing product code to bypass typed API binding.
+  `forge_api_http` instead of allowing product code to bypass typed API binding.
 - Re-run package install plus external `find_package(Forge CONFIG REQUIRED)`
   consumer smoke before releases.
 - Keep review focused on architecture boundaries, dependency hygiene, security

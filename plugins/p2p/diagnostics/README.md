@@ -57,7 +57,7 @@ plugins:
 ## Dependencies
 
 - `forge_app`
-- `forge_api`
+- `forge_api_core`
 - `forge_plugins_p2p_node`
 - `forge_config`
 - `forge_schema`

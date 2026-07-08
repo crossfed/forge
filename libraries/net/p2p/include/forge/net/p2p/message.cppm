@@ -9,7 +9,7 @@ module;
 
 export module forge.net.p2p.message;
 
-import forge.api.types;
+import forge.api.core.types;
 import forge.net.p2p.protocol;
 import forge.raw.raw;
 
@@ -18,15 +18,15 @@ export namespace forge::net::p2p {
 class message {
  public:
    struct options {
-      forge::api::codec_id codec{.value = "forge.raw"};
-      forge::api::metadata meta;
+      forge::api::core::codec_id codec{.value = "forge.raw"};
+      forge::api::core::metadata meta;
    };
 
    message() = default;
 
-   message(protocol_id protocol, forge::api::bytes data) : message{std::move(protocol), std::move(data), options{}} {}
+   message(protocol_id protocol, forge::api::core::bytes data) : message{std::move(protocol), std::move(data), options{}} {}
 
-   message(protocol_id protocol, forge::api::bytes data, options value)
+   message(protocol_id protocol, forge::api::core::bytes data, options value)
        : protocol_{std::move(protocol)}, codec_{std::move(value.codec)}, meta_{std::move(value.meta)},
          data_{std::move(data)} {}
 
@@ -47,15 +47,15 @@ class message {
       return protocol_;
    }
 
-   [[nodiscard]] const forge::api::codec_id& codec() const noexcept {
+   [[nodiscard]] const forge::api::core::codec_id& codec() const noexcept {
       return codec_;
    }
 
-   [[nodiscard]] const forge::api::metadata& meta() const noexcept {
+   [[nodiscard]] const forge::api::core::metadata& meta() const noexcept {
       return meta_;
    }
 
-   [[nodiscard]] const forge::api::bytes& data() const noexcept {
+   [[nodiscard]] const forge::api::core::bytes& data() const noexcept {
       return data_;
    }
 
@@ -67,9 +67,9 @@ class message {
    }
 
    protocol_id protocol_;
-   forge::api::codec_id codec_{.value = "forge.raw"};
-   forge::api::metadata meta_;
-   forge::api::bytes data_;
+   forge::api::core::codec_id codec_{.value = "forge.raw"};
+   forge::api::core::metadata meta_;
+   forge::api::core::bytes data_;
 };
 
 } // namespace forge::net::p2p

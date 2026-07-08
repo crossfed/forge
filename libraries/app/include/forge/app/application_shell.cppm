@@ -9,15 +9,15 @@ export module forge.app.application_shell;
 
 import forge.asio.runtime;
 import forge.asio.task_scheduler;
-import forge.api.exceptions;
-import forge.api.types;
-import forge.api.descriptor;
-import forge.api.error_projection;
-import forge.api.handle;
-import forge.api.connection;
-import forge.api.registry;
-import forge.api.binding;
-import forge.api.dispatcher;
+import forge.api.core.exceptions;
+import forge.api.core.types;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.core.handle;
+import forge.api.core.connection;
+import forge.api.core.registry;
+import forge.api.core.binding;
+import forge.api.core.dispatcher;
 import forge.config.key_path;
 import forge.config.value;
 import forge.config.document;
@@ -41,12 +41,12 @@ struct application_shell_options {
 class application_context {
  public:
    application_context(forge::asio::runtime& runtime, forge::asio::task_scheduler& scheduler,
-                       forge::api::registry& apis, signal_bus& signals, event_bus& events,
+                       forge::api::core::registry& apis, signal_bus& signals, event_bus& events,
                        diagnostics_store& diagnostics);
 
    [[nodiscard]] forge::asio::runtime& runtime() noexcept;
    [[nodiscard]] forge::asio::task_scheduler& scheduler() noexcept;
-   [[nodiscard]] forge::api::installer apis() noexcept;
+   [[nodiscard]] forge::api::core::installer apis() noexcept;
    [[nodiscard]] signal_bus& signals() noexcept;
    [[nodiscard]] event_bus& events() noexcept;
    [[nodiscard]] diagnostics_store& diagnostics() noexcept;
@@ -54,7 +54,7 @@ class application_context {
  private:
    forge::asio::runtime* runtime_ = nullptr;
    forge::asio::task_scheduler* scheduler_ = nullptr;
-   forge::api::registry* apis_ = nullptr;
+   forge::api::core::registry* apis_ = nullptr;
    signal_bus* signals_ = nullptr;
    event_bus* events_ = nullptr;
    diagnostics_store* diagnostics_ = nullptr;
@@ -90,7 +90,7 @@ class application_shell : public application_base {
    [[nodiscard]] application_state state() const noexcept;
    [[nodiscard]] forge::asio::runtime& runtime() noexcept;
    [[nodiscard]] forge::asio::task_scheduler& scheduler() noexcept;
-   [[nodiscard]] forge::api::registry& apis() noexcept;
+   [[nodiscard]] forge::api::core::registry& apis() noexcept;
    [[nodiscard]] signal_bus& signals() noexcept;
    [[nodiscard]] event_bus& events() noexcept;
    [[nodiscard]] diagnostics_store& diagnostics() noexcept;

@@ -44,7 +44,7 @@ Public modules:
 ## Dependencies
 
 - `forge_app`
-- `forge_api`
+- `forge_api_core`
 - `forge_crypto`
 - `forge_config`
 - `forge_schema`

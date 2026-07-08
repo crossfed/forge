@@ -9,14 +9,14 @@ module forge.app.plugin_context;
 namespace forge::app {
 namespace {
 
-forge::api::registry& default_api_registry() {
-   static auto registry = forge::api::registry{};
+forge::api::core::registry& default_api_registry() {
+   static auto registry = forge::api::core::registry{};
    return registry;
 }
 
 } // namespace
 
-plugin_context::plugin_context(forge::asio::task_scheduler& scheduler, forge::api::registry& apis, signal_bus& signals,
+plugin_context::plugin_context(forge::asio::task_scheduler& scheduler, forge::api::core::registry& apis, signal_bus& signals,
                                event_bus& events, diagnostics_store* diagnostics, config_view config)
     : scheduler_{&scheduler}, apis_{&apis}, signals_{&signals}, events_{&events}, diagnostics_{diagnostics},
       config_{std::move(config)} {}
@@ -29,8 +29,8 @@ forge::asio::task_scheduler& plugin_context::scheduler() noexcept {
    return *scheduler_;
 }
 
-forge::api::view plugin_context::apis() const noexcept {
-   return forge::api::view{*apis_};
+forge::api::core::view plugin_context::apis() const noexcept {
+   return forge::api::core::view{*apis_};
 }
 
 signal_bus& plugin_context::signals() noexcept {

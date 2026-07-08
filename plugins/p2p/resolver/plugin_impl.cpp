@@ -18,9 +18,9 @@ module;
 
 module forge.plugins.p2p.resolver.plugin;
 
-import forge.api.binding;
-import forge.api.registry;
-import forge.transport.api.options;
+import forge.api.core.binding;
+import forge.api.core.registry;
+import forge.api.transport.options;
 import forge.exceptions;
 import forge.net.p2p.identity;
 import forge.net.p2p.protocol;
@@ -100,7 +100,7 @@ std::vector<entry> plugin::impl::local_snapshot() const {
    return local;
 }
 
-void plugin::impl::add_local(forge::api::binding_plan plan, forge::net::p2p::protocol_id route, publish_options options) {
+void plugin::impl::add_local(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id route, publish_options options) {
    auto& p2p_api = require_p2p();
    validate_transport_options(options.transport);
    if (route.value.empty() || route.value.front() != '/' || plan.exports.empty()) {

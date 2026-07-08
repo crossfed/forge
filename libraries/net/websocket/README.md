@@ -71,25 +71,25 @@ router.websocket("/events", [](std::shared_ptr<forge::net::websocket::connection
 
 ### Serve An API Session
 
-`forge.net.websocket.api` uses `forge::api::frame` because WebSocket is
+`forge.net.websocket.api` uses `forge::api::core::frame` because WebSocket is
 message-oriented and bidirectional. The binding is continuous: every inbound
 WebSocket message is decoded as an API frame, checked against the configured
-codec and frame-size limit, dispatched through `forge::api::frame_dispatcher`,
+codec and frame-size limit, dispatched through `forge::api::core::frame_dispatcher`,
 then replied with a response/error frame.
 
 ```cpp
-import forge.api.exceptions;
-import forge.api.types;
-import forge.api.descriptor;
-import forge.api.error_projection;
-import forge.api.handle;
-import forge.api.connection;
-import forge.api.registry;
-import forge.api.binding;
-import forge.api.dispatcher;
+import forge.api.core.exceptions;
+import forge.api.core.types;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.core.handle;
+import forge.api.core.connection;
+import forge.api.core.registry;
+import forge.api.core.binding;
+import forge.api.core.dispatcher;
 import forge.net.websocket.api;
 
-auto plan = forge::api::binding()
+auto plan = forge::api::core::binding()
    .serve(app.apis())
    .export_api<cache>({.id = {"cache"}, .major = 1, .min_revision = 8})
    .require_peer_api<client_session>({.id = {"client.session"}, .major = 1})
@@ -112,7 +112,7 @@ router.websocket("/api", [binding](forge::net::websocket::connection::ptr connec
 
 `forge.net.websocket.api` owns API-level WebSocket binding behavior only:
 max-frame-size rejection and handoff to the shared `frame_dispatcher`. It does
-not use `forge.transport.api`, because WebSocket messages are not
+not use `forge.api.transport`, because WebSocket messages are not
 `transport::stream` chunks. HTTP upgrade routes, TLS verification and application
 reconnect policy stay with the transport owner.
 
@@ -156,7 +156,7 @@ stay explicit and should not be hidden behind broad "dev" defaults.
   empty completion handler. FORGE records handler failures and closes the handler
   path instead of silently swallowing correctness bugs.
 - Do not invent WebSocket-specific error payloads for typed APIs; use
-  `forge::api::error_payload` in error frames.
+  `forge::api::core::error_payload` in error frames.
 - Do not treat `.backpressure(...)` as a decorative value. If max inflight is
   exceeded, the API call runtime rejects the frame before application handlers run.
 - Do not put HTTP upgrade or TLS policy in `forge.net.websocket.api`; it is an API

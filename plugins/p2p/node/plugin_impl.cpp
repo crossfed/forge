@@ -11,7 +11,7 @@ module;
 
 module forge.plugins.p2p.node.plugin;
 
-import forge.transport.api.options;
+import forge.api.transport.options;
 import forge.asio.runtime;
 import forge.exceptions;
 import forge.net.p2p.endpoint;
@@ -98,7 +98,7 @@ forge::net::p2p::node::open_options plugin::impl::open_options_for(remote_option
    };
 }
 
-forge::transport::api::options plugin::impl::api_options_for(const remote_options& value) const {
+forge::api::transport::options plugin::impl::api_options_for(const remote_options& value) const {
    auto out = api_options;
    if (value.codec.has_value()) {
       if (value.codec->value.empty()) {

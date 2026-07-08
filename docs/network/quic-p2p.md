@@ -115,7 +115,7 @@ READMEs may link here, but must not define a second block order.
   reusable muxer because it is needed by libp2p TCP, STCP/API stacks and future
   stream-session transports.
 - Current order: `multiaddr -> forge_net_transport -> tcp/stcp/yamux/quic -> p2p
-  rebase -> p2p completion -> forge.transport.api`.
+  rebase -> p2p completion -> forge.api.transport`.
 - Existing P2P achievements remain valid checkpoints: QUIC, Ping, Identify,
   Relay v2, AutoNAT/DCUtR, DHT/Rendezvous component layer and GossipSub v1
   proof are not discarded. They must be preserved while the substrate is
@@ -139,7 +139,7 @@ READMEs may link here, but must not define a second block order.
   `frame`, `limits` and `exceptions`.
 - Add Asio-style `stream_connector`, `stream_listener`, `session_connector`,
   `session_listener` and transport registry primitives.
-- `forge_net_transport` must not import or model `forge_api`, `forge_net_p2p`, concrete
+- `forge_net_transport` must not import or model `forge_api_core`, `forge_net_p2p`, concrete
   QUIC/TCP types, TLS policy, Yamux policy, Peer ID, Relay, DHT, Rendezvous or
   GossipSub.
 - Builders are allowed only as composition helpers over real owner-shaped
@@ -327,7 +327,7 @@ READMEs may link here, but must not define a second block order.
   `forge_net_transport`.
 - E.2d is not the final content data-plane implementation. It does not claim
   kernel zero-copy, file-backed chunks, `sendfile`, content addressing or
-  `contentd` bulk-transfer readiness. Before `forge.transport.api` or content
+  `contentd` bulk-transfer readiness. Before `forge.api.transport` or content
   bulk workloads ship, a separate benchmark/throughput block must audit
   remaining copies, allocation counts and large-chunk behavior.
 - E.3 checkpoint: host-level multi-transport orchestration lives in private
@@ -424,21 +424,21 @@ READMEs may link here, but must not define a second block order.
   fixture command is involved. Runner retry is limited to one fixture-timeout
   retry; protocol, security, identity and negotiation failures are not retried
   or hidden as flakes.
-- G.1 implemented checkpoint: `forge_api` is the transport-neutral contract layer.
+- G.1 implemented checkpoint: `forge_api_core` is the transport-neutral contract layer.
   It owns descriptors, registry/view, frame vocabulary, `frame_dispatcher`,
   codec validation, grouped stream state, max-inflight/deadline checks and
   shared error projection. It must not import `forge_net_transport`, QUIC, P2P, HTTP,
   WebSocket, plugins or product layers.
-- G.1 implemented checkpoint: `forge_transport_api` is the API-over-transport
+- G.1 implemented checkpoint: `forge_api_transport` is the API-over-transport
   binding. It owns API frames over `transport::stream` and
   `transport::session`, a concurrent client read loop with pending call map,
   serialized writes, `serve_stream(...)`, `serve_session(...)`, bounded
   concurrency, close/cancel wakeups and typed transport API exceptions.
 - `forge.net.quic.api` and `forge.net.p2p.api` are policy adapters over
-  `forge.transport.api`. QUIC policy stays in `forge_net_quic`; P2P policy stays in
+  `forge.api.transport`. QUIC policy stays in `forge_net_quic`; P2P policy stays in
   `forge_net_p2p` as protocol id, known-peer checks and discovery scope.
-- `forge.net.websocket.api` shares `forge::api::frame_dispatcher`, but does not import
-  `forge.transport.api`, because WebSocket is message-oriented and not a
+- `forge.net.websocket.api` shares `forge::api::core::frame_dispatcher`, but does not import
+  `forge.api.transport`, because WebSocket is message-oriented and not a
   `transport::stream`.
 - HTTP remains a separate request/response binding.
 - G.2 implemented checkpoint: `forge::plugins::p2p::node` is a narrow host facade
@@ -625,7 +625,7 @@ Accepted:
   rendezvous, Identify, AutoRelay and path scoring are not built twice around
   QUIC-only endpoint state.
 - `forge_net_transport` as a reusable byte-stream/session substrate, not an API/RPC
-  framework. A future `forge.transport.api` layer should sit above it and stop
+  framework. A future `forge.api.transport` layer should sit above it and stop
   QUIC/P2P/TCP API bindings from duplicating API frame serve-loop logic.
 - TCP + Noise/TLS + Yamux direct path is accepted as the TCP compatibility
   baseline; proof is tracked in

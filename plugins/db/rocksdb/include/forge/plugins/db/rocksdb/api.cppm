@@ -1,7 +1,7 @@
 module;
 
 #include <boost/asio/awaitable.hpp>
-#include <forge/api/macros.hpp>
+#include <forge/api/core/macros.hpp>
 
 #include <memory>
 #include <optional>
@@ -11,7 +11,7 @@ export module forge.plugins.db.rocksdb.api;
 
 export import forge.plugins.db.rocksdb.types;
 
-import forge.api.binding;
+import forge.api.core.binding;
 
 export namespace forge::plugins::db::rocksdb {
 
@@ -38,7 +38,7 @@ class transaction {
    virtual boost::asio::awaitable<void> rollback() = 0;
 };
 
-class api : public forge::api::contract<api, forge::api::surface::local> {
+class api : public forge::api::core::contract<api, forge::api::core::surface::local> {
  public:
    virtual ~api() = default;
 

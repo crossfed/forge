@@ -52,9 +52,9 @@ product-specific behavior.
 ## Dependencies
 
 - `forge_app`
-- `forge_api`
+- `forge_api_core`
 - `forge_net_http`
-- `forge_http_api`
+- `forge_api_http`
 - `forge_config`
 - `forge_schema`
 - Boost.Asio
@@ -88,10 +88,10 @@ consumer.
 
 ```cpp
 #include <boost/describe.hpp>
-#include <forge/api/macros.hpp>
-#include <forge/http_api/macros.hpp>
+#include <forge/api/core/macros.hpp>
+#include <forge/api/http/macros.hpp>
 
-import forge.api.binding;
+import forge.api.core.binding;
 import forge.app.plugin;
 import forge.net.http.file;
 import forge.net.http.stream;
@@ -118,7 +118,7 @@ BOOST_DESCRIBE_STRUCT(item_request, (), (id))
 BOOST_DESCRIBE_STRUCT(update_item_request, (), (id, title))
 BOOST_DESCRIBE_STRUCT(item_response, (), (id, title))
 
-class catalog_api : public forge::api::contract<catalog_api> {
+class catalog_api : public forge::api::core::contract<catalog_api> {
  public:
    virtual boost::asio::awaitable<item_response>
    read_item(item_request request) = 0;
@@ -209,4 +209,4 @@ registry.register_plugin(forge::plugins::http::server::descriptor());
 
 - `test_forge_plugins`
 - `test_forge_http_websocket`
-- `test_forge_api`
+- `test_forge_api_core`

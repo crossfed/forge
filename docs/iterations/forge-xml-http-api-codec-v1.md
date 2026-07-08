@@ -2,7 +2,7 @@
 
 This note fixes the implementation order for XML (Extensible Markup Language)
 support and S3-ready HTTP API binding. The first block is the neutral
-`forge_xml` library. The second block extends `forge_http_api` from a JSON-only
+`forge_xml` library. The second block extends `forge_api_http` from a JSON-only
 body/error binding into a multi-codec HTTP API layer. Downstream S3 gateways
 must use `FORGE_API(...)` plus `FORGE_HTTP_API(...)`; bypassing the API layer
 with manual router handlers is not the product path.
@@ -46,7 +46,7 @@ Security and compatibility defaults:
 
 ## Block 2: HTTP API Multi-Codec
 
-After `forge_xml` lands, extend `forge_http_api` rather than writing product
+After `forge_xml` lands, extend `forge_api_http` rather than writing product
 routes directly against `forge_net_http::router`.
 
 Changes:
@@ -93,7 +93,7 @@ storage policy or product error vocabulary into Forge.
 - depth, text, attribute and output size limits;
 - package consumer smoke for `Forge::forge_xml`.
 
-`forge_http_api` tests:
+`forge_api_http` tests:
 
 - JSON default behavior remains compatible;
 - XML request/response body roundtrip through typed API client and server;
@@ -106,15 +106,15 @@ Validation:
 
 ```bash
 cmake --build build/forge-debug -j 1 \
-  --target test_forge_xml test_forge_http_websocket test_forge_api \
+  --target test_forge_xml test_forge_http_websocket test_forge_api_core \
            test_forge_package_xml_component
 
 ctest --test-dir build/forge-debug --output-on-failure \
-  -R "^(test_forge_xml|test_forge_http_websocket|test_forge_api|test_forge_package_xml_component)$" \
+  -R "^(test_forge_xml|test_forge_http_websocket|test_forge_api_core|test_forge_package_xml_component)$" \
   --timeout 300
 
 rg "$FORGE_XML_BACKEND_LEAK_PATTERN" \
-  libraries/xml/include libraries/http_api/include -g "*.cppm"
+  libraries/xml/include libraries/api_http/include -g "*.cppm"
 
 git diff --check
 ```
@@ -124,7 +124,7 @@ git diff --check
 - `pugixml` is the default backend unless size/package benchmarking disproves
   it before implementation.
 - `forge_xml` is neutral infrastructure, not an S3 library.
-- `forge_http_api` is the mandatory HTTP application binding layer for S3-style
+- `forge_api_http` is the mandatory HTTP application binding layer for S3-style
   APIs; manual router bypass is allowed only for low-level substrate tests and
   examples.
 - S3-specific XML DTOs, error codes, SigV4, bucket semantics and object

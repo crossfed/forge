@@ -49,10 +49,10 @@ Boost.Beast remains the runtime donor and backend for parser/serializer/socket
 mechanics, but public HTTP APIs use `forge::net::http::request` and
 `forge::net::http::response` wrappers rather than Beast message aliases.
 
-Typed `FORGE_HTTP_API(...)` route binding lives in the separate `forge_http_api`
-target/component. Its public modules are `forge.http.api.binding`,
-`forge.http.api.mapping` and `forge.http.api.proxy`; its macro header is
-`<forge/http_api/macros.hpp>`.
+Typed `FORGE_HTTP_API(...)` route binding lives in the separate `forge_api_http`
+target/component. Its public modules are `forge.api.http.binding`,
+`forge.api.http.mapping` and `forge.api.http.proxy`; its macro header is
+`<forge/api/http/macros.hpp>`.
 
 ## Examples
 
@@ -257,14 +257,14 @@ authorization, placement and compatibility-specific error shapes belong above
 The binding is a composable artifact; `build()` does not mutate the router.
 
 ```cpp
-#include <forge/api/macros.hpp>
-#include <forge/http_api/macros.hpp>
+#include <forge/api/core/macros.hpp>
+#include <forge/api/http/macros.hpp>
 
-import forge.api.connection;
-import forge.api.registry;
-import forge.api.binding;
-import forge.http.api.binding;
-import forge.http.api.proxy;
+import forge.api.core.connection;
+import forge.api.core.registry;
+import forge.api.core.binding;
+import forge.api.http.binding;
+import forge.api.http.proxy;
 import forge.net.http.router;
 
 struct read_chunk {
@@ -282,9 +282,9 @@ struct chunk {
    std::string bytes;
 };
 
-class cache : public forge::api::contract<
+class cache : public forge::api::core::contract<
    cache,
-   forge::api::surface::local | forge::api::surface::remote> {
+   forge::api::core::surface::local | forge::api::core::surface::remote> {
  public:
    virtual ~cache() = default;
 
@@ -303,12 +303,12 @@ FORGE_HTTP_API(
    FORGE_HTTP_GET(read, "/cache/chunks/:ref?offset={offset}&limit={limit}"),
    FORGE_HTTP_PUT(write, "/cache/chunks/:ref", created))
 
-auto plan = forge::api::binding()
+auto plan = forge::api::core::binding()
    .serve(app.apis())
    .export_api<cache>()
    .build();
 
-auto binding = forge::http::api::binding()
+auto binding = forge::api::http::binding()
    .use(plan)
    .bind<cache>()
    .build();
@@ -324,7 +324,7 @@ not wrap typed calls in a message-frame body.
 For production HTTP endpoints, prefer one described request DTO. FastAPI-style
 parameter categories live as DTO fields, not as a long positional method
 signature. This keeps call sites readable, keeps validation paths named, and
-keeps the HTTP-specific surface out of `forge_api`.
+keeps the HTTP-specific surface out of `forge_api_core`.
 
 ```cpp
 struct write_payload {
@@ -348,7 +348,7 @@ struct update_item_request {
 
 BOOST_DESCRIBE_STRUCT(update_item_request, (), (collection, item, ttl, request_id, body))
 
-class catalog_api : public forge::api::contract<catalog_api> {
+class catalog_api : public forge::api::core::contract<catalog_api> {
  public:
    virtual ~catalog_api() = default;
 
@@ -376,7 +376,7 @@ or `FORGE_HTTP_FORM(field, "wire-name")`.
 The same typed client call builds the HTTP request:
 
 ```cpp
-auto catalog = co_await forge::http::api::remote<catalog_api>(client);
+auto catalog = co_await forge::api::http::remote<catalog_api>(client);
 auto receipt = co_await catalog->update_item({
    .collection = "cache",
    .item = "entry-1",
@@ -426,7 +426,7 @@ Typed API bindings should contribute middleware through the binding artifact so
 route plugins can be composed before the server starts:
 
 ```cpp
-auto binding = forge::http::api::binding()
+auto binding = forge::api::http::binding()
    .use(plan)
    .middleware(forge::net::http::middleware_descriptor{
       .id = "cache.authz",
@@ -493,12 +493,12 @@ boost::asio::awaitable<void> check_ready(forge::net::http::client& client) {
 ```cpp
 #include <boost/asio/awaitable.hpp>
 
-import forge.api.handle;
+import forge.api.core.handle;
 import forge.net.http.client;
-import forge.http.api.proxy;
+import forge.api.http.proxy;
 
 boost::asio::awaitable<void> read_chunk(forge::net::http::client& client) {
-   forge::api::handle<cache> cache_api = co_await forge::http::api::remote<cache>(client);
+   forge::api::core::handle<cache> cache_api = co_await forge::api::http::remote<cache>(client);
    chunk value = co_await cache_api->read({
       .ref = "abc",
       .offset = 0,
@@ -570,12 +570,12 @@ limits/timeouts apply while chunks are read.
   contain credentials or user data.
 - Do not catch application exceptions in every route by hand. Prefer typed
   `forge_exceptions` categories and let API bindings project them to
-  `forge::api::error_payload`.
+  `forge::api::core::error_payload`.
 - Do not force all typed APIs into a single generic RPC endpoint; use native HTTP route/status
   mapping where HTTP is the transport.
 - Do not force file upload/download through `FORGE_API`; use stream routes and the
   file/upload helper layers.
-- Do not hide server bind/TLS/lifecycle in `forge.http.api.binding`; the API builder owns
+- Do not hide server bind/TLS/lifecycle in `forge.api.http.binding`; the API builder owns
   route mapping, API middleware, status projection and error payloads only.
 - Do not add HTTP API builder options unless they change runtime behavior and
   have tests.

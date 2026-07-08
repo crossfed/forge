@@ -14,9 +14,9 @@ module;
 
 module forge.plugins.p2p.resolver.plugin;
 
-import forge.api.binding;
-import forge.api.registry;
-import forge.transport.api.options;
+import forge.api.core.binding;
+import forge.api.core.registry;
+import forge.api.transport.options;
 import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.config.component;
@@ -64,7 +64,7 @@ boost::asio::awaitable<void> plugin::configure(forge::config::component_view vie
    co_return;
 }
 
-boost::asio::awaitable<void> plugin::provide(forge::api::provider& provider) {
+boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provider) {
    provider.install<api>(std::make_shared<resolver_api>(impl_));
    co_return;
 }

@@ -1,7 +1,7 @@
 module;
 
 #include <boost/asio/awaitable.hpp>
-#include <forge/api/macros.hpp>
+#include <forge/api/core/macros.hpp>
 
 #include <concepts>
 #include <functional>
@@ -11,15 +11,15 @@ module;
 
 export module forge.plugins.p2p.pubsub.api;
 
-import forge.api.exceptions;
-import forge.api.types;
-import forge.api.descriptor;
-import forge.api.error_projection;
-import forge.api.handle;
-import forge.api.connection;
-import forge.api.registry;
-import forge.api.binding;
-import forge.api.dispatcher;
+import forge.api.core.exceptions;
+import forge.api.core.types;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.core.handle;
+import forge.api.core.connection;
+import forge.api.core.registry;
+import forge.api.core.binding;
+import forge.api.core.dispatcher;
 import forge.net.p2p.pubsub;
 import forge.plugins.p2p.pubsub.types;
 import forge.raw.raw;
@@ -30,7 +30,7 @@ using handler = std::function<boost::asio::awaitable<forge::net::p2p::pubsub::va
 template <typename T>
 using typed_handler = std::function<boost::asio::awaitable<forge::net::p2p::pubsub::validation_result>(typed_message<T>)>;
 
-class api : public forge::api::contract<api> {
+class api : public forge::api::core::contract<api> {
  public:
    virtual ~api() = default;
 

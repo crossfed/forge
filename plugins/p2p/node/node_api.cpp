@@ -13,9 +13,9 @@ module;
 
 module forge.plugins.p2p.node.plugin;
 
-import forge.api.binding;
-import forge.transport.api.connection;
-import forge.transport.api.options;
+import forge.api.core.binding;
+import forge.api.transport.connection;
+import forge.api.transport.options;
 import forge.asio.runtime;
 import forge.net.p2p.api;
 import forge.net.p2p.endpoint;
@@ -54,12 +54,12 @@ info plugin::node_api::network_info() const {
    };
 }
 
-void plugin::node_api::publish_api(forge::api::binding_plan plan, forge::net::p2p::protocol_id protocol) {
+void plugin::node_api::publish_api(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id protocol) {
    publish_api(std::move(plan), std::move(protocol), impl_->api_options);
 }
 
-void plugin::node_api::publish_api(forge::api::binding_plan plan, forge::net::p2p::protocol_id protocol,
-                                   forge::transport::api::options options) {
+void plugin::node_api::publish_api(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id protocol,
+                                   forge::api::transport::options options) {
    auto binding = forge::net::p2p::api()
                      .use(std::move(plan))
                      .protocol_id(protocol)
@@ -76,13 +76,13 @@ void plugin::node_api::publish_protocol(forge::net::p2p::protocol_id protocol, f
    impl_->add_route(binding.protocol(), binding.handler());
 }
 
-boost::asio::awaitable<forge::transport::api::connection>
+boost::asio::awaitable<forge::api::transport::connection>
 plugin::node_api::open_api_connection(forge::net::p2p::peer_id peer,
                                       forge::net::p2p::protocol_id protocol,
                                       remote_options options) {
    auto stream = co_await impl_->require_node().async_open_protocol_stream(std::move(peer), std::move(protocol),
                                                                             impl_->open_options_for(options));
-   co_return forge::transport::api::connection{std::move(stream).into_transport_stream(), impl_->api_options_for(options)};
+   co_return forge::api::transport::connection{std::move(stream).into_transport_stream(), impl_->api_options_for(options)};
 }
 
 } // namespace forge::plugins::p2p::node

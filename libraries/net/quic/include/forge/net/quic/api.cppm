@@ -8,20 +8,20 @@ module;
 
 export module forge.net.quic.api;
 
-import forge.api.exceptions;
-import forge.api.types;
-import forge.api.descriptor;
-import forge.api.error_projection;
-import forge.api.handle;
-import forge.api.connection;
-import forge.api.registry;
-import forge.api.binding;
-import forge.api.dispatcher;
-import forge.transport.api.exceptions;
-import forge.transport.api.options;
-import forge.transport.api.client;
-import forge.transport.api.connection;
-import forge.transport.api.server;
+import forge.api.core.exceptions;
+import forge.api.core.types;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.core.handle;
+import forge.api.core.connection;
+import forge.api.core.registry;
+import forge.api.core.binding;
+import forge.api.core.dispatcher;
+import forge.api.transport.exceptions;
+import forge.api.transport.options;
+import forge.api.transport.client;
+import forge.api.transport.connection;
+import forge.api.transport.server;
 import forge.net.quic.stream;
 import forge.net.quic.transport;
 import forge.net.transport.stream;
@@ -30,11 +30,11 @@ export namespace forge::net::quic {
 
 class api_binding {
  public:
-   api_binding(forge::api::binding_plan plan, forge::transport::api::options options)
+   api_binding(forge::api::core::binding_plan plan, forge::api::transport::options options)
        : plan_{std::move(plan)}, options_{std::move(options)} {}
 
    boost::asio::awaitable<void> accept(forge::net::transport::stream stream) const {
-      co_await forge::transport::api::serve_stream(std::move(stream), plan_, options_);
+      co_await forge::api::transport::serve_stream(std::move(stream), plan_, options_);
    }
 
    boost::asio::awaitable<void> accept(forge::net::quic::stream stream) const {
@@ -49,7 +49,7 @@ class api_binding {
       co_await accept(std::move(stream));
    }
 
-   [[nodiscard]] const forge::api::codec_id& codec() const noexcept {
+   [[nodiscard]] const forge::api::core::codec_id& codec() const noexcept {
       return options_.codec;
    }
 
@@ -61,23 +61,23 @@ class api_binding {
       return options_.deadline;
    }
 
-   [[nodiscard]] const forge::transport::api::options& options() const noexcept {
+   [[nodiscard]] const forge::api::transport::options& options() const noexcept {
       return options_;
    }
 
  private:
-   forge::api::binding_plan plan_;
-   forge::transport::api::options options_;
+   forge::api::core::binding_plan plan_;
+   forge::api::transport::options options_;
 };
 
 class api_builder {
  public:
-   api_builder& use(forge::api::binding_plan plan) {
+   api_builder& use(forge::api::core::binding_plan plan) {
       plan_ = std::move(plan);
       return *this;
    }
 
-   api_builder& codec(forge::api::codec_id value) {
+   api_builder& codec(forge::api::core::codec_id value) {
       options_.codec = std::move(value);
       return *this;
    }
@@ -102,8 +102,8 @@ class api_builder {
    }
 
  private:
-   forge::api::binding_plan plan_;
-   forge::transport::api::options options_{.deadline = std::chrono::milliseconds{5000}};
+   forge::api::core::binding_plan plan_;
+   forge::api::transport::options options_{.deadline = std::chrono::milliseconds{5000}};
 };
 
 [[nodiscard]] inline api_builder api() {

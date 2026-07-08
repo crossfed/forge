@@ -16,7 +16,7 @@ module;
 
 module forge.plugins.db.objectdb.plugin;
 
-import forge.api.binding;
+import forge.api.core.binding;
 import forge.app.plugin_context;
 import forge.config.component;
 import forge.config.decode;
@@ -270,7 +270,7 @@ boost::asio::awaitable<void> lifecycle::configure(const std::shared_ptr<plugin::
 }
 
 boost::asio::awaitable<void> lifecycle::provide(const std::shared_ptr<plugin::impl>& impl,
-                                                forge::api::provider& provider) {
+                                                forge::api::core::provider& provider) {
    provider.install<api>(std::make_shared<plugin::api_impl>(impl));
    co_return;
 }

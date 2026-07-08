@@ -84,9 +84,9 @@ provide real identity material or an explicitly configured peer identity.
 ## Dependencies
 
 - `forge_app`
-- `forge_api`
+- `forge_api_core`
 - `forge_net_p2p`
-- `forge_transport_api`
+- `forge_api_transport`
 - `forge_config`
 - `forge_schema`
 
@@ -95,7 +95,7 @@ provide real identity material or an explicitly configured peer identity.
 ### Publish A Typed API
 
 ```cpp
-import forge.api.binding;
+import forge.api.core.binding;
 import forge.plugins.p2p.node.api;
 import forge.plugins.p2p.node.plugin;
 
@@ -105,7 +105,7 @@ class catalog_p2p_plugin final : public forge::app::plugin {
       auto p2p = context.apis().get<forge::plugins::p2p::node::api>(
          {.id = {"forge.plugins.p2p.node"}, .major = 1});
 
-      auto plan = forge::api::binding()
+      auto plan = forge::api::core::binding()
          .serve(context.apis())
          .export_api<catalog_api>()
          .build();

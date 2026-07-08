@@ -10,20 +10,20 @@ module;
 
 export module forge.net.p2p.api;
 
-import forge.api.exceptions;
-import forge.api.types;
-import forge.api.descriptor;
-import forge.api.error_projection;
-import forge.api.handle;
-import forge.api.connection;
-import forge.api.registry;
-import forge.api.binding;
-import forge.api.dispatcher;
-import forge.transport.api.exceptions;
-import forge.transport.api.options;
-import forge.transport.api.client;
-import forge.transport.api.connection;
-import forge.transport.api.server;
+import forge.api.core.exceptions;
+import forge.api.core.types;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.core.handle;
+import forge.api.core.connection;
+import forge.api.core.registry;
+import forge.api.core.binding;
+import forge.api.core.dispatcher;
+import forge.api.transport.exceptions;
+import forge.api.transport.options;
+import forge.api.transport.client;
+import forge.api.transport.connection;
+import forge.api.transport.server;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.node;
 import forge.net.p2p.protocol;
@@ -41,7 +41,7 @@ class api_binding {
       std::string value;
    };
 
-   api_binding(node* owner, forge::api::binding_plan plan, protocol_id protocol, forge::transport::api::options options,
+   api_binding(node* owner, forge::api::core::binding_plan plan, protocol_id protocol, forge::api::transport::options options,
                peer_policy peer_policy_value, discovery_scope discovery_scope_value)
        : owner_{owner}, plan_{std::move(plan)}, protocol_{std::move(protocol)}, options_{std::move(options)},
          peer_policy_{std::move(peer_policy_value)}, discovery_scope_{std::move(discovery_scope_value)} {}
@@ -58,13 +58,13 @@ class api_binding {
 
    boost::asio::awaitable<void> accept(node::incoming_protocol_stream stream) const {
       validate_stream(stream);
-      auto trusted = forge::api::metadata{
-         forge::api::metadata_entry{
-            .key = std::string{forge::api::p2p_remote_peer_metadata_key},
+      auto trusted = forge::api::core::metadata{
+         forge::api::core::metadata_entry{
+            .key = std::string{forge::api::core::p2p_remote_peer_metadata_key},
             .value = stream.session.remote_peer.to_string(),
          },
       };
-      co_await forge::transport::api::serve_stream(std::move(stream.stream).into_transport_stream(), plan_, options_,
+      co_await forge::api::transport::serve_stream(std::move(stream.stream).into_transport_stream(), plan_, options_,
                                                  std::move(trusted));
    }
 
@@ -72,7 +72,7 @@ class api_binding {
       co_await accept(std::move(stream));
    }
 
-   [[nodiscard]] const forge::api::codec_id& codec() const noexcept {
+   [[nodiscard]] const forge::api::core::codec_id& codec() const noexcept {
       return options_.codec;
    }
 
@@ -88,7 +88,7 @@ class api_binding {
       return options_.max_inflight;
    }
 
-   [[nodiscard]] const forge::transport::api::options& options() const noexcept {
+   [[nodiscard]] const forge::api::transport::options& options() const noexcept {
       return options_;
    }
 
@@ -107,9 +107,9 @@ class api_binding {
    }
 
    node* owner_ = nullptr;
-   forge::api::binding_plan plan_;
+   forge::api::core::binding_plan plan_;
    protocol_id protocol_;
-   forge::transport::api::options options_;
+   forge::api::transport::options options_;
    peer_policy peer_policy_{};
    discovery_scope discovery_scope_{};
 };
@@ -119,7 +119,7 @@ class api_builder {
    api_builder() = default;
    explicit api_builder(node& owner) : owner_{&owner} {}
 
-   api_builder& use(forge::api::binding_plan plan) {
+   api_builder& use(forge::api::core::binding_plan plan) {
       plan_ = std::move(plan);
       return *this;
    }
@@ -134,7 +134,7 @@ class api_builder {
       return *this;
    }
 
-   api_builder& codec(forge::api::codec_id value) {
+   api_builder& codec(forge::api::core::codec_id value) {
       options_.codec = std::move(value);
       return *this;
    }
@@ -171,9 +171,9 @@ class api_builder {
 
  private:
    node* owner_ = nullptr;
-   forge::api::binding_plan plan_;
+   forge::api::core::binding_plan plan_;
    forge::net::p2p::protocol_id protocol_{.value = "/forge/api/1"};
-   forge::transport::api::options options_{.max_inflight = 64};
+   forge::api::transport::options options_{.max_inflight = 64};
    api_binding::peer_policy peer_policy_{};
    api_binding::discovery_scope discovery_scope_{};
 };

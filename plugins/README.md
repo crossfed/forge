@@ -13,7 +13,7 @@ application plugins need to contribute behavior to it.
 
 - A resource has application lifecycle, config and startup/shutdown ordering.
 - Multiple application plugins should contribute to one shared service.
-- The shared service should expose a narrow local `forge_api` contract instead
+- The shared service should expose a narrow local `forge_api_core` contract instead
   of leaking low-level implementation types.
 - Operators should configure the service through `plugins.<family>.<name>`.
 
@@ -91,7 +91,7 @@ Each official plugin follows the same public module layout:
 
 - `forge.plugins.<family>.<name>.plugin` provides `plugin` and `descriptor()`.
 - `forge.plugins.<family>.<name>.api` provides typed contracts exposed through
-  `forge_api`.
+  `forge_api_core`.
 - `forge.plugins.<family>.<name>.types` provides config and DTO types.
 - `forge.plugins.<family>.<name>.exceptions` provides typed exceptions.
 
@@ -106,7 +106,7 @@ Official plugins are not mini-applications and do not expose raw lifecycle or
 transport mutation APIs. Their public APIs are typed contribution surfaces:
 
 - HTTP APIs are published through `publish<Interface>()`, not raw route verbs.
-- P2P APIs are published through typed `forge::api::binding_plan` values.
+- P2P APIs are published through typed `forge::api::core::binding_plan` values.
 - Config is decoded through `BOOST_DESCRIBE_STRUCT`, `forge_schema` rules and
   `forge_config`.
 - Product policy, auth, billing, storage semantics and downstream vocabulary do

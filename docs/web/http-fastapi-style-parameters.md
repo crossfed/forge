@@ -14,7 +14,7 @@ a generic frame RPC transport:
 - HTTP positional arguments are limited to path/query routing sugar plus at most
   one described JSON body DTO.
 - Boost.Beast request/parser/serializer mechanics stay private to `forge_net_http`.
-- `forge_api` stays HTTP-free.
+- `forge_api_core` stays HTTP-free.
 
 Donor behavior:
 
@@ -244,7 +244,7 @@ values.
   manual router bypass for normal endpoints.
 - FORGE does not add S3, SigV4, bucket, object-policy, billing or tenant-auth
   semantics.
-- `forge_api` must not import `forge_net_http`.
+- `forge_api_core` must not import `forge_net_http`.
 - HTTP special parameter types make an API method HTTP-bound and should appear
   as fields of HTTP request DTOs. Transport-neutral APIs should keep ordinary
   request/response DTOs or use positional arguments without HTTP wrappers.

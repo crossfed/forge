@@ -1,5 +1,5 @@
 #include <boost/test/unit_test.hpp>
-#include <forge/api/macros.hpp>
+#include <forge/api/core/macros.hpp>
 #include <forge/exceptions/macros.hpp>
 
 #include <algorithm>
@@ -26,20 +26,20 @@
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/system/error_code.hpp>
 
-import forge.api.exceptions;
-import forge.api.types;
-import forge.api.descriptor;
-import forge.api.error_projection;
-import forge.api.handle;
-import forge.api.connection;
-import forge.api.registry;
-import forge.api.binding;
-import forge.api.dispatcher;
-import forge.transport.api.exceptions;
-import forge.transport.api.options;
-import forge.transport.api.client;
-import forge.transport.api.connection;
-import forge.transport.api.server;
+import forge.api.core.exceptions;
+import forge.api.core.types;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.core.handle;
+import forge.api.core.connection;
+import forge.api.core.registry;
+import forge.api.core.binding;
+import forge.api.core.dispatcher;
+import forge.api.transport.exceptions;
+import forge.api.transport.options;
+import forge.api.transport.client;
+import forge.api.transport.connection;
+import forge.api.transport.server;
 import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.raw.raw;
@@ -78,14 +78,14 @@ template <typename Stream> Stream& operator>>(Stream& stream, chunk& value) {
 }
 
 class cache_api
-    : public forge::api::contract<cache_api, forge::api::surface::local | forge::api::surface::remote> {
+    : public forge::api::core::contract<cache_api, forge::api::core::surface::local | forge::api::core::surface::remote> {
  public:
    virtual ~cache_api() = default;
    virtual boost::asio::awaitable<chunk> read(read_chunk request) = 0;
 };
 
 class positional_api
-    : public forge::api::contract<positional_api, forge::api::surface::local | forge::api::surface::remote> {
+    : public forge::api::core::contract<positional_api, forge::api::core::surface::local | forge::api::core::surface::remote> {
  public:
    virtual ~positional_api() = default;
    virtual boost::asio::awaitable<chunk> join(std::string left, std::string right) = 0;
@@ -105,8 +105,8 @@ using cache_api = transport_api_typed::cache_api;
 using positional_api = transport_api_typed::positional_api;
 
 template <typename T>
-[[nodiscard]] forge::api::bytes pack_payload(const T& value) {
-   return forge::api::pack_body(value);
+[[nodiscard]] forge::api::core::bytes pack_payload(const T& value) {
+   return forge::api::core::pack_body(value);
 }
 
 class cache_impl final : public cache_api {
@@ -403,21 +403,21 @@ class fake_session final : public forge::net::transport::detail::session_concept
    return forge::net::transport::detail::session_access::make(std::move(model));
 }
 
-[[nodiscard]] bytes pack_api_frame(const forge::api::frame& frame) {
-   auto payload = forge::api::bytes{};
+[[nodiscard]] bytes pack_api_frame(const forge::api::core::frame& frame) {
+   auto payload = forge::api::core::bytes{};
    forge::raw::pack(payload, frame);
    return forge::net::transport::encode_frame(payload);
 }
 
-[[nodiscard]] forge::api::frame unpack_written_frame(const bytes& value) {
+[[nodiscard]] forge::api::core::frame unpack_written_frame(const bytes& value) {
    const auto decoded = forge::net::transport::decode_frame(value);
    BOOST_REQUIRE(decoded.status == forge::net::transport::frame_decode_status::complete);
-   return forge::raw::unpack<forge::api::frame>(decoded.payload);
+   return forge::raw::unpack<forge::api::core::frame>(decoded.payload);
 }
 
-[[nodiscard]] forge::api::frame read_request(std::uint64_t id, std::string ref) {
-   return forge::api::frame{
-       .kind = forge::api::frame_kind::request,
+[[nodiscard]] forge::api::core::frame read_request(std::uint64_t id, std::string ref) {
+   return forge::api::core::frame{
+       .kind = forge::api::core::frame_kind::request,
        .id = {.value = id},
        .api = {.id = {"cache"}, .major = 1, .min_revision = 0},
        .method = "read",
@@ -426,9 +426,9 @@ class fake_session final : public forge::net::transport::detail::session_concept
    };
 }
 
-[[nodiscard]] forge::api::frame read_response(std::uint64_t id, std::string value) {
-   return forge::api::frame{
-       .kind = forge::api::frame_kind::response,
+[[nodiscard]] forge::api::core::frame read_response(std::uint64_t id, std::string value) {
+   return forge::api::core::frame{
+       .kind = forge::api::core::frame_kind::response,
        .id = {.value = id},
        .api = {.id = {"cache"}, .major = 1, .min_revision = 0},
        .method = "read",
@@ -437,15 +437,15 @@ class fake_session final : public forge::net::transport::detail::session_concept
    };
 }
 
-[[nodiscard]] forge::api::frame stream_item(std::uint64_t id, std::string value) {
+[[nodiscard]] forge::api::core::frame stream_item(std::uint64_t id, std::string value) {
    auto item = read_response(id, std::move(value));
-   item.kind = forge::api::frame_kind::stream_item;
+   item.kind = forge::api::core::frame_kind::stream_item;
    return item;
 }
 
-[[nodiscard]] forge::api::frame stream_end(std::uint64_t id) {
+[[nodiscard]] forge::api::core::frame stream_end(std::uint64_t id) {
    auto end = read_response(id, "");
-   end.kind = forge::api::frame_kind::stream_end;
+   end.kind = forge::api::core::frame_kind::stream_end;
    end.payload.clear();
    return end;
 }
@@ -465,7 +465,7 @@ struct call_state {
    }
 
    boost::asio::steady_timer timer;
-   std::optional<forge::api::frame> response;
+   std::optional<forge::api::core::frame> response;
    std::exception_ptr error;
    bool done = false;
 };
@@ -476,7 +476,7 @@ struct stream_call_state {
    }
 
    boost::asio::steady_timer timer;
-   std::optional<std::vector<forge::api::frame>> response;
+   std::optional<std::vector<forge::api::core::frame>> response;
    std::exception_ptr error;
    bool done = false;
 };
@@ -531,8 +531,8 @@ boost::asio::awaitable<void> wait_until(Predicate predicate, std::chrono::millis
    }
 }
 
-std::shared_ptr<call_state> start_call(forge::transport::api::client& client, boost::asio::any_io_executor executor,
-                                       forge::api::frame request) {
+std::shared_ptr<call_state> start_call(forge::api::transport::client& client, boost::asio::any_io_executor executor,
+                                       forge::api::core::frame request) {
    auto state = std::make_shared<call_state>(executor);
    boost::asio::co_spawn(
        executor,
@@ -549,7 +549,7 @@ std::shared_ptr<call_state> start_call(forge::transport::api::client& client, bo
    return state;
 }
 
-boost::asio::awaitable<forge::api::frame> wait_call(std::shared_ptr<call_state> state) {
+boost::asio::awaitable<forge::api::core::frame> wait_call(std::shared_ptr<call_state> state) {
    while (!state->done) {
       auto error = boost::system::error_code{};
       co_await state->timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
@@ -560,10 +560,10 @@ boost::asio::awaitable<forge::api::frame> wait_call(std::shared_ptr<call_state> 
    co_return std::move(*state->response);
 }
 
-std::shared_ptr<stream_call_state> start_stream_call(forge::transport::api::client& client,
+std::shared_ptr<stream_call_state> start_stream_call(forge::api::transport::client& client,
                                                      boost::asio::any_io_executor executor,
-                                                     forge::api::frame request,
-                                                     forge::transport::api::call_options options = {}) {
+                                                     forge::api::core::frame request,
+                                                     forge::api::transport::call_options options = {}) {
    auto state = std::make_shared<stream_call_state>(executor);
    boost::asio::co_spawn(
        executor,
@@ -581,7 +581,7 @@ std::shared_ptr<stream_call_state> start_stream_call(forge::transport::api::clie
    return state;
 }
 
-boost::asio::awaitable<std::vector<forge::api::frame>> wait_stream_call(std::shared_ptr<stream_call_state> state) {
+boost::asio::awaitable<std::vector<forge::api::core::frame>> wait_stream_call(std::shared_ptr<stream_call_state> state) {
    while (!state->done) {
       auto error = boost::system::error_code{};
       co_await state->timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
@@ -599,8 +599,8 @@ BOOST_AUTO_TEST_SUITE(transport_api_tests)
 BOOST_AUTO_TEST_CASE(transport_api_client_roundtrips_frame_level_calls) {
    auto runtime = forge::asio::runtime{};
    auto model = std::make_shared<fake_stream>();
-   model->reads.push_back(pack_api_frame(forge::api::frame{
-       .kind = forge::api::frame_kind::response,
+   model->reads.push_back(pack_api_frame(forge::api::core::frame{
+       .kind = forge::api::core::frame_kind::response,
        .id = {.value = 9},
        .api = {.id = {"cache"}, .major = 1, .min_revision = 0},
        .method = "read",
@@ -608,12 +608,12 @@ BOOST_AUTO_TEST_CASE(transport_api_client_roundtrips_frame_level_calls) {
        .payload = pack_payload(protocol::chunk{.bytes = "abc:ok"}),
    }));
 
-   auto client = forge::transport::api::client{make_stream(model), forge::transport::api::options{}};
+   auto client = forge::api::transport::client{make_stream(model), forge::api::transport::options{}};
    auto request = read_request(9, "abc");
 
    const auto response = forge::asio::blocking::run(runtime, client.async_call(std::move(request)));
 
-   BOOST_CHECK(response.kind == forge::api::frame_kind::response);
+   BOOST_CHECK(response.kind == forge::api::core::frame_kind::response);
    BOOST_TEST(forge::raw::unpack<protocol::chunk>(response.payload).bytes == "abc:ok");
    BOOST_REQUIRE_EQUAL(model->write_count(), 1U);
    BOOST_TEST(unpack_written_frame(model->written(0)).id.value == 9U);
@@ -625,7 +625,7 @@ BOOST_AUTO_TEST_CASE(transport_api_client_routes_concurrent_out_of_order_respons
    auto scenario = []() -> boost::asio::awaitable<void> {
       auto model = std::make_shared<fake_stream>();
       model->wait_for_reads = true;
-      auto client = forge::transport::api::client{make_stream(model), forge::transport::api::options{}};
+      auto client = forge::api::transport::client{make_stream(model), forge::api::transport::options{}};
       const auto executor = co_await boost::asio::this_coro::executor;
 
       auto first = start_call(client, executor, read_request(1, "one"));
@@ -654,8 +654,8 @@ BOOST_AUTO_TEST_CASE(transport_api_client_serializes_concurrent_stream_calls) {
    auto scenario = []() -> boost::asio::awaitable<void> {
       auto model = std::make_shared<fake_stream>();
       model->wait_for_reads = true;
-      auto client = forge::transport::api::client{make_stream(model),
-                                                forge::transport::api::options{.max_inflight = 2}};
+      auto client = forge::api::transport::client{make_stream(model),
+                                                forge::api::transport::options{.max_inflight = 2}};
       const auto executor = co_await boost::asio::this_coro::executor;
 
       auto first = start_stream_call(client, executor, read_request(0, "one"));
@@ -691,8 +691,8 @@ BOOST_AUTO_TEST_CASE(transport_api_client_serializes_concurrent_max_inflight_rej
    auto scenario = []() -> boost::asio::awaitable<void> {
       auto model = std::make_shared<fake_stream>();
       model->wait_for_reads = true;
-      auto client = forge::transport::api::client{make_stream(model),
-                                                forge::transport::api::options{.max_inflight = 1}};
+      auto client = forge::api::transport::client{make_stream(model),
+                                                forge::api::transport::options{.max_inflight = 1}};
       const auto executor = co_await boost::asio::this_coro::executor;
 
       auto first = start_stream_call(client, executor, read_request(0, "one"));
@@ -701,7 +701,7 @@ BOOST_AUTO_TEST_CASE(transport_api_client_serializes_concurrent_max_inflight_rej
       auto rejected = false;
       try {
          (void)co_await client.async_call_stream(read_request(0, "two"));
-      } catch (const forge::api::exceptions::resource_exhausted&) {
+      } catch (const forge::api::core::exceptions::resource_exhausted&) {
          rejected = true;
       }
       BOOST_TEST(rejected);
@@ -724,8 +724,8 @@ BOOST_AUTO_TEST_CASE(transport_api_client_deadline_expires_while_waiting_for_wri
       auto model = std::make_shared<fake_stream>();
       model->wait_for_reads = true;
       model->hold_writes = true;
-      auto client = forge::transport::api::client{make_stream(model),
-                                                forge::transport::api::options{.max_inflight = 2}};
+      auto client = forge::api::transport::client{make_stream(model),
+                                                forge::api::transport::options{.max_inflight = 2}};
       const auto executor = co_await boost::asio::this_coro::executor;
 
       auto first = start_stream_call(client, executor, read_request(0, "one"));
@@ -733,7 +733,7 @@ BOOST_AUTO_TEST_CASE(transport_api_client_deadline_expires_while_waiting_for_wri
 
       auto second = start_stream_call(
           client, executor, read_request(0, "two"),
-          forge::transport::api::call_options{.deadline = std::chrono::milliseconds{10}});
+          forge::api::transport::call_options{.deadline = std::chrono::milliseconds{10}});
 
       auto timer = boost::asio::steady_timer{executor};
       timer.expires_after(std::chrono::milliseconds{50});
@@ -745,7 +745,7 @@ BOOST_AUTO_TEST_CASE(transport_api_client_deadline_expires_while_waiting_for_wri
       auto second_deadline = false;
       try {
          (void)co_await wait_stream_call(std::move(second));
-      } catch (const forge::api::exceptions::deadline_exceeded&) {
+      } catch (const forge::api::core::exceptions::deadline_exceeded&) {
          second_deadline = true;
       }
       BOOST_TEST(second_deadline);
@@ -753,8 +753,8 @@ BOOST_AUTO_TEST_CASE(transport_api_client_deadline_expires_while_waiting_for_wri
       try {
          (void)co_await wait_stream_call(std::move(first));
       } catch (const forge::net::transport::exceptions::closed&) {
-      } catch (const forge::api::exceptions::deadline_exceeded&) {
-      } catch (const forge::api::exceptions::cancelled&) {
+      } catch (const forge::api::core::exceptions::deadline_exceeded&) {
+      } catch (const forge::api::core::exceptions::cancelled&) {
       }
 
       BOOST_TEST(model->write_count() == 0U);
@@ -769,8 +769,8 @@ BOOST_AUTO_TEST_CASE(transport_api_client_keeps_streaming_call_pending_until_str
    auto scenario = []() -> boost::asio::awaitable<void> {
       auto model = std::make_shared<fake_stream>();
       model->wait_for_reads = true;
-      auto client = forge::transport::api::client{make_stream(model),
-                                                forge::transport::api::options{.max_inflight = 1}};
+      auto client = forge::api::transport::client{make_stream(model),
+                                                forge::api::transport::options{.max_inflight = 1}};
       const auto executor = co_await boost::asio::this_coro::executor;
 
       auto pending = start_call(client, executor, read_request(3, "stream"));
@@ -785,14 +785,14 @@ BOOST_AUTO_TEST_CASE(transport_api_client_keeps_streaming_call_pending_until_str
       auto rejected = false;
       try {
          (void)co_await client.async_call(read_request(4, "blocked"));
-      } catch (const forge::api::exceptions::resource_exhausted&) {
+      } catch (const forge::api::core::exceptions::resource_exhausted&) {
          rejected = true;
       }
       BOOST_TEST(rejected);
 
       model->push_read(pack_api_frame(stream_end(3)));
       const auto response = co_await wait_call(std::move(pending));
-      BOOST_TEST(static_cast<int>(response.kind) == static_cast<int>(forge::api::frame_kind::stream_item));
+      BOOST_TEST(static_cast<int>(response.kind) == static_cast<int>(forge::api::core::frame_kind::stream_item));
       BOOST_TEST(forge::raw::unpack<protocol::chunk>(response.payload).bytes == "stream:0");
    };
 
@@ -805,7 +805,7 @@ BOOST_AUTO_TEST_CASE(transport_api_client_returns_streaming_response_sequence) {
    auto scenario = []() -> boost::asio::awaitable<void> {
       auto model = std::make_shared<fake_stream>();
       model->wait_for_reads = true;
-      auto client = forge::transport::api::client{make_stream(model), forge::transport::api::options{}};
+      auto client = forge::api::transport::client{make_stream(model), forge::api::transport::options{}};
       const auto executor = co_await boost::asio::this_coro::executor;
 
       auto pending = start_stream_call(client, executor, read_request(5, "stream"));
@@ -816,9 +816,9 @@ BOOST_AUTO_TEST_CASE(transport_api_client_returns_streaming_response_sequence) {
 
       const auto responses = co_await wait_stream_call(std::move(pending));
       BOOST_REQUIRE_EQUAL(responses.size(), 3U);
-      BOOST_TEST(static_cast<int>(responses[0].kind) == static_cast<int>(forge::api::frame_kind::stream_item));
-      BOOST_TEST(static_cast<int>(responses[1].kind) == static_cast<int>(forge::api::frame_kind::stream_item));
-      BOOST_TEST(static_cast<int>(responses[2].kind) == static_cast<int>(forge::api::frame_kind::stream_end));
+      BOOST_TEST(static_cast<int>(responses[0].kind) == static_cast<int>(forge::api::core::frame_kind::stream_item));
+      BOOST_TEST(static_cast<int>(responses[1].kind) == static_cast<int>(forge::api::core::frame_kind::stream_item));
+      BOOST_TEST(static_cast<int>(responses[2].kind) == static_cast<int>(forge::api::core::frame_kind::stream_end));
       BOOST_TEST(forge::raw::unpack<protocol::chunk>(responses[0].payload).bytes == "stream:0");
       BOOST_TEST(forge::raw::unpack<protocol::chunk>(responses[1].payload).bytes == "stream:1");
    };
@@ -832,8 +832,8 @@ BOOST_AUTO_TEST_CASE(transport_api_client_releases_streaming_slot_after_stream_e
    auto scenario = []() -> boost::asio::awaitable<void> {
       auto model = std::make_shared<fake_stream>();
       model->wait_for_reads = true;
-      auto client = forge::transport::api::client{make_stream(model),
-                                                forge::transport::api::options{.max_inflight = 1}};
+      auto client = forge::api::transport::client{make_stream(model),
+                                                forge::api::transport::options{.max_inflight = 1}};
       const auto executor = co_await boost::asio::this_coro::executor;
 
       auto first = start_stream_call(client, executor, read_request(6, "first"));
@@ -861,8 +861,8 @@ BOOST_AUTO_TEST_CASE(transport_api_client_enforces_max_inflight) {
    auto scenario = []() -> boost::asio::awaitable<void> {
       auto model = std::make_shared<fake_stream>();
       model->wait_for_reads = true;
-      auto client = forge::transport::api::client{make_stream(model),
-                                                forge::transport::api::options{.max_inflight = 1}};
+      auto client = forge::api::transport::client{make_stream(model),
+                                                forge::api::transport::options{.max_inflight = 1}};
       const auto executor = co_await boost::asio::this_coro::executor;
 
       auto first = start_call(client, executor, read_request(1, "one"));
@@ -871,7 +871,7 @@ BOOST_AUTO_TEST_CASE(transport_api_client_enforces_max_inflight) {
       auto rejected = false;
       try {
          (void)co_await client.async_call(read_request(2, "two"));
-      } catch (const forge::api::exceptions::resource_exhausted&) {
+      } catch (const forge::api::core::exceptions::resource_exhausted&) {
          rejected = true;
       }
       BOOST_TEST(rejected);
@@ -888,11 +888,11 @@ BOOST_AUTO_TEST_CASE(transport_api_client_deadline_cancels_pending_call) {
    auto runtime = forge::asio::runtime{};
    auto model = std::make_shared<fake_stream>();
    model->wait_for_reads = true;
-   auto client = forge::transport::api::client{
-       make_stream(model), forge::transport::api::options{.deadline = std::chrono::milliseconds{10}}};
+   auto client = forge::api::transport::client{
+       make_stream(model), forge::api::transport::options{.deadline = std::chrono::milliseconds{10}}};
 
    BOOST_CHECK_THROW((void)forge::asio::blocking::run(runtime, client.async_call(read_request(1, "late"))),
-                     forge::api::exceptions::deadline_exceeded);
+                     forge::api::core::exceptions::deadline_exceeded);
    BOOST_TEST(model->cancel_count == 1U);
 }
 
@@ -902,7 +902,7 @@ BOOST_AUTO_TEST_CASE(transport_api_client_cancel_unblocks_pending_call) {
    auto scenario = []() -> boost::asio::awaitable<void> {
       auto model = std::make_shared<fake_stream>();
       model->wait_for_reads = true;
-      auto client = forge::transport::api::client{make_stream(model), forge::transport::api::options{}};
+      auto client = forge::api::transport::client{make_stream(model), forge::api::transport::options{}};
       const auto executor = co_await boost::asio::this_coro::executor;
 
       auto pending = start_call(client, executor, read_request(1, "cancel"));
@@ -912,7 +912,7 @@ BOOST_AUTO_TEST_CASE(transport_api_client_cancel_unblocks_pending_call) {
       auto cancelled = false;
       try {
          (void)co_await wait_call(std::move(pending));
-      } catch (const forge::api::exceptions::cancelled&) {
+      } catch (const forge::api::core::exceptions::cancelled&) {
          cancelled = true;
       }
       BOOST_TEST(cancelled);
@@ -925,17 +925,17 @@ BOOST_AUTO_TEST_CASE(transport_api_client_cancel_unblocks_pending_call) {
 BOOST_AUTO_TEST_CASE(transport_api_connection_returns_typed_remote_handle) {
    auto runtime = forge::asio::runtime{};
    auto model = std::make_shared<fake_stream>();
-   model->reads.push_back(pack_api_frame(forge::api::frame{
-       .kind = forge::api::frame_kind::response,
+   model->reads.push_back(pack_api_frame(forge::api::core::frame{
+       .kind = forge::api::core::frame_kind::response,
        .id = {.value = 1},
        .api = {.id = {"cache"}, .major = 1, .min_revision = 0},
        .method = "read",
        .codec = {.value = "forge.raw"},
-       .payload = forge::api::pack_body(transport_api_typed::chunk{.bytes = "typed:ok"}),
+       .payload = forge::api::core::pack_body(transport_api_typed::chunk{.bytes = "typed:ok"}),
    }));
 
    auto scenario = [model]() -> boost::asio::awaitable<void> {
-      auto connection = forge::transport::api::connection{make_stream(model), forge::transport::api::options{}};
+      auto connection = forge::api::transport::connection{make_stream(model), forge::api::transport::options{}};
       auto cache = co_await connection.get_remote_api<transport_api_typed::cache_api>();
       const auto response = co_await cache->read(transport_api_typed::read_chunk{.ref = "typed"});
 
@@ -946,23 +946,23 @@ BOOST_AUTO_TEST_CASE(transport_api_connection_returns_typed_remote_handle) {
    BOOST_REQUIRE_EQUAL(model->writes.size(), 1U);
    const auto request = unpack_written_frame(model->writes.front());
    BOOST_TEST(request.method == "read");
-   BOOST_TEST(forge::api::unpack_body<transport_api_typed::read_chunk>(request.payload).ref == "typed");
+   BOOST_TEST(forge::api::core::unpack_body<transport_api_typed::read_chunk>(request.payload).ref == "typed");
 }
 
 BOOST_AUTO_TEST_CASE(transport_api_connection_returns_positional_remote_handle) {
    auto runtime = forge::asio::runtime{};
    auto model = std::make_shared<fake_stream>();
-   model->reads.push_back(pack_api_frame(forge::api::frame{
-       .kind = forge::api::frame_kind::response,
+   model->reads.push_back(pack_api_frame(forge::api::core::frame{
+       .kind = forge::api::core::frame_kind::response,
        .id = {.value = 1},
        .api = {.id = {"positional.transport"}, .major = 1, .min_revision = 0},
        .method = "join",
        .codec = {.value = "forge.raw"},
-       .payload = forge::api::pack_body(transport_api_typed::chunk{.bytes = "left:right:remote"}),
+       .payload = forge::api::core::pack_body(transport_api_typed::chunk{.bytes = "left:right:remote"}),
    }));
 
    auto scenario = [model]() -> boost::asio::awaitable<void> {
-      auto connection = forge::transport::api::connection{make_stream(model), forge::transport::api::options{}};
+      auto connection = forge::api::transport::connection{make_stream(model), forge::api::transport::options{}};
       auto positional = co_await connection.get_remote_api<transport_api_typed::positional_api>();
       const auto response = co_await positional->join("left", "right");
 
@@ -974,7 +974,7 @@ BOOST_AUTO_TEST_CASE(transport_api_connection_returns_positional_remote_handle) 
    const auto request = unpack_written_frame(model->writes.front());
    BOOST_TEST(request.api.id.value == "positional.transport");
    BOOST_TEST(request.method == "join");
-   const auto args = forge::api::unpack_body<std::tuple<std::string, std::string>>(request.payload);
+   const auto args = forge::api::core::unpack_body<std::tuple<std::string, std::string>>(request.payload);
    BOOST_TEST(std::get<0>(args) == "left");
    BOOST_TEST(std::get<1>(args) == "right");
 }
@@ -982,17 +982,17 @@ BOOST_AUTO_TEST_CASE(transport_api_connection_returns_positional_remote_handle) 
 BOOST_AUTO_TEST_CASE(connection_get_remote_api_preserves_requested_revision) {
    auto runtime = forge::asio::runtime{};
    auto model = std::make_shared<fake_stream>();
-   model->reads.push_back(pack_api_frame(forge::api::frame{
-       .kind = forge::api::frame_kind::response,
+   model->reads.push_back(pack_api_frame(forge::api::core::frame{
+       .kind = forge::api::core::frame_kind::response,
        .id = {.value = 1},
        .api = {.id = {"cache"}, .major = 1, .min_revision = 2},
        .method = "read",
        .codec = {.value = "forge.raw"},
-       .payload = forge::api::pack_body(transport_api_typed::chunk{.bytes = "typed:older"}),
+       .payload = forge::api::core::pack_body(transport_api_typed::chunk{.bytes = "typed:older"}),
    }));
 
    auto scenario = [model]() -> boost::asio::awaitable<void> {
-      auto connection = forge::transport::api::connection{make_stream(model), forge::transport::api::options{}};
+      auto connection = forge::api::transport::connection{make_stream(model), forge::api::transport::options{}};
       auto cache = co_await connection.get_remote_api<transport_api_typed::cache_api>(
          transport_api_typed::cache_api::ref(2));
       const auto response = co_await cache->read(transport_api_typed::read_chunk{.ref = "typed"});
@@ -1014,65 +1014,65 @@ BOOST_AUTO_TEST_CASE(transport_api_serve_stream_dispatches_requests) {
    auto model = std::make_shared<fake_stream>();
    model->reads.push_back(pack_api_frame(read_request(11, "server")));
 
-   auto registry = forge::api::registry{};
+   auto registry = forge::api::core::registry{};
    registry.install<cache_api>(cache_api::describe(), std::make_shared<cache_impl>());
-   auto plan = forge::api::binding().serve(registry).build();
+   auto plan = forge::api::core::binding().serve(registry).build();
 
-   forge::asio::blocking::run(runtime, forge::transport::api::serve_stream(make_stream(model), std::move(plan),
-                                                                       forge::transport::api::options{}));
+   forge::asio::blocking::run(runtime, forge::api::transport::serve_stream(make_stream(model), std::move(plan),
+                                                                       forge::api::transport::options{}));
 
    BOOST_REQUIRE_EQUAL(model->writes.size(), 1U);
    const auto response = unpack_written_frame(model->writes.front());
-   BOOST_CHECK(response.kind == forge::api::frame_kind::response);
+   BOOST_CHECK(response.kind == forge::api::core::frame_kind::response);
    BOOST_TEST(forge::raw::unpack<protocol::chunk>(response.payload).bytes == "server:ok");
 }
 
 BOOST_AUTO_TEST_CASE(transport_api_serve_stream_dispatches_positional_requests) {
    auto runtime = forge::asio::runtime{};
    auto model = std::make_shared<fake_stream>();
-   model->reads.push_back(pack_api_frame(forge::api::frame{
-       .kind = forge::api::frame_kind::request,
+   model->reads.push_back(pack_api_frame(forge::api::core::frame{
+       .kind = forge::api::core::frame_kind::request,
        .id = {.value = 15},
        .api = {.id = {"positional.transport"}, .major = 1, .min_revision = 0},
        .method = "join",
        .codec = {.value = "forge.raw"},
-       .payload = forge::api::pack_body(std::make_tuple(std::string{"server"}, std::string{"args"})),
+       .payload = forge::api::core::pack_body(std::make_tuple(std::string{"server"}, std::string{"args"})),
    }));
 
-   auto registry = forge::api::registry{};
+   auto registry = forge::api::core::registry{};
    registry.install<positional_api>(positional_api::describe(), std::make_shared<positional_impl>());
-   auto plan = forge::api::binding().serve(registry).build();
+   auto plan = forge::api::core::binding().serve(registry).build();
 
-   forge::asio::blocking::run(runtime, forge::transport::api::serve_stream(make_stream(model), std::move(plan),
-                                                                       forge::transport::api::options{}));
+   forge::asio::blocking::run(runtime, forge::api::transport::serve_stream(make_stream(model), std::move(plan),
+                                                                       forge::api::transport::options{}));
 
    BOOST_REQUIRE_EQUAL(model->writes.size(), 1U);
    const auto response = unpack_written_frame(model->writes.front());
-   BOOST_CHECK(response.kind == forge::api::frame_kind::response);
+   BOOST_CHECK(response.kind == forge::api::core::frame_kind::response);
    BOOST_TEST(forge::raw::unpack<protocol::chunk>(response.payload).bytes == "server:args:ok");
 }
 
 BOOST_AUTO_TEST_CASE(transport_api_serve_stream_overwrites_reserved_metadata_with_trusted_values) {
    auto runtime = forge::asio::runtime{};
    auto request = read_request(13, "context");
-   request.meta.push_back({.key = std::string{forge::api::p2p_remote_peer_metadata_key}, .value = "spoofed-peer"});
+   request.meta.push_back({.key = std::string{forge::api::core::p2p_remote_peer_metadata_key}, .value = "spoofed-peer"});
 
    auto model = std::make_shared<fake_stream>();
    model->reads.push_back(pack_api_frame(request));
 
-   auto registry = forge::api::registry{};
+   auto registry = forge::api::core::registry{};
    registry.install<cache_api>(cache_api::describe(), std::make_shared<cache_impl>());
    auto observed_peer = std::make_shared<std::string>();
    auto observed_payload = std::make_shared<std::string>();
-   auto plan = forge::api::binding()
+   auto plan = forge::api::core::binding()
                   .serve(registry)
-                  .interceptor(forge::api::interceptor()
+                  .interceptor(forge::api::core::interceptor()
                                   .id("trusted-peer")
-                                  .phase(forge::api::interceptor_phase::authorize)
-                                  .handler([observed_peer, observed_payload](forge::api::call_context& context)
+                                  .phase(forge::api::core::interceptor_phase::authorize)
+                                  .handler([observed_peer, observed_payload](forge::api::core::call_context& context)
                                                -> boost::asio::awaitable<void> {
-                                     *observed_peer = forge::api::metadata_value(
-                                                        context.meta, forge::api::p2p_remote_peer_metadata_key)
+                                     *observed_peer = forge::api::core::metadata_value(
+                                                        context.meta, forge::api::core::p2p_remote_peer_metadata_key)
                                                         .value_or("no-remote-peer");
                                      *observed_payload =
                                         forge::raw::unpack<protocol::read_chunk>(context.payload).ref;
@@ -1082,14 +1082,14 @@ BOOST_AUTO_TEST_CASE(transport_api_serve_stream_overwrites_reserved_metadata_wit
                   .build();
 
    forge::asio::blocking::run(
-      runtime, forge::transport::api::serve_stream(
-                  make_stream(model), std::move(plan), forge::transport::api::options{},
-                  forge::api::metadata{{.key = std::string{forge::api::p2p_remote_peer_metadata_key},
+      runtime, forge::api::transport::serve_stream(
+                  make_stream(model), std::move(plan), forge::api::transport::options{},
+                  forge::api::core::metadata{{.key = std::string{forge::api::core::p2p_remote_peer_metadata_key},
                                       .value = "trusted-peer"}}));
 
    BOOST_REQUIRE_EQUAL(model->writes.size(), 1U);
    const auto response = unpack_written_frame(model->writes.front());
-   BOOST_CHECK(response.kind == forge::api::frame_kind::response);
+   BOOST_CHECK(response.kind == forge::api::core::frame_kind::response);
    BOOST_TEST(forge::raw::unpack<protocol::chunk>(response.payload).bytes == "context:ok");
    BOOST_TEST(*observed_peer == "trusted-peer");
    BOOST_TEST(*observed_payload == "context");
@@ -1100,30 +1100,30 @@ BOOST_AUTO_TEST_CASE(transport_api_serve_stream_without_trusted_peer_has_no_remo
    auto model = std::make_shared<fake_stream>();
    model->reads.push_back(pack_api_frame(read_request(14, "context")));
 
-   auto registry = forge::api::registry{};
+   auto registry = forge::api::core::registry{};
    registry.install<cache_api>(cache_api::describe(), std::make_shared<cache_impl>());
    auto observed_peer = std::make_shared<std::string>();
-   auto plan = forge::api::binding()
+   auto plan = forge::api::core::binding()
                   .serve(registry)
-                  .interceptor(forge::api::interceptor()
+                  .interceptor(forge::api::core::interceptor()
                                   .id("trusted-peer")
-                                  .phase(forge::api::interceptor_phase::authorize)
-                                  .handler([observed_peer](forge::api::call_context& context)
+                                  .phase(forge::api::core::interceptor_phase::authorize)
+                                  .handler([observed_peer](forge::api::core::call_context& context)
                                                -> boost::asio::awaitable<void> {
-                                     *observed_peer = forge::api::metadata_value(
-                                                        context.meta, forge::api::p2p_remote_peer_metadata_key)
+                                     *observed_peer = forge::api::core::metadata_value(
+                                                        context.meta, forge::api::core::p2p_remote_peer_metadata_key)
                                                         .value_or("no-remote-peer");
                                      co_return;
                                   })
                                   .build())
                   .build();
 
-   forge::asio::blocking::run(runtime, forge::transport::api::serve_stream(make_stream(model), std::move(plan),
-                                                                       forge::transport::api::options{}));
+   forge::asio::blocking::run(runtime, forge::api::transport::serve_stream(make_stream(model), std::move(plan),
+                                                                       forge::api::transport::options{}));
 
    BOOST_REQUIRE_EQUAL(model->writes.size(), 1U);
    const auto response = unpack_written_frame(model->writes.front());
-   BOOST_CHECK(response.kind == forge::api::frame_kind::response);
+   BOOST_CHECK(response.kind == forge::api::core::frame_kind::response);
    BOOST_TEST(forge::raw::unpack<protocol::chunk>(response.payload).bytes == "context:ok");
    BOOST_TEST(*observed_peer == "no-remote-peer");
 }
@@ -1135,12 +1135,12 @@ BOOST_AUTO_TEST_CASE(transport_api_serve_session_accepts_streams) {
    auto session_model = std::make_shared<fake_session>();
    session_model->accepted.push_back(make_stream(stream_model));
 
-   auto registry = forge::api::registry{};
+   auto registry = forge::api::core::registry{};
    registry.install<cache_api>(cache_api::describe(), std::make_shared<cache_impl>());
-   auto plan = forge::api::binding().serve(registry).build();
+   auto plan = forge::api::core::binding().serve(registry).build();
 
-   forge::asio::blocking::run(runtime, forge::transport::api::serve_session(make_session(session_model), std::move(plan),
-                                                                        forge::transport::api::session_options{}));
+   forge::asio::blocking::run(runtime, forge::api::transport::serve_session(make_session(session_model), std::move(plan),
+                                                                        forge::api::transport::session_options{}));
 
    BOOST_REQUIRE_EQUAL(stream_model->writes.size(), 1U);
    BOOST_TEST(forge::raw::unpack<protocol::chunk>(unpack_written_frame(stream_model->writes.front()).payload).bytes ==
@@ -1161,13 +1161,13 @@ BOOST_AUTO_TEST_CASE(transport_api_serve_session_serializes_admission_on_multi_w
       session_model->accepted.push_back(make_stream(first));
       session_model->accepted.push_back(make_stream(second));
 
-      auto registry = forge::api::registry{};
+      auto registry = forge::api::core::registry{};
       registry.install<cache_api>(cache_api::describe(), std::make_shared<gated_cache_impl>(state));
-      auto plan = forge::api::binding().serve(registry).build();
+      auto plan = forge::api::core::binding().serve(registry).build();
       auto service =
-          start_service(executor, forge::transport::api::serve_session(
+          start_service(executor, forge::api::transport::serve_session(
                                       make_session(session_model), std::move(plan),
-                                      forge::transport::api::session_options{.max_concurrent_streams = 1}));
+                                      forge::api::transport::session_options{.max_concurrent_streams = 1}));
 
       co_await wait_until(
           [state] {
@@ -1215,14 +1215,14 @@ BOOST_AUTO_TEST_CASE(transport_api_rejects_codec_mismatch_as_typed_error) {
    bad.codec.value = "other";
    model->reads.push_back(pack_api_frame(bad));
 
-   auto registry = forge::api::registry{};
+   auto registry = forge::api::core::registry{};
    registry.install<cache_api>(cache_api::describe(), std::make_shared<cache_impl>());
-   auto plan = forge::api::binding().serve(registry).build();
+   auto plan = forge::api::core::binding().serve(registry).build();
 
-   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, forge::transport::api::serve_stream(make_stream(model),
+   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, forge::api::transport::serve_stream(make_stream(model),
                                                                                         std::move(plan),
-                                                                                        forge::transport::api::options{})),
-                     forge::api::exceptions::codec_failed);
+                                                                                        forge::api::transport::options{})),
+                     forge::api::core::exceptions::codec_failed);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

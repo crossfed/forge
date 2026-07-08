@@ -18,20 +18,20 @@ module;
 
 module forge.plugins.p2p.node.plugin;
 
-import forge.api.exceptions;
-import forge.api.types;
-import forge.api.descriptor;
-import forge.api.error_projection;
-import forge.api.handle;
-import forge.api.connection;
-import forge.api.registry;
-import forge.api.binding;
-import forge.api.dispatcher;
-import forge.transport.api.exceptions;
-import forge.transport.api.options;
-import forge.transport.api.client;
-import forge.transport.api.connection;
-import forge.transport.api.server;
+import forge.api.core.exceptions;
+import forge.api.core.types;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.core.handle;
+import forge.api.core.connection;
+import forge.api.core.registry;
+import forge.api.core.binding;
+import forge.api.core.dispatcher;
+import forge.api.transport.exceptions;
+import forge.api.transport.options;
+import forge.api.transport.client;
+import forge.api.transport.connection;
+import forge.api.transport.server;
 import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.asio.runtime;
@@ -93,7 +93,7 @@ boost::asio::awaitable<void> plugin::configure(forge::config::component_view vie
    co_return;
 }
 
-boost::asio::awaitable<void> plugin::provide(forge::api::provider& provider) {
+boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provider) {
    provider.install<api>(std::make_shared<node_api>(impl_));
    provider.install<diagnostics_source>(std::make_shared<diagnostics_source_adapter>(impl_));
    provider.install<pubsub_source>(std::make_shared<pubsub_source_adapter>(impl_));

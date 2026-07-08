@@ -23,7 +23,7 @@ target_include_directories(forge_net_http PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
 target_link_libraries(
    forge_net_http PUBLIC
       forge_exceptions
-      forge_api
+      forge_api_core
       forge_asio
       forge_json
       forge_schema

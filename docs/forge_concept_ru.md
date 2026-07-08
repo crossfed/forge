@@ -609,7 +609,7 @@ import forge.net.http.connection;
 import forge.net.http.client;
 import forge.net.http.router;
 import forge.net.http.server;
-import forge.http.api.binding;
+import forge.api.http.binding;
 ```
 
 Пример:

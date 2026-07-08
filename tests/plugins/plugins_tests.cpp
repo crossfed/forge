@@ -8,9 +8,9 @@
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/describe.hpp>
 #include <boost/test/unit_test.hpp>
-#include <forge/api/macros.hpp>
+#include <forge/api/core/macros.hpp>
 #include <forge/exceptions/macros.hpp>
-#include <forge/http_api/macros.hpp>
+#include <forge/api/http/macros.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -34,20 +34,20 @@
 #include <variant>
 #include <vector>
 
-import forge.api.exceptions;
-import forge.api.types;
-import forge.api.descriptor;
-import forge.api.error_projection;
-import forge.api.handle;
-import forge.api.connection;
-import forge.api.registry;
-import forge.api.binding;
-import forge.api.dispatcher;
-import forge.transport.api.exceptions;
-import forge.transport.api.options;
-import forge.transport.api.client;
-import forge.transport.api.connection;
-import forge.transport.api.server;
+import forge.api.core.exceptions;
+import forge.api.core.types;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.core.handle;
+import forge.api.core.connection;
+import forge.api.core.registry;
+import forge.api.core.binding;
+import forge.api.core.dispatcher;
+import forge.api.transport.exceptions;
+import forge.api.transport.options;
+import forge.api.transport.client;
+import forge.api.transport.connection;
+import forge.api.transport.server;
 import forge.app.exceptions;
 import forge.app.application;
 import forge.app.events;
@@ -72,17 +72,17 @@ import forge.crypto.p256;
 import forge.crypto.secp256k1;
 import forge.crypto.sha256;
 import forge.env;
-import forge.http.api.binding;
+import forge.api.http.binding;
 import forge.net.http.base_url;
-import forge.http.api.parameters;
+import forge.api.http.parameters;
 import forge.net.http.body;
 import forge.net.http.client;
 import forge.net.http.connection;
 import forge.net.http.exceptions;
 import forge.net.http.file;
-import forge.http.api.mapping;
+import forge.api.http.mapping;
 import forge.net.http.middleware;
-import forge.http.api.proxy;
+import forge.api.http.proxy;
 import forge.net.http.router;
 import forge.net.http.stream;
 import forge.net.http.types;
@@ -142,11 +142,11 @@ import forge.schema.object;
 import forge.schema.enums;
 
 template <typename T>
-concept accepts_raw_http_binding = requires(T& api, forge::http::api::binding_plan binding) {
+concept accepts_raw_http_binding = requires(T& api, forge::api::http::binding_plan binding) {
    api.publish(std::move(binding), forge::plugins::http::server::publish_options{});
 };
 
-namespace raw_http = forge::http;
+namespace raw_http = forge::net::http;
 using raw_http_middleware = raw_http::middleware_descriptor;
 
 template <typename T>
@@ -221,28 +221,28 @@ BOOST_DESCRIBE_STRUCT(http_stream_read_request, (), (ref))
 namespace plugin_test_contract {
 
 class node_test_api
-    : public forge::api::contract<node_test_api, forge::api::surface::local | forge::api::surface::remote> {
+    : public forge::api::core::contract<node_test_api, forge::api::core::surface::local | forge::api::core::surface::remote> {
  public:
    virtual ~node_test_api() = default;
    virtual boost::asio::awaitable<int> ping(int request) = 0;
 };
 
 class peer_context_test_api
-    : public forge::api::contract<peer_context_test_api, forge::api::surface::local | forge::api::surface::remote> {
+    : public forge::api::core::contract<peer_context_test_api, forge::api::core::surface::local | forge::api::core::surface::remote> {
  public:
    virtual ~peer_context_test_api() = default;
    virtual boost::asio::awaitable<std::string> remote_peer(std::string request) = 0;
 };
 
 class receipt_test_api
-    : public forge::api::contract<receipt_test_api, forge::api::surface::local | forge::api::surface::remote> {
+    : public forge::api::core::contract<receipt_test_api, forge::api::core::surface::local | forge::api::core::surface::remote> {
  public:
    virtual ~receipt_test_api() = default;
    virtual boost::asio::awaitable<operation_receipt> apply(operation_request request) = 0;
 };
 
 class http_cache_api
-    : public forge::api::contract<http_cache_api, forge::api::surface::local | forge::api::surface::remote> {
+    : public forge::api::core::contract<http_cache_api, forge::api::core::surface::local | forge::api::core::surface::remote> {
  public:
    virtual ~http_cache_api() = default;
    virtual boost::asio::awaitable<http_chunk> read(http_read_request request) = 0;
@@ -250,21 +250,21 @@ class http_cache_api
 };
 
 class http_stream_api
-    : public forge::api::contract<http_stream_api, forge::api::surface::local | forge::api::surface::remote> {
+    : public forge::api::core::contract<http_stream_api, forge::api::core::surface::local | forge::api::core::surface::remote> {
  public:
    virtual ~http_stream_api() = default;
    virtual boost::asio::awaitable<forge::net::http::streaming_response> download(http_stream_read_request request) = 0;
 };
 
 class http_empty_api
-    : public forge::api::contract<http_empty_api, forge::api::surface::local | forge::api::surface::remote> {
+    : public forge::api::core::contract<http_empty_api, forge::api::core::surface::local | forge::api::core::surface::remote> {
  public:
    virtual ~http_empty_api() = default;
    virtual boost::asio::awaitable<forge::net::http::empty_response> clear(http_stream_read_request request) = 0;
 };
 
 class scripted_resolver_api
-    : public forge::api::contract<scripted_resolver_api, forge::api::surface::local | forge::api::surface::remote> {
+    : public forge::api::core::contract<scripted_resolver_api, forge::api::core::surface::local | forge::api::core::surface::remote> {
  public:
    virtual ~scripted_resolver_api() = default;
    virtual boost::asio::awaitable<forge::plugins::p2p::resolver::response>
@@ -935,7 +935,7 @@ class fake_p2p_node_plugin final : public forge::app::plugin {
       return "test";
    }
 
-   boost::asio::awaitable<void> provide(forge::api::provider& provider) override {
+   boost::asio::awaitable<void> provide(forge::api::core::provider& provider) override {
       provider.install<forge::plugins::p2p::node::pubsub_source>(std::make_shared<fake_pubsub_source>(state_));
       co_return;
    }
@@ -986,7 +986,7 @@ class scripted_resolver_api_impl final : public scripted_resolver_api {
       .max_frame_size = 16 * 1024 * 1024,
       .methods = {forge::plugins::p2p::resolver::method{
          .name = "ping",
-         .kind = forge::api::method_kind::unary,
+         .kind = forge::api::core::method_kind::unary,
       }},
    };
 }
@@ -1007,21 +1007,21 @@ class route_publisher_plugin final : public forge::app::plugin {
       auto p2p = context.apis().get<forge::plugins::p2p::node::api>(
          {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
 
-      auto plan = forge::api::binding()
+      auto plan = forge::api::core::binding()
                      .serve(context.apis())
                      .export_api<node_test_api>({.id = {"node.test"}, .major = 1, .min_revision = 0})
                      .export_api<peer_context_test_api>({.id = {"peer-context.test"}, .major = 1, .min_revision = 0})
-                     .interceptor(forge::api::interceptor()
+                     .interceptor(forge::api::core::interceptor()
                                      .id("peer-context")
-                                     .phase(forge::api::interceptor_phase::authorize)
-                                     .handler([](forge::api::call_context& value) -> boost::asio::awaitable<void> {
+                                     .phase(forge::api::core::interceptor_phase::authorize)
+                                     .handler([](forge::api::core::call_context& value) -> boost::asio::awaitable<void> {
                                         if (value.api.id.value != "peer-context.test" ||
                                             value.method != "remote_peer") {
                                            co_return;
                                         }
                                         const auto peer =
-                                           forge::api::metadata_value(value.meta,
-                                                                    forge::api::p2p_remote_peer_metadata_key)
+                                           forge::api::core::metadata_value(value.meta,
+                                                                    forge::api::core::p2p_remote_peer_metadata_key)
                                               .value_or("missing");
                                         const auto request = forge::raw::unpack<std::string>(value.payload);
                                         const auto response = peer + ":" + request;
@@ -1099,7 +1099,7 @@ class resolver_route_publisher_plugin final : public forge::app::plugin {
       auto resolver = context.apis().get<forge::plugins::p2p::resolver::api>(
          {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
 
-      auto plan = forge::api::binding()
+      auto plan = forge::api::core::binding()
                      .serve(context.apis())
                      .export_api<node_test_api>({.id = {"node.test"}, .major = 1, .min_revision = 0})
                      .build();
@@ -1129,7 +1129,7 @@ class duplicate_resolver_route_plugin final : public forge::app::plugin {
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
       auto resolver = context.apis().get<forge::plugins::p2p::resolver::api>(
          {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
-      auto plan = forge::api::binding()
+      auto plan = forge::api::core::binding()
                      .serve(context.apis())
                      .export_api<node_test_api>({.id = {"node.test"}, .major = 1, .min_revision = 0})
                      .build();
@@ -1160,13 +1160,13 @@ class resolver_custom_transport_route_plugin final : public forge::app::plugin {
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
       auto resolver = context.apis().get<forge::plugins::p2p::resolver::api>(
          {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
-      auto plan = forge::api::binding()
+      auto plan = forge::api::core::binding()
                      .serve(context.apis())
                      .export_api<node_test_api>({.id = {"node.test"}, .major = 1, .min_revision = 0})
                      .build();
       resolver->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/forge/api/node-test-custom/1"},
                             forge::plugins::p2p::resolver::publish_options{
-                               .transport = forge::transport::api::options{
+                               .transport = forge::api::transport::options{
                                   .codec = {.value = "forge.test.raw"},
                                   .max_inflight = 7,
                                   .max_frame_size = 512 * 1024,
@@ -1198,7 +1198,7 @@ class receipt_route_publisher_plugin final : public forge::app::plugin {
       auto resolver = context.apis().get<forge::plugins::p2p::resolver::api>(
          {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
 
-      auto plan = forge::api::binding()
+      auto plan = forge::api::core::binding()
                      .serve(context.apis())
                      .export_api<receipt_test_api>({.id = {"receipt.test"}, .major = 1, .min_revision = 0})
                      .build();
@@ -1258,7 +1258,7 @@ class scripted_resolver_plugin final : public forge::app::plugin {
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
       auto p2p = context.apis().get<forge::plugins::p2p::node::api>(
          {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
-      auto plan = forge::api::binding()
+      auto plan = forge::api::core::binding()
                      .serve(context.apis())
                      .export_api<scripted_resolver_api>(
                         {.id = {"forge.plugins.p2p.resolver.protocol"}, .major = 1, .min_revision = 0})
@@ -1728,8 +1728,8 @@ static_assert(!has_metrics<forge::plugins::p2p::node::api>);
 static_assert(!has_peers<forge::plugins::p2p::node::api>);
 static_assert(!has_pubsub_publish<forge::plugins::p2p::node::api>);
 static_assert(!has_pubsub_subscribe<forge::plugins::p2p::node::api>);
-static_assert(forge::api::local_interface<crypto_signer::api>);
-static_assert(!forge::api::remote_interface<crypto_signer::api>);
+static_assert(forge::api::core::local_interface<crypto_signer::api>);
+static_assert(!forge::api::core::remote_interface<crypto_signer::api>);
 
 } // namespace
 
@@ -1802,7 +1802,7 @@ BOOST_AUTO_TEST_CASE(http_server_plugin_publishes_typed_api_under_configured_bas
 
    auto client = forge::net::http::client{app.runtime(), forge::net::http::parse_base_url("http://127.0.0.1:" +
                                                                             std::to_string(port) + "/api")};
-   auto cache = forge::asio::blocking::run(app.runtime(), forge::http::api::remote<http_cache_api>(client));
+   auto cache = forge::asio::blocking::run(app.runtime(), forge::api::http::remote<http_cache_api>(client));
    const auto chunk = forge::asio::blocking::run(
       app.runtime(), cache->read(http_read_request{.ref = "alpha", .offset = 7, .limit = 9}));
    BOOST_TEST(chunk.bytes == "alpha:7:9");
@@ -1824,7 +1824,7 @@ BOOST_AUTO_TEST_CASE(http_server_plugin_uses_publish_base_path_override) {
 
    auto client = forge::net::http::client{app.runtime(), forge::net::http::parse_base_url("http://127.0.0.1:" +
                                                                             std::to_string(port) + "/custom")};
-   auto cache = forge::asio::blocking::run(app.runtime(), forge::http::api::remote<http_cache_api>(client));
+   auto cache = forge::asio::blocking::run(app.runtime(), forge::api::http::remote<http_cache_api>(client));
    const auto chunk = forge::asio::blocking::run(
       app.runtime(), cache->write(http_write_request{.ref = "beta", .bytes = "payload"}));
    BOOST_TEST(chunk.bytes == "beta:payload");
@@ -2217,8 +2217,8 @@ BOOST_AUTO_TEST_CASE(crypto_signer_signs_k1_digest_with_antelope_output) {
    auto runtime = forge::asio::runtime{};
    forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.crypto.signer"}));
 
-   auto apis = forge::api::registry{};
-   auto provider = forge::api::installer{apis};
+   auto apis = forge::api::core::registry{};
+   auto provider = forge::api::core::installer{apis};
    forge::asio::blocking::run(runtime, plugin.provide(provider));
 
    auto api = apis.get<crypto_signer::api>(crypto_signer::api::ref());
@@ -2258,8 +2258,8 @@ BOOST_AUTO_TEST_CASE(crypto_signer_sugar_uses_configured_default_output_profile)
    auto runtime = forge::asio::runtime{};
    forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.crypto.signer"}));
 
-   auto apis = forge::api::registry{};
-   auto provider = forge::api::installer{apis};
+   auto apis = forge::api::core::registry{};
+   auto provider = forge::api::core::installer{apis};
    forge::asio::blocking::run(runtime, plugin.provide(provider));
 
    auto api = apis.get<crypto_signer::api>(crypto_signer::api::ref());
@@ -2301,8 +2301,8 @@ BOOST_AUTO_TEST_CASE(crypto_signer_supports_p256_and_ed25519_without_k1_assumpti
    auto runtime = forge::asio::runtime{};
    forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.crypto.signer"}));
 
-   auto apis = forge::api::registry{};
-   auto provider = forge::api::installer{apis};
+   auto apis = forge::api::core::registry{};
+   auto provider = forge::api::core::installer{apis};
    forge::asio::blocking::run(runtime, plugin.provide(provider));
    auto api = apis.get<crypto_signer::api>(crypto_signer::api::ref());
 
@@ -2343,8 +2343,8 @@ BOOST_AUTO_TEST_CASE(crypto_signer_enforces_allowed_purpose_and_algorithm) {
    auto runtime = forge::asio::runtime{};
    forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.crypto.signer"}));
 
-   auto apis = forge::api::registry{};
-   auto provider = forge::api::installer{apis};
+   auto apis = forge::api::core::registry{};
+   auto provider = forge::api::core::installer{apis};
    forge::asio::blocking::run(runtime, plugin.provide(provider));
    auto api = apis.get<crypto_signer::api>(crypto_signer::api::ref());
    const auto digest = forge::crypto::sha256::hash("receipt-payload");
@@ -2465,8 +2465,8 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_rejects_duplicate_protocol_contributions_be
 BOOST_AUTO_TEST_CASE(p2p_node_api_rejects_facade_calls_before_initialize) {
    auto runtime = forge::asio::runtime{};
    auto plugin = forge::plugins::p2p::node::plugin{};
-   auto apis = forge::api::registry{};
-   auto provider = forge::api::installer{apis};
+   auto apis = forge::api::core::registry{};
+   auto provider = forge::api::core::installer{apis};
    forge::asio::blocking::run(runtime, plugin.provide(provider));
 
    auto p2p = apis.get<forge::plugins::p2p::node::api>(
@@ -2654,8 +2654,8 @@ BOOST_AUTO_TEST_CASE(p2p_diagnostics_plugin_config_is_described_from_public_sche
 BOOST_AUTO_TEST_CASE(p2p_diagnostics_api_rejects_facade_calls_before_initialize) {
    auto runtime = forge::asio::runtime{};
    auto plugin = forge::plugins::p2p::diagnostics::plugin{};
-   auto apis = forge::api::registry{};
-   auto provider = forge::api::installer{apis};
+   auto apis = forge::api::core::registry{};
+   auto provider = forge::api::core::installer{apis};
    forge::asio::blocking::run(runtime, plugin.provide(provider));
 
    auto diagnostics = apis.get<forge::plugins::p2p::diagnostics::api>(
@@ -2742,8 +2742,8 @@ BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_config_is_described_from_public_schema) {
 BOOST_AUTO_TEST_CASE(p2p_pubsub_api_rejects_facade_calls_before_initialize) {
    auto runtime = forge::asio::runtime{};
    auto plugin = forge::plugins::p2p::pubsub::plugin{};
-   auto apis = forge::api::registry{};
-   auto provider = forge::api::installer{apis};
+   auto apis = forge::api::core::registry{};
+   auto provider = forge::api::core::installer{apis};
    forge::asio::blocking::run(runtime, plugin.provide(provider));
 
    auto pubsub = apis.get<forge::plugins::p2p::pubsub::api>(
@@ -3192,14 +3192,14 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_plugin_config_is_described_from_public_sch
 BOOST_AUTO_TEST_CASE(p2p_api_resolver_rejects_facade_calls_before_initialize) {
    auto runtime = forge::asio::runtime{};
    auto plugin = forge::plugins::p2p::resolver::plugin{};
-   auto apis = forge::api::registry{};
-   auto provider = forge::api::installer{apis};
+   auto apis = forge::api::core::registry{};
+   auto provider = forge::api::core::installer{apis};
    forge::asio::blocking::run(runtime, plugin.provide(provider));
 
    auto resolver = apis.get<forge::plugins::p2p::resolver::api>(
       {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
 
-   auto plan = forge::api::binding().serve(apis).build();
+   auto plan = forge::api::core::binding().serve(apis).build();
    BOOST_CHECK_THROW(resolver->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/forge/api/node-test/1"}),
                      forge::plugins::p2p::resolver::exceptions::plugin_not_initialized);
    BOOST_CHECK_THROW((void)resolver->local_apis(),
@@ -3241,7 +3241,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_publishes_metadata_and_delegates_route_mou
    BOOST_REQUIRE_EQUAL(entries.front().methods.size(), 1U);
    BOOST_TEST(entries.front().methods.front().name == "ping");
    BOOST_TEST(static_cast<int>(entries.front().methods.front().kind) ==
-              static_cast<int>(forge::api::method_kind::unary));
+              static_cast<int>(forge::api::core::method_kind::unary));
 
    forge::asio::blocking::run(app.runtime(), app.shutdown());
 }

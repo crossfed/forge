@@ -11,9 +11,9 @@ module;
 
 module forge.plugins.http.server.plugin;
 
-import forge.api.registry;
+import forge.api.core.registry;
 import forge.asio.runtime;
-import forge.http.api.binding;
+import forge.api.http.binding;
 import forge.net.http.middleware;
 import forge.net.http.router;
 import forge.net.http.server;

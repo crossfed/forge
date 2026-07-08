@@ -19,8 +19,8 @@
 #include <utility>
 #include <vector>
 
-import forge.api.binding;
-import forge.api.registry;
+import forge.api.core.binding;
+import forge.api.core.registry;
 import forge.app.application_builder;
 import forge.app.application_shell;
 import forge.app.events;
@@ -315,14 +315,14 @@ BOOST_AUTO_TEST_CASE(objectdb_plugin_descriptor_api_and_config_are_nested) {
 BOOST_AUTO_TEST_CASE(objectdb_plugin_rejects_invalid_programmatic_setup) {
    auto runtime = forge::asio::runtime{};
    auto scheduler = forge::asio::task_scheduler{runtime};
-   auto apis = forge::api::registry{};
+   auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
    auto plugin = objectdb_plugin::plugin{};
 
    auto document = forge::config::document{};
    forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.objectdb"}));
-   auto provider = forge::api::installer{apis};
+   auto provider = forge::api::core::installer{apis};
    forge::asio::blocking::run(runtime, plugin.provide(provider));
    auto context = forge::app::plugin_context{scheduler, apis, signals, events};
    forge::asio::blocking::run(runtime, plugin.initialize(context));
@@ -433,7 +433,7 @@ BOOST_AUTO_TEST_CASE(objectdb_plugin_custom_driver_store_handle_reads_writes_flu
 BOOST_AUTO_TEST_CASE(objectdb_plugin_store_handle_remains_valid_during_dependent_shutdown) {
    auto runtime = forge::asio::runtime{};
    auto scheduler = forge::asio::task_scheduler{runtime};
-   auto apis = forge::api::registry{};
+   auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
    auto plugin = objectdb_plugin::plugin{};
@@ -441,7 +441,7 @@ BOOST_AUTO_TEST_CASE(objectdb_plugin_store_handle_remains_valid_during_dependent
 
    auto document = forge::config::document{};
    forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.objectdb"}));
-   auto provider = forge::api::installer{apis};
+   auto provider = forge::api::core::installer{apis};
    forge::asio::blocking::run(runtime, plugin.provide(provider));
    auto context = forge::app::plugin_context{scheduler, apis, signals, events};
    forge::asio::blocking::run(runtime, plugin.initialize(context));
@@ -471,7 +471,7 @@ BOOST_AUTO_TEST_CASE(objectdb_plugin_store_handle_remains_valid_during_dependent
 BOOST_AUTO_TEST_CASE(objectdb_plugin_store_handle_concurrent_close_is_snapshot_safe) {
    auto runtime = forge::asio::runtime{};
    auto scheduler = forge::asio::task_scheduler{runtime};
-   auto apis = forge::api::registry{};
+   auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
    auto plugin = objectdb_plugin::plugin{};
@@ -479,7 +479,7 @@ BOOST_AUTO_TEST_CASE(objectdb_plugin_store_handle_concurrent_close_is_snapshot_s
 
    auto document = forge::config::document{};
    forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.objectdb"}));
-   auto provider = forge::api::installer{apis};
+   auto provider = forge::api::core::installer{apis};
    forge::asio::blocking::run(runtime, plugin.provide(provider));
    auto context = forge::app::plugin_context{scheduler, apis, signals, events};
    forge::asio::blocking::run(runtime, plugin.initialize(context));

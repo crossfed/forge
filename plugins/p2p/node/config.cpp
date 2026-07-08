@@ -14,7 +14,7 @@ module;
 
 module forge.plugins.p2p.node.plugin;
 
-import forge.transport.api.options;
+import forge.api.transport.options;
 import forge.asio.runtime;
 import forge.config.component;
 import forge.config.decode;
@@ -110,8 +110,8 @@ std::vector<forge::net::p2p::endpoint> parse_endpoint_list(const std::vector<std
 
 void apply_config(plugin::impl& state, const config& config) {
    state.policy = parse_policy(config);
-   state.api_options = forge::transport::api::options{
-      .codec = forge::api::codec_id{.value = config.api_codec},
+   state.api_options = forge::api::transport::options{
+      .codec = forge::api::core::codec_id{.value = config.api_codec},
       .max_inflight = static_cast<std::size_t>(config.max_inflight_per_peer),
       .deadline = to_ms(config.api_deadline_ms),
       .max_frame_size = static_cast<std::uint32_t>(config.api_max_frame_size),

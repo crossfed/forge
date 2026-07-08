@@ -137,22 +137,22 @@ boost::asio::awaitable<void> write_payload(forge::net::quic::connection& connect
 ### Bind API Frames To QUIC Streams
 
 `forge.net.quic.api` is the API-over-QUIC adapter. It keeps QUIC transport policy in
-`forge_net_quic`, contract/error semantics in `forge_api`, and delegates frame-loop
-mechanics to `forge.transport.api`.
+`forge_net_quic`, contract/error semantics in `forge_api_core`, and delegates frame-loop
+mechanics to `forge.api.transport`.
 
 ```cpp
-import forge.api.exceptions;
-import forge.api.types;
-import forge.api.descriptor;
-import forge.api.error_projection;
-import forge.api.handle;
-import forge.api.connection;
-import forge.api.registry;
-import forge.api.binding;
-import forge.api.dispatcher;
+import forge.api.core.exceptions;
+import forge.api.core.types;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.core.handle;
+import forge.api.core.connection;
+import forge.api.core.registry;
+import forge.api.core.binding;
+import forge.api.core.dispatcher;
 import forge.net.quic.api;
 
-auto plan = forge::api::binding()
+auto plan = forge::api::core::binding()
    .serve(app.apis())
    .export_api<cache>({.id = {"cache"}, .major = 1, .min_revision = 8})
    .build();
@@ -172,7 +172,7 @@ boost::asio::awaitable<void> serve_api_stream(forge::net::quic::connection& conn
 
 `forge.net.quic.api` does not own certificates, ALPN, listener/connector setup or
 packet-level limits. Those remain in `forge_net_quic` transport options. It also does
-not own the generic API frame state machine; that lives in `forge.transport.api`.
+not own the generic API frame state machine; that lives in `forge.api.transport`.
 
 ### Decode Frames Without A Connection
 
@@ -219,7 +219,7 @@ become application defaults.
 - Do not raise frame/queue limits without backpressure tests. Oversized frames
   are a memory pressure and denial-of-service vector.
 - Do not define application API envelopes in QUIC handlers. Use `forge.net.quic.api` and
-  `forge::api::frame` for typed API calls over QUIC streams.
+  `forge::api::core::frame` for typed API calls over QUIC streams.
 - Do not swallow handler exceptions in detached stream tasks; convert expected
   failures into typed `forge_exceptions` values or API error frames.
 - Do not treat `.deadline(...)` or `.max_concurrent_calls(...)` as documentation

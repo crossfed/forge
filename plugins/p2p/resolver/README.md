@@ -38,7 +38,7 @@ contracts it exposes before opening a typed API connection.
 
 - Publishes local API descriptors under a P2P protocol id.
 - Queries peer API descriptors with bounded response validation.
-- Resolves a requested `forge::api::api_ref` to a concrete peer descriptor.
+- Resolves a requested `forge::api::core::api_ref` to a concrete peer descriptor.
 - Opens typed remote API handles with compatibility projection.
 
 It does not own the P2P node lifecycle; it composes through
@@ -63,7 +63,7 @@ plugins:
 ## Dependencies
 
 - `forge_app`
-- `forge_api`
+- `forge_api_core`
 - `forge_net_p2p`
 - `forge_plugins_p2p_node`
 - `forge_config`
@@ -83,7 +83,7 @@ class catalog_resolver_plugin final : public forge::app::plugin {
       auto resolver = context.apis().get<forge::plugins::p2p::resolver::api>(
          {.id = {"forge.plugins.p2p.resolver"}, .major = 1});
 
-      auto plan = forge::api::binding()
+      auto plan = forge::api::core::binding()
          .serve(context.apis())
          .export_api<catalog_api>()
          .build();

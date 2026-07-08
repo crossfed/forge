@@ -11,10 +11,10 @@ struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
 
    mutable std::mutex mutex;
    config settings;
-   forge::transport::api::options resolver_transport{};
+   forge::api::transport::options resolver_transport{};
    forge::net::p2p::protocol_id protocol = default_protocol();
    forge::plugins::p2p::node::api* p2p = nullptr;
-   forge::api::registry protocol_registry;
+   forge::api::core::registry protocol_registry;
    std::vector<entry> local;
    std::map<std::string, cache_record> cache;
    bool initialized = false;
@@ -28,7 +28,7 @@ struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
                                                               resolve_options options) const;
    void store_peer(const forge::net::p2p::peer_id& peer, std::vector<entry> entries);
    [[nodiscard]] std::vector<entry> local_snapshot() const;
-   void add_local(forge::api::binding_plan plan, forge::net::p2p::protocol_id route, publish_options options);
+   void add_local(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id route, publish_options options);
    [[nodiscard]] response query_local(const query& request) const;
    void install_protocol();
    boost::asio::awaitable<std::vector<entry>> query_remote_apis(forge::net::p2p::peer_id peer,

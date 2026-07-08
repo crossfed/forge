@@ -17,7 +17,7 @@ multiaddr parsing. Those layers sit above raw TCP.
 
 - Do not use raw TCP when the caller requires TLS, ALPN or certificate
   verification. Use `forge_net_stcp`.
-- Do not implement API frames directly on top of TCP. Use `forge_transport_api`
+- Do not implement API frames directly on top of TCP. Use `forge_api_transport`
   after a stream is established.
 - Do not put DNS policy, peer identity, relay logic or product admission policy
   in this library.

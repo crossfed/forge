@@ -15,7 +15,7 @@ module;
 
 module forge.plugins.p2p.node.plugin;
 
-import forge.transport.api.options;
+import forge.api.transport.options;
 import forge.asio.runtime;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.identity;

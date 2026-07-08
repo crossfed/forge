@@ -16,7 +16,7 @@ error shapes.
 - WebSocket upgrade routing;
 - `FORGE_HTTP_API(...)` presentation metadata on top of `FORGE_API(...)`;
 - JSON request/response DTOs for ordinary typed HTTP methods, with planned XML
-  request/response/error codecs in `forge_http_api` after `forge_xml` lands;
+  request/response/error codecs in `forge_api_http` after `forge_xml` lands;
 - path, query and header binding into described request DTOs;
 - HTTP-only typed fields such as `header<T>`, `form_field<T>`,
   `body_stream`, `body_bytes` and `upload_file`;
@@ -35,7 +35,7 @@ surface is stable. This document describes the library substrate only.
 The intended application shape is one C++ API class per HTTP API surface:
 
 ```cpp
-class object_api : public forge::api::contract<object_api> {
+class object_api : public forge::api::core::contract<object_api> {
  public:
    virtual boost::asio::awaitable<put_response>
    put_object(put_request request) = 0;
@@ -63,7 +63,7 @@ the HTTP presentation: method, path, status and HTTP field mapping.
 
 Ordinary DTO request/response bodies use JSON by default. S3-compatible APIs
 need XML bodies, so the planned path is `forge_xml` first, then multi-codec
-`forge_http_api` binding. Downstream object gateways should still declare typed
+`forge_api_http` binding. Downstream object gateways should still declare typed
 API contracts and HTTP presentation metadata; manual `router` bypass is not the
 normal endpoint pattern.
 
@@ -102,7 +102,7 @@ streaming request bodies and file responses. Remaining HTTP-library work should
 stay generic:
 
 - XML codec support through a new `forge_xml` leaf library;
-- multi-codec request, response and error profiles in `forge_http_api`;
+- multi-codec request, response and error profiles in `forge_api_http`;
 - complete route option metadata instead of macro placeholders for custom
   header/form names;
 - typed HTTP client streaming request writer and response reader;

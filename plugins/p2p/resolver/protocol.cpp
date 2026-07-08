@@ -1,6 +1,6 @@
 module;
 
-#include <forge/api/macros.hpp>
+#include <forge/api/core/macros.hpp>
 
 #include <boost/asio/awaitable.hpp>
 
@@ -15,10 +15,10 @@ module;
 
 module forge.plugins.p2p.resolver.plugin;
 
-import forge.api.binding;
-import forge.api.registry;
-import forge.transport.api.connection;
-import forge.transport.api.options;
+import forge.api.core.binding;
+import forge.api.core.registry;
+import forge.api.transport.connection;
+import forge.api.transport.options;
 import forge.net.p2p.identity;
 import forge.net.p2p.protocol;
 import forge.plugins.p2p.resolver.api;
@@ -32,7 +32,7 @@ import forge.plugins.p2p.node.types;
 namespace forge::plugins::p2p::resolver::detail {
 
 class resolver_protocol
-    : public forge::api::contract<resolver_protocol, forge::api::surface::local | forge::api::surface::remote> {
+    : public forge::api::core::contract<resolver_protocol, forge::api::core::surface::local | forge::api::core::surface::remote> {
  public:
    virtual ~resolver_protocol() = default;
    virtual boost::asio::awaitable<response> query(::forge::plugins::p2p::resolver::query request) = 0;
@@ -61,7 +61,7 @@ void plugin::impl::install_protocol() {
    protocol_registry.clear();
    protocol_registry.install<detail::resolver_protocol>(
       std::make_shared<plugin::resolver_protocol_service>(shared_from_this()));
-   auto plan = forge::api::binding()
+   auto plan = forge::api::core::binding()
                   .serve(protocol_registry)
                   .export_api<detail::resolver_protocol>({.id = {resolver_api_id}, .major = 1, .min_revision = 0})
                   .build();

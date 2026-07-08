@@ -14,7 +14,7 @@
 #include <thread>
 #include <vector>
 
-import forge.api.registry;
+import forge.api.core.registry;
 import forge.app.diagnostics;
 import forge.app.events;
 import forge.app.plugin_context;
@@ -137,7 +137,7 @@ class fake_collector {
 struct plugin_harness {
    forge::asio::runtime runtime;
    forge::asio::task_scheduler scheduler;
-   forge::api::registry apis;
+   forge::api::core::registry apis;
    forge::app::signal_bus signals;
    forge::app::event_bus events;
    forge::app::diagnostics_store diagnostics;
@@ -151,7 +151,7 @@ struct plugin_harness {
    }
 
    void provide_and_start() {
-      auto provider = forge::api::installer{apis};
+      auto provider = forge::api::core::installer{apis};
       forge::asio::blocking::run(runtime, plugin.provide(provider));
       auto context = forge::app::plugin_context{scheduler, apis, signals, events, &diagnostics};
       forge::asio::blocking::run(runtime, plugin.initialize(context));

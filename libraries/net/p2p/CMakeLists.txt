@@ -56,8 +56,8 @@ target_compile_definitions(forge_net_p2p PRIVATE FORGE_HAS_ROCKSDB=$<BOOL:${FORG
 target_link_libraries(
    forge_net_p2p PUBLIC
       forge_exceptions
-      forge_api
-      forge_transport_api
+      forge_api_core
+      forge_api_transport
       forge_raw
       forge_crypto
       forge_multiformats

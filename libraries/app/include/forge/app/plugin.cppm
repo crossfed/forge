@@ -9,15 +9,15 @@ module;
 export module forge.app.plugin;
 
 import forge.config.component;
-import forge.api.exceptions;
-import forge.api.types;
-import forge.api.descriptor;
-import forge.api.error_projection;
-import forge.api.handle;
-import forge.api.connection;
-import forge.api.registry;
-import forge.api.binding;
-import forge.api.dispatcher;
+import forge.api.core.exceptions;
+import forge.api.core.types;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.core.handle;
+import forge.api.core.connection;
+import forge.api.core.registry;
+import forge.api.core.binding;
+import forge.api.core.dispatcher;
 import forge.app.plugin_context;
 
 export namespace forge::app {
@@ -50,7 +50,7 @@ class plugin {
 
    [[nodiscard]] virtual std::optional<config::component_descriptor> describe_config() const;
    virtual boost::asio::awaitable<void> configure(config::component_view view);
-   virtual boost::asio::awaitable<void> provide(forge::api::provider& provider);
+   virtual boost::asio::awaitable<void> provide(forge::api::core::provider& provider);
    virtual boost::asio::awaitable<void> initialize(plugin_context& context) = 0;
    virtual boost::asio::awaitable<void> startup() = 0;
    virtual void request_stop() noexcept;
