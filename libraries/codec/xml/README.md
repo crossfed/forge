@@ -27,7 +27,7 @@ bodies.
 
 - CMake target: `forge_codec_xml`
 - Package target: `Forge::forge_codec_xml`
-- Package component: `xml`
+- Package component: `codec_xml`
 
 ## Dependencies
 
