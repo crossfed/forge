@@ -59,8 +59,8 @@ plugins:
 ## Dependencies
 
 - `forge_app`
-- `forge_api`
-- `forge_p2p`
+- `forge_api_core`
+- `forge_net_p2p`
 - `forge_plugins_p2p_node`
 - `forge_config`
 - `forge_schema`
@@ -77,15 +77,15 @@ auto pubsub = context.apis().get<forge::plugins::p2p::pubsub::api>(
    {.id = {"forge.plugins.p2p.pubsub"}, .major = 1});
 
 auto subscription = co_await pubsub->subscribe(
-   forge::p2p::pubsub::topic{.value = "catalog.updates"},
+   forge::net::p2p::pubsub::topic{.value = "catalog.updates"},
    [](forge::plugins::p2p::pubsub::message value)
-      -> boost::asio::awaitable<forge::p2p::pubsub::validation_result> {
+      -> boost::asio::awaitable<forge::net::p2p::pubsub::validation_result> {
       consume(value.data);
-      co_return forge::p2p::pubsub::validation_result::accept;
+      co_return forge::net::p2p::pubsub::validation_result::accept;
    });
 
 co_await pubsub->publish(
-   forge::p2p::pubsub::topic{.value = "catalog.updates"},
+   forge::net::p2p::pubsub::topic{.value = "catalog.updates"},
    std::vector<std::uint8_t>{1, 2, 3});
 ```
 

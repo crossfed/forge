@@ -11,7 +11,7 @@ module;
 
 module forge.plugins.db.objectdb.plugin;
 
-import forge.api.binding;
+import forge.api.core.binding;
 import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.config.component;
@@ -41,7 +41,7 @@ boost::asio::awaitable<void> plugin::configure(forge::config::component_view vie
    return detail::lifecycle::configure(impl_, view);
 }
 
-boost::asio::awaitable<void> plugin::provide(forge::api::provider& provider) {
+boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provider) {
    return detail::lifecycle::provide(impl_, provider);
 }
 

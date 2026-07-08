@@ -14,13 +14,13 @@ module;
 
 module forge.plugins.p2p.pubsub.plugin;
 
-import forge.api.registry;
+import forge.api.core.registry;
 import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.config.component;
 import forge.config.decode;
 import forge.exceptions;
-import forge.p2p.pubsub;
+import forge.net.p2p.pubsub;
 import forge.plugins.p2p.node.api;
 import forge.plugins.p2p.pubsub.api;
 import forge.plugins.p2p.pubsub.types;
@@ -54,7 +54,7 @@ boost::asio::awaitable<void> plugin::configure(forge::config::component_view vie
    co_return;
 }
 
-boost::asio::awaitable<void> plugin::provide(forge::api::provider& provider) {
+boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provider) {
    provider.install<api>(std::make_shared<subscription_api>(impl_));
    co_return;
 }
@@ -80,12 +80,12 @@ void plugin::request_stop() noexcept {
 
 boost::asio::awaitable<void> plugin::shutdown() {
    request_stop();
-   std::vector<forge::p2p::pubsub::topic> topics;
+   std::vector<forge::net::p2p::pubsub::topic> topics;
    {
       auto lock = std::scoped_lock{impl_->mutex};
       topics.reserve(impl_->topics.size());
       for (const auto& [topic, _] : impl_->topics) {
-         topics.push_back(forge::p2p::pubsub::topic{.value = topic});
+         topics.push_back(forge::net::p2p::pubsub::topic{.value = topic});
       }
       impl_->topics.clear();
    }

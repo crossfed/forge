@@ -4,7 +4,7 @@
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/describe.hpp>
-#include <forge/api/macros.hpp>
+#include <forge/api/core/macros.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -34,15 +34,15 @@ import forge.app.application_shell;
 import forge.app.application_builder;
 import forge.app.runner;
 import forge.app.daemon;
-import forge.api.exceptions;
-import forge.api.types;
-import forge.api.descriptor;
-import forge.api.error_projection;
-import forge.api.handle;
-import forge.api.connection;
-import forge.api.registry;
-import forge.api.binding;
-import forge.api.dispatcher;
+import forge.api.core.exceptions;
+import forge.api.core.types;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.core.handle;
+import forge.api.core.connection;
+import forge.api.core.registry;
+import forge.api.core.binding;
+import forge.api.core.dispatcher;
 import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.asio.task_scheduler;
@@ -59,7 +59,7 @@ import forge.schema.enums;
 
 namespace app_test_contract {
 
-class sample_api : public forge::api::contract<sample_api> {
+class sample_api : public forge::api::core::contract<sample_api> {
  public:
    virtual ~sample_api() = default;
    virtual boost::asio::awaitable<int> value(int input) = 0;
@@ -117,7 +117,7 @@ class sample_api_consumer_plugin final : public forge::app::plugin {
 
  private:
    lifecycle_log* log_ = nullptr;
-   forge::api::handle<sample_api> api_;
+   forge::api::core::handle<sample_api> api_;
 };
 
 struct slow_shutdown_state {

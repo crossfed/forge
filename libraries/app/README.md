@@ -468,16 +468,16 @@ boost::asio::co_spawn(
 
 ## APIs
 
-Plugin-to-plugin contracts use `forge_api`: the application can publish
+Plugin-to-plugin contracts use `forge_api_core`: the application can publish
 implementations during the `on_provide(...)` phase, plugins can publish
 implementations during their `provide(...)` phase, and runtime consumers receive
 a read-only API view. This keeps lifecycle in `forge_app` and contract/version/error
-semantics in `forge_api`.
+semantics in `forge_api_core`.
 
 ```cpp
-#include <forge/api/macros.hpp>
+#include <forge/api/core/macros.hpp>
 
-class cache : public forge::api::contract<cache> {
+class cache : public forge::api::core::contract<cache> {
  public:
    virtual ~cache() = default;
    virtual boost::asio::awaitable<models::chunk> read(protocol::read_chunk request) = 0;
@@ -500,7 +500,7 @@ Infrastructure plugins should publish narrow APIs instead of leaking their
 transport/runtime internals:
 
 ```cpp
-boost::asio::awaitable<void> provide(forge::api::provider& provider) override {
+boost::asio::awaitable<void> provide(forge::api::core::provider& provider) override {
    provider.install<node_admin_api>(std::make_shared<node_admin_api_impl>(impl_));
    co_return;
 }

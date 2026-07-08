@@ -1,14 +1,14 @@
 # QUIC + P2P
 
-`forge_quic`, `forge_transport` and `forge_p2p` form the FORGE peer data-plane
-foundation. QUIC is one concrete transport. `forge_transport` is the reusable
+`forge_net_quic`, `forge_net_transport` and `forge_net_p2p` form the FORGE peer data-plane
+foundation. QUIC is one concrete transport. `forge_net_transport` is the reusable
 stream/session substrate. P2P is the peer/session/protocol-stream layer above
 transport-shaped connections.
 
 Local guides:
 
-- [QUIC README](../../libraries/quic/README.md)
-- [P2P README](../../libraries/p2p/README.md)
+- [QUIC README](../../libraries/net/quic/README.md)
+- [P2P README](../../libraries/net/p2p/README.md)
 
 ## Задача
 
@@ -23,11 +23,11 @@ concerns need reusable FORGE primitives without embedding any product protocol.
 forge_asio::runtime
   -> forge_multiformats
       -> multiaddr
-  -> forge_transport
+  -> forge_net_transport
       -> endpoint/stream/session/frame contracts
-  -> forge_tcp / forge_stcp / forge_yamux / forge_quic
+  -> forge_net_tcp / forge_net_stcp / forge_net_yamux / forge_net_quic
       -> concrete transport implementations and adapters
-  -> forge_p2p
+  -> forge_net_p2p
       -> peer identity
       -> security upgrade, mux selection and protocol negotiation
       -> protocol streams
@@ -35,7 +35,7 @@ forge_asio::runtime
 ```
 
 Concrete network libraries know sockets, TLS, QUIC engines and muxing mechanics.
-`forge_transport` exposes the common byte-stream/session contracts. P2P knows
+`forge_net_transport` exposes the common byte-stream/session contracts. P2P knows
 peers, libp2p security semantics and protocol streams. Application protocols
 live above P2P and define their own messages, durability and authorization.
 
@@ -60,19 +60,19 @@ QUIC does not own peer discovery, relay policy or application protocol naming.
 - Path scoring/backoff across direct and relay candidates.
 
 P2P does not promise exactly-once delivery, durable storage or product
-authorization. DHT/rendezvous discovery belongs in `forge_p2p`; product plugins
+authorization. DHT/rendezvous discovery belongs in `forge_net_p2p`; product plugins
 must not replace it with parallel discovery loops.
 
 For application/plugin composition, `forge::plugins::p2p::node` is the production
-host facade above `forge_p2p`. It applies config, starts the node and mounts
+host facade above `forge_net_p2p`. It applies config, starts the node and mounts
 protocol/API contributions. G.2 narrows the API around typed remote access and
 local network information. Durable queues, application fan-out and read-only
 diagnostics move to focused plugins or product layers. Product plugins should
-not create a second node or run ad hoc retry loops against raw `forge::p2p::node`.
+not create a second node or run ad hoc retry loops against raw `forge::net::p2p::node`.
 
 ## Production P2P Direction
 
-`forge_p2p` targets a clean C++23 implementation of a libp2p-compatible network
+`forge_net_p2p` targets a clean C++23 implementation of a libp2p-compatible network
 stack. Compatibility means protocol compatibility (`протокольная
 совместимость`): when FORGE declares support for a libp2p protocol, an FORGE node
 must be able to talk to go-libp2p and rust-libp2p nodes using the same wire
@@ -86,7 +86,7 @@ and `protocol_id`. `multiaddr` is still a first-class FORGE multiformats concept
 because it is the libp2p address contract; `p2p::endpoint` is a typed P2P view
 over a multiaddr, not a parallel source of truth.
 
-Production network mechanics belong in `forge_p2p`, not in plugin-local
+Production network mechanics belong in `forge_net_p2p`, not in plugin-local
 workarounds: identity, keys, endpoint/address encoding, protocol negotiation,
 Identify, Ping, peer/path store, relay, AutoNAT, DHT and pubsub. The
 `forge::plugins::p2p::node` plugin only maps config into the node, owns application
@@ -114,8 +114,8 @@ READMEs may link here, but must not define a second block order.
 - The previous conclusion "Yamux is private to P2P" is superseded. Yamux is a
   reusable muxer because it is needed by libp2p TCP, STCP/API stacks and future
   stream-session transports.
-- Current order: `multiaddr -> forge_transport -> tcp/stcp/yamux/quic -> p2p
-  rebase -> p2p completion -> forge.transport.api`.
+- Current order: `multiaddr -> forge_net_transport -> tcp/stcp/yamux/quic -> p2p
+  rebase -> p2p completion -> forge.api.transport`.
 - Existing P2P achievements remain valid checkpoints: QUIC, Ping, Identify,
   Relay v2, AutoNAT/DCUtR, DHT/Rendezvous component layer and GossipSub v1
   proof are not discarded. They must be preserved while the substrate is
@@ -133,13 +133,13 @@ READMEs may link here, but must not define a second block order.
 - `p2p::endpoint` becomes a typed view over `multiaddr`, not the source of
   truth for address encoding.
 
-### Block C: `forge_transport` Foundation
+### Block C: `forge_net_transport` Foundation
 
-- `forge_transport` owns only low-level reusable contracts: `stream`, `session`,
+- `forge_net_transport` owns only low-level reusable contracts: `stream`, `session`,
   `frame`, `limits` and `exceptions`.
 - Add Asio-style `stream_connector`, `stream_listener`, `session_connector`,
   `session_listener` and transport registry primitives.
-- `forge_transport` must not import or model `forge_api`, `forge_p2p`, concrete
+- `forge_net_transport` must not import or model `forge_api_core`, `forge_net_p2p`, concrete
   QUIC/TCP types, TLS policy, Yamux policy, Peer ID, Relay, DHT, Rendezvous or
   GossipSub.
 - Builders are allowed only as composition helpers over real owner-shaped
@@ -148,46 +148,46 @@ READMEs may link here, but must not define a second block order.
 
 ### Block D: Reusable Network Layers
 
-- D.1 `forge_tcp`: Boost.Asio TCP adapted to `transport::stream`.
+- D.1 `forge_net_tcp`: Boost.Asio TCP adapted to `transport::stream`.
 - D.2 TCP upgrade surface: `tcp::connection` owns the native socket until an
   upper layer either turns it into `transport::stream` or releases it for a
   TLS/security upgrade.
-- D.3 `forge_stcp`: TCP+TLS mechanics adapted to secure `transport::stream`.
+- D.3 `forge_net_stcp`: TCP+TLS mechanics adapted to secure `transport::stream`.
   This layer owns certificates, trust stores, fingerprint checks, ALPN and TLS
   handshakes, but not P2P Peer ID verification, libp2p protocol choice or
   multistream decisions.
-- D.4 `forge_yamux`: reusable muxer from `transport::stream` to
+- D.4 `forge_net_yamux`: reusable muxer from `transport::stream` to
   `transport::session`, donor-derived from go-libp2p and rust-libp2p Yamux.
-- D.5 `forge_quic`: QUIC adapted to native `transport::session`.
-- Current checkpoint: `forge_quic` exposes `quic::as_transport_stream(...)`,
+- D.5 `forge_net_quic`: QUIC adapted to native `transport::session`.
+- Current checkpoint: `forge_net_quic` exposes `quic::as_transport_stream(...)`,
   `quic::as_transport_session(...)`, native
   `transport::session_connector/session_listener` construction and
   `transport::registry` registration for `/quic-v1` endpoints.
 - WebSocket transport is not implemented in this block. Product
-  `forge_websocket` remains an application WebSocket API, not a libp2p transport
+  `forge_net_websocket` remains an application WebSocket API, not a libp2p transport
   claim.
 
 ### Block E: P2P Rebase
 
-- `forge_p2p` uses first-class multiaddr, the transport registry and reusable
+- `forge_net_p2p` uses first-class multiaddr, the transport registry and reusable
   network layers.
-- QUIC path: `/udp/.../quic-v1 -> forge_quic -> transport::session`.
-- TCP path: `/tcp/... -> forge_tcp -> libp2p security upgrade -> forge_yamux ->
+- QUIC path: `/udp/.../quic-v1 -> forge_net_quic -> transport::session`.
+- TCP path: `/tcp/... -> forge_net_tcp -> libp2p security upgrade -> forge_net_yamux ->
   transport::session`.
 - E.1 checkpoint: QUIC is hidden behind a private P2P direct profile. The
   profile may inspect native QUIC certificates before erasing the connection to
   `transport::session`, because Peer ID verification is P2P semantics.
-- E.1 checkpoint: relay and DCUtR use reusable `forge_yamux`; the old private
+- E.1 checkpoint: relay and DCUtR use reusable `forge_net_yamux`; the old private
   P2P Yamux runtime is removed.
 - E.1 checkpoint: `/tcp`, `/ws` and `/wss` endpoints became parseable. E.2a
   supersedes the `/tcp` part by wiring direct TCP; `/ws` and `/wss` still return
   typed unsupported from P2P dial/listen.
 - E.2a checkpoint: direct `/tcp/...` now uses the libp2p TCP stack shape:
-  `forge_tcp -> multistream-select -> Noise -> forge_yamux -> transport::session`.
+  `forge_net_tcp -> multistream-select -> Noise -> forge_net_yamux -> transport::session`.
   FORGE, go-libp2p and rust-libp2p live scenarios cover Ping, Identify and a
   framed echo stream in both FORGE directions.
 - E.2b checkpoint: direct TCP now prefers the libp2p TLS security branch:
-  `forge_tcp -> multistream-select -> /tls/1.0.0 -> forge_stcp -> forge_yamux ->
+  `forge_net_tcp -> multistream-select -> /tls/1.0.0 -> forge_net_stcp -> forge_net_yamux ->
   transport::session`. Noise remains a supported fallback. FORGE, go-libp2p and
   rust-libp2p live scenarios cover Ping, Identify and a framed echo stream for
   both TCP security branches.
@@ -216,16 +216,16 @@ READMEs may link here, but must not define a second block order.
   feature.
 - E.2c does not add P2P protocols, API bindings or `/ws`/`/wss`
   dial/listen paths.
-  It is a cleanup block for reusable `forge_yamux` plus donor-derived regression
+  It is a cleanup block for reusable `forge_net_yamux` plus donor-derived regression
   tests, and it must remain compatible with the already proven TCP Noise/TLS
   and QUIC/P2P scenarios.
 - E.2c implementation files:
-  `libraries/yamux/session.cpp`,
-  `libraries/yamux/include/forge/yamux/options.cppm`,
+  `libraries/net/yamux/session.cpp`,
+  `libraries/net/yamux/include/forge/net/yamux/options.cppm`,
   `tests/yamux/yamux_tests.cpp` and `docs/donors/forge-yamux-v1.md`.
-  No `libraries/p2p`, API, QUIC, TCP or STCP runtime code should change unless
+  No `libraries/net/p2p`, API, QUIC, TCP or STCP runtime code should change unless
   a regression test proves the reusable Yamux contract cannot be fixed in
-  `forge_yamux` alone.
+  `forge_net_yamux` alone.
 - E.2c option invariants:
   `validate_options()` must reject `initial_window == 0`,
   `max_stream_window < initial_window`,
@@ -240,7 +240,7 @@ READMEs may link here, but must not define a second block order.
   its buffered inbound data with correct `session_buffer_` accounting, wake
   stream waiters, send `RST` for that stream and continue the session read loop.
   Local users of the reset stream observe typed
-  `forge::yamux::exceptions::stream_reset`; unrelated streams remain usable.
+  `forge::net::yamux::exceptions::stream_reset`; unrelated streams remain usable.
 - E.2c session-failure behavior:
   malformed frame version/type/flags, stream zero misuse, invalid stream ID
   parity, duplicate stream IDs, oversized DATA frames and GOAWAY/error paths
@@ -277,11 +277,11 @@ READMEs may link here, but must not define a second block order.
 - E.2c static gates:
 
   ```sh
-  rg -n "buffer\\.erase\\(buffer\\.begin\\(\\)" libraries/yamux/session.cpp
+  rg -n "buffer\\.erase\\(buffer\\.begin\\(\\)" libraries/net/yamux/session.cpp
   rg -n "FORGE_THROW\\(|throw std::runtime_error|exceptions::raise\\(" \
-    libraries/yamux tests/yamux
+    libraries/net/yamux tests/yamux
   rg -n "import forge\\.(api|p2p|quic|tcp|stcp|multiformats|websocket)|forge::(api|p2p|quic|tcp|stcp|multiformats|websocket)" \
-    libraries/yamux/include libraries/yamux --glob "*.cpp"
+    libraries/net/yamux/include libraries/net/yamux --glob "*.cpp"
   ```
 
   All three searches should be empty after cleanup.
@@ -289,7 +289,7 @@ READMEs may link here, but must not define a second block order.
 
   ```sh
   cmake --build build/forge-typed-exceptions-debug -j 1 \
-    --target forge_yamux forge_transport forge_tcp forge_stcp forge_quic forge_p2p forge \
+    --target forge_net_yamux forge_net_transport forge_net_tcp forge_net_stcp forge_net_quic forge_net_p2p forge \
              test_forge_yamux test_forge_quic_p2p test_forge_libp2p_interop
 
   ctest --test-dir build/forge-typed-exceptions-debug --output-on-failure \
@@ -304,9 +304,9 @@ READMEs may link here, but must not define a second block order.
   git diff --check
   ```
 - E.2d implements the transport buffer API compatibility guardrail before the
-  next P2P completion work. `forge_transport::stream` keeps
+  next P2P completion work. `forge_net_transport::stream` keeps
   `async_read()`/`async_read_frame()` as stable vector-returning convenience
-  APIs, and adds an additive `forge.transport.buffer` fast path for serious
+  APIs, and adds an additive `forge.net.transport.buffer` fast path for serious
   stream consumers.
 - E.2d adds transport-owned `chunk`, `chunk_builder` and `buffer_pool`
   primitives. Chunks carry safe shared byte ownership, builders provide writable
@@ -324,14 +324,14 @@ READMEs may link here, but must not define a second block order.
 - E.2d integrates the fast path with TCP, STCP, QUIC and Yamux transport
   adapters. TCP/STCP read into pooled builders; QUIC/Yamux wrap or move already
   owned stream data into chunks without adding P2P/API semantics to
-  `forge_transport`.
+  `forge_net_transport`.
 - E.2d is not the final content data-plane implementation. It does not claim
   kernel zero-copy, file-backed chunks, `sendfile`, content addressing or
-  `contentd` bulk-transfer readiness. Before `forge.transport.api` or content
+  `contentd` bulk-transfer readiness. Before `forge.api.transport` or content
   bulk workloads ship, a separate benchmark/throughput block must audit
   remaining copies, allocation counts and large-chunk behavior.
 - E.3 checkpoint: host-level multi-transport orchestration lives in private
-  `forge_p2p` host/node helpers, not in a new public multi-transport library and
+  `forge_net_p2p` host/node helpers, not in a new public multi-transport library and
   not inside the direct transport layer. A production node can listen on several
   direct transports at the same time, for example `/udp/.../quic-v1` and
   `/tcp/...`, and advertises the selected address set through Identify and peer
@@ -341,7 +341,7 @@ READMEs may link here, but must not define a second block order.
   adds `node::local_endpoints()` and keeps `local_endpoint()` as a first-endpoint
   compatibility convenience. `async_listen(...)` is intentionally multi-call for
   supported direct endpoints.
-- E.3 keeps `forge::p2p::direct` direct-only: QUIC/TCP direct profiles, direct
+- E.3 keeps `forge::net::p2p::direct` direct-only: QUIC/TCP direct profiles, direct
   listen/connect/accept and no Identify, DHT, Relay, peer exchange, address
   advertisement or path scoring ownership. Relay/circuit paths stay above direct
   and are selected by host/node orchestration.
@@ -364,7 +364,7 @@ READMEs may link here, but must not define a second block order.
 ### Block F: P2P Completion
 
 - F.1 implemented checkpoint: production AutoRelay discovery lives in private
-  `forge_p2p` host/node orchestration. `node::async_refresh_relay_candidates()`
+  `forge_net_p2p` host/node orchestration. `node::async_refresh_relay_candidates()`
   and the background maintenance path use the same candidate collector over
   peer store, Identify/peer-exchange records, DHT-learned peers and
   Rendezvous-learned peers. The node maintains fresh outbound relay
@@ -373,7 +373,7 @@ READMEs may link here, but must not define a second block order.
   Manual `relay_peer` remains an explicit override. Relay discovery is not owned
   by `direct`, plugins or product loops.
 - F.2 implemented checkpoint: DHT/Rendezvous discovery lifecycle is hardened in
-  private `forge_p2p` algorithms, not transport/direct/plugins. `dht_query`
+  private `forge_net_p2p` algorithms, not transport/direct/plugins. `dht_query`
   performs bounded iterative Kademlia-style lookup with queried/failed sets,
   XOR-distance closer-peer merging, typed timeout/cancel behavior and stale
   routing/provider pruning through `peer_store`. `node::async_find_peer(...)`,
@@ -388,7 +388,7 @@ READMEs may link here, but must not define a second block order.
   fixture support and are tracked as donor-matrix gaps, not unsupported runtime
   behavior.
 - F.3 implemented checkpoint: connection manager and resource policy live in
-  private `forge_p2p` host/node orchestration around `session_state`, not in
+  private `forge_net_p2p` host/node orchestration around `session_state`, not in
   `direct`, transport libraries, plugins or product loops. `resource_manager`
   counts pending/established inbound/outbound session scopes and denials;
   `connection_manager` owns admission decisions, protected peer tags,
@@ -424,25 +424,25 @@ READMEs may link here, but must not define a second block order.
   fixture command is involved. Runner retry is limited to one fixture-timeout
   retry; protocol, security, identity and negotiation failures are not retried
   or hidden as flakes.
-- G.1 implemented checkpoint: `forge_api` is the transport-neutral contract layer.
+- G.1 implemented checkpoint: `forge_api_core` is the transport-neutral contract layer.
   It owns descriptors, registry/view, frame vocabulary, `frame_dispatcher`,
   codec validation, grouped stream state, max-inflight/deadline checks and
-  shared error projection. It must not import `forge_transport`, QUIC, P2P, HTTP,
+  shared error projection. It must not import `forge_net_transport`, QUIC, P2P, HTTP,
   WebSocket, plugins or product layers.
-- G.1 implemented checkpoint: `forge_transport_api` is the API-over-transport
+- G.1 implemented checkpoint: `forge_api_transport` is the API-over-transport
   binding. It owns API frames over `transport::stream` and
   `transport::session`, a concurrent client read loop with pending call map,
   serialized writes, `serve_stream(...)`, `serve_session(...)`, bounded
   concurrency, close/cancel wakeups and typed transport API exceptions.
-- `forge.quic.api` and `forge.p2p.api` are policy adapters over
-  `forge.transport.api`. QUIC policy stays in `forge_quic`; P2P policy stays in
-  `forge_p2p` as protocol id, known-peer checks and discovery scope.
-- `forge.websocket.api` shares `forge::api::frame_dispatcher`, but does not import
-  `forge.transport.api`, because WebSocket is message-oriented and not a
+- `forge.api.quic.binding` and `forge.api.p2p.binding` are policy adapters over
+  `forge.api.transport`. QUIC policy stays in `forge_net_quic`; P2P policy stays in
+  `forge_net_p2p` as protocol id, known-peer checks and discovery scope.
+- `forge.api.websocket.binding` shares `forge::api::core::frame_dispatcher`, but does not import
+  `forge.api.transport`, because WebSocket is message-oriented and not a
   `transport::stream`.
 - HTTP remains a separate request/response binding.
 - G.2 implemented checkpoint: `forge::plugins::p2p::node` is a narrow host facade
-  over `forge_p2p`. It owns lifecycle, config-to-node mapping, local endpoint
+  over `forge_net_p2p`. It owns lifecycle, config-to-node mapping, local endpoint
   reporting, protocol/API route mounting and typed remote API access. Durable
   queues, application fan-out and raw network diagnostics are outside this host
   facade and move to focused plugins or product layers.
@@ -458,7 +458,7 @@ READMEs may link here, but must not define a second block order.
   Go/Rust libp2p support claims.
 - G.4 implemented checkpoint: `forge::plugins::p2p::diagnostics` is a read-only in-process
   plugin for peer/path/session/relay/DHT/Rendezvous/pubsub/connection-manager
-  health. `forge_p2p` owns immutable diagnostics snapshots; the plugin exposes
+  health. `forge_net_p2p` owns immutable diagnostics snapshots; the plugin exposes
   capped operator/test projections through `forge_app`. It does not add a network
   diagnostics protocol, product authorization, remediation, routing policy or
   retry decisions.
@@ -467,11 +467,11 @@ READMEs may link here, but must not define a second block order.
   local handlers, handler deadlines, topic allow/deny policy, deterministic
   subscriptions and capped plugin snapshots for application plugins. It is not a
   durable queue, delivery system, authorization layer or replacement for
-  `forge_p2p` GossipSub mesh/scoring/heartbeat mechanics.
+  `forge_net_p2p` GossipSub mesh/scoring/heartbeat mechanics.
 - G.6a implemented checkpoint: observability starts as a reusable FORGE OTLP logs
   exporter. OTLP is OpenTelemetry Protocol. `forge_otlp` exports `forge_log` records
   to an operator-configured OpenTelemetry Collector through OTLP/HTTP JSON over
-  `forge_http` and `forge_asio`. `forge_log` remains synchronous and transport-free;
+  `forge_net_http` and `forge_asio`. `forge_log` remains synchronous and transport-free;
   the OTLP sink is an optional adapter with bounded queueing, batching,
   retry/backoff, `Retry-After` handling, `Resource` attributes such as
   `service.name` and deterministic shutdown. Metrics and traces are later
@@ -508,9 +508,9 @@ READMEs may link here, but must not define a second block order.
   authoritative settlement remain product/control-plane responsibilities.
 - IPFS/Boxo content, provider, exchange, retrieval and pinning donors inform
   future product/content/storage layers. They are not `forge_plugins` or
-  `forge_p2p` support claims.
+  `forge_net_p2p` support claims.
 
-AutoNAT, AutoRelay, DHT and pubsub algorithms must live in `forge_p2p`.
+AutoNAT, AutoRelay, DHT and pubsub algorithms must live in `forge_net_p2p`.
 `forge::plugins::p2p::node` configures and runs the shared node, then exposes the
 network capabilities through narrow application APIs. If a network behavior is
 not implemented yet, expose a typed unsupported/limited result instead of hiding
@@ -557,25 +557,25 @@ and required interop coverage.
 ## Integration Example
 
 ```cpp
-auto options = forge::p2p::node::options{
+auto options = forge::net::p2p::node::options{
    .certificate_pem = certificate_pem,
    .private_key_pem = private_key_pem,
 };
 
-auto node = forge::p2p::node{runtime, options};
+auto node = forge::net::p2p::node{runtime, options};
 node.register_protocol_handler(
-   forge::p2p::protocol_id{.value = "/example/1"},
-   [](forge::p2p::node::incoming_protocol_stream incoming) -> boost::asio::awaitable<void> {
+   forge::net::p2p::protocol_id{.value = "/example/1"},
+   [](forge::net::p2p::node::incoming_protocol_stream incoming) -> boost::asio::awaitable<void> {
       std::vector<std::uint8_t> frame = co_await incoming.stream.async_read_frame();
       co_await incoming.stream.async_write_frame(frame);
    });
 
-boost::asio::awaitable<void> connect_example(forge::p2p::node& node) {
-   co_await node.async_listen(forge::p2p::parse_endpoint("/ip4/127.0.0.1/udp/9443/quic-v1"));
-   forge::p2p::node::session_info session = co_await node.async_connect(remote_endpoint, {.expected_peer = remote_peer});
-   forge::p2p::stream stream = co_await node.async_open_protocol_stream(
+boost::asio::awaitable<void> connect_example(forge::net::p2p::node& node) {
+   co_await node.async_listen(forge::net::p2p::parse_endpoint("/ip4/127.0.0.1/udp/9443/quic-v1"));
+   forge::net::p2p::node::session_info session = co_await node.async_connect(remote_endpoint, {.expected_peer = remote_peer});
+   forge::net::p2p::stream stream = co_await node.async_open_protocol_stream(
       session.remote_peer,
-      forge::p2p::protocol_id{.value = "/example/1"});
+      forge::net::p2p::protocol_id{.value = "/example/1"});
    use_stream(std::move(stream));
 }
 ```
@@ -624,8 +624,8 @@ Accepted:
 - Transport abstraction before further discovery/path hardening, so DHT,
   rendezvous, Identify, AutoRelay and path scoring are not built twice around
   QUIC-only endpoint state.
-- `forge_transport` as a reusable byte-stream/session substrate, not an API/RPC
-  framework. A future `forge.transport.api` layer should sit above it and stop
+- `forge_net_transport` as a reusable byte-stream/session substrate, not an API/RPC
+  framework. A future `forge.api.transport` layer should sit above it and stop
   QUIC/P2P/TCP API bindings from duplicating API frame serve-loop logic.
 - TCP + Noise/TLS + Yamux direct path is accepted as the TCP compatibility
   baseline; proof is tracked in
@@ -641,7 +641,7 @@ Accepted:
   same OTLP path. Signal handlers only perform async-signal-safe writes; normal
   symbolication/redaction/export happens outside the crashing signal context.
 - Durable asynchronous retry as an application/plugin-level pattern, not a
-  storage dependency inside `forge_p2p`.
+  storage dependency inside `forge_net_p2p`.
 - Typed request/receipt protocols over `forge::plugins::p2p::resolver` as the baseline for
   synchronous product operations. Idempotency keys and domain receipts belong to
   the product API contract, while FORGE supplies discovery, stream opening and API

@@ -10,7 +10,7 @@ module;
 
 module forge.plugins.crypto.secrets.plugin;
 
-import forge.api.registry;
+import forge.api.core.registry;
 import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.app.plugin_registry;
@@ -54,7 +54,7 @@ boost::asio::awaitable<void> plugin::configure(forge::config::component_view vie
    co_return;
 }
 
-boost::asio::awaitable<void> plugin::provide(forge::api::provider& provider) {
+boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provider) {
    provider.install<api>(std::make_shared<secret_api>(impl_));
    co_return;
 }

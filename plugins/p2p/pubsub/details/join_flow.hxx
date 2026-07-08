@@ -4,7 +4,7 @@ namespace forge::plugins::p2p::pubsub {
 
 struct handler_record {
    std::uint64_t id = 0;
-   forge::p2p::pubsub::topic subject;
+   forge::net::p2p::pubsub::topic subject;
    handler callback;
    std::chrono::milliseconds deadline{0};
 };

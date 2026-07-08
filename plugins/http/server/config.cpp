@@ -13,7 +13,7 @@ module forge.plugins.http.server.plugin;
 import forge.config.component;
 import forge.config.decode;
 import forge.exceptions;
-import forge.http.server;
+import forge.net.http.server;
 import forge.plugins.http.server.exceptions;
 import forge.plugins.http.server.types;
 
@@ -53,8 +53,8 @@ std::string resolve_base_path(const config& settings, std::string_view override_
    return normalize_base_path(settings.api_base_path);
 }
 
-forge::http::server_config to_server_config(const config& value) {
-   return forge::http::server_config{
+forge::net::http::server_config to_server_config(const config& value) {
+   return forge::net::http::server_config{
       .bind_address = value.bind_address,
       .port = static_cast<std::uint16_t>(value.port),
       .max_request_body_bytes = value.max_request_body_bytes,

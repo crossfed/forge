@@ -1,0 +1,201 @@
+module;
+
+#include <boost/asio/awaitable.hpp>
+#include <forge/exceptions/macros.hpp>
+
+#include <algorithm>
+#include <array>
+#include <cctype>
+#include <cstddef>
+#include <cstring>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <typeindex>
+#include <tuple>
+#include <utility>
+#include <vector>
+
+export module forge.api.http.proxy;
+
+import forge.api.core.connection;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.core.types;
+export import forge.api.core.handle;
+export import forge.api.http.client_response;
+export import forge.net.http.client;
+import forge.net.http.exceptions;
+export import forge.api.http.mapping;
+
+export namespace forge::api::http {
+
+using namespace forge::net::http;
+
+template <typename Interface> class proxy;
+
+namespace detail {
+
+struct route_call {
+   std::string method;
+   std::function<boost::asio::awaitable<forge::api::core::response>(client&, const forge::api::core::descriptor&, forge::api::core::request)>
+      handler;
+   std::function<boost::asio::awaitable<void>(client&,
+                                              const forge::api::core::descriptor&,
+                                              forge::api::core::request,
+                                              std::type_index,
+                                              void*,
+                                              std::type_index,
+                                              void*)>
+      typed_handler;
+};
+
+class route_invoker final : public forge::api::core::remote_invoker {
+ public:
+   route_invoker(client& target, forge::api::core::descriptor descriptor, std::vector<route_call> routes)
+       : target_{&target}, descriptor_{std::move(descriptor)}, routes_{std::move(routes)} {}
+
+   boost::asio::awaitable<forge::api::core::response> async_call(forge::api::core::request value) override {
+      const auto route =
+         std::find_if(routes_.begin(), routes_.end(), [&](const route_call& candidate) {
+            return candidate.method == value.method;
+         });
+      if (route == routes_.end()) {
+         FORGE_THROW_EXCEPTION(forge::api::core::exceptions::method_not_found, "HTTP API route is not declared",
+                             forge::exceptions::ctx("method", value.method));
+      }
+      co_return co_await route->handler(*target_, descriptor_, std::move(value));
+   }
+
+   bool supports_typed_arguments() const noexcept override {
+      return true;
+   }
+
+   boost::asio::awaitable<void> async_call_arguments(forge::api::core::request value,
+                                                     std::type_index argument_tuple_type,
+                                                     void* argument_tuple,
+                                                     std::type_index response_type,
+                                                     void* response_storage) override {
+      const auto route =
+         std::find_if(routes_.begin(), routes_.end(), [&](const route_call& candidate) {
+            return candidate.method == value.method;
+         });
+      if (route == routes_.end()) {
+         FORGE_THROW_EXCEPTION(forge::api::core::exceptions::method_not_found, "HTTP API route is not declared",
+                             forge::exceptions::ctx("method", value.method));
+      }
+      co_await route->typed_handler(*target_, descriptor_, std::move(value), argument_tuple_type, argument_tuple,
+                                    response_type, response_storage);
+   }
+
+ private:
+   client* target_;
+   forge::api::core::descriptor descriptor_;
+   std::vector<route_call> routes_;
+};
+
+[[nodiscard]] inline std::vector<std::string> argument_names_for(const forge::api::core::descriptor& descriptor,
+                                                                 std::string_view method) {
+   const auto* value = forge::api::core::find_method(descriptor, method);
+   if (value == nullptr) {
+      FORGE_THROW_EXCEPTION(forge::api::core::exceptions::method_not_found, "HTTP API route method is not declared",
+                          forge::exceptions::ctx("method", std::string{method}));
+   }
+   return value->argument_names;
+}
+
+template <auto Method, typename Request, typename Response>
+route_call make_route_call(route route) {
+   return route_call{
+      .method = route.method_name,
+      .handler = [route](client& target,
+                         const forge::api::core::descriptor& descriptor,
+                         forge::api::core::request value) -> boost::asio::awaitable<forge::api::core::response> {
+         auto output = forge::api::core::response{
+            .api = value.api,
+            .method = value.method,
+            .codec = value.codec,
+         };
+         if constexpr (!is_positional_http_method_v<Method, Request>) {
+            if constexpr (detail::request_has_http_parameter_v<Request> ||
+                          detail::request_needs_stream_v<Request> ||
+                          detail::response_needs_stream_v<Response> ||
+                          detail::is_bytes_response_v<Response> ||
+                          detail::is_empty_response_v<Response>) {
+               FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error,
+                                   "HTTP parameter methods require typed HTTP invocation");
+            } else {
+               auto request_value = forge::api::core::unpack_body<Request>(value.body);
+               auto response_value =
+                  co_await call<Request, Response>(target, descriptor, route, std::move(request_value));
+               output.body = forge::api::core::pack_body(response_value);
+            }
+         } else {
+            using argument_tuple = forge::api::core::method_argument_tuple_t<Method>;
+            auto arguments = forge::api::core::unpack_body<argument_tuple>(value.body);
+            auto response_value = co_await call_arguments<argument_tuple, Response>(
+               target, descriptor, route, std::move(arguments), argument_names_for(descriptor, route.method_name));
+            output.body = forge::api::core::pack_body(response_value);
+         }
+         co_return output;
+      },
+      .typed_handler =
+         [route = std::move(route)](client& target,
+                                    const forge::api::core::descriptor& descriptor,
+                                    forge::api::core::request value,
+                                    std::type_index argument_tuple_type,
+                                    void* argument_tuple,
+                                    std::type_index response_type,
+                                    void* response_storage) -> boost::asio::awaitable<void> {
+         using argument_tuple_t = forge::api::core::method_argument_tuple_t<Method>;
+         if (argument_tuple_type != typeid(argument_tuple_t) || response_type != typeid(Response)) {
+            FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error,
+                                "HTTP API typed argument invocation has incompatible storage");
+         }
+         auto& arguments = *static_cast<argument_tuple_t*>(argument_tuple);
+         auto& output = *static_cast<std::optional<Response>*>(response_storage);
+         if constexpr (is_positional_http_method_v<Method, Request>) {
+            output.emplace(co_await call_arguments<argument_tuple_t, Response>(
+               target, descriptor, route, std::move(arguments), argument_names_for(descriptor, value.method)));
+         } else {
+            output.emplace(co_await call<Request, Response>(
+               target, descriptor, route, std::move(std::get<0>(arguments))));
+         }
+      },
+   };
+}
+
+inline std::shared_ptr<forge::api::core::remote_invoker> make_route_invoker(client& target,
+                                                                    forge::api::core::descriptor descriptor,
+                                                                    std::vector<route_call> routes) {
+   return std::make_shared<route_invoker>(target, std::move(descriptor), std::move(routes));
+}
+
+template <auto Method, typename Request, typename Response>
+inline constexpr auto route_can_use_api_proxy_v =
+   is_positional_http_method_v<Method, Request> ||
+   (!detail::request_has_http_parameter_v<Request> &&
+    !detail::request_needs_stream_v<Request> &&
+    !detail::response_needs_stream_v<Response> &&
+    !detail::is_bytes_response_v<Response> &&
+    !detail::is_empty_response_v<Response>);
+
+} // namespace detail
+
+template <typename Interface>
+boost::asio::awaitable<forge::api::core::handle<Interface>> remote(client& value) {
+   if constexpr (traits<Interface>::use_api_proxy) {
+      co_return forge::api::core::handle<Interface>{
+         std::make_shared<forge::api::core::proxy<Interface>>(
+            traits<Interface>::make_invoker(value),
+            Interface::ref())};
+   } else {
+      co_return forge::api::core::handle<Interface>{std::make_shared<proxy<Interface>>(value)};
+   }
+}
+
+} // namespace forge::api::http

@@ -14,16 +14,16 @@ module;
 
 module forge.plugins.p2p.resolver.plugin;
 
-import forge.api.binding;
-import forge.api.registry;
-import forge.transport.api.options;
+import forge.api.core.binding;
+import forge.api.core.registry;
+import forge.api.transport.options;
 import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.config.component;
 import forge.config.decode;
 import forge.exceptions;
-import forge.p2p.identity;
-import forge.p2p.protocol;
+import forge.net.p2p.identity;
+import forge.net.p2p.protocol;
 import forge.plugins.p2p.resolver.api;
 import forge.plugins.p2p.resolver.exceptions;
 import forge.plugins.p2p.resolver.types;
@@ -40,8 +40,8 @@ namespace forge::plugins::p2p::resolver {
 plugin::plugin() : impl_{std::make_shared<impl>()} {}
 plugin::~plugin() = default;
 
-forge::p2p::protocol_id default_protocol() {
-   return forge::p2p::protocol_id{.value = "/forge/api/resolver/1"};
+forge::net::p2p::protocol_id default_protocol() {
+   return forge::net::p2p::protocol_id{.value = "/forge/api/resolver/1"};
 }
 
 forge::app::plugin_id plugin::id() const {
@@ -60,11 +60,11 @@ boost::asio::awaitable<void> plugin::configure(forge::config::component_view vie
    auto config = decode_config(view);
    validate_config(config);
    impl_->settings = std::move(config);
-   impl_->protocol = forge::p2p::protocol_id{.value = impl_->settings.protocol_id};
+   impl_->protocol = forge::net::p2p::protocol_id{.value = impl_->settings.protocol_id};
    co_return;
 }
 
-boost::asio::awaitable<void> plugin::provide(forge::api::provider& provider) {
+boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provider) {
    provider.install<api>(std::make_shared<resolver_api>(impl_));
    co_return;
 }

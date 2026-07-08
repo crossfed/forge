@@ -49,7 +49,7 @@ Runtime identity:
 ## Dependencies
 
 - `forge_app`
-- `forge_api`
+- `forge_api_core`
 - `forge_log`
 - `forge_otlp`
 - `forge_config`

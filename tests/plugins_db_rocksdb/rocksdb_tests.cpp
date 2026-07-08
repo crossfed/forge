@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-import forge.api.binding;
+import forge.api.core.binding;
 import forge.app.application_builder;
 import forge.app.application_shell;
 import forge.app.daemon;

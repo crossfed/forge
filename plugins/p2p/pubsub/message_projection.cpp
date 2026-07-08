@@ -6,8 +6,8 @@ module;
 
 module forge.plugins.p2p.pubsub.plugin;
 
-import forge.p2p.identity;
-import forge.p2p.pubsub;
+import forge.net.p2p.identity;
+import forge.net.p2p.pubsub;
 import forge.plugins.p2p.pubsub.types;
 
 #include "details/message_projection.hxx"
@@ -18,8 +18,8 @@ bool contains_topic(const std::vector<std::string>& values, const std::string& t
    return std::ranges::find(values, topic) != values.end();
 }
 
-message project_message(const forge::p2p::peer_id& source,
-                        const forge::p2p::pubsub::message& value) {
+message project_message(const forge::net::p2p::peer_id& source,
+                        const forge::net::p2p::pubsub::message& value) {
    return message{
       .source = source,
       .author = value.from,

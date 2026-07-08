@@ -14,7 +14,7 @@ bodies.
 ## When Not To Use
 
 - Do not use `forge_xml` as an HTTP router or transport binding. Use
-  `forge_http_api` for typed HTTP routes.
+  `forge_api_http` for typed HTTP routes.
 - Do not use it for protocol-specific semantics, authentication, signing or
   storage policy. Those belong to the consuming product or protocol layer.
 - Do not expose backend XML parser types in public APIs.

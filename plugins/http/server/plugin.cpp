@@ -11,14 +11,14 @@ module;
 
 module forge.plugins.http.server.plugin;
 
-import forge.api.registry;
+import forge.api.core.registry;
 import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.asio.runtime;
 import forge.config.component;
 import forge.config.decode;
-import forge.http.api.binding;
-import forge.http.server;
+import forge.api.http.binding;
+import forge.net.http.server;
 import forge.plugins.http.server.api;
 import forge.plugins.http.server.exceptions;
 import forge.plugins.http.server.middleware;
@@ -52,7 +52,7 @@ boost::asio::awaitable<void> plugin::configure(forge::config::component_view vie
    co_return;
 }
 
-boost::asio::awaitable<void> plugin::provide(forge::api::provider& provider) {
+boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provider) {
    provider.install<api>(std::make_shared<publisher_api>(impl_));
    co_return;
 }

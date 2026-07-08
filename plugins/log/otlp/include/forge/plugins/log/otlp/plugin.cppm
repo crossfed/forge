@@ -8,15 +8,15 @@ module;
 
 export module forge.plugins.log.otlp.plugin;
 
-import forge.api.exceptions;
-import forge.api.types;
-import forge.api.descriptor;
-import forge.api.error_projection;
-import forge.api.handle;
-import forge.api.connection;
-import forge.api.registry;
-import forge.api.binding;
-import forge.api.dispatcher;
+import forge.api.core.exceptions;
+import forge.api.core.types;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.core.handle;
+import forge.api.core.connection;
+import forge.api.core.registry;
+import forge.api.core.binding;
+import forge.api.core.dispatcher;
 import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.app.plugin_registry;
@@ -36,7 +36,7 @@ class plugin final : public forge::app::plugin {
    [[nodiscard]] std::string version() const override;
    [[nodiscard]] std::optional<forge::config::component_descriptor> describe_config() const override;
    boost::asio::awaitable<void> configure(forge::config::component_view view) override;
-   boost::asio::awaitable<void> provide(forge::api::provider& provider) override;
+   boost::asio::awaitable<void> provide(forge::api::core::provider& provider) override;
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override;
    boost::asio::awaitable<void> startup() override;
    void request_stop() noexcept override;

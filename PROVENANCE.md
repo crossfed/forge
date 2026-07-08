@@ -80,7 +80,7 @@ references. They do not create runtime source attribution unless source text,
 schemas, generated code, or vendored runtime code are copied into FORGE.
 
 - libp2p specifications, go-libp2p, go-libp2p-kad-dht, go-libp2p-pubsub, and
-  rust-libp2p are compatibility donors for `forge_p2p`, Yamux, QUIC/TCP
+  rust-libp2p are compatibility donors for `forge_net_p2p`, Yamux, QUIC/TCP
   transport composition, Relay, DCUtR, AutoNAT, DHT, Rendezvous, and GossipSub.
   The 2026-06-07 audit found no copied `.proto` files, protobuf-generated
   files, or copied Go/Rust libp2p source under `libraries/p2p` or

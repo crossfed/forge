@@ -19,7 +19,7 @@ module;
 
 module forge.plugins.db.rocksdb.plugin;
 
-import forge.api.binding;
+import forge.api.core.binding;
 import forge.app.plugin_context;
 import forge.asio.task_scheduler;
 import forge.config.component;
@@ -135,7 +135,7 @@ boost::asio::awaitable<void> lifecycle::configure(const std::shared_ptr<plugin::
    co_return;
 }
 
-boost::asio::awaitable<void> lifecycle::provide(const std::shared_ptr<plugin::impl>& impl_, forge::api::provider& provider) {
+boost::asio::awaitable<void> lifecycle::provide(const std::shared_ptr<plugin::impl>& impl_, forge::api::core::provider& provider) {
    provider.install<api>(std::make_shared<plugin::api_impl>(impl_));
    co_return;
 }

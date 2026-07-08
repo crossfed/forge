@@ -35,17 +35,17 @@
 
 import forge.asio.blocking;
 import forge.asio.runtime;
-import forge.quic.connection;
-import forge.quic.connector;
-import forge.quic.endpoint;
-import forge.quic.exceptions;
-import forge.quic.framed_stream;
-import forge.quic.listener;
-import forge.quic.options;
-import forge.quic.runtime;
-import forge.quic.security;
+import forge.net.quic.connection;
+import forge.net.quic.connector;
+import forge.net.quic.endpoint;
+import forge.net.quic.exceptions;
+import forge.net.quic.framed_stream;
+import forge.net.quic.listener;
+import forge.net.quic.options;
+import forge.net.quic.runtime;
+import forge.net.quic.security;
 
-namespace forge::quic {
+namespace forge::net::quic {
 namespace {
 
 using udp = boost::asio::ip::udp;
@@ -490,7 +490,7 @@ BOOST_AUTO_TEST_CASE(quic_endpoint_rejects_non_quic_scheme) {
       (void)parse_endpoint(std::string{"https"} + "://" + std::string{"127.0.0.1"} + ":" + std::to_string(9443));
       BOOST_FAIL("expected typed QUIC exception");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::quic::exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::invalid_endpoint));
+      BOOST_TEST(static_cast<int>(forge::net::quic::exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::invalid_endpoint));
    }
 }
 
@@ -509,7 +509,7 @@ BOOST_AUTO_TEST_CASE(quic_connect_timeout_wins_over_pre_connection_error_race) {
           std::chrono::milliseconds{2'000}, "pre-connection error timeout winner");
       BOOST_FAIL("expected QUIC connect timeout");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::quic::exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::connect_timeout));
+      BOOST_TEST(static_cast<int>(forge::net::quic::exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::connect_timeout));
    }
 }
 
@@ -541,7 +541,7 @@ BOOST_AUTO_TEST_CASE(quic_frame_codec_rejects_oversized_payload) {
       (void)encode_frame(payload, frame_codec_options{.max_frame_size = 3});
       BOOST_FAIL("expected typed QUIC exception");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::quic::exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::frame_too_large));
+      BOOST_TEST(static_cast<int>(forge::net::quic::exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::frame_too_large));
    }
 }
 
@@ -570,7 +570,7 @@ BOOST_AUTO_TEST_CASE(quic_options_validation_rejects_bad_alpn) {
       validate(options);
       BOOST_FAIL("expected typed QUIC exception");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::quic::exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::invalid_options));
+      BOOST_TEST(static_cast<int>(forge::net::quic::exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::invalid_options));
    }
 }
 
@@ -1018,8 +1018,8 @@ BOOST_AUTO_TEST_CASE(quic_loopback_rejects_alpn_mismatch) {
                                                         }));
       BOOST_FAIL("expected QUIC handshake/alpn failure");
    } catch (const forge::exceptions::base& error) {
-      const auto acceptable = forge::quic::exceptions::code_of(error).value() == exceptions::code::handshake_timeout ||
-                              forge::quic::exceptions::code_of(error).value() == exceptions::code::alpn_mismatch || forge::quic::exceptions::code_of(error).value() == exceptions::code::internal;
+      const auto acceptable = forge::net::quic::exceptions::code_of(error).value() == exceptions::code::handshake_timeout ||
+                              forge::net::quic::exceptions::code_of(error).value() == exceptions::code::alpn_mismatch || forge::net::quic::exceptions::code_of(error).value() == exceptions::code::internal;
       BOOST_TEST(acceptable);
    }
    server.stop();
@@ -1043,7 +1043,7 @@ BOOST_AUTO_TEST_CASE(quic_connect_timeout_limits_stalled_handshake_budget) {
                               std::chrono::milliseconds{2'000}, "blackhole connect timeout");
       BOOST_FAIL("expected QUIC connect timeout");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::quic::exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::connect_timeout));
+      BOOST_TEST(static_cast<int>(forge::net::quic::exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::connect_timeout));
    }
    const auto elapsed =
        std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
@@ -1071,8 +1071,8 @@ BOOST_AUTO_TEST_CASE(quic_failed_handshake_releases_listener_connection_slot) {
                               std::chrono::milliseconds{2'000}, "failed alpn connect");
       BOOST_FAIL("expected QUIC ALPN failure");
    } catch (const forge::exceptions::base& error) {
-      const auto acceptable = forge::quic::exceptions::code_of(error).value() == exceptions::code::handshake_timeout ||
-                              forge::quic::exceptions::code_of(error).value() == exceptions::code::alpn_mismatch || forge::quic::exceptions::code_of(error).value() == exceptions::code::internal;
+      const auto acceptable = forge::net::quic::exceptions::code_of(error).value() == exceptions::code::handshake_timeout ||
+                              forge::net::quic::exceptions::code_of(error).value() == exceptions::code::alpn_mismatch || forge::net::quic::exceptions::code_of(error).value() == exceptions::code::internal;
       BOOST_TEST(acceptable);
    }
 
@@ -1116,8 +1116,8 @@ BOOST_AUTO_TEST_CASE(quic_remote_close_during_active_read_is_reported) {
       (void)forge::asio::blocking::run(runtime, framed.async_read_frame());
       BOOST_FAIL("expected remote stream close to unblock read with typed error");
    } catch (const forge::exceptions::base& error) {
-      const auto acceptable = forge::quic::exceptions::code_of(error).value() == exceptions::code::stream_closed ||
-                              forge::quic::exceptions::code_of(error).value() == exceptions::code::connection_closed || forge::quic::exceptions::code_of(error).value() == exceptions::code::stream_reset;
+      const auto acceptable = forge::net::quic::exceptions::code_of(error).value() == exceptions::code::stream_closed ||
+                              forge::net::quic::exceptions::code_of(error).value() == exceptions::code::connection_closed || forge::net::quic::exceptions::code_of(error).value() == exceptions::code::stream_reset;
       BOOST_TEST(acceptable);
    }
    server_close.get();
@@ -1170,7 +1170,7 @@ BOOST_AUTO_TEST_CASE(quic_connection_cancel_rejects_new_streams) {
       (void)forge::asio::blocking::run(runtime, client_connection.async_open_stream());
       BOOST_FAIL("expected canceled connection to reject new streams");
    } catch (const forge::exceptions::base& error) {
-      const auto acceptable = forge::quic::exceptions::code_of(error).value() == exceptions::code::connection_closed || forge::quic::exceptions::code_of(error).value() == exceptions::code::canceled;
+      const auto acceptable = forge::net::quic::exceptions::code_of(error).value() == exceptions::code::connection_closed || forge::net::quic::exceptions::code_of(error).value() == exceptions::code::canceled;
       BOOST_TEST(acceptable);
    }
    server.stop();
@@ -1238,10 +1238,10 @@ BOOST_AUTO_TEST_CASE(quic_loopback_rejects_ca_certificate_hostname_mismatch) {
                               std::chrono::milliseconds{5'000}, "CA hostname mismatch connect");
       BOOST_FAIL("expected QUIC hostname verification failure");
    } catch (const forge::exceptions::base& error) {
-      const auto acceptable = forge::quic::exceptions::code_of(error).value() == exceptions::code::tls_failed ||
-                              forge::quic::exceptions::code_of(error).value() == exceptions::code::peer_verification_failed ||
-                              forge::quic::exceptions::code_of(error).value() == exceptions::code::handshake_timeout || forge::quic::exceptions::code_of(error).value() == exceptions::code::canceled;
-      BOOST_TEST_CONTEXT("error kind=" << static_cast<int>(forge::quic::exceptions::code_of(error).value()) << " message=" << error.what()) {
+      const auto acceptable = forge::net::quic::exceptions::code_of(error).value() == exceptions::code::tls_failed ||
+                              forge::net::quic::exceptions::code_of(error).value() == exceptions::code::peer_verification_failed ||
+                              forge::net::quic::exceptions::code_of(error).value() == exceptions::code::handshake_timeout || forge::net::quic::exceptions::code_of(error).value() == exceptions::code::canceled;
+      BOOST_TEST_CONTEXT("error kind=" << static_cast<int>(forge::net::quic::exceptions::code_of(error).value()) << " message=" << error.what()) {
          BOOST_TEST(acceptable);
       }
    }
@@ -1292,17 +1292,17 @@ BOOST_AUTO_TEST_CASE(quic_loopback_rejects_missing_mtls_client_certificate) {
       run_with_deadline(runtime, connection.async_close(), std::chrono::milliseconds{5'000},
                         "close missing-cert client");
    } catch (const forge::exceptions::base& error) {
-      const auto acceptable = forge::quic::exceptions::code_of(error).value() == exceptions::code::peer_verification_failed ||
-                              forge::quic::exceptions::code_of(error).value() == exceptions::code::tls_failed || forge::quic::exceptions::code_of(error).value() == exceptions::code::handshake_timeout;
+      const auto acceptable = forge::net::quic::exceptions::code_of(error).value() == exceptions::code::peer_verification_failed ||
+                              forge::net::quic::exceptions::code_of(error).value() == exceptions::code::tls_failed || forge::net::quic::exceptions::code_of(error).value() == exceptions::code::handshake_timeout;
       BOOST_TEST(acceptable);
    }
    try {
       (void)get_with_deadline(accept_future, std::chrono::milliseconds{5'000}, "missing-cert server accept");
       BOOST_FAIL("expected missing client certificate to reject server accept");
    } catch (const forge::exceptions::base& error) {
-      const auto acceptable = forge::quic::exceptions::code_of(error).value() == exceptions::code::peer_verification_failed ||
-                              forge::quic::exceptions::code_of(error).value() == exceptions::code::tls_failed || forge::quic::exceptions::code_of(error).value() == exceptions::code::handshake_timeout ||
-                              forge::quic::exceptions::code_of(error).value() == exceptions::code::connection_closed;
+      const auto acceptable = forge::net::quic::exceptions::code_of(error).value() == exceptions::code::peer_verification_failed ||
+                              forge::net::quic::exceptions::code_of(error).value() == exceptions::code::tls_failed || forge::net::quic::exceptions::code_of(error).value() == exceptions::code::handshake_timeout ||
+                              forge::net::quic::exceptions::code_of(error).value() == exceptions::code::connection_closed;
       BOOST_TEST(acceptable);
    }
    (void)client_connected;
@@ -1329,7 +1329,7 @@ BOOST_AUTO_TEST_CASE(quic_loopback_rejects_wrong_peer_fingerprint) {
                                }));
       BOOST_FAIL("expected peer fingerprint rejection");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::quic::exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::peer_verification_failed));
+      BOOST_TEST(static_cast<int>(forge::net::quic::exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::peer_verification_failed));
    }
    server.stop();
 }
@@ -1352,8 +1352,8 @@ BOOST_AUTO_TEST_CASE(quic_connection_close_unblocks_pending_stream_read) {
       (void)get_with_deadline(read_future, std::chrono::milliseconds{5'000}, "pending stream read after close");
       BOOST_FAIL("expected pending stream read to unblock with a close error");
    } catch (const forge::exceptions::base& error) {
-      const auto acceptable = forge::quic::exceptions::code_of(error).value() == exceptions::code::connection_closed ||
-                              forge::quic::exceptions::code_of(error).value() == exceptions::code::stream_closed || forge::quic::exceptions::code_of(error).value() == exceptions::code::stream_reset;
+      const auto acceptable = forge::net::quic::exceptions::code_of(error).value() == exceptions::code::connection_closed ||
+                              forge::net::quic::exceptions::code_of(error).value() == exceptions::code::stream_closed || forge::net::quic::exceptions::code_of(error).value() == exceptions::code::stream_reset;
       BOOST_TEST(acceptable);
    }
    run_with_deadline(runtime, server_connection.async_close(), std::chrono::milliseconds{5'000},
@@ -1377,7 +1377,7 @@ BOOST_AUTO_TEST_CASE(quic_loopback_rejects_max_streams_backpressure) {
       (void)forge::asio::blocking::run(runtime, connection.async_open_stream());
       BOOST_FAIL("expected max streams rejection");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::quic::exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::backpressure_rejected));
+      BOOST_TEST(static_cast<int>(forge::net::quic::exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::backpressure_rejected));
    }
    forge::asio::blocking::run(runtime, connection.async_close());
    server.stop();
@@ -1396,7 +1396,7 @@ BOOST_AUTO_TEST_CASE(quic_loopback_allows_new_stream_after_previous_stream_close
    auto connection = run_with_deadline(
        runtime, client.async_connect(server.local_endpoint(), loopback_client_options("forge-p2p/1", client_limits)),
        std::chrono::milliseconds{5'000}, "stream reuse connect");
-   auto server_connection = std::make_shared<forge::quic::connection>(
+   auto server_connection = std::make_shared<forge::net::quic::connection>(
        get_with_deadline(accept_future, std::chrono::milliseconds{5'000}, "stream reuse accept"));
 
    for (auto index = 0U; index < 2U; ++index) {
@@ -1420,9 +1420,9 @@ BOOST_AUTO_TEST_CASE(quic_loopback_allows_new_stream_after_previous_stream_close
          (void)run_with_deadline(runtime, framed.async_read_frame(), std::chrono::milliseconds{5'000},
                                  "observe active-limited stream close");
       } catch (const forge::exceptions::base& error) {
-         const auto acceptable = forge::quic::exceptions::code_of(error).value() == exceptions::code::stream_closed ||
-                                 forge::quic::exceptions::code_of(error).value() == exceptions::code::connection_closed ||
-                                 forge::quic::exceptions::code_of(error).value() == exceptions::code::stream_reset;
+         const auto acceptable = forge::net::quic::exceptions::code_of(error).value() == exceptions::code::stream_closed ||
+                                 forge::net::quic::exceptions::code_of(error).value() == exceptions::code::connection_closed ||
+                                 forge::net::quic::exceptions::code_of(error).value() == exceptions::code::stream_reset;
          BOOST_TEST(acceptable);
       }
       get_with_deadline(server_task, std::chrono::milliseconds{5'000}, "stream reuse server task");
@@ -1448,7 +1448,7 @@ BOOST_AUTO_TEST_CASE(quic_loopback_rejects_max_queued_bytes_backpressure) {
       forge::asio::blocking::run(runtime, outbound.async_write(payload));
       BOOST_FAIL("expected queued bytes rejection");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::quic::exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::backpressure_rejected));
+      BOOST_TEST(static_cast<int>(forge::net::quic::exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::backpressure_rejected));
    }
    BOOST_TEST(connection.metrics().backpressure_rejections >= 1U);
    forge::asio::blocking::run(runtime, connection.async_close());
@@ -1590,8 +1590,8 @@ BOOST_AUTO_TEST_CASE(quic_loopback_rejects_inbound_packet_queue_overflow) {
           std::chrono::milliseconds{5'000}, "inbound overflow connect");
       BOOST_FAIL("expected inbound packet queue overflow to close the connection");
    } catch (const forge::exceptions::base& error) {
-      const auto acceptable = forge::quic::exceptions::code_of(error).value() == exceptions::code::connection_closed || forge::quic::exceptions::code_of(error).value() == exceptions::code::canceled ||
-                              forge::quic::exceptions::code_of(error).value() == exceptions::code::backpressure_rejected;
+      const auto acceptable = forge::net::quic::exceptions::code_of(error).value() == exceptions::code::connection_closed || forge::net::quic::exceptions::code_of(error).value() == exceptions::code::canceled ||
+                              forge::net::quic::exceptions::code_of(error).value() == exceptions::code::backpressure_rejected;
       BOOST_TEST(acceptable);
    }
 
@@ -1637,7 +1637,7 @@ BOOST_AUTO_TEST_CASE(quic_framed_stream_rejects_oversized_remote_frame) {
       (void)forge::asio::blocking::run(runtime, framed.async_read_frame());
       BOOST_FAIL("expected oversized frame rejection");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::quic::exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::frame_too_large));
+      BOOST_TEST(static_cast<int>(forge::net::quic::exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::frame_too_large));
    }
    server_send.get();
    forge::asio::blocking::run(runtime, client_connection.async_close());
@@ -1655,9 +1655,9 @@ BOOST_AUTO_TEST_CASE(quic_listener_stop_unblocks_pending_accept) {
       (void)accept_future.get();
       BOOST_FAIL("expected stopped listener to unblock accept with an error");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::quic::exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::connection_closed));
+      BOOST_TEST(static_cast<int>(forge::net::quic::exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::connection_closed));
    }
 }
 
 } // namespace
-} // namespace forge::quic
+} // namespace forge::net::quic

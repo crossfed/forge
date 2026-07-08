@@ -1,6 +1,6 @@
 # P2P Node Plugin
 
-`forge::plugins::p2p::node` owns one shared `forge_p2p` node and exposes typed
+`forge::plugins::p2p::node` owns one shared `forge_net_p2p` node and exposes typed
 contribution APIs for protocol handlers and API-over-P2P publication.
 
 ## When To Use
@@ -15,7 +15,7 @@ contribution APIs for protocol handlers and API-over-P2P publication.
 
 - Do not create product routing, durable queue or authorization policy in this
   plugin.
-- Do not instantiate raw `forge::p2p::node` separately inside application
+- Do not instantiate raw `forge::net::p2p::node` separately inside application
   plugins.
 - Do not enable insecure test mode outside local tests.
 
@@ -44,7 +44,7 @@ contribution APIs for protocol handlers and API-over-P2P publication.
 - Provides internal source APIs used by focused diagnostics and pubsub plugins.
 
 The plugin does not implement product routing policy or durable application
-queues. Core libp2p-style mechanics belong to `forge_p2p`; this plugin composes
+queues. Core libp2p-style mechanics belong to `forge_net_p2p`; this plugin composes
 that substrate for applications.
 
 ## Config
@@ -84,9 +84,9 @@ provide real identity material or an explicitly configured peer identity.
 ## Dependencies
 
 - `forge_app`
-- `forge_api`
-- `forge_p2p`
-- `forge_transport_api`
+- `forge_api_core`
+- `forge_net_p2p`
+- `forge_api_transport`
 - `forge_config`
 - `forge_schema`
 
@@ -95,7 +95,7 @@ provide real identity material or an explicitly configured peer identity.
 ### Publish A Typed API
 
 ```cpp
-import forge.api.binding;
+import forge.api.core.binding;
 import forge.plugins.p2p.node.api;
 import forge.plugins.p2p.node.plugin;
 
@@ -105,12 +105,12 @@ class catalog_p2p_plugin final : public forge::app::plugin {
       auto p2p = context.apis().get<forge::plugins::p2p::node::api>(
          {.id = {"forge.plugins.p2p.node"}, .major = 1});
 
-      auto plan = forge::api::binding()
+      auto plan = forge::api::core::binding()
          .serve(context.apis())
          .export_api<catalog_api>()
          .build();
 
-      p2p->publish_api(std::move(plan), forge::p2p::protocol_id{.value = "/catalog/api/1"});
+      p2p->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/catalog/api/1"});
       co_return;
    }
 };
@@ -125,7 +125,7 @@ registry.register_plugin(forge::plugins::p2p::node::descriptor());
 - The plugin owns network lifecycle and contribution mounting, not product
   authorization decisions.
 - Peer identity, protocol negotiation and session mechanics stay in
-  `forge_p2p`; application plugins use typed contribution APIs.
+  `forge_net_p2p`; application plugins use typed contribution APIs.
 - Insecure test mode and generated identity material are local-test-only.
 
 ## Common Mistakes

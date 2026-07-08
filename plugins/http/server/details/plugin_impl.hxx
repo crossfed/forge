@@ -3,7 +3,7 @@
 namespace forge::plugins::http::server {
 
 struct pending_binding {
-   forge::http::api::binding_plan binding;
+   forge::api::http::binding_plan binding;
    publish_options options;
 };
 
@@ -16,10 +16,10 @@ struct plugin::impl {
    mutable std::mutex mutex;
    config settings;
    forge::asio::runtime* runtime = nullptr;
-   const forge::api::registry* apis = nullptr;
+   const forge::api::core::registry* apis = nullptr;
    std::vector<pending_binding> bindings;
    std::vector<middleware_descriptor> middleware;
-   std::unique_ptr<forge::http::server> server;
+   std::unique_ptr<forge::net::http::server> server;
    bool publication_closed = false;
    bool stopping = false;
 

@@ -118,10 +118,10 @@ FORGE не должен быть одним большим target. Каждый 
 - `forge_runtime`;
 - `forge_log`;
 - `forge_app`;
-- `forge_http`;
-- `forge_websocket`;
-- `forge_quic`;
-- `forge_p2p`;
+- `forge_net_http`;
+- `forge_net_websocket`;
+- `forge_net_quic`;
+- `forge_net_p2p`;
 - `forge_tui`.
 
 ### 3.4 Pimpl и стабильность ABI
@@ -130,10 +130,10 @@ FORGE не должен быть одним большим target. Каждый 
 
 Примеры кандидатов на `pimpl`:
 
-- `forge::quic::connection`;
-- `forge::quic::listener`;
-- `forge::p2p::node`;
-- `forge::http::server`;
+- `forge::net::quic::connection`;
+- `forge::net::quic::listener`;
+- `forge::net::p2p::node`;
+- `forge::net::http::server`;
 - `forge::app::runtime`;
 - `forge::tui::screen`;
 - `forge::crypto::vault`;
@@ -599,23 +599,23 @@ auto result = forge::runtime::blocking::run(runtime, some_awaitable());
 Цель:
 
 ```cpp
-import forge.http.exceptions;
-import forge.http.types;
-import forge.http.base_url;
-import forge.http.target;
-import forge.http.route_context;
-import forge.http.middleware;
-import forge.http.connection;
-import forge.http.client;
-import forge.http.router;
-import forge.http.server;
-import forge.http.api.binding;
+import forge.net.http.exceptions;
+import forge.net.http.types;
+import forge.net.http.base_url;
+import forge.net.http.target;
+import forge.net.http.route_context;
+import forge.net.http.middleware;
+import forge.net.http.connection;
+import forge.net.http.client;
+import forge.net.http.router;
+import forge.net.http.server;
+import forge.api.http.binding;
 ```
 
 Пример:
 
 ```cpp
-forge::http::router router;
+forge::net::http::router router;
 router.get("/healthz", [](auto& ctx) {
    return ctx.json({{"ok", true}});
 });
@@ -678,28 +678,28 @@ FORGE_ENABLE_QUIC=ON
 FORGE P2P должен позволять:
 
 ```cpp
-import forge.p2p.exceptions;
-import forge.p2p.identity;
-import forge.p2p.endpoint;
-import forge.p2p.envelope;
-import forge.p2p.identify;
-import forge.p2p.diagnostics;
-import forge.p2p.discovery;
-import forge.p2p.dht;
-import forge.p2p.rendezvous;
-import forge.p2p.pubsub;
-import forge.p2p.reachability;
-import forge.p2p.hole_punch;
-import forge.p2p.protocol;
-import forge.p2p.message;
-import forge.p2p.scoring;
-import forge.p2p.relay;
-import forge.p2p.resource_manager;
-import forge.p2p.stream;
-import forge.p2p.negotiation;
-import forge.p2p.peer_store;
-import forge.p2p.node;
-import forge.p2p.api;
+import forge.net.p2p.exceptions;
+import forge.net.p2p.identity;
+import forge.net.p2p.endpoint;
+import forge.net.p2p.envelope;
+import forge.net.p2p.identify;
+import forge.net.p2p.diagnostics;
+import forge.net.p2p.discovery;
+import forge.net.p2p.dht;
+import forge.net.p2p.rendezvous;
+import forge.net.p2p.pubsub;
+import forge.net.p2p.reachability;
+import forge.net.p2p.hole_punch;
+import forge.net.p2p.protocol;
+import forge.net.p2p.message;
+import forge.net.p2p.scoring;
+import forge.net.p2p.relay;
+import forge.net.p2p.resource_manager;
+import forge.net.p2p.stream;
+import forge.net.p2p.negotiation;
+import forge.net.p2p.peer_store;
+import forge.net.p2p.node;
+import forge.api.p2p.binding;
 
 node.register_protocol("/my/product/1", handler);
 boost::asio::awaitable<void> open_product_stream() {
@@ -869,10 +869,10 @@ forge_runtime
 forge_log
 forge_config
 forge_app
-forge_http
-forge_websocket
-forge_quic
-forge_p2p
+forge_net_http
+forge_net_websocket
+forge_net_quic
+forge_net_p2p
 forge_tui
 ```
 

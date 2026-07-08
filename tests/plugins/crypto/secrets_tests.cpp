@@ -11,7 +11,7 @@
 #include <variant>
 #include <vector>
 
-import forge.api.registry;
+import forge.api.core.registry;
 import forge.app.plugin;
 import forge.asio.blocking;
 import forge.asio.runtime;
@@ -124,12 +124,12 @@ void overwrite_u64_le(forge::crypto::bytes& value, std::size_t offset, std::uint
    }
 }
 
-[[nodiscard]] forge::api::handle<crypto_secrets::api> configured_api(forge::asio::runtime& runtime,
+[[nodiscard]] forge::api::core::handle<crypto_secrets::api> configured_api(forge::asio::runtime& runtime,
                                                                     crypto_secrets::plugin& plugin,
                                                                     const forge::config::document& document) {
    forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, crypto_secrets_section}));
-   auto registry = forge::api::registry{};
-   auto installer = forge::api::installer{registry};
+   auto registry = forge::api::core::registry{};
+   auto installer = forge::api::core::installer{registry};
    forge::asio::blocking::run(runtime, plugin.provide(installer));
    return registry.get<crypto_secrets::api>(crypto_secrets::api::ref());
 }
@@ -178,8 +178,8 @@ BOOST_AUTO_TEST_CASE(crypto_secrets_config_direct_defaults_match_schema_constant
 FORGE_LOG_AND_RETHROW();
 
 BOOST_AUTO_TEST_CASE(crypto_secrets_descriptor_redacts_config_and_keeps_api_local) try {
-   static_assert(forge::api::local_interface<crypto_secrets::api>);
-   static_assert(!forge::api::remote_interface<crypto_secrets::api>);
+   static_assert(forge::api::core::local_interface<crypto_secrets::api>);
+   static_assert(!forge::api::core::remote_interface<crypto_secrets::api>);
 
    auto plugin = crypto_secrets::plugin{};
    const auto descriptor = plugin.describe_config();

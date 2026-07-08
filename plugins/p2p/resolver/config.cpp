@@ -9,7 +9,7 @@ module;
 
 module forge.plugins.p2p.resolver.plugin;
 
-import forge.transport.api.options;
+import forge.api.transport.options;
 import forge.config.component;
 import forge.config.decode;
 import forge.exceptions;
@@ -48,7 +48,7 @@ void validate_config(const config& value) {
    }
 }
 
-void validate_transport_options(const forge::transport::api::options& value) {
+void validate_transport_options(const forge::api::transport::options& value) {
    if (value.codec.value.empty() || value.max_inflight == 0 || value.max_frame_size == 0) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_config, "resolver API transport options are invalid");
    }

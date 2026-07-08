@@ -20,9 +20,10 @@ target_include_directories(
 target_link_libraries(
    forge_plugins_p2p_node PUBLIC
       forge_app
-      forge_api
-      forge_transport_api
-      forge_p2p
+      forge_api_core
+      forge_api_transport
+      forge_api_p2p
+      forge_net_p2p
       forge_config
       forge_schema
       forge_asio

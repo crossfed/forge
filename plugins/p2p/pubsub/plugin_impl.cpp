@@ -22,8 +22,8 @@ module;
 module forge.plugins.p2p.pubsub.plugin;
 
 import forge.exceptions;
-import forge.p2p.identity;
-import forge.p2p.pubsub;
+import forge.net.p2p.identity;
+import forge.net.p2p.pubsub;
 import forge.plugins.p2p.node.api;
 import forge.plugins.p2p.pubsub.api;
 import forge.plugins.p2p.pubsub.exceptions;
@@ -42,7 +42,7 @@ forge::plugins::p2p::node::pubsub_source& plugin::impl::require_source() const {
    return *source;
 }
 
-void plugin::impl::ensure_topic_allowed(const forge::p2p::pubsub::topic& subject) const {
+void plugin::impl::ensure_topic_allowed(const forge::net::p2p::pubsub::topic& subject) const {
    if (subject.value.empty()) {
       FORGE_THROW_EXCEPTION(exceptions::topic_not_allowed, "P2P PubSub topic is empty");
    }
@@ -95,10 +95,10 @@ void plugin::impl::record_drop() {
    ++messages_dropped;
 }
 
-boost::asio::awaitable<forge::p2p::pubsub::validation_result>
+boost::asio::awaitable<forge::net::p2p::pubsub::validation_result>
 plugin::impl::call_handler(handler_record handler, message value) {
    if (!try_begin_handler()) {
-      co_return forge::p2p::pubsub::validation_result::ignore;
+      co_return forge::net::p2p::pubsub::validation_result::ignore;
    }
 
    if (handler.deadline.count() <= 0) {
@@ -109,7 +109,7 @@ plugin::impl::call_handler(handler_record handler, message value) {
       } catch (...) {
          finish_handler();
          record_handler_failure();
-         co_return forge::p2p::pubsub::validation_result::ignore;
+         co_return forge::net::p2p::pubsub::validation_result::ignore;
       }
    }
 
@@ -117,7 +117,7 @@ plugin::impl::call_handler(handler_record handler, message value) {
    auto self = shared_from_this();
    auto guarded_handler =
       [self, handler = std::move(handler), value = std::move(value)]() mutable
-      -> boost::asio::awaitable<std::optional<forge::p2p::pubsub::validation_result>> {
+      -> boost::asio::awaitable<std::optional<forge::net::p2p::pubsub::validation_result>> {
       try {
          co_return co_await handler.callback(std::move(value));
       } catch (...) {
@@ -137,49 +137,49 @@ plugin::impl::call_handler(handler_record handler, message value) {
          if (value.has_value()) {
             co_return *value;
          }
-         co_return forge::p2p::pubsub::validation_result::ignore;
+         co_return forge::net::p2p::pubsub::validation_result::ignore;
       }
       record_handler_failure();
    } catch (...) {
       finish_handler();
       record_handler_failure();
    }
-   co_return forge::p2p::pubsub::validation_result::ignore;
+   co_return forge::net::p2p::pubsub::validation_result::ignore;
 }
 
-boost::asio::awaitable<forge::p2p::pubsub::validation_result>
-plugin::impl::handle_event(forge::p2p::pubsub::event event) {
+boost::asio::awaitable<forge::net::p2p::pubsub::validation_result>
+plugin::impl::handle_event(forge::net::p2p::pubsub::event event) {
    if (event.value.data.size() > settings.max_message_size) {
       record_drop();
-      co_return forge::p2p::pubsub::validation_result::ignore;
+      co_return forge::net::p2p::pubsub::validation_result::ignore;
    }
 
    auto handlers = handlers_for(event.value.subject.value);
    if (handlers.empty()) {
-      co_return forge::p2p::pubsub::validation_result::ignore;
+      co_return forge::net::p2p::pubsub::validation_result::ignore;
    }
 
-   auto final_result = forge::p2p::pubsub::validation_result::ignore;
+   auto final_result = forge::net::p2p::pubsub::validation_result::ignore;
    for (auto& handler : handlers) {
       auto result = co_await call_handler(handler, project_message(event.source, event.value));
-      if (result == forge::p2p::pubsub::validation_result::reject) {
-         final_result = forge::p2p::pubsub::validation_result::reject;
-      } else if (result == forge::p2p::pubsub::validation_result::accept &&
-                 final_result != forge::p2p::pubsub::validation_result::reject) {
-         final_result = forge::p2p::pubsub::validation_result::accept;
+      if (result == forge::net::p2p::pubsub::validation_result::reject) {
+         final_result = forge::net::p2p::pubsub::validation_result::reject;
+      } else if (result == forge::net::p2p::pubsub::validation_result::accept &&
+                 final_result != forge::net::p2p::pubsub::validation_result::reject) {
+         final_result = forge::net::p2p::pubsub::validation_result::accept;
       }
    }
 
    auto lock = std::scoped_lock{mutex};
    ++messages_delivered;
    switch (final_result) {
-   case forge::p2p::pubsub::validation_result::accept:
+   case forge::net::p2p::pubsub::validation_result::accept:
       ++messages_accepted;
       break;
-   case forge::p2p::pubsub::validation_result::reject:
+   case forge::net::p2p::pubsub::validation_result::reject:
       ++messages_rejected;
       break;
-   case forge::p2p::pubsub::validation_result::ignore:
+   case forge::net::p2p::pubsub::validation_result::ignore:
       ++messages_ignored;
       break;
    }

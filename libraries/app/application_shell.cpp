@@ -118,7 +118,7 @@ void publish_application_event(event_bus& events, event_severity severity, std::
 } // namespace
 
 application_context::application_context(forge::asio::runtime& runtime, forge::asio::task_scheduler& scheduler,
-                                         forge::api::registry& apis, signal_bus& signals,
+                                         forge::api::core::registry& apis, signal_bus& signals,
                                          event_bus& events, diagnostics_store& diagnostics)
     : runtime_{&runtime}, scheduler_{&scheduler}, apis_{&apis}, signals_{&signals},
       events_{&events}, diagnostics_{&diagnostics} {}
@@ -131,8 +131,8 @@ forge::asio::task_scheduler& application_context::scheduler() noexcept {
    return *scheduler_;
 }
 
-forge::api::installer application_context::apis() noexcept {
-   return forge::api::installer{*apis_};
+forge::api::core::installer application_context::apis() noexcept {
+   return forge::api::core::installer{*apis_};
 }
 
 signal_bus& application_context::signals() noexcept {
@@ -171,7 +171,7 @@ struct application_shell::impl {
    application_shell_options options;
    forge::asio::runtime runtime;
    forge::asio::task_scheduler scheduler;
-   forge::api::registry apis;
+   forge::api::core::registry apis;
    signal_bus signals;
    event_bus events;
    diagnostics_store diagnostics;
@@ -378,7 +378,7 @@ forge::asio::task_scheduler& application_shell::scheduler() noexcept {
    return impl_->scheduler;
 }
 
-forge::api::registry& application_shell::apis() noexcept {
+forge::api::core::registry& application_shell::apis() noexcept {
    return impl_->apis;
 }
 

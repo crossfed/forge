@@ -10,7 +10,7 @@ export module forge.plugins.db.objectdb.plugin;
 
 export import forge.plugins.db.objectdb.api;
 
-import forge.api.binding;
+import forge.api.core.binding;
 import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.app.plugin_registry;
@@ -36,7 +36,7 @@ class plugin final : public forge::app::plugin {
    [[nodiscard]] std::string version() const override;
    [[nodiscard]] std::optional<forge::config::component_descriptor> describe_config() const override;
    boost::asio::awaitable<void> configure(forge::config::component_view view) override;
-   boost::asio::awaitable<void> provide(forge::api::provider& provider) override;
+   boost::asio::awaitable<void> provide(forge::api::core::provider& provider) override;
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override;
    boost::asio::awaitable<void> startup() override;
    void request_stop() noexcept override;

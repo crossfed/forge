@@ -13,15 +13,15 @@ module;
 
 module forge.plugins.p2p.node.plugin;
 
-import forge.transport.api.options;
+import forge.api.transport.options;
 import forge.asio.runtime;
-import forge.p2p.diagnostics;
-import forge.p2p.endpoint;
-import forge.p2p.identity;
-import forge.p2p.node;
-import forge.p2p.protocol;
-import forge.p2p.pubsub;
-import forge.p2p.scoring;
+import forge.net.p2p.diagnostics;
+import forge.net.p2p.endpoint;
+import forge.net.p2p.identity;
+import forge.net.p2p.node;
+import forge.net.p2p.protocol;
+import forge.net.p2p.pubsub;
+import forge.net.p2p.scoring;
 import forge.plugins.p2p.node.api;
 import forge.plugins.p2p.node.types;
 
@@ -33,8 +33,8 @@ namespace forge::plugins::p2p::node {
 plugin::diagnostics_source_adapter::diagnostics_source_adapter(std::shared_ptr<plugin::impl> impl)
     : impl_{std::move(impl)} {}
 
-forge::p2p::diagnostics::snapshot
-plugin::diagnostics_source_adapter::snapshot(forge::p2p::diagnostics::options options) const {
+forge::net::p2p::diagnostics::snapshot
+plugin::diagnostics_source_adapter::snapshot(forge::net::p2p::diagnostics::options options) const {
    return impl_->require_node().diagnostics(options);
 }
 

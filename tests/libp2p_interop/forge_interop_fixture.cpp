@@ -28,24 +28,24 @@
 import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.crypto.pem;
-import forge.p2p.dht;
+import forge.net.p2p.dht;
 import forge.multiformats.exceptions;
 import forge.multiformats.multihash;
 import forge.multiformats.types;
 import forge.multiformats.varint;
-import forge.p2p.endpoint;
-import forge.p2p.envelope;
-import forge.p2p.exceptions;
-import forge.p2p.hole_punch;
-import forge.p2p.identify;
-import forge.p2p.identity;
-import forge.p2p.node;
-import forge.p2p.protocol;
-import forge.p2p.pubsub;
-import forge.p2p.reachability;
-import forge.p2p.rendezvous;
-import forge.p2p.relay;
-import forge.p2p.stream;
+import forge.net.p2p.endpoint;
+import forge.net.p2p.envelope;
+import forge.net.p2p.exceptions;
+import forge.net.p2p.hole_punch;
+import forge.net.p2p.identify;
+import forge.net.p2p.identity;
+import forge.net.p2p.node;
+import forge.net.p2p.protocol;
+import forge.net.p2p.pubsub;
+import forge.net.p2p.reachability;
+import forge.net.p2p.rendezvous;
+import forge.net.p2p.relay;
+import forge.net.p2p.stream;
 
 namespace {
 
@@ -102,7 +102,7 @@ struct libp2p_identity {
    std::string certificate_pem;
    std::string private_key_pem;
    std::vector<std::uint8_t> public_key;
-   forge::p2p::peer_id peer;
+   forge::net::p2p::peer_id peer;
 };
 
 std::string json_escape(std::string_view value) {
@@ -285,8 +285,8 @@ libp2p_identity generate_libp2p_identity() {
    signed_message.insert(signed_message.end(), prefix.begin(), prefix.end());
    signed_message.insert(signed_message.end(), spki.begin(), spki.end());
    const auto signature = identity_sign(key.get(), signed_message);
-   const auto public_key = forge::p2p::encode_public_key(forge::p2p::public_key{
-       .type = forge::p2p::public_key::type::ed25519,
+   const auto public_key = forge::net::p2p::encode_public_key(forge::net::p2p::public_key{
+       .type = forge::net::p2p::public_key::type::ed25519,
        .data = raw_public_key(key.get()),
    });
    const auto extension_value = signed_key_der(public_key, signature);
@@ -338,8 +338,8 @@ libp2p_identity generate_libp2p_identity() {
        .certificate_pem = bio_to_string(certificate_bio.get()),
        .private_key_pem = bio_to_string(private_key_bio.get()),
        .public_key = public_key,
-       .peer = forge::p2p::make_peer_id(forge::p2p::public_key{
-           .type = forge::p2p::public_key::type::ed25519,
+       .peer = forge::net::p2p::make_peer_id(forge::net::p2p::public_key{
+           .type = forge::net::p2p::public_key::type::ed25519,
            .data = raw_public_key(key.get()),
        }),
    };
@@ -350,52 +350,52 @@ const libp2p_identity& local_identity() {
    return identity;
 }
 
-forge::p2p::node::options node_options(const std::filesystem::path& store_path, const libp2p_identity& identity) {
-   auto out = forge::p2p::node::options{
+forge::net::p2p::node::options node_options(const std::filesystem::path& store_path, const libp2p_identity& identity) {
+   auto out = forge::net::p2p::node::options{
        .certificate_pem = identity.certificate_pem,
        .private_key_pem = identity.private_key_pem,
        .explicit_peer_id = identity.peer,
-       .capabilities = forge::p2p::capability_set{.bits = forge::p2p::capabilities::direct_quic |
-                                                        forge::p2p::capabilities::peer_exchange |
-                                                        forge::p2p::capabilities::autonat |
-                                                        forge::p2p::capabilities::relay |
-                                                        forge::p2p::capabilities::hole_punching |
-                                                        forge::p2p::capabilities::relay_reservation |
-                                                        forge::p2p::capabilities::dht |
-                                                        forge::p2p::capabilities::rendezvous |
-                                                        forge::p2p::capabilities::pubsub},
+       .capabilities = forge::net::p2p::capability_set{.bits = forge::net::p2p::capabilities::direct_quic |
+                                                        forge::net::p2p::capabilities::peer_exchange |
+                                                        forge::net::p2p::capabilities::autonat |
+                                                        forge::net::p2p::capabilities::relay |
+                                                        forge::net::p2p::capabilities::hole_punching |
+                                                        forge::net::p2p::capabilities::relay_reservation |
+                                                        forge::net::p2p::capabilities::dht |
+                                                        forge::net::p2p::capabilities::rendezvous |
+                                                        forge::net::p2p::capabilities::pubsub},
        .public_key = identity.public_key,
        .peer_store_path = store_path,
        .allow_insecure_test_mode = true,
    };
-   out.limits.dht.operating_mode = forge::p2p::dht::mode::server;
-   out.limits.rendezvous.operating_role = forge::p2p::rendezvous::role::client_and_server;
+   out.limits.dht.operating_mode = forge::net::p2p::dht::mode::server;
+   out.limits.rendezvous.operating_role = forge::net::p2p::rendezvous::role::client_and_server;
    return out;
 }
 
-forge::p2p::node::options node_options(const std::filesystem::path& store_path) {
+forge::net::p2p::node::options node_options(const std::filesystem::path& store_path) {
    return node_options(store_path, local_identity());
 }
 
-std::string endpoint_json(const forge::p2p::endpoint& endpoint) {
+std::string endpoint_json(const forge::net::p2p::endpoint& endpoint) {
    return "\"" + json_escape(endpoint.to_string()) + "\"";
 }
 
-forge::p2p::endpoint loopback_quic_endpoint(std::uint16_t port = 0) {
-   return forge::p2p::endpoint{.transport = {.host_type = forge::p2p::endpoint::host_kind::ip4,
-                                           .protocol = forge::p2p::endpoint::protocol_kind::quic_v1,
+forge::net::p2p::endpoint loopback_quic_endpoint(std::uint16_t port = 0) {
+   return forge::net::p2p::endpoint{.transport = {.host_type = forge::net::p2p::endpoint::host_kind::ip4,
+                                           .protocol = forge::net::p2p::endpoint::protocol_kind::quic_v1,
                                            .host = "127.0.0.1",
                                            .port = port}};
 }
 
-forge::p2p::endpoint loopback_tcp_endpoint(std::uint16_t port = 0) {
-   return forge::p2p::endpoint{.transport = {.host_type = forge::p2p::endpoint::host_kind::ip4,
-                                           .protocol = forge::p2p::endpoint::protocol_kind::tcp,
+forge::net::p2p::endpoint loopback_tcp_endpoint(std::uint16_t port = 0) {
+   return forge::net::p2p::endpoint{.transport = {.host_type = forge::net::p2p::endpoint::host_kind::ip4,
+                                           .protocol = forge::net::p2p::endpoint::protocol_kind::tcp,
                                            .host = "127.0.0.1",
                                            .port = port}};
 }
 
-forge::p2p::endpoint loopback_endpoint_for(std::string_view transport) {
+forge::net::p2p::endpoint loopback_endpoint_for(std::string_view transport) {
    if (transport == "tcp" || transport == "tcp-tls") {
       return loopback_tcp_endpoint();
    }
@@ -405,24 +405,24 @@ forge::p2p::endpoint loopback_endpoint_for(std::string_view transport) {
    throw std::runtime_error{"unsupported FORGE fixture transport: " + std::string{transport}};
 }
 
-forge::p2p::endpoint p2p_endpoint_for(forge::p2p::endpoint value, const forge::p2p::peer_id& peer) {
+forge::net::p2p::endpoint p2p_endpoint_for(forge::net::p2p::endpoint value, const forge::net::p2p::peer_id& peer) {
    value.peer = peer;
    return value;
 }
 
-forge::p2p::dht::key provider_key() {
+forge::net::p2p::dht::key provider_key() {
    constexpr auto source = std::string_view{"forge-libp2p-dht-provider"};
    auto digest = forge::multiformats::multihash::sha2_256(
        std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(source.data()), source.size()});
-   return forge::p2p::dht::key{.bytes = digest.encode()};
+   return forge::net::p2p::dht::key{.bytes = digest.encode()};
 }
 
-std::vector<std::uint8_t> signed_rendezvous_record(const libp2p_identity& identity, const forge::p2p::endpoint& endpoint) {
-   const auto key = forge::p2p::decode_public_key(identity.public_key);
-   return forge::p2p::rendezvous::codec::seal_peer_record(
-              forge::p2p::rendezvous::peer_record{
+std::vector<std::uint8_t> signed_rendezvous_record(const libp2p_identity& identity, const forge::net::p2p::endpoint& endpoint) {
+   const auto key = forge::net::p2p::decode_public_key(identity.public_key);
+   return forge::net::p2p::rendezvous::codec::seal_peer_record(
+              forge::net::p2p::rendezvous::peer_record{
                   .peer = identity.peer,
-                  .endpoints = std::vector<forge::p2p::endpoint>{endpoint},
+                  .endpoints = std::vector<forge::net::p2p::endpoint>{endpoint},
                   .sequence = static_cast<std::uint64_t>(
                       std::chrono::system_clock::now().time_since_epoch().count()),
               },
@@ -432,11 +432,11 @@ std::vector<std::uint8_t> signed_rendezvous_record(const libp2p_identity& identi
 
 std::vector<std::uint8_t> wrap_length_delimited(std::span<const std::uint8_t> payload);
 boost::asio::awaitable<std::vector<std::uint8_t>>
-read_length_delimited(forge::p2p::stream& stream, std::size_t max_payload_size);
+read_length_delimited(forge::net::p2p::stream& stream, std::size_t max_payload_size);
 
-void register_echo(forge::p2p::node& value) {
-   value.register_protocol_handler(forge::p2p::protocol_id{.value = std::string{echo_protocol}},
-                                   [](forge::p2p::node::incoming_protocol_stream incoming)
+void register_echo(forge::net::p2p::node& value) {
+   value.register_protocol_handler(forge::net::p2p::protocol_id{.value = std::string{echo_protocol}},
+                                   [](forge::net::p2p::node::incoming_protocol_stream incoming)
                                        -> boost::asio::awaitable<void> {
                                       auto payload = co_await read_length_delimited(incoming.stream, 16 * 1024);
                                       co_await incoming.stream.async_write(wrap_length_delimited(payload));
@@ -450,12 +450,12 @@ struct pubsub_stress_state {
    std::uint64_t invalid = 0;
 };
 
-void register_pubsub_listener(forge::asio::runtime& runtime, forge::p2p::node& value, std::filesystem::path result_file) {
+void register_pubsub_listener(forge::asio::runtime& runtime, forge::net::p2p::node& value, std::filesystem::path result_file) {
    forge::asio::blocking::run(
        runtime, value.async_subscribe(
-                    forge::p2p::pubsub::topic{.value = std::string{pubsub_topic}},
+                    forge::net::p2p::pubsub::topic{.value = std::string{pubsub_topic}},
                     [result_file = std::move(result_file)](
-                        forge::p2p::pubsub::event event) -> boost::asio::awaitable<forge::p2p::pubsub::validation_result> {
+                        forge::net::p2p::pubsub::event event) -> boost::asio::awaitable<forge::net::p2p::pubsub::validation_result> {
                        const auto payload = std::string{event.value.data.begin(), event.value.data.end()};
                        write_file(result_file,
                                   "{\"implementation\":\"forge\",\"scenario\":\"gossipsub_publish\",\"status\":\"" +
@@ -464,34 +464,34 @@ void register_pubsub_listener(forge::asio::runtime& runtime, forge::p2p::node& v
                                       json_escape(payload) + "\",\"source\":\"" +
                                       json_escape(event.value.from ? event.value.from->to_string() : std::string{}) +
                                       "\"}\n");
-                       co_return forge::p2p::pubsub::validation_result::accept;
+                       co_return forge::net::p2p::pubsub::validation_result::accept;
                     }));
 }
 
 std::shared_ptr<pubsub_stress_state> register_pubsub_stress_listener(forge::asio::runtime& runtime,
-                                                                      forge::p2p::node& value) {
+                                                                      forge::net::p2p::node& value) {
    auto state = std::make_shared<pubsub_stress_state>();
    forge::asio::blocking::run(
        runtime, value.async_subscribe(
-                    forge::p2p::pubsub::topic{.value = std::string{pubsub_topic}},
-                    [state](forge::p2p::pubsub::event event)
-                        -> boost::asio::awaitable<forge::p2p::pubsub::validation_result> {
+                    forge::net::p2p::pubsub::topic{.value = std::string{pubsub_topic}},
+                    [state](forge::net::p2p::pubsub::event event)
+                        -> boost::asio::awaitable<forge::net::p2p::pubsub::validation_result> {
                        const auto payload = std::string{event.value.data.begin(), event.value.data.end()};
                        auto lock = std::scoped_lock{state->mutex};
                        if (!state->payloads.insert(payload).second) {
                           ++state->duplicates;
                        }
-                       co_return forge::p2p::pubsub::validation_result::accept;
+                       co_return forge::net::p2p::pubsub::validation_result::accept;
                     }));
    return state;
 }
 
-void prepare_pubsub_publisher(forge::asio::runtime& runtime, forge::p2p::node& value) {
+void prepare_pubsub_publisher(forge::asio::runtime& runtime, forge::net::p2p::node& value) {
    forge::asio::blocking::run(
        runtime, value.async_subscribe(
-                    forge::p2p::pubsub::topic{.value = std::string{pubsub_topic}},
-                    [](forge::p2p::pubsub::event) -> boost::asio::awaitable<forge::p2p::pubsub::validation_result> {
-                       co_return forge::p2p::pubsub::validation_result::accept;
+                    forge::net::p2p::pubsub::topic{.value = std::string{pubsub_topic}},
+                    [](forge::net::p2p::pubsub::event) -> boost::asio::awaitable<forge::net::p2p::pubsub::validation_result> {
+                       co_return forge::net::p2p::pubsub::validation_result::accept;
                     }));
 
    const auto deadline = std::chrono::steady_clock::now() + 8s;
@@ -505,7 +505,7 @@ void prepare_pubsub_publisher(forge::asio::runtime& runtime, forge::p2p::node& v
 }
 
 void write_pubsub_stress_result(const std::filesystem::path& result_file, std::string_view implementation,
-                                const pubsub_stress_state& state, std::uint64_t expected, const forge::p2p::node& value) {
+                                const pubsub_stress_state& state, std::uint64_t expected, const forge::net::p2p::node& value) {
    auto payloads = std::string{};
    auto first = true;
    for (const auto& payload : state.payloads) {
@@ -552,7 +552,7 @@ std::vector<std::uint8_t> wrap_length_delimited(std::span<const std::uint8_t> pa
 }
 
 boost::asio::awaitable<std::vector<std::uint8_t>>
-read_length_delimited(forge::p2p::stream& stream, std::size_t max_payload_size) {
+read_length_delimited(forge::net::p2p::stream& stream, std::size_t max_payload_size) {
    auto buffer = std::vector<std::uint8_t>{};
    while (true) {
       try {
@@ -578,7 +578,7 @@ read_length_delimited(forge::p2p::stream& stream, std::size_t max_payload_size) 
 
 int listen_mode(const std::map<std::string, std::string>& args) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
-   auto value = forge::p2p::node{runtime, node_options(required(args, "store-dir"))};
+   auto value = forge::net::p2p::node{runtime, node_options(required(args, "store-dir"))};
    register_echo(value);
    const auto scenario = optional_value(args, "scenario");
    auto stress_state = std::shared_ptr<pubsub_stress_state>{};
@@ -606,17 +606,17 @@ int listen_mode(const std::map<std::string, std::string>& args) {
          const auto seed_file = std::filesystem::path{required(args, "seed-file")};
          if (std::filesystem::exists(seed_file)) {
             for (const auto& line : read_lines(seed_file)) {
-               const auto remote = forge::p2p::parse_endpoint(line);
+               const auto remote = forge::net::p2p::parse_endpoint(line);
                if (!remote.peer || *remote.peer == value.local_peer()) {
                   continue;
                }
                value.peers().learn_endpoint(*remote.peer, remote,
-                                            forge::p2p::capability_set{.bits = forge::p2p::capabilities::direct_quic |
-                                                                             forge::p2p::capabilities::pubsub});
+                                            forge::net::p2p::capability_set{.bits = forge::net::p2p::capabilities::direct_quic |
+                                                                             forge::net::p2p::capabilities::pubsub});
                try {
                   (void)forge::asio::blocking::run(
                       runtime, value.async_connect(remote,
-                                                   forge::p2p::node::connect_options{.expected_peer = *remote.peer,
+                                                   forge::net::p2p::node::connect_options{.expected_peer = *remote.peer,
                                                                                    .allow_relay = false,
                                                                                    .allow_hole_punch = false}));
                } catch (const forge::exceptions::base&) {
@@ -650,16 +650,16 @@ int listen_mode(const std::map<std::string, std::string>& args) {
 
 int destination_mode(const std::map<std::string, std::string>& args) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
-   auto value = forge::p2p::node{runtime, node_options(required(args, "store-dir"))};
+   auto value = forge::net::p2p::node{runtime, node_options(required(args, "store-dir"))};
    register_echo(value);
    forge::asio::blocking::run(runtime, value.async_listen(loopback_quic_endpoint()));
 
-   const auto relay_addr = forge::p2p::parse_endpoint(required(args, "relay-addr"));
-   const auto relay_peer = forge::p2p::peer_id::from_string(required(args, "relay-peer-id"));
+   const auto relay_addr = forge::net::p2p::parse_endpoint(required(args, "relay-addr"));
+   const auto relay_peer = forge::net::p2p::peer_id::from_string(required(args, "relay-peer-id"));
    value.peers().learn_endpoint(relay_peer, relay_addr,
-                                forge::p2p::capability_set{.bits = forge::p2p::capabilities::direct_quic |
-                                                                 forge::p2p::capabilities::relay |
-                                                                 forge::p2p::capabilities::relay_reservation});
+                                forge::net::p2p::capability_set{.bits = forge::net::p2p::capabilities::direct_quic |
+                                                                 forge::net::p2p::capabilities::relay |
+                                                                 forge::net::p2p::capabilities::relay_reservation});
    const auto reservation = forge::asio::blocking::run(runtime, value.async_reserve_relay(relay_peer));
    const auto local = value.local_endpoint();
    if (!local) {
@@ -688,21 +688,21 @@ int destination_mode(const std::map<std::string, std::string>& args) {
    return 0;
 }
 
-std::string run_scenario(forge::asio::runtime& runtime, forge::p2p::node& value, std::string_view scenario,
+std::string run_scenario(forge::asio::runtime& runtime, forge::net::p2p::node& value, std::string_view scenario,
                          std::string_view payload,
-                         const forge::p2p::peer_id& peer) {
+                         const forge::net::p2p::peer_id& peer) {
    if (scenario == "ping") {
       const auto rtt = forge::asio::blocking::run(runtime, value.async_ping(
-                                                        peer, forge::p2p::node::open_options{.allow_relay = false,
+                                                        peer, forge::net::p2p::node::open_options{.allow_relay = false,
                                                                                             .allow_hole_punch = false}));
       return "\"rtt_ms\":" + std::to_string(rtt.count());
    }
    if (scenario == "identify") {
-      auto document = forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<forge::p2p::identify::document> {
-         auto stream = co_await value.async_open_protocol_stream(peer, forge::p2p::builtins::identify,
-                                                                 forge::p2p::node::open_options{.allow_relay = false});
+      auto document = forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<forge::net::p2p::identify::document> {
+         auto stream = co_await value.async_open_protocol_stream(peer, forge::net::p2p::builtins::identify,
+                                                                 forge::net::p2p::node::open_options{.allow_relay = false});
          auto payload = co_await read_length_delimited(stream, 4 * 1024 * 1024);
-         co_return forge::p2p::identify::decode(payload);
+         co_return forge::net::p2p::identify::decode(payload);
       }());
       return "\"protocol_count\":" + std::to_string(document.protocols.size()) + ",\"agent_version\":\"" +
              json_escape(document.agent_version) + "\"";
@@ -724,15 +724,15 @@ std::string run_scenario(forge::asio::runtime& runtime, forge::p2p::node& value,
       const auto key = provider_key();
       forge::asio::blocking::run(runtime, value.async_provide(key));
       auto stream = forge::asio::blocking::run(runtime, value.async_open_protocol_stream(
-                                                         peer, forge::p2p::builtins::kad_dht,
-                                                         forge::p2p::node::open_options{.allow_relay = false}));
-      forge::asio::blocking::run(runtime, stream.async_write(forge::p2p::dht::codec::encode(
-                                          forge::p2p::dht::message{
-                                              .type = forge::p2p::dht::message_type::get_providers,
+                                                         peer, forge::net::p2p::builtins::kad_dht,
+                                                         forge::net::p2p::node::open_options{.allow_relay = false}));
+      forge::asio::blocking::run(runtime, stream.async_write(forge::net::p2p::dht::codec::encode(
+                                          forge::net::p2p::dht::message{
+                                              .type = forge::net::p2p::dht::message_type::get_providers,
                                               .key_value = key,
                                           },
-                                          forge::p2p::dht::options{})));
-      const auto response = forge::p2p::dht::codec::decode(
+                                          forge::net::p2p::dht::options{})));
+      const auto response = forge::net::p2p::dht::codec::decode(
           wrap_length_delimited(forge::asio::blocking::run(runtime, read_length_delimited(stream, 1024 * 1024))));
       return "\"provider_count\":" + std::to_string(response.provider_peers.size());
    }
@@ -745,18 +745,18 @@ std::string run_scenario(forge::asio::runtime& runtime, forge::p2p::node& value,
       const auto record = signed_rendezvous_record(local_identity(), endpoint);
       const auto registration = forge::asio::blocking::run(runtime, value.async_rendezvous_register(
                                                                       peer,
-                                                                      forge::p2p::rendezvous::register_request{
+                                                                      forge::net::p2p::rendezvous::register_request{
                                                                           .namespace_name =
                                                                               std::string{rendezvous_namespace},
                                                                           .signed_peer_record = record,
                                                                           .ttl = std::chrono::seconds{7'200},
                                                                       }));
-      if (registration.status_value != forge::p2p::rendezvous::status::ok) {
+      if (registration.status_value != forge::net::p2p::rendezvous::status::ok) {
          throw std::runtime_error{"rendezvous register failed"};
       }
       const auto discovered = forge::asio::blocking::run(runtime, value.async_rendezvous_discover(
                                                                     peer,
-                                                                    forge::p2p::rendezvous::discover_request{
+                                                                    forge::net::p2p::rendezvous::discover_request{
                                                                         .namespace_name =
                                                                             std::string{rendezvous_namespace},
                                                                         .limit = 10,
@@ -767,7 +767,7 @@ std::string run_scenario(forge::asio::runtime& runtime, forge::p2p::node& value,
    if (scenario == "gossipsub_publish" || scenario == "gossipsub_mixed_mesh_stress") {
       prepare_pubsub_publisher(runtime, value);
       const auto message = forge::asio::blocking::run(runtime, value.async_publish(
-                                                                forge::p2p::pubsub::topic{
+                                                                forge::net::p2p::pubsub::topic{
                                                                     .value = std::string{pubsub_topic},
                                                                 },
                                                                 std::vector<std::uint8_t>{
@@ -780,8 +780,8 @@ std::string run_scenario(forge::asio::runtime& runtime, forge::p2p::node& value,
    if (scenario == "echo") {
       auto stream = forge::asio::blocking::run(runtime, value.async_open_protocol_stream(
                                                          peer,
-                                                         forge::p2p::protocol_id{.value = std::string{echo_protocol}},
-                                                         forge::p2p::node::open_options{.allow_relay = false,
+                                                         forge::net::p2p::protocol_id{.value = std::string{echo_protocol}},
+                                                         forge::net::p2p::node::open_options{.allow_relay = false,
                                                                                       .allow_hole_punch = false}));
       const auto bytes = std::vector<std::uint8_t>{payload.begin(), payload.end()};
       forge::asio::blocking::run(runtime, stream.async_write(wrap_length_delimited(bytes)));
@@ -799,11 +799,11 @@ std::string run_scenario(forge::asio::runtime& runtime, forge::p2p::node& value,
    if (scenario == "unknown_protocol") {
       try {
          (void)forge::asio::blocking::run(runtime, value.async_open_protocol_stream(
-                                                     peer, forge::p2p::protocol_id{.value = "/forge/interop/unknown/1"},
-                                                     forge::p2p::node::open_options{.allow_relay = false,
+                                                     peer, forge::net::p2p::protocol_id{.value = "/forge/interop/unknown/1"},
+                                                     forge::net::p2p::node::open_options{.allow_relay = false,
                                                                                   .allow_hole_punch = false}));
       } catch (const forge::exceptions::base& error) {
-         if (forge::p2p::exceptions::code_of(error).value() != forge::p2p::exceptions::code::unsupported_protocol) {
+         if (forge::net::p2p::exceptions::code_of(error).value() != forge::net::p2p::exceptions::code::unsupported_protocol) {
             throw;
          }
          return "\"expected_error\":\"" + json_escape(error.what()) + "\"";
@@ -815,27 +815,27 @@ std::string run_scenario(forge::asio::runtime& runtime, forge::p2p::node& value,
 
 int dial_mode(const std::map<std::string, std::string>& args) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
-   auto value = forge::p2p::node{runtime, node_options(required(args, "store-dir"))};
+   auto value = forge::net::p2p::node{runtime, node_options(required(args, "store-dir"))};
    forge::asio::blocking::run(runtime, value.async_listen(loopback_quic_endpoint()));
 
-   auto remote = forge::p2p::parse_endpoint(required(args, "addr"));
-   auto peer = forge::p2p::peer_id::from_string(required(args, "peer-id"));
+   auto remote = forge::net::p2p::parse_endpoint(required(args, "addr"));
+   auto peer = forge::net::p2p::peer_id::from_string(required(args, "peer-id"));
    value.peers().learn_endpoint(peer, remote,
-                                forge::p2p::capability_set{.bits = forge::p2p::capabilities::direct_quic |
-                                                                 forge::p2p::capabilities::peer_exchange |
-                                                                 forge::p2p::capabilities::autonat |
-                                                                 forge::p2p::capabilities::relay |
-                                                                 forge::p2p::capabilities::hole_punching |
-                                                                 forge::p2p::capabilities::relay_reservation |
-                                                                 forge::p2p::capabilities::dht |
-                                                                  forge::p2p::capabilities::rendezvous |
-                                                                  forge::p2p::capabilities::pubsub});
+                                forge::net::p2p::capability_set{.bits = forge::net::p2p::capabilities::direct_quic |
+                                                                 forge::net::p2p::capabilities::peer_exchange |
+                                                                 forge::net::p2p::capabilities::autonat |
+                                                                 forge::net::p2p::capabilities::relay |
+                                                                 forge::net::p2p::capabilities::hole_punching |
+                                                                 forge::net::p2p::capabilities::relay_reservation |
+                                                                 forge::net::p2p::capabilities::dht |
+                                                                  forge::net::p2p::capabilities::rendezvous |
+                                                                  forge::net::p2p::capabilities::pubsub});
 
    const auto scenario = required(args, "scenario");
    if (scenario == "gossipsub_publish" || scenario == "gossipsub_mixed_mesh_stress") {
       (void)forge::asio::blocking::run(
           runtime, value.async_connect(remote,
-                                       forge::p2p::node::connect_options{.expected_peer = peer,
+                                       forge::net::p2p::node::connect_options{.expected_peer = peer,
                                                                        .allow_relay = false,
                                                                        .allow_hole_punch = false}));
    }
@@ -850,25 +850,25 @@ int dial_mode(const std::map<std::string, std::string>& args) {
 
 int dial_relay_mode(const std::map<std::string, std::string>& args) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
-   auto value = forge::p2p::node{runtime, node_options(required(args, "store-dir"))};
+   auto value = forge::net::p2p::node{runtime, node_options(required(args, "store-dir"))};
    forge::asio::blocking::run(runtime, value.async_listen(loopback_quic_endpoint()));
 
-   const auto relay_addr = forge::p2p::parse_endpoint(required(args, "relay-addr"));
-   const auto relay_peer = forge::p2p::peer_id::from_string(required(args, "relay-peer-id"));
-   const auto target_peer = forge::p2p::peer_id::from_string(required(args, "peer-id"));
+   const auto relay_addr = forge::net::p2p::parse_endpoint(required(args, "relay-addr"));
+   const auto relay_peer = forge::net::p2p::peer_id::from_string(required(args, "relay-peer-id"));
+   const auto target_peer = forge::net::p2p::peer_id::from_string(required(args, "peer-id"));
    value.peers().learn_endpoint(relay_peer, relay_addr,
-                                forge::p2p::capability_set{.bits = forge::p2p::capabilities::direct_quic |
-                                                                 forge::p2p::capabilities::relay |
-                                                                 forge::p2p::capabilities::relay_reservation |
-                                                                 forge::p2p::capabilities::hole_punching});
+                                forge::net::p2p::capability_set{.bits = forge::net::p2p::capabilities::direct_quic |
+                                                                 forge::net::p2p::capabilities::relay |
+                                                                 forge::net::p2p::capabilities::relay_reservation |
+                                                                 forge::net::p2p::capabilities::hole_punching});
 
-   auto status = forge::p2p::hole_punch::status::failed;
+   auto status = forge::net::p2p::hole_punch::status::failed;
    auto relay_echo = false;
    if (required(args, "scenario") == "relay_echo_topology") {
       auto stream = forge::asio::blocking::run(runtime, value.async_open_protocol_stream(
                                                          target_peer,
-                                                         forge::p2p::protocol_id{.value = std::string{echo_protocol}},
-                                                         forge::p2p::node::open_options{
+                                                         forge::net::p2p::protocol_id{.value = std::string{echo_protocol}},
+                                                         forge::net::p2p::node::open_options{
                                                              .allow_relay = true,
                                                              .relay_peer = relay_peer,
                                                              .timeout = 15s,
@@ -883,7 +883,7 @@ int dial_relay_mode(const std::map<std::string, std::string>& args) {
       relay_echo = true;
    } else {
       status = forge::asio::blocking::run(runtime, value.async_attempt_hole_punch(target_peer, relay_peer, 15s));
-      relay_echo = status == forge::p2p::hole_punch::status::succeeded;
+      relay_echo = status == forge::net::p2p::hole_punch::status::succeeded;
    }
    const auto metrics = value.metrics();
    forge::asio::blocking::run(runtime, value.async_stop());
@@ -902,7 +902,7 @@ int dial_relay_mode(const std::map<std::string, std::string>& args) {
                   std::string{relay_echo ? "true" : "false"} + ",\"relay_bytes\":" +
                   std::to_string(metrics.relay_bytes) + "}\n");
    if (required(args, "scenario") == "dcutr_relay_topology" &&
-       status != forge::p2p::hole_punch::status::succeeded) {
+       status != forge::net::p2p::hole_punch::status::succeeded) {
       throw std::runtime_error{"FORGE relay topology DCUtR did not succeed"};
    }
    return 0;
@@ -918,20 +918,20 @@ int topology_mode(const std::map<std::string, std::string>& args) {
    const auto destination_identity = generate_libp2p_identity();
 
    auto relay_options = node_options(root / "relay-store", relay_identity);
-   relay_options.capabilities = forge::p2p::capability_set{
-       .bits = forge::p2p::capabilities::direct_quic | forge::p2p::capabilities::relay |
-               forge::p2p::capabilities::relay_reservation | forge::p2p::capabilities::hole_punching};
+   relay_options.capabilities = forge::net::p2p::capability_set{
+       .bits = forge::net::p2p::capabilities::direct_quic | forge::net::p2p::capabilities::relay |
+               forge::net::p2p::capabilities::relay_reservation | forge::net::p2p::capabilities::hole_punching};
    auto source_options = node_options(root / "source-store", source_identity);
-   source_options.capabilities = forge::p2p::capability_set{
-       .bits = forge::p2p::capabilities::direct_quic | forge::p2p::capabilities::hole_punching};
+   source_options.capabilities = forge::net::p2p::capability_set{
+       .bits = forge::net::p2p::capabilities::direct_quic | forge::net::p2p::capabilities::hole_punching};
    auto destination_options = node_options(root / "destination-store", destination_identity);
-   destination_options.capabilities = forge::p2p::capability_set{
-       .bits = forge::p2p::capabilities::direct_quic | forge::p2p::capabilities::relay_reservation |
-               forge::p2p::capabilities::hole_punching};
+   destination_options.capabilities = forge::net::p2p::capability_set{
+       .bits = forge::net::p2p::capabilities::direct_quic | forge::net::p2p::capabilities::relay_reservation |
+               forge::net::p2p::capabilities::hole_punching};
 
-   auto relay = forge::p2p::node{runtime, std::move(relay_options)};
-   auto source = forge::p2p::node{runtime, std::move(source_options)};
-   auto destination = forge::p2p::node{runtime, std::move(destination_options)};
+   auto relay = forge::net::p2p::node{runtime, std::move(relay_options)};
+   auto source = forge::net::p2p::node{runtime, std::move(source_options)};
+   auto destination = forge::net::p2p::node{runtime, std::move(destination_options)};
    register_echo(destination);
 
    forge::asio::blocking::run(runtime, relay.async_listen(loopback_quic_endpoint()));
@@ -946,22 +946,22 @@ int topology_mode(const std::map<std::string, std::string>& args) {
    }
 
    source.peers().learn_endpoint(relay.local_peer(), *relay_endpoint,
-                                 forge::p2p::capability_set{.bits = forge::p2p::capabilities::direct_quic |
-                                                                  forge::p2p::capabilities::relay |
-                                                                  forge::p2p::capabilities::relay_reservation});
+                                 forge::net::p2p::capability_set{.bits = forge::net::p2p::capabilities::direct_quic |
+                                                                  forge::net::p2p::capabilities::relay |
+                                                                  forge::net::p2p::capabilities::relay_reservation});
    destination.peers().learn_endpoint(relay.local_peer(), *relay_endpoint,
-                                      forge::p2p::capability_set{.bits = forge::p2p::capabilities::direct_quic |
-                                                                       forge::p2p::capabilities::relay |
-                                                                       forge::p2p::capabilities::relay_reservation});
+                                      forge::net::p2p::capability_set{.bits = forge::net::p2p::capabilities::direct_quic |
+                                                                       forge::net::p2p::capabilities::relay |
+                                                                       forge::net::p2p::capabilities::relay_reservation});
 
    const auto reservation = forge::asio::blocking::run(runtime, destination.async_reserve_relay(relay.local_peer()));
-   auto status = forge::p2p::hole_punch::status::failed;
+   auto status = forge::net::p2p::hole_punch::status::failed;
    auto relay_echo = false;
    if (required(args, "scenario") == "relay_echo_topology") {
       auto stream = forge::asio::blocking::run(runtime, source.async_open_protocol_stream(
                                                          destination.local_peer(),
-                                                         forge::p2p::protocol_id{.value = std::string{echo_protocol}},
-                                                         forge::p2p::node::open_options{
+                                                         forge::net::p2p::protocol_id{.value = std::string{echo_protocol}},
+                                                         forge::net::p2p::node::open_options{
                                                              .allow_relay = true,
                                                              .relay_peer = relay.local_peer(),
                                                              .timeout = 10s,
@@ -976,7 +976,7 @@ int topology_mode(const std::map<std::string, std::string>& args) {
    } else {
       status = forge::asio::blocking::run(
           runtime, source.async_attempt_hole_punch(destination.local_peer(), relay.local_peer(), 10s));
-      relay_echo = status == forge::p2p::hole_punch::status::succeeded;
+      relay_echo = status == forge::net::p2p::hole_punch::status::succeeded;
    }
 
    const auto source_metrics = source.metrics();

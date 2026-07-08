@@ -18,7 +18,7 @@ target_include_directories(
 
 target_link_libraries(
    forge_plugins_db_rocksdb PUBLIC
-      forge_api
+      forge_api_core
       forge_app
       forge_asio
       forge_config
