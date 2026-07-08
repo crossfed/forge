@@ -152,7 +152,22 @@ boost::asio::awaitable<stat> transaction::stat_blob_encoded(std::string algorith
    };
 }
 
-boost::asio::awaitable<void> transaction::erase_encoded(std::string algorithm, std::vector<std::byte> digest) {
+boost::asio::awaitable<void> transaction::erase_encoded(std::string algorithm,
+                                                        std::vector<std::byte> digest,
+                                                        std::uint64_t size) {
+   require_encoded_ref(algorithm, digest);
+   auto key = detail::data_key(algorithm, digest);
+   auto bytes = co_await impl_->transaction().get(impl_->data_family, key);
+   if (!bytes.has_value()) {
+      co_return;
+   }
+   if (bytes->size() != size) {
+      FORGE_THROW_EXCEPTION(exceptions::digest_mismatch, "blob size does not match reference");
+   }
+   co_await impl_->transaction().erase(impl_->data_family, std::move(key));
+}
+
+boost::asio::awaitable<void> transaction::erase_stored_encoded(std::string algorithm, std::vector<std::byte> digest) {
    require_encoded_ref(algorithm, digest);
    co_await impl_->transaction().erase(impl_->data_family, detail::data_key(algorithm, digest));
 }
@@ -211,7 +226,7 @@ boost::asio::awaitable<collect_result> transaction::collect_unreferenced(collect
       for (const auto& entry : page.entries) {
          auto key_ref = ref_from_data_key(entry.key);
          if ((co_await ref_count_encoded(key_ref.algorithm, key_ref.digest)) == 0) {
-            co_await erase_encoded(std::move(key_ref.algorithm), std::move(key_ref.digest));
+            co_await erase_stored_encoded(std::move(key_ref.algorithm), std::move(key_ref.digest));
             ++result.removed;
             if (result.removed >= options.limit) {
                break;

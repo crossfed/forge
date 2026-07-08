@@ -485,6 +485,9 @@ BOOST_AUTO_TEST_CASE(db_blob_put_returns_default_ref_and_default_operations_use_
       BOOST_CHECK_THROW(co_await blobs.stat_blob(wrong_size), forge::db::blob::exceptions::digest_mismatch);
       BOOST_CHECK_THROW(co_await blobs.get(wrong_size), forge::db::blob::exceptions::digest_mismatch);
       BOOST_CHECK_THROW(co_await blobs.verify(wrong_size), forge::db::blob::exceptions::digest_mismatch);
+      BOOST_CHECK_THROW(co_await blobs.erase(wrong_size), forge::db::blob::exceptions::digest_mismatch);
+      BOOST_CHECK(co_await blobs.has(ref));
+      BOOST_CHECK_EQUAL(text(co_await blobs.get(ref)), "alpha");
 
       auto wrong = ref;
       wrong.digest = forge::db::blob::hash<forge::db::blob::digest>{}(bytes("wrong"));
