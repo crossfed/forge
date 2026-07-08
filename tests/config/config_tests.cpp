@@ -9,12 +9,12 @@
 #include <optional>
 #include <vector>
 
-import forge.config.key_path;
-import forge.config.value;
-import forge.config.document;
-import forge.config.component;
-import forge.config.decode;
-import forge.config.migration;
+import forge.config.core.key_path;
+import forge.config.core.value;
+import forge.config.core.document;
+import forge.config.core.component;
+import forge.config.core.decode;
+import forge.config.core.migration;
 import forge.schema.diagnostic;
 import forge.schema.value_kind;
 import forge.schema.object;
@@ -181,28 +181,28 @@ template <> struct forge::schema::rules<string_shorthand_list_config> {
 }
 
 BOOST_AUTO_TEST_CASE(config_key_path_splits_dotted_keys) {
-   auto segments = forge::config::key_path{.value = "http.bind-port"}.segments();
+   auto segments = forge::config::core::key_path{.value = "http.bind-port"}.segments();
    BOOST_REQUIRE_EQUAL(segments.size(), 2U);
    BOOST_TEST(segments[0] == "http");
    BOOST_TEST(segments[1] == "bind-port");
 
-   auto compacted = forge::config::key_path{.value = ".http..tls-enabled."}.segments();
+   auto compacted = forge::config::core::key_path{.value = ".http..tls-enabled."}.segments();
    BOOST_REQUIRE_EQUAL(compacted.size(), 2U);
    BOOST_TEST(compacted[0] == "http");
    BOOST_TEST(compacted[1] == "tls-enabled");
 }
 
 BOOST_AUTO_TEST_CASE(config_document_paths_merge_and_decode) {
-   auto defaults = forge::config::defaults_for<http_config>("http");
-   auto file = forge::config::document{};
+   auto defaults = forge::config::core::defaults_for<http_config>("http");
+   auto file = forge::config::core::document{};
    file.set("http.bind-port", 8081);
-   auto cli = forge::config::document{};
+   auto cli = forge::config::core::document{};
    cli.set("http.bind-port", 9090);
    cli.set("http.tls-enabled", false);
-   cli.set("http.tags", forge::config::value::array_type{forge::config::value{"alpha"}, forge::config::value{"beta"}});
+   cli.set("http.tags", forge::config::core::value::array_type{forge::config::core::value{"alpha"}, forge::config::core::value{"beta"}});
 
-   const auto merged = forge::config::merge({defaults, file, cli});
-   const auto decoded = forge::config::decode<http_config>(merged, "http");
+   const auto merged = forge::config::core::merge({defaults, file, cli});
+   const auto decoded = forge::config::core::decode<http_config>(merged, "http");
    BOOST_TEST(decoded.ok());
    BOOST_TEST(decoded.value.bind_port == 9090U);
    BOOST_TEST(decoded.value.bind_host == "127.0.0.1");
@@ -212,12 +212,12 @@ BOOST_AUTO_TEST_CASE(config_document_paths_merge_and_decode) {
 }
 
 BOOST_AUTO_TEST_CASE(config_optional_defaults_export_and_decode_consistently) {
-   const auto descriptor = forge::config::describe_component<optional_default_config>("http");
+   const auto descriptor = forge::config::core::describe_component<optional_default_config>("http");
    BOOST_REQUIRE_EQUAL(descriptor.fields.size(), 2U);
    BOOST_TEST(std::get<std::uint64_t>(descriptor.fields[0].default_value.storage) == 443U);
    BOOST_TEST(std::get<std::uint64_t>(descriptor.fields[1].default_value.storage) == 8443U);
 
-   const auto defaults = forge::config::defaults_for<optional_default_config>("http");
+   const auto defaults = forge::config::core::defaults_for<optional_default_config>("http");
    const auto* wrapped = defaults.try_get("http.wrapped-port");
    const auto* raw = defaults.try_get("http.raw-port");
    BOOST_REQUIRE(wrapped != nullptr);
@@ -225,7 +225,7 @@ BOOST_AUTO_TEST_CASE(config_optional_defaults_export_and_decode_consistently) {
    BOOST_TEST(std::get<std::uint64_t>(wrapped->storage) == 443U);
    BOOST_TEST(std::get<std::uint64_t>(raw->storage) == 8443U);
 
-   const auto decoded = forge::config::decode<optional_default_config>(defaults, "http");
+   const auto decoded = forge::config::core::decode<optional_default_config>(defaults, "http");
    BOOST_REQUIRE(decoded.ok());
    BOOST_REQUIRE(decoded.value.wrapped_port.has_value());
    BOOST_TEST(*decoded.value.wrapped_port == 443U);
@@ -234,25 +234,25 @@ BOOST_AUTO_TEST_CASE(config_optional_defaults_export_and_decode_consistently) {
 }
 
 BOOST_AUTO_TEST_CASE(config_decode_rejects_integer_overflow_before_range_validation) {
-   auto numeric = forge::config::document{};
+   auto numeric = forge::config::core::document{};
    numeric.set("http.bind-port", 70000);
-   const auto decoded_numeric = forge::config::decode<http_config>(numeric, "http");
+   const auto decoded_numeric = forge::config::core::decode<http_config>(numeric, "http");
 
    BOOST_TEST(!decoded_numeric.ok());
    BOOST_TEST(has_diagnostic(decoded_numeric.diagnostics.entries, "http.bind-port", "config.type"));
    BOOST_TEST(decoded_numeric.value.bind_port == 8080U);
 
-   auto text = forge::config::document{};
+   auto text = forge::config::core::document{};
    text.set("http.bind-port", std::string{"70000"});
-   const auto decoded_text = forge::config::decode<http_config>(text, "http");
+   const auto decoded_text = forge::config::core::decode<http_config>(text, "http");
 
    BOOST_TEST(!decoded_text.ok());
    BOOST_TEST(has_diagnostic(decoded_text.diagnostics.entries, "http.bind-port", "config.type"));
    BOOST_TEST(decoded_text.value.bind_port == 8080U);
 
-   auto trailing = forge::config::document{};
+   auto trailing = forge::config::core::document{};
    trailing.set("http.bind-port", std::string{"123abc"});
-   const auto decoded_trailing = forge::config::decode<http_config>(trailing, "http");
+   const auto decoded_trailing = forge::config::core::decode<http_config>(trailing, "http");
 
    BOOST_TEST(!decoded_trailing.ok());
    BOOST_TEST(has_diagnostic(decoded_trailing.diagnostics.entries, "http.bind-port", "config.type"));
@@ -277,34 +277,34 @@ BOOST_AUTO_TEST_CASE(schema_scalar_text_codec_is_shared_and_checked) {
 
 BOOST_AUTO_TEST_CASE(config_value_to_any_rejects_integer_overflow_and_trailing_junk) {
    BOOST_CHECK_THROW(
-      static_cast<void>(forge::config::value_to_any(
-         forge::config::value{std::numeric_limits<std::uint64_t>::max()},
+      static_cast<void>(forge::config::core::value_to_any(
+         forge::config::core::value{std::numeric_limits<std::uint64_t>::max()},
          forge::schema::value_kind::signed_integer)),
       std::invalid_argument);
 
    BOOST_CHECK_THROW(
-      static_cast<void>(forge::config::value_to_any(forge::config::value{std::string{"123abc"}},
+      static_cast<void>(forge::config::core::value_to_any(forge::config::core::value{std::string{"123abc"}},
                                                  forge::schema::value_kind::signed_integer)),
       std::invalid_argument);
 
    BOOST_CHECK_THROW(
-      static_cast<void>(forge::config::value_to_any(forge::config::value{std::int64_t{-1}},
+      static_cast<void>(forge::config::core::value_to_any(forge::config::core::value{std::int64_t{-1}},
                                                  forge::schema::value_kind::unsigned_integer)),
       std::invalid_argument);
 
    BOOST_CHECK_THROW(
-      static_cast<void>(forge::config::value_to_any(forge::config::value{std::string{"123abc"}},
+      static_cast<void>(forge::config::core::value_to_any(forge::config::core::value{std::string{"123abc"}},
                                                  forge::schema::value_kind::unsigned_integer)),
       std::invalid_argument);
 
-   const auto valid = forge::config::value_to_any(forge::config::value{std::string{"123"}},
+   const auto valid = forge::config::core::value_to_any(forge::config::core::value{std::string{"123"}},
                                                 forge::schema::value_kind::unsigned_integer);
    BOOST_REQUIRE(valid.has_value());
    BOOST_TEST(std::any_cast<std::uint64_t>(valid) == 123U);
 }
 
 BOOST_AUTO_TEST_CASE(config_document_erase_and_rename_nested_keys) {
-   auto doc = forge::config::document{};
+   auto doc = forge::config::core::document{};
    doc.set("http.bind-port", 8080);
    doc.set("http.host", "127.0.0.1");
    doc.set("legacy.timeout", 30);
@@ -328,40 +328,40 @@ BOOST_AUTO_TEST_CASE(config_document_erase_and_rename_nested_keys) {
 }
 
 BOOST_AUTO_TEST_CASE(config_reports_required_unknown_deprecated_and_redacts) {
-   auto doc = forge::config::document{};
+   auto doc = forge::config::core::document{};
    doc.set("http.bind-host", "127.0.0.1");
    doc.set("http.token", "secret-value");
    doc.set("http.extra", "ignored");
 
-   const auto decoded = forge::config::decode<http_config>(doc, "http");
+   const auto decoded = forge::config::core::decode<http_config>(doc, "http");
    BOOST_TEST(!decoded.ok());
    BOOST_TEST(decoded.diagnostics.entries.size() >= 3U);
 
-   auto registry = forge::config::component_registry{};
-   registry.add(forge::config::describe_component<http_config>("http"));
-   auto redacted = forge::config::redact(doc, registry);
+   auto registry = forge::config::core::component_registry{};
+   registry.add(forge::config::core::describe_component<http_config>("http"));
+   auto redacted = forge::config::core::redact(doc, registry);
    const auto* token = redacted.try_get("http.token");
    BOOST_REQUIRE(token != nullptr);
    BOOST_TEST(std::get<std::string>(token->storage) == "<redacted>");
 }
 
 BOOST_AUTO_TEST_CASE(config_registry_rejects_duplicate_aliases) {
-   auto registry = forge::config::component_registry{};
-   registry.add(forge::config::describe_component<http_config>("http"));
-   BOOST_CHECK_THROW(registry.add(forge::config::describe_component<http_config>("http")), std::invalid_argument);
+   auto registry = forge::config::core::component_registry{};
+   registry.add(forge::config::core::describe_component<http_config>("http"));
+   BOOST_CHECK_THROW(registry.add(forge::config::core::describe_component<http_config>("http")), std::invalid_argument);
 }
 
 BOOST_AUTO_TEST_CASE(config_registry_supports_empty_component_sections) {
-   auto registry = forge::config::component_registry{};
-   registry.add(forge::config::describe_component<flat_config>(""));
+   auto registry = forge::config::core::component_registry{};
+   registry.add(forge::config::core::describe_component<flat_config>(""));
 
-   auto doc = forge::config::document{};
+   auto doc = forge::config::core::document{};
    doc.set("log-level", "debug");
 
-   const auto view = forge::config::component_view{doc, ""};
+   const auto view = forge::config::core::component_view{doc, ""};
    BOOST_TEST(view.get_or<std::string>("log-level", "info") == "debug");
 
-   const auto decoded = forge::config::decode<flat_config>(doc);
+   const auto decoded = forge::config::core::decode<flat_config>(doc);
    BOOST_TEST(decoded.ok());
    BOOST_TEST(decoded.value.log_level == "debug");
    BOOST_REQUIRE_EQUAL(registry.components().front().fields.size(), 1U);
@@ -369,27 +369,27 @@ BOOST_AUTO_TEST_CASE(config_registry_supports_empty_component_sections) {
 }
 
 BOOST_AUTO_TEST_CASE(config_component_view_rejects_integer_overflow) {
-   auto doc = forge::config::document{};
+   auto doc = forge::config::core::document{};
    doc.set("http.small", std::uint64_t{70000});
    doc.set("http.negative", std::int64_t{-1});
 
-   const auto view = forge::config::component_view{doc, "http"};
+   const auto view = forge::config::core::component_view{doc, "http"};
    BOOST_CHECK_THROW(static_cast<void>(view.get_or<std::uint16_t>("small", 0)), std::invalid_argument);
    BOOST_CHECK_THROW(static_cast<void>(view.get_or<std::uint16_t>("negative", 0)), std::invalid_argument);
    BOOST_TEST(view.get_or<std::uint16_t>("missing", 42) == 42U);
 }
 
 BOOST_AUTO_TEST_CASE(config_decodes_nested_object_lists_with_item_defaults_and_paths) {
-   auto key = forge::config::value::object_type{};
-   key["id"] = forge::config::value{"provider"};
-   key["private-key"] = forge::config::value{"PVT_FAKE"};
-   key["purposes"] = forge::config::value::array_type{forge::config::value{"storage.receipt"}};
-   key["unknown"] = forge::config::value{"ignored"};
+   auto key = forge::config::core::value::object_type{};
+   key["id"] = forge::config::core::value{"provider"};
+   key["private-key"] = forge::config::core::value{"PVT_FAKE"};
+   key["purposes"] = forge::config::core::value::array_type{forge::config::core::value{"storage.receipt"}};
+   key["unknown"] = forge::config::core::value{"ignored"};
 
-   auto doc = forge::config::document{};
-   doc.set("plugins.crypto.signer.keys", forge::config::value::array_type{forge::config::value{key}});
+   auto doc = forge::config::core::document{};
+   doc.set("plugins.crypto.signer.keys", forge::config::core::value::array_type{forge::config::core::value{key}});
 
-   const auto decoded = forge::config::decode<nested_signer_config>(doc, "plugins.crypto.signer");
+   const auto decoded = forge::config::core::decode<nested_signer_config>(doc, "plugins.crypto.signer");
    BOOST_TEST(decoded.ok());
    BOOST_REQUIRE_EQUAL(decoded.value.keys.size(), 1U);
    BOOST_TEST(decoded.value.keys.front().id == "provider");
@@ -400,28 +400,28 @@ BOOST_AUTO_TEST_CASE(config_decodes_nested_object_lists_with_item_defaults_and_p
 }
 
 BOOST_AUTO_TEST_CASE(config_nested_object_list_validators_report_stable_diagnostics) {
-   auto invalid = forge::config::value::object_type{};
-   invalid["id"] = forge::config::value{""};
-   invalid["private-key"] = forge::config::value{""};
-   invalid["purposes"] = forge::config::value::array_type{forge::config::value{""}};
+   auto invalid = forge::config::core::value::object_type{};
+   invalid["id"] = forge::config::core::value{""};
+   invalid["private-key"] = forge::config::core::value{""};
+   invalid["purposes"] = forge::config::core::value::array_type{forge::config::core::value{""}};
 
-   auto duplicate = forge::config::value::object_type{};
-   duplicate["id"] = forge::config::value{"duplicate"};
-   duplicate["private-key"] = forge::config::value{"PVT_ONE"};
-   duplicate["purposes"] = forge::config::value::array_type{forge::config::value{"storage.receipt"}};
+   auto duplicate = forge::config::core::value::object_type{};
+   duplicate["id"] = forge::config::core::value{"duplicate"};
+   duplicate["private-key"] = forge::config::core::value{"PVT_ONE"};
+   duplicate["purposes"] = forge::config::core::value::array_type{forge::config::core::value{"storage.receipt"}};
 
    auto duplicate_two = duplicate;
-   duplicate_two["private-key"] = forge::config::value{"PVT_TWO"};
+   duplicate_two["private-key"] = forge::config::core::value{"PVT_TWO"};
 
-   auto doc = forge::config::document{};
+   auto doc = forge::config::core::document{};
    doc.set("plugins.crypto.signer.keys",
-           forge::config::value::array_type{
-              forge::config::value{invalid},
-              forge::config::value{duplicate},
-              forge::config::value{duplicate_two},
+           forge::config::core::value::array_type{
+              forge::config::core::value{invalid},
+              forge::config::core::value{duplicate},
+              forge::config::core::value{duplicate_two},
            });
 
-   const auto decoded = forge::config::decode<nested_signer_config>(doc, "plugins.crypto.signer");
+   const auto decoded = forge::config::core::decode<nested_signer_config>(doc, "plugins.crypto.signer");
    BOOST_TEST(!decoded.ok());
    BOOST_TEST(has_diagnostic(decoded.diagnostics.entries, "plugins.crypto.signer.keys[0].id", "schema.non_empty"));
    BOOST_TEST(has_diagnostic(decoded.diagnostics.entries, "plugins.crypto.signer.keys[0].private-key",
@@ -432,27 +432,27 @@ BOOST_AUTO_TEST_CASE(config_nested_object_list_validators_report_stable_diagnost
 }
 
 BOOST_AUTO_TEST_CASE(config_string_shorthand_object_list_entries_run_nested_validation) {
-   auto doc = forge::config::document{};
-   doc.set("test.items", forge::config::value::array_type{forge::config::value{""}});
+   auto doc = forge::config::core::document{};
+   doc.set("test.items", forge::config::core::value::array_type{forge::config::core::value{""}});
 
-   const auto decoded = forge::config::decode<string_shorthand_list_config>(doc, "test");
+   const auto decoded = forge::config::core::decode<string_shorthand_list_config>(doc, "test");
    BOOST_TEST(!decoded.ok());
    BOOST_TEST(has_diagnostic(decoded.diagnostics.entries, "test.items[0].name", "schema.non_empty"));
 }
 
 BOOST_AUTO_TEST_CASE(config_formats_full_decode_diagnostics) {
-   auto invalid = forge::config::value::object_type{};
-   invalid["id"] = forge::config::value{""};
-   invalid["private-key"] = forge::config::value{""};
-   invalid["purposes"] = forge::config::value::array_type{forge::config::value{""}};
+   auto invalid = forge::config::core::value::object_type{};
+   invalid["id"] = forge::config::core::value{""};
+   invalid["private-key"] = forge::config::core::value{""};
+   invalid["purposes"] = forge::config::core::value::array_type{forge::config::core::value{""}};
 
-   auto doc = forge::config::document{};
-   doc.set("plugins.crypto.signer.keys", forge::config::value::array_type{forge::config::value{invalid}});
+   auto doc = forge::config::core::document{};
+   doc.set("plugins.crypto.signer.keys", forge::config::core::value::array_type{forge::config::core::value{invalid}});
 
-   const auto decoded = forge::config::decode<nested_signer_config>(doc, "plugins.crypto.signer");
+   const auto decoded = forge::config::core::decode<nested_signer_config>(doc, "plugins.crypto.signer");
    BOOST_TEST(!decoded.ok());
 
-   const auto message = forge::config::format_decode_diagnostics("invalid crypto signer config",
+   const auto message = forge::config::core::format_decode_diagnostics("invalid crypto signer config",
                                                                decoded.diagnostics);
    BOOST_TEST(message.find("invalid crypto signer config") != std::string::npos);
    BOOST_TEST(message.find("plugins.crypto.signer.keys[0].id schema.non_empty") != std::string::npos);
@@ -461,7 +461,7 @@ BOOST_AUTO_TEST_CASE(config_formats_full_decode_diagnostics) {
 }
 
 BOOST_AUTO_TEST_CASE(config_describes_secret_object_list_without_nested_env_fields) {
-   const auto descriptor = forge::config::describe_component<nested_signer_config>("plugins.crypto.signer");
+   const auto descriptor = forge::config::core::describe_component<nested_signer_config>("plugins.crypto.signer");
    BOOST_REQUIRE_EQUAL(descriptor.fields.size(), 2U);
    BOOST_TEST(descriptor.fields[0].name == "keys");
    BOOST_TEST(static_cast<int>(descriptor.fields[0].kind) == static_cast<int>(forge::schema::value_kind::object_list));
@@ -471,7 +471,7 @@ BOOST_AUTO_TEST_CASE(config_describes_secret_object_list_without_nested_env_fiel
 
 BOOST_AUTO_TEST_CASE(config_describes_object_list_default_values) {
    const auto descriptor =
-      forge::config::describe_component<defaulted_nested_signer_config>("plugins.crypto.signer");
+      forge::config::core::describe_component<defaulted_nested_signer_config>("plugins.crypto.signer");
    BOOST_REQUIRE_EQUAL(descriptor.fields.size(), 1U);
    BOOST_TEST(descriptor.fields[0].has_default);
 
@@ -485,8 +485,8 @@ BOOST_AUTO_TEST_CASE(config_describes_object_list_default_values) {
    BOOST_TEST(std::get<std::string>(first->at("private-key").storage) == "PVT_DEFAULT");
    BOOST_TEST(std::get<std::string>(first->at("input-profile").storage) == "forge");
 
-   const auto document = forge::config::defaults_for<defaulted_nested_signer_config>("plugins.crypto.signer");
-   const auto decoded = forge::config::decode<defaulted_nested_signer_config>(document, "plugins.crypto.signer");
+   const auto document = forge::config::core::defaults_for<defaulted_nested_signer_config>("plugins.crypto.signer");
+   const auto decoded = forge::config::core::decode<defaulted_nested_signer_config>(document, "plugins.crypto.signer");
    BOOST_TEST(decoded.ok());
    BOOST_REQUIRE_EQUAL(decoded.value.keys.size(), 1U);
    BOOST_TEST(decoded.value.keys.front().id == "default");
@@ -497,18 +497,18 @@ BOOST_AUTO_TEST_CASE(config_describes_object_list_default_values) {
 }
 
 BOOST_AUTO_TEST_CASE(config_migration_chain_updates_document_version) {
-   auto doc = forge::config::document{};
+   auto doc = forge::config::core::document{};
    doc.set("http.port", 8080);
 
-   auto plan = forge::config::migration_plan{};
-   plan.step(0, 1, "rename port", [](forge::config::document& input) {
+   auto plan = forge::config::core::migration_plan{};
+   plan.step(0, 1, "rename port", [](forge::config::core::document& input) {
       static_cast<void>(input.rename("http.port", "http.bind-port"));
    });
-   plan.step(1, 2, "add host", [](forge::config::document& input) {
+   plan.step(1, 2, "add host", [](forge::config::core::document& input) {
       input.set("http.bind-host", "127.0.0.1");
    });
 
-   const auto migrated = forge::config::migrate(std::move(doc), plan);
+   const auto migrated = forge::config::core::migrate(std::move(doc), plan);
    BOOST_TEST(migrated.ok());
    BOOST_TEST(migrated.from_version == 0U);
    BOOST_TEST(migrated.to_version == 2U);
@@ -521,18 +521,18 @@ BOOST_AUTO_TEST_CASE(config_migration_chain_updates_document_version) {
 }
 
 BOOST_AUTO_TEST_CASE(config_migration_reports_missing_and_future_versions) {
-   auto plan = forge::config::migration_plan{};
-   plan.step(0, 1, "first", [](forge::config::document&) {});
-   plan.step(2, 3, "gap", [](forge::config::document&) {});
+   auto plan = forge::config::core::migration_plan{};
+   plan.step(0, 1, "first", [](forge::config::core::document&) {});
+   plan.step(2, 3, "gap", [](forge::config::core::document&) {});
 
-   auto missing = forge::config::migrate(forge::config::document{}, plan);
+   auto missing = forge::config::core::migrate(forge::config::core::document{}, plan);
    BOOST_TEST(!missing.ok());
    BOOST_REQUIRE_EQUAL(missing.diagnostics.size(), 1U);
    BOOST_TEST(missing.diagnostics.front().code == "config.migration.missing-step");
 
-   auto future_doc = forge::config::document{};
+   auto future_doc = forge::config::core::document{};
    future_doc.set("version", 9U);
-   auto future = forge::config::migrate(std::move(future_doc), plan);
+   auto future = forge::config::core::migrate(std::move(future_doc), plan);
    BOOST_TEST(!future.ok());
    BOOST_REQUIRE_EQUAL(future.diagnostics.size(), 1U);
    BOOST_TEST(future.diagnostics.front().code == "config.migration.future-version");

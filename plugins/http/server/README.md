@@ -55,7 +55,7 @@ product-specific behavior.
 - `forge_api_core`
 - `forge_net_http`
 - `forge_api_http`
-- `forge_config`
+- `forge_config_core`
 - `forge_schema`
 - Boost.Asio
 

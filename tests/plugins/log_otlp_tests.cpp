@@ -22,9 +22,9 @@ import forge.app.signals;
 import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.asio.task_scheduler;
-import forge.config.component;
-import forge.config.document;
-import forge.config.value;
+import forge.config.core.component;
+import forge.config.core.document;
+import forge.config.core.value;
 import forge.net.http.route_context;
 import forge.net.http.server;
 import forge.net.http.types;
@@ -110,25 +110,25 @@ class fake_collector {
    std::vector<collected_request> requests_;
 };
 
-[[nodiscard]] forge::config::value logger_route(std::string name,
+[[nodiscard]] forge::config::core::value logger_route(std::string name,
                                                 std::string level = "info",
                                                 bool enabled = true,
                                                 bool export_logs = true) {
-   auto object = forge::config::value::object_type{};
-   object.emplace("name", forge::config::value{std::move(name)});
-   object.emplace("level", forge::config::value{std::move(level)});
-   object.emplace("enabled", forge::config::value{enabled});
-   object.emplace("export", forge::config::value{export_logs});
-   return forge::config::value{std::move(object)};
+   auto object = forge::config::core::value::object_type{};
+   object.emplace("name", forge::config::core::value{std::move(name)});
+   object.emplace("level", forge::config::core::value{std::move(level)});
+   object.emplace("enabled", forge::config::core::value{enabled});
+   object.emplace("export", forge::config::core::value{export_logs});
+   return forge::config::core::value{std::move(object)};
 }
 
-[[nodiscard]] forge::config::document plugin_config(const std::string& endpoint,
-                                                    forge::config::value::array_type loggers) {
-   auto document = forge::config::document{};
+[[nodiscard]] forge::config::core::document plugin_config(const std::string& endpoint,
+                                                    forge::config::core::value::array_type loggers) {
+   auto document = forge::config::core::document{};
    document.set("plugins.log.otlp.endpoint", endpoint);
    document.set("plugins.log.otlp.logs-path", std::string{"/v1/logs"});
    document.set("plugins.log.otlp.protocol", std::string{"http-json"});
-   document.set("plugins.log.otlp.loggers", forge::config::value{std::move(loggers)});
+   document.set("plugins.log.otlp.loggers", forge::config::core::value{std::move(loggers)});
    document.set("plugins.log.otlp.batch.flush-interval-ms", std::uint64_t{60000});
    document.set("plugins.log.otlp.retry.max-attempts", std::uint64_t{0});
    return document;
@@ -145,9 +145,9 @@ struct plugin_harness {
 
    plugin_harness() : runtime{}, scheduler{runtime} {}
 
-   void configure(const forge::config::document& document) {
+   void configure(const forge::config::core::document& document) {
       forge::asio::blocking::run(
-         runtime, plugin.configure(forge::config::component_view{document, "plugins.log.otlp"}));
+         runtime, plugin.configure(forge::config::core::component_view{document, "plugins.log.otlp"}));
    }
 
    void provide_and_start() {
@@ -194,7 +194,7 @@ BOOST_AUTO_TEST_CASE(log_otlp_descriptor_api_and_config_are_nested) {
 
 BOOST_AUTO_TEST_CASE(log_otlp_disabled_config_does_not_export_and_api_is_unavailable) {
    auto harness = plugin_harness{};
-   auto document = forge::config::document{};
+   auto document = forge::config::core::document{};
    document.set("plugins.log.otlp.enabled", false);
    harness.configure(document);
    harness.provide_and_start();
@@ -248,14 +248,14 @@ BOOST_AUTO_TEST_CASE(log_otlp_exports_default_and_named_logger_routes) {
 BOOST_AUTO_TEST_CASE(log_otlp_rejects_invalid_config_through_schema_and_domain_validation) {
    {
       auto harness = plugin_harness{};
-      auto document = forge::config::document{};
+      auto document = forge::config::core::document{};
       document.set("plugins.log.otlp.protocol", std::string{"grpc"});
       BOOST_CHECK_THROW(harness.configure(document), log_otlp::exceptions::invalid_config);
    }
 
    {
       auto harness = plugin_harness{};
-      auto document = forge::config::document{};
+      auto document = forge::config::core::document{};
       document.set("plugins.log.otlp.endpoint", std::string{"not a url"});
       BOOST_CHECK_THROW(harness.configure(document), log_otlp::exceptions::invalid_config);
    }

@@ -26,8 +26,8 @@ import forge.api.core.binding;
 import forge.api.core.dispatcher;
 import forge.app.plugin;
 import forge.app.plugin_context;
-import forge.config.component;
-import forge.config.decode;
+import forge.config.core.component;
+import forge.config.core.decode;
 import forge.exceptions;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.identity;
@@ -75,11 +75,11 @@ std::string plugin::version() const {
    return "1.0.0";
 }
 
-std::optional<forge::config::component_descriptor> plugin::describe_config() const {
-   return forge::config::describe_component<config>("plugins.p2p.diagnostics");
+std::optional<forge::config::core::component_descriptor> plugin::describe_config() const {
+   return forge::config::core::describe_component<config>("plugins.p2p.diagnostics");
 }
 
-boost::asio::awaitable<void> plugin::configure(forge::config::component_view view) {
+boost::asio::awaitable<void> plugin::configure(forge::config::core::component_view view) {
    auto config = decode_config(view);
    validate_config(config);
    impl_->settings = std::move(config);

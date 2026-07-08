@@ -20,8 +20,8 @@ are bounded, shutdown is deterministic and diagnostics are part of the contract.
 ```text
 foreground daemon
   -> forge_app::run_daemon
-  -> forge_yaml / forge_env / forge_program_options
-  -> forge_config::document
+  -> forge_codec_yaml / forge_config_env / forge_config_program_options
+  -> forge_config_core::document
   -> forge_app::application_shell
   -> plugins configured through component_view
   -> forge_asio runtime / task_scheduler for async work
@@ -32,7 +32,7 @@ standard source adapters, merge order, generated config, effective config
 printing and signal policy. The daemon runner can independently disable YAML,
 explicit `.env`, process env and app/plugin CLI sources. `run_application(...)`
 remains the lower-level lifecycle runner for tests, embedded hosts and custom
-product shells that already have a `config::document`.
+product shells that already have a `config::core::document`.
 
 `application_runtime` remains a lower-level escape hatch, while
 `application_shell` is the preferred production owner of runtime, scheduler,
@@ -114,12 +114,12 @@ class service_application final : public forge::app::application_shell {
       registry.register_plugin(make_http_plugin_descriptor());
    }
 
-   void on_describe_config(forge::config::component_registry& registry) const override {
-      registry.add(forge::config::describe_component<service_config>("service"));
+   void on_describe_config(forge::config::core::component_registry& registry) const override {
+      registry.add(forge::config::core::describe_component<service_config>("service"));
    }
 };
 
-boost::asio::awaitable<void> run_service(service_application& app, const forge::config::document& document) {
+boost::asio::awaitable<void> run_service(service_application& app, const forge::config::core::document& document) {
    app.configure(document);
    co_await app.startup();
    app.request_stop();
@@ -166,8 +166,8 @@ example tree.
 
 - `forge_asio` imports no app/config/network/TUI code.
 - `forge_app` may depend on source adapters at the high daemon-runner layer:
-  `forge_yaml`, `forge_env` and `forge_program_options`. Plugins and app hooks still
-  see only `config::document` / `component_view`.
+  `forge_codec_yaml`, `forge_config_env` and `forge_config_program_options`. Plugins and app hooks still
+  see only `config::core::document` / `component_view`.
 - Events and signals are diagnostics/lifecycle surfaces. They are not hidden
   business-flow transport.
 - APIs are typed boundaries; stringly-typed event buses are not a replacement

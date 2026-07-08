@@ -37,9 +37,9 @@ export import forge.api.http.mapping;
 import forge.net.http.stream;
 import forge.net.http.types;
 import forge.net.http.upload;
-import forge.json;
+import forge.codec.json;
 import forge.reflect.reflect;
-import forge.xml;
+import forge.codec.xml;
 
 export namespace forge::api::http {
 
@@ -47,15 +47,15 @@ using namespace forge::net::http;
 
 namespace detail {
 
-[[nodiscard]] inline const forge::xml::element* find_xml_child(const forge::xml::element& parent,
+[[nodiscard]] inline const forge::codec::xml::element* find_xml_child(const forge::codec::xml::element& parent,
                                                               std::string_view name) noexcept {
-   const auto found = std::find_if(parent.children.begin(), parent.children.end(), [&](const forge::xml::element& child) {
+   const auto found = std::find_if(parent.children.begin(), parent.children.end(), [&](const forge::codec::xml::element& child) {
       return child.name == name;
    });
    return found == parent.children.end() ? nullptr : &*found;
 }
 
-[[nodiscard]] inline std::string xml_child_text(const forge::xml::element& parent, std::string_view name) {
+[[nodiscard]] inline std::string xml_child_text(const forge::codec::xml::element& parent, std::string_view name) {
    if (const auto* child = find_xml_child(parent, name); child != nullptr) {
       return child->text;
    }
@@ -74,7 +74,7 @@ namespace detail {
 }
 
 [[nodiscard]] inline forge::api::core::error_payload decode_xml_error_payload(const response& value) {
-   auto decoded = forge::xml::read_value(value.body(), forge::xml::read_options{.source_name = "http.error"});
+   auto decoded = forge::codec::xml::read_value(value.body(), forge::codec::xml::read_options{.source_name = "http.error"});
    if (!decoded.ok()) {
       return {};
    }
@@ -97,9 +97,9 @@ namespace detail {
 [[nodiscard]] inline forge::api::core::error_payload decode_error_payload(const response& value, error_codec codec) {
    switch (codec) {
    case error_codec::json: {
-      auto decoded = forge::json::read<forge::api::core::error_payload>(
-         value.body(), forge::json::read_options{.source_name = "http.error",
-                                               .unknown_fields = forge::json::unknown_field_policy::ignore});
+      auto decoded = forge::codec::json::read<forge::api::core::error_payload>(
+         value.body(), forge::codec::json::read_options{.source_name = "http.error",
+                                               .unknown_fields = forge::codec::json::unknown_field_policy::ignore});
       if (decoded.ok()) {
          auto payload = std::move(decoded.value);
          payload.status_code = static_cast<forge::api::core::status>(value.result_int());
@@ -135,20 +135,20 @@ template <typename Response> [[nodiscard]] Response decode_response_body(const r
                                                                          body_codec codec) {
    switch (codec) {
    case body_codec::json: {
-      auto decoded = forge::json::read<Response>(
+      auto decoded = forge::codec::json::read<Response>(
          response_value.body(),
-         forge::json::read_options{.source_name = "http.response",
-                                 .unknown_fields = forge::json::unknown_field_policy::error});
+         forge::codec::json::read_options{.source_name = "http.response",
+                                 .unknown_fields = forge::codec::json::unknown_field_policy::error});
       if (!decoded.ok()) {
          FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request, "HTTP API response JSON is invalid");
       }
       return std::move(decoded.value);
    }
    case body_codec::xml: {
-      auto decoded = forge::xml::read<Response>(
+      auto decoded = forge::codec::xml::read<Response>(
          response_value.body(),
-         forge::xml::read_options{.source_name = "http.response",
-                                .unknown_fields = forge::xml::unknown_field_policy::error});
+         forge::codec::xml::read_options{.source_name = "http.response",
+                                .unknown_fields = forge::codec::xml::unknown_field_policy::error});
       if (!decoded.ok()) {
          FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request, "HTTP API response XML is invalid");
       }

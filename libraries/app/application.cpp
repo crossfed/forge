@@ -11,8 +11,8 @@ module;
 
 module forge.app.application;
 
-import forge.config.component;
-import forge.config.document;
+import forge.config.core.component;
+import forge.config.core.document;
 import forge.api.core.exceptions;
 import forge.api.core.types;
 import forge.api.core.descriptor;
@@ -59,8 +59,8 @@ application_runtime::~application_runtime() {
    request_stop();
 }
 
-config::component_registry application_runtime::describe_config() const {
-   auto registry = config::component_registry{};
+config::core::component_registry application_runtime::describe_config() const {
+   auto registry = config::core::component_registry{};
    for (const auto& value : plugins_) {
       if (auto descriptor = value->describe_config()) {
          registry.add(std::move(*descriptor));
@@ -69,7 +69,7 @@ config::component_registry application_runtime::describe_config() const {
    return registry;
 }
 
-boost::asio::awaitable<void> application_runtime::configure(const config::document& document) {
+boost::asio::awaitable<void> application_runtime::configure(const config::core::document& document) {
    if (state_ != application_state::created) {
       throw std::logic_error{"app runtime must be configured before initialize"};
    }
@@ -79,7 +79,7 @@ boost::asio::awaitable<void> application_runtime::configure(const config::docume
       if (auto descriptor = value->describe_config()) {
          section = descriptor->section;
       }
-      co_await value->configure(config::component_view{document, std::move(section)});
+      co_await value->configure(config::core::component_view{document, std::move(section)});
    }
 }
 

@@ -2,30 +2,30 @@
 
 This note fixes the implementation order for XML (Extensible Markup Language)
 support and S3-ready HTTP API binding. The first block is the neutral
-`forge_xml` library. The second block extends `forge_api_http` from a JSON-only
+`forge_codec_xml` library. The second block extends `forge_api_http` from a JSON-only
 body/error binding into a multi-codec HTTP API layer. Downstream S3 gateways
 must use `FORGE_API(...)` plus `FORGE_HTTP_API(...)`; bypassing the API layer
 with manual router handlers is not the product path.
 
-## Block 1: `forge_xml`
+## Block 1: `forge_codec_xml`
 
 Add a standalone library:
 
-- target: `forge_xml`;
-- namespace: `forge::xml`;
-- public module: `forge.xml`;
-- public path: `libraries/xml/include/forge/xml/xml.cppm`;
-- library guide: `libraries/xml/README.md`;
-- package component: `xml`.
+- target: `forge_codec_xml`;
+- namespace: `forge::codec::xml`;
+- public module: `forge.codec.xml`;
+- public path: `libraries/codec/xml/include/forge/codec/xml/xml.cppm`;
+- library guide: `libraries/codec/xml/README.md`;
+- package component: `codec_xml`.
 
 Recommended backend is `pugixml`, kept private to implementation files. Public
 modules must not expose backend namespace types. Build the backend without XPath
 by default and keep XML parser/writer options behind Forge-owned DTOs.
 
-Public API shape follows `forge_json` and `forge_yaml`:
+Public API shape follows `forge_codec_json` and `forge_codec_yaml`:
 
 - `read_value` / `write_value` for generic `forge::variant`;
-- `read_document` / `write_document` for `forge::config::document`;
+- `read_document` / `write_document` for `forge::config::core::document`;
 - `read<T>` / `write<T>` for Boost.Describe and `forge_schema` described types;
 - `load_*` / `save_*` for filesystem paths only if JSON/YAML parity requires it;
 - `read_options` with source name, max bytes, max depth and unknown field policy;
@@ -46,14 +46,14 @@ Security and compatibility defaults:
 
 ## Block 2: HTTP API Multi-Codec
 
-After `forge_xml` lands, extend `forge_api_http` rather than writing product
+After `forge_codec_xml` lands, extend `forge_api_http` rather than writing product
 routes directly against `forge_net_http::router`.
 
 Changes:
 
 - keep JSON as the default request, response and error codec;
 - add route-level request body codec, response body codec and error codec;
-- support XML request/response DTO bodies through `forge::xml::read/write`;
+- support XML request/response DTO bodies through `forge::codec::xml::read/write`;
 - support `application/xml`, `text/xml` and structured `+xml` content types;
 - keep positional HTTP arguments bounded to simple path/query use; XML request
   bodies stay DTO/envelope based;
@@ -83,7 +83,7 @@ storage policy or product error vocabulary into Forge.
 
 ## Tests And Acceptance
 
-`forge_xml` tests:
+`forge_codec_xml` tests:
 
 - generic value/document read-write roundtrip;
 - typed Boost.Describe + `forge_schema` read/write;
@@ -91,7 +91,7 @@ storage policy or product error vocabulary into Forge.
 - malformed XML diagnostics with source paths;
 - DTD/entity/processing-instruction rejection;
 - depth, text, attribute and output size limits;
-- package consumer smoke for `Forge::forge_xml`.
+- package consumer smoke for `Forge::forge_codec_xml`.
 
 `forge_api_http` tests:
 
@@ -106,15 +106,15 @@ Validation:
 
 ```bash
 cmake --build build/forge-debug -j 1 \
-  --target test_forge_xml test_forge_http_websocket test_forge_api_core \
-           test_forge_package_xml_component
+  --target test_forge_codec_xml test_forge_http_websocket test_forge_api_core \
+           test_forge_package_codec_xml_component
 
 ctest --test-dir build/forge-debug --output-on-failure \
-  -R "^(test_forge_xml|test_forge_http_websocket|test_forge_api_core|test_forge_package_xml_component)$" \
+  -R "^(test_forge_codec_xml|test_forge_http_websocket|test_forge_api_core|test_forge_package_codec_xml_component)$" \
   --timeout 300
 
 rg "$FORGE_XML_BACKEND_LEAK_PATTERN" \
-  libraries/xml/include libraries/api_http/include -g "*.cppm"
+  libraries/codec/xml/include libraries/api_http/include -g "*.cppm"
 
 git diff --check
 ```
@@ -123,7 +123,7 @@ git diff --check
 
 - `pugixml` is the default backend unless size/package benchmarking disproves
   it before implementation.
-- `forge_xml` is neutral infrastructure, not an S3 library.
+- `forge_codec_xml` is neutral infrastructure, not an S3 library.
 - `forge_api_http` is the mandatory HTTP application binding layer for S3-style
   APIs; manual router bypass is allowed only for low-level substrate tests and
   examples.

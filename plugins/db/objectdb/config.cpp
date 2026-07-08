@@ -10,8 +10,8 @@ module;
 
 module forge.plugins.db.objectdb.plugin;
 
-import forge.config.component;
-import forge.config.decode;
+import forge.config.core.component;
+import forge.config.core.decode;
 import forge.exceptions;
 import forge.objectdb.store;
 import forge.plugins.db.objectdb.exceptions;
@@ -21,11 +21,11 @@ import forge.plugins.db.objectdb.types;
 
 namespace forge::plugins::db::objectdb::detail {
 
-config decode_config(const forge::config::component_view& view) {
-   auto decoded = forge::config::decode<config>(view.source(), view.section());
+config decode_config(const forge::config::core::component_view& view) {
+   auto decoded = forge::config::core::decode<config>(view.source(), view.section());
    if (!decoded.ok()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_config,
-                            forge::config::format_decode_diagnostics("invalid ObjectDB plugin config",
+                            forge::config::core::format_decode_diagnostics("invalid ObjectDB plugin config",
                                                                       decoded.diagnostics));
    }
    validate_config(decoded.value);

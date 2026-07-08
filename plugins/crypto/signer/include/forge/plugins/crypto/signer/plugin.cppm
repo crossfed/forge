@@ -20,7 +20,7 @@ import forge.api.core.dispatcher;
 import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.app.plugin_registry;
-import forge.config.component;
+import forge.config.core.component;
 import forge.plugins.crypto.signer.types;
 
 export namespace forge::plugins::crypto::signer {
@@ -35,8 +35,8 @@ class plugin final : public forge::app::plugin {
 
    [[nodiscard]] forge::app::plugin_id id() const override;
    [[nodiscard]] std::string version() const override;
-   [[nodiscard]] std::optional<forge::config::component_descriptor> describe_config() const override;
-   boost::asio::awaitable<void> configure(forge::config::component_view view) override;
+   [[nodiscard]] std::optional<forge::config::core::component_descriptor> describe_config() const override;
+   boost::asio::awaitable<void> configure(forge::config::core::component_view view) override;
    boost::asio::awaitable<void> provide(forge::api::core::provider& provider) override;
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override;
    boost::asio::awaitable<void> startup() override;
@@ -47,7 +47,7 @@ class plugin final : public forge::app::plugin {
    struct impl;
    class signer_api;
 
-   friend void apply_config(impl&, forge::config::component_view);
+   friend void apply_config(impl&, forge::config::core::component_view);
 
    std::shared_ptr<impl> impl_;
 };

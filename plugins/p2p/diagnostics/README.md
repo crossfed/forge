@@ -59,7 +59,7 @@ plugins:
 - `forge_app`
 - `forge_api_core`
 - `forge_plugins_p2p_node`
-- `forge_config`
+- `forge_config_core`
 - `forge_schema`
 
 ## Examples

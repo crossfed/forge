@@ -62,16 +62,16 @@ import forge.app.runner;
 import forge.app.daemon;
 import forge.asio.blocking;
 import forge.asio.runtime;
-import forge.config.component;
-import forge.config.document;
-import forge.config.value;
-import forge.config.decode;
+import forge.config.core.component;
+import forge.config.core.document;
+import forge.config.core.value;
+import forge.config.core.decode;
 import forge.crypto.asymmetric;
 import forge.crypto.ed25519;
 import forge.crypto.p256;
 import forge.crypto.secp256k1;
 import forge.crypto.sha256;
-import forge.env;
+import forge.config.env;
 import forge.api.http.binding;
 import forge.net.http.base_url;
 import forge.api.http.parameters;
@@ -134,7 +134,7 @@ import forge.plugins.http.server.exceptions;
 import forge.plugins.http.server.middleware;
 import forge.plugins.http.server.api;
 import forge.plugins.http.server.plugin;
-import forge.program_options;
+import forge.config.program_options;
 import forge.raw.raw;
 import forge.schema.diagnostic;
 import forge.schema.value_kind;
@@ -367,8 +367,8 @@ std::string_view test_private_key() {
       {.type = forge::net::p2p::public_key::type::ed25519, .data = std::vector<std::uint8_t>(32, seed)});
 }
 
-[[nodiscard]] forge::config::document test_p2p_config(std::optional<forge::net::p2p::peer_id> peer = std::nullopt) {
-   auto document = forge::config::document{};
+[[nodiscard]] forge::config::core::document test_p2p_config(std::optional<forge::net::p2p::peer_id> peer = std::nullopt) {
+   auto document = forge::config::core::document{};
    document.set("plugins.p2p.node.allow-insecure-test-mode", true);
    document.set("plugins.p2p.node.certificate-pem", std::string{test_certificate()});
    document.set("plugins.p2p.node.private-key-pem", std::string{test_private_key()});
@@ -1642,7 +1642,7 @@ class late_http_server_application final : public forge::app::application_shell 
    }
 };
 
-[[nodiscard]] const forge::config::field_descriptor& require_field(const forge::config::component_descriptor& descriptor,
+[[nodiscard]] const forge::config::core::field_descriptor& require_field(const forge::config::core::component_descriptor& descriptor,
                                                                  std::string_view name) {
    const auto found = std::ranges::find_if(descriptor.fields, [&](const auto& field) {
       return field.name == name;
@@ -1651,7 +1651,7 @@ class late_http_server_application final : public forge::app::application_shell 
    return *found;
 }
 
-[[nodiscard]] bool has_field(const forge::config::component_descriptor& descriptor, std::string_view name) {
+[[nodiscard]] bool has_field(const forge::config::core::component_descriptor& descriptor, std::string_view name) {
    return std::ranges::any_of(descriptor.fields, [&](const auto& field) {
       return field.name == name;
    });
@@ -1667,37 +1667,37 @@ class late_http_server_application final : public forge::app::application_shell 
    return port;
 }
 
-[[nodiscard]] forge::config::value key_entry(std::string key_id,
+[[nodiscard]] forge::config::core::value key_entry(std::string key_id,
                                            std::string private_key,
                                            std::string input_profile,
                                            std::vector<std::string> purposes) {
-   auto purpose_values = forge::config::value::array_type{};
+   auto purpose_values = forge::config::core::value::array_type{};
    for (auto& purpose : purposes) {
       purpose_values.emplace_back(std::move(purpose));
    }
 
-   auto object = forge::config::value::object_type{};
-   object.emplace("id", forge::config::value{std::move(key_id)});
-   object.emplace("private-key", forge::config::value{std::move(private_key)});
-   object.emplace("input-profile", forge::config::value{std::move(input_profile)});
-   object.emplace("purposes", forge::config::value{std::move(purpose_values)});
-   return forge::config::value{std::move(object)};
+   auto object = forge::config::core::value::object_type{};
+   object.emplace("id", forge::config::core::value{std::move(key_id)});
+   object.emplace("private-key", forge::config::core::value{std::move(private_key)});
+   object.emplace("input-profile", forge::config::core::value{std::move(input_profile)});
+   object.emplace("purposes", forge::config::core::value{std::move(purpose_values)});
+   return forge::config::core::value{std::move(object)};
 }
 
-[[nodiscard]] forge::config::value key_entry_without_purposes(std::string key_id,
+[[nodiscard]] forge::config::core::value key_entry_without_purposes(std::string key_id,
                                                             std::string private_key,
                                                             std::string input_profile) {
-   auto object = forge::config::value::object_type{};
-   object.emplace("id", forge::config::value{std::move(key_id)});
-   object.emplace("private-key", forge::config::value{std::move(private_key)});
-   object.emplace("input-profile", forge::config::value{std::move(input_profile)});
-   return forge::config::value{std::move(object)};
+   auto object = forge::config::core::value::object_type{};
+   object.emplace("id", forge::config::core::value{std::move(key_id)});
+   object.emplace("private-key", forge::config::core::value{std::move(private_key)});
+   object.emplace("input-profile", forge::config::core::value{std::move(input_profile)});
+   return forge::config::core::value{std::move(object)};
 }
 
-[[nodiscard]] forge::config::document signer_config(std::vector<forge::config::value> keys,
+[[nodiscard]] forge::config::core::document signer_config(std::vector<forge::config::core::value> keys,
                                                   std::string default_output_profile = "forge") {
-   auto document = forge::config::document{};
-   document.set("plugins.crypto.signer.keys", forge::config::value::array_type(keys.begin(), keys.end()));
+   auto document = forge::config::core::document{};
+   document.set("plugins.crypto.signer.keys", forge::config::core::value::array_type(keys.begin(), keys.end()));
    document.set("plugins.crypto.signer.default-output-profile", std::move(default_output_profile));
    return document;
 }
@@ -1762,12 +1762,12 @@ BOOST_AUTO_TEST_CASE(http_server_config_is_described_from_schema) {
 
 BOOST_AUTO_TEST_CASE(http_server_rejects_invalid_schema_config) {
    auto plugin = http_server::plugin{};
-   auto document = forge::config::document{};
+   auto document = forge::config::core::document{};
    document.set("plugins.http.server.port", std::uint64_t{70000});
 
    auto runtime = forge::asio::runtime{};
    BOOST_CHECK_THROW(
-      forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.http.server"})),
+      forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.http.server"})),
       http_server::exceptions::invalid_config);
 }
 
@@ -1775,17 +1775,17 @@ BOOST_AUTO_TEST_CASE(http_server_plugin_rejects_invalid_api_base_path_during_con
    auto runtime = forge::asio::runtime{};
 
    auto empty = http_server::plugin{};
-   auto empty_document = forge::config::document{};
+   auto empty_document = forge::config::core::document{};
    empty_document.set("plugins.http.server.api-base-path", std::string{});
    BOOST_CHECK_THROW(
-      forge::asio::blocking::run(runtime, empty.configure(forge::config::component_view{empty_document, "plugins.http.server"})),
+      forge::asio::blocking::run(runtime, empty.configure(forge::config::core::component_view{empty_document, "plugins.http.server"})),
       http_server::exceptions::invalid_config);
 
    auto relative = http_server::plugin{};
-   auto relative_document = forge::config::document{};
+   auto relative_document = forge::config::core::document{};
    relative_document.set("plugins.http.server.api-base-path", std::string{"api"});
    BOOST_CHECK_THROW(forge::asio::blocking::run(
-                        runtime, relative.configure(forge::config::component_view{relative_document, "plugins.http.server"})),
+                        runtime, relative.configure(forge::config::core::component_view{relative_document, "plugins.http.server"})),
                      http_server::exceptions::invalid_config);
 }
 
@@ -1793,7 +1793,7 @@ BOOST_AUTO_TEST_CASE(http_server_plugin_publishes_typed_api_under_configured_bas
    const auto port = reserve_loopback_port();
    auto state = std::make_shared<http_publish_state>();
    auto app = http_server_application{state};
-   auto config = forge::config::document{};
+   auto config = forge::config::core::document{};
    config.set("plugins.http.server.port", std::uint64_t{port});
    config.set("plugins.http.server.api-base-path", std::string{"/api"});
 
@@ -1815,7 +1815,7 @@ BOOST_AUTO_TEST_CASE(http_server_plugin_uses_publish_base_path_override) {
    auto state = std::make_shared<http_publish_state>();
    state->base_path = "/custom";
    auto app = http_server_application{state};
-   auto config = forge::config::document{};
+   auto config = forge::config::core::document{};
    config.set("plugins.http.server.port", std::uint64_t{port});
    config.set("plugins.http.server.api-base-path", std::string{"/api"});
 
@@ -1837,7 +1837,7 @@ BOOST_AUTO_TEST_CASE(http_server_plugin_applies_middleware_order_and_short_circu
    auto state = std::make_shared<http_publish_state>();
    state->short_circuit = true;
    auto app = http_server_application{state, true};
-   auto config = forge::config::document{};
+   auto config = forge::config::core::document{};
    config.set("plugins.http.server.port", std::uint64_t{port});
    config.set("plugins.http.server.api-base-path", std::string{"/api"});
 
@@ -1872,7 +1872,7 @@ BOOST_AUTO_TEST_CASE(http_server_plugin_preserves_stream_framing_through_middlew
    auto state = std::make_shared<http_publish_state>();
    state->base_path = "/api";
    auto app = http_stream_server_application{state};
-   auto config = forge::config::document{};
+   auto config = forge::config::core::document{};
    config.set("plugins.http.server.port", std::uint64_t{port});
    config.set("plugins.http.server.api-base-path", std::string{"/api"});
 
@@ -1908,7 +1908,7 @@ BOOST_AUTO_TEST_CASE(http_server_plugin_stream_middleware_content_type_preserves
    state->base_path = "/api";
    state->set_stream_content_type_after_next = true;
    auto app = http_stream_server_application{state};
-   auto config = forge::config::document{};
+   auto config = forge::config::core::document{};
    config.set("plugins.http.server.port", std::uint64_t{port});
    config.set("plugins.http.server.api-base-path", std::string{"/api"});
 
@@ -1944,7 +1944,7 @@ BOOST_AUTO_TEST_CASE(http_server_plugin_preserves_absent_content_type_through_mi
    auto state = std::make_shared<http_publish_state>();
    state->base_path = "/api";
    auto app = http_empty_server_application{state};
-   auto config = forge::config::document{};
+   auto config = forge::config::core::document{};
    config.set("plugins.http.server.port", std::uint64_t{port});
    config.set("plugins.http.server.api-base-path", std::string{"/api"});
 
@@ -1977,7 +1977,7 @@ BOOST_AUTO_TEST_CASE(http_server_plugin_stream_middleware_replacement_does_not_l
    state->base_path = "/api";
    state->replace_stream_after_next = true;
    auto app = http_stream_server_application{state};
-   auto config = forge::config::document{};
+   auto config = forge::config::core::document{};
    config.set("plugins.http.server.port", std::uint64_t{port});
    config.set("plugins.http.server.api-base-path", std::string{"/api"});
 
@@ -2011,7 +2011,7 @@ BOOST_AUTO_TEST_CASE(http_server_plugin_empty_stream_middleware_replacement_clea
    state->base_path = "/api";
    state->empty_replace_stream_after_next = true;
    auto app = http_stream_server_application{state};
-   auto config = forge::config::document{};
+   auto config = forge::config::core::document{};
    config.set("plugins.http.server.port", std::uint64_t{port});
    config.set("plugins.http.server.api-base-path", std::string{"/api"});
 
@@ -2042,7 +2042,7 @@ BOOST_AUTO_TEST_CASE(http_server_plugin_empty_stream_middleware_replacement_clea
 BOOST_AUTO_TEST_CASE(http_server_plugin_rejects_duplicate_publication_on_startup) {
    const auto port = reserve_loopback_port();
    auto app = duplicate_http_server_application{};
-   auto config = forge::config::document{};
+   auto config = forge::config::core::document{};
    config.set("plugins.http.server.port", std::uint64_t{port});
 
    app.configure(config);
@@ -2052,7 +2052,7 @@ BOOST_AUTO_TEST_CASE(http_server_plugin_rejects_duplicate_publication_on_startup
 BOOST_AUTO_TEST_CASE(http_server_plugin_rejects_late_publication_after_startup_closed) {
    const auto port = reserve_loopback_port();
    auto app = late_http_server_application{};
-   auto config = forge::config::document{};
+   auto config = forge::config::core::document{};
    config.set("plugins.http.server.port", std::uint64_t{port});
 
    app.configure(config);
@@ -2071,7 +2071,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_config_is_redacted_and_local_only) {
    BOOST_TEST(static_cast<int>(keys.kind) == static_cast<int>(forge::schema::value_kind::object_list));
    BOOST_TEST(has_field(*descriptor, "default-output-profile"));
 
-   auto registry = forge::config::component_registry{};
+   auto registry = forge::config::core::component_registry{};
    registry.add(*descriptor);
 
    const auto key = forge::crypto::asymmetric::private_key::generate<forge::crypto::secp256k1::private_key_shim>();
@@ -2080,7 +2080,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_config_is_redacted_and_local_only) {
                  forge::crypto::asymmetric::encoding::forge().format(key),
                  "forge",
                  {"storage.receipt"})});
-   const auto redacted = forge::config::redact(document, registry);
+   const auto redacted = forge::config::core::redact(document, registry);
    const auto* value = redacted.try_get("plugins.crypto.signer.keys");
    BOOST_REQUIRE(value != nullptr);
    const auto* text = std::get_if<std::string>(&value->storage);
@@ -2096,7 +2096,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_config_decodes_through_public_schema) {
                  "forge",
                  {"storage.receipt"})});
 
-   const auto decoded = forge::config::decode<crypto_signer::config>(document, "plugins.crypto.signer");
+   const auto decoded = forge::config::core::decode<crypto_signer::config>(document, "plugins.crypto.signer");
    BOOST_TEST(decoded.ok());
    BOOST_REQUIRE_EQUAL(decoded.value.keys.size(), 1U);
    BOOST_TEST(decoded.value.keys.front().id == "provider");
@@ -2111,14 +2111,14 @@ BOOST_AUTO_TEST_CASE(crypto_signer_structured_keys_are_not_cli_or_env_fields) {
    const auto descriptor = plugin.describe_config();
    BOOST_REQUIRE(descriptor.has_value());
 
-   auto registry = forge::config::component_registry{};
+   auto registry = forge::config::core::component_registry{};
    registry.add(*descriptor);
 
-   const auto help = forge::program_options::help(registry, "FORGE options");
+   const auto help = forge::config::program_options::help(registry, "FORGE options");
    BOOST_TEST(help.find("plugins.crypto.signer.keys") == std::string::npos);
 
    const char* argv[] = {"tool", "--plugins.crypto.signer.keys=provider"};
-   const auto parsed = forge::program_options::parse(2, argv, registry);
+   const auto parsed = forge::config::program_options::parse(2, argv, registry);
    BOOST_TEST(!parsed.ok());
    BOOST_TEST(parsed.document.try_get("plugins.crypto.signer.keys") == nullptr);
 
@@ -2129,18 +2129,18 @@ BOOST_AUTO_TEST_CASE(crypto_signer_structured_keys_are_not_cli_or_env_fields) {
                  "forge",
                  {"storage.receipt"})});
 
-   const auto written = forge::env::write_document(document, registry, {.prefix = "FORGE"});
+   const auto written = forge::config::env::write_document(document, registry, {.prefix = "FORGE"});
    BOOST_TEST(written.ok());
    BOOST_TEST(written.text.find("FORGE_PLUGINS_CRYPTO_SIGNER_KEYS") == std::string::npos);
 
-   const auto example = forge::env::write_example(registry, {.prefix = "FORGE"});
+   const auto example = forge::config::env::write_example(registry, {.prefix = "FORGE"});
    BOOST_TEST(example.ok());
    BOOST_TEST(example.text.find("FORGE_PLUGINS_CRYPTO_SIGNER_KEYS") == std::string::npos);
 
-   const auto read = forge::env::read_document(
+   const auto read = forge::config::env::read_document(
       "FORGE_PLUGINS_CRYPTO_SIGNER_KEYS=provider\n",
       registry,
-      {.prefix = "FORGE", .unknown_variables = forge::env::unknown_variable_policy::error});
+      {.prefix = "FORGE", .unknown_variables = forge::config::env::unknown_variable_policy::error});
    BOOST_TEST(!read.ok());
    BOOST_REQUIRE_EQUAL(read.diagnostics.size(), 1U);
    BOOST_TEST(read.diagnostics.front().code == "env.unknown");
@@ -2154,7 +2154,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_rejects_malformed_private_key_without_leaking
 
    auto runtime = forge::asio::runtime{};
    BOOST_CHECK_EXCEPTION(
-      forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.crypto.signer"})),
+      forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.crypto.signer"})),
       crypto_signer::exceptions::invalid_key,
       [&](const auto& error) {
          const auto text = std::string{error.what()};
@@ -2171,7 +2171,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_rejects_empty_private_key_through_schema) {
 
    auto runtime = forge::asio::runtime{};
    BOOST_CHECK_EXCEPTION(
-      forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.crypto.signer"})),
+      forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.crypto.signer"})),
       crypto_signer::exceptions::invalid_config,
       [](const auto& error) {
          const auto text = std::string{error.what()};
@@ -2189,19 +2189,19 @@ BOOST_AUTO_TEST_CASE(crypto_signer_requires_explicit_non_empty_purposes) {
    auto missing = crypto_signer::plugin{};
    auto missing_document = signer_config({key_entry_without_purposes("missing", private_key, "forge")});
    BOOST_CHECK_THROW(
-      forge::asio::blocking::run(runtime, missing.configure(forge::config::component_view{missing_document, "plugins.crypto.signer"})),
+      forge::asio::blocking::run(runtime, missing.configure(forge::config::core::component_view{missing_document, "plugins.crypto.signer"})),
       crypto_signer::exceptions::invalid_config);
 
    auto empty = crypto_signer::plugin{};
    auto empty_document = signer_config({key_entry("empty", private_key, "forge", {})});
    BOOST_CHECK_THROW(
-      forge::asio::blocking::run(runtime, empty.configure(forge::config::component_view{empty_document, "plugins.crypto.signer"})),
+      forge::asio::blocking::run(runtime, empty.configure(forge::config::core::component_view{empty_document, "plugins.crypto.signer"})),
       crypto_signer::exceptions::invalid_config);
 
    auto blank = crypto_signer::plugin{};
    auto blank_document = signer_config({key_entry("blank", private_key, "forge", {""})});
    BOOST_CHECK_THROW(
-      forge::asio::blocking::run(runtime, blank.configure(forge::config::component_view{blank_document, "plugins.crypto.signer"})),
+      forge::asio::blocking::run(runtime, blank.configure(forge::config::core::component_view{blank_document, "plugins.crypto.signer"})),
       crypto_signer::exceptions::invalid_config);
 }
 
@@ -2215,7 +2215,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_signs_k1_digest_with_antelope_output) {
                  {"storage.receipt", "storage.audit"})});
 
    auto runtime = forge::asio::runtime{};
-   forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.crypto.signer"}));
+   forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.crypto.signer"}));
 
    auto apis = forge::api::core::registry{};
    auto provider = forge::api::core::installer{apis};
@@ -2256,7 +2256,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_sugar_uses_configured_default_output_profile)
       "antelope");
 
    auto runtime = forge::asio::runtime{};
-   forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.crypto.signer"}));
+   forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.crypto.signer"}));
 
    auto apis = forge::api::core::registry{};
    auto provider = forge::api::core::installer{apis};
@@ -2299,7 +2299,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_supports_p256_and_ed25519_without_k1_assumpti
        key_entry("ed25519", forge::crypto::asymmetric::encoding::forge().format(ed25519_key), "forge", {"api.auth"})});
 
    auto runtime = forge::asio::runtime{};
-   forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.crypto.signer"}));
+   forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.crypto.signer"}));
 
    auto apis = forge::api::core::registry{};
    auto provider = forge::api::core::installer{apis};
@@ -2341,7 +2341,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_enforces_allowed_purpose_and_algorithm) {
       {key_entry("provider", forge::crypto::asymmetric::encoding::forge().format(key), "forge", {"storage.receipt"})});
 
    auto runtime = forge::asio::runtime{};
-   forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.crypto.signer"}));
+   forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.crypto.signer"}));
 
    auto apis = forge::api::core::registry{};
    auto provider = forge::api::core::installer{apis};
@@ -2486,8 +2486,8 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_listens_from_config_and_exposes_local_endpo
    const auto local_peer = test_peer(20);
    auto config = test_p2p_config(local_peer);
    config.set("plugins.p2p.node.listen",
-              forge::config::value::array_type{forge::config::value{"/ip4/127.0.0.1/udp/0/quic-v1"},
-                                             forge::config::value{"/ip4/127.0.0.1/tcp/0"}});
+              forge::config::core::value::array_type{forge::config::core::value{"/ip4/127.0.0.1/udp/0/quic-v1"},
+                                             forge::config::core::value{"/ip4/127.0.0.1/tcp/0"}});
 
    auto app = p2p_only_application{};
    app.configure(config);
@@ -2516,7 +2516,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_listens_from_config_and_exposes_local_endpo
 
 BOOST_AUTO_TEST_CASE(p2p_node_plugin_without_peer_id_does_not_inject_test_peer) {
    auto config = test_p2p_config();
-   config.set("plugins.p2p.node.listen", forge::config::value::array_type{forge::config::value{"/ip4/127.0.0.1/tcp/0"}});
+   config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{forge::config::core::value{"/ip4/127.0.0.1/tcp/0"}});
 
    auto app = p2p_only_application{};
    app.configure(config);
@@ -2527,8 +2527,8 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_without_peer_id_does_not_inject_test_peer) 
 BOOST_AUTO_TEST_CASE(p2p_node_plugin_opens_remote_api_over_p2p_stream) {
    const auto server_peer = test_peer(30);
    auto server_config = test_p2p_config(server_peer);
-   server_config.set("plugins.p2p.node.listen", forge::config::value::array_type{
-                                      forge::config::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
+   server_config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{
+                                      forge::config::core::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
 
    auto log = plugin_log{};
    auto server = p2p_plugin_application{log};
@@ -2543,7 +2543,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_opens_remote_api_over_p2p_stream) {
    const auto client_peer = test_peer(31);
    auto client_config = test_p2p_config(client_peer);
    client_config.set("plugins.p2p.node.bootstrap",
-                     forge::config::value::array_type{forge::config::value{server_endpoint->to_string()}});
+                     forge::config::core::value::array_type{forge::config::core::value{server_endpoint->to_string()}});
 
    auto client = p2p_only_application{};
    client.configure(client_config);
@@ -2581,7 +2581,7 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_rejects_invalid_typed_config_before_startup
 
    {
       auto config = test_p2p_config();
-      config.set("plugins.p2p.node.listen", forge::config::value::array_type{forge::config::value{"127.0.0.1:0"}});
+      config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{forge::config::core::value{"127.0.0.1:0"}});
       auto app = p2p_only_application{};
       BOOST_CHECK_THROW(app.configure(config), forge::plugins::p2p::node::exceptions::invalid_config);
    }
@@ -2673,8 +2673,8 @@ BOOST_AUTO_TEST_CASE(p2p_diagnostics_api_rejects_facade_calls_before_initialize)
 BOOST_AUTO_TEST_CASE(p2p_diagnostics_plugin_reports_live_p2p_node_state) {
    const auto server_peer = test_peer(91);
    auto server_config = test_p2p_config(server_peer);
-   server_config.set("plugins.p2p.node.listen", forge::config::value::array_type{
-                                      forge::config::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
+   server_config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{
+                                      forge::config::core::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
 
    auto log = plugin_log{};
    auto server = p2p_plugin_application{log};
@@ -2689,7 +2689,7 @@ BOOST_AUTO_TEST_CASE(p2p_diagnostics_plugin_reports_live_p2p_node_state) {
    const auto client_peer = test_peer(92);
    auto client_config = test_p2p_config(client_peer);
    client_config.set("plugins.p2p.node.bootstrap",
-                     forge::config::value::array_type{forge::config::value{server_endpoint->to_string()}});
+                     forge::config::core::value::array_type{forge::config::core::value{server_endpoint->to_string()}});
 
    auto client = diagnostics_application{};
    client.configure(client_config);
@@ -2773,8 +2773,8 @@ BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_rejects_invalid_typed_config_before_start
 
 BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_requests_core_pubsub_capability_before_startup) {
    auto config = test_p2p_config(test_peer(94));
-   config.set("plugins.p2p.node.listen", forge::config::value::array_type{
-                                forge::config::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
+   config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{
+                                forge::config::core::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
    config.set("plugins.p2p.pubsub.sign-publishes", false);
 
    auto app = pubsub_application{};
@@ -2917,8 +2917,8 @@ BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_failed_first_join_clears_pending_topic) {
 BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_publishes_and_subscribes_raw_and_typed_messages) {
    const auto subscriber_peer = test_peer(95);
    auto subscriber_config = test_p2p_config(subscriber_peer);
-   subscriber_config.set("plugins.p2p.node.listen", forge::config::value::array_type{
-                                           forge::config::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
+   subscriber_config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{
+                                           forge::config::core::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
    subscriber_config.set("plugins.p2p.pubsub.sign-publishes", false);
 
    auto subscriber = pubsub_application{};
@@ -2933,7 +2933,7 @@ BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_publishes_and_subscribes_raw_and_typed_me
    const auto publisher_peer = test_peer(96);
    auto publisher_config = test_p2p_config(publisher_peer);
    publisher_config.set("plugins.p2p.node.bootstrap",
-                        forge::config::value::array_type{forge::config::value{subscriber_endpoint->to_string()}});
+                        forge::config::core::value::array_type{forge::config::core::value{subscriber_endpoint->to_string()}});
    publisher_config.set("plugins.p2p.pubsub.sign-publishes", false);
 
    auto publisher = pubsub_application{};
@@ -3020,8 +3020,8 @@ BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_publishes_and_subscribes_raw_and_typed_me
 BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_aggregates_handler_results_and_deadlines) {
    const auto subscriber_peer = test_peer(98);
    auto subscriber_config = test_p2p_config(subscriber_peer);
-   subscriber_config.set("plugins.p2p.node.listen", forge::config::value::array_type{
-                                           forge::config::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
+   subscriber_config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{
+                                           forge::config::core::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
    subscriber_config.set("plugins.p2p.pubsub.sign-publishes", false);
 
    auto subscriber = pubsub_application{};
@@ -3035,7 +3035,7 @@ BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_aggregates_handler_results_and_deadlines)
 
    auto publisher_config = test_p2p_config(test_peer(99));
    publisher_config.set("plugins.p2p.node.bootstrap",
-                        forge::config::value::array_type{forge::config::value{subscriber_endpoint->to_string()}});
+                        forge::config::core::value::array_type{forge::config::core::value{subscriber_endpoint->to_string()}});
    publisher_config.set("plugins.p2p.pubsub.sign-publishes", false);
 
    auto publisher = pubsub_application{};
@@ -3135,8 +3135,8 @@ BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_enforces_topic_policy_and_handler_bounds)
    config.set("plugins.p2p.pubsub.max-handlers-per-topic", std::uint64_t{1});
    config.set("plugins.p2p.pubsub.max-message-size", std::uint64_t{4});
    config.set("plugins.p2p.pubsub.allowed-topics",
-              forge::config::value::array_type{forge::config::value{"forge.allowed"}});
-   config.set("plugins.p2p.pubsub.denied-topics", forge::config::value::array_type{forge::config::value{"forge.denied"}});
+              forge::config::core::value::array_type{forge::config::core::value{"forge.allowed"}});
+   config.set("plugins.p2p.pubsub.denied-topics", forge::config::core::value::array_type{forge::config::core::value{"forge.denied"}});
 
    auto app = pubsub_application{};
    app.configure(config);
@@ -3265,8 +3265,8 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_rejects_duplicate_api_and_resolver_protoco
 BOOST_AUTO_TEST_CASE(p2p_api_resolver_resolves_remote_api_and_opens_typed_remote) {
    const auto server_peer = test_peer(70);
    auto server_config = test_p2p_config(server_peer);
-   server_config.set("plugins.p2p.node.listen", forge::config::value::array_type{
-                                      forge::config::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
+   server_config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{
+                                      forge::config::core::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
 
    auto server = resolver_plugin_application{};
    server.configure(server_config);
@@ -3279,7 +3279,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_resolves_remote_api_and_opens_typed_remote
 
    auto client_config = test_p2p_config(test_peer(71));
    client_config.set("plugins.p2p.node.bootstrap",
-                     forge::config::value::array_type{forge::config::value{server_endpoint->to_string()}});
+                     forge::config::core::value::array_type{forge::config::core::value{server_endpoint->to_string()}});
    auto client = resolver_only_application{};
    client.configure(client_config);
    forge::asio::blocking::run(client.runtime(), client.startup());
@@ -3305,8 +3305,8 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_resolves_remote_api_and_opens_typed_remote
 BOOST_AUTO_TEST_CASE(p2p_api_resolver_remote_honors_advertised_transport_options) {
    const auto server_peer = test_peer(72);
    auto server_config = test_p2p_config(server_peer);
-   server_config.set("plugins.p2p.node.listen", forge::config::value::array_type{
-                                      forge::config::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
+   server_config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{
+                                      forge::config::core::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
 
    auto server = resolver_custom_transport_application{};
    server.configure(server_config);
@@ -3319,7 +3319,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_remote_honors_advertised_transport_options
 
    auto client_config = test_p2p_config(test_peer(73));
    client_config.set("plugins.p2p.node.bootstrap",
-                     forge::config::value::array_type{forge::config::value{server_endpoint->to_string()}});
+                     forge::config::core::value::array_type{forge::config::core::value{server_endpoint->to_string()}});
    auto client = resolver_only_application{};
    client.configure(client_config);
    forge::asio::blocking::run(client.runtime(), client.startup());
@@ -3343,8 +3343,8 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_remote_honors_advertised_transport_options
 BOOST_AUTO_TEST_CASE(p2p_api_resolver_supports_receipt_based_product_api) {
    const auto server_peer = test_peer(74);
    auto server_config = test_p2p_config(server_peer);
-   server_config.set("plugins.p2p.node.listen", forge::config::value::array_type{
-                                      forge::config::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
+   server_config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{
+                                      forge::config::core::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
 
    auto server_state = std::make_shared<receipt_test_state>();
    auto server = receipt_resolver_application{server_state};
@@ -3358,7 +3358,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_supports_receipt_based_product_api) {
 
    auto client_config = test_p2p_config(test_peer(75));
    client_config.set("plugins.p2p.node.bootstrap",
-                     forge::config::value::array_type{forge::config::value{server_endpoint->to_string()}});
+                     forge::config::core::value::array_type{forge::config::core::value{server_endpoint->to_string()}});
    auto client = resolver_only_application{};
    client.configure(client_config);
    forge::asio::blocking::run(client.runtime(), client.startup());
@@ -3399,8 +3399,8 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_supports_receipt_based_product_api) {
 BOOST_AUTO_TEST_CASE(p2p_api_resolver_enforces_version_compatibility) {
    const auto server_peer = test_peer(80);
    auto server_config = test_p2p_config(server_peer);
-   server_config.set("plugins.p2p.node.listen", forge::config::value::array_type{
-                                      forge::config::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
+   server_config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{
+                                      forge::config::core::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
 
    auto server = resolver_plugin_application{};
    server.configure(server_config);
@@ -3413,7 +3413,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_enforces_version_compatibility) {
 
    auto client_config = test_p2p_config(test_peer(81));
    client_config.set("plugins.p2p.node.bootstrap",
-                     forge::config::value::array_type{forge::config::value{server_endpoint->to_string()}});
+                     forge::config::core::value::array_type{forge::config::core::value{server_endpoint->to_string()}});
    auto client = resolver_only_application{};
    client.configure(client_config);
    forge::asio::blocking::run(client.runtime(), client.startup());
@@ -3442,8 +3442,8 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_rejects_malformed_remote_metadata_without_
       scripted_resolver_state{.responses = {std::move(duplicate), std::move(good)}});
 
    auto server_config = test_p2p_config(server_peer);
-   server_config.set("plugins.p2p.node.listen", forge::config::value::array_type{
-                                      forge::config::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
+   server_config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{
+                                      forge::config::core::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
 
    auto server = scripted_resolver_application{state};
    server.configure(server_config);
@@ -3456,7 +3456,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_rejects_malformed_remote_metadata_without_
 
    auto client_config = test_p2p_config(test_peer(86));
    client_config.set("plugins.p2p.node.bootstrap",
-                     forge::config::value::array_type{forge::config::value{server_endpoint->to_string()}});
+                     forge::config::core::value::array_type{forge::config::core::value{server_endpoint->to_string()}});
    auto client = resolver_only_application{};
    client.configure(client_config);
    forge::asio::blocking::run(client.runtime(), client.startup());
@@ -3476,8 +3476,8 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_rejects_malformed_remote_metadata_without_
 BOOST_AUTO_TEST_CASE(p2p_api_resolver_cache_ttl_and_force_refresh_are_behavioral) {
    const auto server_peer = test_peer(90);
    auto server_config = test_p2p_config(server_peer);
-   server_config.set("plugins.p2p.node.listen", forge::config::value::array_type{
-                                      forge::config::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
+   server_config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{
+                                      forge::config::core::value{"/ip4/127.0.0.1/udp/0/quic-v1"}});
 
    auto server = resolver_plugin_application{};
    server.configure(server_config);
@@ -3490,7 +3490,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_cache_ttl_and_force_refresh_are_behavioral
 
    auto client_config = test_p2p_config(test_peer(91));
    client_config.set("plugins.p2p.node.bootstrap",
-                     forge::config::value::array_type{forge::config::value{server_endpoint->to_string()}});
+                     forge::config::core::value::array_type{forge::config::core::value{server_endpoint->to_string()}});
    client_config.set("plugins.p2p.resolver.cache-ttl-ms", std::uint64_t{200});
    auto client = resolver_only_application{};
    client.configure(client_config);

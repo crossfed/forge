@@ -45,7 +45,7 @@ configured keys.
 - `forge_app`
 - `forge_api_core`
 - `forge_crypto`
-- `forge_config`
+- `forge_config_core`
 - `forge_schema`
 
 ## Config

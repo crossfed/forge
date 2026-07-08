@@ -18,12 +18,12 @@ import forge.api.core.connection;
 import forge.api.core.registry;
 import forge.api.core.binding;
 import forge.api.core.dispatcher;
-import forge.config.key_path;
-import forge.config.value;
-import forge.config.document;
-import forge.config.component;
-import forge.config.decode;
-import forge.config.migration;
+import forge.config.core.key_path;
+import forge.config.core.value;
+import forge.config.core.document;
+import forge.config.core.component;
+import forge.config.core.decode;
+import forge.config.core.migration;
 import forge.app.application;
 import forge.app.diagnostics;
 import forge.app.events;
@@ -62,13 +62,13 @@ class application_context {
 
 class configure_context {
  public:
-   explicit configure_context(const forge::config::document& document);
+   explicit configure_context(const forge::config::core::document& document);
 
-   [[nodiscard]] const forge::config::document& document() const noexcept;
-   [[nodiscard]] forge::config::component_view view(std::string section) const;
+   [[nodiscard]] const forge::config::core::document& document() const noexcept;
+   [[nodiscard]] forge::config::core::component_view view(std::string section) const;
 
  private:
-   const forge::config::document* document_ = nullptr;
+   const forge::config::core::document* document_ = nullptr;
 };
 
 class application_shell : public application_base {
@@ -79,8 +79,8 @@ class application_shell : public application_base {
    application_shell(const application_shell&) = delete;
    application_shell& operator=(const application_shell&) = delete;
 
-   [[nodiscard]] forge::config::component_registry describe_config();
-   void configure(const forge::config::document& document);
+   [[nodiscard]] forge::config::core::component_registry describe_config();
+   void configure(const forge::config::core::document& document);
    boost::asio::awaitable<void> initialize() final;
    boost::asio::awaitable<void> startup() final;
    boost::asio::awaitable<void> shutdown() final;
@@ -96,7 +96,7 @@ class application_shell : public application_base {
    [[nodiscard]] diagnostics_store& diagnostics() noexcept;
 
  protected:
-   virtual void on_describe_config(forge::config::component_registry& registry) const;
+   virtual void on_describe_config(forge::config::core::component_registry& registry) const;
    virtual boost::asio::awaitable<void> on_configure(configure_context& context);
    virtual void on_register_plugins(plugin_registry& registry);
    virtual boost::asio::awaitable<void> on_provide(application_context& context);
@@ -104,10 +104,10 @@ class application_shell : public application_base {
 
  private:
    void ensure_plugins_registered();
-   void instantiate_plugins(const forge::config::document& document);
-   [[nodiscard]] forge::config::component_registry collect_config();
-   [[nodiscard]] forge::config::document make_effective_config(const forge::config::document& document);
-   boost::asio::awaitable<void> apply_effective_config(forge::config::document document);
+   void instantiate_plugins(const forge::config::core::document& document);
+   [[nodiscard]] forge::config::core::component_registry collect_config();
+   [[nodiscard]] forge::config::core::document make_effective_config(const forge::config::core::document& document);
+   boost::asio::awaitable<void> apply_effective_config(forge::config::core::document document);
 
    struct impl;
    std::unique_ptr<impl> impl_;

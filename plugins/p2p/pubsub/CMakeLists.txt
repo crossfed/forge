@@ -23,7 +23,7 @@ target_link_libraries(
       forge_app
       forge_api_core
       forge_net_p2p
-      forge_config
+      forge_config_core
       forge_schema
       forge_raw
       forge_exceptions

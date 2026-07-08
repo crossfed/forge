@@ -175,6 +175,6 @@ Diagnostics carry:
 
 ## Tests
 
-`test_forge_schema` and `test_forge_config` cover field traversal, defaults, range
+`test_forge_schema` and `test_forge_config_core` cover field traversal, defaults, range
 validation, nested object-list decode, secret/deprecated metadata, and enum
 string/int conversion.

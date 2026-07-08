@@ -76,8 +76,8 @@ namespace detail {
 
 struct lifecycle {
 [[nodiscard]] static std::shared_ptr<plugin::impl> make_impl();
-[[nodiscard]] static std::optional<forge::config::component_descriptor> describe_config(const std::shared_ptr<plugin::impl>& impl);
-static boost::asio::awaitable<void> configure(const std::shared_ptr<plugin::impl>& impl, forge::config::component_view view);
+[[nodiscard]] static std::optional<forge::config::core::component_descriptor> describe_config(const std::shared_ptr<plugin::impl>& impl);
+static boost::asio::awaitable<void> configure(const std::shared_ptr<plugin::impl>& impl, forge::config::core::component_view view);
 static boost::asio::awaitable<void> provide(const std::shared_ptr<plugin::impl>& impl, forge::api::core::provider& provider);
 static boost::asio::awaitable<void> initialize(const std::shared_ptr<plugin::impl>& impl, forge::app::plugin_context& context);
 static boost::asio::awaitable<void> startup(const std::shared_ptr<plugin::impl>& impl);

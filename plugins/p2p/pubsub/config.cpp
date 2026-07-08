@@ -14,8 +14,8 @@ module;
 
 module forge.plugins.p2p.pubsub.plugin;
 
-import forge.config.component;
-import forge.config.decode;
+import forge.config.core.component;
+import forge.config.core.decode;
 import forge.exceptions;
 import forge.net.p2p.pubsub;
 import forge.plugins.p2p.pubsub.exceptions;
@@ -47,11 +47,11 @@ std::chrono::milliseconds to_ms(std::uint64_t value) {
    return std::chrono::milliseconds{static_cast<std::chrono::milliseconds::rep>(value)};
 }
 
-config decode_config(const forge::config::component_view& view) {
-   auto decoded = forge::config::decode<config>(view.source(), view.section());
+config decode_config(const forge::config::core::component_view& view) {
+   auto decoded = forge::config::core::decode<config>(view.source(), view.section());
    if (!decoded.ok()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_config,
-                          forge::config::format_decode_diagnostics("invalid P2P PubSub config",
+                          forge::config::core::format_decode_diagnostics("invalid P2P PubSub config",
                                                                  decoded.diagnostics));
    }
    return std::move(decoded.value);

@@ -27,7 +27,7 @@ import forge.net.http.exceptions;
 import forge.net.http.middleware;
 import forge.net.http.stream;
 import forge.net.http.target;
-import forge.json;
+import forge.codec.json;
 
 #include "details/router_match.hxx"
 
@@ -138,11 +138,11 @@ void restore_stream_transfer_framing(response& value, const stream_transfer_fram
 }
 
 std::string encode_error_payload(const forge::api::core::error_payload& payload) {
-   auto encoded = forge::json::write(payload);
+   auto encoded = forge::codec::json::write(payload);
    if (encoded.ok()) {
       return std::move(encoded.text);
    }
-   return forge::json::write(forge::api::core::make_internal_error_payload()).text;
+   return forge::codec::json::write(forge::api::core::make_internal_error_payload()).text;
 }
 
 response make_exception_response(const request& request, const forge::exceptions::base& error) {

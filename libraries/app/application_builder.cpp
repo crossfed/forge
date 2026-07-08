@@ -14,12 +14,12 @@ module forge.app.application_builder;
 
 import forge.asio.runtime;
 import forge.asio.task_scheduler;
-import forge.config.key_path;
-import forge.config.value;
-import forge.config.document;
-import forge.config.component;
-import forge.config.decode;
-import forge.config.migration;
+import forge.config.core.key_path;
+import forge.config.core.value;
+import forge.config.core.document;
+import forge.config.core.component;
+import forge.config.core.decode;
+import forge.config.core.migration;
 import forge.app.application_shell;
 import forge.app.plugin_registry;
 
@@ -29,7 +29,7 @@ namespace {
 struct builder_state {
    application_shell_options options;
    std::vector<plugin_descriptor> plugins;
-   std::vector<forge::config::component_descriptor> config_descriptors;
+   std::vector<forge::config::core::component_descriptor> config_descriptors;
    std::vector<std::function<boost::asio::awaitable<void>(configure_context&)>> configure_callbacks;
    std::vector<std::function<boost::asio::awaitable<void>(application_context&)>> provide_callbacks;
    std::function<int(application_shell&)> foreground;
@@ -40,7 +40,7 @@ class built_application final : public application_shell {
    explicit built_application(builder_state state) : application_shell{std::move(state.options)}, state_{std::move(state)} {}
 
  protected:
-   void on_describe_config(forge::config::component_registry& registry) const override {
+   void on_describe_config(forge::config::core::component_registry& registry) const override {
       for (auto descriptor : state_.config_descriptors) {
          registry.add(std::move(descriptor));
       }
@@ -109,7 +109,7 @@ application_builder& application_builder::plugin(plugin_descriptor descriptor) {
    return *this;
 }
 
-application_builder& application_builder::describe_config(forge::config::component_descriptor descriptor) {
+application_builder& application_builder::describe_config(forge::config::core::component_descriptor descriptor) {
    impl_->state.config_descriptors.push_back(std::move(descriptor));
    return *this;
 }
@@ -128,7 +128,7 @@ std::unique_ptr<application_shell> application_builder::build() && {
    return std::make_unique<built_application>(std::move(state));
 }
 
-std::invalid_argument application_builder::make_decode_error(const forge::config::decode_diagnostics& diagnostics) {
+std::invalid_argument application_builder::make_decode_error(const forge::config::core::decode_diagnostics& diagnostics) {
    auto message = std::ostringstream{};
    message << "application config decode failed";
    for (const auto& entry : diagnostics.entries) {

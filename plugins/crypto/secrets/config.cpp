@@ -10,8 +10,8 @@ module;
 
 module forge.plugins.crypto.secrets.plugin;
 
-import forge.config.component;
-import forge.config.decode;
+import forge.config.core.component;
+import forge.config.core.decode;
 import forge.crypto.secret_bytes;
 import forge.exceptions;
 import forge.plugins.crypto.secrets.exceptions;
@@ -36,17 +36,17 @@ void require_aes_update_limit(std::uint64_t value, const char* label) {
 
 } // namespace
 
-config decode_config(const forge::config::component_view& view) {
-   auto decoded = forge::config::decode<config>(view.source(), view.section());
+config decode_config(const forge::config::core::component_view& view) {
+   auto decoded = forge::config::core::decode<config>(view.source(), view.section());
    if (!decoded.ok()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_config,
-                          forge::config::format_decode_diagnostics("invalid crypto secrets config",
+                          forge::config::core::format_decode_diagnostics("invalid crypto secrets config",
                                                                  decoded.diagnostics));
    }
    return std::move(decoded.value);
 }
 
-void apply_config(plugin::impl& state, forge::config::component_view view) {
+void apply_config(plugin::impl& state, forge::config::core::component_view view) {
    auto decoded = decode_config(view);
    require_aes_update_limit(decoded.default_max_plaintext_bytes, "default-max-plaintext-bytes");
    require_aes_update_limit(decoded.default_max_ciphertext_bytes, "default-max-ciphertext-bytes");

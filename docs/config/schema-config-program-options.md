@@ -1,17 +1,17 @@
 # Schema + Config + Source Adapters
 
 This document explains the configuration stack across `forge_schema`,
-`forge_config`, `forge_yaml`, `forge_json`, `forge_env`, `forge_program_options` and
+`forge_config_core`, `forge_codec_yaml`, `forge_codec_json`, `forge_config_env`, `forge_config_program_options` and
 `forge_app`.
 
 Local guides:
 
 - [schema](../../libraries/schema/README.md)
-- [config](../../libraries/config/README.md)
-- [program_options](../../libraries/program_options/README.md)
-- [env](../../libraries/env/README.md)
-- [yaml](../../libraries/yaml/README.md)
-- [json](../../libraries/json/README.md)
+- [config](../../libraries/config/core/README.md)
+- [program_options](../../libraries/config/program_options/README.md)
+- [env](../../libraries/config/env/README.md)
+- [yaml](../../libraries/codec/yaml/README.md)
+- [json](../../libraries/codec/json/README.md)
 - [app](../../libraries/app/README.md)
 
 ## Задача
@@ -23,11 +23,11 @@ came from YAML, JSON, environment or `--http.bind-port=9090`.
 ## Ownership
 
 - `forge_schema` describes typed field rules and diagnostics.
-- `forge_config` stores neutral documents, merges layers, decodes types and
+- `forge_config_core` stores neutral documents, merges layers, decodes types and
   redacts secrets.
-- `forge_yaml` and `forge_json` are file/text codec adapters.
-- `forge_env` is the process environment and explicit `.env` adapter.
-- `forge_program_options` is the CLI adapter over Boost.Program_options.
+- `forge_codec_yaml` and `forge_codec_json` are file/text codec adapters.
+- `forge_config_env` is the process environment and explicit `.env` adapter.
+- `forge_config_program_options` is the CLI adapter over Boost.Program_options.
 - `forge_app` consumes `component_view` and never sees parser backend types.
 
 ## End-To-End Flow
@@ -35,8 +35,8 @@ came from YAML, JSON, environment or `--http.bind-port=9090`.
 ```text
 Boost.Describe struct
   -> forge_schema::rules<T>
-  -> forge_config::component_descriptor
-  -> YAML/JSON/env/CLI adapters produce config::document
+  -> forge_config_core::component_descriptor
+  -> YAML/JSON/env/CLI adapters produce config::core::document
   -> merge(defaults, file, dotenv, process_env, cli)
   -> decode<T>(document, section)
   -> plugin.configure(component_view)
@@ -53,7 +53,7 @@ The default order is:
 5. CLI.
 
 Adapters do not hard-code precedence. Programs compose documents through
-`forge::config::merge`.
+`forge::config::core::merge`.
 
 ## Diagnostics
 
@@ -70,7 +70,7 @@ without re-parsing exception text.
 
 ## Redaction
 
-Secret fields are declared in schema. `forge_config::redact(document, registry)`
+Secret fields are declared in schema. `forge_config_core::redact(document, registry)`
 applies that metadata before output. Redaction is not encryption and does not
 replace vault/secret storage.
 
@@ -78,10 +78,10 @@ replace vault/secret storage.
 
 ```cpp
 auto registry = application.describe_config();
-auto yaml = forge::yaml::load_document(config_path);
-auto dotenv = forge::env::load_document(workspace / ".env", registry, {.prefix = "APP"});
-auto env = forge::env::read_process_document(registry, {.prefix = "APP"});
-auto cli = forge::program_options::parse(argc, argv, registry);
+auto yaml = forge::codec::yaml::load_document(config_path);
+auto dotenv = forge::config::env::load_document(workspace / ".env", registry, {.prefix = "APP"});
+auto env = forge::config::env::read_process_document(registry, {.prefix = "APP"});
+auto cli = forge::config::program_options::parse(argc, argv, registry);
 if (!yaml.ok()) {
    report_diagnostics(yaml.diagnostics);
 }
@@ -96,7 +96,7 @@ if (!cli.ok()) {
 }
 
 if (yaml.ok() && dotenv.ok() && env.ok() && cli.ok()) {
-   auto effective = forge::config::merge({
+   auto effective = forge::config::core::merge({
       defaults,
       yaml.value,
       dotenv.value,
@@ -118,9 +118,9 @@ if (yaml.ok() && dotenv.ok() && env.ok() && cli.ok()) {
 ## Verification
 
 - `test_forge_schema`: rules/defaults/range/enum behavior.
-- `test_forge_config`: key paths, merge, decode, redaction and registry conflicts.
-- `test_forge_program_options`: dotted flags, booleans, repeated list values and
+- `test_forge_config_core`: key paths, merge, decode, redaction and registry conflicts.
+- `test_forge_config_program_options`: dotted flags, booleans, repeated list values and
   parse diagnostics.
-- `test_forge_env`: dotenv grammar, env name mapping, aliases, conversions,
+- `test_forge_config_env`: dotenv grammar, env name mapping, aliases, conversions,
   unknowns and secret-safe examples.
 - `test_forge_app`: config descriptor collection and configure-before-initialize.

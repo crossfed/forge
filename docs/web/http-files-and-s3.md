@@ -16,7 +16,7 @@ error shapes.
 - WebSocket upgrade routing;
 - `FORGE_HTTP_API(...)` presentation metadata on top of `FORGE_API(...)`;
 - JSON request/response DTOs for ordinary typed HTTP methods, with planned XML
-  request/response/error codecs in `forge_api_http` after `forge_xml` lands;
+  request/response/error codecs in `forge_api_http` after `forge_codec_xml` lands;
 - path, query and header binding into described request DTOs;
 - HTTP-only typed fields such as `header<T>`, `form_field<T>`,
   `body_stream`, `body_bytes` and `upload_file`;
@@ -62,7 +62,7 @@ FORGE_HTTP_API(
 the HTTP presentation: method, path, status and HTTP field mapping.
 
 Ordinary DTO request/response bodies use JSON by default. S3-compatible APIs
-need XML bodies, so the planned path is `forge_xml` first, then multi-codec
+need XML bodies, so the planned path is `forge_codec_xml` first, then multi-codec
 `forge_api_http` binding. Downstream object gateways should still declare typed
 API contracts and HTTP presentation metadata; manual `router` bypass is not the
 normal endpoint pattern.
@@ -101,7 +101,7 @@ The current slice proves the server-side typed binding model for JSON DTOs,
 streaming request bodies and file responses. Remaining HTTP-library work should
 stay generic:
 
-- XML codec support through a new `forge_xml` leaf library;
+- XML codec support through a new `forge_codec_xml` leaf library;
 - multi-codec request, response and error profiles in `forge_api_http`;
 - complete route option metadata instead of macro placeholders for custom
   header/form names;

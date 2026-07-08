@@ -8,7 +8,7 @@ module;
 
 export module forge.app.plugin;
 
-import forge.config.component;
+import forge.config.core.component;
 import forge.api.core.exceptions;
 import forge.api.core.types;
 import forge.api.core.descriptor;
@@ -48,8 +48,8 @@ class plugin {
    [[nodiscard]] virtual plugin_id id() const = 0;
    [[nodiscard]] virtual std::string version() const = 0;
 
-   [[nodiscard]] virtual std::optional<config::component_descriptor> describe_config() const;
-   virtual boost::asio::awaitable<void> configure(config::component_view view);
+   [[nodiscard]] virtual std::optional<config::core::component_descriptor> describe_config() const;
+   virtual boost::asio::awaitable<void> configure(config::core::component_view view);
    virtual boost::asio::awaitable<void> provide(forge::api::core::provider& provider);
    virtual boost::asio::awaitable<void> initialize(plugin_context& context) = 0;
    virtual boost::asio::awaitable<void> startup() = 0;

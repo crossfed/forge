@@ -71,10 +71,10 @@ import forge.net.http.stream;
 import forge.net.http.target;
 import forge.net.http.types;
 import forge.net.http.upload;
-import forge.json;
+import forge.codec.json;
 import forge.raw.raw;
 import forge.schema.object;
-import forge.xml;
+import forge.codec.xml;
 import forge.api.websocket.binding;
 import forge.net.websocket.client;
 import forge.net.websocket.connection;
@@ -1131,15 +1131,15 @@ concept has_public_request_marker_stream_request =
 
 body_reader make_body_reader(std::vector<std::string> chunks);
 
-[[nodiscard]] const forge::xml::element* find_xml_child(const forge::xml::element& parent,
+[[nodiscard]] const forge::codec::xml::element* find_xml_child(const forge::codec::xml::element& parent,
                                                         std::string_view name) noexcept {
-   const auto found = std::find_if(parent.children.begin(), parent.children.end(), [&](const forge::xml::element& child) {
+   const auto found = std::find_if(parent.children.begin(), parent.children.end(), [&](const forge::codec::xml::element& child) {
       return child.name == name;
    });
    return found == parent.children.end() ? nullptr : &*found;
 }
 
-[[nodiscard]] std::string xml_child_text(const forge::xml::element& parent, std::string_view name) {
+[[nodiscard]] std::string xml_child_text(const forge::codec::xml::element& parent, std::string_view name) {
    if (const auto* child = find_xml_child(parent, name); child != nullptr) {
       return child->text;
    }
@@ -2179,7 +2179,7 @@ BOOST_AUTO_TEST_CASE(router_escapes_control_bytes_in_exception_json) {
 
    BOOST_TEST(response.result_int() == static_cast<unsigned>(status::bad_request));
    BOOST_TEST(response[field::content_type] == "application/json");
-   const auto parsed = forge::json::read_value(response.body());
+   const auto parsed = forge::codec::json::read_value(response.body());
    BOOST_REQUIRE(parsed.ok());
    BOOST_TEST(parsed.value.get_object()["error"].get_string() == "bad_request");
    auto contains_raw_control = false;
@@ -2281,7 +2281,7 @@ BOOST_AUTO_TEST_CASE(http_api_plan_populates_get_request_from_route_and_query) {
    context.runtime = &runtime;
 
    const auto response = handle(router, context);
-   const auto unpacked = forge::json::read<api_chunk>(response.body());
+   const auto unpacked = forge::codec::json::read<api_chunk>(response.body());
 
    BOOST_TEST(response.result_int() == static_cast<unsigned>(status::ok));
    BOOST_REQUIRE(unpacked.ok());
@@ -2307,7 +2307,7 @@ BOOST_AUTO_TEST_CASE(http_api_plan_escapes_json_error_fields) {
    const auto response = handle(router, context);
 
    BOOST_TEST(response.result_int() == static_cast<unsigned>(status::not_found));
-   const auto parsed = forge::json::read_value(response.body());
+   const auto parsed = forge::codec::json::read_value(response.body());
    BOOST_REQUIRE(parsed.ok());
    const auto& message = parsed.value.get_object()["message"].get_string();
    BOOST_TEST(message.find("chunk \"missing\"") != std::string::npos);
@@ -2340,7 +2340,7 @@ BOOST_AUTO_TEST_CASE(http_api_plan_passes_put_body_to_typed_api) {
    context.runtime = &runtime;
 
    const auto response = handle(router, context);
-   const auto unpacked = forge::json::read<api_chunk>(response.body());
+   const auto unpacked = forge::codec::json::read<api_chunk>(response.body());
 
    BOOST_TEST(response.result_int() == static_cast<unsigned>(status::ok));
    BOOST_REQUIRE(unpacked.ok());
@@ -2375,7 +2375,7 @@ BOOST_AUTO_TEST_CASE(http_api_macro_get_maps_route_and_query) {
    context.runtime = &runtime;
 
    const auto response = handle(router, context);
-   const auto unpacked = forge::json::read<macro_chunk>(response.body());
+   const auto unpacked = forge::codec::json::read<macro_chunk>(response.body());
 
    BOOST_TEST(response.result_int() == static_cast<unsigned>(status::ok));
    BOOST_REQUIRE(unpacked.ok());
@@ -2398,7 +2398,7 @@ BOOST_AUTO_TEST_CASE(http_api_query_template_preserves_wire_alias) {
    auto connection = forge::net::http::connection{runtime, parse_base_url("http://127.0.0.1:" + std::to_string(port))};
    auto request_value = make_request(method::get, "/search/cache?page_size=25");
    const auto response = forge::asio::blocking::run(runtime, connection.async_request(std::move(request_value)));
-   const auto decoded = forge::json::read<search_response>(response.body());
+   const auto decoded = forge::codec::json::read<search_response>(response.body());
    BOOST_TEST(response.result_int() == static_cast<unsigned>(status::ok));
    BOOST_REQUIRE(decoded.ok());
    BOOST_TEST(decoded.value.value == "cache:25");
@@ -2583,7 +2583,7 @@ BOOST_AUTO_TEST_CASE(http_endpoint_request_injects_request_and_response_state) {
    auto current_request = make_request(method::get, "/endpoint/abc");
    current_request.set("X-Trace", "trace-1");
    auto current = forge::asio::blocking::run(runtime, connection.async_request(std::move(current_request)));
-   auto decoded = forge::json::read<endpoint_control_response>(current.body());
+   auto decoded = forge::codec::json::read<endpoint_control_response>(current.body());
    BOOST_REQUIRE(decoded.ok());
    BOOST_TEST(decoded.value.summary == "abc:/endpoint/abc:trace-1");
    BOOST_TEST(current["X-Endpoint-Id"] == "abc");
@@ -2685,7 +2685,7 @@ BOOST_AUTO_TEST_CASE(http_stream_path_buffered_response_merges_endpoint_headers_
       return header.name == "Set-Cookie" && header.text == "stream=payload";
    }));
 
-   auto decoded = forge::json::read<endpoint_control_response>(response_value.body());
+   auto decoded = forge::codec::json::read<endpoint_control_response>(response_value.body());
    BOOST_REQUIRE(decoded.ok());
    BOOST_TEST(decoded.value.summary == "abc:payload");
 
@@ -3109,7 +3109,7 @@ BOOST_AUTO_TEST_CASE(http_api_macro_put_uses_default_json_codec_without_content_
    context.runtime = &runtime;
 
    const auto response = handle(router, context);
-   const auto decoded = forge::json::read<macro_chunk>(response.body());
+   const auto decoded = forge::codec::json::read<macro_chunk>(response.body());
 
    BOOST_TEST(response.result_int() == static_cast<unsigned>(status::created));
    BOOST_TEST(response[field::content_type] == "application/json");
@@ -3160,7 +3160,7 @@ BOOST_AUTO_TEST_CASE(http_api_xml_request_and_response_body_roundtrip) {
    context.runtime = &runtime;
 
    const auto response = handle(router, context);
-   const auto decoded = forge::xml::read<macro_chunk>(response.body());
+   const auto decoded = forge::codec::xml::read<macro_chunk>(response.body());
 
    BOOST_TEST(response.result_int() == static_cast<unsigned>(status::created));
    BOOST_TEST(response[field::content_type] == "application/xml");
@@ -3186,7 +3186,7 @@ BOOST_AUTO_TEST_CASE(http_api_xml_error_body_uses_route_error_codec) {
    context.runtime = &runtime;
 
    const auto response = handle(router, context);
-   const auto decoded = forge::xml::read_value(response.body());
+   const auto decoded = forge::codec::xml::read_value(response.body());
 
    BOOST_TEST(response.result_int() == static_cast<unsigned>(status::unsupported_media_type));
    BOOST_TEST(response[field::content_type] == "application/xml");
@@ -3212,7 +3212,7 @@ BOOST_AUTO_TEST_CASE(http_api_request_content_type_rejects_wildcard_media_range)
    context.runtime = &runtime;
 
    const auto response = handle(router, context);
-   const auto decoded = forge::xml::read_value(response.body());
+   const auto decoded = forge::codec::xml::read_value(response.body());
 
    BOOST_TEST(response.result_int() == static_cast<unsigned>(status::unsupported_media_type));
    BOOST_TEST(response[field::content_type] == "application/xml");
@@ -3236,7 +3236,7 @@ BOOST_AUTO_TEST_CASE(http_api_xml_route_rejects_unacceptable_accept) {
    context.runtime = &runtime;
 
    const auto response = handle(router, context);
-   const auto decoded = forge::xml::read_value(response.body());
+   const auto decoded = forge::codec::xml::read_value(response.body());
 
    BOOST_TEST(response.result_int() == static_cast<unsigned>(status::not_acceptable));
    BOOST_TEST(response[field::content_type] == "application/xml");
@@ -3260,7 +3260,7 @@ BOOST_AUTO_TEST_CASE(http_api_xml_route_rejects_specific_zero_quality_accept) {
    context.runtime = &runtime;
 
    const auto response = handle(router, context);
-   const auto decoded = forge::xml::read_value(response.body());
+   const auto decoded = forge::codec::xml::read_value(response.body());
 
    BOOST_TEST(response.result_int() == static_cast<unsigned>(status::not_acceptable));
    BOOST_TEST(response[field::content_type] == "application/xml");
@@ -3285,7 +3285,7 @@ BOOST_AUTO_TEST_CASE(http_api_xml_route_combines_repeated_accept_headers) {
    context.runtime = &runtime;
 
    const auto response = handle(router, context);
-   const auto decoded = forge::xml::read<macro_chunk>(response.body());
+   const auto decoded = forge::codec::xml::read<macro_chunk>(response.body());
 
    BOOST_TEST(response.result_int() == static_cast<unsigned>(status::ok));
    BOOST_TEST(response[field::content_type] == "application/xml");
@@ -3314,7 +3314,7 @@ BOOST_AUTO_TEST_CASE(http_api_xml_route_combines_repeated_accept_zero_quality_be
    context.runtime = &runtime;
 
    const auto response = handle(router, context);
-   const auto decoded = forge::xml::read_value(response.body());
+   const auto decoded = forge::codec::xml::read_value(response.body());
 
    BOOST_TEST(response.result_int() == static_cast<unsigned>(status::not_acceptable));
    BOOST_TEST(response[field::content_type] == "application/xml");
@@ -3344,7 +3344,7 @@ BOOST_AUTO_TEST_CASE(http_api_xml_route_negotiates_actual_response_media_type_be
       context.runtime = &runtime;
 
       const auto response = handle(router, context);
-      const auto decoded = forge::xml::read_value(response.body());
+      const auto decoded = forge::codec::xml::read_value(response.body());
 
       BOOST_TEST(response.result_int() == static_cast<unsigned>(status::not_acceptable));
       BOOST_TEST(response[field::content_type] == "application/xml");
@@ -3421,7 +3421,7 @@ BOOST_AUTO_TEST_CASE(http_api_rejects_unacceptable_accept_before_handler_invocat
    context.runtime = &runtime;
 
    const auto response = handle(router, context);
-   const auto decoded = forge::xml::read_value(response.body());
+   const auto decoded = forge::codec::xml::read_value(response.body());
 
    BOOST_TEST(response.result_int() == static_cast<unsigned>(status::not_acceptable));
    BOOST_TEST(response[field::content_type] == "application/xml");
@@ -3643,7 +3643,7 @@ BOOST_AUTO_TEST_CASE(http_api_preserves_explicit_method_name_for_same_dto_method
    auto context = make_route_context(request);
    context.runtime = &runtime;
    const auto response = handle(router, context);
-   const auto decoded = forge::json::read<control_response>(response.body());
+   const auto decoded = forge::codec::json::read<control_response>(response.body());
 
    BOOST_TEST(response.result_int() == static_cast<unsigned>(status::ok));
    BOOST_REQUIRE(decoded.ok());
@@ -4017,7 +4017,7 @@ BOOST_AUTO_TEST_CASE(http_api_form_only_request_uses_multipart_binding) {
    request_value.prepare_payload();
 
    const auto response = forge::asio::blocking::run(runtime, connection.async_request(std::move(request_value)));
-   const auto decoded = forge::json::read<form_submit_response>(response.body());
+   const auto decoded = forge::codec::json::read<form_submit_response>(response.body());
    BOOST_TEST(response.result_int() == static_cast<unsigned>(status::ok));
    BOOST_REQUIRE(decoded.ok());
    BOOST_TEST(decoded.value.summary == "alpha:7");
@@ -4062,7 +4062,7 @@ BOOST_AUTO_TEST_CASE(http_api_patch_route_is_mounted) {
    auto context = make_route_context(request);
    context.runtime = &runtime;
    const auto response = handle(router, context);
-   const auto decoded = forge::json::read<control_response>(response.body());
+   const auto decoded = forge::codec::json::read<control_response>(response.body());
 
    BOOST_TEST(response.result_int() == static_cast<unsigned>(status::ok));
    BOOST_REQUIRE(decoded.ok());
@@ -4190,7 +4190,7 @@ BOOST_AUTO_TEST_CASE(http_api_plan_mounts_under_base_path) {
    context.runtime = &runtime;
 
    const auto response = handle(router, context);
-   const auto unpacked = forge::json::read<macro_chunk>(response.body());
+   const auto unpacked = forge::codec::json::read<macro_chunk>(response.body());
 
    BOOST_TEST(response.result_int() == static_cast<unsigned>(status::ok));
    BOOST_REQUIRE(unpacked.ok());

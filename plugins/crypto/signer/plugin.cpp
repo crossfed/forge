@@ -31,10 +31,10 @@ import forge.api.core.dispatcher;
 import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.app.plugin_registry;
-import forge.config.component;
-import forge.config.decode;
-import forge.config.document;
-import forge.config.value;
+import forge.config.core.component;
+import forge.config.core.decode;
+import forge.config.core.document;
+import forge.config.core.value;
 import forge.crypto.asymmetric;
 import forge.crypto.sha256;
 import forge.exceptions;
@@ -71,11 +71,11 @@ std::string plugin::version() const {
    return "1.0.0";
 }
 
-std::optional<forge::config::component_descriptor> plugin::describe_config() const {
-   return forge::config::describe_component<config>("plugins.crypto.signer");
+std::optional<forge::config::core::component_descriptor> plugin::describe_config() const {
+   return forge::config::core::describe_component<config>("plugins.crypto.signer");
 }
 
-boost::asio::awaitable<void> plugin::configure(forge::config::component_view view) {
+boost::asio::awaitable<void> plugin::configure(forge::config::core::component_view view) {
    apply_config(*impl_, view);
    co_return;
 }

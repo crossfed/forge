@@ -24,7 +24,7 @@ target_link_libraries(
       forge_api_transport
       forge_api_p2p
       forge_net_p2p
-      forge_config
+      forge_config_core
       forge_schema
       forge_asio
       forge_exceptions

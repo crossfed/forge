@@ -7,8 +7,8 @@ target_link_libraries(
    forge_api_http PUBLIC
       forge_api_core
       forge_net_http
-      forge_json
-      forge_xml
+      forge_codec_json
+      forge_codec_xml
       forge_raw
       forge_reflect
       forge_schema

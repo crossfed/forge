@@ -58,12 +58,12 @@ target_compile_definitions(test_forge_otlp PRIVATE FORGE_OTLP_CRASH_HELPER="$<TA
 add_test(NAME test_forge_otlp COMMAND test_forge_otlp WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
-   test_forge_json
+   test_forge_codec_json
    unit/main.cpp
    json/test_json.cpp
 )
-target_link_libraries(test_forge_json forge Boost::included_unit_test_framework)
-add_test(NAME test_forge_json COMMAND test_forge_json WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+target_link_libraries(test_forge_codec_json forge Boost::included_unit_test_framework)
+add_test(NAME test_forge_codec_json COMMAND test_forge_codec_json WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
    test_forge_raw
@@ -227,44 +227,44 @@ target_link_libraries(test_forge_schema forge Boost::included_unit_test_framewor
 add_test(NAME test_forge_schema COMMAND test_forge_schema WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
-   test_forge_config
+   test_forge_config_core
    unit/main.cpp
    config/config_tests.cpp
 )
-target_link_libraries(test_forge_config forge Boost::included_unit_test_framework)
-add_test(NAME test_forge_config COMMAND test_forge_config WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+target_link_libraries(test_forge_config_core forge Boost::included_unit_test_framework)
+add_test(NAME test_forge_config_core COMMAND test_forge_config_core WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
-   test_forge_yaml
+   test_forge_codec_yaml
    unit/main.cpp
    yaml/yaml_tests.cpp
 )
-target_link_libraries(test_forge_yaml forge Boost::included_unit_test_framework)
-add_test(NAME test_forge_yaml COMMAND test_forge_yaml WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+target_link_libraries(test_forge_codec_yaml forge Boost::included_unit_test_framework)
+add_test(NAME test_forge_codec_yaml COMMAND test_forge_codec_yaml WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
-   test_forge_xml
+   test_forge_codec_xml
    unit/main.cpp
    xml/xml_tests.cpp
 )
-target_link_libraries(test_forge_xml forge_xml Boost::included_unit_test_framework)
-add_test(NAME test_forge_xml COMMAND test_forge_xml WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+target_link_libraries(test_forge_codec_xml forge_codec_xml Boost::included_unit_test_framework)
+add_test(NAME test_forge_codec_xml COMMAND test_forge_codec_xml WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
-   test_forge_program_options
+   test_forge_config_program_options
    unit/main.cpp
    program_options/program_options_tests.cpp
 )
-target_link_libraries(test_forge_program_options forge Boost::included_unit_test_framework)
-add_test(NAME test_forge_program_options COMMAND test_forge_program_options WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+target_link_libraries(test_forge_config_program_options forge Boost::included_unit_test_framework)
+add_test(NAME test_forge_config_program_options COMMAND test_forge_config_program_options WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
-   test_forge_env
+   test_forge_config_env
    unit/main.cpp
    env/env_tests.cpp
 )
-target_link_libraries(test_forge_env forge Boost::included_unit_test_framework)
-add_test(NAME test_forge_env COMMAND test_forge_env WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+target_link_libraries(test_forge_config_env forge Boost::included_unit_test_framework)
+add_test(NAME test_forge_config_env COMMAND test_forge_config_env WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
    test_forge_api_core
@@ -447,11 +447,11 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
-   test_forge_package_env_lightweight
+   test_forge_package_config_core_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
-      ${CMAKE_CURRENT_SOURCE_DIR}/package_env_lightweight
-      ${CMAKE_BINARY_DIR}/forge-package-env-lightweight
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_config_core_component
+      ${CMAKE_BINARY_DIR}/forge-package-config-core-component
       --build-generator ${CMAKE_GENERATOR}
       --build-options
          ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
@@ -459,7 +459,39 @@ add_custom_target(
          -DCMAKE_DISABLE_FIND_PACKAGE_Ngtcp2=ON
          -DCMAKE_DISABLE_FIND_PACKAGE_glaze=ON
          -DCMAKE_DISABLE_FIND_PACKAGE_Notcurses=ON
-      --test-command forge_package_env_lightweight
+      --test-command forge_package_config_core_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_config_env_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_config_env_component
+      ${CMAKE_BINARY_DIR}/forge-package-config-env-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options
+         ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_Ngtcp2=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_glaze=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_Notcurses=ON
+      --test-command forge_package_config_env_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_config_program_options_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_config_program_options_component
+      ${CMAKE_BINARY_DIR}/forge-package-config-program-options-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options
+         ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_Ngtcp2=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_glaze=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_Notcurses=ON
+      --test-command forge_package_config_program_options_component
    DEPENDS test_forge_package_install
 )
 add_custom_target(
@@ -699,30 +731,52 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
-   test_forge_package_xml_component
+   test_forge_package_codec_json_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
-      ${CMAKE_CURRENT_SOURCE_DIR}/package_xml_component
-      ${CMAKE_BINARY_DIR}/forge-package-xml-component
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_codec_json_component
+      ${CMAKE_BINARY_DIR}/forge-package-codec-json-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_codec_json_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_codec_yaml_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_codec_yaml_component
+      ${CMAKE_BINARY_DIR}/forge-package-codec-yaml-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_codec_yaml_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_codec_xml_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_codec_xml_component
+      ${CMAKE_BINARY_DIR}/forge-package-codec-xml-component
       --build-generator ${CMAKE_GENERATOR}
       --build-options
          ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
          -DCMAKE_DISABLE_FIND_PACKAGE_glaze=ON
-      --test-command forge_package_xml_component
+      --test-command forge_package_codec_xml_component
    DEPENDS test_forge_package_install
 )
 add_custom_target(
-   test_forge_package_xml_add_subdirectory
+   test_forge_package_codec_xml_add_subdirectory
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
-      ${CMAKE_CURRENT_SOURCE_DIR}/package_xml_add_subdirectory
-      ${CMAKE_BINARY_DIR}/forge-package-xml-add-subdirectory
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_codec_xml_add_subdirectory
+      ${CMAKE_BINARY_DIR}/forge-package-codec-xml-add-subdirectory
       --build-generator ${CMAKE_GENERATOR}
       --build-options
          ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
          -DFORGE_SOURCE_DIR=${CMAKE_SOURCE_DIR}
-      --build-target forge_xml_add_subdirectory
-      --test-command forge_xml_add_subdirectory
+      --build-target forge_codec_xml_add_subdirectory
+      --test-command forge_codec_xml_add_subdirectory
 )
 add_custom_target(
    test_forge_package_api_transport_component
@@ -908,11 +962,11 @@ add_test(
 )
 set_tests_properties(test_forge_package_core_lightweight PROPERTIES DEPENDS test_forge_package_install)
 add_test(
-   NAME test_forge_package_env_lightweight
+   NAME test_forge_package_config_core_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
-      ${CMAKE_CURRENT_SOURCE_DIR}/package_env_lightweight
-      ${CMAKE_BINARY_DIR}/forge-package-env-lightweight
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_config_core_component
+      ${CMAKE_BINARY_DIR}/forge-package-config-core-component
       --build-generator ${CMAKE_GENERATOR}
       --build-options
          ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
@@ -920,9 +974,41 @@ add_test(
          -DCMAKE_DISABLE_FIND_PACKAGE_Ngtcp2=ON
          -DCMAKE_DISABLE_FIND_PACKAGE_glaze=ON
          -DCMAKE_DISABLE_FIND_PACKAGE_Notcurses=ON
-      --test-command forge_package_env_lightweight
+      --test-command forge_package_config_core_component
 )
-set_tests_properties(test_forge_package_env_lightweight PROPERTIES DEPENDS test_forge_package_install)
+set_tests_properties(test_forge_package_config_core_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_config_env_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_config_env_component
+      ${CMAKE_BINARY_DIR}/forge-package-config-env-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options
+         ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_Ngtcp2=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_glaze=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_Notcurses=ON
+      --test-command forge_package_config_env_component
+)
+set_tests_properties(test_forge_package_config_env_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_config_program_options_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_config_program_options_component
+      ${CMAKE_BINARY_DIR}/forge-package-config-program-options-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options
+         ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_Ngtcp2=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_glaze=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_Notcurses=ON
+      --test-command forge_package_config_program_options_component
+)
+set_tests_properties(test_forge_package_config_program_options_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_api_core_component
    COMMAND ${CMAKE_CTEST_COMMAND}
@@ -1160,30 +1246,52 @@ add_test(
 )
 set_tests_properties(test_forge_package_blobdb_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
-   NAME test_forge_package_xml_component
+   NAME test_forge_package_codec_json_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
-      ${CMAKE_CURRENT_SOURCE_DIR}/package_xml_component
-      ${CMAKE_BINARY_DIR}/forge-package-xml-component
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_codec_json_component
+      ${CMAKE_BINARY_DIR}/forge-package-codec-json-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_codec_json_component
+)
+set_tests_properties(test_forge_package_codec_json_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_codec_yaml_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_codec_yaml_component
+      ${CMAKE_BINARY_DIR}/forge-package-codec-yaml-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_codec_yaml_component
+)
+set_tests_properties(test_forge_package_codec_yaml_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_codec_xml_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_codec_xml_component
+      ${CMAKE_BINARY_DIR}/forge-package-codec-xml-component
       --build-generator ${CMAKE_GENERATOR}
       --build-options
          ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
          -DCMAKE_DISABLE_FIND_PACKAGE_glaze=ON
-      --test-command forge_package_xml_component
+      --test-command forge_package_codec_xml_component
 )
-set_tests_properties(test_forge_package_xml_component PROPERTIES DEPENDS test_forge_package_install)
+set_tests_properties(test_forge_package_codec_xml_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
-   NAME test_forge_package_xml_add_subdirectory
+   NAME test_forge_package_codec_xml_add_subdirectory
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
-      ${CMAKE_CURRENT_SOURCE_DIR}/package_xml_add_subdirectory
-      ${CMAKE_BINARY_DIR}/forge-package-xml-add-subdirectory
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_codec_xml_add_subdirectory
+      ${CMAKE_BINARY_DIR}/forge-package-codec-xml-add-subdirectory
       --build-generator ${CMAKE_GENERATOR}
       --build-options
          ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
          -DFORGE_SOURCE_DIR=${CMAKE_SOURCE_DIR}
-      --build-target forge_xml_add_subdirectory
-      --test-command forge_xml_add_subdirectory
+      --build-target forge_codec_xml_add_subdirectory
+      --test-command forge_codec_xml_add_subdirectory
 )
 add_test(
    NAME test_forge_package_api_transport_component

@@ -22,8 +22,8 @@ module forge.plugins.db.rocksdb.plugin;
 import forge.api.core.binding;
 import forge.app.plugin_context;
 import forge.asio.task_scheduler;
-import forge.config.component;
-import forge.config.decode;
+import forge.config.core.component;
+import forge.config.core.decode;
 import forge.exceptions;
 import forge.plugins.db.rocksdb.exceptions;
 import forge.rocksdb.store;
@@ -126,11 +126,11 @@ std::shared_ptr<plugin::impl> lifecycle::make_impl() {
    return std::make_shared<plugin::impl>();
 }
 
-std::optional<forge::config::component_descriptor> lifecycle::describe_config(const std::shared_ptr<plugin::impl>&) {
-   return forge::config::describe_component<config>("plugins.db.rocksdb");
+std::optional<forge::config::core::component_descriptor> lifecycle::describe_config(const std::shared_ptr<plugin::impl>&) {
+   return forge::config::core::describe_component<config>("plugins.db.rocksdb");
 }
 
-boost::asio::awaitable<void> lifecycle::configure(const std::shared_ptr<plugin::impl>& impl_, forge::config::component_view view) {
+boost::asio::awaitable<void> lifecycle::configure(const std::shared_ptr<plugin::impl>& impl_, forge::config::core::component_view view) {
    impl_->configure(decode_config(view));
    co_return;
 }
