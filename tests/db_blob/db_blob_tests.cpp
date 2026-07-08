@@ -197,6 +197,13 @@ struct strict_digest {
    auto operator<=>(const strict_digest&) const = default;
 };
 
+struct capped_digest {
+   std::vector<std::byte> bytes;
+
+   bool operator==(const capped_digest&) const = default;
+   auto operator<=>(const capped_digest&) const = default;
+};
+
 struct by_id;
 
 struct document : forge::db::object::object<document, 3, 9> {
@@ -294,6 +301,19 @@ struct digest_traits<strict_digest> {
          bytes.push_back(static_cast<std::byte>(byte));
       }
       return strict_digest{std::move(bytes)};
+   }
+};
+
+template <>
+struct digest_traits<capped_digest> {
+   static constexpr auto max_byte_size = std::size_t{2U};
+
+   [[nodiscard]] static std::vector<std::byte> to_bytes(const capped_digest& value) {
+      return value.bytes;
+   }
+
+   [[nodiscard]] static capped_digest from_bytes(std::span<const std::byte> value) {
+      return capped_digest{std::vector<std::byte>{value.begin(), value.end()}};
    }
 };
 
@@ -399,6 +419,26 @@ BOOST_AUTO_TEST_CASE(db_blob_ref_raw_rejects_truncated_streambuf_payload) {
    auto stream = forge::datastream<std::stringbuf>{packed_text, std::ios_base::in};
    auto decoded = forge::db::blob::ref<>{};
    BOOST_CHECK_THROW(stream >> decoded, forge::raw::exceptions::codec_error);
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_ref_raw_rejects_truncated_in_memory_payload_as_codec_error) {
+   auto value = forge::db::blob::ref<>{
+      .digest = forge::db::blob::hash<forge::db::blob::digest>{}(bytes("db-blob-truncated-memory-ref")),
+      .size = 1001,
+   };
+   auto packed = forge::raw::pack(value);
+   packed.pop_back();
+
+   BOOST_CHECK_THROW(forge::raw::unpack<forge::db::blob::ref<>>(packed), forge::raw::exceptions::codec_error);
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_ref_raw_rejects_excessive_variable_digest_size) {
+   auto packed = std::vector<char>{};
+   auto stream = forge::datastream<std::vector<char>>{packed};
+   forge::raw::pack(stream, std::uint32_t{0xffffffffU});
+
+   BOOST_CHECK_THROW(forge::raw::unpack<forge::db::blob::ref<capped_digest>>(stream.storage()),
+                     forge::raw::exceptions::codec_error);
 }
 
 BOOST_AUTO_TEST_CASE(db_blob_ref_supports_custom_digest_text_roundtrip) {

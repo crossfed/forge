@@ -8,6 +8,7 @@ module;
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -65,20 +66,49 @@ concept fixed_size_digest = requires {
    { digest_traits<Digest>::byte_size } -> std::convertible_to<std::size_t>;
 };
 
+template <typename Digest>
+concept max_size_digest = requires {
+   { digest_traits<Digest>::max_byte_size } -> std::convertible_to<std::size_t>;
+};
+
+template <typename Digest>
+[[nodiscard]] constexpr std::size_t max_digest_byte_size() {
+   if constexpr (fixed_size_digest<Digest>) {
+      return digest_traits<Digest>::byte_size;
+   } else if constexpr (max_size_digest<Digest>) {
+      return digest_traits<Digest>::max_byte_size;
+   } else {
+      return std::size_t{4096U};
+   }
+}
+
+template <typename Digest>
+void require_digest_byte_size(std::size_t size) {
+   if (size > max_digest_byte_size<Digest>()) {
+      FORGE_THROW_EXCEPTION(forge::raw::exceptions::codec_error, "db blob ref digest raw size exceeds limit");
+   }
+}
+
 template <typename Stream>
 void read_exact(Stream& stream, char* data, std::size_t size) {
    if (size == 0U) {
       return;
    }
-   if constexpr (std::same_as<decltype(stream.read(data, size)), bool>) {
-      if (!stream.read(data, size)) {
-         FORGE_THROW_EXCEPTION(forge::raw::exceptions::codec_error, "db blob ref raw payload is truncated");
+   try {
+      if constexpr (std::same_as<decltype(stream.read(data, size)), bool>) {
+         if (!stream.read(data, size)) {
+            FORGE_THROW_EXCEPTION(forge::raw::exceptions::codec_error, "db blob ref raw payload is truncated");
+         }
+      } else {
+         const auto read = stream.read(data, size);
+         if (static_cast<std::size_t>(read) != size) {
+            FORGE_THROW_EXCEPTION(forge::raw::exceptions::codec_error, "db blob ref raw payload is truncated");
+         }
       }
-   } else {
-      const auto read = stream.read(data, size);
-      if (static_cast<std::size_t>(read) != size) {
-         FORGE_THROW_EXCEPTION(forge::raw::exceptions::codec_error, "db blob ref raw payload is truncated");
-      }
+   } catch (const forge::raw::exceptions::range_error&) {
+      FORGE_THROW_EXCEPTION(forge::raw::exceptions::codec_error, "db blob ref raw payload is truncated");
+   } catch (const std::out_of_range&) {
+      FORGE_THROW_EXCEPTION(forge::raw::exceptions::codec_error, "db blob ref raw payload is truncated");
    }
 }
 
@@ -174,6 +204,7 @@ struct ref {
       } else {
          auto encoded_size = std::uint32_t{};
          detail::read_scalar(stream, encoded_size);
+         detail::require_digest_byte_size<Digest>(encoded_size);
          digest_size = encoded_size;
       }
       auto digest_bytes = std::vector<std::byte>(digest_size);
