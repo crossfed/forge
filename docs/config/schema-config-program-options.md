@@ -7,7 +7,7 @@ This document explains the configuration stack across `forge_schema`,
 Local guides:
 
 - [schema](../../libraries/schema/README.md)
-- [config](../../libraries/config/README.md)
+- [config](../../libraries/config/core/README.md)
 - [program_options](../../libraries/config/program_options/README.md)
 - [env](../../libraries/config/env/README.md)
 - [yaml](../../libraries/codec/yaml/README.md)

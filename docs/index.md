@@ -51,7 +51,7 @@ Each library guide must be useful without reading source first:
 - [yaml](../libraries/codec/yaml/README.md)
 - [xml](../libraries/codec/xml/README.md)
 - [schema](../libraries/schema/README.md)
-- [config](../libraries/config/README.md)
+- [config](../libraries/config/core/README.md)
 - [program_options](../libraries/config/program_options/README.md)
 - [env](../libraries/config/env/README.md)
 - [api](../libraries/api/README.md)
