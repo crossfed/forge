@@ -74,7 +74,7 @@ target_link_libraries(app PRIVATE
 | [`forge::plugins::crypto::signer`](crypto/signer/README.md) | `forge_plugins_crypto_signer` | `plugins.crypto.signer` | Signs digests with configured local keys and output profiles. |
 | [`forge::plugins::crypto::secrets`](crypto/secrets/README.md) | `forge_plugins_crypto_secrets` | `plugins.crypto.secrets` | Provides bounded secret retrieval, derivation and symmetric encryption operations. |
 | [`forge::plugins::log::otlp`](log/otlp/README.md) | `forge_plugins_log_otlp` | `plugins.log.otlp` | Exports configured FORGE logger routes to OTLP/HTTP JSON. |
-| [`forge::plugins::db::object`](db/object/README.md) | `forge_plugins_db_object` | `plugins.db.object` | Owns configured named DB Object stores and exposes lifecycle-safe store handles. |
+| [`forge::plugins::db::store`](db/store/README.md) | `forge_plugins_db_store` | `plugins.db.store` | Owns configured named DB stores and exposes object/blob layer handles. |
 | [`forge::plugins::db::rocksdb`](db/rocksdb/README.md) | `forge_plugins_db_rocksdb` | `plugins.db.rocksdb` | Provides a local RocksDB TransactionDB service for infrastructure plugins that need durable key/value state. |
 
 The aggregate target `forge_plugins` and package component `plugins` are

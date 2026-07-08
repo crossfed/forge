@@ -1,0 +1,289 @@
+module;
+
+#include <boost/asio/awaitable.hpp>
+#include <forge/api/macros.hpp>
+
+#include <concepts>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <optional>
+#include <string>
+#include <utility>
+#include <vector>
+
+export module forge.plugins.db.store.api;
+
+export import forge.plugins.db.store.exceptions;
+export import forge.plugins.db.store.types;
+
+import forge.api.binding;
+import forge.db.blob.ref;
+import forge.db.blob.store;
+import forge.db.blob.transaction;
+import forge.db.blob.types;
+import forge.db.core.driver;
+import forge.db.core.record;
+import forge.ids.object_id;
+import forge.db.object.hooks;
+import forge.db.object.index;
+import forge.db.object.object;
+import forge.db.object.snapshot;
+import forge.db.object.store;
+import forge.db.object.transaction;
+
+export namespace forge::plugins::db::store {
+
+class store_handle_state {
+ public:
+   virtual ~store_handle_state() = default;
+
+   [[nodiscard]] virtual std::string name() const = 0;
+   [[nodiscard]] virtual std::shared_ptr<forge::db::core::driver> require_driver() const = 0;
+   [[nodiscard]] virtual std::shared_ptr<forge::db::object::store> require_objects() const = 0;
+   [[nodiscard]] virtual std::shared_ptr<forge::db::blob::store> require_blobs() const = 0;
+};
+
+class object_handle {
+ public:
+   object_handle() = default;
+   explicit object_handle(std::shared_ptr<store_handle_state> state) : state_{std::move(state)} {}
+
+   [[nodiscard]] explicit operator bool() const noexcept {
+      return static_cast<bool>(state_);
+   }
+
+   [[nodiscard]] std::string name() const;
+
+   template <forge::db::object::object_model Object>
+   void register_object() const {
+      require_store()->template register_object<Object>();
+   }
+
+   void add_interceptor(std::shared_ptr<forge::db::object::interceptor> value) const;
+   void add_observer(std::shared_ptr<forge::db::object::observer> value) const;
+
+   boost::asio::awaitable<forge::db::object::transaction> begin_transaction() const;
+   boost::asio::awaitable<forge::db::object::snapshot> begin_read() const;
+   [[nodiscard]] forge::db::object::transaction join(forge::db::core::transaction& active) const;
+
+   template <typename SharedTransaction>
+      requires requires(SharedTransaction& active) {
+         { active.db_transaction() } -> std::same_as<forge::db::core::transaction&>;
+      }
+   [[nodiscard]] forge::db::object::transaction join(SharedTransaction& active) const {
+      return join(active.db_transaction());
+   }
+
+   template <forge::ids::typed_id_like Id>
+   boost::asio::awaitable<typename forge::db::object::object_index_for_id_t<Id>::value_type> get(Id id) const {
+      co_return co_await require_store()->get(id);
+   }
+
+   template <forge::ids::typed_id_like Id>
+   boost::asio::awaitable<std::optional<typename forge::db::object::object_index_for_id_t<Id>::value_type>>
+   find(Id id) const {
+      co_return co_await require_store()->find(id);
+   }
+
+   template <forge::db::object::object_model Object>
+   boost::asio::awaitable<typename Object::value_type> get(forge::ids::object_id id) const {
+      co_return co_await require_store()->template get<Object>(id);
+   }
+
+   template <forge::db::object::object_model Object>
+   boost::asio::awaitable<std::optional<typename Object::value_type>> find(forge::ids::object_id id) const {
+      co_return co_await require_store()->template find<Object>(id);
+   }
+
+   template <forge::db::object::object_value Value>
+   boost::asio::awaitable<void> insert(Value value) const {
+      co_await require_store()->insert(std::move(value));
+   }
+
+   template <forge::db::object::object_value Value>
+   boost::asio::awaitable<void> replace(Value value) const {
+      co_await require_store()->replace(std::move(value));
+   }
+
+   template <forge::ids::typed_id_like Id, typename Fn>
+   boost::asio::awaitable<void> modify(Id id, Fn&& fn) const {
+      co_await require_store()->modify(id, std::forward<Fn>(fn));
+   }
+
+   template <forge::ids::typed_id_like Id>
+   boost::asio::awaitable<void> erase(Id id) const {
+      co_await require_store()->erase(id);
+   }
+
+   template <forge::db::object::object_model Object>
+   boost::asio::awaitable<void> erase(forge::ids::object_id id) const {
+      co_await require_store()->template erase<Object>(id);
+   }
+
+   template <forge::db::object::object_model Object, typename Tag>
+   [[nodiscard]] forge::db::object::index_view<Object, Tag> index() const {
+      auto state = state_;
+      using value_type = typename Object::value_type;
+      return forge::db::object::index_view<Object, Tag>{
+         [state](forge::db::core::record_range range,
+                 forge::db::core::page_request request) mutable
+            -> boost::asio::awaitable<forge::db::object::object_page<value_type>> {
+            auto handle = object_handle{state};
+            auto view = handle.require_store()->template index<Object, Tag>();
+            co_return co_await view.page(std::move(range), std::move(request));
+         },
+         [state]() mutable -> forge::db::object::index_page_query<value_type> {
+            auto active = std::make_shared<std::optional<forge::db::object::snapshot>>();
+            return [state = std::move(state), active](forge::db::core::record_range range,
+                                                      forge::db::core::page_request request) mutable
+                      -> boost::asio::awaitable<forge::db::object::object_page<value_type>> {
+               auto handle = object_handle{state};
+               if (!active->has_value()) {
+                  active->emplace(co_await handle.begin_read());
+               }
+               auto view = active->value().template index<Object, Tag>();
+               co_return co_await view.page(std::move(range), std::move(request));
+            };
+         }};
+   }
+
+ private:
+   [[nodiscard]] std::shared_ptr<forge::db::object::store> require_store() const;
+
+   std::shared_ptr<store_handle_state> state_;
+
+   friend class store_handle;
+};
+
+class blob_handle {
+ public:
+   blob_handle() = default;
+   explicit blob_handle(std::shared_ptr<store_handle_state> state) : state_{std::move(state)} {}
+
+   [[nodiscard]] explicit operator bool() const noexcept {
+      return static_cast<bool>(state_);
+   }
+
+   [[nodiscard]] std::string name() const;
+
+   boost::asio::awaitable<forge::db::blob::transaction> begin_transaction() const;
+   [[nodiscard]] forge::db::blob::transaction join(forge::db::core::transaction& active) const;
+
+   template <typename SharedTransaction>
+      requires requires(SharedTransaction& active) {
+         { active.db_transaction() } -> std::same_as<forge::db::core::transaction&>;
+      }
+   [[nodiscard]] forge::db::blob::transaction join(SharedTransaction& active) const {
+      return join(active.db_transaction());
+   }
+
+   boost::asio::awaitable<forge::db::blob::ref<forge::db::blob::digest>> put(std::vector<std::byte> payload) const;
+
+   template <forge::db::blob::digest_algorithm Digest>
+   boost::asio::awaitable<forge::db::blob::ref<Digest>> put_as(std::vector<std::byte> payload) const {
+      co_return co_await require_store()->template put_as<Digest>(std::move(payload));
+   }
+
+   template <forge::db::blob::digest_algorithm Digest>
+   boost::asio::awaitable<void> put(forge::db::blob::ref<Digest> value, std::vector<std::byte> payload) const {
+      co_await require_store()->put(std::move(value), std::move(payload));
+   }
+
+   template <forge::db::blob::digest_algorithm Digest>
+   boost::asio::awaitable<std::vector<std::byte>> get(forge::db::blob::ref<Digest> value) const {
+      co_return co_await require_store()->get(std::move(value));
+   }
+
+   template <forge::db::blob::digest_algorithm Digest>
+   boost::asio::awaitable<bool> has(forge::db::blob::ref<Digest> value) const {
+      co_return co_await require_store()->has(std::move(value));
+   }
+
+   template <forge::db::blob::digest_algorithm Digest>
+   boost::asio::awaitable<forge::db::blob::stat> stat_blob(forge::db::blob::ref<Digest> value) const {
+      co_return co_await require_store()->stat_blob(std::move(value));
+   }
+
+   template <forge::db::blob::digest_algorithm Digest>
+   boost::asio::awaitable<void> erase(forge::db::blob::ref<Digest> value) const {
+      co_await require_store()->erase(std::move(value));
+   }
+
+   template <forge::db::blob::digest_algorithm Digest>
+   boost::asio::awaitable<void> verify(forge::db::blob::ref<Digest> value) const {
+      co_await require_store()->verify(std::move(value));
+   }
+
+   template <forge::db::blob::digest_algorithm Digest>
+   boost::asio::awaitable<void> retain(forge::db::blob::ref<Digest> value, forge::db::blob::owner_ref owner) const {
+      co_await require_store()->retain(std::move(value), std::move(owner));
+   }
+
+   template <forge::db::blob::digest_algorithm Digest>
+   boost::asio::awaitable<void> release(forge::db::blob::ref<Digest> value, forge::db::blob::owner_ref owner) const {
+      co_await require_store()->release(std::move(value), std::move(owner));
+   }
+
+   template <forge::db::blob::digest_algorithm Digest>
+   boost::asio::awaitable<std::uint64_t> ref_count(forge::db::blob::ref<Digest> value) const {
+      co_return co_await require_store()->ref_count(std::move(value));
+   }
+
+   boost::asio::awaitable<forge::db::blob::collect_result>
+   collect_unreferenced(forge::db::blob::collect_options options = {}) const;
+
+ private:
+   [[nodiscard]] std::shared_ptr<forge::db::blob::store> require_store() const;
+
+   std::shared_ptr<store_handle_state> state_;
+
+   friend class store_handle;
+};
+
+class store_handle {
+ public:
+   store_handle() = default;
+   explicit store_handle(std::shared_ptr<store_handle_state> state) : state_{std::move(state)} {}
+
+   [[nodiscard]] explicit operator bool() const noexcept {
+      return static_cast<bool>(state_);
+   }
+
+   [[nodiscard]] std::string name() const;
+
+   boost::asio::awaitable<forge::db::core::transaction> begin_transaction() const;
+
+   [[nodiscard]] object_handle objects() const;
+   [[nodiscard]] blob_handle blobs() const;
+
+ private:
+   [[nodiscard]] std::shared_ptr<forge::db::core::driver> require_driver() const;
+
+   std::shared_ptr<store_handle_state> state_;
+
+   friend class api;
+   friend class store_handle_state;
+};
+
+class api : public forge::api::contract<api, forge::api::surface::local> {
+ public:
+   virtual ~api() = default;
+
+   virtual boost::asio::awaitable<void>
+   add_store(std::string name,
+             std::shared_ptr<forge::db::core::driver> driver,
+             store_options options = {}) = 0;
+   virtual boost::asio::awaitable<store_handle> store(std::string name) = 0;
+   virtual boost::asio::awaitable<void> flush(std::string name, bool sync = true) = 0;
+   virtual boost::asio::awaitable<void> flush_all(bool sync = true) = 0;
+   virtual boost::asio::awaitable<::forge::plugins::db::store::status> status() = 0;
+};
+
+} // namespace forge::plugins::db::store
+
+namespace store_plugin_api = ::forge::plugins::db::store;
+
+export {
+FORGE_API(store_plugin_api::api, FORGE_API_CONTRACT("forge.plugins.db.store", 1, 0))
+}

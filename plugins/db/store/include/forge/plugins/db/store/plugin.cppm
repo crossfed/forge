@@ -6,9 +6,9 @@ module;
 #include <optional>
 #include <string>
 
-export module forge.plugins.db.object.plugin;
+export module forge.plugins.db.store.plugin;
 
-export import forge.plugins.db.object.api;
+export import forge.plugins.db.store.api;
 
 import forge.api.binding;
 import forge.app.plugin;
@@ -16,13 +16,13 @@ import forge.app.plugin_context;
 import forge.app.plugin_registry;
 import forge.config.component;
 
-namespace forge::plugins::db::object {
+namespace forge::plugins::db::store {
 namespace detail {
 struct lifecycle;
 } // namespace detail
-} // namespace forge::plugins::db::object
+} // namespace forge::plugins::db::store
 
-export namespace forge::plugins::db::object {
+export namespace forge::plugins::db::store {
 
 class plugin final : public forge::app::plugin {
  public:
@@ -51,4 +51,4 @@ class plugin final : public forge::app::plugin {
 
 [[nodiscard]] forge::app::plugin_descriptor descriptor();
 
-} // namespace forge::plugins::db::object
+} // namespace forge::plugins::db::store

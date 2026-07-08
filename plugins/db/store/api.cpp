@@ -7,19 +7,20 @@ module;
 #include <string>
 #include <utility>
 
-module forge.plugins.db.object.plugin;
+module forge.plugins.db.store.plugin;
 
+import forge.db.blob.store;
 import forge.db.object.hooks;
 import forge.db.object.snapshot;
 import forge.db.object.store;
 import forge.db.object.transaction;
 import forge.db.core.driver;
-import forge.plugins.db.object.exceptions;
-import forge.plugins.db.object.types;
+import forge.plugins.db.store.exceptions;
+import forge.plugins.db.store.types;
 
 #include "details/plugin_impl.hxx"
 
-namespace forge::plugins::db::object {
+namespace forge::plugins::db::store {
 
 class plugin::api_impl::handle_state final : public store_handle_state {
  public:
@@ -29,22 +30,41 @@ class plugin::api_impl::handle_state final : public store_handle_state {
       return name_;
    }
 
-   [[nodiscard]] std::shared_ptr<forge::db::object::store> require_store() const override {
-      const auto owner = owner_.lock();
-      if (!owner) {
-         FORGE_THROW_EXCEPTION(exceptions::stopped, "db object plugin is stopped");
-      }
-
-      return owner->require_open_store(name_).store;
-   }
-
    [[nodiscard]] std::shared_ptr<forge::db::core::driver> require_driver() const override {
       const auto owner = owner_.lock();
       if (!owner) {
-         FORGE_THROW_EXCEPTION(exceptions::stopped, "db object plugin is stopped");
+         FORGE_THROW_EXCEPTION(exceptions::stopped, "db store plugin is stopped");
       }
 
       return owner->require_open_store(name_).driver;
+   }
+
+   [[nodiscard]] std::shared_ptr<forge::db::object::store> require_objects() const override {
+      const auto owner = owner_.lock();
+      if (!owner) {
+         FORGE_THROW_EXCEPTION(exceptions::stopped, "db store plugin is stopped");
+      }
+
+      auto opened = owner->require_open_store(name_);
+      if (!opened.objects) {
+         FORGE_THROW_EXCEPTION(exceptions::unavailable_layer, "db store object layer is not configured",
+                               forge::exceptions::ctx("store", name_));
+      }
+      return opened.objects;
+   }
+
+   [[nodiscard]] std::shared_ptr<forge::db::blob::store> require_blobs() const override {
+      const auto owner = owner_.lock();
+      if (!owner) {
+         FORGE_THROW_EXCEPTION(exceptions::stopped, "db store plugin is stopped");
+      }
+
+      auto opened = owner->require_open_store(name_);
+      if (!opened.blobs) {
+         FORGE_THROW_EXCEPTION(exceptions::unavailable_layer, "db store blob layer is not configured",
+                               forge::exceptions::ctx("store", name_));
+      }
+      return opened.blobs;
    }
 
  private:
@@ -57,7 +77,7 @@ plugin::api_impl::api_impl(std::shared_ptr<impl> owner) : owner_{std::move(owner
 boost::asio::awaitable<void>
 plugin::api_impl::add_store(std::string name,
                             std::shared_ptr<forge::db::core::driver> driver,
-                            forge::db::object::store::options options) {
+                            store_options options) {
    owner_->add_store(std::move(name), std::move(driver), options);
    co_return;
 }
@@ -79,8 +99,8 @@ boost::asio::awaitable<void> plugin::api_impl::flush_all(bool sync) {
    }
 }
 
-boost::asio::awaitable<::forge::plugins::db::object::status> plugin::api_impl::status() {
+boost::asio::awaitable<::forge::plugins::db::store::status> plugin::api_impl::status() {
    co_return owner_->current_status();
 }
 
-} // namespace forge::plugins::db::object
+} // namespace forge::plugins::db::store

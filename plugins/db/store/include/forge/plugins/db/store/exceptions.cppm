@@ -4,11 +4,11 @@ module;
 
 #include <cstdint>
 
-export module forge.plugins.db.object.exceptions;
+export module forge.plugins.db.store.exceptions;
 
 import forge.exceptions;
 
-export namespace forge::plugins::db::object {
+export namespace forge::plugins::db::store {
 
 class exceptions {
  public:
@@ -19,6 +19,7 @@ class exceptions {
       stopped = 4,
       startup_failed = 5,
       invalid_argument = 6,
+      unavailable_layer = 7,
       internal_error = 255,
    };
 
@@ -28,9 +29,10 @@ class exceptions {
    using stopped = forge::exceptions::coded_exception<code, code::stopped>;
    using startup_failed = forge::exceptions::coded_exception<code, code::startup_failed>;
    using invalid_argument = forge::exceptions::coded_exception<code, code::invalid_argument>;
+   using unavailable_layer = forge::exceptions::coded_exception<code, code::unavailable_layer>;
    using internal_error = forge::exceptions::coded_exception<code, code::internal_error>;
 };
 
-FORGE_DECLARE_EXCEPTION_CATEGORY(exceptions::code, "forge.plugins.db.object")
+FORGE_DECLARE_EXCEPTION_CATEGORY(exceptions::code, "forge.plugins.db.store")
 
-} // namespace forge::plugins::db::object
+} // namespace forge::plugins::db::store

@@ -244,7 +244,7 @@ set(FORGE_PLUGINS_P2P_DIAGNOSTICS_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugi
 set(FORGE_PLUGINS_P2P_PUBSUB_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/p2p/pubsub/include")
 set(FORGE_PLUGINS_HTTP_SERVER_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/http/server/include")
 set(FORGE_PLUGINS_LOG_OTLP_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/log/otlp/include")
-set(FORGE_PLUGINS_DB_OBJECT_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/db/object/include")
+set(FORGE_PLUGINS_DB_STORE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/db/store/include")
 set(FORGE_PLUGINS_DB_ROCKSDB_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/db/rocksdb/include")
 
 if(FORGE_ENABLE_TUI AND FORGE_TUI_NOTCURSES_TARGET)
@@ -433,7 +433,7 @@ set(
    forge_plugins_p2p_pubsub
    forge_plugins_http_server
    forge_plugins_log_otlp
-   forge_plugins_db_object
+   forge_plugins_db_store
    forge_plugins
 )
 
@@ -527,7 +527,7 @@ install(
              plugins/p2p/pubsub/include/forge
              plugins/http/server/include/forge
              plugins/log/otlp/include/forge
-             plugins/db/object/include/forge
+             plugins/db/store/include/forge
    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT dev EXCLUDE_FROM_ALL
 )
 

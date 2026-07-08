@@ -9,24 +9,25 @@ module;
 #include <optional>
 #include <string>
 
-module forge.plugins.db.object.plugin;
+module forge.plugins.db.store.plugin;
 
 import forge.api.binding;
 import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.config.component;
+import forge.db.blob.store;
 import forge.db.core.driver;
 import forge.db.object.store;
 
 #include "details/plugin_impl.hxx"
 
-namespace forge::plugins::db::object {
+namespace forge::plugins::db::store {
 
 plugin::plugin() : impl_{detail::lifecycle::make_impl()} {}
 plugin::~plugin() = default;
 
 forge::app::plugin_id plugin::id() const {
-   return forge::app::plugin_id{.value = "forge.plugins.db.object"};
+   return forge::app::plugin_id{.value = "forge.plugins.db.store"};
 }
 
 std::string plugin::version() const {
@@ -63,11 +64,11 @@ boost::asio::awaitable<void> plugin::shutdown() {
 
 forge::app::plugin_descriptor descriptor() {
    return forge::app::plugin_descriptor{
-      .id = forge::app::plugin_id{.value = "forge.plugins.db.object"},
+      .id = forge::app::plugin_id{.value = "forge.plugins.db.store"},
       .factory = [] {
          return std::make_unique<plugin>();
       },
    };
 }
 
-} // namespace forge::plugins::db::object
+} // namespace forge::plugins::db::store

@@ -1,6 +1,6 @@
 #pragma once
 
-namespace forge::plugins::db::object {
+namespace forge::plugins::db::store {
 
 enum class phase : std::uint8_t {
    registered,
@@ -15,17 +15,18 @@ struct managed_store {
    std::string name;
    std::string driver_name;
    std::string path;
-   std::string family;
-   forge::db::object::store::options options;
+   store_options options;
    std::shared_ptr<forge::db::core::driver> driver;
-   std::shared_ptr<forge::db::object::store> store;
+   std::shared_ptr<forge::db::object::store> objects;
+   std::shared_ptr<forge::db::blob::store> blobs;
    bool started = false;
 };
 
 struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
    struct opened_store {
-      std::shared_ptr<forge::db::object::store> store;
       std::shared_ptr<forge::db::core::driver> driver;
+      std::shared_ptr<forge::db::object::store> objects;
+      std::shared_ptr<forge::db::blob::store> blobs;
    };
 
    mutable std::mutex mutex;
@@ -42,7 +43,7 @@ struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
 
    void add_store(std::string name,
                   std::shared_ptr<forge::db::core::driver> driver,
-                  forge::db::object::store::options options);
+                  store_options options);
    [[nodiscard]] std::shared_ptr<managed_store> find_store(const std::string& name) const;
    [[nodiscard]] std::shared_ptr<managed_store> require_store(const std::string& name) const;
    [[nodiscard]] opened_store require_open_store(const std::string& name) const;
@@ -61,11 +62,11 @@ class plugin::api_impl final : public api {
    boost::asio::awaitable<void>
    add_store(std::string name,
              std::shared_ptr<forge::db::core::driver> driver,
-             forge::db::object::store::options options) override;
+             store_options options) override;
    boost::asio::awaitable<store_handle> store(std::string name) override;
    boost::asio::awaitable<void> flush(std::string name, bool sync) override;
    boost::asio::awaitable<void> flush_all(bool sync) override;
-   boost::asio::awaitable<::forge::plugins::db::object::status> status() override;
+   boost::asio::awaitable<::forge::plugins::db::store::status> status() override;
 
  private:
    class handle_state;
@@ -89,4 +90,4 @@ static boost::asio::awaitable<void> shutdown(const std::shared_ptr<plugin::impl>
 
 } // namespace detail
 
-} // namespace forge::plugins::db::object
+} // namespace forge::plugins::db::store

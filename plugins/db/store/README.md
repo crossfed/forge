@@ -1,0 +1,61 @@
+# DB Store Plugin
+
+`forge::plugins::db::store` owns configured named physical DB stores for
+applications. Each named store owns one `forge::db::core::driver` and may expose
+`forge::db::object::store`, `forge::db::blob::store`, or both as logical layers.
+
+- Target: `forge_plugins_db_store`
+- Package component: `plugins_db_store`
+- Runtime id and API id: `forge.plugins.db.store`
+- Config section: `plugins.db.store`
+
+The plugin handles physical store setup, lifecycle, status and flushing. It does
+not describe C++ object schemas or blob retention policy in YAML. Domain code
+still declares object/index descriptors in C++ and registers them on
+`store_handle.objects()`.
+
+## Config
+
+```yaml
+plugins:
+  db:
+    store:
+      stores:
+        - name: "witness"
+          driver: "rocksdb"
+          path: "./data/rocksdb/witness"
+          object:
+            family: "objectdb"
+            write-policy: "single-writer"
+          blob:
+            data-family: "blobdb.data"
+            refs-family: "blobdb.refs"
+            data-blobs:
+              enable-blob-files: true
+              min-blob-size: 4096
+```
+
+`driver: rocksdb` is available when Forge is built with RocksDB support. Custom
+drivers are added programmatically through the local API before plugin startup.
+
+## Usage
+
+```cpp
+auto db = context.apis().get<forge::plugins::db::store::api>(
+   forge::plugins::db::store::api::ref());
+
+auto witness = co_await db->store("witness");
+witness.objects().register_object<witness_object>();
+
+auto tx = co_await witness.begin_transaction();
+auto objects = witness.objects().join(tx);
+auto blobs = witness.blobs().join(tx);
+
+auto content = co_await blobs.put(bytes);
+co_await objects.insert(witness_record{.content = content});
+co_await tx.commit();
+```
+
+Use `add_store(name, driver, options)` during setup when an application provides
+its own `forge::db::core::driver`. After startup, new stores are rejected so
+handles stay tied to the plugin lifecycle.

@@ -352,16 +352,16 @@ target_link_libraries(test_forge_plugins forge Boost::included_unit_test_framewo
 add_test(NAME test_forge_plugins COMMAND test_forge_plugins WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
-   test_forge_plugins_db_object
+   test_forge_plugins_db_store
    unit/main.cpp
-   plugins_db_object/db_object_tests.cpp
+   plugins_db_store/db_store_tests.cpp
 )
-target_link_libraries(test_forge_plugins_db_object forge_plugins_db_object forge Boost::included_unit_test_framework)
-target_compile_definitions(test_forge_plugins_db_object PRIVATE FORGE_HAS_ROCKSDB=$<BOOL:${FORGE_HAS_ROCKSDB}>)
+target_link_libraries(test_forge_plugins_db_store forge_plugins_db_store forge Boost::included_unit_test_framework)
+target_compile_definitions(test_forge_plugins_db_store PRIVATE FORGE_HAS_ROCKSDB=$<BOOL:${FORGE_HAS_ROCKSDB}>)
 if(FORGE_HAS_ROCKSDB)
-   target_link_libraries(test_forge_plugins_db_object forge_db_rocksdb)
+   target_link_libraries(test_forge_plugins_db_store forge_db_rocksdb)
 endif()
-add_test(NAME test_forge_plugins_db_object COMMAND test_forge_plugins_db_object WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+add_test(NAME test_forge_plugins_db_store COMMAND test_forge_plugins_db_store WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
    test_forge_crypto_secrets
@@ -670,14 +670,14 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
-   test_forge_package_plugins_db_object
+   test_forge_package_plugins_db_store
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
-      ${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_db_object
-      ${CMAKE_BINARY_DIR}/forge-package-plugins-db-object
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_db_store
+      ${CMAKE_BINARY_DIR}/forge-package-plugins-db-store
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
-      --test-command forge_package_plugins_db_object
+      --test-command forge_package_plugins_db_store
    DEPENDS test_forge_package_install
 )
 if(FORGE_HAS_ROCKSDB)
@@ -1010,16 +1010,16 @@ add_test(
 )
 set_tests_properties(test_forge_package_plugins_log_otlp PROPERTIES DEPENDS test_forge_package_install)
 add_test(
-   NAME test_forge_package_plugins_db_object
+   NAME test_forge_package_plugins_db_store
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
-      ${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_db_object
-      ${CMAKE_BINARY_DIR}/forge-package-plugins-db-object
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_db_store
+      ${CMAKE_BINARY_DIR}/forge-package-plugins-db-store
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
-      --test-command forge_package_plugins_db_object
+      --test-command forge_package_plugins_db_store
 )
-set_tests_properties(test_forge_package_plugins_db_object PROPERTIES DEPENDS test_forge_package_install)
+set_tests_properties(test_forge_package_plugins_db_store PROPERTIES DEPENDS test_forge_package_install)
 if(FORGE_HAS_ROCKSDB)
    add_test(
       NAME test_forge_package_db_rocksdb_component
