@@ -1,7 +1,7 @@
 # forge_http_api
 
 `forge_http_api` binds `FORGE_API(...)` contracts to native HTTP routes. It sits
-above `forge_http` and `forge_api`: the lower layer owns HTTP mechanics, while
+above `forge_net_http` and `forge_api`: the lower layer owns HTTP mechanics, while
 this library owns typed request/response mapping, codec dispatch and typed
 clients.
 
@@ -16,9 +16,9 @@ clients.
 ## When Not To Use
 
 - Do not use `forge_http_api` for raw streaming endpoints that do not have a
-  typed API contract. Use `forge_http` directly.
+  typed API contract. Use `forge_net_http` directly.
 - Do not put server bind, TLS, socket lifecycle or application auth policy in
-  this library. Those belong to `forge_http`, plugins or consumers.
+  this library. Those belong to `forge_net_http`, plugins or consumers.
 - Do not force every API into one generic RPC endpoint. Use explicit HTTP
   routes and statuses.
 
@@ -45,7 +45,7 @@ Macro header: `<forge/http_api/macros.hpp>`.
 
 ## Dependencies
 
-- `forge_http`
+- `forge_net_http`
 - `forge_api`
 - `forge_json`
 - `forge_xml`
@@ -108,8 +108,8 @@ before invoking the handler when the emitted codec is not acceptable.
 
 - Do not add route options that do not change runtime behavior and tests.
 - Do not decode native stream/file/bytes responses through JSON or XML.
-- Do not make `forge_http` depend on `forge_http_api`; dependency direction is
-  `forge_http_api -> forge_http`.
+- Do not make `forge_net_http` depend on `forge_http_api`; dependency direction is
+  `forge_http_api -> forge_net_http`.
 - Do not use positional HTTP arguments for large envelopes. Use a described
   request DTO when the body or validation surface grows.
 

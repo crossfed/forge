@@ -14,10 +14,10 @@ module forge.plugins.p2p.diagnostics.plugin;
 import forge.config.component;
 import forge.config.decode;
 import forge.exceptions;
-import forge.p2p.diagnostics;
-import forge.p2p.identity;
-import forge.p2p.pubsub;
-import forge.p2p.resource_manager;
+import forge.net.p2p.diagnostics;
+import forge.net.p2p.identity;
+import forge.net.p2p.pubsub;
+import forge.net.p2p.resource_manager;
 import forge.plugins.p2p.diagnostics.api;
 import forge.plugins.p2p.diagnostics.exceptions;
 import forge.plugins.p2p.diagnostics.types;
@@ -40,8 +40,8 @@ void validate_config(const config& value) {
    static_cast<void>(value);
 }
 
-forge::p2p::diagnostics::options configured_options(const config& value) {
-   return forge::p2p::diagnostics::options{
+forge::net::p2p::diagnostics::options configured_options(const config& value) {
+   return forge::net::p2p::diagnostics::options{
       .max_peers = static_cast<std::size_t>(value.max_peers),
       .max_sessions = static_cast<std::size_t>(value.max_sessions),
       .max_endpoints_per_peer = static_cast<std::size_t>(value.max_endpoints_per_peer),
@@ -50,16 +50,16 @@ forge::p2p::diagnostics::options configured_options(const config& value) {
    };
 }
 
-std::vector<forge::p2p::diagnostics::peer>
-filter_peers(const forge::p2p::diagnostics::snapshot& snapshot, const filter& filter) {
-   auto connected = std::set<forge::p2p::peer_id>{};
+std::vector<forge::net::p2p::diagnostics::peer>
+filter_peers(const forge::net::p2p::diagnostics::snapshot& snapshot, const filter& filter) {
+   auto connected = std::set<forge::net::p2p::peer_id>{};
    if (filter.only_connected) {
       for (const auto& session : snapshot.sessions) {
          connected.insert(session.remote_peer);
       }
    }
 
-   auto out = std::vector<forge::p2p::diagnostics::peer>{};
+   auto out = std::vector<forge::net::p2p::diagnostics::peer>{};
    out.reserve(snapshot.peers.size());
    for (const auto& peer : snapshot.peers) {
       if (filter.peer.has_value() && peer.peer != *filter.peer) {

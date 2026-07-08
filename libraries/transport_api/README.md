@@ -1,13 +1,13 @@
 # forge_transport_api
 
-`forge_transport_api` binds typed `forge_api` contracts to `forge_transport`
+`forge_transport_api` binds typed `forge_api` contracts to `forge_net_transport`
 streams and sessions. It does not own sockets, QUIC, P2P, WebSocket, HTTP,
 plugins or application policy.
 
 ## When To Use
 
 - Run a typed `forge_api` contract over an already established
-  `forge_transport::stream` or session.
+  `forge_net_transport::stream` or session.
 - Need request/response correlation, max-inflight limits and deadlines over a
   byte-stream transport.
 - Build channel-specific API adapters such as QUIC or P2P bindings without
@@ -31,19 +31,19 @@ plugins or application policy.
 
 - `forge_api`
 - `forge_raw`
-- `forge_transport`
+- `forge_net_transport`
 - Boost.Asio
 
 ## Responsibility
 
 - `forge_api` owns contract descriptors, method dispatch, frame vocabulary and
   typed error projection.
-- `forge_transport` owns byte streams, sessions, frame encoding and cancellation.
+- `forge_net_transport` owns byte streams, sessions, frame encoding and cancellation.
 - `forge_transport_api` owns API frames over `transport::stream`: client pending
   calls, serialized writes, server frame loop, max-inflight limits, deadlines
   and close/cancel wakeups.
-- `forge_quic.api` and `forge_p2p.api` are policy adapters over this layer.
-- `forge_websocket.api` shares `forge::api::frame_dispatcher`, but not this layer,
+- `forge_net_quic.api` and `forge_net_p2p.api` are policy adapters over this layer.
+- `forge_net_websocket.api` shares `forge::api::frame_dispatcher`, but not this layer,
   because WebSocket is message-oriented rather than a `transport::stream`.
 
 ## Examples
@@ -88,7 +88,7 @@ class cache_impl final : public cache {
 };
 
 boost::asio::awaitable<void>
-serve_cache(forge::transport::stream stream, cache_store& store) {
+serve_cache(forge::net::transport::stream stream, cache_store& store) {
    auto apis = forge::api::registry{};
    apis.install<cache>(std::make_shared<cache_impl>(store));
 
@@ -116,7 +116,7 @@ import forge.transport.api.options;
 import forge.transport.api.connection;
 
 boost::asio::awaitable<chunk>
-read_remote(forge::transport::stream stream, std::string ref) {
+read_remote(forge::net::transport::stream stream, std::string ref) {
    auto connection = forge::transport::api::connection{
       std::move(stream),
       forge::transport::api::options{

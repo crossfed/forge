@@ -13,6 +13,6 @@ target_link_libraries(
       forge_exceptions
       forge_api
       forge_raw
-      forge_transport
+      forge_net_transport
       Boost::asio
 )

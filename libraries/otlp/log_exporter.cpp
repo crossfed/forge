@@ -35,9 +35,9 @@ module forge.otlp.log_exporter;
 
 import forge.asio.runtime;
 import forge.exceptions;
-import forge.http.base_url;
-import forge.http.client;
-import forge.http.types;
+import forge.net.http.base_url;
+import forge.net.http.client;
+import forge.net.http.types;
 import forge.json;
 import forge.log.log_message;
 
@@ -133,12 +133,12 @@ std::optional<std::chrono::milliseconds> parse_retry_after(std::string_view valu
    return std::chrono::seconds{seconds};
 }
 
-bool retryable_status(forge::http::status status) {
-   return status == forge::http::status::too_many_requests || status == forge::http::status::bad_gateway ||
-          status == forge::http::status::service_unavailable || status == forge::http::status::gateway_timeout;
+bool retryable_status(forge::net::http::status status) {
+   return status == forge::net::http::status::too_many_requests || status == forge::net::http::status::bad_gateway ||
+          status == forge::net::http::status::service_unavailable || status == forge::net::http::status::gateway_timeout;
 }
 
-bool success_status(forge::http::status status) {
+bool success_status(forge::net::http::status status) {
    const auto value = static_cast<unsigned>(status);
    return value >= 200 && value < 300;
 }
@@ -301,13 +301,13 @@ struct log_exporter::impl : std::enable_shared_from_this<impl> {
          flush_timer(strand, (std::chrono::steady_clock::time_point::max)()) {
       validate_options();
       try {
-         endpoint = forge::http::parse_base_url(options.endpoint);
+         endpoint = forge::net::http::parse_base_url(options.endpoint);
       } catch (const std::exception& error) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_options, "invalid OTLP endpoint",
                              forge::exceptions::ctx("endpoint", options.endpoint),
                              forge::exceptions::ctx("reason", error.what()));
       }
-      client = std::make_unique<forge::http::client>(runtime, endpoint);
+      client = std::make_unique<forge::net::http::client>(runtime, endpoint);
    }
 
    void validate_options() const {
@@ -541,7 +541,7 @@ struct log_exporter::impl : std::enable_shared_from_this<impl> {
             if (!retryable_status(response.result()) || attempt >= options.retry.max_attempts) {
                co_return false;
             }
-            const auto retry_after = response.find(forge::http::field::retry_after);
+            const auto retry_after = response.find(forge::net::http::field::retry_after);
             auto response_delay = retry_after != response.end()
                                       ? parse_retry_after(std::string_view{retry_after->value()})
                                       : std::optional<std::chrono::milliseconds>{};
@@ -565,15 +565,15 @@ struct log_exporter::impl : std::enable_shared_from_this<impl> {
       }
    }
 
-   forge::http::request make_request(const std::string& payload) const {
-      auto request = forge::http::request{};
-      request.method(forge::http::method::post);
+   forge::net::http::request make_request(const std::string& payload) const {
+      auto request = forge::net::http::request{};
+      request.method(forge::net::http::method::post);
       request.target(endpoint.make_target(options.logs_path));
       request.version(11);
       request.body() = payload;
-      request.set(forge::http::field::content_type, "application/json");
+      request.set(forge::net::http::field::content_type, "application/json");
       if (!options.user_agent.empty()) {
-         request.set(forge::http::field::user_agent, options.user_agent);
+         request.set(forge::net::http::field::user_agent, options.user_agent);
       }
       for (const auto& header : options.headers) {
          request.set(header.key, header.value);
@@ -746,8 +746,8 @@ struct log_exporter::impl : std::enable_shared_from_this<impl> {
    log_exporter_options options;
    asio::strand<asio::io_context::executor_type> strand;
    asio::steady_timer flush_timer;
-   forge::http::base_url endpoint;
-   std::unique_ptr<forge::http::client> client;
+   forge::net::http::base_url endpoint;
+   std::unique_ptr<forge::net::http::client> client;
 
    mutable std::mutex mutex;
    mutable exporter_metrics current_metrics;

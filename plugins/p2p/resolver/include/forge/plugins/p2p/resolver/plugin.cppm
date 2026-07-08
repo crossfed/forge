@@ -21,7 +21,7 @@ import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.app.plugin_registry;
 import forge.config.component;
-import forge.p2p.protocol;
+import forge.net.p2p.protocol;
 
 export namespace forge::plugins::p2p::resolver {
 
@@ -51,6 +51,6 @@ class plugin final : public forge::app::plugin {
 };
 
 [[nodiscard]] forge::app::plugin_descriptor descriptor();
-[[nodiscard]] forge::p2p::protocol_id default_protocol();
+[[nodiscard]] forge::net::p2p::protocol_id default_protocol();
 
 } // namespace forge::plugins::p2p::resolver

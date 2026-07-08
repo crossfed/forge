@@ -10,14 +10,14 @@ export module forge.transport.api.client;
 export import forge.api.types;
 export import forge.transport.api.exceptions;
 export import forge.transport.api.options;
-export import forge.transport.stream;
+export import forge.net.transport.stream;
 
 export namespace forge::transport::api {
 
 class client {
  public:
    client();
-   client(forge::transport::stream stream, options value = {});
+   client(forge::net::transport::stream stream, options value = {});
    ~client();
 
    client(client&&) noexcept;

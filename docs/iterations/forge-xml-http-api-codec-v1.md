@@ -47,7 +47,7 @@ Security and compatibility defaults:
 ## Block 2: HTTP API Multi-Codec
 
 After `forge_xml` lands, extend `forge_http_api` rather than writing product
-routes directly against `forge_http::router`.
+routes directly against `forge_net_http::router`.
 
 Changes:
 
@@ -69,7 +69,7 @@ using the same FastAPI-style binding system as JSON endpoints.
 
 ## HTTP Substrate Follow-Up
 
-`forge_http` remains the transport substrate. It should receive only generic
+`forge_net_http` remains the transport substrate. It should receive only generic
 mechanics needed by the API layer and downstream object APIs:
 
 - `Expect: 100-continue` support that lets middleware/handlers reject by headers

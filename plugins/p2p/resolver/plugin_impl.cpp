@@ -22,8 +22,8 @@ import forge.api.binding;
 import forge.api.registry;
 import forge.transport.api.options;
 import forge.exceptions;
-import forge.p2p.identity;
-import forge.p2p.protocol;
+import forge.net.p2p.identity;
+import forge.net.p2p.protocol;
 import forge.plugins.p2p.resolver.exceptions;
 import forge.plugins.p2p.resolver.types;
 import forge.plugins.p2p.node.api;
@@ -69,7 +69,7 @@ void plugin::impl::evict_cache_locked() {
    }
 }
 
-std::optional<std::vector<entry>> plugin::impl::cached_peer(const forge::p2p::peer_id& peer,
+std::optional<std::vector<entry>> plugin::impl::cached_peer(const forge::net::p2p::peer_id& peer,
                                                            resolve_options options) const {
    if (options.force_refresh) {
       return std::nullopt;
@@ -84,7 +84,7 @@ std::optional<std::vector<entry>> plugin::impl::cached_peer(const forge::p2p::pe
    return found->second.apis;
 }
 
-void plugin::impl::store_peer(const forge::p2p::peer_id& peer, std::vector<entry> entries) {
+void plugin::impl::store_peer(const forge::net::p2p::peer_id& peer, std::vector<entry> entries) {
    const auto now = std::chrono::steady_clock::now();
    auto lock = std::scoped_lock{mutex};
    cache[peer.to_string()] = cache_record{
@@ -100,7 +100,7 @@ std::vector<entry> plugin::impl::local_snapshot() const {
    return local;
 }
 
-void plugin::impl::add_local(forge::api::binding_plan plan, forge::p2p::protocol_id route, publish_options options) {
+void plugin::impl::add_local(forge::api::binding_plan plan, forge::net::p2p::protocol_id route, publish_options options) {
    auto& p2p_api = require_p2p();
    validate_transport_options(options.transport);
    if (route.value.empty() || route.value.front() != '/' || plan.exports.empty()) {

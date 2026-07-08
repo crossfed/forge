@@ -19,7 +19,7 @@ struct plugin::impl {
    const forge::api::registry* apis = nullptr;
    std::vector<pending_binding> bindings;
    std::vector<middleware_descriptor> middleware;
-   std::unique_ptr<forge::http::server> server;
+   std::unique_ptr<forge::net::http::server> server;
    bool publication_closed = false;
    bool stopping = false;
 

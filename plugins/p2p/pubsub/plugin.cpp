@@ -20,7 +20,7 @@ import forge.app.plugin_context;
 import forge.config.component;
 import forge.config.decode;
 import forge.exceptions;
-import forge.p2p.pubsub;
+import forge.net.p2p.pubsub;
 import forge.plugins.p2p.node.api;
 import forge.plugins.p2p.pubsub.api;
 import forge.plugins.p2p.pubsub.types;
@@ -80,12 +80,12 @@ void plugin::request_stop() noexcept {
 
 boost::asio::awaitable<void> plugin::shutdown() {
    request_stop();
-   std::vector<forge::p2p::pubsub::topic> topics;
+   std::vector<forge::net::p2p::pubsub::topic> topics;
    {
       auto lock = std::scoped_lock{impl_->mutex};
       topics.reserve(impl_->topics.size());
       for (const auto& [topic, _] : impl_->topics) {
-         topics.push_back(forge::p2p::pubsub::topic{.value = topic});
+         topics.push_back(forge::net::p2p::pubsub::topic{.value = topic});
       }
       impl_->topics.clear();
    }

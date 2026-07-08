@@ -19,8 +19,8 @@ module forge.plugins.p2p.resolver.plugin;
 import forge.api.descriptor;
 import forge.transport.api.connection;
 import forge.exceptions;
-import forge.p2p.identity;
-import forge.p2p.protocol;
+import forge.net.p2p.identity;
+import forge.net.p2p.protocol;
 import forge.plugins.p2p.resolver.api;
 import forge.plugins.p2p.resolver.exceptions;
 import forge.plugins.p2p.resolver.types;
@@ -36,7 +36,7 @@ namespace forge::plugins::p2p::resolver {
 plugin::resolver_api::resolver_api(std::shared_ptr<plugin::impl> impl) : impl_{std::move(impl)} {}
 
 void plugin::resolver_api::publish_api(forge::api::binding_plan plan,
-                                   forge::p2p::protocol_id protocol,
+                                   forge::net::p2p::protocol_id protocol,
                                    publish_options options) {
    impl_->add_local(std::move(plan), std::move(protocol), std::move(options));
 }
@@ -47,7 +47,7 @@ std::vector<entry> plugin::resolver_api::local_apis() const {
 }
 
 boost::asio::awaitable<std::vector<entry>>
-plugin::resolver_api::peer_apis(forge::p2p::peer_id peer, resolve_options options) {
+plugin::resolver_api::peer_apis(forge::net::p2p::peer_id peer, resolve_options options) {
    (void)impl_->require_p2p();
    if (auto cached = impl_->cached_peer(peer, options)) {
       co_return *cached;
@@ -60,7 +60,7 @@ plugin::resolver_api::peer_apis(forge::p2p::peer_id peer, resolve_options option
 }
 
 boost::asio::awaitable<resolution>
-plugin::resolver_api::resolve(forge::p2p::peer_id peer, forge::api::api_ref api, resolve_options options) {
+plugin::resolver_api::resolve(forge::net::p2p::peer_id peer, forge::api::api_ref api, resolve_options options) {
    const auto entries = co_await peer_apis(std::move(peer), options);
    if (auto selected = select_compatible(entries, api)) {
       co_return resolution{.api = std::move(*selected)};
@@ -77,13 +77,13 @@ plugin::resolver_api::resolve(forge::p2p::peer_id peer, forge::api::api_ref api,
 }
 
 boost::asio::awaitable<resolved_connection>
-plugin::resolver_api::open_resolved_connection(forge::p2p::peer_id peer,
+plugin::resolver_api::open_resolved_connection(forge::net::p2p::peer_id peer,
                                            forge::api::api_ref api,
                                            forge::api::descriptor descriptor,
                                            resolve_options options) {
    auto selected = co_await resolve(peer, api, options);
    validate_descriptor_compatible(descriptor, selected.api);
-   auto protocol = forge::p2p::protocol_id{.value = selected.api.protocol};
+   auto protocol = forge::net::p2p::protocol_id{.value = selected.api.protocol};
    auto connection = co_await impl_->p2p->open_api_connection(
       std::move(peer), std::move(protocol),
       forge::plugins::p2p::node::remote_options{

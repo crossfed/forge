@@ -14,7 +14,7 @@ export namespace forge::transport::api {
 class connection final : public forge::api::connection {
  public:
    connection();
-   connection(forge::transport::stream stream, options value = {});
+   connection(forge::net::transport::stream stream, options value = {});
    ~connection() override;
 
    connection(connection&&) noexcept;

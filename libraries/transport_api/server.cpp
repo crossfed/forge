@@ -23,8 +23,8 @@ module;
 module forge.transport.api.server;
 
 import forge.raw.raw;
-import forge.transport.exceptions;
-import forge.transport.frame;
+import forge.net.transport.exceptions;
+import forge.net.transport.frame;
 
 namespace forge::transport::api {
 namespace {
@@ -55,15 +55,15 @@ void compact_buffer(std::vector<std::uint8_t>& buffer, std::size_t& consumed) {
    return {buffer.data() + consumed, buffer.size() - consumed};
 }
 
-boost::asio::awaitable<forge::transport::chunk> read_transport_frame(forge::transport::stream& stream,
+boost::asio::awaitable<forge::net::transport::chunk> read_transport_frame(forge::net::transport::stream& stream,
                                                                    std::vector<std::uint8_t>& buffer,
                                                                    std::size_t& consumed,
                                                                    std::uint32_t max_frame_size) {
    while (true) {
-      const auto decoded = forge::transport::decode_frame_view(available_bytes(buffer, consumed),
-                                                             forge::transport::frame_options{.max_size = max_frame_size});
-      if (decoded.status == forge::transport::frame_decode_status::complete) {
-         const auto payload = forge::transport::chunk{decoded.payload};
+      const auto decoded = forge::net::transport::decode_frame_view(available_bytes(buffer, consumed),
+                                                             forge::net::transport::frame_options{.max_size = max_frame_size});
+      if (decoded.status == forge::net::transport::frame_decode_status::complete) {
+         const auto payload = forge::net::transport::chunk{decoded.payload};
          consumed += decoded.consumed;
          if (consumed >= buffer.size() || consumed > compact_threshold) {
             compact_buffer(buffer, consumed);
@@ -78,25 +78,25 @@ boost::asio::awaitable<forge::transport::chunk> read_transport_frame(forge::tran
    }
 }
 
-boost::asio::awaitable<void> write_transport_frame(forge::transport::stream& stream, std::span<const std::uint8_t> payload,
+boost::asio::awaitable<void> write_transport_frame(forge::net::transport::stream& stream, std::span<const std::uint8_t> payload,
                                                   std::uint32_t max_frame_size) {
    auto encoded = std::vector<std::uint8_t>{};
-   forge::transport::encode_frame_to(encoded, payload, forge::transport::frame_options{.max_size = max_frame_size});
-   co_await stream.async_write(forge::transport::chunk{std::move(encoded)});
+   forge::net::transport::encode_frame_to(encoded, payload, forge::net::transport::frame_options{.max_size = max_frame_size});
+   co_await stream.async_write(forge::net::transport::chunk{std::move(encoded)});
 }
 
 [[nodiscard]] bool is_clean_close(const forge::exceptions::base& error) noexcept {
-   return forge::transport::exceptions::is(error, forge::transport::exceptions::code::closed) ||
-          forge::transport::exceptions::is(error, forge::transport::exceptions::code::canceled);
+   return forge::net::transport::exceptions::is(error, forge::net::transport::exceptions::code::closed) ||
+          forge::net::transport::exceptions::is(error, forge::net::transport::exceptions::code::canceled);
 }
 
 } // namespace
 
-boost::asio::awaitable<void> serve_stream(forge::transport::stream stream, forge::api::binding_plan plan, options value) {
+boost::asio::awaitable<void> serve_stream(forge::net::transport::stream stream, forge::api::binding_plan plan, options value) {
    co_await serve_stream(std::move(stream), std::move(plan), value, {});
 }
 
-boost::asio::awaitable<void> serve_stream(forge::transport::stream stream, forge::api::binding_plan plan, options value,
+boost::asio::awaitable<void> serve_stream(forge::net::transport::stream stream, forge::api::binding_plan plan, options value,
                                          forge::api::metadata trusted_metadata) {
    auto dispatcher = forge::api::frame_dispatcher{std::move(plan), forge::api::dispatch_options{
                                                                      .codec = value.codec,
@@ -126,7 +126,7 @@ boost::asio::awaitable<void> serve_stream(forge::transport::stream stream, forge
    }
 }
 
-boost::asio::awaitable<void> serve_session(forge::transport::session session, forge::api::binding_plan plan,
+boost::asio::awaitable<void> serve_session(forge::net::transport::session session, forge::api::binding_plan plan,
                                            session_options value) {
    if (value.max_concurrent_streams == 0) {
       FORGE_THROW_EXCEPTION(exceptions::resource_exhausted, "API transport max concurrent streams must be positive");

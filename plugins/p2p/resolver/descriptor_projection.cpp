@@ -18,7 +18,7 @@ import forge.api.error_projection;
 import forge.transport.api.options;
 import forge.api.types;
 import forge.exceptions;
-import forge.p2p.protocol;
+import forge.net.p2p.protocol;
 import forge.plugins.p2p.resolver.exceptions;
 import forge.plugins.p2p.resolver.types;
 
@@ -65,7 +65,7 @@ std::string api_key(const forge::api::api_id& id, std::uint16_t major) {
 }
 
 entry project_descriptor(const forge::api::descriptor& descriptor,
-                         const forge::p2p::protocol_id& protocol,
+                         const forge::net::p2p::protocol_id& protocol,
                          const forge::transport::api::options& options) {
    auto methods = std::vector<method>{};
    methods.reserve(descriptor.methods.size());

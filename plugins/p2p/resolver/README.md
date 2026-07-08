@@ -64,7 +64,7 @@ plugins:
 
 - `forge_app`
 - `forge_api`
-- `forge_p2p`
+- `forge_net_p2p`
 - `forge_plugins_p2p_node`
 - `forge_config`
 - `forge_schema`
@@ -88,7 +88,7 @@ class catalog_resolver_plugin final : public forge::app::plugin {
          .export_api<catalog_api>()
          .build();
 
-      resolver->publish_api(std::move(plan), forge::p2p::protocol_id{.value = "/catalog/api/1"});
+      resolver->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/catalog/api/1"});
       co_return;
    }
 };

@@ -47,7 +47,7 @@ plugins, telemetry and compatibility layers должны быть пригодн
   routing, middleware, upgrades and retry boundaries.
 - [QUIC + P2P](network/quic-p2p.md): secure transport, peer identity, protocol
   streams, relay and path selection.
-- [Transport substrate](../libraries/transport/README.md): reusable
+- [Transport substrate](../libraries/net/transport/README.md): reusable
   stream/session concepts, chunks, frame helpers and muxer substrate.
 - [Infrastructure plugins](../plugins/README.md): lifecycle-owned P2P
   node, API resolver, diagnostics and PubSub facade.

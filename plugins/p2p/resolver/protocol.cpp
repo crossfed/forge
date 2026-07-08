@@ -19,8 +19,8 @@ import forge.api.binding;
 import forge.api.registry;
 import forge.transport.api.connection;
 import forge.transport.api.options;
-import forge.p2p.identity;
-import forge.p2p.protocol;
+import forge.net.p2p.identity;
+import forge.net.p2p.protocol;
 import forge.plugins.p2p.resolver.api;
 import forge.plugins.p2p.resolver.types;
 import forge.plugins.p2p.node.api;
@@ -69,7 +69,7 @@ void plugin::impl::install_protocol() {
 }
 
 boost::asio::awaitable<std::vector<entry>>
-plugin::impl::query_remote_apis(forge::p2p::peer_id peer, resolve_options options) {
+plugin::impl::query_remote_apis(forge::net::p2p::peer_id peer, resolve_options options) {
    auto remote = co_await p2p->remote<detail::resolver_protocol>(
       peer, protocol,
       forge::plugins::p2p::node::remote_options{.open_deadline = open_deadline(options),

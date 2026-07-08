@@ -9,7 +9,7 @@ bounded snapshots of network state without depending on private node internals.
 - Operators or tests need bounded P2P snapshots through a typed local API.
 - A product plugin needs read-only peer/session/resource/pubsub visibility.
 - Diagnostics should compose over the shared node without importing private
-  `forge_p2p` internals.
+  `forge_net_p2p` internals.
 
 ## When Not To Use
 

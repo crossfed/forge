@@ -12,7 +12,7 @@ module forge.plugins.log.otlp.plugin;
 
 import forge.config.component;
 import forge.config.decode;
-import forge.http.base_url;
+import forge.net.http.base_url;
 import forge.log.log_message;
 import forge.otlp.options;
 import forge.otlp.crash;
@@ -39,7 +39,7 @@ forge::otlp::attribute to_otlp_header(const header& value) {
 
 void validate_endpoint(const std::string& value) {
    try {
-      const auto parsed = forge::http::parse_base_url(value);
+      const auto parsed = forge::net::http::parse_base_url(value);
       if (parsed.scheme != "http" && parsed.scheme != "https") {
          FORGE_THROW_EXCEPTION(exceptions::invalid_config, "OTLP logs endpoint must use http or https");
       }

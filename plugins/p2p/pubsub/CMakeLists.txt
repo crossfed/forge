@@ -22,7 +22,7 @@ target_link_libraries(
       forge_plugins_p2p_node
       forge_app
       forge_api
-      forge_p2p
+      forge_net_p2p
       forge_config
       forge_schema
       forge_raw

@@ -14,9 +14,9 @@ module forge.plugins.http.server.plugin;
 import forge.api.registry;
 import forge.asio.runtime;
 import forge.http.api.binding;
-import forge.http.middleware;
-import forge.http.router;
-import forge.http.server;
+import forge.net.http.middleware;
+import forge.net.http.router;
+import forge.net.http.server;
 import forge.plugins.http.server.exceptions;
 import forge.plugins.http.server.middleware;
 import forge.plugins.http.server.types;
@@ -34,7 +34,7 @@ boost::asio::awaitable<void> start_server(plugin::impl& state) {
    }
 
    auto snapshot = state.close_publication();
-   auto router = forge::http::router{};
+   auto router = forge::net::http::router{};
    for (auto& descriptor : snapshot.middleware) {
       router.use(to_http_middleware(std::move(descriptor)));
    }
@@ -42,7 +42,7 @@ boost::asio::awaitable<void> start_server(plugin::impl& state) {
       value.binding.mount(router, resolve_base_path(state.settings, value.options.base_path));
    }
 
-   auto server = std::make_unique<forge::http::server>(*state.runtime, to_server_config(state.settings), std::move(router));
+   auto server = std::make_unique<forge::net::http::server>(*state.runtime, to_server_config(state.settings), std::move(router));
    co_await server->async_start();
 
    auto lock = std::scoped_lock{state.mutex};
@@ -50,7 +50,7 @@ boost::asio::awaitable<void> start_server(plugin::impl& state) {
 }
 
 boost::asio::awaitable<void> stop_server(plugin::impl& state) {
-   auto server = std::unique_ptr<forge::http::server>{};
+   auto server = std::unique_ptr<forge::net::http::server>{};
    {
       auto lock = std::scoped_lock{state.mutex};
       server = std::move(state.server);

@@ -153,22 +153,22 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [program_options](libraries/program_options/README.md) | `forge_program_options` | CLI adapter from Boost.Program_options into config documents. | Boost.Program_options privately. |
 | [env](libraries/env/README.md) | `forge_env` | Process env and explicit `.env` adapter into config documents. | `forge_config`, `forge_schema`. |
 | [api](libraries/api/README.md) | `forge_api` | Typed local/remote API contracts, handles, descriptors and frame vocabulary. | `forge_exceptions`, `forge_raw`. |
-| [transport_api](libraries/transport_api/README.md) | `forge_transport_api` | API frames over reusable transport streams/sessions. | `forge_api`, `forge_raw`, `forge_transport`. |
+| [transport_api](libraries/transport_api/README.md) | `forge_transport_api` | API frames over reusable transport streams/sessions. | `forge_api`, `forge_raw`, `forge_net_transport`. |
 | [crypto](libraries/crypto/README.md) | `forge_crypto` | Hashes, encodings, keys, signatures, OpenSSL 3.0+ crypto. | OpenSSL::Crypto, GMP, secp256k1, BLS. |
 | [log](libraries/log/README.md) | `forge_log` | Logging core, messages, console/appender boundary. | `forge_variant`, Boost.DLL privately. |
-| [otlp](libraries/otlp/README.md) | `forge_otlp` | OTLP/HTTP JSON log export and crash-spool resend. | `forge_log`, `forge_http`, `forge_asio`. |
+| [otlp](libraries/otlp/README.md) | `forge_otlp` | OTLP/HTTP JSON log export and crash-spool resend. | `forge_log`, `forge_net_http`, `forge_asio`. |
 | [asio](libraries/asio/README.md) | `forge_asio` | Asio runtime, blocking boundary, priority scheduler. | Boost.Asio, threads. |
 | [app](libraries/app/README.md) | `forge_app` | Opinionated application shell, plugins, ports, config and diagnostics. | `forge_asio`, `forge_config`. |
-| [http](libraries/http/README.md) | `forge_http` | HTTP target/base URL, router, middleware, client/server. | Boost.Beast/URL/Asio, OpenSSL. |
-| [http_api](libraries/http_api/README.md) | `forge_http_api` | Typed Forge API contracts over native HTTP routes with JSON/XML codecs. | `forge_http`, `forge_api`, `forge_json`, `forge_xml`. |
-| [websocket](libraries/websocket/README.md) | `forge_websocket` | WebSocket connection/client primitives. | Boost.Beast/Asio, OpenSSL. |
-| [transport](libraries/transport/README.md) | `forge_transport` | Reusable stream/session concepts, chunk buffers and frame helpers. | Boost.Asio, `forge_exceptions`. |
-| [tcp](libraries/tcp/README.md) | `forge_tcp` | TCP transport adapter over `forge_transport`. | Boost.Asio, `forge_transport`. |
-| [stcp](libraries/stcp/README.md) | `forge_stcp` | Secure TCP transport profile. | `forge_tcp`, `forge_crypto`, `forge_transport`. |
-| [yamux](libraries/yamux/README.md) | `forge_yamux` | Yamux multiplexed sessions over a transport stream. | `forge_transport`, Boost.Asio. |
-| [quic](libraries/quic/README.md) | `forge_quic` | QUIC endpoint, listener, connector, framed streams. | ngtcp2, OpenSSL 3.0+, Boost.Asio. |
+| [http](libraries/http/README.md) | `forge_net_http` | HTTP target/base URL, router, middleware, client/server. | Boost.Beast/URL/Asio, OpenSSL. |
+| [http_api](libraries/http_api/README.md) | `forge_http_api` | Typed Forge API contracts over native HTTP routes with JSON/XML codecs. | `forge_net_http`, `forge_api`, `forge_json`, `forge_xml`. |
+| [websocket](libraries/websocket/README.md) | `forge_net_websocket` | WebSocket connection/client primitives. | Boost.Beast/Asio, OpenSSL. |
+| [transport](libraries/transport/README.md) | `forge_net_transport` | Reusable stream/session concepts, chunk buffers and frame helpers. | Boost.Asio, `forge_exceptions`. |
+| [tcp](libraries/tcp/README.md) | `forge_net_tcp` | TCP transport adapter over `forge_net_transport`. | Boost.Asio, `forge_net_transport`. |
+| [stcp](libraries/stcp/README.md) | `forge_net_stcp` | Secure TCP transport profile. | `forge_net_tcp`, `forge_crypto`, `forge_net_transport`. |
+| [yamux](libraries/yamux/README.md) | `forge_net_yamux` | Yamux multiplexed sessions over a transport stream. | `forge_net_transport`, Boost.Asio. |
+| [quic](libraries/quic/README.md) | `forge_net_quic` | QUIC endpoint, listener, connector, framed streams. | ngtcp2, OpenSSL 3.0+, Boost.Asio. |
 | [multiformats](libraries/multiformats/README.md) | `forge_multiformats` | libp2p-compatible varint, multicodec, multihash, multibase and multiaddr. | `forge_crypto`, `forge_exceptions`. |
-| [p2p](libraries/p2p/README.md) | `forge_p2p` | Peer identity, sessions, discovery, relay, DHT, rendezvous and GossipSub. | `forge_transport`, `forge_multiformats`, `forge_quic`, `forge_yamux`. |
+| [p2p](libraries/p2p/README.md) | `forge_net_p2p` | Peer identity, sessions, discovery, relay, DHT, rendezvous and GossipSub. | `forge_net_transport`, `forge_multiformats`, `forge_net_quic`, `forge_net_yamux`. |
 | [rocksdb](libraries/rocksdb/README.md) | `forge_rocksdb` | Optional RocksDB TransactionDB wrapper. | RocksDB privately, `forge_exceptions`, `forge_schema`. |
 | [plugins](plugins/README.md) | `forge_plugins`, `forge_plugins_*_*` | Official infrastructure plugins: P2P node, API resolver, diagnostics, PubSub facade, crypto signer and crypto secrets. | `forge_app`, `forge_api`, focused plugin targets. |
 | [tui](libraries/tui/README.md) | `forge_tui` | Terminal UI value models, render helpers, runner. | Notcurses core privately and optionally. |
@@ -177,7 +177,7 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 only the `core` package surface. Production code that needs feature libraries
 must request components and then link concrete leaf targets such as
 `Forge::forge_config`, `Forge::forge_env`, `Forge::forge_json`,
-`Forge::forge_xml`, `Forge::forge_http_api` or `Forge::forge_quic`. External backends like
+`Forge::forge_xml`, `Forge::forge_http_api` or `Forge::forge_net_quic`. External backends like
 OpenSSL, ngtcp2, Glaze and Boost components belong to the leaf target that
 actually owns their API or implementation use. `Forge::forge` remains the all-in
 aggregate target, but consumers should request `COMPONENTS all` before linking

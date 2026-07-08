@@ -33,28 +33,28 @@
    __VA_OPT__(BOOST_PP_SEQ_FOR_EACH(FORGE_HTTP_DETAIL_OPTION_APPLY, _, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__)))
 
 #define FORGE_HTTP_GET(NAME, TARGET, ...)                                                                             \
-   (NAME, (::forge::http::api::route_builder{::forge::http::method::get, BOOST_PP_STRINGIZE(NAME), TARGET,               \
-                                          ::forge::http::status::ok} FORGE_HTTP_DETAIL_OPTIONS(__VA_ARGS__))             \
+   (NAME, (::forge::http::api::route_builder{::forge::net::http::method::get, BOOST_PP_STRINGIZE(NAME), TARGET,               \
+                                          ::forge::net::http::status::ok} FORGE_HTTP_DETAIL_OPTIONS(__VA_ARGS__))             \
              .build())
 #define FORGE_HTTP_HEAD(NAME, TARGET, ...)                                                                            \
-   (NAME, (::forge::http::api::route_builder{::forge::http::method::head, BOOST_PP_STRINGIZE(NAME), TARGET,              \
-                                          ::forge::http::status::ok} FORGE_HTTP_DETAIL_OPTIONS(__VA_ARGS__))             \
+   (NAME, (::forge::http::api::route_builder{::forge::net::http::method::head, BOOST_PP_STRINGIZE(NAME), TARGET,              \
+                                          ::forge::net::http::status::ok} FORGE_HTTP_DETAIL_OPTIONS(__VA_ARGS__))             \
              .build())
 #define FORGE_HTTP_POST(NAME, TARGET, STATUS, ...)                                                                    \
-   (NAME, (::forge::http::api::route_builder{::forge::http::method::post, BOOST_PP_STRINGIZE(NAME), TARGET,              \
-                                          ::forge::http::status::STATUS} FORGE_HTTP_DETAIL_OPTIONS(__VA_ARGS__))         \
+   (NAME, (::forge::http::api::route_builder{::forge::net::http::method::post, BOOST_PP_STRINGIZE(NAME), TARGET,              \
+                                          ::forge::net::http::status::STATUS} FORGE_HTTP_DETAIL_OPTIONS(__VA_ARGS__))         \
              .build())
 #define FORGE_HTTP_PUT(NAME, TARGET, STATUS, ...)                                                                     \
-   (NAME, (::forge::http::api::route_builder{::forge::http::method::put, BOOST_PP_STRINGIZE(NAME), TARGET,               \
-                                          ::forge::http::status::STATUS} FORGE_HTTP_DETAIL_OPTIONS(__VA_ARGS__))         \
+   (NAME, (::forge::http::api::route_builder{::forge::net::http::method::put, BOOST_PP_STRINGIZE(NAME), TARGET,               \
+                                          ::forge::net::http::status::STATUS} FORGE_HTTP_DETAIL_OPTIONS(__VA_ARGS__))         \
              .build())
 #define FORGE_HTTP_PATCH(NAME, TARGET, STATUS, ...)                                                                   \
-   (NAME, (::forge::http::api::route_builder{::forge::http::method::patch, BOOST_PP_STRINGIZE(NAME), TARGET,             \
-                                          ::forge::http::status::STATUS} FORGE_HTTP_DETAIL_OPTIONS(__VA_ARGS__))         \
+   (NAME, (::forge::http::api::route_builder{::forge::net::http::method::patch, BOOST_PP_STRINGIZE(NAME), TARGET,             \
+                                          ::forge::net::http::status::STATUS} FORGE_HTTP_DETAIL_OPTIONS(__VA_ARGS__))         \
              .build())
 #define FORGE_HTTP_DELETE(NAME, TARGET, STATUS, ...)                                                                  \
-   (NAME, (::forge::http::api::route_builder{::forge::http::method::delete_, BOOST_PP_STRINGIZE(NAME), TARGET,           \
-                                          ::forge::http::status::STATUS} FORGE_HTTP_DETAIL_OPTIONS(__VA_ARGS__))         \
+   (NAME, (::forge::http::api::route_builder{::forge::net::http::method::delete_, BOOST_PP_STRINGIZE(NAME), TARGET,           \
+                                          ::forge::net::http::status::STATUS} FORGE_HTTP_DETAIL_OPTIONS(__VA_ARGS__))         \
              .build())
 
 #define FORGE_HTTP_HEADER(FIELD, NAME) (header, FIELD, NAME)
@@ -118,7 +118,7 @@
                std::move(request));                                                                                 \
          }                                                                                                          \
       } else {                                                                                                      \
-         FORGE_THROW_EXCEPTION(::forge::http::exceptions::bad_request,                                                   \
+         FORGE_THROW_EXCEPTION(::forge::net::http::exceptions::bad_request,                                                   \
                              "HTTP positional proxy requires forge::api remote proxy");                              \
       }                                                                                                             \
    }
@@ -140,7 +140,7 @@
       static constexpr bool use_api_proxy = true                                                                     \
          BOOST_PP_SEQ_FOR_EACH(FORGE_HTTP_DETAIL_ROUTE_API_PROXY_SUPPORTED, INTERFACE,                                \
                                BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__));                                               \
-      static std::shared_ptr<::forge::api::remote_invoker> make_invoker(::forge::http::client& value) {                              \
+      static std::shared_ptr<::forge::api::remote_invoker> make_invoker(::forge::net::http::client& value) {                              \
          return ::forge::http::api::detail::make_route_invoker(                                                            \
             value, ::forge::api::api_traits<INTERFACE>::describe(),                                                    \
             std::vector<::forge::http::api::detail::route_call>{                                                           \
@@ -150,11 +150,11 @@
    };                                                                                                               \
    template <> class proxy<INTERFACE> : public ::forge::api::proxy<INTERFACE> {                                      \
     public:                                                                                                         \
-      explicit proxy(::forge::http::client& value)                                                                    \
+      explicit proxy(::forge::net::http::client& value)                                                                    \
           : ::forge::api::proxy<INTERFACE>(traits<INTERFACE>::make_invoker(value), INTERFACE::ref()), client_(&value) {} \
       BOOST_PP_SEQ_FOR_EACH(FORGE_HTTP_DETAIL_PROXY_USING, INTERFACE, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__))          \
       BOOST_PP_SEQ_FOR_EACH(FORGE_HTTP_DETAIL_PROXY_METHOD, INTERFACE, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__))         \
     private:                                                                                                        \
-      ::forge::http::client* client_;                                                                                              \
+      ::forge::net::http::client* client_;                                                                                              \
    };                                                                                                               \
    }

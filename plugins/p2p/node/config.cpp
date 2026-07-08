@@ -19,12 +19,12 @@ import forge.asio.runtime;
 import forge.config.component;
 import forge.config.decode;
 import forge.exceptions;
-import forge.p2p.endpoint;
-import forge.p2p.identity;
-import forge.p2p.node;
-import forge.p2p.protocol;
-import forge.p2p.pubsub;
-import forge.p2p.scoring;
+import forge.net.p2p.endpoint;
+import forge.net.p2p.identity;
+import forge.net.p2p.node;
+import forge.net.p2p.protocol;
+import forge.net.p2p.pubsub;
+import forge.net.p2p.scoring;
 import forge.plugins.p2p.node.exceptions;
 import forge.plugins.p2p.node.types;
 
@@ -34,28 +34,28 @@ import forge.plugins.p2p.node.types;
 namespace forge::plugins::p2p::node {
 namespace {
 
-[[nodiscard]] forge::p2p::path::policy parse_path_policy(path_policy value, bool relay_client_enabled,
+[[nodiscard]] forge::net::p2p::path::policy parse_path_policy(path_policy value, bool relay_client_enabled,
                                                        std::size_t relay_max_candidates) {
    if (relay_max_candidates == 0) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_config, "P2P relay candidate limit must be positive");
    }
    switch (value) {
    case path_policy::direct_only:
-      return forge::p2p::path::policy{
+      return forge::net::p2p::path::policy{
          .allow_direct = true,
          .allow_hole_punch = false,
          .allow_relay = false,
          .max_relay_candidates = relay_max_candidates,
       };
    case path_policy::direct_preferred:
-      return forge::p2p::path::policy{
+      return forge::net::p2p::path::policy{
          .allow_direct = true,
          .allow_hole_punch = relay_client_enabled,
          .allow_relay = relay_client_enabled,
          .max_relay_candidates = relay_max_candidates,
       };
    case path_policy::relay_only:
-      return forge::p2p::path::policy{
+      return forge::net::p2p::path::policy{
          .allow_direct = false,
          .allow_hole_punch = false,
          .allow_relay = relay_client_enabled,
@@ -94,12 +94,12 @@ parsed_policy parse_policy(const config& config) {
    };
 }
 
-std::vector<forge::p2p::endpoint> parse_endpoint_list(const std::vector<std::string>& values) {
-   auto out = std::vector<forge::p2p::endpoint>{};
+std::vector<forge::net::p2p::endpoint> parse_endpoint_list(const std::vector<std::string>& values) {
+   auto out = std::vector<forge::net::p2p::endpoint>{};
    out.reserve(values.size());
    for (const auto& value : values) {
       try {
-         out.push_back(forge::p2p::parse_endpoint(value));
+         out.push_back(forge::net::p2p::parse_endpoint(value));
       } catch (const std::exception& error) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_config, "invalid P2P endpoint",
                              forge::exceptions::ctx("endpoint", value), forge::exceptions::ctx("error", error.what()));
@@ -121,15 +121,15 @@ void apply_config(plugin::impl& state, const config& config) {
    state.options.advertised_endpoints = parse_endpoint_list(config.advertised_endpoints);
    state.options.certificate_pem = config.certificate_pem;
    state.options.private_key_pem = config.private_key_pem;
-   state.options.capabilities = forge::p2p::capability_set{
-      .bits = forge::p2p::capabilities::direct_quic | forge::p2p::capabilities::peer_exchange,
+   state.options.capabilities = forge::net::p2p::capability_set{
+      .bits = forge::net::p2p::capabilities::direct_quic | forge::net::p2p::capabilities::peer_exchange,
    };
    if (state.policy.relay_client_enabled) {
-      state.options.capabilities.add(forge::p2p::capabilities::hole_punching);
+      state.options.capabilities.add(forge::net::p2p::capabilities::hole_punching);
    }
    if (state.policy.relay_server_enabled) {
-      state.options.capabilities.add(forge::p2p::capabilities::relay);
-      state.options.capabilities.add(forge::p2p::capabilities::relay_reservation);
+      state.options.capabilities.add(forge::net::p2p::capabilities::relay);
+      state.options.capabilities.add(forge::net::p2p::capabilities::relay_reservation);
    }
    state.options.path_policy = state.policy.path;
    state.options.relay_policy.client_enabled = state.policy.relay_client_enabled;
@@ -144,7 +144,7 @@ void apply_config(plugin::impl& state, const config& config) {
    state.options.limits.relay.reservation_ttl = state.policy.relay_reservation_ttl;
    const auto& peer_id = config.peer_id;
    state.options.explicit_peer_id =
-      peer_id.empty() ? std::nullopt : std::make_optional(forge::p2p::peer_id{.value = peer_id});
+      peer_id.empty() ? std::nullopt : std::make_optional(forge::net::p2p::peer_id{.value = peer_id});
    state.options.limits.max_sessions = static_cast<std::size_t>(config.max_sessions);
    state.options.limits.session_low_watermark =
       std::min(state.options.limits.session_low_watermark, state.options.limits.max_sessions);

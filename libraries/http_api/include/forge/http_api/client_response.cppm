@@ -27,21 +27,23 @@ import forge.api.connection;
 import forge.api.descriptor;
 import forge.api.error_projection;
 import forge.api.types;
-import forge.http.body;
+import forge.net.http.body;
 import forge.http.api.client_request;
 import forge.http.api.parameters;
-export import forge.http.client;
-import forge.http.exceptions;
-import forge.http.file;
+export import forge.net.http.client;
+import forge.net.http.exceptions;
+import forge.net.http.file;
 export import forge.http.api.mapping;
-import forge.http.stream;
-import forge.http.types;
-import forge.http.upload;
+import forge.net.http.stream;
+import forge.net.http.types;
+import forge.net.http.upload;
 import forge.json;
 import forge.reflect.reflect;
 import forge.xml;
 
 export namespace forge::http::api {
+
+using namespace forge::net::http;
 
 namespace detail {
 
@@ -138,7 +140,7 @@ template <typename Response> [[nodiscard]] Response decode_response_body(const r
          forge::json::read_options{.source_name = "http.response",
                                  .unknown_fields = forge::json::unknown_field_policy::error});
       if (!decoded.ok()) {
-         FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request, "HTTP API response JSON is invalid");
+         FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request, "HTTP API response JSON is invalid");
       }
       return std::move(decoded.value);
    }
@@ -148,7 +150,7 @@ template <typename Response> [[nodiscard]] Response decode_response_body(const r
          forge::xml::read_options{.source_name = "http.response",
                                 .unknown_fields = forge::xml::unknown_field_policy::error});
       if (!decoded.ok()) {
-         FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request, "HTTP API response XML is invalid");
+         FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request, "HTTP API response XML is invalid");
       }
       return std::move(decoded.value);
    }
@@ -162,7 +164,7 @@ boost::asio::awaitable<std::string> read_bounded_error_body(body_reader& body) {
    auto output = std::string{};
    while (auto chunk = co_await body.async_read()) {
       if (chunk->bytes.size() > max_stream_error_body_bytes - output.size()) {
-         FORGE_THROW_EXCEPTION(forge::http::exceptions::payload_too_large,
+         FORGE_THROW_EXCEPTION(forge::net::http::exceptions::payload_too_large,
                              "HTTP API error response body exceeds the streaming client limit");
       }
       output.append(reinterpret_cast<const char*>(chunk->bytes.data()), chunk->bytes.size());

@@ -16,7 +16,7 @@ it does not own TCP, TLS, QUIC, Yamux, P2P, API or content semantics.
 | --- | --- | --- |
 | Boost.Beast flat buffer | `/opt/homebrew/include/boost/beast/core/flat_buffer.hpp` | Contiguous readable/writable storage, explicit prepare/commit/consume lifecycle and configured maximum storage size. |
 | Boost.Asio buffers | `/opt/homebrew/include/boost/asio/buffer.hpp`, TCP/STCP async read/write usage in FCL | Async operations consume caller-provided buffer sequences; FCL must own write/read storage across suspension. |
-| FCL Yamux cleanup | `docs/donors/fcl-yamux-v1.md`, `libraries/yamux/session.cpp` | Consumed-offset parsing and bounded compaction are preferred over front erasing receive buffers. |
+| FCL Yamux cleanup | `docs/donors/fcl-yamux-v1.md`, `libraries/net/yamux/session.cpp` | Consumed-offset parsing and bounded compaction are preferred over front erasing receive buffers. |
 | libp2p Yamux donors | `donors/go-libp2p/p2p/muxer/yamux`, `donors/rust-libp2p/muxers/yamux` | Muxer buffers are resource-accounted and higher-level protocol semantics stay out of the byte transport layer. |
 
 ## FCL Decisions

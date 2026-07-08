@@ -20,23 +20,23 @@ import forge.api.connection;
 import forge.api.registry;
 import forge.api.binding;
 import forge.api.dispatcher;
-import forge.p2p.pubsub;
+import forge.net.p2p.pubsub;
 import forge.plugins.p2p.pubsub.types;
 import forge.raw.raw;
 
 export namespace forge::plugins::p2p::pubsub {
 
-using handler = std::function<boost::asio::awaitable<forge::p2p::pubsub::validation_result>(message)>;
+using handler = std::function<boost::asio::awaitable<forge::net::p2p::pubsub::validation_result>(message)>;
 template <typename T>
-using typed_handler = std::function<boost::asio::awaitable<forge::p2p::pubsub::validation_result>(typed_message<T>)>;
+using typed_handler = std::function<boost::asio::awaitable<forge::net::p2p::pubsub::validation_result>(typed_message<T>)>;
 
 class api : public forge::api::contract<api> {
  public:
    virtual ~api() = default;
 
-   virtual boost::asio::awaitable<message> publish(forge::p2p::pubsub::topic subject, std::vector<std::uint8_t> data,
+   virtual boost::asio::awaitable<message> publish(forge::net::p2p::pubsub::topic subject, std::vector<std::uint8_t> data,
                                                    publish_options options = {}) = 0;
-   virtual boost::asio::awaitable<subscription> subscribe(forge::p2p::pubsub::topic subject, handler callback,
+   virtual boost::asio::awaitable<subscription> subscribe(forge::net::p2p::pubsub::topic subject, handler callback,
                                                           subscribe_options options = {}) = 0;
    virtual boost::asio::awaitable<void> unsubscribe(subscription value) = 0;
    [[nodiscard]] virtual std::vector<subscription> subscriptions() const = 0;
@@ -45,7 +45,7 @@ class api : public forge::api::contract<api> {
    template <typename T>
       requires(!std::same_as<std::remove_cvref_t<T>, std::vector<std::uint8_t>> &&
                !std::same_as<std::remove_cvref_t<T>, std::vector<char>>)
-   boost::asio::awaitable<message> publish(forge::p2p::pubsub::topic subject, const T& value,
+   boost::asio::awaitable<message> publish(forge::net::p2p::pubsub::topic subject, const T& value,
                                            publish_options options = {}) {
       auto packed = forge::raw::pack(value);
       auto bytes = std::vector<std::uint8_t>{packed.begin(), packed.end()};
@@ -53,10 +53,10 @@ class api : public forge::api::contract<api> {
    }
 
    template <typename T>
-   boost::asio::awaitable<subscription> subscribe(forge::p2p::pubsub::topic subject, typed_handler<T> callback,
+   boost::asio::awaitable<subscription> subscribe(forge::net::p2p::pubsub::topic subject, typed_handler<T> callback,
                                                   subscribe_options options = {}) {
       auto wrapper = [callback = std::move(callback)](message value) mutable
-         -> boost::asio::awaitable<forge::p2p::pubsub::validation_result> {
+         -> boost::asio::awaitable<forge::net::p2p::pubsub::validation_result> {
          auto typed = typed_message<T>{
             .source = std::move(value.source),
             .author = std::move(value.author),

@@ -25,20 +25,22 @@ export module forge.http.api.client_request;
 import forge.api.connection;
 import forge.api.descriptor;
 import forge.api.types;
-import forge.http.body;
+import forge.net.http.body;
 import forge.http.api.parameters;
-export import forge.http.client;
-import forge.http.exceptions;
-import forge.http.file;
+export import forge.net.http.client;
+import forge.net.http.exceptions;
+import forge.net.http.file;
 export import forge.http.api.mapping;
-import forge.http.stream;
-import forge.http.types;
-import forge.http.upload;
+import forge.net.http.stream;
+import forge.net.http.types;
+import forge.net.http.upload;
 import forge.json;
 import forge.reflect.reflect;
 import forge.xml;
 
 export namespace forge::http::api {
+
+using namespace forge::net::http;
 
 namespace detail {
 
@@ -83,7 +85,7 @@ void apply_route_headers(request& target, const route& route, const Request& val
             if (header.present) {
                auto encoded = format_http_field(header.value);
                if (!encoded.has_value()) {
-                  FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request,
+                  FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                       "HTTP API header value cannot be encoded as text");
                }
                target.set(route_header_name(route, field_name), std::move(*encoded));
@@ -108,7 +110,7 @@ void append_route_query_fields(std::string& target, const route& route, const Re
             if (!already_rendered && query.present) {
                auto encoded = format_http_field(query.value);
                if (!encoded.has_value()) {
-                  FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request,
+                  FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                       "HTTP API query value cannot be encoded as text");
                }
                target.push_back(target.find('?') == std::string::npos ? '?' : '&');
@@ -132,7 +134,7 @@ void apply_route_cookies(request& target, const Request& value) {
             if (field.present) {
                auto encoded = format_http_field(field.value);
                if (!encoded.has_value()) {
-                  FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request,
+                  FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                       "HTTP API cookie value cannot be encoded as text");
                }
                if (!cookie.empty()) {
@@ -188,7 +190,7 @@ template <typename Tuple>
                                                       std::string_view name) {
    auto value = tuple_argument_text(arguments, names, name);
    if (!value.has_value()) {
-      FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request, "HTTP API positional argument is not available",
+      FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request, "HTTP API positional argument is not available",
                           forge::exceptions::ctx("field", std::string{name}));
    }
    return *value;
@@ -290,7 +292,7 @@ void append_unconsumed_query_arguments(std::string& target,
                 }
                 auto encoded = format_http_field(argument.value);
                 if (!encoded.has_value()) {
-                   FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request,
+                   FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                        "HTTP API query value cannot be encoded as text");
                 }
                 target.push_back(target.find('?') == std::string::npos ? '?' : '&');
@@ -316,13 +318,13 @@ void apply_route_headers(request& target,
              using argument_type = std::remove_cvref_t<decltype(argument)>;
              if constexpr (detail::is_header<argument_type>::value) {
                 if (Index >= names.size()) {
-                   FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request,
+                   FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                        "HTTP API positional header name is missing");
                 }
                 if (argument.present) {
                    auto encoded = format_http_field(argument.value);
                    if (!encoded.has_value()) {
-                      FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request,
+                      FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                           "HTTP API header value cannot be encoded as text");
                    }
                    target.set(route_header_name(route, names[Index]), std::move(*encoded));
@@ -346,13 +348,13 @@ void apply_route_cookies(request& target,
              using argument_type = std::remove_cvref_t<decltype(argument)>;
              if constexpr (detail::is_cookie<argument_type>::value) {
                 if (Index >= names.size()) {
-                   FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request,
+                   FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                        "HTTP API positional cookie name is missing");
                 }
                 if (argument.present) {
                    auto encoded = format_http_field(argument.value);
                    if (!encoded.has_value()) {
-                      FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request,
+                      FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                           "HTTP API cookie value cannot be encoded as text");
                    }
                    if (!cookie.empty()) {
@@ -378,14 +380,14 @@ void apply_route_cookies(request& target,
    case body_codec::json: {
       auto encoded = forge::json::write(value);
       if (!encoded.ok()) {
-         FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request, "HTTP API request body cannot be encoded as JSON");
+         FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request, "HTTP API request body cannot be encoded as JSON");
       }
       return std::move(encoded.text);
    }
    case body_codec::xml: {
       auto encoded = forge::xml::write(value);
       if (!encoded.ok()) {
-         FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request, "HTTP API request body cannot be encoded as XML");
+         FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request, "HTTP API request body cannot be encoded as XML");
       }
       return std::move(encoded.text);
    }
@@ -407,7 +409,7 @@ std::optional<std::string> positional_codec_body(const Tuple& arguments,
                 return;
              }
              if (result.has_value()) {
-                FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request,
+                FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                     "HTTP API request has multiple body parameters");
              }
              result = encode_body_value(argument.value, codec);
@@ -418,7 +420,7 @@ std::optional<std::string> positional_codec_body(const Tuple& arguments,
                 return;
              }
              if (result.has_value()) {
-                FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request,
+                FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                     "HTTP API request has multiple positional body candidates");
              }
              result = encode_body_value(argument, codec);
@@ -518,7 +520,7 @@ void reject_unsupported_positional_client_body(const Tuple& arguments) {
                         detail::is_form_field<argument_type>::value ||
                         detail::is_upload_file_v<argument_type>) {
              static_cast<void>(argument);
-             FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request,
+             FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                  "HTTP positional form and upload client binding is not implemented");
           }
        }()),
@@ -534,7 +536,7 @@ void reject_http_positional_parameters(const Tuple& arguments) {
           using argument_type = std::remove_cvref_t<decltype(argument)>;
           if constexpr (detail::is_http_parameter_v<argument_type>) {
              static_cast<void>(argument);
-             FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request,
+             FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                  "HTTP positional methods cannot use forge::http parameter wrappers");
           }
        }()),
@@ -553,12 +555,12 @@ std::optional<body_reader> bind_positional_request_body(request& target,
    reject_unsupported_positional_client_body(arguments);
    constexpr auto explicit_body_sources = positional_explicit_body_source_count<Tuple>();
    if constexpr (explicit_body_sources > 1U) {
-      FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request, "HTTP API request has multiple body parameters");
+      FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request, "HTTP API request has multiple body parameters");
    }
    const auto plain_body_candidates = positional_plain_codec_body_candidate_count<Tuple>(consumed);
    if constexpr (explicit_body_sources > 0U) {
       if (plain_body_candidates > 0U) {
-         FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request,
+         FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                              "HTTP API request has explicit and inferred body parameters");
       }
    }
@@ -679,7 +681,7 @@ std::optional<std::string> dto_multipart_body(request& target, const route& rout
             if (field.present) {
                auto encoded = format_http_field(field.value);
                if (!encoded.has_value()) {
-                  FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request,
+                  FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                       "HTTP API form value cannot be encoded as text");
                }
                append_field(route_form_name(route, field_name), *encoded);
@@ -726,7 +728,7 @@ std::optional<body_reader> bind_dto_request_body(request& target, const route& r
       ++body_count;
    }
    if (body_count > 1U) {
-      FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request, "HTTP API request has multiple body sources");
+      FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request, "HTTP API request has multiple body sources");
    }
    if (stream_body.has_value()) {
       return stream_body;

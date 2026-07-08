@@ -17,15 +17,15 @@ module;
 export module forge.http.api.parameters;
 
 import forge.api.exceptions;
-import forge.http.body;
-import forge.http.file;
-import forge.http.stream;
-import forge.http.types;
-import forge.http.upload;
+import forge.net.http.body;
+import forge.net.http.file;
+import forge.net.http.stream;
+import forge.net.http.types;
+import forge.net.http.upload;
 import forge.reflect.reflect;
 import forge.raw.raw;
 
-export namespace forge::http {
+export namespace forge::net::http {
 
 template <typename T> struct header {
    T value{};
@@ -413,4 +413,4 @@ template <typename Stream> Stream& operator>>(Stream& stream, empty_response&) {
    FORGE_THROW_EXCEPTION(forge::api::exceptions::protocol_error, "HTTP empty responses are HTTP-only and cannot use generic binary serialization");
 }
 
-} // namespace forge::http
+} // namespace forge::net::http

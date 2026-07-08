@@ -24,7 +24,7 @@ target_link_libraries(
       forge_schema
       forge_log
       forge_otlp
-      forge_http
+      forge_net_http
       forge_asio
       forge_exceptions
       Boost::asio

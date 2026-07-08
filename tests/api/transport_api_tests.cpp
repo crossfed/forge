@@ -43,9 +43,9 @@ import forge.transport.api.server;
 import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.raw.raw;
-import forge.transport.exceptions;
-import forge.transport.session;
-import forge.transport.stream;
+import forge.net.transport.exceptions;
+import forge.net.transport.session;
+import forge.net.transport.stream;
 
 namespace transport_api_typed {
 
@@ -176,7 +176,7 @@ class gated_cache_impl final : public cache_api {
    std::shared_ptr<gated_state> state_;
 };
 
-class fake_stream final : public forge::transport::detail::stream_concept {
+class fake_stream final : public forge::net::transport::detail::stream_concept {
  public:
    [[nodiscard]] bool valid() const noexcept override {
       auto lock = std::scoped_lock{mutex};
@@ -194,7 +194,7 @@ class fake_stream final : public forge::transport::detail::stream_concept {
       co_return;
    }
 
-   boost::asio::awaitable<void> async_write_chunk(forge::transport::chunk value) override {
+   boost::asio::awaitable<void> async_write_chunk(forge::net::transport::chunk value) override {
       co_await wait_for_write_release();
       auto lock = std::scoped_lock{mutex};
       writes.push_back(value.to_vector());
@@ -205,14 +205,14 @@ class fake_stream final : public forge::transport::detail::stream_concept {
       co_return (co_await async_read_chunk()).into_vector();
    }
 
-   boost::asio::awaitable<forge::transport::chunk> async_read_chunk() override {
+   boost::asio::awaitable<forge::net::transport::chunk> async_read_chunk() override {
       if (wait_for_reads) {
          {
             auto lock = std::scoped_lock{mutex};
             if (!reads.empty()) {
                auto out = std::move(reads.front());
                reads.pop_front();
-               co_return forge::transport::chunk{std::move(out)};
+               co_return forge::net::transport::chunk{std::move(out)};
             }
          }
 
@@ -235,11 +235,11 @@ class fake_stream final : public forge::transport::detail::stream_concept {
       auto lock = std::scoped_lock{mutex};
       if (reads.empty()) {
          open = false;
-         FORGE_THROW_EXCEPTION(forge::transport::exceptions::closed, "fake stream closed");
+         FORGE_THROW_EXCEPTION(forge::net::transport::exceptions::closed, "fake stream closed");
       }
       auto out = std::move(reads.front());
       reads.pop_front();
-      co_return forge::transport::chunk{std::move(out)};
+      co_return forge::net::transport::chunk{std::move(out)};
    }
 
    boost::asio::awaitable<void> async_close() override {
@@ -346,7 +346,7 @@ class fake_stream final : public forge::transport::detail::stream_concept {
          {
             auto lock = std::scoped_lock{mutex};
             if (!open) {
-               FORGE_THROW_EXCEPTION(forge::transport::exceptions::closed, "fake stream closed");
+               FORGE_THROW_EXCEPTION(forge::net::transport::exceptions::closed, "fake stream closed");
             }
             if (!hold_writes || writes_released) {
                co_return;
@@ -362,20 +362,20 @@ class fake_stream final : public forge::transport::detail::stream_concept {
    mutable std::mutex mutex;
 };
 
-class fake_session final : public forge::transport::detail::session_concept {
+class fake_session final : public forge::net::transport::detail::session_concept {
  public:
    [[nodiscard]] bool valid() const noexcept override {
       return open;
    }
 
-   boost::asio::awaitable<forge::transport::stream> async_open_stream() override {
-      FORGE_THROW_EXCEPTION(forge::transport::exceptions::closed, "fake session does not open outbound streams");
+   boost::asio::awaitable<forge::net::transport::stream> async_open_stream() override {
+      FORGE_THROW_EXCEPTION(forge::net::transport::exceptions::closed, "fake session does not open outbound streams");
    }
 
-   boost::asio::awaitable<forge::transport::stream> async_accept_stream() override {
+   boost::asio::awaitable<forge::net::transport::stream> async_accept_stream() override {
       if (accepted.empty()) {
          open = false;
-         FORGE_THROW_EXCEPTION(forge::transport::exceptions::closed, "fake session closed");
+         FORGE_THROW_EXCEPTION(forge::net::transport::exceptions::closed, "fake session closed");
       }
       auto out = std::move(accepted.front());
       accepted.pop_front();
@@ -391,27 +391,27 @@ class fake_session final : public forge::transport::detail::session_concept {
       open = false;
    }
 
-   std::deque<forge::transport::stream> accepted;
+   std::deque<forge::net::transport::stream> accepted;
    bool open = true;
 };
 
-[[nodiscard]] forge::transport::stream make_stream(std::shared_ptr<fake_stream> model) {
-   return forge::transport::detail::stream_access::make(std::move(model));
+[[nodiscard]] forge::net::transport::stream make_stream(std::shared_ptr<fake_stream> model) {
+   return forge::net::transport::detail::stream_access::make(std::move(model));
 }
 
-[[nodiscard]] forge::transport::session make_session(std::shared_ptr<fake_session> model) {
-   return forge::transport::detail::session_access::make(std::move(model));
+[[nodiscard]] forge::net::transport::session make_session(std::shared_ptr<fake_session> model) {
+   return forge::net::transport::detail::session_access::make(std::move(model));
 }
 
 [[nodiscard]] bytes pack_api_frame(const forge::api::frame& frame) {
    auto payload = forge::api::bytes{};
    forge::raw::pack(payload, frame);
-   return forge::transport::encode_frame(payload);
+   return forge::net::transport::encode_frame(payload);
 }
 
 [[nodiscard]] forge::api::frame unpack_written_frame(const bytes& value) {
-   const auto decoded = forge::transport::decode_frame(value);
-   BOOST_REQUIRE(decoded.status == forge::transport::frame_decode_status::complete);
+   const auto decoded = forge::net::transport::decode_frame(value);
+   BOOST_REQUIRE(decoded.status == forge::net::transport::frame_decode_status::complete);
    return forge::raw::unpack<forge::api::frame>(decoded.payload);
 }
 
@@ -752,7 +752,7 @@ BOOST_AUTO_TEST_CASE(transport_api_client_deadline_expires_while_waiting_for_wri
 
       try {
          (void)co_await wait_stream_call(std::move(first));
-      } catch (const forge::transport::exceptions::closed&) {
+      } catch (const forge::net::transport::exceptions::closed&) {
       } catch (const forge::api::exceptions::deadline_exceeded&) {
       } catch (const forge::api::exceptions::cancelled&) {
       }

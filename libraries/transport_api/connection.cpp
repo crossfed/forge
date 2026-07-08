@@ -29,7 +29,7 @@ struct connection::impl {
 
 connection::connection() = default;
 
-connection::connection(forge::transport::stream stream, options value) : impl_(std::make_shared<impl>()) {
+connection::connection(forge::net::transport::stream stream, options value) : impl_(std::make_shared<impl>()) {
    impl_->transport = client{std::move(stream), std::move(value)};
 }
 

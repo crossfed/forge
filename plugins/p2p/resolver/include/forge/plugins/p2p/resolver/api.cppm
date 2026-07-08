@@ -17,8 +17,8 @@ import forge.api.connection;
 import forge.api.registry;
 import forge.api.binding;
 import forge.api.dispatcher;
-import forge.p2p.identity;
-import forge.p2p.protocol;
+import forge.net.p2p.identity;
+import forge.net.p2p.protocol;
 import forge.plugins.p2p.resolver.types;
 
 export namespace forge::plugins::p2p::resolver {
@@ -27,15 +27,15 @@ class api : public forge::api::contract<api> {
  public:
    virtual ~api() = default;
 
-   virtual void publish_api(forge::api::binding_plan plan, forge::p2p::protocol_id protocol,
+   virtual void publish_api(forge::api::binding_plan plan, forge::net::p2p::protocol_id protocol,
                             publish_options options = {}) = 0;
    [[nodiscard]] virtual std::vector<entry> local_apis() const = 0;
-   virtual boost::asio::awaitable<std::vector<entry>> peer_apis(forge::p2p::peer_id peer,
+   virtual boost::asio::awaitable<std::vector<entry>> peer_apis(forge::net::p2p::peer_id peer,
                                                                 resolve_options options = {}) = 0;
-   virtual boost::asio::awaitable<resolution> resolve(forge::p2p::peer_id peer, forge::api::api_ref api,
+   virtual boost::asio::awaitable<resolution> resolve(forge::net::p2p::peer_id peer, forge::api::api_ref api,
                                                       resolve_options options = {}) = 0;
    template <typename Interface>
-   boost::asio::awaitable<forge::api::handle<Interface>> remote(forge::p2p::peer_id peer, resolve_options options = {}) {
+   boost::asio::awaitable<forge::api::handle<Interface>> remote(forge::net::p2p::peer_id peer, resolve_options options = {}) {
       auto descriptor = Interface::describe();
       auto requested = forge::api::api_ref{.id = descriptor.id,
                                          .major = descriptor.version.major,
@@ -47,7 +47,7 @@ class api : public forge::api::contract<api> {
 
  private:
    virtual boost::asio::awaitable<resolved_connection>
-   open_resolved_connection(forge::p2p::peer_id peer, forge::api::api_ref api, forge::api::descriptor descriptor,
+   open_resolved_connection(forge::net::p2p::peer_id peer, forge::api::api_ref api, forge::api::descriptor descriptor,
                             resolve_options options) = 0;
 };
 

@@ -1,6 +1,6 @@
 # HTTP Server Plugin
 
-`forge::plugins::http::server` owns one configured `forge_http` server and exposes a
+`forge::plugins::http::server` owns one configured `forge_net_http` server and exposes a
 local-only API for application plugins to publish typed HTTP APIs and middleware
 before startup.
 
@@ -16,7 +16,7 @@ before startup.
 ## When Not To Use
 
 - Do not use this plugin for raw socket ownership, TLS policy or transport
-  experiments. Use `forge_http` directly for low-level HTTP mechanics.
+  experiments. Use `forge_net_http` directly for low-level HTTP mechanics.
 - Do not put product authorization, account policy, storage policy or protocol
   vocabulary into this plugin.
 - Do not publish routes after the server has entered startup; contribution
@@ -45,7 +45,7 @@ before startup.
 - Accepts plugin-owned middleware descriptors through
   `forge::plugins::http::server::middleware_descriptor`.
 
-It does not expose raw route verbs, raw `forge::http::router`,
+It does not expose raw route verbs, raw `forge::net::http::router`,
 diagnostics/status endpoints, auth policy, TLS policy, CORS policy or
 product-specific behavior.
 
@@ -53,7 +53,7 @@ product-specific behavior.
 
 - `forge_app`
 - `forge_api`
-- `forge_http`
+- `forge_net_http`
 - `forge_http_api`
 - `forge_config`
 - `forge_schema`
@@ -93,18 +93,18 @@ consumer.
 
 import forge.api.binding;
 import forge.app.plugin;
-import forge.http.file;
-import forge.http.stream;
-import forge.http.types;
+import forge.net.http.file;
+import forge.net.http.stream;
+import forge.net.http.types;
 import forge.plugins.http.server.api;
 import forge.plugins.http.server.middleware;
 import forge.plugins.http.server.plugin;
 
-struct item_request : forge::http::endpoint_request {
+struct item_request : forge::net::http::endpoint_request {
    std::string id;
 };
 
-struct update_item_request : forge::http::endpoint_request {
+struct update_item_request : forge::net::http::endpoint_request {
    std::string id;
    std::string title;
 };
@@ -189,7 +189,7 @@ registry.register_plugin(forge::plugins::http::server::descriptor());
 
 - The plugin is not an authority boundary. Authentication, authorization,
   tenancy and rate policy belong to middleware or consuming product plugins.
-- Body/header limits and timeouts are config-owned and enforced by `forge_http`.
+- Body/header limits and timeouts are config-owned and enforced by `forge_net_http`.
 - Middleware should avoid logging raw headers, query strings or request bodies
   before redaction.
 - Native file/stream responses are route-level escape hatches; they do not go

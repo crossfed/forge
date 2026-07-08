@@ -23,7 +23,7 @@ target_link_libraries(
       forge_api
       forge_config
       forge_schema
-      forge_http
+      forge_net_http
       forge_http_api
       forge_asio
       forge_exceptions

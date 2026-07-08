@@ -25,9 +25,9 @@ import forge.asio.task_scheduler;
 import forge.config.component;
 import forge.config.document;
 import forge.config.value;
-import forge.http.route_context;
-import forge.http.server;
-import forge.http.types;
+import forge.net.http.route_context;
+import forge.net.http.server;
+import forge.net.http.types;
 import forge.log.logger;
 import forge.log.logger_config;
 import forge.plugins.log.otlp.api;
@@ -51,7 +51,7 @@ class fake_collector {
  public:
    explicit fake_collector(forge::asio::runtime& runtime)
        : server_(runtime, {.bind_address = "127.0.0.1", .port = 0},
-                 [this](forge::http::route_context& context) { return handle(context); }) {
+                 [this](forge::net::http::route_context& context) { return handle(context); }) {
       server_.start();
       for (auto attempt = 0; attempt != 100; ++attempt) {
          if (server_.port() != 0) {
@@ -82,12 +82,12 @@ class fake_collector {
    }
 
  private:
-   boost::asio::awaitable<forge::http::response> handle(forge::http::route_context& context) {
+   boost::asio::awaitable<forge::net::http::response> handle(forge::net::http::route_context& context) {
       auto request = collected_request{
          .target = std::string{context.request.target()},
          .body = context.request.body(),
       };
-      if (const auto header = context.request.find(forge::http::field::content_type);
+      if (const auto header = context.request.find(forge::net::http::field::content_type);
           header != context.request.end()) {
          request.content_type = std::string{header->value()};
       }
@@ -97,14 +97,14 @@ class fake_collector {
       }
       ready_.notify_all();
 
-      auto response = forge::http::response{forge::http::status::ok, context.request.version()};
-      response.set(forge::http::field::content_type, "application/json");
+      auto response = forge::net::http::response{forge::net::http::status::ok, context.request.version()};
+      response.set(forge::net::http::field::content_type, "application/json");
       response.body() = "{}";
       response.prepare_payload();
       co_return response;
    }
 
-   forge::http::server server_;
+   forge::net::http::server server_;
    mutable std::mutex mutex_;
    mutable std::condition_variable ready_;
    std::vector<collected_request> requests_;

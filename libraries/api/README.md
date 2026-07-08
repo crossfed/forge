@@ -17,8 +17,8 @@ diagnostic context.
 
 ## When Not To Use
 
-- Do not use `forge_api` as a replacement for `forge_http`, `forge_quic`,
-  `forge_websocket` or `forge_p2p`.
+- Do not use `forge_api` as a replacement for `forge_net_http`, `forge_net_quic`,
+  `forge_net_websocket` or `forge_net_p2p`.
 - Do not put transport paths, peer policies, HTTP status routing or server
   lifecycle in the core API layer.
 - Do not invent per-transport error DTOs. Use `forge::api::error_payload`.
@@ -88,7 +88,7 @@ The argument names are metadata, not type declarations. Existing
 `FORGE_API_METHOD(read)` one-request DTO methods keep their old source and wire
 shape. Positional methods are new declarations and use an internal argument-pack
 payload for frame transports. HTTP-specific request wrappers are not part of
-`forge_api`; `forge_http` supports them as fields of described request DTOs and
+`forge_api`; `forge_net_http` supports them as fields of described request DTOs and
 keeps HTTP positional methods limited to path/query routing plus an optional
 single JSON DTO body.
 
@@ -192,14 +192,14 @@ return forge::api::define<cache>({.id = {"cache.bulk"}, .version = {1, 0}})
 ## API Over Transport
 
 `forge.transport.api` is the reusable binding for API-over-stream transports. It
-sits above `forge_api` and `forge_transport`, uses `forge::transport::stream` /
-`forge::transport::session`, and owns the shared frame read/write loop, codec
+sits above `forge_api` and `forge_net_transport`, uses `forge::net::transport::stream` /
+`forge::net::transport::session`, and owns the shared frame read/write loop, codec
 checks, grouped stream handling, max-inflight limits, deadlines and error
 projection.
 
-This layer must not move into `forge_transport`: transport stays a low-level
+This layer must not move into `forge_net_transport`: transport stays a low-level
 byte-stream/session contract and must not import the API contract layer.
-`forge.quic.api` and `forge.p2p.api` are thin adapters or policy wrappers over the
+`forge.net.quic.api` and `forge.net.p2p.api` are thin adapters or policy wrappers over the
 API transport binding. WebSocket shares `forge::api::frame_dispatcher`, but not the
 stream transport binding, because it is message-oriented rather than a
 `transport::stream`. HTTP remains a separate binding because it is
@@ -229,7 +229,7 @@ auto plan = forge::api::binding()
    .build();
 ```
 
-HTTP-specific request middleware stays in `forge_http` or the `forge::plugins::http::server`
+HTTP-specific request middleware stays in `forge_net_http` or the `forge::plugins::http::server`
 plugin facade; API interceptors do not parse HTTP headers, routes or upgrade
 state.
 

@@ -479,14 +479,91 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
-   test_forge_package_quic_component
+   test_forge_package_net_transport_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
-      ${CMAKE_CURRENT_SOURCE_DIR}/package_quic_component
-      ${CMAKE_BINARY_DIR}/forge-package-quic-component
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_transport_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-transport-component
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
-      --test-command forge_package_quic_component
+      --test-command forge_package_net_transport_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_net_tcp_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_tcp_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-tcp-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_tcp_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_net_stcp_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_stcp_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-stcp-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_stcp_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_net_yamux_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_yamux_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-yamux-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_yamux_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_net_http_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_http_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-http-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_http_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_net_websocket_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_websocket_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-websocket-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_websocket_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_net_quic_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_quic_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-quic-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_quic_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_net_p2p_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_p2p_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-p2p-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_p2p_component
    DEPENDS test_forge_package_install
 )
 add_custom_target(
@@ -819,16 +896,93 @@ add_test(
 )
 set_tests_properties(test_forge_package_api_lightweight PROPERTIES DEPENDS test_forge_package_install)
 add_test(
-   NAME test_forge_package_quic_component
+   NAME test_forge_package_net_transport_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
-      ${CMAKE_CURRENT_SOURCE_DIR}/package_quic_component
-      ${CMAKE_BINARY_DIR}/forge-package-quic-component
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_transport_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-transport-component
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
-      --test-command forge_package_quic_component
+      --test-command forge_package_net_transport_component
 )
-set_tests_properties(test_forge_package_quic_component PROPERTIES DEPENDS test_forge_package_install)
+set_tests_properties(test_forge_package_net_transport_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_net_tcp_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_tcp_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-tcp-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_tcp_component
+)
+set_tests_properties(test_forge_package_net_tcp_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_net_stcp_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_stcp_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-stcp-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_stcp_component
+)
+set_tests_properties(test_forge_package_net_stcp_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_net_yamux_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_yamux_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-yamux-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_yamux_component
+)
+set_tests_properties(test_forge_package_net_yamux_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_net_http_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_http_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-http-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_http_component
+)
+set_tests_properties(test_forge_package_net_http_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_net_websocket_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_websocket_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-websocket-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_websocket_component
+)
+set_tests_properties(test_forge_package_net_websocket_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_net_quic_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_quic_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-quic-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_quic_component
+)
+set_tests_properties(test_forge_package_net_quic_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_net_p2p_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_net_p2p_component
+      ${CMAKE_BINARY_DIR}/forge-package-net-p2p-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_net_p2p_component
+)
+set_tests_properties(test_forge_package_net_p2p_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_otlp_component
    COMMAND ${CMAKE_CTEST_COMMAND}

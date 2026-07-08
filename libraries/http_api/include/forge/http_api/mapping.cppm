@@ -20,13 +20,15 @@ import forge.api.connection;
 import forge.api.descriptor;
 import forge.api.types;
 import forge.http.api.parameters;
-import forge.http.exceptions;
-import forge.http.negotiation;
-import forge.http.types;
+import forge.net.http.exceptions;
+import forge.net.http.negotiation;
+import forge.net.http.types;
 import forge.reflect.reflect;
 import forge.schema.scalar;
 
 export namespace forge::http::api {
+
+using namespace forge::net::http;
 
 enum class body_codec {
    json,
@@ -123,37 +125,37 @@ template <typename Interface> struct traits;
 
 namespace detail {
 
-using ::forge::http::detail::is_body;
-using ::forge::http::detail::is_body_bytes_v;
-using ::forge::http::detail::is_body_stream_v;
-using ::forge::http::detail::is_bytes_response_v;
-using ::forge::http::detail::is_cookie;
-using ::forge::http::detail::is_empty_response_v;
-using ::forge::http::detail::is_form;
-using ::forge::http::detail::is_form_field;
-using ::forge::http::detail::is_header;
-using ::forge::http::detail::is_http_parameter_v;
-using ::forge::http::detail::is_query;
-using ::forge::http::detail::is_stream_response_v;
-using ::forge::http::detail::is_streaming_response_v;
-using ::forge::http::detail::is_upload_file_v;
-using ::forge::http::detail::request_has_http_parameter_v;
-using ::forge::http::detail::request_needs_stream_v;
-using ::forge::http::detail::response_needs_stream_v;
+using ::forge::net::http::detail::is_body;
+using ::forge::net::http::detail::is_body_bytes_v;
+using ::forge::net::http::detail::is_body_stream_v;
+using ::forge::net::http::detail::is_bytes_response_v;
+using ::forge::net::http::detail::is_cookie;
+using ::forge::net::http::detail::is_empty_response_v;
+using ::forge::net::http::detail::is_form;
+using ::forge::net::http::detail::is_form_field;
+using ::forge::net::http::detail::is_header;
+using ::forge::net::http::detail::is_http_parameter_v;
+using ::forge::net::http::detail::is_query;
+using ::forge::net::http::detail::is_stream_response_v;
+using ::forge::net::http::detail::is_streaming_response_v;
+using ::forge::net::http::detail::is_upload_file_v;
+using ::forge::net::http::detail::request_has_http_parameter_v;
+using ::forge::net::http::detail::request_needs_stream_v;
+using ::forge::net::http::detail::response_needs_stream_v;
 
 [[nodiscard]] inline bool uses_request_body(method verb) noexcept {
    return verb == method::post || verb == method::put || verb == method::patch || verb == method::delete_;
 }
 
-[[nodiscard]] inline std::span<const forge::http::media_type_match> media_types(body_codec codec) noexcept {
+[[nodiscard]] inline std::span<const forge::net::http::media_type_match> media_types(body_codec codec) noexcept {
    static constexpr auto json = std::array{
-      forge::http::media_type_match{.type = "application/json", .structured_suffix = {}},
-      forge::http::media_type_match{.type = {}, .structured_suffix = "+json"},
+      forge::net::http::media_type_match{.type = "application/json", .structured_suffix = {}},
+      forge::net::http::media_type_match{.type = {}, .structured_suffix = "+json"},
    };
    static constexpr auto xml = std::array{
-      forge::http::media_type_match{.type = "application/xml", .structured_suffix = {}},
-      forge::http::media_type_match{.type = "text/xml", .structured_suffix = {}},
-      forge::http::media_type_match{.type = {}, .structured_suffix = "+xml"},
+      forge::net::http::media_type_match{.type = "application/xml", .structured_suffix = {}},
+      forge::net::http::media_type_match{.type = "text/xml", .structured_suffix = {}},
+      forge::net::http::media_type_match{.type = {}, .structured_suffix = "+xml"},
    };
    switch (codec) {
    case body_codec::json:
@@ -164,12 +166,12 @@ using ::forge::http::detail::response_needs_stream_v;
    return {};
 }
 
-[[nodiscard]] inline std::span<const forge::http::media_type_match> response_media_types(body_codec codec) noexcept {
+[[nodiscard]] inline std::span<const forge::net::http::media_type_match> response_media_types(body_codec codec) noexcept {
    static constexpr auto json = std::array{
-      forge::http::media_type_match{.type = "application/json", .structured_suffix = {}},
+      forge::net::http::media_type_match{.type = "application/json", .structured_suffix = {}},
    };
    static constexpr auto xml = std::array{
-      forge::http::media_type_match{.type = "application/xml", .structured_suffix = {}},
+      forge::net::http::media_type_match{.type = "application/xml", .structured_suffix = {}},
    };
    switch (codec) {
    case body_codec::json:
@@ -181,7 +183,7 @@ using ::forge::http::detail::response_needs_stream_v;
 }
 
 [[nodiscard]] inline bool media_type_matches(body_codec codec, std::string_view value) {
-   return forge::http::media_type_matches(value, media_types(codec));
+   return forge::net::http::media_type_matches(value, media_types(codec));
 }
 
 [[nodiscard]] inline std::string_view content_type(body_codec codec) noexcept {
@@ -205,7 +207,7 @@ using ::forge::http::detail::response_needs_stream_v;
 }
 
 [[nodiscard]] inline bool accept_allows(body_codec codec, std::string_view value) {
-   return forge::http::accept_allows(value, response_media_types(codec));
+   return forge::net::http::accept_allows(value, response_media_types(codec));
 }
 
 template <auto Method, typename Request>
@@ -297,7 +299,7 @@ template <typename Request>
 [[nodiscard]] std::string require_request_field(const Request& request, std::string_view name) {
    auto value = request_field_text(request, name);
    if (!value.has_value()) {
-      FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request, "HTTP API route field is not available",
+      FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request, "HTTP API route field is not available",
                           forge::exceptions::ctx("field", std::string{name}));
    }
    return *value;
@@ -305,7 +307,7 @@ template <typename Request>
 
 [[nodiscard]] inline parsed_route parse_route_template(std::string_view target) {
    if (target.empty() || target.front() != '/') {
-      FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request, "HTTP API route must start with /");
+      FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request, "HTTP API route must start with /");
    }
 
    auto normalize_path = [](std::string_view path) {
@@ -323,13 +325,13 @@ template <typename Request>
          const auto segment = path.substr(offset, end - offset);
          if (segment.find('{') != std::string_view::npos || segment.find('}') != std::string_view::npos) {
             if (segment.size() <= 2U || segment.front() != '{' || segment.back() != '}') {
-               FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request,
+               FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                    "HTTP API path placeholders must occupy a complete segment");
             }
             const auto name = segment.substr(1U, segment.size() - 2U);
             for (const auto value : name) {
                if (std::isalnum(static_cast<unsigned char>(value)) == 0 && value != '_') {
-                  FORGE_THROW_EXCEPTION(forge::http::exceptions::bad_request,
+                  FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                       "HTTP API path placeholder name is invalid");
                }
             }

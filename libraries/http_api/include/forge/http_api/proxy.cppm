@@ -28,11 +28,13 @@ import forge.api.error_projection;
 import forge.api.types;
 export import forge.api.handle;
 export import forge.http.api.client_response;
-export import forge.http.client;
-import forge.http.exceptions;
+export import forge.net.http.client;
+import forge.net.http.exceptions;
 export import forge.http.api.mapping;
 
 export namespace forge::http::api {
+
+using namespace forge::net::http;
 
 template <typename Interface> class proxy;
 

@@ -9,7 +9,7 @@ module;
 
 export module forge.plugins.p2p.diagnostics.types;
 
-import forge.p2p.identity;
+import forge.net.p2p.identity;
 import forge.schema.diagnostic;
 import forge.schema.value_kind;
 import forge.schema.object;
@@ -26,7 +26,7 @@ struct config {
 };
 
 struct filter {
-   std::optional<forge::p2p::peer_id> peer;
+   std::optional<forge::net::p2p::peer_id> peer;
    bool only_connected = false;
    bool only_protected = false;
    std::uint64_t limit = 0;

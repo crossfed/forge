@@ -18,7 +18,7 @@ import forge.asio.runtime;
 import forge.config.component;
 import forge.config.decode;
 import forge.http.api.binding;
-import forge.http.server;
+import forge.net.http.server;
 import forge.plugins.http.server.api;
 import forge.plugins.http.server.exceptions;
 import forge.plugins.http.server.middleware;

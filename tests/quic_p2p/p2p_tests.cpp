@@ -48,34 +48,34 @@ import forge.crypto.pem;
 import forge.crypto.rsa;
 import forge.crypto.secp256k1;
 import forge.crypto.x509;
-import forge.p2p.dht;
-import forge.p2p.discovery;
-import forge.p2p.endpoint;
-import forge.p2p.envelope;
-import forge.p2p.exceptions;
-import forge.p2p.diagnostics;
-import forge.p2p.hole_punch;
-import forge.p2p.identify;
-import forge.p2p.identity;
-import forge.p2p.message;
-import forge.p2p.negotiation;
-import forge.p2p.node;
-import forge.p2p.peer_store;
-import forge.p2p.protocol;
-import forge.p2p.pubsub;
-import forge.p2p.reachability;
-import forge.p2p.rendezvous;
-import forge.p2p.relay;
-import forge.p2p.resource_manager;
-import forge.p2p.scoring;
-import forge.p2p.stream;
-import forge.quic.endpoint;
-import forge.quic.libp2p;
-import forge.quic.transport;
-import forge.transport.endpoint;
-import forge.transport.frame;
-import forge.transport.stream;
-import forge.tcp.listener;
+import forge.net.p2p.dht;
+import forge.net.p2p.discovery;
+import forge.net.p2p.endpoint;
+import forge.net.p2p.envelope;
+import forge.net.p2p.exceptions;
+import forge.net.p2p.diagnostics;
+import forge.net.p2p.hole_punch;
+import forge.net.p2p.identify;
+import forge.net.p2p.identity;
+import forge.net.p2p.message;
+import forge.net.p2p.negotiation;
+import forge.net.p2p.node;
+import forge.net.p2p.peer_store;
+import forge.net.p2p.protocol;
+import forge.net.p2p.pubsub;
+import forge.net.p2p.reachability;
+import forge.net.p2p.rendezvous;
+import forge.net.p2p.relay;
+import forge.net.p2p.resource_manager;
+import forge.net.p2p.scoring;
+import forge.net.p2p.stream;
+import forge.net.quic.endpoint;
+import forge.net.quic.libp2p;
+import forge.net.quic.transport;
+import forge.net.transport.endpoint;
+import forge.net.transport.frame;
+import forge.net.transport.stream;
+import forge.net.tcp.listener;
 import forge.multiformats.exceptions;
 import forge.multiformats.types;
 import forge.multiformats.varint;
@@ -84,10 +84,10 @@ import forge.multiformats.multihash;
 import forge.multiformats.multibase;
 import forge.multiformats.multiaddr;
 
-#include "../../libraries/p2p/details/session_lifecycle.hxx"
-#include "../../libraries/p2p/details/relay_accounting.hxx"
+#include "../../libraries/net/p2p/details/session_lifecycle.hxx"
+#include "../../libraries/net/p2p/details/relay_accounting.hxx"
 
-namespace forge::p2p {
+namespace forge::net::p2p {
 namespace {
 
 struct product_announce {
@@ -803,7 +803,7 @@ read_length_delimited(stream& value, std::size_t max_payload_size = 4 * 1024 * 1
    }
 }
 
-class queued_transport_stream final : public forge::transport::detail::stream_concept {
+class queued_transport_stream final : public forge::net::transport::detail::stream_concept {
  public:
    explicit queued_transport_stream(std::int64_t stream_id) : stream_id_{stream_id} {}
 
@@ -820,7 +820,7 @@ class queued_transport_stream final : public forge::transport::detail::stream_co
       co_return;
    }
 
-   boost::asio::awaitable<void> async_write_chunk(forge::transport::chunk bytes) override {
+   boost::asio::awaitable<void> async_write_chunk(forge::net::transport::chunk bytes) override {
       ++chunk_writes;
       writes.push_back(bytes.to_vector());
       co_return;
@@ -833,12 +833,12 @@ class queued_transport_stream final : public forge::transport::detail::stream_co
       co_return out;
    }
 
-   boost::asio::awaitable<forge::transport::chunk> async_read_chunk() override {
+   boost::asio::awaitable<forge::net::transport::chunk> async_read_chunk() override {
       ++chunk_reads;
       BOOST_REQUIRE(!reads.empty());
       auto out = std::move(reads.front());
       reads.pop_front();
-      co_return forge::transport::chunk{std::move(out)};
+      co_return forge::net::transport::chunk{std::move(out)};
    }
 
    boost::asio::awaitable<void> async_close() override {
@@ -867,7 +867,7 @@ class counting_peer_store_backend final : public peer_store::backend {
       records[value.peer] = std::move(value);
    }
 
-   void learn_endpoint(peer_id value, forge::p2p::endpoint endpoint, capability_set capabilities) override {
+   void learn_endpoint(peer_id value, forge::net::p2p::endpoint endpoint, capability_set capabilities) override {
       ++learn_endpoint_count;
       auto& record = records[value];
       record.peer = std::move(value);
@@ -876,7 +876,7 @@ class counting_peer_store_backend final : public peer_store::backend {
    }
 
    void mark_reachability(peer_id value, reachability::state state,
-                          std::optional<forge::p2p::endpoint> observed) override {
+                          std::optional<forge::net::p2p::endpoint> observed) override {
       auto& record = records[value];
       record.peer = std::move(value);
       record.reachability = state;
@@ -896,7 +896,7 @@ class counting_peer_store_backend final : public peer_store::backend {
       ++record.failures;
    }
 
-   void mark_endpoint_success(const peer_id& value, const forge::p2p::endpoint& endpoint, path::kind kind,
+   void mark_endpoint_success(const peer_id& value, const forge::net::p2p::endpoint& endpoint, path::kind kind,
                               std::chrono::milliseconds latency) override {
       auto& record = records[value];
       record.peer = value;
@@ -904,7 +904,7 @@ class counting_peer_store_backend final : public peer_store::backend {
           peer_store::endpoint_record{.endpoint = endpoint, .kind = kind, .last_latency = latency});
    }
 
-   void mark_endpoint_failure(const peer_id& value, const forge::p2p::endpoint& endpoint, path::kind kind,
+   void mark_endpoint_failure(const peer_id& value, const forge::net::p2p::endpoint& endpoint, path::kind kind,
                               std::chrono::system_clock::time_point backoff_until) override {
       auto& record = records[value];
       record.peer = value;
@@ -1172,8 +1172,8 @@ BOOST_AUTO_TEST_CASE(p2p_websocket_multiaddr_is_parseable_but_not_dialable) {
          forge::asio::blocking::run(runtime, value.async_listen(endpoint));
          BOOST_FAIL("expected unsupported listen endpoint");
       } catch (const forge::exceptions::base& error) {
-         BOOST_REQUIRE(forge::p2p::exceptions::code_of(error).has_value());
-         BOOST_TEST(static_cast<int>(forge::p2p::exceptions::code_of(error).value()) ==
+         BOOST_REQUIRE(forge::net::p2p::exceptions::code_of(error).has_value());
+         BOOST_TEST(static_cast<int>(forge::net::p2p::exceptions::code_of(error).value()) ==
                     static_cast<int>(exceptions::code::unsupported_protocol));
       }
 
@@ -1181,8 +1181,8 @@ BOOST_AUTO_TEST_CASE(p2p_websocket_multiaddr_is_parseable_but_not_dialable) {
          forge::asio::blocking::run(runtime, value.async_connect(endpoint));
          BOOST_FAIL("expected unsupported connect endpoint");
       } catch (const forge::exceptions::base& error) {
-         BOOST_REQUIRE(forge::p2p::exceptions::code_of(error).has_value());
-         BOOST_TEST(static_cast<int>(forge::p2p::exceptions::code_of(error).value()) ==
+         BOOST_REQUIRE(forge::net::p2p::exceptions::code_of(error).has_value());
+         BOOST_TEST(static_cast<int>(forge::net::p2p::exceptions::code_of(error).value()) ==
                     static_cast<int>(exceptions::code::unsupported_protocol));
       }
    }
@@ -1236,8 +1236,8 @@ BOOST_AUTO_TEST_CASE(p2p_duplicate_direct_listen_rejects_typed) {
       forge::asio::blocking::run(runtime, value.async_listen(local));
       BOOST_FAIL("expected duplicate listen rejection");
    } catch (const forge::exceptions::base& error) {
-      BOOST_REQUIRE(forge::p2p::exceptions::code_of(error).has_value());
-      BOOST_TEST(static_cast<int>(*forge::p2p::exceptions::code_of(error)) ==
+      BOOST_REQUIRE(forge::net::p2p::exceptions::code_of(error).has_value());
+      BOOST_TEST(static_cast<int>(*forge::net::p2p::exceptions::code_of(error)) ==
                  static_cast<int>(exceptions::code::invalid_options));
    }
 
@@ -1610,7 +1610,7 @@ BOOST_AUTO_TEST_CASE(p2p_stop_closes_all_direct_listeners) {
 
    auto rebound = node{runtime, options_for(peer(217))};
    forge::asio::blocking::run(runtime, rebound.async_listen(quic));
-   auto tcp_rebound = forge::tcp::listener{runtime.context().get_executor(), tcp.transport};
+   auto tcp_rebound = forge::net::tcp::listener{runtime.context().get_executor(), tcp.transport};
    BOOST_TEST(tcp_rebound.valid());
 
    forge::asio::blocking::run(runtime, tcp_rebound.async_close());
@@ -1665,8 +1665,8 @@ BOOST_AUTO_TEST_CASE(p2p_direct_tcp_rejects_tls_peer_mismatch) {
           runtime, client.async_connect(server_endpoint, node::connect_options{.expected_peer = peer(150)}));
       BOOST_FAIL("expected TCP TLS peer mismatch");
    } catch (const forge::exceptions::base& error) {
-      BOOST_REQUIRE(forge::p2p::exceptions::code_of(error).has_value());
-      BOOST_TEST(static_cast<int>(forge::p2p::exceptions::code_of(error).value()) ==
+      BOOST_REQUIRE(forge::net::p2p::exceptions::code_of(error).has_value());
+      BOOST_TEST(static_cast<int>(forge::net::p2p::exceptions::code_of(error).value()) ==
                  static_cast<int>(exceptions::code::peer_verification_failed));
    }
 
@@ -1690,8 +1690,8 @@ BOOST_AUTO_TEST_CASE(p2p_direct_tcp_upgrade_honors_attempt_timeout) {
                                                                        .timeout = std::chrono::milliseconds{100}});
              BOOST_FAIL("expected stalled TCP direct connect timeout");
           } catch (const forge::exceptions::base& error) {
-             BOOST_REQUIRE(forge::p2p::exceptions::code_of(error).has_value());
-             BOOST_TEST(static_cast<int>(*forge::p2p::exceptions::code_of(error)) ==
+             BOOST_REQUIRE(forge::net::p2p::exceptions::code_of(error).has_value());
+             BOOST_TEST(static_cast<int>(*forge::net::p2p::exceptions::code_of(error)) ==
                         static_cast<int>(exceptions::code::timeout));
              saw_timeout = true;
           }
@@ -1710,33 +1710,33 @@ BOOST_AUTO_TEST_CASE(p2p_direct_tcp_stop_closes_listener_port) {
 
    forge::asio::blocking::run(runtime, server.async_stop());
 
-   auto rebound = forge::tcp::listener{runtime.context().get_executor(), server_endpoint.transport};
+   auto rebound = forge::net::tcp::listener{runtime.context().get_executor(), server_endpoint.transport};
    BOOST_TEST(rebound.valid());
    forge::asio::blocking::run(runtime, rebound.async_close());
 }
 
 BOOST_AUTO_TEST_CASE(quic_libp2p_profile_sets_required_alpn) {
-   auto client = forge::quic::libp2p::client_profile();
-   auto server = forge::quic::libp2p::server_profile();
+   auto client = forge::net::quic::libp2p::client_profile();
+   auto server = forge::net::quic::libp2p::server_profile();
 
    BOOST_TEST(client.alpn == "libp2p");
    BOOST_TEST(server.alpn == "libp2p");
-   BOOST_TEST(forge::quic::libp2p::is_profile_alpn(client.alpn));
+   BOOST_TEST(forge::net::quic::libp2p::is_profile_alpn(client.alpn));
 }
 
 BOOST_AUTO_TEST_CASE(transport_frame_and_stream_round_trip_payload) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    auto backend = std::make_shared<queued_transport_stream>(42);
-   auto value = forge::transport::detail::stream_access::make(backend);
+   auto value = forge::net::transport::detail::stream_access::make(backend);
    const auto payload = std::vector<std::uint8_t>{'t', 'r', 'a', 'n', 's', 'p', 'o', 'r', 't'};
-   const auto encoded = forge::transport::encode_frame(payload);
-   const auto decoded = forge::transport::decode_frame(encoded);
-   BOOST_TEST(static_cast<int>(decoded.status) == static_cast<int>(forge::transport::frame_decode_status::complete));
+   const auto encoded = forge::net::transport::encode_frame(payload);
+   const auto decoded = forge::net::transport::decode_frame(encoded);
+   BOOST_TEST(static_cast<int>(decoded.status) == static_cast<int>(forge::net::transport::frame_decode_status::complete));
    BOOST_TEST(decoded.payload == payload, boost::test_tools::per_element());
 
    forge::asio::blocking::run(runtime, value.async_write_frame(payload));
    BOOST_REQUIRE_EQUAL(backend->writes.size(), 1U);
-   BOOST_TEST(forge::transport::decode_frame(backend->writes.front()).payload == payload,
+   BOOST_TEST(forge::net::transport::decode_frame(backend->writes.front()).payload == payload,
               boost::test_tools::per_element());
 
    backend->reads.push_back({encoded.begin(), encoded.begin() + 3});
@@ -1748,7 +1748,7 @@ BOOST_AUTO_TEST_CASE(transport_frame_and_stream_round_trip_payload) {
 BOOST_AUTO_TEST_CASE(p2p_stream_wraps_transport_stream) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    auto backend = std::make_shared<queued_transport_stream>(77);
-   auto value = forge::p2p::stream{forge::transport::detail::stream_access::make(backend)};
+   auto value = forge::net::p2p::stream{forge::net::transport::detail::stream_access::make(backend)};
    const auto payload = std::vector<std::uint8_t>{'p', '2', 'p'};
    const auto reply = std::vector<std::uint8_t>{'o', 'k'};
 
@@ -1770,12 +1770,12 @@ BOOST_AUTO_TEST_CASE(p2p_stream_wraps_transport_stream) {
 BOOST_AUTO_TEST_CASE(p2p_stream_delegates_chunk_read_write_and_preserves_framed_trailing_bytes) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    auto backend = std::make_shared<queued_transport_stream>(78);
-   auto value = forge::p2p::stream{forge::transport::detail::stream_access::make(backend)};
+   auto value = forge::net::p2p::stream{forge::net::transport::detail::stream_access::make(backend)};
    const auto payload = std::vector<std::uint8_t>{'c', 'h', 'u', 'n', 'k'};
    const auto first = std::vector<std::uint8_t>{'o', 'n', 'e'};
    const auto second = std::vector<std::uint8_t>{'t', 'w', 'o'};
 
-   forge::asio::blocking::run(runtime, value.async_write(forge::transport::chunk{payload}));
+   forge::asio::blocking::run(runtime, value.async_write(forge::net::transport::chunk{payload}));
    BOOST_REQUIRE_EQUAL(backend->chunk_writes, 1U);
    BOOST_REQUIRE_EQUAL(backend->writes.size(), 1U);
    BOOST_TEST(backend->writes.front() == payload, boost::test_tools::per_element());
@@ -1785,8 +1785,8 @@ BOOST_AUTO_TEST_CASE(p2p_stream_delegates_chunk_read_write_and_preserves_framed_
    BOOST_REQUIRE_EQUAL(backend->chunk_reads, 1U);
    BOOST_TEST(read.to_vector() == payload, boost::test_tools::per_element());
 
-   auto combined = forge::transport::encode_frame(first);
-   auto encoded_second = forge::transport::encode_frame(second);
+   auto combined = forge::net::transport::encode_frame(first);
+   auto encoded_second = forge::net::transport::encode_frame(second);
    combined.insert(combined.end(), encoded_second.begin(), encoded_second.end());
    backend->reads.push_back(std::move(combined));
 
@@ -1802,12 +1802,12 @@ BOOST_AUTO_TEST_CASE(p2p_stream_with_buffer_preserves_prefetched_framed_chunks) 
    auto backend = std::make_shared<queued_transport_stream>(79);
    auto first = std::vector<std::uint8_t>{'p', 'r', 'e'};
    auto second = std::vector<std::uint8_t>{'b', 'u', 'f'};
-   auto buffered = forge::transport::encode_frame(first);
-   auto encoded_second = forge::transport::encode_frame(second);
+   auto buffered = forge::net::transport::encode_frame(first);
+   auto encoded_second = forge::net::transport::encode_frame(second);
    buffered.insert(buffered.end(), encoded_second.begin(), encoded_second.end());
 
-   auto value = forge::p2p::detail::stream_access::with_buffer(
-       forge::p2p::stream{forge::transport::detail::stream_access::make(backend)}, std::move(buffered));
+   auto value = forge::net::p2p::detail::stream_access::with_buffer(
+       forge::net::p2p::stream{forge::net::transport::detail::stream_access::make(backend)}, std::move(buffered));
 
    auto first_read = forge::asio::blocking::run(runtime, value.async_read_frame_chunk());
    BOOST_TEST(first_read.to_vector() == first, boost::test_tools::per_element());
@@ -1861,16 +1861,16 @@ BOOST_AUTO_TEST_CASE(p2p_session_lifecycle_cancels_rejected_new_session) {
 }
 
 BOOST_AUTO_TEST_CASE(quic_transport_adapter_preserves_endpoint_kind_and_authority) {
-   const auto ip4 = forge::quic::to_transport_endpoint(forge::quic::endpoint{.host = "127.0.0.1", .port = 4001});
-   BOOST_TEST(static_cast<int>(ip4.host_type) == static_cast<int>(forge::transport::endpoint::host_kind::ip4));
-   BOOST_TEST(static_cast<int>(ip4.protocol) == static_cast<int>(forge::transport::endpoint::protocol_kind::quic_v1));
+   const auto ip4 = forge::net::quic::to_transport_endpoint(forge::net::quic::endpoint{.host = "127.0.0.1", .port = 4001});
+   BOOST_TEST(static_cast<int>(ip4.host_type) == static_cast<int>(forge::net::transport::endpoint::host_kind::ip4));
+   BOOST_TEST(static_cast<int>(ip4.protocol) == static_cast<int>(forge::net::transport::endpoint::protocol_kind::quic_v1));
    const auto authority = std::string{"127.0.0.1"} + ":" + std::to_string(4001);
    BOOST_TEST(ip4.authority() == authority);
-   const auto roundtrip = forge::quic::from_transport_endpoint(ip4);
+   const auto roundtrip = forge::net::quic::from_transport_endpoint(ip4);
    BOOST_TEST(roundtrip.authority() == authority);
 
-   const auto dns = forge::quic::to_transport_endpoint(forge::quic::endpoint{.host = "localhost", .port = 4002});
-   BOOST_TEST(static_cast<int>(dns.host_type) == static_cast<int>(forge::transport::endpoint::host_kind::dns));
+   const auto dns = forge::net::quic::to_transport_endpoint(forge::net::quic::endpoint{.host = "localhost", .port = 4002});
+   BOOST_TEST(static_cast<int>(dns.host_type) == static_cast<int>(forge::net::transport::endpoint::host_kind::dns));
 }
 
 BOOST_AUTO_TEST_CASE(p2p_multistream_select_encodes_libp2p_messages) {
@@ -2576,7 +2576,7 @@ BOOST_AUTO_TEST_CASE(p2p_connection_manager_rejects_when_all_sessions_are_protec
           runtime, client.async_connect(third_endpoint, node::connect_options{.expected_peer = third.local_peer()}));
       BOOST_FAIL("expected all-protected session limit rejection");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::p2p::exceptions::code_of(error).value()) ==
+      BOOST_TEST(static_cast<int>(forge::net::p2p::exceptions::code_of(error).value()) ==
                  static_cast<int>(exceptions::code::backpressure_rejected));
    }
    const auto metrics = client.metrics();
@@ -2760,7 +2760,7 @@ BOOST_AUTO_TEST_CASE(p2p_connection_manager_enforces_outbound_session_limit) {
           runtime, client.async_connect(second_endpoint, node::connect_options{.expected_peer = second.local_peer()}));
       BOOST_FAIL("expected outbound session limit rejection");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::p2p::exceptions::code_of(error).value()) ==
+      BOOST_TEST(static_cast<int>(forge::net::p2p::exceptions::code_of(error).value()) ==
                  static_cast<int>(exceptions::code::backpressure_rejected));
    }
 
@@ -2826,7 +2826,7 @@ BOOST_AUTO_TEST_CASE(p2p_connection_manager_enforces_sessions_per_peer_limit) {
           runtime, client.async_connect(endpoint, node::connect_options{.expected_peer = server.local_peer()}));
       BOOST_FAIL("expected per-peer session limit rejection");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::p2p::exceptions::code_of(error).value()) ==
+      BOOST_TEST(static_cast<int>(forge::net::p2p::exceptions::code_of(error).value()) ==
                  static_cast<int>(exceptions::code::backpressure_rejected));
    }
    BOOST_TEST(client.metrics().active_sessions == 1U);
@@ -2864,7 +2864,7 @@ BOOST_AUTO_TEST_CASE(p2p_connection_manager_rejects_pending_outbound_limit_witho
                                        }));
       BOOST_FAIL("expected pending outbound session limit rejection");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::p2p::exceptions::code_of(error).value()) ==
+      BOOST_TEST(static_cast<int>(forge::net::p2p::exceptions::code_of(error).value()) ==
                  static_cast<int>(exceptions::code::backpressure_rejected));
    }
 
@@ -2978,7 +2978,7 @@ BOOST_AUTO_TEST_CASE(p2p_libp2p_autonat_v1_codec_matches_spec_shape) {
        .peer =
            reachability::peer_info{
                .peer = id,
-               .endpoints = std::vector<forge::p2p::endpoint>{endpoint},
+               .endpoints = std::vector<forge::net::p2p::endpoint>{endpoint},
            },
    };
 
@@ -3010,7 +3010,7 @@ BOOST_AUTO_TEST_CASE(p2p_libp2p_autonat_v2_codec_covers_nonce_data_and_statuses)
        .type = reachability::v2::message::kind::dial_request,
        .dial_request =
            reachability::v2::dial_request{
-               .endpoints = std::vector<forge::p2p::endpoint>{remote_endpoint},
+               .endpoints = std::vector<forge::net::p2p::endpoint>{remote_endpoint},
                .nonce = 0x0102'0304'0506'0708ULL,
            },
    };
@@ -3354,7 +3354,7 @@ BOOST_AUTO_TEST_CASE(p2p_relay_policy_options_are_behavioral) {
       (void)forge::asio::blocking::run(runtime, client.async_reserve_relay(relay_node.local_peer()));
       BOOST_FAIL("expected relay service policy rejection");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::p2p::exceptions::code_of(error).value()) ==
+      BOOST_TEST(static_cast<int>(forge::net::p2p::exceptions::code_of(error).value()) ==
                  static_cast<int>(exceptions::code::relay_rejected));
    }
 
@@ -3365,7 +3365,7 @@ BOOST_AUTO_TEST_CASE(p2p_relay_policy_options_are_behavioral) {
       (void)forge::asio::blocking::run(runtime, disabled_client.async_reserve_relay(relay_node.local_peer()));
       BOOST_FAIL("expected relay client policy rejection");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::p2p::exceptions::code_of(error).value()) ==
+      BOOST_TEST(static_cast<int>(forge::net::p2p::exceptions::code_of(error).value()) ==
                  static_cast<int>(exceptions::code::relay_not_available));
    }
 
@@ -3407,7 +3407,7 @@ BOOST_AUTO_TEST_CASE(p2p_relay_connect_requires_target_reservation) {
                                                      }));
       BOOST_FAIL("expected relay CONNECT rejection without target reservation");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::p2p::exceptions::code_of(error).value()) ==
+      BOOST_TEST(static_cast<int>(forge::net::p2p::exceptions::code_of(error).value()) ==
                  static_cast<int>(exceptions::code::relay_rejected));
    }
 
@@ -3597,8 +3597,8 @@ BOOST_AUTO_TEST_CASE(p2p_direct_quic_rejects_endpoint_peer_mismatch) {
       (void)forge::asio::blocking::run(runtime, client.async_connect(server_endpoint));
       BOOST_FAIL("expected QUIC endpoint peer mismatch");
    } catch (const forge::exceptions::base& error) {
-      BOOST_REQUIRE(forge::p2p::exceptions::code_of(error).has_value());
-      BOOST_TEST(static_cast<int>(forge::p2p::exceptions::code_of(error).value()) ==
+      BOOST_REQUIRE(forge::net::p2p::exceptions::code_of(error).has_value());
+      BOOST_TEST(static_cast<int>(forge::net::p2p::exceptions::code_of(error).value()) ==
                  static_cast<int>(exceptions::code::peer_verification_failed));
    }
 
@@ -3646,8 +3646,8 @@ BOOST_AUTO_TEST_CASE(p2p_direct_quic_rejects_missing_certificate_identity_withou
       (void)forge::asio::blocking::run(runtime, client.async_connect(server_endpoint));
       BOOST_FAIL("expected missing QUIC certificate identity extension to fail");
    } catch (const forge::exceptions::base& error) {
-      BOOST_REQUIRE(forge::p2p::exceptions::code_of(error).has_value());
-      BOOST_TEST(static_cast<int>(forge::p2p::exceptions::code_of(error).value()) ==
+      BOOST_REQUIRE(forge::net::p2p::exceptions::code_of(error).has_value());
+      BOOST_TEST(static_cast<int>(forge::net::p2p::exceptions::code_of(error).value()) ==
                  static_cast<int>(exceptions::code::peer_verification_failed));
    }
 
@@ -3676,8 +3676,8 @@ BOOST_AUTO_TEST_CASE(p2p_direct_quic_rejects_missing_certificate_identity_with_e
       (void)forge::asio::blocking::run(runtime, client.async_connect(server_endpoint));
       BOOST_FAIL("expected missing QUIC certificate identity extension to fail");
    } catch (const forge::exceptions::base& error) {
-      BOOST_REQUIRE(forge::p2p::exceptions::code_of(error).has_value());
-      BOOST_TEST(static_cast<int>(forge::p2p::exceptions::code_of(error).value()) ==
+      BOOST_REQUIRE(forge::net::p2p::exceptions::code_of(error).has_value());
+      BOOST_TEST(static_cast<int>(forge::net::p2p::exceptions::code_of(error).value()) ==
                  static_cast<int>(exceptions::code::peer_verification_failed));
    }
 
@@ -4662,7 +4662,7 @@ BOOST_AUTO_TEST_CASE(p2p_unsupported_protocol_rejection_keeps_session_usable) {
           runtime, client.async_open_protocol_stream(server.local_peer(), protocol_id{.value = "/product/missing/1"}));
       BOOST_FAIL("expected unsupported protocol rejection");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::p2p::exceptions::code_of(error).value()) ==
+      BOOST_TEST(static_cast<int>(forge::net::p2p::exceptions::code_of(error).value()) ==
                  static_cast<int>(exceptions::code::unsupported_protocol));
    }
 
@@ -4789,7 +4789,7 @@ BOOST_AUTO_TEST_CASE(p2p_duplicate_protocol_handler_is_rejected) {
       register_echo(value);
       BOOST_FAIL("expected duplicate protocol handler rejection");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::p2p::exceptions::code_of(error).value()) ==
+      BOOST_TEST(static_cast<int>(forge::net::p2p::exceptions::code_of(error).value()) ==
                  static_cast<int>(exceptions::code::duplicate_protocol));
    }
 }
@@ -4798,7 +4798,7 @@ BOOST_AUTO_TEST_CASE(p2p_product_message_packs_typed_payload_as_data) {
    const auto protocol = protocol_id{.value = "/product/chunk-announce/1"};
    const auto value = product_announce{.ref = "chunk-1"};
 
-   const auto message = forge::p2p::message{protocol, value};
+   const auto message = forge::net::p2p::message{protocol, value};
 
    BOOST_TEST(message.protocol().value == protocol.value);
    BOOST_TEST(message.codec().value == "forge.raw");
@@ -4817,7 +4817,7 @@ BOOST_AUTO_TEST_CASE(p2p_connect_rejects_non_positive_timeout) {
                                                                             .timeout = std::chrono::milliseconds{0}}));
       BOOST_FAIL("expected invalid connect timeout");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::p2p::exceptions::code_of(error).value()) ==
+      BOOST_TEST(static_cast<int>(forge::net::p2p::exceptions::code_of(error).value()) ==
                  static_cast<int>(exceptions::code::invalid_options));
    }
 
@@ -4834,7 +4834,7 @@ BOOST_AUTO_TEST_CASE(p2p_open_protocol_rejects_non_positive_timeout) {
                                                      node::open_options{.timeout = std::chrono::milliseconds{0}}));
       BOOST_FAIL("expected invalid protocol open timeout");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::p2p::exceptions::code_of(error).value()) ==
+      BOOST_TEST(static_cast<int>(forge::net::p2p::exceptions::code_of(error).value()) ==
                  static_cast<int>(exceptions::code::invalid_options));
    }
 
@@ -4917,7 +4917,7 @@ BOOST_AUTO_TEST_CASE(p2p_peer_store_rocksdb_survives_reopen) {
               .relay = relay_id,
               .reservation_id = 99,
               .expires_at = reservation_expires_at,
-              .endpoints = std::vector<forge::p2p::endpoint>{relay_endpoint},
+              .endpoints = std::vector<forge::net::p2p::endpoint>{relay_endpoint},
               .voucher = std::vector<std::uint8_t>{8, 9, 10},
               .successes = 3,
               .failures = 1,
@@ -5060,7 +5060,7 @@ BOOST_AUTO_TEST_CASE(p2p_production_options_reject_missing_mtls_identity) {
       validate(node::options{});
       BOOST_FAIL("expected missing mTLS identity rejection");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::p2p::exceptions::code_of(error).value()) ==
+      BOOST_TEST(static_cast<int>(forge::net::p2p::exceptions::code_of(error).value()) ==
                  static_cast<int>(exceptions::code::invalid_options));
    }
 }
@@ -5073,7 +5073,7 @@ BOOST_AUTO_TEST_CASE(p2p_production_options_require_peer_store_path) {
       });
       BOOST_FAIL("expected missing persistent peer store rejection");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::p2p::exceptions::code_of(error).value()) ==
+      BOOST_TEST(static_cast<int>(forge::net::p2p::exceptions::code_of(error).value()) ==
                  static_cast<int>(exceptions::code::invalid_options));
    }
 }
@@ -5113,4 +5113,4 @@ BOOST_AUTO_TEST_CASE(p2p_production_options_use_rocksdb_peer_store_path) {
 }
 #endif
 
-} // namespace forge::p2p
+} // namespace forge::net::p2p

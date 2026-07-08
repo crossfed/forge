@@ -224,15 +224,15 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/multiformats/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/asio/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/http/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/http/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/http_api/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/websocket/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/transport/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/tcp/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/yamux/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/quic/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/stcp/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/p2p/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/websocket/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/transport/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/tcp/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/yamux/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/quic/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/stcp/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/p2p/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/app/include"
 )
 
@@ -371,20 +371,13 @@ add_subdirectory(libraries/log)
 add_subdirectory(libraries/crypto)
 add_subdirectory(libraries/multiformats)
 add_subdirectory(libraries/asio)
-add_subdirectory(libraries/http)
 add_subdirectory(libraries/http_api)
 add_subdirectory(libraries/otlp)
 if(FORGE_HAS_ROCKSDB)
    add_subdirectory(libraries/rocksdb)
    add_subdirectory(libraries/db_rocksdb)
 endif()
-add_subdirectory(libraries/websocket)
-add_subdirectory(libraries/transport)
-add_subdirectory(libraries/tcp)
-add_subdirectory(libraries/stcp)
-add_subdirectory(libraries/yamux)
-add_subdirectory(libraries/quic)
-add_subdirectory(libraries/p2p)
+add_subdirectory(libraries/net)
 add_subdirectory(libraries/app)
 add_subdirectory(plugins)
 if(FORGE_ENABLE_TUI AND FORGE_TUI_NOTCURSES_TARGET)
@@ -418,15 +411,15 @@ set(
    forge_crypto
    forge_multiformats
    forge_asio
-   forge_http
+   forge_net_http
    forge_http_api
-   forge_websocket
-   forge_transport
-   forge_tcp
-   forge_stcp
-   forge_yamux
-   forge_quic
-   forge_p2p
+   forge_net_websocket
+   forge_net_transport
+   forge_net_tcp
+   forge_net_stcp
+   forge_net_yamux
+   forge_net_quic
+   forge_net_p2p
    forge_app
    forge_plugins_crypto_signer
    forge_plugins_crypto_secrets
@@ -512,15 +505,15 @@ install(
              libraries/crypto/include/forge
              libraries/multiformats/include/forge
              libraries/asio/include/forge
-             libraries/http/include/forge
+             libraries/net/http/include/forge
              libraries/http_api/include/forge
-             libraries/websocket/include/forge
-             libraries/transport/include/forge
-             libraries/tcp/include/forge
-             libraries/yamux/include/forge
-             libraries/quic/include/forge
-             libraries/stcp/include/forge
-             libraries/p2p/include/forge
+             libraries/net/websocket/include/forge
+             libraries/net/transport/include/forge
+             libraries/net/tcp/include/forge
+             libraries/net/yamux/include/forge
+             libraries/net/quic/include/forge
+             libraries/net/stcp/include/forge
+             libraries/net/p2p/include/forge
              libraries/app/include/forge
              plugins/crypto/signer/include/forge
              plugins/crypto/secrets/include/forge

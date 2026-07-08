@@ -15,18 +15,18 @@
 
 import forge.asio.blocking;
 import forge.asio.runtime;
-import forge.tcp.connection;
-import forge.tcp.connector;
-import forge.tcp.exceptions;
-import forge.tcp.listener;
-import forge.tcp.options;
-import forge.tcp.transport;
-import forge.transport.buffer;
-import forge.transport.endpoint;
-import forge.transport.exceptions;
-import forge.transport.frame;
-import forge.transport.registry;
-import forge.transport.stream;
+import forge.net.tcp.connection;
+import forge.net.tcp.connector;
+import forge.net.tcp.exceptions;
+import forge.net.tcp.listener;
+import forge.net.tcp.options;
+import forge.net.tcp.transport;
+import forge.net.transport.buffer;
+import forge.net.transport.endpoint;
+import forge.net.transport.exceptions;
+import forge.net.transport.frame;
+import forge.net.transport.registry;
+import forge.net.transport.stream;
 
 namespace {
 
@@ -36,34 +36,34 @@ using bytes = std::vector<std::uint8_t>;
    return {value.begin(), value.end()};
 }
 
-[[nodiscard]] forge::transport::endpoint loopback(std::uint16_t port) {
-   return forge::transport::endpoint{.host_type = forge::transport::endpoint::host_kind::ip4,
-                                   .protocol = forge::transport::endpoint::protocol_kind::tcp,
+[[nodiscard]] forge::net::transport::endpoint loopback(std::uint16_t port) {
+   return forge::net::transport::endpoint{.host_type = forge::net::transport::endpoint::host_kind::ip4,
+                                   .protocol = forge::net::transport::endpoint::protocol_kind::tcp,
                                    .host = "127.0.0.1",
                                    .port = port};
 }
 
-[[nodiscard]] forge::transport::endpoint invalid_quic_endpoint() {
-   return forge::transport::endpoint{.host_type = forge::transport::endpoint::host_kind::ip4,
-                                   .protocol = forge::transport::endpoint::protocol_kind::quic_v1,
+[[nodiscard]] forge::net::transport::endpoint invalid_quic_endpoint() {
+   return forge::net::transport::endpoint{.host_type = forge::net::transport::endpoint::host_kind::ip4,
+                                   .protocol = forge::net::transport::endpoint::protocol_kind::quic_v1,
                                    .host = "127.0.0.1",
                                    .port = 1};
 }
 
 boost::asio::awaitable<void> tcp_roundtrip() {
    auto executor = co_await boost::asio::this_coro::executor;
-   auto listener = forge::tcp::listener{executor, loopback(0)};
+   auto listener = forge::net::tcp::listener{executor, loopback(0)};
    const auto local = listener.local_endpoint();
-   BOOST_CHECK(local.protocol == forge::transport::endpoint::protocol_kind::tcp);
+   BOOST_CHECK(local.protocol == forge::net::transport::endpoint::protocol_kind::tcp);
    BOOST_CHECK_EQUAL(local.host, "127.0.0.1");
    BOOST_CHECK(local.port != 0);
 
    auto accept = boost::asio::co_spawn(executor, listener.async_accept(), boost::asio::use_awaitable);
-   auto connector = forge::tcp::connector{executor};
+   auto connector = forge::net::tcp::connector{executor};
    auto client = co_await connector.async_connect(local);
    auto server = co_await std::move(accept);
 
-   BOOST_CHECK(client.local_endpoint.protocol == forge::transport::endpoint::protocol_kind::tcp);
+   BOOST_CHECK(client.local_endpoint.protocol == forge::net::transport::endpoint::protocol_kind::tcp);
    BOOST_CHECK_EQUAL(client.remote_endpoint.port, local.port);
    BOOST_CHECK_EQUAL(server.local_endpoint.port, local.port);
    BOOST_CHECK_EQUAL(server.remote_endpoint.port, client.local_endpoint.port);
@@ -81,7 +81,7 @@ boost::asio::awaitable<void> tcp_roundtrip() {
    BOOST_CHECK_EQUAL_COLLECTIONS(received_pong.begin(), received_pong.end(), pong.begin(), pong.end());
 
    const auto chunk_payload = text_bytes("chunk payload");
-   co_await client.stream.async_write(forge::transport::chunk{chunk_payload});
+   co_await client.stream.async_write(forge::net::transport::chunk{chunk_payload});
    auto received_chunk = co_await server.stream.async_read_chunk();
    const auto received_chunk_bytes = received_chunk.to_vector();
    BOOST_CHECK_EQUAL_COLLECTIONS(
@@ -93,7 +93,7 @@ boost::asio::awaitable<void> tcp_roundtrip() {
    BOOST_CHECK_EQUAL_COLLECTIONS(received_frame.begin(), received_frame.end(), framed.begin(), framed.end());
 
    const auto framed_chunk = text_bytes("framed chunk payload");
-   co_await client.stream.async_write_frame(forge::transport::chunk{framed_chunk});
+   co_await client.stream.async_write_frame(forge::net::transport::chunk{framed_chunk});
    auto received_frame_chunk = co_await server.stream.async_read_frame_chunk();
    const auto received_frame_chunk_bytes = received_frame_chunk.to_vector();
    BOOST_CHECK_EQUAL_COLLECTIONS(received_frame_chunk_bytes.begin(), received_frame_chunk_bytes.end(),
@@ -106,11 +106,11 @@ boost::asio::awaitable<void> tcp_roundtrip() {
 
 boost::asio::awaitable<void> tcp_read_chunk_limit_is_behavioral() {
    auto executor = co_await boost::asio::this_coro::executor;
-   auto listener = forge::tcp::listener{executor, loopback(0), {}, forge::tcp::options{.read_chunk_size = 4}};
+   auto listener = forge::net::tcp::listener{executor, loopback(0), {}, forge::net::tcp::options{.read_chunk_size = 4}};
    const auto local = listener.local_endpoint();
 
    auto accept = boost::asio::co_spawn(executor, listener.async_accept(), boost::asio::use_awaitable);
-   auto connector = forge::tcp::connector{executor, forge::tcp::options{.read_chunk_size = 4}};
+   auto connector = forge::net::tcp::connector{executor, forge::net::tcp::options{.read_chunk_size = 4}};
    auto client = co_await connector.async_connect(local);
    auto server = co_await std::move(accept);
 
@@ -128,11 +128,11 @@ boost::asio::awaitable<void> tcp_read_chunk_limit_is_behavioral() {
 
 boost::asio::awaitable<void> tcp_connection_roundtrip_and_handoff() {
    auto executor = co_await boost::asio::this_coro::executor;
-   auto listener = forge::tcp::listener{executor, loopback(0)};
+   auto listener = forge::net::tcp::listener{executor, loopback(0)};
    const auto local = listener.local_endpoint();
 
    auto accept = boost::asio::co_spawn(executor, listener.async_accept_connection(), boost::asio::use_awaitable);
-   auto connector = forge::tcp::connector{executor};
+   auto connector = forge::net::tcp::connector{executor};
    auto client = co_await connector.async_connect_connection(local);
    auto server = co_await std::move(accept);
 
@@ -151,15 +151,15 @@ boost::asio::awaitable<void> tcp_connection_roundtrip_and_handoff() {
    const auto framed = text_bytes("connection framed");
    co_await stream_connection.stream.async_write_frame(framed);
    auto received_frame = co_await server.async_read();
-   auto decoded = forge::transport::decode_frame(received_frame);
-   BOOST_REQUIRE(decoded.status == forge::transport::frame_decode_status::complete);
+   auto decoded = forge::net::transport::decode_frame(received_frame);
+   BOOST_REQUIRE(decoded.status == forge::net::transport::frame_decode_status::complete);
    BOOST_CHECK_EQUAL_COLLECTIONS(decoded.payload.begin(), decoded.payload.end(), framed.begin(), framed.end());
 
    co_await stream_connection.stream.async_close();
    co_await server.async_close();
    co_await listener.async_close();
 
-   auto release_listener = forge::tcp::listener{executor, loopback(0)};
+   auto release_listener = forge::net::tcp::listener{executor, loopback(0)};
    auto release_accept =
        boost::asio::co_spawn(executor, release_listener.async_accept_connection(), boost::asio::use_awaitable);
    auto release_client = co_await connector.async_connect_connection(release_listener.local_endpoint());
@@ -174,8 +174,8 @@ boost::asio::awaitable<void> tcp_connection_roundtrip_and_handoff() {
 
 boost::asio::awaitable<void> tcp_registry_roundtrip() {
    auto executor = co_await boost::asio::this_coro::executor;
-   auto registry = forge::transport::registry{};
-   forge::tcp::register_stream(registry, executor);
+   auto registry = forge::net::transport::registry{};
+   forge::net::tcp::register_stream(registry, executor);
 
    auto listener = co_await registry.async_listen_stream(loopback(0));
    auto accept = boost::asio::co_spawn(executor, listener.async_accept(), boost::asio::use_awaitable);
@@ -194,7 +194,7 @@ boost::asio::awaitable<void> tcp_registry_roundtrip() {
 
 boost::asio::awaitable<void> cancel_unblocks_accept() {
    auto executor = co_await boost::asio::this_coro::executor;
-   auto listener = forge::tcp::listener{executor, loopback(0)};
+   auto listener = forge::net::tcp::listener{executor, loopback(0)};
    auto timer = boost::asio::steady_timer{executor};
    timer.expires_after(std::chrono::milliseconds{25});
    boost::asio::co_spawn(
@@ -208,14 +208,14 @@ boost::asio::awaitable<void> cancel_unblocks_accept() {
    try {
       (void)co_await listener.async_accept();
       BOOST_FAIL("accept should be canceled");
-   } catch (const forge::tcp::exceptions::canceled&) {
+   } catch (const forge::net::tcp::exceptions::canceled&) {
       co_return;
    }
 }
 
 boost::asio::awaitable<void> close_unblocks_accept() {
    auto executor = co_await boost::asio::this_coro::executor;
-   auto listener = forge::tcp::listener{executor, loopback(0)};
+   auto listener = forge::net::tcp::listener{executor, loopback(0)};
    auto timer = boost::asio::steady_timer{executor};
    timer.expires_after(std::chrono::milliseconds{25});
    boost::asio::co_spawn(
@@ -229,29 +229,29 @@ boost::asio::awaitable<void> close_unblocks_accept() {
    try {
       (void)co_await listener.async_accept();
       BOOST_FAIL("accept should be closed");
-   } catch (const forge::tcp::exceptions::closed&) {
+   } catch (const forge::net::tcp::exceptions::closed&) {
       co_return;
    }
 }
 
 boost::asio::awaitable<void> close_releases_bound_port() {
    auto executor = co_await boost::asio::this_coro::executor;
-   auto listener = forge::tcp::listener{executor, loopback(0)};
+   auto listener = forge::net::tcp::listener{executor, loopback(0)};
    const auto local = listener.local_endpoint();
 
    listener.close();
    BOOST_CHECK(!listener.valid());
 
-   auto rebound = forge::tcp::listener{executor, local};
+   auto rebound = forge::net::tcp::listener{executor, local};
    BOOST_CHECK(rebound.valid());
    co_await rebound.async_close();
 }
 
 boost::asio::awaitable<void> connection_cancel_unblocks_pending_read() {
    auto executor = co_await boost::asio::this_coro::executor;
-   auto listener = forge::tcp::listener{executor, loopback(0)};
+   auto listener = forge::net::tcp::listener{executor, loopback(0)};
    auto accept = boost::asio::co_spawn(executor, listener.async_accept_connection(), boost::asio::use_awaitable);
-   auto connector = forge::tcp::connector{executor};
+   auto connector = forge::net::tcp::connector{executor};
    auto client = co_await connector.async_connect_connection(listener.local_endpoint());
    auto server = co_await std::move(accept);
 
@@ -268,7 +268,7 @@ boost::asio::awaitable<void> connection_cancel_unblocks_pending_read() {
    try {
       (void)co_await server.async_read();
       BOOST_FAIL("read should be canceled");
-   } catch (const forge::tcp::exceptions::canceled&) {
+   } catch (const forge::net::tcp::exceptions::canceled&) {
    }
 
    co_await client.async_close();
@@ -277,20 +277,20 @@ boost::asio::awaitable<void> connection_cancel_unblocks_pending_read() {
 
 boost::asio::awaitable<void> tcp_invalid_endpoint_checks() {
    auto executor = co_await boost::asio::this_coro::executor;
-   auto connector = forge::tcp::connector{executor};
-   BOOST_CHECK_THROW((void)co_await connector.async_connect(invalid_quic_endpoint()), forge::tcp::exceptions::invalid_endpoint);
-   BOOST_CHECK_THROW((void)co_await connector.async_connect(loopback(0)), forge::tcp::exceptions::invalid_endpoint);
+   auto connector = forge::net::tcp::connector{executor};
+   BOOST_CHECK_THROW((void)co_await connector.async_connect(invalid_quic_endpoint()), forge::net::tcp::exceptions::invalid_endpoint);
+   BOOST_CHECK_THROW((void)co_await connector.async_connect(loopback(0)), forge::net::tcp::exceptions::invalid_endpoint);
 
-   auto dns_listen = forge::transport::endpoint{.host_type = forge::transport::endpoint::host_kind::dns,
-                                              .protocol = forge::transport::endpoint::protocol_kind::tcp,
+   auto dns_listen = forge::net::transport::endpoint{.host_type = forge::net::transport::endpoint::host_kind::dns,
+                                              .protocol = forge::net::transport::endpoint::protocol_kind::tcp,
                                               .host = "localhost",
                                               .port = 0};
-   BOOST_CHECK_THROW(((void)forge::tcp::listener{executor, dns_listen}), forge::tcp::exceptions::invalid_endpoint);
+   BOOST_CHECK_THROW(((void)forge::net::tcp::listener{executor, dns_listen}), forge::net::tcp::exceptions::invalid_endpoint);
 
-   auto refused_probe = forge::tcp::listener{executor, loopback(0)};
+   auto refused_probe = forge::net::tcp::listener{executor, loopback(0)};
    auto refused_endpoint = refused_probe.local_endpoint();
    co_await refused_probe.async_close();
-   BOOST_CHECK_THROW((void)co_await connector.async_connect(refused_endpoint), forge::tcp::exceptions::connect_failed);
+   BOOST_CHECK_THROW((void)co_await connector.async_connect(refused_endpoint), forge::net::tcp::exceptions::connect_failed);
 }
 
 } // namespace

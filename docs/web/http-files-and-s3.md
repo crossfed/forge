@@ -1,6 +1,6 @@
 # HTTP Files And Object-Gateway Readiness
 
-This note records the `forge_http` file/upload direction after the FastAPI-style
+This note records the `forge_net_http` file/upload direction after the FastAPI-style
 typed binding work. S3-compatible APIs are used only as a downstream readiness
 driver: FORGE owns generic HTTP mechanics, while an application owns object
 storage semantics, credentials, authorization, billing and gateway-specific
@@ -8,7 +8,7 @@ error shapes.
 
 ## Current HTTP Surface
 
-`forge_http` owns:
+`forge_net_http` owns:
 
 - async router, route handlers and middleware;
 - server, connection and client mechanics over `forge_asio`;
@@ -27,7 +27,7 @@ error shapes.
 - file/range helpers for `HEAD`, `Range`, `206`, `416`, `ETag` and
   `Last-Modified` behavior.
 
-The official HTTP server plugin is parked until the `forge_http` typed binding
+The official HTTP server plugin is parked until the `forge_net_http` typed binding
 surface is stable. This document describes the library substrate only.
 
 ## Binding Model
@@ -40,7 +40,7 @@ class object_api : public forge::api::contract<object_api> {
    virtual boost::asio::awaitable<put_response>
    put_object(put_request request) = 0;
 
-   virtual boost::asio::awaitable<forge::http::file_response>
+   virtual boost::asio::awaitable<forge::net::http::file_response>
    get_object(get_request request) = 0;
 };
 
@@ -48,7 +48,7 @@ FORGE_API(
    object_api,
    FORGE_API_CONTRACT("object", 1, 0),
    FORGE_API_METHOD_TYPED(put_object, put_request, put_response),
-   FORGE_API_METHOD_TYPED(get_object, get_request, forge::http::file_response))
+   FORGE_API_METHOD_TYPED(get_object, get_request, forge::net::http::file_response))
 
 FORGE_HTTP_API(
    object_api,
