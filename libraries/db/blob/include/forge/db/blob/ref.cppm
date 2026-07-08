@@ -187,6 +187,7 @@ struct ref {
             FORGE_THROW_EXCEPTION(forge::raw::exceptions::codec_error, "db blob ref digest has invalid fixed size");
          }
       } else {
+         detail::require_digest_byte_size<Digest>(digest_bytes.size());
          forge::raw::pack(stream, static_cast<std::uint32_t>(digest_bytes.size()));
       }
       if (!digest_bytes.empty()) {

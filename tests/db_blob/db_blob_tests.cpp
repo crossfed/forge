@@ -441,6 +441,15 @@ BOOST_AUTO_TEST_CASE(db_blob_ref_raw_rejects_excessive_variable_digest_size) {
                      forge::raw::exceptions::codec_error);
 }
 
+BOOST_AUTO_TEST_CASE(db_blob_ref_raw_rejects_oversized_variable_digest_on_pack) {
+   auto value = forge::db::blob::ref<capped_digest>{
+      .digest = capped_digest{bytes("\x01\x02\x03")},
+      .size = 3,
+   };
+
+   BOOST_CHECK_THROW(forge::raw::pack(value), forge::raw::exceptions::codec_error);
+}
+
 BOOST_AUTO_TEST_CASE(db_blob_ref_supports_custom_digest_text_roundtrip) {
    auto value = forge::db::blob::ref<toy_digest>{
       .digest = toy_digest{bytes("\xde\xad")},
