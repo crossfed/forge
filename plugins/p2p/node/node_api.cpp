@@ -17,7 +17,7 @@ import forge.api.core.binding;
 import forge.api.transport.connection;
 import forge.api.transport.options;
 import forge.asio.runtime;
-import forge.net.p2p.api;
+import forge.api.p2p.binding;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.identity;
 import forge.net.p2p.node;
@@ -60,7 +60,7 @@ void plugin::node_api::publish_api(forge::api::core::binding_plan plan, forge::n
 
 void plugin::node_api::publish_api(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id protocol,
                                    forge::api::transport::options options) {
-   auto binding = forge::net::p2p::api()
+   auto binding = forge::api::p2p::api()
                      .use(std::move(plan))
                      .protocol_id(protocol)
                      .codec(options.codec)
@@ -72,7 +72,7 @@ void plugin::node_api::publish_api(forge::api::core::binding_plan plan, forge::n
 }
 
 void plugin::node_api::publish_protocol(forge::net::p2p::protocol_id protocol, forge::net::p2p::node::protocol_handler handler) {
-   auto binding = forge::net::p2p::route().protocol_id(std::move(protocol)).handler(std::move(handler)).build();
+   auto binding = forge::api::p2p::route().protocol_id(std::move(protocol)).handler(std::move(handler)).build();
    impl_->add_route(binding.protocol(), binding.handler());
 }
 

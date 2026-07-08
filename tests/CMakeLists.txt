@@ -589,6 +589,39 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
+   test_forge_package_api_quic_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_api_quic_component
+      ${CMAKE_BINARY_DIR}/forge-package-api-quic-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_api_quic_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_api_websocket_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_api_websocket_component
+      ${CMAKE_BINARY_DIR}/forge-package-api-websocket-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_api_websocket_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_api_p2p_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_api_p2p_component
+      ${CMAKE_BINARY_DIR}/forge-package-api-p2p-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_api_p2p_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
    test_forge_package_ids_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
@@ -1005,6 +1038,39 @@ add_test(
       --test-command forge_package_api_http_component
 )
 set_tests_properties(test_forge_package_api_http_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_api_quic_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_api_quic_component
+      ${CMAKE_BINARY_DIR}/forge-package-api-quic-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_api_quic_component
+)
+set_tests_properties(test_forge_package_api_quic_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_api_websocket_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_api_websocket_component
+      ${CMAKE_BINARY_DIR}/forge-package-api-websocket-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_api_websocket_component
+)
+set_tests_properties(test_forge_package_api_websocket_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_api_p2p_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_api_p2p_component
+      ${CMAKE_BINARY_DIR}/forge-package-api-p2p-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_api_p2p_component
+)
+set_tests_properties(test_forge_package_api_p2p_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_ids_component
    COMMAND ${CMAKE_CTEST_COMMAND}

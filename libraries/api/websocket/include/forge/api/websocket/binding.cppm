@@ -8,7 +8,7 @@ module;
 #include <string>
 #include <utility>
 
-export module forge.net.websocket.api;
+export module forge.api.websocket.binding;
 
 import forge.api.core.exceptions;
 import forge.api.core.types;
@@ -23,7 +23,7 @@ import forge.raw.raw;
 import forge.net.websocket.connection;
 import forge.net.websocket.exceptions;
 
-export namespace forge::net::websocket {
+export namespace forge::api::websocket {
 
 struct api_backpressure_options {
    std::size_t max_inflight = 128;
@@ -36,12 +36,12 @@ class api_binding {
        : plan_{std::move(plan)}, codec_{std::move(codec)}, max_frame_size_{max_frame_size},
          backpressure_{backpressure} {}
 
-   boost::asio::awaitable<void> accept(connection::ptr connection) const {
+   boost::asio::awaitable<void> accept(forge::net::websocket::connection::ptr connection) const {
       install_frame_handler(std::move(connection));
       co_return;
    }
 
-   boost::asio::awaitable<void> connect(connection::ptr connection) const {
+   boost::asio::awaitable<void> connect(forge::net::websocket::connection::ptr connection) const {
       co_await accept(std::move(connection));
    }
 
@@ -58,7 +58,7 @@ class api_binding {
    }
 
  private:
-   void install_frame_handler(connection::ptr connection) const {
+   void install_frame_handler(forge::net::websocket::connection::ptr connection) const {
       if (!connection) {
          FORGE_THROW_EXCEPTION(forge::net::websocket::exceptions::closed, "websocket API binding received null connection");
       }
@@ -131,4 +131,4 @@ class api_builder {
    return {};
 }
 
-} // namespace forge::net::websocket
+} // namespace forge::api::websocket

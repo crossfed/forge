@@ -57,7 +57,6 @@ target_link_libraries(
    forge_net_p2p PUBLIC
       forge_exceptions
       forge_api_core
-      forge_api_transport
       forge_raw
       forge_crypto
       forge_multiformats

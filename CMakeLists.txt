@@ -219,6 +219,9 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/core/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/http/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/transport/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/quic/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/websocket/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/p2p/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/log/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/otlp/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/rocksdb/include"
@@ -404,6 +407,9 @@ set(
    forge_env
    forge_api_core
    forge_api_transport
+   forge_api_quic
+   forge_api_websocket
+   forge_api_p2p
    forge_log
    forge_otlp
    forge_crypto
@@ -499,6 +505,9 @@ install(
              libraries/api/core/include/forge
              libraries/api/http/include/forge
              libraries/api/transport/include/forge
+             libraries/api/quic/include/forge
+             libraries/api/websocket/include/forge
+             libraries/api/p2p/include/forge
              libraries/log/include/forge
              libraries/otlp/include/forge
              libraries/crypto/include/forge

@@ -699,7 +699,7 @@ import forge.net.p2p.stream;
 import forge.net.p2p.negotiation;
 import forge.net.p2p.peer_store;
 import forge.net.p2p.node;
-import forge.net.p2p.api;
+import forge.api.p2p.binding;
 
 node.register_protocol("/my/product/1", handler);
 boost::asio::awaitable<void> open_product_stream() {

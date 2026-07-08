@@ -8,7 +8,7 @@ module;
 #include <string>
 #include <utility>
 
-export module forge.net.p2p.api;
+export module forge.api.p2p.binding;
 
 import forge.api.core.exceptions;
 import forge.api.core.types;
@@ -29,7 +29,7 @@ import forge.net.p2p.node;
 import forge.net.p2p.protocol;
 import forge.net.p2p.stream;
 
-export namespace forge::net::p2p {
+export namespace forge::api::p2p {
 
 class api_binding {
  public:
@@ -41,22 +41,23 @@ class api_binding {
       std::string value;
    };
 
-   api_binding(node* owner, forge::api::core::binding_plan plan, protocol_id protocol, forge::api::transport::options options,
+   api_binding(forge::net::p2p::node* owner, forge::api::core::binding_plan plan,
+               forge::net::p2p::protocol_id protocol, forge::api::transport::options options,
                peer_policy peer_policy_value, discovery_scope discovery_scope_value)
        : owner_{owner}, plan_{std::move(plan)}, protocol_{std::move(protocol)}, options_{std::move(options)},
          peer_policy_{std::move(peer_policy_value)}, discovery_scope_{std::move(discovery_scope_value)} {}
 
-   [[nodiscard]] const protocol_id& protocol() const noexcept {
+   [[nodiscard]] const forge::net::p2p::protocol_id& protocol() const noexcept {
       return protocol_;
    }
 
-   [[nodiscard]] node::protocol_handler handler() const {
-      return [binding = *this](node::incoming_protocol_stream stream) mutable -> boost::asio::awaitable<void> {
+   [[nodiscard]] forge::net::p2p::node::protocol_handler handler() const {
+      return [binding = *this](forge::net::p2p::node::incoming_protocol_stream stream) mutable -> boost::asio::awaitable<void> {
          co_await binding.accept(std::move(stream));
       };
    }
 
-   boost::asio::awaitable<void> accept(node::incoming_protocol_stream stream) const {
+   boost::asio::awaitable<void> accept(forge::net::p2p::node::incoming_protocol_stream stream) const {
       validate_stream(stream);
       auto trusted = forge::api::core::metadata{
          forge::api::core::metadata_entry{
@@ -68,7 +69,7 @@ class api_binding {
                                                  std::move(trusted));
    }
 
-   boost::asio::awaitable<void> serve(node::incoming_protocol_stream stream) const {
+   boost::asio::awaitable<void> serve(forge::net::p2p::node::incoming_protocol_stream stream) const {
       co_await accept(std::move(stream));
    }
 
@@ -93,7 +94,7 @@ class api_binding {
    }
 
  private:
-   void validate_stream(const node::incoming_protocol_stream& stream) const {
+   void validate_stream(const forge::net::p2p::node::incoming_protocol_stream& stream) const {
       if (stream.protocol != protocol_) {
          FORGE_THROW_EXCEPTION(forge::net::p2p::exceptions::unsupported_protocol, "P2P API binding received wrong protocol",
                              forge::exceptions::ctx("protocol", stream.protocol.value));
@@ -106,9 +107,9 @@ class api_binding {
       }
    }
 
-   node* owner_ = nullptr;
+   forge::net::p2p::node* owner_ = nullptr;
    forge::api::core::binding_plan plan_;
-   protocol_id protocol_;
+   forge::net::p2p::protocol_id protocol_;
    forge::api::transport::options options_;
    peer_policy peer_policy_{};
    discovery_scope discovery_scope_{};
@@ -117,7 +118,7 @@ class api_binding {
 class api_builder {
  public:
    api_builder() = default;
-   explicit api_builder(node& owner) : owner_{&owner} {}
+   explicit api_builder(forge::net::p2p::node& owner) : owner_{&owner} {}
 
    api_builder& use(forge::api::core::binding_plan plan) {
       plan_ = std::move(plan);
@@ -170,7 +171,7 @@ class api_builder {
    }
 
  private:
-   node* owner_ = nullptr;
+   forge::net::p2p::node* owner_ = nullptr;
    forge::api::core::binding_plan plan_;
    forge::net::p2p::protocol_id protocol_{.value = "/forge/api/1"};
    forge::api::transport::options options_{.max_inflight = 64};
@@ -178,7 +179,7 @@ class api_builder {
    api_binding::discovery_scope discovery_scope_{};
 };
 
-[[nodiscard]] inline api_builder api(node& owner) {
+[[nodiscard]] inline api_builder api(forge::net::p2p::node& owner) {
    return api_builder{owner};
 }
 
@@ -188,20 +189,20 @@ class api_builder {
 
 class route_binding {
  public:
-   route_binding(protocol_id protocol, node::protocol_handler handler)
+   route_binding(forge::net::p2p::protocol_id protocol, forge::net::p2p::node::protocol_handler handler)
        : protocol_{std::move(protocol)}, handler_{std::move(handler)} {}
 
-   [[nodiscard]] const protocol_id& protocol() const noexcept {
+   [[nodiscard]] const forge::net::p2p::protocol_id& protocol() const noexcept {
       return protocol_;
    }
 
-   [[nodiscard]] const node::protocol_handler& handler() const noexcept {
+   [[nodiscard]] const forge::net::p2p::node::protocol_handler& handler() const noexcept {
       return handler_;
    }
 
  private:
-   protocol_id protocol_;
-   node::protocol_handler handler_;
+   forge::net::p2p::protocol_id protocol_;
+   forge::net::p2p::node::protocol_handler handler_;
 };
 
 class route_builder {
@@ -216,7 +217,7 @@ class route_builder {
       return *this;
    }
 
-   route_builder& handler(node::protocol_handler value) {
+   route_builder& handler(forge::net::p2p::node::protocol_handler value) {
       handler_ = std::move(value);
       return *this;
    }
@@ -227,11 +228,11 @@ class route_builder {
 
  private:
    forge::net::p2p::protocol_id protocol_{.value = "/forge/route/1"};
-   node::protocol_handler handler_;
+   forge::net::p2p::node::protocol_handler handler_;
 };
 
 [[nodiscard]] inline route_builder route() {
    return {};
 }
 
-} // namespace forge::net::p2p
+} // namespace forge::api::p2p

@@ -136,7 +136,7 @@ boost::asio::awaitable<void> write_payload(forge::net::quic::connection& connect
 
 ### Bind API Frames To QUIC Streams
 
-`forge.net.quic.api` is the API-over-QUIC adapter. It keeps QUIC transport policy in
+`forge.api.quic.binding` is the API-over-QUIC adapter. It keeps QUIC transport policy in
 `forge_net_quic`, contract/error semantics in `forge_api_core`, and delegates frame-loop
 mechanics to `forge.api.transport`.
 
@@ -150,14 +150,14 @@ import forge.api.core.connection;
 import forge.api.core.registry;
 import forge.api.core.binding;
 import forge.api.core.dispatcher;
-import forge.net.quic.api;
+import forge.api.quic.binding;
 
 auto plan = forge::api::core::binding()
    .serve(app.apis())
    .export_api<cache>({.id = {"cache"}, .major = 1, .min_revision = 8})
    .build();
 
-auto binding = forge::net::quic::api()
+auto binding = forge::api::quic::api()
    .use(plan)
    .codec({"forge.raw"})
    .max_concurrent_calls(256)
@@ -170,7 +170,7 @@ boost::asio::awaitable<void> serve_api_stream(forge::net::quic::connection& conn
 }
 ```
 
-`forge.net.quic.api` does not own certificates, ALPN, listener/connector setup or
+`forge.api.quic.binding` does not own certificates, ALPN, listener/connector setup or
 packet-level limits. Those remain in `forge_net_quic` transport options. It also does
 not own the generic API frame state machine; that lives in `forge.api.transport`.
 
@@ -218,14 +218,14 @@ become application defaults.
   the certificate to the requested endpoint host.
 - Do not raise frame/queue limits without backpressure tests. Oversized frames
   are a memory pressure and denial-of-service vector.
-- Do not define application API envelopes in QUIC handlers. Use `forge.net.quic.api` and
+- Do not define application API envelopes in QUIC handlers. Use `forge.api.quic.binding` and
   `forge::api::core::frame` for typed API calls over QUIC streams.
 - Do not swallow handler exceptions in detached stream tasks; convert expected
   failures into typed `forge_exceptions` values or API error frames.
 - Do not treat `.deadline(...)` or `.max_concurrent_calls(...)` as documentation
   only; API frames are checked by the call runtime before application handlers run.
 - Do not put ALPN, certificate or listener lifecycle options into
-  `forge.net.quic.api`; those belong to the transport owner.
+  `forge.api.quic.binding`; those belong to the transport owner.
 
 ## Typical Mistakes
 

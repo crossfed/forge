@@ -17,6 +17,8 @@ import forge.net.http.types;
 
 export namespace forge::plugins::http::server {
 
+namespace http = forge::net::http;
+
 namespace detail {
 struct middleware_bridge_access;
 }
@@ -43,7 +45,7 @@ struct middleware_request {
 
    [[nodiscard]] std::optional<std::string_view> header(std::string_view name) const noexcept {
       for (const auto& entry : headers) {
-         if (forge::net::http::header_name_equal(entry.name, name)) {
+         if (http::header_name_equal(entry.name, name)) {
             return std::string_view{entry.value};
          }
       }
@@ -82,7 +84,7 @@ class middleware_response {
 
    void set_header(std::string name, std::string value) {
       for (auto& entry : headers_) {
-         if (forge::net::http::header_name_equal(entry.name, name)) {
+         if (http::header_name_equal(entry.name, name)) {
             entry.value = std::move(value);
             return;
          }

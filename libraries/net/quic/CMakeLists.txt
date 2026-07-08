@@ -20,9 +20,6 @@ target_include_directories(forge_net_quic PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
 target_link_libraries(
    forge_net_quic PUBLIC
       forge_exceptions
-      forge_api_core
-      forge_api_transport
-      forge_raw
       forge_crypto
       forge_asio
       forge_net_transport

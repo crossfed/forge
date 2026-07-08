@@ -10,8 +10,6 @@ target_include_directories(forge_net_websocket PUBLIC ${FORGE_PUBLIC_INCLUDE_DIR
 target_link_libraries(
    forge_net_websocket PUBLIC
       forge_exceptions
-      forge_api_core
-      forge_raw
       forge_asio
       Boost::asio
       Boost::beast

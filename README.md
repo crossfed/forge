@@ -112,7 +112,7 @@ auto document = forge::config::decode_document<http_config>(config_value);
 
 ### Native HTTP API Binding
 
-Use `forge_api` to define a typed contract and `forge_http_api` to publish it
+Use `forge_api_core` to define a typed contract and `forge_api_http` to publish it
 with real HTTP route/path/status semantics. JSON is the default body codec; XML
 is opt-in per route for typed DTO bodies.
 
@@ -152,32 +152,35 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [config](libraries/config/README.md) | `forge_config` | Neutral config document, merge, decode, redaction. | `forge_schema`. |
 | [program_options](libraries/program_options/README.md) | `forge_program_options` | CLI adapter from Boost.Program_options into config documents. | Boost.Program_options privately. |
 | [env](libraries/env/README.md) | `forge_env` | Process env and explicit `.env` adapter into config documents. | `forge_config`, `forge_schema`. |
-| [api](libraries/api/README.md) | `forge_api` | Typed local/remote API contracts, handles, descriptors and frame vocabulary. | `forge_exceptions`, `forge_raw`. |
-| [transport_api](libraries/transport_api/README.md) | `forge_transport_api` | API frames over reusable transport streams/sessions. | `forge_api`, `forge_raw`, `forge_net_transport`. |
+| [api/core](libraries/api/core/README.md) | `forge_api_core` | Typed local/remote API contracts, handles, descriptors and frame vocabulary. | `forge_exceptions`, `forge_raw`. |
+| [api/transport](libraries/api/transport/README.md) | `forge_api_transport` | API frames over reusable transport streams/sessions. | `forge_api_core`, `forge_raw`, `forge_net_transport`. |
+| [api/http](libraries/api/http/README.md) | `forge_api_http` | Typed Forge API contracts over native HTTP routes with JSON/XML codecs. | `forge_net_http`, `forge_api_core`, `forge_json`, `forge_xml`. |
+| [api/quic](libraries/api/quic/README.md) | `forge_api_quic` | API frame binding over QUIC streams. | `forge_api_transport`, `forge_net_quic`. |
+| [api/websocket](libraries/api/websocket/README.md) | `forge_api_websocket` | API frame binding over WebSocket messages. | `forge_api_core`, `forge_net_websocket`, `forge_raw`. |
+| [api/p2p](libraries/api/p2p/README.md) | `forge_api_p2p` | API frame binding over negotiated P2P protocol streams. | `forge_api_transport`, `forge_net_p2p`. |
 | [crypto](libraries/crypto/README.md) | `forge_crypto` | Hashes, encodings, keys, signatures, OpenSSL 3.0+ crypto. | OpenSSL::Crypto, GMP, secp256k1, BLS. |
 | [log](libraries/log/README.md) | `forge_log` | Logging core, messages, console/appender boundary. | `forge_variant`, Boost.DLL privately. |
 | [otlp](libraries/otlp/README.md) | `forge_otlp` | OTLP/HTTP JSON log export and crash-spool resend. | `forge_log`, `forge_net_http`, `forge_asio`. |
 | [asio](libraries/asio/README.md) | `forge_asio` | Asio runtime, blocking boundary, priority scheduler. | Boost.Asio, threads. |
 | [app](libraries/app/README.md) | `forge_app` | Opinionated application shell, plugins, ports, config and diagnostics. | `forge_asio`, `forge_config`. |
-| [http](libraries/http/README.md) | `forge_net_http` | HTTP target/base URL, router, middleware, client/server. | Boost.Beast/URL/Asio, OpenSSL. |
-| [http_api](libraries/http_api/README.md) | `forge_http_api` | Typed Forge API contracts over native HTTP routes with JSON/XML codecs. | `forge_net_http`, `forge_api`, `forge_json`, `forge_xml`. |
-| [websocket](libraries/websocket/README.md) | `forge_net_websocket` | WebSocket connection/client primitives. | Boost.Beast/Asio, OpenSSL. |
-| [transport](libraries/transport/README.md) | `forge_net_transport` | Reusable stream/session concepts, chunk buffers and frame helpers. | Boost.Asio, `forge_exceptions`. |
-| [tcp](libraries/tcp/README.md) | `forge_net_tcp` | TCP transport adapter over `forge_net_transport`. | Boost.Asio, `forge_net_transport`. |
-| [stcp](libraries/stcp/README.md) | `forge_net_stcp` | Secure TCP transport profile. | `forge_net_tcp`, `forge_crypto`, `forge_net_transport`. |
-| [yamux](libraries/yamux/README.md) | `forge_net_yamux` | Yamux multiplexed sessions over a transport stream. | `forge_net_transport`, Boost.Asio. |
-| [quic](libraries/quic/README.md) | `forge_net_quic` | QUIC endpoint, listener, connector, framed streams. | ngtcp2, OpenSSL 3.0+, Boost.Asio. |
+| [net/http](libraries/net/http/README.md) | `forge_net_http` | HTTP target/base URL, router, middleware, client/server. | Boost.Beast/URL/Asio, OpenSSL. |
+| [net/websocket](libraries/net/websocket/README.md) | `forge_net_websocket` | WebSocket connection/client primitives. | Boost.Beast/Asio, OpenSSL. |
+| [net/transport](libraries/net/transport/README.md) | `forge_net_transport` | Reusable stream/session concepts, chunk buffers and frame helpers. | Boost.Asio, `forge_exceptions`. |
+| [net/tcp](libraries/net/tcp/README.md) | `forge_net_tcp` | TCP transport adapter over `forge_net_transport`. | Boost.Asio, `forge_net_transport`. |
+| [net/stcp](libraries/net/stcp/README.md) | `forge_net_stcp` | Secure TCP transport profile. | `forge_net_tcp`, `forge_crypto`, `forge_net_transport`. |
+| [net/yamux](libraries/net/yamux/README.md) | `forge_net_yamux` | Yamux multiplexed sessions over a transport stream. | `forge_net_transport`, Boost.Asio. |
+| [net/quic](libraries/net/quic/README.md) | `forge_net_quic` | QUIC endpoint, listener, connector, framed streams. | ngtcp2, OpenSSL 3.0+, Boost.Asio. |
 | [multiformats](libraries/multiformats/README.md) | `forge_multiformats` | libp2p-compatible varint, multicodec, multihash, multibase and multiaddr. | `forge_crypto`, `forge_exceptions`. |
-| [p2p](libraries/p2p/README.md) | `forge_net_p2p` | Peer identity, sessions, discovery, relay, DHT, rendezvous and GossipSub. | `forge_net_transport`, `forge_multiformats`, `forge_net_quic`, `forge_net_yamux`. |
+| [net/p2p](libraries/net/p2p/README.md) | `forge_net_p2p` | Peer identity, sessions, discovery, relay, DHT, rendezvous and GossipSub. | `forge_net_transport`, `forge_multiformats`, `forge_net_quic`, `forge_net_yamux`. |
 | [rocksdb](libraries/rocksdb/README.md) | `forge_rocksdb` | Optional RocksDB TransactionDB wrapper. | RocksDB privately, `forge_exceptions`, `forge_schema`. |
-| [plugins](plugins/README.md) | `forge_plugins`, `forge_plugins_*_*` | Official infrastructure plugins: P2P node, API resolver, diagnostics, PubSub facade, crypto signer and crypto secrets. | `forge_app`, `forge_api`, focused plugin targets. |
+| [plugins](plugins/README.md) | `forge_plugins`, `forge_plugins_*_*` | Official infrastructure plugins: P2P node, API resolver, diagnostics, PubSub facade, crypto signer and crypto secrets. | `forge_app`, `forge_api_core`, focused plugin targets. |
 | [tui](libraries/tui/README.md) | `forge_tui` | Terminal UI value models, render helpers, runner. | Notcurses core privately and optionally. |
 
 `find_package(Forge CONFIG REQUIRED)` is intentionally lightweight and discovers
 only the `core` package surface. Production code that needs feature libraries
 must request components and then link concrete leaf targets such as
 `Forge::forge_config`, `Forge::forge_env`, `Forge::forge_json`,
-`Forge::forge_xml`, `Forge::forge_http_api` or `Forge::forge_net_quic`. External backends like
+`Forge::forge_xml`, `Forge::forge_api_http` or `Forge::forge_net_quic`. External backends like
 OpenSSL, ngtcp2, Glaze and Boost components belong to the leaf target that
 actually owns their API or implementation use. `Forge::forge` remains the all-in
 aggregate target, but consumers should request `COMPONENTS all` before linking
@@ -228,8 +231,8 @@ cmake --build build/forge-debug -j 4 \
    --target forge test_forge test_forge_exceptions test_forge_raw test_forge_json test_forge_crypto \
   test_forge_multiformats test_forge_asio test_forge_transport test_forge_tcp test_forge_stcp \
   test_forge_yamux test_forge_quic test_forge_app test_forge_schema test_forge_config \
-  test_forge_yaml test_forge_program_options test_forge_env test_forge_api \
-  test_forge_transport_api test_forge_http_websocket test_forge_quic_p2p \
+  test_forge_yaml test_forge_program_options test_forge_env test_forge_api_core \
+  test_forge_api_transport test_forge_http_websocket test_forge_quic_p2p \
   test_forge_plugins test_forge_otlp test_forge_tui test_forge_xml
 
 ctest --test-dir build/forge-debug --output-on-failure
@@ -256,14 +259,14 @@ cmake --install build/forge-debug --prefix build/forge-install --component dev
 Consumer CMake:
 
 ```cmake
-find_package(Forge CONFIG REQUIRED COMPONENTS raw crypto app log http_api xml)
+find_package(Forge CONFIG REQUIRED COMPONENTS raw crypto app log api_http xml)
 
 target_link_libraries(my_program PRIVATE
    Forge::forge_raw
    Forge::forge_crypto
    Forge::forge_app
    Forge::forge_log
-   Forge::forge_http_api
+   Forge::forge_api_http
    Forge::forge_xml
 )
 ```

@@ -71,7 +71,7 @@ router.websocket("/events", [](std::shared_ptr<forge::net::websocket::connection
 
 ### Serve An API Session
 
-`forge.net.websocket.api` uses `forge::api::core::frame` because WebSocket is
+`forge.api.websocket.binding` uses `forge::api::core::frame` because WebSocket is
 message-oriented and bidirectional. The binding is continuous: every inbound
 WebSocket message is decoded as an API frame, checked against the configured
 codec and frame-size limit, dispatched through `forge::api::core::frame_dispatcher`,
@@ -87,7 +87,7 @@ import forge.api.core.connection;
 import forge.api.core.registry;
 import forge.api.core.binding;
 import forge.api.core.dispatcher;
-import forge.net.websocket.api;
+import forge.api.websocket.binding;
 
 auto plan = forge::api::core::binding()
    .serve(app.apis())
@@ -95,7 +95,7 @@ auto plan = forge::api::core::binding()
    .require_peer_api<client_session>({.id = {"client.session"}, .major = 1})
    .build();
 
-auto binding = forge::net::websocket::api()
+auto binding = forge::api::websocket::api()
    .use(plan)
    .codec({"forge.raw"})
    .max_frame_size(1 << 20)
@@ -110,7 +110,7 @@ router.websocket("/api", [binding](forge::net::websocket::connection::ptr connec
 });
 ```
 
-`forge.net.websocket.api` owns API-level WebSocket binding behavior only:
+`forge.api.websocket.binding` owns API-level WebSocket binding behavior only:
 max-frame-size rejection and handoff to the shared `frame_dispatcher`. It does
 not use `forge.api.transport`, because WebSocket messages are not
 `transport::stream` chunks. HTTP upgrade routes, TLS verification and application
@@ -159,7 +159,7 @@ stay explicit and should not be hidden behind broad "dev" defaults.
   `forge::api::core::error_payload` in error frames.
 - Do not treat `.backpressure(...)` as a decorative value. If max inflight is
   exceeded, the API call runtime rejects the frame before application handlers run.
-- Do not put HTTP upgrade or TLS policy in `forge.net.websocket.api`; it is an API
+- Do not put HTTP upgrade or TLS policy in `forge.api.websocket.binding`; it is an API
   binding over an already accepted connection.
 
 ## Typical Mistakes

@@ -75,7 +75,7 @@ import forge.json;
 import forge.raw.raw;
 import forge.schema.object;
 import forge.xml;
-import forge.net.websocket.api;
+import forge.api.websocket.binding;
 import forge.net.websocket.client;
 import forge.net.websocket.connection;
 import forge.net.websocket.exceptions;
@@ -251,35 +251,35 @@ struct positional_body_response {
 
 struct dto_http_request {
    std::string ref;
-   forge::net::http::query<std::uint32_t> limit;
-   forge::net::http::header<std::string> request_id;
-   forge::net::http::cookie<std::string> session;
-   forge::net::http::body<positional_body_payload> payload;
+   forge::api::http::query<std::uint32_t> limit;
+   forge::api::http::header<std::string> request_id;
+   forge::api::http::cookie<std::string> session;
+   forge::api::http::body<positional_body_payload> payload;
 };
 
 struct dto_bytes_request {
    std::string ref;
-   forge::net::http::body_bytes bytes;
+   forge::api::http::body_bytes bytes;
 };
 
 struct dto_multipart_request {
-   forge::net::http::form<std::string> category;
-   forge::net::http::form_field<std::uint32_t> count;
-   forge::net::http::upload_file file;
+   forge::api::http::form<std::string> category;
+   forge::api::http::form_field<std::uint32_t> count;
+   forge::api::http::upload_file file;
 };
 
 struct dto_ambiguous_body_request {
    std::string ref;
-   forge::net::http::body<positional_body_payload> payload;
-   forge::net::http::body_bytes bytes;
+   forge::api::http::body<positional_body_payload> payload;
+   forge::api::http::body_bytes bytes;
 };
 
 struct object_put_request {
    std::string collection;
    std::string key;
-   forge::net::http::header<std::string> content_type;
-   forge::net::http::header<std::string> digest;
-   forge::net::http::body_stream body;
+   forge::api::http::header<std::string> content_type;
+   forge::api::http::header<std::string> digest;
+   forge::api::http::body_stream body;
 };
 
 struct object_put_response {
@@ -294,8 +294,8 @@ struct object_get_request {
 };
 
 struct form_submit_request {
-   forge::net::http::form_field<std::string> label;
-   forge::net::http::form_field<std::uint32_t> count;
+   forge::api::http::form_field<std::string> label;
+   forge::api::http::form_field<std::uint32_t> count;
 };
 
 struct form_submit_response {
@@ -313,7 +313,7 @@ struct control_patch_request {
 
 struct delete_body_request {
    std::string ref;
-   forge::net::http::body<positional_body_payload> payload;
+   forge::api::http::body<positional_body_payload> payload;
 };
 
 struct delete_path_request : forge::net::http::endpoint_request {
@@ -323,7 +323,7 @@ struct delete_path_request : forge::net::http::endpoint_request {
 
 struct delete_stream_request {
    std::string ref;
-   forge::net::http::body_stream body;
+   forge::api::http::body_stream body;
 };
 
 struct control_response {
@@ -331,8 +331,8 @@ struct control_response {
 };
 
 struct default_header_request {
-   forge::net::http::header<std::string> request_id;
-   forge::net::http::body_stream body;
+   forge::api::http::header<std::string> request_id;
+   forge::api::http::body_stream body;
 };
 
 struct default_header_response {
@@ -356,12 +356,12 @@ struct endpoint_control_response {
 
 struct stream_buffered_request : forge::net::http::endpoint_request {
    std::string id;
-   forge::net::http::body_stream body;
+   forge::api::http::body_stream body;
 };
 
 struct stream_body_echo_request : forge::net::http::endpoint_request {
    std::string id;
-   forge::net::http::body_stream body;
+   forge::api::http::body_stream body;
 };
 
 struct mixed_download_request {
@@ -451,9 +451,9 @@ class positional_api_http : public forge::api::core::contract<positional_api_htt
 
    virtual boost::asio::awaitable<positional_http_response>
    read(std::string ref,
-        forge::net::http::query<std::uint32_t> limit,
-        forge::net::http::header<std::string> request_id,
-        forge::net::http::cookie<std::string> session) = 0;
+        forge::api::http::query<std::uint32_t> limit,
+        forge::api::http::header<std::string> request_id,
+        forge::api::http::cookie<std::string> session) = 0;
 };
 
 class positional_body_api : public forge::api::core::contract<positional_body_api> {
@@ -461,7 +461,7 @@ class positional_body_api : public forge::api::core::contract<positional_body_ap
    virtual ~positional_body_api() = default;
 
    virtual boost::asio::awaitable<positional_body_response>
-   write(std::string ref, forge::net::http::body<positional_body_payload> payload) = 0;
+   write(std::string ref, forge::api::http::body<positional_body_payload> payload) = 0;
 };
 
 class positional_single_query_api : public forge::api::core::contract<positional_single_query_api> {
@@ -469,7 +469,7 @@ class positional_single_query_api : public forge::api::core::contract<positional
    virtual ~positional_single_query_api() = default;
 
    virtual boost::asio::awaitable<positional_http_response>
-   read(forge::net::http::query<std::uint32_t> limit) = 0;
+   read(forge::api::http::query<std::uint32_t> limit) = 0;
 };
 
 class positional_query_append_api : public forge::api::core::contract<positional_query_append_api> {
@@ -477,7 +477,7 @@ class positional_query_append_api : public forge::api::core::contract<positional
    virtual ~positional_query_append_api() = default;
 
    virtual boost::asio::awaitable<positional_http_response>
-   read(std::string ref, forge::net::http::query<std::uint32_t> limit) = 0;
+   read(std::string ref, forge::api::http::query<std::uint32_t> limit) = 0;
 };
 
 class positional_plain_body_api : public forge::api::core::contract<positional_plain_body_api> {
@@ -517,7 +517,7 @@ class positional_stream_api : public forge::api::core::contract<positional_strea
    virtual ~positional_stream_api() = default;
 
    virtual boost::asio::awaitable<positional_body_response>
-   write(std::string ref, forge::net::http::body_stream body) = 0;
+   write(std::string ref, forge::api::http::body_stream body) = 0;
 };
 
 class dto_api_http : public forge::api::core::contract<dto_api_http> {
@@ -551,7 +551,7 @@ class object_api : public forge::api::core::contract<object_api> {
    virtual boost::asio::awaitable<forge::net::http::file_response> get_object(object_get_request request) = 0;
    virtual boost::asio::awaitable<forge::net::http::file_response> head_object(object_get_request request) = 0;
    virtual boost::asio::awaitable<forge::net::http::streaming_response> stream_object(object_get_request request) = 0;
-   virtual boost::asio::awaitable<forge::net::http::empty_response> delete_object(object_get_request request) = 0;
+   virtual boost::asio::awaitable<forge::api::http::empty_response> delete_object(object_get_request request) = 0;
 };
 
 class file_only_api : public forge::api::core::contract<file_only_api> {
@@ -572,9 +572,9 @@ class control_api : public forge::api::core::contract<control_api> {
  public:
    virtual ~control_api() = default;
 
-   virtual boost::asio::awaitable<forge::net::http::bytes_response> bytes(control_request request) = 0;
-   virtual boost::asio::awaitable<forge::net::http::empty_response> accepted(control_request request) = 0;
-   virtual boost::asio::awaitable<forge::net::http::empty_response> head(control_request request) = 0;
+   virtual boost::asio::awaitable<forge::api::http::bytes_response> bytes(control_request request) = 0;
+   virtual boost::asio::awaitable<forge::api::http::empty_response> accepted(control_request request) = 0;
+   virtual boost::asio::awaitable<forge::api::http::empty_response> head(control_request request) = 0;
 };
 
 class alias_api : public forge::api::core::contract<alias_api> {
@@ -634,7 +634,7 @@ class endpoint_api : public forge::api::core::contract<endpoint_api> {
    virtual boost::asio::awaitable<endpoint_control_response> current(endpoint_control_request request) = 0;
    virtual boost::asio::awaitable<forge::net::http::file_response> download(endpoint_control_request request) = 0;
    virtual boost::asio::awaitable<forge::net::http::streaming_response> stream(endpoint_control_request request) = 0;
-   virtual boost::asio::awaitable<forge::net::http::empty_response> accepted(endpoint_control_request request) = 0;
+   virtual boost::asio::awaitable<forge::api::http::empty_response> accepted(endpoint_control_request request) = 0;
 };
 
 class stream_buffered_api : public forge::api::core::contract<stream_buffered_api> {
@@ -728,7 +728,7 @@ FORGE_API(::forge::net::http::test_api::object_api, FORGE_API_CONTRACT("object",
         FORGE_API_METHOD_TYPED(head_object, ::forge::net::http::test_api::object_get_request, ::forge::net::http::file_response),
         FORGE_API_METHOD_TYPED(stream_object, ::forge::net::http::test_api::object_get_request,
                              ::forge::net::http::streaming_response),
-        FORGE_API_METHOD_TYPED(delete_object, ::forge::net::http::test_api::object_get_request, ::forge::net::http::empty_response))
+        FORGE_API_METHOD_TYPED(delete_object, ::forge::net::http::test_api::object_get_request, ::forge::api::http::empty_response))
 
 FORGE_API(::forge::net::http::test_api::file_only_api, FORGE_API_CONTRACT("file-only", 1, 0),
         FORGE_API_METHOD_TYPED(download, ::forge::net::http::test_api::object_get_request, ::forge::net::http::file_response))
@@ -738,9 +738,9 @@ FORGE_API(::forge::net::http::test_api::form_api, FORGE_API_CONTRACT("form", 1, 
                              ::forge::net::http::test_api::form_submit_response))
 
 FORGE_API(::forge::net::http::test_api::control_api, FORGE_API_CONTRACT("control", 1, 0),
-        FORGE_API_METHOD_TYPED(bytes, ::forge::net::http::test_api::control_request, ::forge::net::http::bytes_response),
-        FORGE_API_METHOD_TYPED(accepted, ::forge::net::http::test_api::control_request, ::forge::net::http::empty_response),
-        FORGE_API_METHOD_TYPED(head, ::forge::net::http::test_api::control_request, ::forge::net::http::empty_response))
+        FORGE_API_METHOD_TYPED(bytes, ::forge::net::http::test_api::control_request, ::forge::api::http::bytes_response),
+        FORGE_API_METHOD_TYPED(accepted, ::forge::net::http::test_api::control_request, ::forge::api::http::empty_response),
+        FORGE_API_METHOD_TYPED(head, ::forge::net::http::test_api::control_request, ::forge::api::http::empty_response))
 
 FORGE_API(::forge::net::http::test_api::alias_api, FORGE_API_CONTRACT("alias", 1, 0),
         FORGE_API_METHOD_TYPED(current, ::forge::net::http::test_api::control_request,
@@ -780,7 +780,7 @@ FORGE_API(::forge::net::http::test_api::endpoint_api, FORGE_API_CONTRACT("endpoi
         FORGE_API_METHOD_TYPED(stream, ::forge::net::http::test_api::endpoint_control_request,
                              ::forge::net::http::streaming_response),
         FORGE_API_METHOD_TYPED(accepted, ::forge::net::http::test_api::endpoint_control_request,
-                             ::forge::net::http::empty_response))
+                             ::forge::api::http::empty_response))
 
 FORGE_API(::forge::net::http::test_api::stream_buffered_api, FORGE_API_CONTRACT("stream-buffered", 1, 0),
         FORGE_API_METHOD_TYPED(write, ::forge::net::http::test_api::stream_buffered_request,
@@ -1247,9 +1247,9 @@ class positional_http_api_impl final : public positional_api_http {
  public:
    boost::asio::awaitable<positional_http_response>
    read(std::string ref,
-        forge::net::http::query<std::uint32_t> limit,
-        forge::net::http::header<std::string> request_id,
-        forge::net::http::cookie<std::string> session) override {
+        forge::api::http::query<std::uint32_t> limit,
+        forge::api::http::header<std::string> request_id,
+        forge::api::http::cookie<std::string> session) override {
       const auto limit_text = limit.present ? std::to_string(limit.value) : std::string{"missing-limit"};
       const auto request_text = request_id.present ? request_id.value : std::string{"missing-request"};
       const auto session_text = session.present ? session.value : std::string{"missing-session"};
@@ -1261,7 +1261,7 @@ class positional_http_api_impl final : public positional_api_http {
 class positional_body_api_impl final : public positional_body_api {
  public:
    boost::asio::awaitable<positional_body_response>
-   write(std::string ref, forge::net::http::body<positional_body_payload> payload) override {
+   write(std::string ref, forge::api::http::body<positional_body_payload> payload) override {
       const auto body = payload.present ? payload.value.value : std::string{"missing-body"};
       co_return positional_body_response{.summary = std::move(ref) + ":" + body};
    }
@@ -1270,7 +1270,7 @@ class positional_body_api_impl final : public positional_body_api {
 class positional_single_query_api_impl final : public positional_single_query_api {
  public:
    boost::asio::awaitable<positional_http_response>
-   read(forge::net::http::query<std::uint32_t> limit) override {
+   read(forge::api::http::query<std::uint32_t> limit) override {
       const auto limit_text = limit.present ? std::to_string(limit.value) : std::string{"missing-limit"};
       co_return positional_http_response{.value = "single:" + limit_text};
    }
@@ -1279,7 +1279,7 @@ class positional_single_query_api_impl final : public positional_single_query_ap
 class positional_query_append_api_impl final : public positional_query_append_api {
  public:
    boost::asio::awaitable<positional_http_response>
-   read(std::string ref, forge::net::http::query<std::uint32_t> limit) override {
+   read(std::string ref, forge::api::http::query<std::uint32_t> limit) override {
       const auto limit_text = limit.present ? std::to_string(limit.value) : std::string{"missing-limit"};
       co_return positional_http_response{.value = std::move(ref) + ":" + limit_text};
    }
@@ -1318,14 +1318,14 @@ class positional_streaming_body_api_impl final : public positional_streaming_bod
          forge::net::http::streaming_response_options{
             .content_type = "text/plain",
             .body =
-               [text, sent = false]() mutable -> boost::asio::awaitable<std::optional<forge::net::http::body_chunk>> {
+               [text, sent = false]() mutable -> boost::asio::awaitable<std::optional<forge::api::http::body_chunk>> {
                   if (sent) {
                      co_return std::nullopt;
                   }
                   sent = true;
                   auto bytes = std::vector<std::byte>(text->size());
                   std::memcpy(bytes.data(), text->data(), text->size());
-                  co_return forge::net::http::body_chunk{.bytes = std::move(bytes)};
+                  co_return forge::api::http::body_chunk{.bytes = std::move(bytes)};
                },
          });
    }
@@ -1334,7 +1334,7 @@ class positional_streaming_body_api_impl final : public positional_streaming_bod
 class positional_stream_api_impl final : public positional_stream_api {
  public:
    boost::asio::awaitable<positional_body_response>
-   write(std::string ref, forge::net::http::body_stream body) override {
+   write(std::string ref, forge::api::http::body_stream body) override {
       auto text = co_await body.async_read_all();
       co_return positional_body_response{.summary = std::move(ref) + ":" + std::move(text)};
    }
@@ -1434,7 +1434,7 @@ class object_api_impl final : public object_api {
          forge::net::http::streaming_response_options{
             .content_type = "application/octet-stream",
             .body =
-               [file]() mutable -> boost::asio::awaitable<std::optional<forge::net::http::body_chunk>> {
+               [file]() mutable -> boost::asio::awaitable<std::optional<forge::api::http::body_chunk>> {
                   auto bytes = std::vector<std::byte>(7);
                   file->read(reinterpret_cast<char*>(bytes.data()), static_cast<std::streamsize>(bytes.size()));
                   const auto count = static_cast<std::size_t>(file->gcount());
@@ -1442,14 +1442,14 @@ class object_api_impl final : public object_api {
                      co_return std::nullopt;
                   }
                   bytes.resize(count);
-                  co_return forge::net::http::body_chunk{.bytes = std::move(bytes)};
+                  co_return forge::api::http::body_chunk{.bytes = std::move(bytes)};
                },
          });
    }
 
-   boost::asio::awaitable<forge::net::http::empty_response> delete_object(object_get_request request) override {
+   boost::asio::awaitable<forge::api::http::empty_response> delete_object(object_get_request request) override {
       std::filesystem::remove(object_path(request.collection, request.key));
-      co_return forge::net::http::empty_response{.status_code = status::no_content};
+      co_return forge::api::http::empty_response{.status_code = status::no_content};
    }
 
  private:
@@ -1480,7 +1480,7 @@ class object_proxy_api_impl final : public object_api {
       co_return co_await upstream_->stream_object(std::move(request));
    }
 
-   boost::asio::awaitable<forge::net::http::empty_response> delete_object(object_get_request request) override {
+   boost::asio::awaitable<forge::api::http::empty_response> delete_object(object_get_request request) override {
       co_return co_await upstream_->delete_object(std::move(request));
    }
 
@@ -1498,14 +1498,14 @@ class json_stream_api_impl final : public json_stream_api {
          forge::net::http::streaming_response_options{
             .content_type = "text/plain",
             .body =
-               [chunks, index]() mutable -> boost::asio::awaitable<std::optional<forge::net::http::body_chunk>> {
+               [chunks, index]() mutable -> boost::asio::awaitable<std::optional<forge::api::http::body_chunk>> {
                   if (*index == chunks->size()) {
                      co_return std::nullopt;
                   }
                   const auto& text = (*chunks)[(*index)++];
                   auto bytes = std::vector<std::byte>(text.size());
                   std::memcpy(bytes.data(), text.data(), text.size());
-                  co_return forge::net::http::body_chunk{.bytes = std::move(bytes)};
+                  co_return forge::api::http::body_chunk{.bytes = std::move(bytes)};
                },
          });
    }
@@ -1539,21 +1539,21 @@ class endpoint_api_impl final : public endpoint_api {
          forge::net::http::streaming_response_options{
             .content_type = "text/plain",
             .body =
-               [text, sent = false]() mutable -> boost::asio::awaitable<std::optional<forge::net::http::body_chunk>> {
+               [text, sent = false]() mutable -> boost::asio::awaitable<std::optional<forge::api::http::body_chunk>> {
                   if (sent) {
                      co_return std::nullopt;
                   }
                   sent = true;
                   auto bytes = std::vector<std::byte>(text->size());
                   std::memcpy(bytes.data(), text->data(), text->size());
-                  co_return forge::net::http::body_chunk{.bytes = std::move(bytes)};
+                  co_return forge::api::http::body_chunk{.bytes = std::move(bytes)};
                },
          });
    }
 
-   boost::asio::awaitable<forge::net::http::empty_response> accepted(endpoint_control_request request) override {
+   boost::asio::awaitable<forge::api::http::empty_response> accepted(endpoint_control_request request) override {
       request.response().set("X-Endpoint-Empty", request.id);
-      co_return forge::net::http::empty_response{.status_code = status::accepted};
+      co_return forge::api::http::empty_response{.status_code = status::accepted};
    }
 
  private:
@@ -1615,22 +1615,22 @@ class form_api_impl final : public form_api {
 
 class control_api_impl final : public control_api {
  public:
-   boost::asio::awaitable<forge::net::http::bytes_response> bytes(control_request request) override {
+   boost::asio::awaitable<forge::api::http::bytes_response> bytes(control_request request) override {
       auto text = std::string{"bytes:" + request.id};
       auto bytes = std::vector<std::byte>(text.size());
       std::memcpy(bytes.data(), text.data(), text.size());
-      co_return forge::net::http::bytes_response{
+      co_return forge::api::http::bytes_response{
          .bytes = std::move(bytes),
          .content_type = "application/control",
       };
    }
 
-   boost::asio::awaitable<forge::net::http::empty_response> accepted(control_request) override {
-      co_return forge::net::http::empty_response{.status_code = status::accepted};
+   boost::asio::awaitable<forge::api::http::empty_response> accepted(control_request) override {
+      co_return forge::api::http::empty_response{.status_code = status::accepted};
    }
 
-   boost::asio::awaitable<forge::net::http::empty_response> head(control_request) override {
-      co_return forge::net::http::empty_response{.status_code = status::no_content};
+   boost::asio::awaitable<forge::api::http::empty_response> head(control_request) override {
+      co_return forge::api::http::empty_response{.status_code = status::no_content};
    }
 };
 
@@ -2430,8 +2430,8 @@ BOOST_AUTO_TEST_CASE(http_typed_proxy_sends_default_mapped_header_fields) {
    const auto response = forge::asio::blocking::run(
       runtime,
       headers->echo(default_header_request{
-         .request_id = forge::net::http::header<std::string>{.value = "trace-123", .present = true},
-         .body = forge::net::http::body_stream{make_body_reader({"payload"})},
+         .request_id = forge::api::http::header<std::string>{.value = "trace-123", .present = true},
+         .body = forge::api::http::body_stream{make_body_reader({"payload"})},
       }));
 
    BOOST_TEST(response.present);
@@ -2460,11 +2460,11 @@ BOOST_AUTO_TEST_CASE(http_dto_parameters_bind_query_header_cookie_and_body) {
       runtime,
       api->write(dto_http_request{
          .ref = "chunk-1",
-         .limit = forge::net::http::query<std::uint32_t>{.value = 9, .present = true},
-         .request_id = forge::net::http::header<std::string>{.value = "trace-123", .present = true},
-         .session = forge::net::http::cookie<std::string>{.value = "session-7", .present = true},
+         .limit = forge::api::http::query<std::uint32_t>{.value = 9, .present = true},
+         .request_id = forge::api::http::header<std::string>{.value = "trace-123", .present = true},
+         .session = forge::api::http::cookie<std::string>{.value = "session-7", .present = true},
          .payload =
-            forge::net::http::body<positional_body_payload>{
+            forge::api::http::body<positional_body_payload>{
                .value = positional_body_payload{.value = "payload"},
                .present = true,
             },
@@ -2495,7 +2495,7 @@ BOOST_AUTO_TEST_CASE(http_typed_proxy_sends_delete_json_body) {
       api->remove(delete_body_request{
          .ref = "chunk-1",
          .payload =
-            forge::net::http::body<positional_body_payload>{
+            forge::api::http::body<positional_body_payload>{
                .value = positional_body_payload{.value = "payload"},
                .present = true,
             },
@@ -2552,7 +2552,7 @@ BOOST_AUTO_TEST_CASE(http_delete_stream_body_route_mounts_and_reads_body) {
       runtime,
       api->remove(delete_stream_request{
          .ref = "chunk-stream",
-         .body = forge::net::http::body_stream{make_body_reader({"pay", "load"})},
+         .body = forge::api::http::body_stream{make_body_reader({"pay", "load"})},
       }));
 
    BOOST_TEST(response.value == "chunk-stream:payload");
@@ -2739,7 +2739,7 @@ BOOST_AUTO_TEST_CASE(http_dto_body_bytes_roundtrips) {
       runtime,
       api->write_bytes(dto_bytes_request{
          .ref = "chunk-bytes",
-         .bytes = forge::net::http::body_bytes{.bytes = std::move(bytes)},
+         .bytes = forge::api::http::body_bytes{.bytes = std::move(bytes)},
       }));
 
    BOOST_TEST(response.summary == "chunk-bytes:raw-payload");
@@ -2776,9 +2776,9 @@ BOOST_AUTO_TEST_CASE(http_dto_multipart_form_and_upload_roundtrips) {
    const auto response = forge::asio::blocking::run(
       runtime,
       api->upload(dto_multipart_request{
-         .category = forge::net::http::form<std::string>{.value = "images", .present = true},
-         .count = forge::net::http::form_field<std::uint32_t>{.value = 2, .present = true},
-         .file = forge::net::http::upload_file{std::move(part)},
+         .category = forge::api::http::form<std::string>{.value = "images", .present = true},
+         .count = forge::api::http::form_field<std::uint32_t>{.value = 2, .present = true},
+         .file = forge::api::http::upload_file{std::move(part)},
       }));
 
    BOOST_TEST(response.summary == "images:2:demo.txt:file-content");
@@ -2823,11 +2823,11 @@ BOOST_AUTO_TEST_CASE(http_dto_rejects_multiple_body_sources) {
          api->write(dto_ambiguous_body_request{
             .ref = "chunk-1",
             .payload =
-               forge::net::http::body<positional_body_payload>{
+               forge::api::http::body<positional_body_payload>{
                   .value = positional_body_payload{.value = "json-payload"},
                   .present = true,
                },
-            .bytes = forge::net::http::body_bytes{.bytes = std::move(bytes)},
+            .bytes = forge::api::http::body_bytes{.bytes = std::move(bytes)},
          })),
       forge::net::http::exceptions::bad_request);
 }
@@ -2875,7 +2875,7 @@ BOOST_AUTO_TEST_CASE(http_positional_client_rejects_http_parameter_wrappers) {
    BOOST_CHECK_THROW(
       forge::asio::blocking::run(
          runtime,
-         api->write("chunk-3", forge::net::http::body_stream{make_body_reader({"payload"})})),
+         api->write("chunk-3", forge::api::http::body_stream{make_body_reader({"payload"})})),
       forge::net::http::exceptions::bad_request);
 }
 
@@ -3012,13 +3012,13 @@ BOOST_AUTO_TEST_CASE(http_positional_ordinary_dto_body_rejects_route_disagreemen
 
 BOOST_AUTO_TEST_CASE(http_parameter_wrappers_reject_generic_raw_serialization) {
    BOOST_CHECK_THROW(
-      (void)forge::api::core::pack_body(forge::net::http::query<std::uint32_t>{.value = 7, .present = true}),
+      (void)forge::api::core::pack_body(forge::api::http::query<std::uint32_t>{.value = 7, .present = true}),
       forge::api::core::exceptions::protocol_error);
    BOOST_CHECK_THROW(
-      (void)forge::api::core::pack_body(forge::net::http::header<std::string>{.value = "trace", .present = true}),
+      (void)forge::api::core::pack_body(forge::api::http::header<std::string>{.value = "trace", .present = true}),
       forge::api::core::exceptions::protocol_error);
    BOOST_CHECK_THROW(
-      (void)forge::api::core::pack_body(forge::net::http::body<positional_body_payload>{
+      (void)forge::api::core::pack_body(forge::api::http::body<positional_body_payload>{
          .value = positional_body_payload{.value = "payload"},
          .present = true,
       }),
@@ -3467,11 +3467,11 @@ BOOST_AUTO_TEST_CASE(http_api_native_responses_bypass_xml_codec_options) {
    auto router = forge::net::http::router{};
    auto binding = forge::api::http::binding()
                      .use(forge::api::core::binding().serve(apis).build())
-                     .route<&control_api::bytes, control_request, forge::net::http::bytes_response>(
+                     .route<&control_api::bytes, control_request, forge::api::http::bytes_response>(
                         forge::api::http::route_builder{method::get, "bytes", "/xml/native/:id/bytes", status::ok}
                            .response_body_codec(forge::api::http::body_codec::xml)
                            .build())
-                     .route<&control_api::accepted, control_request, forge::net::http::empty_response>(
+                     .route<&control_api::accepted, control_request, forge::api::http::empty_response>(
                         forge::api::http::route_builder{method::get, "accepted", "/xml/native/:id/accepted", status::ok}
                            .response_body_codec(forge::api::http::body_codec::xml)
                            .build())
@@ -3674,9 +3674,9 @@ BOOST_AUTO_TEST_CASE(http_api_special_types_support_streaming_put_and_file_get) 
       object->put_object(object_put_request{
          .collection = "cache",
          .key = "chunk.bin",
-         .content_type = forge::net::http::header<std::string>{.value = "application/octet-stream", .present = true},
-         .digest = forge::net::http::header<std::string>{.value = "checksum", .present = true},
-         .body = forge::net::http::body_stream{make_body_reader({payload.substr(0, 2048), payload.substr(2048)})},
+         .content_type = forge::api::http::header<std::string>{.value = "application/octet-stream", .present = true},
+         .digest = forge::api::http::header<std::string>{.value = "checksum", .present = true},
+         .body = forge::api::http::body_stream{make_body_reader({payload.substr(0, 2048), payload.substr(2048)})},
       }));
    BOOST_TEST(put_body.bytes == 96U * 1024U);
    BOOST_TEST(put_body.content_type == "application/octet-stream");
@@ -6317,7 +6317,7 @@ BOOST_AUTO_TEST_CASE(websocket_echo_shares_server_port) {
    server.stop();
 }
 
-BOOST_AUTO_TEST_CASE(websocket_api_binding_strips_reserved_metadata) {
+BOOST_AUTO_TEST_CASE(websocket_api_adapter_strips_reserved_metadata) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
 
    auto registry = forge::api::core::registry{};
@@ -6344,7 +6344,7 @@ BOOST_AUTO_TEST_CASE(websocket_api_binding_strips_reserved_metadata) {
                                   .build())
                   .build();
 
-   auto binding = forge::net::websocket::api().use(std::move(plan)).build();
+   auto binding = forge::api::websocket::api().use(std::move(plan)).build();
    auto router = forge::net::http::router{};
    router.websocket("/api", [&runtime, binding = std::move(binding)](forge::net::websocket::connection::ptr connection) mutable {
       boost::asio::co_spawn(runtime.context(), binding.accept(std::move(connection)), boost::asio::detached);
@@ -6403,13 +6403,13 @@ BOOST_AUTO_TEST_CASE(websocket_api_binding_strips_reserved_metadata) {
    server.stop();
 }
 
-BOOST_AUTO_TEST_CASE(websocket_api_binding_dispatches_positional_method) {
+BOOST_AUTO_TEST_CASE(websocket_api_adapter_dispatches_positional_method) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
 
    auto registry = forge::api::core::registry{};
    registry.install<websocket_positional_api>(websocket_positional_api::describe(),
                                               std::make_shared<websocket_positional_impl>());
-   auto binding = forge::net::websocket::api().use(forge::api::core::binding().serve(registry).build()).build();
+   auto binding = forge::api::websocket::api().use(forge::api::core::binding().serve(registry).build()).build();
 
    auto router = forge::net::http::router{};
    router.websocket("/api", [&runtime, binding = std::move(binding)](forge::net::websocket::connection::ptr connection) mutable {

@@ -108,7 +108,7 @@ import forge.net.p2p.stream;
 import forge.net.p2p.negotiation;
 import forge.net.p2p.peer_store;
 import forge.net.p2p.node;
-import forge.net.p2p.api;
+import forge.api.p2p.binding;
 import forge.plugins.crypto.signer.types;
 import forge.plugins.crypto.signer.exceptions;
 import forge.plugins.crypto.signer.api;
@@ -260,7 +260,7 @@ class http_empty_api
     : public forge::api::core::contract<http_empty_api, forge::api::core::surface::local | forge::api::core::surface::remote> {
  public:
    virtual ~http_empty_api() = default;
-   virtual boost::asio::awaitable<forge::net::http::empty_response> clear(http_stream_read_request request) = 0;
+   virtual boost::asio::awaitable<forge::api::http::empty_response> clear(http_stream_read_request request) = 0;
 };
 
 class scripted_resolver_api
@@ -282,7 +282,7 @@ FORGE_API(::plugin_test_contract::http_cache_api, FORGE_API_CONTRACT("cache", 1,
 FORGE_API(::plugin_test_contract::http_stream_api, FORGE_API_CONTRACT("stream-cache", 1, 0),
         FORGE_API_METHOD_TYPED(download, ::http_stream_read_request, ::forge::net::http::streaming_response))
 FORGE_API(::plugin_test_contract::http_empty_api, FORGE_API_CONTRACT("empty-cache", 1, 0),
-        FORGE_API_METHOD_TYPED(clear, ::http_stream_read_request, ::forge::net::http::empty_response))
+        FORGE_API_METHOD_TYPED(clear, ::http_stream_read_request, ::forge::api::http::empty_response))
 FORGE_API(::plugin_test_contract::scripted_resolver_api,
         FORGE_API_CONTRACT("forge.plugins.p2p.resolver.protocol", 1, 0), FORGE_API_METHOD(query))
 
@@ -480,8 +480,8 @@ class http_stream_api_impl final : public http_stream_api {
 
 class http_empty_api_impl final : public http_empty_api {
  public:
-   boost::asio::awaitable<forge::net::http::empty_response> clear(http_stream_read_request) override {
-      co_return forge::net::http::empty_response{.status_code = forge::net::http::status::no_content};
+   boost::asio::awaitable<forge::api::http::empty_response> clear(http_stream_read_request) override {
+      co_return forge::api::http::empty_response{.status_code = forge::net::http::status::no_content};
    }
 };
 

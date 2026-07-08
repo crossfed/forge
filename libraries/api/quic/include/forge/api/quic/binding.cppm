@@ -6,7 +6,7 @@ module;
 #include <cstddef>
 #include <utility>
 
-export module forge.net.quic.api;
+export module forge.api.quic.binding;
 
 import forge.api.core.exceptions;
 import forge.api.core.types;
@@ -26,7 +26,7 @@ import forge.net.quic.stream;
 import forge.net.quic.transport;
 import forge.net.transport.stream;
 
-export namespace forge::net::quic {
+export namespace forge::api::quic {
 
 class api_binding {
  public:
@@ -110,4 +110,4 @@ class api_builder {
    return {};
 }
 
-} // namespace forge::net::quic
+} // namespace forge::api::quic

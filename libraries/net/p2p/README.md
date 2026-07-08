@@ -182,7 +182,7 @@ the application handler owns authorization and durable state.
 
 ### Typed API Protocol Binding
 
-`forge.net.p2p.api` builds P2P API bindings on top of negotiated protocol streams.
+`forge.api.p2p.binding` builds P2P API bindings on top of negotiated protocol streams.
 The binding path uses `multistream-select` and the same direct, hole-punch and
 relay path manager as ordinary P2P protocol streams; it must not reintroduce an
 FORGE-only hello envelope into direct QUIC sessions. Once a protocol stream is
@@ -281,7 +281,7 @@ identity extension and invalid envelopes are correctness failures.
 - Do not treat `.peer_policy(...)` or `.max_inflight_per_peer(...)` as cosmetic.
   Unknown peers and too many active API calls are rejected before application API
   handlers run.
-- Do not make `forge.net.p2p.api` responsible for peer discovery, relay or node
+- Do not make `forge.api.p2p.binding` responsible for peer discovery, relay or node
   lifecycle. It is only the API protocol binding artifact.
 - Do not implement AutoNAT, AutoRelay, DHT, rendezvous or pubsub loops in an
   infrastructure plugin. Network mechanics belong in `forge_net_p2p`; plugins only

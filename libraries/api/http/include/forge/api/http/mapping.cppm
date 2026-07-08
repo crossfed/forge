@@ -125,23 +125,23 @@ template <typename Interface> struct traits;
 
 namespace detail {
 
-using ::forge::net::http::detail::is_body;
-using ::forge::net::http::detail::is_body_bytes_v;
-using ::forge::net::http::detail::is_body_stream_v;
-using ::forge::net::http::detail::is_bytes_response_v;
-using ::forge::net::http::detail::is_cookie;
-using ::forge::net::http::detail::is_empty_response_v;
-using ::forge::net::http::detail::is_form;
-using ::forge::net::http::detail::is_form_field;
-using ::forge::net::http::detail::is_header;
-using ::forge::net::http::detail::is_http_parameter_v;
-using ::forge::net::http::detail::is_query;
-using ::forge::net::http::detail::is_stream_response_v;
-using ::forge::net::http::detail::is_streaming_response_v;
-using ::forge::net::http::detail::is_upload_file_v;
-using ::forge::net::http::detail::request_has_http_parameter_v;
-using ::forge::net::http::detail::request_needs_stream_v;
-using ::forge::net::http::detail::response_needs_stream_v;
+using ::forge::api::http::detail::is_body;
+using ::forge::api::http::detail::is_body_bytes_v;
+using ::forge::api::http::detail::is_body_stream_v;
+using ::forge::api::http::detail::is_bytes_response_v;
+using ::forge::api::http::detail::is_cookie;
+using ::forge::api::http::detail::is_empty_response_v;
+using ::forge::api::http::detail::is_form;
+using ::forge::api::http::detail::is_form_field;
+using ::forge::api::http::detail::is_header;
+using ::forge::api::http::detail::is_http_parameter_v;
+using ::forge::api::http::detail::is_query;
+using ::forge::api::http::detail::is_stream_response_v;
+using ::forge::api::http::detail::is_streaming_response_v;
+using ::forge::api::http::detail::is_upload_file_v;
+using ::forge::api::http::detail::request_has_http_parameter_v;
+using ::forge::api::http::detail::request_needs_stream_v;
+using ::forge::api::http::detail::response_needs_stream_v;
 
 [[nodiscard]] inline bool uses_request_body(method verb) noexcept {
    return verb == method::post || verb == method::put || verb == method::patch || verb == method::delete_;

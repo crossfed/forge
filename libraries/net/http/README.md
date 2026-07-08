@@ -148,7 +148,7 @@ router.get_stream("/download", [](forge::net::http::stream_request& req)
    co_return forge::net::http::stream_response{
       .head = std::move(head),
       .body = [source = std::move(source)]() mutable
-         -> boost::asio::awaitable<std::optional<forge::net::http::body_chunk>> {
+         -> boost::asio::awaitable<std::optional<forge::api::http::body_chunk>> {
          co_return co_await source.next_chunk();
       },
    };
@@ -341,9 +341,9 @@ BOOST_DESCRIBE_STRUCT(write_receipt, (), (id))
 struct update_item_request {
    std::string collection;
    std::string item;
-   forge::net::http::query<std::uint32_t> ttl;
-   forge::net::http::header<std::string> request_id;
-   forge::net::http::body<write_payload> body;
+   forge::api::http::query<std::uint32_t> ttl;
+   forge::api::http::header<std::string> request_id;
+   forge::api::http::body<write_payload> body;
 };
 
 BOOST_DESCRIBE_STRUCT(update_item_request, (), (collection, item, ttl, request_id, body))

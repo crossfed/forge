@@ -434,10 +434,10 @@ READMEs may link here, but must not define a second block order.
   `transport::session`, a concurrent client read loop with pending call map,
   serialized writes, `serve_stream(...)`, `serve_session(...)`, bounded
   concurrency, close/cancel wakeups and typed transport API exceptions.
-- `forge.net.quic.api` and `forge.net.p2p.api` are policy adapters over
+- `forge.api.quic.binding` and `forge.api.p2p.binding` are policy adapters over
   `forge.api.transport`. QUIC policy stays in `forge_net_quic`; P2P policy stays in
   `forge_net_p2p` as protocol id, known-peer checks and discovery scope.
-- `forge.net.websocket.api` shares `forge::api::core::frame_dispatcher`, but does not import
+- `forge.api.websocket.binding` shares `forge::api::core::frame_dispatcher`, but does not import
   `forge.api.transport`, because WebSocket is message-oriented and not a
   `transport::stream`.
 - HTTP remains a separate request/response binding.

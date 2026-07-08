@@ -1,3 +1,6 @@
 add_subdirectory(core)
 add_subdirectory(http)
 add_subdirectory(transport)
+add_subdirectory(quic)
+add_subdirectory(websocket)
+add_subdirectory(p2p)

@@ -25,7 +25,7 @@ import forge.net.http.upload;
 import forge.reflect.reflect;
 import forge.raw.raw;
 
-export namespace forge::net::http {
+export namespace forge::api::http {
 
 template <typename T> struct header {
    T value{};
@@ -60,13 +60,13 @@ template <typename T> struct form_field {
 class body_stream {
  public:
    body_stream() = default;
-   explicit body_stream(body_reader reader) : reader_{std::move(reader)} {}
+   explicit body_stream(forge::net::http::body_reader reader) : reader_{std::move(reader)} {}
 
    [[nodiscard]] bool valid() const noexcept {
       return reader_.valid();
    }
 
-   boost::asio::awaitable<std::optional<body_chunk>> async_read() {
+   boost::asio::awaitable<std::optional<forge::net::http::body_chunk>> async_read() {
       co_return co_await reader_.async_read();
    }
 
@@ -74,7 +74,7 @@ class body_stream {
       co_return co_await reader_.async_read_all();
    }
 
-   [[nodiscard]] body_reader release_reader() noexcept {
+   [[nodiscard]] forge::net::http::body_reader release_reader() noexcept {
       return std::move(reader_);
    }
 
@@ -83,7 +83,7 @@ class body_stream {
    }
 
  private:
-   body_reader reader_;
+   forge::net::http::body_reader reader_;
 };
 
 struct body_bytes {
@@ -93,17 +93,17 @@ struct body_bytes {
 class upload_file {
  public:
    upload_file() = default;
-   explicit upload_file(upload_part part) : part_{std::move(part)}, present_{true} {}
+   explicit upload_file(forge::net::http::upload_part part) : part_{std::move(part)}, present_{true} {}
 
    [[nodiscard]] bool present() const noexcept {
       return present_;
    }
 
-   [[nodiscard]] const upload_part& part() const noexcept {
+   [[nodiscard]] const forge::net::http::upload_part& part() const noexcept {
       return part_;
    }
 
-   [[nodiscard]] upload_part& part() noexcept {
+   [[nodiscard]] forge::net::http::upload_part& part() noexcept {
       return part_;
    }
 
@@ -136,18 +136,18 @@ class upload_file {
    }
 
  private:
-   upload_part part_;
+   forge::net::http::upload_part part_;
    bool present_ = false;
 };
 
 struct bytes_response {
    std::vector<std::byte> bytes;
    std::string content_type = "application/octet-stream";
-   status status_code = status::ok;
+   forge::net::http::status status_code = forge::net::http::status::ok;
 };
 
 struct empty_response {
-   status status_code = status::no_content;
+   forge::net::http::status status_code = forge::net::http::status::no_content;
 };
 
 namespace detail {
@@ -192,10 +192,12 @@ template <typename T>
 inline constexpr auto is_upload_file_v = std::is_same_v<std::remove_cvref_t<T>, upload_file>;
 
 template <typename T>
-inline constexpr auto is_stream_response_v = std::is_same_v<std::remove_cvref_t<T>, stream_response>;
+inline constexpr auto is_stream_response_v =
+   std::is_same_v<std::remove_cvref_t<T>, forge::net::http::stream_response>;
 
 template <typename T>
-inline constexpr auto is_streaming_response_v = std::is_same_v<std::remove_cvref_t<T>, streaming_response>;
+inline constexpr auto is_streaming_response_v =
+   std::is_same_v<std::remove_cvref_t<T>, forge::net::http::streaming_response>;
 
 template <typename T>
 inline constexpr auto is_bytes_response_v = std::is_same_v<std::remove_cvref_t<T>, bytes_response>;
@@ -259,9 +261,10 @@ template <typename T>
 inline constexpr auto request_needs_stream_v = request_needs_stream<T>::value;
 
 template <typename T>
-inline constexpr auto response_needs_stream_v = std::is_same_v<std::remove_cvref_t<T>, file_response> ||
-                                                is_stream_response_v<T> ||
-                                                is_streaming_response_v<T>;
+inline constexpr auto response_needs_stream_v =
+   std::is_same_v<std::remove_cvref_t<T>, forge::net::http::file_response> ||
+   is_stream_response_v<T> ||
+   is_streaming_response_v<T>;
 
 } // namespace detail
 
@@ -373,6 +376,26 @@ template <typename Stream> Stream& operator>>(Stream& stream, body_bytes&) {
    FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error, "HTTP body bytes are HTTP-only and cannot use generic binary serialization");
 }
 
+template <typename Stream> Stream& operator<<(Stream& stream, const bytes_response&) {
+   FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error, "HTTP byte responses are HTTP-only and cannot use generic binary serialization");
+}
+
+template <typename Stream> Stream& operator>>(Stream& stream, bytes_response&) {
+   FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error, "HTTP byte responses are HTTP-only and cannot use generic binary serialization");
+}
+
+template <typename Stream> Stream& operator<<(Stream& stream, const empty_response&) {
+   FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error, "HTTP empty responses are HTTP-only and cannot use generic binary serialization");
+}
+
+template <typename Stream> Stream& operator>>(Stream& stream, empty_response&) {
+   FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error, "HTTP empty responses are HTTP-only and cannot use generic binary serialization");
+}
+
+} // namespace forge::api::http
+
+export namespace forge::net::http {
+
 template <typename Stream> Stream& operator<<(Stream& stream, const file_response&) {
    FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error, "HTTP file responses are HTTP-only and cannot use generic binary serialization");
 }
@@ -395,22 +418,6 @@ template <typename Stream> Stream& operator<<(Stream& stream, const streaming_re
 
 template <typename Stream> Stream& operator>>(Stream& stream, streaming_response&) {
    FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error, "HTTP streaming responses are HTTP-only and cannot use generic binary serialization");
-}
-
-template <typename Stream> Stream& operator<<(Stream& stream, const bytes_response&) {
-   FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error, "HTTP byte responses are HTTP-only and cannot use generic binary serialization");
-}
-
-template <typename Stream> Stream& operator>>(Stream& stream, bytes_response&) {
-   FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error, "HTTP byte responses are HTTP-only and cannot use generic binary serialization");
-}
-
-template <typename Stream> Stream& operator<<(Stream& stream, const empty_response&) {
-   FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error, "HTTP empty responses are HTTP-only and cannot use generic binary serialization");
-}
-
-template <typename Stream> Stream& operator>>(Stream& stream, empty_response&) {
-   FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error, "HTTP empty responses are HTTP-only and cannot use generic binary serialization");
 }
 
 } // namespace forge::net::http

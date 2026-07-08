@@ -19,41 +19,43 @@ import forge.plugins.http.server.middleware;
 namespace forge::plugins::http::server {
 namespace {
 
-[[nodiscard]] forge::net::http::middleware_phase to_http_phase(middleware_phase value) noexcept {
+namespace http = forge::net::http;
+
+[[nodiscard]] http::middleware_phase to_http_phase(middleware_phase value) noexcept {
    switch (value) {
    case middleware_phase::request_context:
-      return forge::net::http::middleware_phase::request_context;
+      return http::middleware_phase::request_context;
    case middleware_phase::security:
-      return forge::net::http::middleware_phase::security;
+      return http::middleware_phase::security;
    case middleware_phase::limits:
-      return forge::net::http::middleware_phase::limits;
+      return http::middleware_phase::limits;
    case middleware_phase::before_handler:
-      return forge::net::http::middleware_phase::before_handler;
+      return http::middleware_phase::before_handler;
    case middleware_phase::after_handler:
-      return forge::net::http::middleware_phase::after_handler;
+      return http::middleware_phase::after_handler;
    case middleware_phase::error:
-      return forge::net::http::middleware_phase::error;
+      return http::middleware_phase::error;
    }
-   return forge::net::http::middleware_phase::before_handler;
+   return http::middleware_phase::before_handler;
 }
 
-[[nodiscard]] std::string_view method_text(forge::net::http::method value) noexcept {
+[[nodiscard]] std::string_view method_text(http::method value) noexcept {
    switch (value) {
-   case forge::net::http::method::delete_:
+   case http::method::delete_:
       return "DELETE";
-   case forge::net::http::method::get:
+   case http::method::get:
       return "GET";
-   case forge::net::http::method::head:
+   case http::method::head:
       return "HEAD";
-   case forge::net::http::method::options:
+   case http::method::options:
       return "OPTIONS";
-   case forge::net::http::method::patch:
+   case http::method::patch:
       return "PATCH";
-   case forge::net::http::method::post:
+   case http::method::post:
       return "POST";
-   case forge::net::http::method::put:
+   case http::method::put:
       return "PUT";
-   case forge::net::http::method::unknown:
+   case http::method::unknown:
       return "UNKNOWN";
    }
    return "UNKNOWN";
@@ -78,12 +80,12 @@ namespace {
    detail::middleware_bridge_access::set_status(result, value.result());
    detail::middleware_bridge_access::set_body(result, std::move(value.body()));
    for (const auto& header : value.headers()) {
-      if (forge::net::http::header_name_equal(header.name, forge::net::http::field_name(forge::net::http::field::content_type))) {
+      if (http::header_name_equal(header.name, http::field_name(http::field::content_type))) {
          detail::middleware_bridge_access::set_content_type(result, header.text);
          continue;
       }
-      if (forge::net::http::header_name_equal(header.name, forge::net::http::field_name(forge::net::http::field::content_length)) ||
-          forge::net::http::header_name_equal(header.name, forge::net::http::field_name(forge::net::http::field::transfer_encoding))) {
+      if (http::header_name_equal(header.name, http::field_name(http::field::content_length)) ||
+          http::header_name_equal(header.name, http::field_name(http::field::transfer_encoding))) {
          continue;
       }
       detail::middleware_bridge_access::headers(result).push_back(
@@ -101,8 +103,8 @@ namespace {
    }
    result.body() = detail::middleware_bridge_access::take_body(value);
    for (const auto& header : value.headers()) {
-      if (forge::net::http::header_name_equal(header.name, "Content-Length") ||
-          forge::net::http::header_name_equal(header.name, "Transfer-Encoding")) {
+      if (http::header_name_equal(header.name, "Content-Length") ||
+          http::header_name_equal(header.name, "Transfer-Encoding")) {
          continue;
       }
       result.set(std::string_view{header.name}, std::string_view{header.value});

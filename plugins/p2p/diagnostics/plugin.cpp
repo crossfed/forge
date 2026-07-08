@@ -50,7 +50,7 @@ import forge.net.p2p.stream;
 import forge.net.p2p.negotiation;
 import forge.net.p2p.peer_store;
 import forge.net.p2p.node;
-import forge.net.p2p.api;
+import forge.api.p2p.binding;
 import forge.plugins.p2p.node.types;
 import forge.plugins.p2p.node.exceptions;
 import forge.plugins.p2p.node.api;

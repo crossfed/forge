@@ -88,7 +88,7 @@ The argument names are metadata, not type declarations. Existing
 `FORGE_API_METHOD(read)` one-request DTO methods keep their old source and wire
 shape. Positional methods are new declarations and use an internal argument-pack
 payload for frame transports. HTTP-specific request wrappers are not part of
-`forge_api_core`; `forge_net_http` supports them as fields of described request DTOs and
+`forge_api_core`; `forge_api_http` supports them as fields of described request DTOs and
 keeps HTTP positional methods limited to path/query routing plus an optional
 single JSON DTO body.
 
@@ -199,7 +199,7 @@ projection.
 
 This layer must not move into `forge_net_transport`: transport stays a low-level
 byte-stream/session contract and must not import the API contract layer.
-`forge.net.quic.api` and `forge.net.p2p.api` are thin adapters or policy wrappers over the
+`forge.api.quic.binding` and `forge.api.p2p.binding` are thin adapters or policy wrappers over the
 API transport binding. WebSocket shares `forge::api::core::frame_dispatcher`, but not the
 stream transport binding, because it is message-oriented rather than a
 `transport::stream`. HTTP remains a separate binding because it is
