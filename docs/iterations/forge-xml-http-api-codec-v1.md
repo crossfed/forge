@@ -12,11 +12,11 @@ with manual router handlers is not the product path.
 Add a standalone library:
 
 - target: `forge_codec_xml`;
-- namespace: `forge::xml`;
+- namespace: `forge::codec::xml`;
 - public module: `forge.codec.xml`;
-- public path: `libraries/codec/xml/include/forge/xml/xml.cppm`;
+- public path: `libraries/codec/xml/include/forge/codec/xml/xml.cppm`;
 - library guide: `libraries/codec/xml/README.md`;
-- package component: `xml`.
+- package component: `codec_xml`.
 
 Recommended backend is `pugixml`, kept private to implementation files. Public
 modules must not expose backend namespace types. Build the backend without XPath
@@ -107,10 +107,10 @@ Validation:
 ```bash
 cmake --build build/forge-debug -j 1 \
   --target test_forge_codec_xml test_forge_http_websocket test_forge_api_core \
-           test_forge_package_xml_component
+           test_forge_package_codec_xml_component
 
 ctest --test-dir build/forge-debug --output-on-failure \
-  -R "^(test_forge_codec_xml|test_forge_http_websocket|test_forge_api_core|test_forge_package_xml_component)$" \
+  -R "^(test_forge_codec_xml|test_forge_http_websocket|test_forge_api_core|test_forge_package_codec_xml_component)$" \
   --timeout 300
 
 rg "$FORGE_XML_BACKEND_LEAK_PATTERN" \

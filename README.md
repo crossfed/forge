@@ -149,7 +149,7 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [yaml](libraries/codec/yaml/README.md) | `forge_codec_yaml` | YAML typed/value/document codec with JSON-shaped API. | Glaze privately, `forge_config_core`, `forge_schema`. |
 | [xml](libraries/codec/xml/README.md) | `forge_codec_xml` | XML typed/tree codec over private pugixml. | `forge_core`, `forge_reflect`, `forge_schema`, pugixml privately. |
 | [schema](libraries/schema/README.md) | `forge_schema` | Field rules, defaults, ranges, diagnostics. | `forge_reflect`. |
-| [config](libraries/config/README.md) | `forge_config_core` | Neutral config document, merge, decode, redaction. | `forge_schema`. |
+| [config](libraries/config/core/README.md) | `forge_config_core` | Neutral config document, merge, decode, redaction. | `forge_schema`. |
 | [program_options](libraries/config/program_options/README.md) | `forge_config_program_options` | CLI adapter from Boost.Program_options into config documents. | Boost.Program_options privately. |
 | [env](libraries/config/env/README.md) | `forge_config_env` | Process env and explicit `.env` adapter into config documents. | `forge_config_core`, `forge_schema`. |
 | [api/core](libraries/api/core/README.md) | `forge_api_core` | Typed local/remote API contracts, handles, descriptors and frame vocabulary. | `forge_exceptions`, `forge_raw`. |
@@ -260,7 +260,7 @@ cmake --install build/forge-debug --prefix build/forge-install --component dev
 Consumer CMake:
 
 ```cmake
-find_package(Forge CONFIG REQUIRED COMPONENTS raw crypto app log api_http xml)
+find_package(Forge CONFIG REQUIRED COMPONENTS raw crypto app log api_http codec_xml)
 
 target_link_libraries(my_program PRIVATE
    Forge::forge_raw

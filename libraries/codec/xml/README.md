@@ -116,5 +116,5 @@ auto body = forge::codec::xml::write(resource_list{.name = "primary"},
 ## Tests
 
 - `test_forge_codec_xml`
-- `test_forge_package_xml_component`
-- `test_forge_package_xml_add_subdirectory`
+- `test_forge_package_codec_xml_component`
+- `test_forge_package_codec_xml_add_subdirectory`
