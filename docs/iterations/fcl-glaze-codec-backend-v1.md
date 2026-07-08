@@ -2,7 +2,7 @@
 
 ## Summary
 
-FCL JSON and YAML now use Glaze as the single codec backend. FCL still owns the public API, schema diagnostics, redaction model, `fcl::variant`, `fcl::config::document`, and Boost.Describe/schema rules. Glaze remains an implementation dependency and must not define the public FCL contract.
+FCL JSON and YAML now use Glaze as the single codec backend. FCL still owns the public API, schema diagnostics, redaction model, `fcl::variant`, `fcl::config::core::document`, and Boost.Describe/schema rules. Glaze remains an implementation dependency and must not define the public FCL contract.
 
 ## Public Shape
 
@@ -11,7 +11,7 @@ FCL JSON and YAML now use Glaze as the single codec backend. FCL still owns the 
 - `fcl::json::read<T>()`, `write<T>()`, `read_value()`, `write_value()`, `read_document()`, `write_document()`, `load_*()`, `save_*()`.
 - `fcl::yaml` exposes the same shape for YAML.
 - `read_value()` and `write_value()` use `fcl::variant`.
-- `read_document()` and `write_document()` use `fcl::config::document`.
+- `read_document()` and `write_document()` use `fcl::config::core::document`.
 - `read<T>()` uses schema rules when a schema is defined, otherwise it falls back to `fcl::from_variant` when available.
 
 ## Backend Boundary
@@ -43,5 +43,5 @@ This is a deliberate source-breaking pass:
 cmake --build build/fcl-glaze-codec-debug -j 1 --target test_fcl_json test_fcl_yaml
 ctest --test-dir build/fcl-glaze-codec-debug --output-on-failure -R "^(test_fcl_json|test_fcl_yaml)$" --timeout 120
 rg "legacy parser facade|old YAML backend|backend node type" AGENTS.md docs libraries tests CMakeLists.txt
-rg "glz::|glaze/" libraries/json/include libraries/yaml/include
+rg "glz::|glaze/" libraries/codec/json/include libraries/codec/yaml/include
 ```

@@ -6,7 +6,7 @@ module;
 
 module forge.app.plugin;
 
-import forge.config.component;
+import forge.config.core.component;
 import forge.api.core.exceptions;
 import forge.api.core.types;
 import forge.api.core.descriptor;
@@ -19,11 +19,11 @@ import forge.api.core.dispatcher;
 
 namespace forge::app {
 
-std::optional<config::component_descriptor> plugin::describe_config() const {
+std::optional<config::core::component_descriptor> plugin::describe_config() const {
    return std::nullopt;
 }
 
-boost::asio::awaitable<void> plugin::configure(config::component_view) {
+boost::asio::awaitable<void> plugin::configure(config::core::component_view) {
    co_return;
 }
 

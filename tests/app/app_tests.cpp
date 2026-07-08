@@ -46,12 +46,12 @@ import forge.api.core.dispatcher;
 import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.asio.task_scheduler;
-import forge.config.key_path;
-import forge.config.value;
-import forge.config.document;
-import forge.config.component;
-import forge.config.decode;
-import forge.config.migration;
+import forge.config.core.key_path;
+import forge.config.core.value;
+import forge.config.core.document;
+import forge.config.core.component;
+import forge.config.core.decode;
+import forge.config.core.migration;
 import forge.schema.diagnostic;
 import forge.schema.value_kind;
 import forge.schema.object;
@@ -233,10 +233,10 @@ class configurable_plugin final : public forge::app::plugin {
       return "1";
    }
 
-   std::optional<forge::config::component_descriptor> describe_config() const override {
-      return forge::config::component_descriptor{
+   std::optional<forge::config::core::component_descriptor> describe_config() const override {
+      return forge::config::core::component_descriptor{
           .section = "http",
-          .fields = {forge::config::field_descriptor{
+          .fields = {forge::config::core::field_descriptor{
               .name = "bind-port",
               .kind = forge::schema::value_kind::unsigned_integer,
               .required = true,
@@ -244,7 +244,7 @@ class configurable_plugin final : public forge::app::plugin {
       };
    }
 
-   boost::asio::awaitable<void> configure(forge::config::component_view view) override {
+   boost::asio::awaitable<void> configure(forge::config::core::component_view view) override {
       bind_port_ = view.get_or<std::uint16_t>("bind-port", 0);
       log_->entries.push_back("configure:" + std::to_string(bind_port_));
       co_return;
@@ -404,11 +404,11 @@ class shell_config_plugin final : public forge::app::plugin {
       return "1";
    }
 
-   std::optional<forge::config::component_descriptor> describe_config() const override {
-      return forge::config::describe_component<shell_plugin_config>("http");
+   std::optional<forge::config::core::component_descriptor> describe_config() const override {
+      return forge::config::core::describe_component<shell_plugin_config>("http");
    }
 
-   boost::asio::awaitable<void> configure(forge::config::component_view view) override {
+   boost::asio::awaitable<void> configure(forge::config::core::component_view view) override {
       port_ = view.get_or<std::uint16_t>("port", 0);
       log_->entries.push_back("plugin.configure:" + std::to_string(port_));
       co_return;
@@ -598,8 +598,8 @@ class shell_test_application final : public forge::app::application_shell {
    }
 
  protected:
-   void on_describe_config(forge::config::component_registry& registry) const override {
-      registry.add(forge::config::describe_component<shell_service_config>("service"));
+   void on_describe_config(forge::config::core::component_registry& registry) const override {
+      registry.add(forge::config::core::describe_component<shell_service_config>("service"));
    }
 
    boost::asio::awaitable<void> on_configure(forge::app::configure_context& context) override {
@@ -822,12 +822,12 @@ class daemon_test_application final : public forge::app::application_shell {
    }
 
  protected:
-   void on_describe_config(forge::config::component_registry& registry) const override {
-      registry.add(forge::config::describe_component<daemon_service_config>("service"));
+   void on_describe_config(forge::config::core::component_registry& registry) const override {
+      registry.add(forge::config::core::describe_component<daemon_service_config>("service"));
    }
 
    boost::asio::awaitable<void> on_configure(forge::app::configure_context& context) override {
-      auto decoded = forge::config::decode<daemon_service_config>(context.document(), "service");
+      auto decoded = forge::config::core::decode<daemon_service_config>(context.document(), "service");
       if (!decoded.ok()) {
          throw std::invalid_argument{decoded.diagnostics.entries.front().message};
       }
@@ -1075,7 +1075,7 @@ BOOST_AUTO_TEST_CASE(application_runtime_collects_and_applies_plugin_config_befo
    BOOST_REQUIRE_EQUAL(registry.components().size(), 1U);
    BOOST_TEST(registry.components().front().section == "http");
 
-   auto document = forge::config::document{};
+   auto document = forge::config::core::document{};
    document.set("http.bind-port", 7777);
    forge::asio::blocking::run(runtime, app.configure(document));
    forge::asio::blocking::run(runtime, app.startup());
@@ -1098,7 +1098,7 @@ BOOST_AUTO_TEST_CASE(application_shell_owns_config_plugin_lifecycle_and_context)
    BOOST_TEST(registry.components()[1].section == "plugins");
    BOOST_TEST(registry.components()[2].section == "http");
 
-   auto document = forge::config::document{};
+   auto document = forge::config::core::document{};
    document.set("service.workers", 4);
    app.configure(document);
 
@@ -1145,7 +1145,7 @@ BOOST_AUTO_TEST_CASE(application_shell_preserves_dependency_order_and_reverse_sh
    auto log = lifecycle_log{};
    auto app = shell_order_application{log};
 
-   app.configure(forge::config::document{});
+   app.configure(forge::config::core::document{});
    forge::asio::blocking::run(app.runtime(), app.startup());
    forge::asio::blocking::run(app.runtime(), app.shutdown());
 
@@ -1231,7 +1231,7 @@ BOOST_AUTO_TEST_CASE(application_shell_applies_plugin_selection_from_config) {
    }
    BOOST_TEST(found_plugins_section);
 
-   auto document = forge::config::document{};
+   auto document = forge::config::core::document{};
    document.set("plugins.api.enabled", false);
    document.set("plugins.metrics.enabled", true);
    app.configure(document);
@@ -1264,7 +1264,7 @@ BOOST_AUTO_TEST_CASE(application_shell_uses_nested_official_plugin_selection_pat
    }
    BOOST_TEST(found_plugins_section);
 
-   auto document = forge::config::document{};
+   auto document = forge::config::core::document{};
    document.set("plugins.p2p.node.enabled", false);
    app.configure(document);
    forge::asio::blocking::run(app.runtime(), app.startup());
@@ -1277,7 +1277,7 @@ BOOST_AUTO_TEST_CASE(application_shell_accepts_textual_plugin_selection_flags) {
    auto log = lifecycle_log{};
    auto app = shell_selection_application{log};
 
-   auto document = forge::config::document{};
+   auto document = forge::config::core::document{};
    document.set("plugins.api.enabled", "false");
    document.set("plugins.metrics.enabled", "true");
    app.configure(document);
@@ -1299,7 +1299,7 @@ BOOST_AUTO_TEST_CASE(application_shell_rejects_invalid_textual_plugin_selection_
    auto log = lifecycle_log{};
    auto app = shell_selection_application{log};
 
-   auto document = forge::config::document{};
+   auto document = forge::config::core::document{};
    document.set("plugins.api.enabled", "definitely");
 
    BOOST_CHECK_THROW(app.configure(document), std::invalid_argument);
@@ -1310,7 +1310,7 @@ BOOST_AUTO_TEST_CASE(application_shell_rejects_enabled_plugin_with_disabled_depe
    auto log = lifecycle_log{};
    auto app = shell_selection_application{log};
 
-   auto document = forge::config::document{};
+   auto document = forge::config::core::document{};
    document.set("plugins.store.enabled", false);
    document.set("plugins.api.enabled", true);
 
@@ -1332,7 +1332,7 @@ BOOST_AUTO_TEST_CASE(run_application_executes_lifecycle_and_custom_stop_waiter) 
       co_return;
    };
 
-   const auto exit_code = forge::app::run_application(app, forge::config::document{}, options);
+   const auto exit_code = forge::app::run_application(app, forge::config::core::document{}, options);
    BOOST_TEST(exit_code == 0);
    BOOST_TEST(static_cast<int>(app.state()) == static_cast<int>(forge::app::application_state::stopped));
 
@@ -1357,7 +1357,7 @@ BOOST_AUTO_TEST_CASE(run_application_unique_ptr_reports_shutdown_timeout_after_c
    options.handle_sigterm = false;
    options.shutdown_timeout = std::chrono::milliseconds{1};
 
-   BOOST_CHECK_THROW(forge::app::run_application(std::move(app), forge::config::document{}, options),
+   BOOST_CHECK_THROW(forge::app::run_application(std::move(app), forge::config::core::document{}, options),
                      forge::app::exceptions::shutdown_failed);
    BOOST_TEST(!state->shutdown_finished());
    BOOST_TEST(!state->shell_destroyed());
@@ -1384,7 +1384,7 @@ BOOST_AUTO_TEST_CASE(run_application_reference_reports_timeout_only_after_shutdo
 
    auto threw_timeout = false;
    try {
-      static_cast<void>(forge::app::run_application(app, forge::config::document{}, options));
+      static_cast<void>(forge::app::run_application(app, forge::config::core::document{}, options));
    } catch (const forge::app::exceptions::shutdown_failed&) {
       threw_timeout = true;
    }
@@ -1868,7 +1868,7 @@ BOOST_AUTO_TEST_CASE(application_builder_creates_shell_and_applies_config_handle
    BOOST_REQUIRE_EQUAL(registry.components().size(), 1U);
    BOOST_TEST(registry.components()[0].section == "service");
 
-   auto document = forge::config::document{};
+   auto document = forge::config::core::document{};
    document.set("service.workers", 6);
    app->configure(document);
    forge::asio::blocking::run(app->runtime(), app->startup());
@@ -1919,7 +1919,7 @@ BOOST_AUTO_TEST_CASE(application_builder_collects_plugin_config_and_preserves_de
    BOOST_TEST(registry.components()[0].section == "plugins");
    BOOST_TEST(registry.components()[1].section == "http");
 
-   app->configure(forge::config::document{});
+   app->configure(forge::config::core::document{});
    forge::asio::blocking::run(app->runtime(), app->startup());
    forge::asio::blocking::run(app->runtime(), app->shutdown());
 
@@ -1952,7 +1952,7 @@ BOOST_AUTO_TEST_CASE(application_builder_rejects_invalid_typed_config_before_sid
    });
 
    auto app = std::move(builder).build();
-   auto document = forge::config::document{};
+   auto document = forge::config::core::document{};
    document.set("service.workers", 99);
 
    BOOST_CHECK_THROW(app->configure(document), std::invalid_argument);

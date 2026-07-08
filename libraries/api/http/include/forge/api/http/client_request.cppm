@@ -34,9 +34,9 @@ export import forge.api.http.mapping;
 import forge.net.http.stream;
 import forge.net.http.types;
 import forge.net.http.upload;
-import forge.json;
+import forge.codec.json;
 import forge.reflect.reflect;
-import forge.xml;
+import forge.codec.xml;
 
 export namespace forge::api::http {
 
@@ -378,14 +378,14 @@ void apply_route_cookies(request& target,
 [[nodiscard]] std::string encode_body_value(const auto& value, body_codec codec) {
    switch (codec) {
    case body_codec::json: {
-      auto encoded = forge::json::write(value);
+      auto encoded = forge::codec::json::write(value);
       if (!encoded.ok()) {
          FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request, "HTTP API request body cannot be encoded as JSON");
       }
       return std::move(encoded.text);
    }
    case body_codec::xml: {
-      auto encoded = forge::xml::write(value);
+      auto encoded = forge::codec::xml::write(value);
       if (!encoded.ok()) {
          FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request, "HTTP API request body cannot be encoded as XML");
       }

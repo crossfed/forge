@@ -18,8 +18,8 @@ module forge.plugins.db.objectdb.plugin;
 
 import forge.api.core.binding;
 import forge.app.plugin_context;
-import forge.config.component;
-import forge.config.decode;
+import forge.config.core.component;
+import forge.config.core.decode;
 import forge.db.driver;
 import forge.db.record;
 import forge.exceptions;
@@ -259,12 +259,12 @@ std::shared_ptr<plugin::impl> lifecycle::make_impl() {
    return std::make_shared<plugin::impl>();
 }
 
-std::optional<forge::config::component_descriptor> lifecycle::describe_config(const std::shared_ptr<plugin::impl>&) {
-   return forge::config::describe_component<config>("plugins.db.objectdb");
+std::optional<forge::config::core::component_descriptor> lifecycle::describe_config(const std::shared_ptr<plugin::impl>&) {
+   return forge::config::core::describe_component<config>("plugins.db.objectdb");
 }
 
 boost::asio::awaitable<void> lifecycle::configure(const std::shared_ptr<plugin::impl>& impl,
-                                                  forge::config::component_view view) {
+                                                  forge::config::core::component_view view) {
    impl->configure(decode_config(view));
    co_return;
 }

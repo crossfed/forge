@@ -15,7 +15,7 @@ import forge.api.core.binding;
 import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.asio.task_scheduler;
-import forge.config.component;
+import forge.config.core.component;
 import forge.rocksdb.store;
 
 #include "details/plugin_impl.hxx"
@@ -35,11 +35,11 @@ std::string plugin::version() const {
 }
 
 
-std::optional<forge::config::component_descriptor> plugin::describe_config() const {
+std::optional<forge::config::core::component_descriptor> plugin::describe_config() const {
    return detail::lifecycle::describe_config(impl_);
 }
 
-boost::asio::awaitable<void> plugin::configure(forge::config::component_view view) {
+boost::asio::awaitable<void> plugin::configure(forge::config::core::component_view view) {
    return detail::lifecycle::configure(impl_, view);
 }
 

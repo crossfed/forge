@@ -108,7 +108,7 @@ transport mutation APIs. Their public APIs are typed contribution surfaces:
 - HTTP APIs are published through `publish<Interface>()`, not raw route verbs.
 - P2P APIs are published through typed `forge::api::core::binding_plan` values.
 - Config is decoded through `BOOST_DESCRIBE_STRUCT`, `forge_schema` rules and
-  `forge_config`.
+  `forge_config_core`.
 - Product policy, auth, billing, storage semantics and downstream vocabulary do
   not belong in FORGE plugins.
 

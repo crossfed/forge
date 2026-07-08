@@ -52,13 +52,13 @@ Runtime identity:
 - `forge_api_core`
 - `forge_log`
 - `forge_otlp`
-- `forge_config`
+- `forge_config_core`
 - `forge_schema`
 
 ## Configuration
 
 Configuration is schema-driven through `BOOST_DESCRIBE_STRUCT`,
-`forge::schema::rules<T>` and `forge::config::decode<T>()`.
+`forge::schema::rules<T>` and `forge::config::core::decode<T>()`.
 
 ```yaml
 plugins:

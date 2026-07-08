@@ -25,7 +25,7 @@ target_link_libraries(
       forge_exceptions
       forge_api_core
       forge_asio
-      forge_json
+      forge_codec_json
       forge_schema
       forge_net_websocket
       Boost::asio

@@ -112,8 +112,8 @@ FORGE не должен быть одним большим target. Каждый 
 - `forge_core`;
 - `forge_reflect`;
 - `forge_raw`;
-- `forge_yaml`;
-- `forge_json`;
+- `forge_codec_yaml`;
+- `forge_codec_json`;
 - `forge_crypto`;
 - `forge_runtime`;
 - `forge_log`;
@@ -280,24 +280,24 @@ FC enum conversion имел свою семантику. FORGE должен яв
 Пример целевого API:
 
 ```cpp
-import forge.yaml;
-import forge.config.key_path;
-import forge.config.value;
-import forge.config.document;
-import forge.config.component;
-import forge.config.decode;
-import forge.config.migration;
+import forge.codec.yaml;
+import forge.config.core.key_path;
+import forge.config.core.value;
+import forge.config.core.document;
+import forge.config.core.component;
+import forge.config.core.decode;
+import forge.config.core.migration;
 
-auto loaded = forge::yaml::load_document("config.yml");
-auto decoded = forge::config::decode<server_config>(loaded.value, "server");
-forge::yaml::save_document("effective.yml", forge::config::redact(loaded.value, registry));
+auto loaded = forge::codec::yaml::load_document("config.yml");
+auto decoded = forge::config::core::decode<server_config>(loaded.value, "server");
+forge::codec::yaml::save_document("effective.yml", forge::config::core::redact(loaded.value, registry));
 ```
 
 Или:
 
 ```cpp
-auto parsed = forge::yaml::read_document(text);
-auto config = forge::config::decode<server_config>(parsed.value, "server");
+auto parsed = forge::codec::yaml::read_document(text);
+auto config = forge::config::core::decode<server_config>(parsed.value, "server");
 ```
 
 ### 6.2 Boost.Describe не является валидатором
@@ -376,18 +376,18 @@ recovery material
 vault passphrase
 ```
 
-`forge.yaml` / `forge.config` должны уметь печатать effective config with redaction:
+`forge.codec.yaml` / `forge.config` должны уметь печатать effective config with redaction:
 
 ```cpp
-auto redacted = forge::config::redact(effective_document, registry);
-std::cout << forge::yaml::write_document(redacted).text << "\n";
+auto redacted = forge::config::core::redact(effective_document, registry);
+std::cout << forge::codec::yaml::write_document(redacted).text << "\n";
 ```
 
 ### 6.6 JSON/YAML backend
 
-Glaze — единый backend для `forge_json` и `forge_yaml`. FORGE остаётся владельцем public API, `forge::variant`, `forge::config::document`, schema diagnostics и redaction. Glaze types, reflection metadata и backend parser details не выходят в public module interfaces.
+Glaze — единый backend для `forge_codec_json` и `forge_codec_yaml`. FORGE остаётся владельцем public API, `forge::variant`, `forge::config::core::document`, schema diagnostics и redaction. Glaze types, reflection metadata и backend parser details не выходят в public module interfaces.
 
-`Boost.Program_options` — только backend `forge_program_options`. Он переводит `argv` в `forge::config::document`; `forge_app` и plugins не видят `options_description` или `variables_map`.
+`Boost.Program_options` — только backend `forge_config_program_options`. Он переводит `argv` в `forge::config::core::document`; `forge_app` и plugins не видят `options_description` или `variables_map`.
 
 Merge order фиксируется так:
 
@@ -398,12 +398,12 @@ schema defaults < config file < environment/custom adapters < CLI
 Публичный API должен быть:
 
 ```cpp
-import forge.json;
-import forge.yaml;
+import forge.codec.json;
+import forge.codec.yaml;
 ```
 
-`forge::json::read_value/write_value` and `forge::yaml::read_value/write_value` work with `forge::variant`.
-`read_document/write_document` work with `forge::config::document`.
+`forge::codec::json::read_value/write_value` and `forge::codec::yaml::read_value/write_value` work with `forge::variant`.
+`read_document/write_document` work with `forge::config::core::document`.
 `read<T>/write<T>` are typed codec functions over schema/Boost.Describe metadata.
 
 ### 6.7 JSON
@@ -411,10 +411,10 @@ import forge.yaml;
 Тот же reflection/schema слой должен работать для JSON:
 
 ```cpp
-import forge.json;
+import forge.codec.json;
 
-auto json_text = forge::json::write(value).text;
-auto value = forge::json::read<T>(json_text).value;
+auto json_text = forge::codec::json::write(value).text;
+auto value = forge::codec::json::read<T>(json_text).value;
 ```
 
 Цель: заменить старую FC‑зависимость от JSON reflection более универсальной схемой.
@@ -728,7 +728,7 @@ boost::asio::awaitable<void> open_product_stream() {
 ### 11.2 Что изменить
 
 - убрать жёсткую привязку base plugin API к Boost.Program_options;
-- оставить CLI parsing в отдельном adapter target `forge_program_options`;
+- оставить CLI parsing в отдельном adapter target `forge_config_program_options`;
 - plugins описывают конфиг через `describe_config()` и получают typed view через `configure(...)`;
 - lifecycle для plugins async: `initialize/startup/shutdown -> boost::asio::awaitable<void>`;
 - `request_stop()` остаётся sync/noexcept;
@@ -846,7 +846,7 @@ libraries/crypto/
 
 ### 14.2 Владение module BMI
 
-`BMI` — Binary Module Interface, служебный файл компилятора для C++ modules. Целевое состояние: каждый доменный target (`forge_core`, `forge_raw`, `forge_json`, `forge_crypto` и т. д.) сам владеет своими `.cppm` через `FILE_SET CXX_MODULES`.
+`BMI` — Binary Module Interface, служебный файл компилятора для C++ modules. Целевое состояние: каждый доменный target (`forge_core`, `forge_raw`, `forge_codec_json`, `forge_crypto` и т. д.) сам владеет своими `.cppm` через `FILE_SET CXX_MODULES`.
 
 Общий `forge_modules` bridge удалён. Он был допустим только как временная миграционная подпорка для старого монолитного графа, но не является архитектурным слоем FORGE.
 
@@ -862,12 +862,12 @@ libraries/crypto/
 forge_core
 forge_reflect
 forge_raw
-forge_yaml
-forge_json
+forge_codec_yaml
+forge_codec_json
 forge_crypto
 forge_runtime
 forge_log
-forge_config
+forge_config_core
 forge_app
 forge_net_http
 forge_net_websocket
@@ -1012,7 +1012,7 @@ tests/unit/forge_compat
 - schema/validation;
 - redaction;
 - logging/diagnostics.
-- текущий v1 split: `forge_schema`, `forge_config`, `forge_yaml`, `forge_program_options`.
+- текущий v1 split: `forge_schema`, `forge_config_core`, `forge_codec_yaml`, `forge_config_program_options`.
 
 ### Этап 6 — app
 

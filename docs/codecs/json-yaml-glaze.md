@@ -1,16 +1,16 @@
 # JSON + YAML Codecs
 
-`forge_json` and `forge_yaml` expose a symmetric typed codec API over a Glaze
+`forge_codec_json` and `forge_codec_yaml` expose a symmetric typed codec API over a Glaze
 backend. FORGE owns the public API, value/document model, schema diagnostics and
 redaction boundary. Planned XML support follows the same ownership model in
 [Forge XML And HTTP API Codec Plan](../iterations/forge-xml-http-api-codec-v1.md):
-the XML backend stays private, while `forge_xml` exposes Forge-owned typed codec
+the XML backend stays private, while `forge_codec_xml` exposes Forge-owned typed codec
 functions over Boost.Describe and `forge_schema`.
 
 Local guides:
 
-- [JSON README](../../libraries/json/README.md)
-- [YAML README](../../libraries/yaml/README.md)
+- [JSON README](../../libraries/codec/json/README.md)
+- [YAML README](../../libraries/codec/yaml/README.md)
 
 ## Задача
 
@@ -19,7 +19,7 @@ class with static methods. YAML had a narrower config-only surface. FORGE now us
 one modern API shape for both formats:
 
 - `read_value` / `write_value` for generic `forge::variant`;
-- `read_document` / `write_document` for `forge::config::document`;
+- `read_document` / `write_document` for `forge::config::core::document`;
 - `read<T>` / `write<T>` for typed described objects;
 - `load_*` / `save_*` for filesystem paths.
 
@@ -28,7 +28,7 @@ one modern API shape for both formats:
 ```text
 JSON/YAML text
   -> Glaze backend parse
-  -> forge::variant or forge::config::document
+  -> forge::variant or forge::config::core::document
   -> optional forge_schema decode/validation
   -> read_result<T> with diagnostics
 ```
@@ -45,7 +45,7 @@ and message. Backend parser error types do not cross the module boundary.
 ## Redaction
 
 Codecs serialize the value or document they receive. They do not guess which
-fields are secret. Callers must use `forge_config::redact` or another explicit
+fields are secret. Callers must use `forge_config_core::redact` or another explicit
 redaction step before writing logs, diagnostics or operator-visible output.
 
 ## Unknown Fields
@@ -71,7 +71,7 @@ This policy only has meaning when schema rules can provide known field names.
 
 ## Verification
 
-- `test_forge_json`: generic value roundtrip, large integers, config document
+- `test_forge_codec_json`: generic value roundtrip, large integers, config document
   roundtrip, typed schema read and malformed input diagnostics.
-- `test_forge_yaml`: scalar/list/map roundtrip, config document roundtrip, typed
+- `test_forge_codec_yaml`: scalar/list/map roundtrip, config document roundtrip, typed
   schema read and malformed YAML diagnostics.

@@ -76,10 +76,10 @@ Build/test gates:
 
 ```bash
 cmake --build build/forge-debug -j 1 \
-  --target forge test_forge test_forge_exceptions test_forge_raw test_forge_json test_forge_crypto \
+  --target forge test_forge test_forge_exceptions test_forge_raw test_forge_codec_json test_forge_crypto \
   test_forge_multiformats test_forge_asio test_forge_transport test_forge_tcp test_forge_stcp \
-  test_forge_yamux test_forge_quic test_forge_app test_forge_schema test_forge_config \
-  test_forge_yaml test_forge_program_options test_forge_env test_forge_api_core \
+  test_forge_yamux test_forge_quic test_forge_app test_forge_schema test_forge_config_core \
+  test_forge_codec_yaml test_forge_config_program_options test_forge_config_env test_forge_api_core \
   test_forge_api_transport test_forge_http_websocket test_forge_quic_p2p \
   test_forge_plugins test_forge_otlp test_forge_tui
 

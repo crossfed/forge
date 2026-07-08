@@ -10,8 +10,8 @@ module;
 
 module forge.plugins.log.otlp.plugin;
 
-import forge.config.component;
-import forge.config.decode;
+import forge.config.core.component;
+import forge.config.core.decode;
 import forge.net.http.base_url;
 import forge.log.log_message;
 import forge.otlp.options;
@@ -82,11 +82,11 @@ forge::log_level parse_log_level(std::string_view value) {
    }
 }
 
-config decode_config(const forge::config::component_view& view) {
-   auto decoded = forge::config::decode<config>(view.source(), view.section());
+config decode_config(const forge::config::core::component_view& view) {
+   auto decoded = forge::config::core::decode<config>(view.source(), view.section());
    if (!decoded.ok()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_config,
-                            forge::config::format_decode_diagnostics("invalid OTLP logs config",
+                            forge::config::core::format_decode_diagnostics("invalid OTLP logs config",
                                                                       decoded.diagnostics));
    }
    validate_endpoint(decoded.value.endpoint);

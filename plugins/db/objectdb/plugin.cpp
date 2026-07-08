@@ -14,7 +14,7 @@ module forge.plugins.db.objectdb.plugin;
 import forge.api.core.binding;
 import forge.app.plugin;
 import forge.app.plugin_context;
-import forge.config.component;
+import forge.config.core.component;
 import forge.db.driver;
 import forge.objectdb.store;
 
@@ -33,11 +33,11 @@ std::string plugin::version() const {
    return "1.0.0";
 }
 
-std::optional<forge::config::component_descriptor> plugin::describe_config() const {
+std::optional<forge::config::core::component_descriptor> plugin::describe_config() const {
    return detail::lifecycle::describe_config(impl_);
 }
 
-boost::asio::awaitable<void> plugin::configure(forge::config::component_view view) {
+boost::asio::awaitable<void> plugin::configure(forge::config::core::component_view view) {
    return detail::lifecycle::configure(impl_, view);
 }
 

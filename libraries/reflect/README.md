@@ -87,5 +87,5 @@ order for byte-compatible packing.
 ## Tests
 
 Reflect behavior is mostly exercised through `test_forge_raw`,
-`test_forge_variant`, `test_forge_schema` and `test_forge_config`, where member order
+`test_forge_variant`, `test_forge_schema` and `test_forge_config_core`, where member order
 and enum mapping are observable.

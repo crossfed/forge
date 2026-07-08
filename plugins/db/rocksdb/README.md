@@ -34,7 +34,7 @@ It is the only official plugin layer that should touch RocksDB directly.
 - `forge_app`
 - `forge_api_core`
 - `forge_rocksdb`
-- `forge_config`
+- `forge_config_core`
 - `forge_schema`
 
 ## Config

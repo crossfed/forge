@@ -210,12 +210,12 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db_rocksdb/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/objectdb/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/blobdb/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/json/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/config/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/yaml/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/xml/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/program_options/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/env/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec/json/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/config/core/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec/yaml/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec/xml/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/config/program_options/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/config/env/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/core/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/http/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/stream/include"
@@ -364,11 +364,7 @@ add_subdirectory(libraries/db)
 add_subdirectory(libraries/objectdb)
 add_subdirectory(libraries/blobdb)
 add_subdirectory(libraries/config)
-add_subdirectory(libraries/json)
-add_subdirectory(libraries/yaml)
-add_subdirectory(libraries/xml)
-add_subdirectory(libraries/program_options)
-add_subdirectory(libraries/env)
+add_subdirectory(libraries/codec)
 add_subdirectory(libraries/api)
 add_subdirectory(libraries/log)
 add_subdirectory(libraries/crypto)
@@ -400,12 +396,12 @@ set(
    forge_db
    forge_objectdb
    forge_blobdb
-   forge_config
-   forge_json
-   forge_yaml
-   forge_xml
-   forge_program_options
-   forge_env
+   forge_config_core
+   forge_codec_json
+   forge_codec_yaml
+   forge_codec_xml
+   forge_config_program_options
+   forge_config_env
    forge_api_core
    forge_api_stream
    forge_api_transport
@@ -498,12 +494,12 @@ install(
              libraries/db/include/forge
              libraries/objectdb/include/forge
              libraries/blobdb/include/forge
-             libraries/json/include/forge
-             libraries/config/include/forge
-             libraries/yaml/include/forge
-             libraries/xml/include/forge
-             libraries/program_options/include/forge
-             libraries/env/include/forge
+             libraries/codec/json/include/forge
+             libraries/config/core/include/forge
+             libraries/codec/yaml/include/forge
+             libraries/codec/xml/include/forge
+             libraries/config/program_options/include/forge
+             libraries/config/env/include/forge
              libraries/api/core/include/forge
              libraries/api/http/include/forge
              libraries/api/stream/include/forge

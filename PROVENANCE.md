@@ -50,9 +50,9 @@ network/API work and did not show source continuity to the initial FC import in
 this audit:
 
 - `libraries/app`
-- `libraries/config`
-- `libraries/program_options`
-- `libraries/yaml`
+- `libraries/config/core`
+- `libraries/config/program_options`
+- `libraries/codec/yaml`
 - OpenSSL3-backed crypto mechanics introduced after the initial import,
   including current AES streaming/GCM/CBC mechanics, random bytes, KDF,
   DER/PEM helpers, Ed25519, RSA, X25519, X.509, WebAuthn parsing, asymmetric
@@ -61,9 +61,9 @@ this audit:
 - FORGE raw infrastructure added after the initial import, including
   `forge.raw.exceptions`, `serialization.hpp`, target/module glue, and typed
   datastream range-error plumbing.
-- current Glaze-backed `libraries/json`
+- current Glaze-backed `libraries/codec/json`
 - current Boost.Describe-based `libraries/reflect`
-- `libraries/asio`, `libraries/env`, `libraries/exceptions`, `libraries/http`,
+- `libraries/asio`, `libraries/config/env`, `libraries/exceptions`, `libraries/http`,
   `libraries/schema`, `libraries/transport`, `libraries/websocket`
 - `libraries/quic`, `libraries/tcp`, `libraries/stcp`, `libraries/yamux`,
   `libraries/p2p`
@@ -114,7 +114,7 @@ items include:
   implementation with Kevin Heifner modification notice.
 - `libraries/core/uint128.cpp`: portions adapted from Evan Teran.
 - `vendor/pugixml`: Arseny Kapoulkine pugixml, MIT. FORGE compiles
-  `vendor/pugixml/src/pugixml.cpp` directly into `forge_xml` as a private XML
+  `vendor/pugixml/src/pugixml.cpp` directly into `forge_codec_xml` as a private XML
   backend; `pugi::*` types are not part of the public API.
 
 Submodules may contain their own third-party dependency notices, such as

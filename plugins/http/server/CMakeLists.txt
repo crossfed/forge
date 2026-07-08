@@ -21,7 +21,7 @@ target_link_libraries(
    forge_plugins_http_server PUBLIC
       forge_app
       forge_api_core
-      forge_config
+      forge_config_core
       forge_schema
       forge_net_http
       forge_api_http

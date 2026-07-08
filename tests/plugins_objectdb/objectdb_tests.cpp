@@ -31,9 +31,9 @@ import forge.app.signals;
 import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.asio.task_scheduler;
-import forge.config.component;
-import forge.config.document;
-import forge.config.value;
+import forge.config.core.component;
+import forge.config.core.document;
+import forge.config.core.value;
 import forge.ids.object_id;
 import forge.objectdb.cursor;
 import forge.objectdb.exceptions;
@@ -226,7 +226,7 @@ class installer_plugin final : public forge::app::plugin {
 }
 
 [[nodiscard]] std::unique_ptr<forge::app::application_shell>
-make_app(forge::config::document document = {}, std::shared_ptr<memory_driver> driver = {}) {
+make_app(forge::config::core::document document = {}, std::shared_ptr<memory_driver> driver = {}) {
    auto builder = forge::app::application_builder{};
    builder.name("objectdb-plugin-test")
       .runtime(forge::asio::runtime_options{.worker_threads = 1, .thread_name = "objectdb-plugin-test"})
@@ -249,8 +249,8 @@ make_app(forge::config::document document = {}, std::shared_ptr<memory_driver> d
    return value;
 }
 
-[[nodiscard]] const forge::config::field_descriptor&
-require_field(const forge::config::component_descriptor& descriptor, const std::string& name) {
+[[nodiscard]] const forge::config::core::field_descriptor&
+require_field(const forge::config::core::component_descriptor& descriptor, const std::string& name) {
    const auto found = std::ranges::find_if(descriptor.fields, [&](const auto& field) {
       return field.name == name;
    });
@@ -258,19 +258,19 @@ require_field(const forge::config::component_descriptor& descriptor, const std::
    return *found;
 }
 
-[[nodiscard]] forge::config::value configured_store(std::string name, std::filesystem::path path) {
-   auto object = forge::config::value::object_type{};
-   object.emplace("name", forge::config::value{std::move(name)});
-   object.emplace("driver", forge::config::value{std::string{"rocksdb"}});
-   object.emplace("path", forge::config::value{path.string()});
-   object.emplace("family", forge::config::value{std::string{"objectdb"}});
-   object.emplace("write-policy", forge::config::value{std::string{"single-writer"}});
-   return forge::config::value{std::move(object)};
+[[nodiscard]] forge::config::core::value configured_store(std::string name, std::filesystem::path path) {
+   auto object = forge::config::core::value::object_type{};
+   object.emplace("name", forge::config::core::value{std::move(name)});
+   object.emplace("driver", forge::config::core::value{std::string{"rocksdb"}});
+   object.emplace("path", forge::config::core::value{path.string()});
+   object.emplace("family", forge::config::core::value{std::string{"objectdb"}});
+   object.emplace("write-policy", forge::config::core::value{std::string{"single-writer"}});
+   return forge::config::core::value{std::move(object)};
 }
 
-[[nodiscard]] forge::config::document document_for_rocksdb(const std::filesystem::path& path) {
-   auto document = forge::config::document{};
-   document.set("plugins.db.objectdb.stores", forge::config::value::array_type{configured_store("accounts", path)});
+[[nodiscard]] forge::config::core::document document_for_rocksdb(const std::filesystem::path& path) {
+   auto document = forge::config::core::document{};
+   document.set("plugins.db.objectdb.stores", forge::config::core::value::array_type{configured_store("accounts", path)});
    return document;
 }
 
@@ -320,8 +320,8 @@ BOOST_AUTO_TEST_CASE(objectdb_plugin_rejects_invalid_programmatic_setup) {
    auto events = forge::app::event_bus{};
    auto plugin = objectdb_plugin::plugin{};
 
-   auto document = forge::config::document{};
-   forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.objectdb"}));
+   auto document = forge::config::core::document{};
+   forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.objectdb"}));
    auto provider = forge::api::core::installer{apis};
    forge::asio::blocking::run(runtime, plugin.provide(provider));
    auto context = forge::app::plugin_context{scheduler, apis, signals, events};
@@ -349,29 +349,29 @@ BOOST_AUTO_TEST_CASE(objectdb_plugin_rejects_invalid_programmatic_setup) {
 BOOST_AUTO_TEST_CASE(objectdb_plugin_rejects_duplicate_configured_store_names) {
    auto runtime = forge::asio::runtime{};
    auto plugin = objectdb_plugin::plugin{};
-   auto document = forge::config::document{};
+   auto document = forge::config::core::document{};
    document.set(
       "plugins.db.objectdb.stores",
-      forge::config::value::array_type{
+      forge::config::core::value::array_type{
          configured_store("accounts", "/tmp/forge-objectdb-plugin-duplicate-a"),
          configured_store("accounts", "/tmp/forge-objectdb-plugin-duplicate-b"),
       });
 
    BOOST_CHECK_THROW(
-      forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.objectdb"})),
+      forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.objectdb"})),
       objectdb_plugin::exceptions::invalid_config);
 }
 
 BOOST_AUTO_TEST_CASE(objectdb_plugin_rejects_configure_after_stop_or_shutdown) {
    auto runtime = forge::asio::runtime{};
-   auto document = forge::config::document{};
+   auto document = forge::config::core::document{};
 
    {
       auto plugin = objectdb_plugin::plugin{};
       plugin.request_stop();
 
       BOOST_CHECK_THROW(
-         forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.objectdb"})),
+         forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.objectdb"})),
          objectdb_plugin::exceptions::stopped);
       BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, plugin.startup()),
                         objectdb_plugin::exceptions::startup_failed);
@@ -379,12 +379,12 @@ BOOST_AUTO_TEST_CASE(objectdb_plugin_rejects_configure_after_stop_or_shutdown) {
 
    {
       auto plugin = objectdb_plugin::plugin{};
-      forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.objectdb"}));
+      forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.objectdb"}));
       forge::asio::blocking::run(runtime, plugin.startup());
       forge::asio::blocking::run(runtime, plugin.shutdown());
 
       BOOST_CHECK_THROW(
-         forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.objectdb"})),
+         forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.objectdb"})),
          objectdb_plugin::exceptions::stopped);
    }
 }
@@ -439,8 +439,8 @@ BOOST_AUTO_TEST_CASE(objectdb_plugin_store_handle_remains_valid_during_dependent
    auto plugin = objectdb_plugin::plugin{};
    auto driver = std::make_shared<memory_driver>();
 
-   auto document = forge::config::document{};
-   forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.objectdb"}));
+   auto document = forge::config::core::document{};
+   forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.objectdb"}));
    auto provider = forge::api::core::installer{apis};
    forge::asio::blocking::run(runtime, plugin.provide(provider));
    auto context = forge::app::plugin_context{scheduler, apis, signals, events};
@@ -477,8 +477,8 @@ BOOST_AUTO_TEST_CASE(objectdb_plugin_store_handle_concurrent_close_is_snapshot_s
    auto plugin = objectdb_plugin::plugin{};
    auto driver = std::make_shared<memory_driver>();
 
-   auto document = forge::config::document{};
-   forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.objectdb"}));
+   auto document = forge::config::core::document{};
+   forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.objectdb"}));
    auto provider = forge::api::core::installer{apis};
    forge::asio::blocking::run(runtime, plugin.provide(provider));
    auto context = forge::app::plugin_context{scheduler, apis, signals, events};

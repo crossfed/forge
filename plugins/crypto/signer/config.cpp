@@ -9,8 +9,8 @@ module;
 
 module forge.plugins.crypto.signer.plugin;
 
-import forge.config.component;
-import forge.config.decode;
+import forge.config.core.component;
+import forge.config.core.decode;
 import forge.crypto.asymmetric;
 import forge.exceptions;
 import forge.plugins.crypto.signer.exceptions;
@@ -21,17 +21,17 @@ import forge.plugins.crypto.signer.types;
 
 namespace forge::plugins::crypto::signer {
 
-config decode_config(const forge::config::component_view& view) {
-   auto decoded = forge::config::decode<config>(view.source(), view.section());
+config decode_config(const forge::config::core::component_view& view) {
+   auto decoded = forge::config::core::decode<config>(view.source(), view.section());
    if (!decoded.ok()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_config,
-                          forge::config::format_decode_diagnostics("invalid crypto signer config",
+                          forge::config::core::format_decode_diagnostics("invalid crypto signer config",
                                                                  decoded.diagnostics));
    }
    return std::move(decoded.value);
 }
 
-void apply_config(plugin::impl& state, forge::config::component_view view) {
+void apply_config(plugin::impl& state, forge::config::core::component_view view) {
    auto config = decode_config(view);
    (void)state.profile_by_name(config.default_output_profile);
    auto loaded = std::map<std::string, plugin::impl::loaded_key>{};

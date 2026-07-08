@@ -20,7 +20,7 @@ target_link_libraries(
    forge_plugins_log_otlp PUBLIC
       forge_app
       forge_api_core
-      forge_config
+      forge_config_core
       forge_schema
       forge_log
       forge_otlp

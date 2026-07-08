@@ -25,8 +25,8 @@ for applications with substantial state or custom lifecycle hooks.
 
 - Do not use `forge_app` as a generic dependency injection container.
 - Do not parse `argv`, YAML or JSON inside plugins. Use `run_daemon(...)` for
-  normal foreground daemons, or use `forge_program_options`, `forge_yaml` and
-  `forge_json` before `application_shell::configure(...)` in custom hosts.
+  normal foreground daemons, or use `forge_config_program_options`, `forge_codec_yaml` and
+  `forge_codec_json` before `application_shell::configure(...)` in custom hosts.
 - Do not put security authority into UI/events/diagnostics. They are
   observability surfaces, not permission boundaries.
 - Do not invent hook names that repeat the application context. The shell
@@ -48,8 +48,8 @@ for applications with substantial state or custom lifecycle hooks.
 
 Target: `forge_app`.
 
-Dependencies: `forge_asio`, `forge_config`, `forge_yaml`, `forge_env`,
-`forge_program_options`, Boost headers.
+Dependencies: `forge_asio`, `forge_config_core`, `forge_codec_yaml`, `forge_config_env`,
+`forge_config_program_options`, Boost headers.
 
 ## Examples
 
@@ -64,7 +64,7 @@ shell-owned.
 ```cpp
 boost::asio::awaitable<void> run_configured_app(
    forge::app::application_shell& app,
-   const forge::config::document& document) {
+   const forge::config::core::document& document) {
    app.describe_config();
    app.configure(document);
    co_await app.initialize();
@@ -103,7 +103,7 @@ import forge.app.plugin_context;
 import forge.app.plugin;
 import forge.app.plugin_registry;
 import forge.app.application_shell;
-import forge.config.document;
+import forge.config.core.document;
 import forge.schema.object;
 
 struct http_config {
@@ -128,11 +128,11 @@ class http_plugin final : public forge::app::plugin {
    forge::app::plugin_id id() const override { return forge::app::plugin_id{"http"}; }
    std::string version() const override { return "1"; }
 
-   std::optional<forge::config::component_descriptor> describe_config() const override {
-      return forge::config::describe_component<http_config>("http");
+   std::optional<forge::config::core::component_descriptor> describe_config() const override {
+      return forge::config::core::describe_component<http_config>("http");
    }
 
-   boost::asio::awaitable<void> configure(forge::config::component_view view) override {
+   boost::asio::awaitable<void> configure(forge::config::core::component_view view) override {
       bind_port_ = view.get_or<std::uint16_t>("bind-port", 8080);
       tls_enabled_ = view.get_or<bool>("tls-enabled", false);
       co_return;
@@ -186,7 +186,7 @@ void on_register_plugins(forge::app::plugin_registry& registry) override {
    });
 }
 
-auto document = forge::config::document{};
+auto document = forge::config::core::document{};
 document.set("plugins.metrics.enabled", true);
 document.set("plugins.api.enabled", false);
 app.configure(document);
@@ -223,8 +223,8 @@ class service_application final : public forge::app::application_shell {
          }} {}
 
  protected:
-   void on_describe_config(forge::config::component_registry& registry) const override {
-      registry.add(forge::config::describe_component<service_config>("service"));
+   void on_describe_config(forge::config::core::component_registry& registry) const override {
+      registry.add(forge::config::core::describe_component<service_config>("service"));
    }
 
    boost::asio::awaitable<void> on_configure(forge::app::configure_context& context) override {
@@ -304,15 +304,15 @@ cleanly.
 ## Running The Shell
 
 Config can come from YAML, JSON, environment adapters or CLI. The shell only
-receives a neutral `forge::config::document`.
+receives a neutral `forge::config::core::document`.
 
 ```cpp
 import forge.asio.blocking;
-import forge.config.document;
+import forge.config.core.document;
 
 auto app = service_application{};
 
-auto document = forge::config::document{};
+auto document = forge::config::core::document{};
 document.set("service.workers", 4U);
 document.set("http.bind-port", 9090U);
 
@@ -332,10 +332,10 @@ standardizes the common flow: configure, startup, wait, request stop, shutdown.
 ```cpp
 import forge.app.application_shell;
 import forge.app.runner;
-import forge.config.document;
+import forge.config.core.document;
 
 auto app = service_application{};
-auto document = forge::config::document{};
+auto document = forge::config::core::document{};
 document.set("service.workers", 4U);
 
 auto options = forge::app::run_options{

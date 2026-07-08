@@ -24,7 +24,7 @@ import forge.asio.blocking;
 import forge.app.exceptions;
 import forge.app.application;
 import forge.app.application_shell;
-import forge.config.document;
+import forge.config.core.document;
 
 namespace forge::app {
 namespace {
@@ -162,7 +162,7 @@ void shutdown_with_timeout(application_shell& app, std::chrono::milliseconds tim
    }
 }
 
-int run_application_impl(application_shell& app, const forge::config::document& document, run_options options,
+int run_application_impl(application_shell& app, const forge::config::core::document& document, run_options options,
                          std::shared_ptr<shutdown_owner> owner) {
    auto exit_code = 0;
    auto failure = std::exception_ptr{};
@@ -198,11 +198,11 @@ int run_application_impl(application_shell& app, const forge::config::document& 
 
 } // namespace
 
-int run_application(application_shell& app, const forge::config::document& document, run_options options) {
+int run_application(application_shell& app, const forge::config::core::document& document, run_options options) {
    return run_application_impl(app, document, std::move(options), {});
 }
 
-int run_application(std::unique_ptr<application_shell> app, const forge::config::document& document,
+int run_application(std::unique_ptr<application_shell> app, const forge::config::core::document& document,
                     run_options options) {
    if (!app) {
       throw std::invalid_argument{"application pointer must not be null"};

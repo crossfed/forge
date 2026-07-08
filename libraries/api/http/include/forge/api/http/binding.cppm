@@ -45,12 +45,12 @@ import forge.net.http.route_context;
 import forge.net.http.stream;
 import forge.net.http.types;
 import forge.net.http.upload;
-import forge.json;
+import forge.codec.json;
 import forge.reflect.reflect;
 import forge.schema.diagnostic;
 import forge.schema.object;
 import forge.schema.scalar;
-import forge.xml;
+import forge.codec.xml;
 
 export namespace forge::api::http {
 
@@ -288,38 +288,38 @@ class binding_builder {
    [[nodiscard]] static std::string encode_error_payload(const forge::api::core::error_payload& error, error_codec codec) {
       switch (codec) {
       case error_codec::json: {
-         auto encoded = forge::json::write(error);
+         auto encoded = forge::codec::json::write(error);
          if (encoded.ok()) {
             return std::move(encoded.text);
          }
-         return forge::json::write(forge::api::core::make_internal_error_payload()).text;
+         return forge::codec::json::write(forge::api::core::make_internal_error_payload()).text;
       }
       case error_codec::xml: {
-         auto doc = forge::xml::document{
+         auto doc = forge::codec::xml::document{
             .root =
-               forge::xml::element{
+               forge::codec::xml::element{
                   .name = "ErrorPayload",
                   .children =
                      {
-                        forge::xml::element{.name = "error", .text = error.error},
-                        forge::xml::element{.name = "message", .text = error.message},
-                        forge::xml::element{.name = "retryable", .text = error.retryable ? "true" : "false"},
-                        forge::xml::element{
+                        forge::codec::xml::element{.name = "error", .text = error.error},
+                        forge::codec::xml::element{.name = "message", .text = error.message},
+                        forge::codec::xml::element{.name = "retryable", .text = error.retryable ? "true" : "false"},
+                        forge::codec::xml::element{
                            .name = "status_code",
                            .text = std::to_string(static_cast<unsigned>(error.status_code)),
                         },
-                        forge::xml::element{
+                        forge::codec::xml::element{
                            .name = "identity",
                            .children =
                               {
-                                 forge::xml::element{.name = "category", .text = error.identity.category},
-                                 forge::xml::element{.name = "code", .text = std::to_string(error.identity.code)},
+                                 forge::codec::xml::element{.name = "category", .text = error.identity.category},
+                                 forge::codec::xml::element{.name = "code", .text = std::to_string(error.identity.code)},
                               },
                         },
                      },
                },
          };
-         auto encoded = forge::xml::write_value(doc);
+         auto encoded = forge::codec::xml::write_value(doc);
          if (encoded.ok()) {
             return std::move(encoded.text);
          }
@@ -831,10 +831,10 @@ class binding_builder {
    [[nodiscard]] static T decode_value(std::string_view body, std::string_view source_name, body_codec codec) {
       switch (codec) {
       case body_codec::json: {
-         auto decoded = forge::json::read<T>(body,
-                                           forge::json::read_options{.source_name = std::string{source_name},
+         auto decoded = forge::codec::json::read<T>(body,
+                                           forge::codec::json::read_options{.source_name = std::string{source_name},
                                                                    .unknown_fields =
-                                                                      forge::json::unknown_field_policy::error});
+                                                                      forge::codec::json::unknown_field_policy::error});
          if (!decoded.ok()) {
             FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                 diagnostic_message(decoded.diagnostics, "HTTP API JSON request body is invalid"));
@@ -842,10 +842,10 @@ class binding_builder {
          return std::move(decoded.value);
       }
       case body_codec::xml: {
-         auto decoded = forge::xml::read<T>(body,
-                                          forge::xml::read_options{.source_name = std::string{source_name},
+         auto decoded = forge::codec::xml::read<T>(body,
+                                          forge::codec::xml::read_options{.source_name = std::string{source_name},
                                                                  .unknown_fields =
-                                                                    forge::xml::unknown_field_policy::error});
+                                                                    forge::codec::xml::unknown_field_policy::error});
          if (!decoded.ok()) {
             FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                 diagnostic_message(decoded.diagnostics, "HTTP API XML request body is invalid"));
@@ -1370,14 +1370,14 @@ class binding_builder {
    [[nodiscard]] static std::string encode_response_body(const Response& value, body_codec codec) {
       switch (codec) {
       case body_codec::json: {
-         auto encoded = forge::json::write(value);
+         auto encoded = forge::codec::json::write(value);
          if (!encoded.ok()) {
             FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request, "HTTP API response cannot be encoded as JSON");
          }
          return std::move(encoded.text);
       }
       case body_codec::xml: {
-         auto encoded = forge::xml::write(value);
+         auto encoded = forge::codec::xml::write(value);
          if (!encoded.ok()) {
             FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request, "HTTP API response cannot be encoded as XML");
          }

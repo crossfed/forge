@@ -42,7 +42,7 @@ still owns HTTP mechanics; the plugin owns app lifecycle/config composition.
 
 Target: `forge_net_http`.
 
-Dependencies: `forge_asio`, `forge_net_websocket`, `forge_json`, `forge_schema`,
+Dependencies: `forge_asio`, `forge_net_websocket`, `forge_codec_json`, `forge_schema`,
 Boost.Asio, Boost.Beast, Boost.URL, OpenSSL.
 
 Boost.Beast remains the runtime donor and backend for parser/serializer/socket
@@ -516,7 +516,7 @@ boost::asio::awaitable<void> read_chunk(forge::net::http::client& client) {
 
 import forge.net.http.client;
 import forge.net.http.types;
-import forge.json;
+import forge.codec.json;
 
 struct action_request {
    bool dry_run = false;
@@ -525,7 +525,7 @@ struct action_request {
 BOOST_DESCRIBE_STRUCT(action_request, (), (dry_run))
 
 boost::asio::awaitable<void> submit_action(forge::net::http::client& client) {
-   auto body = forge::json::write(action_request{.dry_run = true});
+   auto body = forge::codec::json::write(action_request{.dry_run = true});
    if (!body.ok()) {
       report_diagnostics(body.diagnostics);
       co_return;
@@ -539,7 +539,7 @@ boost::asio::awaitable<void> submit_action(forge::net::http::client& client) {
 ```
 
 Raw JSON string literals are fine for tests and probes, but application APIs should
-prefer described DTOs plus `forge_json` so field names and diagnostics stay in one
+prefer described DTOs plus `forge_codec_json` so field names and diagnostics stay in one
 place.
 
 ### WebSocket Upgrade Route

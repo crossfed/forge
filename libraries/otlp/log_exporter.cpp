@@ -38,7 +38,7 @@ import forge.exceptions;
 import forge.net.http.base_url;
 import forge.net.http.client;
 import forge.net.http.types;
-import forge.json;
+import forge.codec.json;
 import forge.log.log_message;
 
 namespace forge::otlp {
@@ -662,7 +662,7 @@ struct log_exporter::impl : std::enable_shared_from_this<impl> {
             },
       };
 
-      auto encoded = forge::json::write(request);
+      auto encoded = forge::codec::json::write(request);
       if (!encoded.ok()) {
          const auto message = encoded.diagnostics.empty() ? std::string{"unknown JSON encoding error"}
                                                           : encoded.diagnostics.front().message;

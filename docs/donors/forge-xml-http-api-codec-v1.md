@@ -1,6 +1,6 @@
 # Forge XML And HTTP API Codec Donor Note
 
-This donor note records the patterns accepted for the `forge_xml` library and
+This donor note records the patterns accepted for the `forge_codec_xml` library and
 the follow-up `forge_api_http` multi-codec binding work.
 
 ## Donors Inspected

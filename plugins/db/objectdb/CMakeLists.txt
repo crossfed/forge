@@ -20,7 +20,7 @@ target_link_libraries(
    forge_plugins_db_objectdb PUBLIC
       forge_app
       forge_api_core
-      forge_config
+      forge_config_core
       forge_schema
       forge_db
       forge_objectdb

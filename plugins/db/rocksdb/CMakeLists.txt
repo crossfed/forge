@@ -21,7 +21,7 @@ target_link_libraries(
       forge_api_core
       forge_app
       forge_asio
-      forge_config
+      forge_config_core
       forge_schema
       forge_rocksdb
       forge_exceptions

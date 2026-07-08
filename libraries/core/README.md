@@ -31,7 +31,7 @@ logging or network dependencies.
 Target: `forge_core`.
 
 Owned dependencies: minimal Boost implementation details only. `forge_core` must
-not import or link `forge_raw`, `forge_variant`, `forge_json`, `forge_log`, `forge_crypto`
+not import or link `forge_raw`, `forge_variant`, `forge_codec_json`, `forge_log`, `forge_crypto`
 or network targets.
 
 ## Examples

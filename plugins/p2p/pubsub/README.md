@@ -62,7 +62,7 @@ plugins:
 - `forge_api_core`
 - `forge_net_p2p`
 - `forge_plugins_p2p_node`
-- `forge_config`
+- `forge_config_core`
 - `forge_schema`
 
 ## Examples
