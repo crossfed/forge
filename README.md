@@ -153,11 +153,12 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [program_options](libraries/program_options/README.md) | `forge_program_options` | CLI adapter from Boost.Program_options into config documents. | Boost.Program_options privately. |
 | [env](libraries/env/README.md) | `forge_env` | Process env and explicit `.env` adapter into config documents. | `forge_config`, `forge_schema`. |
 | [api/core](libraries/api/core/README.md) | `forge_api_core` | Typed local/remote API contracts, handles, descriptors and frame vocabulary. | `forge_exceptions`, `forge_raw`. |
-| [api/transport](libraries/api/transport/README.md) | `forge_api_transport` | API frames over reusable transport streams/sessions. | `forge_api_core`, `forge_raw`, `forge_net_transport`. |
+| [api/stream](libraries/api/stream/README.md) | `forge_api_stream` | Server-side API frame loop over reusable transport streams. | `forge_api_core`, `forge_raw`, `forge_net_transport`. |
+| [api/transport](libraries/api/transport/README.md) | `forge_api_transport` | Generic API transport client, connection and session serving. | `forge_api_stream`, `forge_net_transport`. |
 | [api/http](libraries/api/http/README.md) | `forge_api_http` | Typed Forge API contracts over native HTTP routes with JSON/XML codecs. | `forge_net_http`, `forge_api_core`, `forge_json`, `forge_xml`. |
-| [api/quic](libraries/api/quic/README.md) | `forge_api_quic` | API frame binding over QUIC streams. | `forge_api_transport`, `forge_net_quic`. |
+| [api/quic](libraries/api/quic/README.md) | `forge_api_quic` | API frame binding over QUIC streams. | `forge_api_stream`, `forge_net_quic`. |
 | [api/websocket](libraries/api/websocket/README.md) | `forge_api_websocket` | API frame binding over WebSocket messages. | `forge_api_core`, `forge_net_websocket`, `forge_raw`. |
-| [api/p2p](libraries/api/p2p/README.md) | `forge_api_p2p` | API frame binding over negotiated P2P protocol streams. | `forge_api_transport`, `forge_net_p2p`. |
+| [api/p2p](libraries/api/p2p/README.md) | `forge_api_p2p` | API frame binding over negotiated P2P protocol streams. | `forge_api_stream`, `forge_net_p2p`. |
 | [crypto](libraries/crypto/README.md) | `forge_crypto` | Hashes, encodings, keys, signatures, OpenSSL 3.0+ crypto. | OpenSSL::Crypto, GMP, secp256k1, BLS. |
 | [log](libraries/log/README.md) | `forge_log` | Logging core, messages, console/appender boundary. | `forge_variant`, Boost.DLL privately. |
 | [otlp](libraries/otlp/README.md) | `forge_otlp` | OTLP/HTTP JSON log export and crash-spool resend. | `forge_log`, `forge_net_http`, `forge_asio`. |

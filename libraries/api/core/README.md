@@ -191,11 +191,12 @@ return forge::api::core::define<cache>({.id = {"cache.bulk"}, .version = {1, 0}}
 
 ## API Over Transport
 
-`forge.api.transport` is the reusable binding for API-over-stream transports. It
-sits above `forge_api_core` and `forge_net_transport`, uses `forge::net::transport::stream` /
-`forge::net::transport::session`, and owns the shared frame read/write loop, codec
-checks, grouped stream handling, max-inflight limits, deadlines and error
-projection.
+`forge.api.stream` is the reusable binding for API-over-stream serving. It
+sits above `forge_api_core` and `forge_net_transport`, uses
+`forge::net::transport::stream`, and owns the shared server frame read/write
+loop, codec checks, max-inflight limits, deadlines and error projection.
+`forge.api.transport` builds the generic client, connection and session layer
+on top of that stream primitive.
 
 This layer must not move into `forge_net_transport`: transport stays a low-level
 byte-stream/session contract and must not import the API contract layer.

@@ -17,11 +17,8 @@ import forge.api.core.connection;
 import forge.api.core.registry;
 import forge.api.core.binding;
 import forge.api.core.dispatcher;
-import forge.api.transport.exceptions;
-import forge.api.transport.options;
-import forge.api.transport.client;
-import forge.api.transport.connection;
-import forge.api.transport.server;
+import forge.api.stream.options;
+import forge.api.stream.server;
 import forge.net.quic.stream;
 import forge.net.quic.transport;
 import forge.net.transport.stream;
@@ -30,11 +27,11 @@ export namespace forge::api::quic {
 
 class api_binding {
  public:
-   api_binding(forge::api::core::binding_plan plan, forge::api::transport::options options)
+   api_binding(forge::api::core::binding_plan plan, forge::api::stream::options options)
        : plan_{std::move(plan)}, options_{std::move(options)} {}
 
    boost::asio::awaitable<void> accept(forge::net::transport::stream stream) const {
-      co_await forge::api::transport::serve_stream(std::move(stream), plan_, options_);
+      co_await forge::api::stream::serve_stream(std::move(stream), plan_, options_);
    }
 
    boost::asio::awaitable<void> accept(forge::net::quic::stream stream) const {
@@ -61,13 +58,13 @@ class api_binding {
       return options_.deadline;
    }
 
-   [[nodiscard]] const forge::api::transport::options& options() const noexcept {
+   [[nodiscard]] const forge::api::stream::options& options() const noexcept {
       return options_;
    }
 
  private:
    forge::api::core::binding_plan plan_;
-   forge::api::transport::options options_;
+   forge::api::stream::options options_;
 };
 
 class api_builder {
@@ -103,7 +100,7 @@ class api_builder {
 
  private:
    forge::api::core::binding_plan plan_;
-   forge::api::transport::options options_{.deadline = std::chrono::milliseconds{5000}};
+   forge::api::stream::options options_{.deadline = std::chrono::milliseconds{5000}};
 };
 
 [[nodiscard]] inline api_builder api() {

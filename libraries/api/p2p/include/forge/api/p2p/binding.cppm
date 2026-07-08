@@ -19,11 +19,8 @@ import forge.api.core.connection;
 import forge.api.core.registry;
 import forge.api.core.binding;
 import forge.api.core.dispatcher;
-import forge.api.transport.exceptions;
-import forge.api.transport.options;
-import forge.api.transport.client;
-import forge.api.transport.connection;
-import forge.api.transport.server;
+import forge.api.stream.options;
+import forge.api.stream.server;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.node;
 import forge.net.p2p.protocol;
@@ -42,7 +39,7 @@ class api_binding {
    };
 
    api_binding(forge::net::p2p::node* owner, forge::api::core::binding_plan plan,
-               forge::net::p2p::protocol_id protocol, forge::api::transport::options options,
+               forge::net::p2p::protocol_id protocol, forge::api::stream::options options,
                peer_policy peer_policy_value, discovery_scope discovery_scope_value)
        : owner_{owner}, plan_{std::move(plan)}, protocol_{std::move(protocol)}, options_{std::move(options)},
          peer_policy_{std::move(peer_policy_value)}, discovery_scope_{std::move(discovery_scope_value)} {}
@@ -65,8 +62,8 @@ class api_binding {
             .value = stream.session.remote_peer.to_string(),
          },
       };
-      co_await forge::api::transport::serve_stream(std::move(stream.stream).into_transport_stream(), plan_, options_,
-                                                 std::move(trusted));
+      co_await forge::api::stream::serve_stream(std::move(stream.stream).into_transport_stream(), plan_, options_,
+                                               std::move(trusted));
    }
 
    boost::asio::awaitable<void> serve(forge::net::p2p::node::incoming_protocol_stream stream) const {
@@ -89,7 +86,7 @@ class api_binding {
       return options_.max_inflight;
    }
 
-   [[nodiscard]] const forge::api::transport::options& options() const noexcept {
+   [[nodiscard]] const forge::api::stream::options& options() const noexcept {
       return options_;
    }
 
@@ -110,7 +107,7 @@ class api_binding {
    forge::net::p2p::node* owner_ = nullptr;
    forge::api::core::binding_plan plan_;
    forge::net::p2p::protocol_id protocol_;
-   forge::api::transport::options options_;
+   forge::api::stream::options options_;
    peer_policy peer_policy_{};
    discovery_scope discovery_scope_{};
 };
@@ -174,7 +171,7 @@ class api_builder {
    forge::net::p2p::node* owner_ = nullptr;
    forge::api::core::binding_plan plan_;
    forge::net::p2p::protocol_id protocol_{.value = "/forge/api/1"};
-   forge::api::transport::options options_{.max_inflight = 64};
+   forge::api::stream::options options_{.max_inflight = 64};
    api_binding::peer_policy peer_policy_{};
    api_binding::discovery_scope discovery_scope_{};
 };

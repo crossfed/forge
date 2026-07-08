@@ -138,7 +138,7 @@ boost::asio::awaitable<void> write_payload(forge::net::quic::connection& connect
 
 `forge.api.quic.binding` is the API-over-QUIC adapter. It keeps QUIC transport policy in
 `forge_net_quic`, contract/error semantics in `forge_api_core`, and delegates frame-loop
-mechanics to `forge.api.transport`.
+mechanics to `forge.api.stream`.
 
 ```cpp
 import forge.api.core.exceptions;
@@ -172,7 +172,7 @@ boost::asio::awaitable<void> serve_api_stream(forge::net::quic::connection& conn
 
 `forge.api.quic.binding` does not own certificates, ALPN, listener/connector setup or
 packet-level limits. Those remain in `forge_net_quic` transport options. It also does
-not own the generic API frame state machine; that lives in `forge.api.transport`.
+not own the generic API frame state machine; that lives in `forge.api.stream`.
 
 ### Decode Frames Without A Connection
 

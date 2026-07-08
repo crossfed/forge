@@ -7,7 +7,7 @@ target_link_libraries(
    forge_api_p2p PUBLIC
       forge_exceptions
       forge_api_core
-      forge_api_transport
+      forge_api_stream
       forge_net_p2p
       Boost::asio
 )

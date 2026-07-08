@@ -7,15 +7,11 @@ module;
 export module forge.api.transport.options;
 
 export import forge.api.core.types;
+export import forge.api.stream.options;
 
 export namespace forge::api::transport {
 
-struct options {
-   forge::api::core::codec_id codec{.value = "forge.raw"};
-   std::size_t max_inflight = 128;
-   std::chrono::milliseconds deadline{0};
-   std::uint32_t max_frame_size = 16 * 1024 * 1024;
-};
+using options = forge::api::stream::options;
 
 struct call_options {
    forge::api::core::call_id id{};

@@ -1,17 +1,18 @@
 # forge_api_transport
 
-`forge_api_transport` binds typed `forge_api_core` contracts to `forge_net_transport`
-streams and sessions. It does not own sockets, QUIC, P2P, WebSocket, HTTP,
-plugins or application policy.
+`forge_api_transport` binds typed `forge_api_core` contracts to
+`forge_net_transport` connections and sessions. Shared API-over-stream serving
+lives in `forge_api_stream`; this library adds the generic client,
+connection and session layer. It does not own sockets, QUIC, P2P, WebSocket,
+HTTP, plugins or application policy.
 
 ## When To Use
 
 - Run a typed `forge_api_core` contract over an already established
-  `forge_net_transport::stream` or session.
+  `forge_net_transport` connection or session.
 - Need request/response correlation, max-inflight limits and deadlines over a
   byte-stream transport.
-- Build channel-specific API adapters such as QUIC or P2P bindings without
-  duplicating frame dispatch.
+- Accept and serve generic transport sessions with admission/backpressure.
 
 ## When Not To Use
 
@@ -29,8 +30,7 @@ plugins or application policy.
 
 ## Dependencies
 
-- `forge_api_core`
-- `forge_raw`
+- `forge_api_stream`
 - `forge_net_transport`
 - Boost.Asio
 
@@ -39,11 +39,13 @@ plugins or application policy.
 - `forge_api_core` owns contract descriptors, method dispatch, frame vocabulary and
   typed error projection.
 - `forge_net_transport` owns byte streams, sessions, frame encoding and cancellation.
-- `forge_api_transport` owns API frames over `transport::stream`: client pending
-  calls, serialized writes, server frame loop, max-inflight limits, deadlines
-  and close/cancel wakeups.
-- `forge_net_quic.api` and `forge_net_p2p.api` are policy adapters over this layer.
-- `forge_net_websocket.api` shares `forge::api::core::frame_dispatcher`, but not this layer,
+- `forge_api_stream` owns the server-side frame loop over one
+  `transport::stream`.
+- `forge_api_transport` owns API clients/connections and session admission over
+  `forge_net_transport`.
+- `forge_api_quic` and `forge_api_p2p` use `forge_api_stream` directly for
+  their stream adapters.
+- `forge_api_websocket` shares `forge::api::core::frame_dispatcher`, but not this layer,
   because WebSocket is message-oriented rather than a `transport::stream`.
 
 ## Examples
