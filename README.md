@@ -51,7 +51,7 @@ cmake -S . -B build/forge-debug -G Ninja \
   -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++ \
   -DCMAKE_OSX_SYSROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk
 
-cmake --build build/forge-debug -j 4 --target forge test_forge
+cmake --build build/forge-debug -j 4
 ctest --test-dir build/forge-debug --output-on-failure
 ```
 
@@ -235,19 +235,15 @@ README в `libraries/<lib>` является быстрым guide по конк�
 ## Release Gates
 
 ```bash
-cmake --build build/forge-debug -j 4 \
-  --target forge test_forge test_forge_exceptions test_forge_raw test_forge_codec_json test_forge_crypto \
-  test_forge_ids test_forge_chain test_forge_db test_forge_compression \
-  test_forge_objectdb test_forge_blobdb test_forge_multiformats test_forge_asio \
-  test_forge_transport test_forge_tcp test_forge_stcp test_forge_yamux test_forge_quic \
-  test_forge_app test_forge_schema test_forge_config_core test_forge_codec_yaml \
-  test_forge_config_program_options test_forge_config_env test_forge_api_core \
-  test_forge_api_transport test_forge_http_websocket test_forge_quic_p2p \
-  test_forge_plugins test_forge_otlp test_forge_tui test_forge_codec_xml
+cmake --build build/forge-debug -j 4
 
 ctest --test-dir build/forge-debug --output-on-failure
 git diff --check
 ```
+
+The default build target is intentional: it builds every configured test
+executable before `ctest`, including optional targets when their dependencies
+are enabled.
 
 Static gates used during development:
 
