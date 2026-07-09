@@ -145,7 +145,7 @@ read_remote(forge::net::transport::stream stream, std::string ref) {
 - `serve_session(...)` owns admission through a Boost.Asio strand, so accepted
   stream slots and drain wakeups stay ordered on multi-worker runtimes. The
   full thread safety model is documented in
-  [docs/runtime/thread-safety.md](../../docs/runtime/thread-safety.md).
+  [docs/runtime/thread-safety.md](../../../docs/runtime/thread-safety.md).
 - Do not add Peer ID, relay, discovery, HTTP routing or plugin lifecycle here.
 
 ## Security And Common Mistakes

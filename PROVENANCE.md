@@ -63,11 +63,12 @@ this audit:
   datastream range-error plumbing.
 - current Glaze-backed `libraries/codec/json`
 - current Boost.Describe-based `libraries/reflect`
-- `libraries/asio`, `libraries/config/env`, `libraries/exceptions`, `libraries/http`,
-  `libraries/schema`, `libraries/transport`, `libraries/websocket`
-- `libraries/quic`, `libraries/tcp`, `libraries/stcp`, `libraries/yamux`,
-  `libraries/p2p`
-- `libraries/api`, `libraries/transport_api`, `libraries/plugins`,
+- `libraries/asio`, `libraries/config/env`, `libraries/exceptions`,
+  `libraries/net/http`, `libraries/schema`, `libraries/net/transport`,
+  `libraries/net/websocket`
+- `libraries/net/quic`, `libraries/net/tcp`, `libraries/net/stcp`,
+  `libraries/net/yamux`, `libraries/net/p2p`
+- `libraries/api/core`, `libraries/api/transport`, `libraries/plugins`,
   `libraries/tui`
 
 If a future file-level audit proves source continuity for a specific file in
@@ -83,7 +84,7 @@ schemas, generated code, or vendored runtime code are copied into FORGE.
   rust-libp2p are compatibility donors for `forge_net_p2p`, Yamux, QUIC/TCP
   transport composition, Relay, DCUtR, AutoNAT, DHT, Rendezvous, and GossipSub.
   The 2026-06-07 audit found no copied `.proto` files, protobuf-generated
-  files, or copied Go/Rust libp2p source under `libraries/p2p` or
+  files, or copied Go/Rust libp2p source under `libraries/net/p2p` or
   `tests/quic_p2p`. FORGE P2P codecs are hand-written C++ implementations of the
   wire behavior.
 - Boost.Asio and Boost.Beast are architecture and mechanics donors for async

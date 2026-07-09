@@ -207,7 +207,7 @@ stream transport binding, because it is message-oriented rather than a
 request/response oriented rather than a long-lived bidirectional stream.
 
 The network/P2P implementation order is tracked only in
-[`docs/network/quic-p2p.md`](../../docs/network/quic-p2p.md); this README only
+[`docs/network/quic-p2p.md`](../../../docs/network/quic-p2p.md); this README only
 records the API-layer boundary.
 
 ## Interceptors

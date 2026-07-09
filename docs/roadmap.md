@@ -41,7 +41,7 @@ plugins, telemetry and compatibility layers должны быть пригодн
 
 - [Runtime + App](runtime/asio-app.md): runtime ownership, scheduler,
   backpressure and async plugin lifecycle.
-- [API Contracts](../libraries/api/README.md): typed handles, descriptor
+- [API Contracts](../libraries/api/core/README.md): typed handles, descriptor
   macros, local/remote surfaces, API frames and shared error payloads.
 - [HTTP + WebSocket](web/http-websocket.md): web/control-plane substrate,
   routing, middleware, upgrades and retry boundaries.
