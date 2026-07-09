@@ -82,6 +82,10 @@ class store {
    template <object_value Value>
    boost::asio::awaitable<void> insert(Value value);
 
+   template <object_value Value, typename Fn>
+      requires std::default_initializable<Value> && std::invocable<Fn&, Value&>
+   boost::asio::awaitable<Value> create(Fn&& fn);
+
    template <object_value Value>
    boost::asio::awaitable<void> replace(Value value);
 
@@ -157,6 +161,25 @@ boost::asio::awaitable<void> store::insert(Value value) {
       co_await active.rollback();
       std::rethrow_exception(error);
    }
+}
+
+template <object_value Value, typename Fn>
+   requires std::default_initializable<Value> && std::invocable<Fn&, Value&>
+boost::asio::awaitable<Value> store::create(Fn&& fn) {
+   auto active = co_await begin_transaction();
+   auto error = std::exception_ptr{};
+   auto created = std::optional<Value>{};
+   try {
+      created = co_await active.template create<Value>(std::forward<Fn>(fn));
+      co_await active.commit();
+   } catch (...) {
+      error = std::current_exception();
+   }
+   if (error) {
+      co_await active.rollback();
+      std::rethrow_exception(error);
+   }
+   co_return std::move(*created);
 }
 
 template <object_value Value>

@@ -114,7 +114,7 @@ inline void append_record_prefix(std::vector<std::byte>& out, entry_kind kind, f
 }
 
 template <object_model Object>
-[[nodiscard]] forge::db::core::record_key object_record_key(id_type_of<Object> id) {
+[[nodiscard]] forge::db::core::record_key object_record_key(id_t_of<Object> id) {
    auto bytes = std::vector<std::byte>{};
    append_record_prefix(bytes, entry_kind::object_record, object_id_of<Object>::value);
    append_be64(bytes, id.instance);
@@ -136,11 +136,11 @@ T unpack_value(const std::vector<std::byte>& bytes) {
 }
 
 template <object_model Object>
-id_type_of<Object> typed_id_from(forge::ids::object_id id) {
-   if (!forge::ids::matches<id_type_of<Object>::space, id_type_of<Object>::type>(id)) {
+id_t_of<Object> typed_id_from(forge::ids::object_id id) {
+   if (!forge::ids::matches<id_t_of<Object>::space, id_t_of<Object>::type>(id)) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "object_id does not match db object type");
    }
-   return id_type_of<Object>{id};
+   return id_t_of<Object>{id};
 }
 
 template <object_model Object, typename Access>
@@ -168,7 +168,7 @@ boost::asio::awaitable<object_page<typename Object::value_type>> page_snapshot_o
    out.next = std::move(records.next);
 
    for (const auto& entry : records.entries) {
-      const auto id = unpack_value<id_type_of<Object>>(entry.value);
+      const auto id = unpack_value<id_t_of<Object>>(entry.value);
       auto value = co_await read_snapshot_object<Object>(view, id.as_object_id());
       if (!value.has_value()) {
          FORGE_THROW_EXCEPTION(exceptions::not_found, "db object index points to a missing object");

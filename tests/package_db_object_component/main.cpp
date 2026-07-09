@@ -32,8 +32,8 @@ FORGE_DB_OBJECT(account_object)
 
 int main() {
    static_assert(forge::db::object::object_model<account_object>);
-   static_assert(std::same_as<forge::ids::type_for_id_t<account::id_type>, account_object>);
-   static_assert(std::same_as<forge::db::object::object_index_for_id_t<account::id_type>, account_object>);
+   static_assert(std::same_as<forge::ids::type_for_id_t<account::id_t>, account_object>);
+   static_assert(std::same_as<forge::db::object::object_index_for_id_t<account::id_t>, account_object>);
    constexpr auto type = forge::db::object::object_id_of<account_object>::value;
    const auto key = forge::db::core::record_key{std::vector<std::byte>{std::byte{0x01}}};
    return type.space == 1 && type.type == 7 && !key.empty() ? 0 : 1;

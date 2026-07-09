@@ -24,6 +24,7 @@ namespace forge::db::object {
 transaction::impl::impl(forge::db::core::transaction active_value,
                         forge::db::core::family family_value,
                         transaction::ensure_registered_fn ensure,
+                        transaction::allocate_id_fn allocate,
                         std::vector<std::shared_ptr<interceptor>> interceptors_value,
                         std::vector<std::shared_ptr<observer>> observers_value,
                         transaction::release_fn release) noexcept
@@ -31,6 +32,7 @@ transaction::impl::impl(forge::db::core::transaction active_value,
       active{&*owned},
       family{std::move(family_value)},
       ensure_registered{std::move(ensure)},
+      allocate_id{std::move(allocate)},
       interceptors{std::move(interceptors_value)},
       observers{std::move(observers_value)},
       release_writer{std::move(release)},
@@ -39,11 +41,13 @@ transaction::impl::impl(forge::db::core::transaction active_value,
 transaction::impl::impl(forge::db::core::transaction& active_value,
                         forge::db::core::family family_value,
                         transaction::ensure_registered_fn ensure,
+                        transaction::allocate_id_fn allocate,
                         std::vector<std::shared_ptr<interceptor>> interceptors_value,
                         std::vector<std::shared_ptr<observer>> observers_value) noexcept
     : active{&active_value},
       family{std::move(family_value)},
       ensure_registered{std::move(ensure)},
+      allocate_id{std::move(allocate)},
       interceptors{std::move(interceptors_value)},
       observers{std::move(observers_value)} {}
 
@@ -76,12 +80,14 @@ boost::asio::awaitable<void> transaction::impl::after_commit() {
 transaction::transaction(forge::db::core::transaction&& active,
                          forge::db::core::family family,
                          ensure_registered_fn ensure,
+                         allocate_id_fn allocate,
                          std::vector<std::shared_ptr<interceptor>> interceptors,
                          std::vector<std::shared_ptr<observer>> observers,
                          release_fn release)
     : transaction(std::move(active),
                   std::move(family),
                   std::move(ensure),
+                  std::move(allocate),
                   std::move(interceptors),
                   std::move(observers),
                   std::move(release),
@@ -92,12 +98,29 @@ transaction::transaction(forge::db::core::transaction&& active,
                          ensure_registered_fn ensure,
                          std::vector<std::shared_ptr<interceptor>> interceptors,
                          std::vector<std::shared_ptr<observer>> observers,
+                         release_fn release)
+    : transaction(std::move(active),
+                  std::move(family),
+                  std::move(ensure),
+                  allocate_id_fn{},
+                  std::move(interceptors),
+                  std::move(observers),
+                  std::move(release),
+                  boost::asio::system_executor{}) {}
+
+transaction::transaction(forge::db::core::transaction&& active,
+                         forge::db::core::family family,
+                         ensure_registered_fn ensure,
+                         allocate_id_fn allocate,
+                         std::vector<std::shared_ptr<interceptor>> interceptors,
+                         std::vector<std::shared_ptr<observer>> observers,
                          release_fn release,
                          boost::asio::any_io_executor)
     : impl_{std::make_shared<impl>(
          std::move(active),
          std::move(family),
          std::move(ensure),
+         std::move(allocate),
          std::move(interceptors),
          std::move(observers),
          std::move(release))} {
@@ -118,15 +141,33 @@ transaction::transaction(forge::db::core::transaction&& active,
    });
 }
 
+transaction::transaction(forge::db::core::transaction&& active,
+                         forge::db::core::family family,
+                         ensure_registered_fn ensure,
+                         std::vector<std::shared_ptr<interceptor>> interceptors,
+                         std::vector<std::shared_ptr<observer>> observers,
+                         release_fn release,
+                         boost::asio::any_io_executor cleanup_executor)
+    : transaction(std::move(active),
+                  std::move(family),
+                  std::move(ensure),
+                  allocate_id_fn{},
+                  std::move(interceptors),
+                  std::move(observers),
+                  std::move(release),
+                  std::move(cleanup_executor)) {}
+
 transaction::transaction(forge::db::core::transaction& active,
                          forge::db::core::family family,
                          ensure_registered_fn ensure,
+                         allocate_id_fn allocate,
                          std::vector<std::shared_ptr<interceptor>> interceptors,
                          std::vector<std::shared_ptr<observer>> observers)
     : impl_{std::make_shared<impl>(
          active,
          std::move(family),
          std::move(ensure),
+         std::move(allocate),
          std::move(interceptors),
          std::move(observers))} {
    auto weak_state = std::weak_ptr<impl>{impl_};
@@ -142,6 +183,18 @@ transaction::transaction(forge::db::core::transaction& active,
       }
    });
 }
+
+transaction::transaction(forge::db::core::transaction& active,
+                         forge::db::core::family family,
+                         ensure_registered_fn ensure,
+                         std::vector<std::shared_ptr<interceptor>> interceptors,
+                         std::vector<std::shared_ptr<observer>> observers)
+    : transaction(active,
+                  std::move(family),
+                  std::move(ensure),
+                  allocate_id_fn{},
+                  std::move(interceptors),
+                  std::move(observers)) {}
 
 forge::db::core::transaction& transaction::db_transaction() const {
    return active_transaction();
@@ -176,6 +229,13 @@ boost::asio::awaitable<void> transaction::before_mutation(const object_mutation&
       co_await hook->before_mutation(mutation);
    }
    co_return;
+}
+
+boost::asio::awaitable<forge::ids::object_id> transaction::allocate_id(forge::ids::object_id type) const {
+   if (!impl_ || !impl_->allocate_id) {
+      FORGE_THROW_EXCEPTION(exceptions::unsupported_operation, "db object transaction cannot allocate ids");
+   }
+   co_return co_await impl_->allocate_id(type);
 }
 
 boost::asio::awaitable<std::optional<std::vector<std::byte>>> transaction::get_record(forge::db::core::record_key key) const {

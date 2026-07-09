@@ -220,7 +220,7 @@ using document_object =
 
 document make_document(std::uint64_t instance, forge::db::blob::ref<forge::db::blob::digest> ref) {
    auto value = document{};
-   value.id = document::id_type{instance};
+   value.id = document::id_t{instance};
    value.blob = std::move(ref);
    value.title = "doc";
    return value;
@@ -610,12 +610,12 @@ BOOST_AUTO_TEST_CASE(db_blob_join_shares_commit_boundary_with_db_object_metadata
       co_await object_tx.insert(make_document(7, id));
 
       BOOST_CHECK(!(co_await blobs.has(id)));
-      BOOST_CHECK(!(co_await objects.find(document::id_type{7})).has_value());
+      BOOST_CHECK(!(co_await objects.find(document::id_t{7})).has_value());
 
       co_await db_tx.commit();
 
       BOOST_CHECK(co_await blobs.has(id));
-      const auto loaded = co_await objects.get(document::id_type{7});
+      const auto loaded = co_await objects.get(document::id_t{7});
       BOOST_CHECK(loaded.blob == id);
       co_return;
    }());

@@ -22,7 +22,9 @@
 #include <iomanip>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
+#include <set>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -100,6 +102,7 @@ struct byte_less {
 };
 
 struct memory_state {
+   mutable std::mutex mutex;
    std::map<forge::db::core::record_key, std::vector<std::byte>, byte_less> records;
    std::size_t scan_calls = 0;
    std::size_t active_writes = 0;
@@ -110,7 +113,9 @@ struct memory_state {
 
 class memory_session final : public forge::db::core::session {
  public:
-   explicit memory_session(std::shared_ptr<memory_state> state) : state_{std::move(state)}, working_{state_->records} {
+   explicit memory_session(std::shared_ptr<memory_state> state) : state_{std::move(state)} {
+      auto guard = std::scoped_lock{state_->mutex};
+      working_ = state_->records;
       ++state_->active_writes;
       if (state_->active_writes > 1) {
          state_->overlapping_writes = true;
@@ -134,19 +139,27 @@ class memory_session final : public forge::db::core::session {
    }
 
    boost::asio::awaitable<void> put(forge::db::core::family, forge::db::core::record_key key, std::vector<std::byte> value) override {
-      working_[std::move(key)] = std::move(value);
+      auto stored_key = key;
+      working_[stored_key] = value;
+      erased_.erase(stored_key);
+      writes_[std::move(key)] = std::move(value);
       co_return;
    }
 
    boost::asio::awaitable<void> erase(forge::db::core::family, forge::db::core::record_key key) override {
       working_.erase(key);
+      writes_.erase(key);
+      erased_.insert(std::move(key));
       co_return;
    }
 
    boost::asio::awaitable<forge::db::core::record_page> scan_page(forge::db::core::family, forge::db::core::record_range range,
                                                                   forge::db::core::page_request request) override {
       forge::db::object::validate_page_request(request);
-      ++state_->scan_calls;
+      {
+         auto guard = std::scoped_lock{state_->mutex};
+         ++state_->scan_calls;
+      }
 
       auto result = forge::db::core::record_page{};
       auto current = working_.lower_bound(request.after ? request.after->boundary : range.begin);
@@ -175,8 +188,16 @@ class memory_session final : public forge::db::core::session {
    }
 
    boost::asio::awaitable<void> commit() override {
-      state_->records = std::move(working_);
-      finish();
+      {
+         auto guard = std::scoped_lock{state_->mutex};
+         for (const auto& key : erased_) {
+            state_->records.erase(key);
+         }
+         for (auto& [key, value] : writes_) {
+            state_->records[key] = std::move(value);
+         }
+         close_locked();
+      }
       co_return;
    }
 
@@ -191,15 +212,22 @@ class memory_session final : public forge::db::core::session {
    }
 
  private:
-   void finish() noexcept {
+   void close_locked() noexcept {
       if (!closed_) {
          closed_ = true;
          --state_->active_writes;
       }
    }
 
+   void finish() noexcept {
+      auto guard = std::scoped_lock{state_->mutex};
+      close_locked();
+   }
+
    std::shared_ptr<memory_state> state_;
    std::map<forge::db::core::record_key, std::vector<std::byte>, byte_less> working_;
+   std::map<forge::db::core::record_key, std::vector<std::byte>, byte_less> writes_;
+   std::set<forge::db::core::record_key, byte_less> erased_;
    bool closed_ = false;
 };
 
@@ -383,8 +411,10 @@ class throwing_commit_session final : public forge::db::core::session {
 
 class memory_snapshot_session final : public forge::db::core::session {
  public:
-   explicit memory_snapshot_session(std::shared_ptr<memory_state> state)
-       : state_{std::move(state)}, snapshot_{state_->records} {}
+   explicit memory_snapshot_session(std::shared_ptr<memory_state> state) : state_{std::move(state)} {
+      auto guard = std::scoped_lock{state_->mutex};
+      snapshot_ = state_->records;
+   }
 
    [[nodiscard]] forge::db::core::capabilities capabilities() const noexcept override {
       return forge::db::core::capabilities{.snapshot_reads = true, .writes = false};
@@ -409,7 +439,10 @@ class memory_snapshot_session final : public forge::db::core::session {
    boost::asio::awaitable<forge::db::core::record_page> scan_page(forge::db::core::family, forge::db::core::record_range range,
                                                                   forge::db::core::page_request request) override {
       forge::db::object::validate_page_request(request);
-      ++state_->scan_calls;
+      {
+         auto guard = std::scoped_lock{state_->mutex};
+         ++state_->scan_calls;
+      }
 
       auto result = forge::db::core::record_page{};
       auto current = snapshot_.lower_bound(request.after ? request.after->boundary : range.begin);
@@ -489,14 +522,17 @@ class memory_driver : public forge::db::core::driver {
    }
 
    [[nodiscard]] std::size_t scan_calls() const noexcept {
+      auto guard = std::scoped_lock{state_->mutex};
       return state_->scan_calls;
    }
 
    [[nodiscard]] std::size_t record_count() const noexcept {
+      auto guard = std::scoped_lock{state_->mutex};
       return state_->records.size();
    }
 
    [[nodiscard]] std::vector<forge::db::core::record_key> keys() const {
+      auto guard = std::scoped_lock{state_->mutex};
       auto out = std::vector<forge::db::core::record_key>{};
       out.reserve(state_->records.size());
       for (const auto& [key, _] : state_->records) {
@@ -506,6 +542,7 @@ class memory_driver : public forge::db::core::driver {
    }
 
    [[nodiscard]] bool overlapping_writes() const noexcept {
+      auto guard = std::scoped_lock{state_->mutex};
       return state_->overlapping_writes;
    }
 
@@ -597,7 +634,7 @@ std::string hex(const std::vector<std::byte>& bytes) {
 
 [[nodiscard]] account make_account(std::uint64_t instance, std::string name, std::uint64_t balance, std::uint32_t region) {
    auto value = account{};
-   value.id = account::id_type{instance};
+   value.id = account::id_t{instance};
    value.name = std::move(name);
    value.balance = balance;
    value.region = region;
@@ -619,9 +656,9 @@ using namespace db_object_tests;
 static_assert(forge::db::object::object_model<account_object>);
 static_assert(!forge::db::object::object_model<bad_object>);
 static_assert(!forge::db::object::object_model<duplicate_tag_object>);
-static_assert(std::same_as<forge::db::object::id_type_of<account_object>, forge::ids::typed_id<1, 7>>);
-static_assert(std::same_as<forge::ids::type_for_id_t<account::id_type>, account_object>);
-static_assert(std::same_as<forge::db::object::object_index_for_id_t<account::id_type>, account_object>);
+static_assert(std::same_as<forge::db::object::id_t_of<account_object>, forge::ids::typed_id<1, 7>>);
+static_assert(std::same_as<forge::ids::type_for_id_t<account::id_t>, account_object>);
+static_assert(std::same_as<forge::db::object::object_index_for_id_t<account::id_t>, account_object>);
 static_assert(std::same_as<forge::db::object::index_by_tag<account_object, by_name>,
                            forge::db::object::secondary_unique<by_name, &account::name>>);
 static_assert(forge::db::object::index_id_by_tag<account_object, by_id> == 0);
@@ -689,7 +726,7 @@ BOOST_AUTO_TEST_CASE(db_object_store_accepts_owner_driver) {
 
    forge::asio::blocking::run(runtime, [&store]() -> boost::asio::awaitable<void> {
       co_await store.insert(make_account(42, "alice", 100, 3));
-      auto loaded = co_await store.get(account::id_type{42});
+      auto loaded = co_await store.get(account::id_t{42});
       BOOST_CHECK_EQUAL(loaded.name, "alice");
    }());
 }
@@ -704,7 +741,7 @@ BOOST_AUTO_TEST_CASE(db_object_store_direct_api_autocommits_and_reads_indexes) {
       co_await store.insert(make_account(43, "bob", 50, 3));
       co_await store.insert(make_account(44, "carol", 75, 4));
 
-      const auto alice = co_await store.get(account::id_type{42});
+      const auto alice = co_await store.get(account::id_t{42});
       BOOST_CHECK_EQUAL(alice.name, "alice");
 
       const auto found = co_await store.index<account_object, by_name>().find("bob");
@@ -718,8 +755,202 @@ BOOST_AUTO_TEST_CASE(db_object_store_direct_api_autocommits_and_reads_indexes) {
       BOOST_CHECK_EQUAL(page.items[0].name, "bob");
       BOOST_CHECK_EQUAL(page.items[1].name, "alice");
 
-      co_await store.erase(account::id_type{43});
-      BOOST_CHECK(!(co_await store.find(account::id_type{43})).has_value());
+      co_await store.erase(account::id_t{43});
+      BOOST_CHECK(!(co_await store.find(account::id_t{43})).has_value());
+
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_create_generates_monotonic_ids_and_returns_object) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = make_store(driver);
+
+      auto alice = co_await store.create<account>([](account& value) {
+         value.name = "alice";
+         value.balance = 100;
+         value.region = 3;
+      });
+      auto bob = co_await store.create<account>([](account& value) {
+         value.name = "bob";
+         value.balance = 50;
+         value.region = 4;
+      });
+
+      BOOST_CHECK_EQUAL(alice.id.instance, 0U);
+      BOOST_CHECK_EQUAL(bob.id.instance, 1U);
+      BOOST_CHECK_EQUAL((co_await store.get(alice.id)).name, "alice");
+      BOOST_CHECK_EQUAL((co_await store.get(bob.id)).name, "bob");
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_create_does_not_reuse_deleted_ids) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = make_store(driver);
+
+      auto alice = co_await store.create<account>([](account& value) {
+         value.name = "alice";
+      });
+      co_await store.erase(alice.id);
+
+      auto bob = co_await store.create<account>([](account& value) {
+         value.name = "bob";
+      });
+
+      BOOST_CHECK_EQUAL(alice.id.instance, 0U);
+      BOOST_CHECK_EQUAL(bob.id.instance, 1U);
+      BOOST_CHECK(!(co_await store.find(alice.id)).has_value());
+      BOOST_CHECK_EQUAL((co_await store.get(bob.id)).name, "bob");
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_create_skips_existing_manual_primary_ids) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = make_store(driver);
+
+      co_await store.insert(make_account(0, "manual", 1, 1));
+      auto generated = co_await store.create<account>([](account& value) {
+         value.name = "generated";
+      });
+
+      BOOST_CHECK_EQUAL(generated.id.instance, 1U);
+      BOOST_CHECK_EQUAL((co_await store.get(generated.id)).name, "generated");
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_create_failure_consumes_id_without_persisting_object) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = make_store(driver);
+
+      auto alice = co_await store.create<account>([](account& value) {
+         value.name = "alice";
+      });
+      BOOST_CHECK_THROW(co_await store.create<account>([](account& value) { value.name = "alice"; }),
+                        forge::db::object::exceptions::duplicate_object);
+
+      auto bob = co_await store.create<account>([](account& value) {
+         value.name = "bob";
+      });
+
+      BOOST_CHECK_EQUAL(alice.id.instance, 0U);
+      BOOST_CHECK_EQUAL(bob.id.instance, 2U);
+      BOOST_CHECK(!(co_await store.find(account::id_t{1})).has_value());
+      BOOST_CHECK_EQUAL((co_await store.get(bob.id)).name, "bob");
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_create_transaction_rollback_consumes_id) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = make_store(driver);
+
+      auto tx = co_await store.begin_transaction();
+      auto draft = co_await tx.create<account>([](account& value) {
+         value.name = "draft";
+      });
+      BOOST_CHECK_EQUAL(draft.id.instance, 0U);
+      co_await tx.rollback();
+
+      BOOST_CHECK(!(co_await store.find(draft.id)).has_value());
+
+      auto committed = co_await store.create<account>([](account& value) {
+         value.name = "committed";
+      });
+      BOOST_CHECK_EQUAL(committed.id.instance, 1U);
+      BOOST_CHECK_EQUAL((co_await store.get(committed.id)).name, "committed");
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_create_joined_transaction_rollback_consumes_id) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = make_store(driver);
+
+      auto shared = co_await driver->begin_transaction();
+      auto object_tx = store.join(shared);
+      auto draft = co_await object_tx.create<account>([](account& value) {
+         value.name = "joined";
+      });
+      BOOST_CHECK_EQUAL(draft.id.instance, 0U);
+      co_await shared.rollback();
+
+      BOOST_CHECK(!(co_await store.find(draft.id)).has_value());
+
+      auto committed = co_await store.create<account>([](account& value) {
+         value.name = "after-join-rollback";
+      });
+      BOOST_CHECK_EQUAL(committed.id.instance, 1U);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_create_concurrent_calls_generate_unique_ids) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = make_store(driver);
+      constexpr auto count = std::size_t{12};
+      auto completed = std::make_shared<std::atomic_size_t>(0);
+      auto instances = std::make_shared<std::vector<std::uint64_t>>();
+      auto lock = std::make_shared<std::mutex>();
+      auto error = std::make_shared<std::exception_ptr>();
+      const auto executor = co_await boost::asio::this_coro::executor;
+
+      for (auto index = std::size_t{0}; index < count; ++index) {
+         boost::asio::co_spawn(
+            executor,
+            [store, completed, instances, lock, error, index]() mutable -> boost::asio::awaitable<void> {
+               try {
+                  auto created = co_await store.create<account>([index](account& value) {
+                     value.name = "user-" + std::to_string(index);
+                  });
+                  {
+                     auto guard = std::scoped_lock{*lock};
+                     instances->push_back(created.id.instance);
+                  }
+               } catch (...) {
+                  auto guard = std::scoped_lock{*lock};
+                  if (!*error) {
+                     *error = std::current_exception();
+                  }
+               }
+               completed->fetch_add(1, std::memory_order_release);
+               co_return;
+            },
+            boost::asio::detached);
+      }
+
+      auto timer = boost::asio::steady_timer{executor};
+      for (auto attempts = 0; attempts < 200 && completed->load(std::memory_order_acquire) != count; ++attempts) {
+         timer.expires_after(std::chrono::milliseconds{5});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+
+      if (*error) {
+         std::rethrow_exception(*error);
+      }
+      BOOST_REQUIRE_EQUAL(completed->load(std::memory_order_acquire), count);
+
+      std::sort(instances->begin(), instances->end());
+      BOOST_REQUIRE_EQUAL(instances->size(), count);
+      for (auto index = std::size_t{0}; index < count; ++index) {
+         BOOST_CHECK_EQUAL((*instances)[index], index);
+      }
 
       co_return;
    }());
@@ -733,9 +964,9 @@ BOOST_AUTO_TEST_CASE(db_object_transaction_groups_mutations_and_requires_commit)
 
       auto tx = co_await store.begin_transaction();
       co_await tx.insert(make_account(42, "alice", 100, 3));
-      BOOST_CHECK(!(co_await store.find(account::id_type{42})).has_value());
+      BOOST_CHECK(!(co_await store.find(account::id_t{42})).has_value());
       co_await tx.commit();
-      BOOST_CHECK_EQUAL((co_await store.get(account::id_type{42})).name, "alice");
+      BOOST_CHECK_EQUAL((co_await store.get(account::id_t{42})).name, "alice");
 
       co_return;
    }());
@@ -752,7 +983,7 @@ BOOST_AUTO_TEST_CASE(db_object_transaction_destruction_discards_uncommitted_chan
          co_await tx.insert(make_account(42, "alice", 100, 3));
       }
 
-      BOOST_CHECK(!(co_await store.find(account::id_type{42})).has_value());
+      BOOST_CHECK(!(co_await store.find(account::id_t{42})).has_value());
       co_return;
    }());
 }
@@ -923,16 +1154,16 @@ BOOST_AUTO_TEST_CASE(db_object_memory_snapshot_preserves_old_state_across_writes
       co_await store.insert(make_account(42, "alice", 100, 3));
 
       auto snapshot = co_await store.begin_read();
-      co_await store.modify(account::id_type{42}, [](account& value) {
+      co_await store.modify(account::id_t{42}, [](account& value) {
          value.balance = 200;
          value.name = "alice-new";
       });
 
-      const auto old_value = co_await snapshot.get(account::id_type{42});
+      const auto old_value = co_await snapshot.get(account::id_t{42});
       BOOST_CHECK_EQUAL(old_value.name, "alice");
       BOOST_CHECK_EQUAL(old_value.balance, 100U);
 
-      const auto new_value = co_await store.get(account::id_type{42});
+      const auto new_value = co_await store.get(account::id_t{42});
       BOOST_CHECK_EQUAL(new_value.name, "alice-new");
       BOOST_CHECK_EQUAL(new_value.balance, 200U);
 
@@ -1357,7 +1588,7 @@ BOOST_AUTO_TEST_CASE(db_object_modify_updates_secondary_indexes_and_unique_const
       co_await store.insert(make_account(42, "alice", 100, 3));
       co_await store.insert(make_account(43, "bob", 50, 3));
 
-      co_await store.modify(account::id_type{42}, [](account& value) {
+      co_await store.modify(account::id_t{42}, [](account& value) {
          value.name = "alice-2";
          value.balance = 200;
          value.region = 5;
@@ -1366,9 +1597,9 @@ BOOST_AUTO_TEST_CASE(db_object_modify_updates_secondary_indexes_and_unique_const
       BOOST_CHECK(!(co_await store.index<account_object, by_name>().find("alice")).has_value());
       BOOST_REQUIRE((co_await store.index<account_object, by_name>().find("alice-2")).has_value());
 
-      BOOST_CHECK_THROW(co_await store.modify(account::id_type{43}, [](account& value) { value.name = "alice-2"; }),
+      BOOST_CHECK_THROW(co_await store.modify(account::id_t{43}, [](account& value) { value.name = "alice-2"; }),
                         forge::db::object::exceptions::duplicate_object);
-      BOOST_CHECK_EQUAL((co_await store.get(account::id_type{43})).name, "bob");
+      BOOST_CHECK_EQUAL((co_await store.get(account::id_t{43})).name, "bob");
 
       co_return;
    }());
@@ -1428,7 +1659,7 @@ BOOST_AUTO_TEST_CASE(db_object_direct_mutation_rolls_back_when_interceptor_vetoe
       BOOST_CHECK_THROW(co_await store.insert(make_account(42, "alice", 100, 3)),
                         forge::db::object::exceptions::duplicate_object);
       BOOST_CHECK_EQUAL(veto->calls, 1U);
-      BOOST_CHECK(!(co_await store.find(account::id_type{42})).has_value());
+      BOOST_CHECK(!(co_await store.find(account::id_t{42})).has_value());
       BOOST_CHECK_EQUAL(driver->record_count(), 0U);
 
       co_return;
@@ -1495,7 +1726,7 @@ BOOST_AUTO_TEST_CASE(db_object_db_rocksdb_driver_persists_objects_indexes_pages_
       auto store = forge::db::object::store{driver};
       store.register_object<account_object>();
 
-      BOOST_CHECK_EQUAL((co_await store.get(account::id_type{42})).name, "alice");
+      BOOST_CHECK_EQUAL((co_await store.get(account::id_t{42})).name, "alice");
 
       const auto page = co_await store.index<account_object, by_region_balance>()
                            .equal_range(std::make_tuple(std::uint32_t{3}))
@@ -1542,7 +1773,7 @@ BOOST_AUTO_TEST_CASE(db_object_db_rocksdb_driver_rolls_back_uncommitted_transact
          co_await tx.insert(make_account(42, "alice", 100, 3));
       }
 
-      BOOST_CHECK(!(co_await store.find(account::id_type{42})).has_value());
+      BOOST_CHECK(!(co_await store.find(account::id_t{42})).has_value());
       co_return;
    }());
 
@@ -1565,13 +1796,13 @@ BOOST_AUTO_TEST_CASE(db_object_db_rocksdb_snapshot_preserves_old_state_across_wr
 
       co_await store.insert(make_account(42, "alice", 100, 3));
       auto snapshot = co_await store.begin_read();
-      co_await store.modify(account::id_type{42}, [](account& value) {
+      co_await store.modify(account::id_t{42}, [](account& value) {
          value.name = "alice-new";
          value.balance = 200;
       });
 
-      BOOST_CHECK_EQUAL((co_await snapshot.get(account::id_type{42})).name, "alice");
-      BOOST_CHECK_EQUAL((co_await store.get(account::id_type{42})).name, "alice-new");
+      BOOST_CHECK_EQUAL((co_await snapshot.get(account::id_t{42})).name, "alice");
+      BOOST_CHECK_EQUAL((co_await store.get(account::id_t{42})).name, "alice-new");
 
       co_return;
    }());

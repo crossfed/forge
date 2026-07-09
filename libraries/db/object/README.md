@@ -10,11 +10,12 @@ through `forge_db_rocksdb`, and future backends without importing them.
 
 ## Layering
 
-- `forge::db`: low-level record driver, transaction and snapshot contract.
+- `forge::db::core`: low-level record driver, transaction and snapshot contract.
 - `forge::db::object`: typed objects, indexes, hooks and store/transaction API.
 - `forge::db::rocksdb`: RocksDB implementation of the shared `forge::db`
   driver.
-- `plugins.db.object`: application lifecycle and named object stores.
+- `plugins.db.store`: application lifecycle and named physical DB stores with an
+  optional object layer.
 
 `forge_db_object` must not import `forge_rocksdb`, plugins, app lifecycle or
 product code.
@@ -88,19 +89,30 @@ rollback on failure:
 
 ```cpp
 co_await store.insert(account{...});
+auto created = co_await store.create<account>([](account& value) {
+   value.name = "alice";
+   value.balance = 100;
+});
 co_await store.replace(account{...});
-co_await store.modify(account::id_type{42}, [](account& value) {
+co_await store.modify(account::id_t{42}, [](account& value) {
    value.balance += 100;
 });
-co_await store.erase(account::id_type{42});
+co_await store.erase(account::id_t{42});
 ```
+
+`insert(value)` is strict and expects `value.id` to be already assigned. Use
+`create<T>(...)` when DB Object should allocate a new ID. Generated IDs are
+monotonic per `{space,type}`, start at instance `0`, and are not allocated again
+after erase, rollback or failed insert; gaps are expected.
 
 Use an explicit transaction when several object changes must commit together:
 
 ```cpp
 auto tx = co_await store.begin_transaction();
-co_await tx.insert(account{...});
-co_await tx.modify(account::id_type{42}, [](account& value) {
+auto created = co_await tx.create<account>([](account& value) {
+   value.name = "bob";
+});
+co_await tx.modify(account::id_t{42}, [](account& value) {
    value.region = 3;
 });
 co_await tx.commit();
@@ -135,8 +147,8 @@ the shared path and does not own commit/rollback.
 Direct reads use `begin_read()` and stable backend snapshots:
 
 ```cpp
-auto value = co_await store.get(account::id_type{42});
-auto maybe = co_await store.find(account::id_type{42});
+auto value = co_await store.get(account::id_t{42});
+auto maybe = co_await store.find(account::id_t{42});
 ```
 
 Index queries are Boost.MultiIndex-style and execute through persisted ordered

@@ -4,6 +4,7 @@ module;
 #include <boost/asio/awaitable.hpp>
 #include <forge/exceptions/macros.hpp>
 
+#include <concepts>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -36,9 +37,32 @@ export namespace forge::db::object {
 class transaction {
  public:
    using ensure_registered_fn = std::function<void(forge::ids::object_id, std::type_index)>;
+   using allocate_id_fn = std::function<boost::asio::awaitable<forge::ids::object_id>(forge::ids::object_id)>;
    using release_fn = std::function<void()>;
 
    transaction() = default;
+   transaction(forge::db::core::transaction&& active,
+               forge::db::core::family family,
+               ensure_registered_fn ensure,
+               allocate_id_fn allocate,
+               std::vector<std::shared_ptr<interceptor>> interceptors,
+               std::vector<std::shared_ptr<observer>> observers,
+               release_fn release);
+   transaction(forge::db::core::transaction&& active,
+               forge::db::core::family family,
+               ensure_registered_fn ensure,
+               allocate_id_fn allocate,
+               std::vector<std::shared_ptr<interceptor>> interceptors,
+               std::vector<std::shared_ptr<observer>> observers,
+               release_fn release,
+               boost::asio::any_io_executor cleanup_executor);
+   transaction(forge::db::core::transaction& active,
+               forge::db::core::family family,
+               ensure_registered_fn ensure,
+               allocate_id_fn allocate,
+               std::vector<std::shared_ptr<interceptor>> interceptors,
+               std::vector<std::shared_ptr<observer>> observers);
+
    transaction(forge::db::core::transaction&& active,
                forge::db::core::family family,
                ensure_registered_fn ensure,
@@ -73,6 +97,10 @@ class transaction {
    template <object_value Value>
    boost::asio::awaitable<void> insert(Value value);
 
+   template <object_value Value, typename Fn>
+      requires std::default_initializable<Value> && std::invocable<Fn&, Value&>
+   boost::asio::awaitable<Value> create(Fn&& fn);
+
    template <object_value Value>
    boost::asio::awaitable<void> replace(Value value);
 
@@ -101,6 +129,7 @@ class transaction {
 
    void ensure_registered_type(forge::ids::object_id type, std::type_index model) const;
    boost::asio::awaitable<void> before_mutation(const object_mutation& mutation) const;
+   boost::asio::awaitable<forge::ids::object_id> allocate_id(forge::ids::object_id type) const;
    boost::asio::awaitable<std::optional<std::vector<std::byte>>> get_record(forge::db::core::record_key key) const;
    boost::asio::awaitable<void> put_record(forge::db::core::record_key key, std::vector<std::byte> value) const;
    boost::asio::awaitable<void> erase_record(forge::db::core::record_key key) const;
@@ -145,6 +174,10 @@ class transaction::access {
 
    boost::asio::awaitable<void> before_mutation(const object_mutation& mutation) const {
       return owner_.before_mutation(mutation);
+   }
+
+   boost::asio::awaitable<forge::ids::object_id> allocate_id(forge::ids::object_id type) const {
+      co_return co_await owner_.allocate_id(type);
    }
 
  private:
@@ -290,7 +323,7 @@ inline void append_index_prefix(std::vector<std::byte>& out,
 }
 
 template <object_model Object>
-[[nodiscard]] forge::db::core::record_key object_record_key(id_type_of<Object> id) {
+[[nodiscard]] forge::db::core::record_key object_record_key(id_t_of<Object> id) {
    auto bytes = std::vector<std::byte>{};
    append_record_prefix(bytes, entry_kind::object_record, object_id_of<Object>::value);
    append_be64(bytes, id.instance);
@@ -345,11 +378,11 @@ T unpack_value(const std::vector<std::byte>& bytes) {
 }
 
 template <object_model Object>
-id_type_of<Object> typed_id_from(forge::ids::object_id id) {
-   if (!forge::ids::matches<id_type_of<Object>::space, id_type_of<Object>::type>(id)) {
+id_t_of<Object> typed_id_from(forge::ids::object_id id) {
+   if (!forge::ids::matches<id_t_of<Object>::space, id_t_of<Object>::type>(id)) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "object_id does not match db object type");
    }
-   return id_type_of<Object>{id};
+   return id_t_of<Object>{id};
 }
 
 template <object_model Object, typename Access>
@@ -377,7 +410,7 @@ boost::asio::awaitable<object_page<typename Object::value_type>> page_transactio
    out.next = std::move(records.next);
 
    for (const auto& entry : records.entries) {
-      const auto id = unpack_value<id_type_of<Object>>(entry.value);
+      const auto id = unpack_value<id_t_of<Object>>(entry.value);
       auto value = co_await read_transaction_object<Object>(tx, id.as_object_id());
       if (!value.has_value()) {
          FORGE_THROW_EXCEPTION(exceptions::not_found, "db object index points to a missing object");
@@ -397,7 +430,7 @@ boost::asio::awaitable<void> verify_unique_indexes(Access tx, const typename Obj
          const auto key = index_entry_key<Object, typename index::tag_type>(value);
          const auto existing = co_await tx.get(key);
          if (existing.has_value()) {
-            const auto existing_id = unpack_value<id_type_of<Object>>(*existing);
+            const auto existing_id = unpack_value<id_t_of<Object>>(*existing);
             if (existing_id != value.id) {
                FORGE_THROW_EXCEPTION(exceptions::duplicate_object, "db object unique index value already exists");
             }
@@ -438,7 +471,7 @@ boost::asio::awaitable<void> remove_secondary_indexes(Access tx, const typename 
 
 template <typename Access, object_value Value>
 boost::asio::awaitable<void> insert_object(Access tx, Value value) {
-   using object_model_type = object_index_for_id_t<typename Value::id_type>;
+   using object_model_type = object_index_for_id_t<typename Value::id_t>;
    tx.template ensure_registered<object_model_type>();
 
    const auto object_key = object_record_key<object_model_type>(value.id);
@@ -462,7 +495,7 @@ boost::asio::awaitable<void> insert_object(Access tx, Value value) {
 
 template <typename Access, object_value Value>
 boost::asio::awaitable<void> replace_object(Access tx, Value value, mutation_kind kind) {
-   using object_model_type = object_index_for_id_t<typename Value::id_type>;
+   using object_model_type = object_index_for_id_t<typename Value::id_t>;
    tx.template ensure_registered<object_model_type>();
 
    const auto existing = co_await read_transaction_object<object_model_type>(tx, value.id.as_object_id());
@@ -509,6 +542,28 @@ boost::asio::awaitable<void> erase_object(Access tx, forge::ids::object_id id) {
    co_return;
 }
 
+template <typename Access, object_value Value, typename Fn>
+   requires std::default_initializable<Value> && std::invocable<Fn&, Value&>
+boost::asio::awaitable<Value> create_object(Access tx, Fn&& fn) {
+   using object_model_type = object_index_for_id_t<typename Value::id_t>;
+   tx.template ensure_registered<object_model_type>();
+
+   auto allocated = co_await tx.allocate_id(object_id_of<object_model_type>::value);
+   auto value = Value{};
+   value.id = typename Value::id_t{allocated};
+   const auto generated_id = value.id;
+
+   using result_type = std::invoke_result_t<Fn&, Value&>;
+   static_assert(std::is_void_v<result_type>, "db object create initializer must return void");
+   std::invoke(fn, value);
+   if (value.id != generated_id) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db object create initializer must not change generated id");
+   }
+
+   co_await insert_object(tx, value);
+   co_return value;
+}
+
 } // namespace forge::db::object::detail
 
 export namespace forge::db::object {
@@ -541,6 +596,12 @@ template <object_value Value>
 boost::asio::awaitable<void> transaction::insert(Value value) {
    co_await detail::insert_object(access{*this}, std::move(value));
    co_return;
+}
+
+template <object_value Value, typename Fn>
+   requires std::default_initializable<Value> && std::invocable<Fn&, Value&>
+boost::asio::awaitable<Value> transaction::create(Fn&& fn) {
+   co_return co_await detail::create_object<access, Value>(access{*this}, std::forward<Fn>(fn));
 }
 
 template <object_value Value>

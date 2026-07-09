@@ -6,6 +6,7 @@ struct transaction::impl {
    impl(forge::db::core::transaction active_value,
         forge::db::core::family family_value,
         transaction::ensure_registered_fn ensure,
+        transaction::allocate_id_fn allocate,
         std::vector<std::shared_ptr<interceptor>> interceptors_value,
         std::vector<std::shared_ptr<observer>> observers_value,
         transaction::release_fn release) noexcept;
@@ -13,6 +14,7 @@ struct transaction::impl {
    impl(forge::db::core::transaction& active_value,
         forge::db::core::family family_value,
         transaction::ensure_registered_fn ensure,
+        transaction::allocate_id_fn allocate,
         std::vector<std::shared_ptr<interceptor>> interceptors_value,
         std::vector<std::shared_ptr<observer>> observers_value) noexcept;
 
@@ -20,6 +22,7 @@ struct transaction::impl {
    forge::db::core::transaction* active = nullptr;
    forge::db::core::family family;
    transaction::ensure_registered_fn ensure_registered;
+   transaction::allocate_id_fn allocate_id;
    std::vector<std::shared_ptr<interceptor>> interceptors;
    std::vector<std::shared_ptr<observer>> observers;
    transaction::release_fn release_writer;

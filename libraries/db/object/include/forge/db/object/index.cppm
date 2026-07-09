@@ -140,7 +140,7 @@ struct object_index_value_traits {};
 template <typename Value>
 struct object_index_value_traits<Value, true> {
    using base_type = object<Value, Value::space, Value::type>;
-   using id_type = typename Value::id_type;
+   using id_t = typename Value::id_t;
 };
 
 template <typename Value, typename Indexes>
@@ -236,7 +236,7 @@ struct first_primary_index<indexed_by<>> {
 };
 
 template <typename Object>
-using primary_id_t = typename Object::id_type;
+using primary_id_t = typename Object::id_t;
 
 template <typename Indexes>
 struct unique_tags;
@@ -272,7 +272,7 @@ struct valid_object
     : valid_object_impl<Object,
                         requires {
                            typename Object::value_type;
-                           typename Object::id_type;
+                           typename Object::id_t;
                            typename Object::indexes_type;
                         }> {};
 
@@ -302,16 +302,16 @@ template <typename T>
 concept object_model = detail::valid_object<T>::value;
 
 template <object_model Object>
-using id_type_of = detail::primary_id_t<Object>;
+using id_t_of = detail::primary_id_t<Object>;
 
 template <object_model Object>
 struct object_id_of {
  private:
-   using id_type = std::remove_cvref_t<id_type_of<Object>>;
+   using id_t = std::remove_cvref_t<id_t_of<Object>>;
 
  public:
-   static constexpr std::uint8_t space = forge::ids::typed_id_traits<id_type>::space;
-   static constexpr std::uint16_t type = forge::ids::typed_id_traits<id_type>::type;
+   static constexpr std::uint8_t space = forge::ids::typed_id_traits<id_t>::space;
+   static constexpr std::uint16_t type = forge::ids::typed_id_traits<id_t>::type;
    static constexpr forge::ids::object_id value{.space = space, .type = type, .instance = 0};
 };
 

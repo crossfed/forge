@@ -15,12 +15,12 @@ export namespace forge::db::object {
 template <typename Derived, std::uint8_t Space, std::uint16_t Type>
 struct object {
    using derived_type = Derived;
-   using id_type = forge::ids::typed_id<Space, Type>;
+   using id_t = forge::ids::typed_id<Space, Type>;
 
    static constexpr std::uint8_t space = Space;
    static constexpr std::uint16_t type = Type;
 
-   id_type id;
+   id_t id;
 
    bool operator==(const object&) const = default;
    auto operator<=>(const object&) const = default;
@@ -37,17 +37,17 @@ template <typename Derived, std::uint8_t Space, std::uint16_t Type>
 struct object_base_traits<object<Derived, Space, Type>> {
    static constexpr bool is_object_base = true;
    using derived_type = Derived;
-   using id_type = forge::ids::typed_id<Space, Type>;
+   using id_t = forge::ids::typed_id<Space, Type>;
    static constexpr std::uint8_t space = Space;
    static constexpr std::uint16_t type = Type;
 };
 
 template <typename T>
 concept object_value = requires {
-   typename std::remove_cvref_t<T>::id_type;
+   typename std::remove_cvref_t<T>::id_t;
    { std::remove_cvref_t<T>::space } -> std::convertible_to<std::uint8_t>;
    { std::remove_cvref_t<T>::type } -> std::convertible_to<std::uint16_t>;
-} && forge::ids::typed_id_traits<typename std::remove_cvref_t<T>::id_type>::is_typed_id &&
+} && forge::ids::typed_id_traits<typename std::remove_cvref_t<T>::id_t>::is_typed_id &&
    std::derived_from<std::remove_cvref_t<T>,
                      object<std::remove_cvref_t<T>, std::remove_cvref_t<T>::space, std::remove_cvref_t<T>::type>>;
 
