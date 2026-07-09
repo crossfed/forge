@@ -798,6 +798,50 @@ BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_rollback_hides_object_and_b
    forge::asio::blocking::run(runtime, plugin.shutdown());
 }
 
+BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_object_failure_rolls_back_blob_payload) {
+   auto runtime = forge::asio::runtime{};
+   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto apis = forge::api::core::registry{};
+   auto signals = forge::app::signal_bus{};
+   auto events = forge::app::event_bus{};
+   auto plugin = store_plugin::plugin{};
+   auto driver = std::make_shared<memory_driver>();
+
+   auto document = forge::config::core::document{};
+   forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.store"}));
+   auto provider = forge::api::core::installer{apis};
+   forge::asio::blocking::run(runtime, plugin.provide(provider));
+   auto context = forge::app::plugin_context{scheduler, apis, signals, events};
+   forge::asio::blocking::run(runtime, plugin.initialize(context));
+
+   auto options = store_plugin::store_options{};
+   options.blob = store_plugin::blob_layer_options{};
+
+   auto api = apis.get<store_plugin::api>(store_plugin::api::ref());
+   forge::asio::blocking::run(runtime, api->add_store("files", driver, options));
+   forge::asio::blocking::run(runtime, plugin.startup());
+
+   auto handle = forge::asio::blocking::run(runtime, api->store("files"));
+   handle.objects().register_object<file_object>();
+   forge::asio::blocking::run(runtime, handle.objects().insert(make_file(1, "/duplicate.txt", {})));
+
+   auto tx = forge::asio::blocking::run(runtime, handle.begin_transaction());
+   auto object_tx = handle.objects().join(tx);
+   auto blob_tx = handle.blobs().join(tx);
+
+   auto content = forge::asio::blocking::run(runtime, blob_tx.put(bytes("orphan candidate")));
+   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, object_tx.insert(make_file(2, "/duplicate.txt", content))),
+                     forge::db::object::exceptions::duplicate_object);
+   forge::asio::blocking::run(runtime, tx.rollback());
+
+   BOOST_TEST(!forge::asio::blocking::run(runtime, handle.blobs().has(content)));
+   const auto existing = forge::asio::blocking::run(runtime, handle.objects().get(decltype(file_record{}.id){1}));
+   BOOST_TEST(existing.path == "/duplicate.txt");
+   BOOST_TEST(!driver->overlapping_writes());
+
+   forge::asio::blocking::run(runtime, plugin.shutdown());
+}
+
 BOOST_AUTO_TEST_CASE(store_plugin_store_handle_remains_valid_during_dependent_shutdown) {
    auto runtime = forge::asio::runtime{};
    auto scheduler = forge::asio::task_scheduler{runtime};

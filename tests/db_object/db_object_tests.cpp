@@ -105,6 +105,8 @@ struct memory_state {
    mutable std::mutex mutex;
    std::map<forge::db::core::record_key, std::vector<std::byte>, byte_less> records;
    std::size_t scan_calls = 0;
+   std::size_t commit_calls = 0;
+   std::size_t fail_commits = 0;
    std::size_t active_writes = 0;
    std::size_t rollback_calls = 0;
    std::size_t destroyed_without_finish = 0;
@@ -193,6 +195,11 @@ class memory_session final : public forge::db::core::session {
    boost::asio::awaitable<void> commit() override {
       {
          auto guard = std::scoped_lock{state_->mutex};
+         ++state_->commit_calls;
+         if (state_->fail_commits > 0) {
+            --state_->fail_commits;
+            throw std::runtime_error{"db object test commit failure"};
+         }
          for (const auto& key : erased_) {
             state_->records.erase(key);
          }
@@ -559,6 +566,11 @@ class memory_driver : public forge::db::core::driver {
       return state_->records.size();
    }
 
+   [[nodiscard]] std::size_t commit_calls() const noexcept {
+      auto guard = std::scoped_lock{state_->mutex};
+      return state_->commit_calls;
+   }
+
    [[nodiscard]] std::vector<forge::db::core::record_key> keys() const {
       auto guard = std::scoped_lock{state_->mutex};
       auto out = std::vector<forge::db::core::record_key>{};
@@ -587,6 +599,11 @@ class memory_driver : public forge::db::core::driver {
    void fail_rollbacks(bool value) {
       auto guard = std::scoped_lock{state_->mutex};
       state_->fail_rollbacks = value;
+   }
+
+   void fail_next_commits(std::size_t count) {
+      auto guard = std::scoped_lock{state_->mutex};
+      state_->fail_commits = count;
    }
 
    [[nodiscard]] bool rollback_started() const noexcept {
@@ -895,6 +912,36 @@ BOOST_AUTO_TEST_CASE(db_object_create_failure_consumes_id_without_persisting_obj
       BOOST_CHECK_EQUAL(bob.id.instance, 2U);
       BOOST_CHECK(!(co_await store.find(account::id_t{1})).has_value());
       BOOST_CHECK_EQUAL((co_await store.get(bob.id)).name, "bob");
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_direct_create_commit_failure_rolls_back_releases_writer_and_seals_id) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      {
+         auto store = make_store(driver);
+         driver->fail_next_commits(1);
+         BOOST_CHECK_THROW(co_await store.create<account>([](account& value) {
+                              value.name = "commit-fails";
+                           }),
+                           std::runtime_error);
+      }
+
+      BOOST_CHECK(!driver->overlapping_writes());
+      BOOST_CHECK_EQUAL(driver->active_writes(), 0U);
+      BOOST_CHECK_GE(driver->commit_calls(), 2U);
+
+      auto reopened = make_store(driver);
+      auto committed = co_await reopened.create<account>([](account& value) {
+         value.name = "after-commit-failure";
+      });
+
+      BOOST_CHECK_EQUAL(committed.id.instance, 1U);
+      BOOST_CHECK_EQUAL((co_await reopened.get(committed.id)).name, "after-commit-failure");
+      BOOST_CHECK(!driver->overlapping_writes());
+      BOOST_CHECK_EQUAL(driver->active_writes(), 0U);
       co_return;
    }());
 }
@@ -2008,6 +2055,45 @@ BOOST_AUTO_TEST_CASE(db_object_observer_runs_after_commit_only) {
       BOOST_CHECK_EQUAL(observer->calls, 1U);
       BOOST_CHECK_EQUAL(observer->mutation_count, 1U);
       BOOST_REQUIRE(observer->last.has_value());
+      BOOST_CHECK_EQUAL(static_cast<int>(observer->last->mutations.front().kind),
+                        static_cast<int>(forge::db::object::mutation_kind::insert));
+
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_create_observer_runs_after_commit_only) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = make_store(driver);
+      auto observer = std::make_shared<counting_observer>();
+      store.add_observer(observer);
+
+      {
+         auto tx = co_await store.begin_transaction();
+         auto draft = co_await tx.create<account>([](account& value) {
+            value.name = "draft";
+            value.balance = 10;
+            value.region = 1;
+         });
+         BOOST_CHECK_EQUAL(draft.id.instance, 0U);
+         co_await tx.rollback();
+      }
+      BOOST_CHECK_EQUAL(observer->calls, 0U);
+
+      auto committed = co_await store.create<account>([](account& value) {
+         value.name = "committed";
+         value.balance = 20;
+         value.region = 2;
+      });
+
+      BOOST_CHECK_EQUAL(committed.id.instance, 1U);
+      BOOST_CHECK_EQUAL(observer->calls, 1U);
+      BOOST_CHECK_EQUAL(observer->mutation_count, 1U);
+      BOOST_REQUIRE(observer->last.has_value());
+      BOOST_REQUIRE_EQUAL(observer->last->mutations.size(), 1U);
+      BOOST_CHECK_EQUAL(observer->last->mutations.front().id.instance, 1U);
       BOOST_CHECK_EQUAL(static_cast<int>(observer->last->mutations.front().kind),
                         static_cast<int>(forge::db::object::mutation_kind::insert));
 
