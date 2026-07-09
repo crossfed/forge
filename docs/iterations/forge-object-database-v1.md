@@ -18,14 +18,14 @@ hand-roll object ids, keyspaces, index records, cursor pages and mutation
 records. Both donor areas show that this code is being repeated in product
 layers.
 
-The missing Forge layer starts smaller: a neutral `forge::objectdb` primitives
+The missing Forge layer starts smaller: a neutral `forge::db::object` primitives
 library for typed objects, stable ordered keys, index descriptors, cursor
 boundaries and storage-neutral records/mutations. It is not a backend, runtime,
 plugin, repository, session or transaction abstraction.
 
 The donor baseline is tracked separately in
 [`docs/donors/forge-objectdb-donor-baseline-v1.md`](../donors/forge-objectdb-donor-baseline-v1.md).
-That note records which serious database systems influence each objectdb
+That note records which serious database systems influence each DB Object
 component class.
 
 The first prototype implementation has been quarantined under
@@ -36,7 +36,7 @@ the public API shape.
 
 ## Active First Slice
 
-The active first slice is now `forge_objectdb` with declarative object/index
+The active first slice is now `forge_db_object` with declarative object/index
 descriptors, deterministic key layout and async store/index access:
 
 - user object types derive from `object<Derived, Space, Type>`;
@@ -44,7 +44,7 @@ descriptors, deterministic key layout and async store/index access:
   storage behavior;
 - `object_index<T, indexed_by<...>>` is the schema descriptor;
 - `primary_unique<Tag>` is shorthand for the base `id`;
-- `FORGE_OBJECTDB_OBJECT(Object)` creates the inverse compile-time mapping from
+- `FORGE_DB_OBJECT(Object)` creates the inverse compile-time mapping from
   typed id to object descriptor;
 - `secondary_unique` and `secondary_non_unique` describe stored index entries;
 - `composite_key<&T::field1, &T::field2>` establishes lexicographic member
@@ -79,7 +79,7 @@ It should not be copied into Forge unchanged.
 ### Problems To Fix Before Porting
 
 - The RocksDB adapter is built over the runtime plugin API
-  `forge.plugins.db.rocksdb.api`. `forge::objectdb` must not depend on either
+  `forge.plugins.db.rocksdb.api`. `forge::db::object` must not depend on either
   the plugin API or `forge::rocksdb`; storage application belongs above this
   primitive layer.
 - `session::scan_prefix(...)` pulls the full backend prefix and merges the
@@ -170,16 +170,16 @@ accidental mix into the object database contract.
 
 The library is top-level:
 
-- namespace: `forge::objectdb`;
-- target/component: `forge_objectdb` / `objectdb`;
-- module prefix: `forge.objectdb.*`.
+- namespace: `forge::db::object`;
+- target/component: `forge_db_object` / `db_object`;
+- module prefix: `forge.db.object.*`.
 
 It sits below storage backends, app plugins and products. It provides stable
 object/index components those layers can reuse; it does not open or own any
 storage engine.
 
-The reusable engine type is `forge::objectdb::store`, not
-`forge::objectdb::database`. The word "database" describes the architecture
+The reusable engine type is `forge::db::object::store`, not
+`forge::db::object::database`. The word "database" describes the architecture
 class, while `store` makes the C++ boundary clearer: it is an object/index
 engine over an explicit storage context, not a runtime owner that opens files,
 owns RocksDB, runs schedulers or exposes health/metrics.
@@ -205,17 +205,17 @@ Explicitly out of this block:
 - concurrency, lock, retry or conflict policy;
 - blockchain/FUSE/Spring/content semantics.
 
-`forge::objectdb` must not introduce a parallel object-id model. The canonical
+`forge::db::object` must not introduce a parallel object-id model. The canonical
 ID foundation is `forge::ids`, ported from the Storlane/BitShares-style
 `{space,type,instance}` model.
 
 Future layers can add migrations, snapshots, revision journals and richer
 storage adapters, but those algorithms should still avoid product semantics and
-should not make `forge_objectdb` own app/plugin lifecycle.
+should not make `forge_db_object` own app/plugin lifecycle.
 
 ## Query And Index Execution Direction
 
-The objectdb store should feel closer to Boost.MultiIndex than to a manual
+The DB Object store should feel closer to Boost.MultiIndex than to a manual
 RocksDB key helper layer:
 
 ```cpp
@@ -238,7 +238,7 @@ The important part is not the exact spelling yet, but the contract:
 - large ranges can be consumed lazily with `stream().next()` or `for_each(...)`;
 - non-indexed predicates must not be disguised as indexed lookup APIs.
 
-RocksDB does not provide native objectdb secondary indexes. Forge must maintain
+RocksDB does not provide native DB Object secondary indexes. Forge must maintain
 secondary index records itself:
 
 - primary record: `object-id -> serialized object`;
@@ -268,7 +268,7 @@ block:
 
 ## Acceptance For The Future Implementation
 
-- `forge_objectdb` does not import app/plugin APIs, `forge::rocksdb` or product
+- `forge_db_object` does not import app/plugin APIs, `forge::rocksdb` or product
   libraries.
 - The API exposes object descriptors, async store/session/index access and
   primitive validation helpers.

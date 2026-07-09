@@ -1,0 +1,74 @@
+module;
+
+#include <boost/asio/awaitable.hpp>
+
+#include <atomic>
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+
+module forge.plugins.db.store.plugin;
+
+import forge.api.core.binding;
+import forge.app.plugin;
+import forge.app.plugin_context;
+import forge.config.core.component;
+import forge.db.blob.store;
+import forge.db.core.driver;
+import forge.db.object.store;
+
+#include "details/plugin_impl.hxx"
+
+namespace forge::plugins::db::store {
+
+plugin::plugin() : impl_{detail::lifecycle::make_impl()} {}
+plugin::~plugin() = default;
+
+forge::app::plugin_id plugin::id() const {
+   return forge::app::plugin_id{.value = "forge.plugins.db.store"};
+}
+
+std::string plugin::version() const {
+   return "1.0.0";
+}
+
+std::optional<forge::config::core::component_descriptor> plugin::describe_config() const {
+   return detail::lifecycle::describe_config(impl_);
+}
+
+boost::asio::awaitable<void> plugin::configure(forge::config::core::component_view view) {
+   return detail::lifecycle::configure(impl_, view);
+}
+
+boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provider) {
+   return detail::lifecycle::provide(impl_, provider);
+}
+
+boost::asio::awaitable<void> plugin::initialize(forge::app::plugin_context& context) {
+   return detail::lifecycle::initialize(impl_, context);
+}
+
+boost::asio::awaitable<void> plugin::startup() {
+   return detail::lifecycle::startup(impl_);
+}
+
+void plugin::request_stop() noexcept {
+   detail::lifecycle::request_stop(impl_);
+}
+
+boost::asio::awaitable<void> plugin::shutdown() {
+   return detail::lifecycle::shutdown(impl_);
+}
+
+forge::app::plugin_descriptor descriptor() {
+   return forge::app::plugin_descriptor{
+      .id = forge::app::plugin_id{.value = "forge.plugins.db.store"},
+      .factory = [] {
+         return std::make_unique<plugin>();
+      },
+   };
+}
+
+} // namespace forge::plugins::db::store

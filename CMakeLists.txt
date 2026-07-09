@@ -206,10 +206,10 @@ set(
 	   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/ids/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/compression/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/chain/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db_rocksdb/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/objectdb/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/blobdb/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/core/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/rocksdb/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/object/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/blob/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec/json/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/config/core/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec/yaml/include"
@@ -248,7 +248,7 @@ set(FORGE_PLUGINS_P2P_DIAGNOSTICS_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugi
 set(FORGE_PLUGINS_P2P_PUBSUB_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/p2p/pubsub/include")
 set(FORGE_PLUGINS_HTTP_SERVER_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/http/server/include")
 set(FORGE_PLUGINS_LOG_OTLP_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/log/otlp/include")
-set(FORGE_PLUGINS_DB_OBJECTDB_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/db/objectdb/include")
+set(FORGE_PLUGINS_DB_STORE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/db/store/include")
 set(FORGE_PLUGINS_DB_ROCKSDB_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/db/rocksdb/include")
 
 if(FORGE_ENABLE_TUI AND FORGE_TUI_NOTCURSES_TARGET)
@@ -361,8 +361,6 @@ add_subdirectory(libraries/ids)
 add_subdirectory(libraries/compression)
 add_subdirectory(libraries/chain)
 add_subdirectory(libraries/db)
-add_subdirectory(libraries/objectdb)
-add_subdirectory(libraries/blobdb)
 add_subdirectory(libraries/config)
 add_subdirectory(libraries/codec)
 add_subdirectory(libraries/api)
@@ -373,7 +371,6 @@ add_subdirectory(libraries/asio)
 add_subdirectory(libraries/otlp)
 if(FORGE_HAS_ROCKSDB)
    add_subdirectory(libraries/rocksdb)
-   add_subdirectory(libraries/db_rocksdb)
 endif()
 add_subdirectory(libraries/net)
 add_subdirectory(libraries/app)
@@ -393,9 +390,9 @@ set(
 	   forge_ids
    forge_compression
    forge_chain
-   forge_db
-   forge_objectdb
-   forge_blobdb
+   forge_db_core
+   forge_db_object
+   forge_db_blob
    forge_config_core
    forge_codec_json
    forge_codec_yaml
@@ -431,7 +428,7 @@ set(
    forge_plugins_p2p_pubsub
    forge_plugins_http_server
    forge_plugins_log_otlp
-   forge_plugins_db_objectdb
+   forge_plugins_db_store
    forge_plugins
 )
 
@@ -491,9 +488,9 @@ install(
 	             libraries/ids/include/forge
              libraries/compression/include/forge
              libraries/chain/include/forge
-             libraries/db/include/forge
-             libraries/objectdb/include/forge
-             libraries/blobdb/include/forge
+             libraries/db/core/include/forge
+             libraries/db/object/include/forge
+             libraries/db/blob/include/forge
              libraries/codec/json/include/forge
              libraries/config/core/include/forge
              libraries/codec/yaml/include/forge
@@ -529,7 +526,7 @@ install(
              plugins/p2p/pubsub/include/forge
              plugins/http/server/include/forge
              plugins/log/otlp/include/forge
-             plugins/db/objectdb/include/forge
+             plugins/db/store/include/forge
    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT dev EXCLUDE_FROM_ALL
 )
 
@@ -542,7 +539,7 @@ endif()
 
 if(TARGET forge_db_rocksdb)
    install(
-      DIRECTORY libraries/db_rocksdb/include/forge
+      DIRECTORY libraries/db/rocksdb/include/forge
       DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT dev EXCLUDE_FROM_ALL
    )
 endif()
