@@ -35,9 +35,16 @@ boost::asio::awaitable<void> rollback_dropped_transaction(std::unique_ptr<sessio
                                                           std::vector<transaction::after_rollback_fn> hooks) {
    try {
       co_await active->rollback();
+   } catch (...) {
+   }
+
+   active.reset();
+
+   try {
       co_await run_after_rollback_hooks(std::move(hooks));
    } catch (...) {
    }
+
    co_return;
 }
 

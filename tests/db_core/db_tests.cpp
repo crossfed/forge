@@ -52,13 +52,19 @@ bool starts_with(const forge::db::core::record_key& value, const forge::db::core
 struct memory_state {
    family_map records;
    bool fail_commit = false;
+   bool fail_rollback = false;
    std::size_t rollback_calls = 0;
+   std::size_t destroyed_sessions = 0;
 };
 
 class memory_session final : public forge::db::core::session {
  public:
    memory_session(std::shared_ptr<memory_state> state, bool snapshot, bool writable)
        : state_{std::move(state)}, working_{state_->records}, snapshot_{snapshot}, writable_{writable} {}
+
+   ~memory_session() override {
+      ++state_->destroyed_sessions;
+   }
 
    [[nodiscard]] forge::db::core::capabilities capabilities() const noexcept override {
       return forge::db::core::capabilities{.snapshot_reads = snapshot_, .writes = writable_};
@@ -139,6 +145,9 @@ class memory_session final : public forge::db::core::session {
 
    boost::asio::awaitable<void> rollback() override {
       ++state_->rollback_calls;
+      if (state_->fail_rollback) {
+         throw std::runtime_error{"db test rollback failure"};
+      }
       co_return;
    }
 
@@ -311,6 +320,66 @@ BOOST_AUTO_TEST_CASE(db_transaction_awaits_async_rollback_hooks_before_returning
 
       co_await tx.rollback();
       BOOST_CHECK(hook_completed);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_dropped_transaction_runs_rollback_hooks_after_backend_rollback_failure) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   state->fail_rollback = true;
+   auto driver = std::make_shared<memory_driver>(state);
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto hook_called = false;
+
+      {
+         auto tx = co_await driver->begin_transaction();
+         tx.after_rollback([&]() -> boost::asio::awaitable<void> {
+            hook_called = true;
+            co_return;
+         });
+      }
+
+      auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+      for (auto attempt = 0; attempt != 100 && !hook_called; ++attempt) {
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+
+      BOOST_CHECK(hook_called);
+      BOOST_CHECK_EQUAL(state->rollback_calls, 1U);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_dropped_transaction_destroys_session_before_rollback_hooks) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   auto driver = std::make_shared<memory_driver>(state);
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto hook_called = false;
+      auto session_destroyed_before_hook = false;
+
+      {
+         auto tx = co_await driver->begin_transaction();
+         tx.after_rollback([&]() -> boost::asio::awaitable<void> {
+            hook_called = true;
+            session_destroyed_before_hook = state->destroyed_sessions == 1U;
+            co_return;
+         });
+      }
+
+      auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+      for (auto attempt = 0; attempt != 100 && !hook_called; ++attempt) {
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+
+      BOOST_REQUIRE(hook_called);
+      BOOST_CHECK(session_destroyed_before_hook);
+      BOOST_CHECK_EQUAL(state->destroyed_sessions, 1U);
       co_return;
    }());
 }
