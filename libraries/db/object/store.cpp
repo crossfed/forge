@@ -51,7 +51,7 @@ boost::asio::awaitable<transaction> store::begin_transaction() {
    const auto executor = co_await boost::asio::this_coro::executor;
    auto ticket = std::optional<detail::write_gate::ticket>{};
    if (impl_->settings.writes == write_policy::single_writer) {
-      ticket.emplace(co_await impl_->write_gate->acquire());
+      ticket.emplace(co_await impl_->runtime->write_gate->acquire());
    }
 
    auto active = forge::db::core::transaction{};

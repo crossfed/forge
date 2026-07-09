@@ -6,6 +6,12 @@
 
 namespace forge::db::object {
 
+struct runtime_state {
+   std::shared_ptr<detail::write_gate> write_gate = std::make_shared<detail::write_gate>();
+   std::shared_ptr<detail::write_gate> allocator_gate = std::make_shared<detail::write_gate>();
+   std::map<forge::ids::object_id, std::uint64_t> next_instances;
+};
+
 struct store::impl {
    impl(std::shared_ptr<forge::db::core::driver> driver_value, store::config config_value, store::options options_value);
 
@@ -19,12 +25,10 @@ struct store::impl {
    void ensure_registered_type(forge::ids::object_id type, std::type_index model) const;
 
    std::shared_ptr<forge::db::core::driver> driver;
+   std::shared_ptr<runtime_state> runtime;
    store::config config;
    store::options settings;
-   std::shared_ptr<detail::write_gate> write_gate;
-   std::shared_ptr<detail::write_gate> allocator_gate;
    std::map<forge::ids::object_id, std::type_index> registered;
-   std::map<forge::ids::object_id, std::uint64_t> next_instances;
    std::vector<std::shared_ptr<interceptor>> interceptors;
    std::vector<std::shared_ptr<observer>> observers;
 };

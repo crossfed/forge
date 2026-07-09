@@ -11,6 +11,7 @@ module;
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <typeindex>
 #include <utility>
@@ -85,6 +86,55 @@ std::uint64_t decode_next_instance(const std::vector<std::byte>& bytes) {
    return value;
 }
 
+struct runtime_entry {
+   std::weak_ptr<forge::db::core::driver> driver;
+   std::string family;
+   std::weak_ptr<runtime_state> runtime;
+};
+
+std::vector<runtime_entry>& runtime_registry() {
+   static auto entries = std::vector<runtime_entry>{};
+   return entries;
+}
+
+std::mutex& runtime_registry_mutex() {
+   static auto mutex = std::mutex{};
+   return mutex;
+}
+
+bool same_owner(const std::shared_ptr<forge::db::core::driver>& left,
+                const std::shared_ptr<forge::db::core::driver>& right) noexcept {
+   const auto less = std::owner_less<std::shared_ptr<forge::db::core::driver>>{};
+   return !less(left, right) && !less(right, left);
+}
+
+std::shared_ptr<runtime_state> acquire_runtime_state(
+   const std::shared_ptr<forge::db::core::driver>& driver,
+   const forge::db::core::family& family) {
+   auto guard = std::scoped_lock{runtime_registry_mutex()};
+   auto& entries = runtime_registry();
+
+   entries.erase(std::remove_if(entries.begin(),
+                                entries.end(),
+                                [](const runtime_entry& entry) {
+                                   return entry.driver.expired() || entry.runtime.expired();
+                                }),
+                 entries.end());
+
+   for (const auto& entry : entries) {
+      auto existing_driver = entry.driver.lock();
+      if (existing_driver && entry.family == family.name && same_owner(existing_driver, driver)) {
+         if (auto runtime = entry.runtime.lock()) {
+            return runtime;
+         }
+      }
+   }
+
+   auto runtime = std::make_shared<runtime_state>();
+   entries.push_back(runtime_entry{.driver = driver, .family = family.name, .runtime = runtime});
+   return runtime;
+}
+
 } // namespace
 
 store::impl::impl(std::shared_ptr<forge::db::core::driver> driver_value,
@@ -92,15 +142,14 @@ store::impl::impl(std::shared_ptr<forge::db::core::driver> driver_value,
                   store::options options_value)
     : driver{std::move(driver_value)},
       config{std::move(config_value)},
-      settings{options_value},
-      write_gate{std::make_shared<detail::write_gate>()},
-      allocator_gate{std::make_shared<detail::write_gate>()} {
+      settings{options_value} {
    if (!driver) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db object driver is null");
    }
    if (config.family.name.empty()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db object family is empty");
    }
+   runtime = acquire_runtime_state(driver, config.family);
 }
 
 boost::asio::awaitable<forge::db::core::transaction> store::impl::open_write_transaction() const {
@@ -119,15 +168,15 @@ boost::asio::awaitable<forge::db::core::snapshot> store::impl::open_read_snapsho
 
 boost::asio::awaitable<forge::ids::object_id> store::impl::allocate_id(forge::ids::object_id type,
                                                                        forge::db::core::transaction& active) {
-   const auto ticket = co_await allocator_gate->acquire();
+   const auto ticket = co_await runtime->allocator_gate->acquire();
    auto allocated = type;
 
    const auto key = sequence_record_key(type);
-   auto cursor = next_instances.find(type);
-   if (cursor == next_instances.end()) {
+   auto cursor = runtime->next_instances.find(type);
+   if (cursor == runtime->next_instances.end()) {
       const auto existing = co_await active.get(config.family, key);
       const auto next = existing.has_value() ? decode_next_instance(*existing) : std::uint64_t{0};
-      cursor = next_instances.emplace(type, next).first;
+      cursor = runtime->next_instances.emplace(type, next).first;
    }
 
    auto next = cursor->second;
@@ -156,7 +205,7 @@ boost::asio::awaitable<void> store::impl::seal_allocations(transaction::allocati
       co_return;
    }
 
-   const auto ticket = co_await allocator_gate->acquire();
+   const auto ticket = co_await runtime->allocator_gate->acquire();
    auto active = co_await open_write_transaction();
    auto error = std::exception_ptr{};
 
@@ -172,9 +221,9 @@ boost::asio::awaitable<void> store::impl::seal_allocations(transaction::allocati
             co_await active.put(config.family, key, encode_next_instance(sealed_next));
          }
 
-         auto cursor = next_instances.find(sealed_type);
-         if (cursor == next_instances.end()) {
-            next_instances.emplace(sealed_type, sealed_next);
+         auto cursor = runtime->next_instances.find(sealed_type);
+         if (cursor == runtime->next_instances.end()) {
+            runtime->next_instances.emplace(sealed_type, sealed_next);
          } else {
             cursor->second = std::max(cursor->second, sealed_next);
          }

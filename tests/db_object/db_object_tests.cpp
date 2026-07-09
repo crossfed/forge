@@ -109,6 +109,8 @@ struct memory_state {
    std::size_t rollback_calls = 0;
    std::size_t destroyed_without_finish = 0;
    bool overlapping_writes = false;
+   bool block_rollbacks = false;
+   bool rollback_started = false;
 };
 
 class memory_session final : public forge::db::core::session {
@@ -202,6 +204,23 @@ class memory_session final : public forge::db::core::session {
    }
 
    boost::asio::awaitable<void> rollback() override {
+      {
+         auto guard = std::scoped_lock{state_->mutex};
+         ++state_->rollback_calls;
+         state_->rollback_started = true;
+      }
+      const auto executor = co_await boost::asio::this_coro::executor;
+      auto timer = boost::asio::steady_timer{executor};
+      for (;;) {
+         {
+            auto guard = std::scoped_lock{state_->mutex};
+            if (!state_->block_rollbacks) {
+               break;
+            }
+         }
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
       finish();
       working_.clear();
       co_return;
@@ -549,6 +568,16 @@ class memory_driver : public forge::db::core::driver {
    [[nodiscard]] std::size_t active_writes() const noexcept {
       auto guard = std::scoped_lock{state_->mutex};
       return state_->active_writes;
+   }
+
+   void block_rollbacks(bool value) {
+      auto guard = std::scoped_lock{state_->mutex};
+      state_->block_rollbacks = value;
+   }
+
+   [[nodiscard]] bool rollback_started() const noexcept {
+      auto guard = std::scoped_lock{state_->mutex};
+      return state_->rollback_started;
    }
 
  private:
@@ -921,9 +950,6 @@ BOOST_AUTO_TEST_CASE(db_object_create_owned_transaction_drop_seals_id_across_sto
             });
             BOOST_CHECK_EQUAL(draft.id.instance, 0U);
          }
-
-         auto cleanup = co_await store.begin_transaction();
-         co_await cleanup.rollback();
       }
 
       auto reopened = make_store(driver);
@@ -932,6 +958,74 @@ BOOST_AUTO_TEST_CASE(db_object_create_owned_transaction_drop_seals_id_across_sto
       });
 
       BOOST_CHECK_EQUAL(committed.id.instance, 1U);
+      BOOST_CHECK(!driver->overlapping_writes());
+      BOOST_CHECK_EQUAL(driver->active_writes(), 0U);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_create_owned_transaction_drop_reopen_waits_for_allocation_seal) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      driver->block_rollbacks(true);
+      {
+         auto store = make_store(driver);
+         {
+            auto tx = co_await store.begin_transaction();
+            auto draft = co_await tx.create<account>([](account& value) {
+               value.name = "blocked-drop";
+            });
+            BOOST_CHECK_EQUAL(draft.id.instance, 0U);
+         }
+      }
+
+      const auto executor = co_await boost::asio::this_coro::executor;
+      auto timer = boost::asio::steady_timer{executor};
+      for (auto attempt = 0; attempt != 100 && !driver->rollback_started(); ++attempt) {
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+      BOOST_REQUIRE(driver->rollback_started());
+
+      auto reopened = make_store(driver);
+      auto second_finished = std::make_shared<std::atomic_bool>(false);
+      auto second_instance = std::make_shared<std::optional<std::uint64_t>>();
+      auto second_error = std::make_shared<std::exception_ptr>();
+      boost::asio::co_spawn(
+         executor,
+         [reopened, second_finished, second_instance, second_error]() mutable -> boost::asio::awaitable<void> {
+            try {
+               auto committed = co_await reopened.create<account>([](account& value) {
+                  value.name = "after-blocked-drop";
+               });
+               *second_instance = committed.id.instance;
+            } catch (...) {
+               *second_error = std::current_exception();
+            }
+            second_finished->store(true, std::memory_order_release);
+            co_return;
+         },
+         boost::asio::detached);
+
+      timer.expires_after(std::chrono::milliseconds{50});
+      co_await timer.async_wait(boost::asio::use_awaitable);
+      BOOST_CHECK(!second_finished->load(std::memory_order_acquire));
+      BOOST_CHECK_EQUAL(driver->active_writes(), 1U);
+      BOOST_CHECK(!driver->overlapping_writes());
+
+      driver->block_rollbacks(false);
+      for (auto attempt = 0; attempt != 200 && !second_finished->load(std::memory_order_acquire); ++attempt) {
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+
+      if (*second_error) {
+         std::rethrow_exception(*second_error);
+      }
+      BOOST_REQUIRE(second_finished->load(std::memory_order_acquire));
+      BOOST_REQUIRE(second_instance->has_value());
+      BOOST_CHECK_EQUAL(**second_instance, 1U);
       BOOST_CHECK(!driver->overlapping_writes());
       BOOST_CHECK_EQUAL(driver->active_writes(), 0U);
       co_return;
