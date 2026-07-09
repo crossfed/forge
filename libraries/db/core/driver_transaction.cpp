@@ -22,16 +22,21 @@ namespace forge::db::core {
 
 namespace {
 
+boost::asio::awaitable<void> run_after_rollback_hooks(std::vector<transaction::after_rollback_fn> hooks) {
+   for (auto& hook : hooks) {
+      if (hook) {
+         co_await hook();
+      }
+   }
+   co_return;
+}
+
 boost::asio::awaitable<void> rollback_dropped_transaction(std::unique_ptr<session> active,
                                                           std::vector<transaction::after_rollback_fn> hooks) {
    try {
       co_await active->rollback();
+      co_await run_after_rollback_hooks(std::move(hooks));
    } catch (...) {
-   }
-   for (auto& hook : hooks) {
-      if (hook) {
-         hook();
-      }
    }
    co_return;
 }
@@ -45,20 +50,15 @@ transaction::impl::~impl() {
    rollback_on_drop();
 }
 
-void transaction::impl::run_after_rollback() noexcept {
+boost::asio::awaitable<void> transaction::impl::run_after_rollback() {
    auto hooks = std::move(after_rollback_hooks);
    after_rollback_hooks.clear();
-   for (auto& hook : hooks) {
-      if (hook) {
-         hook();
-      }
-   }
+   co_await run_after_rollback_hooks(std::move(hooks));
 }
 
 void transaction::impl::rollback_on_drop() noexcept {
    if (!active || closed || committed) {
       active.reset();
-      run_after_rollback();
       return;
    }
 
@@ -73,11 +73,6 @@ void transaction::impl::rollback_on_drop() noexcept {
                             boost::asio::detached);
    } catch (...) {
       dropped.reset();
-      for (auto& hook : hooks) {
-         if (hook) {
-            hook();
-         }
-      }
    }
 }
 
@@ -184,7 +179,13 @@ boost::asio::awaitable<void> transaction::rollback() {
    active_session.reset();
    for (auto& hook : hooks) {
       if (hook) {
-         hook();
+         try {
+            co_await hook();
+         } catch (...) {
+            if (!error) {
+               error = std::current_exception();
+            }
+         }
       }
    }
    if (error) {

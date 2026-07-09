@@ -9,6 +9,7 @@ module;
 #include <cstdint>
 #include <functional>
 #include <limits>
+#include <map>
 #include <memory>
 #include <optional>
 #include <string>
@@ -39,6 +40,8 @@ class transaction {
    using ensure_registered_fn = std::function<void(forge::ids::object_id, std::type_index)>;
    using allocate_id_fn = std::function<boost::asio::awaitable<forge::ids::object_id>(
       forge::ids::object_id, forge::db::core::transaction&)>;
+   using allocation_seal_map = std::map<forge::ids::object_id, std::uint64_t>;
+   using seal_allocations_fn = std::function<boost::asio::awaitable<void>(allocation_seal_map)>;
    using release_fn = std::function<void()>;
 
    transaction() = default;
@@ -53,10 +56,18 @@ class transaction {
                forge::db::core::family family,
                ensure_registered_fn ensure,
                allocate_id_fn allocate,
+               seal_allocations_fn seal,
                std::vector<std::shared_ptr<interceptor>> interceptors,
                std::vector<std::shared_ptr<observer>> observers,
                release_fn release,
                boost::asio::any_io_executor cleanup_executor);
+   transaction(forge::db::core::transaction& active,
+               forge::db::core::family family,
+               ensure_registered_fn ensure,
+               allocate_id_fn allocate,
+               seal_allocations_fn seal,
+               std::vector<std::shared_ptr<interceptor>> interceptors,
+               std::vector<std::shared_ptr<observer>> observers);
    transaction(forge::db::core::transaction& active,
                forge::db::core::family family,
                ensure_registered_fn ensure,

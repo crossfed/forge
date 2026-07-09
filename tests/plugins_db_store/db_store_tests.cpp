@@ -450,6 +450,51 @@ BOOST_AUTO_TEST_CASE(store_plugin_rejects_invalid_programmatic_setup) {
    forge::asio::blocking::run(runtime, plugin.shutdown());
 }
 
+BOOST_AUTO_TEST_CASE(store_plugin_rejects_programmatic_overlapping_layer_families) {
+   auto runtime = forge::asio::runtime{};
+   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto apis = forge::api::registry{};
+   auto signals = forge::app::signal_bus{};
+   auto events = forge::app::event_bus{};
+   auto plugin = store_plugin::plugin{};
+
+   auto document = forge::config::document{};
+   forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.store"}));
+   auto provider = forge::api::installer{apis};
+   forge::asio::blocking::run(runtime, plugin.provide(provider));
+   auto context = forge::app::plugin_context{scheduler, apis, signals, events};
+   forge::asio::blocking::run(runtime, plugin.initialize(context));
+
+   auto api = apis.get<store_plugin::api>(store_plugin::api::ref());
+   auto driver = std::make_shared<memory_driver>();
+
+   auto object_data_overlap = store_plugin::store_options{};
+   object_data_overlap.object = store_plugin::object_layer_options{.family = forge::db::core::family{"shared"}};
+   object_data_overlap.blob = store_plugin::blob_layer_options{
+      .data_family = forge::db::core::family{"shared"},
+      .refs_family = forge::db::core::family{"blob.refs"},
+   };
+   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, api->add_store("object-data", driver, object_data_overlap)),
+                     store_plugin::exceptions::invalid_argument);
+
+   auto object_refs_overlap = store_plugin::store_options{};
+   object_refs_overlap.object = store_plugin::object_layer_options{.family = forge::db::core::family{"shared"}};
+   object_refs_overlap.blob = store_plugin::blob_layer_options{
+      .data_family = forge::db::core::family{"blob.data"},
+      .refs_family = forge::db::core::family{"shared"},
+   };
+   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, api->add_store("object-refs", driver, object_refs_overlap)),
+                     store_plugin::exceptions::invalid_argument);
+
+   auto blob_overlap = store_plugin::store_options{};
+   blob_overlap.blob = store_plugin::blob_layer_options{
+      .data_family = forge::db::core::family{"blob.shared"},
+      .refs_family = forge::db::core::family{"blob.shared"},
+   };
+   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, api->add_store("blob-overlap", driver, blob_overlap)),
+                     store_plugin::exceptions::invalid_argument);
+}
+
 BOOST_AUTO_TEST_CASE(store_plugin_rejects_duplicate_configured_store_names) {
    auto runtime = forge::asio::runtime{};
    auto plugin = store_plugin::plugin{};
@@ -480,6 +525,38 @@ BOOST_AUTO_TEST_CASE(store_plugin_rejects_configured_store_without_layers) {
    BOOST_CHECK_THROW(
       forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.store"})),
       store_plugin::exceptions::invalid_config);
+}
+
+BOOST_AUTO_TEST_CASE(store_plugin_rejects_configured_overlapping_layer_families) {
+   auto runtime = forge::asio::runtime{};
+
+   auto expect_invalid = [&](std::string object_family, std::string data_family, std::string refs_family) {
+      auto plugin = store_plugin::plugin{};
+      auto store = forge::config::value::object_type{};
+      store.emplace("name", forge::config::value{std::string{"files"}});
+      store.emplace("driver", forge::config::value{std::string{"rocksdb"}});
+      store.emplace("path", forge::config::value{std::string{"/tmp/forge-db-store-plugin-overlap"}});
+
+      auto object_layer = forge::config::value::object_type{};
+      object_layer.emplace("family", forge::config::value{std::move(object_family)});
+      store.emplace("object", forge::config::value{std::move(object_layer)});
+
+      auto blob_layer = forge::config::value::object_type{};
+      blob_layer.emplace("data-family", forge::config::value{std::move(data_family)});
+      blob_layer.emplace("refs-family", forge::config::value{std::move(refs_family)});
+      store.emplace("blob", forge::config::value{std::move(blob_layer)});
+
+      auto document = forge::config::document{};
+      document.set("plugins.db.store.stores", forge::config::value::array_type{forge::config::value{std::move(store)}});
+
+      BOOST_CHECK_THROW(
+         forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.store"})),
+         store_plugin::exceptions::invalid_config);
+   };
+
+   expect_invalid("shared", "shared", "blob.refs");
+   expect_invalid("shared", "blob.data", "shared");
+   expect_invalid("objectdb", "blob.shared", "blob.shared");
 }
 
 BOOST_AUTO_TEST_CASE(store_plugin_rejects_configure_after_stop_or_shutdown) {

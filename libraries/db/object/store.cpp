@@ -76,6 +76,10 @@ boost::asio::awaitable<transaction> store::begin_transaction() {
                      forge::db::core::transaction& active) -> boost::asio::awaitable<forge::ids::object_id> {
          co_return co_await impl->allocate_id(type, active);
       },
+      [impl = impl_](transaction::allocation_seal_map seals) -> boost::asio::awaitable<void> {
+         co_await impl->seal_allocations(std::move(seals));
+         co_return;
+      },
       impl_->interceptors,
       impl_->observers,
       std::move(release),
@@ -107,6 +111,10 @@ transaction store::join(forge::db::core::transaction& active) {
       [impl = impl_](forge::ids::object_id type,
                      forge::db::core::transaction& active) -> boost::asio::awaitable<forge::ids::object_id> {
          co_return co_await impl->allocate_id(type, active);
+      },
+      [impl = impl_](transaction::allocation_seal_map seals) -> boost::asio::awaitable<void> {
+         co_await impl->seal_allocations(std::move(seals));
+         co_return;
       },
       impl_->interceptors,
       impl_->observers};

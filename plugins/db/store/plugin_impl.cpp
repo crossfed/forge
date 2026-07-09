@@ -103,6 +103,7 @@ void plugin::impl::add_store(std::string name,
       FORGE_THROW_EXCEPTION(exceptions::invalid_argument, "db store must configure object or blob layer",
                             forge::exceptions::ctx("store", name));
    }
+   detail::validate_options(options, name, true);
 
    auto record = std::make_shared<managed_store>();
    record->name = std::move(name);

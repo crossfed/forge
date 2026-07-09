@@ -1,6 +1,7 @@
 #pragma once
 
 #include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/awaitable.hpp>
 
 #include <functional>
 #include <memory>
@@ -13,7 +14,7 @@ struct transaction::impl {
    ~impl();
 
    void rollback_on_drop() noexcept;
-   void run_after_rollback() noexcept;
+   boost::asio::awaitable<void> run_after_rollback();
 
    std::unique_ptr<session> active;
    boost::asio::any_io_executor cleanup_executor;

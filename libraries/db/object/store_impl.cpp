@@ -4,6 +4,7 @@ module;
 
 #include <boost/asio/awaitable.hpp>
 
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <exception>
@@ -148,6 +149,50 @@ boost::asio::awaitable<forge::ids::object_id> store::impl::allocate_id(forge::id
    cursor->second = next + 1U;
    co_await active.put(config.family, key, encode_next_instance(cursor->second));
    co_return allocated;
+}
+
+boost::asio::awaitable<void> store::impl::seal_allocations(transaction::allocation_seal_map seals) {
+   if (seals.empty()) {
+      co_return;
+   }
+
+   const auto ticket = co_await allocator_gate->acquire();
+   auto active = co_await open_write_transaction();
+   auto error = std::exception_ptr{};
+
+   try {
+      for (auto& [type, consumed_next] : seals) {
+         auto sealed_type = type;
+         sealed_type.instance = 0;
+         const auto key = sequence_record_key(sealed_type);
+         const auto existing = co_await active.get(config.family, key);
+         const auto stored_next = existing.has_value() ? decode_next_instance(*existing) : std::uint64_t{0};
+         const auto sealed_next = std::max(stored_next, consumed_next);
+         if (sealed_next != stored_next) {
+            co_await active.put(config.family, key, encode_next_instance(sealed_next));
+         }
+
+         auto cursor = next_instances.find(sealed_type);
+         if (cursor == next_instances.end()) {
+            next_instances.emplace(sealed_type, sealed_next);
+         } else {
+            cursor->second = std::max(cursor->second, sealed_next);
+         }
+      }
+
+      co_await active.commit();
+   } catch (...) {
+      error = std::current_exception();
+   }
+
+   if (error) {
+      try {
+         co_await active.rollback();
+      } catch (...) {
+      }
+      std::rethrow_exception(error);
+   }
+   co_return;
 }
 
 void store::impl::register_object_type(forge::ids::object_id type, std::type_index model) {

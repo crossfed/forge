@@ -5,7 +5,9 @@ module;
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/system_executor.hpp>
 
+#include <algorithm>
 #include <functional>
+#include <map>
 #include <memory>
 #include <optional>
 #include <typeindex>
@@ -25,6 +27,7 @@ transaction::impl::impl(forge::db::core::transaction active_value,
                         forge::db::core::family family_value,
                         transaction::ensure_registered_fn ensure,
                         transaction::allocate_id_fn allocate,
+                        transaction::seal_allocations_fn seal,
                         std::vector<std::shared_ptr<interceptor>> interceptors_value,
                         std::vector<std::shared_ptr<observer>> observers_value,
                         transaction::release_fn release) noexcept
@@ -33,6 +36,7 @@ transaction::impl::impl(forge::db::core::transaction active_value,
       family{std::move(family_value)},
       ensure_registered{std::move(ensure)},
       allocate_id{std::move(allocate)},
+      seal_allocations{std::move(seal)},
       interceptors{std::move(interceptors_value)},
       observers{std::move(observers_value)},
       release_writer{std::move(release)},
@@ -42,12 +46,14 @@ transaction::impl::impl(forge::db::core::transaction& active_value,
                         forge::db::core::family family_value,
                         transaction::ensure_registered_fn ensure,
                         transaction::allocate_id_fn allocate,
+                        transaction::seal_allocations_fn seal,
                         std::vector<std::shared_ptr<interceptor>> interceptors_value,
                         std::vector<std::shared_ptr<observer>> observers_value) noexcept
     : active{&active_value},
       family{std::move(family_value)},
       ensure_registered{std::move(ensure)},
       allocate_id{std::move(allocate)},
+      seal_allocations{std::move(seal)},
       interceptors{std::move(interceptors_value)},
       observers{std::move(observers_value)} {}
 
@@ -58,15 +64,33 @@ void transaction::impl::release() noexcept {
    }
 }
 
-void transaction::impl::after_rollback() noexcept {
+void transaction::impl::remember_allocation(forge::ids::object_id type, std::uint64_t next_instance) {
+   type.instance = 0;
+   auto& existing = allocation_seals[type];
+   existing = std::max(existing, next_instance);
+}
+
+boost::asio::awaitable<void> transaction::impl::after_rollback() {
    finalized = true;
    changes.mutations.clear();
+   auto seals = std::move(allocation_seals);
+   allocation_seals.clear();
+   try {
+      if (seal_allocations && !seals.empty()) {
+         co_await seal_allocations(std::move(seals));
+      }
+   } catch (...) {
+      release();
+      throw;
+   }
    release();
+   co_return;
 }
 
 boost::asio::awaitable<void> transaction::impl::after_commit() {
    finalized = true;
    auto committed_changes = std::move(changes);
+   allocation_seals.clear();
    release();
 
    if (!committed_changes.empty()) {
@@ -88,6 +112,7 @@ transaction::transaction(forge::db::core::transaction&& active,
                   std::move(family),
                   std::move(ensure),
                   std::move(allocate),
+                  seal_allocations_fn{},
                   std::move(interceptors),
                   std::move(observers),
                   std::move(release),
@@ -103,6 +128,7 @@ transaction::transaction(forge::db::core::transaction&& active,
                   std::move(family),
                   std::move(ensure),
                   allocate_id_fn{},
+                  seal_allocations_fn{},
                   std::move(interceptors),
                   std::move(observers),
                   std::move(release),
@@ -112,6 +138,7 @@ transaction::transaction(forge::db::core::transaction&& active,
                          forge::db::core::family family,
                          ensure_registered_fn ensure,
                          allocate_id_fn allocate,
+                         seal_allocations_fn seal,
                          std::vector<std::shared_ptr<interceptor>> interceptors,
                          std::vector<std::shared_ptr<observer>> observers,
                          release_fn release,
@@ -121,6 +148,7 @@ transaction::transaction(forge::db::core::transaction&& active,
          std::move(family),
          std::move(ensure),
          std::move(allocate),
+         std::move(seal),
          std::move(interceptors),
          std::move(observers),
          std::move(release))} {
@@ -132,12 +160,13 @@ transaction::transaction(forge::db::core::transaction&& active,
       co_return;
    });
    auto rollback_release = impl_->release_writer;
-   db_transaction().after_rollback([weak_state, release = std::move(rollback_release)]() mutable {
+   db_transaction().after_rollback([weak_state, release = std::move(rollback_release)]() mutable -> boost::asio::awaitable<void> {
       if (auto state = weak_state.lock()) {
-         state->after_rollback();
+         co_await state->after_rollback();
       } else if (release) {
          release();
       }
+      co_return;
    });
 }
 
@@ -152,6 +181,7 @@ transaction::transaction(forge::db::core::transaction&& active,
                   std::move(family),
                   std::move(ensure),
                   allocate_id_fn{},
+                  seal_allocations_fn{},
                   std::move(interceptors),
                   std::move(observers),
                   std::move(release),
@@ -163,11 +193,27 @@ transaction::transaction(forge::db::core::transaction& active,
                          allocate_id_fn allocate,
                          std::vector<std::shared_ptr<interceptor>> interceptors,
                          std::vector<std::shared_ptr<observer>> observers)
+    : transaction(active,
+                  std::move(family),
+                  std::move(ensure),
+                  std::move(allocate),
+                  seal_allocations_fn{},
+                  std::move(interceptors),
+                  std::move(observers)) {}
+
+transaction::transaction(forge::db::core::transaction& active,
+                         forge::db::core::family family,
+                         ensure_registered_fn ensure,
+                         allocate_id_fn allocate,
+                         seal_allocations_fn seal,
+                         std::vector<std::shared_ptr<interceptor>> interceptors,
+                         std::vector<std::shared_ptr<observer>> observers)
     : impl_{std::make_shared<impl>(
          active,
          std::move(family),
          std::move(ensure),
          std::move(allocate),
+         std::move(seal),
          std::move(interceptors),
          std::move(observers))} {
    auto weak_state = std::weak_ptr<impl>{impl_};
@@ -177,10 +223,11 @@ transaction::transaction(forge::db::core::transaction& active,
       }
       co_return;
    });
-   db_transaction().after_rollback([weak_state]() mutable {
+   db_transaction().after_rollback([weak_state]() mutable -> boost::asio::awaitable<void> {
       if (auto state = weak_state.lock()) {
-         state->after_rollback();
+         co_await state->after_rollback();
       }
+      co_return;
    });
 }
 
@@ -193,6 +240,7 @@ transaction::transaction(forge::db::core::transaction& active,
                   std::move(family),
                   std::move(ensure),
                   allocate_id_fn{},
+                  seal_allocations_fn{},
                   std::move(interceptors),
                   std::move(observers)) {}
 
@@ -235,7 +283,9 @@ boost::asio::awaitable<forge::ids::object_id> transaction::allocate_id(forge::id
    if (!impl_ || !impl_->allocate_id) {
       FORGE_THROW_EXCEPTION(exceptions::unsupported_operation, "db object transaction cannot allocate ids");
    }
-   co_return co_await impl_->allocate_id(type, active_transaction());
+   auto allocated = co_await impl_->allocate_id(type, active_transaction());
+   impl_->remember_allocation(type, allocated.instance + 1U);
+   co_return allocated;
 }
 
 boost::asio::awaitable<std::optional<std::vector<std::byte>>> transaction::get_record(forge::db::core::record_key key) const {

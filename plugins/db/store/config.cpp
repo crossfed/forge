@@ -66,6 +66,33 @@ store_options parse_options(const store_config& value) {
    return options;
 }
 
+void validate_options(const store_options& value, const std::string& store_name, bool programmatic) {
+   const auto fail = [&](const char* message, const std::string& family) {
+      if (programmatic) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_argument,
+                               message,
+                               forge::exceptions::ctx("store", store_name),
+                               forge::exceptions::ctx("family", family));
+      }
+      FORGE_THROW_EXCEPTION(exceptions::invalid_config,
+                            message,
+                            forge::exceptions::ctx("store", store_name),
+                            forge::exceptions::ctx("family", family));
+   };
+
+   if (value.object && value.blob) {
+      if (value.object->family.name == value.blob->data_family.name) {
+         fail("db store object and blob data families must be distinct", value.object->family.name);
+      }
+      if (value.object->family.name == value.blob->refs_family.name) {
+         fail("db store object and blob refs families must be distinct", value.object->family.name);
+      }
+   }
+   if (value.blob && value.blob->data_family.name == value.blob->refs_family.name) {
+      fail("db store blob data and refs families must be distinct", value.blob->data_family.name);
+   }
+}
+
 void validate_config(const config& value) {
    auto names = std::unordered_set<std::string>{};
    for (const auto& item : value.stores) {
@@ -100,7 +127,7 @@ void validate_config(const config& value) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_config, "db store blob refs family must not be empty",
                                forge::exceptions::ctx("store", item.name));
       }
-      (void)parse_options(item);
+      validate_options(parse_options(item), item.name, false);
    }
 }
 

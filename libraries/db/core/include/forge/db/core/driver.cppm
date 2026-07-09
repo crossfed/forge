@@ -39,7 +39,7 @@ class session {
 class transaction {
  public:
    using after_commit_fn = std::function<boost::asio::awaitable<void>()>;
-   using after_rollback_fn = std::function<void()>;
+   using after_rollback_fn = std::function<boost::asio::awaitable<void>()>;
 
    transaction() = default;
    transaction(std::unique_ptr<session> active, boost::asio::any_io_executor cleanup_executor);

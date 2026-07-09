@@ -2,6 +2,8 @@
 
 #include "write_gate.hxx"
 
+#include <map>
+
 namespace forge::db::object {
 
 struct store::impl {
@@ -11,6 +13,7 @@ struct store::impl {
    boost::asio::awaitable<forge::db::core::snapshot> open_read_snapshot() const;
    boost::asio::awaitable<forge::ids::object_id> allocate_id(forge::ids::object_id type,
                                                              forge::db::core::transaction& active);
+   boost::asio::awaitable<void> seal_allocations(transaction::allocation_seal_map seals);
 
    void register_object_type(forge::ids::object_id type, std::type_index model);
    void ensure_registered_type(forge::ids::object_id type, std::type_index model) const;

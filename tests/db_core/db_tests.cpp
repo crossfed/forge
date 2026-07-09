@@ -1,7 +1,11 @@
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/use_awaitable.hpp>
 #include <boost/test/unit_test.hpp>
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <map>
 #include <memory>
@@ -264,8 +268,9 @@ BOOST_AUTO_TEST_CASE(db_transaction_participant_hooks_follow_commit_and_rollback
             ++commits;
             co_return;
          });
-         tx.after_rollback([&]() {
+         tx.after_rollback([&]() -> boost::asio::awaitable<void> {
             ++rollbacks;
+            co_return;
          });
          co_await tx.commit();
       }
@@ -275,14 +280,37 @@ BOOST_AUTO_TEST_CASE(db_transaction_participant_hooks_follow_commit_and_rollback
             ++commits;
             co_return;
          });
-         tx.after_rollback([&]() {
+         tx.after_rollback([&]() -> boost::asio::awaitable<void> {
             ++rollbacks;
+            co_return;
          });
          co_await tx.rollback();
       }
 
       BOOST_CHECK_EQUAL(commits, 1U);
       BOOST_CHECK_EQUAL(rollbacks, 1U);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_transaction_awaits_async_rollback_hooks_before_returning) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto hook_completed = false;
+
+      auto tx = co_await driver->begin_transaction();
+      tx.after_rollback([&]() -> boost::asio::awaitable<void> {
+         auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+         hook_completed = true;
+         co_return;
+      });
+
+      co_await tx.rollback();
+      BOOST_CHECK(hook_completed);
       co_return;
    }());
 }
@@ -298,8 +326,9 @@ BOOST_AUTO_TEST_CASE(db_commit_failure_preserves_rollback_state) {
       auto rolled_back = false;
 
       auto tx = co_await driver->begin_transaction();
-      tx.after_rollback([&]() {
+      tx.after_rollback([&]() -> boost::asio::awaitable<void> {
          rolled_back = true;
+         co_return;
       });
       co_await tx.put(meta, key("a"), bytes("pending"));
 
