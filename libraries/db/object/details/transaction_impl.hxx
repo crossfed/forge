@@ -7,6 +7,19 @@
 namespace forge::db::object {
 
 struct transaction::impl {
+   struct rollback_state {
+      rollback_state(transaction::seal_allocations_fn seal, transaction::release_fn release) noexcept;
+
+      transaction::seal_allocations_fn seal_allocations;
+      transaction::allocation_seal_map allocation_seals;
+      transaction::release_fn release_writer;
+
+      void release() noexcept;
+      void remember_allocation(forge::ids::object_id type, std::uint64_t next_instance);
+      void clear_allocations() noexcept;
+      boost::asio::awaitable<void> after_rollback();
+   };
+
    impl(forge::db::core::transaction active_value,
         forge::db::core::family family_value,
         transaction::ensure_registered_fn ensure,
@@ -29,11 +42,9 @@ struct transaction::impl {
    forge::db::core::family family;
    transaction::ensure_registered_fn ensure_registered;
    transaction::allocate_id_fn allocate_id;
-   transaction::seal_allocations_fn seal_allocations;
-   transaction::allocation_seal_map allocation_seals;
+   std::shared_ptr<rollback_state> rollback;
    std::vector<std::shared_ptr<interceptor>> interceptors;
    std::vector<std::shared_ptr<observer>> observers;
-   transaction::release_fn release_writer;
    change_set changes;
    bool owns_commit = false;
    bool finalized = false;

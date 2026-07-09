@@ -23,56 +23,28 @@ import forge.db.object.exceptions;
 
 namespace forge::db::object {
 
-transaction::impl::impl(forge::db::core::transaction active_value,
-                        forge::db::core::family family_value,
-                        transaction::ensure_registered_fn ensure,
-                        transaction::allocate_id_fn allocate,
-                        transaction::seal_allocations_fn seal,
-                        std::vector<std::shared_ptr<interceptor>> interceptors_value,
-                        std::vector<std::shared_ptr<observer>> observers_value,
-                        transaction::release_fn release) noexcept
-    : owned{std::move(active_value)},
-      active{&*owned},
-      family{std::move(family_value)},
-      ensure_registered{std::move(ensure)},
-      allocate_id{std::move(allocate)},
-      seal_allocations{std::move(seal)},
-      interceptors{std::move(interceptors_value)},
-      observers{std::move(observers_value)},
-      release_writer{std::move(release)},
-      owns_commit{true} {}
+transaction::impl::rollback_state::rollback_state(transaction::seal_allocations_fn seal,
+                                                  transaction::release_fn release) noexcept
+    : seal_allocations{std::move(seal)}, release_writer{std::move(release)} {}
 
-transaction::impl::impl(forge::db::core::transaction& active_value,
-                        forge::db::core::family family_value,
-                        transaction::ensure_registered_fn ensure,
-                        transaction::allocate_id_fn allocate,
-                        transaction::seal_allocations_fn seal,
-                        std::vector<std::shared_ptr<interceptor>> interceptors_value,
-                        std::vector<std::shared_ptr<observer>> observers_value) noexcept
-    : active{&active_value},
-      family{std::move(family_value)},
-      ensure_registered{std::move(ensure)},
-      allocate_id{std::move(allocate)},
-      seal_allocations{std::move(seal)},
-      interceptors{std::move(interceptors_value)},
-      observers{std::move(observers_value)} {}
-
-void transaction::impl::release() noexcept {
+void transaction::impl::rollback_state::release() noexcept {
    if (release_writer) {
       release_writer();
       release_writer = {};
    }
 }
 
-void transaction::impl::remember_allocation(forge::ids::object_id type, std::uint64_t next_instance) {
+void transaction::impl::rollback_state::remember_allocation(forge::ids::object_id type, std::uint64_t next_instance) {
    type.instance = 0;
    auto& existing = allocation_seals[type];
    existing = std::max(existing, next_instance);
 }
 
-boost::asio::awaitable<void> transaction::impl::after_rollback() {
-   finalized = true;
-   changes.mutations.clear();
+void transaction::impl::rollback_state::clear_allocations() noexcept {
+   allocation_seals.clear();
+}
+
+boost::asio::awaitable<void> transaction::impl::rollback_state::after_rollback() {
    auto seals = std::move(allocation_seals);
    allocation_seals.clear();
    try {
@@ -87,10 +59,66 @@ boost::asio::awaitable<void> transaction::impl::after_rollback() {
    co_return;
 }
 
+transaction::impl::impl(forge::db::core::transaction active_value,
+                        forge::db::core::family family_value,
+                        transaction::ensure_registered_fn ensure,
+                        transaction::allocate_id_fn allocate,
+                        transaction::seal_allocations_fn seal,
+                        std::vector<std::shared_ptr<interceptor>> interceptors_value,
+                        std::vector<std::shared_ptr<observer>> observers_value,
+                        transaction::release_fn release) noexcept
+    : owned{std::move(active_value)},
+      active{&*owned},
+      family{std::move(family_value)},
+      ensure_registered{std::move(ensure)},
+      allocate_id{std::move(allocate)},
+      rollback{std::make_shared<rollback_state>(std::move(seal), std::move(release))},
+      interceptors{std::move(interceptors_value)},
+      observers{std::move(observers_value)},
+      owns_commit{true} {}
+
+transaction::impl::impl(forge::db::core::transaction& active_value,
+                        forge::db::core::family family_value,
+                        transaction::ensure_registered_fn ensure,
+                        transaction::allocate_id_fn allocate,
+                        transaction::seal_allocations_fn seal,
+                        std::vector<std::shared_ptr<interceptor>> interceptors_value,
+                        std::vector<std::shared_ptr<observer>> observers_value) noexcept
+    : active{&active_value},
+      family{std::move(family_value)},
+      ensure_registered{std::move(ensure)},
+      allocate_id{std::move(allocate)},
+      rollback{std::make_shared<rollback_state>(std::move(seal), transaction::release_fn{})},
+      interceptors{std::move(interceptors_value)},
+      observers{std::move(observers_value)} {}
+
+void transaction::impl::release() noexcept {
+   if (rollback) {
+      rollback->release();
+   }
+}
+
+void transaction::impl::remember_allocation(forge::ids::object_id type, std::uint64_t next_instance) {
+   if (rollback) {
+      rollback->remember_allocation(type, next_instance);
+   }
+}
+
+boost::asio::awaitable<void> transaction::impl::after_rollback() {
+   finalized = true;
+   changes.mutations.clear();
+   if (rollback) {
+      co_await rollback->after_rollback();
+   }
+   co_return;
+}
+
 boost::asio::awaitable<void> transaction::impl::after_commit() {
    finalized = true;
    auto committed_changes = std::move(changes);
-   allocation_seals.clear();
+   if (rollback) {
+      rollback->clear_allocations();
+   }
    release();
 
    if (!committed_changes.empty()) {
@@ -159,12 +187,12 @@ transaction::transaction(forge::db::core::transaction&& active,
       }
       co_return;
    });
-   auto rollback_release = impl_->release_writer;
-   db_transaction().after_rollback([weak_state, release = std::move(rollback_release)]() mutable -> boost::asio::awaitable<void> {
+   auto rollback_state = impl_->rollback;
+   db_transaction().after_rollback([weak_state, rollback_state]() mutable -> boost::asio::awaitable<void> {
       if (auto state = weak_state.lock()) {
          co_await state->after_rollback();
-      } else if (release) {
-         release();
+      } else if (rollback_state) {
+         co_await rollback_state->after_rollback();
       }
       co_return;
    });
