@@ -14,12 +14,12 @@ export module forge.app.application_builder;
 
 import forge.asio.runtime;
 import forge.asio.task_scheduler;
-import forge.config.key_path;
-import forge.config.value;
-import forge.config.document;
-import forge.config.component;
-import forge.config.decode;
-import forge.config.migration;
+import forge.config.core.key_path;
+import forge.config.core.value;
+import forge.config.core.document;
+import forge.config.core.component;
+import forge.config.core.decode;
+import forge.config.core.migration;
 import forge.app.application_shell;
 import forge.app.plugin_registry;
 
@@ -41,15 +41,15 @@ class application_builder {
    application_builder& scheduler(forge::asio::task_scheduler::options value);
 
    application_builder& plugin(plugin_descriptor descriptor);
-   application_builder& describe_config(forge::config::component_descriptor descriptor);
+   application_builder& describe_config(forge::config::core::component_descriptor descriptor);
 
    template <typename T, typename Handler> application_builder& config(std::string section, Handler&& handler) {
-      auto descriptor = forge::config::describe_component<T>(section);
+      auto descriptor = forge::config::core::describe_component<T>(section);
       using handler_type = std::decay_t<Handler>;
       add_configure_callback(
          [section = std::move(section), handler = handler_type{std::forward<Handler>(handler)}](
             configure_context& context) mutable -> boost::asio::awaitable<void> {
-            auto decoded = forge::config::decode<T>(context.document(), section);
+            auto decoded = forge::config::core::decode<T>(context.document(), section);
             if (!decoded.ok()) {
                throw make_decode_error(decoded.diagnostics);
             }
@@ -140,7 +140,7 @@ class application_builder {
 
    template <typename> static constexpr bool dependent_false = false;
 
-   static std::invalid_argument make_decode_error(const forge::config::decode_diagnostics& diagnostics);
+   static std::invalid_argument make_decode_error(const forge::config::core::decode_diagnostics& diagnostics);
 
    void add_configure_callback(configure_callback callback);
    void add_provide_callback(provide_callback callback);

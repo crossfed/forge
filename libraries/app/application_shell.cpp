@@ -15,12 +15,12 @@ module forge.app.application_shell;
 import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.asio.task_scheduler;
-import forge.config.key_path;
-import forge.config.value;
-import forge.config.document;
-import forge.config.component;
-import forge.config.decode;
-import forge.config.migration;
+import forge.config.core.key_path;
+import forge.config.core.value;
+import forge.config.core.document;
+import forge.config.core.component;
+import forge.config.core.decode;
+import forge.config.core.migration;
 import forge.exceptions;
 import forge.schema.value_kind;
 import forge.app.application;
@@ -73,11 +73,11 @@ void publish_application_event(event_bus& events, event_severity severity, std::
    return id.value;
 }
 
-[[nodiscard]] forge::config::component_descriptor plugin_selection_descriptor(const plugin_registry& registry) {
-   auto descriptor = forge::config::component_descriptor{.section = "plugins"};
+[[nodiscard]] forge::config::core::component_descriptor plugin_selection_descriptor(const plugin_registry& registry) {
+   auto descriptor = forge::config::core::component_descriptor{.section = "plugins"};
    for (const auto& plugin : registry.descriptors()) {
       const auto key = plugin_selection_key(plugin.id);
-      descriptor.fields.push_back(forge::config::field_descriptor{
+      descriptor.fields.push_back(forge::config::core::field_descriptor{
          .name = key + ".enabled",
          .kind = forge::schema::value_kind::boolean,
          .has_default = true,
@@ -89,7 +89,7 @@ void publish_application_event(event_bus& events, event_severity severity, std::
 }
 
 [[nodiscard]] std::vector<plugin_config> plugin_selection_from_document(const plugin_registry& registry,
-                                                                        const forge::config::document& document) {
+                                                                        const forge::config::core::document& document) {
    auto out = std::vector<plugin_config>{};
    for (const auto& descriptor : registry.descriptors()) {
       auto enabled = descriptor.enabled_by_default;
@@ -99,7 +99,7 @@ void publish_application_event(event_bus& events, event_severity severity, std::
             enabled = *value;
          } else if (const auto* text = std::get_if<std::string>(&configured->storage)) {
             auto parsed = false;
-            if (!forge::config::parse_bool_text(*text, parsed)) {
+            if (!forge::config::core::parse_bool_text(*text, parsed)) {
                throw std::invalid_argument{"plugin enabled flag must be boolean: " + path};
             }
             enabled = parsed;
@@ -118,7 +118,7 @@ void publish_application_event(event_bus& events, event_severity severity, std::
 } // namespace
 
 application_context::application_context(forge::asio::runtime& runtime, forge::asio::task_scheduler& scheduler,
-                                         forge::api::registry& apis, signal_bus& signals,
+                                         forge::api::core::registry& apis, signal_bus& signals,
                                          event_bus& events, diagnostics_store& diagnostics)
     : runtime_{&runtime}, scheduler_{&scheduler}, apis_{&apis}, signals_{&signals},
       events_{&events}, diagnostics_{&diagnostics} {}
@@ -131,8 +131,8 @@ forge::asio::task_scheduler& application_context::scheduler() noexcept {
    return *scheduler_;
 }
 
-forge::api::installer application_context::apis() noexcept {
-   return forge::api::installer{*apis_};
+forge::api::core::installer application_context::apis() noexcept {
+   return forge::api::core::installer{*apis_};
 }
 
 signal_bus& application_context::signals() noexcept {
@@ -147,14 +147,14 @@ diagnostics_store& application_context::diagnostics() noexcept {
    return *diagnostics_;
 }
 
-configure_context::configure_context(const forge::config::document& document) : document_{&document} {}
+configure_context::configure_context(const forge::config::core::document& document) : document_{&document} {}
 
-const forge::config::document& configure_context::document() const noexcept {
+const forge::config::core::document& configure_context::document() const noexcept {
    return *document_;
 }
 
-forge::config::component_view configure_context::view(std::string section) const {
-   return forge::config::component_view{*document_, std::move(section)};
+forge::config::core::component_view configure_context::view(std::string section) const {
+   return forge::config::core::component_view{*document_, std::move(section)};
 }
 
 struct application_shell::impl {
@@ -171,7 +171,7 @@ struct application_shell::impl {
    application_shell_options options;
    forge::asio::runtime runtime;
    forge::asio::task_scheduler scheduler;
-   forge::api::registry apis;
+   forge::api::core::registry apis;
    signal_bus signals;
    event_bus events;
    diagnostics_store diagnostics;
@@ -179,7 +179,7 @@ struct application_shell::impl {
    plugin_registry registry;
    std::unique_ptr<plugin_context> plugin_context_value;
    std::unique_ptr<application_runtime> plugin_runtime;
-   forge::config::document effective_config;
+   forge::config::core::document effective_config;
    bool plugins_registered = false;
    bool configured = false;
    bool apis_provided = false;
@@ -190,7 +190,7 @@ application_shell::application_shell(application_shell_options options) : impl_{
 
 application_shell::~application_shell() = default;
 
-void application_shell::on_describe_config(forge::config::component_registry&) const {}
+void application_shell::on_describe_config(forge::config::core::component_registry&) const {}
 
 boost::asio::awaitable<void> application_shell::on_configure(configure_context&) {
    co_return;
@@ -214,7 +214,7 @@ void application_shell::ensure_plugins_registered() {
    impl_->plugins_registered = true;
 }
 
-void application_shell::instantiate_plugins(const forge::config::document& document) {
+void application_shell::instantiate_plugins(const forge::config::core::document& document) {
    ensure_plugins_registered();
    impl_->plugin_runtime.reset();
    impl_->plugin_context_value.reset();
@@ -226,9 +226,9 @@ void application_shell::instantiate_plugins(const forge::config::document& docum
       &impl_->diagnostics);
 }
 
-forge::config::component_registry application_shell::collect_config() {
+forge::config::core::component_registry application_shell::collect_config() {
    ensure_plugins_registered();
-   auto registry = forge::config::component_registry{};
+   auto registry = forge::config::core::component_registry{};
    on_describe_config(registry);
    if (!impl_->registry.descriptors().empty()) {
       registry.add(plugin_selection_descriptor(impl_->registry));
@@ -246,12 +246,12 @@ forge::config::component_registry application_shell::collect_config() {
    return registry;
 }
 
-forge::config::document application_shell::make_effective_config(const forge::config::document& document) {
+forge::config::core::document application_shell::make_effective_config(const forge::config::core::document& document) {
    auto registry = collect_config();
-   return forge::config::merge({forge::config::defaults_for(registry), document});
+   return forge::config::core::merge({forge::config::core::defaults_for(registry), document});
 }
 
-boost::asio::awaitable<void> application_shell::apply_effective_config(forge::config::document document) {
+boost::asio::awaitable<void> application_shell::apply_effective_config(forge::config::core::document document) {
    impl_->effective_config = std::move(document);
    instantiate_plugins(impl_->effective_config);
    auto context = configure_context{impl_->effective_config};
@@ -260,11 +260,11 @@ boost::asio::awaitable<void> application_shell::apply_effective_config(forge::co
    impl_->configured = true;
 }
 
-forge::config::component_registry application_shell::describe_config() {
+forge::config::core::component_registry application_shell::describe_config() {
    return collect_config();
 }
 
-void application_shell::configure(const forge::config::document& document) {
+void application_shell::configure(const forge::config::core::document& document) {
    impl_->require_created("configure");
    forge::asio::blocking::run(impl_->runtime, apply_effective_config(make_effective_config(document)));
 }
@@ -274,7 +274,7 @@ boost::asio::awaitable<void> application_shell::initialize() {
       co_return;
    }
    if (!impl_->configured) {
-      co_await apply_effective_config(make_effective_config(forge::config::document{}));
+      co_await apply_effective_config(make_effective_config(forge::config::core::document{}));
    }
    try {
       impl_->diagnostics.set_application_state(lifecycle_state::initializing, "initialize");
@@ -378,7 +378,7 @@ forge::asio::task_scheduler& application_shell::scheduler() noexcept {
    return impl_->scheduler;
 }
 
-forge::api::registry& application_shell::apis() noexcept {
+forge::api::core::registry& application_shell::apis() noexcept {
    return impl_->apis;
 }
 

@@ -10,9 +10,9 @@ module;
 
 module forge.plugins.log.otlp.plugin;
 
-import forge.config.component;
-import forge.config.decode;
-import forge.http.base_url;
+import forge.config.core.component;
+import forge.config.core.decode;
+import forge.net.http.base_url;
 import forge.log.log_message;
 import forge.otlp.options;
 import forge.otlp.crash;
@@ -39,7 +39,7 @@ forge::otlp::attribute to_otlp_header(const header& value) {
 
 void validate_endpoint(const std::string& value) {
    try {
-      const auto parsed = forge::http::parse_base_url(value);
+      const auto parsed = forge::net::http::parse_base_url(value);
       if (parsed.scheme != "http" && parsed.scheme != "https") {
          FORGE_THROW_EXCEPTION(exceptions::invalid_config, "OTLP logs endpoint must use http or https");
       }
@@ -82,11 +82,11 @@ forge::log_level parse_log_level(std::string_view value) {
    }
 }
 
-config decode_config(const forge::config::component_view& view) {
-   auto decoded = forge::config::decode<config>(view.source(), view.section());
+config decode_config(const forge::config::core::component_view& view) {
+   auto decoded = forge::config::core::decode<config>(view.source(), view.section());
    if (!decoded.ok()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_config,
-                            forge::config::format_decode_diagnostics("invalid OTLP logs config",
+                            forge::config::core::format_decode_diagnostics("invalid OTLP logs config",
                                                                       decoded.diagnostics));
    }
    validate_endpoint(decoded.value.endpoint);

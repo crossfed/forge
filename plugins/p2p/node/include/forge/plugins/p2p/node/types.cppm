@@ -12,9 +12,9 @@ module;
 
 export module forge.plugins.p2p.node.types;
 
-import forge.transport.api.options;
-import forge.p2p.identity;
-import forge.p2p.endpoint;
+import forge.api.transport.options;
+import forge.net.p2p.identity;
+import forge.net.p2p.endpoint;
 import forge.schema.diagnostic;
 import forge.schema.value_kind;
 import forge.schema.object;
@@ -60,14 +60,14 @@ struct config {
 };
 
 struct info {
-   forge::p2p::peer_id local_peer;
-   std::vector<forge::p2p::endpoint> local_endpoints;
+   forge::net::p2p::peer_id local_peer;
+   std::vector<forge::net::p2p::endpoint> local_endpoints;
    bool started = false;
 };
 
 struct remote_options {
    std::chrono::milliseconds open_deadline{10'000};
-   std::optional<forge::api::codec_id> codec;
+   std::optional<forge::api::core::codec_id> codec;
    std::optional<std::size_t> max_inflight;
    std::optional<std::chrono::milliseconds> deadline;
    std::optional<std::uint32_t> max_frame_size;

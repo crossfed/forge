@@ -19,22 +19,22 @@ module;
 
 module forge.plugins.crypto.signer.plugin;
 
-import forge.api.exceptions;
-import forge.api.types;
-import forge.api.descriptor;
-import forge.api.error_projection;
-import forge.api.handle;
-import forge.api.connection;
-import forge.api.registry;
-import forge.api.binding;
-import forge.api.dispatcher;
+import forge.api.core.exceptions;
+import forge.api.core.types;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.core.handle;
+import forge.api.core.connection;
+import forge.api.core.registry;
+import forge.api.core.binding;
+import forge.api.core.dispatcher;
 import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.app.plugin_registry;
-import forge.config.component;
-import forge.config.decode;
-import forge.config.document;
-import forge.config.value;
+import forge.config.core.component;
+import forge.config.core.decode;
+import forge.config.core.document;
+import forge.config.core.value;
 import forge.crypto.asymmetric;
 import forge.crypto.sha256;
 import forge.exceptions;
@@ -71,16 +71,16 @@ std::string plugin::version() const {
    return "1.0.0";
 }
 
-std::optional<forge::config::component_descriptor> plugin::describe_config() const {
-   return forge::config::describe_component<config>("plugins.crypto.signer");
+std::optional<forge::config::core::component_descriptor> plugin::describe_config() const {
+   return forge::config::core::describe_component<config>("plugins.crypto.signer");
 }
 
-boost::asio::awaitable<void> plugin::configure(forge::config::component_view view) {
+boost::asio::awaitable<void> plugin::configure(forge::config::core::component_view view) {
    apply_config(*impl_, view);
    co_return;
 }
 
-boost::asio::awaitable<void> plugin::provide(forge::api::provider& provider) {
+boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provider) {
    provider.install<api>(std::make_shared<signer_api>(impl_));
    co_return;
 }

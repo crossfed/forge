@@ -11,17 +11,17 @@ module;
 
 export module forge.plugins.p2p.resolver.types;
 
-import forge.api.exceptions;
-import forge.api.types;
-import forge.api.descriptor;
-import forge.api.error_projection;
-import forge.api.handle;
-import forge.api.connection;
-import forge.api.registry;
-import forge.api.binding;
-import forge.api.dispatcher;
-import forge.transport.api.options;
-import forge.transport.api.connection;
+import forge.api.core.exceptions;
+import forge.api.core.types;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.core.handle;
+import forge.api.core.connection;
+import forge.api.core.registry;
+import forge.api.core.binding;
+import forge.api.core.dispatcher;
+import forge.api.transport.options;
+import forge.api.transport.connection;
 import forge.schema.diagnostic;
 import forge.schema.value_kind;
 import forge.schema.object;
@@ -41,7 +41,7 @@ struct config {
 };
 
 struct publish_options {
-   forge::transport::api::options transport{};
+   forge::api::transport::options transport{};
 };
 
 struct resolve_options {
@@ -52,8 +52,8 @@ struct resolve_options {
 
 struct error {
    std::string name;
-   forge::api::error_identity identity;
-   forge::api::status status_code = forge::api::status::internal;
+   forge::api::core::error_identity identity;
+   forge::api::core::status status_code = forge::api::core::status::internal;
    bool retryable = false;
 
    bool operator==(const error&) const = default;
@@ -61,17 +61,17 @@ struct error {
 
 struct method {
    std::string name;
-   forge::api::method_kind kind = forge::api::method_kind::unary;
+   forge::api::core::method_kind kind = forge::api::core::method_kind::unary;
    std::vector<error> errors;
 
    bool operator==(const method&) const = default;
 };
 
 struct entry {
-   forge::api::api_id id;
-   forge::api::api_version version;
+   forge::api::core::api_id id;
+   forge::api::core::api_version version;
    std::string protocol;
-   forge::api::codec_id codec{.value = "forge.raw"};
+   forge::api::core::codec_id codec{.value = "forge.raw"};
    std::uint64_t max_inflight = 0;
    std::uint64_t max_frame_size = 0;
    std::vector<method> methods;
@@ -86,12 +86,12 @@ struct resolution {
 };
 
 struct resolved_connection {
-   forge::transport::api::connection connection;
-   forge::api::api_ref selected;
+   forge::api::transport::connection connection;
+   forge::api::core::api_ref selected;
 };
 
 struct query {
-   std::vector<forge::api::api_ref> apis;
+   std::vector<forge::api::core::api_ref> apis;
 
    bool operator==(const query&) const = default;
 };

@@ -235,7 +235,7 @@ fcl::asio::blocking::run(app.runtime(), app.shutdown());
 ```
 
 Plugins describe config through `describe_config()` and receive
-`config::component_view`; they do not parse CLI/YAML directly.
+`config::core::component_view`; they do not parse CLI/YAML directly.
 Use lower-level `application_runtime` only when an existing host framework
 already owns runtime, ports, events, signals and diagnostics.
 

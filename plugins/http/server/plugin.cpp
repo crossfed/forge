@@ -11,14 +11,14 @@ module;
 
 module forge.plugins.http.server.plugin;
 
-import forge.api.registry;
+import forge.api.core.registry;
 import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.asio.runtime;
-import forge.config.component;
-import forge.config.decode;
-import forge.http.api.binding;
-import forge.http.server;
+import forge.config.core.component;
+import forge.config.core.decode;
+import forge.api.http.binding;
+import forge.net.http.server;
 import forge.plugins.http.server.api;
 import forge.plugins.http.server.exceptions;
 import forge.plugins.http.server.middleware;
@@ -43,16 +43,16 @@ std::string plugin::version() const {
    return "1.0.0";
 }
 
-std::optional<forge::config::component_descriptor> plugin::describe_config() const {
-   return forge::config::describe_component<config>("plugins.http.server");
+std::optional<forge::config::core::component_descriptor> plugin::describe_config() const {
+   return forge::config::core::describe_component<config>("plugins.http.server");
 }
 
-boost::asio::awaitable<void> plugin::configure(forge::config::component_view view) {
+boost::asio::awaitable<void> plugin::configure(forge::config::core::component_view view) {
    impl_->settings = decode_config(view);
    co_return;
 }
 
-boost::asio::awaitable<void> plugin::provide(forge::api::provider& provider) {
+boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provider) {
    provider.install<api>(std::make_shared<publisher_api>(impl_));
    co_return;
 }

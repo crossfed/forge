@@ -20,15 +20,15 @@ struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
    bool stopping = false;
 
    [[nodiscard]] forge::plugins::p2p::node::pubsub_source& require_source() const;
-   void ensure_topic_allowed(const forge::p2p::pubsub::topic& subject) const;
+   void ensure_topic_allowed(const forge::net::p2p::pubsub::topic& subject) const;
    [[nodiscard]] std::vector<handler_record> handlers_for(const std::string& topic) const;
    [[nodiscard]] bool try_begin_handler();
    void finish_handler();
    void record_handler_failure();
    void record_drop();
-   boost::asio::awaitable<forge::p2p::pubsub::validation_result>
+   boost::asio::awaitable<forge::net::p2p::pubsub::validation_result>
    call_handler(handler_record handler, message value);
-   boost::asio::awaitable<forge::p2p::pubsub::validation_result> handle_event(forge::p2p::pubsub::event event);
+   boost::asio::awaitable<forge::net::p2p::pubsub::validation_result> handle_event(forge::net::p2p::pubsub::event event);
 };
 
 } // namespace forge::plugins::p2p::pubsub

@@ -13,5 +13,5 @@ target_link_libraries(
       forge_exceptions
       forge_log
       forge_asio
-      forge_http
+      forge_net_http
 )

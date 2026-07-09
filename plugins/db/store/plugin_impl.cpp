@@ -17,10 +17,10 @@ module;
 
 module forge.plugins.db.store.plugin;
 
-import forge.api.binding;
+import forge.api.core.binding;
 import forge.app.plugin_context;
-import forge.config.component;
-import forge.config.decode;
+import forge.config.core.component;
+import forge.config.core.decode;
 import forge.db.blob.store;
 import forge.db.core.driver;
 import forge.db.core.record;
@@ -277,18 +277,18 @@ std::shared_ptr<plugin::impl> lifecycle::make_impl() {
    return std::make_shared<plugin::impl>();
 }
 
-std::optional<forge::config::component_descriptor> lifecycle::describe_config(const std::shared_ptr<plugin::impl>&) {
-   return forge::config::describe_component<config>("plugins.db.store");
+std::optional<forge::config::core::component_descriptor> lifecycle::describe_config(const std::shared_ptr<plugin::impl>&) {
+   return forge::config::core::describe_component<config>("plugins.db.store");
 }
 
 boost::asio::awaitable<void> lifecycle::configure(const std::shared_ptr<plugin::impl>& impl,
-                                                  forge::config::component_view view) {
+                                                  forge::config::core::component_view view) {
    impl->configure(decode_config(view));
    co_return;
 }
 
 boost::asio::awaitable<void> lifecycle::provide(const std::shared_ptr<plugin::impl>& impl,
-                                                forge::api::provider& provider) {
+                                                forge::api::core::provider& provider) {
    provider.install<api>(std::make_shared<plugin::api_impl>(impl));
    co_return;
 }

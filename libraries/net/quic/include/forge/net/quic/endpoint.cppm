@@ -1,0 +1,22 @@
+module;
+
+#include <cstdint>
+#include <string>
+#include <string_view>
+
+export module forge.net.quic.endpoint;
+
+import forge.net.quic.exceptions;
+
+export namespace forge::net::quic {
+
+struct endpoint {
+   std::string host;
+   std::uint16_t port = 0;
+
+   [[nodiscard]] std::string authority() const;
+};
+
+[[nodiscard]] endpoint parse_endpoint(std::string_view value);
+
+} // namespace forge::net::quic

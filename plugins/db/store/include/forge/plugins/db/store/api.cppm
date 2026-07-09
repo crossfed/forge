@@ -1,7 +1,7 @@
 module;
 
 #include <boost/asio/awaitable.hpp>
-#include <forge/api/macros.hpp>
+#include <forge/api/core/macros.hpp>
 
 #include <concepts>
 #include <cstddef>
@@ -17,7 +17,7 @@ export module forge.plugins.db.store.api;
 export import forge.plugins.db.store.exceptions;
 export import forge.plugins.db.store.types;
 
-import forge.api.binding;
+import forge.api.core.binding;
 import forge.db.blob.ref;
 import forge.db.blob.store;
 import forge.db.blob.transaction;
@@ -289,7 +289,7 @@ class store_handle {
    friend class store_handle_state;
 };
 
-class api : public forge::api::contract<api, forge::api::surface::local> {
+class api : public forge::api::core::contract<api, forge::api::core::surface::local> {
  public:
    virtual ~api() = default;
 

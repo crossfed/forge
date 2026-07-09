@@ -14,7 +14,7 @@ module;
 
 module forge.plugins.p2p.pubsub.plugin;
 
-import forge.p2p.pubsub;
+import forge.net.p2p.pubsub;
 import forge.plugins.p2p.pubsub.api;
 import forge.plugins.p2p.pubsub.types;
 

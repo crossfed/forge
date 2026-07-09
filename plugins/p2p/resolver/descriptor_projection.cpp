@@ -13,12 +13,12 @@ module;
 
 module forge.plugins.p2p.resolver.plugin;
 
-import forge.api.descriptor;
-import forge.api.error_projection;
-import forge.transport.api.options;
-import forge.api.types;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.transport.options;
+import forge.api.core.types;
 import forge.exceptions;
-import forge.p2p.protocol;
+import forge.net.p2p.protocol;
 import forge.plugins.p2p.resolver.exceptions;
 import forge.plugins.p2p.resolver.types;
 
@@ -36,7 +36,7 @@ namespace {
    return api_key(value.id, value.version.major) + "#" + std::to_string(value.version.revision);
 }
 
-[[nodiscard]] error project_error(const forge::api::error_descriptor& value) {
+[[nodiscard]] error project_error(const forge::api::core::error_descriptor& value) {
    return error{
       .name = value.name,
       .identity = value.identity,
@@ -45,7 +45,7 @@ namespace {
    };
 }
 
-[[nodiscard]] method project_method(const forge::api::method_descriptor& value) {
+[[nodiscard]] method project_method(const forge::api::core::method_descriptor& value) {
    auto errors = std::vector<error>{};
    errors.reserve(value.errors.size());
    for (const auto& error : value.errors) {
@@ -60,13 +60,13 @@ namespace {
 
 } // namespace
 
-std::string api_key(const forge::api::api_id& id, std::uint16_t major) {
+std::string api_key(const forge::api::core::api_id& id, std::uint16_t major) {
    return id.value + "#" + std::to_string(major);
 }
 
-entry project_descriptor(const forge::api::descriptor& descriptor,
-                         const forge::p2p::protocol_id& protocol,
-                         const forge::transport::api::options& options) {
+entry project_descriptor(const forge::api::core::descriptor& descriptor,
+                         const forge::net::p2p::protocol_id& protocol,
+                         const forge::api::transport::options& options) {
    auto methods = std::vector<method>{};
    methods.reserve(descriptor.methods.size());
    for (const auto& method : descriptor.methods) {
@@ -131,9 +131,9 @@ void validate_response(const std::vector<entry>& entries, const config& limits) 
    }
 }
 
-void validate_descriptor_compatible(const forge::api::descriptor& descriptor, const entry& remote) {
-   if (!forge::api::compatible(forge::api::descriptor{.id = remote.id, .version = remote.version},
-                             forge::api::api_ref{.id = descriptor.id,
+void validate_descriptor_compatible(const forge::api::core::descriptor& descriptor, const entry& remote) {
+   if (!forge::api::core::compatible(forge::api::core::descriptor{.id = remote.id, .version = remote.version},
+                             forge::api::core::api_ref{.id = descriptor.id,
                                                .major = descriptor.version.major,
                                                .min_revision = descriptor.version.revision})) {
       FORGE_THROW_EXCEPTION(exceptions::incompatible_api, "remote API version is incompatible",
@@ -141,7 +141,7 @@ void validate_descriptor_compatible(const forge::api::descriptor& descriptor, co
    }
    for (const auto& local_method : descriptor.methods) {
       const auto found = std::ranges::find_if(remote.methods, [&](const auto& candidate) {
-         return forge::api::compatible(forge::api::method_descriptor{.name = candidate.name, .kind = candidate.kind},
+         return forge::api::core::compatible(forge::api::core::method_descriptor{.name = candidate.name, .kind = candidate.kind},
                                      local_method);
       });
       if (found == remote.methods.end()) {
@@ -153,10 +153,10 @@ void validate_descriptor_compatible(const forge::api::descriptor& descriptor, co
 }
 
 std::optional<entry> select_compatible(const std::vector<entry>& entries,
-                                       const forge::api::api_ref& requested) {
+                                       const forge::api::core::api_ref& requested) {
    auto selected = std::optional<entry>{};
    for (const auto& entry : entries) {
-      if (!forge::api::compatible(forge::api::descriptor{.id = entry.id, .version = entry.version}, requested)) {
+      if (!forge::api::core::compatible(forge::api::core::descriptor{.id = entry.id, .version = entry.version}, requested)) {
          continue;
       }
       if (!selected || entry.version.revision > selected->version.revision) {

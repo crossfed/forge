@@ -39,7 +39,7 @@ If a domain needs array, forwarding or safety wrappers internally, it must use s
 
 Raw serialization lives only in `libraries/raw`. `core` must not define `namespace fcl::raw` or raw overloads.
 
-Variant and JSON glue for retained scalar/value types lives in `libraries/variant` and `libraries/json`, not in the foundational core modules. This keeps the dependency graph one-way: higher domains may adapt core values, but core does not know about higher domains.
+Variant and JSON glue for retained scalar/value types lives in `libraries/variant` and `libraries/codec/json`, not in the foundational core modules. This keeps the dependency graph one-way: higher domains may adapt core values, but core does not know about higher domains.
 
 ## Time
 

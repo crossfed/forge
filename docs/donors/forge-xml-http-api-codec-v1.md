@@ -1,7 +1,7 @@
 # Forge XML And HTTP API Codec Donor Note
 
-This donor note records the patterns accepted for the `forge_xml` library and
-the follow-up `forge_http_api` multi-codec binding work.
+This donor note records the patterns accepted for the `forge_codec_xml` library and
+the follow-up `forge_api_http` multi-codec binding work.
 
 ## Donors Inspected
 
@@ -68,7 +68,7 @@ From existing Forge JSON/YAML:
   wrapped cleanly.
 - Putting S3 route matrices, bucket/object models, SigV4, storage policy or
   product error names into Forge.
-- Allowing S3-style products to bypass `forge_http_api` for normal endpoints.
+- Allowing S3-style products to bypass `forge_api_http` for normal endpoints.
 - Making XML the default codec for existing HTTP APIs.
 
 ## Test Mapping

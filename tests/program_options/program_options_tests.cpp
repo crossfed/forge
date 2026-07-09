@@ -6,13 +6,13 @@
 #include <variant>
 #include <vector>
 
-import forge.config.key_path;
-import forge.config.value;
-import forge.config.document;
-import forge.config.component;
-import forge.config.decode;
-import forge.config.migration;
-import forge.program_options;
+import forge.config.core.key_path;
+import forge.config.core.value;
+import forge.config.core.document;
+import forge.config.core.component;
+import forge.config.core.decode;
+import forge.config.core.migration;
+import forge.config.program_options;
 import forge.schema.diagnostic;
 import forge.schema.value_kind;
 import forge.schema.object;
@@ -54,16 +54,16 @@ template <> struct forge::schema::rules<flat_config> {
 };
 
 BOOST_AUTO_TEST_CASE(program_options_parses_cli_into_config_document) {
-   auto registry = forge::config::component_registry{};
-   registry.add(forge::config::describe_component<http_config>("http"));
+   auto registry = forge::config::core::component_registry{};
+   registry.add(forge::config::core::describe_component<http_config>("http"));
 
    const char* argv[] = {
        "tool", "--http.bind-port=9090", "--http.tls-enabled=false", "--http.tags=alpha", "--http.tags=beta",
    };
-   const auto parsed = forge::program_options::parse(5, argv, registry);
+   const auto parsed = forge::config::program_options::parse(5, argv, registry);
    BOOST_TEST(parsed.ok());
 
-   const auto decoded = forge::config::decode<http_config>(parsed.document, "http");
+   const auto decoded = forge::config::core::decode<http_config>(parsed.document, "http");
    BOOST_TEST(decoded.ok());
    BOOST_TEST(decoded.value.bind_port == 9090U);
    BOOST_TEST(!decoded.value.tls_enabled);
@@ -72,18 +72,18 @@ BOOST_AUTO_TEST_CASE(program_options_parses_cli_into_config_document) {
 }
 
 BOOST_AUTO_TEST_CASE(program_options_reports_conversion_errors) {
-   auto registry = forge::config::component_registry{};
-   registry.add(forge::config::describe_component<http_config>("http"));
+   auto registry = forge::config::core::component_registry{};
+   registry.add(forge::config::core::describe_component<http_config>("http"));
 
    const char* argv[] = {"tool", "--http.tls-enabled=maybe"};
-   const auto parsed = forge::program_options::parse(2, argv, registry);
+   const auto parsed = forge::config::program_options::parse(2, argv, registry);
    BOOST_TEST(!parsed.ok());
    BOOST_REQUIRE_EQUAL(parsed.diagnostics.size(), 1U);
    BOOST_TEST(parsed.diagnostics.front().code == "program_options.convert");
 }
 
 BOOST_AUTO_TEST_CASE(program_options_prescans_reserved_options_and_filters_application_args) {
-   const auto reserved = std::vector<forge::program_options::reserved_option>{
+   const auto reserved = std::vector<forge::config::program_options::reserved_option>{
       {
          .name = "runtime-threads",
          .path = "daemon.runtime-threads",
@@ -109,7 +109,7 @@ BOOST_AUTO_TEST_CASE(program_options_prescans_reserved_options_and_filters_appli
       "dev",
    };
 
-   const auto parsed = forge::program_options::pre_scan_reserved(6, argv, reserved);
+   const auto parsed = forge::config::program_options::pre_scan_reserved(6, argv, reserved);
    BOOST_TEST(parsed.ok());
    BOOST_TEST(parsed.present("daemon.runtime-threads"));
    BOOST_TEST(parsed.present("daemon.check-config"));
@@ -132,27 +132,27 @@ BOOST_AUTO_TEST_CASE(program_options_prescans_reserved_options_and_filters_appli
 }
 
 BOOST_AUTO_TEST_CASE(program_options_supports_empty_component_section_as_flat_flags) {
-   auto registry = forge::config::component_registry{};
-   registry.add(forge::config::describe_component<flat_config>(""));
+   auto registry = forge::config::core::component_registry{};
+   registry.add(forge::config::core::describe_component<flat_config>(""));
 
    const char* argv[] = {"tool", "--log-level=debug"};
-   const auto parsed = forge::program_options::parse(2, argv, registry);
+   const auto parsed = forge::config::program_options::parse(2, argv, registry);
    BOOST_TEST(parsed.ok());
 
-   const auto decoded = forge::config::decode<flat_config>(parsed.document);
+   const auto decoded = forge::config::core::decode<flat_config>(parsed.document);
    BOOST_TEST(decoded.ok());
    BOOST_TEST(decoded.value.log_level == "debug");
 }
 
 BOOST_AUTO_TEST_CASE(program_options_supports_flat_component_section) {
-   auto registry = forge::config::component_registry{};
-   registry.add(forge::config::describe_component<http_config>(""));
+   auto registry = forge::config::core::component_registry{};
+   registry.add(forge::config::core::describe_component<http_config>(""));
 
    const char* argv[] = {"tool", "--bind-port=8081", "--tls-enabled=false", "--tags=daemon"};
-   const auto parsed = forge::program_options::parse(4, argv, registry);
+   const auto parsed = forge::config::program_options::parse(4, argv, registry);
    BOOST_TEST(parsed.ok());
 
-   const auto decoded = forge::config::decode<http_config>(parsed.document);
+   const auto decoded = forge::config::core::decode<http_config>(parsed.document);
    BOOST_TEST(decoded.ok());
    BOOST_TEST(decoded.value.bind_port == 8081U);
    BOOST_TEST(!decoded.value.tls_enabled);

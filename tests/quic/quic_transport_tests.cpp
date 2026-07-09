@@ -29,19 +29,19 @@
 import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.exceptions;
-import forge.quic.endpoint;
-import forge.quic.exceptions;
-import forge.quic.options;
-import forge.quic.security;
-import forge.quic.transport;
-import forge.transport.buffer;
-import forge.transport.connector;
-import forge.transport.endpoint;
-import forge.transport.exceptions;
-import forge.transport.listener;
-import forge.transport.registry;
-import forge.transport.session;
-import forge.transport.stream;
+import forge.net.quic.endpoint;
+import forge.net.quic.exceptions;
+import forge.net.quic.options;
+import forge.net.quic.security;
+import forge.net.quic.transport;
+import forge.net.transport.buffer;
+import forge.net.transport.connector;
+import forge.net.transport.endpoint;
+import forge.net.transport.exceptions;
+import forge.net.transport.listener;
+import forge.net.transport.registry;
+import forge.net.transport.session;
+import forge.net.transport.stream;
 
 namespace {
 
@@ -128,23 +128,23 @@ using bio_ptr = std::unique_ptr<BIO, bio_deleter>;
    return {value.begin(), value.end()};
 }
 
-[[nodiscard]] forge::transport::endpoint loopback_quic(std::uint16_t port) {
-   return forge::transport::endpoint{.host_type = forge::transport::endpoint::host_kind::ip4,
-                                   .protocol = forge::transport::endpoint::protocol_kind::quic_v1,
+[[nodiscard]] forge::net::transport::endpoint loopback_quic(std::uint16_t port) {
+   return forge::net::transport::endpoint{.host_type = forge::net::transport::endpoint::host_kind::ip4,
+                                   .protocol = forge::net::transport::endpoint::protocol_kind::quic_v1,
                                    .host = "127.0.0.1",
                                    .port = port};
 }
 
-[[nodiscard]] forge::transport::endpoint dns_quic(std::uint16_t port) {
-   return forge::transport::endpoint{.host_type = forge::transport::endpoint::host_kind::dns,
-                                   .protocol = forge::transport::endpoint::protocol_kind::quic_v1,
+[[nodiscard]] forge::net::transport::endpoint dns_quic(std::uint16_t port) {
+   return forge::net::transport::endpoint{.host_type = forge::net::transport::endpoint::host_kind::dns,
+                                   .protocol = forge::net::transport::endpoint::protocol_kind::quic_v1,
                                    .host = "localhost",
                                    .port = port};
 }
 
-[[nodiscard]] forge::transport::endpoint tcp_endpoint(std::uint16_t port) {
-   return forge::transport::endpoint{.host_type = forge::transport::endpoint::host_kind::ip4,
-                                   .protocol = forge::transport::endpoint::protocol_kind::tcp,
+[[nodiscard]] forge::net::transport::endpoint tcp_endpoint(std::uint16_t port) {
+   return forge::net::transport::endpoint{.host_type = forge::net::transport::endpoint::host_kind::ip4,
+                                   .protocol = forge::net::transport::endpoint::protocol_kind::tcp,
                                    .host = "127.0.0.1",
                                    .port = port};
 }
@@ -250,73 +250,73 @@ void add_extension(X509* certificate, X509* issuer, int nid, std::string_view va
                                   .private_key = write_private_key_pem(server_key.get())}};
 }
 
-[[nodiscard]] forge::quic::server_options make_server_options(const tls_material& material,
+[[nodiscard]] forge::net::quic::server_options make_server_options(const tls_material& material,
                                                             std::string alpn = "forge-quic-transport/1",
-                                                            forge::quic::transport_limits limits = {}) {
-   return forge::quic::server_options{
+                                                            forge::net::quic::transport_limits limits = {}) {
+   return forge::net::quic::server_options{
        .alpn = std::move(alpn),
        .limits = limits,
-       .security = forge::quic::security_options{.verify_peer = false},
+       .security = forge::net::quic::security_options{.verify_peer = false},
        .certificate_pem = material.server.certificate,
        .private_key_pem = material.server.private_key,
    };
 }
 
-[[nodiscard]] forge::quic::client_options make_client_options(const tls_material& material,
+[[nodiscard]] forge::net::quic::client_options make_client_options(const tls_material& material,
                                                             std::string alpn = "forge-quic-transport/1",
-                                                            forge::quic::transport_limits limits = {}) {
-   auto out = forge::quic::client_options{
+                                                            forge::net::quic::transport_limits limits = {}) {
+   auto out = forge::net::quic::client_options{
        .alpn = std::move(alpn),
        .handshake_timeout = std::chrono::milliseconds{5'000},
        .limits = limits,
-       .security = forge::quic::security_options{.verify_peer = false},
+       .security = forge::net::quic::security_options{.verify_peer = false},
    };
    (void)material;
    return out;
 }
 
-[[nodiscard]] forge::quic::client_options make_pinned_client_options(const tls_material& material,
+[[nodiscard]] forge::net::quic::client_options make_pinned_client_options(const tls_material& material,
                                                                    std::string alpn = "forge-quic-transport/1") {
    auto out = make_client_options(material, std::move(alpn));
    out.security.verify_peer = true;
    out.security.expected_sha256_fingerprint =
-       forge::quic::sha256_fingerprint(certificate_der_from_pem(material.server.certificate));
+       forge::net::quic::sha256_fingerprint(certificate_der_from_pem(material.server.certificate));
    return out;
 }
 
-[[nodiscard]] bool has_quic_code(const forge::exceptions::base& error, forge::quic::exceptions::code expected) {
-   const auto actual = forge::quic::exceptions::code_of(error);
+[[nodiscard]] bool has_quic_code(const forge::exceptions::base& error, forge::net::quic::exceptions::code expected) {
+   const auto actual = forge::net::quic::exceptions::code_of(error);
    return actual && *actual == expected;
 }
 
-void require_quic_code(const forge::exceptions::base& error, forge::quic::exceptions::code expected) {
+void require_quic_code(const forge::exceptions::base& error, forge::net::quic::exceptions::code expected) {
    BOOST_TEST_REQUIRE(has_quic_code(error, expected));
 }
 
-void require_transport_code(const forge::exceptions::base& error, forge::transport::exceptions::code expected) {
-   BOOST_TEST_REQUIRE(forge::transport::exceptions::is(error, expected));
+void require_transport_code(const forge::exceptions::base& error, forge::net::transport::exceptions::code expected) {
+   BOOST_TEST_REQUIRE(forge::net::transport::exceptions::is(error, expected));
 }
 
 boost::asio::awaitable<void> session_loopback_roundtrip(forge::asio::runtime& runtime) {
    const auto material = make_tls_material();
-   auto listener = forge::quic::make_session_listener(runtime, loopback_quic(0), make_server_options(material));
-   auto connector = forge::quic::make_session_connector(runtime, make_client_options(material));
+   auto listener = forge::net::quic::make_session_listener(runtime, loopback_quic(0), make_server_options(material));
+   auto connector = forge::net::quic::make_session_connector(runtime, make_client_options(material));
    auto executor = co_await boost::asio::this_coro::executor;
 
-   auto accept = spawn_result<forge::transport::session_connection>(executor, listener.async_accept());
+   auto accept = spawn_result<forge::net::transport::session_connection>(executor, listener.async_accept());
    auto client = co_await connector.async_connect(listener.local_endpoint());
    auto server = co_await take_result(accept);
 
    BOOST_TEST(static_cast<int>(client.local_endpoint.protocol) ==
-              static_cast<int>(forge::transport::endpoint::protocol_kind::quic_v1));
+              static_cast<int>(forge::net::transport::endpoint::protocol_kind::quic_v1));
    BOOST_TEST(static_cast<int>(client.remote_endpoint.protocol) ==
-              static_cast<int>(forge::transport::endpoint::protocol_kind::quic_v1));
+              static_cast<int>(forge::net::transport::endpoint::protocol_kind::quic_v1));
    BOOST_TEST(client.local_endpoint.port != 0U);
    BOOST_TEST(client.remote_endpoint.port != 0U);
    BOOST_TEST(server.local_endpoint.port != 0U);
    BOOST_TEST(server.remote_endpoint.port != 0U);
 
-   auto inbound = spawn_result<forge::transport::stream>(executor, server.session.async_accept_stream());
+   auto inbound = spawn_result<forge::net::transport::stream>(executor, server.session.async_accept_stream());
    auto outbound = co_await client.session.async_open_stream();
 
    const auto payload = text_bytes("quic transport session");
@@ -326,7 +326,7 @@ boost::asio::awaitable<void> session_loopback_roundtrip(forge::asio::runtime& ru
    BOOST_TEST(received == payload, boost::test_tools::per_element());
 
    const auto chunk_payload = text_bytes("quic chunk");
-   co_await outbound.async_write(forge::transport::chunk{chunk_payload});
+   co_await outbound.async_write(forge::net::transport::chunk{chunk_payload});
    auto received_chunk = co_await accepted.async_read_chunk();
    BOOST_TEST(received_chunk.to_vector() == chunk_payload, boost::test_tools::per_element());
 
@@ -336,7 +336,7 @@ boost::asio::awaitable<void> session_loopback_roundtrip(forge::asio::runtime& ru
    BOOST_TEST(echoed == reply, boost::test_tools::per_element());
 
    const auto frame_chunk = text_bytes("session chunk reply");
-   co_await accepted.async_write_frame(forge::transport::chunk{frame_chunk});
+   co_await accepted.async_write_frame(forge::net::transport::chunk{frame_chunk});
    auto echoed_chunk = co_await outbound.async_read_frame_chunk();
    BOOST_TEST(echoed_chunk.to_vector() == frame_chunk, boost::test_tools::per_element());
 
@@ -349,17 +349,17 @@ boost::asio::awaitable<void> session_loopback_roundtrip(forge::asio::runtime& ru
 
 boost::asio::awaitable<void> registry_roundtrip(forge::asio::runtime& runtime) {
    const auto material = make_tls_material();
-   auto registry = forge::transport::registry{};
-   forge::quic::register_session(registry, runtime, make_client_options(material), make_server_options(material));
-   BOOST_TEST(registry.has_session(forge::transport::endpoint::protocol_kind::quic_v1));
+   auto registry = forge::net::transport::registry{};
+   forge::net::quic::register_session(registry, runtime, make_client_options(material), make_server_options(material));
+   BOOST_TEST(registry.has_session(forge::net::transport::endpoint::protocol_kind::quic_v1));
 
    auto listener = co_await registry.async_listen_session(loopback_quic(0));
    auto executor = co_await boost::asio::this_coro::executor;
-   auto accept = spawn_result<forge::transport::session_connection>(executor, listener.async_accept());
+   auto accept = spawn_result<forge::net::transport::session_connection>(executor, listener.async_accept());
    auto client = co_await registry.async_connect_session(listener.local_endpoint());
    auto server = co_await take_result(accept);
 
-   auto inbound = spawn_result<forge::transport::stream>(executor, server.session.async_accept_stream());
+   auto inbound = spawn_result<forge::net::transport::stream>(executor, server.session.async_accept_stream());
    auto outbound = co_await client.session.async_open_stream();
    const auto payload = text_bytes("registry path");
    co_await outbound.async_write(payload);
@@ -377,15 +377,15 @@ boost::asio::awaitable<void> registry_roundtrip(forge::asio::runtime& runtime) {
 boost::asio::awaitable<void> options_and_limit_override(forge::asio::runtime& runtime) {
    const auto material = make_tls_material();
    const auto alpn = std::string{"forge-quic-transport-custom/2"};
-   auto listener = forge::quic::make_session_listener(runtime, loopback_quic(0), make_server_options(material, alpn));
-   auto connector = forge::quic::make_session_connector(runtime, make_pinned_client_options(material, alpn));
+   auto listener = forge::net::quic::make_session_listener(runtime, loopback_quic(0), make_server_options(material, alpn));
+   auto connector = forge::net::quic::make_session_connector(runtime, make_pinned_client_options(material, alpn));
    auto executor = co_await boost::asio::this_coro::executor;
 
-   auto accept = spawn_result<forge::transport::session_connection>(executor, listener.async_accept());
+   auto accept = spawn_result<forge::net::transport::session_connection>(executor, listener.async_accept());
    auto client = co_await connector.async_connect(
        listener.local_endpoint(),
-       forge::transport::connect_options{
-           .limits = forge::transport::limits{.max_streams_per_connection = 1},
+       forge::net::transport::connect_options{
+           .limits = forge::net::transport::limits{.max_streams_per_connection = 1},
        });
    auto server = co_await take_result(accept);
 
@@ -395,7 +395,7 @@ boost::asio::awaitable<void> options_and_limit_override(forge::asio::runtime& ru
       (void)co_await client.session.async_open_stream();
       BOOST_FAIL("expected stream limit rejection from transport override");
    } catch (const forge::exceptions::base& error) {
-      require_quic_code(error, forge::quic::exceptions::code::backpressure_rejected);
+      require_quic_code(error, forge::net::quic::exceptions::code::backpressure_rejected);
    }
 
    co_await first.async_close();
@@ -406,49 +406,49 @@ boost::asio::awaitable<void> options_and_limit_override(forge::asio::runtime& ru
 
 boost::asio::awaitable<void> invalid_endpoints_are_typed(forge::asio::runtime& runtime) {
    const auto material = make_tls_material();
-   auto connector = forge::quic::make_session_connector(runtime, make_client_options(material));
+   auto connector = forge::net::quic::make_session_connector(runtime, make_client_options(material));
 
    try {
       (void)co_await connector.async_connect(tcp_endpoint(9443));
       BOOST_FAIL("expected invalid protocol rejection");
    } catch (const forge::exceptions::base& error) {
-      require_quic_code(error, forge::quic::exceptions::code::invalid_endpoint);
+      require_quic_code(error, forge::net::quic::exceptions::code::invalid_endpoint);
    }
 
    try {
       (void)co_await connector.async_connect(loopback_quic(0));
       BOOST_FAIL("expected zero-port rejection");
    } catch (const forge::exceptions::base& error) {
-      require_quic_code(error, forge::quic::exceptions::code::invalid_endpoint);
+      require_quic_code(error, forge::net::quic::exceptions::code::invalid_endpoint);
    }
 
    try {
-      auto listener = forge::quic::make_session_listener(runtime, dns_quic(0), make_server_options(material));
+      auto listener = forge::net::quic::make_session_listener(runtime, dns_quic(0), make_server_options(material));
       (void)listener;
       BOOST_FAIL("expected DNS listen rejection");
    } catch (const forge::exceptions::base& error) {
-      require_quic_code(error, forge::quic::exceptions::code::invalid_endpoint);
+      require_quic_code(error, forge::net::quic::exceptions::code::invalid_endpoint);
    }
 }
 
 boost::asio::awaitable<void> cancellation_unblocks_listener_and_rejects_connector(forge::asio::runtime& runtime) {
    const auto material = make_tls_material();
-   auto listener = forge::quic::make_session_listener(runtime, loopback_quic(0), make_server_options(material));
+   auto listener = forge::net::quic::make_session_listener(runtime, loopback_quic(0), make_server_options(material));
    const auto local = listener.local_endpoint();
    auto executor = co_await boost::asio::this_coro::executor;
-   auto accept = spawn_result<forge::transport::session_connection>(executor, listener.async_accept());
+   auto accept = spawn_result<forge::net::transport::session_connection>(executor, listener.async_accept());
    listener.cancel();
 
    try {
       (void)co_await take_result(accept);
       BOOST_FAIL("expected canceled listener accept to fail");
    } catch (const forge::exceptions::base& error) {
-      const auto acceptable = has_quic_code(error, forge::quic::exceptions::code::connection_closed) ||
-                              has_quic_code(error, forge::quic::exceptions::code::canceled);
+      const auto acceptable = has_quic_code(error, forge::net::quic::exceptions::code::connection_closed) ||
+                              has_quic_code(error, forge::net::quic::exceptions::code::canceled);
       BOOST_TEST(acceptable);
    }
 
-   auto connector = forge::quic::make_session_connector(runtime, make_client_options(material));
+   auto connector = forge::net::quic::make_session_connector(runtime, make_client_options(material));
    BOOST_TEST(connector.valid());
    connector.cancel();
    BOOST_TEST(!connector.valid());
@@ -456,7 +456,7 @@ boost::asio::awaitable<void> cancellation_unblocks_listener_and_rejects_connecto
       (void)co_await connector.async_connect(local);
       BOOST_FAIL("expected canceled connector to reject new connects");
    } catch (const forge::exceptions::base& error) {
-      require_transport_code(error, forge::transport::exceptions::code::closed);
+      require_transport_code(error, forge::net::transport::exceptions::code::closed);
    }
 }
 
@@ -466,31 +466,31 @@ BOOST_AUTO_TEST_SUITE(forge_quic_transport_tests)
 
 BOOST_AUTO_TEST_CASE(endpoint_conversion_preserves_transport_shape) {
    const auto ipv4 =
-       forge::quic::to_transport_endpoint(forge::quic::endpoint{.host = "127.0.0.1", .port = 9443});
-   BOOST_TEST(static_cast<int>(ipv4.host_type) == static_cast<int>(forge::transport::endpoint::host_kind::ip4));
+       forge::net::quic::to_transport_endpoint(forge::net::quic::endpoint{.host = "127.0.0.1", .port = 9443});
+   BOOST_TEST(static_cast<int>(ipv4.host_type) == static_cast<int>(forge::net::transport::endpoint::host_kind::ip4));
    BOOST_TEST(static_cast<int>(ipv4.protocol) ==
-              static_cast<int>(forge::transport::endpoint::protocol_kind::quic_v1));
+              static_cast<int>(forge::net::transport::endpoint::protocol_kind::quic_v1));
    BOOST_TEST(ipv4.host == "127.0.0.1");
    BOOST_TEST(ipv4.port == 9443U);
 
-   const auto ipv6 = forge::quic::to_transport_endpoint(forge::quic::endpoint{.host = "::1", .port = 9444});
-   BOOST_TEST(static_cast<int>(ipv6.host_type) == static_cast<int>(forge::transport::endpoint::host_kind::ip6));
+   const auto ipv6 = forge::net::quic::to_transport_endpoint(forge::net::quic::endpoint{.host = "::1", .port = 9444});
+   BOOST_TEST(static_cast<int>(ipv6.host_type) == static_cast<int>(forge::net::transport::endpoint::host_kind::ip6));
    BOOST_TEST(static_cast<int>(ipv6.protocol) ==
-              static_cast<int>(forge::transport::endpoint::protocol_kind::quic_v1));
+              static_cast<int>(forge::net::transport::endpoint::protocol_kind::quic_v1));
 
-   const auto dns = forge::quic::to_transport_endpoint(forge::quic::endpoint{.host = "localhost", .port = 9445});
-   BOOST_TEST(static_cast<int>(dns.host_type) == static_cast<int>(forge::transport::endpoint::host_kind::dns));
+   const auto dns = forge::net::quic::to_transport_endpoint(forge::net::quic::endpoint{.host = "localhost", .port = 9445});
+   BOOST_TEST(static_cast<int>(dns.host_type) == static_cast<int>(forge::net::transport::endpoint::host_kind::dns));
    BOOST_TEST(static_cast<int>(dns.protocol) ==
-              static_cast<int>(forge::transport::endpoint::protocol_kind::quic_v1));
+              static_cast<int>(forge::net::transport::endpoint::protocol_kind::quic_v1));
 
-   const auto roundtrip = forge::quic::from_transport_endpoint(ipv4);
+   const auto roundtrip = forge::net::quic::from_transport_endpoint(ipv4);
    BOOST_TEST(roundtrip.host == "127.0.0.1");
    BOOST_TEST(roundtrip.port == 9443U);
 
    BOOST_CHECK_EXCEPTION(
-       (void)forge::quic::from_transport_endpoint(tcp_endpoint(9443)), forge::exceptions::base,
+       (void)forge::net::quic::from_transport_endpoint(tcp_endpoint(9443)), forge::exceptions::base,
        [](const forge::exceptions::base& error) {
-          return has_quic_code(error, forge::quic::exceptions::code::invalid_endpoint);
+          return has_quic_code(error, forge::net::quic::exceptions::code::invalid_endpoint);
        });
 }
 

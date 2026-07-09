@@ -8,10 +8,10 @@ module;
 
 module forge.plugins.http.server.plugin;
 
-import forge.api.registry;
+import forge.api.core.registry;
 import forge.asio.runtime;
-import forge.http.api.binding;
-import forge.http.server;
+import forge.api.http.binding;
+import forge.net.http.server;
 import forge.plugins.http.server.api;
 import forge.plugins.http.server.exceptions;
 import forge.plugins.http.server.middleware;
@@ -24,7 +24,7 @@ namespace forge::plugins::http::server {
 
 plugin::publisher_api::publisher_api(std::shared_ptr<plugin::impl> impl) : impl_{std::move(impl)} {}
 
-const forge::api::registry& plugin::publisher_api::registry() const {
+const forge::api::core::registry& plugin::publisher_api::registry() const {
    if (impl_->apis == nullptr) {
       FORGE_THROW_EXCEPTION(exceptions::startup_failed, "HTTP server plugin is not initialized");
    }

@@ -14,13 +14,13 @@ module;
 
 module forge.plugins.p2p.pubsub.plugin;
 
-import forge.api.registry;
+import forge.api.core.registry;
 import forge.app.plugin;
 import forge.app.plugin_context;
-import forge.config.component;
-import forge.config.decode;
+import forge.config.core.component;
+import forge.config.core.decode;
 import forge.exceptions;
-import forge.p2p.pubsub;
+import forge.net.p2p.pubsub;
 import forge.plugins.p2p.node.api;
 import forge.plugins.p2p.pubsub.api;
 import forge.plugins.p2p.pubsub.types;
@@ -43,18 +43,18 @@ std::string plugin::version() const {
    return "1.0.0";
 }
 
-std::optional<forge::config::component_descriptor> plugin::describe_config() const {
-   return forge::config::describe_component<config>("plugins.p2p.pubsub");
+std::optional<forge::config::core::component_descriptor> plugin::describe_config() const {
+   return forge::config::core::describe_component<config>("plugins.p2p.pubsub");
 }
 
-boost::asio::awaitable<void> plugin::configure(forge::config::component_view view) {
+boost::asio::awaitable<void> plugin::configure(forge::config::core::component_view view) {
    auto config = decode_config(view);
    validate_config(config);
    impl_->settings = std::move(config);
    co_return;
 }
 
-boost::asio::awaitable<void> plugin::provide(forge::api::provider& provider) {
+boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provider) {
    provider.install<api>(std::make_shared<subscription_api>(impl_));
    co_return;
 }
@@ -80,12 +80,12 @@ void plugin::request_stop() noexcept {
 
 boost::asio::awaitable<void> plugin::shutdown() {
    request_stop();
-   std::vector<forge::p2p::pubsub::topic> topics;
+   std::vector<forge::net::p2p::pubsub::topic> topics;
    {
       auto lock = std::scoped_lock{impl_->mutex};
       topics.reserve(impl_->topics.size());
       for (const auto& [topic, _] : impl_->topics) {
-         topics.push_back(forge::p2p::pubsub::topic{.value = topic});
+         topics.push_back(forge::net::p2p::pubsub::topic{.value = topic});
       }
       impl_->topics.clear();
    }

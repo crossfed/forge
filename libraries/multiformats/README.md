@@ -1,7 +1,7 @@
 # forge_multiformats
 
 `forge_multiformats` owns the libp2p-compatible multiformat primitives used by
-`forge_p2p`: unsigned varint, multicodec constants, multihash, multibase and
+`forge_net_p2p`: unsigned varint, multicodec constants, multihash, multibase and
 multiaddr parsing/encoding. It is a compatibility substrate, not a P2P node and
 not an application addressing policy layer.
 
@@ -16,7 +16,7 @@ not an application addressing policy layer.
 
 - Do not put peer-store, routing, relay, DHT or rendezvous policy here.
 - Do not treat a syntactically valid multiaddr as dialable or trusted. Host
-  address policy belongs to `forge_p2p`.
+  address policy belongs to `forge_net_p2p`.
 - Do not add application endpoint names, storage locations or authorization rules.
 
 ## Public Modules

@@ -50,9 +50,9 @@ network/API work and did not show source continuity to the initial FC import in
 this audit:
 
 - `libraries/app`
-- `libraries/config`
-- `libraries/program_options`
-- `libraries/yaml`
+- `libraries/config/core`
+- `libraries/config/program_options`
+- `libraries/codec/yaml`
 - OpenSSL3-backed crypto mechanics introduced after the initial import,
   including current AES streaming/GCM/CBC mechanics, random bytes, KDF,
   DER/PEM helpers, Ed25519, RSA, X25519, X.509, WebAuthn parsing, asymmetric
@@ -61,13 +61,14 @@ this audit:
 - FORGE raw infrastructure added after the initial import, including
   `forge.raw.exceptions`, `serialization.hpp`, target/module glue, and typed
   datastream range-error plumbing.
-- current Glaze-backed `libraries/json`
+- current Glaze-backed `libraries/codec/json`
 - current Boost.Describe-based `libraries/reflect`
-- `libraries/asio`, `libraries/env`, `libraries/exceptions`, `libraries/http`,
-  `libraries/schema`, `libraries/transport`, `libraries/websocket`
-- `libraries/quic`, `libraries/tcp`, `libraries/stcp`, `libraries/yamux`,
-  `libraries/p2p`
-- `libraries/api`, `libraries/transport_api`, `libraries/plugins`,
+- `libraries/asio`, `libraries/config/env`, `libraries/exceptions`,
+  `libraries/net/http`, `libraries/schema`, `libraries/net/transport`,
+  `libraries/net/websocket`
+- `libraries/net/quic`, `libraries/net/tcp`, `libraries/net/stcp`,
+  `libraries/net/yamux`, `libraries/net/p2p`
+- `libraries/api/core`, `libraries/api/transport`, `libraries/plugins`,
   `libraries/tui`
 
 If a future file-level audit proves source continuity for a specific file in
@@ -80,10 +81,10 @@ references. They do not create runtime source attribution unless source text,
 schemas, generated code, or vendored runtime code are copied into FORGE.
 
 - libp2p specifications, go-libp2p, go-libp2p-kad-dht, go-libp2p-pubsub, and
-  rust-libp2p are compatibility donors for `forge_p2p`, Yamux, QUIC/TCP
+  rust-libp2p are compatibility donors for `forge_net_p2p`, Yamux, QUIC/TCP
   transport composition, Relay, DCUtR, AutoNAT, DHT, Rendezvous, and GossipSub.
   The 2026-06-07 audit found no copied `.proto` files, protobuf-generated
-  files, or copied Go/Rust libp2p source under `libraries/p2p` or
+  files, or copied Go/Rust libp2p source under `libraries/net/p2p` or
   `tests/quic_p2p`. FORGE P2P codecs are hand-written C++ implementations of the
   wire behavior.
 - Boost.Asio and Boost.Beast are architecture and mechanics donors for async
@@ -114,7 +115,7 @@ items include:
   implementation with Kevin Heifner modification notice.
 - `libraries/core/uint128.cpp`: portions adapted from Evan Teran.
 - `vendor/pugixml`: Arseny Kapoulkine pugixml, MIT. FORGE compiles
-  `vendor/pugixml/src/pugixml.cpp` directly into `forge_xml` as a private XML
+  `vendor/pugixml/src/pugixml.cpp` directly into `forge_codec_xml` as a private XML
   backend; `pugi::*` types are not part of the public API.
 
 Submodules may contain their own third-party dependency notices, such as

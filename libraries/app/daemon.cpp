@@ -17,25 +17,25 @@ import forge.app.application_shell;
 import forge.app.runner;
 import forge.asio.runtime;
 import forge.asio.task_scheduler;
-import forge.config.key_path;
-import forge.config.value;
-import forge.config.document;
-import forge.config.component;
-import forge.config.decode;
-import forge.config.migration;
-import forge.env;
-import forge.program_options;
+import forge.config.core.key_path;
+import forge.config.core.value;
+import forge.config.core.document;
+import forge.config.core.component;
+import forge.config.core.decode;
+import forge.config.core.migration;
+import forge.config.env;
+import forge.config.program_options;
 import forge.schema.diagnostic;
 import forge.schema.value_kind;
 import forge.schema.object;
 import forge.schema.enums;
-import forge.yaml;
+import forge.codec.yaml;
 
 namespace forge::app {
 namespace {
 
 struct parsed_cli {
-   forge::config::document document;
+   forge::config::core::document document;
    std::vector<std::string> filtered_args;
    std::vector<forge::schema::diagnostic> diagnostics;
    bool help = false;
@@ -50,8 +50,8 @@ struct parsed_cli {
    }
 };
 
-const std::vector<forge::program_options::reserved_option>& daemon_reserved_options() {
-   static const auto options = std::vector<forge::program_options::reserved_option>{
+const std::vector<forge::config::program_options::reserved_option>& daemon_reserved_options() {
+   static const auto options = std::vector<forge::config::program_options::reserved_option>{
       {.name = "help", .path = "daemon.help", .kind = forge::schema::value_kind::boolean, .aliases = {"h", "daemon.help"}},
       {.name = "profile", .path = "daemon.profile", .kind = forge::schema::value_kind::string, .aliases = {"daemon.profile"}},
       {.name = "data-dir", .path = "daemon.data-dir", .kind = forge::schema::value_kind::string, .aliases = {"daemon.data-dir"}},
@@ -67,7 +67,7 @@ const std::vector<forge::program_options::reserved_option>& daemon_reserved_opti
    return options;
 }
 
-bool document_bool(const forge::config::document& document, std::string_view path) {
+bool document_bool(const forge::config::core::document& document, std::string_view path) {
    const auto* value = document.try_get(path);
    if (!value) {
       return false;
@@ -85,7 +85,7 @@ parsed_cli read_daemon_cli(int argc, char** argv) {
       pointers.push_back(argv == nullptr ? nullptr : argv[index]);
    }
 
-   auto scanned = forge::program_options::pre_scan_reserved(static_cast<int>(pointers.size()), pointers.data(),
+   auto scanned = forge::config::program_options::pre_scan_reserved(static_cast<int>(pointers.size()), pointers.data(),
                                                           daemon_reserved_options());
    auto parsed = parsed_cli{};
    parsed.document = std::move(scanned.document);
@@ -105,82 +105,82 @@ parsed_cli read_daemon_cli(int argc, char** argv) {
 
 std::filesystem::path default_data_dir(const daemon_options& options) {
    const auto name = options.default_data_dir_name.empty() ? options.name : options.default_data_dir_name;
-   if (const auto home = forge::env::home_directory()) {
+   if (const auto home = forge::config::env::home_directory()) {
       return *home / ".forge" / name;
    }
    return std::filesystem::temp_directory_path() / "forge" / name;
 }
 
-forge::config::component_descriptor daemon_descriptor() {
-   return forge::config::component_descriptor{
+forge::config::core::component_descriptor daemon_descriptor() {
+   return forge::config::core::component_descriptor{
       .section = "daemon",
       .fields =
          {
-            forge::config::field_descriptor{
+            forge::config::core::field_descriptor{
                .name = "profile",
                .kind = forge::schema::value_kind::string,
                .has_default = true,
                .default_value = "dev_local",
                .description = "daemon profile name",
             },
-            forge::config::field_descriptor{
+            forge::config::core::field_descriptor{
                .name = "data-dir",
                .kind = forge::schema::value_kind::string,
                .description = "daemon data directory",
             },
-            forge::config::field_descriptor{
+            forge::config::core::field_descriptor{
                .name = "config",
                .kind = forge::schema::value_kind::string,
                .description = "daemon YAML config path",
             },
-            forge::config::field_descriptor{
+            forge::config::core::field_descriptor{
                .name = "dotenv",
                .kind = forge::schema::value_kind::string,
                .description = "daemon .env config path",
             },
-            forge::config::field_descriptor{
+            forge::config::core::field_descriptor{
                .name = "runtime-threads",
                .kind = forge::schema::value_kind::unsigned_integer,
                .has_default = true,
                .default_value = 1U,
                .description = "runtime worker thread count",
             },
-            forge::config::field_descriptor{
+            forge::config::core::field_descriptor{
                .name = "scheduler-queue-depth",
                .kind = forge::schema::value_kind::unsigned_integer,
                .has_default = true,
                .default_value = 4096U,
                .description = "maximum pending scheduler tasks",
             },
-            forge::config::field_descriptor{
+            forge::config::core::field_descriptor{
                .name = "shutdown-timeout-ms",
                .kind = forge::schema::value_kind::unsigned_integer,
                .has_default = true,
                .default_value = 10'000U,
                .description = "shutdown timeout in milliseconds",
             },
-            forge::config::field_descriptor{
+            forge::config::core::field_descriptor{
                .name = "help",
                .kind = forge::schema::value_kind::boolean,
                .has_default = true,
                .default_value = false,
                .description = "show daemon and application options",
             },
-            forge::config::field_descriptor{
+            forge::config::core::field_descriptor{
                .name = "check-config",
                .kind = forge::schema::value_kind::boolean,
                .has_default = true,
                .default_value = false,
                .description = "validate config and exit",
             },
-            forge::config::field_descriptor{
+            forge::config::core::field_descriptor{
                .name = "print-effective-config",
                .kind = forge::schema::value_kind::boolean,
                .has_default = true,
                .default_value = false,
                .description = "print redacted effective config and exit",
             },
-            forge::config::field_descriptor{
+            forge::config::core::field_descriptor{
                .name = "configure",
                .kind = forge::schema::value_kind::boolean,
                .has_default = true,
@@ -191,13 +191,13 @@ forge::config::component_descriptor daemon_descriptor() {
    };
 }
 
-forge::config::component_registry daemon_registry() {
-   auto registry = forge::config::component_registry{};
+forge::config::core::component_registry daemon_registry() {
+   auto registry = forge::config::core::component_registry{};
    registry.add(daemon_descriptor());
    return registry;
 }
 
-forge::config::component_registry full_registry(const forge::config::component_registry& app_registry) {
+forge::config::core::component_registry full_registry(const forge::config::core::component_registry& app_registry) {
    auto registry = daemon_registry();
    for (auto component : app_registry.components()) {
       registry.add(std::move(component));
@@ -212,8 +212,8 @@ std::size_t blocking_budget(unsigned runtime_threads) {
    return static_cast<std::size_t>(runtime_threads - 1);
 }
 
-forge::config::document dynamic_daemon_defaults(const daemon_options& options) {
-   auto output = forge::config::document{};
+forge::config::core::document dynamic_daemon_defaults(const daemon_options& options) {
+   auto output = forge::config::core::document{};
    const auto data_dir = default_data_dir(options);
    output.set("daemon.profile", options.default_profile);
    output.set("daemon.data-dir", data_dir.string());
@@ -227,7 +227,7 @@ forge::config::document dynamic_daemon_defaults(const daemon_options& options) {
    return output;
 }
 
-std::string string_field(const forge::config::document& document, std::string_view path, std::string fallback = {}) {
+std::string string_field(const forge::config::core::document& document, std::string_view path, std::string fallback = {}) {
    const auto* value = document.try_get(path);
    if (!value) {
       return fallback;
@@ -238,7 +238,7 @@ std::string string_field(const forge::config::document& document, std::string_vi
    throw std::invalid_argument{"daemon config value must be a string: " + std::string{path}};
 }
 
-std::uint64_t unsigned_field(const forge::config::document& document, std::string_view path, std::uint64_t fallback) {
+std::uint64_t unsigned_field(const forge::config::core::document& document, std::string_view path, std::uint64_t fallback) {
    const auto* value = document.try_get(path);
    if (!value) {
       return fallback;
@@ -252,7 +252,7 @@ std::uint64_t unsigned_field(const forge::config::document& document, std::strin
    throw std::invalid_argument{"daemon config value must be an unsigned integer: " + std::string{path}};
 }
 
-bool bool_field(const forge::config::document& document, std::string_view path, bool fallback) {
+bool bool_field(const forge::config::core::document& document, std::string_view path, bool fallback) {
    const auto* value = document.try_get(path);
    if (!value) {
       return fallback;
@@ -262,7 +262,7 @@ bool bool_field(const forge::config::document& document, std::string_view path, 
    }
    if (const auto* text = std::get_if<std::string>(&value->storage)) {
       auto parsed = false;
-      if (forge::config::parse_bool_text(*text, parsed)) {
+      if (forge::config::core::parse_bool_text(*text, parsed)) {
          return parsed;
       }
    }
@@ -325,7 +325,7 @@ int fail_with_bootstrap_diagnostic(std::vector<forge::schema::diagnostic>& diagn
    return fail_with_diagnostics(diagnostics);
 }
 
-forge::config::document read_yaml_layer(const std::filesystem::path& path, bool required,
+forge::config::core::document read_yaml_layer(const std::filesystem::path& path, bool required,
                                       std::vector<forge::schema::diagnostic>& diagnostics) {
    if (path.empty() || !std::filesystem::exists(path)) {
       if (required) {
@@ -338,13 +338,13 @@ forge::config::document read_yaml_layer(const std::filesystem::path& path, bool 
       }
       return {};
    }
-   auto parsed = forge::yaml::load_document(path, forge::yaml::read_options{.source_name = path.string()});
+   auto parsed = forge::codec::yaml::load_document(path, forge::codec::yaml::read_options{.source_name = path.string()});
    append_diagnostics(diagnostics, parsed.diagnostics);
-   return parsed.ok() ? std::move(parsed.value) : forge::config::document{};
+   return parsed.ok() ? std::move(parsed.value) : forge::config::core::document{};
 }
 
-forge::config::document read_dotenv_layer(const std::filesystem::path& path,
-                                        const forge::config::component_registry& registry,
+forge::config::core::document read_dotenv_layer(const std::filesystem::path& path,
+                                        const forge::config::core::component_registry& registry,
                                         const daemon_options& options, bool required,
                                         std::vector<forge::schema::diagnostic>& diagnostics) {
    if (!options.read_dotenv || options.env_prefix.empty()) {
@@ -361,46 +361,46 @@ forge::config::document read_dotenv_layer(const std::filesystem::path& path,
       }
       return {};
    }
-   auto parsed = forge::env::load_document(
+   auto parsed = forge::config::env::load_document(
       path,
       registry,
-      forge::env::read_options{
+      forge::config::env::read_options{
          .prefix = options.env_prefix,
          .source_name = path.string(),
       });
    append_diagnostics(diagnostics, parsed.diagnostics);
-   return parsed.ok() ? std::move(parsed.value) : forge::config::document{};
+   return parsed.ok() ? std::move(parsed.value) : forge::config::core::document{};
 }
 
-forge::config::document read_process_env_layer(const forge::config::component_registry& registry,
+forge::config::core::document read_process_env_layer(const forge::config::core::component_registry& registry,
                                              const daemon_options& options,
-                                             forge::env::unknown_variable_policy unknown_variables,
+                                             forge::config::env::unknown_variable_policy unknown_variables,
                                              std::vector<forge::schema::diagnostic>& diagnostics) {
    if (!options.read_process_env || options.env_prefix.empty()) {
       return {};
    }
-   auto parsed = forge::env::read_process_document(registry, forge::env::read_options{
+   auto parsed = forge::config::env::read_process_document(registry, forge::config::env::read_options{
                                                               .prefix = options.env_prefix,
                                                               .unknown_variables = unknown_variables,
                                                            });
    append_diagnostics(diagnostics, parsed.diagnostics);
-   return parsed.ok() ? std::move(parsed.value) : forge::config::document{};
+   return parsed.ok() ? std::move(parsed.value) : forge::config::core::document{};
 }
 
-forge::config::document read_product_cli_layer(const std::vector<std::string>& filtered_args,
-                                             const forge::config::component_registry& registry,
+forge::config::core::document read_product_cli_layer(const std::vector<std::string>& filtered_args,
+                                             const forge::config::core::component_registry& registry,
                                              const daemon_options& options,
                                              std::vector<forge::schema::diagnostic>& diagnostics) {
    if (!options.read_cli) {
       return {};
    }
    const auto pointers = argv_view(filtered_args);
-   auto parsed = forge::program_options::parse(static_cast<int>(pointers.size()), pointers.data(), registry);
+   auto parsed = forge::config::program_options::parse(static_cast<int>(pointers.size()), pointers.data(), registry);
    append_diagnostics(diagnostics, parsed.diagnostics);
-   return parsed.ok() ? std::move(parsed.document) : forge::config::document{};
+   return parsed.ok() ? std::move(parsed.document) : forge::config::core::document{};
 }
 
-daemon_context context_from_document(const daemon_options& options, const forge::config::document& document) {
+daemon_context context_from_document(const daemon_options& options, const forge::config::core::document& document) {
    auto context = daemon_context{};
    const auto config_filename = options.config_filename.empty() ? std::filesystem::path{"config.yml"}
                                                                 : std::filesystem::path{options.config_filename};
@@ -430,7 +430,7 @@ daemon_context context_from_document(const daemon_options& options, const forge:
    return context;
 }
 
-forge::config::document resolve_daemon_paths(forge::config::document document, const daemon_options& options) {
+forge::config::core::document resolve_daemon_paths(forge::config::core::document document, const daemon_options& options) {
    const auto context = context_from_document(options, document);
    if (!document.try_get("daemon.data-dir")) {
       document.set("daemon.data-dir", context.data_dir.string());
@@ -444,14 +444,14 @@ forge::config::document resolve_daemon_paths(forge::config::document document, c
    return document;
 }
 
-void reset_daemon_action_flags(forge::config::document& document) {
+void reset_daemon_action_flags(forge::config::core::document& document) {
    document.set("daemon.help", false);
    document.set("daemon.check-config", false);
    document.set("daemon.print-effective-config", false);
    document.set("daemon.configure", false);
 }
 
-void apply_run_options_from_document(forge::app::run_options& options, const forge::config::document& document) {
+void apply_run_options_from_document(forge::app::run_options& options, const forge::config::core::document& document) {
    const auto timeout_ms = unsigned_field(document, "daemon.shutdown-timeout-ms", 10'000);
    const auto clamped = timeout_ms > static_cast<std::uint64_t>(std::numeric_limits<int>::max())
                            ? std::numeric_limits<int>::max()
@@ -459,7 +459,7 @@ void apply_run_options_from_document(forge::app::run_options& options, const for
    options.shutdown_timeout = std::chrono::milliseconds{clamped};
 }
 
-std::string daemon_help(const daemon_options& options, const forge::config::component_registry& registry) {
+std::string daemon_help(const daemon_options& options, const forge::config::core::component_registry& registry) {
    auto output = std::string{};
    output += options.display_name.empty() ? options.name : options.display_name;
    output += "\n\nDaemon options:\n";
@@ -474,7 +474,7 @@ std::string daemon_help(const daemon_options& options, const forge::config::comp
    output += "  --check-config\n";
    output += "  --print-effective-config\n";
    output += "  --configure\n\n";
-   output += forge::program_options::help(registry, "Application and plugin options");
+   output += forge::config::program_options::help(registry, "Application and plugin options");
    return output;
 }
 
@@ -498,7 +498,7 @@ int run_daemon(daemon_factory make_app, int argc, char** argv, daemon_options op
 
    if (daemon_cli.help) {
       try {
-         const auto context = context_from_document(options, forge::config::merge({daemon_defaults, daemon_cli.document}));
+         const auto context = context_from_document(options, forge::config::core::merge({daemon_defaults, daemon_cli.document}));
          auto app = make_app(context);
          if (!app) {
             std::cerr << "error: daemon factory returned null application\n";
@@ -513,24 +513,24 @@ int run_daemon(daemon_factory make_app, int argc, char** argv, daemon_options op
 
    try {
       auto early_process_env =
-         read_process_env_layer(daemon_only_registry, options, forge::env::unknown_variable_policy::ignore, diagnostics);
+         read_process_env_layer(daemon_only_registry, options, forge::config::env::unknown_variable_policy::ignore, diagnostics);
       if (has_errors(diagnostics)) {
          return fail_with_diagnostics(diagnostics);
       }
 
-      auto early_without_yaml = forge::config::merge({daemon_defaults, early_process_env, daemon_cli.document});
+      auto early_without_yaml = forge::config::core::merge({daemon_defaults, early_process_env, daemon_cli.document});
       auto early_context = context_from_document(options, early_without_yaml);
       auto yaml = options.read_yaml ? read_yaml_layer(
                                          early_context.config_path,
                                          daemon_cli.config_explicit && !daemon_cli.configure && !daemon_cli.help,
                                          diagnostics)
-                                    : forge::config::document{};
+                                    : forge::config::core::document{};
       if (has_errors(diagnostics)) {
          return fail_with_diagnostics(diagnostics);
       }
 
       auto early_paths = resolve_daemon_paths(
-         forge::config::merge({daemon_defaults, yaml, early_process_env, daemon_cli.document}), options);
+         forge::config::core::merge({daemon_defaults, yaml, early_process_env, daemon_cli.document}), options);
       auto early_path_context = context_from_document(options, early_paths);
       auto early_dotenv = read_dotenv_layer(
          early_path_context.dotenv_path,
@@ -543,7 +543,7 @@ int run_daemon(daemon_factory make_app, int argc, char** argv, daemon_options op
       }
 
       auto early_effective = resolve_daemon_paths(
-         forge::config::merge({daemon_defaults, yaml, early_dotenv, early_process_env, daemon_cli.document}), options);
+         forge::config::core::merge({daemon_defaults, yaml, early_dotenv, early_process_env, daemon_cli.document}), options);
       auto context = context_from_document(options, early_effective);
       auto app = make_app(context);
       if (!app) {
@@ -561,15 +561,15 @@ int run_daemon(daemon_factory make_app, int argc, char** argv, daemon_options op
          daemon_cli.dotenv_explicit && !daemon_cli.configure && !daemon_cli.help,
          diagnostics);
       auto process_env =
-         read_process_env_layer(registry, options, forge::env::unknown_variable_policy::warn, diagnostics);
+         read_process_env_layer(registry, options, forge::config::env::unknown_variable_policy::warn, diagnostics);
       auto product_cli = read_product_cli_layer(daemon_cli.filtered_args, app_registry, options, diagnostics);
       if (has_errors(diagnostics)) {
          return fail_with_diagnostics(diagnostics);
       }
 
       auto effective = resolve_daemon_paths(
-         forge::config::merge({
-            forge::config::defaults_for(registry),
+         forge::config::core::merge({
+            forge::config::core::defaults_for(registry),
             daemon_defaults,
             yaml,
             dotenv,
@@ -603,11 +603,11 @@ int run_daemon(daemon_factory make_app, int argc, char** argv, daemon_options op
             std::filesystem::create_directories(parent);
          }
          auto generated =
-            forge::config::merge({forge::config::defaults_for(registry), daemon_defaults, early_process_env,
+            forge::config::core::merge({forge::config::core::defaults_for(registry), daemon_defaults, early_process_env,
                                 daemon_cli.document});
          reset_daemon_action_flags(generated);
          generated = resolve_daemon_paths(std::move(generated), options);
-         auto saved = forge::yaml::save_document(config_path, forge::config::redact(std::move(generated), registry));
+         auto saved = forge::codec::yaml::save_document(config_path, forge::config::core::redact(std::move(generated), registry));
          append_diagnostics(diagnostics, saved.diagnostics);
          if (!saved.ok()) {
             return fail_with_diagnostics(diagnostics);
@@ -619,7 +619,7 @@ int run_daemon(daemon_factory make_app, int argc, char** argv, daemon_options op
             std::cerr << "error: --print-effective-config is disabled for this daemon\n";
             return 1;
          }
-         auto written = forge::yaml::write_document(forge::config::redact(effective, registry));
+         auto written = forge::codec::yaml::write_document(forge::config::core::redact(effective, registry));
          append_diagnostics(diagnostics, written.diagnostics);
          if (!written.ok()) {
             return fail_with_diagnostics(diagnostics);

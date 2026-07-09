@@ -19,11 +19,11 @@ target_include_directories(forge_app PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
 target_link_libraries(
    forge_app PUBLIC
       forge_exceptions
-      forge_api
+      forge_api_core
       forge_asio
-      forge_config
-      forge_env
-      forge_program_options
-      forge_yaml
+      forge_config_core
+      forge_config_env
+      forge_config_program_options
+      forge_codec_yaml
       Boost::headers
 )

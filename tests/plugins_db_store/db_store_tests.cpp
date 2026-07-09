@@ -25,8 +25,8 @@
 #include <utility>
 #include <vector>
 
-import forge.api.binding;
-import forge.api.registry;
+import forge.api.core.binding;
+import forge.api.core.registry;
 import forge.app.application_builder;
 import forge.app.application_shell;
 import forge.app.events;
@@ -37,9 +37,9 @@ import forge.app.signals;
 import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.asio.task_scheduler;
-import forge.config.component;
-import forge.config.document;
-import forge.config.value;
+import forge.config.core.component;
+import forge.config.core.document;
+import forge.config.core.value;
 import forge.ids.object_id;
 import forge.db.blob.ref;
 import forge.db.blob.store;
@@ -286,7 +286,7 @@ class installer_plugin final : public forge::app::plugin {
 }
 
 [[nodiscard]] std::unique_ptr<forge::app::application_shell>
-make_app(forge::config::document document = {}, std::shared_ptr<memory_driver> driver = {}) {
+make_app(forge::config::core::document document = {}, std::shared_ptr<memory_driver> driver = {}) {
    auto builder = forge::app::application_builder{};
    builder.name("db-store-plugin-test")
       .runtime(forge::asio::runtime_options{.worker_threads = 1, .thread_name = "db-store-plugin-test"})
@@ -326,8 +326,8 @@ make_app(forge::config::document document = {}, std::shared_ptr<memory_driver> d
    };
 }
 
-[[nodiscard]] const forge::config::field_descriptor&
-require_field(const forge::config::component_descriptor& descriptor, const std::string& name) {
+[[nodiscard]] const forge::config::core::field_descriptor&
+require_field(const forge::config::core::component_descriptor& descriptor, const std::string& name) {
    const auto found = std::ranges::find_if(descriptor.fields, [&](const auto& field) {
       return field.name == name;
    });
@@ -335,45 +335,45 @@ require_field(const forge::config::component_descriptor& descriptor, const std::
    return *found;
 }
 
-[[nodiscard]] forge::config::value configured_store(std::string name, std::filesystem::path path) {
-   auto object = forge::config::value::object_type{};
-   object.emplace("name", forge::config::value{std::move(name)});
-   object.emplace("driver", forge::config::value{std::string{"rocksdb"}});
-   object.emplace("path", forge::config::value{path.string()});
-   auto object_layer = forge::config::value::object_type{};
-   object_layer.emplace("family", forge::config::value{std::string{"objectdb"}});
-   object_layer.emplace("write-policy", forge::config::value{std::string{"single-writer"}});
-   object.emplace("object", forge::config::value{std::move(object_layer)});
-   return forge::config::value{std::move(object)};
+[[nodiscard]] forge::config::core::value configured_store(std::string name, std::filesystem::path path) {
+   auto object = forge::config::core::value::object_type{};
+   object.emplace("name", forge::config::core::value{std::move(name)});
+   object.emplace("driver", forge::config::core::value{std::string{"rocksdb"}});
+   object.emplace("path", forge::config::core::value{path.string()});
+   auto object_layer = forge::config::core::value::object_type{};
+   object_layer.emplace("family", forge::config::core::value{std::string{"objectdb"}});
+   object_layer.emplace("write-policy", forge::config::core::value{std::string{"single-writer"}});
+   object.emplace("object", forge::config::core::value{std::move(object_layer)});
+   return forge::config::core::value{std::move(object)};
 }
 
-[[nodiscard]] forge::config::value configured_object_blob_store(std::string name, std::filesystem::path path) {
-   auto object = forge::config::value::object_type{};
-   object.emplace("name", forge::config::value{std::move(name)});
-   object.emplace("driver", forge::config::value{std::string{"rocksdb"}});
-   object.emplace("path", forge::config::value{path.string()});
+[[nodiscard]] forge::config::core::value configured_object_blob_store(std::string name, std::filesystem::path path) {
+   auto object = forge::config::core::value::object_type{};
+   object.emplace("name", forge::config::core::value{std::move(name)});
+   object.emplace("driver", forge::config::core::value{std::string{"rocksdb"}});
+   object.emplace("path", forge::config::core::value{path.string()});
 
-   auto object_layer = forge::config::value::object_type{};
-   object_layer.emplace("family", forge::config::value{std::string{"objectdb"}});
-   object_layer.emplace("write-policy", forge::config::value{std::string{"single-writer"}});
-   object.emplace("object", forge::config::value{std::move(object_layer)});
+   auto object_layer = forge::config::core::value::object_type{};
+   object_layer.emplace("family", forge::config::core::value{std::string{"objectdb"}});
+   object_layer.emplace("write-policy", forge::config::core::value{std::string{"single-writer"}});
+   object.emplace("object", forge::config::core::value{std::move(object_layer)});
 
-   auto data_blobs = forge::config::value::object_type{};
-   data_blobs.emplace("enable-blob-files", forge::config::value{true});
-   data_blobs.emplace("min-blob-size", forge::config::value{std::uint64_t{16U}});
+   auto data_blobs = forge::config::core::value::object_type{};
+   data_blobs.emplace("enable-blob-files", forge::config::core::value{true});
+   data_blobs.emplace("min-blob-size", forge::config::core::value{std::uint64_t{16U}});
 
-   auto blob_layer = forge::config::value::object_type{};
-   blob_layer.emplace("data-family", forge::config::value{std::string{"blobdb.data"}});
-   blob_layer.emplace("refs-family", forge::config::value{std::string{"blobdb.refs"}});
-   blob_layer.emplace("data-blobs", forge::config::value{std::move(data_blobs)});
-   object.emplace("blob", forge::config::value{std::move(blob_layer)});
+   auto blob_layer = forge::config::core::value::object_type{};
+   blob_layer.emplace("data-family", forge::config::core::value{std::string{"blobdb.data"}});
+   blob_layer.emplace("refs-family", forge::config::core::value{std::string{"blobdb.refs"}});
+   blob_layer.emplace("data-blobs", forge::config::core::value{std::move(data_blobs)});
+   object.emplace("blob", forge::config::core::value{std::move(blob_layer)});
 
-   return forge::config::value{std::move(object)};
+   return forge::config::core::value{std::move(object)};
 }
 
-[[nodiscard]] forge::config::document document_for_rocksdb(const std::filesystem::path& path) {
-   auto document = forge::config::document{};
-   document.set("plugins.db.store.stores", forge::config::value::array_type{configured_store("accounts", path)});
+[[nodiscard]] forge::config::core::document document_for_rocksdb(const std::filesystem::path& path) {
+   auto document = forge::config::core::document{};
+   document.set("plugins.db.store.stores", forge::config::core::value::array_type{configured_store("accounts", path)});
    return document;
 }
 
@@ -419,14 +419,14 @@ BOOST_AUTO_TEST_CASE(store_plugin_descriptor_api_and_config_are_nested) {
 BOOST_AUTO_TEST_CASE(store_plugin_rejects_invalid_programmatic_setup) {
    auto runtime = forge::asio::runtime{};
    auto scheduler = forge::asio::task_scheduler{runtime};
-   auto apis = forge::api::registry{};
+   auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
    auto plugin = store_plugin::plugin{};
 
-   auto document = forge::config::document{};
-   forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.store"}));
-   auto provider = forge::api::installer{apis};
+   auto document = forge::config::core::document{};
+   forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.store"}));
+   auto provider = forge::api::core::installer{apis};
    forge::asio::blocking::run(runtime, plugin.provide(provider));
    auto context = forge::app::plugin_context{scheduler, apis, signals, events};
    forge::asio::blocking::run(runtime, plugin.initialize(context));
@@ -453,14 +453,14 @@ BOOST_AUTO_TEST_CASE(store_plugin_rejects_invalid_programmatic_setup) {
 BOOST_AUTO_TEST_CASE(store_plugin_rejects_programmatic_overlapping_layer_families) {
    auto runtime = forge::asio::runtime{};
    auto scheduler = forge::asio::task_scheduler{runtime};
-   auto apis = forge::api::registry{};
+   auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
    auto plugin = store_plugin::plugin{};
 
-   auto document = forge::config::document{};
-   forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.store"}));
-   auto provider = forge::api::installer{apis};
+   auto document = forge::config::core::document{};
+   forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.store"}));
+   auto provider = forge::api::core::installer{apis};
    forge::asio::blocking::run(runtime, plugin.provide(provider));
    auto context = forge::app::plugin_context{scheduler, apis, signals, events};
    forge::asio::blocking::run(runtime, plugin.initialize(context));
@@ -498,32 +498,32 @@ BOOST_AUTO_TEST_CASE(store_plugin_rejects_programmatic_overlapping_layer_familie
 BOOST_AUTO_TEST_CASE(store_plugin_rejects_duplicate_configured_store_names) {
    auto runtime = forge::asio::runtime{};
    auto plugin = store_plugin::plugin{};
-   auto document = forge::config::document{};
+   auto document = forge::config::core::document{};
    document.set(
       "plugins.db.store.stores",
-      forge::config::value::array_type{
+      forge::config::core::value::array_type{
          configured_store("accounts", "/tmp/forge-db-store-plugin-duplicate-a"),
          configured_store("accounts", "/tmp/forge-db-store-plugin-duplicate-b"),
       });
 
    BOOST_CHECK_THROW(
-      forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.store"})),
+      forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.store"})),
       store_plugin::exceptions::invalid_config);
 }
 
 BOOST_AUTO_TEST_CASE(store_plugin_rejects_configured_store_without_layers) {
    auto runtime = forge::asio::runtime{};
    auto plugin = store_plugin::plugin{};
-   auto store = forge::config::value::object_type{};
-   store.emplace("name", forge::config::value{std::string{"empty"}});
-   store.emplace("driver", forge::config::value{std::string{"rocksdb"}});
-   store.emplace("path", forge::config::value{std::string{"/tmp/forge-db-store-plugin-no-layers"}});
+   auto store = forge::config::core::value::object_type{};
+   store.emplace("name", forge::config::core::value{std::string{"empty"}});
+   store.emplace("driver", forge::config::core::value{std::string{"rocksdb"}});
+   store.emplace("path", forge::config::core::value{std::string{"/tmp/forge-db-store-plugin-no-layers"}});
 
-   auto document = forge::config::document{};
-   document.set("plugins.db.store.stores", forge::config::value::array_type{forge::config::value{std::move(store)}});
+   auto document = forge::config::core::document{};
+   document.set("plugins.db.store.stores", forge::config::core::value::array_type{forge::config::core::value{std::move(store)}});
 
    BOOST_CHECK_THROW(
-      forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.store"})),
+      forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.store"})),
       store_plugin::exceptions::invalid_config);
 }
 
@@ -532,25 +532,25 @@ BOOST_AUTO_TEST_CASE(store_plugin_rejects_configured_overlapping_layer_families)
 
    auto expect_invalid = [&](std::string object_family, std::string data_family, std::string refs_family) {
       auto plugin = store_plugin::plugin{};
-      auto store = forge::config::value::object_type{};
-      store.emplace("name", forge::config::value{std::string{"files"}});
-      store.emplace("driver", forge::config::value{std::string{"rocksdb"}});
-      store.emplace("path", forge::config::value{std::string{"/tmp/forge-db-store-plugin-overlap"}});
+      auto store = forge::config::core::value::object_type{};
+      store.emplace("name", forge::config::core::value{std::string{"files"}});
+      store.emplace("driver", forge::config::core::value{std::string{"rocksdb"}});
+      store.emplace("path", forge::config::core::value{std::string{"/tmp/forge-db-store-plugin-overlap"}});
 
-      auto object_layer = forge::config::value::object_type{};
-      object_layer.emplace("family", forge::config::value{std::move(object_family)});
-      store.emplace("object", forge::config::value{std::move(object_layer)});
+      auto object_layer = forge::config::core::value::object_type{};
+      object_layer.emplace("family", forge::config::core::value{std::move(object_family)});
+      store.emplace("object", forge::config::core::value{std::move(object_layer)});
 
-      auto blob_layer = forge::config::value::object_type{};
-      blob_layer.emplace("data-family", forge::config::value{std::move(data_family)});
-      blob_layer.emplace("refs-family", forge::config::value{std::move(refs_family)});
-      store.emplace("blob", forge::config::value{std::move(blob_layer)});
+      auto blob_layer = forge::config::core::value::object_type{};
+      blob_layer.emplace("data-family", forge::config::core::value{std::move(data_family)});
+      blob_layer.emplace("refs-family", forge::config::core::value{std::move(refs_family)});
+      store.emplace("blob", forge::config::core::value{std::move(blob_layer)});
 
-      auto document = forge::config::document{};
-      document.set("plugins.db.store.stores", forge::config::value::array_type{forge::config::value{std::move(store)}});
+      auto document = forge::config::core::document{};
+      document.set("plugins.db.store.stores", forge::config::core::value::array_type{forge::config::core::value{std::move(store)}});
 
       BOOST_CHECK_THROW(
-         forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.store"})),
+         forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.store"})),
          store_plugin::exceptions::invalid_config);
    };
 
@@ -561,14 +561,14 @@ BOOST_AUTO_TEST_CASE(store_plugin_rejects_configured_overlapping_layer_families)
 
 BOOST_AUTO_TEST_CASE(store_plugin_rejects_configure_after_stop_or_shutdown) {
    auto runtime = forge::asio::runtime{};
-   auto document = forge::config::document{};
+   auto document = forge::config::core::document{};
 
    {
       auto plugin = store_plugin::plugin{};
       plugin.request_stop();
 
       BOOST_CHECK_THROW(
-         forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.store"})),
+         forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.store"})),
          store_plugin::exceptions::stopped);
       BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, plugin.startup()),
                         store_plugin::exceptions::startup_failed);
@@ -576,12 +576,12 @@ BOOST_AUTO_TEST_CASE(store_plugin_rejects_configure_after_stop_or_shutdown) {
 
    {
       auto plugin = store_plugin::plugin{};
-      forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.store"}));
+      forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.store"}));
       forge::asio::blocking::run(runtime, plugin.startup());
       forge::asio::blocking::run(runtime, plugin.shutdown());
 
       BOOST_CHECK_THROW(
-         forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.store"})),
+         forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.store"})),
          store_plugin::exceptions::stopped);
    }
 }
@@ -631,15 +631,15 @@ BOOST_AUTO_TEST_CASE(store_plugin_custom_driver_store_handle_reads_writes_flushe
 BOOST_AUTO_TEST_CASE(store_plugin_blob_only_programmatic_store_rejects_objects_and_roundtrips_blob) {
    auto runtime = forge::asio::runtime{};
    auto scheduler = forge::asio::task_scheduler{runtime};
-   auto apis = forge::api::registry{};
+   auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
    auto plugin = store_plugin::plugin{};
    auto driver = std::make_shared<memory_driver>();
 
-   auto document = forge::config::document{};
-   forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.store"}));
-   auto provider = forge::api::installer{apis};
+   auto document = forge::config::core::document{};
+   forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.store"}));
+   auto provider = forge::api::core::installer{apis};
    forge::asio::blocking::run(runtime, plugin.provide(provider));
    auto context = forge::app::plugin_context{scheduler, apis, signals, events};
    forge::asio::blocking::run(runtime, plugin.initialize(context));
@@ -666,15 +666,15 @@ BOOST_AUTO_TEST_CASE(store_plugin_blob_only_programmatic_store_rejects_objects_a
 BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_commits_object_metadata_and_blob_payload) {
    auto runtime = forge::asio::runtime{};
    auto scheduler = forge::asio::task_scheduler{runtime};
-   auto apis = forge::api::registry{};
+   auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
    auto plugin = store_plugin::plugin{};
    auto driver = std::make_shared<memory_driver>();
 
-   auto document = forge::config::document{};
-   forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.store"}));
-   auto provider = forge::api::installer{apis};
+   auto document = forge::config::core::document{};
+   forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.store"}));
+   auto provider = forge::api::core::installer{apis};
    forge::asio::blocking::run(runtime, plugin.provide(provider));
    auto context = forge::app::plugin_context{scheduler, apis, signals, events};
    forge::asio::blocking::run(runtime, plugin.initialize(context));
@@ -761,15 +761,15 @@ BOOST_AUTO_TEST_CASE(store_plugin_begin_transaction_preserves_object_single_writ
 BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_rollback_hides_object_and_blob) {
    auto runtime = forge::asio::runtime{};
    auto scheduler = forge::asio::task_scheduler{runtime};
-   auto apis = forge::api::registry{};
+   auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
    auto plugin = store_plugin::plugin{};
    auto driver = std::make_shared<memory_driver>();
 
-   auto document = forge::config::document{};
-   forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.store"}));
-   auto provider = forge::api::installer{apis};
+   auto document = forge::config::core::document{};
+   forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.store"}));
+   auto provider = forge::api::core::installer{apis};
    forge::asio::blocking::run(runtime, plugin.provide(provider));
    auto context = forge::app::plugin_context{scheduler, apis, signals, events};
    forge::asio::blocking::run(runtime, plugin.initialize(context));
@@ -801,15 +801,15 @@ BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_rollback_hides_object_and_b
 BOOST_AUTO_TEST_CASE(store_plugin_store_handle_remains_valid_during_dependent_shutdown) {
    auto runtime = forge::asio::runtime{};
    auto scheduler = forge::asio::task_scheduler{runtime};
-   auto apis = forge::api::registry{};
+   auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
    auto plugin = store_plugin::plugin{};
    auto driver = std::make_shared<memory_driver>();
 
-   auto document = forge::config::document{};
-   forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.store"}));
-   auto provider = forge::api::installer{apis};
+   auto document = forge::config::core::document{};
+   forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.store"}));
+   auto provider = forge::api::core::installer{apis};
    forge::asio::blocking::run(runtime, plugin.provide(provider));
    auto context = forge::app::plugin_context{scheduler, apis, signals, events};
    forge::asio::blocking::run(runtime, plugin.initialize(context));
@@ -839,15 +839,15 @@ BOOST_AUTO_TEST_CASE(store_plugin_store_handle_remains_valid_during_dependent_sh
 BOOST_AUTO_TEST_CASE(store_plugin_store_handle_concurrent_close_is_snapshot_safe) {
    auto runtime = forge::asio::runtime{};
    auto scheduler = forge::asio::task_scheduler{runtime};
-   auto apis = forge::api::registry{};
+   auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
    auto plugin = store_plugin::plugin{};
    auto driver = std::make_shared<memory_driver>();
 
-   auto document = forge::config::document{};
-   forge::asio::blocking::run(runtime, plugin.configure(forge::config::component_view{document, "plugins.db.store"}));
-   auto provider = forge::api::installer{apis};
+   auto document = forge::config::core::document{};
+   forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.store"}));
+   auto provider = forge::api::core::installer{apis};
    forge::asio::blocking::run(runtime, plugin.provide(provider));
    auto context = forge::app::plugin_context{scheduler, apis, signals, events};
    forge::asio::blocking::run(runtime, plugin.initialize(context));
@@ -945,9 +945,9 @@ BOOST_AUTO_TEST_CASE(store_plugin_configured_rocksdb_store_persists_object_and_b
    const auto db_path = root.root / "storedb";
 
    {
-      auto document = forge::config::document{};
+      auto document = forge::config::core::document{};
       document.set("plugins.db.store.stores",
-                   forge::config::value::array_type{configured_object_blob_store("files", db_path)});
+                   forge::config::core::value::array_type{configured_object_blob_store("files", db_path)});
       auto app = make_app(std::move(document));
       auto api = app->apis().get<store_plugin::api>(store_plugin::api::ref());
       auto handle = forge::asio::blocking::run(app->runtime(), api->store("files"));
@@ -965,9 +965,9 @@ BOOST_AUTO_TEST_CASE(store_plugin_configured_rocksdb_store_persists_object_and_b
    }
 
    {
-      auto document = forge::config::document{};
+      auto document = forge::config::core::document{};
       document.set("plugins.db.store.stores",
-                   forge::config::value::array_type{configured_object_blob_store("files", db_path)});
+                   forge::config::core::value::array_type{configured_object_blob_store("files", db_path)});
       auto app = make_app(std::move(document));
       auto api = app->apis().get<store_plugin::api>(store_plugin::api::ref());
       auto handle = forge::asio::blocking::run(app->runtime(), api->store("files"));

@@ -8,7 +8,7 @@ module;
 
 export module forge.app.runner;
 
-import forge.config.document;
+import forge.config.core.document;
 import forge.app.application_shell;
 
 export namespace forge::app {
@@ -22,8 +22,8 @@ struct run_options {
    stop_waiter wait_for_stop;
 };
 
-int run_application(application_shell& app, const forge::config::document& document, run_options options = {});
-int run_application(std::unique_ptr<application_shell> app, const forge::config::document& document,
+int run_application(application_shell& app, const forge::config::core::document& document, run_options options = {});
+int run_application(std::unique_ptr<application_shell> app, const forge::config::core::document& document,
                     run_options options = {});
 
 } // namespace forge::app

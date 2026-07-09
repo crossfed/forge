@@ -19,8 +19,8 @@ target_include_directories(forge_plugins_db_store PRIVATE ${CMAKE_CURRENT_SOURCE
 target_link_libraries(
    forge_plugins_db_store PUBLIC
       forge_app
-      forge_api
-      forge_config
+      forge_api_core
+      forge_config_core
       forge_schema
       forge_db_core
       forge_db_object

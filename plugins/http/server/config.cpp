@@ -10,10 +10,10 @@ module;
 
 module forge.plugins.http.server.plugin;
 
-import forge.config.component;
-import forge.config.decode;
+import forge.config.core.component;
+import forge.config.core.decode;
 import forge.exceptions;
-import forge.http.server;
+import forge.net.http.server;
 import forge.plugins.http.server.exceptions;
 import forge.plugins.http.server.types;
 
@@ -21,11 +21,11 @@ import forge.plugins.http.server.types;
 
 namespace forge::plugins::http::server {
 
-config decode_config(const forge::config::component_view& view) {
-   auto decoded = forge::config::decode<config>(view.source(), view.section());
+config decode_config(const forge::config::core::component_view& view) {
+   auto decoded = forge::config::core::decode<config>(view.source(), view.section());
    if (!decoded.ok()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_config,
-                          forge::config::format_decode_diagnostics("invalid HTTP server config",
+                          forge::config::core::format_decode_diagnostics("invalid HTTP server config",
                                                                  decoded.diagnostics));
    }
    decoded.value.api_base_path = normalize_base_path(decoded.value.api_base_path);
@@ -53,8 +53,8 @@ std::string resolve_base_path(const config& settings, std::string_view override_
    return normalize_base_path(settings.api_base_path);
 }
 
-forge::http::server_config to_server_config(const config& value) {
-   return forge::http::server_config{
+forge::net::http::server_config to_server_config(const config& value) {
+   return forge::net::http::server_config{
       .bind_address = value.bind_address,
       .port = static_cast<std::uint16_t>(value.port),
       .max_request_body_bytes = value.max_request_body_bytes,
