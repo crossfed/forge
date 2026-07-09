@@ -960,6 +960,35 @@ BOOST_AUTO_TEST_CASE(db_object_create_joined_transaction_rollback_seals_id_acros
    }());
 }
 
+BOOST_AUTO_TEST_CASE(db_object_create_joined_transaction_drop_before_rollback_seals_id_across_store_reopen) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      {
+         auto store = make_store(driver);
+         auto shared = co_await driver->begin_transaction();
+         {
+            auto object_tx = store.join(shared);
+            auto draft = co_await object_tx.create<account>([](account& value) {
+               value.name = "joined";
+            });
+            BOOST_CHECK_EQUAL(draft.id.instance, 0U);
+         }
+         co_await shared.rollback();
+      }
+
+      auto reopened = make_store(driver);
+      auto committed = co_await reopened.create<account>([](account& value) {
+         value.name = "after-dropped-join-rollback";
+      });
+
+      BOOST_CHECK_EQUAL(committed.id.instance, 1U);
+      BOOST_CHECK(!driver->overlapping_writes());
+      BOOST_CHECK_EQUAL(driver->active_writes(), 0U);
+      co_return;
+   }());
+}
+
 BOOST_AUTO_TEST_CASE(db_object_create_concurrent_calls_generate_unique_ids) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto driver = std::make_shared<memory_driver>();

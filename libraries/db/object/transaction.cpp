@@ -216,17 +216,13 @@ transaction::transaction(forge::db::core::transaction& active,
          std::move(seal),
          std::move(interceptors),
          std::move(observers))} {
-   auto weak_state = std::weak_ptr<impl>{impl_};
-   db_transaction().after_commit([weak_state]() mutable -> boost::asio::awaitable<void> {
-      if (auto state = weak_state.lock()) {
-         co_await state->after_commit();
-      }
+   auto state = impl_;
+   db_transaction().after_commit([state]() mutable -> boost::asio::awaitable<void> {
+      co_await state->after_commit();
       co_return;
    });
-   db_transaction().after_rollback([weak_state]() mutable -> boost::asio::awaitable<void> {
-      if (auto state = weak_state.lock()) {
-         co_await state->after_rollback();
-      }
+   db_transaction().after_rollback([state]() mutable -> boost::asio::awaitable<void> {
+      co_await state->after_rollback();
       co_return;
    });
 }
