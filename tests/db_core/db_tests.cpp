@@ -302,6 +302,43 @@ BOOST_AUTO_TEST_CASE(db_transaction_participant_hooks_follow_commit_and_rollback
    }());
 }
 
+BOOST_AUTO_TEST_CASE(db_commit_hook_failure_keeps_commit_boundary_closed) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   auto driver = std::make_shared<memory_driver>(state);
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto meta = forge::db::core::family{"meta"};
+      auto rollback_hook_called = false;
+      auto session_destroyed_before_commit_hook = false;
+
+      auto tx = co_await driver->begin_transaction();
+      co_await tx.put(meta, key("a"), bytes("committed"));
+      tx.after_commit([&]() -> boost::asio::awaitable<void> {
+         session_destroyed_before_commit_hook = state->destroyed_sessions == 1U;
+         throw std::runtime_error{"db test commit hook failure"};
+         co_return;
+      });
+      tx.after_rollback([&]() -> boost::asio::awaitable<void> {
+         rollback_hook_called = true;
+         co_return;
+      });
+
+      BOOST_CHECK_THROW(co_await tx.commit(), std::runtime_error);
+      BOOST_CHECK(!tx.active());
+      co_await tx.rollback();
+
+      auto read = co_await driver->begin_read();
+      const auto value = co_await read.get(meta, key("a"));
+      BOOST_REQUIRE(value.has_value());
+      BOOST_CHECK_EQUAL(text(*value), "committed");
+      BOOST_CHECK(session_destroyed_before_commit_hook);
+      BOOST_CHECK(!rollback_hook_called);
+      BOOST_CHECK_EQUAL(state->rollback_calls, 0U);
+      co_return;
+   }());
+}
+
 BOOST_AUTO_TEST_CASE(db_transaction_awaits_async_rollback_hooks_before_returning) {
    auto runtime = forge::asio::runtime{};
    auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
@@ -320,6 +357,36 @@ BOOST_AUTO_TEST_CASE(db_transaction_awaits_async_rollback_hooks_before_returning
 
       co_await tx.rollback();
       BOOST_CHECK(hook_completed);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_dropped_transaction_swallows_rollback_hook_failure) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   auto driver = std::make_shared<memory_driver>(state);
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto hook_called = false;
+
+      {
+         auto tx = co_await driver->begin_transaction();
+         tx.after_rollback([&]() -> boost::asio::awaitable<void> {
+            hook_called = true;
+            throw std::runtime_error{"db test rollback hook failure"};
+            co_return;
+         });
+      }
+
+      auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+      for (auto attempt = 0; attempt != 100 && !hook_called; ++attempt) {
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+
+      BOOST_CHECK(hook_called);
+      BOOST_CHECK_EQUAL(state->rollback_calls, 1U);
+      BOOST_CHECK_EQUAL(state->destroyed_sessions, 1U);
       co_return;
    }());
 }

@@ -256,6 +256,56 @@ BOOST_AUTO_TEST_CASE(db_rocksdb_snapshot_scan_preserves_empty_key_cursor) {
    std::filesystem::remove_all(root);
 }
 
+BOOST_AUTO_TEST_CASE(db_rocksdb_transaction_scans_match_snapshot_range_cursor_contract) {
+   const auto root = make_test_root("forge_db_rocksdb_transaction_scan_contract");
+   auto runtime = forge::asio::runtime{};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto driver = forge::db::rocksdb::driver{config_for(root / "store")};
+      const auto objects = forge::db::core::family{"objectdb"};
+
+      auto seed = co_await driver.begin_transaction();
+      co_await seed.put(objects, empty_key(), bytes("empty"));
+      for (const auto* value : {"a", "b", "c", "z"}) {
+         co_await seed.put(objects, key(value), bytes(value));
+      }
+      co_await seed.commit();
+
+      auto tx = co_await driver.begin_transaction();
+      auto first = co_await tx.scan_page(
+         objects,
+         forge::db::core::record_range{.begin = empty_key(), .end = key("z")},
+         forge::db::core::page_request{.limit = 1});
+      BOOST_REQUIRE_EQUAL(first.entries.size(), 1U);
+      BOOST_CHECK(first.entries.front().key.empty());
+      BOOST_REQUIRE(first.next.has_value());
+      BOOST_CHECK(first.next->boundary.empty());
+
+      auto second = co_await tx.scan_page(
+         objects,
+         forge::db::core::record_range{.begin = empty_key(), .end = key("z")},
+         forge::db::core::page_request{.after = first.next, .limit = 2});
+      BOOST_REQUIRE_EQUAL(second.entries.size(), 2U);
+      BOOST_CHECK_EQUAL(text(second.entries[0].value), "a");
+      BOOST_CHECK_EQUAL(text(second.entries[1].value), "b");
+      BOOST_REQUIRE(second.next.has_value());
+
+      auto bounded = co_await tx.scan_page(
+         objects,
+         forge::db::core::record_range{.begin = key("a"), .end = key("c")},
+         forge::db::core::page_request{.limit = 2});
+      BOOST_REQUIRE_EQUAL(bounded.entries.size(), 2U);
+      BOOST_CHECK_EQUAL(text(bounded.entries[0].value), "a");
+      BOOST_CHECK_EQUAL(text(bounded.entries[1].value), "b");
+      BOOST_CHECK(!bounded.next.has_value());
+
+      co_await tx.rollback();
+      co_return;
+   }());
+
+   std::filesystem::remove_all(root);
+}
+
 BOOST_AUTO_TEST_CASE(db_rocksdb_blob_enabled_family_roundtrips_large_values) {
    const auto root = make_test_root("forge_db_rocksdb_blob");
    auto runtime = forge::asio::runtime{};

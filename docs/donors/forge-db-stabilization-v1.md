@@ -124,6 +124,27 @@ Rejected pattern:
 - Prove configured object/blob families are distinct and lifecycle snapshots are
   copied under the plugin mutex.
 
+## Verified Invariants
+
+The stabilization pass adds regression coverage for the following donor-backed
+edges:
+
+- commit hooks run after the backend session is closed; if a commit hook throws,
+  the transaction stays closed and rollback hooks are not resurrected;
+- dropped rollback cleanup swallows rollback hook failures while still attempting
+  backend rollback and session destruction;
+- direct `create<T>()` commit failure rolls back, releases the object writer lane
+  and seals the consumed generated ID before the next store instance can reuse it;
+- generated-ID observers are commit-only and are not called for rollback or seal
+  cleanup;
+- Blob refs are isolated by algorithm id even when digest bytes are identical;
+- Blob retain, release and collect changes roll back with the owning DB
+  transaction;
+- RocksDB-backed write transactions preserve the same half-open range, range-end
+  cursor and empty-key cursor semantics as snapshots;
+- DB Store plugin shared transactions roll back blob writes when a later object
+  mutation fails.
+
 ## Non-Goals
 
 - No new public API.

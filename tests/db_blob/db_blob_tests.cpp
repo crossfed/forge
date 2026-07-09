@@ -187,6 +187,13 @@ struct toy_digest {
    auto operator<=>(const toy_digest&) const = default;
 };
 
+struct mirror_digest {
+   std::vector<std::byte> bytes;
+
+   bool operator==(const mirror_digest&) const = default;
+   auto operator<=>(const mirror_digest&) const = default;
+};
+
 struct strict_digest {
    std::vector<std::byte> bytes;
 
@@ -264,6 +271,43 @@ struct digest_traits<toy_digest> {
          bytes.push_back(static_cast<std::byte>(byte));
       }
       return toy_digest{std::move(bytes)};
+   }
+};
+
+template <>
+struct hash<mirror_digest> {
+   [[nodiscard]] mirror_digest operator()(std::span<const std::byte> payload) const {
+      return mirror_digest{std::vector<std::byte>{payload.begin(), payload.end()}};
+   }
+};
+
+template <>
+struct digest_traits<mirror_digest> {
+   static constexpr auto algorithm = std::string_view{"mirror"};
+
+   [[nodiscard]] static std::vector<std::byte> to_bytes(const mirror_digest& value) {
+      return value.bytes;
+   }
+
+   [[nodiscard]] static mirror_digest from_bytes(std::span<const std::byte> value) {
+      return mirror_digest{std::vector<std::byte>{value.begin(), value.end()}};
+   }
+
+   [[nodiscard]] static std::string text(const mirror_digest& value) {
+      return forge::crypto::to_hex(
+         reinterpret_cast<const std::uint8_t*>(value.bytes.data()),
+         static_cast<std::uint32_t>(value.bytes.size()));
+   }
+
+   [[nodiscard]] static mirror_digest from_text(std::string_view value) {
+      auto decoded = std::vector<std::uint8_t>(value.size() / 2U);
+      forge::crypto::from_hex(std::string{value}, decoded.data(), decoded.size());
+      auto bytes = std::vector<std::byte>{};
+      bytes.reserve(decoded.size());
+      for (const auto byte : decoded) {
+         bytes.push_back(static_cast<std::byte>(byte));
+      }
+      return mirror_digest{std::move(bytes)};
    }
 };
 
@@ -629,6 +673,76 @@ BOOST_AUTO_TEST_CASE(db_blob_ref_keys_do_not_alias_variable_length_digests) {
       BOOST_CHECK_EQUAL(collected.removed, 1U);
       BOOST_CHECK(!(co_await blobs.has(short_ref)));
       BOOST_CHECK(co_await blobs.has(long_ref));
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_algorithm_ids_isolate_identical_digest_bytes) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   auto blobs = forge::db::blob::store{driver};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto payload = bytes("same-bytes");
+      const auto toy = forge::db::blob::ref<toy_digest>{.digest = toy_digest{payload}, .size = payload.size()};
+      const auto mirror = forge::db::blob::ref<mirror_digest>{.digest = mirror_digest{payload}, .size = payload.size()};
+
+      co_await blobs.put(toy, payload);
+      co_await blobs.put(mirror, payload);
+      co_await blobs.retain(mirror, forge::db::blob::owner_ref{"doc:mirror"});
+
+      BOOST_CHECK_EQUAL(co_await blobs.ref_count(toy), 0U);
+      BOOST_CHECK_EQUAL(co_await blobs.ref_count(mirror), 1U);
+
+      auto collected = co_await blobs.collect_unreferenced({.limit = 10});
+      BOOST_CHECK_EQUAL(collected.removed, 1U);
+      BOOST_CHECK(!(co_await blobs.has(toy)));
+      BOOST_CHECK(co_await blobs.has(mirror));
+      BOOST_CHECK_EQUAL(text(co_await blobs.get(mirror)), "same-bytes");
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_retain_release_and_collect_roll_back_with_transaction) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   auto blobs = forge::db::blob::store{driver};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto owner = forge::db::blob::owner_ref{"doc:rollback"};
+      const auto kept = co_await blobs.put(bytes("kept"));
+      co_await blobs.retain(kept, owner);
+
+      {
+         auto tx = co_await blobs.begin_transaction();
+         co_await tx.release(kept, owner);
+         BOOST_CHECK_EQUAL(co_await tx.ref_count(kept), 0U);
+         co_await tx.rollback();
+      }
+      BOOST_CHECK_EQUAL(co_await blobs.ref_count(kept), 1U);
+
+      co_await blobs.release(kept, owner);
+      BOOST_CHECK_EQUAL(co_await blobs.ref_count(kept), 0U);
+      {
+         auto tx = co_await blobs.begin_transaction();
+         co_await tx.retain(kept, owner);
+         BOOST_CHECK_EQUAL(co_await tx.ref_count(kept), 1U);
+         co_await tx.rollback();
+      }
+      BOOST_CHECK_EQUAL(co_await blobs.ref_count(kept), 0U);
+
+      const auto free = co_await blobs.put(bytes("free"));
+      {
+         auto tx = co_await blobs.begin_transaction();
+         const auto collected = co_await tx.collect_unreferenced({.limit = 10});
+         BOOST_CHECK_EQUAL(collected.removed, 2U);
+         BOOST_CHECK(!(co_await tx.has(kept)));
+         BOOST_CHECK(!(co_await tx.has(free)));
+         co_await tx.rollback();
+      }
+      BOOST_CHECK(co_await blobs.has(kept));
+      BOOST_CHECK(co_await blobs.has(free));
+      BOOST_CHECK_EQUAL(co_await blobs.ref_count(kept), 0U);
       co_return;
    }());
 }
