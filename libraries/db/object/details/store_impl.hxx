@@ -9,7 +9,8 @@ struct store::impl {
 
    boost::asio::awaitable<forge::db::core::transaction> open_write_transaction() const;
    boost::asio::awaitable<forge::db::core::snapshot> open_read_snapshot() const;
-   boost::asio::awaitable<forge::ids::object_id> allocate_id(forge::ids::object_id type) const;
+   boost::asio::awaitable<forge::ids::object_id> allocate_id(forge::ids::object_id type,
+                                                             forge::db::core::transaction& active);
 
    void register_object_type(forge::ids::object_id type, std::type_index model);
    void ensure_registered_type(forge::ids::object_id type, std::type_index model) const;
@@ -20,6 +21,7 @@ struct store::impl {
    std::shared_ptr<detail::write_gate> write_gate;
    std::shared_ptr<detail::write_gate> allocator_gate;
    std::map<forge::ids::object_id, std::type_index> registered;
+   std::map<forge::ids::object_id, std::uint64_t> next_instances;
    std::vector<std::shared_ptr<interceptor>> interceptors;
    std::vector<std::shared_ptr<observer>> observers;
 };

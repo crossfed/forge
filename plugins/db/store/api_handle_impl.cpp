@@ -23,6 +23,48 @@ import forge.db.object.transaction;
 
 namespace forge::plugins::db::store {
 
+transaction::transaction(forge::db::core::transaction active) : core_{std::move(active)} {}
+
+transaction::transaction(forge::db::object::transaction active) : object_{std::move(active)} {}
+
+bool transaction::active() const noexcept {
+   return object_.has_value() || (core_.has_value() && core_->active());
+}
+
+forge::db::core::transaction& transaction::db_transaction() {
+   if (object_.has_value()) {
+      return object_->db_transaction();
+   }
+   if (core_.has_value()) {
+      return *core_;
+   }
+   FORGE_THROW_EXCEPTION(exceptions::stopped, "db store transaction is closed");
+}
+
+boost::asio::awaitable<void> transaction::commit() {
+   if (object_.has_value()) {
+      co_await object_->commit();
+      object_.reset();
+      co_return;
+   }
+   if (core_.has_value()) {
+      co_await core_->commit();
+      core_.reset();
+   }
+}
+
+boost::asio::awaitable<void> transaction::rollback() {
+   if (object_.has_value()) {
+      co_await object_->rollback();
+      object_.reset();
+      co_return;
+   }
+   if (core_.has_value()) {
+      co_await core_->rollback();
+      core_.reset();
+   }
+}
+
 std::string object_handle::name() const {
    if (!state_) {
       return {};
@@ -103,8 +145,11 @@ std::shared_ptr<forge::db::core::driver> store_handle::require_driver() const {
    return state_->require_driver();
 }
 
-boost::asio::awaitable<forge::db::core::transaction> store_handle::begin_transaction() const {
-   co_return co_await require_driver()->begin_transaction();
+boost::asio::awaitable<transaction> store_handle::begin_transaction() const {
+   if (!state_) {
+      FORGE_THROW_EXCEPTION(exceptions::stopped, "db store handle is empty");
+   }
+   co_return co_await state_->begin_transaction();
 }
 
 object_handle store_handle::objects() const {

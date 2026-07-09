@@ -116,46 +116,37 @@ boost::asio::awaitable<forge::db::core::snapshot> store::impl::open_read_snapsho
    co_return co_await driver->begin_read();
 }
 
-boost::asio::awaitable<forge::ids::object_id> store::impl::allocate_id(forge::ids::object_id type) const {
+boost::asio::awaitable<forge::ids::object_id> store::impl::allocate_id(forge::ids::object_id type,
+                                                                       forge::db::core::transaction& active) {
    const auto ticket = co_await allocator_gate->acquire();
-   auto active = co_await open_write_transaction();
-   auto error = std::exception_ptr{};
    auto allocated = type;
 
-   try {
-      const auto key = sequence_record_key(type);
+   const auto key = sequence_record_key(type);
+   auto cursor = next_instances.find(type);
+   if (cursor == next_instances.end()) {
       const auto existing = co_await active.get(config.family, key);
-      auto next = existing.has_value() ? decode_next_instance(*existing) : std::uint64_t{0};
+      const auto next = existing.has_value() ? decode_next_instance(*existing) : std::uint64_t{0};
+      cursor = next_instances.emplace(type, next).first;
+   }
+
+   auto next = cursor->second;
+   if (next == std::numeric_limits<std::uint64_t>::max()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db object id sequence is exhausted");
+   }
+
+   while ((co_await active.get(config.family, object_record_key(type, next))).has_value()) {
       if (next == std::numeric_limits<std::uint64_t>::max()) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db object id sequence is exhausted");
       }
-
-      while ((co_await active.get(config.family, object_record_key(type, next))).has_value()) {
-         if (next == std::numeric_limits<std::uint64_t>::max()) {
-            FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db object id sequence is exhausted");
-         }
-         ++next;
-      }
-      if (next == std::numeric_limits<std::uint64_t>::max()) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db object id sequence is exhausted");
-      }
-
-      allocated.instance = next;
       ++next;
-      co_await active.put(config.family, key, encode_next_instance(next));
-      co_await active.commit();
-   } catch (...) {
-      error = std::current_exception();
+   }
+   if (next == std::numeric_limits<std::uint64_t>::max()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db object id sequence is exhausted");
    }
 
-   if (error) {
-      try {
-         co_await active.rollback();
-      } catch (...) {
-      }
-      std::rethrow_exception(error);
-   }
-
+   allocated.instance = next;
+   cursor->second = next + 1U;
+   co_await active.put(config.family, key, encode_next_instance(cursor->second));
    co_return allocated;
 }
 

@@ -546,6 +546,11 @@ class memory_driver : public forge::db::core::driver {
       return state_->overlapping_writes;
    }
 
+   [[nodiscard]] std::size_t active_writes() const noexcept {
+      auto guard = std::scoped_lock{state_->mutex};
+      return state_->active_writes;
+   }
+
  private:
    boost::asio::awaitable<std::unique_ptr<forge::db::core::session>> open_transaction() override {
       co_return std::make_unique<memory_session>(state_);
@@ -952,6 +957,23 @@ BOOST_AUTO_TEST_CASE(db_object_create_concurrent_calls_generate_unique_ids) {
          BOOST_CHECK_EQUAL((*instances)[index], index);
       }
 
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_create_does_not_open_nested_write_transaction) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = make_store(driver);
+
+      const auto created = co_await store.create<account>([](account& value) {
+         value.name = "single-writer-safe";
+      });
+
+      BOOST_CHECK_EQUAL(created.id.instance, 0U);
+      BOOST_CHECK(!driver->overlapping_writes());
+      BOOST_CHECK_EQUAL(driver->active_writes(), 0U);
       co_return;
    }());
 }

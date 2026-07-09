@@ -568,6 +568,45 @@ BOOST_AUTO_TEST_CASE(db_blob_release_rejects_wrong_size_ref_without_dropping_own
    }());
 }
 
+BOOST_AUTO_TEST_CASE(db_blob_retain_rejects_wrong_size_ref_without_creating_owner) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   auto blobs = forge::db::blob::store{driver};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto owner = forge::db::blob::owner_ref{"doc:stale-retain"};
+      const auto ref = co_await blobs.put(bytes("retained"));
+      auto wrong_size = ref;
+      wrong_size.size = ref.size + 1U;
+
+      BOOST_CHECK_THROW(co_await blobs.retain(wrong_size, owner), forge::db::blob::exceptions::digest_mismatch);
+      BOOST_CHECK_EQUAL(co_await blobs.ref_count(ref), 0U);
+
+      const auto collected = co_await blobs.collect_unreferenced({.limit = 10});
+      BOOST_CHECK_EQUAL(collected.removed, 1U);
+      BOOST_CHECK(!(co_await blobs.has(ref)));
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_retain_rejects_missing_blob_without_creating_owner) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   auto blobs = forge::db::blob::store{driver};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto missing = forge::db::blob::ref<>{
+         .digest = forge::db::blob::hash<forge::db::blob::digest>{}(bytes("missing")),
+         .size = 7U,
+      };
+
+      BOOST_CHECK_THROW(co_await blobs.retain(missing, forge::db::blob::owner_ref{"doc:missing"}),
+                        forge::db::blob::exceptions::not_found);
+      BOOST_CHECK_EQUAL(co_await blobs.ref_count(missing), 0U);
+      co_return;
+   }());
+}
+
 BOOST_AUTO_TEST_CASE(db_blob_ref_keys_do_not_alias_variable_length_digests) {
    auto runtime = forge::asio::runtime{};
    auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());

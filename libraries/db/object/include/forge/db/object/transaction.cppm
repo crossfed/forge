@@ -37,7 +37,8 @@ export namespace forge::db::object {
 class transaction {
  public:
    using ensure_registered_fn = std::function<void(forge::ids::object_id, std::type_index)>;
-   using allocate_id_fn = std::function<boost::asio::awaitable<forge::ids::object_id>(forge::ids::object_id)>;
+   using allocate_id_fn = std::function<boost::asio::awaitable<forge::ids::object_id>(
+      forge::ids::object_id, forge::db::core::transaction&)>;
    using release_fn = std::function<void()>;
 
    transaction() = default;

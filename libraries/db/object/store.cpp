@@ -72,8 +72,9 @@ boost::asio::awaitable<transaction> store::begin_transaction() {
       [impl = impl_](forge::ids::object_id type, std::type_index model) {
          impl->ensure_registered_type(type, model);
       },
-      [impl = impl_](forge::ids::object_id type) -> boost::asio::awaitable<forge::ids::object_id> {
-         co_return co_await impl->allocate_id(type);
+      [impl = impl_](forge::ids::object_id type,
+                     forge::db::core::transaction& active) -> boost::asio::awaitable<forge::ids::object_id> {
+         co_return co_await impl->allocate_id(type, active);
       },
       impl_->interceptors,
       impl_->observers,
@@ -103,8 +104,9 @@ transaction store::join(forge::db::core::transaction& active) {
       [impl = impl_](forge::ids::object_id type, std::type_index model) {
          impl->ensure_registered_type(type, model);
       },
-      [impl = impl_](forge::ids::object_id type) -> boost::asio::awaitable<forge::ids::object_id> {
-         co_return co_await impl->allocate_id(type);
+      [impl = impl_](forge::ids::object_id type,
+                     forge::db::core::transaction& active) -> boost::asio::awaitable<forge::ids::object_id> {
+         co_return co_await impl->allocate_id(type, active);
       },
       impl_->interceptors,
       impl_->observers};

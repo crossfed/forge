@@ -1,4 +1,9 @@
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/use_awaitable.hpp>
 #include <boost/describe.hpp>
 #include <boost/test/unit_test.hpp>
 #include <forge/exceptions/macros.hpp>
@@ -102,12 +107,24 @@ struct byte_less {
 struct memory_state {
    std::map<std::string, std::map<forge::db::core::record_key, std::vector<std::byte>, byte_less>> records;
    std::size_t flush_calls = 0;
+   std::size_t active_writes = 0;
+   bool overlapping_writes = false;
 };
 
 class memory_session final : public forge::db::core::session {
  public:
-   memory_session(std::shared_ptr<memory_state> state, bool writes)
-       : state_{std::move(state)}, writes_{writes}, working_{state_->records} {}
+   memory_session(std::shared_ptr<memory_state> state, bool writes) : state_{std::move(state)}, writes_{writes}, working_{state_->records} {
+      if (writes_) {
+         ++state_->active_writes;
+         if (state_->active_writes > 1U) {
+            state_->overlapping_writes = true;
+         }
+      }
+   }
+
+   ~memory_session() override {
+      close();
+   }
 
    [[nodiscard]] forge::db::core::capabilities capabilities() const noexcept override {
       return forge::db::core::capabilities{.snapshot_reads = !writes_, .writes = writes_};
@@ -177,16 +194,26 @@ class memory_session final : public forge::db::core::session {
          FORGE_THROW_EXCEPTION(forge::db::object::exceptions::unsupported_operation, "test snapshot cannot commit");
       }
       state_->records = std::move(working_);
+      close();
       co_return;
    }
 
    boost::asio::awaitable<void> rollback() override {
+      close();
       co_return;
    }
 
  private:
+   void close() noexcept {
+      if (writes_ && !closed_) {
+         closed_ = true;
+         --state_->active_writes;
+      }
+   }
+
    std::shared_ptr<memory_state> state_;
    bool writes_ = false;
+   bool closed_ = false;
    std::map<std::string, std::map<forge::db::core::record_key, std::vector<std::byte>, byte_less>> working_;
 };
 
@@ -199,6 +226,14 @@ class memory_driver final : public forge::db::core::driver {
 
    [[nodiscard]] std::size_t flush_calls() const noexcept {
       return state_->flush_calls;
+   }
+
+   [[nodiscard]] std::size_t active_writes() const noexcept {
+      return state_->active_writes;
+   }
+
+   [[nodiscard]] bool overlapping_writes() const noexcept {
+      return state_->overlapping_writes;
    }
 
  private:
@@ -593,6 +628,57 @@ BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_commits_object_metadata_and
    BOOST_TEST(forge::asio::blocking::run(runtime, handle.blobs().ref_count(content)) == 1U);
 
    forge::asio::blocking::run(runtime, plugin.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(store_plugin_begin_transaction_preserves_object_single_writer_gate) {
+   auto driver = std::make_shared<memory_driver>();
+   auto app = make_app({}, driver);
+   auto api = app->apis().get<store_plugin::api>(store_plugin::api::ref());
+   auto handle = forge::asio::blocking::run(app->runtime(), api->store("accounts"));
+   handle.objects().register_object<account_object>();
+
+   forge::asio::blocking::run(app->runtime(), [&]() -> boost::asio::awaitable<void> {
+      auto first = co_await handle.begin_transaction();
+
+      auto second_started = std::make_shared<bool>(false);
+      auto second_error = std::make_shared<std::exception_ptr>();
+      const auto executor = co_await boost::asio::this_coro::executor;
+      boost::asio::co_spawn(
+         executor,
+         [handle, second_started, second_error]() mutable -> boost::asio::awaitable<void> {
+            try {
+               auto second = co_await handle.begin_transaction();
+               *second_started = true;
+               co_await second.rollback();
+            } catch (...) {
+               *second_error = std::current_exception();
+            }
+            co_return;
+         },
+         boost::asio::detached);
+
+      auto timer = boost::asio::steady_timer{executor};
+      timer.expires_after(std::chrono::milliseconds{50});
+      co_await timer.async_wait(boost::asio::use_awaitable);
+
+      BOOST_CHECK(!*second_started);
+      BOOST_CHECK(!driver->overlapping_writes());
+
+      co_await first.rollback();
+
+      timer.expires_after(std::chrono::milliseconds{50});
+      co_await timer.async_wait(boost::asio::use_awaitable);
+
+      if (*second_error) {
+         std::rethrow_exception(*second_error);
+      }
+      BOOST_CHECK(*second_started);
+      BOOST_CHECK(!driver->overlapping_writes());
+      BOOST_CHECK_EQUAL(driver->active_writes(), 0U);
+      co_return;
+   }());
+
+   forge::asio::blocking::run(app->runtime(), app->shutdown());
 }
 
 BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_rollback_hides_object_and_blob) {

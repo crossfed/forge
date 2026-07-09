@@ -235,7 +235,7 @@ boost::asio::awaitable<forge::ids::object_id> transaction::allocate_id(forge::id
    if (!impl_ || !impl_->allocate_id) {
       FORGE_THROW_EXCEPTION(exceptions::unsupported_operation, "db object transaction cannot allocate ids");
    }
-   co_return co_await impl_->allocate_id(type);
+   co_return co_await impl_->allocate_id(type, active_transaction());
 }
 
 boost::asio::awaitable<std::optional<std::vector<std::byte>>> transaction::get_record(forge::db::core::record_key key) const {

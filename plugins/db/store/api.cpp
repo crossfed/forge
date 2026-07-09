@@ -67,6 +67,19 @@ class plugin::api_impl::handle_state final : public store_handle_state {
       return opened.blobs;
    }
 
+   boost::asio::awaitable<transaction> begin_transaction() const override {
+      const auto owner = owner_.lock();
+      if (!owner) {
+         FORGE_THROW_EXCEPTION(exceptions::stopped, "db store plugin is stopped");
+      }
+
+      auto opened = owner->require_open_store(name_);
+      if (opened.objects) {
+         co_return transaction{co_await opened.objects->begin_transaction()};
+      }
+      co_return transaction{co_await opened.driver->begin_transaction()};
+   }
+
  private:
    std::weak_ptr<impl> owner_;
    std::string name_;

@@ -34,6 +34,28 @@ import forge.db.object.transaction;
 
 export namespace forge::plugins::db::store {
 
+class transaction {
+ public:
+   transaction() = default;
+   explicit transaction(forge::db::core::transaction active);
+   explicit transaction(forge::db::object::transaction active);
+   transaction(const transaction&) = delete;
+   transaction& operator=(const transaction&) = delete;
+   transaction(transaction&&) noexcept = default;
+   transaction& operator=(transaction&&) noexcept = default;
+   ~transaction() = default;
+
+   [[nodiscard]] bool active() const noexcept;
+   [[nodiscard]] forge::db::core::transaction& db_transaction();
+
+   boost::asio::awaitable<void> commit();
+   boost::asio::awaitable<void> rollback();
+
+ private:
+   std::optional<forge::db::core::transaction> core_;
+   std::optional<forge::db::object::transaction> object_;
+};
+
 class store_handle_state {
  public:
    virtual ~store_handle_state() = default;
@@ -42,6 +64,7 @@ class store_handle_state {
    [[nodiscard]] virtual std::shared_ptr<forge::db::core::driver> require_driver() const = 0;
    [[nodiscard]] virtual std::shared_ptr<forge::db::object::store> require_objects() const = 0;
    [[nodiscard]] virtual std::shared_ptr<forge::db::blob::store> require_blobs() const = 0;
+   virtual boost::asio::awaitable<transaction> begin_transaction() const = 0;
 };
 
 class object_handle {
@@ -252,7 +275,7 @@ class store_handle {
 
    [[nodiscard]] std::string name() const;
 
-   boost::asio::awaitable<forge::db::core::transaction> begin_transaction() const;
+   boost::asio::awaitable<transaction> begin_transaction() const;
 
    [[nodiscard]] object_handle objects() const;
    [[nodiscard]] blob_handle blobs() const;
