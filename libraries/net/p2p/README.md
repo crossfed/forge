@@ -56,7 +56,7 @@ It means the same peer identity model, address encoding, protocol negotiation,
 handshake, protocol IDs and message rules for protocols FORGE marks as supported.
 
 The canonical block order and donor test rules live in
-[`docs/network/quic-p2p.md`](../../docs/network/quic-p2p.md). Keep this README
+[`docs/network/quic-p2p.md`](../../../docs/network/quic-p2p.md). Keep this README
 as a library overview; do not duplicate the block sequence here.
 
 Current direction: P2P sits above first-class multiaddr, reusable

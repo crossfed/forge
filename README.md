@@ -145,6 +145,9 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [reflect](libraries/reflect/README.md) | `forge_reflect` | Thin Boost.Describe traversal helpers. | Boost.Describe via Boost headers. |
 | [variant](libraries/variant/README.md) | `forge_variant` | Dynamic value/object model and described conversions. | `forge_core`, `forge_reflect`, Boost.MultiIndex/multiprecision. |
 | [raw](libraries/raw/README.md) | `forge_raw` | Byte-compatible binary serialization. | `forge_core`, `forge_reflect`, `forge_variant`, `forge_exceptions`. |
+| [ids](libraries/ids/README.md) | `forge_ids` | Compact object IDs and typed ID bindings. | `forge_raw`, `forge_variant`. |
+| [compression](libraries/compression/README.md) | `forge_compression` | Bounded zlib compression/decompression helpers. | Boost.Iostreams, ZLIB, `forge_exceptions`. |
+| [chain](libraries/chain/README.md) | `forge_chain` | Neutral chain protocol values, transactions, blocks, ABI and signing digests. | `forge_compression`, `forge_raw`, `forge_variant`, `forge_crypto`. |
 | [json](libraries/codec/json/README.md) | `forge_codec_json` | JSON typed/value/document codec over Glaze. | Glaze privately, `forge_variant`, `forge_config_core`, `forge_schema`. |
 | [yaml](libraries/codec/yaml/README.md) | `forge_codec_yaml` | YAML typed/value/document codec with JSON-shaped API. | Glaze privately, `forge_config_core`, `forge_schema`. |
 | [xml](libraries/codec/xml/README.md) | `forge_codec_xml` | XML typed/tree codec over private pugixml. | `forge_core`, `forge_reflect`, `forge_schema`, pugixml privately. |
@@ -173,8 +176,12 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [net/quic](libraries/net/quic/README.md) | `forge_net_quic` | QUIC endpoint, listener, connector, framed streams. | ngtcp2, OpenSSL 3.0+, Boost.Asio. |
 | [multiformats](libraries/multiformats/README.md) | `forge_multiformats` | libp2p-compatible varint, multicodec, multihash, multibase and multiaddr. | `forge_crypto`, `forge_exceptions`. |
 | [net/p2p](libraries/net/p2p/README.md) | `forge_net_p2p` | Peer identity, sessions, discovery, relay, DHT, rendezvous and GossipSub. | `forge_net_transport`, `forge_multiformats`, `forge_net_quic`, `forge_net_yamux`. |
+| [db](libraries/db/README.md) | `forge_db` | Shared record driver, transaction and snapshot contract. | Boost.Asio, `forge_exceptions`. |
+| [objectdb](libraries/objectdb/README.md) | `forge_objectdb` | Typed object/index store over the shared DB driver. | `forge_db`, `forge_ids`, `forge_raw`, `forge_exceptions`. |
+| [blobdb](libraries/blobdb/README.md) | `forge_blobdb` | Content-addressed blob store with explicit retention primitives. | `forge_db`, `forge_exceptions`. |
 | [rocksdb](libraries/rocksdb/README.md) | `forge_rocksdb` | Optional RocksDB TransactionDB wrapper. | RocksDB privately, `forge_exceptions`, `forge_schema`. |
-| [plugins](plugins/README.md) | `forge_plugins`, `forge_plugins_*_*` | Official infrastructure plugins: P2P node, API resolver, diagnostics, PubSub facade, crypto signer and crypto secrets. | `forge_app`, `forge_api_core`, focused plugin targets. |
+| [db_rocksdb](libraries/db_rocksdb/README.md) | `forge_db_rocksdb` | RocksDB implementation of the shared DB driver contract. | `forge_db`, `forge_rocksdb`. |
+| [plugins](plugins/README.md) | `forge_plugins`, `forge_plugins_*_*` | Official infrastructure plugins: P2P node, API resolver, diagnostics, PubSub facade, crypto signer/secrets, DB ObjectDB and RocksDB services. | `forge_app`, `forge_api_core`, focused plugin targets. |
 | [tui](libraries/tui/README.md) | `forge_tui` | Terminal UI value models, render helpers, runner. | Notcurses core privately and optionally. |
 
 `find_package(Forge CONFIG REQUIRED)` is intentionally lightweight and discovers
@@ -229,10 +236,12 @@ README в `libraries/<lib>` является быстрым guide по конк�
 
 ```bash
 cmake --build build/forge-debug -j 4 \
-   --target forge test_forge test_forge_exceptions test_forge_raw test_forge_codec_json test_forge_crypto \
-  test_forge_multiformats test_forge_asio test_forge_transport test_forge_tcp test_forge_stcp \
-  test_forge_yamux test_forge_quic test_forge_app test_forge_schema test_forge_config_core \
-  test_forge_codec_yaml test_forge_config_program_options test_forge_config_env test_forge_api_core \
+  --target forge test_forge test_forge_exceptions test_forge_raw test_forge_codec_json test_forge_crypto \
+  test_forge_ids test_forge_chain test_forge_db test_forge_compression \
+  test_forge_objectdb test_forge_blobdb test_forge_multiformats test_forge_asio \
+  test_forge_transport test_forge_tcp test_forge_stcp test_forge_yamux test_forge_quic \
+  test_forge_app test_forge_schema test_forge_config_core test_forge_codec_yaml \
+  test_forge_config_program_options test_forge_config_env test_forge_api_core \
   test_forge_api_transport test_forge_http_websocket test_forge_quic_p2p \
   test_forge_plugins test_forge_otlp test_forge_tui test_forge_codec_xml
 
