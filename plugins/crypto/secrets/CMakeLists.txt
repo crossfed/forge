@@ -20,8 +20,8 @@ target_include_directories(
 target_link_libraries(
    forge_plugins_crypto_secrets PUBLIC
       forge_app
-      forge_api
-      forge_config
+      forge_api_core
+      forge_config_core
       forge_schema
       forge_crypto
       forge_exceptions

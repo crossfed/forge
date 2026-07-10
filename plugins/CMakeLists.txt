@@ -6,7 +6,7 @@ add_subdirectory(p2p/diagnostics)
 add_subdirectory(p2p/pubsub)
 add_subdirectory(http/server)
 add_subdirectory(log/otlp)
-add_subdirectory(db/objectdb)
+add_subdirectory(db/store)
 if(FORGE_HAS_ROCKSDB)
    add_subdirectory(db/rocksdb)
 endif()
@@ -25,7 +25,7 @@ target_link_libraries(
       forge_plugins_p2p_pubsub
       forge_plugins_http_server
       forge_plugins_log_otlp
-      forge_plugins_db_objectdb
+      forge_plugins_db_store
 )
 
 if(TARGET forge_plugins_db_rocksdb)

@@ -20,8 +20,8 @@ module;
 module forge.plugins.db.rocksdb.plugin;
 
 import forge.asio.task_scheduler;
-import forge.config.component;
-import forge.config.decode;
+import forge.config.core.component;
+import forge.config.core.decode;
 import forge.exceptions;
 import forge.plugins.db.rocksdb.exceptions;
 import forge.rocksdb.store;
@@ -31,11 +31,11 @@ import forge.rocksdb.store;
 
 namespace forge::plugins::db::rocksdb::detail {
 
-config decode_config(const forge::config::component_view& view) {
-   auto decoded = forge::config::decode<config>(view.source(), view.section());
+config decode_config(const forge::config::core::component_view& view) {
+   auto decoded = forge::config::core::decode<config>(view.source(), view.section());
    if (!decoded.ok()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_config,
-                          forge::config::format_decode_diagnostics("invalid RocksDB config",
+                          forge::config::core::format_decode_diagnostics("invalid RocksDB config",
                                                                  decoded.diagnostics));
    }
    return std::move(decoded.value);

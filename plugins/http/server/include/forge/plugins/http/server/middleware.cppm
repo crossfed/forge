@@ -12,10 +12,12 @@ module;
 
 export module forge.plugins.http.server.middleware;
 
-import forge.http.middleware;
-import forge.http.types;
+import forge.net.http.middleware;
+import forge.net.http.types;
 
 export namespace forge::plugins::http::server {
+
+namespace http = forge::net::http;
 
 namespace detail {
 struct middleware_bridge_access;
@@ -43,7 +45,7 @@ struct middleware_request {
 
    [[nodiscard]] std::optional<std::string_view> header(std::string_view name) const noexcept {
       for (const auto& entry : headers) {
-         if (forge::http::header_name_equal(entry.name, name)) {
+         if (http::header_name_equal(entry.name, name)) {
             return std::string_view{entry.value};
          }
       }
@@ -53,7 +55,7 @@ struct middleware_request {
 
 class middleware_response {
  public:
-   [[nodiscard]] static middleware_response text(forge::http::status status_value,
+   [[nodiscard]] static middleware_response text(forge::net::http::status status_value,
                                                  std::string body_value,
                                                  std::string content_type_value = "text/plain") {
       auto result = middleware_response{};
@@ -63,7 +65,7 @@ class middleware_response {
       return result;
    }
 
-   [[nodiscard]] forge::http::status status() const noexcept {
+   [[nodiscard]] forge::net::http::status status() const noexcept {
       return status_;
    }
 
@@ -82,7 +84,7 @@ class middleware_response {
 
    void set_header(std::string name, std::string value) {
       for (auto& entry : headers_) {
-         if (forge::http::header_name_equal(entry.name, name)) {
+         if (http::header_name_equal(entry.name, name)) {
             entry.value = std::move(value);
             return;
          }
@@ -90,7 +92,7 @@ class middleware_response {
       headers_.push_back(header_entry{.name = std::move(name), .value = std::move(value)});
    }
 
-   void set_status(forge::http::status value) noexcept {
+   void set_status(forge::net::http::status value) noexcept {
       status_ = value;
       stream_state_.clear();
    }
@@ -110,11 +112,11 @@ class middleware_response {
    }
 
  private:
-   forge::http::status status_ = forge::http::status::ok;
+   forge::net::http::status status_ = forge::net::http::status::ok;
    std::vector<header_entry> headers_;
    std::string body_;
    std::optional<std::string> content_type_;
-   forge::http::stream_pass_through_state stream_state_;
+   forge::net::http::stream_pass_through_state stream_state_;
 
    friend struct detail::middleware_bridge_access;
 };
@@ -122,7 +124,7 @@ class middleware_response {
 namespace detail {
 
 struct middleware_bridge_access {
-   static void set_status(middleware_response& value, forge::http::status status) noexcept {
+   static void set_status(middleware_response& value, forge::net::http::status status) noexcept {
       value.status_ = status;
    }
 
@@ -147,11 +149,11 @@ struct middleware_bridge_access {
       return value.headers_;
    }
 
-   static void set_stream_state(middleware_response& value, forge::http::stream_pass_through_state state) {
+   static void set_stream_state(middleware_response& value, forge::net::http::stream_pass_through_state state) {
       value.stream_state_ = std::move(state);
    }
 
-   [[nodiscard]] static const forge::http::stream_pass_through_state& stream_state(
+   [[nodiscard]] static const forge::net::http::stream_pass_through_state& stream_state(
       const middleware_response& value) noexcept {
       return value.stream_state_;
    }

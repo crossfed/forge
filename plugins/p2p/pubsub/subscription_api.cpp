@@ -21,8 +21,8 @@ module;
 module forge.plugins.p2p.pubsub.plugin;
 
 import forge.exceptions;
-import forge.p2p.identity;
-import forge.p2p.pubsub;
+import forge.net.p2p.identity;
+import forge.net.p2p.pubsub;
 import forge.plugins.p2p.node.api;
 import forge.plugins.p2p.pubsub.api;
 import forge.plugins.p2p.pubsub.exceptions;
@@ -39,7 +39,7 @@ namespace forge::plugins::p2p::pubsub {
 plugin::subscription_api::subscription_api(std::shared_ptr<plugin::impl> impl) : impl_{std::move(impl)} {}
 
 boost::asio::awaitable<message>
-plugin::subscription_api::publish(forge::p2p::pubsub::topic subject,
+plugin::subscription_api::publish(forge::net::p2p::pubsub::topic subject,
                           std::vector<std::uint8_t> data,
                           publish_options options) {
    auto& source = impl_->require_source();
@@ -50,7 +50,7 @@ plugin::subscription_api::publish(forge::p2p::pubsub::topic subject,
    }
    auto published = co_await source.async_publish_message(
       std::move(subject), std::move(data),
-      forge::p2p::pubsub::publish_options{.sign = options.sign.value_or(impl_->settings.sign_publishes)});
+      forge::net::p2p::pubsub::publish_options{.sign = options.sign.value_or(impl_->settings.sign_publishes)});
    {
       auto lock = std::scoped_lock{impl_->mutex};
       ++impl_->messages_published;
@@ -59,7 +59,7 @@ plugin::subscription_api::publish(forge::p2p::pubsub::topic subject,
 }
 
 boost::asio::awaitable<subscription>
-plugin::subscription_api::subscribe(forge::p2p::pubsub::topic subject,
+plugin::subscription_api::subscribe(forge::net::p2p::pubsub::topic subject,
                             handler callback,
                             subscribe_options options) {
    auto& source = impl_->require_source();
@@ -121,8 +121,8 @@ plugin::subscription_api::subscribe(forge::p2p::pubsub::topic subject,
       auto self = impl_;
       try {
          (void)co_await source.async_join_topic(
-            subject, [self](forge::p2p::pubsub::event event) mutable
-                        -> boost::asio::awaitable<forge::p2p::pubsub::validation_result> {
+            subject, [self](forge::net::p2p::pubsub::event event) mutable
+                        -> boost::asio::awaitable<forge::net::p2p::pubsub::validation_result> {
                co_return co_await self->handle_event(std::move(event));
             });
          auto waiters = std::vector<std::shared_ptr<join_waiter>>{};

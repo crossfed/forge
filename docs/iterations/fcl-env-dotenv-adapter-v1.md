@@ -3,17 +3,17 @@
 ## Решение
 
 `fcl_env` добавлен как отдельный source adapter для process environment и
-явных `.env` файлов. Он строит `fcl::config::document` из
-`fcl::config::component_registry`, но не входит в `fcl_app` lifecycle и не
+явных `.env` файлов. Он строит `fcl::config::core::document` из
+`fcl::config::core::component_registry`, но не входит в `fcl_app` lifecycle и не
 задаёт product bootstrap policy.
 
 Это симметрично текущим источникам конфигурации:
 
 ```text
-fcl_yaml             file codec -> config::document / typed config
-fcl_json             file/text codec -> config::document / typed config
-fcl_program_options  argv -> config::document
-fcl_env              process env / .env -> config::document
+fcl_yaml             file codec -> config::core::document / typed config
+fcl_json             file/text codec -> config::core::document / typed config
+fcl_program_options  argv -> config::core::document
+fcl_env              process env / .env -> config::core::document
 ```
 
 ## Доноры

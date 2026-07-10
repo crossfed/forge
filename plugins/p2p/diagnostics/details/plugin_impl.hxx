@@ -9,7 +9,7 @@ struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
    bool stopping = false;
 
    [[nodiscard]] forge::plugins::p2p::node::diagnostics_source& require_source() const;
-   [[nodiscard]] forge::p2p::diagnostics::snapshot snapshot() const;
+   [[nodiscard]] forge::net::p2p::diagnostics::snapshot snapshot() const;
 };
 
 } // namespace forge::plugins::p2p::diagnostics

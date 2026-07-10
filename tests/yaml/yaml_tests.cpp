@@ -21,12 +21,12 @@ struct http_config {
 
 BOOST_DESCRIBE_STRUCT(forge_yaml_tests::http_config, (), (bind_port, bind_host, tls_enabled, tags))
 
-import forge.config.key_path;
-import forge.config.value;
-import forge.config.document;
-import forge.config.component;
-import forge.config.decode;
-import forge.config.migration;
+import forge.config.core.key_path;
+import forge.config.core.value;
+import forge.config.core.document;
+import forge.config.core.component;
+import forge.config.core.decode;
+import forge.config.core.migration;
 import forge.schema.diagnostic;
 import forge.schema.value_kind;
 import forge.schema.object;
@@ -39,7 +39,7 @@ import forge.variant.chrono;
 import forge.variant.multiprecision;
 import forge.variant.format;
 import forge.variant.described;
-import forge.yaml;
+import forge.codec.yaml;
 
 template <> struct forge::schema::rules<forge_yaml_tests::http_config> {
    [[nodiscard]] static forge::schema::object_schema<forge_yaml_tests::http_config> define() {
@@ -55,7 +55,7 @@ template <> struct forge::schema::rules<forge_yaml_tests::http_config> {
 BOOST_AUTO_TEST_SUITE(yaml_codec_tests)
 
 BOOST_AUTO_TEST_CASE(yaml_value_roundtrip_preserves_scalars_lists_and_maps) {
-   const auto parsed = forge::yaml::read_value("flag: true\n"
+   const auto parsed = forge::codec::yaml::read_value("flag: true\n"
                                              "i: -2\n"
                                              "u: 7\n"
                                              "d: 3.5\n"
@@ -73,9 +73,9 @@ BOOST_AUTO_TEST_CASE(yaml_value_roundtrip_preserves_scalars_lists_and_maps) {
    BOOST_TEST(object["s"].get_string() == "x");
    BOOST_REQUIRE_EQUAL(object["a"].get_array().size(), 2U);
 
-   const auto written = forge::yaml::write_value(parsed.value);
+   const auto written = forge::codec::yaml::write_value(parsed.value);
    BOOST_REQUIRE(written.ok());
-   const auto reparsed = forge::yaml::read_value(written.text);
+   const auto reparsed = forge::codec::yaml::read_value(written.text);
    BOOST_REQUIRE(reparsed.ok());
    BOOST_TEST(reparsed.value.get_object()["flag"].as_bool());
    BOOST_TEST(reparsed.value.get_object()["i"].as_int64() == -2);
@@ -84,21 +84,21 @@ BOOST_AUTO_TEST_CASE(yaml_value_roundtrip_preserves_scalars_lists_and_maps) {
 }
 
 BOOST_AUTO_TEST_CASE(yaml_document_roundtrip_uses_config_document) {
-   auto document = forge::config::document{};
+   auto document = forge::config::core::document{};
    document.set("http.bind-host", "127.0.0.1");
    document.set("http.bind-port", 8080);
    document.set("http.tls-enabled", true);
 
-   const auto written = forge::yaml::write_document(document);
+   const auto written = forge::codec::yaml::write_document(document);
    BOOST_REQUIRE(written.ok());
-   const auto parsed = forge::yaml::read_document(written.text);
+   const auto parsed = forge::codec::yaml::read_document(written.text);
    BOOST_REQUIRE(parsed.ok());
    BOOST_REQUIRE(parsed.value.try_get("http.bind-host") != nullptr);
    BOOST_REQUIRE(parsed.value.try_get("http.bind-port") != nullptr);
 }
 
 BOOST_AUTO_TEST_CASE(yaml_typed_read_uses_schema_defaults_validation_and_unknown_policy) {
-   const auto parsed = forge::yaml::read<forge_yaml_tests::http_config>("bind-port: 9090\n"
+   const auto parsed = forge::codec::yaml::read<forge_yaml_tests::http_config>("bind-port: 9090\n"
                                                                     "tls-enabled: false\n"
                                                                     "tags:\n"
                                                                     "  - alpha\n"
@@ -110,14 +110,14 @@ BOOST_AUTO_TEST_CASE(yaml_typed_read_uses_schema_defaults_validation_and_unknown
    BOOST_TEST(parsed.diagnostics.size() == 1U);
    BOOST_TEST(parsed.diagnostics.front().code == "yaml.unknown");
 
-   auto options = forge::yaml::read_options{};
-   options.unknown_fields = forge::yaml::unknown_field_policy::error;
-   const auto rejected = forge::yaml::read<forge_yaml_tests::http_config>("bind-port: 9090\n"
+   auto options = forge::codec::yaml::read_options{};
+   options.unknown_fields = forge::codec::yaml::unknown_field_policy::error;
+   const auto rejected = forge::codec::yaml::read<forge_yaml_tests::http_config>("bind-port: 9090\n"
                                                                       "extra: 1\n",
                                                                       options);
    BOOST_TEST(!rejected.ok());
 
-   const auto invalid = forge::yaml::read<forge_yaml_tests::http_config>("bind-port: 0\n");
+   const auto invalid = forge::codec::yaml::read<forge_yaml_tests::http_config>("bind-port: 0\n");
    BOOST_TEST(!invalid.ok());
 }
 
@@ -137,28 +137,28 @@ BOOST_AUTO_TEST_CASE(yaml_typed_load_uses_same_unknown_policy_as_read) {
       }
    } remove_file{path};
 
-   const auto warned = forge::yaml::load<forge_yaml_tests::http_config>(path);
+   const auto warned = forge::codec::yaml::load<forge_yaml_tests::http_config>(path);
    BOOST_REQUIRE(warned.ok());
    BOOST_REQUIRE_EQUAL(warned.diagnostics.size(), 1U);
    BOOST_TEST(warned.diagnostics.front().code == "yaml.unknown");
 
-   auto rejected_options = forge::yaml::read_options{};
-   rejected_options.unknown_fields = forge::yaml::unknown_field_policy::error;
-   const auto rejected = forge::yaml::load<forge_yaml_tests::http_config>(path, rejected_options);
+   auto rejected_options = forge::codec::yaml::read_options{};
+   rejected_options.unknown_fields = forge::codec::yaml::unknown_field_policy::error;
+   const auto rejected = forge::codec::yaml::load<forge_yaml_tests::http_config>(path, rejected_options);
    BOOST_TEST(!rejected.ok());
    BOOST_REQUIRE_EQUAL(rejected.diagnostics.size(), 1U);
    BOOST_TEST(rejected.diagnostics.front().code == "yaml.unknown");
 
-   auto ignored_options = forge::yaml::read_options{};
-   ignored_options.unknown_fields = forge::yaml::unknown_field_policy::ignore;
-   const auto ignored = forge::yaml::load<forge_yaml_tests::http_config>(path, ignored_options);
+   auto ignored_options = forge::codec::yaml::read_options{};
+   ignored_options.unknown_fields = forge::codec::yaml::unknown_field_policy::ignore;
+   const auto ignored = forge::codec::yaml::load<forge_yaml_tests::http_config>(path, ignored_options);
    BOOST_REQUIRE(ignored.ok());
    BOOST_TEST(ignored.diagnostics.empty());
    BOOST_TEST(ignored.value.bind_port == 9090U);
 }
 
 BOOST_AUTO_TEST_CASE(yaml_malformed_input_returns_forge_diagnostic) {
-   const auto parsed = forge::yaml::read_value("root: [unterminated\n");
+   const auto parsed = forge::codec::yaml::read_value("root: [unterminated\n");
    BOOST_TEST(!parsed.ok());
    BOOST_REQUIRE_EQUAL(parsed.diagnostics.size(), 1U);
    BOOST_TEST(parsed.diagnostics.front().code == "yaml.parse");

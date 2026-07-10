@@ -9,9 +9,9 @@
 
 import forge.asio.blocking;
 import forge.asio.runtime;
-import forge.db.driver;
-import forge.db.record;
-import forge.db.rocksdb;
+import forge.db.core.driver;
+import forge.db.core.record;
+import forge.db.rocksdb.driver;
 import forge.rocksdb.types;
 
 namespace {
@@ -35,12 +35,12 @@ std::string text(const std::vector<std::byte>& bytes_value) {
       reinterpret_cast<const char*>(bytes_value.data() + bytes_value.size())};
 }
 
-forge::db::record_key key(std::string text_value) {
-   return forge::db::record_key{bytes(std::move(text_value))};
+forge::db::core::record_key key(std::string text_value) {
+   return forge::db::core::record_key{bytes(std::move(text_value))};
 }
 
-forge::db::record_key empty_key() {
-   return forge::db::record_key{std::vector<std::byte>{}};
+forge::db::core::record_key empty_key() {
+   return forge::db::core::record_key{std::vector<std::byte>{}};
 }
 
 forge::db::rocksdb::config config_for(const std::filesystem::path& path) {
@@ -69,9 +69,9 @@ BOOST_AUTO_TEST_CASE(db_rocksdb_transaction_writes_across_families_atomically) {
 
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       auto driver = forge::db::rocksdb::driver{config_for(root / "store")};
-      const auto objects = forge::db::family{"objectdb"};
-      const auto blobs = forge::db::family{"blobdb.data"};
-      const auto refs = forge::db::family{"blobdb.refs"};
+      const auto objects = forge::db::core::family{"objectdb"};
+      const auto blobs = forge::db::core::family{"blobdb.data"};
+      const auto refs = forge::db::core::family{"blobdb.refs"};
 
       {
          auto tx = co_await driver.begin_transaction();
@@ -100,9 +100,9 @@ BOOST_AUTO_TEST_CASE(db_rocksdb_transaction_writes_across_families_atomically) {
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       auto reopened = forge::db::rocksdb::driver{config_for(root / "store")};
       auto snapshot = co_await reopened.begin_read();
-      BOOST_CHECK_EQUAL(text(*(co_await snapshot.get(forge::db::family{"objectdb"}, key("doc:1")))), "metadata");
-      BOOST_CHECK_EQUAL(text(*(co_await snapshot.get(forge::db::family{"blobdb.data"}, key("blob:1")))), "payload");
-      BOOST_CHECK_EQUAL(text(*(co_await snapshot.get(forge::db::family{"blobdb.refs"}, key("ref:1")))), "doc:1");
+      BOOST_CHECK_EQUAL(text(*(co_await snapshot.get(forge::db::core::family{"objectdb"}, key("doc:1")))), "metadata");
+      BOOST_CHECK_EQUAL(text(*(co_await snapshot.get(forge::db::core::family{"blobdb.data"}, key("blob:1")))), "payload");
+      BOOST_CHECK_EQUAL(text(*(co_await snapshot.get(forge::db::core::family{"blobdb.refs"}, key("ref:1")))), "doc:1");
       co_return;
    }());
 
@@ -115,7 +115,7 @@ BOOST_AUTO_TEST_CASE(db_rocksdb_snapshot_preserves_old_records_and_scan_pages) {
 
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       auto driver = forge::db::rocksdb::driver{config_for(root / "store")};
-      const auto objects = forge::db::family{"objectdb"};
+      const auto objects = forge::db::core::family{"objectdb"};
 
       auto seed = co_await driver.begin_transaction();
       co_await seed.put(objects, key("doc:1"), bytes("old"));
@@ -132,16 +132,16 @@ BOOST_AUTO_TEST_CASE(db_rocksdb_snapshot_preserves_old_records_and_scan_pages) {
 
       auto page = co_await snapshot.scan_page(
          objects,
-         forge::db::record_range{.begin = key("doc:"), .end = key("doc;"), .prefix = key("doc:")},
-         forge::db::page_request{.limit = 1});
+         forge::db::core::record_range{.begin = key("doc:"), .end = key("doc;"), .prefix = key("doc:")},
+         forge::db::core::page_request{.limit = 1});
       BOOST_REQUIRE_EQUAL(page.entries.size(), 1U);
       BOOST_CHECK_EQUAL(text(page.entries.front().value), "old");
       BOOST_REQUIRE(page.next.has_value());
 
       auto second = co_await snapshot.scan_page(
          objects,
-         forge::db::record_range{.begin = key("doc:"), .end = key("doc;"), .prefix = key("doc:")},
-         forge::db::page_request{.after = page.next, .limit = 2});
+         forge::db::core::record_range{.begin = key("doc:"), .end = key("doc;"), .prefix = key("doc:")},
+         forge::db::core::page_request{.after = page.next, .limit = 2});
       BOOST_REQUIRE_EQUAL(second.entries.size(), 1U);
       BOOST_CHECK_EQUAL(text(second.entries.front().value), "two");
       BOOST_CHECK(!second.next.has_value());
@@ -157,7 +157,7 @@ BOOST_AUTO_TEST_CASE(db_rocksdb_snapshot_scans_prefixless_half_open_ranges) {
 
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       auto driver = forge::db::rocksdb::driver{config_for(root / "store")};
-      const auto objects = forge::db::family{"objectdb"};
+      const auto objects = forge::db::core::family{"objectdb"};
 
       auto seed = co_await driver.begin_transaction();
       for (const auto* value : {"a", "aa", "b", "y", "z"}) {
@@ -168,8 +168,8 @@ BOOST_AUTO_TEST_CASE(db_rocksdb_snapshot_scans_prefixless_half_open_ranges) {
       auto snapshot = co_await driver.begin_read();
       auto first = co_await snapshot.scan_page(
          objects,
-         forge::db::record_range{.begin = key("a"), .end = key("z")},
-         forge::db::page_request{.limit = 3});
+         forge::db::core::record_range{.begin = key("a"), .end = key("z")},
+         forge::db::core::page_request{.limit = 3});
       BOOST_REQUIRE_EQUAL(first.entries.size(), 3U);
       BOOST_CHECK_EQUAL(text(first.entries[0].value), "a");
       BOOST_CHECK_EQUAL(text(first.entries[1].value), "aa");
@@ -178,8 +178,8 @@ BOOST_AUTO_TEST_CASE(db_rocksdb_snapshot_scans_prefixless_half_open_ranges) {
 
       auto second = co_await snapshot.scan_page(
          objects,
-         forge::db::record_range{.begin = key("a"), .end = key("z")},
-         forge::db::page_request{.after = first.next, .limit = 3});
+         forge::db::core::record_range{.begin = key("a"), .end = key("z")},
+         forge::db::core::page_request{.after = first.next, .limit = 3});
       BOOST_REQUIRE_EQUAL(second.entries.size(), 1U);
       BOOST_CHECK_EQUAL(text(second.entries.front().value), "y");
       BOOST_CHECK(!second.next.has_value());
@@ -195,7 +195,7 @@ BOOST_AUTO_TEST_CASE(db_rocksdb_snapshot_scan_does_not_emit_cursor_at_range_end)
 
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       auto driver = forge::db::rocksdb::driver{config_for(root / "store")};
-      const auto objects = forge::db::family{"objectdb"};
+      const auto objects = forge::db::core::family{"objectdb"};
 
       auto seed = co_await driver.begin_transaction();
       for (const auto* value : {"a", "b", "c"}) {
@@ -206,8 +206,8 @@ BOOST_AUTO_TEST_CASE(db_rocksdb_snapshot_scan_does_not_emit_cursor_at_range_end)
       auto snapshot = co_await driver.begin_read();
       auto page = co_await snapshot.scan_page(
          objects,
-         forge::db::record_range{.begin = key("a"), .end = key("c")},
-         forge::db::page_request{.limit = 2});
+         forge::db::core::record_range{.begin = key("a"), .end = key("c")},
+         forge::db::core::page_request{.limit = 2});
       BOOST_REQUIRE_EQUAL(page.entries.size(), 2U);
       BOOST_CHECK_EQUAL(text(page.entries[0].value), "a");
       BOOST_CHECK_EQUAL(text(page.entries[1].value), "b");
@@ -224,7 +224,7 @@ BOOST_AUTO_TEST_CASE(db_rocksdb_snapshot_scan_preserves_empty_key_cursor) {
 
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       auto driver = forge::db::rocksdb::driver{config_for(root / "store")};
-      const auto objects = forge::db::family{"objectdb"};
+      const auto objects = forge::db::core::family{"objectdb"};
 
       auto seed = co_await driver.begin_transaction();
       co_await seed.put(objects, empty_key(), bytes("empty"));
@@ -234,8 +234,8 @@ BOOST_AUTO_TEST_CASE(db_rocksdb_snapshot_scan_preserves_empty_key_cursor) {
       auto snapshot = co_await driver.begin_read();
       auto first = co_await snapshot.scan_page(
          objects,
-         forge::db::record_range{.begin = empty_key(), .end = key("z")},
-         forge::db::page_request{.limit = 1});
+         forge::db::core::record_range{.begin = empty_key(), .end = key("z")},
+         forge::db::core::page_request{.limit = 1});
       BOOST_REQUIRE_EQUAL(first.entries.size(), 1U);
       BOOST_CHECK(first.entries.front().key.empty());
       BOOST_CHECK_EQUAL(text(first.entries.front().value), "empty");
@@ -244,12 +244,62 @@ BOOST_AUTO_TEST_CASE(db_rocksdb_snapshot_scan_preserves_empty_key_cursor) {
 
       auto second = co_await snapshot.scan_page(
          objects,
-         forge::db::record_range{.begin = empty_key(), .end = key("z")},
-         forge::db::page_request{.after = first.next, .limit = 1});
+         forge::db::core::record_range{.begin = empty_key(), .end = key("z")},
+         forge::db::core::page_request{.after = first.next, .limit = 1});
       BOOST_REQUIRE_EQUAL(second.entries.size(), 1U);
       BOOST_CHECK_EQUAL(text(second.entries.front().key.bytes()), "next");
       BOOST_CHECK_EQUAL(text(second.entries.front().value), "next");
       BOOST_CHECK(!second.next.has_value());
+      co_return;
+   }());
+
+   std::filesystem::remove_all(root);
+}
+
+BOOST_AUTO_TEST_CASE(db_rocksdb_transaction_scans_match_snapshot_range_cursor_contract) {
+   const auto root = make_test_root("forge_db_rocksdb_transaction_scan_contract");
+   auto runtime = forge::asio::runtime{};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto driver = forge::db::rocksdb::driver{config_for(root / "store")};
+      const auto objects = forge::db::core::family{"objectdb"};
+
+      auto seed = co_await driver.begin_transaction();
+      co_await seed.put(objects, empty_key(), bytes("empty"));
+      for (const auto* value : {"a", "b", "c", "z"}) {
+         co_await seed.put(objects, key(value), bytes(value));
+      }
+      co_await seed.commit();
+
+      auto tx = co_await driver.begin_transaction();
+      auto first = co_await tx.scan_page(
+         objects,
+         forge::db::core::record_range{.begin = empty_key(), .end = key("z")},
+         forge::db::core::page_request{.limit = 1});
+      BOOST_REQUIRE_EQUAL(first.entries.size(), 1U);
+      BOOST_CHECK(first.entries.front().key.empty());
+      BOOST_REQUIRE(first.next.has_value());
+      BOOST_CHECK(first.next->boundary.empty());
+
+      auto second = co_await tx.scan_page(
+         objects,
+         forge::db::core::record_range{.begin = empty_key(), .end = key("z")},
+         forge::db::core::page_request{.after = first.next, .limit = 2});
+      BOOST_REQUIRE_EQUAL(second.entries.size(), 2U);
+      BOOST_CHECK_EQUAL(text(second.entries[0].value), "a");
+      BOOST_CHECK_EQUAL(text(second.entries[1].value), "b");
+      BOOST_REQUIRE(second.next.has_value());
+
+      auto bounded = co_await tx.scan_page(
+         objects,
+         forge::db::core::record_range{.begin = key("a"), .end = key("c")},
+         forge::db::core::page_request{.limit = 2});
+      BOOST_REQUIRE_EQUAL(bounded.entries.size(), 2U);
+      BOOST_CHECK_EQUAL(text(bounded.entries[0].value), "a");
+      BOOST_CHECK_EQUAL(text(bounded.entries[1].value), "b");
+      BOOST_CHECK(!bounded.next.has_value());
+
+      co_await tx.rollback();
       co_return;
    }());
 
@@ -262,7 +312,7 @@ BOOST_AUTO_TEST_CASE(db_rocksdb_blob_enabled_family_roundtrips_large_values) {
 
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       auto driver = forge::db::rocksdb::driver{config_for(root / "store")};
-      const auto blobs = forge::db::family{"blobdb.data"};
+      const auto blobs = forge::db::core::family{"blobdb.data"};
       auto payload = std::vector<std::byte>(4096, std::byte{0x7b});
 
       auto tx = co_await driver.begin_transaction();

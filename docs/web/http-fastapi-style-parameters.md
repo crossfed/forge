@@ -13,8 +13,8 @@ a generic frame RPC transport:
 - Request parameters are classified from described DTO fields first.
 - HTTP positional arguments are limited to path/query routing sugar plus at most
   one described JSON body DTO.
-- Boost.Beast request/parser/serializer mechanics stay private to `forge_http`.
-- `forge_api` stays HTTP-free.
+- Boost.Beast request/parser/serializer mechanics stay private to `forge_net_http`.
+- `forge_api_core` stays HTTP-free.
 
 Donor behavior:
 
@@ -43,8 +43,8 @@ request DTO. FastAPI-style parameter categories are represented as fields:
 struct object_request {
    std::string bucket;
    std::string key;
-   forge::http::query<std::uint32_t> limit;
-   forge::http::header<std::string> request_id;
+   forge::api::http::query<std::uint32_t> limit;
+   forge::api::http::header<std::string> request_id;
 };
 
 BOOST_DESCRIBE_STRUCT(object_request, (), (bucket, key, limit, request_id))
@@ -90,8 +90,8 @@ signature:
 struct put_object_request {
    bucket_name bucket;
    object_key key;
-   forge::http::header<std::string> type;
-   forge::http::body_stream body;
+   forge::api::http::header<std::string> type;
+   forge::api::http::body_stream body;
 };
 
 BOOST_DESCRIBE_STRUCT(put_object_request, (), (bucket, key, type, body))
@@ -129,15 +129,15 @@ are supported as described request DTO fields:
 
 | Type | Meaning |
 | --- | --- |
-| `forge::http::query<T>` | Query parameter value decoded by field name or route query alias. |
-| `forge::http::header<T>` | Header value decoded by explicit `FORGE_HTTP_HEADER(...)` alias or default field-name mapping `_ -> -`. |
-| `forge::http::cookie<T>` | Cookie value decoded by field name. |
-| `forge::http::body<T>` | Explicit JSON body DTO field. |
-| `forge::http::body_bytes` | Bounded raw body bytes. |
-| `forge::http::body_stream` | Streaming request body. |
-| `forge::http::form<T>` | Form field value decoded by field name or form alias. |
-| `forge::http::form_field<T>` | Server-side named form field. |
-| `forge::http::upload_file` | Server-side multipart file part with safe filename helpers and bounded spool behavior. |
+| `forge::api::http::query<T>` | Query parameter value decoded by field name or route query alias. |
+| `forge::api::http::header<T>` | Header value decoded by explicit `FORGE_HTTP_HEADER(...)` alias or default field-name mapping `_ -> -`. |
+| `forge::api::http::cookie<T>` | Cookie value decoded by field name. |
+| `forge::api::http::body<T>` | Explicit JSON body DTO field. |
+| `forge::api::http::body_bytes` | Bounded raw body bytes. |
+| `forge::api::http::body_stream` | Streaming request body. |
+| `forge::api::http::form<T>` | Form field value decoded by field name or form alias. |
+| `forge::api::http::form_field<T>` | Server-side named form field. |
+| `forge::api::http::upload_file` | Server-side multipart file part with safe filename helpers and bounded spool behavior. |
 
 The typed HTTP client supports DTO fields for ordinary JSON, `query<T>`,
 `header<T>`, `cookie<T>`, `body<T>`, `body_bytes`, `body_stream`, `form<T>`,
@@ -153,10 +153,10 @@ plugin lifecycle or product job system, not to HTTP parameter binding.
 
 Response special types remain return values, not request parameters:
 
-- `forge::http::file_response`;
-- `forge::http::streaming_response`;
-- `forge::http::bytes_response`;
-- `forge::http::empty_response`.
+- `forge::net::http::file_response`;
+- `forge::net::http::streaming_response`;
+- `forge::api::http::bytes_response`;
+- `forge::api::http::empty_response`.
 
 ## Binding Rules
 
@@ -206,7 +206,7 @@ Rules:
   body codec payload for `POST`, `PUT`, `PATCH` and body-capable `DELETE`;
 - remaining scalar/string/enum/optional arguments are errors if not consumed by
   path/query;
-- `forge::http::query<T>`, `header<T>`, `cookie<T>`, `body<T>`, `form<T>`,
+- `forge::api::http::query<T>`, `header<T>`, `cookie<T>`, `body<T>`, `form<T>`,
   `form_field<T>`, `upload_file`, `body_bytes` and `body_stream` are DTO-only
   for HTTP and are rejected in positional HTTP signatures.
 
@@ -244,7 +244,7 @@ values.
   manual router bypass for normal endpoints.
 - FORGE does not add S3, SigV4, bucket, object-policy, billing or tenant-auth
   semantics.
-- `forge_api` must not import `forge_http`.
+- `forge_api_core` must not import `forge_net_http`.
 - HTTP special parameter types make an API method HTTP-bound and should appear
   as fields of HTTP request DTOs. Transport-neutral APIs should keep ordinary
   request/response DTOs or use positional arguments without HTTP wrappers.
@@ -252,6 +252,6 @@ values.
 - Manual per-argument macros are not part of the normal path. Existing
   `FORGE_HTTP_HEADER(...)`, `FORGE_HTTP_FORM(...)` and response mode options only
   express wire aliases or response presentation.
-- Background task injection is out of scope for `forge_http`; HTTP endpoints may
+- Background task injection is out of scope for `forge_net_http`; HTTP endpoints may
   submit work through explicit application/plugin APIs instead of hidden
   framework-managed post-response jobs.

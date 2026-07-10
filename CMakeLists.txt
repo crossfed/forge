@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.31)
 
-project(forge VERSION 6.4.0 LANGUAGES C CXX ASM)
+project(forge VERSION 7.0.0 LANGUAGES C CXX ASM)
 
 include(GNUInstallDirs)
 include(CheckCXXSourceCompiles)
@@ -206,33 +206,37 @@ set(
 	   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/ids/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/compression/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/chain/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db_rocksdb/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/objectdb/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/blobdb/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/json/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/config/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/yaml/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/xml/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/program_options/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/env/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/transport_api/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/core/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/rocksdb/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/object/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/blob/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec/json/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/config/core/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec/yaml/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec/xml/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/config/program_options/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/config/env/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/core/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/http/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/stream/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/transport/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/quic/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/websocket/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/api/p2p/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/log/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/otlp/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/rocksdb/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/multiformats/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/asio/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/http/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/http_api/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/websocket/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/transport/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/tcp/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/yamux/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/quic/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/stcp/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/p2p/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/http/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/websocket/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/transport/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/tcp/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/yamux/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/quic/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/stcp/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/p2p/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/app/include"
 )
 
@@ -244,7 +248,7 @@ set(FORGE_PLUGINS_P2P_DIAGNOSTICS_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugi
 set(FORGE_PLUGINS_P2P_PUBSUB_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/p2p/pubsub/include")
 set(FORGE_PLUGINS_HTTP_SERVER_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/http/server/include")
 set(FORGE_PLUGINS_LOG_OTLP_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/log/otlp/include")
-set(FORGE_PLUGINS_DB_OBJECTDB_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/db/objectdb/include")
+set(FORGE_PLUGINS_DB_STORE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/db/store/include")
 set(FORGE_PLUGINS_DB_ROCKSDB_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/db/rocksdb/include")
 
 if(FORGE_ENABLE_TUI AND FORGE_TUI_NOTCURSES_TARGET)
@@ -357,34 +361,18 @@ add_subdirectory(libraries/ids)
 add_subdirectory(libraries/compression)
 add_subdirectory(libraries/chain)
 add_subdirectory(libraries/db)
-add_subdirectory(libraries/objectdb)
-add_subdirectory(libraries/blobdb)
 add_subdirectory(libraries/config)
-add_subdirectory(libraries/json)
-add_subdirectory(libraries/yaml)
-add_subdirectory(libraries/xml)
-add_subdirectory(libraries/program_options)
-add_subdirectory(libraries/env)
+add_subdirectory(libraries/codec)
 add_subdirectory(libraries/api)
-add_subdirectory(libraries/transport_api)
 add_subdirectory(libraries/log)
 add_subdirectory(libraries/crypto)
 add_subdirectory(libraries/multiformats)
 add_subdirectory(libraries/asio)
-add_subdirectory(libraries/http)
-add_subdirectory(libraries/http_api)
 add_subdirectory(libraries/otlp)
 if(FORGE_HAS_ROCKSDB)
    add_subdirectory(libraries/rocksdb)
-   add_subdirectory(libraries/db_rocksdb)
 endif()
-add_subdirectory(libraries/websocket)
-add_subdirectory(libraries/transport)
-add_subdirectory(libraries/tcp)
-add_subdirectory(libraries/stcp)
-add_subdirectory(libraries/yamux)
-add_subdirectory(libraries/quic)
-add_subdirectory(libraries/p2p)
+add_subdirectory(libraries/net)
 add_subdirectory(libraries/app)
 add_subdirectory(plugins)
 if(FORGE_ENABLE_TUI AND FORGE_TUI_NOTCURSES_TARGET)
@@ -402,31 +390,35 @@ set(
 	   forge_ids
    forge_compression
    forge_chain
-   forge_db
-   forge_objectdb
-   forge_blobdb
-   forge_config
-   forge_json
-   forge_yaml
-   forge_xml
-   forge_program_options
-   forge_env
-   forge_api
-   forge_transport_api
+   forge_db_core
+   forge_db_object
+   forge_db_blob
+   forge_config_core
+   forge_codec_json
+   forge_codec_yaml
+   forge_codec_xml
+   forge_config_program_options
+   forge_config_env
+   forge_api_core
+   forge_api_stream
+   forge_api_transport
+   forge_api_quic
+   forge_api_websocket
+   forge_api_p2p
    forge_log
    forge_otlp
    forge_crypto
    forge_multiformats
    forge_asio
-   forge_http
-   forge_http_api
-   forge_websocket
-   forge_transport
-   forge_tcp
-   forge_stcp
-   forge_yamux
-   forge_quic
-   forge_p2p
+   forge_net_http
+   forge_api_http
+   forge_net_websocket
+   forge_net_transport
+   forge_net_tcp
+   forge_net_stcp
+   forge_net_yamux
+   forge_net_quic
+   forge_net_p2p
    forge_app
    forge_plugins_crypto_signer
    forge_plugins_crypto_secrets
@@ -436,7 +428,7 @@ set(
    forge_plugins_p2p_pubsub
    forge_plugins_http_server
    forge_plugins_log_otlp
-   forge_plugins_db_objectdb
+   forge_plugins_db_store
    forge_plugins
 )
 
@@ -496,31 +488,35 @@ install(
 	             libraries/ids/include/forge
              libraries/compression/include/forge
              libraries/chain/include/forge
-             libraries/db/include/forge
-             libraries/objectdb/include/forge
-             libraries/blobdb/include/forge
-             libraries/json/include/forge
-             libraries/config/include/forge
-             libraries/yaml/include/forge
-             libraries/xml/include/forge
-             libraries/program_options/include/forge
-             libraries/env/include/forge
-             libraries/api/include/forge
-             libraries/transport_api/include/forge
+             libraries/db/core/include/forge
+             libraries/db/object/include/forge
+             libraries/db/blob/include/forge
+             libraries/codec/json/include/forge
+             libraries/config/core/include/forge
+             libraries/codec/yaml/include/forge
+             libraries/codec/xml/include/forge
+             libraries/config/program_options/include/forge
+             libraries/config/env/include/forge
+             libraries/api/core/include/forge
+             libraries/api/http/include/forge
+             libraries/api/stream/include/forge
+             libraries/api/transport/include/forge
+             libraries/api/quic/include/forge
+             libraries/api/websocket/include/forge
+             libraries/api/p2p/include/forge
              libraries/log/include/forge
              libraries/otlp/include/forge
              libraries/crypto/include/forge
              libraries/multiformats/include/forge
              libraries/asio/include/forge
-             libraries/http/include/forge
-             libraries/http_api/include/forge
-             libraries/websocket/include/forge
-             libraries/transport/include/forge
-             libraries/tcp/include/forge
-             libraries/yamux/include/forge
-             libraries/quic/include/forge
-             libraries/stcp/include/forge
-             libraries/p2p/include/forge
+             libraries/net/http/include/forge
+             libraries/net/websocket/include/forge
+             libraries/net/transport/include/forge
+             libraries/net/tcp/include/forge
+             libraries/net/yamux/include/forge
+             libraries/net/quic/include/forge
+             libraries/net/stcp/include/forge
+             libraries/net/p2p/include/forge
              libraries/app/include/forge
              plugins/crypto/signer/include/forge
              plugins/crypto/secrets/include/forge
@@ -530,7 +526,7 @@ install(
              plugins/p2p/pubsub/include/forge
              plugins/http/server/include/forge
              plugins/log/otlp/include/forge
-             plugins/db/objectdb/include/forge
+             plugins/db/store/include/forge
    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT dev EXCLUDE_FROM_ALL
 )
 
@@ -543,7 +539,7 @@ endif()
 
 if(TARGET forge_db_rocksdb)
    install(
-      DIRECTORY libraries/db_rocksdb/include/forge
+      DIRECTORY libraries/db/rocksdb/include/forge
       DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT dev EXCLUDE_FROM_ALL
    )
 endif()

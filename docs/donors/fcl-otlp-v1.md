@@ -19,7 +19,7 @@ runtime or HTTP dependencies.
 | OpenTelemetry OTLP protocol | `https://opentelemetry.io/docs/specs/otlp/` | Logs use OTLP/HTTP endpoint `/v1/logs`, JSON request body and `Content-Type: application/json`; retryable statuses include `429`, `502`, `503` and `504`; `Retry-After` is authoritative when present. |
 | OpenTelemetry exporter config | `https://opentelemetry.io/docs/specs/otel/protocol/exporter/` | HTTP/JSON is a supported exporter protocol and endpoint selection is operator configuration. |
 | FCL logging rules | `AGENTS.md`, `libraries/log` | Logging core is synchronous and small; async/network export belongs in an adapter, not in `fcl_log`. |
-| FCL HTTP/runtime layers | `libraries/http`, `libraries/asio` | Reuse existing HTTP client and Asio runtime instead of introducing a second networking stack. |
+| FCL HTTP/runtime layers | `libraries/net/http`, `libraries/asio` | Reuse existing HTTP client and Asio runtime instead of introducing a second networking stack. |
 | POSIX signal-safety rules | `signal-safety(7)`, platform `sigaction` docs | Crash signal handler writes a fixed binary record with async-signal-safe operations only; no allocation, logging, JSON, HTTP or locks in signal context. |
 | C++ terminate handling | `std::set_terminate`, FCL typed exceptions | Terminate path may inspect the current typed exception category/code and capture stacktrace addresses, but it must not persist raw exception text or application context. |
 | Native minidump crash reporters | public design docs for minidump-oriented crash capture | Accepted design lesson: separate crash-time capture from upload/symbolication. Rejected dependency: no backend SDK or minidump runtime in this FCL block. |

@@ -1,0 +1,8 @@
+add_subdirectory(transport)
+add_subdirectory(tcp)
+add_subdirectory(stcp)
+add_subdirectory(yamux)
+add_subdirectory(websocket)
+add_subdirectory(http)
+add_subdirectory(quic)
+add_subdirectory(p2p)

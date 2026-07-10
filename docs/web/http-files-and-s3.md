@@ -1,6 +1,6 @@
 # HTTP Files And Object-Gateway Readiness
 
-This note records the `forge_http` file/upload direction after the FastAPI-style
+This note records the `forge_net_http` file/upload direction after the FastAPI-style
 typed binding work. S3-compatible APIs are used only as a downstream readiness
 driver: FORGE owns generic HTTP mechanics, while an application owns object
 storage semantics, credentials, authorization, billing and gateway-specific
@@ -8,7 +8,7 @@ error shapes.
 
 ## Current HTTP Surface
 
-`forge_http` owns:
+`forge_net_http` owns:
 
 - async router, route handlers and middleware;
 - server, connection and client mechanics over `forge_asio`;
@@ -16,7 +16,7 @@ error shapes.
 - WebSocket upgrade routing;
 - `FORGE_HTTP_API(...)` presentation metadata on top of `FORGE_API(...)`;
 - JSON request/response DTOs for ordinary typed HTTP methods, with planned XML
-  request/response/error codecs in `forge_http_api` after `forge_xml` lands;
+  request/response/error codecs in `forge_api_http` after `forge_codec_xml` lands;
 - path, query and header binding into described request DTOs;
 - HTTP-only typed fields such as `header<T>`, `form_field<T>`,
   `body_stream`, `body_bytes` and `upload_file`;
@@ -27,7 +27,7 @@ error shapes.
 - file/range helpers for `HEAD`, `Range`, `206`, `416`, `ETag` and
   `Last-Modified` behavior.
 
-The official HTTP server plugin is parked until the `forge_http` typed binding
+The official HTTP server plugin is parked until the `forge_net_http` typed binding
 surface is stable. This document describes the library substrate only.
 
 ## Binding Model
@@ -35,12 +35,12 @@ surface is stable. This document describes the library substrate only.
 The intended application shape is one C++ API class per HTTP API surface:
 
 ```cpp
-class object_api : public forge::api::contract<object_api> {
+class object_api : public forge::api::core::contract<object_api> {
  public:
    virtual boost::asio::awaitable<put_response>
    put_object(put_request request) = 0;
 
-   virtual boost::asio::awaitable<forge::http::file_response>
+   virtual boost::asio::awaitable<forge::net::http::file_response>
    get_object(get_request request) = 0;
 };
 
@@ -48,7 +48,7 @@ FORGE_API(
    object_api,
    FORGE_API_CONTRACT("object", 1, 0),
    FORGE_API_METHOD_TYPED(put_object, put_request, put_response),
-   FORGE_API_METHOD_TYPED(get_object, get_request, forge::http::file_response))
+   FORGE_API_METHOD_TYPED(get_object, get_request, forge::net::http::file_response))
 
 FORGE_HTTP_API(
    object_api,
@@ -62,8 +62,8 @@ FORGE_HTTP_API(
 the HTTP presentation: method, path, status and HTTP field mapping.
 
 Ordinary DTO request/response bodies use JSON by default. S3-compatible APIs
-need XML bodies, so the planned path is `forge_xml` first, then multi-codec
-`forge_http_api` binding. Downstream object gateways should still declare typed
+need XML bodies, so the planned path is `forge_codec_xml` first, then multi-codec
+`forge_api_http` binding. Downstream object gateways should still declare typed
 API contracts and HTTP presentation metadata; manual `router` bypass is not the
 normal endpoint pattern.
 
@@ -101,8 +101,8 @@ The current slice proves the server-side typed binding model for JSON DTOs,
 streaming request bodies and file responses. Remaining HTTP-library work should
 stay generic:
 
-- XML codec support through a new `forge_xml` leaf library;
-- multi-codec request, response and error profiles in `forge_http_api`;
+- XML codec support through a new `forge_codec_xml` leaf library;
+- multi-codec request, response and error profiles in `forge_api_http`;
 - complete route option metadata instead of macro placeholders for custom
   header/form names;
 - typed HTTP client streaming request writer and response reader;

@@ -8,7 +8,7 @@ minimal crash-spool records on the next start.
 
 - `forge_log` owns log records, structured fields, redaction and synchronous sink
   mechanics.
-- `forge_http` owns HTTP client mechanics.
+- `forge_net_http` owns HTTP client mechanics.
 - `forge_asio` owns runtime scheduling, timers and cancellation.
 - `forge_otlp` owns OTLP log JSON mapping, bounded export queues, retry policy,
   explicit flush/shutdown, and crash-spool resend.
@@ -46,7 +46,7 @@ an exporter or contact a collector.
 
 Target: `forge_otlp`.
 
-Dependencies: `forge_exceptions`, `forge_log`, `forge_asio` and `forge_http`. The
+Dependencies: `forge_exceptions`, `forge_log`, `forge_asio` and `forge_net_http`. The
 library does not depend on `opentelemetry-cpp`, gRPC, protobuf, backend SDKs,
 P2P, plugins or application code.
 

@@ -10,12 +10,12 @@ module;
 
 module forge.plugins.crypto.secrets.plugin;
 
-import forge.api.registry;
+import forge.api.core.registry;
 import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.app.plugin_registry;
-import forge.config.component;
-import forge.config.decode;
+import forge.config.core.component;
+import forge.config.core.decode;
 import forge.crypto.secret_bytes;
 import forge.plugins.crypto.secrets.api;
 import forge.plugins.crypto.secrets.types;
@@ -45,16 +45,16 @@ std::string plugin::version() const {
    return "1.0.0";
 }
 
-std::optional<forge::config::component_descriptor> plugin::describe_config() const {
-   return forge::config::describe_component<config>("plugins.crypto.secrets");
+std::optional<forge::config::core::component_descriptor> plugin::describe_config() const {
+   return forge::config::core::describe_component<config>("plugins.crypto.secrets");
 }
 
-boost::asio::awaitable<void> plugin::configure(forge::config::component_view view) {
+boost::asio::awaitable<void> plugin::configure(forge::config::core::component_view view) {
    apply_config(*impl_, view);
    co_return;
 }
 
-boost::asio::awaitable<void> plugin::provide(forge::api::provider& provider) {
+boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provider) {
    provider.install<api>(std::make_shared<secret_api>(impl_));
    co_return;
 }

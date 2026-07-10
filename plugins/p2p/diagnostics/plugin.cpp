@@ -15,42 +15,42 @@ module;
 
 module forge.plugins.p2p.diagnostics.plugin;
 
-import forge.api.exceptions;
-import forge.api.types;
-import forge.api.descriptor;
-import forge.api.error_projection;
-import forge.api.handle;
-import forge.api.connection;
-import forge.api.registry;
-import forge.api.binding;
-import forge.api.dispatcher;
+import forge.api.core.exceptions;
+import forge.api.core.types;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.core.handle;
+import forge.api.core.connection;
+import forge.api.core.registry;
+import forge.api.core.binding;
+import forge.api.core.dispatcher;
 import forge.app.plugin;
 import forge.app.plugin_context;
-import forge.config.component;
-import forge.config.decode;
+import forge.config.core.component;
+import forge.config.core.decode;
 import forge.exceptions;
-import forge.p2p.exceptions;
-import forge.p2p.identity;
-import forge.p2p.endpoint;
-import forge.p2p.envelope;
-import forge.p2p.identify;
-import forge.p2p.diagnostics;
-import forge.p2p.discovery;
-import forge.p2p.dht;
-import forge.p2p.rendezvous;
-import forge.p2p.pubsub;
-import forge.p2p.reachability;
-import forge.p2p.hole_punch;
-import forge.p2p.protocol;
-import forge.p2p.message;
-import forge.p2p.scoring;
-import forge.p2p.relay;
-import forge.p2p.resource_manager;
-import forge.p2p.stream;
-import forge.p2p.negotiation;
-import forge.p2p.peer_store;
-import forge.p2p.node;
-import forge.p2p.api;
+import forge.net.p2p.exceptions;
+import forge.net.p2p.identity;
+import forge.net.p2p.endpoint;
+import forge.net.p2p.envelope;
+import forge.net.p2p.identify;
+import forge.net.p2p.diagnostics;
+import forge.net.p2p.discovery;
+import forge.net.p2p.dht;
+import forge.net.p2p.rendezvous;
+import forge.net.p2p.pubsub;
+import forge.net.p2p.reachability;
+import forge.net.p2p.hole_punch;
+import forge.net.p2p.protocol;
+import forge.net.p2p.message;
+import forge.net.p2p.scoring;
+import forge.net.p2p.relay;
+import forge.net.p2p.resource_manager;
+import forge.net.p2p.stream;
+import forge.net.p2p.negotiation;
+import forge.net.p2p.peer_store;
+import forge.net.p2p.node;
+import forge.api.p2p.binding;
 import forge.plugins.p2p.node.types;
 import forge.plugins.p2p.node.exceptions;
 import forge.plugins.p2p.node.api;
@@ -75,18 +75,18 @@ std::string plugin::version() const {
    return "1.0.0";
 }
 
-std::optional<forge::config::component_descriptor> plugin::describe_config() const {
-   return forge::config::describe_component<config>("plugins.p2p.diagnostics");
+std::optional<forge::config::core::component_descriptor> plugin::describe_config() const {
+   return forge::config::core::describe_component<config>("plugins.p2p.diagnostics");
 }
 
-boost::asio::awaitable<void> plugin::configure(forge::config::component_view view) {
+boost::asio::awaitable<void> plugin::configure(forge::config::core::component_view view) {
    auto config = decode_config(view);
    validate_config(config);
    impl_->settings = std::move(config);
    co_return;
 }
 
-boost::asio::awaitable<void> plugin::provide(forge::api::provider& provider) {
+boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provider) {
    provider.install<api>(std::make_shared<diagnostics_api>(impl_));
    co_return;
 }

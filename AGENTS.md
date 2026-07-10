@@ -104,19 +104,21 @@ class service_node {
   - `forge_reflect`
   - `forge_raw`
   - `forge_schema`
-  - `forge_config`
-  - `forge_yaml`
-  - `forge_program_options`
-  - `forge_json`
-  - `forge_api`
+  - `forge_config_core`
+  - `forge_codec_yaml`
+  - `forge_config_program_options`
+  - `forge_codec_json`
+  - `forge_api_core`
+  - `forge_api_http`
+  - `forge_api_transport`
   - `forge_crypto`
   - `forge_runtime`
   - `forge_log`
   - `forge_app`
-  - `forge_http`
-  - `forge_websocket`
-  - `forge_quic`
-  - `forge_p2p`
+  - `forge_net_http`
+  - `forge_net_websocket`
+  - `forge_net_quic`
+  - `forge_net_p2p`
 - `forge_plugins`
 - `forge_tui`
 - Heavy classes that own sockets, event loops, crypto contexts, terminal state, or other external resources should use pimpl.
@@ -157,8 +159,8 @@ representation or variant of `A`.
 Group by what the artifact is, not by an implementation detail:
 
 - Library/domain artifacts use top-level `forge::<domain>`, for example
-  `forge::core`, `forge::raw`, `forge::http`, `forge::p2p`, `forge::api`,
-  `forge::app`, `forge::tui` and `forge::crypto`.
+  `forge::core`, `forge::raw`, `forge::net::http`, `forge::net::p2p`,
+  `forge::api`, `forge::app`, `forge::tui` and `forge::crypto`.
 - Plugin artifact family/role, namespace, target, component, module prefix and
   contract id mapping are owned by `create-plugin`; apply that skill instead of
   re-deriving plugin layout here.
@@ -166,14 +168,18 @@ Group by what the artifact is, not by an implementation detail:
   a kind of application, for example `forge::app::tui` or
   `forge::app::daemon`. Do not put application variants under implementation
   library namespaces such as `forge::tui::app`.
-- Bindings and adapters that expose a core over a medium are rooted in the
-  medium, not under the core, when the core fails the is-a test. Examples:
-  `forge::http::api` and `forge::transport::api`.
+- API artifacts are grouped under the `forge::api` family. Neutral contracts
+  live in `forge::api::core`; channel-specific variants live in leaves such as
+  `forge::api::http`, `forge::api::transport`, `forge::api::quic`,
+  `forge::api::websocket` and `forge::api::p2p`.
+- Network substrates remain separate under `forge::net`, for example
+  `forge::net::http`, `forge::net::transport` and `forge::net::quic`. API
+  bindings may depend on these substrates; network substrates must not depend
+  on API bindings.
 
 Core or foundation namespaces may be family roots only when the is-a test passes.
-`api` remains a leaf because there are no kinds of API; HTTP and transport expose
-API over their channels, so use `forge::http::api` and `forge::transport::api`,
-never `forge::api::http` or `forge::api::transport`. `app` may be a family root
+`api` is a family root because core contracts and HTTP, stream, transport, QUIC,
+WebSocket and P2P bindings are API-layer variants. `app` may be a family root
 because daemon, CLI and TUI are kinds of application hosts.
 
 Apply this verification order before adding or renaming a public namespace:
@@ -182,7 +188,7 @@ Apply this verification order before adding or renaming a public namespace:
 2. For plugins, apply `create-plugin` and do not duplicate plugin family rules
    here.
 3. For non-plugin artifacts, apply the matching tree: `forge::<domain>`,
-   `forge::app::<archetype>` or `forge::<medium>::<core>`.
+   `forge::<family>::<member>` or `forge::app::<archetype>`.
 4. If a core/foundation namespace is involved, run the is-a test to decide
    whether it can be a family root.
 5. Check the `::` to `_` to `.` mapping and empty grouping namespaces.
@@ -215,14 +221,18 @@ implementation-library namespaces. For plugin family/role decisions, follow
 - Validation belongs in schema rules, not in ad hoc parser code.
 - Diagnostics must include clear paths, field names, and expected values.
 - Secret-like fields must support redaction in configs, logs, diagnostics, and error context.
-- `Boost.Program_options` is a backend dependency of `forge_program_options` only. App/plugin core must not expose `variables_map`, `options_description`, or other CLI parser types.
+- `Boost.Program_options` is a backend dependency of
+  `forge_config_program_options` only. App/plugin core must not expose
+  `variables_map`, `options_description`, or other CLI parser types.
 - Generic config merge order is schema defaults, config file,
   environment/custom adapters, then CLI. Foreground daemons use the stricter
   `run_daemon(...)` order: schema defaults, daemon defaults, YAML, `.env`,
   process env, daemon CLI, then app/plugin CLI.
-- Environment and `.env` loading belongs to `forge_env`, not to `forge_app` or plugins.
-- `forge_env` is a source adapter like `forge_program_options`: it maps process env
-  and explicit `.env` files into `forge::config::document` using
+- Environment and `.env` loading belongs to `forge_config_env`, not to
+  `forge_app` or plugins.
+- `forge_config_env` is a source adapter like `forge_config_program_options`: it
+  maps process env and explicit `.env` files into
+  `forge::config::core::document` using
   `component_registry`. It must not mutate global environment, implicitly search
   parent directories or expose downstream product variable names.
 - Products decide source precedence explicitly before calling
@@ -287,22 +297,23 @@ implementation-library namespaces. For plugin family/role decisions, follow
 - Synchronous wrappers are allowed, but must not be the only API for heavy operations.
 - Boost.Asio and Boost.Beast are valid dependencies for future runtime and network targets.
 - Legacy networking code from the old codebase must not define the new network API.
-- The network family is a set of independent root libraries: `forge_http`, `forge_websocket`, `forge_quic`, and `forge_p2p`.
-- `forge_api` is the neutral typed contract layer used by app/network bindings; it
-  must not import `forge_app`, `forge_http`, `forge_websocket`, `forge_quic` or
-  `forge_p2p`.
+- The network family contains independent member libraries: `forge_net_http`,
+  `forge_net_websocket`, `forge_net_quic` and `forge_net_p2p`.
+- `forge_api_core` is the neutral typed contract layer used by app/network bindings; it
+  must not import `forge_app`, `forge_net_http`, `forge_net_websocket`, `forge_net_quic` or
+  `forge_net_p2p`.
 - HTTP API bindings must preserve native HTTP route/path/status semantics; do
   not force all APIs into a frame-only `POST /rpc` model.
-- WebSocket, QUIC and P2P API bindings use `forge::api::frame` and the shared
-  `forge::api::error_payload`; protocol-specific duplicate error DTOs are
+- WebSocket, QUIC and P2P API bindings use `forge::api::core::frame` and the shared
+  `forge::api::core::error_payload`; protocol-specific duplicate error DTOs are
   forbidden.
 - API binding builders must not expose decorative options. Every public option
   such as codec, frame size, max inflight, deadline, peer policy or middleware
   must affect runtime behavior and be covered by tests.
-- HTTP-specific middleware belongs to `forge_http` router composition or the
+- HTTP-specific middleware belongs to `forge_net_http` router composition or the
   `forge::plugins::http::server` plugin facade.
   Protocol-neutral trace/authz/metrics/limits logic belongs to
-  `forge::api::interceptor(...)`.
+  `forge::api::core::interceptor(...)`.
 - Do not create `libraries/network`, legacy net-prefixed target, module, or namespace forms.
 - Runtime workers must have explicit cancellation, bounded queues where needed, and deterministic shutdown.
 - Do not introduce `std::async`, ad hoc polling loops, or unmanaged background threads as core runtime behavior.
@@ -327,7 +338,7 @@ implementation-library namespaces. For plugin family/role decisions, follow
 - Plugins own behavior and lifecycle. APIs expose typed contracts; they
   must not become fake lifecycle modules.
 - Ready-made infrastructure plugins may own transport/runtime lifecycle and
-  publish narrow `forge_api` capabilities for product plugins, but they must not
+  publish narrow `forge_api_core` capabilities for product plugins, but they must not
   own product business logic.
 - Plugin-specific exception families live with the owning plugin module, not in
   a shared catch-all plugin exceptions module. Concrete module/namespace layout
@@ -337,7 +348,7 @@ implementation-library namespaces. For plugin family/role decisions, follow
   endpoint reporting and typed remote API access; product plugins must not
   create parallel P2P nodes or call raw `p2p::node` path/relay primitives when
   the plugin owns the node.
-- Production P2P network mechanics belong to `forge_p2p`, not to
+- Production P2P network mechanics belong to `forge_net_p2p`, not to
   `forge::plugins::p2p::node`. FORGE's P2P direction is a clean C++23
   libp2p-compatible implementation: FORGE public APIs stay FORGE/Boost-style, but
   declared libp2p protocols must be wire-compatible with go-libp2p and
@@ -357,8 +368,8 @@ implementation-library namespaces. For plugin family/role decisions, follow
   go-libp2p/rust-libp2p and live interop coverage. A test that is merely
   "similar to libp2p" is not enough.
 - Keep AutoNAT, AutoRelay, DHT, rendezvous, pubsub/gossip and relay discovery in
-  `forge_p2p`. If a network-level behavior is missing, expose a typed
-  unsupported/limited behavior or implement it in `forge_p2p`; do not hide it
+  `forge_net_p2p`. If a network-level behavior is missing, expose a typed
+  unsupported/limited behavior or implement it in `forge_net_p2p`; do not hide it
   above the network layer.
 - Durable P2P delivery in FORGE is pluggable, not storage-bound. If needed, it
   belongs to a focused future plugin or product service, not to the
@@ -376,7 +387,7 @@ implementation-library namespaces. For plugin family/role decisions, follow
   `application_shell`, not generic config frameworks.
 - `run_application(...)` remains the lower-level lifecycle runner for tests,
   embedded hosts and custom shells that already own a merged
-  `forge::config::document`.
+  `forge::config::core::document`.
 - Public lifecycle methods on `application_shell` are not extension points.
   Derived applications implement only hooks named without app tautology:
   `on_describe_config`, `on_configure`, `on_register_plugins`,

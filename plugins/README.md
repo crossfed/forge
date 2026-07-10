@@ -13,7 +13,7 @@ application plugins need to contribute behavior to it.
 
 - A resource has application lifecycle, config and startup/shutdown ordering.
 - Multiple application plugins should contribute to one shared service.
-- The shared service should expose a narrow local `forge_api` contract instead
+- The shared service should expose a narrow local `forge_api_core` contract instead
   of leaking low-level implementation types.
 - Operators should configure the service through `plugins.<family>.<name>`.
 
@@ -74,7 +74,7 @@ target_link_libraries(app PRIVATE
 | [`forge::plugins::crypto::signer`](crypto/signer/README.md) | `forge_plugins_crypto_signer` | `plugins.crypto.signer` | Signs digests with configured local keys and output profiles. |
 | [`forge::plugins::crypto::secrets`](crypto/secrets/README.md) | `forge_plugins_crypto_secrets` | `plugins.crypto.secrets` | Provides bounded secret retrieval, derivation and symmetric encryption operations. |
 | [`forge::plugins::log::otlp`](log/otlp/README.md) | `forge_plugins_log_otlp` | `plugins.log.otlp` | Exports configured FORGE logger routes to OTLP/HTTP JSON. |
-| [`forge::plugins::db::objectdb`](db/objectdb/README.md) | `forge_plugins_db_objectdb` | `plugins.db.objectdb` | Owns configured named ObjectDB stores and exposes lifecycle-safe store handles. |
+| [`forge::plugins::db::store`](db/store/README.md) | `forge_plugins_db_store` | `plugins.db.store` | Owns configured named DB stores and exposes object/blob layer handles. |
 | [`forge::plugins::db::rocksdb`](db/rocksdb/README.md) | `forge_plugins_db_rocksdb` | `plugins.db.rocksdb` | Provides a local RocksDB TransactionDB service for infrastructure plugins that need durable key/value state. |
 
 The aggregate target `forge_plugins` and package component `plugins` are
@@ -91,7 +91,7 @@ Each official plugin follows the same public module layout:
 
 - `forge.plugins.<family>.<name>.plugin` provides `plugin` and `descriptor()`.
 - `forge.plugins.<family>.<name>.api` provides typed contracts exposed through
-  `forge_api`.
+  `forge_api_core`.
 - `forge.plugins.<family>.<name>.types` provides config and DTO types.
 - `forge.plugins.<family>.<name>.exceptions` provides typed exceptions.
 
@@ -106,9 +106,9 @@ Official plugins are not mini-applications and do not expose raw lifecycle or
 transport mutation APIs. Their public APIs are typed contribution surfaces:
 
 - HTTP APIs are published through `publish<Interface>()`, not raw route verbs.
-- P2P APIs are published through typed `forge::api::binding_plan` values.
+- P2P APIs are published through typed `forge::api::core::binding_plan` values.
 - Config is decoded through `BOOST_DESCRIBE_STRUCT`, `forge_schema` rules and
-  `forge_config`.
+  `forge_config_core`.
 - Product policy, auth, billing, storage semantics and downstream vocabulary do
   not belong in FORGE plugins.
 

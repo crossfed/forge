@@ -33,7 +33,7 @@ digests with configured private keys and output encoding profiles.
 
 - Loads configured local private keys through `forge_crypto`.
 - Enforces key ids, allowed purposes, required algorithms and output profiles.
-- Signs `forge::crypto::sha256` digests through a local-only `forge_api` contract.
+- Signs `forge::crypto::sha256` digests through a local-only `forge_api_core` contract.
 - Keeps key material config secret/redacted through schema/config metadata.
 
 It is not a wallet, vault, hardware security module or authorization layer. It
@@ -43,9 +43,9 @@ configured keys.
 ## Dependencies
 
 - `forge_app`
-- `forge_api`
+- `forge_api_core`
 - `forge_crypto`
-- `forge_config`
+- `forge_config_core`
 - `forge_schema`
 
 ## Config

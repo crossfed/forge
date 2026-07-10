@@ -17,7 +17,7 @@ plugins, telemetry and compatibility layers должны быть пригодн
 - `forge_raw` byte compatibility for retained old FC wire layouts.
 - Typed `forge_exceptions` categories plus redacted context instead of old
   exception hierarchy.
-- Neutral `forge_api` contracts for in-process plugin APIs and transport API
+- Neutral `forge_api_core` contracts for in-process plugin APIs and transport API
   bindings.
 - `forge_plugins` aggregate plus focused `forge_plugins_<family>_<name>` targets for shared
   lifecycle-owned components such as P2P nodes, with narrow local APIs for
@@ -35,19 +35,19 @@ plugins, telemetry and compatibility layers должны быть пригодн
   plugin flows for typed service composition.
 - OTLP log export and crash-spool resend as opt-in observability adapters.
 - Planned XML codec API backed by a private lightweight XML backend, followed by
-  multi-codec `forge_http_api` binding for XML request/response/error bodies.
+  multi-codec `forge_api_http` binding for XML request/response/error bodies.
 
 ## Library Families
 
 - [Runtime + App](runtime/asio-app.md): runtime ownership, scheduler,
   backpressure and async plugin lifecycle.
-- [API Contracts](../libraries/api/README.md): typed handles, descriptor
+- [API Contracts](../libraries/api/core/README.md): typed handles, descriptor
   macros, local/remote surfaces, API frames and shared error payloads.
 - [HTTP + WebSocket](web/http-websocket.md): web/control-plane substrate,
   routing, middleware, upgrades and retry boundaries.
 - [QUIC + P2P](network/quic-p2p.md): secure transport, peer identity, protocol
   streams, relay and path selection.
-- [Transport substrate](../libraries/transport/README.md): reusable
+- [Transport substrate](../libraries/net/transport/README.md): reusable
   stream/session concepts, chunks, frame helpers and muxer substrate.
 - [Infrastructure plugins](../plugins/README.md): lifecycle-owned P2P
   node, API resolver, diagnostics and PubSub facade.
@@ -75,17 +75,15 @@ plugins, telemetry and compatibility layers должны быть пригодн
 Build/test gates:
 
 ```bash
-cmake --build build/forge-debug -j 1 \
-  --target forge test_forge test_forge_exceptions test_forge_raw test_forge_json test_forge_crypto \
-  test_forge_multiformats test_forge_asio test_forge_transport test_forge_tcp test_forge_stcp \
-  test_forge_yamux test_forge_quic test_forge_app test_forge_schema test_forge_config \
-  test_forge_yaml test_forge_program_options test_forge_env test_forge_api \
-  test_forge_transport_api test_forge_http_websocket test_forge_quic_p2p \
-  test_forge_plugins test_forge_otlp test_forge_tui
+cmake --build build/forge-debug -j 4
 
 ctest --test-dir build/forge-debug --output-on-failure
 git diff --check
 ```
+
+The default build target is intentional: it builds every configured test
+executable before `ctest`, including optional targets when their dependencies
+are enabled.
 
 Architecture gates:
 
@@ -108,7 +106,7 @@ Security gates:
 - Keep library READMEs aligned with public modules and actual targets.
 - Keep donor traceability updated when compatibility behavior changes.
 - Land XML support before downstream S3-compatible APIs, then extend
-  `forge_http_api` instead of allowing product code to bypass typed API binding.
+  `forge_api_http` instead of allowing product code to bypass typed API binding.
 - Re-run package install plus external `find_package(Forge CONFIG REQUIRED)`
   consumer smoke before releases.
 - Keep review focused on architecture boundaries, dependency hygiene, security

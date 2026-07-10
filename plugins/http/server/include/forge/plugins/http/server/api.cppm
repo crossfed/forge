@@ -1,29 +1,29 @@
 module;
 
 #include <boost/asio/awaitable.hpp>
-#include <forge/api/macros.hpp>
+#include <forge/api/core/macros.hpp>
 
 #include <memory>
 #include <utility>
 
 export module forge.plugins.http.server.api;
 
-import forge.api.exceptions;
-import forge.api.types;
-import forge.api.descriptor;
-import forge.api.error_projection;
-import forge.api.handle;
-import forge.api.connection;
-import forge.api.registry;
-import forge.api.dispatcher;
-import forge.api.binding;
-import forge.http.api.binding;
+import forge.api.core.exceptions;
+import forge.api.core.types;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.core.handle;
+import forge.api.core.connection;
+import forge.api.core.registry;
+import forge.api.core.dispatcher;
+import forge.api.core.binding;
+import forge.api.http.binding;
 import forge.plugins.http.server.middleware;
 import forge.plugins.http.server.types;
 
 export namespace forge::plugins::http::server {
 
-class api : public forge::api::contract<api, forge::api::surface::local> {
+class api : public forge::api::core::contract<api, forge::api::core::surface::local> {
  public:
    virtual ~api() = default;
 
@@ -37,19 +37,19 @@ class api : public forge::api::contract<api, forge::api::surface::local> {
    class binding_spec {
     public:
       virtual ~binding_spec() = default;
-      [[nodiscard]] virtual forge::http::api::binding_plan build(const forge::api::registry& registry) const = 0;
+      [[nodiscard]] virtual forge::api::http::binding_plan build(const forge::api::core::registry& registry) const = 0;
    };
 
  private:
    template <typename Interface> class typed_binding_spec final : public binding_spec {
     public:
-      [[nodiscard]] forge::http::api::binding_plan build(const forge::api::registry& registry) const override {
-         auto plan = forge::api::binding().serve(registry).build();
-         return forge::http::api::binding().use(std::move(plan)).bind<Interface>().build();
+      [[nodiscard]] forge::api::http::binding_plan build(const forge::api::core::registry& registry) const override {
+         auto plan = forge::api::core::binding().serve(registry).build();
+         return forge::api::http::binding().use(std::move(plan)).bind<Interface>().build();
       }
    };
 
-   [[nodiscard]] virtual const forge::api::registry& registry() const = 0;
+   [[nodiscard]] virtual const forge::api::core::registry& registry() const = 0;
    virtual boost::asio::awaitable<void> publish(std::unique_ptr<binding_spec> binding,
                                                 publish_options options) = 0;
 };

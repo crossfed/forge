@@ -8,17 +8,17 @@ module;
 
 export module forge.app.application;
 
-import forge.config.component;
-import forge.config.document;
-import forge.api.exceptions;
-import forge.api.types;
-import forge.api.descriptor;
-import forge.api.error_projection;
-import forge.api.handle;
-import forge.api.connection;
-import forge.api.registry;
-import forge.api.binding;
-import forge.api.dispatcher;
+import forge.config.core.component;
+import forge.config.core.document;
+import forge.api.core.exceptions;
+import forge.api.core.types;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.core.handle;
+import forge.api.core.connection;
+import forge.api.core.registry;
+import forge.api.core.binding;
+import forge.api.core.dispatcher;
 import forge.app.diagnostics;
 import forge.app.plugin_context;
 import forge.app.plugin;
@@ -57,9 +57,9 @@ class application_runtime {
    application_runtime(const application_runtime&) = delete;
    application_runtime& operator=(const application_runtime&) = delete;
 
-   [[nodiscard]] config::component_registry describe_config() const;
-   boost::asio::awaitable<void> configure(const config::document& document);
-   boost::asio::awaitable<void> provide(forge::api::provider& provider);
+   [[nodiscard]] config::core::component_registry describe_config() const;
+   boost::asio::awaitable<void> configure(const config::core::document& document);
+   boost::asio::awaitable<void> provide(forge::api::core::provider& provider);
    boost::asio::awaitable<void> initialize();
    boost::asio::awaitable<void> startup();
    boost::asio::awaitable<void> shutdown();

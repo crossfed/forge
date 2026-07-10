@@ -12,8 +12,8 @@ module;
 
 export module forge.plugins.p2p.pubsub.types;
 
-import forge.p2p.identity;
-import forge.p2p.pubsub;
+import forge.net.p2p.identity;
+import forge.net.p2p.pubsub;
 import forge.schema.diagnostic;
 import forge.schema.value_kind;
 import forge.schema.object;
@@ -41,24 +41,24 @@ struct subscribe_options {
 };
 
 struct message {
-   forge::p2p::peer_id source;
-   std::optional<forge::p2p::peer_id> author;
-   forge::p2p::pubsub::topic subject;
+   forge::net::p2p::peer_id source;
+   std::optional<forge::net::p2p::peer_id> author;
+   forge::net::p2p::pubsub::topic subject;
    std::vector<std::uint8_t> data;
    std::vector<std::uint8_t> seqno;
 };
 
 template <typename T> struct typed_message {
-   forge::p2p::peer_id source;
-   std::optional<forge::p2p::peer_id> author;
-   forge::p2p::pubsub::topic subject;
+   forge::net::p2p::peer_id source;
+   std::optional<forge::net::p2p::peer_id> author;
+   forge::net::p2p::pubsub::topic subject;
    T value;
    std::vector<std::uint8_t> seqno;
 };
 
 struct subscription {
    std::uint64_t id = 0;
-   forge::p2p::pubsub::topic subject;
+   forge::net::p2p::pubsub::topic subject;
 };
 
 struct snapshot {
@@ -72,7 +72,7 @@ struct snapshot {
    std::uint64_t messages_ignored = 0;
    std::uint64_t messages_dropped = 0;
    std::uint64_t handler_failures = 0;
-   forge::p2p::pubsub::snapshot core;
+   forge::net::p2p::pubsub::snapshot core;
 };
 
 BOOST_DESCRIBE_STRUCT(config, (),

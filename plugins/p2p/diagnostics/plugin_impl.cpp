@@ -6,7 +6,7 @@ module;
 
 module forge.plugins.p2p.diagnostics.plugin;
 
-import forge.p2p.diagnostics;
+import forge.net.p2p.diagnostics;
 import forge.plugins.p2p.node.api;
 import forge.plugins.p2p.diagnostics.exceptions;
 import forge.plugins.p2p.diagnostics.types;
@@ -23,7 +23,7 @@ forge::plugins::p2p::node::diagnostics_source& plugin::impl::require_source() co
    return *source;
 }
 
-forge::p2p::diagnostics::snapshot plugin::impl::snapshot() const {
+forge::net::p2p::diagnostics::snapshot plugin::impl::snapshot() const {
    return require_source().snapshot(configured_options(settings));
 }
 

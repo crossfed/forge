@@ -9,9 +9,9 @@ module;
 
 module forge.plugins.p2p.resolver.plugin;
 
-import forge.transport.api.options;
-import forge.config.component;
-import forge.config.decode;
+import forge.api.transport.options;
+import forge.config.core.component;
+import forge.config.core.decode;
 import forge.exceptions;
 import forge.plugins.p2p.resolver.exceptions;
 import forge.plugins.p2p.resolver.types;
@@ -31,11 +31,11 @@ std::chrono::milliseconds to_ms(std::uint64_t value) {
    return std::chrono::milliseconds{static_cast<std::chrono::milliseconds::rep>(value)};
 }
 
-config decode_config(const forge::config::component_view& view) {
-   auto decoded = forge::config::decode<config>(view.source(), view.section());
+config decode_config(const forge::config::core::component_view& view) {
+   auto decoded = forge::config::core::decode<config>(view.source(), view.section());
    if (!decoded.ok()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_config,
-                          forge::config::format_decode_diagnostics("invalid P2P API resolver config",
+                          forge::config::core::format_decode_diagnostics("invalid P2P API resolver config",
                                                                  decoded.diagnostics));
    }
    return std::move(decoded.value);
@@ -48,7 +48,7 @@ void validate_config(const config& value) {
    }
 }
 
-void validate_transport_options(const forge::transport::api::options& value) {
+void validate_transport_options(const forge::api::transport::options& value) {
    if (value.codec.value.empty() || value.max_inflight == 0 || value.max_frame_size == 0) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_config, "resolver API transport options are invalid");
    }

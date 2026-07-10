@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 
-import forge.api.binding;
+import forge.api.core.binding;
 import forge.app.application_builder;
 import forge.app.application_shell;
 import forge.app.daemon;
@@ -23,9 +23,9 @@ import forge.app.plugin_registry;
 import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.asio.task_scheduler;
-import forge.config.component;
-import forge.config.document;
-import forge.config.value;
+import forge.config.core.component;
+import forge.config.core.document;
+import forge.config.core.value;
 import forge.plugins.db.rocksdb.exceptions;
 import forge.plugins.db.rocksdb.plugin;
 
@@ -46,8 +46,8 @@ using forge::plugins::db::rocksdb::to_string;
 using forge::plugins::db::rocksdb::write_options;
 namespace db = forge::plugins::db::rocksdb;
 
-[[nodiscard]] const forge::config::field_descriptor&
-require_field(const forge::config::component_descriptor& descriptor, const std::string& name) {
+[[nodiscard]] const forge::config::core::field_descriptor&
+require_field(const forge::config::core::component_descriptor& descriptor, const std::string& name) {
    const auto found = std::ranges::find_if(descriptor.fields, [&](const auto& field) {
       return field.name == name;
    });
@@ -70,12 +70,12 @@ struct root_guard {
    }
 };
 
-[[nodiscard]] forge::config::document document_for(const std::filesystem::path& path) {
-   auto document = forge::config::document{};
+[[nodiscard]] forge::config::core::document document_for(const std::filesystem::path& path) {
+   auto document = forge::config::core::document{};
    document.set("plugins.db.rocksdb.path", path.string());
    document.set(
       "plugins.db.rocksdb.column-families",
-      forge::config::value::array_type{forge::config::value{"meta"}, forge::config::value{"data"}});
+      forge::config::core::value::array_type{forge::config::core::value{"meta"}, forge::config::core::value{"data"}});
    return document;
 }
 
@@ -128,24 +128,24 @@ BOOST_AUTO_TEST_CASE(rocksdb_rejects_empty_path_and_empty_column_family) {
 
    {
       auto instance = db::plugin{};
-      auto document = forge::config::document{};
+      auto document = forge::config::core::document{};
       document.set("plugins.db.rocksdb.column-families",
-                   forge::config::value::array_type{forge::config::value{"meta"}});
+                   forge::config::core::value::array_type{forge::config::core::value{"meta"}});
       BOOST_CHECK_THROW(
-         forge::asio::blocking::run(runtime, instance.configure(forge::config::component_view{document, "plugins.db.rocksdb"})),
+         forge::asio::blocking::run(runtime, instance.configure(forge::config::core::component_view{document, "plugins.db.rocksdb"})),
          exceptions::invalid_config);
    }
 
    {
       auto instance = db::plugin{};
-      auto document = forge::config::document{};
+      auto document = forge::config::core::document{};
       document.set("plugins.db.rocksdb.path", std::string{"/tmp/forge-invalid-rocksdb"});
       document.set(
          "plugins.db.rocksdb.column-families",
-         forge::config::value::array_type{forge::config::value{"meta"}, forge::config::value{""}});
+         forge::config::core::value::array_type{forge::config::core::value{"meta"}, forge::config::core::value{""}});
       try {
          forge::asio::blocking::run(runtime,
-                                    instance.configure(forge::config::component_view{document, "plugins.db.rocksdb"}));
+                                    instance.configure(forge::config::core::component_view{document, "plugins.db.rocksdb"}));
          BOOST_FAIL("expected invalid RocksDB config");
       } catch (const exceptions::invalid_config& error) {
          const auto message = std::string{error.what()};

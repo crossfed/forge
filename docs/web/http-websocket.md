@@ -1,12 +1,12 @@
 # HTTP + WebSocket
 
-`forge_http` and `forge_websocket` are separate libraries over the shared Asio
+`forge_net_http` and `forge_net_websocket` are separate libraries over the shared Asio
 runtime. They are web/control surfaces, not the same layer as QUIC/P2P.
 
 Local guides:
 
-- [HTTP README](../../libraries/http/README.md)
-- [WebSocket README](../../libraries/websocket/README.md)
+- [HTTP README](../../libraries/net/http/README.md)
+- [WebSocket README](../../libraries/net/websocket/README.md)
 - [HTTP FastAPI-style parameters](http-fastapi-style-parameters.md)
 - [HTTP files and S3 readiness](http-files-and-s3.md)
 
@@ -21,18 +21,18 @@ semantics creates blurry ownership and unsafe retry behavior.
 
 ```text
 forge_asio::runtime
-  -> forge_http::server/router/middleware
+  -> forge_net_http::server/router/middleware
       -> ordinary HTTP route handlers
       -> WebSocket Upgrade route
-          -> forge_websocket::connection
-  -> forge_http::client/connection
-  -> forge_websocket::client
+          -> forge_net_websocket::connection
+  -> forge_net_http::client/connection
+  -> forge_net_websocket::client
 ```
 
-`forge_http` owns HTTP request/response mechanics and route matching. Public
-HTTP messages are `forge::http::request` / `forge::http::response`; Boost.Beast is
+`forge_net_http` owns HTTP request/response mechanics and route matching. Public
+HTTP messages are `forge::net::http::request` / `forge::net::http::response`; Boost.Beast is
 the internal parser/serializer/socket mechanics donor.
-`forge_websocket` owns bidirectional message connection mechanics. Product DTOs,
+`forge_net_websocket` owns bidirectional message connection mechanics. Product DTOs,
 authentication and business routing live above both.
 
 ## HTTP Decisions
@@ -54,21 +54,21 @@ authentication and business routing live above both.
 ## Integration Example
 
 ```cpp
-auto router = forge::http::router{};
-router.get("/healthz", [](forge::http::route_context& ctx)
-   -> boost::asio::awaitable<forge::http::response> {
-   co_return forge::http::make_text_response(ctx.request, forge::http::status::ok, "ok");
+auto router = forge::net::http::router{};
+router.get("/healthz", [](forge::net::http::route_context& ctx)
+   -> boost::asio::awaitable<forge::net::http::response> {
+   co_return forge::net::http::make_text_response(ctx.request, forge::net::http::status::ok, "ok");
 });
 
-router.websocket("/events", [](std::shared_ptr<forge::websocket::connection> ws) {
-   ws->on_message([](forge::websocket::connection& connection, std::string message)
+router.websocket("/events", [](std::shared_ptr<forge::net::websocket::connection> ws) {
+   ws->on_message([](forge::net::websocket::connection& connection, std::string message)
       -> boost::asio::awaitable<void> {
       co_await connection.send(std::move(message));
    });
-   // forge::http::server starts the WebSocket read loop after this callback.
+   // forge::net::http::server starts the WebSocket read loop after this callback.
 });
 
-auto server = forge::http::server{
+auto server = forge::net::http::server{
    runtime,
    {.bind_address = "127.0.0.1", .port = 8080},
    std::move(router),
@@ -77,7 +77,7 @@ server.start();
 ```
 
 This example intentionally keeps auth, JSON DTOs and product actions outside
-`forge_http` and `forge_websocket`.
+`forge_net_http` and `forge_net_websocket`.
 
 ## Security Boundary
 

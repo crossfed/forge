@@ -11,7 +11,7 @@ import forge.crypto.bls;
 
 import forge.raw.raw;
 import forge.crypto.sha256;
-import forge.json;
+import forge.codec.json;
 import forge.variant.exceptions;
 import forge.variant.value;
 import forge.variant.conversion;
@@ -431,15 +431,15 @@ BOOST_AUTO_TEST_CASE(bls_variant) try {
    forge::variant v;
    std::string s;
    v = prk;
-   s = forge::json::write_value(v).text;
+   s = forge::codec::json::write_value(v).text;
    BOOST_CHECK_EQUAL(s, "\"" + prk.to_string() + "\"");
 
    v = pk;
-   s = forge::json::write_value(v).text;
+   s = forge::codec::json::write_value(v).text;
    BOOST_CHECK_EQUAL(s, "\"" + pk.to_string() + "\"");
 
    v = sig;
-   s = forge::json::write_value(v).text;
+   s = forge::codec::json::write_value(v).text;
    BOOST_CHECK_EQUAL(s, "\"" + sig.to_string() + "\"");
 }
 FORGE_LOG_AND_RETHROW();

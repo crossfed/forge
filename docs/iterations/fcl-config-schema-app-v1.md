@@ -6,7 +6,7 @@ Build the first production-shaped FCL configuration foundation:
 
 - `fcl_schema`: schema rules over described C++ types.
 - `fcl_config`: neutral config document, merge, decode, redaction, component registry.
-- `fcl_yaml`: YAML backend that exposes `config::document` without backend parser leakage.
+- `fcl_yaml`: YAML backend that exposes `config::core::document` without backend parser leakage.
 - `fcl_program_options`: CLI adapter over `Boost.Program_options`.
 - `fcl_app`: plugin config and lifecycle without direct CLI parser dependency.
 
@@ -15,7 +15,7 @@ Build the first production-shaped FCL configuration foundation:
 - Parser backend types are visible only inside codec implementation files.
 - `Boost.Program_options` is visible only inside `fcl_program_options`.
 - App/plugin core imports `fcl_config`, not source parser backends. Later daemon-runner work may orchestrate YAML/env/CLI adapters at the foreground entrypoint layer.
-- Plugins expose config through `describe_config()` and receive a `config::component_view` in `configure(...)`.
+- Plugins expose config through `describe_config()` and receive a `config::core::component_view` in `configure(...)`.
 - Lifecycle methods that may touch resources return `boost::asio::awaitable<void>`.
 - `request_stop()` remains synchronous and `noexcept`.
 
@@ -29,11 +29,11 @@ schema defaults < config file < environment/custom adapters < CLI
 
 `fcl_config::document` is the neutral representation for all sources. Backend adapters translate into that document:
 
-- YAML file -> `fcl_yaml -> config::document`.
-- CLI argv -> `fcl_program_options -> config::document`.
-- Future environment/custom adapters -> `config::document`.
+- YAML file -> `fcl_yaml -> config::core::document`.
+- CLI argv -> `fcl_program_options -> config::core::document`.
+- Future environment/custom adapters -> `config::core::document`.
 
-Typed decoding is done after merge with `config::decode<T>()`.
+Typed decoding is done after merge with `config::core::decode<T>()`.
 
 ## Schema Rules
 
@@ -70,7 +70,7 @@ New shape:
 
 ```text
 plugin -> describe_config()
-plugin -> configure(config::component_view)
+plugin -> configure(config::core::component_view)
 plugin -> initialize(...) -> awaitable<void>
 plugin -> startup() -> awaitable<void>
 plugin -> request_stop() noexcept
@@ -103,7 +103,7 @@ Static gates:
 
 ```sh
 rg "boost/program_options|program_options" libraries/app
-rg "glz::|glaze/" libraries/yaml/include libraries/json/include tests
+rg "glz::|glaze/" libraries/codec/yaml/include libraries/codec/json/include tests
 rg "app_config|config_program_options" libraries tests docs AGENTS.md
 git diff --check
 ```

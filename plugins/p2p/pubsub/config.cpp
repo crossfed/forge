@@ -14,10 +14,10 @@ module;
 
 module forge.plugins.p2p.pubsub.plugin;
 
-import forge.config.component;
-import forge.config.decode;
+import forge.config.core.component;
+import forge.config.core.decode;
 import forge.exceptions;
-import forge.p2p.pubsub;
+import forge.net.p2p.pubsub;
 import forge.plugins.p2p.pubsub.exceptions;
 import forge.plugins.p2p.pubsub.types;
 
@@ -47,11 +47,11 @@ std::chrono::milliseconds to_ms(std::uint64_t value) {
    return std::chrono::milliseconds{static_cast<std::chrono::milliseconds::rep>(value)};
 }
 
-config decode_config(const forge::config::component_view& view) {
-   auto decoded = forge::config::decode<config>(view.source(), view.section());
+config decode_config(const forge::config::core::component_view& view) {
+   auto decoded = forge::config::core::decode<config>(view.source(), view.section());
    if (!decoded.ok()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_config,
-                          forge::config::format_decode_diagnostics("invalid P2P PubSub config",
+                          forge::config::core::format_decode_diagnostics("invalid P2P PubSub config",
                                                                  decoded.diagnostics));
    }
    return std::move(decoded.value);
@@ -62,11 +62,11 @@ void validate_config(const config& value) {
    validate_topic_list(value.denied_topics, "denied-topics");
 }
 
-forge::p2p::pubsub::options core_options_for(const config& settings) {
-   auto out = forge::p2p::pubsub::options{};
+forge::net::p2p::pubsub::options core_options_for(const config& settings) {
+   auto out = forge::net::p2p::pubsub::options{};
    out.signatures =
-      settings.sign_publishes ? forge::p2p::pubsub::signature_policy::strict_sign
-                              : forge::p2p::pubsub::signature_policy::lax_no_sign;
+      settings.sign_publishes ? forge::net::p2p::pubsub::signature_policy::strict_sign
+                              : forge::net::p2p::pubsub::signature_policy::lax_no_sign;
    out.limits.max_data_size = static_cast<std::size_t>(settings.max_message_size);
    out.limits.max_message_size = static_cast<std::size_t>(settings.max_message_size) + 1024;
    out.limits.max_topics = static_cast<std::size_t>(settings.max_topics);

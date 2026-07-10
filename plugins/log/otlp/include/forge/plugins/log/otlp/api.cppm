@@ -1,24 +1,24 @@
 module;
 
 #include <boost/asio/awaitable.hpp>
-#include <forge/api/macros.hpp>
+#include <forge/api/core/macros.hpp>
 
 export module forge.plugins.log.otlp.api;
 
-import forge.api.exceptions;
-import forge.api.types;
-import forge.api.descriptor;
-import forge.api.error_projection;
-import forge.api.handle;
-import forge.api.connection;
-import forge.api.registry;
-import forge.api.binding;
-import forge.api.dispatcher;
+import forge.api.core.exceptions;
+import forge.api.core.types;
+import forge.api.core.descriptor;
+import forge.api.core.error_projection;
+import forge.api.core.handle;
+import forge.api.core.connection;
+import forge.api.core.registry;
+import forge.api.core.binding;
+import forge.api.core.dispatcher;
 import forge.plugins.log.otlp.types;
 
 export namespace forge::plugins::log::otlp {
 
-class api : public forge::api::contract<api, forge::api::surface::local> {
+class api : public forge::api::core::contract<api, forge::api::core::surface::local> {
  public:
    virtual ~api() = default;
 

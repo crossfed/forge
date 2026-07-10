@@ -44,15 +44,15 @@ Public modules:
 ## Dependencies
 
 - `forge_app`
-- `forge_api`
+- `forge_api_core`
 - `forge_crypto`
-- `forge_config`
+- `forge_config_core`
 - `forge_schema`
 
 ## Configuration
 
 Config is decoded through `BOOST_DESCRIBE_STRUCT`, `forge_schema` rules and
-`forge_config`. Secret-bearing fields are schema-marked as secret so generated
+`forge_config_core`. Secret-bearing fields are schema-marked as secret so generated
 diagnostics and redaction paths do not expose raw material.
 
 ```yaml
