@@ -1,8 +1,8 @@
 # forge_db_core
 
 `forge_db_core` is the shared low-level record driver layer. It owns the public
-record-oriented contract used by higher-level stores such as ObjectDB and
-BlobDB.
+record-oriented contract used by higher-level stores such as DB Object and DB
+Blob.
 
 ## Scope
 
