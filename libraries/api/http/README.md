@@ -25,7 +25,8 @@ clients.
 ## Public Modules
 
 - `forge.api.http.parameters` — HTTP request DTO wrapper parameters and special
-  response types that remain in namespace `forge::http`.
+  response types in namespace `forge::api::http`; transport primitives remain
+  in `forge::net::http`.
 - `forge.api.http.mapping` — route metadata, `traits<T>`, route template parsing
   and rendering metadata.
 - `forge.api.http.binding` — `binding_builder`, `binding_plan`, `binding()` and
