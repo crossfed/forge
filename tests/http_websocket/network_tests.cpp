@@ -3042,6 +3042,7 @@ BOOST_AUTO_TEST_CASE(http_api_validates_schema_after_route_and_query_binding) {
    BOOST_TEST(response.result_int() == 422U);
    BOOST_TEST(response[field::content_type] == "application/json");
    BOOST_TEST(response.body().find("validation_error") != std::string::npos);
+   BOOST_TEST(response.body().find(R"("category":"forge.api.http")") != std::string::npos);
    BOOST_TEST(response.body().find("schema.range") != std::string::npos);
 }
 
@@ -3090,6 +3091,7 @@ BOOST_AUTO_TEST_CASE(http_api_macro_put_rejects_unsupported_media_type) {
    BOOST_TEST(response.result_int() == static_cast<unsigned>(status::unsupported_media_type));
    BOOST_TEST(response[field::content_type] == "application/json");
    BOOST_TEST(response.body().find("unsupported_media_type") != std::string::npos);
+   BOOST_TEST(response.body().find(R"("category":"forge.api.http")") != std::string::npos);
 }
 
 BOOST_AUTO_TEST_CASE(http_api_macro_put_uses_default_json_codec_without_content_type) {

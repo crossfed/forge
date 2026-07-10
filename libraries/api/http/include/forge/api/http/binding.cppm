@@ -1277,7 +1277,7 @@ class binding_builder {
          .status_code = static_cast<forge::api::core::status>(status_code),
          .identity =
             {
-               .category = "forge.http",
+               .category = "forge.api.http",
                .code = static_cast<std::uint32_t>(status_code),
             },
       };
@@ -1303,7 +1303,7 @@ class binding_builder {
                                    .status_code = static_cast<forge::api::core::status>(422),
                                    .identity =
                                       {
-                                         .category = "forge.http",
+                                         .category = "forge.api.http",
                                          .code = 422,
                                       },
                                 },
