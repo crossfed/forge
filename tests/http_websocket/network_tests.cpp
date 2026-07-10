@@ -3044,6 +3044,13 @@ BOOST_AUTO_TEST_CASE(http_api_validates_schema_after_route_and_query_binding) {
    BOOST_TEST(response.body().find("validation_error") != std::string::npos);
    BOOST_TEST(response.body().find(R"("category":"forge.api.http")") != std::string::npos);
    BOOST_TEST(response.body().find("schema.range") != std::string::npos);
+
+   const auto decoded = forge::codec::json::read<forge::api::core::error_payload>(response.body());
+   BOOST_REQUIRE(decoded.ok());
+   BOOST_TEST(static_cast<std::uint16_t>(decoded.value.status_code) ==
+              static_cast<std::uint16_t>(forge::api::core::status::invalid_argument));
+   BOOST_TEST(decoded.value.identity.category == "forge.api.http");
+   BOOST_TEST(decoded.value.identity.code == 422U);
 }
 
 BOOST_AUTO_TEST_CASE(http_api_macro_put_rejects_body_route_disagreement) {
@@ -3092,6 +3099,13 @@ BOOST_AUTO_TEST_CASE(http_api_macro_put_rejects_unsupported_media_type) {
    BOOST_TEST(response[field::content_type] == "application/json");
    BOOST_TEST(response.body().find("unsupported_media_type") != std::string::npos);
    BOOST_TEST(response.body().find(R"("category":"forge.api.http")") != std::string::npos);
+
+   const auto decoded = forge::codec::json::read<forge::api::core::error_payload>(response.body());
+   BOOST_REQUIRE(decoded.ok());
+   BOOST_TEST(static_cast<std::uint16_t>(decoded.value.status_code) ==
+              static_cast<std::uint16_t>(forge::api::core::status::invalid_argument));
+   BOOST_TEST(decoded.value.identity.category == "forge.api.http");
+   BOOST_TEST(decoded.value.identity.code == static_cast<std::uint32_t>(status::unsupported_media_type));
 }
 
 BOOST_AUTO_TEST_CASE(http_api_macro_put_uses_default_json_codec_without_content_type) {
