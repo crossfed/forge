@@ -1274,13 +1274,24 @@ class binding_builder {
          .error = std::move(error),
          .message = std::move(message),
          .retryable = false,
-         .status_code = static_cast<forge::api::core::status>(status_code),
+         .status_code = forge::api::core::status::invalid_argument,
          .identity =
             {
                .category = "forge.api.http",
                .code = static_cast<std::uint32_t>(status_code),
             },
       };
+   }
+
+   [[nodiscard]] static response make_http_error_response(const request& request_value,
+                                                          std::string error,
+                                                          std::string message,
+                                                          status status_code,
+                                                          const route_options& options) {
+      const auto payload = make_http_error_payload(std::move(error), std::move(message), status_code);
+      return make_text_response(request_value, status_code,
+                                encode_error_payload(payload, options.error_body_codec),
+                                std::string{detail::content_type(options.error_body_codec)});
    }
 
    [[nodiscard]] static response make_error_response(const request& request_value,
@@ -1300,7 +1311,7 @@ class binding_builder {
                                    .error = "validation_error",
                                    .message = std::string{message},
                                    .retryable = false,
-                                   .status_code = static_cast<forge::api::core::status>(422),
+                                   .status_code = forge::api::core::status::invalid_argument,
                                    .identity =
                                       {
                                          .category = "forge.api.http",
@@ -1551,15 +1562,11 @@ class binding_builder {
                                                                      &request_value);
                   }
                } catch (const forge::net::http::exceptions::unsupported_media_type& error) {
-                  co_return buffered(make_error_response(
-                     request_value.context.request,
-                     make_http_error_payload("unsupported_media_type", error.message(), status::unsupported_media_type),
-                     options));
+                  co_return buffered(make_http_error_response(request_value.context.request, "unsupported_media_type",
+                                                              error.message(), status::unsupported_media_type, options));
                } catch (const forge::net::http::exceptions::not_acceptable& error) {
-                  co_return buffered(make_error_response(
-                     request_value.context.request,
-                     make_http_error_payload("not_acceptable", error.message(), status::not_acceptable),
-                     options));
+                  co_return buffered(make_http_error_response(request_value.context.request, "not_acceptable",
+                                                              error.message(), status::not_acceptable, options));
                } catch (const forge::net::http::exceptions::bad_request& error) {
                   co_return buffered(make_validation_response(request_value.context.request, error.message(), options));
                } catch (const forge::exceptions::base& error) {
@@ -1622,15 +1629,11 @@ class binding_builder {
                      co_return make_success_response(context.request, options.success_status, value, options, endpoint);
                   }
                } catch (const forge::net::http::exceptions::unsupported_media_type& error) {
-                  co_return make_error_response(
-                     context.request,
-                     make_http_error_payload("unsupported_media_type", error.message(), status::unsupported_media_type),
-                     options);
+                  co_return make_http_error_response(context.request, "unsupported_media_type", error.message(),
+                                                     status::unsupported_media_type, options);
                } catch (const forge::net::http::exceptions::not_acceptable& error) {
-                  co_return make_error_response(
-                     context.request,
-                     make_http_error_payload("not_acceptable", error.message(), status::not_acceptable),
-                     options);
+                  co_return make_http_error_response(context.request, "not_acceptable", error.message(),
+                                                     status::not_acceptable, options);
                } catch (const forge::net::http::exceptions::bad_request& error) {
                   co_return make_validation_response(context.request, error.message(), options);
                } catch (const forge::exceptions::base& error) {

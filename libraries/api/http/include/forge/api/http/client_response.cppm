@@ -41,6 +41,38 @@ import forge.codec.json;
 import forge.reflect.reflect;
 import forge.codec.xml;
 
+namespace forge::api::http::detail {
+
+[[nodiscard]] inline forge::api::core::status core_status_from_http(std::uint32_t value) noexcept {
+   using forge::api::core::status;
+   switch (value) {
+   case 400:
+      return status::invalid_argument;
+   case 401:
+      return status::unauthenticated;
+   case 403:
+      return status::permission_denied;
+   case 404:
+      return status::not_found;
+   case 409:
+      return status::conflict;
+   case 412:
+      return status::failed_precondition;
+   case 429:
+      return status::resource_exhausted;
+   case 500:
+      return status::internal;
+   case 503:
+      return status::unavailable;
+   case 504:
+      return status::deadline_exceeded;
+   default:
+      return value >= 400 && value < 500 ? status::invalid_argument : status::internal;
+   }
+}
+
+} // namespace forge::api::http::detail
+
 export namespace forge::api::http {
 
 using namespace forge::net::http;
@@ -89,7 +121,7 @@ namespace detail {
       .error = xml_child_text(root, "error"),
       .message = xml_child_text(root, "message"),
       .retryable = xml_child_text(root, "retryable") == "true" || xml_child_text(root, "retryable") == "1",
-      .status_code = static_cast<forge::api::core::status>(status_code),
+      .status_code = core_status_from_http(status_code),
       .identity = std::move(identity),
    };
 }
@@ -101,18 +133,13 @@ namespace detail {
          value.body(), forge::codec::json::read_options{.source_name = "http.error",
                                                .unknown_fields = forge::codec::json::unknown_field_policy::ignore});
       if (decoded.ok()) {
-         auto payload = std::move(decoded.value);
-         payload.status_code = static_cast<forge::api::core::status>(value.result_int());
-         return payload;
+         return std::move(decoded.value);
       }
       break;
    }
    case error_codec::xml: {
       auto payload = decode_xml_error_payload(value);
       if (!payload.error.empty()) {
-         if (payload.status_code == forge::api::core::status::internal) {
-            payload.status_code = static_cast<forge::api::core::status>(value.result_int());
-         }
          return payload;
       }
       break;
@@ -122,7 +149,7 @@ namespace detail {
       .error = "http_error",
       .message = value.body().empty() ? "HTTP API request failed" : value.body(),
       .retryable = false,
-      .status_code = static_cast<forge::api::core::status>(value.result_int()),
+      .status_code = core_status_from_http(value.result_int()),
       .identity =
          {
             .category = "forge.api",
