@@ -10,7 +10,7 @@
 - Opens RocksDB snapshots for `driver.begin_read()`.
 - Preserves synchronous `flush(bool)` and exposes async `async_flush(bool)`.
 
-It does not contain ObjectDB or BlobDB semantics. Those libraries use this
+It does not contain DB Object or DB Blob semantics. Those libraries use this
 driver through the neutral `forge_db_core` contract.
 
 ## Config
@@ -28,4 +28,4 @@ forge::db::rocksdb::driver driver{
 ```
 
 Families are `forge::rocksdb::column_family_config`, so callers can enable
-RocksDB blob files for blob-heavy families without changing ObjectDB or BlobDB.
+RocksDB blob files for blob-heavy families without changing DB Object or DB Blob.

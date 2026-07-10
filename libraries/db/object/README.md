@@ -12,8 +12,8 @@ through `forge_db_rocksdb`, and future backends without importing them.
 
 - `forge::db::core`: low-level record driver, transaction and snapshot contract.
 - `forge::db::object`: typed objects, indexes, hooks and store/transaction API.
-- `forge::db::rocksdb`: RocksDB implementation of the shared `forge::db`
-  driver.
+- `forge::db::rocksdb`: RocksDB implementation of the shared
+  `forge::db::core::driver` contract.
 - `plugins.db.store`: application lifecycle and named physical DB stores with an
   optional object layer.
 
