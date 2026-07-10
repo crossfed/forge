@@ -53,6 +53,7 @@ boost::asio::awaitable<frame> registry::dispatch(frame request) const {
           .error = "incompatible_version",
           .message = "API is not available or version is incompatible",
           .retryable = false,
+          .status_code = status::failed_precondition,
           .identity =
               {
                   .category = "forge.api",
@@ -67,6 +68,7 @@ boost::asio::awaitable<frame> registry::dispatch(frame request) const {
           .error = "method_not_found",
           .message = "API method is not available",
           .retryable = false,
+          .status_code = status::not_found,
           .identity =
               {
                   .category = "forge.api",
@@ -101,6 +103,7 @@ boost::asio::awaitable<std::vector<frame>> registry::dispatch_many(frame request
                        .error = "incompatible_version",
                        .message = "API is not available or version is incompatible",
                        .retryable = false,
+                       .status_code = status::failed_precondition,
                        .identity =
                            {
                                .category = "forge.api",
@@ -116,6 +119,7 @@ boost::asio::awaitable<std::vector<frame>> registry::dispatch_many(frame request
                        .error = "method_not_found",
                        .message = "API method is not available",
                        .retryable = false,
+                       .status_code = status::not_found,
                        .identity =
                            {
                                .category = "forge.api",
@@ -130,6 +134,7 @@ boost::asio::awaitable<std::vector<frame>> registry::dispatch_many(frame request
                        .error = "protocol_error",
                        .message = "API streaming method requires stream frames",
                        .retryable = false,
+                       .status_code = status::invalid_argument,
                        .identity =
                            {
                                .category = "forge.api",
@@ -149,6 +154,7 @@ boost::asio::awaitable<std::vector<frame>> registry::dispatch_many(frame request
                        .error = "method_not_found",
                        .message = "API streaming method is not available",
                        .retryable = false,
+                       .status_code = status::not_found,
                        .identity =
                            {
                                .category = "forge.api",
@@ -189,6 +195,7 @@ boost::asio::awaitable<std::vector<frame>> registry::dispatch_stream(std::vector
                        .error = "protocol_error",
                        .message = "API stream must start with request frame",
                        .retryable = false,
+                       .status_code = status::invalid_argument,
                        .identity =
                            {
                                .category = "forge.api",
@@ -204,6 +211,7 @@ boost::asio::awaitable<std::vector<frame>> registry::dispatch_stream(std::vector
                        .error = "incompatible_version",
                        .message = "API is not available or version is incompatible",
                        .retryable = false,
+                       .status_code = status::failed_precondition,
                        .identity =
                            {
                                .category = "forge.api",
@@ -219,6 +227,7 @@ boost::asio::awaitable<std::vector<frame>> registry::dispatch_stream(std::vector
                        .error = "method_not_found",
                        .message = "API method is not available",
                        .retryable = false,
+                       .status_code = status::not_found,
                        .identity =
                            {
                                .category = "forge.api",
@@ -237,6 +246,7 @@ boost::asio::awaitable<std::vector<frame>> registry::dispatch_stream(std::vector
                        .error = "protocol_error",
                        .message = "API client stream must end with stream_end frame",
                        .retryable = false,
+                       .status_code = status::invalid_argument,
                        .identity =
                            {
                                .category = "forge.api",
@@ -255,6 +265,7 @@ boost::asio::awaitable<std::vector<frame>> registry::dispatch_stream(std::vector
                           .error = "protocol_error",
                           .message = "API stream contains mismatched or non-item frame",
                           .retryable = false,
+                          .status_code = status::invalid_argument,
                           .identity =
                               {
                                   .category = "forge.api",

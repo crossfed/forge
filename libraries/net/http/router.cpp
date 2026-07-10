@@ -58,6 +58,8 @@ std::string http_error_name(int code) {
       return "conflict";
    case 413:
       return "payload_too_large";
+   case 415:
+      return "unsupported_media_type";
    case 429:
       return "too_many_requests";
    case 431:
@@ -68,6 +70,30 @@ std::string http_error_name(int code) {
       return "gateway_timeout";
    default:
       return "internal";
+   }
+}
+
+forge::api::core::status semantic_status_for_http(int code) noexcept {
+   using forge::api::core::status;
+   switch (code) {
+   case 401:
+      return status::unauthenticated;
+   case 403:
+      return status::permission_denied;
+   case 404:
+      return status::not_found;
+   case 409:
+      return status::conflict;
+   case 413:
+   case 429:
+   case 431:
+      return status::resource_exhausted;
+   case 503:
+      return status::unavailable;
+   case 504:
+      return status::deadline_exceeded;
+   default:
+      return code >= 400 && code < 500 ? status::invalid_argument : status::internal;
    }
 }
 
@@ -87,6 +113,7 @@ forge::api::core::error_payload http_error_payload(const forge::exceptions::base
           .error = http_error_name(error.code().value()),
           .message = error.message().empty() ? http_error_name(error.code().value()) : error.message(),
           .retryable = error.code().value() == 429 || error.code().value() == 503 || error.code().value() == 504,
+          .status_code = semantic_status_for_http(error.code().value()),
           .identity =
               {
                   .category = error.code().category().name(),
@@ -99,6 +126,7 @@ forge::api::core::error_payload http_error_payload(const forge::exceptions::base
        .error = "internal",
        .message = "internal error",
        .retryable = false,
+       .status_code = forge::api::core::status::internal,
        .identity =
            {
                .category = "forge.net.http",
