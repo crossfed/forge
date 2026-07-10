@@ -2163,6 +2163,25 @@ BOOST_AUTO_TEST_CASE(router_maps_typed_http_exception_to_native_json_response) {
    BOOST_TEST(response.body().find("chunk not found") != std::string::npos);
 }
 
+BOOST_AUTO_TEST_CASE(router_names_unsupported_media_type_exception) {
+   auto router = forge::net::http::router{};
+   router.post("/upload", [](route_context&) -> boost::asio::awaitable<response> {
+      FORGE_THROW_EXCEPTION(forge::net::http::exceptions::unsupported_media_type, "unsupported upload media type");
+   });
+
+   auto request = make_request(method::post, "/upload");
+   auto context = make_route_context(request);
+   const auto response = handle(router, context);
+   const auto decoded = forge::codec::json::read<forge::api::core::error_payload>(response.body());
+
+   BOOST_TEST(response.result_int() == static_cast<unsigned>(status::unsupported_media_type));
+   BOOST_REQUIRE(decoded.ok());
+   BOOST_TEST(decoded.value.error == "unsupported_media_type");
+   BOOST_CHECK(decoded.value.status_code == forge::api::core::status::invalid_argument);
+   BOOST_TEST(decoded.value.identity.category == "forge.net.http");
+   BOOST_TEST(decoded.value.identity.code == static_cast<std::uint32_t>(status::unsupported_media_type));
+}
+
 BOOST_AUTO_TEST_CASE(router_escapes_control_bytes_in_exception_json) {
    auto router = forge::net::http::router{};
    router.get("/bad", [](route_context&) -> boost::asio::awaitable<response> {

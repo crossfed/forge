@@ -1408,6 +1408,41 @@ BOOST_AUTO_TEST_CASE(registry_dispatch_invokes_typed_method_over_raw_frame) {
    BOOST_TEST(chunk.bytes == "abc");
 }
 
+BOOST_AUTO_TEST_CASE(registry_builtin_errors_set_semantic_status) {
+   auto runtime = forge::asio::runtime{};
+   auto registry = forge::api::core::registry{};
+   auto request = forge::api::core::frame{
+       .kind = forge::api::core::frame_kind::request,
+       .id = {.value = 9},
+       .api = {.id = {"cache"}, .major = 1, .min_revision = 8},
+       .method = "read",
+       .codec = {.value = "forge.raw"},
+   };
+
+   auto response = forge::asio::blocking::run(runtime, registry.dispatch(request));
+   auto payload = forge::raw::unpack<forge::api::core::error_payload>(response.payload);
+   BOOST_CHECK(response.kind == forge::api::core::frame_kind::error);
+   BOOST_CHECK(payload.status_code == forge::api::core::status::failed_precondition);
+   BOOST_TEST(payload.identity.code ==
+              static_cast<std::uint32_t>(forge::api::core::exceptions::code::incompatible_version));
+
+   registry.install<cache_api>(cache_api::describe(), std::make_shared<cache_impl>());
+   request.method = "missing";
+   response = forge::asio::blocking::run(runtime, registry.dispatch(request));
+   payload = forge::raw::unpack<forge::api::core::error_payload>(response.payload);
+   BOOST_CHECK(payload.status_code == forge::api::core::status::not_found);
+   BOOST_TEST(payload.identity.code ==
+              static_cast<std::uint32_t>(forge::api::core::exceptions::code::method_not_found));
+
+   request.kind = forge::api::core::frame_kind::stream_item;
+   auto responses = forge::asio::blocking::run(runtime, registry.dispatch_stream({request}));
+   BOOST_REQUIRE_EQUAL(responses.size(), 1U);
+   payload = forge::raw::unpack<forge::api::core::error_payload>(responses.front().payload);
+   BOOST_CHECK(payload.status_code == forge::api::core::status::invalid_argument);
+   BOOST_TEST(payload.identity.code ==
+              static_cast<std::uint32_t>(forge::api::core::exceptions::code::protocol_error));
+}
+
 class throwing_cache_impl final : public cache_api {
  public:
    boost::asio::awaitable<protocol::chunk> read(protocol::read_chunk) override {
