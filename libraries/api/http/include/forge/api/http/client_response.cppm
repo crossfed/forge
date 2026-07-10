@@ -41,6 +41,38 @@ import forge.codec.json;
 import forge.reflect.reflect;
 import forge.codec.xml;
 
+namespace forge::api::http::detail {
+
+[[nodiscard]] inline forge::api::core::status core_status_from_http(std::uint32_t value) noexcept {
+   using forge::api::core::status;
+   switch (value) {
+   case 400:
+      return status::invalid_argument;
+   case 401:
+      return status::unauthenticated;
+   case 403:
+      return status::permission_denied;
+   case 404:
+      return status::not_found;
+   case 409:
+      return status::conflict;
+   case 412:
+      return status::failed_precondition;
+   case 429:
+      return status::resource_exhausted;
+   case 500:
+      return status::internal;
+   case 503:
+      return status::unavailable;
+   case 504:
+      return status::deadline_exceeded;
+   default:
+      return value >= 400 && value < 500 ? status::invalid_argument : status::internal;
+   }
+}
+
+} // namespace forge::api::http::detail
+
 export namespace forge::api::http {
 
 using namespace forge::net::http;
@@ -71,34 +103,6 @@ namespace detail {
       return output;
    }
    return fallback;
-}
-
-[[nodiscard]] inline forge::api::core::status core_status_from_http(std::uint32_t value) noexcept {
-   using forge::api::core::status;
-   switch (value) {
-   case 400:
-      return status::invalid_argument;
-   case 401:
-      return status::unauthenticated;
-   case 403:
-      return status::permission_denied;
-   case 404:
-      return status::not_found;
-   case 409:
-      return status::conflict;
-   case 412:
-      return status::failed_precondition;
-   case 429:
-      return status::resource_exhausted;
-   case 500:
-      return status::internal;
-   case 503:
-      return status::unavailable;
-   case 504:
-      return status::deadline_exceeded;
-   default:
-      return value >= 400 && value < 500 ? status::invalid_argument : status::internal;
-   }
 }
 
 [[nodiscard]] inline forge::api::core::error_payload decode_xml_error_payload(const response& value) {
