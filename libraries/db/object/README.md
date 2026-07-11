@@ -43,10 +43,15 @@ using account_object = forge::db::object::object_index<
    account,
    forge::db::object::indexed_by<
       forge::db::object::primary_unique<by_id>,
-      forge::db::object::secondary_unique<by_name, &account::name>,
-      forge::db::object::secondary_non_unique<
+      forge::db::object::ordered_unique<
+         by_name,
+         forge::db::object::member<&account::name>>,
+      forge::db::object::ordered_non_unique<
          by_region_balance,
-         forge::db::object::composite_key<&account::region, &account::balance>>>>;
+         forge::db::object::composite_key<
+            forge::db::object::member<&account::region>,
+            forge::db::object::descending<
+               forge::db::object::member<&account::balance>>>>>>;
 
 FORGE_DB_OBJECT(account_object)
 ```
@@ -55,6 +60,28 @@ FORGE_DB_OBJECT(account_object)
 User values remain described C++ structs. `FORGE_DB_OBJECT(...)` creates
 the compile-time mapping from `typed_id<Space, Type>` to the descriptor, so
 typed-id operations do not require spelling the object type again.
+
+Ordered descriptors follow the Boost.MultiIndex separation between index kind
+and key extraction. `member`, `const_mem_fun` and `global_fun` extract scalar
+keys; `composite_key` combines two or more extractors. Extractors are ascending
+unless wrapped in `descending`; `ascending` can make the default explicit.
+
+Index values use `sort_key<T>` to produce canonical ascending bytes. Forge
+ships codecs for booleans, integers, enums, strings, object IDs, typed IDs and
+fixed-byte values exposing `to_uint8_span()` or `extract_as_byte_array()`.
+Products can support strong domain types without changing DB Object:
+
+```cpp
+template <>
+struct forge::db::object::sort_key<domain_float> {
+   forge::db::object::sort_key_bytes operator()(const domain_float& value) const;
+};
+```
+
+The specialization owns normalization and invalid-value policy. For example, a
+SoftFloat consumer decides how signed zero and NaN values behave. Codec failures
+surface as `forge::db::object::exceptions::invalid_index_key` before index or
+object records are mutated.
 
 ## Store
 
@@ -158,15 +185,23 @@ index records:
 auto alice = co_await store.index<account_object, by_name>().find("alice");
 
 auto page = co_await store.index<account_object, by_region_balance>()
-   .equal_range(std::make_tuple(std::uint32_t{3}))
+   .equal_range(std::uint32_t{3})
    .page({.limit = 100});
 
 auto stream = store.index<account_object, by_region_balance>()
-   .equal_range(std::make_tuple(std::uint32_t{3}))
+   .equal_range(std::tuple{std::uint32_t{3}})
    .stream({.page_size = 100});
+
+auto exact = co_await store.index<account_object, by_region_balance>()
+   .find(std::uint32_t{3}, std::uint64_t{100});
+
+auto tail = store.index<account_object, by_region_balance>()
+   .lower_bound(std::uint32_t{3}, std::uint64_t{100});
 ```
 
-Streams keep one read snapshot for the whole stream lifecycle.
+`find` requires a complete composite key. `equal_range`, `lower_bound` and
+`upper_bound` accept a non-empty ordered prefix. Variadic and tuple forms use
+the same key encoder. Streams keep one read snapshot for their whole lifecycle.
 
 ## Hooks
 
@@ -189,6 +224,16 @@ failed commit. Hooks are DB Object-level and do not expose backend write batches
 
 Deterministic key layout and record materialization are private implementation
 details.
+
+## Index Roadmap
+
+DB Object currently supports primary unique, ordered unique and ordered
+non-unique indexes, including composite keys and mixed ascending/descending
+components. Hashed indexes are deferred: persisted ordered backends already
+provide exact and range access, while a backend-neutral hash contract needs a
+separate demonstrated use case. Boost.MultiIndex `sequenced` and
+`random_access` indexes do not map to this persisted object/index model. Ranked
+indexes require a separate backend-neutral rank-maintenance design.
 
 ## Migration Groundwork
 

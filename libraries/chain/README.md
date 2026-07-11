@@ -10,6 +10,7 @@ controller, state database, consensus engine or product runtime layer.
 - Need FC/Antelope-compatible raw byte layout for protocol records.
 - Need deterministic transaction ids, block ids, signing preimages or digests.
 - Need system action payload records such as `setcode`, `setabi` or `newaccount`.
+- Need donor-compatible fixed-size ordered keys such as `key256`.
 
 ## When Not To Use
 
@@ -36,6 +37,8 @@ controller, state database, consensus engine or product runtime layer.
 - `forge.chain.abi` - ABI structs and optional extension-field compatibility.
 - `forge.chain.system` - system action payload records and canonical action
   names.
+- `forge.chain.fixed_key` - `fixed_key<Size>` and `key256`, with unsigned-word
+  construction, canonical big-endian raw bytes and fixed-width hex variants.
 
 Target: `forge_chain`.
 
@@ -110,6 +113,16 @@ header.transaction_mroot = forge::chain::calculate_transaction_mroot(receipts);
 the legacy EOSIO Merkle algorithm. In modern Spring/Savanna, `action_mroot` is a
 finality-tree root and is intentionally not derived from action receipts by this
 library.
+
+### Build A Fixed Ordered Key
+
+```cpp
+import forge.chain.fixed_key;
+
+auto key = forge::chain::key256::make_from_word_sequence<std::uint64_t>(
+   0, 0, 0, 42);
+auto bytes = key.extract_as_byte_array();
+```
 
 ## Boundaries
 

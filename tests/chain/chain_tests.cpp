@@ -2,6 +2,7 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <array>
 #include <iomanip>
 #include <span>
 #include <sstream>
@@ -14,9 +15,12 @@ import forge.crypto.secp256k1;
 import forge.crypto.sha256;
 import forge.compression.exceptions;
 import forge.raw.raw;
+import forge.raw.exceptions;
+import forge.variant.exceptions;
 import forge.variant.value;
 import forge.chain.abi;
 import forge.chain.block;
+import forge.chain.fixed_key;
 import forge.chain.types;
 import forge.chain.system;
 import forge.chain.transaction;
@@ -41,8 +45,8 @@ std::string hex(std::span<const std::uint8_t> bytes) {
 
 std::string hex(const std::vector<char>& bytes) {
    return hex(std::span{
-      reinterpret_cast<const std::uint8_t*>(bytes.data()),
-      bytes.size(),
+       reinterpret_cast<const std::uint8_t*>(bytes.data()),
+       bytes.size(),
    });
 }
 
@@ -56,8 +60,7 @@ std::vector<char> unhex(std::string_view value) {
    return out;
 }
 
-template <typename T>
-std::string pack_hex(const T& value) {
+template <typename T> std::string pack_hex(const T& value) {
    return hex(forge::raw::pack(value));
 }
 
@@ -104,21 +107,18 @@ protocol::signed_transaction make_reference_signed_transaction() {
 
 protocol::abi_def make_reference_abi() {
    return protocol::abi_def{
-      .version = "eosio::abi/1.2",
-      .types = {protocol::type_def{.new_type_name = "account_name", .type = "name"}},
-      .actions = {protocol::action_def{
-         .name = protocol::make_name("setabi"),
-         .type = "setabi",
-      }},
+       .version = "eosio::abi/1.2",
+       .types = {protocol::type_def{.new_type_name = "account_name", .type = "name"}},
+       .actions = {protocol::action_def{
+           .name = protocol::make_name("setabi"),
+           .type = "setabi",
+       }},
    };
 }
 
 std::string legacy_abi_hex() {
    constexpr auto empty_optional_vector_hex_size = std::size_t{2};
-   return std::string{spring::abi_raw.substr(
-      0,
-      spring::abi_raw.size() - 2U * empty_optional_vector_hex_size
-   )};
+   return std::string{spring::abi_raw.substr(0, spring::abi_raw.size() - 2U * empty_optional_vector_hex_size)};
 }
 
 protocol::block_header make_reference_block_header() {
@@ -157,6 +157,52 @@ protocol::signed_block make_reference_signed_block() {
 } // namespace
 
 BOOST_AUTO_TEST_SUITE(forge_chain_spring_compatibility)
+
+BOOST_AUTO_TEST_CASE(fixed_key_matches_donor_word_and_byte_order) {
+   const auto high = static_cast<protocol::uint128_t>(0x0102030405060708ULL) << 64U |
+                     static_cast<protocol::uint128_t>(0x1112131415161718ULL);
+   const auto low = static_cast<protocol::uint128_t>(0x2122232425262728ULL) << 64U |
+                    static_cast<protocol::uint128_t>(0x3132333435363738ULL);
+   const auto value = protocol::key256{std::array<protocol::uint128_t, 2>{high, low}};
+
+   BOOST_TEST(hex(value.extract_as_byte_array()) == "0102030405060708111213141516171821222324252627283132333435363738");
+   BOOST_TEST(pack_hex(value) == "0102030405060708111213141516171821222324252627283132333435363738");
+   BOOST_TEST((value == forge::raw::unpack<protocol::key256>(forge::raw::pack(value))));
+
+   const auto variant = forge::variant{value};
+   BOOST_TEST(variant.get_string() == "0102030405060708111213141516171821222324252627283132333435363738");
+   BOOST_TEST((variant.as<protocol::key256>() == value));
+}
+
+BOOST_AUTO_TEST_CASE(fixed_key_orders_lexicographically_and_rejects_invalid_text) {
+   const auto lower = protocol::key256::make_from_word_sequence<std::uint64_t>(std::uint64_t{1U}, std::uint64_t{2U},
+                                                                               std::uint64_t{3U}, std::uint64_t{4U});
+   const auto higher = protocol::key256::make_from_word_sequence<std::uint64_t>(std::uint64_t{1U}, std::uint64_t{2U},
+                                                                                std::uint64_t{3U}, std::uint64_t{5U});
+   BOOST_TEST(lower < higher);
+
+   BOOST_CHECK_THROW(forge::variant{"00"}.as<protocol::key256>(), forge::variant_exceptions::decode_error);
+   BOOST_CHECK_THROW(forge::variant{std::string(63U, '0') + "x"}.as<protocol::key256>(),
+                     forge::variant_exceptions::decode_error);
+}
+
+BOOST_AUTO_TEST_CASE(fixed_key_supports_exact_bytes_padding_and_truncated_raw_rejection) {
+   using key160 = protocol::fixed_key<20>;
+   static_assert(key160::num_words() == 2U);
+   static_assert(key160::padded_bytes() == 12U);
+
+   const auto bytes = std::array<std::uint8_t, 20>{
+       0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
+       0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13,
+   };
+   const auto value = key160{bytes};
+   BOOST_TEST(value.extract_as_byte_array() == bytes);
+   BOOST_TEST(pack_hex(value) == "000102030405060708090a0b0c0d0e0f10111213");
+
+   auto truncated = forge::raw::pack(value);
+   truncated.pop_back();
+   BOOST_CHECK_THROW((void)forge::raw::unpack<key160>(truncated), forge::raw::exceptions::codec_error);
+}
 
 BOOST_AUTO_TEST_CASE(name_symbol_and_asset_match_spring_fixtures) {
    const auto eosio = protocol::make_name("eosio");
@@ -244,17 +290,14 @@ BOOST_AUTO_TEST_CASE(action_transaction_and_signed_transaction_match_spring_fixt
 
 BOOST_AUTO_TEST_CASE(zlib_packed_transaction_matches_spring_and_unpacks_from_wire) {
    const auto signed_trx = make_reference_signed_transaction();
-   const auto packed = protocol::packed_transaction{
-      signed_trx,
-      protocol::packed_transaction::compression::zlib};
+   const auto packed = protocol::packed_transaction{signed_trx, protocol::packed_transaction::compression::zlib};
 
    BOOST_TEST(pack_hex(packed) == expected(spring::packed_transaction_zlib_raw));
    BOOST_TEST(packed.id().str() == expected(spring::transaction_id));
    BOOST_TEST(packed.packed_digest().str() == expected(spring::packed_transaction_zlib_digest));
    BOOST_TEST(pack_hex(packed.get_signed_transaction()) == expected(spring::signed_transaction_raw));
 
-   const auto unpacked = forge::raw::unpack<protocol::packed_transaction>(
-      unhex(spring::packed_transaction_zlib_raw));
+   const auto unpacked = forge::raw::unpack<protocol::packed_transaction>(unhex(spring::packed_transaction_zlib_raw));
    BOOST_TEST(unpacked.id().str() == expected(spring::transaction_id));
    BOOST_TEST(unpacked.packed_digest().str() == expected(spring::packed_transaction_zlib_digest));
    BOOST_TEST(pack_hex(unpacked.get_signed_transaction()) == expected(spring::signed_transaction_raw));
@@ -264,10 +307,7 @@ BOOST_AUTO_TEST_CASE(packed_transaction_unknown_compression_is_typed_failure) {
    auto packed = protocol::packed_transaction{make_reference_signed_transaction()};
    packed.compression = static_cast<decltype(packed.compression)>(0xff);
 
-   BOOST_CHECK_THROW(
-      (void)packed.get_signed_transaction(),
-      forge::compression::exceptions::invalid_input
-   );
+   BOOST_CHECK_THROW((void)packed.get_signed_transaction(), forge::compression::exceptions::invalid_input);
 }
 
 BOOST_AUTO_TEST_CASE(transaction_signature_preimage_digest_and_spring_signature_are_compatible) {
@@ -277,11 +317,11 @@ BOOST_AUTO_TEST_CASE(transaction_signature_preimage_digest_and_spring_signature_
 
    BOOST_TEST(hex(protocol::signature_preimage(chain_id, trx, cfd)) ==
               expected(spring::transaction_signature_preimage));
-   BOOST_TEST(protocol::signature_digest(chain_id, trx, cfd).str() ==
-              expected(spring::transaction_signature_digest));
+   BOOST_TEST(protocol::signature_digest(chain_id, trx, cfd).str() == expected(spring::transaction_signature_digest));
 
    const auto signature = parse_spring_signature(spring::transaction_signature);
-   const auto recovered = protocol::public_key{signature, protocol::digest{std::string{spring::transaction_signature_digest}}};
+   const auto recovered =
+       protocol::public_key{signature, protocol::digest{std::string{spring::transaction_signature_digest}}};
    BOOST_TEST(format_spring_public_key(recovered) == expected(spring::test_public_key));
 }
 
@@ -289,8 +329,8 @@ BOOST_AUTO_TEST_CASE(abi_and_system_actions_match_spring_fixtures) {
    BOOST_TEST(pack_hex(make_reference_abi()) == expected(spring::abi_raw));
 
    const auto setabi = protocol::setabi{
-      .account = protocol::make_name("eosio"),
-      .abi = {char{0x0a}, char{0x0b}},
+       .account = protocol::make_name("eosio"),
+       .abi = {char{0x0a}, char{0x0b}},
    };
    BOOST_TEST(pack_hex(setabi) == expected(spring::setabi_raw));
 }
@@ -323,15 +363,15 @@ BOOST_AUTO_TEST_CASE(abi_variant_schema_uses_spring_field_names) {
    auto abi = protocol::abi_def{};
    abi.version = "eosio::abi/1.2";
    abi.tables = {protocol::table_def{
-      .name = protocol::make_name("accounts"),
-      .index_type = "i64",
-      .key_names = {"owner"},
-      .key_types = {"name"},
-      .type = "account",
+       .name = protocol::make_name("accounts"),
+       .index_type = "i64",
+       .key_names = {"owner"},
+       .key_types = {"name"},
+       .type = "account",
    }};
    abi.action_results.value = {protocol::action_result_def{
-      .name = protocol::make_name("get"),
-      .result_type = "account",
+       .name = protocol::make_name("get"),
+       .result_type = "account",
    }};
 
    auto encoded = forge::variant{};

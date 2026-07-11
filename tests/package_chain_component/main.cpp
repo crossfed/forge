@@ -1,6 +1,7 @@
 #include <span>
 
 import forge.chain.block;
+import forge.chain.fixed_key;
 import forge.chain.merkle;
 import forge.chain.transaction;
 
@@ -14,7 +15,9 @@ int main() {
    forge::chain::signed_block block;
    (void)root;
    (void)tree;
+   forge::chain::key256 key;
    (void)transaction;
    (void)block;
+   (void)key;
    return 0;
 }
