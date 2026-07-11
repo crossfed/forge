@@ -22,7 +22,7 @@ class variant_object;
 class mutable_variant_object;
 
 struct blob {
-   std::vector<char> data;
+   std::vector<std::uint8_t> data;
 };
 using variants = std::vector<variant>;
 using ovariant = std::optional<variant>;

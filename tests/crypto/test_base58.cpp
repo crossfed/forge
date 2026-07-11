@@ -24,11 +24,11 @@ BOOST_AUTO_TEST_CASE(base58_byte_api_uses_bitcoin_alphabet_vectors) try {
 }
 FORGE_LOG_AND_RETHROW();
 
-BOOST_AUTO_TEST_CASE(base58_legacy_char_api_stays_compatible) try {
-   const std::vector<char> hello{'h', 'e', 'l', 'l', 'o'};
-   BOOST_CHECK_EQUAL(forge::crypto::to_base58(hello, [] {}), "Cn8eVZg");
+BOOST_AUTO_TEST_CASE(base58_uint8_api_preserves_spring_vector) try {
+   const auto hello = forge::crypto::bytes{'h', 'e', 'l', 'l', 'o'};
+   BOOST_CHECK_EQUAL(forge::crypto::base58_encode(hello, [] {}), "Cn8eVZg");
 
-   auto decoded = forge::crypto::from_base58("Cn8eVZg");
+   auto decoded = forge::crypto::base58_decode("Cn8eVZg");
    BOOST_CHECK_EQUAL_COLLECTIONS(decoded.begin(), decoded.end(), hello.begin(), hello.end());
 }
 FORGE_LOG_AND_RETHROW();

@@ -1,6 +1,7 @@
 module;
 #include <forge/core/macros.hpp>
 #include <bit>
+#include <climits>
 #include <string.h>
 #include <stdint.h>
 #include <algorithm>
@@ -15,6 +16,8 @@ import forge.core.utility;
 import forge.raw.exceptions;
 
 export namespace forge {
+
+static_assert(CHAR_BIT == 8, "Forge datastream requires 8-bit bytes");
 
 namespace detail {
 NO_RETURN void raise_datastream_range(const char* file, size_t len, int64_t over);
@@ -31,8 +34,7 @@ template <typename Storage, typename Enable = void> class datastream;
  */
 template <typename T>
 class datastream<T, std::enable_if_t<std::is_same_v<T, char*> || std::is_same_v<T, const char*> ||
-                                     std::is_same_v<T, unsigned char*> ||
-                                     std::is_same_v<T, const unsigned char*>>> {
+                                     std::is_same_v<T, unsigned char*> || std::is_same_v<T, const unsigned char*>>> {
  public:
    datastream(T start, size_t s) : _start(start), _pos(start), _end(start + s) {};
 
@@ -193,8 +195,8 @@ class datastream<Container, typename std::enable_if_t<(std::is_same_v<std::vecto
    size_t read(char* s, size_t n) {
       if (cur + n > _container.size()) {
          const auto over = (cur + n) - _container.size();
-         throw std::out_of_range("read datastream<std::vector<char>> of length " + std::to_string(_container.size()) +
-                                 " over by " + std::to_string(over));
+         throw std::out_of_range("read byte datastream of length " + std::to_string(_container.size()) + " over by " +
+                                 std::to_string(over));
       }
       std::copy_n(_container.begin() + cur, n, reinterpret_cast<std::uint8_t*>(s));
       cur += n;
@@ -271,13 +273,13 @@ template <typename DataStream> class datastream_mirror {
       return read(&c, 1);
    }
 
-   std::vector<char> extract_mirror() {
+   std::vector<std::uint8_t> extract_mirror() {
       return std::move(mirror);
    }
 
  private:
    DataStream& ds;
-   std::vector<char> mirror;
+   std::vector<std::uint8_t> mirror;
 };
 
 template <typename ST> inline datastream<ST>& operator<<(datastream<ST>& ds, const __int128& d) {

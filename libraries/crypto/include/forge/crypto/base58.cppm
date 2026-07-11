@@ -29,12 +29,6 @@ using backend_error = forge::exceptions::coded_exception<code, code::backend_err
 
 export namespace forge::crypto {
 
-[[nodiscard]] std::string base58_encode(std::span<const std::uint8_t> data,
-                                         const forge::yield_function_t& yield = {});
+[[nodiscard]] std::string base58_encode(std::span<const std::uint8_t> data, const forge::yield_function_t& yield = {});
 [[nodiscard]] bytes base58_decode(std::string_view base58_str);
-
-std::string to_base58(const char* d, size_t s, const forge::yield_function_t& yield);
-std::string to_base58(const std::vector<char>& data, const forge::yield_function_t& yield);
-std::vector<char> from_base58(const std::string& base58_str);
-size_t from_base58(const std::string& base58_str, char* out_data, size_t out_data_len);
 } // namespace forge::crypto

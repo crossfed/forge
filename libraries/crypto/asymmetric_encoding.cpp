@@ -1,10 +1,12 @@
 module;
 #include <forge/exceptions/macros.hpp>
 #include <algorithm>
+#include <cstdint>
 #include <cstring>
 #include <map>
 #include <memory>
 #include <ranges>
+#include <span>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -80,8 +82,8 @@ struct base58_str_parser_impl<Result, Prefixes, Position, KeyType, Rem...> {
       constexpr auto prefix = Prefixes[Position];
 
       if (prefix == prefix_str) {
-         auto bin = forge::crypto::from_base58(data_str);
-         forge::datastream<const char*> unpacker(bin.data(), bin.size());
+         auto bin = forge::crypto::base58_decode(data_str);
+         forge::datastream<const std::uint8_t*> unpacker(bin.data(), bin.size());
          auto wrapped = wrapper{};
          forge::raw::unpack(unpacker, wrapped);
          FORGE_ASSERT(!unpacker.remaining(), "decoded base58 length too long");
@@ -111,7 +113,8 @@ template <const char* const* Prefixes, typename... Ts> struct base58_str_parser<
 
       const auto prefix_str = base58str.substr(0, pivot);
       auto data_str = base58str.substr(pivot + 1);
-      FORGE_ASSERT(!data_str.empty(), "Data only has suite type prefix: ${str}", forge::exceptions::ctx("str", base58str));
+      FORGE_ASSERT(!data_str.empty(), "Data only has suite type prefix: ${str}",
+                   forge::exceptions::ctx("str", base58str));
 
       return base58_str_parser_impl<std::variant<Ts...>, Prefixes, 0, Ts...>::apply(prefix_str, data_str);
    }
@@ -133,7 +136,7 @@ struct base58str_visitor : public forge::visitor<std::string> {
       _yield();
       auto packed = raw::pack(wrapper);
       _yield();
-      auto data_str = to_base58(packed.data(), packed.size(), _yield);
+      auto data_str = base58_encode(packed, _yield);
       _yield();
       if (!is_default) {
          data_str = std::string(Prefixes[position]) + "_" + data_str;
@@ -149,8 +152,8 @@ template <typename Data> [[nodiscard]] Data parse_checked(std::string_view data,
    using data_type = typename Data::data_type;
    using wrapper = checksummed_data<data_type>;
 
-   const auto decoded = forge::crypto::from_base58(std::string(data));
-   auto unpacker = forge::datastream<const char*>(decoded.data(), decoded.size());
+   const auto decoded = forge::crypto::base58_decode(data);
+   auto unpacker = forge::datastream<const std::uint8_t*>(decoded.data(), decoded.size());
    auto wrapped = wrapper{};
    forge::raw::unpack(unpacker, wrapped);
    FORGE_ASSERT(!unpacker.remaining(), "decoded key data length too long");
@@ -168,51 +171,44 @@ template <typename Data>
    wrapped.data = value.serialize();
    wrapped.check = wrapper::calculate_checksum(wrapped.data, checksum_prefix);
    const auto packed = raw::pack(wrapped);
-   return to_base58(packed.data(), packed.size(), yield);
+   return base58_encode(packed, yield);
 }
 
-template <typename Data> [[nodiscard]] std::string to_wif(const Data& secret, const forge::yield_function_t& yield = {}) {
+template <typename Data>
+[[nodiscard]] std::string to_wif(const Data& secret, const forge::yield_function_t& yield = {}) {
    const auto payload_size = sizeof(typename Data::data_type) + 1U;
-   auto data = std::vector<char>(payload_size + 4U);
-   data[0] = static_cast<char>(0x80);
+   auto data = bytes(payload_size + 4U);
+   data[0] = std::uint8_t{0x80};
    const auto serialized = secret.serialize();
-   std::memcpy(data.data() + 1, reinterpret_cast<const char*>(&serialized), sizeof(typename Data::data_type));
-   auto digest = sha256::hash(data.data(), static_cast<std::uint32_t>(payload_size));
+   std::memcpy(data.data() + 1, &serialized, sizeof(typename Data::data_type));
+   auto digest = sha256::hash(std::span<const std::uint8_t>{data.data(), payload_size});
    digest = sha256::hash(digest);
    std::memcpy(data.data() + payload_size, digest.data(), 4U);
-   return to_base58(data.data(), data.size(), yield);
+   return base58_encode(data, yield);
 }
 
 template <typename Data> [[nodiscard]] Data from_wif(std::string_view wif_key) {
-   const auto decoded = from_base58(std::string(wif_key));
+   const auto decoded = base58_decode(wif_key);
    FORGE_ASSERT(decoded.size() >= 5U, "invalid WIF private key");
-   auto key_bytes = std::vector<char>(decoded.begin() + 1, decoded.end() - 4);
-   auto check = sha256::hash(decoded.data(), decoded.size() - 4);
+   auto key_bytes = bytes(decoded.begin() + 1, decoded.end() - 4);
+   auto check = sha256::hash(std::span<const std::uint8_t>{decoded.data(), decoded.size() - 4U});
    auto check2 = sha256::hash(check);
    FORGE_ASSERT(std::memcmp(check.data(), decoded.data() + decoded.size() - 4, 4) == 0 ||
               std::memcmp(check2.data(), decoded.data() + decoded.size() - 4, 4) == 0);
-   return Data(forge::variant(key_bytes).as<typename Data::data_type>());
-}
-
-[[nodiscard]] std::vector<std::uint8_t> to_bytes(const std::vector<char>& input) {
-   return std::vector<std::uint8_t>(input.begin(), input.end());
-}
-
-[[nodiscard]] std::vector<char> to_chars(const std::vector<std::uint8_t>& input) {
-   return std::vector<char>(input.begin(), input.end());
+   auto value = typename Data::data_type{};
+   forge::raw::unpack(std::span<const std::uint8_t>{key_bytes.data(), key_bytes.size()}, value);
+   return Data{value};
 }
 
 template <typename Data> [[nodiscard]] std::vector<std::uint8_t> serialize_bytes(const Data& value) {
    const auto serialized = value.serialize();
-   const auto packed = raw::pack(serialized);
-   return to_bytes(packed);
+   return raw::pack(serialized);
 }
 
 template <typename Data> [[nodiscard]] Data make_value_from_bytes(const std::vector<std::uint8_t>& bytes) {
    using data_type = typename Data::data_type;
 
-   const auto chars = to_chars(bytes);
-   auto unpacker = forge::datastream<const char*>(chars.data(), chars.size());
+   auto unpacker = forge::datastream<const std::uint8_t*>(bytes.data(), bytes.size());
    auto data = data_type{};
    forge::raw::unpack(unpacker, data);
    if (unpacker.remaining()) {
@@ -269,7 +265,8 @@ template <typename Data> [[nodiscard]] Data make_fixed_value_from_bytes(const st
    auto result = std::vector<std::uint8_t>{};
    result.reserve(payload.size() / 2U);
    for (std::size_t i = 0; i < payload.size(); i += 2U) {
-      result.push_back(static_cast<std::uint8_t>((parse_hex_digit(payload[i]) << 4U) | parse_hex_digit(payload[i + 1U])));
+      result.push_back(
+          static_cast<std::uint8_t>((parse_hex_digit(payload[i]) << 4U) | parse_hex_digit(payload[i + 1U])));
    }
    return result;
 }
@@ -280,10 +277,6 @@ template <typename Data> [[nodiscard]] Data make_fixed_value_from_bytes(const st
    return result;
 }
 
-[[nodiscard]] std::vector<char> as_chars(const std::vector<std::uint8_t>& value) {
-   return std::vector<char>(value.begin(), value.end());
-}
-
 [[nodiscard]] std::uint32_t calculate_rule_checksum(const std::vector<std::uint8_t>& raw_payload,
                                                     const std::vector<std::uint8_t>& encoded_payload,
                                                     const checksum_options& options) {
@@ -291,23 +284,19 @@ template <typename Data> [[nodiscard]] Data make_fixed_value_from_bytes(const st
       return 0;
    }
 
-   const auto& checksum_payload =
-      options.payload == checksum_payload::encoded_payload ? encoded_payload : raw_payload;
+   const auto& checksum_payload = options.payload == checksum_payload::encoded_payload ? encoded_payload : raw_payload;
    if (options.scheme == checksum_scheme::single_sha256) {
-      auto chars = as_chars(checksum_payload);
-      auto digest = sha256::hash(chars.data(), static_cast<std::uint32_t>(chars.size()));
+      auto digest = sha256::hash(std::span<const std::uint8_t>{checksum_payload});
       return first_four_bytes(digest);
    }
    if (options.scheme == checksum_scheme::double_sha256) {
-      auto chars = as_chars(checksum_payload);
-      auto digest = sha256::hash(chars.data(), static_cast<std::uint32_t>(chars.size()));
+      auto digest = sha256::hash(std::span<const std::uint8_t>{checksum_payload});
       digest = sha256::hash(digest);
       return first_four_bytes(digest);
    }
 
    auto encoder = ripemd160::encoder{};
-   const auto chars = as_chars(checksum_payload);
-   encoder.write(chars.data(), chars.size());
+   encoder.write(reinterpret_cast<const char*>(checksum_payload.data()), checksum_payload.size());
    if (options.scheme == checksum_scheme::ripemd160_with_text_suffix) {
       encoder.write(options.text_suffix.data(), options.text_suffix.size());
    }
@@ -320,8 +309,7 @@ void append_checksum(std::vector<std::uint8_t>& payload, std::uint32_t checksum)
 }
 
 [[nodiscard]] std::uint32_t read_checksum(std::span<const std::uint8_t> payload) {
-   auto chars = std::vector<char>(payload.begin(), payload.end());
-   auto unpacker = forge::datastream<const char*>(chars.data(), chars.size());
+   auto unpacker = forge::datastream<const std::uint8_t*>(payload.data(), payload.size());
    auto result = std::uint32_t{};
    forge::raw::unpack(unpacker, result);
    if (unpacker.remaining()) {
@@ -423,18 +411,16 @@ void validate_profile(const text_encoding_profile& profile) {
    if (payload_without_check.size() < rule.binary_prefix.size() + rule.binary_suffix.size()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_key, "encoded key payload is too short");
    }
-   if (!std::ranges::equal(rule.binary_suffix,
-                           payload_without_check |
-                              std::views::drop(payload_without_check.size() - rule.binary_suffix.size()))) {
+   if (!std::ranges::equal(rule.binary_suffix, payload_without_check | std::views::drop(payload_without_check.size() -
+                                                                                        rule.binary_suffix.size()))) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_key, "encoded key binary suffix is invalid");
    }
 
-   auto raw_payload = std::vector<std::uint8_t>(
-      payload_without_check.begin() + static_cast<std::ptrdiff_t>(rule.binary_prefix.size()),
+   auto raw_payload =
+       std::vector<std::uint8_t>(payload_without_check.begin() + static_cast<std::ptrdiff_t>(rule.binary_prefix.size()),
       payload_without_check.end() - static_cast<std::ptrdiff_t>(rule.binary_suffix.size()));
    if (rule.checksum.scheme != checksum_scheme::none) {
-      const auto expected_checksum =
-         calculate_rule_checksum(raw_payload, payload_without_check, rule.checksum);
+      const auto expected_checksum = calculate_rule_checksum(raw_payload, payload_without_check, rule.checksum);
       if (actual_checksum != expected_checksum) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_key, "encoded key checksum mismatch");
       }
@@ -442,8 +428,8 @@ void validate_profile(const text_encoding_profile& profile) {
    return raw_payload;
 }
 
-template <typename Data> [[nodiscard]] std::string format_rule_payload(const text_encoding_rule& rule,
-                                                                       const Data& value) {
+template <typename Data>
+[[nodiscard]] std::string format_rule_payload(const text_encoding_rule& rule, const Data& value) {
    auto raw_payload = serialize_bytes(value);
    auto encoded_payload = rule.binary_prefix;
    encoded_payload.insert(encoded_payload.end(), raw_payload.begin(), raw_payload.end());
@@ -502,16 +488,12 @@ template <typename Data> [[nodiscard]] std::string format_rule_payload(const tex
 template <typename Value>
 [[nodiscard]] std::string format_profile_value(const std::vector<text_encoding_rule>& rules, const Value& value) {
    const auto& rule = require_format_rule(rules, value.type());
-   return value.visit([&](const auto& item) {
-      return format_rule_payload(rule, item);
-   });
+   return value.visit([&](const auto& item) { return format_rule_payload(rule, item); });
 }
 
 template <typename Value, typename Parser>
-[[nodiscard]] Value parse_profile_value(const std::vector<text_encoding_rule>& rules,
-                                        std::string_view text,
-                                        std::string_view failure_message,
-                                        Parser parser) {
+[[nodiscard]] Value parse_profile_value(const std::vector<text_encoding_rule>& rules, std::string_view text,
+                                        std::string_view failure_message, Parser parser) {
    auto matched_prefix = false;
    for (const auto* rule : find_parse_rules(rules, text)) {
       matched_prefix = true;

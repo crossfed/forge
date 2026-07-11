@@ -44,19 +44,12 @@ std::string hex(std::span<const std::uint8_t> bytes) {
    return out.str();
 }
 
-std::string hex(const std::vector<char>& bytes) {
-   return hex(std::span{
-       reinterpret_cast<const std::uint8_t*>(bytes.data()),
-       bytes.size(),
-   });
-}
-
-std::vector<char> unhex(std::string_view value) {
-   auto out = std::vector<char>{};
+protocol::bytes unhex(std::string_view value) {
+   auto out = protocol::bytes{};
    out.reserve(value.size() / 2);
    for (auto index = std::size_t{0}; index < value.size(); index += 2) {
       const auto byte = std::string{value.substr(index, 2)};
-      out.push_back(static_cast<char>(std::stoi(byte, nullptr, 16)));
+      out.push_back(static_cast<std::uint8_t>(std::stoi(byte, nullptr, 16)));
    }
    return out;
 }
@@ -301,7 +294,7 @@ BOOST_AUTO_TEST_CASE(fixed_key_zero_size_matches_donor_value_semantics) {
    BOOST_TEST(value.get_array().empty());
    BOOST_TEST(value.extract_as_byte_array().empty());
    BOOST_TEST(forge::raw::pack(value).empty());
-   BOOST_TEST((forge::raw::unpack<empty_key>(std::vector<char>{}) == value));
+   BOOST_TEST((forge::raw::unpack<empty_key>(forge::raw::bytes{}) == value));
 
    const auto variant = forge::variant{value};
    BOOST_TEST(variant.get_string().empty());

@@ -13,7 +13,7 @@ namespace compression = forge::compression;
 
 namespace {
 
-std::vector<char> bytes(std::string_view value) {
+compression::bytes bytes(std::string_view value) {
    return {value.begin(), value.end()};
 }
 
@@ -32,7 +32,7 @@ BOOST_AUTO_TEST_CASE(zlib_round_trips_bytes) {
 }
 
 BOOST_AUTO_TEST_CASE(zlib_round_trips_empty_input) {
-   const auto input = std::vector<char>{};
+   const auto input = compression::bytes{};
 
    const auto compressed = compression::zlib_compress(input);
    const auto decompressed = compression::zlib_decompress(compressed);
@@ -62,7 +62,7 @@ BOOST_AUTO_TEST_CASE(zlib_rejects_trailing_input_after_stream) {
 }
 
 BOOST_AUTO_TEST_CASE(zlib_enforces_output_limit) {
-   auto input = std::vector<char>(4096, char{'x'});
+   auto input = compression::bytes(4096, std::uint8_t{'x'});
    const auto compressed = compression::zlib_compress(input, compression::zlib_level::best_compression);
 
    BOOST_CHECK_THROW(

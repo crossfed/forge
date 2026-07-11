@@ -23,7 +23,6 @@ import forge.variant.described;
 
 export namespace forge::chain {
 
-
 struct action_base {
    account_name account;
    action_name name;
@@ -89,11 +88,9 @@ struct packed_transaction {
    [[nodiscard]] signed_transaction get_signed_transaction() const;
 };
 
-std::vector<char> pack_transaction(const transaction& value);
+bytes pack_transaction(const transaction& value);
 transaction_id calculate_transaction_id(const transaction& value);
-std::vector<char> signature_preimage(const chain_id& chain_id,
-                                     const transaction& value,
-                                     const std::vector<bytes>& cfd = {});
+bytes signature_preimage(const chain_id& chain_id, const transaction& value, const std::vector<bytes>& cfd = {});
 digest signature_digest(const chain_id& chain_id, const transaction& value, const std::vector<bytes>& cfd = {});
 
 } // namespace forge::chain
@@ -102,11 +99,12 @@ export namespace forge::chain {
 BOOST_DESCRIBE_STRUCT(action_base, (), (account, name, authorization))
 BOOST_DESCRIBE_STRUCT(action, (action_base), (data))
 BOOST_DESCRIBE_STRUCT(deferred_transaction_generation_context, (), (sender_trx_id, sender_id, sender))
-BOOST_DESCRIBE_STRUCT(transaction_header, (), (expiration, ref_block_num, ref_block_prefix, max_net_usage_words, max_cpu_usage_ms, delay_sec))
+BOOST_DESCRIBE_STRUCT(transaction_header, (),
+                      (expiration, ref_block_num, ref_block_prefix, max_net_usage_words, max_cpu_usage_ms, delay_sec))
 BOOST_DESCRIBE_STRUCT(transaction, (transaction_header), (context_free_actions, actions, transaction_extensions))
 BOOST_DESCRIBE_STRUCT(signed_transaction, (transaction), (signatures, context_free_data))
 BOOST_DESCRIBE_STRUCT(packed_transaction, (), (signatures, compression, packed_context_free_data, packed_trx))
-}
+} // namespace forge::chain
 
 FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::action_base)
 FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::action)

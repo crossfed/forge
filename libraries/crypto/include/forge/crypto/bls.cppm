@@ -59,7 +59,7 @@ template <typename Container> Container deserialize_base64url(const std::string&
    auto wrapped = wrapper{};
 
    auto bin = forge::crypto::base64url_decode(data_str);
-   forge::datastream<const char*> unpacker(bin.data(), bin.size());
+   forge::datastream<const std::uint8_t*> unpacker(bin.data(), bin.size());
    forge::raw::unpack(unpacker, wrapped);
    FORGE_ASSERT(!unpacker.remaining(), "decoded base64url length too long");
    FORGE_ASSERT(wrapper::calculate_checksum(wrapped.data) == wrapped.check);
@@ -74,7 +74,7 @@ template <typename Container> std::string serialize_base64url(const Container& d
    wrapped.data = data;
    wrapped.check = wrapper::calculate_checksum(wrapped.data);
    auto packed = raw::pack(wrapped);
-   return forge::crypto::base64url_encode(packed.data(), packed.size());
+   return forge::crypto::base64url_encode(std::span<const std::uint8_t>{packed.data(), packed.size()});
 }
 
 } // namespace forge::crypto::bls::detail
@@ -144,8 +144,8 @@ class public_key {
       return ds;
    }
 
-   [[nodiscard]] static bls12_381::g1 from_affine_bytes_le(
-      const std::array<std::uint8_t, 96>& affine_non_montgomery_le);
+   [[nodiscard]] static bls12_381::g1
+   from_affine_bytes_le(const std::array<std::uint8_t, 96>& affine_non_montgomery_le);
 
  private:
    std::array<std::uint8_t, 96> _affine_non_montgomery_le{};
@@ -223,8 +223,8 @@ class signature {
       return ds;
    }
 
-   [[nodiscard]] static bls12_381::g2 to_jacobian_montgomery_le(
-      const std::array<std::uint8_t, 192>& affine_non_montgomery_le);
+   [[nodiscard]] static bls12_381::g2
+   to_jacobian_montgomery_le(const std::array<std::uint8_t, 192>& affine_non_montgomery_le);
 
  private:
    std::array<std::uint8_t, 192> _affine_non_montgomery_le{};

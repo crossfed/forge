@@ -56,12 +56,6 @@ size_t from_hex(const std::string& hex_str, std::uint8_t* out_data, size_t out_d
    return from_hex(hex_str, reinterpret_cast<char*>(out_data), out_data_len);
 }
 
-std::string to_hex(const std::vector<char>& data) {
-   if (data.size())
-      return to_hex(data.data(), data.size());
-   return "";
-}
-
 std::string to_hex(const bytes& data) {
    if (data.size())
       return to_hex(data.data(), data.size());
