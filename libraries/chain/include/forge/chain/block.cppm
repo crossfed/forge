@@ -14,6 +14,7 @@ module;
 export module forge.chain.block;
 
 export import forge.chain.transaction;
+import forge.chain.merkle;
 import forge.crypto.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
@@ -95,6 +96,7 @@ block_id calculate_block_id(const block_header& value);
 std::uint32_t calculate_block_num_from_id(const block_id& id);
 std::uint32_t calculate_block_num(const block_header& value);
 digest transaction_receipt_digest(const transaction_receipt& value);
+digest calculate_transaction_mroot(const std::deque<transaction_receipt>& receipts);
 digest signed_block_digest(const signed_block& value);
 
 } // namespace forge::chain

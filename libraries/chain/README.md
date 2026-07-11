@@ -27,6 +27,8 @@ controller, state database, consensus engine or product runtime layer.
 - `forge.chain.types` - names, assets, symbols, keys, signatures, timestamps and
   common scalar protocol vocabulary.
 - `forge.chain.authority` - permissions, waits and authority thresholds.
+- `forge.chain.merkle` - modern Spring-compatible Merkle roots and incremental
+  Merkle state.
 - `forge.chain.transaction` - actions, transactions, packed transactions,
   transaction ids and transaction signing digests.
 - `forge.chain.block` - block headers, signed blocks, receipts, block digests
@@ -90,6 +92,25 @@ auto packed = forge::chain::packed_transaction{
 auto unpacked = packed.get_signed_transaction();
 ```
 
+### Calculate A Transaction Merkle Root
+
+```cpp
+#include <deque>
+
+import forge.chain.block;
+
+auto receipts = std::deque<forge::chain::transaction_receipt>{};
+// Fill receipts as transactions are accepted into the block.
+
+auto header = forge::chain::block_header{};
+header.transaction_mroot = forge::chain::calculate_transaction_mroot(receipts);
+```
+
+`forge.chain.merkle` implements the modern Spring algorithm. It does not expose
+the legacy EOSIO Merkle algorithm. In modern Spring/Savanna, `action_mroot` is a
+finality-tree root and is intentionally not derived from action receipts by this
+library.
+
 ## Boundaries
 
 - `forge_chain` owns payload field order and deterministic protocol helpers.
@@ -103,8 +124,8 @@ auto unpacked = packed.get_signed_transaction();
 ## Tests
 
 `test_forge_chain` covers raw byte fixtures, name encoding, asset text
-conversion, ABI compatibility, transaction and block ids, packed transactions
-and signature recovery cases.
+conversion, ABI compatibility, transaction and block ids, modern Merkle roots,
+incremental Merkle state, packed transactions and signature recovery cases.
 
 `test_forge_package_chain_component` verifies that installed consumers can use
 `find_package(Forge CONFIG REQUIRED COMPONENTS chain)` and import chain modules.
