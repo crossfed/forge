@@ -3,7 +3,6 @@ add_library(
       plugin.cpp
       config.cpp
       plugin_impl.cpp
-      resolver_protocol_service.cpp
       api_impl.cpp
 )
 forge_target_modules_at(forge_plugins_p2p_resolver plugins/p2p/resolver)

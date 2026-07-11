@@ -1,5 +1,6 @@
 module;
 
+#include <forge/api/core/macros.hpp>
 #include <forge/exceptions/macros.hpp>
 
 #include <boost/asio/awaitable.hpp>
@@ -37,6 +38,11 @@ import forge.plugins.p2p.node.types;
 
 #include "details/config.hxx"
 #include "details/plugin_impl.hxx"
+#include "details/resolver_protocol.hxx"
+
+FORGE_API(::forge::plugins::p2p::resolver::detail::resolver_protocol,
+          FORGE_API_CONTRACT("forge.plugins.p2p.resolver.protocol", 1, 0),
+          FORGE_API_METHOD(query))
 
 namespace forge::plugins::p2p::resolver {
 namespace {
@@ -326,7 +332,7 @@ std::optional<entry> plugin::impl::select_compatible(
 void plugin::impl::install_protocol() {
    protocol_registry.clear();
    protocol_registry.install<detail::resolver_protocol>(
-      std::make_shared<plugin::resolver_protocol_service>(shared_from_this()));
+      std::make_shared<detail::resolver_protocol>(shared_from_this()));
    auto plan = forge::api::core::binding()
                   .serve(protocol_registry)
                   .export_api<detail::resolver_protocol>(

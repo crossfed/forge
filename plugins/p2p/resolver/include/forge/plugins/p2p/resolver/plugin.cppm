@@ -1,7 +1,5 @@
 module;
 
-#include <forge/api/core/macros.hpp>
-
 #include <boost/asio/awaitable.hpp>
 
 #include <memory>
@@ -26,6 +24,12 @@ import forge.config.core.component;
 import forge.net.p2p.protocol;
 import forge.plugins.p2p.resolver.types;
 
+namespace forge::plugins::p2p::resolver::detail {
+
+class resolver_protocol;
+
+} // namespace forge::plugins::p2p::resolver::detail
+
 export namespace forge::plugins::p2p::resolver {
 
 class plugin final : public forge::app::plugin {
@@ -47,8 +51,9 @@ class plugin final : public forge::app::plugin {
    boost::asio::awaitable<void> shutdown() override;
 
  private:
+   friend class detail::resolver_protocol;
+
    struct impl;
-   class resolver_protocol_service;
    class api_impl;
    std::shared_ptr<impl> impl_;
 };
@@ -57,10 +62,3 @@ class plugin final : public forge::app::plugin {
 [[nodiscard]] forge::net::p2p::protocol_id default_protocol();
 
 } // namespace forge::plugins::p2p::resolver
-
-#include "details/resolver_protocol.hxx"
-#include "details/resolver_protocol_service.hxx"
-
-FORGE_API(::forge::plugins::p2p::resolver::detail::resolver_protocol,
-          FORGE_API_CONTRACT("forge.plugins.p2p.resolver.protocol", 1, 0),
-          FORGE_API_METHOD(query))
