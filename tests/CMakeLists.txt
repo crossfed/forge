@@ -85,6 +85,7 @@ add_executable(
    test_forge_chain
    unit/main.cpp
    chain/chain_tests.cpp
+   chain/merkle_tests.cpp
 )
 target_link_libraries(test_forge_chain forge_chain forge Boost::included_unit_test_framework)
 add_test(NAME test_forge_chain COMMAND test_forge_chain WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
