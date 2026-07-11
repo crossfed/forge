@@ -46,11 +46,13 @@ descriptors, deterministic key layout and async store/index access:
 - `primary_unique<Tag>` is shorthand for the base `id`;
 - `FORGE_DB_OBJECT(Object)` creates the inverse compile-time mapping from
   typed id to object descriptor;
-- `secondary_unique` and `secondary_non_unique` describe stored index entries;
-- `composite_key<&T::field1, &T::field2>` establishes lexicographic member
-  order and partial prefix lookup through `std::make_tuple(...)`;
-- `layout<Object>` produces byte-stable low-level record keys for tests and
-  store/session internals;
+- `ordered_unique` and `ordered_non_unique` describe persisted ordered index
+  entries independently from their extractors;
+- `member`, `const_mem_fun` and `global_fun` extract scalar values;
+- `composite_key<member<&T::field1>, member<&T::field2>>` establishes
+  lexicographic component order and partial prefix lookup;
+- `sort_key<T>` owns extensible canonical ascending byte encoding, while
+  `ascending` and `descending` select component direction;
 - `cursor` and `page_request` are key-boundary primitives, not offset-based
   query state;
 - `store.register_object<T>()`, `session`, `index_view`, `page`, `stream` and
@@ -219,12 +221,12 @@ The DB Object store should feel closer to Boost.MultiIndex than to a manual
 RocksDB key helper layer:
 
 ```cpp
-auto session = co_await store.session();
+auto snapshot = co_await store.begin_read();
 
-auto alice = co_await session.index<account_object, by_name>().find("alice");
+auto alice = co_await snapshot.index<account_object, by_name>().find("alice");
 
-auto page = co_await session.index<account_object, by_region_balance>()
-   .equal_range(std::make_tuple(std::uint32_t{3}))
+auto page = co_await snapshot.index<account_object, by_region_balance>()
+   .equal_range(std::uint32_t{3})
    .page({.limit = 100});
 ```
 
@@ -232,8 +234,8 @@ The important part is not the exact spelling yet, but the contract:
 
 - `find`, `lower_bound`, `upper_bound` and `equal_range` operate only on
   declared indexes;
-- composite indexes support full and partial prefix queries through
-  `std::make_tuple(...)`;
+- composite `find` requires all components, while range operations accept a
+  non-empty leading prefix in variadic or tuple form;
 - pagination is cursor/key-boundary based;
 - large ranges can be consumed lazily with `stream().next()` or `for_each(...)`;
 - non-indexed predicates must not be disguised as indexed lookup APIs.

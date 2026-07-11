@@ -38,59 +38,35 @@ export namespace forge::db::object {
 class transaction {
  public:
    using ensure_registered_fn = std::function<void(forge::ids::object_id, std::type_index)>;
-   using allocate_id_fn = std::function<boost::asio::awaitable<forge::ids::object_id>(
-      forge::ids::object_id, forge::db::core::transaction&)>;
+   using allocate_id_fn = std::function<boost::asio::awaitable<forge::ids::object_id>(forge::ids::object_id,
+                                                                                      forge::db::core::transaction&)>;
    using allocation_seal_map = std::map<forge::ids::object_id, std::uint64_t>;
    using seal_allocations_fn = std::function<boost::asio::awaitable<void>(allocation_seal_map)>;
    using release_fn = std::function<void()>;
 
    transaction() = default;
-   transaction(forge::db::core::transaction&& active,
-               forge::db::core::family family,
-               ensure_registered_fn ensure,
-               allocate_id_fn allocate,
-               std::vector<std::shared_ptr<interceptor>> interceptors,
-               std::vector<std::shared_ptr<observer>> observers,
-               release_fn release);
-   transaction(forge::db::core::transaction&& active,
-               forge::db::core::family family,
-               ensure_registered_fn ensure,
-               allocate_id_fn allocate,
-               seal_allocations_fn seal,
-               std::vector<std::shared_ptr<interceptor>> interceptors,
-               std::vector<std::shared_ptr<observer>> observers,
-               release_fn release,
-               boost::asio::any_io_executor cleanup_executor);
-   transaction(forge::db::core::transaction& active,
-               forge::db::core::family family,
-               ensure_registered_fn ensure,
-               allocate_id_fn allocate,
-               seal_allocations_fn seal,
+   transaction(forge::db::core::transaction&& active, forge::db::core::family family, ensure_registered_fn ensure,
+               allocate_id_fn allocate, std::vector<std::shared_ptr<interceptor>> interceptors,
+               std::vector<std::shared_ptr<observer>> observers, release_fn release);
+   transaction(forge::db::core::transaction&& active, forge::db::core::family family, ensure_registered_fn ensure,
+               allocate_id_fn allocate, seal_allocations_fn seal,
+               std::vector<std::shared_ptr<interceptor>> interceptors, std::vector<std::shared_ptr<observer>> observers,
+               release_fn release, boost::asio::any_io_executor cleanup_executor);
+   transaction(forge::db::core::transaction& active, forge::db::core::family family, ensure_registered_fn ensure,
+               allocate_id_fn allocate, seal_allocations_fn seal,
                std::vector<std::shared_ptr<interceptor>> interceptors,
                std::vector<std::shared_ptr<observer>> observers);
-   transaction(forge::db::core::transaction& active,
-               forge::db::core::family family,
-               ensure_registered_fn ensure,
-               allocate_id_fn allocate,
-               std::vector<std::shared_ptr<interceptor>> interceptors,
+   transaction(forge::db::core::transaction& active, forge::db::core::family family, ensure_registered_fn ensure,
+               allocate_id_fn allocate, std::vector<std::shared_ptr<interceptor>> interceptors,
                std::vector<std::shared_ptr<observer>> observers);
 
-   transaction(forge::db::core::transaction&& active,
-               forge::db::core::family family,
-               ensure_registered_fn ensure,
-               std::vector<std::shared_ptr<interceptor>> interceptors,
-               std::vector<std::shared_ptr<observer>> observers,
+   transaction(forge::db::core::transaction&& active, forge::db::core::family family, ensure_registered_fn ensure,
+               std::vector<std::shared_ptr<interceptor>> interceptors, std::vector<std::shared_ptr<observer>> observers,
                release_fn release);
-   transaction(forge::db::core::transaction&& active,
-               forge::db::core::family family,
-               ensure_registered_fn ensure,
-               std::vector<std::shared_ptr<interceptor>> interceptors,
-               std::vector<std::shared_ptr<observer>> observers,
-               release_fn release,
-               boost::asio::any_io_executor cleanup_executor);
-   transaction(forge::db::core::transaction& active,
-               forge::db::core::family family,
-               ensure_registered_fn ensure,
+   transaction(forge::db::core::transaction&& active, forge::db::core::family family, ensure_registered_fn ensure,
+               std::vector<std::shared_ptr<interceptor>> interceptors, std::vector<std::shared_ptr<observer>> observers,
+               release_fn release, boost::asio::any_io_executor cleanup_executor);
+   transaction(forge::db::core::transaction& active, forge::db::core::family family, ensure_registered_fn ensure,
                std::vector<std::shared_ptr<interceptor>> interceptors,
                std::vector<std::shared_ptr<observer>> observers);
 
@@ -100,33 +76,26 @@ class transaction {
    template <forge::ids::typed_id_like Id>
    boost::asio::awaitable<std::optional<typename object_index_for_id_t<Id>::value_type>> find(Id id);
 
-   template <object_model Object>
-   boost::asio::awaitable<typename Object::value_type> get(forge::ids::object_id id);
+   template <object_model Object> boost::asio::awaitable<typename Object::value_type> get(forge::ids::object_id id);
 
    template <object_model Object>
    boost::asio::awaitable<std::optional<typename Object::value_type>> find(forge::ids::object_id id);
 
-   template <object_value Value>
-   boost::asio::awaitable<void> insert(Value value);
+   template <object_value Value> boost::asio::awaitable<void> insert(Value value);
 
    template <object_value Value, typename Fn>
       requires std::default_initializable<Value> && std::invocable<Fn&, Value&>
    boost::asio::awaitable<Value> create(Fn&& fn);
 
-   template <object_value Value>
-   boost::asio::awaitable<void> replace(Value value);
+   template <object_value Value> boost::asio::awaitable<void> replace(Value value);
 
-   template <forge::ids::typed_id_like Id, typename Fn>
-   boost::asio::awaitable<void> modify(Id id, Fn&& fn);
+   template <forge::ids::typed_id_like Id, typename Fn> boost::asio::awaitable<void> modify(Id id, Fn&& fn);
 
-   template <forge::ids::typed_id_like Id>
-   boost::asio::awaitable<void> erase(Id id);
+   template <forge::ids::typed_id_like Id> boost::asio::awaitable<void> erase(Id id);
 
-   template <object_model Object>
-   boost::asio::awaitable<void> erase(forge::ids::object_id id);
+   template <object_model Object> boost::asio::awaitable<void> erase(forge::ids::object_id id);
 
-   template <object_model Object, typename Tag>
-   [[nodiscard]] index_view<Object, Tag> index() const;
+   template <object_model Object, typename Tag> [[nodiscard]] index_view<Object, Tag> index() const;
 
    [[nodiscard]] forge::db::core::transaction& db_transaction() const;
 
@@ -145,7 +114,8 @@ class transaction {
    boost::asio::awaitable<std::optional<std::vector<std::byte>>> get_record(forge::db::core::record_key key) const;
    boost::asio::awaitable<void> put_record(forge::db::core::record_key key, std::vector<std::byte> value) const;
    boost::asio::awaitable<void> erase_record(forge::db::core::record_key key) const;
-   boost::asio::awaitable<forge::db::core::record_page> scan_records(forge::db::core::record_range range, forge::db::core::page_request request) const;
+   boost::asio::awaitable<forge::db::core::record_page> scan_records(forge::db::core::record_range range,
+                                                                     forge::db::core::page_request request) const;
 
    struct impl;
    std::shared_ptr<impl> impl_;
@@ -171,7 +141,8 @@ class transaction::access {
       co_await owner_.erase_record(std::move(key));
    }
 
-   boost::asio::awaitable<forge::db::core::record_page> scan_page(forge::db::core::record_range range, forge::db::core::page_request request) const {
+   boost::asio::awaitable<forge::db::core::record_page> scan_page(forge::db::core::record_range range,
+                                                                  forge::db::core::page_request request) const {
       co_return co_await owner_.scan_records(std::move(range), std::move(request));
    }
 
@@ -179,8 +150,7 @@ class transaction::access {
       return owner_.changes();
    }
 
-   template <object_model Object>
-   void ensure_registered() const {
+   template <object_model Object> void ensure_registered() const {
       owner_.ensure_registered_type(object_id_of<Object>::value, std::type_index{typeid(Object)});
    }
 
@@ -198,168 +168,11 @@ class transaction::access {
 
 } // namespace forge::db::object
 
+#include "ordered_key.hxx"
+
 namespace forge::db::object::detail {
 
-enum class entry_kind : std::uint8_t {
-   object_record = 0x10,
-   secondary_unique_index = 0x20,
-   secondary_non_unique_index = 0x21,
-};
-
-inline void append_byte(std::vector<std::byte>& out, std::uint8_t value) {
-   out.push_back(static_cast<std::byte>(value));
-}
-
-inline void append_be16(std::vector<std::byte>& out, std::uint16_t value) {
-   append_byte(out, static_cast<std::uint8_t>((value >> 8U) & 0xffU));
-   append_byte(out, static_cast<std::uint8_t>(value & 0xffU));
-}
-
-inline void append_be32(std::vector<std::byte>& out, std::uint32_t value) {
-   append_byte(out, static_cast<std::uint8_t>((value >> 24U) & 0xffU));
-   append_byte(out, static_cast<std::uint8_t>((value >> 16U) & 0xffU));
-   append_byte(out, static_cast<std::uint8_t>((value >> 8U) & 0xffU));
-   append_byte(out, static_cast<std::uint8_t>(value & 0xffU));
-}
-
-inline void append_be64(std::vector<std::byte>& out, std::uint64_t value) {
-   for (auto shift = 56; shift >= 0; shift -= 8) {
-      append_byte(out, static_cast<std::uint8_t>((value >> static_cast<unsigned>(shift)) & 0xffU));
-   }
-}
-
-template <typename Unsigned>
-void append_unsigned(std::vector<std::byte>& out, Unsigned value) {
-   static_assert(std::is_unsigned_v<Unsigned>);
-   for (auto index = sizeof(Unsigned); index > 0; --index) {
-      const auto shift = static_cast<unsigned>((index - 1U) * 8U);
-      append_byte(out, static_cast<std::uint8_t>((value >> shift) & static_cast<Unsigned>(0xffU)));
-   }
-}
-
-template <typename Signed>
-void append_signed(std::vector<std::byte>& out, Signed value) {
-   static_assert(std::is_signed_v<Signed>);
-   using unsigned_type = std::make_unsigned_t<Signed>;
-   auto encoded = static_cast<unsigned_type>(value);
-   encoded ^= (unsigned_type{1} << (std::numeric_limits<unsigned_type>::digits - 1U));
-   append_unsigned(out, encoded);
-}
-
-inline void append_string(std::vector<std::byte>& out, std::string_view value) {
-   for (unsigned char ch : value) {
-      append_byte(out, ch);
-      if (ch == 0U) {
-         append_byte(out, 0xffU);
-      }
-   }
-   append_byte(out, 0U);
-}
-
-inline void append_object_id(std::vector<std::byte>& out, forge::ids::object_id value) {
-   append_byte(out, value.space);
-   append_be16(out, value.type);
-   append_be64(out, value.instance);
-}
-
-template <typename T>
-void append_value(std::vector<std::byte>& out, const T& value) {
-   using value_type = std::remove_cvref_t<T>;
-   if constexpr (std::is_same_v<value_type, bool>) {
-      append_byte(out, value ? 1U : 0U);
-   } else if constexpr (std::is_integral_v<value_type> && std::is_unsigned_v<value_type>) {
-      append_unsigned(out, value);
-   } else if constexpr (std::is_integral_v<value_type> && std::is_signed_v<value_type>) {
-      append_signed(out, value);
-   } else if constexpr (std::is_enum_v<value_type>) {
-      append_value(out, static_cast<std::underlying_type_t<value_type>>(value));
-   } else if constexpr (std::is_same_v<value_type, std::string>) {
-      append_string(out, value);
-   } else if constexpr (std::is_same_v<value_type, std::string_view>) {
-      append_string(out, value);
-   } else if constexpr (std::is_convertible_v<T, std::string_view>) {
-      append_string(out, std::string_view{value});
-   } else if constexpr (std::is_same_v<value_type, forge::ids::object_id>) {
-      append_object_id(out, value);
-   } else if constexpr (forge::ids::typed_id_traits<value_type>::is_typed_id) {
-      append_object_id(out, value.as_object_id());
-   } else {
-      static_assert(sizeof(value_type) == 0, "forge::db::object cannot encode this key member type");
-   }
-}
-
-template <auto Extractor, typename Value>
-void append_extracted(std::vector<std::byte>& out, const Value& value) {
-   append_value(out, extractor_traits<Extractor>::get(value));
-}
-
-template <typename KeySpec>
-struct key_encoder;
-
-template <>
-struct key_encoder<primary_key> {
-   template <typename Value>
-   static void append_object(std::vector<std::byte>& out, const Value& value) {
-      append_value(out, value.id);
-   }
-};
-
-template <auto Extractor>
-struct key_encoder<member_key<Extractor>> {
-   template <typename Value>
-   static void append_object(std::vector<std::byte>& out, const Value& value) {
-      append_extracted<Extractor>(out, value);
-   }
-};
-
-template <auto... Extractors>
-struct key_encoder<composite_key<Extractors...>> {
-   template <typename Value>
-   static void append_object(std::vector<std::byte>& out, const Value& value) {
-      (append_extracted<Extractors>(out, value), ...);
-   }
-};
-
-inline void append_record_prefix(std::vector<std::byte>& out, entry_kind kind, forge::ids::object_id type) {
-   append_byte(out, static_cast<std::uint8_t>(kind));
-   append_byte(out, type.space);
-   append_be16(out, type.type);
-}
-
-inline void append_index_prefix(std::vector<std::byte>& out,
-                                entry_kind kind,
-                                forge::ids::object_id type,
-                                std::uint32_t ordinal) {
-   append_record_prefix(out, kind, type);
-   append_be32(out, ordinal);
-}
-
-template <object_model Object>
-[[nodiscard]] forge::db::core::record_key object_record_key(id_t_of<Object> id) {
-   auto bytes = std::vector<std::byte>{};
-   append_record_prefix(bytes, entry_kind::object_record, object_id_of<Object>::value);
-   append_be64(bytes, id.instance);
-   return forge::db::core::record_key{std::move(bytes)};
-}
-
-template <object_model Object, typename Tag>
-[[nodiscard]] forge::db::core::record_key index_entry_key(const typename Object::value_type& value) {
-   using index = index_by_tag<Object, Tag>;
-   static_assert(secondary_index<index>, "db object index_entry_key is only valid for secondary indexes");
-
-   auto bytes = std::vector<std::byte>{};
-   constexpr auto kind = index::kind == index_kind::secondary_unique ? entry_kind::secondary_unique_index
-                                                                     : entry_kind::secondary_non_unique_index;
-   append_index_prefix(bytes, kind, object_id_of<Object>::value, index_id_by_tag<Object, Tag>);
-   key_encoder<typename index::key_spec>::append_object(bytes, value);
-   if constexpr (index::kind == index_kind::secondary_non_unique) {
-      append_be64(bytes, value.id.instance);
-   }
-   return forge::db::core::record_key{std::move(bytes)};
-}
-
-template <typename T>
-std::vector<std::byte> to_byte_vector(const std::vector<T>& input) {
+template <typename T> std::vector<std::byte> to_byte_vector(const std::vector<T>& input) {
    auto out = std::vector<std::byte>{};
    out.reserve(input.size());
    for (auto value : input) {
@@ -377,20 +190,17 @@ inline std::vector<std::uint8_t> to_uint8_vector(const std::vector<std::byte>& i
    return out;
 }
 
-template <typename T>
-std::vector<std::byte> pack_value(const T& value) {
+template <typename T> std::vector<std::byte> pack_value(const T& value) {
    auto bytes = std::vector<std::uint8_t>{};
    forge::raw::pack(bytes, value);
    return to_byte_vector(bytes);
 }
 
-template <typename T>
-T unpack_value(const std::vector<std::byte>& bytes) {
+template <typename T> T unpack_value(const std::vector<std::byte>& bytes) {
    return forge::raw::unpack<T>(to_uint8_vector(bytes));
 }
 
-template <object_model Object>
-id_t_of<Object> typed_id_from(forge::ids::object_id id) {
+template <object_model Object> id_t_of<Object> typed_id_from(forge::ids::object_id id) {
    if (!forge::ids::matches<id_t_of<Object>::space, id_t_of<Object>::type>(id)) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "object_id does not match db object type");
    }
@@ -402,7 +212,7 @@ boost::asio::awaitable<std::optional<typename Object::value_type>> read_transact
                                                                                            forge::ids::object_id id) {
    tx.template ensure_registered<Object>();
    const auto typed = typed_id_from<Object>(id);
-   const auto key = object_record_key<Object>(typed);
+   const auto key = detail::ordered_key::object_record_key<Object>(typed);
    const auto bytes = co_await tx.get(key);
    if (!bytes.has_value()) {
       co_return std::nullopt;
@@ -411,9 +221,8 @@ boost::asio::awaitable<std::optional<typename Object::value_type>> read_transact
 }
 
 template <object_model Object, typename Access>
-boost::asio::awaitable<object_page<typename Object::value_type>> page_transaction_objects(Access tx,
-                                                                                          forge::db::core::record_range range,
-                                                                                          forge::db::core::page_request request) {
+boost::asio::awaitable<object_page<typename Object::value_type>>
+page_transaction_objects(Access tx, forge::db::core::record_range range, forge::db::core::page_request request) {
    tx.template ensure_registered<Object>();
    forge::db::object::validate_page_request(request);
 
@@ -433,74 +242,89 @@ boost::asio::awaitable<object_page<typename Object::value_type>> page_transactio
    co_return out;
 }
 
-template <object_model Object, typename Access, std::size_t Index = 0>
-boost::asio::awaitable<void> verify_unique_indexes(Access tx, const typename Object::value_type& value) {
+struct materialized_index {
+   forge::db::core::record_key key;
+   bool unique = false;
+};
+
+template <object_model Object, std::size_t Index = 0>
+void materialize_indexes(const typename Object::value_type& value, std::vector<materialized_index>& out) {
    using indexes = typename Object::indexes_type::tuple_type;
    if constexpr (Index < std::tuple_size_v<indexes>) {
       using index = std::tuple_element_t<Index, indexes>;
-      if constexpr (index::kind == index_kind::secondary_unique) {
-         const auto key = index_entry_key<Object, typename index::tag_type>(value);
-         const auto existing = co_await tx.get(key);
-         if (existing.has_value()) {
-            const auto existing_id = unpack_value<id_t_of<Object>>(*existing);
-            if (existing_id != value.id) {
-               FORGE_THROW_EXCEPTION(exceptions::duplicate_object, "db object unique index value already exists");
-            }
+      if constexpr (secondary_index<index>) {
+         out.push_back(materialized_index{
+             .key = detail::ordered_key::index_entry_key<Object, typename index::tag_type>(value),
+             .unique = index::kind == index_kind::ordered_unique,
+         });
+      }
+      materialize_indexes<Object, Index + 1>(value, out);
+   }
+}
+
+template <object_model Object>
+[[nodiscard]] std::vector<materialized_index> materialize_indexes(const typename Object::value_type& value) {
+   auto out = std::vector<materialized_index>{};
+   out.reserve(Object::indexes_type::size - 1U);
+   materialize_indexes<Object>(value, out);
+   return out;
+}
+
+template <object_model Object, typename Access>
+boost::asio::awaitable<void> verify_unique_indexes(Access tx, const typename Object::value_type& value,
+                                                   const std::vector<materialized_index>& indexes) {
+   for (const auto& index : indexes) {
+      if (!index.unique) {
+         continue;
+      }
+      const auto existing = co_await tx.get(index.key);
+      if (existing.has_value()) {
+         const auto existing_id = unpack_value<id_t_of<Object>>(*existing);
+         if (existing_id != value.id) {
+            FORGE_THROW_EXCEPTION(exceptions::duplicate_object, "db object unique index value already exists");
          }
       }
-      co_await verify_unique_indexes<Object, Access, Index + 1>(tx, value);
    }
    co_return;
 }
 
-template <object_model Object, typename Access, std::size_t Index = 0>
-boost::asio::awaitable<void> write_secondary_indexes(Access tx, const typename Object::value_type& value) {
-   using indexes = typename Object::indexes_type::tuple_type;
-   if constexpr (Index < std::tuple_size_v<indexes>) {
-      using index = std::tuple_element_t<Index, indexes>;
-      if constexpr (secondary_index<index>) {
-         const auto key = index_entry_key<Object, typename index::tag_type>(value);
-         co_await tx.put(key, pack_value(value.id));
-      }
-      co_await write_secondary_indexes<Object, Access, Index + 1>(tx, value);
+template <typename Access, typename Id>
+boost::asio::awaitable<void> write_secondary_indexes(Access tx, const std::vector<materialized_index>& indexes, Id id) {
+   const auto packed_id = pack_value(id);
+   for (const auto& index : indexes) {
+      co_await tx.put(index.key, packed_id);
    }
    co_return;
 }
 
-template <object_model Object, typename Access, std::size_t Index = 0>
-boost::asio::awaitable<void> remove_secondary_indexes(Access tx, const typename Object::value_type& value) {
-   using indexes = typename Object::indexes_type::tuple_type;
-   if constexpr (Index < std::tuple_size_v<indexes>) {
-      using index = std::tuple_element_t<Index, indexes>;
-      if constexpr (secondary_index<index>) {
-         const auto key = index_entry_key<Object, typename index::tag_type>(value);
-         co_await tx.erase(key);
-      }
-      co_await remove_secondary_indexes<Object, Access, Index + 1>(tx, value);
+template <typename Access>
+boost::asio::awaitable<void> remove_secondary_indexes(Access tx, const std::vector<materialized_index>& indexes) {
+   for (const auto& index : indexes) {
+      co_await tx.erase(index.key);
    }
    co_return;
 }
 
-template <typename Access, object_value Value>
-boost::asio::awaitable<void> insert_object(Access tx, Value value) {
+template <typename Access, object_value Value> boost::asio::awaitable<void> insert_object(Access tx, Value value) {
    using object_model_type = object_index_for_id_t<typename Value::id_t>;
    tx.template ensure_registered<object_model_type>();
 
-   const auto object_key = object_record_key<object_model_type>(value.id);
+   const auto object_key = detail::ordered_key::object_record_key<object_model_type>(value.id);
    if ((co_await tx.get(object_key)).has_value()) {
       FORGE_THROW_EXCEPTION(exceptions::duplicate_object, "db object id already exists");
    }
 
    auto after = pack_value(value);
+   const auto indexes = materialize_indexes<object_model_type>(value);
    auto mutation = object_mutation{
-      .kind = mutation_kind::insert,
-      .id = value.id.as_object_id(),
-      .after = after,
+       .kind = mutation_kind::insert,
+       .id = value.id.as_object_id(),
+       .after = after,
    };
    co_await tx.before_mutation(mutation);
-   co_await verify_unique_indexes<object_model_type>(tx, value);
+   co_await verify_unique_indexes<object_model_type>(tx, value, indexes);
    co_await tx.put(object_key, std::move(after));
-   co_await write_secondary_indexes<object_model_type>(tx, value);
+   co_await write_secondary_indexes(tx, indexes, value.id);
    tx.changes().mutations.push_back(std::move(mutation));
    co_return;
 }
@@ -517,17 +341,19 @@ boost::asio::awaitable<void> replace_object(Access tx, Value value, mutation_kin
 
    auto before = pack_value(*existing);
    auto after = pack_value(value);
+   const auto old_indexes = materialize_indexes<object_model_type>(*existing);
+   const auto new_indexes = materialize_indexes<object_model_type>(value);
    auto mutation = object_mutation{
-      .kind = kind,
-      .id = value.id.as_object_id(),
-      .before = before,
-      .after = after,
+       .kind = kind,
+       .id = value.id.as_object_id(),
+       .before = before,
+       .after = after,
    };
    co_await tx.before_mutation(mutation);
-   co_await verify_unique_indexes<object_model_type>(tx, value);
-   co_await remove_secondary_indexes<object_model_type>(tx, *existing);
-   co_await tx.put(object_record_key<object_model_type>(value.id), std::move(after));
-   co_await write_secondary_indexes<object_model_type>(tx, value);
+   co_await verify_unique_indexes<object_model_type>(tx, value, new_indexes);
+   co_await remove_secondary_indexes(tx, old_indexes);
+   co_await tx.put(detail::ordered_key::object_record_key<object_model_type>(value.id), std::move(after));
+   co_await write_secondary_indexes(tx, new_indexes, value.id);
    tx.changes().mutations.push_back(std::move(mutation));
    co_return;
 }
@@ -542,14 +368,15 @@ boost::asio::awaitable<void> erase_object(Access tx, forge::ids::object_id id) {
    }
 
    auto before = pack_value(*existing);
+   const auto indexes = materialize_indexes<Object>(*existing);
    auto mutation = object_mutation{
-      .kind = mutation_kind::erase,
-      .id = typed.as_object_id(),
-      .before = before,
+       .kind = mutation_kind::erase,
+       .id = typed.as_object_id(),
+       .before = before,
    };
    co_await tx.before_mutation(mutation);
-   co_await remove_secondary_indexes<Object>(tx, *existing);
-   co_await tx.erase(object_record_key<Object>(typed));
+   co_await remove_secondary_indexes(tx, indexes);
+   co_await tx.erase(detail::ordered_key::object_record_key<Object>(typed));
    tx.changes().mutations.push_back(std::move(mutation));
    co_return;
 }
@@ -569,7 +396,8 @@ boost::asio::awaitable<Value> create_object(Access tx, Fn&& fn) {
    static_assert(std::is_void_v<result_type>, "db object create initializer must return void");
    std::invoke(fn, value);
    if (value.id != generated_id) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db object create initializer must not change generated id");
+      FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor,
+                            "db object create initializer must not change generated id");
    }
 
    co_await insert_object(tx, value);
@@ -604,8 +432,7 @@ boost::asio::awaitable<std::optional<typename Object::value_type>> transaction::
    co_return co_await detail::read_transaction_object<Object>(access{*this}, id);
 }
 
-template <object_value Value>
-boost::asio::awaitable<void> transaction::insert(Value value) {
+template <object_value Value> boost::asio::awaitable<void> transaction::insert(Value value) {
    co_await detail::insert_object(access{*this}, std::move(value));
    co_return;
 }
@@ -616,14 +443,12 @@ boost::asio::awaitable<Value> transaction::create(Fn&& fn) {
    co_return co_await detail::create_object<access, Value>(access{*this}, std::forward<Fn>(fn));
 }
 
-template <object_value Value>
-boost::asio::awaitable<void> transaction::replace(Value value) {
+template <object_value Value> boost::asio::awaitable<void> transaction::replace(Value value) {
    co_await detail::replace_object(access{*this}, std::move(value), mutation_kind::replace);
    co_return;
 }
 
-template <forge::ids::typed_id_like Id, typename Fn>
-boost::asio::awaitable<void> transaction::modify(Id id, Fn&& fn) {
+template <forge::ids::typed_id_like Id, typename Fn> boost::asio::awaitable<void> transaction::modify(Id id, Fn&& fn) {
    using object_model_type = object_index_for_id_t<Id>;
    auto next = co_await get(id);
    using result_type = std::invoke_result_t<Fn&, typename object_model_type::value_type&>;
@@ -633,29 +458,23 @@ boost::asio::awaitable<void> transaction::modify(Id id, Fn&& fn) {
    co_return;
 }
 
-template <forge::ids::typed_id_like Id>
-boost::asio::awaitable<void> transaction::erase(Id id) {
+template <forge::ids::typed_id_like Id> boost::asio::awaitable<void> transaction::erase(Id id) {
    co_await erase<object_index_for_id_t<Id>>(id.as_object_id());
    co_return;
 }
 
-template <object_model Object>
-boost::asio::awaitable<void> transaction::erase(forge::ids::object_id id) {
+template <object_model Object> boost::asio::awaitable<void> transaction::erase(forge::ids::object_id id) {
    co_await detail::erase_object<Object>(access{*this}, id);
    co_return;
 }
 
-template <object_model Object, typename Tag>
-[[nodiscard]] index_view<Object, Tag> transaction::index() const {
+template <object_model Object, typename Tag> [[nodiscard]] index_view<Object, Tag> transaction::index() const {
    access{*this}.template ensure_registered<Object>();
-   return index_view<Object, Tag>{
-      [owner = *this](forge::db::core::record_range range, forge::db::core::page_request request) mutable
-         -> boost::asio::awaitable<object_page<typename Object::value_type>> {
-         co_return co_await detail::page_transaction_objects<Object>(
-            access{owner},
-            std::move(range),
-            std::move(request));
-      }};
+   return index_view<Object, Tag>{[owner = *this](forge::db::core::record_range range,
+                                                  forge::db::core::page_request request) mutable
+                                      -> boost::asio::awaitable<object_page<typename Object::value_type>> {
+      co_return co_await detail::page_transaction_objects<Object>(access{owner}, std::move(range), std::move(request));
+   }};
 }
 
 } // namespace forge::db::object

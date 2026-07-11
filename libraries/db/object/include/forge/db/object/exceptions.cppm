@@ -17,6 +17,7 @@ enum class code : std::uint16_t {
    unregistered_object = 5,
    transaction_closed = 6,
    unsupported_operation = 7,
+   invalid_index_key = 8,
 };
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(code, "forge.db.object")
@@ -28,5 +29,6 @@ using duplicate_object = forge::exceptions::coded_exception<code, code::duplicat
 using unregistered_object = forge::exceptions::coded_exception<code, code::unregistered_object>;
 using transaction_closed = forge::exceptions::coded_exception<code, code::transaction_closed>;
 using unsupported_operation = forge::exceptions::coded_exception<code, code::unsupported_operation>;
+using invalid_index_key = forge::exceptions::coded_exception<code, code::invalid_index_key>;
 
 } // namespace forge::db::object::exceptions

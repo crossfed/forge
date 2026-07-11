@@ -61,6 +61,9 @@ plugins, telemetry and compatibility layers должны быть пригодн
   XML library first, then HTTP API multi-codec body/error binding.
 - [Object Database](iterations/forge-object-database-v1.md): problem notes for
   a neutral typed object/index/session layer above key/value backends.
+  Ordered unique/non-unique and composite indexes are active; hashed indexes
+  are deferred, sequenced/random-access do not fit the persisted backend model,
+  and ranked indexes need a separate backend-neutral design.
 - [Config](config/schema-config-program-options.md): schema rules, neutral
   config documents, env/CLI adapters and redaction.
 - [Secret Provider](iterations/fcl-secret-provider-v1.md): neutral

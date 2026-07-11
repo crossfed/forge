@@ -81,7 +81,8 @@ BOOST_DESCRIBE_STRUCT(account, (forge::db::object::object<account, 1, 7>), (name
 using account_object =
    forge::db::object::object_index<account,
                                  forge::db::object::indexed_by<forge::db::object::primary_unique<by_id>,
-                                                             forge::db::object::secondary_unique<by_name, &account::name>>>;
+                                                             forge::db::object::ordered_unique<
+                                                                by_name, forge::db::object::member<&account::name>>>>;
 
 struct file_record : forge::db::object::object<file_record, 1, 8> {
    std::string path;
@@ -96,7 +97,8 @@ using file_object =
    forge::db::object::object_index<file_record,
                                    forge::db::object::indexed_by<
                                       forge::db::object::primary_unique<by_id>,
-                                      forge::db::object::secondary_unique<by_path, &file_record::path>>>;
+                                      forge::db::object::ordered_unique<
+                                         by_path, forge::db::object::member<&file_record::path>>>>;
 
 struct byte_less {
    bool operator()(const forge::db::core::record_key& left, const forge::db::core::record_key& right) const {
