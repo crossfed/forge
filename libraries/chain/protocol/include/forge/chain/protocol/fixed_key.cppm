@@ -15,8 +15,8 @@ module;
 
 export module forge.chain.protocol.fixed_key;
 
+export import forge.chain.protocol.types;
 import forge.crypto.hex;
-import forge.chain.protocol.types;
 import forge.raw.exceptions;
 import forge.raw.raw;
 import forge.variant.exceptions;
@@ -65,7 +65,7 @@ template <std::size_t Size, std::unsigned_integral Word, std::size_t WordCount>
 
    if (words_left != words_per_output) {
       if (words_left > 1U) {
-         // Spring/CDT fixed_bytes uses byte shifts here, rather than Word-sized shifts.
+         // Compatibility layout shifts by remaining bytes, not by input word width.
          packed <<= static_cast<unsigned>(8U * (words_left - 1U));
       }
       output[output_index] = packed;

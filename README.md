@@ -148,7 +148,7 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [ids](libraries/ids/README.md) | `forge_ids` | Compact object IDs and typed ID bindings. | `forge_raw`, `forge_variant`. |
 | [compression](libraries/compression/README.md) | `forge_compression` | Bounded zlib compression/decompression helpers. | Boost.Iostreams, ZLIB, `forge_exceptions`. |
 | [chain/core](libraries/chain/core/README.md) | `forge_chain_core` | Fundamental chain digest and Merkle primitives. | `forge_crypto`, `forge_exceptions`, `forge_raw`. |
-| [chain/protocol](libraries/chain/protocol/README.md) | `forge_chain_protocol` | Canonical protocol values, transactions, blocks, ABI and signing rules. | `forge_chain_core`, `forge_compression`, `forge_raw`, `forge_variant`, `forge_crypto`. |
+| [chain/protocol](libraries/chain/protocol/README.md) | `forge_chain_protocol` | Canonical protocol values, ordered keys, transactions, blocks, ABI and signing rules. | `forge_chain_core`, `forge_compression`, `forge_raw`, `forge_variant`, `forge_crypto`. |
 | [json](libraries/codec/json/README.md) | `forge_codec_json` | JSON typed/value/document codec over Glaze. | Glaze privately, `forge_variant`, `forge_config_core`, `forge_schema`. |
 | [yaml](libraries/codec/yaml/README.md) | `forge_codec_yaml` | YAML typed/value/document codec with JSON-shaped API. | Glaze privately, `forge_config_core`, `forge_schema`. |
 | [xml](libraries/codec/xml/README.md) | `forge_codec_xml` | XML typed/tree codec over private pugixml. | `forge_core`, `forge_reflect`, `forge_schema`, pugixml privately. |

@@ -138,8 +138,9 @@ class service_node {
 - `forge::chain::core` owns fundamental chain mechanisms that do not depend on
   protocol records, currently the canonical digest and Merkle primitives.
 - `forge::chain::protocol` owns deterministic protocol records, raw-compatible
-  serialization, ABI/system payload shapes, transaction and block ID helpers,
-  digest/preimage helpers and compatibility fixtures.
+  serialization, fixed-size ordered keys, ABI/system payload shapes,
+  transaction and block ID helpers, digest/preimage helpers and compatibility
+  fixtures.
 - Dependency direction is `forge_chain_protocol -> forge_chain_core`; core must
   never import protocol.
 - Chain libraries must not contain controller, state, execution, consensus,
