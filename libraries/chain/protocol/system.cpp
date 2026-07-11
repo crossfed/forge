@@ -4,7 +4,7 @@ module;
 
 #include <new>
 
-module forge.chain.system;
+module forge.chain.protocol.system;
 
 import forge.crypto.sha256;
 import forge.raw.datastream;
@@ -17,7 +17,7 @@ import forge.variant.multiprecision;
 import forge.variant.format;
 import forge.variant.described;
 
-namespace forge::chain {
+namespace forge::chain::protocol {
 
 action_name newaccount::get_name() { return make_name("newaccount"); }
 action_name setcode::get_name() { return make_name("setcode"); }
@@ -29,14 +29,14 @@ action_name unlinkauth::get_name() { return make_name("unlinkauth"); }
 action_name canceldelay::get_name() { return make_name("canceldelay"); }
 action_name onerror::get_name() { return make_name("onerror"); }
 
-} // namespace forge::chain
+} // namespace forge::chain::protocol
 
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::newaccount)
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::setcode)
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::setabi)
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::updateauth)
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::deleteauth)
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::linkauth)
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::unlinkauth)
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::canceldelay)
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::onerror)
+FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::newaccount)
+FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::setcode)
+FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::setabi)
+FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::updateauth)
+FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::deleteauth)
+FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::linkauth)
+FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::unlinkauth)
+FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::canceldelay)
+FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::onerror)

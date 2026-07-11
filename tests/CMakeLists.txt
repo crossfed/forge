@@ -95,13 +95,20 @@ target_link_libraries(test_forge_ids forge_ids forge Boost::included_unit_test_f
 add_test(NAME test_forge_ids COMMAND test_forge_ids WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
-   test_forge_chain
+   test_forge_chain_core
    unit/main.cpp
-   chain/chain_tests.cpp
-   chain/merkle_tests.cpp
+   chain_core/merkle_tests.cpp
 )
-target_link_libraries(test_forge_chain forge_chain forge Boost::included_unit_test_framework)
-add_test(NAME test_forge_chain COMMAND test_forge_chain WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+target_link_libraries(test_forge_chain_core forge_chain_core forge Boost::included_unit_test_framework)
+add_test(NAME test_forge_chain_core COMMAND test_forge_chain_core WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(
+   test_forge_chain_protocol
+   unit/main.cpp
+   chain_protocol/protocol_tests.cpp
+)
+target_link_libraries(test_forge_chain_protocol forge_chain_protocol forge Boost::included_unit_test_framework)
+add_test(NAME test_forge_chain_protocol COMMAND test_forge_chain_protocol WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
    test_forge_db_core
@@ -701,14 +708,25 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
-   test_forge_package_chain_component
+   test_forge_package_chain_core_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
-      ${CMAKE_CURRENT_SOURCE_DIR}/package_chain_component
-      ${CMAKE_BINARY_DIR}/forge-package-chain-component
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_chain_core_component
+      ${CMAKE_BINARY_DIR}/forge-package-chain-core-component
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
-      --test-command forge_package_chain_component
+      --test-command forge_package_chain_core_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_chain_protocol_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_chain_protocol_component
+      ${CMAKE_BINARY_DIR}/forge-package-chain-protocol-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_chain_protocol_component
    DEPENDS test_forge_package_install
 )
 add_custom_target(
@@ -1216,16 +1234,27 @@ add_test(
 )
 set_tests_properties(test_forge_package_compression_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
-   NAME test_forge_package_chain_component
+   NAME test_forge_package_chain_core_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
-      ${CMAKE_CURRENT_SOURCE_DIR}/package_chain_component
-      ${CMAKE_BINARY_DIR}/forge-package-chain-component
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_chain_core_component
+      ${CMAKE_BINARY_DIR}/forge-package-chain-core-component
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
-      --test-command forge_package_chain_component
+      --test-command forge_package_chain_core_component
 )
-set_tests_properties(test_forge_package_chain_component PROPERTIES DEPENDS test_forge_package_install)
+set_tests_properties(test_forge_package_chain_core_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_chain_protocol_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_chain_protocol_component
+      ${CMAKE_BINARY_DIR}/forge-package-chain-protocol-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_chain_protocol_component
+)
+set_tests_properties(test_forge_package_chain_protocol_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_db_core_component
    COMMAND ${CMAKE_CTEST_COMMAND}

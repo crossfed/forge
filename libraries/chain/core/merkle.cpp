@@ -9,11 +9,11 @@ module;
 #include <utility>
 #include <vector>
 
-module forge.chain.merkle;
+module forge.chain.core.merkle;
 
 import forge.raw.raw;
 
-namespace forge::chain {
+namespace forge::chain::core {
 namespace {
 
 digest hash_pair(const digest& left, const digest& right) {
@@ -91,4 +91,4 @@ bool incremental_merkle_tree::empty() const noexcept {
    return mask_ == 0U;
 }
 
-} // namespace forge::chain
+} // namespace forge::chain::core

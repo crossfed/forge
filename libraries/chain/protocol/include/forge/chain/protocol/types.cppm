@@ -10,8 +10,9 @@ module;
 #include <string_view>
 #include <vector>
 
-export module forge.chain.types;
+export module forge.chain.protocol.types;
 
+export import forge.chain.core.types;
 import forge.crypto.asymmetric;
 import forge.crypto.ripemd160;
 import forge.crypto.sha256;
@@ -21,17 +22,16 @@ import forge.raw.raw;
 import forge.variant.value;
 import forge.variant.described;
 
-export namespace forge::chain {
+export namespace forge::chain::protocol {
 
 using bytes = std::vector<std::uint8_t>;
-using chain_id = forge::crypto::sha256;
-using block_id = forge::crypto::sha256;
-using checksum = forge::crypto::sha256;
-using checksum256 = forge::crypto::sha256;
+using chain_id = forge::chain::core::digest;
+using block_id = forge::chain::core::digest;
+using checksum = forge::chain::core::digest;
+using checksum256 = forge::chain::core::digest;
 using checksum512 = forge::crypto::sha512;
 using checksum160 = forge::crypto::ripemd160;
 using transaction_id = checksum;
-using digest = checksum;
 using public_key = forge::crypto::asymmetric::public_key;
 using signature = forge::crypto::asymmetric::signature;
 using weight = std::uint16_t;
@@ -137,9 +137,9 @@ void from_variant(const forge::variant& variant, symbol& value);
 void to_variant(const asset& value, forge::variant& variant);
 void from_variant(const forge::variant& variant, asset& value);
 
-} // namespace forge::chain
+} // namespace forge::chain::protocol
 
-export namespace forge::chain {
+export namespace forge::chain::protocol {
 BOOST_DESCRIBE_STRUCT(name, (), (value))
 BOOST_DESCRIBE_STRUCT(permission_level, (), (actor, permission))
 BOOST_DESCRIBE_STRUCT(symbol_code, (), (value))
@@ -148,9 +148,9 @@ BOOST_DESCRIBE_STRUCT(asset, (), (amount, sym))
 BOOST_DESCRIBE_STRUCT(block_timestamp, (), (slot))
 } // namespace forge::chain
 
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::name)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::permission_level)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::symbol_code)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::symbol)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::asset)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::block_timestamp)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::name)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::permission_level)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::symbol_code)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::symbol)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::asset)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::block_timestamp)

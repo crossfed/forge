@@ -8,9 +8,9 @@ module;
 #include <string>
 #include <vector>
 
-export module forge.chain.abi;
+export module forge.chain.protocol.abi;
 
-export import forge.chain.types;
+export import forge.chain.protocol.types;
 import forge.crypto.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
@@ -18,7 +18,7 @@ import forge.variant.value;
 import forge.variant.containers;
 import forge.variant.described;
 
-export namespace forge::chain {
+export namespace forge::chain::protocol {
 
 
 using type_name = std::string;
@@ -122,17 +122,17 @@ struct abi_def {
    may_not_exist<std::vector<action_result_def>> action_results;
 };
 
-} // namespace forge::chain
+} // namespace forge::chain::protocol
 
 export namespace forge::raw {
 
 template <typename Stream, typename T>
-void pack(Stream& stream, const forge::chain::may_not_exist<T>& value) {
+void pack(Stream& stream, const forge::chain::protocol::may_not_exist<T>& value) {
    forge::raw::pack(stream, value.value);
 }
 
 template <typename Stream, typename T>
-void unpack(Stream& stream, forge::chain::may_not_exist<T>& value) {
+void unpack(Stream& stream, forge::chain::protocol::may_not_exist<T>& value) {
    if constexpr (requires { stream.remaining(); }) {
       if (stream.remaining()) {
          forge::raw::unpack(stream, value.value);
@@ -146,7 +146,7 @@ void unpack(Stream& stream, forge::chain::may_not_exist<T>& value) {
 
 } // namespace forge::raw
 
-export namespace forge::chain {
+export namespace forge::chain::protocol {
    BOOST_DESCRIBE_STRUCT(type_def, (), (new_type_name, type))
    BOOST_DESCRIBE_STRUCT(field_def, (), (name, type))
    BOOST_DESCRIBE_STRUCT(struct_def, (), (name, base, fields))
@@ -170,7 +170,7 @@ export namespace forge::chain {
 export namespace forge::raw {
 
 template <typename Stream>
-void pack(Stream& stream, const forge::chain::abi_def& value) {
+void pack(Stream& stream, const forge::chain::protocol::abi_def& value) {
    forge::raw::pack(stream, value.version);
    forge::raw::pack(stream, value.types);
    forge::raw::pack(stream, value.structs);
@@ -184,7 +184,7 @@ void pack(Stream& stream, const forge::chain::abi_def& value) {
 }
 
 template <typename Stream>
-void unpack(Stream& stream, forge::chain::abi_def& value) {
+void unpack(Stream& stream, forge::chain::protocol::abi_def& value) {
    forge::raw::unpack(stream, value.version);
    forge::raw::unpack(stream, value.types);
    forge::raw::unpack(stream, value.structs);
@@ -197,11 +197,11 @@ void unpack(Stream& stream, forge::chain::abi_def& value) {
    forge::raw::unpack(stream, value.action_results);
 }
 
-inline forge::chain::bytes pack(const forge::chain::abi_def& value) {
+inline forge::chain::protocol::bytes pack(const forge::chain::protocol::abi_def& value) {
    forge::datastream<std::size_t> size_stream;
    forge::raw::pack(size_stream, value);
 
-   forge::chain::bytes out(size_stream.tellp());
+   forge::chain::protocol::bytes out(size_stream.tellp());
    if (!out.empty()) {
       forge::datastream<std::uint8_t*> stream(out.data(), out.size());
       forge::raw::pack(stream, value);
@@ -211,12 +211,12 @@ inline forge::chain::bytes pack(const forge::chain::abi_def& value) {
 
 } // namespace forge::raw
 
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::type_def)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::field_def)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::struct_def)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::action_def)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::table_def)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::clause_pair)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::error_message)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::variant_def)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::action_result_def)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::type_def)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::field_def)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::struct_def)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::action_def)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::table_def)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::clause_pair)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::error_message)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::variant_def)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::action_result_def)

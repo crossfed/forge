@@ -37,7 +37,7 @@
 
 import forge.asio.runtime;
 import forge.asio.blocking;
-import forge.chain.fixed_key;
+import forge.chain.protocol.fixed_key;
 import forge.crypto.hex;
 import forge.crypto.sha256;
 import forge.ids.object_id;
@@ -131,7 +131,7 @@ struct document : forge::db::object::object<document, 2, 9> {
    std::uint32_t tenant = 0;
    std::string email;
    std::uint64_t rank = 0;
-   forge::chain::key256 external_key;
+   forge::chain::protocol::key256 external_key;
    forge::crypto::sha256 digest;
    toy_ordered score;
 
@@ -845,7 +845,7 @@ std::string hex(const std::vector<std::byte>& bytes) {
    value.tenant = tenant;
    value.email = std::move(email);
    value.rank = rank;
-   value.external_key = forge::chain::key256::make_from_word_sequence<std::uint64_t>(
+   value.external_key = forge::chain::protocol::key256::make_from_word_sequence<std::uint64_t>(
        std::uint64_t{0U}, std::uint64_t{0U}, std::uint64_t{0U}, instance);
    value.digest = forge::crypto::sha256::hash(value.email + ':' + std::to_string(instance));
    value.score = toy_ordered{score};
@@ -879,7 +879,7 @@ static_assert(forge::db::object::index_id_by_tag<account_object, by_id> == 0);
 static_assert(forge::db::object::index_id_by_tag<account_object, by_name> == 1);
 static_assert(forge::db::object::index_id_by_tag<account_object, by_region_balance> == 2);
 static_assert(forge::db::object::index_id_by_tag<account_object, by_region> == 3);
-static_assert(forge::db::object::sortable_key<forge::chain::key256>);
+static_assert(forge::db::object::sortable_key<forge::chain::protocol::key256>);
 static_assert(forge::db::object::sortable_key<forge::crypto::sha256>);
 static_assert(forge::db::object::sortable_key<toy_ordered>);
 static_assert(!forge::db::object::sortable_key<unsupported_key>);

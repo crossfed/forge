@@ -11,9 +11,9 @@ module;
 #include <variant>
 #include <vector>
 
-export module forge.chain.transaction;
+export module forge.chain.protocol.transaction;
 
-export import forge.chain.types;
+export import forge.chain.protocol.types;
 import forge.crypto.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
@@ -21,7 +21,7 @@ import forge.raw.varint;
 import forge.variant.value;
 import forge.variant.described;
 
-export namespace forge::chain {
+export namespace forge::chain::protocol {
 
 struct action_base {
    account_name account;
@@ -60,7 +60,7 @@ struct transaction : transaction_header {
    extensions transaction_extensions;
 
    [[nodiscard]] transaction_id id() const;
-   [[nodiscard]] digest sig_digest(const chain_id& chain_id, const std::vector<bytes>& cfd = {}) const;
+   [[nodiscard]] core::digest sig_digest(const chain_id& chain_id, const std::vector<bytes>& cfd = {}) const;
 };
 
 struct signed_transaction : transaction {
@@ -83,7 +83,7 @@ struct packed_transaction {
    bytes packed_context_free_data;
    bytes packed_trx;
 
-   [[nodiscard]] digest packed_digest() const;
+   [[nodiscard]] core::digest packed_digest() const;
    [[nodiscard]] transaction_id id() const;
    [[nodiscard]] signed_transaction get_signed_transaction() const;
 };
@@ -91,11 +91,11 @@ struct packed_transaction {
 bytes pack_transaction(const transaction& value);
 transaction_id calculate_transaction_id(const transaction& value);
 bytes signature_preimage(const chain_id& chain_id, const transaction& value, const std::vector<bytes>& cfd = {});
-digest signature_digest(const chain_id& chain_id, const transaction& value, const std::vector<bytes>& cfd = {});
+core::digest signature_digest(const chain_id& chain_id, const transaction& value, const std::vector<bytes>& cfd = {});
 
-} // namespace forge::chain
+} // namespace forge::chain::protocol
 
-export namespace forge::chain {
+export namespace forge::chain::protocol {
 BOOST_DESCRIBE_STRUCT(action_base, (), (account, name, authorization))
 BOOST_DESCRIBE_STRUCT(action, (action_base), (data))
 BOOST_DESCRIBE_STRUCT(deferred_transaction_generation_context, (), (sender_trx_id, sender_id, sender))
@@ -106,10 +106,10 @@ BOOST_DESCRIBE_STRUCT(signed_transaction, (transaction), (signatures, context_fr
 BOOST_DESCRIBE_STRUCT(packed_transaction, (), (signatures, compression, packed_context_free_data, packed_trx))
 } // namespace forge::chain
 
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::action_base)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::action)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::deferred_transaction_generation_context)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::transaction_header)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::transaction)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::signed_transaction)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::packed_transaction)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::action_base)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::action)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::deferred_transaction_generation_context)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::transaction_header)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::transaction)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::signed_transaction)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::packed_transaction)

@@ -1,8 +1,9 @@
 # Forge Chain Modern Merkle Donor Baseline v1
 
 This note records the Spring behavior used to add modern Merkle primitives to
-`forge_chain`. Forge owns an independent C++23 implementation and uses Spring
-as a protocol compatibility donor.
+`forge_chain_core` and its integration with `forge_chain_protocol`. Forge owns
+an independent C++23 implementation and uses Spring as a protocol compatibility
+donor.
 
 ## Donor Snapshot
 
@@ -33,9 +34,9 @@ as a protocol compatibility donor.
 - The legacy EOSIO algorithm, including odd-leaf duplication and left/right bit
   marking, is not supported.
 - Spring's internal Merkle worker pool is runtime scheduling policy and is not
-  part of `forge_chain`.
+  part of `forge_chain_core`.
 - Controller, block assembly, fork database and finality policy remain outside
-  the value/wire primitive library.
+  the Chain family.
 - No `calculate_action_mroot()` helper is provided. Modern Spring/Savanna uses
   the block header's `action_mroot` as a finality-tree root.
 

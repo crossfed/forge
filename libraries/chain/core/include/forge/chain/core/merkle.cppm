@@ -8,13 +8,13 @@ module;
 #include <utility>
 #include <vector>
 
-export module forge.chain.merkle;
+export module forge.chain.core.merkle;
 
-export import forge.chain.types;
+export import forge.chain.core.types;
 import forge.raw.exceptions;
 import forge.raw.raw;
 
-export namespace forge::chain {
+export namespace forge::chain::core {
 
 digest calculate_merkle_root(std::span<const digest> leaves);
 
@@ -54,4 +54,4 @@ class incremental_merkle_tree {
    std::vector<digest> trees_;
 };
 
-} // namespace forge::chain
+} // namespace forge::chain::core
