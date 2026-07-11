@@ -197,13 +197,13 @@ void unpack(Stream& stream, forge::chain::abi_def& value) {
    forge::raw::unpack(stream, value.action_results);
 }
 
-inline std::vector<char> pack(const forge::chain::abi_def& value) {
+inline forge::chain::bytes pack(const forge::chain::abi_def& value) {
    forge::datastream<std::size_t> size_stream;
    forge::raw::pack(size_stream, value);
 
-   std::vector<char> out(size_stream.tellp());
+   forge::chain::bytes out(size_stream.tellp());
    if (!out.empty()) {
-      forge::datastream<char*> stream(out.data(), out.size());
+      forge::datastream<std::uint8_t*> stream(out.data(), out.size());
       forge::raw::pack(stream, value);
    }
    return out;

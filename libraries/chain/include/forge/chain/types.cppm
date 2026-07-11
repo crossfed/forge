@@ -23,7 +23,7 @@ import forge.variant.described;
 
 export namespace forge::chain {
 
-using bytes = std::vector<char>;
+using bytes = std::vector<std::uint8_t>;
 using chain_id = forge::crypto::sha256;
 using block_id = forge::crypto::sha256;
 using checksum = forge::crypto::sha256;
@@ -44,8 +44,7 @@ using extensions = std::vector<std::pair<std::uint16_t, bytes>>;
 struct name {
    std::uint64_t value = 0;
 
-   constexpr name(std::uint64_t raw = 0)
-       : value(raw) {}
+   constexpr name(std::uint64_t raw = 0) : value(raw) {}
 
    constexpr bool operator==(const name&) const = default;
    constexpr auto operator<=>(const name&) const = default;
@@ -67,8 +66,7 @@ struct permission_level {
 struct symbol_code {
    std::uint64_t value = 0;
 
-   constexpr explicit symbol_code(std::uint64_t raw = 0)
-       : value(raw) {}
+   constexpr explicit symbol_code(std::uint64_t raw = 0) : value(raw) {}
 
    constexpr std::uint64_t raw() const {
       return value;
@@ -80,11 +78,9 @@ struct symbol_code {
 struct symbol {
    std::uint64_t value = 0;
 
-   constexpr symbol(std::uint64_t raw = 0)
-       : value(raw) {}
+   constexpr symbol(std::uint64_t raw = 0) : value(raw) {}
 
-   constexpr symbol(symbol_code code, std::uint8_t precision)
-       : value((code.raw() << 8U) | precision) {}
+   constexpr symbol(symbol_code code, std::uint8_t precision) : value((code.raw() << 8U) | precision) {}
 
    constexpr std::uint64_t raw() const {
       return value;
@@ -105,9 +101,7 @@ struct asset {
    std::int64_t amount = 0;
    symbol sym{};
 
-   constexpr asset(std::int64_t raw_amount = 0, symbol raw_symbol = {})
-       : amount(raw_amount)
-       , sym(raw_symbol) {}
+   constexpr asset(std::int64_t raw_amount = 0, symbol raw_symbol = {}) : amount(raw_amount), sym(raw_symbol) {}
 
    constexpr bool operator==(const asset&) const = default;
 };
@@ -115,8 +109,7 @@ struct asset {
 struct block_timestamp {
    std::uint32_t slot = 0;
 
-   constexpr block_timestamp(std::uint32_t raw_slot = 0)
-       : slot(raw_slot) {}
+   constexpr block_timestamp(std::uint32_t raw_slot = 0) : slot(raw_slot) {}
 
    constexpr auto operator<=>(const block_timestamp&) const = default;
 };
@@ -153,7 +146,7 @@ BOOST_DESCRIBE_STRUCT(symbol_code, (), (value))
 BOOST_DESCRIBE_STRUCT(symbol, (), (value))
 BOOST_DESCRIBE_STRUCT(asset, (), (amount, sym))
 BOOST_DESCRIBE_STRUCT(block_timestamp, (), (slot))
-}
+} // namespace forge::chain
 
 FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::name)
 FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::permission_level)

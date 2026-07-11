@@ -6,6 +6,7 @@ module;
 #include <cstdint>
 #include <deque>
 #include <new>
+#include <span>
 #include <variant>
 #include <vector>
 
@@ -41,13 +42,13 @@ block_id block_header::calculate_id() const {
    return calculate_block_id(*this);
 }
 
-std::vector<char> signature_preimage(const block_header& value) {
+bytes signature_preimage(const block_header& value) {
    return forge::raw::pack(value);
 }
 
 digest block_digest(const block_header& value) {
    const auto preimage = signature_preimage(value);
-   return forge::crypto::sha256::hash(preimage.data(), static_cast<std::uint32_t>(preimage.size()));
+   return forge::crypto::sha256::hash(std::span<const std::uint8_t>{preimage.data(), preimage.size()});
 }
 
 std::uint32_t calculate_block_num_from_id(const block_id& id) {

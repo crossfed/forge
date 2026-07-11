@@ -5,6 +5,7 @@ module;
 #include <cstring>
 #include <exception>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -359,8 +360,9 @@ credential_public_key::credential_public_key(const assertion& c, const forge::cr
 
    FORGE_ASSERT(client_data.type == "webauthn.get", "webauthn signature type not an assertion");
 
-   std::vector<char> challenge_bytes = forge::crypto::base64url_decode(client_data.challenge);
-   FORGE_ASSERT(forge::crypto::sha256(challenge_bytes.data(), challenge_bytes.size()) == digest, "Wrong webauthn challenge");
+   const auto challenge_bytes = forge::crypto::base64url_decode(client_data.challenge);
+   FORGE_ASSERT(forge::crypto::sha256{std::span<const std::uint8_t>{challenge_bytes}} == digest,
+                "Wrong webauthn challenge");
 
    char required_origin_scheme[] = "https://";
    size_t https_len = strlen(required_origin_scheme);
@@ -375,15 +377,17 @@ credential_public_key::credential_public_key(const assertion& c, const forge::cr
    if (c.auth_data[32] & 0x04)
       user_verification_type = user_presence_t::USER_PRESENCE_VERIFIED;
 
-   static_assert(min_auth_data_size >= sizeof(forge::crypto::sha256), "auth_data min size not enough to store a sha256");
-   FORGE_ASSERT(memcmp(c.auth_data.data(), forge::crypto::sha256::hash(rpid).data(), sizeof(forge::crypto::sha256)) == 0,
+   static_assert(min_auth_data_size >= sizeof(forge::crypto::sha256),
+                 "auth_data min size not enough to store a sha256");
+   FORGE_ASSERT(memcmp(c.auth_data.data(), forge::crypto::sha256::hash(rpid).data(), sizeof(forge::crypto::sha256)) ==
+                    0,
               "webauthn rpid hash doesn't match origin");
 
    // the signature (and thus public key we need to return) will be over
    //  sha256(auth_data || client_data_hash)
    forge::crypto::sha256 client_data_hash = forge::crypto::sha256::hash(c.client_json);
    forge::crypto::sha256::encoder e;
-   e.write((char*)c.auth_data.data(), c.auth_data.size());
+   e.write(std::span<const std::uint8_t>{c.auth_data.data(), c.auth_data.size()});
    e.write(client_data_hash.data(), client_data_hash.data_size());
    forge::crypto::sha256 signed_digest = e.result();
 

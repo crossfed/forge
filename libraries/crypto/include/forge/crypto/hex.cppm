@@ -26,7 +26,6 @@ export namespace forge::crypto {
 uint8_t from_hex(char c);
 std::string to_hex(const char* d, uint32_t s);
 std::string to_hex(const std::uint8_t* d, uint32_t s);
-std::string to_hex(const std::vector<char>& data);
 std::string to_hex(const bytes& data);
 
 /**

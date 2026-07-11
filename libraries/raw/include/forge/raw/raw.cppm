@@ -5,6 +5,8 @@ module;
 #include <boost/dynamic_bitset.hpp>
 #include <array>
 #include <chrono>
+#include <climits>
+#include <cstddef>
 #include <map>
 #include <deque>
 #include <list>
@@ -41,6 +43,30 @@ import forge.variant.described;
 import forge.variant.dynamic_bitset;
 
 export namespace forge::raw {
+
+using bytes = std::vector<std::uint8_t>;
+
+static_assert(CHAR_BIT == 8, "Forge raw serialization requires 8-bit bytes");
+
+namespace detail {
+
+template <typename Stream> inline void write_bytes(Stream& stream, std::span<const std::byte> value) {
+   stream.write(reinterpret_cast<const char*>(value.data()), value.size());
+}
+
+template <typename Stream> inline void read_bytes(Stream& stream, std::span<std::byte> value) {
+   stream.read(reinterpret_cast<char*>(value.data()), value.size());
+}
+
+template <typename Stream, typename T> inline void write_object(Stream& stream, const T& value) {
+   write_bytes(stream, std::as_bytes(std::span{&value, std::size_t{1}}));
+}
+
+template <typename Stream, typename T> inline void read_object(Stream& stream, T& value) {
+   read_bytes(stream, std::as_writable_bytes(std::span{&value, std::size_t{1}}));
+}
+
+} // namespace detail
 
 template <size_t Size>
 using UInt = boost::multiprecision::number<boost::multiprecision::cpp_int_backend<
@@ -189,7 +215,8 @@ template <typename Stream> inline void unpack(Stream& s, variant& v) {
       return;
    }
    default:
-      FORGE_THROW_EXCEPTION(forge::raw::exceptions::codec_error, "unknown variant type", forge::exceptions::ctx("t", t));
+      FORGE_THROW_EXCEPTION(forge::raw::exceptions::codec_error, "unknown variant type",
+                            forge::exceptions::ctx("t", t));
    }
 }
 
@@ -240,13 +267,13 @@ template <typename Stream> inline void unpack(Stream& s, std::filesystem::path& 
 
 template <typename Stream> inline void pack(Stream& s, const std::chrono::sys_seconds& tp) {
    const uint32_t sec = forge::chrono::to_fc_time_point_sec_wire(tp);
-   s.write((const char*)&sec, sizeof(sec));
+   detail::write_object(s, sec);
 }
 
 template <typename Stream> inline void unpack(Stream& s, std::chrono::sys_seconds& tp) {
    try {
       uint32_t sec;
-      s.read((char*)&sec, sizeof(sec));
+      detail::read_object(s, sec);
       tp = forge::chrono::from_fc_time_point_sec_wire(sec);
    }
    FORGE_CAPTURE_AND_RETHROW("")
@@ -254,13 +281,13 @@ template <typename Stream> inline void unpack(Stream& s, std::chrono::sys_second
 
 template <typename Stream> inline void pack(Stream& s, const std::chrono::sys_time<std::chrono::microseconds>& tp) {
    const uint64_t usec = forge::chrono::to_fc_time_point_wire(tp);
-   s.write((const char*)&usec, sizeof(usec));
+   detail::write_object(s, usec);
 }
 
 template <typename Stream> inline void unpack(Stream& s, std::chrono::sys_time<std::chrono::microseconds>& tp) {
    try {
       uint64_t usec;
-      s.read((char*)&usec, sizeof(usec));
+      detail::read_object(s, usec);
       tp = forge::chrono::from_fc_time_point_wire(usec);
    }
    FORGE_CAPTURE_AND_RETHROW("")
@@ -268,24 +295,24 @@ template <typename Stream> inline void unpack(Stream& s, std::chrono::sys_time<s
 
 template <typename Stream> inline void pack(Stream& s, const std::chrono::microseconds& usec) {
    const uint64_t usec_as_int64 = forge::chrono::to_fc_microseconds_wire(usec);
-   s.write((const char*)&usec_as_int64, sizeof(usec_as_int64));
+   detail::write_object(s, usec_as_int64);
 }
 
 template <typename Stream> inline void unpack(Stream& s, std::chrono::microseconds& usec) {
    try {
       uint64_t usec_as_int64;
-      s.read((char*)&usec_as_int64, sizeof(usec_as_int64));
+      detail::read_object(s, usec_as_int64);
       usec = forge::chrono::from_fc_microseconds_wire(usec_as_int64);
    }
    FORGE_CAPTURE_AND_RETHROW("")
 }
 
 template <typename Stream> inline void pack(Stream& s, const forge::uint128& u) {
-   s.write((const char*)&u, sizeof(u));
+   detail::write_object(s, u);
 }
 
 template <typename Stream> inline void unpack(Stream& s, forge::uint128& u) {
-   s.read((char*)&u, sizeof(u));
+   detail::read_object(s, u);
 }
 
 template <typename Stream, typename T, size_t N>
@@ -338,7 +365,7 @@ template <typename Stream> inline void pack(Stream& s, const signed_int& v) {
       uint8_t b = uint8_t(val) & 0x7f;
       val >>= 7;
       b |= ((val > 0) << 7);
-      s.write((char*)&b, 1); //.put(b);
+      detail::write_object(s, b);
    } while (val);
 }
 
@@ -348,7 +375,7 @@ template <typename Stream> inline void pack(Stream& s, const unsigned_int& v) {
       uint8_t b = uint8_t(val) & 0x7f;
       val >>= 7;
       b |= ((val > 0) << 7);
-      s.write((char*)&b, 1); //.put(b);
+      detail::write_object(s, b);
    } while (val);
 }
 
@@ -411,7 +438,7 @@ template <typename Stream, typename Byte> inline void pack_byte_vector(Stream& s
    FORGE_ASSERT(value.size() <= MAX_SIZE_OF_BYTE_ARRAYS);
    forge::raw::pack(s, unsigned_int((uint32_t)value.size()));
    if (value.size())
-      s.write(reinterpret_cast<const char*>(value.data()), (uint32_t)value.size());
+      write_bytes(s, std::as_bytes(std::span{value}));
 }
 
 template <typename Stream, typename Byte> inline void unpack_byte_vector(Stream& s, std::vector<Byte>& value) {
@@ -420,7 +447,7 @@ template <typename Stream, typename Byte> inline void unpack_byte_vector(Stream&
    FORGE_ASSERT(size.value <= MAX_SIZE_OF_BYTE_ARRAYS);
    value.resize(size.value);
    if (value.size())
-      s.read(reinterpret_cast<char*>(value.data()), value.size());
+      read_bytes(s, std::as_writable_bytes(std::span{value}));
 }
 
 template <typename Container, typename T> inline void pack_to_container(Container& out, const T& value) {
@@ -459,10 +486,10 @@ template <typename Stream> inline void pack(Stream& s, const std::string& v) {
 }
 
 template <typename Stream> inline void unpack(Stream& s, std::string& v) {
-   std::vector<char> tmp;
+   bytes tmp;
    forge::raw::unpack(s, tmp);
    if (tmp.size())
-      v = std::string(tmp.data(), tmp.data() + tmp.size());
+      v = std::string(reinterpret_cast<const char*>(tmp.data()), tmp.size());
    else
       v = std::string();
 }
@@ -504,10 +531,10 @@ template <typename IsClass = forge::true_type> struct if_class {
 
 template <> struct if_class<forge::false_type> {
    template <typename Stream, typename T> static inline void pack(Stream& s, const T& v) {
-      s.write((char*)&v, sizeof(v));
+      write_object(s, v);
    }
    template <typename Stream, typename T> static inline void unpack(Stream& s, T& v) {
-      s.read((char*)&v, sizeof(v));
+      read_object(s, v);
    }
 };
 
@@ -711,7 +738,7 @@ template <typename Stream, typename T> inline void unpack(Stream& s, std::set<T>
 
 template <typename Stream, TrivialScalar T, std::size_t S> inline void pack(Stream& s, const std::array<T, S>& value) {
    static_assert(S <= MAX_NUM_ARRAY_ELEMENTS, "number of elements in array is too large");
-   s.write((const char*)value.data(), S * sizeof(T));
+   detail::write_bytes(s, std::as_bytes(std::span{value}));
 }
 
 template <typename Stream, NotTrivialScalar T, std::size_t S>
@@ -724,7 +751,7 @@ inline void pack(Stream& s, const std::array<T, S>& value) {
 
 template <typename Stream, TrivialScalar T, std::size_t S> inline void unpack(Stream& s, std::array<T, S>& value) {
    static_assert(S <= MAX_NUM_ARRAY_ELEMENTS, "number of elements in array is too large");
-   s.read((char*)value.data(), S * sizeof(T));
+   detail::read_bytes(s, std::as_writable_bytes(std::span{value}));
 }
 
 template <typename Stream, NotTrivialScalar T, std::size_t S> inline void unpack(Stream& s, std::array<T, S>& value) {
@@ -766,46 +793,32 @@ template <typename T> inline size_t pack_size(const T& v) {
    return ps.tellp();
 }
 
-template <typename T> inline std::vector<char> pack(const T& v) {
+template <typename T> inline bytes pack(const T& v) {
    datastream<size_t> ps;
    forge::raw::pack(ps, v);
-   std::vector<char> vec(ps.tellp());
+   bytes vec(ps.tellp());
 
    if (vec.size()) {
-      datastream<char*> ds(vec.data(), size_t(vec.size()));
+      datastream<std::uint8_t*> ds(vec.data(), size_t(vec.size()));
       forge::raw::pack(ds, v);
    }
    return vec;
-}
-
-template <typename T> inline void pack(std::vector<char>& out, const T& v) {
-   detail::pack_to_container(out, v);
 }
 
 template <typename T> inline void pack(std::vector<std::uint8_t>& out, const T& v) {
    detail::pack_to_container(out, v);
 }
 
-template <typename T, typename... Next> inline std::vector<char> pack(const T& v, Next... next) {
+template <typename T, typename... Next> inline bytes pack(const T& v, Next... next) {
    datastream<size_t> ps;
    forge::raw::pack(ps, v, next...);
-   std::vector<char> vec(ps.tellp());
+   bytes vec(ps.tellp());
 
    if (vec.size()) {
-      datastream<char*> ds(vec.data(), size_t(vec.size()));
+      datastream<std::uint8_t*> ds(vec.data(), size_t(vec.size()));
       forge::raw::pack(ds, v, next...);
    }
    return vec;
-}
-
-template <typename T> inline T unpack(const std::vector<char>& s) {
-   try {
-      T tmp;
-      datastream<const char*> ds(s.data(), size_t(s.size()));
-      forge::raw::unpack(ds, tmp);
-      return tmp;
-   }
-   FORGE_CAPTURE_AND_RETHROW("error unpacking ${type}", forge::exceptions::ctx("type", forge::type_name<T>()))
 }
 
 template <typename T> inline T unpack(std::span<const std::uint8_t> s) {
@@ -834,32 +847,24 @@ template <typename T> inline void unpack(const std::vector<std::uint8_t>& s, T& 
    forge::raw::unpack(std::span<const std::uint8_t>{s.data(), s.size()}, tmp);
 }
 
-template <typename T> inline void unpack(const std::vector<char>& s, T& tmp) {
-   try {
-      datastream<const char*> ds(s.data(), size_t(s.size()));
-      forge::raw::unpack(ds, tmp);
-   }
-   FORGE_CAPTURE_AND_RETHROW("error unpacking ${type}", forge::exceptions::ctx("type", forge::type_name<T>()))
-}
-
-template <typename T> inline void pack(char* d, uint32_t s, const T& v) {
-   datastream<char*> ds(d, s);
+template <typename T> inline void pack(std::uint8_t* d, uint32_t s, const T& v) {
+   datastream<std::uint8_t*> ds(d, s);
    forge::raw::pack(ds, v);
 }
 
-template <typename T> inline T unpack(const char* d, uint32_t s) {
+template <typename T> inline T unpack(const std::uint8_t* d, uint32_t s) {
    try {
       T v;
-      datastream<const char*> ds(d, s);
+      datastream<const std::uint8_t*> ds(d, s);
       forge::raw::unpack(ds, v);
       return v;
    }
    FORGE_CAPTURE_AND_RETHROW("error unpacking ${type}", forge::exceptions::ctx("type", forge::get_typename<T>::name()))
 }
 
-template <typename T> inline void unpack(const char* d, uint32_t s, T& v) {
+template <typename T> inline void unpack(const std::uint8_t* d, uint32_t s, T& v) {
    try {
-      datastream<const char*> ds(d, s);
+      datastream<const std::uint8_t*> ds(d, s);
       forge::raw::unpack(ds, v);
    }
    FORGE_CAPTURE_AND_RETHROW("error unpacking ${type}", forge::exceptions::ctx("type", forge::get_typename<T>::name()))
@@ -900,12 +905,12 @@ template <typename Stream, typename... T> void unpack(Stream& s, std::variant<T.
 template <typename Stream, typename T> void pack(Stream& s, const boost::multiprecision::number<T>& n) {
    static_assert(sizeof(n) == (std::numeric_limits<boost::multiprecision::number<T>>::digits + 1) / 8,
                  "unexpected padding");
-   s.write((const char*)&n, sizeof(n));
+   detail::write_object(s, n);
 }
 template <typename Stream, typename T> void unpack(Stream& s, boost::multiprecision::number<T>& n) {
    static_assert(sizeof(n) == (std::numeric_limits<boost::multiprecision::number<T>>::digits + 1) / 8,
                  "unexpected padding");
-   s.read((char*)&n, sizeof(n));
+   detail::read_object(s, n);
 }
 
 template <typename Stream> void pack(Stream& s, const UInt<256>& n) {

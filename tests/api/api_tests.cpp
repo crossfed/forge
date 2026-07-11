@@ -133,6 +133,46 @@ class local_only_api : public forge::api::core::contract<local_only_api> {
 
 FORGE_API(local_only_api, FORGE_API_CONTRACT("local.only", 1, 0))
 
+class local_request {
+ public:
+   explicit local_request(std::string value) : value_(std::make_unique<std::string>(std::move(value))) {}
+   local_request(local_request&&) noexcept = default;
+   local_request& operator=(local_request&&) noexcept = default;
+   local_request(const local_request&) = delete;
+   local_request& operator=(const local_request&) = delete;
+
+   [[nodiscard]] std::string take() {
+      return std::move(*value_);
+   }
+
+ private:
+   std::unique_ptr<std::string> value_;
+};
+
+class local_response {
+ public:
+   explicit local_response(std::string value) : value_(std::make_unique<std::string>(std::move(value))) {}
+   local_response(local_response&&) noexcept = default;
+   local_response& operator=(local_response&&) noexcept = default;
+   local_response(const local_response&) = delete;
+   local_response& operator=(const local_response&) = delete;
+
+   [[nodiscard]] const std::string& value() const noexcept {
+      return *value_;
+   }
+
+ private:
+   std::unique_ptr<std::string> value_;
+};
+
+class local_data_api : public forge::api::core::contract<local_data_api> {
+ public:
+   virtual ~local_data_api() = default;
+   virtual boost::asio::awaitable<local_response> transform(local_request request) = 0;
+};
+
+FORGE_API(local_data_api, FORGE_API_CONTRACT("local.data", 1, 0), FORGE_API_METHOD(transform))
+
 class remote_only_api : public forge::api::core::contract<remote_only_api, forge::api::core::surface::remote> {
  public:
    virtual ~remote_only_api() = default;
@@ -170,6 +210,8 @@ static_assert(forge::api::core::supports_surface<cache_api, forge::api::core::su
 static_assert(forge::api::core::interface<local_only_api>);
 static_assert(forge::api::core::local_interface<local_only_api>);
 static_assert(!forge::api::core::remote_interface<local_only_api>);
+static_assert(forge::api::core::local_interface<local_data_api>);
+static_assert(!forge::api::core::remote_interface<local_data_api>);
 static_assert(forge::api::core::interface<remote_only_api>);
 static_assert(!forge::api::core::local_interface<remote_only_api>);
 static_assert(forge::api::core::remote_interface<remote_only_api>);
@@ -293,6 +335,13 @@ class positional_impl final : public positional_api {
 
    boost::asio::awaitable<protocol::chunk> concat_old(std::string left, std::string right) override {
       co_return protocol::chunk{.bytes = std::move(left) + ":old:" + std::move(right)};
+   }
+};
+
+class local_data_impl final : public local_data_api {
+ public:
+   boost::asio::awaitable<local_response> transform(local_request request) override {
+      co_return local_response{"local:" + request.take()};
    }
 };
 
@@ -493,6 +542,36 @@ BOOST_AUTO_TEST_CASE(generated_api_descriptor_records_positional_argument_names)
    BOOST_TEST(concat_since->since_revision == 2U);
    BOOST_CHECK(concat_old->deprecated);
    BOOST_TEST(concat_old->deprecation_reason == "use concat");
+}
+
+BOOST_AUTO_TEST_CASE(local_api_does_not_require_raw_serialization) {
+   const auto descriptor = local_data_api::describe();
+   const auto* transform = forge::api::core::find_method(descriptor, "transform");
+   BOOST_REQUIRE(transform != nullptr);
+   BOOST_CHECK(forge::api::core::supports(descriptor.supported_surfaces, forge::api::core::surface::local));
+   BOOST_CHECK(!forge::api::core::supports(descriptor.supported_surfaces, forge::api::core::surface::remote));
+   BOOST_CHECK(!transform->raw_invoker);
+   BOOST_TEST((transform->request_type == std::type_index{typeid(local_request)}));
+   BOOST_TEST((transform->response_type == std::type_index{typeid(local_response)}));
+
+   auto runtime = forge::asio::runtime{};
+   auto registry = forge::api::core::registry{};
+   registry.install<local_data_api>(std::make_shared<local_data_impl>());
+   auto handle = registry.get<local_data_api>(local_data_api::ref());
+   const auto response = forge::asio::blocking::run(runtime, handle->transform(local_request{"payload"}));
+   BOOST_TEST(response.value() == "local:payload");
+
+   const auto wire_response = forge::asio::blocking::run(runtime, registry.dispatch(forge::api::core::frame{
+      .kind = forge::api::core::frame_kind::request,
+      .api = local_data_api::ref(),
+      .method = "transform",
+      .codec = {.value = "forge.raw"},
+   }));
+   BOOST_CHECK(wire_response.kind == forge::api::core::frame_kind::error);
+   const auto error = forge::raw::unpack<forge::api::core::error_payload>(wire_response.payload);
+   BOOST_CHECK(error.status_code == forge::api::core::status::failed_precondition);
+   BOOST_TEST(error.identity.code ==
+              static_cast<std::uint32_t>(forge::api::core::exceptions::code::protocol_error));
 }
 
 BOOST_AUTO_TEST_CASE(generated_proxy_invokes_remote_through_typed_handle) {

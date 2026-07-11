@@ -19,8 +19,7 @@ using fake_id = forge::ids::typed_id<9, 42>;
 
 namespace forge::ids {
 
-template <>
-struct type_for_id<fake_id> {
+template <> struct type_for_id<fake_id> {
    using type = fake_object;
 };
 
@@ -28,11 +27,11 @@ struct type_for_id<fake_id> {
 
 namespace {
 
-std::vector<char> pack_object_id(forge::ids::object_id value) {
+forge::raw::bytes pack_object_id(forge::ids::object_id value) {
    return forge::raw::pack(value);
 }
 
-forge::ids::object_id unpack_object_id(const std::vector<char>& bytes) {
+forge::ids::object_id unpack_object_id(const forge::raw::bytes& bytes) {
    return forge::raw::unpack<forge::ids::object_id>(bytes);
 }
 
@@ -45,9 +44,9 @@ BOOST_AUTO_TEST_CASE(ids_object_id_raw_roundtrip_preserves_field_order) {
    const auto packed = pack_object_id(original);
 
    BOOST_REQUIRE_EQUAL(packed.size(), 11U);
-   BOOST_CHECK_EQUAL(static_cast<unsigned char>(packed[0]), 7U);
-   BOOST_CHECK_EQUAL(static_cast<unsigned char>(packed[1]), 1U);
-   BOOST_CHECK_EQUAL(static_cast<unsigned char>(packed[2]), 2U);
+   BOOST_CHECK_EQUAL(packed[0], 7U);
+   BOOST_CHECK_EQUAL(packed[1], 1U);
+   BOOST_CHECK_EQUAL(packed[2], 2U);
 
    const auto decoded = unpack_object_id(packed);
    BOOST_CHECK(decoded == original);
@@ -89,12 +88,13 @@ BOOST_AUTO_TEST_CASE(ids_typed_id_converts_to_and_from_object_id) {
 BOOST_AUTO_TEST_CASE(ids_typed_id_rejects_mismatched_space_or_type) {
    using account_id = forge::ids::typed_id<1, 2>;
 
-   BOOST_CHECK_EXCEPTION(account_id(forge::ids::object_id{.space = 1, .type = 3, .instance = 99}), std::invalid_argument,
-                         [](const std::invalid_argument& error) {
+   BOOST_CHECK_EXCEPTION(account_id(forge::ids::object_id{.space = 1, .type = 3, .instance = 99}),
+                         std::invalid_argument, [](const std::invalid_argument& error) {
                             return std::string{error.what()} == "object_id space/type does not match typed_id";
                          });
 
-   BOOST_CHECK((!forge::ids::try_typed<1, 2>(forge::ids::object_id{.space = 9, .type = 2, .instance = 99}).has_value()));
+   BOOST_CHECK(
+       (!forge::ids::try_typed<1, 2>(forge::ids::object_id{.space = 9, .type = 2, .instance = 99}).has_value()));
 }
 
 BOOST_AUTO_TEST_CASE(ids_to_string_uses_space_type_instance) {

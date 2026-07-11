@@ -71,6 +71,24 @@ enum class method_kind : std::uint8_t {
    bidirectional_stream = 4,
 };
 
+enum class surface : std::uint8_t {
+   none = 0,
+   local = 1,
+   remote = 2,
+};
+
+[[nodiscard]] constexpr surface operator|(surface lhs, surface rhs) noexcept {
+   return static_cast<surface>(static_cast<std::uint8_t>(lhs) | static_cast<std::uint8_t>(rhs));
+}
+
+[[nodiscard]] constexpr surface operator&(surface lhs, surface rhs) noexcept {
+   return static_cast<surface>(static_cast<std::uint8_t>(lhs) & static_cast<std::uint8_t>(rhs));
+}
+
+[[nodiscard]] constexpr bool supports(surface value, surface expected) noexcept {
+   return static_cast<std::uint8_t>(value & expected) == static_cast<std::uint8_t>(expected);
+}
+
 enum class status : std::uint16_t {
    ok = 0,
    invalid_argument = 400,
@@ -139,6 +157,7 @@ struct frame {
 
 BOOST_DESCRIBE_ENUM(frame_kind, request, response, error, cancel, stream_item, stream_end)
 BOOST_DESCRIBE_ENUM(method_kind, unary, server_stream, client_stream, bidirectional_stream)
+BOOST_DESCRIBE_ENUM(surface, none, local, remote)
 BOOST_DESCRIBE_ENUM(status, ok, invalid_argument, unauthenticated, permission_denied, not_found, conflict,
                     failed_precondition, resource_exhausted, deadline_exceeded, unavailable, internal)
 BOOST_DESCRIBE_STRUCT(api_id, (), (value))
@@ -153,4 +172,4 @@ BOOST_DESCRIBE_STRUCT(request, (), (api, method, meta, codec, body))
 BOOST_DESCRIBE_STRUCT(response, (), (api, method, meta, codec, body, error))
 BOOST_DESCRIBE_STRUCT(frame, (), (kind, id, api, method, meta, codec, payload))
 
-} // namespace forge::api
+} // namespace forge::api::core

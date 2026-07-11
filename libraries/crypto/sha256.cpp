@@ -35,6 +35,11 @@ sha256::sha256(const char* data, size_t size) {
       FORGE_THROW_EXCEPTION(digest::exceptions::invalid_size, "sha256 size mismatch");
    memcpy(_hash, data, size);
 }
+sha256::sha256(std::span<const std::uint8_t> data) {
+   if (data.size() != sizeof(_hash))
+      FORGE_THROW_EXCEPTION(digest::exceptions::invalid_size, "sha256 size mismatch");
+   memcpy(_hash, data.data(), data.size());
+}
 sha256::sha256(const std::string& hex_str) {
    auto bytes_written = forge::crypto::from_hex(hex_str, (char*)_hash, sizeof(_hash));
    if (bytes_written < sizeof(_hash))
@@ -231,4 +236,4 @@ uint64_t hash64(const char* buf, size_t len) {
 template <> unsigned int hmac<sha256>::internal_block_size() const {
    return 64;
 }
-} // end namespace forge
+} // namespace forge::crypto

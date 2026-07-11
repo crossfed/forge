@@ -3,6 +3,7 @@ module;
 #include <boost/multiprecision/cpp_int.hpp>
 #include <algorithm>
 #include <cstdint>
+#include <cstring>
 #include <exception>
 #include <iomanip>
 #include <limits>
@@ -474,24 +475,27 @@ blob variant::as_blob() const {
          // Keep legacy base64_decode behavior: extra trailing `=` is accepted.
          // Other base64 decoders will not accept the extra `=`.
          auto decoded = forge::encoding::from_base64(str);
-         return {std::vector<char>{decoded.begin(), decoded.end()}};
+         return {std::move(decoded)};
       } catch (const std::exception&) {
          if (str.ends_with('=')) {
             try {
                auto decoded = forge::encoding::from_base64(std::string_view{str}.substr(0, str.size() - 1U));
-               return {std::vector<char>{decoded.begin(), decoded.end()}};
+               return {std::move(decoded)};
             } catch (const std::exception&) {
             }
          }
          // unable to decode, return the raw chars
       }
-      return blob({std::vector<char>(str.begin(), str.end())});
+      return blob({std::vector<std::uint8_t>(str.begin(), str.end())});
    }
    case object_type:
    case array_type:
       throw std::bad_cast();
    default:
-      return blob({std::vector<char>((char*)&_data, (char*)&_data + sizeof(_data))});
+      auto data = std::vector<std::uint8_t>(sizeof(_data));
+      const auto representation = std::as_bytes(std::span{&_data, 1U});
+      std::memcpy(data.data(), representation.data(), representation.size());
+      return blob({std::move(data)});
    }
 }
 
@@ -710,13 +714,11 @@ void from_variant(const variant& var, std::vector<char>& vo) {
 }
 
 void to_variant(const blob& b, variant& v) {
-   v = variant(forge::encoding::to_base64(
-      std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(b.data.data()), b.data.size()}));
+   v = variant(forge::encoding::to_base64(std::span<const std::uint8_t>{b.data.data(), b.data.size()}));
 }
 
 void from_variant(const variant& v, blob& b) {
-   auto decoded = forge::encoding::from_base64(v.as_string());
-   b.data = std::vector<char>{decoded.begin(), decoded.end()};
+   b.data = forge::encoding::from_base64(v.as_string());
 }
 
 void to_variant(const UInt<8>& n, variant& v) {

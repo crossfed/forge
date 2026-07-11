@@ -38,11 +38,11 @@ constexpr auto spring_state_after_five =
                      "1fcc820563a6deb90991447529903dd43d2c19514dd0e28316508c16fa0ce2b9"
                      "5abef8bc27d85d53753c5b6ed0cd2e197998c21513a379bfcf44d9c7a73c3a7e"};
 
-std::vector<char> unhex(std::string_view value) {
-   auto out = std::vector<char>{};
+protocol::bytes unhex(std::string_view value) {
+   auto out = protocol::bytes{};
    out.reserve(value.size() / 2U);
    for (auto index = std::size_t{0}; index < value.size(); index += 2U) {
-      out.push_back(static_cast<char>(std::stoi(std::string{value.substr(index, 2U)}, nullptr, 16)));
+      out.push_back(static_cast<std::uint8_t>(std::stoi(std::string{value.substr(index, 2U)}, nullptr, 16)));
    }
    return out;
 }
@@ -56,7 +56,7 @@ std::vector<protocol::digest> make_leaves(std::size_t count) {
    return leaves;
 }
 
-std::vector<char> encode_state(std::uint64_t mask, std::vector<protocol::digest> trees) {
+protocol::bytes encode_state(std::uint64_t mask, std::vector<protocol::digest> trees) {
    auto out = forge::raw::pack(mask);
    auto packed_trees = forge::raw::pack(trees);
    out.insert(out.end(), packed_trees.begin(), packed_trees.end());

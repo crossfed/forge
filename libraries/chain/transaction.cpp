@@ -8,6 +8,7 @@ module;
 #include <chrono>
 #include <cstdint>
 #include <new>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -37,13 +38,12 @@ using packed_compression = decltype(std::declval<const packed_transaction&>().co
    FORGE_THROW_EXCEPTION(forge::compression::exceptions::invalid_input, "unknown packed transaction compression");
 }
 
-template <typename T>
-void append_raw(std::vector<char>& out, const T& value) {
+template <typename T> void append_raw(bytes& out, const T& value) {
    auto bytes = forge::raw::pack(value);
    out.insert(out.end(), bytes.begin(), bytes.end());
 }
 
-std::vector<char> maybe_compress(std::vector<char> value, packed_compression selected_compression) {
+bytes maybe_compress(bytes value, packed_compression selected_compression) {
    switch (selected_compression) {
       case packed_compression::none:
          return value;
@@ -53,7 +53,7 @@ std::vector<char> maybe_compress(std::vector<char> value, packed_compression sel
    fail_unknown_compression();
 }
 
-std::vector<char> maybe_decompress(const std::vector<char>& value, packed_compression selected_compression) {
+bytes maybe_decompress(const bytes& value, packed_compression selected_compression) {
    switch (selected_compression) {
       case packed_compression::none:
          return value;
@@ -87,7 +87,7 @@ transaction unpack_transaction_payload(const bytes& value, packed_compression se
 
 } // namespace
 
-std::vector<char> pack_transaction(const transaction& value) {
+bytes pack_transaction(const transaction& value) {
    return forge::raw::pack(value);
 }
 
@@ -101,13 +101,11 @@ digest transaction::sig_digest(const chain_id& chain_id, const std::vector<bytes
 
 transaction_id calculate_transaction_id(const transaction& value) {
    const auto bytes = pack_transaction(value);
-   return forge::crypto::sha256::hash(bytes.data(), static_cast<std::uint32_t>(bytes.size()));
+   return forge::crypto::sha256::hash(std::span<const std::uint8_t>{bytes.data(), bytes.size()});
 }
 
-std::vector<char> signature_preimage(const chain_id& chain_id,
-                                     const transaction& value,
-                                     const std::vector<bytes>& cfd) {
-   auto out = std::vector<char>{};
+bytes signature_preimage(const chain_id& chain_id, const transaction& value, const std::vector<bytes>& cfd) {
+   auto out = bytes{};
    append_raw(out, chain_id);
    append_raw(out, value);
    if (cfd.empty()) {
@@ -120,20 +118,18 @@ std::vector<char> signature_preimage(const chain_id& chain_id,
 
 digest signature_digest(const chain_id& chain_id, const transaction& value, const std::vector<bytes>& cfd) {
    const auto preimage = signature_preimage(chain_id, value, cfd);
-   return forge::crypto::sha256::hash(preimage.data(), static_cast<std::uint32_t>(preimage.size()));
+   return forge::crypto::sha256::hash(std::span<const std::uint8_t>{preimage.data(), preimage.size()});
 }
 
 packed_transaction::packed_transaction(const signed_transaction& value, packed_compression selected_compression)
-    : signatures(value.signatures)
-    , compression(selected_compression)
-    , packed_context_free_data(pack_context_free_data(value.context_free_data, selected_compression))
-    , packed_trx(pack_transaction_payload(static_cast<const transaction&>(value), selected_compression)) {}
+    : signatures(value.signatures), compression(selected_compression),
+      packed_context_free_data(pack_context_free_data(value.context_free_data, selected_compression)),
+      packed_trx(pack_transaction_payload(static_cast<const transaction&>(value), selected_compression)) {}
 
 packed_transaction::packed_transaction(signed_transaction&& value, packed_compression selected_compression)
-    : signatures(value.signatures)
-    , compression(selected_compression)
-    , packed_context_free_data(pack_context_free_data(value.context_free_data, selected_compression))
-    , packed_trx(pack_transaction_payload(static_cast<const transaction&>(value), selected_compression)) {}
+    : signatures(value.signatures), compression(selected_compression),
+      packed_context_free_data(pack_context_free_data(value.context_free_data, selected_compression)),
+      packed_trx(pack_transaction_payload(static_cast<const transaction&>(value), selected_compression)) {}
 
 transaction_id packed_transaction::id() const {
    return calculate_transaction_id(unpack_transaction_payload(packed_trx, compression));

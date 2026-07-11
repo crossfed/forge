@@ -41,10 +41,10 @@ import forge.compression.zlib;
 
 std::string text = "payload";
 auto compressed = forge::compression::zlib_compress(
-   std::span<const char>{text.data(), text.size()});
+   std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(text.data()), text.size()});
 
 auto restored = forge::compression::zlib_decompress(
-   std::span<const char>{compressed.data(), compressed.size()},
+   std::span<const std::uint8_t>{compressed.data(), compressed.size()},
    {.max_output_size = 1024 * 1024});
 ```
 
@@ -52,7 +52,7 @@ auto restored = forge::compression::zlib_decompress(
 
 ```cpp
 std::string text = "payload";
-std::span<const char> input{text.data(), text.size()};
+std::span<const std::uint8_t> input{reinterpret_cast<const std::uint8_t*>(text.data()), text.size()};
 auto compressed = forge::compression::zlib_compress(
    input,
    forge::compression::zlib_level::best_compression);

@@ -477,8 +477,8 @@ BOOST_AUTO_TEST_CASE(db_blob_ref_raw_rejects_truncated_in_memory_payload_as_code
 }
 
 BOOST_AUTO_TEST_CASE(db_blob_ref_raw_rejects_excessive_variable_digest_size) {
-   auto packed = std::vector<char>{};
-   auto stream = forge::datastream<std::vector<char>>{packed};
+   auto packed = forge::raw::bytes{};
+   auto stream = forge::datastream<forge::raw::bytes>{packed};
    forge::raw::pack(stream, std::uint32_t{0xffffffffU});
 
    BOOST_CHECK_THROW(forge::raw::unpack<forge::db::blob::ref<capped_digest>>(stream.storage()),
