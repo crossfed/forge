@@ -1,7 +1,7 @@
 add_library(
    forge_plugins_crypto_signer STATIC
       plugin.cpp
-      signer_api.cpp
+      api_impl.cpp
       config.cpp
       plugin_impl.cpp
 )

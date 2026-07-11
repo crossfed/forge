@@ -3,8 +3,9 @@ add_library(
    plugin.cpp
    config.cpp
    plugin_impl.cpp
-   api_handle_impl.cpp
    api.cpp
+   api_impl.cpp
+   store_handle_state_impl.cpp
 )
 forge_target_modules_at(forge_plugins_db_store plugins/db/store)
 

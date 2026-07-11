@@ -16,12 +16,6 @@ import forge.app.plugin_registry;
 import forge.api.core.binding;
 import forge.config.core.component;
 
-namespace forge::plugins::db::rocksdb {
-namespace detail {
-struct lifecycle;
-} // namespace detail
-} // namespace forge::plugins::db::rocksdb
-
 export namespace forge::plugins::db::rocksdb {
 
 class plugin final : public forge::app::plugin {
@@ -43,7 +37,6 @@ class plugin final : public forge::app::plugin {
    boost::asio::awaitable<void> shutdown() override;
 
  private:
-   friend struct detail::lifecycle;
    struct impl;
    class api_impl;
    class transaction_owner_impl;

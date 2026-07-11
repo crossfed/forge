@@ -1,7 +1,7 @@
 add_library(
    forge_plugins_p2p_node STATIC
       plugin.cpp
-      node_api.cpp
+      api_impl.cpp
       diagnostics_source.cpp
       pubsub_source.cpp
       config.cpp

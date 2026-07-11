@@ -59,7 +59,7 @@ import forge.plugins.p2p.diagnostics.exceptions;
 import forge.plugins.p2p.diagnostics.types;
 
 #include "details/config.hxx"
-#include "details/diagnostics_api.hxx"
+#include "details/api_impl.hxx"
 #include "details/plugin_impl.hxx"
 
 namespace forge::plugins::p2p::diagnostics {
@@ -87,7 +87,7 @@ boost::asio::awaitable<void> plugin::configure(forge::config::core::component_vi
 }
 
 boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provider) {
-   provider.install<api>(std::make_shared<diagnostics_api>(impl_));
+   provider.install<api>(std::make_shared<api_impl>(impl_));
    co_return;
 }
 

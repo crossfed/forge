@@ -30,7 +30,7 @@ import forge.rocksdb.store;
 
 #include "details/plugin_impl.hxx"
 #include "details/config.hxx"
-#include "details/transaction_owner.hxx"
+#include "details/native_transaction_control.hxx"
 
 namespace forge::plugins::db::rocksdb {
 
@@ -119,44 +119,3 @@ std::pair<std::shared_ptr<forge::rocksdb::store>, forge::asio::task_scheduler*> 
 }
 
 } // namespace forge::plugins::db::rocksdb
-
-namespace forge::plugins::db::rocksdb::detail {
-
-std::shared_ptr<plugin::impl> lifecycle::make_impl() {
-   return std::make_shared<plugin::impl>();
-}
-
-std::optional<forge::config::core::component_descriptor> lifecycle::describe_config(const std::shared_ptr<plugin::impl>&) {
-   return forge::config::core::describe_component<config>("plugins.db.rocksdb");
-}
-
-boost::asio::awaitable<void> lifecycle::configure(const std::shared_ptr<plugin::impl>& impl_, forge::config::core::component_view view) {
-   impl_->configure(decode_config(view));
-   co_return;
-}
-
-boost::asio::awaitable<void> lifecycle::provide(const std::shared_ptr<plugin::impl>& impl_, forge::api::core::provider& provider) {
-   provider.install<api>(std::make_shared<plugin::api_impl>(impl_));
-   co_return;
-}
-
-boost::asio::awaitable<void> lifecycle::initialize(const std::shared_ptr<plugin::impl>& impl_, forge::app::plugin_context& context) {
-   impl_->set_scheduler(context.scheduler());
-   co_return;
-}
-
-boost::asio::awaitable<void> lifecycle::startup(const std::shared_ptr<plugin::impl>& impl_) {
-   impl_->open();
-   co_return;
-}
-
-void lifecycle::request_stop(const std::shared_ptr<plugin::impl>& impl_) noexcept {
-   impl_->request_stop();
-}
-
-boost::asio::awaitable<void> lifecycle::shutdown(const std::shared_ptr<plugin::impl>& impl_) {
-   impl_->close();
-   co_return;
-}
-
-} // namespace forge::plugins::db::rocksdb::detail

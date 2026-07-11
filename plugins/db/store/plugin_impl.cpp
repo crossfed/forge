@@ -118,12 +118,6 @@ void plugin::impl::add_store(std::string name,
 }
 
 void plugin::impl::start() {
-   struct pending_open {
-      std::string name;
-      store_config config;
-      std::shared_ptr<forge::db::core::driver> driver;
-   };
-
    auto pending = std::vector<pending_open>{};
    {
       auto lock = std::scoped_lock{mutex};
@@ -150,7 +144,7 @@ void plugin::impl::start() {
    }
 
    for (auto& item : pending) {
-      item.driver = detail::make_configured_driver(item.config);
+      item.driver = make_configured_driver(item.config);
    }
 
    {
@@ -271,58 +265,8 @@ status plugin::impl::current_status() const {
 
 } // namespace forge::plugins::db::store
 
-namespace forge::plugins::db::store::detail {
-
-std::shared_ptr<plugin::impl> lifecycle::make_impl() {
-   return std::make_shared<plugin::impl>();
-}
-
-std::optional<forge::config::core::component_descriptor> lifecycle::describe_config(const std::shared_ptr<plugin::impl>&) {
-   return forge::config::core::describe_component<config>("plugins.db.store");
-}
-
-boost::asio::awaitable<void> lifecycle::configure(const std::shared_ptr<plugin::impl>& impl,
-                                                  forge::config::core::component_view view) {
-   impl->configure(decode_config(view));
-   co_return;
-}
-
-boost::asio::awaitable<void> lifecycle::provide(const std::shared_ptr<plugin::impl>& impl,
-                                                forge::api::core::provider& provider) {
-   provider.install<api>(std::make_shared<plugin::api_impl>(impl));
-   co_return;
-}
-
-boost::asio::awaitable<void> lifecycle::initialize(const std::shared_ptr<plugin::impl>& impl,
-                                                   forge::app::plugin_context&) {
-   impl->initialize();
-   co_return;
-}
-
-boost::asio::awaitable<void> lifecycle::startup(const std::shared_ptr<plugin::impl>& impl) {
-   try {
-      impl->start();
-   } catch (const exceptions::invalid_config&) {
-      throw;
-   } catch (const exceptions::duplicate_store&) {
-      throw;
-   } catch (const exceptions::startup_failed&) {
-      throw;
-   } catch (const std::exception& error) {
-      FORGE_THROW_EXCEPTION(exceptions::startup_failed, "db store plugin startup failed",
-                            forge::exceptions::ctx("error", error.what()));
-   }
-   co_return;
-}
-
-void lifecycle::request_stop(const std::shared_ptr<plugin::impl>& impl) noexcept {
-   impl->request_stop();
-}
-
-boost::asio::awaitable<void> lifecycle::shutdown(const std::shared_ptr<plugin::impl>& impl) {
-   impl->close();
-   co_return;
-}
+namespace forge::plugins::db::store {
+namespace {
 
 #if FORGE_PLUGINS_DB_STORE_HAS_ROCKSDB
 [[nodiscard]] forge::rocksdb::compression_type parse_blob_compression(const std::string& value,
@@ -394,7 +338,9 @@ void add_family_once(std::vector<forge::rocksdb::column_family_config>& families
 }
 #endif
 
-std::shared_ptr<forge::db::core::driver> make_configured_driver(const store_config& value) {
+} // namespace
+
+std::shared_ptr<forge::db::core::driver> plugin::impl::make_configured_driver(const store_config& value) {
    if (value.driver == "rocksdb") {
 #if FORGE_PLUGINS_DB_STORE_HAS_ROCKSDB
       return std::make_shared<forge::db::rocksdb::driver>(
@@ -415,4 +361,4 @@ std::shared_ptr<forge::db::core::driver> make_configured_driver(const store_conf
                          forge::exceptions::ctx("driver", value.driver));
 }
 
-} // namespace forge::plugins::db::store::detail
+} // namespace forge::plugins::db::store

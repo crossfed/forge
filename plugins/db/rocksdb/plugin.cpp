@@ -16,13 +16,16 @@ import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.asio.task_scheduler;
 import forge.config.core.component;
+import forge.config.core.decode;
 import forge.rocksdb.store;
 
+#include "details/api_impl.hxx"
+#include "details/config.hxx"
 #include "details/plugin_impl.hxx"
 
 namespace forge::plugins::db::rocksdb {
 
-plugin::plugin() : impl_{detail::lifecycle::make_impl()} {}
+plugin::plugin() : impl_{std::make_shared<impl>()} {}
 plugin::~plugin() = default;
 
 forge::app::plugin_id plugin::id() const {
@@ -36,31 +39,36 @@ std::string plugin::version() const {
 
 
 std::optional<forge::config::core::component_descriptor> plugin::describe_config() const {
-   return detail::lifecycle::describe_config(impl_);
+   return forge::config::core::describe_component<config>("plugins.db.rocksdb");
 }
 
 boost::asio::awaitable<void> plugin::configure(forge::config::core::component_view view) {
-   return detail::lifecycle::configure(impl_, view);
+   impl_->configure(detail::decode_config(view));
+   co_return;
 }
 
 boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provider) {
-   return detail::lifecycle::provide(impl_, provider);
+   provider.install<api>(std::make_shared<api_impl>(impl_));
+   co_return;
 }
 
 boost::asio::awaitable<void> plugin::initialize(forge::app::plugin_context& context) {
-   return detail::lifecycle::initialize(impl_, context);
+   impl_->set_scheduler(context.scheduler());
+   co_return;
 }
 
 boost::asio::awaitable<void> plugin::startup() {
-   return detail::lifecycle::startup(impl_);
+   impl_->open();
+   co_return;
 }
 
 void plugin::request_stop() noexcept {
-   detail::lifecycle::request_stop(impl_);
+   impl_->request_stop();
 }
 
 boost::asio::awaitable<void> plugin::shutdown() {
-   return detail::lifecycle::shutdown(impl_);
+   impl_->close();
+   co_return;
 }
 
 forge::app::plugin_descriptor descriptor() {

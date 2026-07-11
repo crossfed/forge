@@ -16,12 +16,6 @@ import forge.app.plugin_context;
 import forge.app.plugin_registry;
 import forge.config.core.component;
 
-namespace forge::plugins::db::store {
-namespace detail {
-struct lifecycle;
-} // namespace detail
-} // namespace forge::plugins::db::store
-
 export namespace forge::plugins::db::store {
 
 class plugin final : public forge::app::plugin {
@@ -43,9 +37,9 @@ class plugin final : public forge::app::plugin {
    boost::asio::awaitable<void> shutdown() override;
 
  private:
-   friend struct detail::lifecycle;
    struct impl;
    class api_impl;
+   class store_handle_state_impl;
    std::shared_ptr<impl> impl_;
 };
 

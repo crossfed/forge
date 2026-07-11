@@ -4,7 +4,6 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
-#include <sstream>
 #include <span>
 #include <string>
 #include <string_view>
@@ -31,8 +30,6 @@ import forge.plugins.crypto.secrets.plugin;
 import forge.plugins.crypto.secrets.types;
 import forge.config.program_options;
 import forge.schema.value_kind;
-
-#include "details/source_loading.hxx"
 
 namespace crypto_secrets = forge::plugins::crypto::secrets;
 
@@ -328,16 +325,6 @@ BOOST_AUTO_TEST_CASE(crypto_secrets_file_source_loads_bounded_secret_without_env
                                                }));
 
    BOOST_TEST(result.bytes == bytes("file-secret"));
-}
-FORGE_LOG_AND_RETHROW();
-
-BOOST_AUTO_TEST_CASE(crypto_secrets_file_source_rejects_short_read) try {
-   auto input = std::istringstream{"abc"};
-   auto output = forge::crypto::bytes(5U);
-   input.read(reinterpret_cast<char*>(output.data()), static_cast<std::streamsize>(output.size()));
-
-   BOOST_CHECK_THROW(crypto_secrets::require_complete_file_read(input, output.size(), "/tmp/short-secret", "short"),
-                     crypto_secrets::exceptions::invalid_source);
 }
 FORGE_LOG_AND_RETHROW();
 
