@@ -23,8 +23,7 @@ export import forge.raw.datastream;
 
 export namespace forge::api::core {
 
-template <typename T>
-[[nodiscard]] T unpack_body(std::span<const std::uint8_t> body) {
+template <typename T> [[nodiscard]] T unpack_body(std::span<const std::uint8_t> body) {
    auto out = T{};
    forge::datastream<const std::uint8_t*> stream{body.data(), body.size()};
    forge::raw::unpack(stream, out);
@@ -34,13 +33,11 @@ template <typename T>
    return out;
 }
 
-template <typename T>
-[[nodiscard]] T unpack_body(const bytes& body) {
+template <typename T> [[nodiscard]] T unpack_body(const bytes& body) {
    return unpack_body<T>(std::span<const std::uint8_t>{body.data(), body.size()});
 }
 
-template <typename T>
-[[nodiscard]] bytes pack_body(const T& value) {
+template <typename T> [[nodiscard]] bytes pack_body(const T& value) {
    auto out = bytes(forge::raw::pack_size(value));
    if (!out.empty()) {
       forge::datastream<std::uint8_t*> stream{out.data(), out.size()};
@@ -67,29 +64,23 @@ struct method_signature<boost::asio::awaitable<Response> (Class::*)(Args...) con
 
 template <typename Tuple> struct method_payload;
 
-template <>
-struct method_payload<std::tuple<>> {
+template <> struct method_payload<std::tuple<>> {
    using type = std::tuple<>;
 };
 
-template <typename T>
-struct method_payload<std::tuple<T>> {
+template <typename T> struct method_payload<std::tuple<T>> {
    using type = T;
 };
 
-template <typename First, typename Second, typename... Rest>
-struct method_payload<std::tuple<First, Second, Rest...>> {
+template <typename First, typename Second, typename... Rest> struct method_payload<std::tuple<First, Second, Rest...>> {
    using type = std::tuple<First, Second, Rest...>;
 };
 
-template <auto Method>
-using method_argument_tuple_t = typename method_signature<decltype(Method)>::argument_tuple;
+template <auto Method> using method_argument_tuple_t = typename method_signature<decltype(Method)>::argument_tuple;
 
-template <auto Method>
-using method_request_t = typename method_payload<method_argument_tuple_t<Method>>::type;
+template <auto Method> using method_request_t = typename method_payload<method_argument_tuple_t<Method>>::type;
 
-template <auto Method>
-using method_response_t = typename method_signature<decltype(Method)>::response_type;
+template <auto Method> using method_response_t = typename method_signature<decltype(Method)>::response_type;
 
 template <auto Method, std::size_t Index>
 using method_argument_t = std::tuple_element_t<Index, method_argument_tuple_t<Method>>;
@@ -100,12 +91,12 @@ inline constexpr auto method_argument_count_v = std::tuple_size_v<method_argumen
 namespace detail {
 
 [[nodiscard]] inline std::string_view trim_argument_name(std::string_view value) noexcept {
-   while (!value.empty() && (value.front() == ' ' || value.front() == '\t' || value.front() == '\n' ||
-                            value.front() == '\r')) {
+   while (!value.empty() &&
+          (value.front() == ' ' || value.front() == '\t' || value.front() == '\n' || value.front() == '\r')) {
       value.remove_prefix(1);
    }
-   while (!value.empty() && (value.back() == ' ' || value.back() == '\t' || value.back() == '\n' ||
-                            value.back() == '\r')) {
+   while (!value.empty() &&
+          (value.back() == ' ' || value.back() == '\t' || value.back() == '\n' || value.back() == '\r')) {
       value.remove_suffix(1);
    }
    return value;
@@ -167,8 +158,7 @@ struct method_descriptor {
    std::vector<error_descriptor> errors;
    std::function<boost::asio::awaitable<bytes>(std::shared_ptr<void>, bytes)> raw_invoker;
    std::function<boost::asio::awaitable<std::vector<bytes>>(std::shared_ptr<void>, bytes)> raw_stream_invoker;
-   std::function<boost::asio::awaitable<bytes>(std::shared_ptr<void>, std::vector<bytes>)>
-      raw_client_stream_invoker;
+   std::function<boost::asio::awaitable<bytes>(std::shared_ptr<void>, std::vector<bytes>)> raw_client_stream_invoker;
    std::function<boost::asio::awaitable<std::vector<bytes>>(std::shared_ptr<void>, std::vector<bytes>)>
       raw_bidirectional_stream_invoker;
 };
@@ -176,6 +166,7 @@ struct method_descriptor {
 struct descriptor {
    api_id id;
    api_version version;
+   surface supported_surfaces = surface::local;
    std::type_index interface_type = typeid(void);
    std::vector<method_descriptor> methods;
 };
@@ -184,47 +175,49 @@ struct descriptor {
 [[nodiscard]] bool compatible(const method_descriptor& available, const method_descriptor& requested) noexcept;
 [[nodiscard]] const method_descriptor* find_method(const descriptor& api, std::string_view name) noexcept;
 
-template <typename Exception>
-error_identity exception_identity() {
+template <typename Exception> error_identity exception_identity() {
    static_assert(std::is_base_of_v<forge::exceptions::base, Exception>,
                  "API errors must derive from forge::exceptions::base");
    const auto code = forge::exceptions::make_error_code(Exception::value);
    return error_identity{.category = code.category().name(), .code = static_cast<std::uint32_t>(code.value())};
 }
 
-template <typename Interface> class method_builder;
+template <typename Interface, bool EnableRaw> class method_builder;
 
-template <typename Interface> class contract_builder {
+template <typename Interface, bool EnableRaw> class contract_builder {
  public:
    explicit contract_builder(descriptor value) : descriptor_(std::move(value)) {}
 
-   template <auto Method> method_builder<Interface> method(std::string name) {
+   template <auto Method> method_builder<Interface, EnableRaw> method(std::string name) {
       return add_deduced_method<Method>(std::move(name), {});
    }
 
    template <auto Method>
-   method_builder<Interface> method(std::string name, std::vector<std::string> argument_names) {
+   method_builder<Interface, EnableRaw> method(std::string name, std::vector<std::string> argument_names) {
       return add_deduced_method<Method>(std::move(name), std::move(argument_names));
    }
 
-   template <auto Method, typename Request, typename Response> method_builder<Interface> method(std::string name) {
+   template <auto Method, typename Request, typename Response>
+   method_builder<Interface, EnableRaw> method(std::string name) {
       return add_method<Method, Request, Response>(std::move(name), method_kind::unary);
    }
 
    template <auto Method, typename Request, typename Response>
-   method_builder<Interface> server_stream(std::string name) {
+   method_builder<Interface, EnableRaw> server_stream(std::string name) {
       for (const auto& existing : descriptor_.methods) {
          if (existing.name == name) {
             throw exceptions::protocol_error{"duplicate API method: " + name};
          }
       }
-      descriptor_.methods.push_back(method_descriptor{
+      auto value = method_descriptor{
           .name = std::move(name),
           .kind = method_kind::server_stream,
           .request_type = typeid(Request),
           .response_type = typeid(Response),
-          .raw_stream_invoker =
-              [](std::shared_ptr<void> implementation, bytes payload) -> boost::asio::awaitable<std::vector<bytes>> {
+      };
+      if constexpr (EnableRaw) {
+         value.raw_stream_invoker = [](std::shared_ptr<void> implementation,
+                                       bytes payload) -> boost::asio::awaitable<std::vector<bytes>> {
              auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
              auto request = unpack_body<Request>(payload);
              auto responses = co_await std::invoke(Method, *typed, std::move(request));
@@ -234,25 +227,28 @@ template <typename Interface> class contract_builder {
                 packed.push_back(pack_body(response));
              }
              co_return packed;
-          },
-      });
-      return method_builder<Interface>{*this, descriptor_.methods.back()};
+         };
+      }
+      descriptor_.methods.push_back(std::move(value));
+      return method_builder<Interface, EnableRaw>{*this, descriptor_.methods.back()};
    }
 
    template <auto Method, typename Request, typename Response>
-   method_builder<Interface> client_stream(std::string name) {
+   method_builder<Interface, EnableRaw> client_stream(std::string name) {
       for (const auto& existing : descriptor_.methods) {
          if (existing.name == name) {
             throw exceptions::protocol_error{"duplicate API method: " + name};
          }
       }
-      descriptor_.methods.push_back(method_descriptor{
+      auto value = method_descriptor{
           .name = std::move(name),
           .kind = method_kind::client_stream,
           .request_type = typeid(Request),
           .response_type = typeid(Response),
-          .raw_client_stream_invoker =
-              [](std::shared_ptr<void> implementation, std::vector<bytes> payloads) -> boost::asio::awaitable<bytes> {
+      };
+      if constexpr (EnableRaw) {
+         value.raw_client_stream_invoker = [](std::shared_ptr<void> implementation,
+                                              std::vector<bytes> payloads) -> boost::asio::awaitable<bytes> {
              auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
              auto requests = std::vector<Request>{};
              requests.reserve(payloads.size());
@@ -261,24 +257,27 @@ template <typename Interface> class contract_builder {
              }
              auto response = co_await std::invoke(Method, *typed, std::move(requests));
              co_return pack_body(response);
-          },
-      });
-      return method_builder<Interface>{*this, descriptor_.methods.back()};
+         };
+      }
+      descriptor_.methods.push_back(std::move(value));
+      return method_builder<Interface, EnableRaw>{*this, descriptor_.methods.back()};
    }
 
    template <auto Method, typename Request, typename Response>
-   method_builder<Interface> bidirectional_stream(std::string name) {
+   method_builder<Interface, EnableRaw> bidirectional_stream(std::string name) {
       for (const auto& existing : descriptor_.methods) {
          if (existing.name == name) {
             throw exceptions::protocol_error{"duplicate API method: " + name};
          }
       }
-      descriptor_.methods.push_back(method_descriptor{
+      auto value = method_descriptor{
           .name = std::move(name),
           .kind = method_kind::bidirectional_stream,
           .request_type = typeid(Request),
           .response_type = typeid(Response),
-          .raw_bidirectional_stream_invoker =
+      };
+      if constexpr (EnableRaw) {
+         value.raw_bidirectional_stream_invoker =
               [](std::shared_ptr<void> implementation,
                  std::vector<bytes> payloads) -> boost::asio::awaitable<std::vector<bytes>> {
              auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
@@ -294,14 +293,15 @@ template <typename Interface> class contract_builder {
                 packed.push_back(pack_body(response));
              }
              co_return packed;
-          },
-      });
-      return method_builder<Interface>{*this, descriptor_.methods.back()};
+         };
+      }
+      descriptor_.methods.push_back(std::move(value));
+      return method_builder<Interface, EnableRaw>{*this, descriptor_.methods.back()};
    }
 
  private:
    template <auto Method>
-   method_builder<Interface> add_deduced_method(std::string name, std::vector<std::string> argument_names) {
+   method_builder<Interface, EnableRaw> add_deduced_method(std::string name, std::vector<std::string> argument_names) {
       constexpr auto argument_count = method_argument_count_v<Method>;
       if (!argument_names.empty() && argument_names.size() != argument_count) {
          throw exceptions::protocol_error{"API method argument name count does not match method signature: " + name};
@@ -317,14 +317,15 @@ template <typename Interface> class contract_builder {
             throw exceptions::protocol_error{"duplicate API method: " + name};
          }
       }
-      descriptor_.methods.push_back(method_descriptor{
+      auto value = method_descriptor{
           .name = std::move(name),
           .kind = method_kind::unary,
           .request_type = typeid(Request),
           .response_type = typeid(Response),
           .argument_names = std::move(argument_names),
-          .raw_invoker =
-              [](std::shared_ptr<void> implementation, bytes payload) -> boost::asio::awaitable<bytes> {
+      };
+      if constexpr (EnableRaw) {
+         value.raw_invoker = [](std::shared_ptr<void> implementation, bytes payload) -> boost::asio::awaitable<bytes> {
              auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
              if constexpr (argument_count == 1U) {
                 auto request = unpack_body<Request>(payload);
@@ -338,32 +339,35 @@ template <typename Interface> class contract_builder {
                 auto response = co_await std::apply(invoke, std::move(request));
                 co_return pack_body(response);
              }
-          },
-      });
-      return method_builder<Interface>{*this, descriptor_.methods.back()};
+         };
+      }
+      descriptor_.methods.push_back(std::move(value));
+      return method_builder<Interface, EnableRaw>{*this, descriptor_.methods.back()};
    }
 
    template <auto Method, typename Request, typename Response>
-   method_builder<Interface> add_method(std::string name, method_kind kind) {
+   method_builder<Interface, EnableRaw> add_method(std::string name, method_kind kind) {
       for (const auto& existing : descriptor_.methods) {
          if (existing.name == name) {
             throw exceptions::protocol_error{"duplicate API method: " + name};
          }
       }
-      descriptor_.methods.push_back(method_descriptor{
+      auto value = method_descriptor{
           .name = std::move(name),
           .kind = kind,
           .request_type = typeid(Request),
           .response_type = typeid(Response),
-          .raw_invoker =
-              [](std::shared_ptr<void> implementation, bytes payload) -> boost::asio::awaitable<bytes> {
+      };
+      if constexpr (EnableRaw) {
+         value.raw_invoker = [](std::shared_ptr<void> implementation, bytes payload) -> boost::asio::awaitable<bytes> {
              auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
              auto request = unpack_body<Request>(payload);
              auto response = co_await std::invoke(Method, *typed, std::move(request));
              co_return pack_body(response);
-          },
-      });
-      return method_builder<Interface>{*this, descriptor_.methods.back()};
+         };
+      }
+      descriptor_.methods.push_back(std::move(value));
+      return method_builder<Interface, EnableRaw>{*this, descriptor_.methods.back()};
    }
 
  public:
@@ -384,12 +388,13 @@ template <typename Interface> class contract_builder {
  private:
    descriptor descriptor_;
 
-   friend class method_builder<Interface>;
+   friend class method_builder<Interface, EnableRaw>;
 };
 
-template <typename Interface> class method_builder {
+template <typename Interface, bool EnableRaw> class method_builder {
  public:
-   method_builder(contract_builder<Interface>& owner, method_descriptor& method) : owner_(&owner), method_(&method) {}
+   method_builder(contract_builder<Interface, EnableRaw>& owner, method_descriptor& method)
+       : owner_(&owner), method_(&method) {}
 
    template <typename Exception, typename Details = void>
    method_builder& error(std::string name, error_options options = {}) {
@@ -400,10 +405,8 @@ template <typename Interface> class method_builder {
           .retryable = options.retryable,
           .exception_type = typeid(Exception),
           .details_type = typeid(Details),
-          .thrower =
-              [](const error_payload& payload) -> void {
-             throw Exception{payload.message,
-                             forge::exceptions::make_fields(
+          .thrower = [](const error_payload& payload) -> void {
+             throw Exception{payload.message, forge::exceptions::make_fields(
                                  forge::exceptions::ctx("remote.category", payload.identity.category),
                                  forge::exceptions::ctx("remote.code", payload.identity.code))};
           },
@@ -443,13 +446,15 @@ template <typename Interface> class method_builder {
    }
 
  private:
-   contract_builder<Interface>* owner_ = nullptr;
+   contract_builder<Interface, EnableRaw>* owner_ = nullptr;
    method_descriptor* method_ = nullptr;
 };
 
-template <typename Interface> contract_builder<Interface> define(descriptor value) {
+template <typename Interface, bool EnableRaw = supports(Interface::api_surface, surface::remote)>
+contract_builder<Interface, EnableRaw> define(descriptor value) {
    value.interface_type = typeid(Interface);
-   return contract_builder<Interface>{std::move(value)};
+   value.supported_surfaces = Interface::api_surface;
+   return contract_builder<Interface, EnableRaw>{std::move(value)};
 }
 
-} // namespace forge::api
+} // namespace forge::api::core

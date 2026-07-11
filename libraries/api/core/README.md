@@ -42,21 +42,33 @@ Target: `forge_api_core`.
 
 ## Local Contract
 
+The default contract surface is local. Local calls use the C++ method directly,
+so their request and response types do not need Boost.Describe, default
+constructors or raw operators. Move-only domain values are valid local DTOs.
+
 ```cpp
 #include <forge/api/core/macros.hpp>
+
+class lookup_request {
+ public:
+   explicit lookup_request(std::string key);
+   lookup_request(lookup_request&&) noexcept = default;
+   lookup_request(const lookup_request&) = delete;
+};
 
 class cache : public forge::api::core::contract<cache> {
  public:
    virtual ~cache() = default;
 
    virtual boost::asio::awaitable<models::chunk>
-   read(protocol::read_chunk request) = 0;
+   read(lookup_request request) = 0;
 };
 
 FORGE_API(cache, FORGE_API_CONTRACT("cache", 1, 8), FORGE_API_METHOD(read))
 ```
 
-DTO serialization stays beside the DTO owner:
+Raw bindings are generated only when the contract opts into
+`surface::remote`. Remote DTO serialization stays beside the DTO owner:
 
 ```cpp
 BOOST_DESCRIBE_STRUCT(protocol::read_chunk, (), (ref, offset, limit))
@@ -82,6 +94,9 @@ FORGE_API(
    cache_api,
    FORGE_API_CONTRACT("cache", 1, 0),
    FORGE_API_METHOD(store_chunk, cache, ref, bytes))
+
+BOOST_DESCRIBE_STRUCT(chunk_ref, (), (digest, size))
+BOOST_DESCRIBE_STRUCT(store_receipt, (), (stored, version))
 ```
 
 The argument names are metadata, not type declarations. Existing

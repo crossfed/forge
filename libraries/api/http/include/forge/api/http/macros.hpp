@@ -125,6 +125,8 @@
 
 #define FORGE_HTTP_API(INTERFACE, ...)                                                                                \
    namespace forge::api::http {                                                                                            \
+   static_assert(::forge::api::core::remote_interface<INTERFACE>,                                                    \
+                 "HTTP API interfaces must opt in to forge::api::core::surface::remote");                         \
    template <> struct traits<INTERFACE> {                                                                  \
       static std::vector<route> routes() {                                                                      \
          return ::forge::api::http::detail::validate_routes(                                                               \
