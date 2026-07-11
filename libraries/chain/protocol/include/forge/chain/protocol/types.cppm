@@ -25,10 +25,11 @@ import forge.variant.described;
 export namespace forge::chain::protocol {
 
 using bytes = std::vector<std::uint8_t>;
-using chain_id = forge::chain::core::digest;
-using block_id = forge::chain::core::digest;
-using checksum = forge::chain::core::digest;
-using checksum256 = forge::chain::core::digest;
+using digest = forge::chain::core::digest;
+using chain_id = digest;
+using block_id = digest;
+using checksum = digest;
+using checksum256 = digest;
 using checksum512 = forge::crypto::sha512;
 using checksum160 = forge::crypto::ripemd160;
 using transaction_id = checksum;

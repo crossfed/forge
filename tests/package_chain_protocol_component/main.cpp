@@ -8,7 +8,7 @@ import forge.chain.protocol.transaction;
 
 int main() {
    static_assert(std::same_as<forge::chain::protocol::bytes, std::vector<std::uint8_t>>);
-   const auto digest = forge::chain::core::digest::hash("package-chain-protocol");
+   const auto digest = forge::chain::protocol::digest::hash("package-chain-protocol");
    auto transaction = forge::chain::protocol::transaction{};
    auto block = forge::chain::protocol::signed_block{};
    auto key = forge::chain::protocol::key256{};

@@ -32,6 +32,8 @@ namespace core = forge::chain::core;
 namespace protocol = forge::chain::protocol;
 namespace spring = forge::tests::spring_fixtures;
 
+static_assert(std::same_as<protocol::digest, core::digest>);
+
 namespace {
 
 std::string expected(std::string_view value) {
