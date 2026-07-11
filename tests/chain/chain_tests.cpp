@@ -3,6 +3,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include <array>
+#include <concepts>
 #include <iomanip>
 #include <span>
 #include <sstream>
@@ -63,6 +64,35 @@ std::vector<char> unhex(std::string_view value) {
 template <typename T> std::string pack_hex(const T& value) {
    return hex(forge::raw::pack(value));
 }
+
+std::string word_hex(protocol::uint128_t value) {
+   std::ostringstream out;
+   out << std::hex << std::setfill('0') << std::setw(16) << static_cast<std::uint64_t>(value >> 64U) << std::setw(16)
+       << static_cast<std::uint64_t>(value);
+   return out.str();
+}
+
+template <std::size_t Size> std::string backing_hex(const protocol::fixed_key<Size>& value) {
+   auto result = std::string{};
+   for (const auto word : value.get_array()) {
+      result += word_hex(word);
+   }
+   return result;
+}
+
+template <typename Key, typename Word>
+concept supports_single_word_factory = requires(Word word) {
+   { Key::template make_from_word_sequence<Word>(word) } -> std::same_as<Key>;
+};
+
+static_assert(std::constructible_from<protocol::key256, std::array<std::uint32_t, 5>>);
+static_assert(!std::constructible_from<protocol::key256, std::array<protocol::uint128_t, 1>>);
+static_assert(supports_single_word_factory<protocol::key256, protocol::uint128_t>);
+static_assert(!supports_single_word_factory<protocol::key256, std::int64_t>);
+static_assert(protocol::fixed_key<1>::num_words() == 1U && protocol::fixed_key<1>::padded_bytes() == 15U);
+static_assert(protocol::fixed_key<20>::num_words() == 2U && protocol::fixed_key<20>::padded_bytes() == 12U);
+static_assert(protocol::fixed_key<32>::num_words() == 2U && protocol::fixed_key<32>::padded_bytes() == 0U);
+static_assert(protocol::fixed_key<64>::num_words() == 4U && protocol::fixed_key<64>::padded_bytes() == 0U);
 
 protocol::signature parse_spring_signature(std::string_view value) {
    return forge::crypto::asymmetric::encoding::antelope().parse_signature(value);
@@ -174,6 +204,38 @@ BOOST_AUTO_TEST_CASE(fixed_key_matches_donor_word_and_byte_order) {
    BOOST_TEST((variant.as<protocol::key256>() == value));
 }
 
+BOOST_AUTO_TEST_CASE(fixed_key_partial_word_sequences_match_cdt_fixed_bytes) {
+   const auto u8 = protocol::key256::make_from_word_sequence<std::uint8_t>(std::uint8_t{1U});
+   const auto u16 = protocol::key256::make_from_word_sequence<std::uint16_t>(std::uint16_t{1U});
+   const auto u32 = protocol::key256::make_from_word_sequence<std::uint32_t>(std::uint32_t{1U});
+   const auto u32_pair = protocol::key256::make_from_word_sequence<std::uint32_t>(std::uint32_t{1U}, std::uint32_t{2U});
+   const auto u32_triple = protocol::key256::make_from_word_sequence<std::uint32_t>(
+       std::uint32_t{1U}, std::uint32_t{2U}, std::uint32_t{3U});
+   const auto u32_full = protocol::key256::make_from_word_sequence<std::uint32_t>(std::uint32_t{1U}, std::uint32_t{2U},
+                                                                                  std::uint32_t{3U}, std::uint32_t{4U});
+   const auto u32_crossing = protocol::key256::make_from_word_sequence<std::uint32_t>(
+       std::uint32_t{1U}, std::uint32_t{2U}, std::uint32_t{3U}, std::uint32_t{4U}, std::uint32_t{5U});
+   const auto u64 = protocol::key256::make_from_word_sequence<std::uint64_t>(std::uint64_t{1U});
+   const auto u64_full = protocol::key256::make_from_word_sequence<std::uint64_t>(std::uint64_t{1U}, std::uint64_t{2U},
+                                                                                  std::uint64_t{3U}, std::uint64_t{4U});
+   const auto u128 = protocol::key256::make_from_word_sequence<protocol::uint128_t>(protocol::uint128_t{1U});
+
+   BOOST_TEST(backing_hex(u8) == "0100000000000000000000000000000000000000000000000000000000000000");
+   BOOST_TEST(backing_hex(u16) == "0000000000000001000000000000000000000000000000000000000000000000");
+   BOOST_TEST(backing_hex(u32) == "0000000000000000000100000000000000000000000000000000000000000000");
+   BOOST_TEST(backing_hex(u32_pair) == "0000000000000100000002000000000000000000000000000000000000000000");
+   BOOST_TEST(backing_hex(u32_triple) == "0000000100000002000000030000000000000000000000000000000000000000");
+   BOOST_TEST(backing_hex(u32_full) == "0000000100000002000000030000000400000000000000000000000000000000");
+   BOOST_TEST(backing_hex(u32_crossing) == "0000000100000002000000030000000400000000000000000005000000000000");
+   BOOST_TEST(backing_hex(u64) == "0000000000000001000000000000000000000000000000000000000000000000");
+   BOOST_TEST(backing_hex(u64_full) == "0000000000000001000000000000000200000000000000030000000000000004");
+   BOOST_TEST(backing_hex(u128) == "0000000000000000000000000000000100000000000000000000000000000000");
+
+   BOOST_TEST((u32_crossing == protocol::key256{std::array<std::uint32_t, 5>{1U, 2U, 3U, 4U, 5U}}));
+   BOOST_TEST(hex(u64_full.extract_as_byte_array()) ==
+              "0000000000000001000000000000000200000000000000030000000000000004");
+}
+
 BOOST_AUTO_TEST_CASE(fixed_key_orders_lexicographically_and_rejects_invalid_text) {
    const auto lower = protocol::key256::make_from_word_sequence<std::uint64_t>(std::uint64_t{1U}, std::uint64_t{2U},
                                                                                std::uint64_t{3U}, std::uint64_t{4U});
@@ -202,6 +264,48 @@ BOOST_AUTO_TEST_CASE(fixed_key_supports_exact_bytes_padding_and_truncated_raw_re
    auto truncated = forge::raw::pack(value);
    truncated.pop_back();
    BOOST_CHECK_THROW((void)forge::raw::unpack<key160>(truncated), forge::raw::exceptions::codec_error);
+}
+
+BOOST_AUTO_TEST_CASE(fixed_key_padded_storage_and_order_match_cdt_fixed_bytes) {
+   using key160 = protocol::fixed_key<20>;
+   const auto first = static_cast<protocol::uint128_t>(0x0102030405060708ULL) << 64U |
+                      static_cast<protocol::uint128_t>(0x1112131415161718ULL);
+   const auto second = static_cast<protocol::uint128_t>(0x2122232425262728ULL) << 64U |
+                       static_cast<protocol::uint128_t>(0x3132333435363738ULL);
+   const auto value = key160{std::array<protocol::uint128_t, 2>{first, second}};
+
+   BOOST_TEST(backing_hex(value) == "0102030405060708111213141516171821222324252627283132333435363738");
+   BOOST_TEST(hex(value.extract_as_byte_array()) == "0102030405060708111213141516171821222324");
+
+   const auto bytes = std::array<std::uint8_t, 20>{
+       0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
+       0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13,
+   };
+   const auto canonical = key160{bytes};
+   BOOST_TEST(backing_hex(canonical) == "000102030405060708090a0b0c0d0e0f10111213000000000000000000000000");
+   BOOST_TEST((canonical == forge::raw::unpack<key160>(forge::raw::pack(canonical))));
+
+   const auto visible = static_cast<protocol::uint128_t>(0xaabbccddULL) << 96U;
+   const auto lower = key160{std::array<protocol::uint128_t, 2>{0U, visible | 1U}};
+   const auto higher = key160{std::array<protocol::uint128_t, 2>{0U, visible | 2U}};
+   BOOST_TEST(lower.extract_as_byte_array() == higher.extract_as_byte_array());
+   BOOST_TEST(lower < higher);
+}
+
+BOOST_AUTO_TEST_CASE(fixed_key_zero_size_matches_donor_value_semantics) {
+   using empty_key = protocol::fixed_key<0>;
+   static_assert(empty_key::num_words() == 0U);
+   static_assert(empty_key::padded_bytes() == 0U);
+
+   const auto value = empty_key{};
+   BOOST_TEST(value.get_array().empty());
+   BOOST_TEST(value.extract_as_byte_array().empty());
+   BOOST_TEST(forge::raw::pack(value).empty());
+   BOOST_TEST((forge::raw::unpack<empty_key>(std::vector<char>{}) == value));
+
+   const auto variant = forge::variant{value};
+   BOOST_TEST(variant.get_string().empty());
+   BOOST_TEST((variant.as<empty_key>() == value));
 }
 
 BOOST_AUTO_TEST_CASE(name_symbol_and_asset_match_spring_fixtures) {

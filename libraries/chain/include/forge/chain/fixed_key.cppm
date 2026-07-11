@@ -16,12 +16,85 @@ module;
 export module forge.chain.fixed_key;
 
 import forge.crypto.hex;
+import forge.chain.types;
 import forge.raw.exceptions;
 import forge.raw.raw;
 import forge.variant.exceptions;
 import forge.variant.value;
 
 namespace forge::chain::detail {
+
+template <std::size_t Size> [[nodiscard]] constexpr std::size_t fixed_key_num_words() noexcept {
+   return (Size + sizeof(forge::chain::uint128_t) - 1U) / sizeof(forge::chain::uint128_t);
+}
+
+template <std::size_t Size> [[nodiscard]] constexpr std::size_t fixed_key_padded_bytes() noexcept {
+   return fixed_key_num_words<Size>() * sizeof(forge::chain::uint128_t) - Size;
+}
+
+template <std::size_t Size, std::unsigned_integral Word, std::size_t WordCount>
+   requires(!std::same_as<Word, bool> && sizeof(Word) <= sizeof(forge::chain::uint128_t) &&
+            sizeof(forge::chain::uint128_t) % sizeof(Word) == 0U && WordCount * sizeof(Word) <= Size)
+[[nodiscard]] constexpr auto pack_fixed_key_words(const std::array<Word, WordCount>& input) noexcept {
+   auto output = std::array<forge::chain::uint128_t, fixed_key_num_words<Size>()>{};
+   auto output_index = std::size_t{};
+   auto packed = forge::chain::uint128_t{};
+   constexpr auto shift = static_cast<unsigned>(8U * sizeof(Word));
+   constexpr auto words_per_output = sizeof(forge::chain::uint128_t) / sizeof(Word);
+   auto words_left = words_per_output;
+
+   for (const auto word : input) {
+      if constexpr (words_per_output == 1U) {
+         output[output_index++] = static_cast<forge::chain::uint128_t>(word);
+      } else {
+         if (words_left > 1U) {
+            packed |= static_cast<forge::chain::uint128_t>(word);
+            packed <<= shift;
+            --words_left;
+            continue;
+         }
+
+         packed |= static_cast<forge::chain::uint128_t>(word);
+         output[output_index++] = packed;
+         packed = 0U;
+         words_left = words_per_output;
+      }
+   }
+
+   if (words_left != words_per_output) {
+      if (words_left > 1U) {
+         // Spring/CDT fixed_bytes uses byte shifts here, rather than Word-sized shifts.
+         packed <<= static_cast<unsigned>(8U * (words_left - 1U));
+      }
+      output[output_index] = packed;
+   }
+
+   return output;
+}
+
+template <std::size_t Size>
+[[nodiscard]] constexpr auto
+extract_fixed_key_bytes(const std::array<forge::chain::uint128_t, fixed_key_num_words<Size>()>& words) noexcept {
+   auto output = std::array<std::uint8_t, Size>{};
+   auto output_index = std::size_t{};
+
+   for (auto word_index = std::size_t{}; word_index < words.size(); ++word_index) {
+      auto bytes_left = sizeof(forge::chain::uint128_t);
+      auto word = words[word_index];
+      if (word_index + 1U == words.size()) {
+         bytes_left -= fixed_key_padded_bytes<Size>();
+         word >>= static_cast<unsigned>(8U * fixed_key_padded_bytes<Size>());
+      }
+
+      for (auto byte_index = bytes_left; byte_index > 0U; --byte_index) {
+         output[output_index + byte_index - 1U] = static_cast<std::uint8_t>(word & 0xffU);
+         word >>= 8U;
+      }
+      output_index += bytes_left;
+   }
+
+   return output;
+}
 
 template <typename Stream> void read_fixed_key_bytes(Stream& stream, char* data, std::size_t size) {
    try {
@@ -44,117 +117,69 @@ template <typename Stream> void read_fixed_key_bytes(Stream& stream, char* data,
 export namespace forge::chain {
 
 template <std::size_t Size> class fixed_key {
-   static_assert(Size > 0U, "forge::chain::fixed_key size must be greater than zero");
-
  public:
-   using word_type = unsigned __int128;
+   using word_type = forge::chain::uint128_t;
 
    [[nodiscard]] static constexpr std::size_t num_words() noexcept {
-      return (Size + sizeof(word_type) - 1U) / sizeof(word_type);
+      return detail::fixed_key_num_words<Size>();
    }
 
    [[nodiscard]] static constexpr std::size_t padded_bytes() noexcept {
-      return num_words() * sizeof(word_type) - Size;
+      return detail::fixed_key_padded_bytes<Size>();
    }
 
    fixed_key() = default;
 
-   explicit fixed_key(const std::array<word_type, num_words()>& words) : words_{words} {
-      mask_padding();
-   }
+   explicit constexpr fixed_key(const std::array<word_type, num_words()>& words) : words_{words} {}
 
-   explicit fixed_key(const std::array<std::uint8_t, Size>& bytes) {
-      assign_bytes(bytes);
-   }
+   explicit constexpr fixed_key(const std::array<std::uint8_t, Size>& bytes)
+       : words_{detail::pack_fixed_key_words<Size>(bytes)} {}
 
    template <std::unsigned_integral Word, std::size_t WordCount>
-      requires(!std::same_as<Word, bool> && sizeof(Word) <= sizeof(word_type) && WordCount * sizeof(Word) <= Size)
-   explicit fixed_key(const std::array<Word, WordCount>& words) {
-      assign_words(words);
-   }
+      requires(!std::same_as<Word, bool> && sizeof(Word) < sizeof(word_type) &&
+               sizeof(word_type) % sizeof(Word) == 0U && WordCount * sizeof(Word) <= Size)
+   explicit constexpr fixed_key(const std::array<Word, WordCount>& words)
+       : words_{detail::pack_fixed_key_words<Size>(words)} {}
 
    template <std::unsigned_integral First, std::same_as<First>... Rest>
       requires(!std::same_as<First, bool> && sizeof(First) <= sizeof(word_type) &&
-               (1U + sizeof...(Rest)) * sizeof(First) <= Size)
-   [[nodiscard]] static fixed_key make_from_word_sequence(First first, Rest... rest) {
-      return fixed_key{std::array<First, 1U + sizeof...(Rest)>{first, rest...}};
+               sizeof(word_type) % sizeof(First) == 0U && (1U + sizeof...(Rest)) * sizeof(First) <= Size)
+   [[nodiscard]] static constexpr fixed_key make_from_word_sequence(First first, Rest... rest) {
+      auto result = fixed_key{};
+      result.words_ = detail::pack_fixed_key_words<Size>(std::array<First, 1U + sizeof...(Rest)>{first, rest...});
+      return result;
    }
 
    [[nodiscard]] const std::array<word_type, num_words()>& get_array() const noexcept {
       return words_;
    }
 
-   [[nodiscard]] std::array<std::uint8_t, Size> extract_as_byte_array() const noexcept {
-      auto bytes = std::array<std::uint8_t, Size>{};
-      auto output = std::size_t{};
-      for (auto word_index = std::size_t{}; word_index < words_.size(); ++word_index) {
-         const auto count = word_index + 1U == words_.size() ? sizeof(word_type) - padded_bytes() : sizeof(word_type);
-         const auto word = words_[word_index];
-         for (auto byte_index = count; byte_index > 0U; --byte_index) {
-            const auto shift = static_cast<unsigned>((byte_index - 1U) * 8U);
-            bytes[output++] = static_cast<std::uint8_t>((word >> shift) & word_type{0xffU});
-         }
-      }
-      return bytes;
+   [[nodiscard]] constexpr std::array<std::uint8_t, Size> extract_as_byte_array() const noexcept {
+      return detail::extract_fixed_key_bytes<Size>(words_);
    }
 
    bool operator==(const fixed_key&) const = default;
 
    [[nodiscard]] std::strong_ordering operator<=>(const fixed_key& other) const noexcept {
-      const auto lhs = extract_as_byte_array();
-      const auto rhs = other.extract_as_byte_array();
-      return lhs <=> rhs;
-   }
-
-   template <typename Stream> friend Stream& operator<<(Stream& stream, const fixed_key& value) {
-      const auto bytes = value.extract_as_byte_array();
-      stream.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
-      return stream;
-   }
-
-   template <typename Stream> friend Stream& operator>>(Stream& stream, fixed_key& value) {
-      auto bytes = std::array<std::uint8_t, Size>{};
-      detail::read_fixed_key_bytes(stream, reinterpret_cast<char*>(bytes.data()), bytes.size());
-      value.assign_bytes(bytes);
-      return stream;
+      return words_ <=> other.words_;
    }
 
  private:
-   template <std::unsigned_integral Word, std::size_t WordCount>
-   void assign_words(const std::array<Word, WordCount>& words) noexcept {
-      auto bytes = std::array<std::uint8_t, Size>{};
-      auto output = std::size_t{};
-      for (const auto word : words) {
-         for (auto byte_index = sizeof(Word); byte_index > 0U; --byte_index) {
-            const auto shift = static_cast<unsigned>((byte_index - 1U) * 8U);
-            bytes[output++] = static_cast<std::uint8_t>((word >> shift) & static_cast<Word>(0xffU));
-         }
-      }
-      assign_bytes(bytes);
-   }
-
-   void assign_bytes(const std::array<std::uint8_t, Size>& bytes) noexcept {
-      words_.fill(0U);
-      auto input = std::size_t{};
-      for (auto word_index = std::size_t{}; word_index < words_.size(); ++word_index) {
-         const auto count = word_index + 1U == words_.size() ? sizeof(word_type) - padded_bytes() : sizeof(word_type);
-         auto word = word_type{};
-         for (auto byte_index = std::size_t{}; byte_index < count; ++byte_index) {
-            word = static_cast<word_type>((word << 8U) | bytes[input++]);
-         }
-         words_[word_index] = word;
-      }
-   }
-
-   void mask_padding() noexcept {
-      if constexpr (padded_bytes() != 0U) {
-         constexpr auto bits = static_cast<unsigned>((sizeof(word_type) - padded_bytes()) * 8U);
-         words_.back() &= (word_type{1U} << bits) - 1U;
-      }
-   }
-
    std::array<word_type, num_words()> words_{};
 };
+
+template <typename Stream, std::size_t Size> Stream& operator<<(Stream& stream, const fixed_key<Size>& value) {
+   const auto bytes = value.extract_as_byte_array();
+   stream.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
+   return stream;
+}
+
+template <typename Stream, std::size_t Size> Stream& operator>>(Stream& stream, fixed_key<Size>& value) {
+   auto bytes = std::array<std::uint8_t, Size>{};
+   detail::read_fixed_key_bytes(stream, reinterpret_cast<char*>(bytes.data()), bytes.size());
+   value = fixed_key<Size>{bytes};
+   return stream;
+}
 
 using key256 = fixed_key<32>;
 

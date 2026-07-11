@@ -430,9 +430,11 @@ The ordered-index implementation was checked against these donor files:
   composite keys, tuple interoperability and ordered-prefix lookup;
 - Boost.MultiIndex `boost/multi_index/member.hpp`, `mem_fun.hpp` and
   `global_fun.hpp` for independent key extractor vocabulary;
-- Spring `libraries/chain/include/eosio/chain/fixed_key.hpp` for `uint128_t`
-  word storage, `num_words`, `padded_bytes`, unsigned word-sequence construction
-  and lexicographic fixed-key comparison.
+- Spring `libraries/chain/include/eosio/chain/fixed_bytes.hpp` and CDT
+  `libraries/eosiolib/core/eosio/fixed_bytes.hpp` plus
+  `tests/unit/fixed_bytes_tests.cpp` for `uint128_t` word storage,
+  `num_words`, `padded_bytes`, unsigned word-sequence packing, padded-byte
+  extraction, raw bytes and backing-word comparison.
 
 Accepted for Forge:
 
@@ -442,9 +444,9 @@ Accepted for Forge:
 - non-unique indexes use object ID as a deterministic final tie-break;
 - `sort_key<T>` is the std-style extension point for product-owned strong key
   types and collations;
-- `forge::chain::fixed_key<Size>` follows donor word semantics, but raw and
-  variant representations are explicitly canonical big-endian bytes and
-  lower-case fixed-width hex.
+- `forge::chain::fixed_key<Size>` follows current Spring/CDT `fixed_bytes`
+  backing-word, packing, extraction, comparison and raw-byte semantics; its
+  Forge variant representation is explicitly lower-case fixed-width hex.
 
 Rejected or deferred:
 
