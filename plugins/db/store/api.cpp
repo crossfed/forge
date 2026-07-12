@@ -77,13 +77,14 @@ std::shared_ptr<forge::db::object::store> object_handle::require_setup_store() c
    if (!state_) {
       FORGE_THROW_EXCEPTION(exceptions::stopped, "db store object handle is empty");
    }
-   return state_->require_objects_for_setup();
+   return state_->require_objects();
 }
 
 std::shared_ptr<forge::db::object::store> object_handle::require_store() const {
    if (!state_) {
       FORGE_THROW_EXCEPTION(exceptions::stopped, "db store object handle is empty");
    }
+   (void)state_->require_driver();
    return state_->require_objects();
 }
 

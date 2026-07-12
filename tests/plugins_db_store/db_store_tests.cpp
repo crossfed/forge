@@ -22,6 +22,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -102,6 +103,31 @@ class setup_observer final : public forge::db::object::observer {
       co_return;
    }
 };
+
+class contract_store_handle_state final : public store_plugin::store_handle_state {
+ public:
+   [[nodiscard]] std::string name() const override {
+      return "legacy";
+   }
+
+   [[nodiscard]] std::shared_ptr<forge::db::core::driver> require_driver() const override {
+      return {};
+   }
+
+   [[nodiscard]] std::shared_ptr<forge::db::object::store> require_objects() const override {
+      return {};
+   }
+
+   [[nodiscard]] std::shared_ptr<forge::db::blob::store> require_blobs() const override {
+      return {};
+   }
+
+   boost::asio::awaitable<store_plugin::transaction> begin_transaction() const override {
+      co_return store_plugin::transaction{};
+   }
+};
+
+static_assert(!std::is_abstract_v<contract_store_handle_state>);
 
 struct file_record : forge::db::object::object<file_record, 1, 8> {
    std::string path;

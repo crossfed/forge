@@ -34,26 +34,12 @@ std::shared_ptr<forge::db::core::driver> plugin::store_handle_state_impl::requir
    return owner->require_started_store(name_).driver;
 }
 
-std::shared_ptr<forge::db::object::store>
-plugin::store_handle_state_impl::require_objects_for_setup() const {
-   const auto owner = owner_.lock();
-   if (!owner) {
-      FORGE_THROW_EXCEPTION(exceptions::stopped, "db store plugin is stopped");
-   }
-   auto opened = owner->require_setup_store(name_);
-   if (!opened.objects) {
-      FORGE_THROW_EXCEPTION(exceptions::unavailable_layer, "db store object layer is not configured",
-                            forge::exceptions::ctx("store", name_));
-   }
-   return opened.objects;
-}
-
 std::shared_ptr<forge::db::object::store> plugin::store_handle_state_impl::require_objects() const {
    const auto owner = owner_.lock();
    if (!owner) {
       FORGE_THROW_EXCEPTION(exceptions::stopped, "db store plugin is stopped");
    }
-   auto opened = owner->require_started_store(name_);
+   auto opened = owner->require_setup_store(name_);
    if (!opened.objects) {
       FORGE_THROW_EXCEPTION(exceptions::unavailable_layer, "db store object layer is not configured",
                             forge::exceptions::ctx("store", name_));

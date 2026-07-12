@@ -62,8 +62,6 @@ class store_handle_state {
 
    [[nodiscard]] virtual std::string name() const = 0;
    [[nodiscard]] virtual std::shared_ptr<forge::db::core::driver> require_driver() const = 0;
-   [[nodiscard]] virtual std::shared_ptr<forge::db::object::store>
-   require_objects_for_setup() const = 0;
    [[nodiscard]] virtual std::shared_ptr<forge::db::object::store> require_objects() const = 0;
    [[nodiscard]] virtual std::shared_ptr<forge::db::blob::store> require_blobs() const = 0;
    virtual boost::asio::awaitable<transaction> begin_transaction() const = 0;

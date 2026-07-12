@@ -164,6 +164,7 @@ boost::asio::awaitable<void> application_runtime::initialize() {
    }
 
    if (failure) {
+      request_stop();
       co_await shutdown();
       state_ = application_state::stopped;
       std::rethrow_exception(failure);

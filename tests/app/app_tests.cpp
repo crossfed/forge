@@ -572,6 +572,7 @@ class failing_after_initialize_plugin final : public forge::app::plugin {
    }
 
    boost::asio::awaitable<void> initialize(forge::app::plugin_context&) override {
+      initialized_ = true;
       log_->entries.push_back("initialize:after-init-fail");
       co_return;
    }
@@ -586,6 +587,12 @@ class failing_after_initialize_plugin final : public forge::app::plugin {
       co_return;
    }
 
+   void request_stop() noexcept override {
+      if (initialized_) {
+         log_->entries.push_back("request_stop:after-init-fail");
+      }
+   }
+
    boost::asio::awaitable<void> shutdown() override {
       log_->entries.push_back("shutdown:after-init-fail");
       co_return;
@@ -593,6 +600,7 @@ class failing_after_initialize_plugin final : public forge::app::plugin {
 
  private:
    lifecycle_log* log_ = nullptr;
+   bool initialized_ = false;
 };
 
 class slow_shutdown_plugin final : public forge::app::plugin {
@@ -1301,6 +1309,7 @@ BOOST_AUTO_TEST_CASE(application_shell_after_initialize_failure_cleans_up_and_pr
    const auto expected = std::vector<std::string>{
       "initialize:after-init-fail",
       "after_initialize:after-init-fail",
+      "request_stop:after-init-fail",
       "shutdown:after-init-fail",
    };
    BOOST_TEST(log.entries == expected, boost::test_tools::per_element());
