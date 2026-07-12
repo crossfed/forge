@@ -1313,6 +1313,15 @@ BOOST_AUTO_TEST_CASE(application_shell_after_initialize_failure_cleans_up_and_pr
       "shutdown:after-init-fail",
    };
    BOOST_TEST(log.entries == expected, boost::test_tools::per_element());
+
+   const auto snapshot = app.diagnostics().snapshot(app.events());
+   BOOST_TEST(static_cast<int>(snapshot.state) == static_cast<int>(forge::app::lifecycle_state::failed));
+   BOOST_REQUIRE_EQUAL(snapshot.plugins.size(), 1U);
+   BOOST_TEST(snapshot.plugins.front().id == "after-init-fail");
+   BOOST_TEST(static_cast<int>(snapshot.plugins.front().state) ==
+              static_cast<int>(forge::app::lifecycle_state::failed));
+   BOOST_TEST(snapshot.plugins.front().last_transition == "after_initialize");
+   BOOST_TEST(snapshot.plugins.front().last_error == "after initialize failed");
 }
 
 BOOST_AUTO_TEST_CASE(application_shell_after_initialize_is_idempotent) {

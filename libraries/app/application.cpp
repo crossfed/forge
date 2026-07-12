@@ -111,6 +111,10 @@ boost::asio::awaitable<void> application_runtime::initialize() {
       co_return;
    }
 
+   auto has_after_initialize_failure = false;
+   auto failed_plugin_id = std::string{};
+   auto failed_plugin_version = std::string{};
+   auto failed_plugin_message = std::string{};
    auto failure = std::exception_ptr{};
    try {
       for (auto& value : plugins_) {
@@ -147,6 +151,10 @@ boost::asio::awaitable<void> application_runtime::initialize() {
             publish_lifecycle_event(context_, event_severity::info, id, "initialized");
          } catch (...) {
             const auto message = exception_message();
+            has_after_initialize_failure = true;
+            failed_plugin_id = id.value;
+            failed_plugin_version = version;
+            failed_plugin_message = message;
             if (diagnostics_) {
                diagnostics_->set_plugin_state(id.value, version, lifecycle_state::failed, "after_initialize",
                                               message);
@@ -166,6 +174,11 @@ boost::asio::awaitable<void> application_runtime::initialize() {
    if (failure) {
       request_stop();
       co_await shutdown();
+      if (diagnostics_ && has_after_initialize_failure) {
+         diagnostics_->set_plugin_state(std::move(failed_plugin_id), std::move(failed_plugin_version),
+                                        lifecycle_state::failed, "after_initialize",
+                                        std::move(failed_plugin_message));
+      }
       state_ = application_state::stopped;
       std::rethrow_exception(failure);
    }
