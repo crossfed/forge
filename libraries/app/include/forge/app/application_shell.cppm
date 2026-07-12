@@ -47,6 +47,7 @@ class application_context {
    [[nodiscard]] forge::asio::runtime& runtime() noexcept;
    [[nodiscard]] forge::asio::task_scheduler& scheduler() noexcept;
    [[nodiscard]] forge::api::core::installer apis() noexcept;
+   [[nodiscard]] forge::api::core::view api_view() const noexcept;
    [[nodiscard]] signal_bus& signals() noexcept;
    [[nodiscard]] event_bus& events() noexcept;
    [[nodiscard]] diagnostics_store& diagnostics() noexcept;
@@ -100,6 +101,7 @@ class application_shell : public application_base {
    virtual boost::asio::awaitable<void> on_configure(configure_context& context);
    virtual void on_register_plugins(plugin_registry& registry);
    virtual boost::asio::awaitable<void> on_provide(application_context& context);
+   virtual boost::asio::awaitable<void> on_after_initialize(application_context& context);
    virtual int on_run_foreground();
 
  private:

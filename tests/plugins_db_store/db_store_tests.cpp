@@ -483,6 +483,9 @@ BOOST_AUTO_TEST_CASE(store_plugin_rejects_invalid_programmatic_setup) {
    BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, api->add_store("accounts", driver)),
                      store_plugin::exceptions::duplicate_store);
 
+   forge::asio::blocking::run(runtime, plugin.after_initialize());
+   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, api->add_store("ready-late", driver)),
+                     store_plugin::exceptions::stopped);
    forge::asio::blocking::run(runtime, plugin.startup());
    BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, api->add_store("late", driver)),
                      store_plugin::exceptions::stopped);
@@ -655,7 +658,14 @@ BOOST_AUTO_TEST_CASE(store_plugin_rejects_configure_after_stop_or_shutdown) {
 
    {
       auto plugin = store_plugin::plugin{};
+      auto scheduler = forge::asio::task_scheduler{runtime};
+      auto apis = forge::api::core::registry{};
+      auto signals = forge::app::signal_bus{};
+      auto events = forge::app::event_bus{};
+      auto context = forge::app::plugin_context{scheduler, apis, signals, events};
       forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.store"}));
+      forge::asio::blocking::run(runtime, plugin.initialize(context));
+      forge::asio::blocking::run(runtime, plugin.after_initialize());
       forge::asio::blocking::run(runtime, plugin.startup());
       forge::asio::blocking::run(runtime, plugin.shutdown());
 
@@ -707,6 +717,48 @@ BOOST_AUTO_TEST_CASE(store_plugin_custom_driver_store_handle_reads_writes_flushe
                      store_plugin::exceptions::stopped);
 }
 
+BOOST_AUTO_TEST_CASE(store_plugin_after_initialize_opens_store_for_central_object_registration) {
+   auto driver = std::make_shared<memory_driver>();
+   auto registered = false;
+   auto builder = forge::app::application_builder{};
+   builder.name("db-store-ready-test")
+      .runtime(forge::asio::runtime_options{.worker_threads = 1, .thread_name = "db-store-ready-test"})
+      .plugin(store_plugin::descriptor())
+      .plugin(installer_descriptor(driver))
+      .after_initialize([&](forge::app::application_context& context) -> boost::asio::awaitable<void> {
+         auto api = context.api_view().get<store_plugin::api>(store_plugin::api::ref());
+         const auto state = co_await api->status();
+         BOOST_REQUIRE_EQUAL(state.stores.size(), 1U);
+         BOOST_TEST(!state.stores.front().started);
+
+         auto handle = co_await api->store("accounts");
+         handle.objects().register_object<account_object>();
+         registered = true;
+         co_return;
+      });
+
+   auto app = std::move(builder).build();
+   app->configure(forge::config::core::document{});
+   forge::asio::blocking::run(app->runtime(), app->initialize());
+   BOOST_TEST(registered);
+
+   auto api = app->apis().get<store_plugin::api>(store_plugin::api::ref());
+   auto before_startup = forge::asio::blocking::run(app->runtime(), api->status());
+   BOOST_TEST(!before_startup.stores.front().started);
+
+   forge::asio::blocking::run(app->runtime(), app->startup());
+   auto after_startup = forge::asio::blocking::run(app->runtime(), api->status());
+   BOOST_TEST(after_startup.stores.front().started);
+
+   auto handle = forge::asio::blocking::run(app->runtime(), api->store("accounts"));
+   forge::asio::blocking::run(app->runtime(), handle.objects().insert(make_account(7, "ready", 70)));
+   const auto loaded =
+      forge::asio::blocking::run(app->runtime(), handle.objects().get(decltype(account{}.id){7}));
+   BOOST_TEST(loaded.name == "ready");
+
+   forge::asio::blocking::run(app->runtime(), app->shutdown());
+}
+
 BOOST_AUTO_TEST_CASE(store_plugin_blob_only_programmatic_store_rejects_objects_and_roundtrips_blob) {
    auto runtime = forge::asio::runtime{};
    auto scheduler = forge::asio::task_scheduler{runtime};
@@ -729,6 +781,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_blob_only_programmatic_store_rejects_objects_a
 
    auto api = apis.get<store_plugin::api>(store_plugin::api::ref());
    forge::asio::blocking::run(runtime, api->add_store("blobs", driver, options));
+   forge::asio::blocking::run(runtime, plugin.after_initialize());
    forge::asio::blocking::run(runtime, plugin.startup());
 
    auto handle = forge::asio::blocking::run(runtime, api->store("blobs"));
@@ -763,6 +816,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_commits_object_metadata_and
 
    auto api = apis.get<store_plugin::api>(store_plugin::api::ref());
    forge::asio::blocking::run(runtime, api->add_store("files", driver, options));
+   forge::asio::blocking::run(runtime, plugin.after_initialize());
    forge::asio::blocking::run(runtime, plugin.startup());
 
    auto handle = forge::asio::blocking::run(runtime, api->store("files"));
@@ -858,6 +912,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_rollback_hides_object_and_b
 
    auto api = apis.get<store_plugin::api>(store_plugin::api::ref());
    forge::asio::blocking::run(runtime, api->add_store("files", driver, options));
+   forge::asio::blocking::run(runtime, plugin.after_initialize());
    forge::asio::blocking::run(runtime, plugin.startup());
 
    auto handle = forge::asio::blocking::run(runtime, api->store("files"));
@@ -898,6 +953,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_object_failure_rolls_back_b
 
    auto api = apis.get<store_plugin::api>(store_plugin::api::ref());
    forge::asio::blocking::run(runtime, api->add_store("files", driver, options));
+   forge::asio::blocking::run(runtime, plugin.after_initialize());
    forge::asio::blocking::run(runtime, plugin.startup());
 
    auto handle = forge::asio::blocking::run(runtime, api->store("files"));
@@ -939,6 +995,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_store_handle_remains_valid_during_dependent_sh
 
    auto api = apis.get<store_plugin::api>(store_plugin::api::ref());
    forge::asio::blocking::run(runtime, api->add_store("shutdown", driver));
+   forge::asio::blocking::run(runtime, plugin.after_initialize());
    forge::asio::blocking::run(runtime, plugin.startup());
 
    auto handle = forge::asio::blocking::run(runtime, api->store("shutdown"));
@@ -977,6 +1034,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_store_handle_concurrent_close_is_snapshot_safe
 
    auto api = apis.get<store_plugin::api>(store_plugin::api::ref());
    forge::asio::blocking::run(runtime, api->add_store("shutdown", driver));
+   forge::asio::blocking::run(runtime, plugin.after_initialize());
    forge::asio::blocking::run(runtime, plugin.startup());
 
    auto handle = forge::asio::blocking::run(runtime, api->store("shutdown"));

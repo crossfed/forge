@@ -124,15 +124,32 @@ boost::asio::awaitable<void> application_runtime::initialize() {
             context_->signals().plugin_initializing(plugin_signal{.plugin = id.value});
             co_await value->initialize(*context_);
             ++initialized_count_;
+         } catch (...) {
+            const auto message = exception_message();
             if (diagnostics_) {
-               diagnostics_->set_plugin_state(id.value, version, lifecycle_state::initialized, "initialize");
+               diagnostics_->set_plugin_state(id.value, version, lifecycle_state::failed, "initialize", message);
+            }
+            publish_lifecycle_event(context_, event_severity::error, id, "failed", message);
+            throw;
+         }
+      }
+
+      for (auto index = std::size_t{0}; index < initialized_count_; ++index) {
+         auto& value = plugins_[index];
+         const auto id = value->id();
+         const auto version = value->version();
+         try {
+            co_await value->after_initialize();
+            if (diagnostics_) {
+               diagnostics_->set_plugin_state(id.value, version, lifecycle_state::initialized, "after_initialize");
             }
             context_->signals().plugin_initialized(plugin_signal{.plugin = id.value});
             publish_lifecycle_event(context_, event_severity::info, id, "initialized");
          } catch (...) {
             const auto message = exception_message();
             if (diagnostics_) {
-               diagnostics_->set_plugin_state(id.value, version, lifecycle_state::failed, "initialize", message);
+               diagnostics_->set_plugin_state(id.value, version, lifecycle_state::failed, "after_initialize",
+                                              message);
             }
             publish_lifecycle_event(context_, event_severity::error, id, "failed", message);
             throw;
@@ -148,6 +165,7 @@ boost::asio::awaitable<void> application_runtime::initialize() {
 
    if (failure) {
       co_await shutdown();
+      state_ = application_state::stopped;
       std::rethrow_exception(failure);
    }
 }
