@@ -73,6 +73,13 @@ namespace {
 
 using app_test_contract::sample_api;
 
+template <typename Context>
+concept exposes_api_installer = requires(Context& context) {
+   context.apis();
+};
+
+static_assert(!exposes_api_installer<const forge::app::application_context>);
+
 struct lifecycle_log {
    std::vector<std::string> entries;
 };
@@ -1970,13 +1977,14 @@ BOOST_AUTO_TEST_CASE(application_builder_creates_shell_and_applies_config_handle
          context.apis().install<sample_api>(sample_api::describe(), std::make_shared<sample_api_impl>(workers));
          log.entries.push_back("provide");
       })
-      .after_initialize([&](forge::app::application_context& context) -> boost::asio::awaitable<void> {
+      .after_initialize([&](const forge::app::application_context& context)
+                           -> boost::asio::awaitable<void> {
          auto api = context.api_view().get<sample_api>({.id = {"sample"}, .major = 1});
          BOOST_TEST(co_await api->value(0) == 6);
          log.entries.push_back("after_initialize.async_context");
          co_return;
       })
-      .after_initialize([&](forge::app::application_context& context) {
+      .after_initialize([&](const forge::app::application_context& context) {
          BOOST_TEST(context.api_view().registry_ref().describe({.id = {"sample"}, .major = 1}) != nullptr);
          log.entries.push_back("after_initialize.sync_context");
       })

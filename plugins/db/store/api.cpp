@@ -73,6 +73,13 @@ std::string object_handle::name() const {
    return state_->name();
 }
 
+std::shared_ptr<forge::db::object::store> object_handle::require_setup_store() const {
+   if (!state_) {
+      FORGE_THROW_EXCEPTION(exceptions::stopped, "db store object handle is empty");
+   }
+   return state_->require_objects_for_setup();
+}
+
 std::shared_ptr<forge::db::object::store> object_handle::require_store() const {
    if (!state_) {
       FORGE_THROW_EXCEPTION(exceptions::stopped, "db store object handle is empty");
@@ -81,11 +88,11 @@ std::shared_ptr<forge::db::object::store> object_handle::require_store() const {
 }
 
 void object_handle::add_interceptor(std::shared_ptr<forge::db::object::interceptor> value) const {
-   require_store()->add_interceptor(std::move(value));
+   require_setup_store()->add_interceptor(std::move(value));
 }
 
 void object_handle::add_observer(std::shared_ptr<forge::db::object::observer> value) const {
-   require_store()->add_observer(std::move(value));
+   require_setup_store()->add_observer(std::move(value));
 }
 
 boost::asio::awaitable<forge::db::object::transaction> object_handle::begin_transaction() const {
@@ -155,7 +162,7 @@ boost::asio::awaitable<transaction> store_handle::begin_transaction() const {
 
 object_handle store_handle::objects() const {
    auto handle = object_handle{state_};
-   (void)handle.require_store();
+   (void)handle.require_setup_store();
    return handle;
 }
 

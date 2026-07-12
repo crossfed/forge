@@ -206,7 +206,7 @@ boost::asio::awaitable<void> application_shell::on_provide(application_context&)
    co_return;
 }
 
-boost::asio::awaitable<void> application_shell::on_after_initialize(application_context&) {
+boost::asio::awaitable<void> application_shell::on_after_initialize(const application_context&) {
    co_return;
 }
 

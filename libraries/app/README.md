@@ -80,14 +80,16 @@ Derived applications only implement hooks:
 - `on_configure(configure_context&)`
 - `on_register_plugins(plugin_registry&)`
 - `on_provide(application_context&)`
-- `on_after_initialize(application_context&)`
+- `on_after_initialize(const application_context&)`
 - `on_run_foreground()`
 
 This is deliberately strict. The application controls composition, but FORGE controls
 the order: collect config, configure app and plugins, provide app APIs, let
 plugins provide APIs, initialize every plugin, run every plugin
 `after_initialize()`, run the application `on_after_initialize(...)`, startup
-plugins, request stop, shutdown in reverse order.
+plugins, request stop, shutdown in reverse order. The application callback
+receives a const context: it may consume installed APIs through `api_view()`,
+but it cannot install APIs after plugin initialization.
 
 ## App And Plugin Config
 
@@ -286,7 +288,7 @@ builder.name("service")
          "service.configure",
          "worker slots: " + std::to_string(workers));
    })
-   .after_initialize([](forge::app::application_context& context) {
+   .after_initialize([](const forge::app::application_context& context) {
       // APIs are installed and every plugin has completed initialize().
       auto apis = context.api_view();
    })

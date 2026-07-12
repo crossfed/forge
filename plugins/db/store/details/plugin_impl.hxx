@@ -59,7 +59,8 @@ struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
                   store_options options);
    [[nodiscard]] std::shared_ptr<managed_store> find_store(const std::string& name) const;
    [[nodiscard]] std::shared_ptr<managed_store> require_store(const std::string& name) const;
-   [[nodiscard]] opened_store require_open_store(const std::string& name) const;
+   [[nodiscard]] opened_store require_setup_store(const std::string& name) const;
+   [[nodiscard]] opened_store require_started_store(const std::string& name) const;
    [[nodiscard]] status current_status() const;
 
  private:

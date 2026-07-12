@@ -134,9 +134,9 @@ class application_builder {
       using handler_type = std::decay_t<Handler>;
       add_after_initialize_callback(
          [handler = handler_type{std::forward<Handler>(handler)}](
-            application_context& context) mutable -> boost::asio::awaitable<void> {
-            if constexpr (std::is_invocable_v<handler_type&, application_context&>) {
-               using result_type = std::invoke_result_t<handler_type&, application_context&>;
+            const application_context& context) mutable -> boost::asio::awaitable<void> {
+            if constexpr (std::is_invocable_v<handler_type&, const application_context&>) {
+               using result_type = std::invoke_result_t<handler_type&, const application_context&>;
                if constexpr (std::same_as<std::remove_cvref_t<result_type>, boost::asio::awaitable<void>>) {
                   co_await std::invoke(handler, context);
                } else {
@@ -151,7 +151,7 @@ class application_builder {
                }
             } else {
                static_assert(dependent_false<handler_type>,
-                             "after_initialize handler must accept application_context& or no arguments");
+                             "after_initialize handler must accept const application_context& or no arguments");
             }
             co_return;
          });
@@ -165,7 +165,8 @@ class application_builder {
  private:
    using configure_callback = std::function<boost::asio::awaitable<void>(configure_context&)>;
    using provide_callback = std::function<boost::asio::awaitable<void>(application_context&)>;
-   using after_initialize_callback = std::function<boost::asio::awaitable<void>(application_context&)>;
+   using after_initialize_callback =
+      std::function<boost::asio::awaitable<void>(const application_context&)>;
 
    template <typename> static constexpr bool dependent_false = false;
 

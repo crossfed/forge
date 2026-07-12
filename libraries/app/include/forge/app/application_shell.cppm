@@ -101,7 +101,7 @@ class application_shell : public application_base {
    virtual boost::asio::awaitable<void> on_configure(configure_context& context);
    virtual void on_register_plugins(plugin_registry& registry);
    virtual boost::asio::awaitable<void> on_provide(application_context& context);
-   virtual boost::asio::awaitable<void> on_after_initialize(application_context& context);
+   virtual boost::asio::awaitable<void> on_after_initialize(const application_context& context);
    virtual int on_run_foreground();
 
  private:

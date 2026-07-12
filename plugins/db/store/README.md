@@ -65,7 +65,7 @@ Application `after_initialize` callbacks can then obtain handles and register
 object models before startup:
 
 ```cpp
-builder.after_initialize([](forge::app::application_context& context)
+builder.after_initialize([](const forge::app::application_context& context)
                             -> boost::asio::awaitable<void> {
    auto db = context.api_view().get<forge::plugins::db::store::api>(
       forge::plugins::db::store::api::ref());
@@ -75,5 +75,8 @@ builder.after_initialize([](forge::app::application_context& context)
 ```
 
 `status().stores[i].started` remains false in `ready` and becomes true only
-after plugin startup. New stores are rejected from `ready` onward, while opened
-handles remain available until shutdown closes the physical store.
+after plugin startup. In `ready`, `objects()` permits only object registration,
+interceptor registration and observer registration. Transactions, reads,
+writes, indexes, Blob access and flushes remain unavailable until startup. New
+stores are rejected from `ready` onward, while opened handles remain available
+until shutdown closes the physical store.

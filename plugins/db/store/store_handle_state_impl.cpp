@@ -31,7 +31,21 @@ std::shared_ptr<forge::db::core::driver> plugin::store_handle_state_impl::requir
    if (!owner) {
       FORGE_THROW_EXCEPTION(exceptions::stopped, "db store plugin is stopped");
    }
-   return owner->require_open_store(name_).driver;
+   return owner->require_started_store(name_).driver;
+}
+
+std::shared_ptr<forge::db::object::store>
+plugin::store_handle_state_impl::require_objects_for_setup() const {
+   const auto owner = owner_.lock();
+   if (!owner) {
+      FORGE_THROW_EXCEPTION(exceptions::stopped, "db store plugin is stopped");
+   }
+   auto opened = owner->require_setup_store(name_);
+   if (!opened.objects) {
+      FORGE_THROW_EXCEPTION(exceptions::unavailable_layer, "db store object layer is not configured",
+                            forge::exceptions::ctx("store", name_));
+   }
+   return opened.objects;
 }
 
 std::shared_ptr<forge::db::object::store> plugin::store_handle_state_impl::require_objects() const {
@@ -39,7 +53,7 @@ std::shared_ptr<forge::db::object::store> plugin::store_handle_state_impl::requi
    if (!owner) {
       FORGE_THROW_EXCEPTION(exceptions::stopped, "db store plugin is stopped");
    }
-   auto opened = owner->require_open_store(name_);
+   auto opened = owner->require_started_store(name_);
    if (!opened.objects) {
       FORGE_THROW_EXCEPTION(exceptions::unavailable_layer, "db store object layer is not configured",
                             forge::exceptions::ctx("store", name_));
@@ -52,7 +66,7 @@ std::shared_ptr<forge::db::blob::store> plugin::store_handle_state_impl::require
    if (!owner) {
       FORGE_THROW_EXCEPTION(exceptions::stopped, "db store plugin is stopped");
    }
-   auto opened = owner->require_open_store(name_);
+   auto opened = owner->require_started_store(name_);
    if (!opened.blobs) {
       FORGE_THROW_EXCEPTION(exceptions::unavailable_layer, "db store blob layer is not configured",
                             forge::exceptions::ctx("store", name_));
@@ -65,7 +79,7 @@ boost::asio::awaitable<transaction> plugin::store_handle_state_impl::begin_trans
    if (!owner) {
       FORGE_THROW_EXCEPTION(exceptions::stopped, "db store plugin is stopped");
    }
-   auto opened = owner->require_open_store(name_);
+   auto opened = owner->require_started_store(name_);
    if (opened.objects) {
       co_return transaction{co_await opened.objects->begin_transaction()};
    }

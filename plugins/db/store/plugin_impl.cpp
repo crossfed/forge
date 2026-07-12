@@ -279,7 +279,7 @@ std::shared_ptr<managed_store> plugin::impl::require_store(const std::string& na
    return record;
 }
 
-plugin::impl::opened_store plugin::impl::require_open_store(const std::string& name) const {
+plugin::impl::opened_store plugin::impl::require_setup_store(const std::string& name) const {
    auto lock = std::scoped_lock{mutex};
    const auto found = stores.find(name);
    if (found == stores.end()) {
@@ -291,7 +291,26 @@ plugin::impl::opened_store plugin::impl::require_open_store(const std::string& n
    const auto state = current.load();
    if ((state != phase::ready && state != phase::started && state != phase::stopping) ||
        record->driver == nullptr || !record->opened) {
-      FORGE_THROW_EXCEPTION(exceptions::stopped, "db store is not open",
+      FORGE_THROW_EXCEPTION(exceptions::stopped, "db store is not ready",
+                            forge::exceptions::ctx("store", name));
+   }
+
+   return opened_store{.driver = record->driver, .objects = record->objects, .blobs = record->blobs};
+}
+
+plugin::impl::opened_store plugin::impl::require_started_store(const std::string& name) const {
+   auto lock = std::scoped_lock{mutex};
+   const auto found = stores.find(name);
+   if (found == stores.end()) {
+      FORGE_THROW_EXCEPTION(exceptions::unknown_store, "db store is not registered",
+                            forge::exceptions::ctx("store", name));
+   }
+
+   const auto& record = found->second;
+   const auto state = current.load();
+   if ((state != phase::started && state != phase::stopping) ||
+       record->driver == nullptr || !record->opened || !record->started) {
+      FORGE_THROW_EXCEPTION(exceptions::stopped, "db store is not started",
                             forge::exceptions::ctx("store", name));
    }
 

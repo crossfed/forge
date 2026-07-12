@@ -48,6 +48,7 @@ import forge.db.blob.types;
 import forge.db.object.cursor;
 import forge.db.object.exceptions;
 import forge.db.object.header;
+import forge.db.object.hooks;
 import forge.db.object.index;
 import forge.db.object.object;
 import forge.db.core.driver;
@@ -85,6 +86,22 @@ using account_object =
                                  forge::db::object::indexed_by<forge::db::object::primary_unique<by_id>,
                                                              forge::db::object::ordered_unique<
                                                                 by_name, forge::db::object::member<&account::name>>>>;
+
+class setup_interceptor final : public forge::db::object::interceptor {
+ public:
+   boost::asio::awaitable<void>
+   before_mutation(const forge::db::object::object_mutation&) override {
+      co_return;
+   }
+};
+
+class setup_observer final : public forge::db::object::observer {
+ public:
+   boost::asio::awaitable<void>
+   after_commit(const forge::db::object::change_set&) override {
+      co_return;
+   }
+};
 
 struct file_record : forge::db::object::object<file_record, 1, 8> {
    std::string path;
@@ -720,19 +737,32 @@ BOOST_AUTO_TEST_CASE(store_plugin_custom_driver_store_handle_reads_writes_flushe
 BOOST_AUTO_TEST_CASE(store_plugin_after_initialize_opens_store_for_central_object_registration) {
    auto driver = std::make_shared<memory_driver>();
    auto registered = false;
+   auto ready_handle = store_plugin::store_handle{};
    auto builder = forge::app::application_builder{};
    builder.name("db-store-ready-test")
       .runtime(forge::asio::runtime_options{.worker_threads = 1, .thread_name = "db-store-ready-test"})
       .plugin(store_plugin::descriptor())
       .plugin(installer_descriptor(driver))
-      .after_initialize([&](forge::app::application_context& context) -> boost::asio::awaitable<void> {
+      .after_initialize([&](const forge::app::application_context& context)
+                           -> boost::asio::awaitable<void> {
          auto api = context.api_view().get<store_plugin::api>(store_plugin::api::ref());
          const auto state = co_await api->status();
          BOOST_REQUIRE_EQUAL(state.stores.size(), 1U);
          BOOST_TEST(!state.stores.front().started);
 
          auto handle = co_await api->store("accounts");
-         handle.objects().register_object<account_object>();
+         auto objects = handle.objects();
+         objects.register_object<account_object>();
+         objects.add_interceptor(std::make_shared<setup_interceptor>());
+         objects.add_observer(std::make_shared<setup_observer>());
+
+         BOOST_CHECK_THROW(co_await handle.begin_transaction(), store_plugin::exceptions::stopped);
+         BOOST_CHECK_THROW(co_await objects.begin_read(), store_plugin::exceptions::stopped);
+         BOOST_CHECK_THROW(co_await objects.insert(make_account(7, "too-early", 1)),
+                           store_plugin::exceptions::stopped);
+         BOOST_CHECK_THROW(co_await api->flush("accounts"), store_plugin::exceptions::stopped);
+
+         ready_handle = handle;
          registered = true;
          co_return;
       });
@@ -750,10 +780,9 @@ BOOST_AUTO_TEST_CASE(store_plugin_after_initialize_opens_store_for_central_objec
    auto after_startup = forge::asio::blocking::run(app->runtime(), api->status());
    BOOST_TEST(after_startup.stores.front().started);
 
-   auto handle = forge::asio::blocking::run(app->runtime(), api->store("accounts"));
-   forge::asio::blocking::run(app->runtime(), handle.objects().insert(make_account(7, "ready", 70)));
+   forge::asio::blocking::run(app->runtime(), ready_handle.objects().insert(make_account(7, "ready", 70)));
    const auto loaded =
-      forge::asio::blocking::run(app->runtime(), handle.objects().get(decltype(account{}.id){7}));
+      forge::asio::blocking::run(app->runtime(), ready_handle.objects().get(decltype(account{}.id){7}));
    BOOST_TEST(loaded.name == "ready");
 
    forge::asio::blocking::run(app->runtime(), app->shutdown());
@@ -782,9 +811,10 @@ BOOST_AUTO_TEST_CASE(store_plugin_blob_only_programmatic_store_rejects_objects_a
    auto api = apis.get<store_plugin::api>(store_plugin::api::ref());
    forge::asio::blocking::run(runtime, api->add_store("blobs", driver, options));
    forge::asio::blocking::run(runtime, plugin.after_initialize());
+   auto handle = forge::asio::blocking::run(runtime, api->store("blobs"));
+   BOOST_CHECK_THROW((void)handle.blobs(), store_plugin::exceptions::stopped);
    forge::asio::blocking::run(runtime, plugin.startup());
 
-   auto handle = forge::asio::blocking::run(runtime, api->store("blobs"));
    BOOST_CHECK_THROW((void)handle.objects(), store_plugin::exceptions::unavailable_layer);
 
    auto content = forge::asio::blocking::run(runtime, handle.blobs().put(bytes("blob-only-payload")));
