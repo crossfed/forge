@@ -7,6 +7,7 @@ enum class phase : std::uint8_t {
    configured,
    initialized,
    starting,
+   ready,
    started,
    stopping,
    stopped,
@@ -20,6 +21,7 @@ struct managed_store {
    std::shared_ptr<forge::db::core::driver> driver;
    std::shared_ptr<forge::db::object::store> objects;
    std::shared_ptr<forge::db::blob::store> blobs;
+   bool opened = false;
    bool started = false;
 };
 
@@ -47,7 +49,8 @@ struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
 
    void configure(config value);
    void initialize();
-   boost::asio::awaitable<void> start();
+   boost::asio::awaitable<void> open();
+   void start();
    void request_stop() noexcept;
    void close();
 
@@ -56,7 +59,8 @@ struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
                   store_options options);
    [[nodiscard]] std::shared_ptr<managed_store> find_store(const std::string& name) const;
    [[nodiscard]] std::shared_ptr<managed_store> require_store(const std::string& name) const;
-   [[nodiscard]] opened_store require_open_store(const std::string& name) const;
+   [[nodiscard]] opened_store require_setup_store(const std::string& name) const;
+   [[nodiscard]] opened_store require_started_store(const std::string& name) const;
    [[nodiscard]] status current_status() const;
 
  private:

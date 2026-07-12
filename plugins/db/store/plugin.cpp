@@ -61,9 +61,27 @@ boost::asio::awaitable<void> plugin::initialize(forge::app::plugin_context& cont
    co_return;
 }
 
+boost::asio::awaitable<void> plugin::after_initialize() {
+   try {
+      co_await impl_->open();
+   } catch (const exceptions::invalid_config&) {
+      throw;
+   } catch (const exceptions::duplicate_store&) {
+      throw;
+   } catch (const exceptions::stopped&) {
+      throw;
+   } catch (const exceptions::initialize_failed&) {
+      throw;
+   } catch (const std::exception& error) {
+      FORGE_THROW_EXCEPTION(exceptions::initialize_failed, "db store plugin initialization failed",
+                            forge::exceptions::ctx("error", error.what()));
+   }
+   co_return;
+}
+
 boost::asio::awaitable<void> plugin::startup() {
    try {
-      co_await impl_->start();
+      impl_->start();
    } catch (const exceptions::invalid_config&) {
       throw;
    } catch (const exceptions::duplicate_store&) {

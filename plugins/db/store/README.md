@@ -36,7 +36,9 @@ plugins:
 ```
 
 `driver: rocksdb` is available when Forge is built with RocksDB support. Custom
-drivers are added programmatically through the local API before plugin startup.
+drivers are added programmatically through the local API during plugin
+`initialize()`, before the DB Store `after_initialize()` phase opens every
+configured layer.
 
 ## Usage
 
@@ -57,5 +59,24 @@ co_await tx.commit();
 ```
 
 Use `add_store(name, driver, options)` during setup when an application provides
-its own `forge::db::core::driver`. After startup, new stores are rejected so
-handles stay tied to the plugin lifecycle.
+its own `forge::db::core::driver`. Once every plugin has initialized, DB Store
+opens its drivers and logical layers and enters the private `ready` phase.
+Application `after_initialize` callbacks can then obtain handles and register
+object models before startup:
+
+```cpp
+builder.after_initialize([](const forge::app::application_context& context)
+                            -> boost::asio::awaitable<void> {
+   auto db = context.api_view().get<forge::plugins::db::store::api>(
+      forge::plugins::db::store::api::ref());
+   auto witness = co_await db->store("witness");
+   witness.objects().register_object<witness_object>();
+});
+```
+
+`status().stores[i].started` remains false in `ready` and becomes true only
+after plugin startup. In `ready`, `objects()` permits only object registration,
+interceptor registration and observer registration. Transactions, reads,
+writes, indexes, Blob access and flushes remain unavailable until startup. New
+stores are rejected from `ready` onward, while opened handles remain available
+until shutdown closes the physical store.

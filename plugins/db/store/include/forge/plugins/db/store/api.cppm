@@ -80,7 +80,7 @@ class object_handle {
 
    template <forge::db::object::application_object_model Object>
    void register_object() const {
-      require_store()->template register_object<Object>();
+      require_setup_store()->template register_object<Object>();
    }
 
    void add_interceptor(std::shared_ptr<forge::db::object::interceptor> value) const;
@@ -174,6 +174,7 @@ class object_handle {
    }
 
  private:
+   [[nodiscard]] std::shared_ptr<forge::db::object::store> require_setup_store() const;
    [[nodiscard]] std::shared_ptr<forge::db::object::store> require_store() const;
 
    std::shared_ptr<store_handle_state> state_;

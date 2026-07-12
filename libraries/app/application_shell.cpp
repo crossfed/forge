@@ -135,6 +135,10 @@ forge::api::core::installer application_context::apis() noexcept {
    return forge::api::core::installer{*apis_};
 }
 
+forge::api::core::view application_context::api_view() const noexcept {
+   return forge::api::core::view{*apis_};
+}
+
 signal_bus& application_context::signals() noexcept {
    return *signals_;
 }
@@ -199,6 +203,10 @@ boost::asio::awaitable<void> application_shell::on_configure(configure_context&)
 void application_shell::on_register_plugins(plugin_registry&) {}
 
 boost::asio::awaitable<void> application_shell::on_provide(application_context&) {
+   co_return;
+}
+
+boost::asio::awaitable<void> application_shell::on_after_initialize(const application_context&) {
    co_return;
 }
 
@@ -276,6 +284,8 @@ boost::asio::awaitable<void> application_shell::initialize() {
    if (!impl_->configured) {
       co_await apply_effective_config(make_effective_config(forge::config::core::document{}));
    }
+   auto failure = std::exception_ptr{};
+   auto failure_message = std::string{};
    try {
       impl_->diagnostics.set_application_state(lifecycle_state::initializing, "initialize");
       impl_->signals.application_initializing(application_signal{.name = impl_->options.name});
@@ -287,17 +297,27 @@ boost::asio::awaitable<void> application_shell::initialize() {
          impl_->apis_provided = true;
       }
       co_await impl_->plugin_runtime->initialize();
+      co_await on_after_initialize(impl_->context);
       impl_->state = application_state::initialized;
       impl_->diagnostics.set_application_state(lifecycle_state::initialized, "initialize");
       impl_->signals.application_initialized(application_signal{.name = impl_->options.name});
       publish_application_event(impl_->events, event_severity::info, impl_->options.name, "initialized");
    } catch (...) {
-      const auto message = current_exception_message();
+      failure_message = current_exception_message();
+      failure = std::current_exception();
+   }
+   if (failure) {
+      if (impl_->plugin_runtime &&
+          impl_->plugin_runtime->state() != application_state::stopped) {
+         impl_->plugin_runtime->request_stop();
+         co_await impl_->plugin_runtime->shutdown();
+      }
       impl_->state = application_state::stopped;
-      impl_->diagnostics.set_application_state(lifecycle_state::failed, "initialize", message);
-      publish_application_event(impl_->events, event_severity::error, impl_->options.name, "failed", message);
+      impl_->diagnostics.set_application_state(lifecycle_state::failed, "initialize", failure_message);
+      publish_application_event(impl_->events, event_severity::error, impl_->options.name, "failed",
+                                failure_message);
       impl_->scheduler.stop();
-      throw;
+      std::rethrow_exception(failure);
    }
 }
 
