@@ -72,6 +72,4 @@ class api : public forge::api::core::contract<api> {
 
 } // namespace forge::plugins::p2p::pubsub
 
-export {
-FORGE_API(::forge::plugins::p2p::pubsub::api, FORGE_API_CONTRACT("forge.plugins.p2p.pubsub", 1, 0))
-}
+FORGE_EXPORT_API(::forge::plugins::p2p::pubsub::api, FORGE_API_CONTRACT("forge.plugins.p2p.pubsub", 1, 0))

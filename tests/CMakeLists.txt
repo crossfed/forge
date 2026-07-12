@@ -1,5 +1,18 @@
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
+set(FORGE_STRUCTURE_CHECK ${CMAKE_CURRENT_SOURCE_DIR}/structure/check_structure.py)
+add_custom_target(
+   test_forge_structure
+   COMMAND ${Python3_EXECUTABLE} ${FORGE_STRUCTURE_CHECK} ${CMAKE_SOURCE_DIR}
+   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+   VERBATIM
+)
+add_test(
+   NAME test_forge_structure
+   COMMAND ${Python3_EXECUTABLE} ${FORGE_STRUCTURE_CHECK} ${CMAKE_SOURCE_DIR}
+   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
 add_executable(
    test_forge
    unit/main.cpp

@@ -39,6 +39,5 @@ class api : public forge::api::core::contract<api> {
 
 } // namespace forge::plugins::p2p::diagnostics
 
-export {
-FORGE_API(::forge::plugins::p2p::diagnostics::api, FORGE_API_CONTRACT("forge.plugins.p2p.diagnostics", 1, 0))
-}
+FORGE_EXPORT_API(::forge::plugins::p2p::diagnostics::api,
+                 FORGE_API_CONTRACT("forge.plugins.p2p.diagnostics", 1, 0))

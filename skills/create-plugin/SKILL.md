@@ -49,9 +49,9 @@ description: Use when creating, renaming, moving, refactoring, or reviewing an o
 (`plugins::<domain>::<role>`). Приложение группируется по app-hood, и т.д. — head noun
 задаёт дерево.
 
-**P4. Channel-rooted, не core-as-parent.** Если плагин/слайс **выставляет** ядро `X` по
-каналу `C` — корни в канале: `C::X`, **никогда** `X::C`. Ядро, проваливающее is-a (видов
-нет), — лист, не родитель (`http::api`, не `api::http`).
+**P4. API-family naming задаёт `AGENTS.md`.** Этот skill не переопределяет дерево
+`forge::api` и не выводит порядок `api`/channel самостоятельно. При выборе namespace
+API binding сначала применяй актуальное правило API family из repo-root `AGENTS.md`.
 
 **P5. Промежуточный уровень пуст.** `<ns>::plugins::<family>` — пустая группировка; типы
 только в листе `<ns>::plugins::<family>::<name>`.
@@ -86,12 +86,15 @@ description: Use when creating, renaming, moving, refactoring, or reviewing an o
   facade и пустые helper headers для них запрещены.
 - Private class нельзя объявлять внутри `.cpp`: declaration живёт в
   `details/<exact_entity>.hxx`, member implementation — в одноимённом `.cpp`.
+- Private state record, даже если он header-only, получает собственный
+  `details/<exact_entity>.hxx`. `plugin_impl.hxx` содержит только `plugin::impl`,
+  а не соседние phase/config/snapshot/state types.
 
 ## 5. Методы проверки (перед добавлением/переименованием)
 
 **V1. В том ли семействе?** is-a мастер-тест: «`<name>` — это **вид** `<family>` (kind/view)?»
-Да → семейство верное. Нет, плагин **выставляет/зависит** от концепта `<family>` → P4
-(channel-rooted) или другое размещение.
+Да → семейство верное. Нет → проверить роль, обслуживаемый домен и актуальные naming
+rules из `AGENTS.md`, не изобретая локальное правило порядка namespace segments.
 
 **V2. Семейство оправдано?** ≥2 is-a членов, ИЛИ uniform-nest политика проекта + правдоподобный
 будущий сиблинг. Singleton-семейство по активности/бэкенду без сиблингов → пересмотреть.
@@ -103,8 +106,7 @@ namespace/target/component/module/contract.
 
 **V5. Группировка пуста?** В `<ns>::plugins::<family>` нет объявлений типов (P5).
 
-**V6. Слой верный?** produces/consumes (P6); нет восходящих/циклических зависимостей; ядро
-не родитель канала (P4).
+**V6. Слой верный?** produces/consumes (P6); нет восходящих/циклических зависимостей.
 
 ## 6. Линт-гейты (grep)
 ```sh
@@ -114,8 +116,6 @@ grep -rE '^(export )?(struct|class|enum)' "include/$NS/plugins/<family>/" \
   | grep -v "/plugins/<family>/<name>/"            # → пусто
 # нет aggregate-only модулей
 # 5 форм согласованы (V4): сверить target/component/module/contract против namespace листа
-# ядро не родитель канала (P4): запрет namespace вида <ns>::plugins::api::*
-grep -rE '<ns>::plugins::(api|core)::' .            # → пусто (должно быть <channel>::api)
 # слой (P6): нижний слой не импортит домен этого плагина (направление задаётся проектом)
 ```
 

@@ -20,7 +20,6 @@ import forge.variant.containers;
 import forge.variant.chrono;
 import forge.variant.multiprecision;
 import forge.variant.format;
-import forge.variant.described;
 
 export namespace forge {
 struct appender_config {

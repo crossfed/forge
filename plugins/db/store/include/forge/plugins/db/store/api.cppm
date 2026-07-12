@@ -310,6 +310,4 @@ class api : public forge::api::core::contract<api, forge::api::core::surface::lo
 
 namespace store_plugin_api = ::forge::plugins::db::store;
 
-export {
-FORGE_API(store_plugin_api::api, FORGE_API_CONTRACT("forge.plugins.db.store", 1, 0))
-}
+FORGE_EXPORT_API(store_plugin_api::api, FORGE_API_CONTRACT("forge.plugins.db.store", 1, 0))

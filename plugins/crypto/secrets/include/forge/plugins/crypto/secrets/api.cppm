@@ -31,8 +31,7 @@ class api : public forge::api::core::contract<api, forge::api::core::surface::lo
 
 } // namespace forge::plugins::crypto::secrets
 
-export {
-FORGE_API(::forge::plugins::crypto::secrets::api, FORGE_API_CONTRACT("forge.plugins.crypto.secrets", 1, 0),
+FORGE_EXPORT_API(::forge::plugins::crypto::secrets::api, FORGE_API_CONTRACT("forge.plugins.crypto.secrets", 1, 0),
         FORGE_API_METHOD_TYPED(status, ::forge::plugins::crypto::secrets::query,
                              ::forge::plugins::crypto::secrets::snapshot),
         FORGE_API_METHOD_TYPED(get_bytes, ::forge::plugins::crypto::secrets::get_request,
@@ -43,4 +42,3 @@ FORGE_API(::forge::plugins::crypto::secrets::api, FORGE_API_CONTRACT("forge.plug
                              ::forge::plugins::crypto::secrets::aead_encrypt_result),
         FORGE_API_METHOD_TYPED(decrypt_aes_gcm, ::forge::plugins::crypto::secrets::aead_decrypt_request,
                              ::forge::plugins::crypto::secrets::aead_decrypt_result))
-}
