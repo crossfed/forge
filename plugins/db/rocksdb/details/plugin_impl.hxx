@@ -1,18 +1,9 @@
 #pragma once
 
+#include "native_transaction_control.hxx"
+#include "phase.hxx"
+
 namespace forge::plugins::db::rocksdb {
-
-enum class phase : std::uint8_t {
-   registered,
-   configured,
-   initialized,
-   started,
-   stopping,
-   stopped,
-};
-
-struct native_transaction_control;
-
 struct plugin::impl {
    mutable std::mutex mutex;
    config settings;

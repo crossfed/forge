@@ -19,6 +19,7 @@ BROAD_EXPORT = re.compile(r"^\s*export\s*\{")
 CONDITIONAL_START = re.compile(r"^\s*#\s*(?:if|ifdef|ifndef)\b")
 CONDITIONAL_BRANCH = re.compile(r"^\s*#\s*(?:elif|else)\b")
 CONDITIONAL_END = re.compile(r"^\s*#\s*endif\b")
+PRIVATE_DECLARATION = re.compile(r"^(?:class|struct|enum(?:\s+class)?)\s+([A-Za-z_][A-Za-z0-9_:]*)")
 
 
 def source_files(root: Path, roots: tuple[str, ...]) -> list[Path]:
@@ -65,6 +66,66 @@ def check_aggregates(root: Path, errors: list[str]) -> None:
       for line_number, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
          if anchor.search(line):
             errors.append(f"{path.relative_to(root)}:{line_number}: dummy anchor symbol is forbidden")
+
+
+def component_roots(root: Path) -> list[Path]:
+   roots: list[Path] = []
+   for top in LAYOUT_ROOTS:
+      for cmake in (root / top).rglob("CMakeLists.txt"):
+         component = cmake.parent
+         if any(component.glob("*.cpp")):
+            roots.append(component)
+   return sorted(roots)
+
+
+def matching_headers(component: Path, stem: str) -> list[Path]:
+   matches: list[Path] = []
+   include = component / "include"
+   if include.exists():
+      matches.extend(include.rglob(f"{stem}.cppm"))
+   private = component / "details" / f"{stem}.hxx"
+   if private.exists():
+      matches.append(private)
+   return sorted(matches)
+
+
+def check_pairing(root: Path, errors: list[str]) -> None:
+   for component in component_roots(root):
+      sources = {path.stem: path for path in component.glob("*.cpp")}
+      headers = {stem: matching_headers(component, stem) for stem in sources}
+
+      for stem, source in sorted(sources.items()):
+         relative = source.relative_to(root)
+         direct = headers[stem]
+         if len(direct) == 1:
+            continue
+         if len(direct) > 1:
+            owners = ", ".join(str(path.relative_to(root)) for path in direct)
+            errors.append(f"{relative}: implementation has multiple exact owners: {owners}")
+            continue
+
+         aspect_owners = [
+            owner
+            for owner in sources
+            if stem.startswith(f"{owner}_") and len(headers[owner]) == 1
+         ]
+         if aspect_owners:
+            continue
+         errors.append(
+            f"{relative}: implementation needs an exact {stem}.cppm/{stem}.hxx owner "
+            "or a paired X.cpp for an X_<aspect>.cpp source"
+         )
+
+
+def check_plugin_impl_ownership(root: Path, errors: list[str]) -> None:
+   for path in sorted((root / "plugins").rglob("details/plugin_impl.hxx")):
+      for line_number, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
+         declaration = PRIVATE_DECLARATION.match(line)
+         if declaration and declaration.group(1) != "plugin::impl":
+            errors.append(
+               f"{path.relative_to(root)}:{line_number}: plugin_impl.hxx may only own plugin::impl; "
+               f"move {declaration.group(1)} to its exact private header"
+            )
 
 
 def check_modules(root: Path, files: list[Path], errors: list[str]) -> None:
@@ -140,6 +201,8 @@ def main() -> int:
 
    check_layout(root, errors)
    check_aggregates(root, errors)
+   check_pairing(root, errors)
+   check_plugin_impl_ownership(root, errors)
    check_modules(root, files, errors)
 
    if errors:

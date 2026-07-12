@@ -6,12 +6,9 @@
 #include <string>
 #include <vector>
 
-namespace forge::plugins::log::otlp {
+#include "attached_logger.hxx"
 
-struct attached_logger {
-   std::string name;
-   forge::logger logger;
-};
+namespace forge::plugins::log::otlp {
 
 struct plugin::impl {
    config settings;

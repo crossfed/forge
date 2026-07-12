@@ -1,6 +1,12 @@
 add_library(
    forge_rocksdb STATIC
+   native.cpp
+   snapshot_impl.cpp
    store.cpp
+   store_impl.cpp
+   store_snapshot.cpp
+   store_transaction.cpp
+   transaction_impl.cpp
    types.cpp
 )
 forge_target_modules(forge_rocksdb rocksdb)
