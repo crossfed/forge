@@ -54,7 +54,7 @@ void plugin::impl::configure(config value) {
 
    auto lock = std::scoped_lock{mutex};
    const auto state = current.load();
-   if (state == phase::started || state == phase::stopping || state == phase::stopped) {
+   if (state == phase::starting || state == phase::started || state == phase::stopping || state == phase::stopped) {
       FORGE_THROW_EXCEPTION(exceptions::stopped, "db store plugin cannot be configured after startup or stop");
    }
 
@@ -77,7 +77,7 @@ void plugin::impl::initialize() {
 
 void plugin::impl::reject_started_setup() const {
    const auto state = current.load();
-   if (state == phase::started || state == phase::stopping || state == phase::stopped) {
+   if (state == phase::starting || state == phase::started || state == phase::stopping || state == phase::stopped) {
       FORGE_THROW_EXCEPTION(exceptions::stopped, "db stores can only be added before startup");
    }
 }
@@ -117,77 +117,105 @@ void plugin::impl::add_store(std::string name,
    stores.emplace(record->name, std::move(record));
 }
 
-void plugin::impl::start() {
+boost::asio::awaitable<void> plugin::impl::start() {
    auto pending = std::vector<pending_open>{};
+   auto restore_phase = phase::registered;
    {
       auto lock = std::scoped_lock{mutex};
+      const auto state = current.load();
+      if (state == phase::started) {
+         co_return;
+      }
+      if (state == phase::stopping || state == phase::stopped) {
+         FORGE_THROW_EXCEPTION(exceptions::stopped, "db store plugin is stopping");
+      }
       if (!enabled) {
          current.store(phase::started);
-         return;
+         co_return;
+      }
+      if (state != phase::configured && state != phase::initialized) {
+         FORGE_THROW_EXCEPTION(exceptions::startup_failed, "db store plugin is not configured or initialized");
       }
 
-      const auto state = current.load();
-      if (state == phase::stopping || state == phase::stopped) {
-         FORGE_THROW_EXCEPTION(exceptions::stopped, "db store plugin is stopping");
+      restore_phase = state;
+      current.store(phase::starting);
+      pending.reserve(stores.size());
+      for (const auto& [name, record] : stores) {
+         auto item = pending_open{
+            .name = name,
+            .options = record->options,
+            .driver = record->driver,
+         };
+         if (!item.driver) {
+            const auto configured = std::ranges::find_if(settings.stores, [&](const auto& value) {
+               return value.name == name;
+            });
+            if (configured == settings.stores.end()) {
+               current.store(restore_phase);
+               FORGE_THROW_EXCEPTION(exceptions::startup_failed, "db store configured store is not registered",
+                                     forge::exceptions::ctx("store", name));
+            }
+            item.config = *configured;
+         }
+         pending.push_back(std::move(item));
       }
+   }
 
-      for (const auto& item : settings.stores) {
-         const auto found = stores.find(item.name);
-         if (found == stores.end()) {
-            FORGE_THROW_EXCEPTION(exceptions::startup_failed, "db store configured store is not registered",
+   try {
+      for (auto& item : pending) {
+         if (!item.driver) {
+            item.driver = make_configured_driver(*item.config);
+         }
+         if (!item.driver) {
+            FORGE_THROW_EXCEPTION(exceptions::startup_failed, "db store has no driver",
                                   forge::exceptions::ctx("store", item.name));
          }
-         if (!found->second->driver) {
-            pending.push_back(pending_open{.name = item.name, .config = item});
+         if (item.options.object) {
+            auto objects = co_await forge::db::object::store::open(
+               item.driver,
+               forge::db::object::store::config{.family = item.options.object->family},
+               item.options.object->runtime);
+            item.objects = std::make_shared<forge::db::object::store>(std::move(objects));
+         }
+         if (item.options.blob) {
+            item.blobs = std::make_shared<forge::db::blob::store>(
+               item.driver,
+               forge::db::blob::store::config{
+                  .data_family = item.options.blob->data_family,
+                  .refs_family = item.options.blob->refs_family,
+               });
          }
       }
-   }
 
-   for (auto& item : pending) {
-      item.driver = make_configured_driver(item.config);
-   }
-
-   {
       auto lock = std::scoped_lock{mutex};
       const auto state = current.load();
       if (state == phase::stopping || state == phase::stopped) {
          FORGE_THROW_EXCEPTION(exceptions::stopped, "db store plugin is stopping");
       }
-
+      if (state != phase::starting) {
+         FORGE_THROW_EXCEPTION(exceptions::startup_failed, "db store plugin startup state changed");
+      }
       for (auto& item : pending) {
          const auto found = stores.find(item.name);
          if (found == stores.end()) {
-            FORGE_THROW_EXCEPTION(exceptions::startup_failed, "db store configured store is not registered",
+            FORGE_THROW_EXCEPTION(exceptions::startup_failed, "db store is no longer registered",
                                   forge::exceptions::ctx("store", item.name));
          }
-         if (!found->second->driver) {
-            found->second->driver = std::move(item.driver);
-         }
-      }
-
-      for (auto& [name, record] : stores) {
-         if (!record->driver) {
-            FORGE_THROW_EXCEPTION(exceptions::startup_failed, "db store has no driver",
-                                  forge::exceptions::ctx("store", name));
-         }
-         if (record->options.object) {
-            record->objects = std::make_shared<forge::db::object::store>(
-               record->driver,
-               forge::db::object::store::config{.family = record->options.object->family},
-               record->options.object->runtime);
-         }
-         if (record->options.blob) {
-            record->blobs = std::make_shared<forge::db::blob::store>(
-               record->driver,
-               forge::db::blob::store::config{
-                  .data_family = record->options.blob->data_family,
-                  .refs_family = record->options.blob->refs_family,
-               });
-         }
+         auto& record = found->second;
+         record->driver = std::move(item.driver);
+         record->objects = std::move(item.objects);
+         record->blobs = std::move(item.blobs);
          record->started = true;
       }
       current.store(phase::started);
+   } catch (...) {
+      auto lock = std::scoped_lock{mutex};
+      if (current.load() == phase::starting) {
+         current.store(restore_phase);
+      }
+      throw;
    }
+   co_return;
 }
 
 void plugin::impl::request_stop() noexcept {
