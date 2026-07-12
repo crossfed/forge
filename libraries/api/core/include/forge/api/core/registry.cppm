@@ -36,9 +36,8 @@ class registry : public service_mount {
       if (!implementation) {
          throw exceptions::protocol_error{"cannot install null API implementation"};
       }
-      if (!descriptor.interface_type.hash_code() || descriptor.interface_type != typeid(Interface)) {
-         descriptor.interface_type = typeid(Interface);
-      }
+      descriptor.interface_type = typeid(Interface);
+      descriptor.supported_surfaces = Interface::api_surface;
       const auto key = key_for(descriptor.id.value, descriptor.version.major);
       if (entries_.contains(key)) {
          throw exceptions::protocol_error{"duplicate API implementation"};
