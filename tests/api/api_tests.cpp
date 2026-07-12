@@ -1456,6 +1456,46 @@ BOOST_AUTO_TEST_CASE(local_registry_view_returns_typed_handle) {
    BOOST_TEST(registry.describe({.id = {"cache"}, .major = 1, .min_revision = 8}) != nullptr);
 }
 
+BOOST_AUTO_TEST_CASE(registry_install_normalizes_custom_descriptor_surfaces) {
+   auto runtime = forge::asio::runtime{};
+   auto registry = forge::api::core::registry{};
+   auto generated = cache_api::describe();
+   auto descriptor = forge::api::core::descriptor{
+      .id = {"cache.alias"},
+      .version = generated.version,
+      .methods = std::move(generated.methods),
+   };
+   BOOST_CHECK(!forge::api::core::supports(
+      descriptor.supported_surfaces, forge::api::core::surface::remote));
+
+   registry.install<cache_api>(std::move(descriptor), std::make_shared<cache_impl>());
+
+   const auto requested = forge::api::core::api_ref{
+      .id = {"cache.alias"},
+      .major = 1,
+      .min_revision = 8,
+   };
+   const auto* installed = registry.describe(requested);
+   BOOST_REQUIRE(installed != nullptr);
+   BOOST_CHECK(forge::api::core::supports(
+      installed->supported_surfaces, forge::api::core::surface::local));
+   BOOST_CHECK(forge::api::core::supports(
+      installed->supported_surfaces, forge::api::core::surface::remote));
+
+   const auto request = forge::api::core::frame{
+      .kind = forge::api::core::frame_kind::request,
+      .id = {.value = 8},
+      .api = requested,
+      .method = "read",
+      .codec = {.value = "forge.raw"},
+      .payload = pack_api_payload(protocol::read_chunk{.ref = "alias"}),
+   };
+   const auto response = forge::asio::blocking::run(runtime, registry.dispatch(request));
+
+   BOOST_CHECK(response.kind == forge::api::core::frame_kind::response);
+   BOOST_TEST(forge::raw::unpack<protocol::chunk>(response.payload).bytes == "alias");
+}
+
 BOOST_AUTO_TEST_CASE(version_lookup_rejects_too_old_revision) {
    auto registry = forge::api::core::registry{};
    registry.install<cache_api>(cache_api::describe(), std::make_shared<cache_impl>());
