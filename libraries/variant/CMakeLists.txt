@@ -1,9 +1,9 @@
 add_library(
    forge_variant STATIC
-   variant_chrono.cpp
-   variant.cpp
-   variant_format.cpp
-   variant_object.cpp
+   chrono.cpp
+   format.cpp
+   value.cpp
+   value_object.cpp
 )
 forge_target_modules(forge_variant variant)
 

@@ -1,17 +1,9 @@
 #pragma once
 
+#include "pending_binding.hxx"
+#include "startup_snapshot.hxx"
+
 namespace forge::plugins::http::server {
-
-struct pending_binding {
-   forge::api::http::binding_plan binding;
-   publish_options options;
-};
-
-struct startup_snapshot {
-   std::vector<pending_binding> bindings;
-   std::vector<middleware_descriptor> middleware;
-};
-
 struct plugin::impl {
    mutable std::mutex mutex;
    config settings;

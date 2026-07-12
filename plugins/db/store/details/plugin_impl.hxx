@@ -1,30 +1,9 @@
 #pragma once
 
+#include "managed_store.hxx"
+#include "phase.hxx"
+
 namespace forge::plugins::db::store {
-
-enum class phase : std::uint8_t {
-   registered,
-   configured,
-   initialized,
-   starting,
-   ready,
-   started,
-   stopping,
-   stopped,
-};
-
-struct managed_store {
-   std::string name;
-   std::string driver_name;
-   std::string path;
-   store_options options;
-   std::shared_ptr<forge::db::core::driver> driver;
-   std::shared_ptr<forge::db::object::store> objects;
-   std::shared_ptr<forge::db::blob::store> blobs;
-   bool opened = false;
-   bool started = false;
-};
-
 struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
    struct pending_open {
       std::string name;
