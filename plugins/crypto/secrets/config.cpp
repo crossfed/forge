@@ -7,6 +7,7 @@ module;
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <istream>
 #include <map>
 #include <source_location>
 #include <string>
@@ -28,6 +29,7 @@ import forge.plugins.crypto.secrets.types;
 
 #include "details/config.hxx"
 #include "details/plugin_impl.hxx"
+#include "details/require_complete_file_read.hxx"
 
 namespace forge::plugins::crypto::secrets {
 namespace {
@@ -98,12 +100,7 @@ namespace {
    auto output = forge::crypto::bytes(static_cast<std::size_t>(size));
    if (!output.empty()) {
       input.read(reinterpret_cast<char*>(output.data()), static_cast<std::streamsize>(output.size()));
-      const auto read_count = input.gcount();
-      if (read_count < 0 || static_cast<std::size_t>(read_count) != output.size() || input.bad()) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_source, "secret file read was incomplete",
-                               forge::exceptions::ctx("secret_id", id),
-                               forge::exceptions::ctx("path", path));
-      }
+      require_complete_file_read(input, output.size(), path, id);
    }
    return output;
 }
