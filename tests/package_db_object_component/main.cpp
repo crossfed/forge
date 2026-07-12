@@ -9,6 +9,7 @@
 
 import forge.ids.object_id;
 import forge.db.core.record;
+import forge.db.object.header;
 import forge.db.object.index;
 import forge.db.object.object;
 import forge.db.object.store;
@@ -51,6 +52,9 @@ FORGE_DB_OBJECT(account_object)
 
 int main() {
    static_assert(forge::db::object::object_model<account_object>);
+   static_assert(forge::db::object::system_object_value<forge::db::object::header>);
+   static_assert(forge::db::object::system_object_model<forge::db::object::header_index>);
+   static_assert(!forge::db::object::application_object_value<forge::db::object::header>);
    static_assert(forge::db::object::sortable_key<external_key>);
    static_assert(std::same_as<forge::ids::type_for_id_t<account::id_t>, account_object>);
    static_assert(std::same_as<forge::db::object::object_index_for_id_t<account::id_t>, account_object>);

@@ -1,6 +1,7 @@
 add_library(
    forge_db_object STATIC
    details/ordered_key.hxx
+   details/record_key.hxx
    snapshot.cpp
    store.cpp
    store_impl.cpp
@@ -17,7 +18,7 @@ target_include_directories(
 )
 
 install(
-   FILES details/ordered_key.hxx
+   FILES details/ordered_key.hxx details/record_key.hxx
    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Forge/details/db_object
    COMPONENT dev
    EXCLUDE_FROM_ALL

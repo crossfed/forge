@@ -314,7 +314,7 @@ template <typename... Indexes> struct indexed_by {
 template <typename Value, bool Valid> struct object_index_value_traits {};
 
 template <typename Value> struct object_index_value_traits<Value, true> {
-   using base_type = object<Value, Value::space, Value::type>;
+   using base_type = typename Value::object_base_type;
    using id_t = typename Value::id_t;
 };
 
@@ -450,6 +450,12 @@ export namespace forge::db::object {
 
 template <typename T>
 concept object_model = detail::valid_object<T>::value;
+
+template <typename T>
+concept application_object_model = object_model<T> && application_object_value<typename T::value_type>;
+
+template <typename T>
+concept system_object_model = object_model<T> && system_object_value<typename T::value_type>;
 
 template <object_model Object> using id_t_of = detail::primary_id_t<Object>;
 

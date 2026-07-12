@@ -95,14 +95,41 @@ auto driver = std::make_shared<forge::db::rocksdb::driver>(
       .families = {"objectdb"}
    });
 
-forge::db::object::store store{
+auto store = co_await forge::db::object::store::open(
    driver,
    forge::db::object::store::config{
       .family = forge::db::core::family{"objectdb"}
-   }};
+   });
 
 store.register_object<account_object>();
 ```
+
+`open()` validates or creates the persisted DB Object header before returning.
+It rejects non-empty families without a header and versions outside the
+supported range. The cached header is available without I/O through
+`store.header()`.
+
+## System Objects
+
+Object space `0` is reserved for Forge system objects. Application objects must
+use a non-zero space. The built-in `forge::db::object::header` is stored at
+`{space=0,type=0,instance=0}` and records the DB Object persisted-format
+version.
+
+System objects are ordinary typed models for reads and indexes:
+
+```cpp
+import forge.db.object.header;
+
+const auto cached = store.header();
+const auto persisted = co_await store.get(forge::db::object::header_id);
+```
+
+They derive from `system_object<Derived, Type>`. Public `insert`, `create`,
+`replace`, `modify` and `erase` accept only application objects, so attempts to
+mutate the header are rejected at compile time. Bootstrap and future migration
+code use a private path that does not invoke application interceptors or
+observers.
 
 The default write policy is `single_writer`, which serializes DB Object
 mutations at the store layer. `write_policy::backend` is available for drivers
@@ -212,6 +239,7 @@ failed commit. Hooks are DB Object-level and do not expose backend write batches
 ## Modules
 
 - `forge.db.object.object`: base object and descriptor mapping.
+- `forge.db.object.header`: persisted format header and its system descriptor.
 - `forge.db.object.index`: index declarations, views, range queries and streams.
 - `forge.db.object.cursor`: DB Object pagination validation over
   `forge.db.core.record` request types.

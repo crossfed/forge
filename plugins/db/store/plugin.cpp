@@ -63,7 +63,7 @@ boost::asio::awaitable<void> plugin::initialize(forge::app::plugin_context& cont
 
 boost::asio::awaitable<void> plugin::startup() {
    try {
-      impl_->start();
+      co_await impl_->start();
    } catch (const exceptions::invalid_config&) {
       throw;
    } catch (const exceptions::duplicate_store&) {

@@ -1,34 +1,13 @@
 #pragma once
 
+#include "record_key.hxx"
+
 namespace forge::db::object::detail::ordered_key {
 
-enum class entry_kind : std::uint8_t {
-   object_record = 0x10,
-   ordered_unique_index = 0x20,
-   ordered_non_unique_index = 0x21,
-};
-
-inline void append_byte(std::vector<std::byte>& out, std::uint8_t value) {
-   out.push_back(static_cast<std::byte>(value));
-}
-
-inline void append_be16(std::vector<std::byte>& out, std::uint16_t value) {
-   append_byte(out, static_cast<std::uint8_t>((value >> 8U) & 0xffU));
-   append_byte(out, static_cast<std::uint8_t>(value & 0xffU));
-}
-
-inline void append_be32(std::vector<std::byte>& out, std::uint32_t value) {
-   append_byte(out, static_cast<std::uint8_t>((value >> 24U) & 0xffU));
-   append_byte(out, static_cast<std::uint8_t>((value >> 16U) & 0xffU));
-   append_byte(out, static_cast<std::uint8_t>((value >> 8U) & 0xffU));
-   append_byte(out, static_cast<std::uint8_t>(value & 0xffU));
-}
-
-inline void append_be64(std::vector<std::byte>& out, std::uint64_t value) {
-   for (auto shift = 56; shift >= 0; shift -= 8) {
-      append_byte(out, static_cast<std::uint8_t>((value >> static_cast<unsigned>(shift)) & 0xffU));
-   }
-}
+using forge::db::object::detail::record_key::append_be32;
+using forge::db::object::detail::record_key::append_be64;
+using forge::db::object::detail::record_key::append_byte;
+using forge::db::object::detail::record_key::entry_kind;
 
 inline void append_framed(std::vector<std::byte>& out, const forge::db::object::sort_key_bytes& payload,
                           forge::db::object::sort_direction direction) {
@@ -149,9 +128,7 @@ struct key_encoder<forge::db::object::composite_key<Extractors...>> {
 };
 
 inline void append_record_prefix(std::vector<std::byte>& out, entry_kind kind, forge::ids::object_id type) {
-   append_byte(out, static_cast<std::uint8_t>(kind));
-   append_byte(out, type.space);
-   append_be16(out, type.type);
+   forge::db::object::detail::record_key::append_application_prefix(out, kind, type);
 }
 
 inline void append_index_prefix(std::vector<std::byte>& out, entry_kind kind, forge::ids::object_id type,
@@ -163,10 +140,7 @@ inline void append_index_prefix(std::vector<std::byte>& out, entry_kind kind, fo
 template <typename Object>
 [[nodiscard]] forge::db::core::record_key object_record_key(forge::db::object::id_t_of<Object> id) {
    static_assert(forge::db::object::object_model<Object>);
-   auto bytes = std::vector<std::byte>{};
-   append_record_prefix(bytes, entry_kind::object_record, forge::db::object::object_id_of<Object>::value);
-   append_be64(bytes, id.instance);
-   return forge::db::core::record_key{std::move(bytes)};
+   return forge::db::object::detail::record_key::object(id.as_object_id());
 }
 
 template <typename Object, typename Tag>

@@ -17,6 +17,8 @@ struct store::impl {
 
    boost::asio::awaitable<forge::db::core::transaction> open_write_transaction() const;
    boost::asio::awaitable<forge::db::core::snapshot> open_read_snapshot() const;
+   boost::asio::awaitable<forge::db::object::header>
+   initialize_header(forge::db::core::transaction& active) const;
    boost::asio::awaitable<forge::ids::object_id> allocate_id(forge::ids::object_id type,
                                                              forge::db::core::transaction& active);
    boost::asio::awaitable<void> seal_allocations(transaction::allocation_seal_map seals);
@@ -28,6 +30,7 @@ struct store::impl {
    std::shared_ptr<runtime_state> runtime;
    store::config config;
    store::options settings;
+   forge::db::object::header header_value;
    std::map<forge::ids::object_id, std::type_index> registered;
    std::vector<std::shared_ptr<interceptor>> interceptors;
    std::vector<std::shared_ptr<observer>> observers;

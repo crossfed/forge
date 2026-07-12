@@ -18,6 +18,8 @@ enum class code : std::uint16_t {
    transaction_closed = 6,
    unsupported_operation = 7,
    invalid_index_key = 8,
+   invalid_header = 9,
+   incompatible_version = 10,
 };
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(code, "forge.db.object")
@@ -30,5 +32,7 @@ using unregistered_object = forge::exceptions::coded_exception<code, code::unreg
 using transaction_closed = forge::exceptions::coded_exception<code, code::transaction_closed>;
 using unsupported_operation = forge::exceptions::coded_exception<code, code::unsupported_operation>;
 using invalid_index_key = forge::exceptions::coded_exception<code, code::invalid_index_key>;
+using invalid_header = forge::exceptions::coded_exception<code, code::invalid_header>;
+using incompatible_version = forge::exceptions::coded_exception<code, code::incompatible_version>;
 
 } // namespace forge::db::object::exceptions

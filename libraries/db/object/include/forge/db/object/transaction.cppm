@@ -81,19 +81,23 @@ class transaction {
    template <object_model Object>
    boost::asio::awaitable<std::optional<typename Object::value_type>> find(forge::ids::object_id id);
 
-   template <object_value Value> boost::asio::awaitable<void> insert(Value value);
+   template <application_object_value Value> boost::asio::awaitable<void> insert(Value value);
 
-   template <object_value Value, typename Fn>
+   template <application_object_value Value, typename Fn>
       requires std::default_initializable<Value> && std::invocable<Fn&, Value&>
    boost::asio::awaitable<Value> create(Fn&& fn);
 
-   template <object_value Value> boost::asio::awaitable<void> replace(Value value);
+   template <application_object_value Value> boost::asio::awaitable<void> replace(Value value);
 
-   template <forge::ids::typed_id_like Id, typename Fn> boost::asio::awaitable<void> modify(Id id, Fn&& fn);
+   template <forge::ids::typed_id_like Id, typename Fn>
+      requires application_object_model<object_index_for_id_t<Id>>
+   boost::asio::awaitable<void> modify(Id id, Fn&& fn);
 
-   template <forge::ids::typed_id_like Id> boost::asio::awaitable<void> erase(Id id);
+   template <forge::ids::typed_id_like Id>
+      requires application_object_model<object_index_for_id_t<Id>>
+   boost::asio::awaitable<void> erase(Id id);
 
-   template <object_model Object> boost::asio::awaitable<void> erase(forge::ids::object_id id);
+   template <application_object_model Object> boost::asio::awaitable<void> erase(forge::ids::object_id id);
 
    template <object_model Object, typename Tag> [[nodiscard]] index_view<Object, Tag> index() const;
 
@@ -305,7 +309,8 @@ boost::asio::awaitable<void> remove_secondary_indexes(Access tx, const std::vect
    co_return;
 }
 
-template <typename Access, object_value Value> boost::asio::awaitable<void> insert_object(Access tx, Value value) {
+template <typename Access, application_object_value Value>
+boost::asio::awaitable<void> insert_object(Access tx, Value value) {
    using object_model_type = object_index_for_id_t<typename Value::id_t>;
    tx.template ensure_registered<object_model_type>();
 
@@ -329,7 +334,7 @@ template <typename Access, object_value Value> boost::asio::awaitable<void> inse
    co_return;
 }
 
-template <typename Access, object_value Value>
+template <typename Access, application_object_value Value>
 boost::asio::awaitable<void> replace_object(Access tx, Value value, mutation_kind kind) {
    using object_model_type = object_index_for_id_t<typename Value::id_t>;
    tx.template ensure_registered<object_model_type>();
@@ -358,7 +363,7 @@ boost::asio::awaitable<void> replace_object(Access tx, Value value, mutation_kin
    co_return;
 }
 
-template <object_model Object, typename Access>
+template <application_object_model Object, typename Access>
 boost::asio::awaitable<void> erase_object(Access tx, forge::ids::object_id id) {
    tx.template ensure_registered<Object>();
    const auto typed = typed_id_from<Object>(id);
@@ -381,7 +386,7 @@ boost::asio::awaitable<void> erase_object(Access tx, forge::ids::object_id id) {
    co_return;
 }
 
-template <typename Access, object_value Value, typename Fn>
+template <typename Access, application_object_value Value, typename Fn>
    requires std::default_initializable<Value> && std::invocable<Fn&, Value&>
 boost::asio::awaitable<Value> create_object(Access tx, Fn&& fn) {
    using object_model_type = object_index_for_id_t<typename Value::id_t>;
@@ -432,23 +437,25 @@ boost::asio::awaitable<std::optional<typename Object::value_type>> transaction::
    co_return co_await detail::read_transaction_object<Object>(access{*this}, id);
 }
 
-template <object_value Value> boost::asio::awaitable<void> transaction::insert(Value value) {
+template <application_object_value Value> boost::asio::awaitable<void> transaction::insert(Value value) {
    co_await detail::insert_object(access{*this}, std::move(value));
    co_return;
 }
 
-template <object_value Value, typename Fn>
+template <application_object_value Value, typename Fn>
    requires std::default_initializable<Value> && std::invocable<Fn&, Value&>
 boost::asio::awaitable<Value> transaction::create(Fn&& fn) {
    co_return co_await detail::create_object<access, Value>(access{*this}, std::forward<Fn>(fn));
 }
 
-template <object_value Value> boost::asio::awaitable<void> transaction::replace(Value value) {
+template <application_object_value Value> boost::asio::awaitable<void> transaction::replace(Value value) {
    co_await detail::replace_object(access{*this}, std::move(value), mutation_kind::replace);
    co_return;
 }
 
-template <forge::ids::typed_id_like Id, typename Fn> boost::asio::awaitable<void> transaction::modify(Id id, Fn&& fn) {
+template <forge::ids::typed_id_like Id, typename Fn>
+   requires application_object_model<object_index_for_id_t<Id>>
+boost::asio::awaitable<void> transaction::modify(Id id, Fn&& fn) {
    using object_model_type = object_index_for_id_t<Id>;
    auto next = co_await get(id);
    using result_type = std::invoke_result_t<Fn&, typename object_model_type::value_type&>;
@@ -458,12 +465,15 @@ template <forge::ids::typed_id_like Id, typename Fn> boost::asio::awaitable<void
    co_return;
 }
 
-template <forge::ids::typed_id_like Id> boost::asio::awaitable<void> transaction::erase(Id id) {
+template <forge::ids::typed_id_like Id>
+   requires application_object_model<object_index_for_id_t<Id>>
+boost::asio::awaitable<void> transaction::erase(Id id) {
    co_await erase<object_index_for_id_t<Id>>(id.as_object_id());
    co_return;
 }
 
-template <object_model Object> boost::asio::awaitable<void> transaction::erase(forge::ids::object_id id) {
+template <application_object_model Object>
+boost::asio::awaitable<void> transaction::erase(forge::ids::object_id id) {
    co_await detail::erase_object<Object>(access{*this}, id);
    co_return;
 }

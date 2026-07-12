@@ -21,55 +21,54 @@ module forge.db.object.store;
 
 import forge.db.core.exceptions;
 import forge.db.object.exceptions;
+import forge.db.object.header;
+import forge.raw.raw;
 
 #include "details/store_impl.hxx"
+#include "details/record_key.hxx"
 
 namespace forge::db::object {
 
 namespace {
 
-constexpr auto sequence_record_kind = std::uint8_t{0x02};
-constexpr auto object_record_kind = std::uint8_t{0x10};
 constexpr auto sequence_value_size = std::size_t{8};
+constexpr auto header_value_size = sizeof(std::uint64_t) + sizeof(std::uint32_t);
 
-void append_byte(std::vector<std::byte>& out, std::uint8_t value) {
-   out.push_back(static_cast<std::byte>(value));
-}
-
-void append_be16(std::vector<std::byte>& out, std::uint16_t value) {
-   append_byte(out, static_cast<std::uint8_t>((value >> 8U) & 0xffU));
-   append_byte(out, static_cast<std::uint8_t>(value & 0xffU));
-}
-
-void append_be64(std::vector<std::byte>& out, std::uint64_t value) {
-   for (auto shift = 56; shift >= 0; shift -= 8) {
-      append_byte(out, static_cast<std::uint8_t>((value >> static_cast<unsigned>(shift)) & 0xffU));
+std::vector<std::byte> encode_header(const forge::db::object::header& value) {
+   const auto packed = forge::raw::pack(value);
+   auto bytes = std::vector<std::byte>{};
+   bytes.reserve(packed.size());
+   for (const auto byte : packed) {
+      bytes.push_back(static_cast<std::byte>(byte));
    }
+   return bytes;
 }
 
-forge::db::core::record_key sequence_record_key(forge::ids::object_id type) {
-   auto bytes = std::vector<std::byte>{};
-   bytes.reserve(4);
-   append_byte(bytes, sequence_record_kind);
-   append_byte(bytes, type.space);
-   append_be16(bytes, type.type);
-   return forge::db::core::record_key{std::move(bytes)};
-}
+forge::db::object::header decode_header(const std::vector<std::byte>& bytes) {
+   if (bytes.size() != header_value_size) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_header, "db object header has invalid size",
+                            forge::exceptions::ctx("size", bytes.size()),
+                            forge::exceptions::ctx("expected-size", header_value_size));
+   }
 
-forge::db::core::record_key object_record_key(forge::ids::object_id type, std::uint64_t instance) {
-   auto bytes = std::vector<std::byte>{};
-   bytes.reserve(12);
-   append_byte(bytes, object_record_kind);
-   append_byte(bytes, type.space);
-   append_be16(bytes, type.type);
-   append_be64(bytes, instance);
-   return forge::db::core::record_key{std::move(bytes)};
+   auto packed = forge::raw::bytes{};
+   packed.reserve(bytes.size());
+   for (const auto byte : bytes) {
+      packed.push_back(std::to_integer<std::uint8_t>(byte));
+   }
+
+   try {
+      return forge::raw::unpack<forge::db::object::header>(packed);
+   } catch (const std::exception& error) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_header, "db object header cannot be decoded",
+                            forge::exceptions::ctx("error", error.what()));
+   }
 }
 
 std::vector<std::byte> encode_next_instance(std::uint64_t value) {
    auto out = std::vector<std::byte>{};
    out.reserve(sequence_value_size);
-   append_be64(out, value);
+   detail::record_key::append_be64(out, value);
    return out;
 }
 
@@ -150,6 +149,7 @@ store::impl::impl(std::shared_ptr<forge::db::core::driver> driver_value,
       FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db object family is empty");
    }
    runtime = acquire_runtime_state(driver, config.family);
+   registered.emplace(object_id_of<header_index>::value, std::type_index{typeid(header_index)});
 }
 
 boost::asio::awaitable<forge::db::core::transaction> store::impl::open_write_transaction() const {
@@ -166,12 +166,53 @@ boost::asio::awaitable<forge::db::core::snapshot> store::impl::open_read_snapsho
    co_return co_await driver->begin_read();
 }
 
+boost::asio::awaitable<forge::db::object::header>
+store::impl::initialize_header(forge::db::core::transaction& active) const {
+   const auto key = detail::record_key::object(forge::db::object::header_id.as_object_id());
+   const auto existing = co_await active.get(config.family, key);
+
+   if (!existing.has_value()) {
+      const auto records = co_await active.scan_page(
+         config.family,
+         forge::db::core::record_range{.has_end = false},
+         forge::db::core::page_request{.limit = 1});
+      if (!records.entries.empty()) {
+         FORGE_THROW_EXCEPTION(exceptions::incompatible_version,
+                               "db object family is non-empty but has no header",
+                               forge::exceptions::ctx("family", config.family.name));
+      }
+
+      auto created = forge::db::object::header{};
+      created.id = forge::db::object::header_id;
+      co_await active.put(config.family, key, encode_header(created));
+      co_return created;
+   }
+
+   auto decoded = decode_header(*existing);
+   if (decoded.id != forge::db::object::header_id) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_header, "db object header has invalid id");
+   }
+   if (decoded.version < forge::db::object::header::minimum_version ||
+       decoded.version > forge::db::object::header::current_version) {
+      FORGE_THROW_EXCEPTION(exceptions::incompatible_version, "db object header version is incompatible",
+                            forge::exceptions::ctx("version", decoded.version),
+                            forge::exceptions::ctx("minimum-version", forge::db::object::header::minimum_version),
+                            forge::exceptions::ctx("current-version", forge::db::object::header::current_version));
+   }
+
+   if (decoded.version != forge::db::object::header::current_version) {
+      decoded.version = forge::db::object::header::current_version;
+      co_await active.put(config.family, key, encode_header(decoded));
+   }
+   co_return decoded;
+}
+
 boost::asio::awaitable<forge::ids::object_id> store::impl::allocate_id(forge::ids::object_id type,
                                                                        forge::db::core::transaction& active) {
    const auto ticket = co_await runtime->allocator_gate->acquire();
    auto allocated = type;
 
-   const auto key = sequence_record_key(type);
+   const auto key = detail::record_key::sequence(type);
    auto cursor = runtime->next_instances.find(type);
    if (cursor == runtime->next_instances.end()) {
       const auto existing = co_await active.get(config.family, key);
@@ -184,11 +225,14 @@ boost::asio::awaitable<forge::ids::object_id> store::impl::allocate_id(forge::id
       FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db object id sequence is exhausted");
    }
 
-   while ((co_await active.get(config.family, object_record_key(type, next))).has_value()) {
+   auto candidate = type;
+   candidate.instance = next;
+   while ((co_await active.get(config.family, detail::record_key::object(candidate))).has_value()) {
       if (next == std::numeric_limits<std::uint64_t>::max()) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db object id sequence is exhausted");
       }
       ++next;
+      candidate.instance = next;
    }
    if (next == std::numeric_limits<std::uint64_t>::max()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db object id sequence is exhausted");
@@ -213,7 +257,7 @@ boost::asio::awaitable<void> store::impl::seal_allocations(transaction::allocati
       for (auto& [type, consumed_next] : seals) {
          auto sealed_type = type;
          sealed_type.instance = 0;
-         const auto key = sequence_record_key(sealed_type);
+         const auto key = detail::record_key::sequence(sealed_type);
          const auto existing = co_await active.get(config.family, key);
          const auto stored_next = existing.has_value() ? decode_next_instance(*existing) : std::uint64_t{0};
          const auto sealed_next = std::max(stored_next, consumed_next);
