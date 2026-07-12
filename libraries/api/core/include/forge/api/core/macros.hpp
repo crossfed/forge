@@ -198,3 +198,10 @@
    };                                                                                                              \
    }                                                                                                               \
    FORGE_API_DETAIL_DIAGNOSTIC_POP
+
+// Module interfaces need to export the generated explicit specializations.
+// Keep this narrow exception instead of exposing arbitrary broad export blocks.
+#define FORGE_EXPORT_API(...)                                                                                        \
+   export {                                                                                                          \
+   FORGE_API(__VA_ARGS__)                                                                                            \
+   }

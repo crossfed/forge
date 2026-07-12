@@ -11,12 +11,12 @@ if(FORGE_HAS_ROCKSDB)
    add_subdirectory(db/rocksdb)
 endif()
 
-add_library(forge_plugins STATIC plugins.cpp)
+add_library(forge_plugins INTERFACE)
 
-target_include_directories(forge_plugins PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
+target_include_directories(forge_plugins INTERFACE ${FORGE_PUBLIC_INCLUDE_DIRS})
 
 target_link_libraries(
-   forge_plugins PUBLIC
+   forge_plugins INTERFACE
       forge_plugins_crypto_signer
       forge_plugins_crypto_secrets
       forge_plugins_p2p_node
@@ -29,5 +29,5 @@ target_link_libraries(
 )
 
 if(TARGET forge_plugins_db_rocksdb)
-   target_link_libraries(forge_plugins PUBLIC forge_plugins_db_rocksdb)
+   target_link_libraries(forge_plugins INTERFACE forge_plugins_db_rocksdb)
 endif()

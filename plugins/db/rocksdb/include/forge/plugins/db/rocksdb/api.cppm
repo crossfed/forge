@@ -67,6 +67,4 @@ class api : public forge::api::core::contract<api, forge::api::core::surface::lo
 
 namespace db_api = ::forge::plugins::db::rocksdb;
 
-export {
-FORGE_API(db_api::api, FORGE_API_CONTRACT("forge.plugins.db.rocksdb", 1, 0))
-}
+FORGE_EXPORT_API(db_api::api, FORGE_API_CONTRACT("forge.plugins.db.rocksdb", 1, 0))

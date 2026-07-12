@@ -16,7 +16,6 @@ import forge.variant.containers;
 import forge.variant.chrono;
 import forge.variant.multiprecision;
 import forge.variant.format;
-import forge.variant.described;
 
 export namespace forge {
 class console_appender final : public appender {

@@ -53,6 +53,4 @@ class api : public forge::api::core::contract<api> {
 
 } // namespace forge::plugins::p2p::resolver
 
-export {
-FORGE_API(::forge::plugins::p2p::resolver::api, FORGE_API_CONTRACT("forge.plugins.p2p.resolver", 1, 0))
-}
+FORGE_EXPORT_API(::forge::plugins::p2p::resolver::api, FORGE_API_CONTRACT("forge.plugins.p2p.resolver", 1, 0))

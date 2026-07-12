@@ -49,8 +49,6 @@ class api : public forge::api::core::contract<api, forge::api::core::surface::lo
 
 } // namespace forge::plugins::crypto::signer
 
-export {
-FORGE_API(::forge::plugins::crypto::signer::api, FORGE_API_CONTRACT("forge.plugins.crypto.signer", 1, 0),
+FORGE_EXPORT_API(::forge::plugins::crypto::signer::api, FORGE_API_CONTRACT("forge.plugins.crypto.signer", 1, 0),
         FORGE_API_METHOD_TYPED(sign, ::forge::plugins::crypto::signer::request,
                              ::forge::plugins::crypto::signer::response))
-}

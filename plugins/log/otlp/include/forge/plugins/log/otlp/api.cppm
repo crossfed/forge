@@ -37,10 +37,8 @@ class api : public forge::api::core::contract<api, forge::api::core::surface::lo
 
 } // namespace forge::plugins::log::otlp
 
-export {
-FORGE_API(::forge::plugins::log::otlp::api, FORGE_API_CONTRACT("forge.plugins.log.otlp", 1, 0),
+FORGE_EXPORT_API(::forge::plugins::log::otlp::api, FORGE_API_CONTRACT("forge.plugins.log.otlp", 1, 0),
         FORGE_API_METHOD_TYPED(flush, ::forge::plugins::log::otlp::flush_request, ::forge::plugins::log::otlp::flush_result),
         FORGE_API_METHOD_TYPED(metrics,
                              ::forge::plugins::log::otlp::metrics_request,
                              ::forge::plugins::log::otlp::metrics))
-}

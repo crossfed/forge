@@ -26,7 +26,6 @@ module;
 #include <limits>
 #include <algorithm>
 
-#include <vector>
 #include <openssl/bn.h>
 
 module forge.crypto.base58;

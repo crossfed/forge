@@ -29,7 +29,6 @@ import forge.variant.chrono;
 import forge.variant.multiprecision;
 import forge.variant.format;
 import forge.variant.described;
-import forge.variant.described;
 import forge.variant.static_variant;
 
 export namespace forge::crypto::asymmetric {
