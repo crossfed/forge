@@ -2,10 +2,8 @@ add_library(
    forge_plugins_p2p_resolver STATIC
       plugin.cpp
       config.cpp
-      descriptor_projection.cpp
       plugin_impl.cpp
-      protocol.cpp
-      resolver_api.cpp
+      api_impl.cpp
 )
 forge_target_modules_at(forge_plugins_p2p_resolver plugins/p2p/resolver)
 

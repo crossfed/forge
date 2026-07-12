@@ -1,0 +1,19 @@
+#pragma once
+
+namespace forge::plugins::crypto::secrets {
+
+class plugin::api_impl final : public api {
+ public:
+   explicit api_impl(std::shared_ptr<impl> state);
+
+   boost::asio::awaitable<snapshot> status(query value) override;
+   boost::asio::awaitable<get_result> get_bytes(get_request value) override;
+   boost::asio::awaitable<derive_result> derive_hkdf_sha256(derive_request value) override;
+   boost::asio::awaitable<aead_encrypt_result> encrypt_aes_gcm(aead_encrypt_request value) override;
+   boost::asio::awaitable<aead_decrypt_result> decrypt_aes_gcm(aead_decrypt_request value) override;
+
+ private:
+   std::shared_ptr<impl> state_;
+};
+
+} // namespace forge::plugins::crypto::secrets

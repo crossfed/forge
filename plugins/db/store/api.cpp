@@ -3,117 +3,166 @@ module;
 #include <boost/asio/awaitable.hpp>
 #include <forge/exceptions/macros.hpp>
 
+#include <cstddef>
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
-module forge.plugins.db.store.plugin;
+module forge.plugins.db.store.api;
 
+import forge.db.blob.ref;
 import forge.db.blob.store;
+import forge.db.blob.transaction;
+import forge.db.blob.types;
+import forge.db.core.driver;
 import forge.db.object.hooks;
 import forge.db.object.snapshot;
 import forge.db.object.store;
 import forge.db.object.transaction;
-import forge.db.core.driver;
 import forge.plugins.db.store.exceptions;
-import forge.plugins.db.store.types;
-
-#include "details/plugin_impl.hxx"
 
 namespace forge::plugins::db::store {
 
-class plugin::api_impl::handle_state final : public store_handle_state {
- public:
-   handle_state(std::weak_ptr<impl> owner, std::string name) : owner_{std::move(owner)}, name_{std::move(name)} {}
+transaction::transaction(forge::db::core::transaction active) : core_{std::move(active)} {}
 
-   [[nodiscard]] std::string name() const override {
-      return name_;
-   }
+transaction::transaction(forge::db::object::transaction active) : object_{std::move(active)} {}
 
-   [[nodiscard]] std::shared_ptr<forge::db::core::driver> require_driver() const override {
-      const auto owner = owner_.lock();
-      if (!owner) {
-         FORGE_THROW_EXCEPTION(exceptions::stopped, "db store plugin is stopped");
-      }
-
-      return owner->require_open_store(name_).driver;
-   }
-
-   [[nodiscard]] std::shared_ptr<forge::db::object::store> require_objects() const override {
-      const auto owner = owner_.lock();
-      if (!owner) {
-         FORGE_THROW_EXCEPTION(exceptions::stopped, "db store plugin is stopped");
-      }
-
-      auto opened = owner->require_open_store(name_);
-      if (!opened.objects) {
-         FORGE_THROW_EXCEPTION(exceptions::unavailable_layer, "db store object layer is not configured",
-                               forge::exceptions::ctx("store", name_));
-      }
-      return opened.objects;
-   }
-
-   [[nodiscard]] std::shared_ptr<forge::db::blob::store> require_blobs() const override {
-      const auto owner = owner_.lock();
-      if (!owner) {
-         FORGE_THROW_EXCEPTION(exceptions::stopped, "db store plugin is stopped");
-      }
-
-      auto opened = owner->require_open_store(name_);
-      if (!opened.blobs) {
-         FORGE_THROW_EXCEPTION(exceptions::unavailable_layer, "db store blob layer is not configured",
-                               forge::exceptions::ctx("store", name_));
-      }
-      return opened.blobs;
-   }
-
-   boost::asio::awaitable<transaction> begin_transaction() const override {
-      const auto owner = owner_.lock();
-      if (!owner) {
-         FORGE_THROW_EXCEPTION(exceptions::stopped, "db store plugin is stopped");
-      }
-
-      auto opened = owner->require_open_store(name_);
-      if (opened.objects) {
-         co_return transaction{co_await opened.objects->begin_transaction()};
-      }
-      co_return transaction{co_await opened.driver->begin_transaction()};
-   }
-
- private:
-   std::weak_ptr<impl> owner_;
-   std::string name_;
-};
-
-plugin::api_impl::api_impl(std::shared_ptr<impl> owner) : owner_{std::move(owner)} {}
-
-boost::asio::awaitable<void>
-plugin::api_impl::add_store(std::string name,
-                            std::shared_ptr<forge::db::core::driver> driver,
-                            store_options options) {
-   owner_->add_store(std::move(name), std::move(driver), options);
-   co_return;
+bool transaction::active() const noexcept {
+   return object_.has_value() || (core_.has_value() && core_->active());
 }
 
-boost::asio::awaitable<store_handle> plugin::api_impl::store(std::string name) {
-   (void)owner_->require_store(name);
-   co_return store_handle{std::make_shared<handle_state>(owner_, std::move(name))};
+forge::db::core::transaction& transaction::db_transaction() {
+   if (object_.has_value()) {
+      return object_->db_transaction();
+   }
+   if (core_.has_value()) {
+      return *core_;
+   }
+   FORGE_THROW_EXCEPTION(exceptions::stopped, "db store transaction is closed");
 }
 
-boost::asio::awaitable<void> plugin::api_impl::flush(std::string name, bool sync) {
-   auto state = std::make_shared<handle_state>(owner_, std::move(name));
-   co_await state->require_driver()->async_flush(sync);
-}
-
-boost::asio::awaitable<void> plugin::api_impl::flush_all(bool sync) {
-   for (const auto& item : owner_->current_status().stores) {
-      auto state = std::make_shared<handle_state>(owner_, item.name);
-      co_await state->require_driver()->async_flush(sync);
+boost::asio::awaitable<void> transaction::commit() {
+   if (object_.has_value()) {
+      co_await object_->commit();
+      object_.reset();
+      co_return;
+   }
+   if (core_.has_value()) {
+      co_await core_->commit();
+      core_.reset();
    }
 }
 
-boost::asio::awaitable<::forge::plugins::db::store::status> plugin::api_impl::status() {
-   co_return owner_->current_status();
+boost::asio::awaitable<void> transaction::rollback() {
+   if (object_.has_value()) {
+      co_await object_->rollback();
+      object_.reset();
+      co_return;
+   }
+   if (core_.has_value()) {
+      co_await core_->rollback();
+      core_.reset();
+   }
+}
+
+std::string object_handle::name() const {
+   if (!state_) {
+      return {};
+   }
+   return state_->name();
+}
+
+std::shared_ptr<forge::db::object::store> object_handle::require_store() const {
+   if (!state_) {
+      FORGE_THROW_EXCEPTION(exceptions::stopped, "db store object handle is empty");
+   }
+   return state_->require_objects();
+}
+
+void object_handle::add_interceptor(std::shared_ptr<forge::db::object::interceptor> value) const {
+   require_store()->add_interceptor(std::move(value));
+}
+
+void object_handle::add_observer(std::shared_ptr<forge::db::object::observer> value) const {
+   require_store()->add_observer(std::move(value));
+}
+
+boost::asio::awaitable<forge::db::object::transaction> object_handle::begin_transaction() const {
+   co_return co_await require_store()->begin_transaction();
+}
+
+boost::asio::awaitable<forge::db::object::snapshot> object_handle::begin_read() const {
+   co_return co_await require_store()->begin_read();
+}
+
+forge::db::object::transaction object_handle::join(forge::db::core::transaction& active) const {
+   return require_store()->join(active);
+}
+
+std::string blob_handle::name() const {
+   if (!state_) {
+      return {};
+   }
+   return state_->name();
+}
+
+std::shared_ptr<forge::db::blob::store> blob_handle::require_store() const {
+   if (!state_) {
+      FORGE_THROW_EXCEPTION(exceptions::stopped, "db store blob handle is empty");
+   }
+   return state_->require_blobs();
+}
+
+boost::asio::awaitable<forge::db::blob::transaction> blob_handle::begin_transaction() const {
+   co_return co_await require_store()->begin_transaction();
+}
+
+forge::db::blob::transaction blob_handle::join(forge::db::core::transaction& active) const {
+   return require_store()->join(active);
+}
+
+boost::asio::awaitable<forge::db::blob::ref<forge::db::blob::digest>>
+blob_handle::put(std::vector<std::byte> payload) const {
+   co_return co_await require_store()->put(std::move(payload));
+}
+
+boost::asio::awaitable<forge::db::blob::collect_result>
+blob_handle::collect_unreferenced(forge::db::blob::collect_options options) const {
+   co_return co_await require_store()->collect_unreferenced(std::move(options));
+}
+
+std::string store_handle::name() const {
+   if (!state_) {
+      return {};
+   }
+   return state_->name();
+}
+
+std::shared_ptr<forge::db::core::driver> store_handle::require_driver() const {
+   if (!state_) {
+      FORGE_THROW_EXCEPTION(exceptions::stopped, "db store handle is empty");
+   }
+   return state_->require_driver();
+}
+
+boost::asio::awaitable<transaction> store_handle::begin_transaction() const {
+   if (!state_) {
+      FORGE_THROW_EXCEPTION(exceptions::stopped, "db store handle is empty");
+   }
+   co_return co_await state_->begin_transaction();
+}
+
+object_handle store_handle::objects() const {
+   auto handle = object_handle{state_};
+   (void)handle.require_store();
+   return handle;
+}
+
+blob_handle store_handle::blobs() const {
+   auto handle = blob_handle{state_};
+   (void)handle.require_store();
+   return handle;
 }
 
 } // namespace forge::plugins::db::store

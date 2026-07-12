@@ -26,9 +26,8 @@ import forge.plugins.p2p.pubsub.api;
 import forge.plugins.p2p.pubsub.types;
 
 #include "details/config.hxx"
-#include "details/join_flow.hxx"
 #include "details/plugin_impl.hxx"
-#include "details/subscription_api.hxx"
+#include "details/api_impl.hxx"
 
 namespace forge::plugins::p2p::pubsub {
 
@@ -55,7 +54,7 @@ boost::asio::awaitable<void> plugin::configure(forge::config::core::component_vi
 }
 
 boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provider) {
-   provider.install<api>(std::make_shared<subscription_api>(impl_));
+   provider.install<api>(std::make_shared<api_impl>(impl_));
    co_return;
 }
 

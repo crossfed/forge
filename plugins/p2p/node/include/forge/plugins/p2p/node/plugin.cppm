@@ -45,7 +45,7 @@ class plugin final : public forge::app::plugin {
 
  private:
    struct impl;
-   class node_api;
+   class api_impl;
    class diagnostics_source_adapter;
    class pubsub_source_adapter;
 

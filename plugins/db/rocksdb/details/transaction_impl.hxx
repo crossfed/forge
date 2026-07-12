@@ -1,6 +1,7 @@
 #pragma once
 
-#include "transaction_owner.hxx"
+#include "native_transaction_control.hxx"
+#include "native_transaction_owner.hxx"
 
 namespace forge::plugins::db::rocksdb {
 

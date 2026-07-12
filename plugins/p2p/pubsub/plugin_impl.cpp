@@ -7,6 +7,7 @@ module;
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <exception>
@@ -29,11 +30,17 @@ import forge.plugins.p2p.pubsub.api;
 import forge.plugins.p2p.pubsub.exceptions;
 import forge.plugins.p2p.pubsub.types;
 
-#include "details/join_flow.hxx"
-#include "details/message_projection.hxx"
+#include "details/project_message.hxx"
 #include "details/plugin_impl.hxx"
 
 namespace forge::plugins::p2p::pubsub {
+namespace {
+
+[[nodiscard]] bool contains_topic(const std::vector<std::string>& values, const std::string& topic) {
+   return std::ranges::find(values, topic) != values.end();
+}
+
+} // namespace
 
 forge::plugins::p2p::node::pubsub_source& plugin::impl::require_source() const {
    if (!initialized || !source) {

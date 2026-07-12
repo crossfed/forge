@@ -2,8 +2,7 @@ add_library(
    forge_plugins_log_otlp STATIC
    plugin.cpp
    config.cpp
-   exporter_lifecycle.cpp
-   management_api.cpp
+   api_impl.cpp
    plugin_impl.cpp
 )
 forge_target_modules_at(forge_plugins_log_otlp plugins/log/otlp)

@@ -1,7 +1,7 @@
 add_library(
    forge_plugins_p2p_diagnostics STATIC
       plugin.cpp
-      diagnostics_api.cpp
+      api_impl.cpp
       config.cpp
       plugin_impl.cpp
 )

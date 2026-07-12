@@ -48,7 +48,7 @@ import forge.schema.enums;
 
 #include "details/config.hxx"
 #include "details/plugin_impl.hxx"
-#include "details/signer_api.hxx"
+#include "details/api_impl.hxx"
 
 namespace forge::plugins::crypto::signer {
 
@@ -81,7 +81,7 @@ boost::asio::awaitable<void> plugin::configure(forge::config::core::component_vi
 }
 
 boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provider) {
-   provider.install<api>(std::make_shared<signer_api>(impl_));
+   provider.install<api>(std::make_shared<api_impl>(impl_));
    co_return;
 }
 

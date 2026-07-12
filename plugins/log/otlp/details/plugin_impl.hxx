@@ -29,8 +29,4 @@ struct plugin::impl {
    void detach_sink() noexcept;
 };
 
-boost::asio::awaitable<void> start_exporter(plugin::impl& state);
-void request_exporter_stop(plugin::impl& state) noexcept;
-boost::asio::awaitable<void> stop_exporter(plugin::impl& state);
-
 } // namespace forge::plugins::log::otlp

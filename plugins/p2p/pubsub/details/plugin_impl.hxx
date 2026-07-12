@@ -1,5 +1,7 @@
 #pragma once
 
+#include "topic_state.hxx"
+
 namespace forge::plugins::p2p::pubsub {
 
 struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {

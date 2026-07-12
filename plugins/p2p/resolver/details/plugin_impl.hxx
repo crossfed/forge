@@ -30,6 +30,17 @@ struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
    [[nodiscard]] std::vector<entry> local_snapshot() const;
    void add_local(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id route, publish_options options);
    [[nodiscard]] response query_local(const query& request) const;
+   [[nodiscard]] static std::string api_key(const forge::api::core::api_id& id, std::uint16_t major);
+   [[nodiscard]] entry project_descriptor(const forge::api::core::descriptor& descriptor,
+                                          const forge::net::p2p::protocol_id& protocol,
+                                          const forge::api::transport::options& options) const;
+   void validate_entry(const entry& value, std::string_view source) const;
+   void validate_response(const std::vector<entry>& entries) const;
+   void validate_descriptor_compatible(const forge::api::core::descriptor& descriptor,
+                                       const entry& remote) const;
+   [[nodiscard]] std::optional<entry> select_compatible(
+      const std::vector<entry>& entries,
+      const forge::api::core::api_ref& requested) const;
    void install_protocol();
    boost::asio::awaitable<std::vector<entry>> query_remote_apis(forge::net::p2p::peer_id peer,
                                                                 resolve_options options);

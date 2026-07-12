@@ -72,6 +72,21 @@ description: Use when creating, renaming, moving, refactoring, or reviewing an o
 Приватный impl и `.cpp` — по `create-library` (`details/*.hxx`, корневые `*.cpp`, парные,
 `_impl` только под крупный pimpl).
 
+### Каноническая реализация plugin/API
+
+- `plugin.cppm` + `plugin.cpp` объявляют и реализуют public plugin lifecycle.
+- `details/plugin_impl.hxx` + `plugin_impl.cpp` содержат только `plugin::impl` и его
+  методы. Concrete API implementation и lifecycle facade в этих файлах запрещены.
+- Concrete implementation локального `api` называется `plugin::api_impl` и живёт в
+  `details/api_impl.hxx` + `api_impl.cpp`.
+- Pure-virtual `api.cppm` не получает декоративный `api.cpp`. `api.cpp` допустим только
+  для out-of-line реализации concrete public entities, объявленных в `api.cppm`.
+- `configure`, `provide`, `initialize`, `startup`, `request_stop` и `shutdown`
+  реализуются прямо как методы `plugin` в `plugin.cpp`; одноразовые lifecycle helper
+  facade и пустые helper headers для них запрещены.
+- Private class нельзя объявлять внутри `.cpp`: declaration живёт в
+  `details/<exact_entity>.hxx`, member implementation — в одноимённом `.cpp`.
+
 ## 5. Методы проверки (перед добавлением/переименованием)
 
 **V1. В том ли семействе?** is-a мастер-тест: «`<name>` — это **вид** `<family>` (kind/view)?»
