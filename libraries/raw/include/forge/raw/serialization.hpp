@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 
 // Macro-only explicit-instantiation helpers for product/domain DTOs.
 //
@@ -23,9 +24,12 @@
    namespace forge::raw {                                                                                                \
    ext template void pack<forge::datastream<std::size_t>, type>(forge::datastream<std::size_t> & stream,                   \
                                                               const type& value);                                      \
-   ext template void pack<forge::crypto::sha256::encoder, type>(forge::crypto::sha256::encoder & stream, const type& value);               \
-   ext template void pack<forge::datastream<char*>, type>(forge::datastream<char*> & stream, const type& value);           \
-   ext template void unpack<forge::datastream<const char*>, type>(forge::datastream<const char*> & stream, type& value);   \
+   ext template void pack<forge::crypto::sha256::encoder, type>(forge::crypto::sha256::encoder & stream,               \
+                                                                const type& value);                                    \
+   ext template void pack<forge::datastream<std::uint8_t*>, type>(forge::datastream<std::uint8_t*> & stream,           \
+                                                                  const type& value);                                  \
+   ext template void                                                                                                   \
+   unpack<forge::datastream<const std::uint8_t*>, type>(forge::datastream<const std::uint8_t*> & stream, type& value); \
    }
 
 #define FORGE_SERIALIZATION(ext, type)                                                                                   \

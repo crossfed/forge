@@ -19,22 +19,11 @@ import forge.exceptions;
 import forge.plugins.db.rocksdb.exceptions;
 import forge.rocksdb.store;
 
-#include "details/plugin_impl.hxx"
+#include "details/native_transaction_state.hxx"
 #include "details/transaction_impl.hxx"
-#include "details/transaction_owner.hxx"
+#include "details/scheduled_operation.hxx"
 
 namespace forge::plugins::db::rocksdb {
-
-struct native_transaction_state {
-   native_transaction_state(std::shared_ptr<native_transaction_owner> owner_value, forge::rocksdb::transaction transaction_value)
-      : owner{std::move(owner_value)}
-      , transaction{std::move(transaction_value)} {}
-
-   std::shared_ptr<native_transaction_owner> owner;
-   std::optional<forge::rocksdb::transaction> transaction;
-   std::mutex mutex;
-   bool closed_by_owner = false;
-};
 
 namespace {
 

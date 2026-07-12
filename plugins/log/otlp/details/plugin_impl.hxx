@@ -6,12 +6,9 @@
 #include <string>
 #include <vector>
 
-namespace forge::plugins::log::otlp {
+#include "attached_logger.hxx"
 
-struct attached_logger {
-   std::string name;
-   forge::logger logger;
-};
+namespace forge::plugins::log::otlp {
 
 struct plugin::impl {
    config settings;
@@ -28,9 +25,5 @@ struct plugin::impl {
    boost::asio::awaitable<void> flush();
    void detach_sink() noexcept;
 };
-
-boost::asio::awaitable<void> start_exporter(plugin::impl& state);
-void request_exporter_stop(plugin::impl& state) noexcept;
-boost::asio::awaitable<void> stop_exporter(plugin::impl& state);
 
 } // namespace forge::plugins::log::otlp

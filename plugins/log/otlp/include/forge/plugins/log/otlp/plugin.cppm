@@ -44,11 +44,7 @@ class plugin final : public forge::app::plugin {
 
  private:
    struct impl;
-   class management_api;
-
-   friend boost::asio::awaitable<void> start_exporter(impl&);
-   friend void request_exporter_stop(impl&) noexcept;
-   friend boost::asio::awaitable<void> stop_exporter(impl&);
+   class api_impl;
 
    std::shared_ptr<impl> impl_;
 };

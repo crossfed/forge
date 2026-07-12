@@ -10,6 +10,7 @@ controller, state database, consensus engine or product runtime layer.
 - Need FC/Antelope-compatible raw byte layout for protocol records.
 - Need deterministic transaction ids, block ids, signing preimages or digests.
 - Need system action payload records such as `setcode`, `setabi` or `newaccount`.
+- Need donor-compatible fixed-size ordered keys such as `key256`.
 
 ## When Not To Use
 
@@ -27,6 +28,8 @@ controller, state database, consensus engine or product runtime layer.
 - `forge.chain.types` - names, assets, symbols, keys, signatures, timestamps and
   common scalar protocol vocabulary.
 - `forge.chain.authority` - permissions, waits and authority thresholds.
+- `forge.chain.merkle` - modern Spring-compatible Merkle roots and incremental
+  Merkle state.
 - `forge.chain.transaction` - actions, transactions, packed transactions,
   transaction ids and transaction signing digests.
 - `forge.chain.block` - block headers, signed blocks, receipts, block digests
@@ -34,6 +37,8 @@ controller, state database, consensus engine or product runtime layer.
 - `forge.chain.abi` - ABI structs and optional extension-field compatibility.
 - `forge.chain.system` - system action payload records and canonical action
   names.
+- `forge.chain.fixed_key` - `fixed_key<Size>` and `key256`, with unsigned-word
+  construction, canonical big-endian raw bytes and fixed-width hex variants.
 
 Target: `forge_chain`.
 
@@ -90,6 +95,35 @@ auto packed = forge::chain::packed_transaction{
 auto unpacked = packed.get_signed_transaction();
 ```
 
+### Calculate A Transaction Merkle Root
+
+```cpp
+#include <deque>
+
+import forge.chain.block;
+
+auto receipts = std::deque<forge::chain::transaction_receipt>{};
+// Fill receipts as transactions are accepted into the block.
+
+auto header = forge::chain::block_header{};
+header.transaction_mroot = forge::chain::calculate_transaction_mroot(receipts);
+```
+
+`forge.chain.merkle` implements the modern Spring algorithm. It does not expose
+the legacy EOSIO Merkle algorithm. In modern Spring/Savanna, `action_mroot` is a
+finality-tree root and is intentionally not derived from action receipts by this
+library.
+
+### Build A Fixed Ordered Key
+
+```cpp
+import forge.chain.fixed_key;
+
+auto key = forge::chain::key256::make_from_word_sequence<std::uint64_t>(
+   0, 0, 0, 42);
+auto bytes = key.extract_as_byte_array();
+```
+
 ## Boundaries
 
 - `forge_chain` owns payload field order and deterministic protocol helpers.
@@ -103,8 +137,8 @@ auto unpacked = packed.get_signed_transaction();
 ## Tests
 
 `test_forge_chain` covers raw byte fixtures, name encoding, asset text
-conversion, ABI compatibility, transaction and block ids, packed transactions
-and signature recovery cases.
+conversion, ABI compatibility, transaction and block ids, modern Merkle roots,
+incremental Merkle state, packed transactions and signature recovery cases.
 
 `test_forge_package_chain_component` verifies that installed consumers can use
 `find_package(Forge CONFIG REQUIRED COMPONENTS chain)` and import chain modules.

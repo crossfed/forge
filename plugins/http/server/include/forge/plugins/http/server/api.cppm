@@ -56,6 +56,4 @@ class api : public forge::api::core::contract<api, forge::api::core::surface::lo
 
 } // namespace forge::plugins::http::server
 
-export {
-FORGE_API(::forge::plugins::http::server::api, FORGE_API_CONTRACT("forge.plugins.http.server", 1, 0))
-}
+FORGE_EXPORT_API(::forge::plugins::http::server::api, FORGE_API_CONTRACT("forge.plugins.http.server", 1, 0))

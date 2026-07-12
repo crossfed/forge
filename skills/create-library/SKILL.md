@@ -53,19 +53,25 @@ libraries/<lib>/                         # или <group>/<lib>/
 - `details/X.hxx` — если это приватная реализация.
 
 Не оба сразу, не ни одного. Декларации, которые реализует `.cpp`, живут в одном месте.
+Одна пара владеет одним связным компонентом; нельзя использовать общий приватный
+хедер как мешок деклараций для нескольких самостоятельных сущностей.
 
-**R3. Header-only компонент — норма.**
+**R3. Header-only компонент — ограниченное исключение.**
 `X.cppm` (или `details/X.hxx`) без парного `.cpp` допустим, если компонент состоит только
-из деклараций (типы, перечисления, исключения, опции, чистые шаблоны).
+из деклараций, POD/value records, перечислений, исключений, опций, templates или
+`constexpr`-кода. Нетривиальные non-template функции и методы реализуются out-of-line
+в парном `X.cpp`.
 
 **R4. Приватные внутренности → `details/X.hxx`.**
 Внутренние хелперы/impl-хедеры идут в `details/` как `.hxx` (+ парный `X.cpp` в корне).
+Каждый private header владеет одной связной сущностью или одним связным компонентом.
 **Никогда** в корень либы, **никогда** `_X.hpp`, **никогда** `.hpp` для приватного.
 
 **R5. Разбиение большого `.cpp`.**
 Если реализация компонента велика — дробить как `X.cpp` + `X_<aspect>.cpp`
 (напр. `parser.cpp` + `parser_simd.cpp`). Все части реализуют **одни и те же** декларации
-(`X.cppm` или `details/X*.hxx`). Единый суффикс `_<aspect>`; не `_`-префикс, не разнобой.
+(`X.cppm` или `details/X.hxx`). Aspect-файл допустим только при наличии основного
+`X.cpp`. Единый суффикс `_<aspect>`; не `_`-префикс, не разнобой.
 
 **R6. Путь `include/` зеркалит namespace.**
 `include/<ns_root>/<lib_path>/` соответствует namespace `<ns_root>::<lib_path>`.
@@ -79,6 +85,11 @@ libraries/<lib>/                         # или <group>/<lib>/
 - плоский тип `<name>_impl` → `<name>_impl.hxx` / `<name>_impl.cpp`. **Не** `<name>.hxx`.
 - Следствие: публичный `<component>` (`<component>.cppm`) и приватный `<component>::impl`
   (`details/<component>_impl.hxx`) — **разные файлы**, имена не схлопываются.
+
+**R8. Aggregate без кода = `INTERFACE`.**
+Convenience target, который только транзитивно собирает usage requirements других
+target-ов, объявляется `INTERFACE`. Добавлять фиктивный `.cpp`, пустой namespace,
+`aggregate_anchor`, `dummy_anchor` или другой placeholder symbol запрещено.
 
 ## Куда положить новый файл (решение)
 1. Публичный интерфейс? → `include/<ns_root>/<lib_path>/<entity>.cppm`
@@ -98,6 +109,10 @@ libraries/<lib>/                         # или <group>/<lib>/
   (должно быть `plugin_impl.hxx`); `<name>.hxx` для типа `<name>_impl`.
 - `.cppm` лежит вне `include/`; `.cpp` лежит в `include/` или `details/`.
 - `.cpp` без парного хедера (декларации нигде или только инлайн в `.cpp`).
+- `X_<aspect>.cpp` без основного `X.cpp`.
+- Нетривиальная coroutine/функция реализована в `.hxx` без template/constexpr причины.
+- Несколько самостоятельных private classes собраны в одном `details/X.hxx`.
+- Code-less aggregate скомпилирован через dummy source или anchor symbol вместо `INTERFACE`.
 - `details/` есть в одних либах и нет в других при наличии приватных хедеров.
 
 ## Линт-гейты (grep, для скилла/CI)

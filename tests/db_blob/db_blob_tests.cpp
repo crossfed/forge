@@ -477,8 +477,8 @@ BOOST_AUTO_TEST_CASE(db_blob_ref_raw_rejects_truncated_in_memory_payload_as_code
 }
 
 BOOST_AUTO_TEST_CASE(db_blob_ref_raw_rejects_excessive_variable_digest_size) {
-   auto packed = std::vector<char>{};
-   auto stream = forge::datastream<std::vector<char>>{packed};
+   auto packed = forge::raw::bytes{};
+   auto stream = forge::datastream<forge::raw::bytes>{packed};
    forge::raw::pack(stream, std::uint32_t{0xffffffffU});
 
    BOOST_CHECK_THROW(forge::raw::unpack<forge::db::blob::ref<capped_digest>>(stream.storage()),
@@ -750,11 +750,11 @@ BOOST_AUTO_TEST_CASE(db_blob_retain_release_and_collect_roll_back_with_transacti
 BOOST_AUTO_TEST_CASE(db_blob_join_shares_commit_boundary_with_db_object_metadata) {
    auto runtime = forge::asio::runtime{};
    auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
-   auto objects = forge::db::object::store{driver};
-   objects.register_object<document_object>();
    auto blobs = forge::db::blob::store{driver};
 
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto objects = co_await forge::db::object::store::open(driver);
+      objects.register_object<document_object>();
       auto db_tx = co_await driver->begin_transaction();
       auto object_tx = objects.join(db_tx);
       auto blob_tx = blobs.join(db_tx);

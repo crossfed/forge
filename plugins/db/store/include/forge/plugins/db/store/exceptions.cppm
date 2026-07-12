@@ -20,6 +20,7 @@ class exceptions {
       startup_failed = 5,
       invalid_argument = 6,
       unavailable_layer = 7,
+      initialize_failed = 8,
       internal_error = 255,
    };
 
@@ -30,6 +31,7 @@ class exceptions {
    using startup_failed = forge::exceptions::coded_exception<code, code::startup_failed>;
    using invalid_argument = forge::exceptions::coded_exception<code, code::invalid_argument>;
    using unavailable_layer = forge::exceptions::coded_exception<code, code::unavailable_layer>;
+   using initialize_failed = forge::exceptions::coded_exception<code, code::initialize_failed>;
    using internal_error = forge::exceptions::coded_exception<code, code::internal_error>;
 };
 

@@ -1,5 +1,18 @@
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
+set(FORGE_STRUCTURE_CHECK ${CMAKE_CURRENT_SOURCE_DIR}/structure/check_structure.py)
+add_custom_target(
+   test_forge_structure
+   COMMAND ${Python3_EXECUTABLE} ${FORGE_STRUCTURE_CHECK} ${CMAKE_SOURCE_DIR}
+   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+   VERBATIM
+)
+add_test(
+   NAME test_forge_structure
+   COMMAND ${Python3_EXECUTABLE} ${FORGE_STRUCTURE_CHECK} ${CMAKE_SOURCE_DIR}
+   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
 add_executable(
    test_forge
    unit/main.cpp
@@ -85,6 +98,7 @@ add_executable(
    test_forge_chain
    unit/main.cpp
    chain/chain_tests.cpp
+   chain/merkle_tests.cpp
 )
 target_link_libraries(test_forge_chain forge_chain forge Boost::included_unit_test_framework)
 add_test(NAME test_forge_chain COMMAND test_forge_chain WORKING_DIRECTORY ${CMAKE_BINARY_DIR})

@@ -419,3 +419,45 @@ The next implementation pass should still be primitives-first:
 If a proposed type needs a storage engine, scheduler, plugin lifecycle, FUSE
 callback, blockchain replay rule or SQL planner to make sense, it does not
 belong in the first `forge::db::object` primitive layer.
+
+## Ordered Index And Fixed-Key Follow-Up
+
+The ordered-index implementation was checked against these donor files:
+
+- Boost.MultiIndex `boost/multi_index/ordered_index.hpp` for the separation of
+  `ordered_unique` and `ordered_non_unique` index kinds;
+- Boost.MultiIndex `boost/multi_index/composite_key.hpp` for lexicographic
+  composite keys, tuple interoperability and ordered-prefix lookup;
+- Boost.MultiIndex `boost/multi_index/member.hpp`, `mem_fun.hpp` and
+  `global_fun.hpp` for independent key extractor vocabulary;
+- Spring `libraries/chain/include/eosio/chain/fixed_bytes.hpp` and CDT
+  `libraries/eosiolib/core/eosio/fixed_bytes.hpp` plus
+  `tests/unit/fixed_bytes_tests.cpp` for `uint128_t` word storage,
+  `num_words`, `padded_bytes`, unsigned word-sequence packing, padded-byte
+  extraction, raw bytes and backing-word comparison.
+
+Accepted for Forge:
+
+- descriptors separate uniqueness from extraction;
+- scalar and composite ordered indexes use the same persisted key pipeline;
+- composite range queries accept a non-empty leading prefix;
+- non-unique indexes use object ID as a deterministic final tie-break;
+- `sort_key<T>` is the std-style extension point for product-owned strong key
+  types and collations;
+- `forge::chain::fixed_key<Size>` follows current Spring/CDT `fixed_bytes`
+  backing-word, packing, extraction, comparison and raw-byte semantics; its
+  Forge variant representation is explicitly lower-case fixed-width hex.
+
+Rejected or deferred:
+
+- native backend comparators, because DB Object key ordering must remain
+  identical across in-memory and RocksDB drivers;
+- hashed indexes until a persisted backend use case justifies a backend-neutral
+  contract;
+- sequenced and random-access indexes, which are container views rather than
+  natural persisted secondary indexes;
+- ranked indexes until rank maintenance, mutation cost and snapshot behavior
+  have a backend-neutral design;
+- bundled Berkeley SoftFloat. Products own the SoftFloat dependency and provide
+  `sort_key<float64_t>` / `sort_key<float128_t>` specializations with explicit
+  NaN and signed-zero policy.

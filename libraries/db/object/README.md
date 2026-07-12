@@ -43,10 +43,15 @@ using account_object = forge::db::object::object_index<
    account,
    forge::db::object::indexed_by<
       forge::db::object::primary_unique<by_id>,
-      forge::db::object::secondary_unique<by_name, &account::name>,
-      forge::db::object::secondary_non_unique<
+      forge::db::object::ordered_unique<
+         by_name,
+         forge::db::object::member<&account::name>>,
+      forge::db::object::ordered_non_unique<
          by_region_balance,
-         forge::db::object::composite_key<&account::region, &account::balance>>>>;
+         forge::db::object::composite_key<
+            forge::db::object::member<&account::region>,
+            forge::db::object::descending<
+               forge::db::object::member<&account::balance>>>>>>;
 
 FORGE_DB_OBJECT(account_object)
 ```
@@ -55,6 +60,28 @@ FORGE_DB_OBJECT(account_object)
 User values remain described C++ structs. `FORGE_DB_OBJECT(...)` creates
 the compile-time mapping from `typed_id<Space, Type>` to the descriptor, so
 typed-id operations do not require spelling the object type again.
+
+Ordered descriptors follow the Boost.MultiIndex separation between index kind
+and key extraction. `member`, `const_mem_fun` and `global_fun` extract scalar
+keys; `composite_key` combines two or more extractors. Extractors are ascending
+unless wrapped in `descending`; `ascending` can make the default explicit.
+
+Index values use `sort_key<T>` to produce canonical ascending bytes. Forge
+ships codecs for booleans, integers, enums, strings, object IDs, typed IDs and
+fixed-byte values exposing `to_uint8_span()` or `extract_as_byte_array()`.
+Products can support strong domain types without changing DB Object:
+
+```cpp
+template <>
+struct forge::db::object::sort_key<domain_float> {
+   forge::db::object::sort_key_bytes operator()(const domain_float& value) const;
+};
+```
+
+The specialization owns normalization and invalid-value policy. For example, a
+SoftFloat consumer decides how signed zero and NaN values behave. Codec failures
+surface as `forge::db::object::exceptions::invalid_index_key` before index or
+object records are mutated.
 
 ## Store
 
@@ -68,14 +95,41 @@ auto driver = std::make_shared<forge::db::rocksdb::driver>(
       .families = {"objectdb"}
    });
 
-forge::db::object::store store{
+auto store = co_await forge::db::object::store::open(
    driver,
    forge::db::object::store::config{
       .family = forge::db::core::family{"objectdb"}
-   }};
+   });
 
 store.register_object<account_object>();
 ```
+
+`open()` validates or creates the persisted DB Object header before returning.
+It rejects non-empty families without a header and versions outside the
+supported range. The cached header is available without I/O through
+`store.header()`.
+
+## System Objects
+
+Object space `0` is reserved for Forge system objects. Application objects must
+use a non-zero space. The built-in `forge::db::object::header` is stored at
+`{space=0,type=0,instance=0}` and records the DB Object persisted-format
+version.
+
+System objects are ordinary typed models for reads and indexes:
+
+```cpp
+import forge.db.object.header;
+
+const auto cached = store.header();
+const auto persisted = co_await store.get(forge::db::object::header_id);
+```
+
+They derive from `system_object<Derived, Type>`. Public `insert`, `create`,
+`replace`, `modify` and `erase` accept only application objects, so attempts to
+mutate the header are rejected at compile time. Bootstrap and future migration
+code use a private path that does not invoke application interceptors or
+observers.
 
 The default write policy is `single_writer`, which serializes DB Object
 mutations at the store layer. `write_policy::backend` is available for drivers
@@ -158,15 +212,23 @@ index records:
 auto alice = co_await store.index<account_object, by_name>().find("alice");
 
 auto page = co_await store.index<account_object, by_region_balance>()
-   .equal_range(std::make_tuple(std::uint32_t{3}))
+   .equal_range(std::uint32_t{3})
    .page({.limit = 100});
 
 auto stream = store.index<account_object, by_region_balance>()
-   .equal_range(std::make_tuple(std::uint32_t{3}))
+   .equal_range(std::tuple{std::uint32_t{3}})
    .stream({.page_size = 100});
+
+auto exact = co_await store.index<account_object, by_region_balance>()
+   .find(std::uint32_t{3}, std::uint64_t{100});
+
+auto tail = store.index<account_object, by_region_balance>()
+   .lower_bound(std::uint32_t{3}, std::uint64_t{100});
 ```
 
-Streams keep one read snapshot for the whole stream lifecycle.
+`find` requires a complete composite key. `equal_range`, `lower_bound` and
+`upper_bound` accept a non-empty ordered prefix. Variadic and tuple forms use
+the same key encoder. Streams keep one read snapshot for their whole lifecycle.
 
 ## Hooks
 
@@ -177,6 +239,7 @@ failed commit. Hooks are DB Object-level and do not expose backend write batches
 ## Modules
 
 - `forge.db.object.object`: base object and descriptor mapping.
+- `forge.db.object.header`: persisted format header and its system descriptor.
 - `forge.db.object.index`: index declarations, views, range queries and streams.
 - `forge.db.object.cursor`: DB Object pagination validation over
   `forge.db.core.record` request types.
@@ -190,6 +253,16 @@ failed commit. Hooks are DB Object-level and do not expose backend write batches
 Deterministic key layout and record materialization are private implementation
 details.
 
+## Index Roadmap
+
+DB Object currently supports primary unique, ordered unique and ordered
+non-unique indexes, including composite keys and mixed ascending/descending
+components. Hashed indexes are deferred: persisted ordered backends already
+provide exact and range access, while a backend-neutral hash contract needs a
+separate demonstrated use case. Boost.MultiIndex `sequenced` and
+`random_access` indexes do not map to this persisted object/index model. Ranked
+indexes require a separate backend-neutral rank-maintenance design.
+
 ## Migration Groundwork
 
 Runtime migration/catalog support is intentionally out of this block. These are
@@ -200,3 +273,7 @@ migration events for a future explicit migration layer:
 - changing an extractor or composite-key member order;
 - changing base object serialization;
 - changing the ordered key codec.
+
+The candidate transaction-integrated revision journal and its boundary with a
+future migration runner are documented in
+[`docs/iterations/forge-db-revisions-migrations-v1.md`](../../../docs/iterations/forge-db-revisions-migrations-v1.md).

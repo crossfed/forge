@@ -19,6 +19,7 @@ import forge.ids.object_id;
 import forge.db.core.driver;
 import forge.db.core.record;
 import forge.db.object.exceptions;
+import forge.db.object.header;
 import forge.db.object.hooks;
 import forge.db.object.index;
 import forge.db.object.object;
@@ -33,6 +34,11 @@ enum class write_policy : std::uint8_t {
 };
 
 class store {
+ private:
+   struct impl;
+
+   explicit store(std::shared_ptr<impl> implementation);
+
  public:
    struct config {
       forge::db::core::family family{"objectdb"};
@@ -42,14 +48,16 @@ class store {
       write_policy writes = write_policy::single_writer;
    };
 
-   explicit store(std::shared_ptr<forge::db::core::driver> value)
-       : store(std::move(value), options{}) {}
+   static boost::asio::awaitable<store> open(std::shared_ptr<forge::db::core::driver> value);
+   static boost::asio::awaitable<store> open(std::shared_ptr<forge::db::core::driver> value, options runtime);
+   static boost::asio::awaitable<store> open(std::shared_ptr<forge::db::core::driver> value, config settings);
+   static boost::asio::awaitable<store> open(std::shared_ptr<forge::db::core::driver> value,
+                                              config settings,
+                                              options runtime);
 
-   store(std::shared_ptr<forge::db::core::driver> value, options settings);
-   store(std::shared_ptr<forge::db::core::driver> value, config settings);
-   store(std::shared_ptr<forge::db::core::driver> value, config settings, options runtime);
+   [[nodiscard]] forge::db::object::header header() const noexcept;
 
-   template <object_model Object>
+   template <application_object_model Object>
    void register_object();
 
    void add_interceptor(std::shared_ptr<interceptor> value);
@@ -79,23 +87,25 @@ class store {
    template <object_model Object>
    boost::asio::awaitable<std::optional<typename Object::value_type>> find(forge::ids::object_id id);
 
-   template <object_value Value>
+   template <application_object_value Value>
    boost::asio::awaitable<void> insert(Value value);
 
-   template <object_value Value, typename Fn>
+   template <application_object_value Value, typename Fn>
       requires std::default_initializable<Value> && std::invocable<Fn&, Value&>
    boost::asio::awaitable<Value> create(Fn&& fn);
 
-   template <object_value Value>
+   template <application_object_value Value>
    boost::asio::awaitable<void> replace(Value value);
 
    template <forge::ids::typed_id_like Id, typename Fn>
+      requires application_object_model<object_index_for_id_t<Id>>
    boost::asio::awaitable<void> modify(Id id, Fn&& fn);
 
    template <forge::ids::typed_id_like Id>
+      requires application_object_model<object_index_for_id_t<Id>>
    boost::asio::awaitable<void> erase(Id id);
 
-   template <object_model Object>
+   template <application_object_model Object>
    boost::asio::awaitable<void> erase(forge::ids::object_id id);
 
    template <object_model Object, typename Tag>
@@ -108,11 +118,10 @@ class store {
    void register_object_type(forge::ids::object_id type, std::type_index model);
    void ensure_registered_type(forge::ids::object_id type, std::type_index model) const;
 
-   struct impl;
    std::shared_ptr<impl> impl_;
 };
 
-template <object_model Object>
+template <application_object_model Object>
 void store::register_object() {
    register_object_type(object_id_of<Object>::value, std::type_index{typeid(Object)});
 }
@@ -147,7 +156,7 @@ boost::asio::awaitable<std::optional<typename Object::value_type>> store::find(f
    co_return co_await read.template find<Object>(id);
 }
 
-template <object_value Value>
+template <application_object_value Value>
 boost::asio::awaitable<void> store::insert(Value value) {
    auto active = co_await begin_transaction();
    auto error = std::exception_ptr{};
@@ -163,7 +172,7 @@ boost::asio::awaitable<void> store::insert(Value value) {
    }
 }
 
-template <object_value Value, typename Fn>
+template <application_object_value Value, typename Fn>
    requires std::default_initializable<Value> && std::invocable<Fn&, Value&>
 boost::asio::awaitable<Value> store::create(Fn&& fn) {
    auto active = co_await begin_transaction();
@@ -182,7 +191,7 @@ boost::asio::awaitable<Value> store::create(Fn&& fn) {
    co_return std::move(*created);
 }
 
-template <object_value Value>
+template <application_object_value Value>
 boost::asio::awaitable<void> store::replace(Value value) {
    auto active = co_await begin_transaction();
    auto error = std::exception_ptr{};
@@ -199,6 +208,7 @@ boost::asio::awaitable<void> store::replace(Value value) {
 }
 
 template <forge::ids::typed_id_like Id, typename Fn>
+   requires application_object_model<object_index_for_id_t<Id>>
 boost::asio::awaitable<void> store::modify(Id id, Fn&& fn) {
    auto active = co_await begin_transaction();
    auto error = std::exception_ptr{};
@@ -215,6 +225,7 @@ boost::asio::awaitable<void> store::modify(Id id, Fn&& fn) {
 }
 
 template <forge::ids::typed_id_like Id>
+   requires application_object_model<object_index_for_id_t<Id>>
 boost::asio::awaitable<void> store::erase(Id id) {
    auto active = co_await begin_transaction();
    auto error = std::exception_ptr{};
@@ -230,7 +241,7 @@ boost::asio::awaitable<void> store::erase(Id id) {
    }
 }
 
-template <object_model Object>
+template <application_object_model Object>
 boost::asio::awaitable<void> store::erase(forge::ids::object_id id) {
    auto active = co_await begin_transaction();
    auto error = std::exception_ptr{};

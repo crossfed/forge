@@ -12,10 +12,7 @@ import forge.variant.chrono;
 import forge.variant.multiprecision;
 import forge.variant.format;
 import forge.variant.described;
-import forge.variant.value;
-import forge.variant.format;
 import forge.core.chrono;
-import forge.variant.described;
 import forge.exceptions;
 import forge.crypto.base64;
 using namespace forge;
@@ -132,7 +129,7 @@ BOOST_AUTO_TEST_CASE(variant_format_string_limited) {
       mu("str", a_long_list);
       mu("obj", variant_object(mutable_variant_object()("a", a_long_list)("b", b_long_list)));
       mu("arr", variants{variant(a_long_list), variant(b_long_list)});
-      mu("blob", blob({std::vector<char>(a_long_list.begin(), a_long_list.end())}));
+      mu("blob", blob({std::vector<std::uint8_t>(a_long_list.begin(), a_long_list.end())}));
       const string format_prefix = "Format string test: ";
       const string format_str = format_prefix + "${str} ${obj} ${arr} {blob}";
       const string result = forge::format_string(format_str, mu, true);
@@ -157,7 +154,7 @@ BOOST_AUTO_TEST_CASE(variant_format_string_limited) {
       forge::mutable_variant_object mu;
       const variant_object vo(mutable_variant_object()("b", b_short_list)("c", c_short_list));
       const variants variant_list{variant(d_short_list), variant(e_short_list)};
-      const blob a_blob({std::vector<char>(f_short_list.begin(), f_short_list.end())});
+      const blob a_blob({std::vector<std::uint8_t>(f_short_list.begin(), f_short_list.end())});
       const variant a_variant(g_short_list);
       mu("str", a_short_list);
       mu("obj", vo);
@@ -165,11 +162,10 @@ BOOST_AUTO_TEST_CASE(variant_format_string_limited) {
       mu("blob", a_blob);
       mu("var", a_variant);
       const string result = forge::format_string(format_str, mu, true);
-      const string target_result = format_prefix + a_short_list + " " + "{" + "\"b\":\"" + b_short_list +
-                                   "\",\"c\":\"" + c_short_list + "\"}" + " " + "[\"" + d_short_list + "\",\"" +
-                                   e_short_list + "\"]" + " " +
-                                   forge::crypto::base64_encode(a_blob.data.data(), a_blob.data.size()) +
-                                   " " + g_short_list;
+      const string target_result =
+          format_prefix + a_short_list + " " + "{" + "\"b\":\"" + b_short_list + "\",\"c\":\"" + c_short_list + "\"}" +
+          " " + "[\"" + d_short_list + "\",\"" + e_short_list + "\"]" + " " +
+          forge::crypto::base64_encode(a_blob.data.data(), a_blob.data.size()) + " " + g_short_list;
 
       BOOST_CHECK_EQUAL(result, target_result);
       BOOST_CHECK_LT(result.size(), 1024 + 3 * mu.size());
@@ -186,8 +182,8 @@ BOOST_AUTO_TEST_CASE(variant_blob) {
       mu("str", a17_encoded);
 
       BOOST_CHECK_EQUAL(mu["blob"].as_string(), a17_encoded);
-      std::vector<char> b64 = mu["str"].as_blob().data;
-      std::string_view b64_str(b64.data(), b64.size());
+      const auto b64 = mu["str"].as_blob().data;
+      std::string_view b64_str(reinterpret_cast<const char*>(b64.data()), b64.size());
       BOOST_CHECK_EQUAL(b64_str, a17_orig);
    }
    {
@@ -201,8 +197,8 @@ BOOST_AUTO_TEST_CASE(variant_blob) {
       mu("str", s_6364_encoded);
 
       BOOST_CHECK_EQUAL(mu["blob"].as_string(), s_6364_encoded);
-      std::vector<char> b64 = mu["str"].as_blob().data;
-      std::string_view b64_str(b64.data(), b64.size());
+      const auto b64 = mu["str"].as_blob().data;
+      std::string_view b64_str(reinterpret_cast<const char*>(b64.data()), b64.size());
       BOOST_CHECK_EQUAL(b64_str, s_6364);
    }
    {
@@ -214,8 +210,8 @@ BOOST_AUTO_TEST_CASE(variant_blob) {
       mu("str", encoded);
 
       BOOST_CHECK_EQUAL(mu["blob"].as_string(), encoded);
-      std::vector<char> b64 = mu["str"].as_blob().data;
-      std::string_view b64_str(b64.data(), b64.size());
+      const auto b64 = mu["str"].as_blob().data;
+      std::string_view b64_str(reinterpret_cast<const char*>(b64.data()), b64.size());
       BOOST_CHECK_EQUAL(b64_str, org);
    }
 }
@@ -232,8 +228,8 @@ BOOST_AUTO_TEST_CASE(variant_blob_backwards_compatibility) {
       mu("str", a17_encoded_old);
 
       BOOST_CHECK_EQUAL(mu["blob"].as_string(), a17_encoded);
-      std::vector<char> b64 = mu["str"].as_blob().data;
-      std::string_view b64_str(b64.data(), b64.size());
+      const auto b64 = mu["str"].as_blob().data;
+      std::string_view b64_str(reinterpret_cast<const char*>(b64.data()), b64.size());
       BOOST_CHECK_EQUAL(b64_str, a17_orig);
    }
    {
@@ -246,8 +242,8 @@ BOOST_AUTO_TEST_CASE(variant_blob_backwards_compatibility) {
       mu("str", encoded_old);
 
       BOOST_CHECK_EQUAL(mu["blob"].as_string(), encoded);
-      std::vector<char> b64 = mu["str"].as_blob().data;
-      std::string_view b64_str(b64.data(), b64.size());
+      const auto b64 = mu["str"].as_blob().data;
+      std::string_view b64_str(reinterpret_cast<const char*>(b64.data()), b64.size());
       BOOST_CHECK_EQUAL(b64_str, org);
    }
 }

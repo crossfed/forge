@@ -26,14 +26,56 @@ import forge.db.object.exceptions;
 
 namespace forge::db::object {
 
-store::store(std::shared_ptr<forge::db::core::driver> value, options settings)
-    : store(std::move(value), config{}, settings) {}
+store::store(std::shared_ptr<impl> implementation) : impl_{std::move(implementation)} {}
 
-store::store(std::shared_ptr<forge::db::core::driver> value, config settings)
-    : store(std::move(value), std::move(settings), options{}) {}
+boost::asio::awaitable<store> store::open(std::shared_ptr<forge::db::core::driver> value) {
+   co_return co_await open(std::move(value), config{}, options{});
+}
 
-store::store(std::shared_ptr<forge::db::core::driver> value, config settings, options runtime)
-    : impl_{std::make_shared<impl>(std::move(value), std::move(settings), runtime)} {}
+boost::asio::awaitable<store> store::open(std::shared_ptr<forge::db::core::driver> value, options runtime) {
+   co_return co_await open(std::move(value), config{}, runtime);
+}
+
+boost::asio::awaitable<store> store::open(std::shared_ptr<forge::db::core::driver> value, config settings) {
+   co_return co_await open(std::move(value), std::move(settings), options{});
+}
+
+boost::asio::awaitable<store> store::open(std::shared_ptr<forge::db::core::driver> value,
+                                         config settings,
+                                         options runtime) {
+   auto result = store{std::make_shared<impl>(std::move(value), std::move(settings), runtime)};
+   auto ticket = co_await result.impl_->runtime->write_gate->acquire();
+   auto active = forge::db::core::transaction{};
+
+   try {
+      active = co_await result.impl_->open_write_transaction();
+   } catch (const forge::db::core::exceptions::unsupported_operation&) {
+      FORGE_THROW_EXCEPTION(exceptions::unsupported_operation, "db object driver does not support writes");
+   }
+
+   auto opened_header = forge::db::object::header{};
+   auto error = std::exception_ptr{};
+   try {
+      opened_header = co_await result.impl_->initialize_header(active);
+      co_await active.commit();
+   } catch (...) {
+      error = std::current_exception();
+   }
+   if (error) {
+      try {
+         co_await active.rollback();
+      } catch (...) {
+      }
+      std::rethrow_exception(error);
+   }
+
+   result.impl_->header_value = opened_header;
+   co_return result;
+}
+
+forge::db::object::header store::header() const noexcept {
+   return impl_->header_value;
+}
 
 void store::add_interceptor(std::shared_ptr<interceptor> value) {
    if (value) {

@@ -80,12 +80,16 @@ Derived applications only implement hooks:
 - `on_configure(configure_context&)`
 - `on_register_plugins(plugin_registry&)`
 - `on_provide(application_context&)`
+- `on_after_initialize(const application_context&)`
 - `on_run_foreground()`
 
 This is deliberately strict. The application controls composition, but FORGE controls
 the order: collect config, configure app and plugins, provide app APIs, let
-plugins provide APIs, initialize
-plugins, startup plugins, request stop, shutdown in reverse order.
+plugins provide APIs, initialize every plugin, run every plugin
+`after_initialize()`, run the application `on_after_initialize(...)`, startup
+plugins, request stop, shutdown in reverse order. The application callback
+receives a const context: it may consume installed APIs through `api_view()`,
+but it cannot install APIs after plugin initialization.
 
 ## App And Plugin Config
 
@@ -284,6 +288,10 @@ builder.name("service")
          "service.configure",
          "worker slots: " + std::to_string(workers));
    })
+   .after_initialize([](const forge::app::application_context& context) {
+      // APIs are installed and every plugin has completed initialize().
+      auto apis = context.api_view();
+   })
    .plugin(forge::app::plugin_descriptor{
       .id = forge::app::plugin_id{"http"},
       .factory = [] {
@@ -471,8 +479,9 @@ boost::asio::co_spawn(
 Plugin-to-plugin contracts use `forge_api_core`: the application can publish
 implementations during the `on_provide(...)` phase, plugins can publish
 implementations during their `provide(...)` phase, and runtime consumers receive
-a read-only API view. This keeps lifecycle in `forge_app` and contract/version/error
-semantics in `forge_api_core`.
+a read-only API view through `application_context::api_view()`. This keeps
+lifecycle in `forge_app` and contract/version/error semantics in
+`forge_api_core`.
 
 ```cpp
 #include <forge/api/core/macros.hpp>
@@ -534,10 +543,11 @@ for (const auto& plugin : snapshot.plugins) {
 
 ## Startup Failure And Rollback
 
-Plugin order comes from `plugin_registry` dependencies. Startup runs in that
-order; shutdown runs in reverse order. If plugin `B` fails during startup after
-plugin `A` started, the shell asks the runtime to shut down started plugins and
-records diagnostics.
+Plugin order comes from `plugin_registry` dependencies. Initialize,
+`after_initialize` and startup run in that order; shutdown runs in reverse
+order. If any initialize hook or application callback fails, the shell shuts
+down every successfully initialized plugin before rethrowing the original
+error. Startup is never entered.
 
 ```cpp
 #include <forge/exceptions/macros.hpp>
@@ -616,9 +626,10 @@ boost::asio::awaitable<void> run_runtime(forge::app::application_runtime& runtim
 
 ## Tests
 
-`test_forge_app` covers API publication, event bus bounds, plugin dependency order,
-config collection, shell-owned default merge, configure-before-initialize,
-startup rollback, reverse shutdown and diagnostics.
+`test_forge_app` covers API publication, event bus bounds, plugin dependency
+order, config collection, shell-owned default merge, configure-before-initialize,
+after-initialize ordering and failure cleanup, startup rollback, reverse shutdown
+and diagnostics.
 
 Executable lifecycle coverage lives in `test_forge_app`. Consumer snippets stay in
 this README and the runtime docs so they cannot drift behind an unbuilt example

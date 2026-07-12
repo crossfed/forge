@@ -73,6 +73,13 @@ namespace {
 
 using app_test_contract::sample_api;
 
+template <typename Context>
+concept exposes_api_installer = requires(Context& context) {
+   context.apis();
+};
+
+static_assert(!exposes_api_installer<const forge::app::application_context>);
+
 struct lifecycle_log {
    std::vector<std::string> entries;
 };
@@ -420,6 +427,11 @@ class shell_config_plugin final : public forge::app::plugin {
       co_return;
    }
 
+   boost::asio::awaitable<void> after_initialize() override {
+      log_->entries.push_back("plugin.after_initialize:" + std::to_string(port_));
+      co_return;
+   }
+
    boost::asio::awaitable<void> startup() override {
       log_->entries.push_back("plugin.startup");
       co_return;
@@ -449,6 +461,11 @@ class shell_dependency_plugin final : public forge::app::plugin {
 
    boost::asio::awaitable<void> initialize(forge::app::plugin_context&) override {
       log_->entries.push_back("initialize:" + id_);
+      co_return;
+   }
+
+   boost::asio::awaitable<void> after_initialize() override {
+      log_->entries.push_back("after_initialize:" + id_);
       co_return;
    }
 
@@ -540,6 +557,50 @@ class failing_initialize_plugin final : public forge::app::plugin {
 
  private:
    lifecycle_log* log_ = nullptr;
+};
+
+class failing_after_initialize_plugin final : public forge::app::plugin {
+ public:
+   explicit failing_after_initialize_plugin(lifecycle_log& log) : log_{&log} {}
+
+   forge::app::plugin_id id() const override {
+      return forge::app::plugin_id{.value = "after-init-fail"};
+   }
+
+   std::string version() const override {
+      return "1";
+   }
+
+   boost::asio::awaitable<void> initialize(forge::app::plugin_context&) override {
+      initialized_ = true;
+      log_->entries.push_back("initialize:after-init-fail");
+      co_return;
+   }
+
+   boost::asio::awaitable<void> after_initialize() override {
+      log_->entries.push_back("after_initialize:after-init-fail");
+      throw forge::app::exceptions::initialize_failed{"after initialize failed"};
+   }
+
+   boost::asio::awaitable<void> startup() override {
+      log_->entries.push_back("startup:after-init-fail");
+      co_return;
+   }
+
+   void request_stop() noexcept override {
+      if (initialized_) {
+         log_->entries.push_back("request_stop:after-init-fail");
+      }
+   }
+
+   boost::asio::awaitable<void> shutdown() override {
+      log_->entries.push_back("shutdown:after-init-fail");
+      co_return;
+   }
+
+ private:
+   lifecycle_log* log_ = nullptr;
+   bool initialized_ = false;
 };
 
 class slow_shutdown_plugin final : public forge::app::plugin {
@@ -712,6 +773,24 @@ class shell_initialize_failure_application final : public forge::app::applicatio
          .id = forge::app::plugin_id{.value = "init-fail"},
          .factory = [this] {
             return std::make_unique<failing_initialize_plugin>(*log_);
+         },
+      });
+   }
+
+ private:
+   lifecycle_log* log_ = nullptr;
+};
+
+class shell_after_initialize_failure_application final : public forge::app::application_shell {
+ public:
+   explicit shell_after_initialize_failure_application(lifecycle_log& log) : log_{&log} {}
+
+ protected:
+   void on_register_plugins(forge::app::plugin_registry& registry) override {
+      registry.register_plugin(forge::app::plugin_descriptor{
+         .id = forge::app::plugin_id{.value = "after-init-fail"},
+         .factory = [this] {
+            return std::make_unique<failing_after_initialize_plugin>(*log_);
          },
       });
    }
@@ -1118,6 +1197,7 @@ BOOST_AUTO_TEST_CASE(application_shell_owns_config_plugin_lifecycle_and_context)
       "plugin.configure:9000",
       "app.provide",
       "plugin.initialize:9000",
+      "plugin.after_initialize:9000",
       "plugin.startup",
       "app.run",
       "plugin.shutdown",
@@ -1152,6 +1232,8 @@ BOOST_AUTO_TEST_CASE(application_shell_preserves_dependency_order_and_reverse_sh
    const auto expected = std::vector<std::string>{
       "initialize:store",
       "initialize:api",
+      "after_initialize:store",
+      "after_initialize:api",
       "startup:store",
       "startup:api",
       "shutdown:api",
@@ -1207,6 +1289,60 @@ BOOST_AUTO_TEST_CASE(application_shell_initialize_failure_transitions_to_stopped
 
    const auto expected = std::vector<std::string>{
       "initialize:init-fail",
+   };
+   BOOST_TEST(log.entries == expected, boost::test_tools::per_element());
+}
+
+BOOST_AUTO_TEST_CASE(application_shell_after_initialize_failure_cleans_up_and_preserves_error) {
+   auto log = lifecycle_log{};
+   auto app = shell_after_initialize_failure_application{log};
+
+   BOOST_CHECK_EXCEPTION(
+      forge::asio::blocking::run(app.runtime(), app.initialize()),
+      forge::app::exceptions::initialize_failed,
+      [](const auto& error) {
+         return error.message() == "after initialize failed";
+      });
+   BOOST_TEST(static_cast<int>(app.state()) == static_cast<int>(forge::app::application_state::stopped));
+   BOOST_CHECK_THROW(forge::asio::blocking::run(app.runtime(), app.startup()), std::logic_error);
+
+   const auto expected = std::vector<std::string>{
+      "initialize:after-init-fail",
+      "after_initialize:after-init-fail",
+      "request_stop:after-init-fail",
+      "shutdown:after-init-fail",
+   };
+   BOOST_TEST(log.entries == expected, boost::test_tools::per_element());
+
+   const auto snapshot = app.diagnostics().snapshot(app.events());
+   BOOST_TEST(static_cast<int>(snapshot.state) == static_cast<int>(forge::app::lifecycle_state::failed));
+   BOOST_REQUIRE_EQUAL(snapshot.plugins.size(), 1U);
+   BOOST_TEST(snapshot.plugins.front().id == "after-init-fail");
+   BOOST_TEST(static_cast<int>(snapshot.plugins.front().state) ==
+              static_cast<int>(forge::app::lifecycle_state::failed));
+   BOOST_TEST(snapshot.plugins.front().last_transition == "after_initialize");
+   BOOST_TEST(snapshot.plugins.front().last_error == "after initialize failed");
+}
+
+BOOST_AUTO_TEST_CASE(application_shell_after_initialize_is_idempotent) {
+   auto log = lifecycle_log{};
+   auto app = shell_order_application{log};
+
+   forge::asio::blocking::run(app.runtime(), app.initialize());
+   forge::asio::blocking::run(app.runtime(), app.initialize());
+   forge::asio::blocking::run(app.runtime(), app.startup());
+   forge::asio::blocking::run(app.runtime(), app.startup());
+   forge::asio::blocking::run(app.runtime(), app.shutdown());
+
+   const auto expected = std::vector<std::string>{
+      "initialize:store",
+      "initialize:api",
+      "after_initialize:store",
+      "after_initialize:api",
+      "startup:store",
+      "startup:api",
+      "shutdown:api",
+      "shutdown:store",
    };
    BOOST_TEST(log.entries == expected, boost::test_tools::per_element());
 }
@@ -1339,6 +1475,8 @@ BOOST_AUTO_TEST_CASE(run_application_executes_lifecycle_and_custom_stop_waiter) 
    const auto expected = std::vector<std::string>{
       "initialize:store",
       "initialize:api",
+      "after_initialize:store",
+      "after_initialize:api",
       "startup:store",
       "startup:api",
       "shutdown:api",
@@ -1857,6 +1995,24 @@ BOOST_AUTO_TEST_CASE(application_builder_creates_shell_and_applies_config_handle
          context.apis().install<sample_api>(sample_api::describe(), std::make_shared<sample_api_impl>(workers));
          log.entries.push_back("provide");
       })
+      .after_initialize([&](const forge::app::application_context& context)
+                           -> boost::asio::awaitable<void> {
+         auto api = context.api_view().get<sample_api>({.id = {"sample"}, .major = 1});
+         BOOST_TEST(co_await api->value(0) == 6);
+         log.entries.push_back("after_initialize.async_context");
+         co_return;
+      })
+      .after_initialize([&](const forge::app::application_context& context) {
+         BOOST_TEST(context.api_view().registry_ref().describe({.id = {"sample"}, .major = 1}) != nullptr);
+         log.entries.push_back("after_initialize.sync_context");
+      })
+      .after_initialize([&] {
+         log.entries.push_back("after_initialize.sync");
+      })
+      .after_initialize([&]() -> boost::asio::awaitable<void> {
+         log.entries.push_back("after_initialize.async");
+         co_return;
+      })
       .run_foreground([&](forge::app::application_shell& shell) {
          log.entries.push_back("run");
          auto api = shell.apis().get<sample_api>({.id = {"sample"}, .major = 1});
@@ -1885,6 +2041,10 @@ BOOST_AUTO_TEST_CASE(application_builder_creates_shell_and_applies_config_handle
       "typed.configure:6",
       "configure.extra",
       "provide",
+      "after_initialize.async_context",
+      "after_initialize.sync_context",
+      "after_initialize.sync",
+      "after_initialize.async",
       "run",
    };
    BOOST_TEST(log.entries == expected, boost::test_tools::per_element());
@@ -1928,6 +2088,9 @@ BOOST_AUTO_TEST_CASE(application_builder_collects_plugin_config_and_preserves_de
       "plugin.initialize:9000",
       "initialize:store",
       "initialize:api",
+      "plugin.after_initialize:9000",
+      "after_initialize:store",
+      "after_initialize:api",
       "plugin.startup",
       "startup:store",
       "startup:api",

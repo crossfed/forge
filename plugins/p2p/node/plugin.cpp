@@ -66,7 +66,7 @@ import forge.plugins.p2p.node.types;
 
 #include "details/config.hxx"
 #include "details/diagnostics_source.hxx"
-#include "details/node_api.hxx"
+#include "details/api_impl.hxx"
 #include "details/plugin_impl.hxx"
 #include "details/pubsub_source.hxx"
 
@@ -94,7 +94,7 @@ boost::asio::awaitable<void> plugin::configure(forge::config::core::component_vi
 }
 
 boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provider) {
-   provider.install<api>(std::make_shared<node_api>(impl_));
+   provider.install<api>(std::make_shared<api_impl>(impl_));
    provider.install<diagnostics_source>(std::make_shared<diagnostics_source_adapter>(impl_));
    provider.install<pubsub_source>(std::make_shared<pubsub_source_adapter>(impl_));
    co_return;

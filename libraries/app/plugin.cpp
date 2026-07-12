@@ -31,6 +31,10 @@ boost::asio::awaitable<void> plugin::provide(forge::api::core::provider&) {
    co_return;
 }
 
+boost::asio::awaitable<void> plugin::after_initialize() {
+   co_return;
+}
+
 void plugin::request_stop() noexcept {}
 
 bool valid_plugin_id(const plugin_id& id) noexcept {

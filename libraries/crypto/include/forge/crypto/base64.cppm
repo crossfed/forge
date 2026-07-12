@@ -1,13 +1,17 @@
 module;
 #include <forge/exceptions/macros.hpp>
 #include <algorithm>
+#include <cstdint>
+#include <span>
 #include <string>
 #include <string_view>
 #include <stdexcept>
+#include <vector>
 
 export module forge.crypto.base64;
 
 import forge.exceptions;
+import forge.crypto.types;
 
 /*
    base64.cpp and base64.h
@@ -44,7 +48,8 @@ import forge.exceptions;
  * Copyright (C) 2023 Kevin Heifner
  *
  * Modified to be header only.
- * Templated for std::string, std::string_view, std::vector<char> and other char containers.
+ * The generic codec supports string-like containers. Forge convenience decode
+ * functions return forge::crypto::bytes (`std::vector<std::uint8_t>`).
  */
 
 namespace forge::crypto::detail {
@@ -121,7 +126,8 @@ template <typename RetString, typename String> inline RetString insert_linebreak
    }
 }
 
-template <typename RetString> inline RetString encode_bytes(const unsigned char* bytes_to_encode, size_t in_len, bool url);
+template <typename RetString>
+inline RetString encode_bytes(const unsigned char* bytes_to_encode, size_t in_len, bool url);
 template <typename RetString, typename String> inline RetString encode(String s, bool url);
 
 template <typename RetString, typename String, unsigned int line_length>
@@ -283,12 +289,12 @@ export namespace forge::crypto {
 //   std::string encoded = base64_encode(s);
 //   std::string_view sv = "foobar";
 //   std::string encoded = base64_encode(sv);
-//   std::vector<char> vc = {'f', 'o', 'o'};
-//   std::string encoded = base64_encode(vc);
+//   forge::crypto::bytes bytes = {'f', 'o', 'o'};
+//   std::string encoded = base64_encode(bytes);
 //
-// Also allows for user provided char containers and specified return types:
+// Also allows user-provided string-like containers and specified return types:
 //   std::string s = "foobar";
-//   std::vector<char> encoded = base64_encode<std::vector<char>>(s);
+//   std::string encoded = base64_encode<std::string>(s);
 
 template <typename RetString = std::string>
 inline RetString base64_encode(const unsigned char* bytes_to_encode, size_t in_len, bool url = false) {
@@ -320,8 +326,8 @@ inline std::string base64_encode(char const* s, unsigned int len) {
    return base64_encode<std::string>((unsigned char const*)s, len, false);
 }
 
-inline std::vector<char> base64_decode(const std::string& s) {
-   return detail::decode<std::vector<char>, std::string>(s, false, false);
+inline bytes base64_decode(const std::string& s) {
+   return detail::decode<bytes, std::string>(s, false, false);
 }
 
 inline std::string base64url_encode(const char* s, size_t len) {
@@ -332,7 +338,11 @@ inline std::string base64url_encode(const std::string& s) {
    return base64_encode<std::string>((unsigned char const*)s.data(), s.size(), true);
 }
 
-inline std::vector<char> base64url_decode(const std::string& s) {
-   return detail::decode<std::vector<char>>(s, false, true);
+inline std::string base64url_encode(std::span<const std::uint8_t> value) {
+   return base64_encode<std::string>(value.data(), value.size(), true);
+}
+
+inline bytes base64url_decode(const std::string& s) {
+   return detail::decode<bytes>(s, false, true);
 }
 } // namespace forge::crypto

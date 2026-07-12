@@ -78,9 +78,9 @@ class object_handle {
 
    [[nodiscard]] std::string name() const;
 
-   template <forge::db::object::object_model Object>
+   template <forge::db::object::application_object_model Object>
    void register_object() const {
-      require_store()->template register_object<Object>();
+      require_setup_store()->template register_object<Object>();
    }
 
    void add_interceptor(std::shared_ptr<forge::db::object::interceptor> value) const;
@@ -119,27 +119,29 @@ class object_handle {
       co_return co_await require_store()->template find<Object>(id);
    }
 
-   template <forge::db::object::object_value Value>
+   template <forge::db::object::application_object_value Value>
    boost::asio::awaitable<void> insert(Value value) const {
       co_await require_store()->insert(std::move(value));
    }
 
-   template <forge::db::object::object_value Value>
+   template <forge::db::object::application_object_value Value>
    boost::asio::awaitable<void> replace(Value value) const {
       co_await require_store()->replace(std::move(value));
    }
 
    template <forge::ids::typed_id_like Id, typename Fn>
+      requires forge::db::object::application_object_model<forge::db::object::object_index_for_id_t<Id>>
    boost::asio::awaitable<void> modify(Id id, Fn&& fn) const {
       co_await require_store()->modify(id, std::forward<Fn>(fn));
    }
 
    template <forge::ids::typed_id_like Id>
+      requires forge::db::object::application_object_model<forge::db::object::object_index_for_id_t<Id>>
    boost::asio::awaitable<void> erase(Id id) const {
       co_await require_store()->erase(id);
    }
 
-   template <forge::db::object::object_model Object>
+   template <forge::db::object::application_object_model Object>
    boost::asio::awaitable<void> erase(forge::ids::object_id id) const {
       co_await require_store()->template erase<Object>(id);
    }
@@ -172,6 +174,7 @@ class object_handle {
    }
 
  private:
+   [[nodiscard]] std::shared_ptr<forge::db::object::store> require_setup_store() const;
    [[nodiscard]] std::shared_ptr<forge::db::object::store> require_store() const;
 
    std::shared_ptr<store_handle_state> state_;
@@ -307,6 +310,4 @@ class api : public forge::api::core::contract<api, forge::api::core::surface::lo
 
 namespace store_plugin_api = ::forge::plugins::db::store;
 
-export {
-FORGE_API(store_plugin_api::api, FORGE_API_CONTRACT("forge.plugins.db.store", 1, 0))
-}
+FORGE_EXPORT_API(store_plugin_api::api, FORGE_API_CONTRACT("forge.plugins.db.store", 1, 0))

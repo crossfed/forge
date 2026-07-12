@@ -10,6 +10,7 @@ module;
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <ios>
 #include <limits>
 #include <span>
@@ -42,14 +43,14 @@ boost::iostreams::zlib_params make_params(zlib_level level) {
 
 } // namespace
 
-std::vector<char> zlib_compress(std::span<const char> input, zlib_level level) {
+bytes zlib_compress(std::span<const std::uint8_t> input, zlib_level level) {
    try {
-      auto out = std::vector<char>{};
+      auto encoded = std::vector<char>{};
       auto stream = boost::iostreams::filtering_ostream{};
       stream.push(boost::iostreams::zlib_compressor{make_params(level)});
-      stream.push(boost::iostreams::back_insert_device(out));
+      stream.push(boost::iostreams::back_insert_device(encoded));
 
-      auto* data = input.data();
+      auto* data = reinterpret_cast<const char*>(input.data());
       auto remaining = input.size();
       while (remaining > 0) {
          const auto size = to_stream_size(remaining);
@@ -59,7 +60,7 @@ std::vector<char> zlib_compress(std::span<const char> input, zlib_level level) {
       }
 
       boost::iostreams::close(stream);
-      return out;
+      return bytes{encoded.begin(), encoded.end()};
    } catch (const boost::iostreams::zlib_error& error) {
       FORGE_THROW_EXCEPTION(exceptions::backend_error, error.what());
    } catch (const std::ios_base::failure& error) {
@@ -67,33 +68,29 @@ std::vector<char> zlib_compress(std::span<const char> input, zlib_level level) {
    }
 }
 
-std::vector<char> zlib_decompress(std::span<const char> input, zlib_limits limits) {
+bytes zlib_decompress(std::span<const std::uint8_t> input, zlib_limits limits) {
    try {
       auto decompressor = boost::iostreams::zlib_decompressor{};
-      auto out = std::vector<char>{};
+      auto out = bytes{};
       auto buffer = std::array<char, chunk_size>{};
-      auto* input_next = input.data();
-      const auto* input_end = input.data() + input.size();
+      auto* input_next = reinterpret_cast<const char*>(input.data());
+      const auto* input_end = input_next + input.size();
 
       while (true) {
          const auto at_limit = out.size() >= limits.max_output_size;
-         const auto capacity = at_limit ? std::size_t{1}
-                                        : std::min(buffer.size(), limits.max_output_size - out.size());
+         const auto capacity = at_limit ? std::size_t{1} : std::min(buffer.size(), limits.max_output_size - out.size());
 
          auto* output_next = buffer.data();
          auto* output_end = buffer.data() + capacity;
          const auto* before_input = input_next;
-         const auto keep_going = decompressor.filter().filter(input_next,
-                                                               input_end,
-                                                               output_next,
-                                                               output_end,
-                                                               false);
+         const auto keep_going = decompressor.filter().filter(input_next, input_end, output_next, output_end, false);
          const auto produced = static_cast<std::size_t>(output_next - buffer.data());
          if (produced > 0) {
             if (at_limit || out.size() + produced > limits.max_output_size) {
                FORGE_THROW_EXCEPTION(exceptions::output_limit, "zlib decompressed output exceeds configured limit");
             }
-            out.insert(out.end(), buffer.data(), buffer.data() + produced);
+            out.insert(out.end(), reinterpret_cast<const std::uint8_t*>(buffer.data()),
+                       reinterpret_cast<const std::uint8_t*>(buffer.data() + produced));
          }
 
          if (!keep_going) {

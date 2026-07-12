@@ -78,7 +78,9 @@ target_link_libraries(app PRIVATE
 | [`forge::plugins::db::rocksdb`](db/rocksdb/README.md) | `forge_plugins_db_rocksdb` | `plugins.db.rocksdb` | Provides a local RocksDB TransactionDB service for infrastructure plugins that need durable key/value state. |
 
 The aggregate target `forge_plugins` and package component `plugins` are
-convenience dependencies. Prefer focused targets/components in small consumers:
+interface convenience dependencies. They own no compiled code and only
+propagate the leaf plugin usage requirements. Prefer focused targets/components
+in small consumers:
 
 ```cmake
 find_package(Forge REQUIRED COMPONENTS plugins_http_server)

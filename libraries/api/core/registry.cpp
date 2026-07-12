@@ -34,6 +34,20 @@ namespace {
    return response;
 }
 
+[[nodiscard]] frame make_local_only_response(const frame& request) {
+   return make_error_response(request, error_payload{
+      .error = "protocol_error",
+      .message = "API is local-only and cannot be invoked through a wire binding",
+      .retryable = false,
+      .status_code = status::failed_precondition,
+      .identity =
+         {
+            .category = "forge.api",
+            .code = static_cast<std::uint32_t>(exceptions::code::protocol_error),
+         },
+   });
+}
+
 } // namespace
 
 registry::registry() = default;
@@ -60,6 +74,9 @@ boost::asio::awaitable<frame> registry::dispatch(frame request) const {
                   .code = static_cast<std::uint32_t>(exceptions::code::incompatible_version),
               },
       });
+   }
+   if (!supports(entry->descriptor.supported_surfaces, surface::remote)) {
+      co_return make_local_only_response(request);
    }
 
    const auto* method = find_method(entry->descriptor, request.method);
@@ -110,6 +127,9 @@ boost::asio::awaitable<std::vector<frame>> registry::dispatch_many(frame request
                                .code = static_cast<std::uint32_t>(exceptions::code::incompatible_version),
                            },
                    })};
+   }
+   if (!supports(entry->descriptor.supported_surfaces, surface::remote)) {
+      co_return std::vector<frame>{make_local_only_response(request)};
    }
 
    const auto* method = find_method(entry->descriptor, request.method);
@@ -218,6 +238,9 @@ boost::asio::awaitable<std::vector<frame>> registry::dispatch_stream(std::vector
                                .code = static_cast<std::uint32_t>(exceptions::code::incompatible_version),
                            },
                    })};
+   }
+   if (!supports(entry->descriptor.supported_surfaces, surface::remote)) {
+      co_return std::vector<frame>{make_local_only_response(request)};
    }
 
    const auto* method = find_method(entry->descriptor, request.method);

@@ -4,12 +4,15 @@ module;
 
 #include <bit>
 #include <cstdint>
+#include <deque>
 #include <new>
+#include <span>
 #include <variant>
 #include <vector>
 
 module forge.chain.block;
 
+import forge.chain.merkle;
 import forge.crypto.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
@@ -39,13 +42,13 @@ block_id block_header::calculate_id() const {
    return calculate_block_id(*this);
 }
 
-std::vector<char> signature_preimage(const block_header& value) {
+bytes signature_preimage(const block_header& value) {
    return forge::raw::pack(value);
 }
 
 digest block_digest(const block_header& value) {
    const auto preimage = signature_preimage(value);
-   return forge::crypto::sha256::hash(preimage.data(), static_cast<std::uint32_t>(preimage.size()));
+   return forge::crypto::sha256::hash(std::span<const std::uint8_t>{preimage.data(), preimage.size()});
 }
 
 std::uint32_t calculate_block_num_from_id(const block_id& id) {
@@ -78,6 +81,15 @@ digest transaction_receipt_digest(const transaction_receipt& value) {
       forge::raw::pack(encoder, std::get<packed_transaction>(value.trx).packed_digest());
    }
    return encoder.result();
+}
+
+digest calculate_transaction_mroot(const std::deque<transaction_receipt>& receipts) {
+   auto digests = std::vector<digest>{};
+   digests.reserve(receipts.size());
+   for (const auto& receipt : receipts) {
+      digests.push_back(transaction_receipt_digest(receipt));
+   }
+   return calculate_merkle_root(digests);
 }
 
 digest signed_block::packed_digest() const {

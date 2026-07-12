@@ -2,10 +2,8 @@ module;
 
 #include <forge/exceptions/macros.hpp>
 
-#include <algorithm>
 #include <cstddef>
 #include <cstring>
-#include <filesystem>
 #include <memory>
 #include <optional>
 #include <span>
@@ -15,11 +13,8 @@ module;
 #include <utility>
 #include <vector>
 
-#include <rocksdb/db.h>
 #include <rocksdb/iterator.h>
-#include <rocksdb/options.h>
-#include <rocksdb/slice.h>
-#include <rocksdb/status.h>
+#include <rocksdb/utilities/transaction.h>
 #include <rocksdb/utilities/transaction_db.h>
 
 module forge.rocksdb.store;
@@ -28,476 +23,11 @@ import forge.exceptions;
 import forge.rocksdb.exceptions;
 
 #include "details/native.hxx"
-
-namespace forge::rocksdb::detail {
-
-::rocksdb::Slice to_slice(std::span<const std::byte> bytes) {
-   return ::rocksdb::Slice{
-      reinterpret_cast<const char*>(bytes.data()),
-      bytes.size(),
-   };
-}
-
-std::vector<std::byte> bytes_from_slice(const ::rocksdb::Slice& value) {
-   std::vector<std::byte> bytes;
-   bytes.resize(value.size());
-   std::memcpy(bytes.data(), value.data(), value.size());
-   return bytes;
-}
-
-bool starts_with(std::span<const std::byte> value, std::span<const std::byte> prefix) {
-   return value.size() >= prefix.size() && std::equal(prefix.begin(), prefix.end(), value.begin());
-}
-
-scan_result read_scan_page(std::unique_ptr<::rocksdb::Iterator> iterator, scan_request request, std::string_view context) {
-   auto result = scan_result{};
-   if (request.limit == 0) {
-      return result;
-   }
-   const auto has_cursor = request.has_cursor || !request.cursor.empty();
-   if (!request.lower_bound.empty() && !starts_with(request.lower_bound, request.prefix)) {
-      return result;
-   }
-   if (has_cursor && !starts_with(request.cursor, request.prefix)) {
-      return result;
-   }
-
-   if (!has_cursor) {
-      iterator->Seek(to_slice(request.lower_bound.empty() ? request.prefix : request.lower_bound));
-   } else {
-      iterator->Seek(to_slice(request.cursor));
-      if (iterator->Valid()) {
-         const auto key = bytes_from_slice(iterator->key());
-         if (key == request.cursor) {
-            iterator->Next();
-         }
-      }
-   }
-
-   for (; iterator->Valid(); iterator->Next()) {
-      auto key = bytes_from_slice(iterator->key());
-      if (!starts_with(key, request.prefix)) {
-         break;
-      }
-      result.entries.push_back(entry{.key = std::move(key), .value = bytes_from_slice(iterator->value())});
-      if (result.entries.size() >= request.limit) {
-         auto cursor = result.entries.back().key;
-         iterator->Next();
-         if (iterator->Valid()) {
-            const auto next_key = bytes_from_slice(iterator->key());
-            if (starts_with(next_key, request.prefix)) {
-               result.next_cursor = std::move(cursor);
-               result.has_next_cursor = true;
-            }
-         }
-         break;
-      }
-   }
-   throw_if_error(iterator->status(), context);
-   return result;
-}
-
-[[nodiscard]] status_code to_status_code(const ::rocksdb::Status& status) {
-   if (status.ok()) {
-      return status_code::ok;
-   }
-   if (status.IsNotFound()) {
-      return status_code::not_found;
-   }
-   if (status.IsInvalidArgument()) {
-      return status_code::invalid_argument;
-   }
-   if (status.IsCorruption()) {
-      return status_code::corruption;
-   }
-   if (status.IsIOError()) {
-      return status_code::io_error;
-   }
-   if (status.IsTimedOut()) {
-      return status_code::timed_out;
-   }
-   if (status.IsBusy()) {
-      return status_code::busy;
-   }
-   return status_code::unknown;
-}
-
-[[noreturn]] void throw_status(status_code code, std::string message) {
-   switch (code) {
-      case status_code::invalid_argument:
-         FORGE_THROW_EXCEPTION(exceptions::invalid_argument, std::move(message));
-      case status_code::corruption:
-         FORGE_THROW_EXCEPTION(exceptions::corruption, std::move(message));
-      case status_code::io_error:
-         FORGE_THROW_EXCEPTION(exceptions::io_error, std::move(message));
-      case status_code::timed_out:
-         FORGE_THROW_EXCEPTION(exceptions::timed_out, std::move(message));
-      case status_code::busy:
-         FORGE_THROW_EXCEPTION(exceptions::busy, std::move(message));
-      case status_code::ok:
-      case status_code::not_found:
-      case status_code::unknown:
-         break;
-   }
-   FORGE_THROW_EXCEPTION(exceptions::internal_error, std::move(message));
-}
-
-void throw_if_error(const ::rocksdb::Status& status, std::string_view context) {
-   if (status.ok()) {
-      return;
-   }
-   throw_status(to_status_code(status), std::string{context} + ": " + status.ToString());
-}
-
-::rocksdb::ReadOptions to_native_options(const read_options& options) {
-   ::rocksdb::ReadOptions native;
-   native.verify_checksums = options.verify_checksums;
-   native.fill_cache = options.fill_cache;
-   return native;
-}
-
-::rocksdb::ReadOptions to_native_options(const read_options& options, const ::rocksdb::Snapshot* snapshot) {
-   auto native = to_native_options(options);
-   native.snapshot = snapshot;
-   return native;
-}
-
-::rocksdb::WriteOptions to_native_options(const write_options& options) {
-   ::rocksdb::WriteOptions native;
-   native.sync = options.sync;
-   native.disableWAL = options.disable_wal;
-   return native;
-}
-
-::rocksdb::CompressionType to_native_compression(compression_type value) {
-   switch (value) {
-      case compression_type::none:
-         return ::rocksdb::kNoCompression;
-      case compression_type::snappy:
-         return ::rocksdb::kSnappyCompression;
-      case compression_type::zlib:
-         return ::rocksdb::kZlibCompression;
-      case compression_type::bzip2:
-         return ::rocksdb::kBZip2Compression;
-      case compression_type::lz4:
-         return ::rocksdb::kLZ4Compression;
-      case compression_type::lz4hc:
-         return ::rocksdb::kLZ4HCCompression;
-      case compression_type::xpress:
-         return ::rocksdb::kXpressCompression;
-      case compression_type::zstd:
-         return ::rocksdb::kZSTD;
-   }
-   return ::rocksdb::kNoCompression;
-}
-
-::rocksdb::ColumnFamilyOptions to_native_options(const column_family_config& value) {
-   auto native = ::rocksdb::ColumnFamilyOptions{};
-   native.enable_blob_files = value.blobs.enable_blob_files;
-   native.min_blob_size = value.blobs.min_blob_size;
-   native.blob_file_size = value.blobs.blob_file_size;
-   native.blob_compression_type = to_native_compression(value.blobs.blob_compression_type);
-   native.enable_blob_garbage_collection = value.blobs.enable_blob_garbage_collection;
-   native.blob_garbage_collection_age_cutoff = value.blobs.blob_garbage_collection_age_cutoff;
-   return native;
-}
-
-} // namespace forge::rocksdb::detail
+#include "details/snapshot_impl.hxx"
+#include "details/store_impl.hxx"
+#include "details/transaction_impl.hxx"
 
 namespace forge::rocksdb {
-
-store::impl::impl(config value) : settings{std::move(value)} {
-   if (settings.path.empty()) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_argument, "RocksDB path must not be empty");
-   }
-
-   auto family_options = std::unordered_map<std::string, column_family_config>{};
-   for (auto family : settings.column_families) {
-      if (family.name.empty()) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_argument, "RocksDB column family name must not be empty");
-      }
-      family_options.emplace(family.name, std::move(family));
-   }
-   family_options.try_emplace("default", column_family_config{"default"});
-
-   auto names = std::vector<std::string>{};
-   names.reserve(family_options.size());
-   for (const auto& [name, options] : family_options) {
-      static_cast<void>(options);
-      if (name != "default") {
-         names.push_back(name);
-      }
-   }
-   std::ranges::sort(names);
-   names.erase(std::unique(names.begin(), names.end()), names.end());
-   names.insert(names.begin(), "default");
-
-   const auto path = std::filesystem::path{settings.path};
-   if (const auto parent = path.parent_path(); !parent.empty()) {
-      try {
-         std::filesystem::create_directories(parent);
-      } catch (const std::filesystem::filesystem_error& error) {
-         FORGE_THROW_EXCEPTION(exceptions::io_error,
-                               "failed to create RocksDB parent directory",
-                               forge::exceptions::ctx("path", path.string()),
-                               forge::exceptions::ctx("parent", parent.string()),
-                               forge::exceptions::ctx("reason", error.what()));
-      } catch (const std::exception& error) {
-         FORGE_THROW_EXCEPTION(exceptions::internal_error,
-                               "failed to create RocksDB parent directory",
-                               forge::exceptions::ctx("path", path.string()),
-                               forge::exceptions::ctx("parent", parent.string()),
-                               forge::exceptions::ctx("reason", error.what()));
-      }
-   }
-
-   auto db_options = ::rocksdb::DBOptions{};
-   db_options.create_if_missing = settings.create_if_missing;
-   db_options.create_missing_column_families = settings.create_missing_column_families;
-
-   std::vector<std::string> existing_names;
-   const auto list_status = ::rocksdb::DB::ListColumnFamilies(db_options, path.string(), &existing_names);
-   if (list_status.ok()) {
-      for (const auto& name : existing_names) {
-         if (std::find(names.begin(), names.end(), name) == names.end()) {
-            names.push_back(name);
-            family_options.try_emplace(name, column_family_config{name});
-         }
-      }
-   } else if (!settings.create_if_missing && !list_status.IsIOError()) {
-      detail::throw_if_error(list_status, "failed to list RocksDB column families");
-   }
-
-   std::vector<::rocksdb::ColumnFamilyDescriptor> descriptors;
-   descriptors.reserve(names.size());
-   for (const auto& name : names) {
-      descriptors.emplace_back(name, detail::to_native_options(family_options.at(name)));
-   }
-
-   std::vector<::rocksdb::ColumnFamilyHandle*> opened_handles;
-   ::rocksdb::TransactionDB* opened_db = nullptr;
-   const auto open_status = ::rocksdb::TransactionDB::Open(
-      db_options,
-      ::rocksdb::TransactionDBOptions{},
-      path.string(),
-      descriptors,
-      &opened_handles,
-      &opened_db);
-   detail::throw_if_error(open_status, "failed to open RocksDB TransactionDB store");
-
-   db.reset(opened_db);
-   for (std::size_t index = 0; index < names.size(); ++index) {
-      handles.emplace(names[index], opened_handles[index]);
-   }
-}
-
-store::impl::~impl() {
-   for (auto& [name, handle] : handles) {
-      static_cast<void>(name);
-      if (handle != nullptr && db != nullptr) {
-         static_cast<void>(db->DestroyColumnFamilyHandle(handle));
-      }
-   }
-}
-
-::rocksdb::ColumnFamilyHandle* store::impl::require_handle(const family& column_family) const {
-   const auto iterator = handles.find(column_family.name);
-   if (iterator == handles.end()) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_argument,
-                          "RocksDB column family is not open",
-                          forge::exceptions::ctx("family", column_family.name));
-   }
-   return iterator->second;
-}
-
-snapshot::impl::impl(std::shared_ptr<store::impl> store_value, const ::rocksdb::Snapshot* snapshot_value)
-    : store{std::move(store_value)}, snapshot{snapshot_value} {}
-
-snapshot::impl::~impl() {
-   if (store && store->db && snapshot != nullptr) {
-      store->db->ReleaseSnapshot(snapshot);
-   }
-}
-
-snapshot::snapshot(std::unique_ptr<impl> impl_value) : impl_{std::move(impl_value)} {}
-snapshot::~snapshot() = default;
-snapshot::snapshot(snapshot&&) noexcept = default;
-snapshot& snapshot::operator=(snapshot&&) noexcept = default;
-
-void snapshot::ensure_active(std::string_view context) const {
-   if (impl_ == nullptr || impl_->snapshot == nullptr) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_argument, std::string{context} + ": RocksDB snapshot is closed");
-   }
-}
-
-std::optional<std::vector<std::byte>> snapshot::get(family column_family, std::vector<std::byte> key, read_options options) {
-   ensure_active("failed to get RocksDB snapshot value");
-   std::string value;
-   const auto status = impl_->store->db->Get(
-      detail::to_native_options(options, impl_->snapshot),
-      impl_->store->require_handle(column_family),
-      detail::to_slice(key),
-      &value);
-   if (status.IsNotFound()) {
-      return std::nullopt;
-   }
-   detail::throw_if_error(status, "failed to get RocksDB snapshot value");
-   auto bytes = std::vector<std::byte>{};
-   bytes.resize(value.size());
-   std::memcpy(bytes.data(), value.data(), value.size());
-   return bytes;
-}
-
-std::vector<entry> snapshot::scan(family column_family, std::vector<std::byte> prefix, read_options options) {
-   ensure_active("failed to scan RocksDB snapshot prefix");
-   auto iterator = std::unique_ptr<::rocksdb::Iterator>{
-      impl_->store->db->NewIterator(
-         detail::to_native_options(options, impl_->snapshot),
-         impl_->store->require_handle(column_family)),
-   };
-
-   auto values = std::vector<entry>{};
-   for (iterator->Seek(detail::to_slice(prefix)); iterator->Valid(); iterator->Next()) {
-      auto key = detail::bytes_from_slice(iterator->key());
-      if (!detail::starts_with(key, prefix)) {
-         break;
-      }
-      values.push_back(entry{.key = std::move(key), .value = detail::bytes_from_slice(iterator->value())});
-   }
-   detail::throw_if_error(iterator->status(), "failed to scan RocksDB snapshot prefix");
-   return values;
-}
-
-scan_result snapshot::scan_page(family column_family, scan_request request) {
-   ensure_active("failed to scan RocksDB snapshot prefix page");
-   auto iterator = std::unique_ptr<::rocksdb::Iterator>{
-      impl_->store->db->NewIterator(
-         detail::to_native_options(request.options, impl_->snapshot),
-         impl_->store->require_handle(column_family)),
-   };
-   return detail::read_scan_page(std::move(iterator), std::move(request), "failed to scan RocksDB snapshot prefix page");
-}
-
-transaction::impl::impl(std::shared_ptr<store::impl> store_value, std::unique_ptr<::rocksdb::Transaction> transaction_value)
-    : store{std::move(store_value)}, transaction{std::move(transaction_value)} {}
-
-transaction::transaction(std::unique_ptr<impl> impl_value) : impl_{std::move(impl_value)} {}
-
-transaction::~transaction() {
-   rollback_if_active();
-}
-
-transaction::transaction(transaction&&) noexcept = default;
-
-transaction& transaction::operator=(transaction&& other) noexcept {
-   if (this != &other) {
-      rollback_if_active();
-      impl_ = std::move(other.impl_);
-   }
-   return *this;
-}
-
-void transaction::rollback_if_active() noexcept {
-   if (impl_ != nullptr && !impl_->finished && impl_->transaction != nullptr) {
-      static_cast<void>(impl_->transaction->Rollback());
-      impl_->finished = true;
-   }
-}
-
-void transaction::ensure_active(std::string_view context) const {
-   if (impl_ == nullptr || impl_->finished || impl_->transaction == nullptr) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_argument, std::string{context} + ": RocksDB transaction is closed");
-   }
-}
-
-std::optional<std::vector<std::byte>>
-transaction::get(family column_family, std::vector<std::byte> key, read_options options) {
-   ensure_active("failed to get RocksDB transaction value");
-   std::string value;
-   const auto status = impl_->transaction->Get(
-      detail::to_native_options(options),
-      impl_->store->require_handle(column_family),
-      detail::to_slice(key),
-      &value);
-   if (status.IsNotFound()) {
-      return std::nullopt;
-   }
-   detail::throw_if_error(status, "failed to get RocksDB transaction value");
-   auto bytes = std::vector<std::byte>{};
-   bytes.resize(value.size());
-   std::memcpy(bytes.data(), value.data(), value.size());
-   return bytes;
-}
-
-std::vector<entry> transaction::scan(family column_family, std::vector<std::byte> prefix, read_options options) {
-   ensure_active("failed to scan RocksDB transaction prefix");
-   auto iterator = std::unique_ptr<::rocksdb::Iterator>{
-      impl_->transaction->GetIterator(detail::to_native_options(options), impl_->store->require_handle(column_family)),
-   };
-
-   auto values = std::vector<entry>{};
-   for (iterator->Seek(detail::to_slice(prefix)); iterator->Valid(); iterator->Next()) {
-      auto key = detail::bytes_from_slice(iterator->key());
-      if (!detail::starts_with(key, prefix)) {
-         break;
-      }
-      values.push_back(entry{.key = std::move(key), .value = detail::bytes_from_slice(iterator->value())});
-   }
-   detail::throw_if_error(iterator->status(), "failed to scan RocksDB transaction prefix");
-   return values;
-}
-
-scan_result transaction::scan_page(family column_family, scan_request request) {
-   ensure_active("failed to scan RocksDB transaction prefix page");
-   auto iterator = std::unique_ptr<::rocksdb::Iterator>{
-      impl_->transaction->GetIterator(
-         detail::to_native_options(request.options),
-         impl_->store->require_handle(column_family)),
-   };
-   return detail::read_scan_page(std::move(iterator), std::move(request), "failed to scan RocksDB transaction prefix page");
-}
-
-void transaction::lock(family column_family, std::vector<std::byte> key, read_options options) {
-   ensure_active("failed to lock RocksDB transaction key");
-   const auto status = impl_->transaction->GetForUpdate(
-      detail::to_native_options(options),
-      impl_->store->require_handle(column_family),
-      detail::to_slice(key),
-      static_cast<std::string*>(nullptr));
-   if (status.IsNotFound()) {
-      return;
-   }
-   detail::throw_if_error(status, "failed to lock RocksDB transaction key");
-}
-
-void transaction::put(family column_family, std::vector<std::byte> key, std::vector<std::byte> value) {
-   ensure_active("failed to put RocksDB transaction value");
-   detail::throw_if_error(
-      impl_->transaction->Put(
-         impl_->store->require_handle(column_family),
-         detail::to_slice(key),
-         detail::to_slice(value)),
-      "failed to put RocksDB transaction value");
-}
-
-void transaction::erase(family column_family, std::vector<std::byte> key) {
-   ensure_active("failed to delete RocksDB transaction value");
-   detail::throw_if_error(
-      impl_->transaction->Delete(impl_->store->require_handle(column_family), detail::to_slice(key)),
-      "failed to delete RocksDB transaction value");
-}
-
-void transaction::commit() {
-   ensure_active("failed to commit RocksDB transaction");
-   detail::throw_if_error(impl_->transaction->Commit(), "failed to commit RocksDB transaction");
-   impl_->finished = true;
-}
-
-void transaction::rollback() {
-   ensure_active("failed to rollback RocksDB transaction");
-   detail::throw_if_error(impl_->transaction->Rollback(), "failed to rollback RocksDB transaction");
-   impl_->finished = true;
-}
 
 store::store(config value) : impl_{std::make_shared<impl>(std::move(value))} {}
 store::~store() = default;
@@ -522,7 +52,10 @@ store::get(family column_family, std::vector<std::byte> key, read_options option
    return bytes;
 }
 
-void store::put(family column_family, std::vector<std::byte> key, std::vector<std::byte> value, write_options options) {
+void store::put(family column_family,
+                std::vector<std::byte> key,
+                std::vector<std::byte> value,
+                write_options options) {
    auto transaction = begin(options);
    transaction.put(std::move(column_family), std::move(key), std::move(value));
    transaction.commit();
@@ -549,12 +82,15 @@ void store::write(std::vector<operation> operations, write_options options) {
    transaction.commit();
 }
 
-std::vector<entry> store::scan(family column_family, std::vector<std::byte> prefix, read_options options) {
+std::vector<entry> store::scan(family column_family,
+                               std::vector<std::byte> prefix,
+                               read_options options) {
    auto iterator = std::unique_ptr<::rocksdb::Iterator>{
-      impl_->db->NewIterator(detail::to_native_options(options), impl_->require_handle(column_family)),
+      impl_->db->NewIterator(
+         detail::to_native_options(options), impl_->require_handle(column_family)),
    };
 
-   std::vector<entry> values;
+   auto values = std::vector<entry>{};
    for (iterator->Seek(detail::to_slice(prefix)); iterator->Valid(); iterator->Next()) {
       auto key = detail::bytes_from_slice(iterator->key());
       if (!detail::starts_with(key, prefix)) {
@@ -568,14 +104,17 @@ std::vector<entry> store::scan(family column_family, std::vector<std::byte> pref
 
 scan_result store::scan_page(family column_family, scan_request request) {
    auto iterator = std::unique_ptr<::rocksdb::Iterator>{
-      impl_->db->NewIterator(detail::to_native_options(request.options), impl_->require_handle(column_family)),
+      impl_->db->NewIterator(
+         detail::to_native_options(request.options), impl_->require_handle(column_family)),
    };
-   return detail::read_scan_page(std::move(iterator), std::move(request), "failed to scan RocksDB prefix page");
+   return detail::read_scan_page(
+      std::move(iterator), std::move(request), "failed to scan RocksDB prefix page");
 }
 
 transaction store::begin(write_options options) {
    auto native = std::unique_ptr<::rocksdb::Transaction>{
-      impl_->db->BeginTransaction(detail::to_native_options(options), ::rocksdb::TransactionOptions{}),
+      impl_->db->BeginTransaction(
+         detail::to_native_options(options), ::rocksdb::TransactionOptions{}),
    };
    if (native == nullptr) {
       FORGE_THROW_EXCEPTION(exceptions::internal_error, "failed to begin RocksDB transaction");

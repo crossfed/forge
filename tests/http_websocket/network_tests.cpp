@@ -438,14 +438,18 @@ class xml_cache_api : public forge::api::core::contract<xml_cache_api, forge::ap
    virtual boost::asio::awaitable<macro_chunk> write(macro_write_request request) = 0;
 };
 
-class search_api : public forge::api::core::contract<search_api> {
+template <typename Interface>
+using http_contract = forge::api::core::contract<
+   Interface, forge::api::core::surface::local | forge::api::core::surface::remote>;
+
+class search_api : public http_contract<search_api> {
  public:
    virtual ~search_api() = default;
 
    virtual boost::asio::awaitable<search_response> search(search_request request) = 0;
 };
 
-class positional_api_http : public forge::api::core::contract<positional_api_http> {
+class positional_api_http : public http_contract<positional_api_http> {
  public:
    virtual ~positional_api_http() = default;
 
@@ -456,7 +460,7 @@ class positional_api_http : public forge::api::core::contract<positional_api_htt
         forge::api::http::cookie<std::string> session) = 0;
 };
 
-class positional_body_api : public forge::api::core::contract<positional_body_api> {
+class positional_body_api : public http_contract<positional_body_api> {
  public:
    virtual ~positional_body_api() = default;
 
@@ -464,7 +468,7 @@ class positional_body_api : public forge::api::core::contract<positional_body_ap
    write(std::string ref, forge::api::http::body<positional_body_payload> payload) = 0;
 };
 
-class positional_single_query_api : public forge::api::core::contract<positional_single_query_api> {
+class positional_single_query_api : public http_contract<positional_single_query_api> {
  public:
    virtual ~positional_single_query_api() = default;
 
@@ -472,7 +476,7 @@ class positional_single_query_api : public forge::api::core::contract<positional
    read(forge::api::http::query<std::uint32_t> limit) = 0;
 };
 
-class positional_query_append_api : public forge::api::core::contract<positional_query_append_api> {
+class positional_query_append_api : public http_contract<positional_query_append_api> {
  public:
    virtual ~positional_query_append_api() = default;
 
@@ -480,7 +484,7 @@ class positional_query_append_api : public forge::api::core::contract<positional
    read(std::string ref, forge::api::http::query<std::uint32_t> limit) = 0;
 };
 
-class positional_plain_body_api : public forge::api::core::contract<positional_plain_body_api> {
+class positional_plain_body_api : public http_contract<positional_plain_body_api> {
  public:
    virtual ~positional_plain_body_api() = default;
 
@@ -488,7 +492,7 @@ class positional_plain_body_api : public forge::api::core::contract<positional_p
    write(std::string ref, positional_body_payload payload) = 0;
 };
 
-class positional_ambiguous_body_api : public forge::api::core::contract<positional_ambiguous_body_api> {
+class positional_ambiguous_body_api : public http_contract<positional_ambiguous_body_api> {
  public:
    virtual ~positional_ambiguous_body_api() = default;
 
@@ -496,7 +500,7 @@ class positional_ambiguous_body_api : public forge::api::core::contract<position
    write(std::string ref, positional_body_payload left, positional_body_payload right) = 0;
 };
 
-class positional_checked_body_api : public forge::api::core::contract<positional_checked_body_api> {
+class positional_checked_body_api : public http_contract<positional_checked_body_api> {
  public:
    virtual ~positional_checked_body_api() = default;
 
@@ -504,7 +508,7 @@ class positional_checked_body_api : public forge::api::core::contract<positional
    write(std::string ref, positional_ref_payload payload) = 0;
 };
 
-class positional_streaming_body_api : public forge::api::core::contract<positional_streaming_body_api> {
+class positional_streaming_body_api : public http_contract<positional_streaming_body_api> {
  public:
    virtual ~positional_streaming_body_api() = default;
 
@@ -512,7 +516,7 @@ class positional_streaming_body_api : public forge::api::core::contract<position
    write(std::string ref, positional_body_payload payload) = 0;
 };
 
-class positional_stream_api : public forge::api::core::contract<positional_stream_api> {
+class positional_stream_api : public http_contract<positional_stream_api> {
  public:
    virtual ~positional_stream_api() = default;
 
@@ -520,7 +524,7 @@ class positional_stream_api : public forge::api::core::contract<positional_strea
    write(std::string ref, forge::api::http::body_stream body) = 0;
 };
 
-class dto_api_http : public forge::api::core::contract<dto_api_http> {
+class dto_api_http : public http_contract<dto_api_http> {
  public:
    virtual ~dto_api_http() = default;
 
@@ -529,21 +533,21 @@ class dto_api_http : public forge::api::core::contract<dto_api_http> {
    virtual boost::asio::awaitable<positional_body_response> upload(dto_multipart_request request) = 0;
 };
 
-class dto_ambiguous_body_api : public forge::api::core::contract<dto_ambiguous_body_api> {
+class dto_ambiguous_body_api : public http_contract<dto_ambiguous_body_api> {
  public:
    virtual ~dto_ambiguous_body_api() = default;
 
    virtual boost::asio::awaitable<positional_body_response> write(dto_ambiguous_body_request request) = 0;
 };
 
-class positional_scalar_body_api : public forge::api::core::contract<positional_scalar_body_api> {
+class positional_scalar_body_api : public http_contract<positional_scalar_body_api> {
  public:
    virtual ~positional_scalar_body_api() = default;
 
    virtual boost::asio::awaitable<positional_body_response> write(std::string ref, std::string payload) = 0;
 };
 
-class object_api : public forge::api::core::contract<object_api> {
+class object_api : public http_contract<object_api> {
  public:
    virtual ~object_api() = default;
 
@@ -554,21 +558,21 @@ class object_api : public forge::api::core::contract<object_api> {
    virtual boost::asio::awaitable<forge::api::http::empty_response> delete_object(object_get_request request) = 0;
 };
 
-class file_only_api : public forge::api::core::contract<file_only_api> {
+class file_only_api : public http_contract<file_only_api> {
  public:
    virtual ~file_only_api() = default;
 
    virtual boost::asio::awaitable<forge::net::http::file_response> download(object_get_request request) = 0;
 };
 
-class form_api : public forge::api::core::contract<form_api> {
+class form_api : public http_contract<form_api> {
  public:
    virtual ~form_api() = default;
 
    virtual boost::asio::awaitable<form_submit_response> submit(form_submit_request request) = 0;
 };
 
-class control_api : public forge::api::core::contract<control_api> {
+class control_api : public http_contract<control_api> {
  public:
    virtual ~control_api() = default;
 
@@ -577,7 +581,7 @@ class control_api : public forge::api::core::contract<control_api> {
    virtual boost::asio::awaitable<forge::api::http::empty_response> head(control_request request) = 0;
 };
 
-class alias_api : public forge::api::core::contract<alias_api> {
+class alias_api : public http_contract<alias_api> {
  public:
    virtual ~alias_api() = default;
 
@@ -585,49 +589,49 @@ class alias_api : public forge::api::core::contract<alias_api> {
    virtual boost::asio::awaitable<control_response> legacy(control_request request) = 0;
 };
 
-class patch_api : public forge::api::core::contract<patch_api> {
+class patch_api : public http_contract<patch_api> {
  public:
    virtual ~patch_api() = default;
 
    virtual boost::asio::awaitable<control_response> patch(control_patch_request request) = 0;
 };
 
-class delete_body_api : public forge::api::core::contract<delete_body_api> {
+class delete_body_api : public http_contract<delete_body_api> {
  public:
    virtual ~delete_body_api() = default;
 
    virtual boost::asio::awaitable<control_response> remove(delete_body_request request) = 0;
 };
 
-class delete_path_api : public forge::api::core::contract<delete_path_api> {
+class delete_path_api : public http_contract<delete_path_api> {
  public:
    virtual ~delete_path_api() = default;
 
    virtual boost::asio::awaitable<control_response> remove(delete_path_request request) = 0;
 };
 
-class delete_stream_api : public forge::api::core::contract<delete_stream_api> {
+class delete_stream_api : public http_contract<delete_stream_api> {
  public:
    virtual ~delete_stream_api() = default;
 
    virtual boost::asio::awaitable<control_response> remove(delete_stream_request request) = 0;
 };
 
-class default_header_api : public forge::api::core::contract<default_header_api> {
+class default_header_api : public http_contract<default_header_api> {
  public:
    virtual ~default_header_api() = default;
 
    virtual boost::asio::awaitable<default_header_response> echo(default_header_request request) = 0;
 };
 
-class json_stream_api : public forge::api::core::contract<json_stream_api> {
+class json_stream_api : public http_contract<json_stream_api> {
  public:
    virtual ~json_stream_api() = default;
 
    virtual boost::asio::awaitable<forge::net::http::streaming_response> stream(json_stream_request request) = 0;
 };
 
-class endpoint_api : public forge::api::core::contract<endpoint_api> {
+class endpoint_api : public http_contract<endpoint_api> {
  public:
    virtual ~endpoint_api() = default;
 
@@ -637,14 +641,14 @@ class endpoint_api : public forge::api::core::contract<endpoint_api> {
    virtual boost::asio::awaitable<forge::api::http::empty_response> accepted(endpoint_control_request request) = 0;
 };
 
-class stream_buffered_api : public forge::api::core::contract<stream_buffered_api> {
+class stream_buffered_api : public http_contract<stream_buffered_api> {
  public:
    virtual ~stream_buffered_api() = default;
 
    virtual boost::asio::awaitable<endpoint_control_response> write(stream_buffered_request request) = 0;
 };
 
-class stream_body_echo_api : public forge::api::core::contract<stream_body_echo_api> {
+class stream_body_echo_api : public http_contract<stream_body_echo_api> {
  public:
    virtual ~stream_body_echo_api() = default;
 
@@ -652,7 +656,7 @@ class stream_body_echo_api : public forge::api::core::contract<stream_body_echo_
    virtual boost::asio::awaitable<forge::net::http::streaming_response> independent(stream_body_echo_request request) = 0;
 };
 
-class mixed_proxy_api : public forge::api::core::contract<mixed_proxy_api> {
+class mixed_proxy_api : public http_contract<mixed_proxy_api> {
  public:
    virtual ~mixed_proxy_api() = default;
 

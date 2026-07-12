@@ -32,6 +32,8 @@ struct builder_state {
    std::vector<forge::config::core::component_descriptor> config_descriptors;
    std::vector<std::function<boost::asio::awaitable<void>(configure_context&)>> configure_callbacks;
    std::vector<std::function<boost::asio::awaitable<void>(application_context&)>> provide_callbacks;
+   std::vector<std::function<boost::asio::awaitable<void>(const application_context&)>>
+      after_initialize_callbacks;
    std::function<int(application_shell&)> foreground;
 };
 
@@ -60,6 +62,12 @@ class built_application final : public application_shell {
 
    boost::asio::awaitable<void> on_provide(application_context& context) override {
       for (auto& callback : state_.provide_callbacks) {
+         co_await callback(context);
+      }
+   }
+
+   boost::asio::awaitable<void> on_after_initialize(const application_context& context) override {
+      for (auto& callback : state_.after_initialize_callbacks) {
          co_await callback(context);
       }
    }
@@ -143,6 +151,10 @@ void application_builder::add_configure_callback(configure_callback callback) {
 
 void application_builder::add_provide_callback(provide_callback callback) {
    impl_->state.provide_callbacks.push_back(std::move(callback));
+}
+
+void application_builder::add_after_initialize_callback(after_initialize_callback callback) {
+   impl_->state.after_initialize_callbacks.push_back(std::move(callback));
 }
 
 } // namespace forge::app

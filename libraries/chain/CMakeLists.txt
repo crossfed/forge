@@ -1,6 +1,7 @@
 add_library(
    forge_chain STATIC
    types.cpp
+   merkle.cpp
    transaction.cpp
    block.cpp
    abi.cpp

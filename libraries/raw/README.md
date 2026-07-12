@@ -40,6 +40,7 @@ Boost headers and Boost.Multiprecision.
 ```cpp
 #include <boost/describe.hpp>
 
+#include <concepts>
 #include <cstdint>
 #include <vector>
 
@@ -53,10 +54,8 @@ struct transfer {
 
 BOOST_DESCRIBE_STRUCT(transfer, (), (id, amount))
 
-auto bytes = std::vector<char>{};
-bytes.resize(forge::raw::pack_size(transfer{.id = 7, .amount = 42}));
-auto stream = forge::datastream<char*>{bytes.data(), bytes.size()};
-forge::raw::pack(stream, transfer{.id = 7, .amount = 42});
+auto bytes = forge::raw::pack(transfer{.id = 7, .amount = 42});
+static_assert(std::same_as<decltype(bytes), forge::raw::bytes>);
 ```
 
 ### Use Raw Bytes As The Hash/Signature Contract
@@ -196,7 +195,8 @@ FORGE_IMPLEMENT_SERIALIZATION(action_payload)
 ```
 
 `FORGE_DECLARE_SERIALIZATION_PACK` and `FORGE_IMPLEMENT_SERIALIZATION_PACK` cover
-`datastream<size_t>`, `datastream<char*>`, `datastream<const char*>` and
+`datastream<size_t>`, `datastream<std::uint8_t*>`,
+`datastream<const std::uint8_t*>` and
 `sha256::encoder`. `FORGE_DECLARE_SERIALIZATION_VARIANT` and
 `FORGE_IMPLEMENT_SERIALIZATION_VARIANT` cover `to_variant/from_variant`.
 
@@ -204,6 +204,12 @@ FORGE_IMPLEMENT_SERIALIZATION(action_payload)
 
 - Described member order is wire order. Changing `BOOST_DESCRIBE_*` order is a
   breaking binary change.
+- `forge::raw::bytes` is the canonical owning wire buffer and uses
+  `std::uint8_t`. A donor DTO may still contain `char` or `std::vector<char>`;
+  those declared field types retain their existing one-byte raw format and are
+  not silently rewritten as unsigned integer fields.
+- Forge requires `CHAR_BIT == 8`. Compatibility is defined by emitted bytes,
+  not by whether the owning C++ container uses `char` or `std::uint8_t`.
 - `sys_time<microseconds>` packs as old FC `time_point` (`uint64` microseconds).
 - `sys_seconds` packs as old FC `time_point_sec` (`uint32` seconds).
 - `std::chrono::microseconds` packs as old FC microseconds (`uint64` bit layout).

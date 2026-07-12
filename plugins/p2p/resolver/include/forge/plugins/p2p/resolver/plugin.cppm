@@ -22,6 +22,13 @@ import forge.app.plugin_context;
 import forge.app.plugin_registry;
 import forge.config.core.component;
 import forge.net.p2p.protocol;
+import forge.plugins.p2p.resolver.types;
+
+namespace forge::plugins::p2p::resolver::detail {
+
+class resolver_protocol;
+
+} // namespace forge::plugins::p2p::resolver::detail
 
 export namespace forge::plugins::p2p::resolver {
 
@@ -44,9 +51,10 @@ class plugin final : public forge::app::plugin {
    boost::asio::awaitable<void> shutdown() override;
 
  private:
+   friend class detail::resolver_protocol;
+
    struct impl;
-   class resolver_protocol_service;
-   class resolver_api;
+   class api_impl;
    std::shared_ptr<impl> impl_;
 };
 

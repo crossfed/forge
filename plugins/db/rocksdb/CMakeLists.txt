@@ -3,8 +3,10 @@ add_library(
    plugin.cpp
    config.cpp
    plugin_impl.cpp
+   api_impl.cpp
+   native_transaction_state.cpp
    transaction_impl.cpp
-   api.cpp
+   transaction_owner_impl.cpp
 )
 forge_target_modules_at(forge_plugins_db_rocksdb plugins/db/rocksdb)
 

@@ -32,6 +32,7 @@ class sha256 : public add_packhash_to_hash<sha256> {
    sha256();
    explicit sha256(const std::string& hex_str);
    explicit sha256(const char* data, size_t size);
+   explicit sha256(std::span<const std::uint8_t> data);
 
    std::string str() const;
    operator std::string() const;

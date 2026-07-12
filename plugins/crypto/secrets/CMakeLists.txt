@@ -1,11 +1,10 @@
 add_library(
    forge_plugins_crypto_secrets STATIC
       plugin.cpp
-      secret_api.cpp
+      api_impl.cpp
       config.cpp
       plugin_impl.cpp
-      source_loading.cpp
-      encrypted_file.cpp
+      types.cpp
 )
 forge_target_modules_at(forge_plugins_crypto_secrets plugins/crypto/secrets)
 

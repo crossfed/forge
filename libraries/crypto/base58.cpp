@@ -26,7 +26,6 @@ module;
 #include <limits>
 #include <algorithm>
 
-#include <vector>
 #include <openssl/bn.h>
 
 module forge.crypto.base58;
@@ -624,34 +623,6 @@ bytes base58_decode(std::string_view base58_str) {
    return bytes{out.begin(), out.end()};
 }
 
-} // namespace forge::crypto
-
-namespace forge::crypto {
-
-std::string to_base58(const char* d, size_t s, const forge::yield_function_t& yield) {
-   const auto bytes = std::span{reinterpret_cast<const std::uint8_t*>(d), s};
-   return forge::crypto::base58_encode(bytes, yield);
-}
-
-std::string to_base58(const std::vector<char>& d, const forge::yield_function_t& yield) {
-   if (d.size())
-      return to_base58(d.data(), d.size(), yield);
-   return std::string();
-}
-std::vector<char> from_base58(const std::string& base58_str) {
-   auto out = forge::crypto::base58_decode(base58_str);
-   return std::vector<char>(out.begin(), out.end());
-}
-/**
- *  @return the number of bytes decoded
- */
-size_t from_base58(const std::string& base58_str, char* out_data, size_t out_data_len) {
-   // slog( "%s", base58_str.c_str() );
-   auto out = forge::crypto::base58_decode(base58_str);
-   FORGE_ASSERT(out.size() <= out_data_len);
-   memcpy(out_data, out.data(), out.size());
-   return out.size();
-}
 } // namespace forge::crypto
 
 #endif

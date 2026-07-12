@@ -37,10 +37,12 @@
    (NAME, REQUEST, RESPONSE, REVISION, 1, REASON, 1, 0, ())
 
 #if defined(__clang__)
-#define FORGE_API_DETAIL_DIAGNOSTIC_PUSH _Pragma("clang diagnostic push") _Pragma("clang diagnostic ignored \"-Wdeprecated-declarations\"")
+#define FORGE_API_DETAIL_DIAGNOSTIC_PUSH                                                                               \
+   _Pragma("clang diagnostic push") _Pragma("clang diagnostic ignored \"-Wdeprecated-declarations\"")
 #define FORGE_API_DETAIL_DIAGNOSTIC_POP _Pragma("clang diagnostic pop")
 #elif defined(__GNUC__)
-#define FORGE_API_DETAIL_DIAGNOSTIC_PUSH _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
+#define FORGE_API_DETAIL_DIAGNOSTIC_PUSH                                                                               \
+   _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
 #define FORGE_API_DETAIL_DIAGNOSTIC_POP _Pragma("GCC diagnostic pop")
 #else
 #define FORGE_API_DETAIL_DIAGNOSTIC_PUSH
@@ -57,7 +59,8 @@
 #define FORGE_API_DETAIL_METHOD_HAS_ARGS(METHOD) BOOST_PP_TUPLE_ELEM(9, 7, METHOD)
 #define FORGE_API_DETAIL_METHOD_ARGS(METHOD) BOOST_PP_TUPLE_ELEM(9, 8, METHOD)
 
-#define FORGE_API_DETAIL_ARG_NAMES_EMPTY_R(r, METHOD) std::vector<std::string>{}
+#define FORGE_API_DETAIL_ARG_NAMES_EMPTY_R(r, METHOD)                                                                  \
+   std::vector<std::string> {}
 #define FORGE_API_DETAIL_ARG_NAMES_NONEMPTY_R(r, METHOD)                                                            \
    ::forge::api::core::detail::argument_names_from_macro(BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_ARGS(METHOD)))
 #define FORGE_API_DETAIL_ARG_NAMES_R(r, METHOD)                                                                      \
@@ -69,8 +72,8 @@
       FORGE_API_DETAIL_METHOD_REQUEST(METHOD))>(&INTERFACE::FORGE_API_DETAIL_METHOD_NAME(METHOD))
 
 #define FORGE_API_DETAIL_DESCRIPTOR_METHODS(INTERFACE, ...)                                                          \
-   __VA_OPT__(BOOST_PP_SEQ_FOR_EACH(FORGE_API_DETAIL_DESCRIPTOR_METHOD, INTERFACE,                                  \
-                                    BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__)))
+   __VA_OPT__(                                                                                                         \
+       BOOST_PP_SEQ_FOR_EACH(FORGE_API_DETAIL_DESCRIPTOR_METHOD, INTERFACE, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__)))
 
 #define FORGE_API_DETAIL_PROXY_METHODS(INTERFACE, ...)                                                               \
    __VA_OPT__(BOOST_PP_SEQ_FOR_EACH(FORGE_API_DETAIL_PROXY_METHOD, INTERFACE, BOOST_PP_VARIADIC_TO_SEQ(__VA_ARGS__)))
@@ -84,19 +87,19 @@
       auto method = builder.template method<&INTERFACE::FORGE_API_DETAIL_METHOD_NAME(METHOD)>(                       \
          BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)), FORGE_API_DETAIL_ARG_NAMES_R(r, METHOD));           \
       method.since_revision(FORGE_API_DETAIL_METHOD_SINCE(METHOD));                                                  \
-      BOOST_PP_IF(FORGE_API_DETAIL_METHOD_DEPRECATED(METHOD),                                                        \
-                  method.deprecated(FORGE_API_DETAIL_METHOD_REASON(METHOD));, )                                      \
+      BOOST_PP_IF(                                                                                                     \
+          FORGE_API_DETAIL_METHOD_DEPRECATED(METHOD), method.deprecated(FORGE_API_DETAIL_METHOD_REASON(METHOD));, )    \
    }
 
 #define FORGE_API_DETAIL_DESCRIPTOR_METHOD_TYPED(r, INTERFACE, METHOD)                                               \
    {                                                                                                               \
-      auto method = builder.template method<FORGE_API_DETAIL_TYPED_METHOD_POINTER(INTERFACE, METHOD),                 \
-                                            FORGE_API_DETAIL_METHOD_REQUEST(METHOD),                                  \
-                                            FORGE_API_DETAIL_METHOD_RESPONSE(METHOD)>(                                \
+      auto method =                                                                                                    \
+          builder.template method<FORGE_API_DETAIL_TYPED_METHOD_POINTER(INTERFACE, METHOD),                            \
+                                  FORGE_API_DETAIL_METHOD_REQUEST(METHOD), FORGE_API_DETAIL_METHOD_RESPONSE(METHOD)>(  \
          BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)));                                                  \
       method.since_revision(FORGE_API_DETAIL_METHOD_SINCE(METHOD));                                                  \
-      BOOST_PP_IF(FORGE_API_DETAIL_METHOD_DEPRECATED(METHOD),                                                        \
-                  method.deprecated(FORGE_API_DETAIL_METHOD_REASON(METHOD));, )                                      \
+      BOOST_PP_IF(                                                                                                     \
+          FORGE_API_DETAIL_METHOD_DEPRECATED(METHOD), method.deprecated(FORGE_API_DETAIL_METHOD_REASON(METHOD));, )    \
    }
 
 #define FORGE_API_DETAIL_PROXY_METHOD(r, INTERFACE, METHOD)                                                          \
@@ -108,21 +111,21 @@
                FORGE_API_DETAIL_PROXY_METHOD_ONE_REQUEST)(r, INTERFACE, METHOD)
 
 #define FORGE_API_DETAIL_PROXY_METHOD_ONE_REQUEST(r, INTERFACE, METHOD)                                              \
-   boost::asio::awaitable<                                                                                         \
-      ::forge::api::core::method_response_t<&INTERFACE::FORGE_API_DETAIL_METHOD_NAME(METHOD)>>                               \
+   boost::asio::awaitable<::forge::api::core::method_response_t<&INTERFACE::FORGE_API_DETAIL_METHOD_NAME(METHOD)>>     \
    FORGE_API_DETAIL_METHOD_NAME(METHOD)(                                                                             \
       ::forge::api::core::method_request_t<&INTERFACE::FORGE_API_DETAIL_METHOD_NAME(METHOD)> request) override {             \
-      co_return co_await this->invoker_->template call<                                                            \
-         ::forge::api::core::method_request_t<&INTERFACE::FORGE_API_DETAIL_METHOD_NAME(METHOD)>,                             \
+      co_return co_await ::forge::api::core::detail::proxy_call<                                                       \
+          INTERFACE, ::forge::api::core::method_request_t<&INTERFACE::FORGE_API_DETAIL_METHOD_NAME(METHOD)>,           \
          ::forge::api::core::method_response_t<&INTERFACE::FORGE_API_DETAIL_METHOD_NAME(METHOD)>>(                           \
-            ::forge::api::core::api_traits<INTERFACE>::describe(), this->selected_api_,                                    \
+          this->invoker_, this->selected_api_,                                                                         \
             BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)), std::move(request));                           \
    }
 
 #define FORGE_API_DETAIL_PROXY_ARG_DECL(r, DATA, INDEX, ARG)                                                         \
    BOOST_PP_COMMA_IF(INDEX)                                                                                        \
-   ::forge::api::core::method_argument_t<&BOOST_PP_TUPLE_ELEM(2, 0, DATA)::FORGE_API_DETAIL_METHOD_NAME(                     \
-                                    BOOST_PP_TUPLE_ELEM(2, 1, DATA)), INDEX> ARG
+   ::forge::api::core::method_argument_t<                                                                              \
+       &BOOST_PP_TUPLE_ELEM(2, 0, DATA)::FORGE_API_DETAIL_METHOD_NAME(BOOST_PP_TUPLE_ELEM(2, 1, DATA)), INDEX>         \
+       ARG
 #define FORGE_API_DETAIL_PROXY_ARG_MOVE(r, DATA, INDEX, ARG) , std::move(ARG)
 #define FORGE_API_DETAIL_PROXY_ARG_DECLS_R(r, INTERFACE, METHOD)                                                     \
    BOOST_PP_SEQ_FOR_EACH_I_R(r, FORGE_API_DETAIL_PROXY_ARG_DECL, (INTERFACE, METHOD),                                \
@@ -132,21 +135,20 @@
                              BOOST_PP_TUPLE_TO_SEQ(FORGE_API_DETAIL_METHOD_ARGS(METHOD)))
 
 #define FORGE_API_DETAIL_PROXY_METHOD_POSITIONAL(r, INTERFACE, METHOD)                                               \
-   boost::asio::awaitable<                                                                                         \
-      ::forge::api::core::method_response_t<&INTERFACE::FORGE_API_DETAIL_METHOD_NAME(METHOD)>>                               \
+   boost::asio::awaitable<::forge::api::core::method_response_t<&INTERFACE::FORGE_API_DETAIL_METHOD_NAME(METHOD)>>     \
    FORGE_API_DETAIL_METHOD_NAME(METHOD)(FORGE_API_DETAIL_PROXY_ARG_DECLS_R(r, INTERFACE, METHOD)) override {           \
-      co_return co_await this->invoker_->template call_arguments<                                                  \
-         ::forge::api::core::method_response_t<&INTERFACE::FORGE_API_DETAIL_METHOD_NAME(METHOD)>>(                           \
-            ::forge::api::core::api_traits<INTERFACE>::describe(), this->selected_api_,                                    \
+      co_return co_await ::forge::api::core::detail::proxy_call_arguments<                                             \
+          INTERFACE, ::forge::api::core::method_response_t<&INTERFACE::FORGE_API_DETAIL_METHOD_NAME(METHOD)>>(         \
+          this->invoker_, this->selected_api_,                                                                         \
             BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)) FORGE_API_DETAIL_PROXY_ARG_MOVES_R(r, METHOD));   \
    }
 
 #define FORGE_API_DETAIL_PROXY_METHOD_TYPED(r, INTERFACE, METHOD)                                                    \
-   boost::asio::awaitable<FORGE_API_DETAIL_METHOD_RESPONSE(METHOD)>                                                  \
-   FORGE_API_DETAIL_METHOD_NAME(METHOD)(FORGE_API_DETAIL_METHOD_REQUEST(METHOD) request) override {                    \
-      co_return co_await this->invoker_->template call<FORGE_API_DETAIL_METHOD_REQUEST(METHOD),                      \
+   boost::asio::awaitable<FORGE_API_DETAIL_METHOD_RESPONSE(METHOD)> FORGE_API_DETAIL_METHOD_NAME(METHOD)(              \
+       FORGE_API_DETAIL_METHOD_REQUEST(METHOD) request) override {                                                     \
+      co_return co_await ::forge::api::core::detail::proxy_call<INTERFACE, FORGE_API_DETAIL_METHOD_REQUEST(METHOD),    \
                                                        FORGE_API_DETAIL_METHOD_RESPONSE(METHOD)>(                     \
-         ::forge::api::core::api_traits<INTERFACE>::describe(), this->selected_api_,                                        \
+          this->invoker_, this->selected_api_,                                                                         \
          BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)), std::move(request));                              \
    }
 
@@ -166,8 +168,13 @@
          return api_ref{.id = id(), .major = value.major, .min_revision = min_revision};                           \
       }                                                                                                            \
       static descriptor describe() {                                                                               \
-         auto builder = ::forge::api::core::define<INTERFACE>(                                                             \
-            descriptor{.id = id(), .version = version(), .interface_type = typeid(INTERFACE)});                    \
+         auto builder =                                                                                                \
+             ::forge::api::core::define<INTERFACE, ::forge::api::core::supports(INTERFACE::api_surface,                \
+                                                                                ::forge::api::core::surface::remote)>( \
+                 descriptor{.id = id(),                                                                                \
+                            .version = version(),                                                                      \
+                            .supported_surfaces = INTERFACE::api_surface,                                              \
+                            .interface_type = typeid(INTERFACE)});                                                     \
          FORGE_API_DETAIL_DESCRIPTOR_METHODS(INTERFACE, __VA_ARGS__)                                                 \
          return builder.build();                                                                                   \
       }                                                                                                            \
@@ -182,20 +189,19 @@
       std::shared_ptr<remote_invoker> invoker_;                                                                    \
       api_ref selected_api_;                                                                                       \
    };                                                                                                              \
-   template <> class proxy_impl<INTERFACE, false> : public proxy_impl<INTERFACE, true> {                           \
-    public:                                                                                                        \
-      explicit proxy_impl(std::shared_ptr<remote_invoker> invoker, api_ref selected_api)                           \
-          : proxy_impl<INTERFACE, true>(std::move(invoker), std::move(selected_api)) {}                            \
-   };                                                                                                              \
    }                                                                                                               \
-   template <> class proxy<INTERFACE>                                                                              \
-       : public detail::proxy_impl<INTERFACE, remote_interface<INTERFACE>> {                                       \
+   template <> class proxy<INTERFACE> : public detail::proxy_impl<INTERFACE, remote_interface<INTERFACE>> {            \
     public:                                                                                                        \
-      explicit proxy(std::shared_ptr<remote_invoker> invoker)                                                      \
-          : proxy(std::move(invoker), INTERFACE::ref()) {}                                                         \
+      explicit proxy(std::shared_ptr<remote_invoker> invoker) : proxy(std::move(invoker), INTERFACE::ref()) {}         \
       explicit proxy(std::shared_ptr<remote_invoker> invoker, api_ref selected_api)                                \
-          : detail::proxy_impl<INTERFACE, remote_interface<INTERFACE>>(std::move(invoker),                         \
-                                                                       std::move(selected_api)) {}                 \
+          : detail::proxy_impl<INTERFACE, remote_interface<INTERFACE>>(std::move(invoker), std::move(selected_api)) {} \
    };                                                                                                              \
    }                                                                                                               \
    FORGE_API_DETAIL_DIAGNOSTIC_POP
+
+// Module interfaces need to export the generated explicit specializations.
+// Keep this narrow exception instead of exposing arbitrary broad export blocks.
+#define FORGE_EXPORT_API(...)                                                                                        \
+   export {                                                                                                          \
+   FORGE_API(__VA_ARGS__)                                                                                            \
+   }

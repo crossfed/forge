@@ -24,24 +24,6 @@ export namespace forge::api::core {
 template <typename Interface> struct api_traits;
 template <typename Interface> class proxy;
 
-enum class surface : std::uint8_t {
-   none = 0,
-   local = 1,
-   remote = 2,
-};
-
-[[nodiscard]] constexpr surface operator|(surface lhs, surface rhs) noexcept {
-   return static_cast<surface>(static_cast<std::uint8_t>(lhs) | static_cast<std::uint8_t>(rhs));
-}
-
-[[nodiscard]] constexpr surface operator&(surface lhs, surface rhs) noexcept {
-   return static_cast<surface>(static_cast<std::uint8_t>(lhs) & static_cast<std::uint8_t>(rhs));
-}
-
-[[nodiscard]] constexpr bool supports(surface value, surface expected) noexcept {
-   return (static_cast<std::uint8_t>(value & expected) == static_cast<std::uint8_t>(expected));
-}
-
 template <typename Interface, surface Surface = surface::local> class contract {
  public:
    using interface = Interface;
@@ -82,10 +64,8 @@ class remote_invoker {
       return false;
    }
 
-   virtual boost::asio::awaitable<void> async_call_arguments(request value,
-                                                            std::type_index argument_tuple_type,
-                                                            void* argument_tuple,
-                                                            std::type_index response_type,
+   virtual boost::asio::awaitable<void> async_call_arguments(request value, std::type_index argument_tuple_type,
+                                                             void* argument_tuple, std::type_index response_type,
                                                             void* response_storage) {
       static_cast<void>(value);
       static_cast<void>(argument_tuple_type);
@@ -152,6 +132,28 @@ class remote_invoker {
 
 namespace detail {
 
+template <typename Interface, typename Request, typename Response>
+boost::asio::awaitable<Response> proxy_call(std::shared_ptr<remote_invoker> invoker, api_ref selected_api,
+                                            std::string method, Request request) {
+   if constexpr (remote_interface<Interface>) {
+      co_return co_await invoker->template call<Request, Response>(
+          api_traits<Interface>::describe(), std::move(selected_api), std::move(method), std::move(request));
+   } else {
+      FORGE_THROW_EXCEPTION(exceptions::protocol_error, "local-only API does not support remote invocation");
+   }
+}
+
+template <typename Interface, typename Response, typename... Args>
+boost::asio::awaitable<Response> proxy_call_arguments(std::shared_ptr<remote_invoker> invoker, api_ref selected_api,
+                                                      std::string method, Args&&... args) {
+   if constexpr (remote_interface<Interface>) {
+      co_return co_await invoker->template call_arguments<Response>(
+          api_traits<Interface>::describe(), std::move(selected_api), std::move(method), std::forward<Args>(args)...);
+   } else {
+      FORGE_THROW_EXCEPTION(exceptions::protocol_error, "local-only API does not support remote invocation");
+   }
+}
+
 template <typename Interface, bool Remote> class proxy_impl;
 
 template <typename Interface> class proxy_impl<Interface, false> {
@@ -166,8 +168,7 @@ class service_mount {
  public:
    virtual ~service_mount() = default;
 
-   template <typename Interface>
-   void register_api(std::shared_ptr<Interface> implementation) {
+   template <typename Interface> void register_api(std::shared_ptr<Interface> implementation) {
       static_assert(local_interface<Interface>, "Interface must opt in to forge::api::core::surface::local");
       register_api(Interface::describe(), std::move(implementation), typeid(Interface));
    }
@@ -189,8 +190,8 @@ class remote_mount {
    }
 
  protected:
-   virtual boost::asio::awaitable<std::shared_ptr<remote_invoker>> open_remote_invoker(api_ref requested,
-                                                                                       descriptor remote_descriptor) = 0;
+   virtual boost::asio::awaitable<std::shared_ptr<remote_invoker>>
+   open_remote_invoker(api_ref requested, descriptor remote_descriptor) = 0;
 };
 
 class connection : public remote_mount {
@@ -201,4 +202,4 @@ class connection : public remote_mount {
    virtual boost::asio::awaitable<void> async_close() = 0;
 };
 
-} // namespace forge::api
+} // namespace forge::api::core

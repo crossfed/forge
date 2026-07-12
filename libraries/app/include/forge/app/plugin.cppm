@@ -52,6 +52,7 @@ class plugin {
    virtual boost::asio::awaitable<void> configure(config::core::component_view view);
    virtual boost::asio::awaitable<void> provide(forge::api::core::provider& provider);
    virtual boost::asio::awaitable<void> initialize(plugin_context& context) = 0;
+   virtual boost::asio::awaitable<void> after_initialize();
    virtual boost::asio::awaitable<void> startup() = 0;
    virtual void request_stop() noexcept;
    virtual boost::asio::awaitable<void> shutdown() = 0;

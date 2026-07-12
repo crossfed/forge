@@ -2,10 +2,10 @@ add_library(
    forge_plugins_p2p_pubsub STATIC
       plugin.cpp
       config.cpp
-      join_flow.cpp
-      message_projection.cpp
+      join_waiter.cpp
+      project_message.cpp
       plugin_impl.cpp
-      subscription_api.cpp
+      api_impl.cpp
 )
 forge_target_modules_at(forge_plugins_p2p_pubsub plugins/p2p/pubsub)
 

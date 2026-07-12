@@ -23,8 +23,8 @@ add_library(
    details/direct_transport.hxx
    host_addresses.cpp
    details/host_addresses.hxx
-   quic_direct_transport.cpp
-   tcp_direct_transport.cpp
+   direct_transport_quic.cpp
+   direct_transport_tcp.cpp
    libp2p_tls.cpp
    details/libp2p_tls.hxx
    node.cpp

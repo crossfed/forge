@@ -32,7 +32,7 @@ import forge.plugins.crypto.secrets.types;
 import forge.config.program_options;
 import forge.schema.value_kind;
 
-#include "details/source_loading.hxx"
+#include "details/require_complete_file_read.hxx"
 
 namespace crypto_secrets = forge::plugins::crypto::secrets;
 

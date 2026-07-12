@@ -44,7 +44,7 @@ class plugin final : public forge::app::plugin {
 
  private:
    struct impl;
-   class diagnostics_api;
+   class api_impl;
    std::shared_ptr<impl> impl_;
 };
 
