@@ -273,3 +273,7 @@ migration events for a future explicit migration layer:
 - changing an extractor or composite-key member order;
 - changing base object serialization;
 - changing the ordered key codec.
+
+The candidate transaction-integrated revision journal and its boundary with a
+future migration runner are documented in
+[`docs/iterations/forge-db-revisions-migrations-v1.md`](../../../docs/iterations/forge-db-revisions-migrations-v1.md).
