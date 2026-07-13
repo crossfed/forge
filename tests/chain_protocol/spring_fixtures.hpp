@@ -26,6 +26,24 @@ inline constexpr std::string_view asset_raw = "2a000000000000000453595300000000"
 
 inline constexpr std::string_view action_raw =
    "0000000000ea305500000000b863b2c200020102";
+inline constexpr std::string_view action_digest_empty_return_value =
+   "6bc920d618547936cc56e31a37b336e4b62e888f5a47567677c337c950788985";
+inline constexpr std::string_view action_digest_with_return_value =
+   "9aa3880a484e175b12f45206fc6fd112fe103b0d11aa82707f3fcf1aba0ca8f3";
+inline constexpr std::string_view action_receipt_raw =
+   "0000000000ea3055"
+   "9aa3880a484e175b12f45206fc6fd112fe103b0d11aa82707f3fcf1aba0ca8f3"
+   "08070605040302010900000000000000"
+   "0201000000000000000b0000000000000002000000000000000c00000000000000"
+   "7f8001";
+inline constexpr std::string_view savanna_witness_hash =
+   "cf491099b1a46ccf905079f5fc5c7245ad44bebf5d04effa8e3470d2f1d0b317";
+inline constexpr std::string_view savanna_action_digest =
+   "7f40d8570da28db3d0591007cc6705f59878cb5371b7cce89a6aecd7db07013c";
+inline constexpr std::string_view second_savanna_action_digest =
+   "f5007577b6bcb8a378b58e88a154543122d8ee371eb7101b4ae7254920be0d26";
+inline constexpr std::string_view savanna_action_root =
+   "b64b2a80d56b1205bde4644f9d671d296a6e5df15f17fc08919ae6ab9c23ccea";
 inline constexpr std::string_view transaction_raw =
    "000000000100ddccbbaa00000000010000000000ea305500000000b863b2c20002010200";
 inline constexpr std::string_view transaction_id =

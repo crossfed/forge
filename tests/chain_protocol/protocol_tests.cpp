@@ -5,6 +5,7 @@
 #include <array>
 #include <concepts>
 #include <deque>
+#include <flat_map>
 #include <iomanip>
 #include <span>
 #include <sstream>
@@ -18,10 +19,13 @@ import forge.crypto.sha256;
 import forge.compression.exceptions;
 import forge.raw.raw;
 import forge.raw.exceptions;
+import forge.variant.described;
 import forge.variant.exceptions;
 import forge.variant.value;
 import forge.chain.core.merkle;
 import forge.chain.protocol.abi;
+import forge.chain.protocol.action;
+import forge.chain.protocol.action_receipt;
 import forge.chain.protocol.block;
 import forge.chain.protocol.fixed_key;
 import forge.chain.protocol.system;
@@ -110,6 +114,22 @@ protocol::action make_setabi_action() {
    value.name = protocol::make_name("setabi");
    value.data = {char{0x01}, char{0x02}};
    return value;
+}
+
+protocol::action_receipt make_reference_action_receipt() {
+   const auto action = make_setabi_action();
+   const auto return_value = protocol::bytes{0x80, 0xff, 0x00};
+
+   auto receipt = protocol::action_receipt{};
+   receipt.receiver = action.account;
+   receipt.act_digest = protocol::generate_action_digest(action, return_value);
+   receipt.global_sequence = 0x0102030405060708ULL;
+   receipt.recv_sequence = 9U;
+   receipt.auth_sequence.emplace(protocol::account_name{2U}, 12U);
+   receipt.auth_sequence.emplace(protocol::account_name{1U}, 11U);
+   receipt.code_sequence = 127U;
+   receipt.abi_sequence = 128U;
+   return receipt;
 }
 
 std::vector<protocol::bytes> make_context_free_data() {
@@ -396,6 +416,67 @@ BOOST_AUTO_TEST_CASE(action_transaction_and_signed_transaction_match_spring_fixt
    BOOST_TEST(pack_hex(packed) == expected(spring::packed_transaction_raw));
    BOOST_TEST(packed.id().str() == expected(spring::transaction_id));
    BOOST_TEST(packed.packed_digest().str() == expected(spring::packed_transaction_digest));
+}
+
+BOOST_AUTO_TEST_CASE(action_digest_with_return_value_matches_spring_savanna_fixture) {
+   const auto action = make_setabi_action();
+   const auto empty_return_value = protocol::bytes{};
+   const auto return_value = protocol::bytes{0x80, 0xff, 0x00};
+
+   BOOST_TEST(protocol::generate_action_digest(action, empty_return_value).str() ==
+              expected(spring::action_digest_empty_return_value));
+   BOOST_TEST(protocol::generate_action_digest(action, return_value).str() ==
+              expected(spring::action_digest_with_return_value));
+}
+
+BOOST_AUTO_TEST_CASE(action_receipt_wire_and_savanna_digests_match_spring_fixtures) {
+   const auto action = make_setabi_action();
+   const auto receipt = make_reference_action_receipt();
+
+   BOOST_TEST(pack_hex(receipt) == expected(spring::action_receipt_raw));
+   BOOST_TEST(protocol::calculate_savanna_witness_hash(receipt).str() == expected(spring::savanna_witness_hash));
+   BOOST_TEST(protocol::calculate_savanna_action_digest(receipt, action).str() ==
+              expected(spring::savanna_action_digest));
+
+   const auto unpacked = forge::raw::unpack<protocol::action_receipt>(forge::raw::pack(receipt));
+   BOOST_TEST(pack_hex(unpacked) == expected(spring::action_receipt_raw));
+
+   auto encoded = forge::variant{};
+   forge::to_variant(receipt, encoded);
+   auto decoded = protocol::action_receipt{};
+   forge::from_variant(encoded, decoded);
+   BOOST_TEST(pack_hex(decoded) == expected(spring::action_receipt_raw));
+}
+
+BOOST_AUTO_TEST_CASE(action_receipt_auth_sequence_is_canonical_and_order_independent) {
+   const auto action = make_setabi_action();
+   const auto canonical = make_reference_action_receipt();
+   auto reordered = canonical;
+   reordered.auth_sequence.clear();
+   reordered.auth_sequence.emplace(protocol::account_name{1U}, 11U);
+   reordered.auth_sequence.emplace(protocol::account_name{2U}, 12U);
+
+   BOOST_TEST(forge::raw::pack(reordered) == forge::raw::pack(canonical));
+   BOOST_TEST(protocol::calculate_savanna_witness_hash(reordered) ==
+              protocol::calculate_savanna_witness_hash(canonical));
+   BOOST_TEST(protocol::calculate_savanna_action_digest(reordered, action) ==
+              protocol::calculate_savanna_action_digest(canonical, action));
+}
+
+BOOST_AUTO_TEST_CASE(savanna_action_receipt_digests_use_core_merkle) {
+   const auto action = make_setabi_action();
+   auto first = make_reference_action_receipt();
+   auto second = first;
+   second.recv_sequence = 10U;
+
+   const auto digests = std::array{
+      protocol::calculate_savanna_action_digest(first, action),
+      protocol::calculate_savanna_action_digest(second, action),
+   };
+
+   BOOST_TEST(digests[0].str() == expected(spring::savanna_action_digest));
+   BOOST_TEST(digests[1].str() == expected(spring::second_savanna_action_digest));
+   BOOST_TEST(core::calculate_merkle_root(digests).str() == expected(spring::savanna_action_root));
 }
 
 BOOST_AUTO_TEST_CASE(zlib_packed_transaction_matches_spring_and_unpacks_from_wire) {
