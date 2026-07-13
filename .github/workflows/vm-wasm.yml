@@ -64,6 +64,10 @@ jobs:
           echo "CC=$llvm_prefix/bin/clang" >> "$GITHUB_ENV"
           echo "CXX=$llvm_prefix/bin/clang++" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            echo "CXXFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
+            echo "LDFLAGS=-stdlib=libc++ -L$llvm_prefix/lib/c++ -L$llvm_prefix/lib/unwind -Wl,-rpath,$llvm_prefix/lib/c++ -Wl,-rpath,$llvm_prefix/lib/unwind -lunwind" >> "$GITHUB_ENV"
+          fi
 
       - name: Check out pinned donor for the mapping gate
         shell: bash
@@ -119,6 +123,8 @@ jobs:
           echo "CC=$llvm_prefix/bin/clang" >> "$GITHUB_ENV"
           echo "CXX=$llvm_prefix/bin/clang++" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+          echo "CXXFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
+          echo "LDFLAGS=-stdlib=libc++ -L$llvm_prefix/lib/c++ -L$llvm_prefix/lib/unwind -Wl,-rpath,$llvm_prefix/lib/c++ -Wl,-rpath,$llvm_prefix/lib/unwind -lunwind" >> "$GITHUB_ENV"
 
       - name: Configure sanitizer build
         shell: bash
@@ -130,8 +136,8 @@ jobs:
             -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
             -DCMAKE_C_FLAGS="$sanitizer_flags" \
-            -DCMAKE_CXX_FLAGS="$sanitizer_flags" \
-            -DCMAKE_EXE_LINKER_FLAGS="$sanitizer_flags" \
+            -DCMAKE_CXX_FLAGS="$sanitizer_flags $CXXFLAGS" \
+            -DCMAKE_EXE_LINKER_FLAGS="$sanitizer_flags $LDFLAGS" \
             -DFORGE_ENABLE_MODULES=ON \
             -DFORGE_ENABLE_ROCKSDB=OFF \
             -DFORGE_ENABLE_TUI=OFF \
@@ -177,6 +183,8 @@ jobs:
           echo "CC=$llvm_prefix/bin/clang" >> "$GITHUB_ENV"
           echo "CXX=$llvm_prefix/bin/clang++" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+          echo "CXXFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
+          echo "LDFLAGS=-stdlib=libc++ -L$llvm_prefix/lib/c++ -L$llvm_prefix/lib/unwind -Wl,-rpath,$llvm_prefix/lib/c++ -Wl,-rpath,$llvm_prefix/lib/unwind -lunwind" >> "$GITHUB_ENV"
 
       - name: Configure package build
         shell: bash
