@@ -4,6 +4,7 @@
 #include <chrono>
 #include <concepts>
 #include <cstdint>
+#include <flat_map>
 #include <optional>
 #include <set>
 #include <span>
@@ -162,6 +163,16 @@ BOOST_AUTO_TEST_CASE(char_and_uint8_values_preserve_spring_wire_bits) {
    BOOST_CHECK_EQUAL(forge::crypto::to_hex(char_wire), "ff");
    BOOST_CHECK_EQUAL(static_cast<unsigned char>(forge::raw::unpack<char>(char_wire)), 0xffU);
    BOOST_CHECK_EQUAL(forge::raw::unpack<std::uint8_t>(octet_wire), 0xffU);
+}
+
+BOOST_AUTO_TEST_CASE(std_flat_map_preserves_spring_sorted_map_wire_layout) {
+   auto value = std::flat_map<std::uint32_t, std::uint32_t>{};
+   value.emplace(2U, 12U);
+   value.emplace(1U, 11U);
+
+   const auto packed = forge::raw::pack(value);
+   BOOST_CHECK_EQUAL(forge::crypto::to_hex(packed), "02010000000b000000020000000c000000");
+   BOOST_CHECK((forge::raw::unpack<std::flat_map<std::uint32_t, std::uint32_t>>(packed) == value));
 }
 
 BOOST_AUTO_TEST_CASE(unknown_variant_wire_type_throws_codec_error) {

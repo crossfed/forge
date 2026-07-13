@@ -134,15 +134,19 @@ class service_node {
 
 ## Chain Library Boundary
 
-- `forge::chain` is the FORGE-owned chain value, wire-format and signing-rule
-  primitive layer.
-- `forge::chain` may contain deterministic protocol records, raw-compatible
-  serialization, ABI/system payload shapes, transaction and block id helpers,
-  digest/preimage helpers and compatibility fixtures.
-- `forge::chain` must not contain controller, state, execution, consensus, P2P
-  sync, node lifecycle, plugin APIs, runtime config, key custody or product
+- `forge::chain` is an empty family root. Public symbols live in leaf libraries.
+- `forge::chain::core` owns fundamental chain mechanisms that do not depend on
+  protocol records, currently the canonical digest and Merkle primitives.
+- `forge::chain::protocol` owns deterministic protocol records, raw-compatible
+  serialization, fixed-size ordered keys, ABI/system payload shapes,
+  transaction and block ID helpers, digest/preimage helpers and compatibility
+  fixtures.
+- Dependency direction is `forge_chain_protocol -> forge_chain_core`; core must
+  never import protocol.
+- Chain libraries must not contain controller, state, execution, consensus,
+  P2P sync, node lifecycle, plugin APIs, runtime config, key custody or product
   policy.
-- Product blockchains may build runtime layers on top of `forge::chain`, but
+- Product blockchains may build runtime layers on top of the Chain family, but
   downstream product names and assumptions must not enter its public API.
 
 ## Namespace And Target Naming

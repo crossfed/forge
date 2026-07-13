@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.31)
 
-project(forge VERSION 8.0.0 LANGUAGES C CXX ASM)
+project(forge VERSION 8.1.0 LANGUAGES C CXX ASM)
 
 include(GNUInstallDirs)
 include(CheckCXXSourceCompiles)
@@ -205,7 +205,8 @@ set(
 	   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/raw/include"
 	   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/ids/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/compression/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/chain/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/chain/core/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/chain/protocol/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/core/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/rocksdb/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/object/include"
@@ -389,7 +390,8 @@ set(
 	   forge_raw
 	   forge_ids
    forge_compression
-   forge_chain
+   forge_chain_core
+   forge_chain_protocol
    forge_db_core
    forge_db_object
    forge_db_blob
@@ -487,7 +489,8 @@ install(
 	             libraries/raw/include/forge
 	             libraries/ids/include/forge
              libraries/compression/include/forge
-             libraries/chain/include/forge
+             libraries/chain/core/include/forge
+             libraries/chain/protocol/include/forge
              libraries/db/core/include/forge
              libraries/db/object/include/forge
              libraries/db/blob/include/forge
