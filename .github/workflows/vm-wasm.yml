@@ -65,8 +65,11 @@ jobs:
           echo "CXX=$llvm_prefix/bin/clang++" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
           if [[ "$RUNNER_OS" == "Linux" ]]; then
-            echo "CXXFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
-            echo "LDFLAGS=-L$llvm_prefix/lib/c++ -Wl,-rpath,$llvm_prefix/lib/c++" >> "$GITHUB_ENV"
+            brew install gcc
+            gcc_driver="$(find -L "$(brew --prefix gcc)/bin" -maxdepth 1 -type f -name 'gcc-[0-9]*' | sort -V | tail -n 1)"
+            gcc_install_dir="$(dirname "$("$gcc_driver" -print-file-name=crtbegin.o)")"
+            test -f "$gcc_install_dir/crtbegin.o"
+            echo "CXXFLAGS=--gcc-install-dir=$gcc_install_dir" >> "$GITHUB_ENV"
           fi
 
       - name: Check out pinned donor for the mapping gate
@@ -123,8 +126,11 @@ jobs:
           echo "CC=$llvm_prefix/bin/clang" >> "$GITHUB_ENV"
           echo "CXX=$llvm_prefix/bin/clang++" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
-          echo "CXXFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
-          echo "LDFLAGS=-L$llvm_prefix/lib/c++ -Wl,-rpath,$llvm_prefix/lib/c++" >> "$GITHUB_ENV"
+          brew install gcc
+          gcc_driver="$(find -L "$(brew --prefix gcc)/bin" -maxdepth 1 -type f -name 'gcc-[0-9]*' | sort -V | tail -n 1)"
+          gcc_install_dir="$(dirname "$("$gcc_driver" -print-file-name=crtbegin.o)")"
+          test -f "$gcc_install_dir/crtbegin.o"
+          echo "CXXFLAGS=--gcc-install-dir=$gcc_install_dir" >> "$GITHUB_ENV"
 
       - name: Configure sanitizer build
         shell: bash
@@ -137,7 +143,7 @@ jobs:
             -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
             -DCMAKE_C_FLAGS="$sanitizer_flags" \
             -DCMAKE_CXX_FLAGS="$sanitizer_flags $CXXFLAGS" \
-            -DCMAKE_EXE_LINKER_FLAGS="$sanitizer_flags $LDFLAGS" \
+            -DCMAKE_EXE_LINKER_FLAGS="$sanitizer_flags" \
             -DFORGE_ENABLE_MODULES=ON \
             -DFORGE_ENABLE_ROCKSDB=OFF \
             -DFORGE_ENABLE_TUI=OFF \
@@ -183,8 +189,11 @@ jobs:
           echo "CC=$llvm_prefix/bin/clang" >> "$GITHUB_ENV"
           echo "CXX=$llvm_prefix/bin/clang++" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
-          echo "CXXFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
-          echo "LDFLAGS=-L$llvm_prefix/lib/c++ -Wl,-rpath,$llvm_prefix/lib/c++" >> "$GITHUB_ENV"
+          brew install gcc
+          gcc_driver="$(find -L "$(brew --prefix gcc)/bin" -maxdepth 1 -type f -name 'gcc-[0-9]*' | sort -V | tail -n 1)"
+          gcc_install_dir="$(dirname "$("$gcc_driver" -print-file-name=crtbegin.o)")"
+          test -f "$gcc_install_dir/crtbegin.o"
+          echo "CXXFLAGS=--gcc-install-dir=$gcc_install_dir" >> "$GITHUB_ENV"
 
       - name: Configure package build
         shell: bash
