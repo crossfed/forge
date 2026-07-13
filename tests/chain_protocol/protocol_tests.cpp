@@ -4,6 +4,7 @@
 
 #include <array>
 #include <concepts>
+#include <deque>
 #include <iomanip>
 #include <span>
 #include <sstream>
@@ -19,15 +20,19 @@ import forge.raw.raw;
 import forge.raw.exceptions;
 import forge.variant.exceptions;
 import forge.variant.value;
-import forge.chain.abi;
-import forge.chain.block;
-import forge.chain.fixed_key;
-import forge.chain.types;
-import forge.chain.system;
-import forge.chain.transaction;
+import forge.chain.core.merkle;
+import forge.chain.protocol.abi;
+import forge.chain.protocol.block;
+import forge.chain.protocol.fixed_key;
+import forge.chain.protocol.system;
+import forge.chain.protocol.transaction;
+import forge.chain.protocol.types;
 
-namespace protocol = forge::chain;
+namespace core = forge::chain::core;
+namespace protocol = forge::chain::protocol;
 namespace spring = forge::tests::spring_fixtures;
+
+static_assert(std::same_as<protocol::digest, core::digest>);
 
 namespace {
 
@@ -162,6 +167,14 @@ protocol::transaction_receipt make_reference_receipt() {
    return receipt;
 }
 
+protocol::transaction_receipt make_receipt(std::uint32_t cpu_usage_us) {
+   auto value = protocol::transaction_receipt{};
+   value.status = protocol::transaction_receipt::status::executed;
+   value.cpu_usage_us = cpu_usage_us;
+   value.trx = protocol::transaction_id::hash("transaction-" + std::to_string(cpu_usage_us));
+   return value;
+}
+
 protocol::signed_block_header make_reference_signed_block_header() {
    auto header = protocol::signed_block_header{};
    static_cast<protocol::block_header&>(header) = make_reference_block_header();
@@ -179,7 +192,7 @@ protocol::signed_block make_reference_signed_block() {
 
 } // namespace
 
-BOOST_AUTO_TEST_SUITE(forge_chain_spring_compatibility)
+BOOST_AUTO_TEST_SUITE(forge_chain_protocol_compatibility)
 
 BOOST_AUTO_TEST_CASE(fixed_key_matches_donor_word_and_byte_order) {
    const auto high = static_cast<protocol::uint128_t>(0x0102030405060708ULL) << 64U |
@@ -417,8 +430,7 @@ BOOST_AUTO_TEST_CASE(transaction_signature_preimage_digest_and_spring_signature_
    BOOST_TEST(protocol::signature_digest(chain_id, trx, cfd).str() == expected(spring::transaction_signature_digest));
 
    const auto signature = parse_spring_signature(spring::transaction_signature);
-   const auto recovered =
-       protocol::public_key{signature, protocol::digest{std::string{spring::transaction_signature_digest}}};
+   const auto recovered = protocol::public_key{signature, core::digest{std::string{spring::transaction_signature_digest}}};
    BOOST_TEST(format_spring_public_key(recovered) == expected(spring::test_public_key));
 }
 
@@ -543,6 +555,23 @@ BOOST_AUTO_TEST_CASE(block_header_receipt_and_signed_block_match_spring_fixtures
 
    const auto block = make_reference_signed_block();
    BOOST_TEST(pack_hex(block) == expected(spring::signed_block_raw));
+}
+
+BOOST_AUTO_TEST_CASE(transaction_mroot_uses_core_merkle_over_receipt_digests) {
+   auto receipts = std::deque<protocol::transaction_receipt>{};
+   BOOST_TEST(protocol::calculate_transaction_mroot(receipts) == core::digest{});
+
+   receipts.push_back(make_receipt(1U));
+   BOOST_TEST(protocol::calculate_transaction_mroot(receipts) == receipts.front().digest());
+
+   receipts.push_back(make_receipt(2U));
+   receipts.push_back(make_receipt(3U));
+   const auto digests = std::array{
+      receipts[0].digest(),
+      receipts[1].digest(),
+      receipts[2].digest(),
+   };
+   BOOST_TEST(protocol::calculate_transaction_mroot(receipts) == core::calculate_merkle_root(digests));
 }
 
 BOOST_AUTO_TEST_CASE(forge_secp256k1_is_the_crypto_surface_for_runtime_signatures) {

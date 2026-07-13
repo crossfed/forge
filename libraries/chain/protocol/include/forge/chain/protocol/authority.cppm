@@ -7,16 +7,16 @@ module;
 #include <new>
 #include <vector>
 
-export module forge.chain.authority;
+export module forge.chain.protocol.authority;
 
-export import forge.chain.types;
+export import forge.chain.protocol.types;
 import forge.crypto.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
 import forge.variant.value;
 import forge.variant.described;
 
-export namespace forge::chain {
+export namespace forge::chain::protocol {
 
 
 struct permission_level_weight {
@@ -41,16 +41,16 @@ struct authority {
    std::vector<wait_weight> waits;
 };
 
-} // namespace forge::chain
+} // namespace forge::chain::protocol
 
-export namespace forge::chain {
+export namespace forge::chain::protocol {
 BOOST_DESCRIBE_STRUCT(permission_level_weight, (), (permission, weight))
 BOOST_DESCRIBE_STRUCT(key_weight, (), (key, weight))
 BOOST_DESCRIBE_STRUCT(wait_weight, (), (wait_sec, weight))
 BOOST_DESCRIBE_STRUCT(authority, (), (threshold, keys, accounts, waits))
 }
 
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::permission_level_weight)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::key_weight)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::wait_weight)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::authority)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::permission_level_weight)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::key_weight)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::wait_weight)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::authority)

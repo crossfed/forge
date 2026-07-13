@@ -9,7 +9,7 @@ module;
 #include <string>
 #include <string_view>
 
-module forge.chain.types;
+module forge.chain.protocol.types;
 
 import forge.crypto.sha256;
 import forge.raw.datastream;
@@ -19,7 +19,7 @@ import forge.variant.conversion;
 import forge.variant.format;
 import forge.variant.described;
 
-namespace forge::chain {
+namespace forge::chain::protocol {
 namespace {
 
 constexpr auto charmap = std::string_view{".12345abcdefghijklmnopqrstuvwxyz"};
@@ -291,11 +291,11 @@ void from_variant(const forge::variant& variant, asset& value) {
    value = parse_asset(variant.as_string());
 }
 
-} // namespace forge::chain
+} // namespace forge::chain::protocol
 
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::name)
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::permission_level)
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::symbol_code)
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::symbol)
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::asset)
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::block_timestamp)
+FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::name)
+FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::permission_level)
+FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::symbol_code)
+FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::symbol)
+FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::asset)
+FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::block_timestamp)

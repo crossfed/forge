@@ -11,10 +11,9 @@ module;
 #include <variant>
 #include <vector>
 
-export module forge.chain.block;
+export module forge.chain.protocol.block;
 
-export import forge.chain.transaction;
-import forge.chain.merkle;
+export import forge.chain.protocol.transaction;
 import forge.crypto.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
@@ -22,7 +21,7 @@ import forge.raw.varint;
 import forge.variant.value;
 import forge.variant.described;
 
-export namespace forge::chain {
+export namespace forge::chain::protocol {
 
 struct producer_key {
    account_name producer_name;
@@ -45,7 +44,7 @@ struct block_header {
    std::optional<producer_schedule> new_producers;
    extensions header_extensions;
 
-   [[nodiscard]] digest digest() const;
+   [[nodiscard]] core::digest digest() const;
    [[nodiscard]] block_id calculate_id() const;
    [[nodiscard]] std::uint32_t calculate_block_num() const;
    [[nodiscard]] static std::uint32_t num_from_id(const block_id& id);
@@ -72,35 +71,35 @@ struct transaction_receipt_header {
 struct transaction_receipt : transaction_receipt_header {
    std::variant<transaction_id, packed_transaction> trx;
 
-   [[nodiscard]] digest digest() const;
+   [[nodiscard]] core::digest digest() const;
 };
 
 struct signed_block : signed_block_header {
    std::deque<transaction_receipt> transactions;
    extensions block_extensions;
 
-   [[nodiscard]] ::forge::chain::digest packed_digest() const;
+   [[nodiscard]] core::digest packed_digest() const;
 };
 
 struct producer_confirmation {
-   ::forge::chain::block_id block_id;
-   digest block_digest;
+   ::forge::chain::protocol::block_id block_id;
+   core::digest block_digest;
    account_name producer;
    signature sig;
 };
 
 bytes signature_preimage(const block_header& value);
-digest block_digest(const block_header& value);
+core::digest block_digest(const block_header& value);
 block_id calculate_block_id(const block_header& value);
 std::uint32_t calculate_block_num_from_id(const block_id& id);
 std::uint32_t calculate_block_num(const block_header& value);
-digest transaction_receipt_digest(const transaction_receipt& value);
-digest calculate_transaction_mroot(const std::deque<transaction_receipt>& receipts);
-digest signed_block_digest(const signed_block& value);
+core::digest transaction_receipt_digest(const transaction_receipt& value);
+core::digest calculate_transaction_mroot(const std::deque<transaction_receipt>& receipts);
+core::digest signed_block_digest(const signed_block& value);
 
-} // namespace forge::chain
+} // namespace forge::chain::protocol
 
-export namespace forge::chain {
+export namespace forge::chain::protocol {
 BOOST_DESCRIBE_STRUCT(producer_key, (), (producer_name, block_signing_key))
 BOOST_DESCRIBE_STRUCT(producer_schedule, (), (version, producers))
 BOOST_DESCRIBE_STRUCT(block_header, (),
@@ -115,48 +114,52 @@ BOOST_DESCRIBE_STRUCT(producer_confirmation, (), (block_id, block_digest, produc
 
 export namespace forge::raw {
 
-template <typename Stream> void pack(Stream& stream, const forge::chain::signed_block& value) {
-   forge::raw::pack(stream, static_cast<const forge::chain::signed_block_header&>(value));
+template <typename Stream>
+void pack(Stream& stream, const forge::chain::protocol::signed_block& value) {
+   forge::raw::pack(stream, static_cast<const forge::chain::protocol::signed_block_header&>(value));
    forge::raw::pack(stream, value.transactions);
    forge::raw::pack(stream, value.block_extensions);
 }
 
-template <typename Stream> void unpack(Stream& stream, forge::chain::signed_block& value) {
-   forge::raw::unpack(stream, static_cast<forge::chain::signed_block_header&>(value));
+template <typename Stream>
+void unpack(Stream& stream, forge::chain::protocol::signed_block& value) {
+   forge::raw::unpack(stream, static_cast<forge::chain::protocol::signed_block_header&>(value));
    forge::raw::unpack(stream, value.transactions);
    forge::raw::unpack(stream, value.block_extensions);
 }
 
 template <>
-inline void pack<forge::datastream<std::size_t>, forge::chain::signed_block>(forge::datastream<std::size_t>& stream,
-   const forge::chain::signed_block& value) {
-   forge::raw::pack(stream, static_cast<const forge::chain::signed_block_header&>(value));
+inline void pack<forge::datastream<std::size_t>, forge::chain::protocol::signed_block>(
+   forge::datastream<std::size_t>& stream,
+   const forge::chain::protocol::signed_block& value) {
+   forge::raw::pack(stream, static_cast<const forge::chain::protocol::signed_block_header&>(value));
    forge::raw::pack(stream, value.transactions);
    forge::raw::pack(stream, value.block_extensions);
 }
 
 template <>
-inline void
-pack<forge::datastream<std::uint8_t*>, forge::chain::signed_block>(forge::datastream<std::uint8_t*>& stream,
-   const forge::chain::signed_block& value) {
-   forge::raw::pack(stream, static_cast<const forge::chain::signed_block_header&>(value));
+inline void pack<forge::datastream<std::uint8_t*>, forge::chain::protocol::signed_block>(
+   forge::datastream<std::uint8_t*>& stream,
+   const forge::chain::protocol::signed_block& value) {
+   forge::raw::pack(stream, static_cast<const forge::chain::protocol::signed_block_header&>(value));
    forge::raw::pack(stream, value.transactions);
    forge::raw::pack(stream, value.block_extensions);
 }
 
 template <>
-inline void unpack<forge::datastream<const std::uint8_t*>, forge::chain::signed_block>(
-    forge::datastream<const std::uint8_t*>& stream, forge::chain::signed_block& value) {
-   forge::raw::unpack(stream, static_cast<forge::chain::signed_block_header&>(value));
+inline void unpack<forge::datastream<const std::uint8_t*>, forge::chain::protocol::signed_block>(
+   forge::datastream<const std::uint8_t*>& stream,
+   forge::chain::protocol::signed_block& value) {
+   forge::raw::unpack(stream, static_cast<forge::chain::protocol::signed_block_header&>(value));
    forge::raw::unpack(stream, value.transactions);
    forge::raw::unpack(stream, value.block_extensions);
 }
 
-inline forge::chain::bytes pack(const forge::chain::signed_block& value) {
+inline forge::chain::protocol::bytes pack(const forge::chain::protocol::signed_block& value) {
    forge::datastream<std::size_t> size_stream;
    forge::raw::pack(size_stream, value);
 
-   forge::chain::bytes out(size_stream.tellp());
+   forge::chain::protocol::bytes out(size_stream.tellp());
    if (!out.empty()) {
       forge::datastream<std::uint8_t*> stream(out.data(), out.size());
       forge::raw::pack(stream, value);
@@ -166,10 +169,10 @@ inline forge::chain::bytes pack(const forge::chain::signed_block& value) {
 
 } // namespace forge::raw
 
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::producer_key)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::producer_schedule)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::block_header)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::signed_block_header)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::transaction_receipt_header)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::transaction_receipt)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::producer_confirmation)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::producer_key)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::producer_schedule)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::block_header)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::signed_block_header)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::transaction_receipt_header)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::transaction_receipt)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::producer_confirmation)

@@ -14,7 +14,7 @@ module;
 #include <utility>
 #include <vector>
 
-module forge.chain.transaction;
+module forge.chain.protocol.transaction;
 
 import forge.compression.zlib;
 import forge.crypto.sha256;
@@ -29,7 +29,7 @@ import forge.variant.multiprecision;
 import forge.variant.format;
 import forge.variant.described;
 
-namespace forge::chain {
+namespace forge::chain::protocol {
 namespace {
 
 using packed_compression = decltype(std::declval<const packed_transaction&>().compression);
@@ -95,7 +95,7 @@ transaction_id transaction::id() const {
    return calculate_transaction_id(*this);
 }
 
-digest transaction::sig_digest(const chain_id& chain_id, const std::vector<bytes>& cfd) const {
+core::digest transaction::sig_digest(const chain_id& chain_id, const std::vector<bytes>& cfd) const {
    return signature_digest(chain_id, *this, cfd);
 }
 
@@ -109,14 +109,14 @@ bytes signature_preimage(const chain_id& chain_id, const transaction& value, con
    append_raw(out, chain_id);
    append_raw(out, value);
    if (cfd.empty()) {
-      append_raw(out, digest{});
+      append_raw(out, core::digest{});
    } else {
-      append_raw(out, digest::hash(cfd));
+      append_raw(out, core::digest::hash(cfd));
    }
    return out;
 }
 
-digest signature_digest(const chain_id& chain_id, const transaction& value, const std::vector<bytes>& cfd) {
+core::digest signature_digest(const chain_id& chain_id, const transaction& value, const std::vector<bytes>& cfd) {
    const auto preimage = signature_preimage(chain_id, value, cfd);
    return forge::crypto::sha256::hash(std::span<const std::uint8_t>{preimage.data(), preimage.size()});
 }
@@ -143,12 +143,12 @@ signed_transaction packed_transaction::get_signed_transaction() const {
    return out;
 }
 
-digest packed_transaction::packed_digest() const {
-   digest::encoder encoder;
+core::digest packed_transaction::packed_digest() const {
+   core::digest::encoder encoder;
    forge::raw::pack(encoder, compression);
    forge::raw::pack(encoder, packed_trx);
 
-   digest::encoder digest_encoder;
+   core::digest::encoder digest_encoder;
    forge::raw::pack(digest_encoder, signatures);
    forge::raw::pack(digest_encoder, packed_context_free_data);
    forge::raw::pack(encoder, digest_encoder.result());
@@ -156,12 +156,12 @@ digest packed_transaction::packed_digest() const {
    return encoder.result();
 }
 
-} // namespace forge::chain
+} // namespace forge::chain::protocol
 
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::action_base)
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::action)
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::deferred_transaction_generation_context)
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::transaction_header)
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::transaction)
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::signed_transaction)
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::packed_transaction)
+FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::action_base)
+FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::action)
+FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::deferred_transaction_generation_context)
+FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::transaction_header)
+FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::transaction)
+FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::signed_transaction)
+FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::packed_transaction)

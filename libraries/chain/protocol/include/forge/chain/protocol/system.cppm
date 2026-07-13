@@ -7,24 +7,24 @@ module;
 #include <new>
 #include <vector>
 
-export module forge.chain.system;
+export module forge.chain.protocol.system;
 
-export import forge.chain.authority;
-export import forge.chain.types;
+export import forge.chain.protocol.authority;
+export import forge.chain.protocol.types;
 import forge.crypto.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
 import forge.variant.value;
 import forge.variant.described;
 
-export namespace forge::chain {
+export namespace forge::chain::protocol {
 
 
 struct newaccount {
    account_name creator;
    account_name name;
-   forge::chain::authority owner;
-   forge::chain::authority active;
+   authority owner;
+   authority active;
 
    static action_name get_name();
 };
@@ -49,7 +49,7 @@ struct updateauth {
    account_name account;
    permission_name permission;
    permission_name parent;
-   forge::chain::authority auth;
+   authority auth;
 
    static action_name get_name();
 };
@@ -92,9 +92,9 @@ struct onerror {
    static action_name get_name();
 };
 
-} // namespace forge::chain
+} // namespace forge::chain::protocol
 
-export namespace forge::chain {
+export namespace forge::chain::protocol {
 BOOST_DESCRIBE_STRUCT(newaccount, (), (creator, name, owner, active))
 BOOST_DESCRIBE_STRUCT(setcode, (), (account, vmtype, vmversion, code))
 BOOST_DESCRIBE_STRUCT(setabi, (), (account, abi))
@@ -106,12 +106,12 @@ BOOST_DESCRIBE_STRUCT(canceldelay, (), (canceling_auth, trx_id))
 BOOST_DESCRIBE_STRUCT(onerror, (), (sender_id, sent_trx))
 }
 
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::newaccount)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::setcode)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::setabi)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::updateauth)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::deleteauth)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::linkauth)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::unlinkauth)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::canceldelay)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::onerror)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::newaccount)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::setcode)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::setabi)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::updateauth)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::deleteauth)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::linkauth)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::unlinkauth)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::canceldelay)
+FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::onerror)
