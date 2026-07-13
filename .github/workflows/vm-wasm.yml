@@ -66,7 +66,7 @@ jobs:
           echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
           if [[ "$RUNNER_OS" == "Linux" ]]; then
             echo "CXXFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
-            echo "LDFLAGS=-stdlib=libc++ -L$llvm_prefix/lib/c++ -L$llvm_prefix/lib/unwind -Wl,-rpath,$llvm_prefix/lib/c++ -Wl,-rpath,$llvm_prefix/lib/unwind -lunwind" >> "$GITHUB_ENV"
+            echo "LDFLAGS=-L$llvm_prefix/lib/c++ -Wl,-rpath,$llvm_prefix/lib/c++" >> "$GITHUB_ENV"
           fi
 
       - name: Check out pinned donor for the mapping gate
@@ -124,7 +124,7 @@ jobs:
           echo "CXX=$llvm_prefix/bin/clang++" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
           echo "CXXFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
-          echo "LDFLAGS=-stdlib=libc++ -L$llvm_prefix/lib/c++ -L$llvm_prefix/lib/unwind -Wl,-rpath,$llvm_prefix/lib/c++ -Wl,-rpath,$llvm_prefix/lib/unwind -lunwind" >> "$GITHUB_ENV"
+          echo "LDFLAGS=-L$llvm_prefix/lib/c++ -Wl,-rpath,$llvm_prefix/lib/c++" >> "$GITHUB_ENV"
 
       - name: Configure sanitizer build
         shell: bash
@@ -184,7 +184,7 @@ jobs:
           echo "CXX=$llvm_prefix/bin/clang++" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
           echo "CXXFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
-          echo "LDFLAGS=-stdlib=libc++ -L$llvm_prefix/lib/c++ -L$llvm_prefix/lib/unwind -Wl,-rpath,$llvm_prefix/lib/c++ -Wl,-rpath,$llvm_prefix/lib/unwind -lunwind" >> "$GITHUB_ENV"
+          echo "LDFLAGS=-L$llvm_prefix/lib/c++ -Wl,-rpath,$llvm_prefix/lib/c++" >> "$GITHUB_ENV"
 
       - name: Configure package build
         shell: bash
