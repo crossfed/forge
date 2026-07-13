@@ -207,6 +207,7 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/compression/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/chain/core/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/chain/protocol/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/vm/wasm/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/core/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/rocksdb/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/object/include"
@@ -338,6 +339,13 @@ endif()
 
 add_subdirectory(vendor/bn256/src)
 add_subdirectory(vendor/bls12-381 EXCLUDE_FROM_ALL)
+add_subdirectory(vendor/softfloat EXCLUDE_FROM_ALL)
+set_target_properties(
+   softfloat PROPERTIES
+   EXPORT_NAME vm_wasm_softfloat_internal
+   INTERFACE_INCLUDE_DIRECTORIES
+      "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/softfloat/source/include>;$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/softfloat/source/8086-SSE>;$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/softfloat/build/Linux-x86_64-GCC>;$<INSTALL_INTERFACE:${CMAKE_INSTALL_LIBDIR}/forge/internal/vm_wasm/softfloat>"
+)
 set_property(
    TARGET bls12-381 PROPERTY INTERFACE_INCLUDE_DIRECTORIES
       "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/bls12-381/include>"
@@ -361,6 +369,7 @@ add_subdirectory(libraries/raw)
 add_subdirectory(libraries/ids)
 add_subdirectory(libraries/compression)
 add_subdirectory(libraries/chain)
+add_subdirectory(libraries/vm)
 add_subdirectory(libraries/db)
 add_subdirectory(libraries/config)
 add_subdirectory(libraries/codec)
@@ -392,6 +401,7 @@ set(
    forge_compression
    forge_chain_core
    forge_chain_protocol
+   forge_vm_wasm
    forge_db_core
    forge_db_object
    forge_db_blob
@@ -473,7 +483,7 @@ install(
 )
 
 install(
-   TARGETS secp256k1-internal secp256k1 bls12-381
+   TARGETS secp256k1-internal secp256k1 bls12-381 softfloat
    EXPORT ForgeTargets
    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev EXCLUDE_FROM_ALL
    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev EXCLUDE_FROM_ALL
@@ -491,6 +501,7 @@ install(
              libraries/compression/include/forge
              libraries/chain/core/include/forge
              libraries/chain/protocol/include/forge
+             libraries/vm/wasm/include/forge
              libraries/db/core/include/forge
              libraries/db/object/include/forge
              libraries/db/blob/include/forge
@@ -575,12 +586,26 @@ install(
 )
 
 install(
+   DIRECTORY libraries/vm/wasm/details/
+   DESTINATION ${CMAKE_INSTALL_LIBDIR}/forge/internal/vm_wasm/details
+   COMPONENT dev
+   EXCLUDE_FROM_ALL
+)
+install(
+   DIRECTORY vendor/softfloat/source/include/
+   DESTINATION ${CMAKE_INSTALL_LIBDIR}/forge/internal/vm_wasm/softfloat
+   COMPONENT dev
+   EXCLUDE_FROM_ALL
+)
+
+install(
    FILES
       "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
       "${CMAKE_CURRENT_SOURCE_DIR}/NOTICE"
       "${CMAKE_CURRENT_SOURCE_DIR}/AUTHORS"
       "${CMAKE_CURRENT_SOURCE_DIR}/PROVENANCE.md"
       "${CMAKE_CURRENT_SOURCE_DIR}/THIRD_PARTY_LICENSES"
+      "${CMAKE_CURRENT_SOURCE_DIR}/libraries/vm/wasm/LICENSE.eos-vm"
    DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/Forge"
    COMPONENT dev
    EXCLUDE_FROM_ALL

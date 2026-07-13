@@ -1,0 +1,109 @@
+include(${CMAKE_CURRENT_SOURCE_DIR}/donor/sources.cmake)
+
+option(FORGE_VM_WASM_TEST_INTERPRETER_ONLY "Exclude JIT from the VM test backend matrix" OFF)
+option(FORGE_VM_WASM_ENABLE_FUZZ_TESTS "Build the Clang libFuzzer VM parser target" OFF)
+
+set(FORGE_VM_WASM_TEST_INCLUDE_DIRS
+   ${CMAKE_CURRENT_SOURCE_DIR}
+   ${CMAKE_CURRENT_SOURCE_DIR}/donor/support
+)
+set(FORGE_VM_WASM_TEST_DEFINITIONS
+   FORGE_VM_WASM_FIXTURE_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/wasms/"
+   FORGE_VM_WASM_HOST_WASM="${CMAKE_CURRENT_SOURCE_DIR}/donor/support/host.wasm"
+)
+
+add_executable(
+   test_forge_vm_wasm_unit
+   main.cpp
+   ${FORGE_VM_WASM_DONOR_UNIT_SOURCES}
+)
+target_include_directories(test_forge_vm_wasm_unit PRIVATE ${FORGE_VM_WASM_TEST_INCLUDE_DIRS})
+target_compile_definitions(test_forge_vm_wasm_unit PRIVATE ${FORGE_VM_WASM_TEST_DEFINITIONS})
+if(FORGE_VM_WASM_TEST_INTERPRETER_ONLY)
+   target_compile_definitions(test_forge_vm_wasm_unit PRIVATE FORGE_VM_WASM_TEST_INTERPRETER_ONLY=1)
+endif()
+target_link_libraries(test_forge_vm_wasm_unit PRIVATE forge_vm_wasm Boost::included_unit_test_framework)
+add_test(NAME test_forge_vm_wasm_unit COMMAND test_forge_vm_wasm_unit)
+set_tests_properties(test_forge_vm_wasm_unit PROPERTIES LABELS vm_wasm)
+
+add_executable(
+   test_forge_vm_wasm_internal
+   main.cpp
+   ${FORGE_VM_WASM_DONOR_INTERNAL_SOURCES}
+)
+target_sources(
+   test_forge_vm_wasm_internal
+   PRIVATE
+      FILE_SET CXX_MODULES
+      FILES
+         internal/leb128.cppm
+         internal/signals.cppm
+)
+target_include_directories(
+   test_forge_vm_wasm_internal
+   PRIVATE
+      ${FORGE_VM_WASM_TEST_INCLUDE_DIRS}
+      ${CMAKE_SOURCE_DIR}/libraries/vm/wasm
+)
+target_compile_definitions(test_forge_vm_wasm_internal PRIVATE ${FORGE_VM_WASM_TEST_DEFINITIONS})
+target_link_libraries(test_forge_vm_wasm_internal PRIVATE forge_vm_wasm Boost::included_unit_test_framework)
+add_test(NAME test_forge_vm_wasm_internal COMMAND test_forge_vm_wasm_internal)
+set_tests_properties(test_forge_vm_wasm_internal PROPERTIES LABELS vm_wasm)
+
+add_executable(
+   test_forge_vm_wasm_spec
+   main.cpp
+   ${FORGE_VM_WASM_DONOR_SPEC_SOURCES}
+)
+target_include_directories(test_forge_vm_wasm_spec PRIVATE ${FORGE_VM_WASM_TEST_INCLUDE_DIRS})
+target_compile_definitions(test_forge_vm_wasm_spec PRIVATE ${FORGE_VM_WASM_TEST_DEFINITIONS})
+if(FORGE_VM_WASM_TEST_INTERPRETER_ONLY)
+   target_compile_definitions(test_forge_vm_wasm_spec PRIVATE FORGE_VM_WASM_TEST_INTERPRETER_ONLY=1)
+endif()
+target_link_libraries(test_forge_vm_wasm_spec PRIVATE forge_vm_wasm Boost::included_unit_test_framework)
+add_test(NAME test_forge_vm_wasm_spec COMMAND test_forge_vm_wasm_spec)
+set_tests_properties(test_forge_vm_wasm_spec PROPERTIES LABELS vm_wasm)
+
+if(FORGE_VM_WASM_DONOR_ROOT)
+   add_test(
+      NAME test_forge_vm_wasm_donor_mapping
+      COMMAND
+         ${Python3_EXECUTABLE}
+         ${CMAKE_CURRENT_SOURCE_DIR}/port_donor_tests.py
+         --donor ${FORGE_VM_WASM_DONOR_ROOT}
+         --fixtures ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/wasms
+         --check
+   )
+   set_tests_properties(test_forge_vm_wasm_donor_mapping PROPERTIES LABELS vm_wasm)
+endif()
+
+add_executable(forge_vm_wasm_spec_test_generator EXCLUDE_FROM_ALL spec_test_generator.cpp)
+add_custom_target(
+   test_forge_vm_wasm_spec_generator_mapping
+   COMMAND
+      ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/verify_spec_generator.py
+      --generator $<TARGET_FILE:forge_vm_wasm_spec_test_generator>
+      --source ${CMAKE_CURRENT_SOURCE_DIR}
+   DEPENDS forge_vm_wasm_spec_test_generator
+   VERBATIM
+)
+add_test(
+   NAME test_forge_vm_wasm_spec_generator_mapping
+   COMMAND
+      ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/verify_spec_generator.py
+      --generator $<TARGET_FILE:forge_vm_wasm_spec_test_generator>
+      --source ${CMAKE_CURRENT_SOURCE_DIR}
+)
+set_tests_properties(test_forge_vm_wasm_spec_generator_mapping PROPERTIES LABELS vm_wasm)
+
+if(FORGE_VM_WASM_ENABLE_FUZZ_TESTS)
+   if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      message(FATAL_ERROR "FORGE_VM_WASM_ENABLE_FUZZ_TESTS requires Clang libFuzzer")
+   endif()
+   add_executable(forge_vm_wasm_fuzz fuzz_driver.cpp)
+   target_link_libraries(forge_vm_wasm_fuzz PRIVATE forge_vm_wasm)
+   target_compile_options(forge_vm_wasm_fuzz PRIVATE -fsanitize=fuzzer,address)
+   target_link_options(forge_vm_wasm_fuzz PRIVATE -fsanitize=fuzzer,address)
+endif()

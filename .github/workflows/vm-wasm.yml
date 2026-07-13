@@ -1,0 +1,239 @@
+name: VM WASM
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/vm-wasm.yml"
+      - ".gitmodules"
+      - "CMakeLists.txt"
+      - "cmake/ForgeConfig.cmake.in"
+      - "libraries/vm/**"
+      - "libraries/exceptions/**"
+      - "tests/CMakeLists.txt"
+      - "tests/package_vm_wasm_component/**"
+      - "tests/vm_wasm/**"
+      - "vendor/softfloat"
+  push:
+    branches: [dev]
+    paths:
+      - ".github/workflows/vm-wasm.yml"
+      - ".gitmodules"
+      - "CMakeLists.txt"
+      - "cmake/ForgeConfig.cmake.in"
+      - "libraries/vm/**"
+      - "libraries/exceptions/**"
+      - "tests/CMakeLists.txt"
+      - "tests/package_vm_wasm_component/**"
+      - "tests/vm_wasm/**"
+      - "vendor/softfloat"
+
+permissions:
+  contents: read
+
+env:
+  DONOR_COMMIT: e5b1fc79c4b8d78f32749afa94a8d4c4d071f67f
+  FIXTURE_COMMIT: ffbbb552e6020623d8ae148d81a152c8ef700325
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+
+jobs:
+  native:
+    name: ${{ matrix.os }} / ${{ matrix.build_type }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15-intel]
+        build_type: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install toolchain and dependencies
+        shell: bash
+        run: |
+          if ! command -v brew >/dev/null 2>&1; then
+            NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+            echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+          fi
+          brew install boost cmake glaze gmp llvm ngtcp2 ninja openssl@3
+          llvm_prefix="$(brew --prefix llvm)"
+          echo "$llvm_prefix/bin" >> "$GITHUB_PATH"
+          echo "CC=$llvm_prefix/bin/clang" >> "$GITHUB_ENV"
+          echo "CXX=$llvm_prefix/bin/clang++" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix ngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+
+      - name: Check out pinned donor for the mapping gate
+        shell: bash
+        run: |
+          git clone --filter=blob:none https://github.com/AntelopeIO/eos-vm.git build/eos-vm-donor
+          git -C build/eos-vm-donor checkout "$DONOR_COMMIT"
+
+      - name: Configure
+        shell: bash
+        run: |
+          cmake -S . -B build/vm-wasm -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
+            -DFORGE_ENABLE_MODULES=ON \
+            -DFORGE_ENABLE_ROCKSDB=OFF \
+            -DFORGE_ENABLE_TUI=OFF \
+            -DFORGE_VM_WASM_DONOR_ROOT="$GITHUB_WORKSPACE/build/eos-vm-donor" \
+            -DBUILD_TESTING=ON
+
+      - name: Build native VM tests
+        run: >-
+          cmake --build build/vm-wasm --target
+          test_forge_vm_wasm_unit
+          test_forge_vm_wasm_internal
+          test_forge_vm_wasm_spec
+          test_forge_vm_wasm_spec_generator_mapping
+          -j 2
+
+      - name: Run interpreter and JIT matrix
+        run: ctest --test-dir build/vm-wasm -L vm_wasm --output-on-failure
+
+  sanitizer:
+    name: ubuntu-24.04 / interpreter / ASan+UBSan
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install toolchain and dependencies
+        shell: bash
+        run: |
+          if ! command -v brew >/dev/null 2>&1; then
+            NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+            echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+          fi
+          brew install boost cmake glaze gmp llvm ngtcp2 ninja openssl@3
+          llvm_prefix="$(brew --prefix llvm)"
+          echo "$llvm_prefix/bin" >> "$GITHUB_PATH"
+          echo "CC=$llvm_prefix/bin/clang" >> "$GITHUB_ENV"
+          echo "CXX=$llvm_prefix/bin/clang++" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix ngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+
+      - name: Configure sanitizer build
+        shell: bash
+        run: |
+          sanitizer_flags="-fsanitize=address,undefined -fno-omit-frame-pointer"
+          cmake -S . -B build/vm-wasm-sanitizer -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
+            -DCMAKE_C_FLAGS="$sanitizer_flags" \
+            -DCMAKE_CXX_FLAGS="$sanitizer_flags" \
+            -DCMAKE_EXE_LINKER_FLAGS="$sanitizer_flags" \
+            -DFORGE_ENABLE_MODULES=ON \
+            -DFORGE_ENABLE_ROCKSDB=OFF \
+            -DFORGE_ENABLE_TUI=OFF \
+            -DFORGE_VM_WASM_TEST_INTERPRETER_ONLY=ON \
+            -DBUILD_TESTING=ON
+
+      - name: Build sanitizer tests
+        run: >-
+          cmake --build build/vm-wasm-sanitizer --target
+          test_forge_vm_wasm_unit
+          test_forge_vm_wasm_internal
+          test_forge_vm_wasm_spec
+          -j 2
+
+      - name: Run sanitizer tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: >-
+          ctest --test-dir build/vm-wasm-sanitizer
+          -R '^test_forge_vm_wasm_(unit|internal|spec)$'
+          --output-on-failure
+
+  package:
+    name: ubuntu-24.04 / relocatable package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install toolchain and dependencies
+        shell: bash
+        run: |
+          if ! command -v brew >/dev/null 2>&1; then
+            NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+            echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+          fi
+          brew install boost cmake glaze gmp llvm ngtcp2 ninja openssl@3
+          llvm_prefix="$(brew --prefix llvm)"
+          echo "$llvm_prefix/bin" >> "$GITHUB_PATH"
+          echo "CC=$llvm_prefix/bin/clang" >> "$GITHUB_ENV"
+          echo "CXX=$llvm_prefix/bin/clang++" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix ngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+
+      - name: Configure package build
+        shell: bash
+        run: |
+          cmake -S . -B build/vm-wasm-package -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
+            -DFORGE_ENABLE_MODULES=ON \
+            -DFORGE_ENABLE_ROCKSDB=OFF \
+            -DFORGE_ENABLE_TUI=OFF \
+            -DBUILD_TESTING=ON
+
+      - name: Build installed package consumer
+        run: cmake --build build/vm-wasm-package --target test_forge_package_vm_wasm_component -j 2
+
+  donor-oracle:
+    name: ubuntu-24.04 / original Catch2 bodies
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install donor build tools
+        run: sudo apt-get update && sudo apt-get install -y cmake ninja-build
+
+      - name: Check out pinned donor and fixture corpus
+        shell: bash
+        run: |
+          git clone https://github.com/AntelopeIO/eos-vm.git build/eos-vm-oracle
+          git -C build/eos-vm-oracle checkout "$DONOR_COMMIT"
+          git -C build/eos-vm-oracle submodule update --init --recursive
+          git clone https://github.com/EOSIO/eos-vm-test-wasms.git build/eos-vm-oracle-build/wasms
+          git -C build/eos-vm-oracle-build/wasms checkout "$FIXTURE_COMMIT"
+
+      - name: Apply audited donor buildability shim
+        run: python3 tests/vm_wasm/prepare_donor_oracle.py --donor build/eos-vm-oracle
+
+      - name: Verify original test bodies remain unchanged
+        run: git -C build/eos-vm-oracle diff --exit-code -- tests
+
+      - name: Configure donor Catch2 suite
+        run: >-
+          cmake -S build/eos-vm-oracle -B build/eos-vm-oracle-build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DENABLE_INSTALL=OFF
+          -DENABLE_TOOLS=OFF
+          -DENABLE_TESTS=ON
+          -DENABLE_SPEC_TESTS=ON
+
+      - name: Build donor Catch2 suite
+        run: cmake --build build/eos-vm-oracle-build --target unit_tests eos_vm_spec_tests -j 2
+
+      - name: Run donor Catch2 suite
+        shell: bash
+        run: |
+          build/eos-vm-oracle-build/tests/unit_tests
+          build/eos-vm-oracle-build/tests/eos_vm_spec_tests

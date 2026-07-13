@@ -7,6 +7,30 @@ Audit date: 2026-06-07.
 
 ## Confirmed Derived Or Adapted Source
 
+### Native EOS VM Port
+
+`libraries/vm/wasm` is a source-derived C++23 module port of
+AntelopeIO/eos-vm commit `e5b1fc79c4b8d78f32749afa94a8d4c4d071f67f`.
+The port preserves the donor parser, validation, interpreter, host-function
+conversion, guarded allocator, watchdog, deterministic SoftFloat behavior and
+x86_64 JIT implementation while renaming the public API to
+`forge::vm::wasm` and mapping failures to Forge exceptions.
+
+The derived library is distributed under EOS VM License V1.0, preserved in
+`libraries/vm/wasm/LICENSE.eos-vm`. Donor tests are mapped mechanically to
+Boost.Test and verified against source and fixture hashes. Test fixtures come
+from EOSIO/eos-vm-test-wasms commit
+`ffbbb552e6020623d8ae148d81a152c8ef700325`.
+
+`vendor/softfloat` pins AntelopeIO/berkeley-softfloat-3 commit
+`19cbea6c254cdbb5d539584e5696675de997721d`; it remains a separate upstream
+dependency and its C types are not part of Forge's public VM API.
+
+The donor Catch2 oracle retains the original test bodies. A hash-checked CI
+preparation step adds the nullable allocator overload and fixes forwarding
+reference classification in the donor host result conversion; no donor test or
+fixture is patched.
+
 The initial standalone import (`02ef01e Initial standalone storlane-fc import`)
 contained FC-style code under `include/fc` and `src`. That import carried the
 MIT notice for AntelopeIO/spring, EOS Network Foundation, and EOSIO/eos. Later

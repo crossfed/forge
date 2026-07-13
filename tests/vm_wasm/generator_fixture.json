@@ -1,0 +1,9 @@
+{
+  "source_filename": "empty.wast",
+  "commands": [
+    {
+      "type": "module",
+      "filename": "empty.0.wasm"
+    }
+  ]
+}
