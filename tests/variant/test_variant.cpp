@@ -1,6 +1,7 @@
 #include <boost/describe.hpp>
 #include <boost/test/unit_test.hpp>
 #include <chrono>
+#include <flat_map>
 #include <forge/exceptions/macros.hpp>
 #include <string>
 
@@ -65,6 +66,19 @@ BOOST_AUTO_TEST_CASE(boost_describe_variant_bad_enum_value_fails) {
 
    described_variant_config parsed;
    BOOST_CHECK_THROW(forge::from_variant(input, parsed), std::invalid_argument);
+}
+
+BOOST_AUTO_TEST_CASE(std_flat_map_variant_uses_sorted_array_of_pairs) {
+   auto value = std::flat_map<std::uint32_t, std::string>{};
+   value.emplace(2U, "second");
+   value.emplace(1U, "first");
+
+   const auto encoded = forge::variant{value};
+   const auto& items = encoded.get_array();
+   BOOST_REQUIRE_EQUAL(items.size(), 2U);
+   BOOST_CHECK_EQUAL(items[0].get_array()[0].as_uint64(), 1U);
+   BOOST_CHECK_EQUAL(items[0].get_array()[1].as_string(), "first");
+   BOOST_CHECK((encoded.as<std::flat_map<std::uint32_t, std::string>>() == value));
 }
 
 BOOST_AUTO_TEST_CASE(std_chrono_variant_iso_roundtrip) {

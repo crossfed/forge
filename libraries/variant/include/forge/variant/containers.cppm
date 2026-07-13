@@ -2,6 +2,7 @@ module;
 #include <forge/core/macros.hpp>
 #include <array>
 #include <deque>
+#include <flat_map>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -76,6 +77,29 @@ template <typename K, typename T> void from_variant(const variant& var, std::map
    vo.clear();
    for (auto itr = vars.begin(); itr != vars.end(); ++itr) {
       vo.insert(itr->as<std::pair<K, T>>());
+   }
+}
+
+template <typename K, typename T, typename Compare, typename KeyContainer, typename MappedContainer>
+void to_variant(const std::flat_map<K, T, Compare, KeyContainer, MappedContainer>& value, variant& out) {
+   if (value.size() > MAX_NUM_ARRAY_ELEMENTS)
+      throw std::range_error("too large");
+   auto items = variants{};
+   items.reserve(value.size());
+   for (const auto& item : value) {
+      items.emplace_back(std::pair<K, T>{item.first, item.second});
+   }
+   out = std::move(items);
+}
+
+template <typename K, typename T, typename Compare, typename KeyContainer, typename MappedContainer>
+void from_variant(const variant& value, std::flat_map<K, T, Compare, KeyContainer, MappedContainer>& out) {
+   const auto& items = value.get_array();
+   if (items.size() > MAX_NUM_ARRAY_ELEMENTS)
+      throw std::range_error("too large");
+   out.clear();
+   for (const auto& item : items) {
+      out.insert(out.end(), item.as<std::pair<K, T>>());
    }
 }
 

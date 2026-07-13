@@ -38,7 +38,9 @@ donor.
 - Controller, block assembly, fork database and finality policy remain outside
   the Chain family.
 - No `calculate_action_mroot()` helper is provided. Modern Spring/Savanna uses
-  the block header's `action_mroot` as a finality-tree root.
+  the block header's `action_mroot` as a finality-tree root. The separate
+  Merkle root of Savanna action receipt digests is documented in
+  `forge-chain-savanna-action-receipt-v1.md`.
 
 ## Verified Invariants
 

@@ -11,6 +11,7 @@ module;
 #include <deque>
 #include <list>
 #include <filesystem>
+#include <flat_map>
 #include <optional>
 #include <set>
 #include <span>
@@ -103,6 +104,10 @@ template <typename Stream> void pack(Stream& s, const std::vector<char>& value);
 template <typename Stream> void unpack(Stream& s, std::vector<char>& value);
 template <typename Stream> void pack(Stream& s, const std::vector<std::uint8_t>& value);
 template <typename Stream> void unpack(Stream& s, std::vector<std::uint8_t>& value);
+template <typename Stream, typename K, typename V, typename Compare, typename KeyContainer, typename MappedContainer>
+void pack(Stream& s, const std::flat_map<K, V, Compare, KeyContainer, MappedContainer>& value);
+template <typename Stream, typename K, typename V, typename Compare, typename KeyContainer, typename MappedContainer>
+void unpack(Stream& s, std::flat_map<K, V, Compare, KeyContainer, MappedContainer>& value);
 template <typename Stream> void pack(Stream& s, const bool& v);
 template <typename Stream> void unpack(Stream& s, bool& v);
 template <typename Stream> void pack(Stream& s, const signed_int& v);
@@ -622,6 +627,29 @@ template <typename Stream, typename K, typename V> inline void unpack(Stream& s,
       std::pair<K, V> tmp;
       forge::raw::unpack(s, tmp);
       value.insert(std::move(tmp));
+   }
+}
+
+template <typename Stream, typename K, typename V, typename Compare, typename KeyContainer, typename MappedContainer>
+inline void pack(Stream& s, const std::flat_map<K, V, Compare, KeyContainer, MappedContainer>& value) {
+   FORGE_ASSERT(value.size() <= MAX_NUM_ARRAY_ELEMENTS);
+   forge::raw::pack(s, unsigned_int(static_cast<std::uint32_t>(value.size())));
+   for (const auto& item : value) {
+      forge::raw::pack(s, item.first);
+      forge::raw::pack(s, item.second);
+   }
+}
+
+template <typename Stream, typename K, typename V, typename Compare, typename KeyContainer, typename MappedContainer>
+inline void unpack(Stream& s, std::flat_map<K, V, Compare, KeyContainer, MappedContainer>& value) {
+   auto size = unsigned_int{};
+   forge::raw::unpack(s, size);
+   FORGE_ASSERT(size.value <= MAX_NUM_ARRAY_ELEMENTS);
+   value.clear();
+   for (auto index = std::uint32_t{0}; index < size.value; ++index) {
+      auto item = std::pair<K, V>{};
+      forge::raw::unpack(s, item);
+      value.insert(value.end(), std::move(item));
    }
 }
 

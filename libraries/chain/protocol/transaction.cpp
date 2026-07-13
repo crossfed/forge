@@ -158,8 +158,6 @@ core::digest packed_transaction::packed_digest() const {
 
 } // namespace forge::chain::protocol
 
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::action_base)
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::action)
 FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::deferred_transaction_generation_context)
 FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::transaction_header)
 FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::transaction)
