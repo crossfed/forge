@@ -43,7 +43,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15-intel]
+        os: [ubuntu-26.04, macos-15-intel]
         build_type: [Debug, Release]
     steps:
       - uses: actions/checkout@v4
@@ -62,9 +62,9 @@ jobs:
           echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
           if [[ "$RUNNER_OS" == "Linux" ]]; then
             sudo apt-get update
-            sudo apt-get install -y clang-20 clang-tools-20 libc++-20-dev libc++abi-20-dev
-            echo "CC=/usr/bin/clang-20" >> "$GITHUB_ENV"
-            echo "CXX=/usr/bin/clang++-20" >> "$GITHUB_ENV"
+            sudo apt-get install -y clang-22 clang-tools-22 libc++-22-dev libc++abi-22-dev
+            echo "CC=/usr/bin/clang-22" >> "$GITHUB_ENV"
+            echo "CXX=/usr/bin/clang++-22" >> "$GITHUB_ENV"
             echo "CXXFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
             echo "LDFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
           else
@@ -108,8 +108,8 @@ jobs:
         run: ctest --test-dir build/vm-wasm -L vm_wasm --output-on-failure
 
   sanitizer:
-    name: ubuntu-24.04 / interpreter / ASan+UBSan
-    runs-on: ubuntu-24.04
+    name: ubuntu-26.04 / interpreter / ASan+UBSan
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -126,9 +126,9 @@ jobs:
           brew install boost cmake glaze gmp libngtcp2 ninja openssl@3
           echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
           sudo apt-get update
-          sudo apt-get install -y clang-20 clang-tools-20 libc++-20-dev libc++abi-20-dev
-          echo "CC=/usr/bin/clang-20" >> "$GITHUB_ENV"
-          echo "CXX=/usr/bin/clang++-20" >> "$GITHUB_ENV"
+          sudo apt-get install -y clang-22 clang-tools-22 libc++-22-dev libc++abi-22-dev
+          echo "CC=/usr/bin/clang-22" >> "$GITHUB_ENV"
+          echo "CXX=/usr/bin/clang++-22" >> "$GITHUB_ENV"
           echo "CXXFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
           echo "LDFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
 
@@ -168,8 +168,8 @@ jobs:
           --output-on-failure
 
   package:
-    name: ubuntu-24.04 / relocatable package
-    runs-on: ubuntu-24.04
+    name: ubuntu-26.04 / relocatable package
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v4
         with:
@@ -186,9 +186,9 @@ jobs:
           brew install boost cmake glaze gmp libngtcp2 ninja openssl@3
           echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
           sudo apt-get update
-          sudo apt-get install -y clang-20 clang-tools-20 libc++-20-dev libc++abi-20-dev
-          echo "CC=/usr/bin/clang-20" >> "$GITHUB_ENV"
-          echo "CXX=/usr/bin/clang++-20" >> "$GITHUB_ENV"
+          sudo apt-get install -y clang-22 clang-tools-22 libc++-22-dev libc++abi-22-dev
+          echo "CC=/usr/bin/clang-22" >> "$GITHUB_ENV"
+          echo "CXX=/usr/bin/clang++-22" >> "$GITHUB_ENV"
           echo "CXXFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
           echo "LDFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
 
