@@ -7,7 +7,7 @@ module;
 #include <memory>
 #include <exception>
 #include <string>
-#ifdef __APPLE__
+#if defined(__linux__) || defined(__FreeBSD__) || defined(__APPLE__)
 #include <pthread.h>
 #endif
 #include <stdexcept>
