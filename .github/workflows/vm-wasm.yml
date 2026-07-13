@@ -68,8 +68,11 @@ jobs:
             brew install gcc
             gcc_driver="$(find -L "$(brew --prefix gcc)/bin" -maxdepth 1 -type f -name 'gcc-[0-9]*' | sort -V | tail -n 1)"
             gcc_install_dir="$(dirname "$("$gcc_driver" -print-file-name=crtbegin.o)")"
+            libstdcxx_dir="$(dirname "$("$gcc_driver" -print-file-name=libstdc++.so)")"
             test -f "$gcc_install_dir/crtbegin.o"
+            test -f "$libstdcxx_dir/libstdc++.so"
             echo "CXXFLAGS=--gcc-install-dir=$gcc_install_dir" >> "$GITHUB_ENV"
+            echo "LDFLAGS=-L$libstdcxx_dir -Wl,-rpath,$libstdcxx_dir" >> "$GITHUB_ENV"
           fi
 
       - name: Check out pinned donor for the mapping gate
@@ -129,8 +132,11 @@ jobs:
           brew install gcc
           gcc_driver="$(find -L "$(brew --prefix gcc)/bin" -maxdepth 1 -type f -name 'gcc-[0-9]*' | sort -V | tail -n 1)"
           gcc_install_dir="$(dirname "$("$gcc_driver" -print-file-name=crtbegin.o)")"
+          libstdcxx_dir="$(dirname "$("$gcc_driver" -print-file-name=libstdc++.so)")"
           test -f "$gcc_install_dir/crtbegin.o"
+          test -f "$libstdcxx_dir/libstdc++.so"
           echo "CXXFLAGS=--gcc-install-dir=$gcc_install_dir" >> "$GITHUB_ENV"
+          echo "LDFLAGS=-L$libstdcxx_dir -Wl,-rpath,$libstdcxx_dir" >> "$GITHUB_ENV"
 
       - name: Configure sanitizer build
         shell: bash
@@ -143,7 +149,7 @@ jobs:
             -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
             -DCMAKE_C_FLAGS="$sanitizer_flags" \
             -DCMAKE_CXX_FLAGS="$sanitizer_flags $CXXFLAGS" \
-            -DCMAKE_EXE_LINKER_FLAGS="$sanitizer_flags" \
+            -DCMAKE_EXE_LINKER_FLAGS="$sanitizer_flags $LDFLAGS" \
             -DFORGE_ENABLE_MODULES=ON \
             -DFORGE_ENABLE_ROCKSDB=OFF \
             -DFORGE_ENABLE_TUI=OFF \
@@ -192,8 +198,11 @@ jobs:
           brew install gcc
           gcc_driver="$(find -L "$(brew --prefix gcc)/bin" -maxdepth 1 -type f -name 'gcc-[0-9]*' | sort -V | tail -n 1)"
           gcc_install_dir="$(dirname "$("$gcc_driver" -print-file-name=crtbegin.o)")"
+          libstdcxx_dir="$(dirname "$("$gcc_driver" -print-file-name=libstdc++.so)")"
           test -f "$gcc_install_dir/crtbegin.o"
+          test -f "$libstdcxx_dir/libstdc++.so"
           echo "CXXFLAGS=--gcc-install-dir=$gcc_install_dir" >> "$GITHUB_ENV"
+          echo "LDFLAGS=-L$libstdcxx_dir -Wl,-rpath,$libstdcxx_dir" >> "$GITHUB_ENV"
 
       - name: Configure package build
         shell: bash
