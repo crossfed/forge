@@ -14,6 +14,7 @@ import forge.db.object.hooks;
 import forge.db.object.snapshot;
 import forge.db.object.store;
 import forge.db.object.transaction;
+import forge.db.revision.store;
 import forge.db.core.driver;
 import forge.plugins.db.store.exceptions;
 import forge.plugins.db.store.types;

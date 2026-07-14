@@ -55,6 +55,10 @@ import forge.db.object.object;
 import forge.db.core.driver;
 import forge.db.core.record;
 import forge.db.object.store;
+import forge.db.revision.exceptions;
+import forge.db.revision.store;
+import forge.db.revision.transaction;
+import forge.db.revision.types;
 import forge.plugins.db.store.api;
 import forge.plugins.db.store.exceptions;
 import forge.plugins.db.store.plugin;
@@ -174,7 +178,12 @@ class memory_session final : public forge::db::core::session {
    }
 
    [[nodiscard]] forge::db::core::capabilities capabilities() const noexcept override {
-      return forge::db::core::capabilities{.snapshot_reads = !writes_, .writes = writes_};
+      return forge::db::core::capabilities{
+         .snapshot_reads = !writes_,
+         .writes = writes_,
+         .savepoints = writes_,
+         .record_locks = writes_,
+      };
    }
 
    boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(forge::db::core::family family, forge::db::core::record_key key) override {
@@ -187,6 +196,16 @@ class memory_session final : public forge::db::core::session {
          co_return std::nullopt;
       }
       co_return found->second;
+   }
+
+   boost::asio::awaitable<std::optional<std::vector<std::byte>>>
+   get_for_update(forge::db::core::family family,
+                  forge::db::core::record_key key) override {
+      if (!writes_) {
+         FORGE_THROW_EXCEPTION(forge::db::object::exceptions::unsupported_operation,
+                               "test snapshot cannot lock records");
+      }
+      co_return co_await get(std::move(family), std::move(key));
    }
 
    boost::asio::awaitable<void> put(forge::db::core::family family, forge::db::core::record_key key, std::vector<std::byte> value) override {
@@ -250,6 +269,30 @@ class memory_session final : public forge::db::core::session {
       co_return;
    }
 
+   boost::asio::awaitable<void> create_savepoint() override {
+      savepoints_.push_back(working_);
+      co_return;
+   }
+
+   boost::asio::awaitable<void> rollback_to_savepoint() override {
+      if (savepoints_.empty()) {
+         FORGE_THROW_EXCEPTION(forge::db::object::exceptions::unsupported_operation,
+                               "test savepoint stack is empty");
+      }
+      working_ = std::move(savepoints_.back());
+      savepoints_.pop_back();
+      co_return;
+   }
+
+   boost::asio::awaitable<void> release_savepoint() override {
+      if (savepoints_.empty()) {
+         FORGE_THROW_EXCEPTION(forge::db::object::exceptions::unsupported_operation,
+                               "test savepoint stack is empty");
+      }
+      savepoints_.pop_back();
+      co_return;
+   }
+
  private:
    void close() noexcept {
       if (writes_ && !closed_) {
@@ -262,6 +305,7 @@ class memory_session final : public forge::db::core::session {
    bool writes_ = false;
    bool closed_ = false;
    std::map<std::string, std::map<forge::db::core::record_key, std::vector<std::byte>, byte_less>> working_;
+   std::vector<decltype(working_)> savepoints_;
 };
 
 class memory_driver final : public forge::db::core::driver {
@@ -405,7 +449,8 @@ require_field(const forge::config::core::component_descriptor& descriptor, const
    return *found;
 }
 
-[[nodiscard]] forge::config::core::value configured_store(std::string name, std::filesystem::path path) {
+[[nodiscard]] forge::config::core::value
+configured_store(std::string name, std::filesystem::path path, bool revision = false) {
    auto object = forge::config::core::value::object_type{};
    object.emplace("name", forge::config::core::value{std::move(name)});
    object.emplace("driver", forge::config::core::value{std::string{"rocksdb"}});
@@ -414,10 +459,16 @@ require_field(const forge::config::core::component_descriptor& descriptor, const
    object_layer.emplace("family", forge::config::core::value{std::string{"objectdb"}});
    object_layer.emplace("write-policy", forge::config::core::value{std::string{"single-writer"}});
    object.emplace("object", forge::config::core::value{std::move(object_layer)});
+   if (revision) {
+      object.emplace("revision", forge::config::core::value{forge::config::core::value::object_type{}});
+   }
    return forge::config::core::value{std::move(object)};
 }
 
-[[nodiscard]] forge::config::core::value configured_object_blob_store(std::string name, std::filesystem::path path) {
+[[nodiscard]] forge::config::core::value
+configured_object_blob_store(std::string name,
+                             std::filesystem::path path,
+                             bool revision = false) {
    auto object = forge::config::core::value::object_type{};
    object.emplace("name", forge::config::core::value{std::move(name)});
    object.emplace("driver", forge::config::core::value{std::string{"rocksdb"}});
@@ -437,6 +488,9 @@ require_field(const forge::config::core::component_descriptor& descriptor, const
    blob_layer.emplace("refs-family", forge::config::core::value{std::string{"blobdb.refs"}});
    blob_layer.emplace("data-blobs", forge::config::core::value{std::move(data_blobs)});
    object.emplace("blob", forge::config::core::value{std::move(blob_layer)});
+   if (revision) {
+      object.emplace("revision", forge::config::core::value{forge::config::core::value::object_type{}});
+   }
 
    return forge::config::core::value{std::move(object)};
 }
@@ -485,6 +539,7 @@ BOOST_AUTO_TEST_SUITE(store_plugin_test_suite)
 BOOST_AUTO_TEST_CASE(store_plugin_descriptor_api_and_config_are_nested) {
    auto plugin = store_plugin::plugin{};
    BOOST_TEST(plugin.id().value == "forge.plugins.db.store");
+   BOOST_TEST(plugin.version() == "1.1.0");
    BOOST_TEST(store_plugin::api::ref().id.value == "forge.plugins.db.store");
 
    const auto descriptor = plugin.describe_config();
@@ -496,6 +551,8 @@ BOOST_AUTO_TEST_CASE(store_plugin_descriptor_api_and_config_are_nested) {
 
    const auto api_descriptor = store_plugin::api::describe();
    BOOST_TEST(api_descriptor.id.value == "forge.plugins.db.store");
+   BOOST_TEST(api_descriptor.version.major == 1U);
+   BOOST_TEST(api_descriptor.version.revision == 1U);
    BOOST_TEST(api_descriptor.methods.empty());
 }
 
@@ -521,6 +578,16 @@ BOOST_AUTO_TEST_CASE(store_plugin_rejects_invalid_programmatic_setup) {
                      store_plugin::exceptions::invalid_argument);
    BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, api->add_store("bad", nullptr)),
                      store_plugin::exceptions::invalid_argument);
+
+   auto revision_without_object = store_plugin::store_options{};
+   revision_without_object.object.reset();
+   revision_without_object.blob = store_plugin::blob_layer_options{};
+   revision_without_object.revision = store_plugin::revision_layer_options{};
+   BOOST_CHECK_THROW(
+      forge::asio::blocking::run(
+         runtime,
+         api->add_store("revision-without-object", driver, revision_without_object)),
+      store_plugin::exceptions::invalid_argument);
 
    forge::asio::blocking::run(runtime, api->add_store("accounts", driver));
    BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, api->add_store("accounts", driver)),
@@ -652,6 +719,31 @@ BOOST_AUTO_TEST_CASE(store_plugin_rejects_configured_store_without_layers) {
       store_plugin::exceptions::invalid_config);
 }
 
+BOOST_AUTO_TEST_CASE(store_plugin_rejects_configured_revision_without_object_layer) {
+   auto runtime = forge::asio::runtime{};
+   auto plugin = store_plugin::plugin{};
+   auto store = forge::config::core::value::object_type{};
+   store.emplace("name", forge::config::core::value{std::string{"invalid-revision"}});
+   store.emplace("driver", forge::config::core::value{std::string{"rocksdb"}});
+   store.emplace("path", forge::config::core::value{std::string{"/tmp/forge-db-store-plugin-revision"}});
+   auto blob = forge::config::core::value::object_type{};
+   blob.emplace("data-family", forge::config::core::value{std::string{"blob.data"}});
+   blob.emplace("refs-family", forge::config::core::value{std::string{"blob.refs"}});
+   store.emplace("blob", forge::config::core::value{std::move(blob)});
+   store.emplace("revision", forge::config::core::value{forge::config::core::value::object_type{}});
+
+   auto document = forge::config::core::document{};
+   document.set(
+      "plugins.db.store.stores",
+      forge::config::core::value::array_type{forge::config::core::value{std::move(store)}});
+
+   BOOST_CHECK_THROW(
+      forge::asio::blocking::run(
+         runtime,
+         plugin.configure(forge::config::core::component_view{document, "plugins.db.store"})),
+      store_plugin::exceptions::invalid_config);
+}
+
 BOOST_AUTO_TEST_CASE(store_plugin_rejects_configured_overlapping_layer_families) {
    auto runtime = forge::asio::runtime{};
 
@@ -726,6 +818,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_custom_driver_store_handle_reads_writes_flushe
    auto handle = forge::asio::blocking::run(app->runtime(), api->store("accounts"));
    BOOST_TEST(handle.name() == "accounts");
    BOOST_CHECK_THROW((void)handle.blobs(), store_plugin::exceptions::unavailable_layer);
+   BOOST_CHECK_THROW((void)handle.revisions(), store_plugin::exceptions::unavailable_layer);
    handle.objects().register_object<account_object>();
 
    forge::asio::blocking::run(app->runtime(), handle.objects().insert(make_account(42, "alice", 100)));
@@ -842,6 +935,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_blob_only_programmatic_store_rejects_objects_a
    forge::asio::blocking::run(runtime, plugin.startup());
 
    BOOST_CHECK_THROW((void)handle.objects(), store_plugin::exceptions::unavailable_layer);
+   BOOST_CHECK_THROW((void)handle.revisions(), store_plugin::exceptions::unavailable_layer);
 
    auto content = forge::asio::blocking::run(runtime, handle.blobs().put(bytes("blob-only-payload")));
    BOOST_TEST(content.size == 17U);
@@ -892,6 +986,218 @@ BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_commits_object_metadata_and
    BOOST_TEST(loaded.content == content);
    BOOST_TEST(forge::asio::blocking::run(runtime, handle.blobs().get(loaded.content)).size() == 14U);
    BOOST_TEST(forge::asio::blocking::run(runtime, handle.blobs().ref_count(content)) == 1U);
+
+   forge::asio::blocking::run(runtime, plugin.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(store_plugin_revision_layer_is_explicit_and_atomic) {
+   auto runtime = forge::asio::runtime{};
+   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto apis = forge::api::core::registry{};
+   auto signals = forge::app::signal_bus{};
+   auto events = forge::app::event_bus{};
+   auto plugin = store_plugin::plugin{};
+   auto driver = std::make_shared<memory_driver>();
+
+   auto document = forge::config::core::document{};
+   forge::asio::blocking::run(
+      runtime,
+      plugin.configure(forge::config::core::component_view{document, "plugins.db.store"}));
+   auto provider = forge::api::core::installer{apis};
+   forge::asio::blocking::run(runtime, plugin.provide(provider));
+   auto context = forge::app::plugin_context{scheduler, apis, signals, events};
+   forge::asio::blocking::run(runtime, plugin.initialize(context));
+
+   auto options = store_plugin::store_options{};
+   options.blob = store_plugin::blob_layer_options{};
+   options.revision = store_plugin::revision_layer_options{};
+
+   auto api = apis.get<store_plugin::api>(store_plugin::api::ref());
+   forge::asio::blocking::run(runtime, api->add_store("files", driver, options));
+   forge::asio::blocking::run(runtime, plugin.after_initialize());
+
+   auto handle = forge::asio::blocking::run(runtime, api->store("files"));
+   handle.objects().register_object<account_object>();
+   handle.objects().register_object<file_object>();
+
+   const auto ready = forge::asio::blocking::run(runtime, api->status());
+   BOOST_REQUIRE_EQUAL(ready.stores.size(), 1U);
+   BOOST_TEST(ready.stores.front().revision);
+   BOOST_TEST(!ready.stores.front().started);
+   BOOST_CHECK_THROW((void)handle.revisions(), store_plugin::exceptions::stopped);
+
+   forge::asio::blocking::run(runtime, plugin.startup());
+   auto revisions = handle.revisions();
+
+   forge::asio::blocking::run(
+      runtime,
+      handle.objects().insert(make_account(10, "outside-revision", 10)));
+   auto state = forge::asio::blocking::run(
+      runtime,
+      handle.objects().get(forge::db::revision::state_id));
+   BOOST_CHECK(!state.head.has_value());
+
+   auto committed = forge::asio::blocking::run(runtime, handle.begin_transaction());
+   const auto committed_revision = forge::asio::blocking::run(runtime, revisions.join(committed));
+   BOOST_TEST(committed_revision.id() == 1U);
+   auto committed_objects = forge::asio::blocking::run(runtime, handle.objects().join(committed));
+   auto committed_blobs = handle.blobs().join(committed);
+   const auto content = forge::asio::blocking::run(
+      runtime,
+      committed_blobs.put(bytes("revision payload")));
+   forge::asio::blocking::run(
+      runtime,
+      committed_blobs.retain(content, forge::db::blob::owner_ref{"file:1"}));
+   forge::asio::blocking::run(
+      runtime,
+      committed_objects.insert(make_file(1, "/revision.txt", content)));
+   forge::asio::blocking::run(runtime, committed.commit());
+
+   state = forge::asio::blocking::run(
+      runtime,
+      handle.objects().get(forge::db::revision::state_id));
+   BOOST_REQUIRE(state.head.has_value());
+   BOOST_TEST(*state.head == 1U);
+   const auto first_entry = forge::asio::blocking::run(
+      runtime,
+      handle.objects().get(forge::db::revision::entry::id_t{1U}));
+   BOOST_TEST(first_entry.delta_count > 0U);
+
+   auto rolled_back = forge::asio::blocking::run(runtime, handle.begin_transaction());
+   const auto rolled_back_revision = forge::asio::blocking::run(runtime, revisions.join(rolled_back));
+   BOOST_TEST(rolled_back_revision.id() == 2U);
+   auto rolled_back_objects = forge::asio::blocking::run(runtime, handle.objects().join(rolled_back));
+   auto rolled_back_blobs = handle.blobs().join(rolled_back);
+   const auto discarded_content = forge::asio::blocking::run(
+      runtime,
+      rolled_back_blobs.put(bytes("discarded payload")));
+   forge::asio::blocking::run(
+      runtime,
+      rolled_back_objects.insert(make_file(2, "/discarded.txt", discarded_content)));
+   forge::asio::blocking::run(runtime, rolled_back.rollback());
+
+   state = forge::asio::blocking::run(
+      runtime,
+      handle.objects().get(forge::db::revision::state_id));
+   BOOST_REQUIRE(state.head.has_value());
+   BOOST_TEST(*state.head == 1U);
+   BOOST_TEST(!forge::asio::blocking::run(
+      runtime,
+      handle.objects().find(decltype(file_record{}.id){2U})).has_value());
+   BOOST_TEST(!forge::asio::blocking::run(runtime, handle.blobs().has(discarded_content)));
+
+   auto savepoint_tx = forge::asio::blocking::run(runtime, handle.begin_transaction());
+   const auto savepoint_revision = forge::asio::blocking::run(runtime, revisions.join(savepoint_tx));
+   BOOST_TEST(savepoint_revision.id() == 2U);
+   auto savepoint_objects = forge::asio::blocking::run(runtime, handle.objects().join(savepoint_tx));
+   const auto point = forge::asio::blocking::run(
+      runtime,
+      savepoint_tx.db_transaction().create_savepoint());
+   forge::asio::blocking::run(
+      runtime,
+      savepoint_objects.insert(make_account(11, "savepoint-discarded", 11)));
+   forge::asio::blocking::run(
+      runtime,
+      savepoint_tx.db_transaction().rollback_to_savepoint(point));
+   forge::asio::blocking::run(runtime, savepoint_tx.commit());
+
+   const auto second_entry = forge::asio::blocking::run(
+      runtime,
+      handle.objects().get(forge::db::revision::entry::id_t{2U}));
+   BOOST_TEST(second_entry.delta_count == 0U);
+   BOOST_TEST(!forge::asio::blocking::run(
+      runtime,
+      handle.objects().find(decltype(account{}.id){11U})).has_value());
+
+   forge::asio::blocking::run(runtime, plugin.shutdown());
+   BOOST_CHECK_THROW((void)handle.revisions(), store_plugin::exceptions::stopped);
+}
+
+BOOST_AUTO_TEST_CASE(store_plugin_revision_handle_reverts_prunes_and_rejects_foreign_transactions) {
+   auto runtime = forge::asio::runtime{};
+   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto apis = forge::api::core::registry{};
+   auto signals = forge::app::signal_bus{};
+   auto events = forge::app::event_bus{};
+   auto plugin = store_plugin::plugin{};
+   auto driver = std::make_shared<memory_driver>();
+
+   auto document = forge::config::core::document{};
+   forge::asio::blocking::run(
+      runtime,
+      plugin.configure(forge::config::core::component_view{document, "plugins.db.store"}));
+   auto provider = forge::api::core::installer{apis};
+   forge::asio::blocking::run(runtime, plugin.provide(provider));
+   auto context = forge::app::plugin_context{scheduler, apis, signals, events};
+   forge::asio::blocking::run(runtime, plugin.initialize(context));
+
+   auto first_options = store_plugin::store_options{};
+   first_options.object = store_plugin::object_layer_options{
+      .family = forge::db::core::family{"objects.first"},
+   };
+   first_options.revision = store_plugin::revision_layer_options{};
+   auto second_options = store_plugin::store_options{};
+   second_options.object = store_plugin::object_layer_options{
+      .family = forge::db::core::family{"objects.second"},
+   };
+   second_options.revision = store_plugin::revision_layer_options{};
+
+   auto api = apis.get<store_plugin::api>(store_plugin::api::ref());
+   forge::asio::blocking::run(runtime, api->add_store("first", driver, first_options));
+   forge::asio::blocking::run(runtime, api->add_store("second", driver, second_options));
+   forge::asio::blocking::run(runtime, plugin.after_initialize());
+   forge::asio::blocking::run(runtime, plugin.startup());
+
+   auto first = forge::asio::blocking::run(runtime, api->store("first"));
+   auto second = forge::asio::blocking::run(runtime, api->store("second"));
+   first.objects().register_object<account_object>();
+   second.objects().register_object<account_object>();
+
+   auto foreign = forge::asio::blocking::run(runtime, first.begin_transaction());
+   BOOST_CHECK_THROW(
+      forge::asio::blocking::run(runtime, second.revisions().join(foreign)),
+      store_plugin::exceptions::invalid_argument);
+   forge::asio::blocking::run(runtime, foreign.rollback());
+
+   auto revision_one = forge::asio::blocking::run(runtime, first.begin_transaction());
+   BOOST_TEST(forge::asio::blocking::run(runtime, first.revisions().join(revision_one)).id() == 1U);
+   auto object_one = forge::asio::blocking::run(runtime, first.objects().join(revision_one));
+   forge::asio::blocking::run(runtime, object_one.insert(make_account(1, "one", 10)));
+   forge::asio::blocking::run(runtime, revision_one.commit());
+
+   auto revision_two = forge::asio::blocking::run(runtime, first.begin_transaction());
+   BOOST_TEST(forge::asio::blocking::run(runtime, first.revisions().join(revision_two)).id() == 2U);
+   auto object_two = forge::asio::blocking::run(runtime, first.objects().join(revision_two));
+   forge::asio::blocking::run(
+      runtime,
+      object_two.modify(decltype(account{}.id){1U}, [](account& value) { value.balance = 20U; }));
+   forge::asio::blocking::run(runtime, revision_two.commit());
+
+   auto revert = forge::asio::blocking::run(runtime, first.begin_transaction());
+   forge::asio::blocking::run(runtime, first.revisions().revert(revert, 2U));
+   forge::asio::blocking::run(runtime, revert.commit());
+   BOOST_TEST(forge::asio::blocking::run(
+      runtime,
+      first.objects().get(decltype(account{}.id){1U})).balance == 10U);
+
+   auto revision_three = forge::asio::blocking::run(runtime, first.begin_transaction());
+   BOOST_TEST(forge::asio::blocking::run(runtime, first.revisions().join(revision_three)).id() == 3U);
+   auto object_three = forge::asio::blocking::run(runtime, first.objects().join(revision_three));
+   forge::asio::blocking::run(
+      runtime,
+      object_three.modify(decltype(account{}.id){1U}, [](account& value) { value.balance = 30U; }));
+   forge::asio::blocking::run(runtime, revision_three.commit());
+
+   auto prune = forge::asio::blocking::run(runtime, first.begin_transaction());
+   const auto pruned = forge::asio::blocking::run(
+      runtime,
+      first.revisions().prune_through(
+         prune,
+         1U,
+         forge::db::revision::prune_options{.max_revisions = 1U, .max_deltas = 100U}));
+   BOOST_TEST(pruned.revisions_pruned == 1U);
+   BOOST_TEST(pruned.complete);
+   forge::asio::blocking::run(runtime, prune.commit());
 
    forge::asio::blocking::run(runtime, plugin.shutdown());
 }
@@ -1257,6 +1563,85 @@ BOOST_AUTO_TEST_CASE(store_plugin_configured_rocksdb_store_persists_object_and_b
       const auto loaded = forge::asio::blocking::run(app->runtime(), handle.objects().get(decltype(file_record{}.id){11}));
       BOOST_TEST(loaded.path == "/rocks.txt");
       BOOST_TEST(forge::asio::blocking::run(app->runtime(), handle.blobs().get(loaded.content)).size() == 23U);
+
+      forge::asio::blocking::run(app->runtime(), app->shutdown());
+   }
+}
+
+BOOST_AUTO_TEST_CASE(store_plugin_configured_rocksdb_revision_preserves_blob_retention_across_reopen) {
+   auto root = root_guard{};
+   const auto db_path = root.root / "revision-store";
+   auto content = forge::db::blob::ref<>{};
+
+   {
+      auto document = forge::config::core::document{};
+      document.set(
+         "plugins.db.store.stores",
+         forge::config::core::value::array_type{
+            configured_object_blob_store("files", db_path, true)});
+      auto app = make_app(std::move(document));
+      auto api = app->apis().get<store_plugin::api>(store_plugin::api::ref());
+      auto handle = forge::asio::blocking::run(app->runtime(), api->store("files"));
+
+      auto baseline = forge::asio::blocking::run(app->runtime(), handle.begin_transaction());
+      auto baseline_blobs = handle.blobs().join(baseline);
+      content = forge::asio::blocking::run(
+         app->runtime(),
+         baseline_blobs.put(bytes("retained revision payload")));
+      forge::asio::blocking::run(
+         app->runtime(),
+         baseline_blobs.retain(content, forge::db::blob::owner_ref{"file:retained"}));
+      forge::asio::blocking::run(app->runtime(), baseline.commit());
+
+      auto revision = forge::asio::blocking::run(app->runtime(), handle.begin_transaction());
+      BOOST_TEST(forge::asio::blocking::run(
+         app->runtime(),
+         handle.revisions().join(revision)).id() == 1U);
+      auto revision_blobs = handle.blobs().join(revision);
+      forge::asio::blocking::run(
+         app->runtime(),
+         revision_blobs.release(content, forge::db::blob::owner_ref{"file:retained"}));
+      forge::asio::blocking::run(app->runtime(), revision.commit());
+
+      BOOST_TEST(forge::asio::blocking::run(
+         app->runtime(), handle.blobs().ref_count(content)) == 0U);
+      BOOST_TEST(forge::asio::blocking::run(
+         app->runtime(), handle.blobs().collect_unreferenced()).removed == 0U);
+      BOOST_TEST(forge::asio::blocking::run(app->runtime(), handle.blobs().has(content)));
+
+      forge::asio::blocking::run(app->runtime(), api->flush_all(true));
+      forge::asio::blocking::run(app->runtime(), app->shutdown());
+   }
+
+   {
+      auto document = forge::config::core::document{};
+      document.set(
+         "plugins.db.store.stores",
+         forge::config::core::value::array_type{
+            configured_object_blob_store("files", db_path, true)});
+      auto app = make_app(std::move(document));
+      auto api = app->apis().get<store_plugin::api>(store_plugin::api::ref());
+      auto handle = forge::asio::blocking::run(app->runtime(), api->store("files"));
+
+      const auto state = forge::asio::blocking::run(
+         app->runtime(),
+         handle.objects().get(forge::db::revision::state_id));
+      BOOST_REQUIRE(state.head.has_value());
+      BOOST_TEST(*state.head == 1U);
+      BOOST_TEST(forge::asio::blocking::run(
+         app->runtime(), handle.blobs().collect_unreferenced()).removed == 0U);
+      BOOST_TEST(forge::asio::blocking::run(app->runtime(), handle.blobs().has(content)));
+
+      auto revert = forge::asio::blocking::run(app->runtime(), handle.begin_transaction());
+      forge::asio::blocking::run(
+         app->runtime(),
+         handle.revisions().revert(revert, 1U));
+      forge::asio::blocking::run(app->runtime(), revert.commit());
+
+      BOOST_TEST(forge::asio::blocking::run(
+         app->runtime(), handle.blobs().ref_count(content)) == 1U);
+      BOOST_TEST(forge::asio::blocking::run(
+         app->runtime(), handle.blobs().get(content)).size() == 25U);
 
       forge::asio::blocking::run(app->runtime(), app->shutdown());
    }

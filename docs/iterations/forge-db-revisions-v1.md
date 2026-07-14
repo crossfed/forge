@@ -1,8 +1,8 @@
 # Forge DB Revisions v1
 
-Status: accepted architecture, implementation pending. This document defines
-the ownership boundaries, persisted model and correctness invariants for the
-first durable revision implementation. It does not describe product policy.
+Status: implemented. This document defines the shipped ownership boundaries,
+persisted model and correctness invariants for the first durable revision
+implementation. It does not describe product policy.
 
 ## Purpose
 
@@ -620,8 +620,8 @@ Reading system rows and safely reverting them are not equivalent operations.
 
 ## Plugin Integration
 
-The library design does not depend on a plugin. A later DB Store plugin extension
-may configure the optional revision layer for one named physical store:
+The library design does not depend on a plugin. The DB Store plugin can configure
+the optional revision layer for one named physical store:
 
 ```text
 one named store
@@ -631,13 +631,14 @@ one named store
   optional DB Revision store
 ```
 
-The runtime handle may expose `revisions()` alongside `objects()` and `blobs()`.
-It must construct all enabled layers over the same driver and preserve one shared
-transaction boundary.
+The runtime handle exposes `revisions()` alongside `objects()` and `blobs()` when
+the layer is configured. It constructs all enabled layers over the same driver
+and preserves one shared transaction boundary. Revision scope remains explicit:
+ordinary plugin transactions do not create revisions automatically.
 
-Plugin configuration, lifecycle and retention policy are separate work and do
-not alter the library contracts in this document. The proposed runtime shape and
-branch scope are recorded in
+Plugin configuration and lifecycle do not alter the library contracts in this
+document. Runtime retention policy remains product-owned. The implemented
+runtime shape and remaining state-service boundaries are recorded in
 [Forge DB State Services v1](forge-db-state-services-v1.md).
 
 ## Error Model

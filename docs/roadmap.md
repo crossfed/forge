@@ -64,18 +64,18 @@ plugins, telemetry and compatibility layers должны быть пригодн
   Ordered unique/non-unique and composite indexes are active; hashed indexes
   are deferred, sequenced/random-access do not fit the persisted backend model,
   and ranked indexes need a separate backend-neutral design.
-- [DB Revisions v1](iterations/forge-db-revisions-v1.md): accepted separate
+- [DB Revisions v1](iterations/forge-db-revisions-v1.md): implemented separate
   revision library, DB Object system tables, shared Core transaction capture,
-  head-only revert and bounded pruning invariants.
-- [DB Savepoints v1](iterations/forge-db-savepoints-v1.md): accepted nested
-  transaction savepoint semantics, native RocksDB mapping and cross-layer
-  participant correctness requirements.
+  head-only revert and bounded pruning.
+- [DB Savepoints v1](iterations/forge-db-savepoints-v1.md): implemented nested
+  transaction savepoints, native RocksDB mapping and cross-layer participant
+  correctness.
 - [DB Revision And Migration Boundary](iterations/forge-db-revisions-migrations-v1.md):
   future migration catalog/runner responsibilities and their optional use of
   revisions and savepoints.
-- [DB State Services v1](iterations/forge-db-state-services-v1.md): shared read
-  view tradeoffs, future physical checkpoints, deferred generic migrations and
-  runtime DB Store revision integration.
+- [DB State Services v1](iterations/forge-db-state-services-v1.md): implemented
+  runtime DB Store revision integration, shared read-view tradeoffs, future
+  physical checkpoints and deferred generic migrations.
 - [Config](config/schema-config-program-options.md): schema rules, neutral
   config documents, env/CLI adapters and redaction.
 - [Secret Provider](iterations/fcl-secret-provider-v1.md): neutral
