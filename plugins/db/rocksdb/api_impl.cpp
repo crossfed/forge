@@ -12,7 +12,7 @@ module;
 #include <vector>
 
 module forge.plugins.db.rocksdb.plugin;
-import forge.asio.task_scheduler;
+import forge.asio.task;
 import forge.exceptions;
 import forge.plugins.db.rocksdb.exceptions;
 import forge.rocksdb.store;

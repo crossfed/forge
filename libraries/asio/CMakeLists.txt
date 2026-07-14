@@ -1,7 +1,8 @@
 add_library(
    forge_asio STATIC
    runtime.cpp
-   task_scheduler.cpp
+   stop_state.cpp
+   task.cpp
 )
 forge_target_modules(forge_asio asio)
 

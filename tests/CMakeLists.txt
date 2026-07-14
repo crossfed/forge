@@ -202,7 +202,7 @@ add_test(NAME test_forge_multiformats COMMAND test_forge_multiformats WORKING_DI
 add_executable(
    test_forge_asio
    unit/main.cpp
-   asio/task_scheduler_tests.cpp
+   asio/task_tests.cpp
 )
 target_link_libraries(test_forge_asio forge Boost::included_unit_test_framework)
 add_test(NAME test_forge_asio COMMAND test_forge_asio WORKING_DIRECTORY ${CMAKE_BINARY_DIR})

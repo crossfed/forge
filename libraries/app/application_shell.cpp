@@ -14,7 +14,7 @@ module forge.app.application_shell;
 
 import forge.asio.blocking;
 import forge.asio.runtime;
-import forge.asio.task_scheduler;
+import forge.asio.task;
 import forge.config.core.key_path;
 import forge.config.core.value;
 import forge.config.core.document;
@@ -117,7 +117,7 @@ void publish_application_event(event_bus& events, event_severity severity, std::
 
 } // namespace
 
-application_context::application_context(forge::asio::runtime& runtime, forge::asio::task_scheduler& scheduler,
+application_context::application_context(forge::asio::runtime& runtime, forge::asio::task::scheduler& scheduler,
                                          forge::api::core::registry& apis, signal_bus& signals,
                                          event_bus& events, diagnostics_store& diagnostics)
     : runtime_{&runtime}, scheduler_{&scheduler}, apis_{&apis}, signals_{&signals},
@@ -127,7 +127,7 @@ forge::asio::runtime& application_context::runtime() noexcept {
    return *runtime_;
 }
 
-forge::asio::task_scheduler& application_context::scheduler() noexcept {
+forge::asio::task::scheduler& application_context::scheduler() noexcept {
    return *scheduler_;
 }
 
@@ -174,7 +174,7 @@ struct application_shell::impl {
 
    application_shell_options options;
    forge::asio::runtime runtime;
-   forge::asio::task_scheduler scheduler;
+   forge::asio::task::scheduler scheduler;
    forge::api::core::registry apis;
    signal_bus signals;
    event_bus events;
@@ -394,7 +394,7 @@ forge::asio::runtime& application_shell::runtime() noexcept {
    return impl_->runtime;
 }
 
-forge::asio::task_scheduler& application_shell::scheduler() noexcept {
+forge::asio::task::scheduler& application_shell::scheduler() noexcept {
    return impl_->scheduler;
 }
 

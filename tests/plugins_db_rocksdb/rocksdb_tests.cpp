@@ -22,7 +22,7 @@ import forge.app.plugin_context;
 import forge.app.plugin_registry;
 import forge.asio.blocking;
 import forge.asio.runtime;
-import forge.asio.task_scheduler;
+import forge.asio.task;
 import forge.config.core.component;
 import forge.config.core.document;
 import forge.config.core.value;
@@ -82,7 +82,7 @@ struct root_guard {
 [[nodiscard]] std::unique_ptr<forge::app::application_shell>
 make_app(const std::filesystem::path& path,
          forge::asio::runtime_options runtime_options = {.worker_threads = 1, .thread_name = "rocksdb-test"},
-         forge::asio::task_scheduler::options scheduler_options = {.max_blocking_tasks = 1, .max_pending_tasks = 256}) {
+         forge::asio::task::scheduler::options scheduler_options = {.max_blocking_tasks = 1, .max_pending_tasks = 256}) {
    auto builder = forge::app::application_builder{};
    builder.name("rocksdb-test")
       .runtime(runtime_options)
@@ -433,7 +433,7 @@ BOOST_AUTO_TEST_CASE(rocksdb_scheduler_backpressure_rejects_saturated_work) {
    auto app = make_app(
       root.root / "store",
       forge::asio::runtime_options{.worker_threads = 2, .thread_name = "rocksdb-backpressure-test"},
-      forge::asio::task_scheduler::options{.max_blocking_tasks = 1, .max_pending_tasks = 1});
+      forge::asio::task::scheduler::options{.max_blocking_tasks = 1, .max_pending_tasks = 1});
    auto db = app->apis().get<api>(api::ref());
 
    auto mutex = std::mutex{};
@@ -443,7 +443,7 @@ BOOST_AUTO_TEST_CASE(rocksdb_scheduler_backpressure_rejects_saturated_work) {
    auto done = false;
 
    auto gate = app->scheduler().submit(
-      forge::asio::task{
+      forge::asio::task::task{
          .name = "rocksdb-test-gate",
          .work =
             [&] {
@@ -464,7 +464,7 @@ BOOST_AUTO_TEST_CASE(rocksdb_scheduler_backpressure_rejects_saturated_work) {
    }
 
    auto pending = app->scheduler().submit_after(
-      forge::asio::task{.name = "rocksdb-test-pending", .work = [] {}},
+      forge::asio::task::task{.name = "rocksdb-test-pending", .work = [] {}},
       std::chrono::hours{1});
 
    BOOST_CHECK_THROW(

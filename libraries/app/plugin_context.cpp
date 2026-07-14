@@ -16,16 +16,16 @@ forge::api::core::registry& default_api_registry() {
 
 } // namespace
 
-plugin_context::plugin_context(forge::asio::task_scheduler& scheduler, forge::api::core::registry& apis, signal_bus& signals,
+plugin_context::plugin_context(forge::asio::task::scheduler& scheduler, forge::api::core::registry& apis, signal_bus& signals,
                                event_bus& events, diagnostics_store* diagnostics, config_view config)
     : scheduler_{&scheduler}, apis_{&apis}, signals_{&signals}, events_{&events}, diagnostics_{diagnostics},
       config_{std::move(config)} {}
 
-plugin_context::plugin_context(forge::asio::task_scheduler& scheduler, signal_bus& signals, event_bus& events,
+plugin_context::plugin_context(forge::asio::task::scheduler& scheduler, signal_bus& signals, event_bus& events,
                                diagnostics_store* diagnostics, config_view config)
     : plugin_context{scheduler, default_api_registry(), signals, events, diagnostics, std::move(config)} {}
 
-forge::asio::task_scheduler& plugin_context::scheduler() noexcept {
+forge::asio::task::scheduler& plugin_context::scheduler() noexcept {
    return *scheduler_;
 }
 

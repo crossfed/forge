@@ -37,7 +37,7 @@ import forge.app.plugin_registry;
 import forge.app.signals;
 import forge.asio.blocking;
 import forge.asio.runtime;
-import forge.asio.task_scheduler;
+import forge.asio.task;
 import forge.config.core.component;
 import forge.config.core.document;
 import forge.config.core.value;
@@ -558,7 +558,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_descriptor_api_and_config_are_nested) {
 
 BOOST_AUTO_TEST_CASE(store_plugin_rejects_invalid_programmatic_setup) {
    auto runtime = forge::asio::runtime{};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
@@ -605,7 +605,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_rejects_invalid_programmatic_setup) {
 
 BOOST_AUTO_TEST_CASE(store_plugin_does_not_publish_object_store_with_incompatible_header) {
    auto runtime = forge::asio::runtime{};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
@@ -644,7 +644,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_does_not_publish_object_store_with_incompatibl
 
 BOOST_AUTO_TEST_CASE(store_plugin_rejects_programmatic_overlapping_layer_families) {
    auto runtime = forge::asio::runtime{};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
@@ -793,7 +793,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_rejects_configure_after_stop_or_shutdown) {
 
    {
       auto plugin = store_plugin::plugin{};
-      auto scheduler = forge::asio::task_scheduler{runtime};
+      auto scheduler = forge::asio::task::scheduler{runtime};
       auto apis = forge::api::core::registry{};
       auto signals = forge::app::signal_bus{};
       auto events = forge::app::event_bus{};
@@ -909,7 +909,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_after_initialize_opens_store_for_central_objec
 
 BOOST_AUTO_TEST_CASE(store_plugin_blob_only_programmatic_store_rejects_objects_and_roundtrips_blob) {
    auto runtime = forge::asio::runtime{};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
@@ -947,7 +947,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_blob_only_programmatic_store_rejects_objects_a
 
 BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_commits_object_metadata_and_blob_payload) {
    auto runtime = forge::asio::runtime{};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
@@ -992,7 +992,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_commits_object_metadata_and
 
 BOOST_AUTO_TEST_CASE(store_plugin_revision_layer_is_explicit_and_atomic) {
    auto runtime = forge::asio::runtime{};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
@@ -1115,7 +1115,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_revision_layer_is_explicit_and_atomic) {
 
 BOOST_AUTO_TEST_CASE(store_plugin_revision_handle_reverts_prunes_and_rejects_foreign_transactions) {
    auto runtime = forge::asio::runtime{};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
@@ -1255,7 +1255,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_begin_transaction_preserves_object_single_writ
 
 BOOST_AUTO_TEST_CASE(store_plugin_rejects_layer_joins_from_another_named_store) {
    auto runtime = forge::asio::runtime{};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
@@ -1316,7 +1316,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_rejects_layer_joins_from_another_named_store) 
 
 BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_rollback_hides_object_and_blob) {
    auto runtime = forge::asio::runtime{};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
@@ -1357,7 +1357,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_rollback_hides_object_and_b
 
 BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_object_failure_rolls_back_blob_payload) {
    auto runtime = forge::asio::runtime{};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
@@ -1402,7 +1402,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_object_failure_rolls_back_b
 
 BOOST_AUTO_TEST_CASE(store_plugin_store_handle_remains_valid_during_dependent_shutdown) {
    auto runtime = forge::asio::runtime{};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
@@ -1441,7 +1441,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_store_handle_remains_valid_during_dependent_sh
 
 BOOST_AUTO_TEST_CASE(store_plugin_store_handle_concurrent_close_is_snapshot_safe) {
    auto runtime = forge::asio::runtime{};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};

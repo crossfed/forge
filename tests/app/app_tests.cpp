@@ -45,7 +45,7 @@ import forge.api.core.binding;
 import forge.api.core.dispatcher;
 import forge.asio.blocking;
 import forge.asio.runtime;
-import forge.asio.task_scheduler;
+import forge.asio.task;
 import forge.config.core.key_path;
 import forge.config.core.value;
 import forge.config.core.document;
@@ -512,8 +512,8 @@ class scheduler_cleanup_plugin final : public forge::app::plugin {
    }
 
    boost::asio::awaitable<void> shutdown() override {
-      auto handle = scheduler_->submit(forge::asio::task{
-         .priority = forge::asio::priority{1},
+      auto handle = scheduler_->submit(forge::asio::task::task{
+         .priority = forge::asio::task::priority{1},
          .name = "cleanup-flush",
          .work = [this] {
             log_->entries.push_back("cleanup.scheduler.work");
@@ -525,7 +525,7 @@ class scheduler_cleanup_plugin final : public forge::app::plugin {
 
  private:
    lifecycle_log* log_ = nullptr;
-   forge::asio::task_scheduler* scheduler_ = nullptr;
+   forge::asio::task::scheduler* scheduler_ = nullptr;
 };
 
 class failing_initialize_plugin final : public forge::app::plugin {
@@ -1038,7 +1038,7 @@ BOOST_AUTO_TEST_CASE(plugin_registry_orders_dependencies_and_rejects_bad_graphs)
 
 BOOST_AUTO_TEST_CASE(application_runtime_rolls_back_and_shutdown_is_idempotent) {
    auto runtime = forge::asio::runtime{};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
    auto context = forge::app::plugin_context{scheduler, signals, events};
@@ -1065,7 +1065,7 @@ BOOST_AUTO_TEST_CASE(application_runtime_rolls_back_and_shutdown_is_idempotent) 
 
 BOOST_AUTO_TEST_CASE(application_runtime_rejects_startup_after_shutdown) {
    auto runtime = forge::asio::runtime{};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
    auto context = forge::app::plugin_context{scheduler, signals, events};
@@ -1091,7 +1091,7 @@ BOOST_AUTO_TEST_CASE(application_runtime_rejects_startup_after_shutdown) {
 
 BOOST_AUTO_TEST_CASE(application_runtime_records_diagnostics_and_events) {
    auto runtime = forge::asio::runtime{};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
    auto diagnostics = forge::app::diagnostics_store{};
@@ -1118,7 +1118,7 @@ BOOST_AUTO_TEST_CASE(application_runtime_records_diagnostics_and_events) {
 
 BOOST_AUTO_TEST_CASE(application_runtime_records_failed_plugin_diagnostics) {
    auto runtime = forge::asio::runtime{};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
    auto diagnostics = forge::app::diagnostics_store{};
@@ -1140,7 +1140,7 @@ BOOST_AUTO_TEST_CASE(application_runtime_records_failed_plugin_diagnostics) {
 
 BOOST_AUTO_TEST_CASE(application_runtime_collects_and_applies_plugin_config_before_initialize) {
    auto runtime = forge::asio::runtime{};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
    auto context = forge::app::plugin_context{scheduler, signals, events};

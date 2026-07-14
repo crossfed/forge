@@ -13,7 +13,7 @@ module;
 module forge.app.application_builder;
 
 import forge.asio.runtime;
-import forge.asio.task_scheduler;
+import forge.asio.task;
 import forge.config.core.key_path;
 import forge.config.core.value;
 import forge.config.core.document;
@@ -107,7 +107,7 @@ application_builder& application_builder::runtime(forge::asio::runtime_options v
    return *this;
 }
 
-application_builder& application_builder::scheduler(forge::asio::task_scheduler::options value) {
+application_builder& application_builder::scheduler(forge::asio::task::scheduler::options value) {
    impl_->state.options.scheduler = std::move(value);
    return *this;
 }

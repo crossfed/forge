@@ -16,7 +16,7 @@ module forge.app.daemon;
 import forge.app.application_shell;
 import forge.app.runner;
 import forge.asio.runtime;
-import forge.asio.task_scheduler;
+import forge.asio.task;
 import forge.config.core.key_path;
 import forge.config.core.value;
 import forge.config.core.document;
@@ -422,7 +422,7 @@ daemon_context context_from_document(const daemon_options& options, const forge:
             .thread_name = context.name,
          },
       .scheduler =
-         forge::asio::task_scheduler::options{
+         forge::asio::task::scheduler::options{
             .max_blocking_tasks = blocking_budget(runtime_threads),
             .max_pending_tasks = static_cast<std::size_t>(queue_depth),
          },
