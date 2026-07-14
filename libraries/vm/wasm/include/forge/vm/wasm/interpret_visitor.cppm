@@ -38,12 +38,14 @@ template <typename ExecutionContext> struct interpret_visitor : base_visitor {
          return addr;
       }
    }
-   template <typename T> static inline T read_unaligned(const void* addr) {
+   // Guest memory faults are VM control flow. ASan's memcpy lowering may partially access a range before the guard-page
+   // signal, so these primitives must retain the donor's native load/store behavior in sanitizer builds.
+   template <typename T> [[gnu::no_sanitize("address")]] static inline T read_unaligned(const void* addr) {
       T result;
       std::memcpy(&result, addr, sizeof(T));
       return result;
    }
-   template <typename T> static void write_unaligned(void* addr, T value) {
+   template <typename T> [[gnu::no_sanitize("address")]] static void write_unaligned(void* addr, T value) {
       std::memcpy(addr, &value, sizeof(T));
    }
 

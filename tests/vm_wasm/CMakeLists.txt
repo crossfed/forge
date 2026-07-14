@@ -11,6 +11,7 @@ set(FORGE_VM_WASM_TEST_DEFINITIONS
    FORGE_VM_WASM_FIXTURE_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/wasms/"
    FORGE_VM_WASM_HOST_WASM="${CMAKE_CURRENT_SOURCE_DIR}/donor/support/host.wasm"
 )
+# The VM, not Boost.Test, owns SIGSEGV and SIGBUS while guarded guest memory is active.
 
 add_executable(
    test_forge_vm_wasm_unit
@@ -25,7 +26,10 @@ if(FORGE_VM_WASM_TEST_INTERPRETER_ONLY)
    target_compile_definitions(test_forge_vm_wasm_unit PRIVATE FORGE_VM_WASM_TEST_INTERPRETER_ONLY=1)
 endif()
 target_link_libraries(test_forge_vm_wasm_unit PRIVATE forge_vm_wasm Boost::included_unit_test_framework)
-add_test(NAME test_forge_vm_wasm_unit COMMAND test_forge_vm_wasm_unit --log_level=test_suite)
+add_test(
+   NAME test_forge_vm_wasm_unit
+   COMMAND test_forge_vm_wasm_unit --catch_system_errors=no --log_level=test_suite
+)
 set_tests_properties(test_forge_vm_wasm_unit PROPERTIES LABELS vm_wasm)
 
 add_executable(
@@ -41,7 +45,7 @@ target_include_directories(
 )
 target_compile_definitions(test_forge_vm_wasm_internal PRIVATE ${FORGE_VM_WASM_TEST_DEFINITIONS})
 target_link_libraries(test_forge_vm_wasm_internal PRIVATE forge_vm_wasm Boost::included_unit_test_framework)
-add_test(NAME test_forge_vm_wasm_internal COMMAND test_forge_vm_wasm_internal)
+add_test(NAME test_forge_vm_wasm_internal COMMAND test_forge_vm_wasm_internal --catch_system_errors=no)
 set_tests_properties(test_forge_vm_wasm_internal PROPERTIES LABELS vm_wasm)
 
 add_executable(
@@ -55,7 +59,7 @@ if(FORGE_VM_WASM_TEST_INTERPRETER_ONLY)
    target_compile_definitions(test_forge_vm_wasm_spec PRIVATE FORGE_VM_WASM_TEST_INTERPRETER_ONLY=1)
 endif()
 target_link_libraries(test_forge_vm_wasm_spec PRIVATE forge_vm_wasm Boost::included_unit_test_framework)
-add_test(NAME test_forge_vm_wasm_spec COMMAND test_forge_vm_wasm_spec)
+add_test(NAME test_forge_vm_wasm_spec COMMAND test_forge_vm_wasm_spec --catch_system_errors=no)
 set_tests_properties(test_forge_vm_wasm_spec PROPERTIES LABELS vm_wasm)
 
 if(FORGE_VM_WASM_DONOR_ROOT)

@@ -50,6 +50,10 @@ bodies remain the compatibility oracle. The imported `f32` sign operations use
 explicit unsigned masks so their bit-level semantics remain defined in C++.
 Arena-backed managed vectors retain appended elements when they grow and reject
 empty pops before their write index can underflow.
+VM tests preserve the donor's disabled POSIX signal handling policy so guarded
+guest-memory faults remain owned by the VM. AddressSanitizer instrumentation is
+disabled only for the native guest-memory read/write primitives because lowering
+a cross-guard-page store may mutate valid bytes before delivering the trap.
 
 The initial standalone import (`02ef01e Initial standalone storlane-fc import`)
 contained FC-style code under `include/fc` and `src`. That import carried the
