@@ -8,88 +8,17 @@ module;
 #include <memory>
 #include <mutex>
 #include <set>
-#include <source_location>
-#include <span>
-#include <string>
 #include <sys/mman.h>
-#include <type_traits>
 #include <unistd.h>
 #include <utility>
 #include <vector>
 
 export module forge.vm.wasm.allocator;
 
+export import forge.vm.wasm.constants;
 export import forge.vm.wasm.exceptions;
-
-namespace forge::vm::wasm::detail {
-template <typename Exception, typename Message>
-[[noreturn]] inline void fail(Message&& message, std::source_location location = std::source_location::current()) {
-   throw Exception{std::string{std::forward<Message>(message)}, {}, location};
-}
-
-template <typename Exception, typename Message>
-inline void check(bool expression, Message&& message, std::source_location location = std::source_location::current()) {
-   if (!expression) [[unlikely]] {
-      fail<Exception>(std::forward<Message>(message), location);
-   }
-}
-} // namespace forge::vm::wasm::detail
-
-export namespace forge::vm::wasm {
-
-template <typename Function> struct scope_guard {
-   explicit scope_guard(Function&& function) : function(std::move(function)) {}
-   ~scope_guard() {
-      function();
-   }
-
-   Function function;
-};
-
-} // namespace forge::vm::wasm
-
-export namespace forge::vm::wasm {
-enum constants {
-   magic = 0x6D736100,
-   version = 0x1,
-   magic_size = sizeof(uint32_t),
-   version_size = sizeof(uint32_t),
-   id_size = sizeof(uint8_t),
-   varuint32_size = 5,
-   max_call_depth = 250,
-   // initial_stack_size is used for reserving initial memory for operand stack.
-   // For JIT, operand stack is only used in calling host function calls, where
-   // number of elements required can never be big.
-   // For Interpreter, performance is not a concern.
-   // Intentionally set to a small number.
-   initial_stack_size = 8,
-   initial_module_size = 1 * 1024 * 1024,
-   max_memory = 4ull << 31,
-   max_useable_memory = (1ull << 32), // 4GiB
-   page_size = 64ull * 1024,          // 64kb
-   max_pages = (max_useable_memory / page_size)
-};
-} // namespace forge::vm::wasm
-
-export namespace forge::vm::wasm {
-using std::span;
-
-inline constexpr std::size_t dynamic_extent = std::dynamic_extent;
-
-namespace detail {
-template <typename T> constexpr std::true_type is_span_type(span<T>) {
-   return {};
-}
-template <typename T> constexpr std::false_type is_span_type(T) {
-   return {};
-}
-} // namespace detail
-
-template <typename T>
-inline constexpr bool is_span_type_v =
-    std::is_same_v<decltype(detail::is_span_type(std::declval<T>())), std::true_type>;
-
-} // namespace forge::vm::wasm
+export import forge.vm.wasm.scope_guard;
+export import forge.vm.wasm.span;
 
 export namespace forge::vm::wasm {
 class bounded_allocator {

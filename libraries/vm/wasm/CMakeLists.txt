@@ -1,11 +1,16 @@
 add_library(
    forge_vm_wasm STATIC
    allocator.cpp
-   backend.cpp
    debug_info.cpp
+   signals.cpp
    types.cpp
    watchdog.cpp
 )
+
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
+   list(APPEND FORGE_vm_wasm_DISABLED_MODULES x86_64)
+endif()
+
 forge_target_modules_at(forge_vm_wasm vm/wasm)
 
 target_include_directories(

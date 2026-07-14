@@ -10,6 +10,8 @@ module;
 
 module forge.vm.wasm.backend;
 
+import :signals;
+
 namespace forge::vm::wasm {
 
 __attribute__((visibility("default"))) thread_local std::atomic<sigjmp_buf*> signal_dest{nullptr};

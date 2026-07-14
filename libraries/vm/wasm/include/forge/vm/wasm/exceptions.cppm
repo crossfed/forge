@@ -2,6 +2,9 @@ module;
 
 #include <cstdint>
 #include <forge/exceptions/macros.hpp>
+#include <source_location>
+#include <string>
+#include <utility>
 
 export module forge.vm.wasm.exceptions;
 
@@ -48,3 +51,19 @@ using span = ::forge::exceptions::coded_exception<code, code::span>;
 using profile = ::forge::exceptions::coded_exception<code, code::profile>;
 
 } // namespace forge::vm::wasm::exceptions
+
+export namespace forge::vm::wasm::detail {
+
+template <typename Exception, typename Message>
+[[noreturn]] inline void fail(Message&& message, std::source_location location = std::source_location::current()) {
+   throw Exception{std::string{std::forward<Message>(message)}, {}, location};
+}
+
+template <typename Exception, typename Message>
+inline void check(bool expression, Message&& message, std::source_location location = std::source_location::current()) {
+   if (!expression) [[unlikely]] {
+      fail<Exception>(std::forward<Message>(message), location);
+   }
+}
+
+} // namespace forge::vm::wasm::detail

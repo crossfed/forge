@@ -11,7 +11,7 @@ SoftFloat operations, and x86_64 just-in-time compiler.
 - Package target: `Forge::forge_vm_wasm`
 - Package component: `vm_wasm`
 - Namespace: `forge::vm::wasm`
-- Modules:
+- Primary modules:
   - `forge.vm.wasm.allocator`
   - `forge.vm.wasm.backend`
   - `forge.vm.wasm.debug_info`
@@ -20,6 +20,14 @@ SoftFloat operations, and x86_64 just-in-time compiler.
   - `forge.vm.wasm.options`
   - `forge.vm.wasm.types`
   - `forge.vm.wasm.watchdog`
+- Leaf modules follow the donor components: `scope_guard`, `constants`, `span`,
+  `variant`, `opcodes`, `vector`, `utils`, `guarded_ptr`, `stack_elem`,
+  `wasm_stack`, `execution_interface`, and `argument_proxy`.
+
+Parser, visitor, signal, execution-context, SoftFloat, and native-code-generator
+components are non-reexported partitions of `forge.vm.wasm.backend`. Their
+source module units are installed so package consumers can build the template
+backend, but their partition names are not public API.
 
 `forge::vm` is a family root. The library does not create a `forge_vm` target
 or an aggregate `forge.vm.wasm` module.
@@ -42,8 +50,8 @@ auto vm = engine{};
 
 Applications normally supply registered host functions and a
 `forge::vm::wasm::wasm_allocator`, then construct a backend from canonical WASM
-bytes. Public code never includes SoftFloat C headers or the installed internal
-implementation assets directly.
+bytes. Public code never includes SoftFloat C headers or imports backend
+partitions directly.
 
 ## Boundaries
 
@@ -54,6 +62,9 @@ Those belong to consuming products.
 
 `compatibility_options` preserves the donor validation profile without using a
 product name. Selecting that profile remains a product decision.
+
+The donor's inactive `memory_dump` and `profile` headers are intentionally not
+ported. They are not part of the active EOS VM build or public VM behavior.
 
 ## Tests
 
