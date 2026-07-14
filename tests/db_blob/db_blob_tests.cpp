@@ -22,6 +22,7 @@ import forge.db.blob.exceptions;
 import forge.db.blob.ref;
 import forge.db.blob.snapshot;
 import forge.db.blob.store;
+import forge.db.blob.transaction;
 import forge.db.blob.types;
 import forge.crypto.hex;
 import forge.crypto.sha256;
@@ -691,6 +692,25 @@ BOOST_AUTO_TEST_CASE(db_blob_refs_and_collection_are_explicit_mechanisms) {
 
       co_await blobs.release(kept, forge::db::blob::owner_ref{"doc:1"});
       BOOST_CHECK_EQUAL(co_await blobs.ref_count(kept), 0U);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_collection_rejects_closed_transaction_before_zero_limit_return) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   auto blobs = forge::db::blob::store{driver};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto closed = forge::db::blob::transaction{};
+      BOOST_CHECK_THROW(co_await closed.collect_unreferenced({.limit = 0}),
+                        forge::db::blob::exceptions::transaction_closed);
+
+      auto active = co_await blobs.begin_transaction();
+      auto moved = std::move(active);
+      BOOST_CHECK_THROW(co_await active.collect_unreferenced({.limit = 0}),
+                        forge::db::blob::exceptions::transaction_closed);
+      co_await moved.rollback();
       co_return;
    }());
 }

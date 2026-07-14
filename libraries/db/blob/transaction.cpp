@@ -244,7 +244,8 @@ transaction::has_retention_barrier_encoded(std::string algorithm, std::vector<st
 }
 
 boost::asio::awaitable<collect_result> transaction::collect_unreferenced(collect_options options) {
-   if (impl_->transaction().captures_mutations()) {
+   auto& active = db_transaction();
+   if (active.captures_mutations()) {
       FORGE_THROW_EXCEPTION(forge::db::core::exceptions::mutation_forbidden,
                             "db blob collection is forbidden while mutation capture is active");
    }
@@ -257,7 +258,7 @@ boost::asio::awaitable<collect_result> transaction::collect_unreferenced(collect
    auto request = forge::db::core::page_request{.limit = 100};
    const auto prefix = detail::data_prefix();
    while (result.removed < options.limit) {
-      auto page = co_await impl_->transaction().scan_page(
+      auto page = co_await active.scan_page(
          impl_->data_family,
          forge::db::core::record_range{.begin = prefix, .prefix = prefix, .has_end = false},
          request);
