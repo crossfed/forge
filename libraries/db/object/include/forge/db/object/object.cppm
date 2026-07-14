@@ -91,6 +91,9 @@ template <typename T>
 concept system_object_value = object_value<T> && std::remove_cvref_t<T>::kind == object_kind::system;
 
 template <typename Id>
-using object_index_for_id_t = forge::ids::type_for_id_t<Id>;
+struct index_for_id;
+
+template <typename Id>
+using index_for_id_t = typename index_for_id<std::remove_cvref_t<Id>>::type;
 
 } // namespace forge::db::object

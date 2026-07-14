@@ -903,8 +903,9 @@ static_assert(forge::db::object::object_model<document_object>);
 static_assert(!forge::db::object::object_model<bad_object>);
 static_assert(!forge::db::object::object_model<duplicate_tag_object>);
 static_assert(std::same_as<forge::db::object::id_t_of<account_object>, forge::ids::typed_id<1, 7>>);
-static_assert(std::same_as<forge::ids::type_for_id_t<account::id_t>, account_object>);
-static_assert(std::same_as<forge::db::object::object_index_for_id_t<account::id_t>, account_object>);
+static_assert(std::same_as<forge::db::object::index_for_id_t<account::id_t>, account_object>);
+static_assert(std::same_as<forge::db::object::index_for_id_t<forge::db::object::header::id_t>,
+                           forge::db::object::header_index>);
 static_assert(std::same_as<forge::db::object::index_by_tag<account_object, by_name>,
                            forge::db::object::ordered_unique<by_name, forge::db::object::member<&account::name>>>);
 static_assert(forge::db::object::index_id_by_tag<account_object, by_id> == 0);

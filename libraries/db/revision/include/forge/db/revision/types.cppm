@@ -104,18 +104,18 @@ inline constexpr auto state_id = state::id_t{0};
 
 } // namespace forge::db::revision
 
-export namespace forge::ids {
+export namespace forge::db::object {
 
-template <> struct type_for_id<forge::db::revision::state::id_t> {
+template <> struct index_for_id<forge::db::revision::state::id_t> {
    using type = forge::db::revision::state_index;
 };
 
-template <> struct type_for_id<forge::db::revision::entry::id_t> {
+template <> struct index_for_id<forge::db::revision::entry::id_t> {
    using type = forge::db::revision::entry_index;
 };
 
-template <> struct type_for_id<forge::db::revision::delta::id_t> {
+template <> struct index_for_id<forge::db::revision::delta::id_t> {
    using type = forge::db::revision::delta_index;
 };
 
-} // namespace forge::ids
+} // namespace forge::db::object

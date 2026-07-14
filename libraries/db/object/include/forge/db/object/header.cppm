@@ -31,12 +31,8 @@ using header_index = object_index<header, indexed_by<primary_unique<header_by_id
 
 inline constexpr auto header_id = header::id_t{0};
 
-} // namespace forge::db::object
-
-export namespace forge::ids {
-
-template <> struct type_for_id<forge::db::object::header::id_t> {
-   using type = forge::db::object::header_index;
+template <> struct index_for_id<header::id_t> {
+   using type = header_index;
 };
 
-} // namespace forge::ids
+} // namespace forge::db::object

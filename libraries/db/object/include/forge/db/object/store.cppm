@@ -81,10 +81,10 @@ class store {
    }
 
    template <forge::ids::typed_id_like Id>
-   boost::asio::awaitable<typename object_index_for_id_t<Id>::value_type> get(Id id);
+   boost::asio::awaitable<typename index_for_id_t<Id>::value_type> get(Id id);
 
    template <forge::ids::typed_id_like Id>
-   boost::asio::awaitable<std::optional<typename object_index_for_id_t<Id>::value_type>> find(Id id);
+   boost::asio::awaitable<std::optional<typename index_for_id_t<Id>::value_type>> find(Id id);
 
    template <object_model Object>
    boost::asio::awaitable<typename Object::value_type> get(forge::ids::object_id id);
@@ -103,11 +103,11 @@ class store {
    boost::asio::awaitable<void> replace(Value value);
 
    template <forge::ids::typed_id_like Id, typename Fn>
-      requires application_object_model<object_index_for_id_t<Id>>
+      requires application_object_model<index_for_id_t<Id>>
    boost::asio::awaitable<void> modify(Id id, Fn&& fn);
 
    template <forge::ids::typed_id_like Id>
-      requires application_object_model<object_index_for_id_t<Id>>
+      requires application_object_model<index_for_id_t<Id>>
    boost::asio::awaitable<void> erase(Id id);
 
    template <application_object_model Object>
@@ -138,7 +138,7 @@ void store::register_system_object() {
 }
 
 template <forge::ids::typed_id_like Id>
-boost::asio::awaitable<typename object_index_for_id_t<Id>::value_type> store::get(Id id) {
+boost::asio::awaitable<typename index_for_id_t<Id>::value_type> store::get(Id id) {
    const auto value = co_await find(id);
    if (!value.has_value()) {
       FORGE_THROW_EXCEPTION(exceptions::not_found, "db object was not found");
@@ -147,7 +147,7 @@ boost::asio::awaitable<typename object_index_for_id_t<Id>::value_type> store::ge
 }
 
 template <forge::ids::typed_id_like Id>
-boost::asio::awaitable<std::optional<typename object_index_for_id_t<Id>::value_type>> store::find(Id id) {
+boost::asio::awaitable<std::optional<typename index_for_id_t<Id>::value_type>> store::find(Id id) {
    auto read = co_await begin_read();
    co_return co_await read.find(id);
 }
@@ -219,7 +219,7 @@ boost::asio::awaitable<void> store::replace(Value value) {
 }
 
 template <forge::ids::typed_id_like Id, typename Fn>
-   requires application_object_model<object_index_for_id_t<Id>>
+   requires application_object_model<index_for_id_t<Id>>
 boost::asio::awaitable<void> store::modify(Id id, Fn&& fn) {
    auto active = co_await begin_transaction();
    auto error = std::exception_ptr{};
@@ -236,7 +236,7 @@ boost::asio::awaitable<void> store::modify(Id id, Fn&& fn) {
 }
 
 template <forge::ids::typed_id_like Id>
-   requires application_object_model<object_index_for_id_t<Id>>
+   requires application_object_model<index_for_id_t<Id>>
 boost::asio::awaitable<void> store::erase(Id id) {
    auto active = co_await begin_transaction();
    auto error = std::exception_ptr{};

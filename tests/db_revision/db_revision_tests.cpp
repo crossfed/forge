@@ -382,6 +382,13 @@ class counting_observer final : public forge::db::object::observer {
 
 FORGE_DB_OBJECT(db_revision_tests::account_object)
 
+static_assert(std::same_as<forge::db::object::index_for_id_t<forge::db::revision::state::id_t>,
+                           forge::db::revision::state_index>);
+static_assert(std::same_as<forge::db::object::index_for_id_t<forge::db::revision::entry::id_t>,
+                           forge::db::revision::entry_index>);
+static_assert(std::same_as<forge::db::object::index_for_id_t<forge::db::revision::delta::id_t>,
+                           forge::db::revision::delta_index>);
+
 BOOST_AUTO_TEST_SUITE(db_revision_test_suite)
 
 BOOST_AUTO_TEST_CASE(db_revision_commits_before_images_and_reverts_only_current_head) {

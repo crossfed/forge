@@ -57,9 +57,11 @@ FORGE_DB_OBJECT(account_object)
 ```
 
 `object_index<T, indexed_by<...>>` is a schema descriptor, not a base class.
-User values remain described C++ structs. `FORGE_DB_OBJECT(...)` creates
-the compile-time mapping from `typed_id<Space, Type>` to the descriptor, so
-typed-id operations do not require spelling the object type again.
+User values remain described C++ structs. `FORGE_DB_OBJECT(...)` specializes
+`forge::db::object::index_for_id` with the compile-time mapping from
+`typed_id<Space, Type>` to the descriptor, so typed-id operations do not require
+spelling the object type again. The macro declares no `forge::ids` symbols and
+does not perform runtime registration.
 
 Ordered descriptors follow the Boost.MultiIndex separation between index kind
 and key extraction. `member`, `const_mem_fun` and `global_fun` extract scalar
