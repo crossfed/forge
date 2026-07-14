@@ -20,7 +20,10 @@ Documents below explain cross-library architecture decisions.
 | [web/http-files-and-s3.md](web/http-files-and-s3.md) | HTTP file upload/download gaps, Beast capabilities and S3-ready substrate plan. |
 | [iterations/forge-xml-http-api-codec-v1.md](iterations/forge-xml-http-api-codec-v1.md) | XML codec and HTTP API multi-codec implementation order for S3-ready typed APIs. |
 | [iterations/forge-object-database-v1.md](iterations/forge-object-database-v1.md) | Problem notes for a neutral object database layer based on blockchain and mountd donors. |
-| [iterations/forge-db-revisions-migrations-v1.md](iterations/forge-db-revisions-migrations-v1.md) | Future transaction-integrated revision journal and its boundary with schema migrations. |
+| [iterations/forge-db-revisions-v1.md](iterations/forge-db-revisions-v1.md) | Accepted durable DB Revision architecture, typed system tables, atomic capture, revert and pruning invariants. |
+| [iterations/forge-db-revisions-migrations-v1.md](iterations/forge-db-revisions-migrations-v1.md) | Future schema migration boundary and its optional use of DB Revision and savepoints. |
+| [iterations/forge-db-savepoints-v1.md](iterations/forge-db-savepoints-v1.md) | Accepted DB Core savepoint semantics, backend mapping and Object/Blob/revision participant invariants. |
+| [iterations/forge-db-state-services-v1.md](iterations/forge-db-state-services-v1.md) | Scope decisions for shared read views, physical checkpoints, deferred migrations and DB Store revision integration. |
 | [iterations/forge-net-family-restructure-v1.md](iterations/forge-net-family-restructure-v1.md) | Future direction for grouping network libraries under `forge::net::*`. |
 | [network/quic-p2p.md](network/quic-p2p.md) | QUIC transport, P2P peer identity, protocol streams and failure model. |
 | [tui/notcurses-component-library.md](tui/notcurses-component-library.md) | TUI value models, deterministic rendering, navigation and Notcurses boundary. |

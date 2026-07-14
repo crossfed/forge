@@ -1,331 +1,160 @@
-# Forge DB Revisions And Migrations
+# Forge DB Revision And Migration Boundary
 
-Status: future direction. This document records a candidate design and required
-correctness properties. It does not declare shipped modules, targets or public
-API names.
+Status: future migration direction. The canonical durable revision design is
+defined separately in [Forge DB Revisions v1](forge-db-revisions-v1.md).
+Transaction-local partial rollback is defined in
+[Forge DB Savepoints v1](forge-db-savepoints-v1.md).
 
 ## Purpose
 
-FORGE DB needs a reusable mechanism for durable revisions: a committed group of
-database changes that can be inspected, reverted, reapplied and eventually
-pruned.
+DB revisions and schema migrations may cooperate, but they are separate
+mechanisms with different ownership.
 
-The immediate downstream use case is a blockchain controller that must revert
-already committed blocks during a fork switch. The same lower-level mechanism
-can support a future `forge.db.migrations` layer, especially for migrations that
-span multiple backend transactions and must resume safely after a crash.
+- DB Revision records a committed state transition and can restore its
+  before-images later.
+- DB Savepoint undoes an uncommitted suffix of one active transaction.
+- DB Migration owns schema/version upgrade policy, ordering, checkpoints and
+  operational diagnostics.
 
-The revision mechanism belongs in FORGE because atomic mutation capture,
-ObjectDB index consistency, BlobDB reference lifetime and backend transaction
-integration are framework concerns. Product code supplies revision identity and
-policy; it must not reimplement a partial journal around FORGE DB.
+A migration may use revisions or savepoints, but neither mechanism decides
+which migration should run or whether an old binary remains compatible with the
+restored schema.
 
-## Current Surface
-
-`forge.db.object.hooks` already provides two useful extension points:
-
-- an `interceptor` receives each proposed `object_mutation` before ObjectDB
-  writes the object and its indexes;
-- an `observer` receives the final `change_set` after a successful commit.
-
-These hooks remain useful, but neither is an atomic revision boundary.
-
-### Interceptor Limitation
-
-`interceptor::before_mutation(...)` receives a proposed semantic object change,
-but does not receive:
-
-- the active `forge::db::core::transaction`;
-- a transaction or revision identity;
-- the final transaction change set;
-- commit or rollback notification;
-- BlobDB mutations.
-
-The callback also runs before unique-index verification and before physical
-object/index writes. A later failure may therefore reject a mutation already
-seen by the interceptor. An interceptor may validate or veto a mutation, but it
-must not independently persist that mutation as a committed revision.
-
-### Observer Limitation
-
-`observer::after_commit(...)` receives only successfully committed ObjectDB
-mutations. It is appropriate for cache invalidation, metrics, audit events and
-eventual projections.
-
-It is too late for the authoritative revision journal. A process can crash
-after the backend commit and before the observer writes the journal, leaving
-committed state without the information required to revert it.
-
-### Transaction Limitation
-
-`forge::db::core::transaction` currently supports `after_commit` and
-`after_rollback` hooks, but has no prepare-before-commit participant. ObjectDB
-keeps its in-progress `change_set` private until commit processing.
-
-The missing boundary is a transaction-integrated prepare phase that can persist
-the revision record through the same backend transaction as the application
-changes.
-
-## Required Separation
-
-Revision journaling and schema migration are related but are not the same API.
-
-### Revision Journal
-
-A revision journal owns generic database mechanics:
-
-- capture physical or semantic changes;
-- atomically persist revision metadata and mutations;
-- revert or reapply a committed revision;
-- verify parent/head continuity;
-- recover incomplete operations after restart;
-- checkpoint and prune revisions;
-- keep referenced BlobDB content alive until the revision is no longer
-  reversible.
-
-### Migration Layer
-
-A future migration layer owns upgrade policy:
-
-- schema and catalog versions;
-- ordered migration identifiers;
-- compatibility checks;
-- maintenance-mode and online-migration policy;
-- progress checkpoints;
-- retry and resume rules;
-- operator diagnostics;
-- optional use of revisions for rollback.
-
-A migration is not automatically reversible. Large data transformations may be
-safer as idempotent forward-only steps with checkpoints and backups than as a
-full before-image journal. Restoring database bytes also does not prove that an
-older application binary can understand the restored schema.
-
-## Candidate Layering
+## Accepted Layering
 
 ```text
 forge.db.core
-  backend transaction
-  record-level mutation capture
-  prepare/commit/rollback participants
+  transactions, savepoints, mutation participants
 
-forge.db.revision                 working name
-  durable revision journal
-  revert/reapply/checkpoint/prune
-  ObjectDB and BlobDB integration
+forge.db.object
+  application and Forge system object models
 
-forge.db.migrations               future consumer
-  schema catalog and migration runner
-  resumable multi-step upgrades
+forge.db.revision
+  durable system tables, before-images, revert and prune
 
-downstream products               future consumers
-  application revision identity and policy
-  blockchain fork choice, migration selection, retention rules
+future forge.db.migrations
+  schema catalog, ordered migration runner and resumable checkpoints
 ```
 
-The names `forge.db.revision` and `forge.db.migrations` are working names only.
-They must go through normal library design before becoming public modules or
-package components.
+The revision library is not part of DB Object even though its system tables are
+typed DB Object models. It captures the shared Core transaction so Object,
+indexes, Blob references and direct Core records remain one atomic revision.
 
-## Mutation Granularity
+## Migration Responsibilities
 
-The authoritative journal should be grounded at `forge.db.core` record level,
-because that is the common atomic boundary for ObjectDB, indexes, BlobDB and
-future DB layers.
+A future migration layer owns:
 
-A conceptual record delta is:
+- persisted schema/catalog versions;
+- stable migration identifiers;
+- dependency and execution ordering;
+- compatibility and maintenance-mode checks;
+- bounded batch size;
+- durable progress checkpoints;
+- retry and restart behavior;
+- operator-readable status and errors;
+- declaration of reversible versus forward-only operations;
+- optional use of DB Revision for reversible batches.
 
-```cpp
-struct record_delta {
-   family family;
-   record_key key;
-   std::optional<std::vector<std::byte>> before;
-   std::optional<std::vector<std::byte>> after;
-};
-```
+These responsibilities do not belong to the revision journal.
 
-This is not a final API declaration. It illustrates the required information.
+## Single-Transaction Migration
 
-Record-level capture has important properties:
+If a migration fits in one backend transaction, ordinary commit/rollback already
+protects failure before commit.
 
-- ObjectDB primary records and secondary indexes are reverted together;
-- schema migrations can restore old bytes without decoding them as the new
-  object type;
-- backend behavior can be tested independently from ObjectDB;
-- revision replay does not silently depend on current index extractors.
-
-ObjectDB `object_mutation` remains valuable as a semantic projection for
-diagnostics and product logic. It should not be the only authoritative rollback
-format across schema changes.
-
-## BlobDB Requirements
-
-Revision journaling must not copy every content-addressed blob into every
-revision. It must preserve enough reference information to prevent collection
-while a revision can still restore that blob.
-
-The design must cover:
-
-- blob creation and deduplication;
-- owner `retain` and `release` transitions;
-- reference counts before and after a revision;
-- garbage collection barriers for reversible revisions;
-- pruning a revision and releasing its retention obligation;
-- crash recovery between metadata and blob-reference changes.
-
-ObjectDB-only hooks cannot provide these guarantees.
-
-## Candidate Transaction Flow
-
-The intended semantic flow is:
+Savepoints may isolate optional steps inside that transaction. A durable revision
+is optional and is useful only when the committed migration must be reversible
+afterward.
 
 ```text
-begin backend transaction
-  -> mutate DB Core/Object/Blob through joined handles
-  -> collect final record deltas
-  -> prepare revision metadata and journal records
-  -> write journal through the same backend transaction
-  -> commit once
-  -> publish post-commit observers
+begin transaction
+  create savepoint
+  apply optional conversion
+  rollback/release savepoint
+  apply required conversion
+commit
 ```
 
-The transaction must not report success when application state committed but
-the corresponding revision record did not.
+## Multi-Transaction Migration
 
-A future API may use a transaction participant or an explicit revision scope.
-The design must avoid recursive capture when journal records are written and
-must define which internal families are excluded from their own journal.
+A large migration may require bounded batches. It then needs a durable migration
+state record containing at least:
 
-## Revert And Reapply
-
-Revert applies deltas in reverse order and swaps the direction:
-
-```text
-insert   -> erase inserted record
-erase    -> restore previous record
-replace  -> restore previous bytes
-```
-
-Reapply uses the recorded `after` values in forward order.
-
-Required invariants:
-
-- a revision has a stable opaque identity;
-- an optional parent identifies the state on which it was built;
-- revert is rejected when the active head does not match the revision;
-- partial revert/reapply cannot become visible;
-- retry after a crash is deterministic and idempotent;
-- indexes and blob references remain consistent;
-- unknown journal versions fail closed;
-- corrupt deltas are detected before commit where possible.
-
-Branch selection is not a FORGE responsibility. A blockchain controller may
-use `block_id` as revision identity and `previous` as parent, but FORGE must not
-contain block, fork-choice, finality or irreversible-block vocabulary.
-
-## Relationship To Migrations
-
-### Single-Transaction Migration
-
-If a migration fits in one backend transaction, ordinary commit/rollback is
-already sufficient for failure before commit. A durable revision is optional.
-
-### Multi-Transaction Migration
-
-Long migrations may require bounded batches. The migration layer then needs:
-
-- a durable migration state record;
+- migration identifier and format version;
+- current phase;
 - last completed checkpoint;
-- idempotent resume behavior;
-- an explicit decision whether completed batches are reversible;
-- compatibility rules while old and new layouts coexist.
+- batch progress;
+- retry/error state;
+- completion marker.
 
-Revision journaling can provide reversible batches and crash evidence, but the
-migration runner still owns ordering and version policy.
+Each batch is independently atomic. A DB revision may make an individual batch
+reversible, but it does not make the entire multi-transaction migration atomic.
+The runner must resume deterministically after interruption.
 
-### Destructive Migration
+## Destructive Migration
 
-A migration that discards information must declare itself irreversible or
-provide an external backup/restore plan. The revision layer must not imply that
-all schema changes have a safe automatic downgrade.
+A migration that discards information must either:
+
+- declare itself irreversible;
+- preserve the required information in DB Revision before-images; or
+- require an external backup/restore procedure.
+
+The migration API must never imply automatic downgrade merely because a revision
+mechanism exists. Restoring old bytes does not prove that an older application
+binary can understand every surrounding catalog or storage-format change.
+
+## Revision Use By Migrations
+
+When enabled for a migration batch:
+
+```text
+begin Core transaction
+  join DB Revision scope
+  apply migration writes
+  persist migration checkpoint
+prepare revision journal
+commit once
+```
+
+The migration checkpoint, transformed records and revision journal commit in the
+same backend transaction.
+
+Rolling back the open transaction requires no revision. Reverting a previously
+committed batch uses the separate revision operation and must still be authorized
+by migration policy.
+
+## System Tables
+
+Migration catalog objects may also use DB Object's system-object mechanism, but
+they must have their own reserved system type IDs and persisted-format version.
+
+Revision and migration tables are separate:
+
+- revision state describes reversible committed transitions;
+- migration state describes upgrade intent and progress;
+- pruning revisions must not delete migration completion history;
+- deleting migration history must not release revision Blob retention barriers.
 
 ## Non-Goals
 
-- No blockchain controller, fork choice or finality logic in FORGE.
-- No product schema or object models in the revision library.
-- No automatic rollback promise for every migration.
-- No journal written by an `after_commit` observer in a second transaction.
-- No stateful global interceptor that guesses transaction boundaries.
-- No raw RocksDB API in public revision or migration contracts.
-- No unbounded retention of revisions or blob content.
-- No final module, target or namespace commitment in this planning document.
+- No automatic schema inference.
+- No assumption that every migration is reversible.
+- No product-specific upgrade policy.
+- No journal written after commit in a second transaction.
+- No unbounded revision retention.
+- No direct RocksDB API in migration contracts.
+- No final `forge.db.migrations` API commitment before donor and failure-mode
+  design is completed.
 
-## Implementation Blocks
+## Future Design Questions
 
-### Block 1: Core Transaction Participation
+- Does v1 require maintenance mode, or support online dual-layout migration?
+- How are migration dependencies and skipped versions represented?
+- Which batch progress fields are generic across backends?
+- How does a migration declare its revision and backup requirements?
+- How are system-table format migrations bootstrapped safely?
+- Which operations require exclusive DB ownership?
+- How are abandoned and operator-cancelled migrations recovered?
 
-- define backend-neutral mutation capture;
-- define a prepare-before-commit participant;
-- prove atomic participant writes with application records;
-- define rollback behavior when prepare fails;
-- prevent nested or recursive journal capture.
-
-### Block 2: Durable Revisions
-
-- define versioned revision metadata and delta encoding;
-- implement commit, load, revert and reapply;
-- implement head/parent continuity checks;
-- implement checkpoint and bounded pruning;
-- add corruption and crash-recovery tests.
-
-### Block 3: ObjectDB And BlobDB Integration
-
-- preserve existing ObjectDB semantic `change_set` observers;
-- map ObjectDB/index records into the core revision atomically;
-- journal BlobDB owner-reference transitions;
-- prevent garbage collection of content required by reversible revisions;
-- prove behavior through shared test-driver and RocksDB suites.
-
-### Block 4: Migration Catalog And Runner
-
-- define schema/catalog version records;
-- define migration identifiers and dependency ordering;
-- implement transactional and checkpointed migration modes;
-- implement resume after process termination;
-- make rollback capability explicit per migration;
-- expose operator-readable progress and failure diagnostics.
-
-## Test Requirements
-
-The implementation is not production-ready until the same behavior suite passes
-against a deterministic test driver and RocksDB:
-
-- application records and journal commit atomically;
-- prepare failure leaves neither data nor journal changes;
-- process termination at every commit boundary recovers deterministically;
-- insert/replace/erase revert and reapply round-trip byte-identically;
-- ObjectDB secondary indexes survive revert/reapply;
-- BlobDB retain/release and garbage collection remain correct;
-- stale-parent and wrong-head operations are rejected;
-- journal corruption and unsupported versions fail closed;
-- pruning cannot remove the active head or required blob content;
-- a multi-batch migration resumes from its last durable checkpoint;
-- irreversible migrations cannot be invoked through a rollback path.
-
-## Open Questions
-
-- Should mutation capture be implemented by DB Core directly or by a required
-  driver transaction capability?
-- What is the minimal backend-neutral representation of column-family identity?
-- Should revision identity be opaque bytes, a digest, or a typed application
-  value encoded into bytes?
-- How should large before-images be bounded, compressed or externalized?
-- How are journal schema upgrades performed without making the journal unable to
-  restore older records?
-- Which retention policies belong in the generic library and which must be
-  supplied by applications?
-- Does a migration runner need online dual-layout support in its first version,
-  or should v1 require maintenance mode?
-
-These questions must be resolved from concrete donor behavior and failure tests,
-not from API naming preferences alone.
+These questions remain migration work. They must not reopen the accepted
+savepoint or revision ownership boundaries.
