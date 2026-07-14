@@ -190,6 +190,21 @@ struct application_shell::impl {
       return std::make_unique<forge::asio::compute::pool>(*options);
    }
 
+   boost::asio::awaitable<void> stop_execution() {
+      auto failure = std::exception_ptr{};
+      if (compute_pool != nullptr) {
+         try {
+            co_await compute_pool->shutdown();
+         } catch (...) {
+            failure = std::current_exception();
+         }
+      }
+      scheduler.stop();
+      if (failure) {
+         std::rethrow_exception(failure);
+      }
+   }
+
    void require_created(const char* operation) const {
       if (state != application_state::created) {
          throw std::logic_error{std::string{"application shell cannot "} + operation + " after initialize"};
@@ -343,10 +358,7 @@ boost::asio::awaitable<void> application_shell::initialize() {
       impl_->diagnostics.set_application_state(lifecycle_state::failed, "initialize", failure_message);
       publish_application_event(impl_->events, event_severity::error, impl_->options.name, "failed",
                                 failure_message);
-      impl_->scheduler.stop();
-      if (impl_->compute_pool != nullptr) {
-         co_await impl_->compute_pool->shutdown();
-      }
+      co_await impl_->stop_execution();
       std::rethrow_exception(failure);
    }
 }
@@ -403,10 +415,7 @@ boost::asio::awaitable<void> application_shell::shutdown() {
    impl_->diagnostics.set_application_state(lifecycle_state::stopped, "shutdown");
    impl_->signals.application_stopped(application_signal{.name = impl_->options.name});
    publish_application_event(impl_->events, event_severity::info, impl_->options.name, "stopped");
-   impl_->scheduler.stop();
-   if (impl_->compute_pool != nullptr) {
-      co_await impl_->compute_pool->shutdown();
-   }
+   co_await impl_->stop_execution();
 }
 
 void application_shell::request_stop() noexcept {

@@ -393,9 +393,10 @@ auto app = std::move(builder).build();
 `application_context`, `plugin_context` and `application_shell` expose
 `has_compute()` and a copyable `compute()` executor. Plugins receive the
 executor; they do not own or stop worker threads. During shutdown, plugins run
-first, then the task scheduler stops, then the compute pool drains and joins,
-and only then may the Asio runtime stop. This keeps compute available for final
-plugin cleanup without detached execution.
+first, then the compute pool drains and joins while scheduler continuations can
+still run, then the task scheduler stops, and only then may the Asio runtime
+stop. This keeps compute available for final plugin cleanup without detached
+execution or a scheduler/compute shutdown deadlock.
 
 ## Daemon Runner
 

@@ -1,12 +1,24 @@
 #include <concepts>
 #include <cstdint>
 
+#include <boost/asio/awaitable.hpp>
+
 import forge.db.core.driver;
 import forge.db.object.index;
+import forge.db.object.store;
 import forge.db.object.system;
 import forge.db.revision.store;
 import forge.db.revision.transaction;
 import forge.db.revision.types;
+
+boost::asio::awaitable<void>
+join_object_revision(forge::db::object::store& objects,
+                     forge::db::revision::store& revisions,
+                     forge::db::core::transaction& active) {
+   auto object_tx = co_await objects.join(active);
+   const auto revision = co_await revisions.join(object_tx);
+   static_cast<void>(revision.id());
+}
 
 int main() {
    static_assert(std::same_as<forge::db::revision::revision_id_t, std::uint64_t>);

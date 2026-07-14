@@ -288,6 +288,9 @@ std::shared_ptr<forge::db::revision::store> revision_handle::require_store() con
 boost::asio::awaitable<forge::db::revision::scope>
 revision_handle::join(transaction& active) const {
    active.require_named_store(name());
+   if (active.object_.has_value()) {
+      co_return co_await require_store()->join(*active.object_);
+   }
    co_return co_await require_store()->join(active.db_transaction());
 }
 
@@ -295,6 +298,10 @@ boost::asio::awaitable<void>
 revision_handle::revert(transaction& active,
                         forge::db::revision::revision_id_t expected_head) const {
    active.require_named_store(name());
+   if (active.object_.has_value()) {
+      co_await require_store()->revert(*active.object_, expected_head);
+      co_return;
+   }
    co_await require_store()->revert(active.db_transaction(), expected_head);
 }
 
@@ -303,6 +310,10 @@ revision_handle::prune_through(transaction& active,
                                forge::db::revision::revision_id_t inclusive_boundary,
                                forge::db::revision::prune_options options) const {
    active.require_named_store(name());
+   if (active.object_.has_value()) {
+      co_return co_await require_store()->prune_through(
+         *active.object_, inclusive_boundary, options);
+   }
    co_return co_await require_store()->prune_through(
       active.db_transaction(), inclusive_boundary, options);
 }
