@@ -85,6 +85,18 @@ co_await tx.commit();
 Joined DB Blob transactions do not own commit/rollback. Standalone
 `blobs.begin_transaction()` remains the convenience path.
 
+If multiple components need Blob access through the same Core transaction,
+reuse the first Blob transaction instead of attaching a second participant:
+
+```cpp
+auto first = blobs.join(tx);
+auto second = blobs.join(first);
+```
+
+Both facades share the existing Blob participant and remain non-owning. Calling
+`blobs.join(tx)` again is intentionally rejected as a duplicate raw Core join;
+passing a Blob transaction from another store is rejected as well.
+
 ## Read Snapshots
 
 `forge.db.blob.snapshot` provides a read-only view over one Core snapshot:

@@ -921,6 +921,55 @@ BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_supports_distinct_store_families
    }());
 }
 
+BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_reuses_existing_store_transaction) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   auto blobs = forge::db::blob::store{driver};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto shared = co_await driver->begin_transaction();
+      auto first = blobs.join(shared);
+      auto second = blobs.join(first);
+
+      const auto kept = co_await first.put(bytes("kept"));
+      const auto point = co_await shared.create_savepoint();
+      const auto rolled_back = co_await second.put(bytes("rolled-back"));
+      co_await shared.rollback_to_savepoint(point);
+      const auto also_kept = co_await second.put(bytes("also-kept"));
+
+      BOOST_CHECK_THROW(co_await second.commit(),
+                        forge::db::blob::exceptions::unsupported_operation);
+      BOOST_CHECK_THROW(co_await second.rollback(),
+                        forge::db::blob::exceptions::unsupported_operation);
+
+      co_await shared.commit();
+      BOOST_CHECK(co_await blobs.has(kept));
+      BOOST_CHECK(!(co_await blobs.has(rolled_back)));
+      BOOST_CHECK(co_await blobs.has(also_kept));
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_rejects_foreign_store_rejoin) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   const auto config = forge::db::blob::store::config{
+      .data_family = forge::db::core::family{"blobs.shared.data"},
+      .refs_family = forge::db::core::family{"blobs.shared.refs"},
+   };
+   auto first = forge::db::blob::store{driver, config};
+   auto foreign = forge::db::blob::store{driver, config};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto shared = co_await driver->begin_transaction();
+      auto first_tx = first.join(shared);
+      BOOST_CHECK_THROW(static_cast<void>(foreign.join(first_tx)),
+                        forge::db::blob::exceptions::invalid_descriptor);
+      co_await shared.rollback();
+      co_return;
+   }());
+}
+
 BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_rejects_duplicate_store_families) {
    auto runtime = forge::asio::runtime{};
    auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());

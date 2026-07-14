@@ -63,6 +63,16 @@ transaction::impl::impl(borrowed_tag,
       refs_family{std::move(refs)},
       participant{std::make_shared<detail::transaction_participant_impl>(data_family, refs_family)} {}
 
+transaction::impl::impl(borrowed_tag,
+                        forge::db::core::transaction& active_value,
+                        forge::db::core::family data,
+                        forge::db::core::family refs,
+                        std::shared_ptr<forge::db::core::transaction_participant> participant_value)
+    : active{&active_value},
+      data_family{std::move(data)},
+      refs_family{std::move(refs)},
+      participant{std::move(participant_value)} {}
+
 forge::db::core::transaction& transaction::impl::transaction() {
    if (active == nullptr || !active->active()) {
       FORGE_THROW_EXCEPTION(exceptions::transaction_closed, "db blob transaction is closed");
@@ -90,6 +100,31 @@ transaction::transaction(forge::db::core::transaction& active,
          std::move(data_family),
          std::move(refs_family))} {
    impl_->transaction().attach_participant(impl_->participant);
+}
+
+void detail::transaction_access::bind_store(transaction& active,
+                                            std::shared_ptr<const void> identity) {
+   if (active.impl_) {
+      active.impl_->store_identity = std::move(identity);
+   }
+}
+
+bool detail::transaction_access::belongs_to(const transaction& active,
+                                            const void* identity) noexcept {
+   return active.impl_ && active.impl_->store_identity.get() == identity;
+}
+
+transaction detail::transaction_access::joined(transaction& active) {
+   auto& db = active.db_transaction();
+   auto result = transaction{};
+   result.impl_ = std::make_shared<transaction::impl>(
+      transaction::impl::borrowed_tag{},
+      db,
+      active.impl_->data_family,
+      active.impl_->refs_family,
+      active.impl_->participant);
+   result.impl_->store_identity = active.impl_->store_identity;
+   return result;
 }
 
 forge::db::core::transaction& transaction::db_transaction() const {

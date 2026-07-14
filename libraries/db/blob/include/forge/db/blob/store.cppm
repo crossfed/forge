@@ -33,6 +33,7 @@ class store {
    boost::asio::awaitable<snapshot> begin_read();
    [[nodiscard]] snapshot join(const forge::db::core::snapshot& active);
    [[nodiscard]] transaction join(forge::db::core::transaction& active);
+   [[nodiscard]] transaction join(transaction& active);
 
    template <typename SharedTransaction>
       requires requires(SharedTransaction& active) {

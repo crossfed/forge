@@ -993,10 +993,11 @@ BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_commits_object_metadata_and
 
    auto tx = forge::asio::blocking::run(runtime, handle.begin_transaction());
    auto object_tx = forge::asio::blocking::run(runtime, handle.objects().join(tx));
-   auto blob_tx = handle.blobs().join(tx);
+   auto first_blob_tx = handle.blobs().join(tx);
+   auto second_blob_tx = handle.blobs().join(tx);
 
-   auto content = forge::asio::blocking::run(runtime, blob_tx.put(bytes("shared payload")));
-   forge::asio::blocking::run(runtime, blob_tx.retain(content, forge::db::blob::owner_ref{"file:1"}));
+   auto content = forge::asio::blocking::run(runtime, first_blob_tx.put(bytes("shared payload")));
+   forge::asio::blocking::run(runtime, second_blob_tx.retain(content, forge::db::blob::owner_ref{"file:1"}));
    forge::asio::blocking::run(runtime, object_tx.insert(make_file(1, "/a.txt", content)));
    forge::asio::blocking::run(runtime, tx.commit());
 
@@ -1009,9 +1010,51 @@ BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_commits_object_metadata_and
    forge::asio::blocking::run(runtime, plugin.shutdown());
 }
 
+BOOST_AUTO_TEST_CASE(store_plugin_repeated_blob_join_reuses_revision_transaction_participant) {
+   auto runtime = forge::asio::runtime{};
+   auto scheduler = forge::asio::task::scheduler{runtime};
+   auto apis = forge::api::core::registry{};
+   auto signals = forge::app::signal_bus{};
+   auto events = forge::app::event_bus{};
+   auto plugin = store_plugin::plugin{};
+   auto driver = std::make_shared<memory_driver>();
+
+   auto document = forge::config::core::document{};
+   forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{document, "plugins.db.store"}));
+   auto provider = forge::api::core::installer{apis};
+   forge::asio::blocking::run(runtime, plugin.provide(provider));
+   auto context = forge::app::plugin_context{scheduler, apis, signals, events};
+   forge::asio::blocking::run(runtime, plugin.initialize(context));
+
+   auto options = store_plugin::store_options{};
+   options.blob = store_plugin::blob_layer_options{};
+   options.revision = store_plugin::revision_layer_options{};
+
+   auto api = apis.get<store_plugin::api>(store_plugin::api::ref());
+   forge::asio::blocking::run(runtime, api->add_store("files", driver, options));
+   forge::asio::blocking::run(runtime, plugin.after_initialize());
+   forge::asio::blocking::run(runtime, plugin.startup());
+
+   auto handle = forge::asio::blocking::run(runtime, api->store("files"));
+   auto tx = forge::asio::blocking::run(runtime, handle.begin_transaction());
+   BOOST_TEST(forge::asio::blocking::run(runtime, handle.revisions().join(tx)).id() == 1U);
+   auto first = handle.blobs().join(tx);
+   auto moved = std::move(tx);
+   auto second = handle.blobs().join(moved);
+
+   const auto content = forge::asio::blocking::run(runtime, first.put(bytes("shared participant")));
+   forge::asio::blocking::run(runtime, second.retain(content, forge::db::blob::owner_ref{"file:1"}));
+   forge::asio::blocking::run(runtime, moved.rollback());
+
+   BOOST_CHECK(!forge::asio::blocking::run(runtime, handle.blobs().has(content)));
+   BOOST_CHECK_THROW((void)handle.blobs().join(moved), store_plugin::exceptions::stopped);
+
+   forge::asio::blocking::run(runtime, plugin.shutdown());
+}
+
 BOOST_AUTO_TEST_CASE(store_plugin_unified_snapshot_preserves_object_blob_and_refs_after_collection) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto apis = forge::api::core::registry{};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
