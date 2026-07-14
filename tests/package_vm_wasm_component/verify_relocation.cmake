@@ -21,6 +21,14 @@ file(REMOVE_RECURSE "${FORGE_PACKAGE_TEST_RELOCATED_PREFIX}")
 file(COPY "${FORGE_PACKAGE_TEST_INSTALL_PREFIX}/" DESTINATION "${FORGE_PACKAGE_TEST_RELOCATED_PREFIX}")
 
 set(
+   forbidden_details
+   "${FORGE_PACKAGE_TEST_RELOCATED_PREFIX}/lib/forge/internal/vm_wasm/details"
+)
+if(EXISTS "${forbidden_details}")
+   message(FATAL_ERROR "Installed vm_wasm package exposes private details: ${forbidden_details}")
+endif()
+
+set(
    targets_file
    "${FORGE_PACKAGE_TEST_RELOCATED_PREFIX}/lib/cmake/Forge/ForgeTargets.cmake"
 )

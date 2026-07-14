@@ -37,6 +37,29 @@ env:
   HOMEBREW_NO_INSTALL_CLEANUP: "1"
 
 jobs:
+  style:
+    name: ubuntu-26.04 / clang-format 22
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format 22
+        run: sudo apt-get update && sudo apt-get install -y clang-format-22
+
+      - name: Check Forge-owned VM sources
+        shell: bash
+        run: |
+          find libraries/vm/wasm -type f \
+            \( -name '*.cppm' -o -name '*.cpp' -o -name '*.hpp' \) \
+            -print0 | xargs -0 clang-format-22 --dry-run --Werror
+          printf '%s\0' \
+            tests/vm_wasm/main.cpp \
+            tests/vm_wasm/test_prelude.hpp \
+            tests/vm_wasm/test_support.hpp \
+            tests/vm_wasm/fuzz_driver.cpp \
+            tests/package_vm_wasm_component/main.cpp \
+            | xargs -0 clang-format-22 --dry-run --Werror
+
   native:
     name: ${{ matrix.os }} / ${{ matrix.build_type }}
     runs-on: ${{ matrix.os }}
@@ -106,6 +129,51 @@ jobs:
 
       - name: Run interpreter and JIT matrix
         run: ctest --test-dir build/vm-wasm -L vm_wasm --output-on-failure
+
+  arm64-interpreter:
+    name: macos-15 / arm64 / interpreter
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install toolchain and dependencies
+        shell: bash
+        run: |
+          test "$(uname -m)" = "arm64"
+          brew install boost cmake glaze gmp libngtcp2 ninja openssl@3 llvm
+          llvm_prefix="$(brew --prefix llvm)"
+          echo "$llvm_prefix/bin" >> "$GITHUB_PATH"
+          echo "CC=$llvm_prefix/bin/clang" >> "$GITHUB_ENV"
+          echo "CXX=$llvm_prefix/bin/clang++" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+
+      - name: Configure interpreter build
+        shell: bash
+        run: |
+          cmake -S . -B build/vm-wasm-arm64 -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
+            -DFORGE_ENABLE_MODULES=ON \
+            -DFORGE_ENABLE_ROCKSDB=OFF \
+            -DFORGE_ENABLE_TUI=OFF \
+            -DFORGE_VM_WASM_TEST_INTERPRETER_ONLY=ON \
+            -DBUILD_TESTING=ON
+
+      - name: Build interpreter tests
+        run: >-
+          cmake --build build/vm-wasm-arm64 --target
+          test_forge_vm_wasm_unit
+          test_forge_vm_wasm_internal
+          test_forge_vm_wasm_spec
+          test_forge_vm_wasm_spec_generator_mapping
+          -j 2
+
+      - name: Run interpreter suite
+        run: ctest --test-dir build/vm-wasm-arm64 -L vm_wasm --output-on-failure
 
   sanitizer:
     name: ubuntu-26.04 / interpreter / ASan+UBSan

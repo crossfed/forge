@@ -20,6 +20,7 @@ CONDITIONAL_START = re.compile(r"^\s*#\s*(?:if|ifdef|ifndef)\b")
 CONDITIONAL_BRANCH = re.compile(r"^\s*#\s*(?:elif|else)\b")
 CONDITIONAL_END = re.compile(r"^\s*#\s*endif\b")
 PRIVATE_DECLARATION = re.compile(r"^(?:class|struct|enum(?:\s+class)?)\s+([A-Za-z_][A-Za-z0-9_:]*)")
+VM_WASM_EXPORT = re.compile(r"\bFORGE_VM_WASM_EXPORT\b")
 
 
 def source_files(root: Path, roots: tuple[str, ...]) -> list[Path]:
@@ -117,6 +118,59 @@ def check_pairing(root: Path, errors: list[str]) -> None:
          )
 
 
+def check_macro_only_header(root: Path, path: Path, errors: list[str]) -> None:
+   text = re.sub(r"/\*.*?\*/", "", path.read_text(errors="ignore"), flags=re.DOTALL)
+   in_macro = False
+
+   for line_number, line in enumerate(text.splitlines(), 1):
+      stripped = re.sub(r"//.*$", "", line).strip()
+      if in_macro:
+         in_macro = line.rstrip().endswith("\\")
+         continue
+      if not stripped:
+         continue
+      if stripped.startswith("#"):
+         if re.match(r"#\s*define\b", stripped):
+            in_macro = line.rstrip().endswith("\\")
+         continue
+      errors.append(
+         f"{path.relative_to(root)}:{line_number}: macro-only public header contains a C++ declaration"
+      )
+
+
+def check_vm_wasm_boundaries(root: Path, errors: list[str]) -> None:
+   component = root / "libraries" / "vm" / "wasm"
+   if not component.exists():
+      return
+
+   details = component / "details"
+   if details.exists():
+      errors.append(f"{details.relative_to(root)}: vm_wasm must not install or compile private source headers")
+
+   include = component / "include" / "forge" / "vm" / "wasm"
+   allowed_headers = {"host_function.hpp", "opcode_macros.hpp"}
+   headers = {path.name for path in include.glob("*.hpp")}
+   unexpected = headers - allowed_headers
+   if unexpected:
+      errors.append(f"{include.relative_to(root)}: unexpected public headers: {', '.join(sorted(unexpected))}")
+
+   for name in sorted(allowed_headers):
+      path = include / name
+      if not path.exists():
+         errors.append(f"{path.relative_to(root)}: required macro-only public header is missing")
+         continue
+      check_macro_only_header(root, path, errors)
+
+   for path in sorted(include.glob("*.cppm")):
+      relative = path.relative_to(root)
+      for line_number, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
+         included = INCLUDE.match(line)
+         if included and (".hxx" in included.group(1) or "details/" in included.group(1)):
+            errors.append(f"{relative}:{line_number}: public VM module includes a private source header")
+         if VM_WASM_EXPORT.search(line):
+            errors.append(f"{relative}:{line_number}: FORGE_VM_WASM_EXPORT is forbidden")
+
+
 def check_plugin_impl_ownership(root: Path, errors: list[str]) -> None:
    for path in sorted((root / "plugins").rglob("details/plugin_impl.hxx")):
       for line_number, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
@@ -202,6 +256,7 @@ def main() -> int:
    check_layout(root, errors)
    check_aggregates(root, errors)
    check_pairing(root, errors)
+   check_vm_wasm_boundaries(root, errors)
    check_plugin_impl_ownership(root, errors)
    check_modules(root, files, errors)
 
