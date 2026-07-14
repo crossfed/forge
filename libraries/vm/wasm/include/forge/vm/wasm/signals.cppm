@@ -93,6 +93,8 @@ template <typename F, typename E>
    setup_signal_handler();
    sigjmp_buf dest;
    sigjmp_buf* volatile old_signal_handler = nullptr;
+   const auto old_code_memory_range = code_memory_range;
+   const auto old_memory_range = memory_range;
    code_memory_range = code_allocator ? code_allocator->get_code_span() : std::span<std::byte>{};
    memory_range = mem_allocator ? mem_allocator->get_span() : std::span<std::byte>{};
    int sig;
@@ -116,13 +118,19 @@ template <typename F, typename E>
          f();
          pthread_sigmask(SIG_SETMASK, &old_sigmask, nullptr);
          std::atomic_store(&signal_dest, old_signal_handler);
+         code_memory_range = old_code_memory_range;
+         memory_range = old_memory_range;
       } catch (...) {
          pthread_sigmask(SIG_SETMASK, &old_sigmask, nullptr);
          std::atomic_store(&signal_dest, old_signal_handler);
+         code_memory_range = old_code_memory_range;
+         memory_range = old_memory_range;
          throw;
       }
    } else {
       std::atomic_store(&signal_dest, old_signal_handler);
+      code_memory_range = old_code_memory_range;
+      memory_range = old_memory_range;
       if (sig == -1) {
          std::exception_ptr exception = std::move(saved_exception);
          saved_exception = nullptr;

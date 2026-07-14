@@ -162,6 +162,16 @@ TEST_CASE("vector to string sizes its destination", "[vector_to_string]") {
    BOOST_TEST(wasm::vector_to_string(input) == "wasm");
 }
 
+TEST_CASE("managed vectors grow from zero capacity", "[managed_vector]") {
+   auto allocator = wasm::growable_allocator{64};
+   auto values = wasm::managed_vector<std::uint32_t, wasm::growable_allocator>{allocator};
+
+   values.push_back(7U);
+
+   BOOST_TEST(values.size() == 1U);
+   BOOST_TEST(values[0] == 7U);
+}
+
 TEST_CASE("alternate stack allocation reports mapping failure", "[stack_allocator]") {
    constexpr auto impossible_size = std::numeric_limits<std::size_t>::max() / 2;
 

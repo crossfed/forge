@@ -25,12 +25,13 @@ if(FORGE_VM_WASM_TEST_INTERPRETER_ONLY)
    target_compile_definitions(test_forge_vm_wasm_unit PRIVATE FORGE_VM_WASM_TEST_INTERPRETER_ONLY=1)
 endif()
 target_link_libraries(test_forge_vm_wasm_unit PRIVATE forge_vm_wasm Boost::included_unit_test_framework)
-add_test(NAME test_forge_vm_wasm_unit COMMAND test_forge_vm_wasm_unit)
+add_test(NAME test_forge_vm_wasm_unit COMMAND test_forge_vm_wasm_unit --log_level=test_suite)
 set_tests_properties(test_forge_vm_wasm_unit PROPERTIES LABELS vm_wasm)
 
 add_executable(
    test_forge_vm_wasm_internal
    main.cpp
+   signals_regression_tests.cpp
    ${FORGE_VM_WASM_DONOR_INTERNAL_SOURCES}
 )
 target_include_directories(

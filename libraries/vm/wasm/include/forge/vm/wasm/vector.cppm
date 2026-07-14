@@ -34,13 +34,13 @@ template <typename T, typename Allocator> class vector {
    constexpr inline void push_back(U&& val) {
       // if the vector is unbounded don't assert
       if (_index >= _size)
-         resize(_size * 2);
+         resize(std::max<std::size_t>(1, _size * 2));
       _data[_index++] = std::forward<U>(val);
    }
    constexpr inline void emplace_back(T&& val) {
       // if the vector is unbounded don't assert
       if (_index >= _size)
-         resize(_size * 2);
+         resize(std::max<std::size_t>(1, _size * 2));
       _data[_index++] = std::move(val);
    }
 

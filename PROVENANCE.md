@@ -43,7 +43,9 @@ host just like JIT. Hosted `execute_all` calls pass that host through the same
 pointer contract as individual calls. These changes harden invalid input and
 allocation-failure paths. Empty profile maps return the unknown-address
 sentinel, and interpreter-only test lanes do not instantiate JIT regressions.
-The unmodified donor test bodies remain the compatibility oracle.
+Zero-capacity managed vectors grow before their first write, and nested signal
+scopes restore the outer memory ranges. The unmodified donor test bodies remain
+the compatibility oracle.
 
 The initial standalone import (`02ef01e Initial standalone storlane-fc import`)
 contained FC-style code under `include/fc` and `src`. That import carried the
