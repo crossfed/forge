@@ -27,6 +27,7 @@ enum class mutation_policy : std::uint8_t {
    reversible,
    excluded,
    forbidden,
+   forbidden_when_captured,
 };
 
 struct record_address {

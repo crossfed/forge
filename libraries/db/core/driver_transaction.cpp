@@ -168,13 +168,16 @@ transaction::mutate(family column_family, record_key key, std::optional<std::vec
 
    const auto kind = after.has_value() ? mutation_kind::put : mutation_kind::erase;
    auto policy = mutation_policy::reversible;
+   auto forbidden = false;
+   auto forbidden_when_captured = false;
    auto capture = std::vector<std::shared_ptr<transaction_participant>>{};
    for (const auto& participant : impl_->participants) {
       const auto classified = participant->classify(column_family, key, kind);
       if (classified == mutation_policy::forbidden) {
-         policy = mutation_policy::forbidden;
-      } else if (classified == mutation_policy::excluded &&
-                 policy != mutation_policy::forbidden) {
+         forbidden = true;
+      } else if (classified == mutation_policy::forbidden_when_captured) {
+         forbidden_when_captured = true;
+      } else if (classified == mutation_policy::excluded) {
          policy = mutation_policy::excluded;
       }
       if (participant->captures_mutations()) {
@@ -182,8 +185,12 @@ transaction::mutate(family column_family, record_key key, std::optional<std::vec
       }
    }
 
-   if (policy == mutation_policy::forbidden && !capture.empty()) {
+   if (forbidden) {
       FORGE_THROW_EXCEPTION(exceptions::mutation_forbidden, "db record mutation is forbidden in this transaction");
+   }
+   if (forbidden_when_captured && !capture.empty()) {
+      FORGE_THROW_EXCEPTION(exceptions::mutation_forbidden,
+                            "db record mutation is forbidden while mutation capture is active");
    }
 
    const auto mutation = record_mutation{
