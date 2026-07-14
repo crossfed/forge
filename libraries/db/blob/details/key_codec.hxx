@@ -77,6 +77,24 @@ inline forge::db::core::record_key ref_prefix(std::string_view algorithm, std::s
    return forge::db::core::record_key{std::move(key)};
 }
 
+inline forge::db::core::record_key retention_barrier_prefix(std::string_view algorithm,
+                                                            std::span<const std::byte> digest) {
+   auto key = ref_prefix(algorithm, digest).bytes();
+   key.front() = static_cast<std::byte>(0x30U);
+   return forge::db::core::record_key{std::move(key)};
+}
+
+inline std::optional<forge::db::core::record_key>
+retention_barrier_key(const forge::db::core::record_key& owner_key, std::span<const std::byte> token) {
+   if (owner_key.empty() || owner_key.bytes().front() != static_cast<std::byte>(0x20U) || token.empty()) {
+      return std::nullopt;
+   }
+   auto key = owner_key.bytes();
+   key.front() = static_cast<std::byte>(0x30U);
+   key.insert(key.end(), token.begin(), token.end());
+   return forge::db::core::record_key{std::move(key)};
+}
+
 inline forge::db::core::record_key data_prefix() {
    return forge::db::core::record_key{std::vector<std::byte>{static_cast<std::byte>(0x10U)}};
 }

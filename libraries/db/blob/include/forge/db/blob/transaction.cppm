@@ -147,6 +147,8 @@ class transaction {
                                                 std::uint64_t size,
                                                 owner_ref owner);
    boost::asio::awaitable<std::uint64_t> ref_count_encoded(std::string algorithm, std::vector<std::byte> digest);
+   boost::asio::awaitable<bool> has_retention_barrier_encoded(std::string algorithm,
+                                                              std::vector<std::byte> digest);
 
    struct impl;
    std::shared_ptr<impl> impl_;

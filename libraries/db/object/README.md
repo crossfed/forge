@@ -131,6 +131,12 @@ mutate the header are rejected at compile time. Bootstrap and future migration
 code use a private path that does not invoke application interceptors or
 observers.
 
+`forge.db.object.system` owns the central catalog of reserved system type IDs
+and the infrastructure-only access path used by DB family libraries. DB
+Revision uses this path for its state, entry and delta models. Those rows remain
+readable through normal Object reads and indexes but cannot be mutated through
+application write APIs.
+
 The default write policy is `single_writer`, which serializes DB Object
 mutations at the store layer. `write_policy::backend` is available for drivers
 that intentionally own write concurrency.
@@ -240,6 +246,8 @@ failed commit. Hooks are DB Object-level and do not expose backend write batches
 
 - `forge.db.object.object`: base object and descriptor mapping.
 - `forge.db.object.header`: persisted format header and its system descriptor.
+- `forge.db.object.system`: reserved system type catalog and infrastructure
+  registration/access contract.
 - `forge.db.object.index`: index declarations, views, range queries and streams.
 - `forge.db.object.cursor`: DB Object pagination validation over
   `forge.db.core.record` request types.

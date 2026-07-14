@@ -75,6 +75,25 @@ transaction::get(family column_family, std::vector<std::byte> key, read_options 
    return bytes;
 }
 
+std::optional<std::vector<std::byte>>
+transaction::get_for_update(family column_family, std::vector<std::byte> key, read_options options) {
+   ensure_active("failed to lock and get RocksDB transaction value");
+   std::string value;
+   const auto status = impl_->transaction->GetForUpdate(
+      detail::to_native_options(options),
+      impl_->store->require_handle(column_family),
+      detail::to_slice(key),
+      &value);
+   if (status.IsNotFound()) {
+      return std::nullopt;
+   }
+   detail::throw_if_error(status, "failed to lock and get RocksDB transaction value");
+   auto bytes = std::vector<std::byte>{};
+   bytes.resize(value.size());
+   std::memcpy(bytes.data(), value.data(), value.size());
+   return bytes;
+}
+
 std::vector<entry> transaction::scan(family column_family,
                                      std::vector<std::byte> prefix,
                                      read_options options) {
@@ -108,16 +127,7 @@ scan_result transaction::scan_page(family column_family, scan_request request) {
 }
 
 void transaction::lock(family column_family, std::vector<std::byte> key, read_options options) {
-   ensure_active("failed to lock RocksDB transaction key");
-   const auto status = impl_->transaction->GetForUpdate(
-      detail::to_native_options(options),
-      impl_->store->require_handle(column_family),
-      detail::to_slice(key),
-      static_cast<std::string*>(nullptr));
-   if (status.IsNotFound()) {
-      return;
-   }
-   detail::throw_if_error(status, "failed to lock RocksDB transaction key");
+   static_cast<void>(get_for_update(std::move(column_family), std::move(key), options));
 }
 
 void transaction::put(family column_family,
@@ -138,6 +148,22 @@ void transaction::erase(family column_family, std::vector<std::byte> key) {
       impl_->transaction->Delete(
          impl_->store->require_handle(column_family), detail::to_slice(key)),
       "failed to delete RocksDB transaction value");
+}
+
+void transaction::create_savepoint() {
+   ensure_active("failed to create RocksDB transaction savepoint");
+   impl_->transaction->SetSavePoint();
+}
+
+void transaction::rollback_to_savepoint() {
+   ensure_active("failed to rollback RocksDB transaction savepoint");
+   detail::throw_if_error(
+      impl_->transaction->RollbackToSavePoint(), "failed to rollback RocksDB transaction savepoint");
+}
+
+void transaction::release_savepoint() {
+   ensure_active("failed to release RocksDB transaction savepoint");
+   detail::throw_if_error(impl_->transaction->PopSavePoint(), "failed to release RocksDB transaction savepoint");
 }
 
 void transaction::commit() {

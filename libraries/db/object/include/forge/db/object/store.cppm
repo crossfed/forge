@@ -56,9 +56,14 @@ class store {
                                               options runtime);
 
    [[nodiscard]] forge::db::object::header header() const noexcept;
+   [[nodiscard]] std::shared_ptr<forge::db::core::driver> driver() const noexcept;
+   [[nodiscard]] forge::db::core::family family() const;
 
    template <application_object_model Object>
    void register_object();
+
+   template <system_object_model Object>
+   void register_system_object();
 
    void add_interceptor(std::shared_ptr<interceptor> value);
    void add_observer(std::shared_ptr<observer> value);
@@ -116,6 +121,7 @@ class store {
    friend class snapshot;
 
    void register_object_type(forge::ids::object_id type, std::type_index model);
+   void register_system_object_type(forge::ids::object_id type, std::type_index model);
    void ensure_registered_type(forge::ids::object_id type, std::type_index model) const;
 
    std::shared_ptr<impl> impl_;
@@ -124,6 +130,11 @@ class store {
 template <application_object_model Object>
 void store::register_object() {
    register_object_type(object_id_of<Object>::value, std::type_index{typeid(Object)});
+}
+
+template <system_object_model Object>
+void store::register_system_object() {
+   register_system_object_type(object_id_of<Object>::value, std::type_index{typeid(Object)});
 }
 
 template <forge::ids::typed_id_like Id>

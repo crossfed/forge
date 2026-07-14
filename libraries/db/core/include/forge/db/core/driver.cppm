@@ -4,20 +4,26 @@ module;
 #include <boost/asio/awaitable.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <vector>
 
 export module forge.db.core.driver;
 
 import forge.db.core.record;
 
+export import forge.db.core.participant;
+
 export namespace forge::db::core {
 
 struct capabilities {
    bool snapshot_reads = false;
    bool writes = true;
+   bool savepoints = false;
+   bool record_locks = false;
 };
 
 class session {
@@ -27,11 +33,16 @@ class session {
    [[nodiscard]] virtual capabilities capabilities() const noexcept = 0;
    virtual boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(family column_family,
                                                                              record_key key) = 0;
+   virtual boost::asio::awaitable<std::optional<std::vector<std::byte>>>
+   get_for_update(family column_family, record_key key);
    virtual boost::asio::awaitable<void> put(family column_family, record_key key, std::vector<std::byte> value) = 0;
    virtual boost::asio::awaitable<void> erase(family column_family, record_key key) = 0;
    virtual boost::asio::awaitable<record_page> scan_page(family column_family,
                                                          record_range range,
                                                          page_request request) = 0;
+   virtual boost::asio::awaitable<void> create_savepoint();
+   virtual boost::asio::awaitable<void> rollback_to_savepoint();
+   virtual boost::asio::awaitable<void> release_savepoint();
    virtual boost::asio::awaitable<void> commit() = 0;
    virtual boost::asio::awaitable<void> rollback() = 0;
 };
@@ -52,11 +63,21 @@ class transaction {
    transaction& operator=(transaction&&) noexcept;
 
    [[nodiscard]] bool active() const noexcept;
+   [[nodiscard]] capabilities capabilities() const noexcept;
 
    boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(family column_family, record_key key);
+   boost::asio::awaitable<std::optional<std::vector<std::byte>>>
+   get_for_update(family column_family, record_key key);
    boost::asio::awaitable<void> put(family column_family, record_key key, std::vector<std::byte> value);
    boost::asio::awaitable<void> erase(family column_family, record_key key);
    boost::asio::awaitable<record_page> scan_page(family column_family, record_range range, page_request request);
+
+   void attach_participant(std::shared_ptr<transaction_participant> participant);
+   [[nodiscard]] bool has_participant(std::string_view name) const noexcept;
+
+   boost::asio::awaitable<savepoint_id_t> create_savepoint();
+   boost::asio::awaitable<void> rollback_to_savepoint(savepoint_id_t savepoint);
+   boost::asio::awaitable<void> release_savepoint(savepoint_id_t savepoint);
 
    void after_commit(after_commit_fn hook);
    void after_rollback(after_rollback_fn hook);
@@ -65,6 +86,9 @@ class transaction {
    boost::asio::awaitable<void> rollback();
 
  private:
+   boost::asio::awaitable<void>
+   mutate(family column_family, record_key key, std::optional<std::vector<std::byte>> after);
+
    struct impl;
    std::shared_ptr<impl> impl_;
 };

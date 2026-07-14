@@ -75,12 +75,22 @@ class transaction_session final : public forge::db::core::session {
    explicit transaction_session(forge::rocksdb::transaction transaction) : transaction_{std::move(transaction)} {}
 
    [[nodiscard]] forge::db::core::capabilities capabilities() const noexcept override {
-      return forge::db::core::capabilities{.snapshot_reads = false, .writes = true};
+      return forge::db::core::capabilities{
+         .snapshot_reads = false,
+         .writes = true,
+         .savepoints = true,
+         .record_locks = true,
+      };
    }
 
    boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(forge::db::core::family column_family,
                                                                      forge::db::core::record_key key) override {
       co_return transaction_.get(native_family(column_family), key.bytes());
+   }
+
+   boost::asio::awaitable<std::optional<std::vector<std::byte>>>
+   get_for_update(forge::db::core::family column_family, forge::db::core::record_key key) override {
+      co_return transaction_.get_for_update(native_family(column_family), key.bytes());
    }
 
    boost::asio::awaitable<void> put(forge::db::core::family column_family,
@@ -100,6 +110,21 @@ class transaction_session final : public forge::db::core::session {
                                                             forge::db::core::page_request request) override {
       auto scan = transaction_.scan_page(native_family(column_family), make_scan_request(range, request));
       co_return to_record_page(std::move(scan), range, request);
+   }
+
+   boost::asio::awaitable<void> create_savepoint() override {
+      transaction_.create_savepoint();
+      co_return;
+   }
+
+   boost::asio::awaitable<void> rollback_to_savepoint() override {
+      transaction_.rollback_to_savepoint();
+      co_return;
+   }
+
+   boost::asio::awaitable<void> release_savepoint() override {
+      transaction_.release_savepoint();
+      co_return;
    }
 
    boost::asio::awaitable<void> commit() override {

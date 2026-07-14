@@ -77,6 +77,14 @@ forge::db::object::header store::header() const noexcept {
    return impl_->header_value;
 }
 
+std::shared_ptr<forge::db::core::driver> store::driver() const noexcept {
+   return impl_->driver;
+}
+
+forge::db::core::family store::family() const {
+   return impl_->config.family;
+}
+
 void store::add_interceptor(std::shared_ptr<interceptor> value) {
    if (value) {
       impl_->interceptors.push_back(std::move(value));
@@ -164,6 +172,17 @@ transaction store::join(forge::db::core::transaction& active) {
 
 void store::register_object_type(forge::ids::object_id type, std::type_index model) {
    impl_->register_object_type(type, model);
+}
+
+void store::register_system_object_type(forge::ids::object_id type, std::type_index model) {
+   const auto found = impl_->registered.find(type);
+   if (found == impl_->registered.end()) {
+      impl_->registered.emplace(type, model);
+      return;
+   }
+   if (found->second != model) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db object system type id is already registered");
+   }
 }
 
 void store::ensure_registered_type(forge::ids::object_id type, std::type_index model) const {

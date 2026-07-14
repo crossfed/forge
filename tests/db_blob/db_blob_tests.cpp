@@ -73,7 +73,11 @@ class memory_session final : public forge::db::core::session {
        : state_{std::move(state)}, working_{state_->records}, snapshot_{snapshot}, writable_{writable} {}
 
    [[nodiscard]] forge::db::core::capabilities capabilities() const noexcept override {
-      return forge::db::core::capabilities{.snapshot_reads = snapshot_, .writes = writable_};
+      return forge::db::core::capabilities{
+         .snapshot_reads = snapshot_,
+         .writes = writable_,
+         .savepoints = writable_,
+      };
    }
 
    boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(forge::db::core::family family,
@@ -98,6 +102,28 @@ class memory_session final : public forge::db::core::session {
 
    boost::asio::awaitable<void> erase(forge::db::core::family family, forge::db::core::record_key key) override {
       working_[family.name].erase(key);
+      co_return;
+   }
+
+   boost::asio::awaitable<void> create_savepoint() override {
+      savepoints_.push_back(working_);
+      co_return;
+   }
+
+   boost::asio::awaitable<void> rollback_to_savepoint() override {
+      if (savepoints_.empty()) {
+         throw std::logic_error{"db blob test savepoint stack is empty"};
+      }
+      working_ = std::move(savepoints_.back());
+      savepoints_.pop_back();
+      co_return;
+   }
+
+   boost::asio::awaitable<void> release_savepoint() override {
+      if (savepoints_.empty()) {
+         throw std::logic_error{"db blob test savepoint stack is empty"};
+      }
+      savepoints_.pop_back();
       co_return;
    }
 
@@ -156,6 +182,7 @@ class memory_session final : public forge::db::core::session {
  private:
    std::shared_ptr<memory_state> state_;
    family_map working_;
+   std::vector<family_map> savepoints_;
    bool snapshot_ = false;
    bool writable_ = false;
 };
@@ -743,6 +770,38 @@ BOOST_AUTO_TEST_CASE(db_blob_retain_release_and_collect_roll_back_with_transacti
       BOOST_CHECK(co_await blobs.has(kept));
       BOOST_CHECK(co_await blobs.has(free));
       BOOST_CHECK_EQUAL(co_await blobs.ref_count(kept), 0U);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_savepoint_rollback_restores_payload_refs_and_collection) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   auto blobs = forge::db::blob::store{driver};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto owner = forge::db::blob::owner_ref{"doc:savepoint"};
+      const auto kept = co_await blobs.put(bytes("kept"));
+      const auto free = co_await blobs.put(bytes("free"));
+      co_await blobs.retain(kept, owner);
+
+      auto tx = co_await blobs.begin_transaction();
+      const auto point = co_await tx.db_transaction().create_savepoint();
+      co_await tx.release(kept, owner);
+      const auto transient = co_await tx.put(bytes("transient"));
+      const auto collected = co_await tx.collect_unreferenced({.limit = 10});
+      BOOST_CHECK_EQUAL(collected.removed, 3U);
+      co_await tx.db_transaction().rollback_to_savepoint(point);
+
+      BOOST_CHECK_EQUAL(co_await tx.ref_count(kept), 1U);
+      BOOST_CHECK(co_await tx.has(kept));
+      BOOST_CHECK(co_await tx.has(free));
+      BOOST_CHECK(!(co_await tx.has(transient)));
+      co_await tx.commit();
+
+      BOOST_CHECK_EQUAL(co_await blobs.ref_count(kept), 1U);
+      BOOST_CHECK(co_await blobs.has(free));
+      BOOST_CHECK(!(co_await blobs.has(transient)));
       co_return;
    }());
 }

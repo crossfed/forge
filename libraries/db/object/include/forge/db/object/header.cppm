@@ -12,8 +12,8 @@ import forge.db.object.object;
 
 export namespace forge::db::object {
 
-struct header : system_object<header, 0> {
-   using base_type = system_object<header, 0>;
+struct header : system_object<header, system::type_id::header> {
+   using base_type = system_object<header, system::type_id::header>;
 
    static constexpr std::uint32_t current_version = 1;
    static constexpr std::uint32_t minimum_version = 1;

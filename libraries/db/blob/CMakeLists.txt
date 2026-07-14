@@ -2,6 +2,7 @@ add_library(
    forge_db_blob STATIC
    store.cpp
    transaction.cpp
+   transaction_participant_impl.cpp
 )
 forge_target_modules_at(forge_db_blob db/blob)
 

@@ -10,6 +10,7 @@ module;
 #include <map>
 #include <memory>
 #include <optional>
+#include <string_view>
 #include <typeindex>
 #include <utility>
 #include <vector>
@@ -20,44 +21,9 @@ import forge.db.core.exceptions;
 import forge.db.object.exceptions;
 
 #include "details/transaction_impl.hxx"
+#include "details/transaction_participant_impl.hxx"
 
 namespace forge::db::object {
-
-transaction::impl::rollback_state::rollback_state(transaction::seal_allocations_fn seal,
-                                                  transaction::release_fn release) noexcept
-    : seal_allocations{std::move(seal)}, release_writer{std::move(release)} {}
-
-void transaction::impl::rollback_state::release() noexcept {
-   if (release_writer) {
-      release_writer();
-      release_writer = {};
-   }
-}
-
-void transaction::impl::rollback_state::remember_allocation(forge::ids::object_id type, std::uint64_t next_instance) {
-   type.instance = 0;
-   auto& existing = allocation_seals[type];
-   existing = std::max(existing, next_instance);
-}
-
-void transaction::impl::rollback_state::clear_allocations() noexcept {
-   allocation_seals.clear();
-}
-
-boost::asio::awaitable<void> transaction::impl::rollback_state::after_rollback() {
-   auto seals = std::move(allocation_seals);
-   allocation_seals.clear();
-   try {
-      if (seal_allocations && !seals.empty()) {
-         co_await seal_allocations(std::move(seals));
-      }
-   } catch (...) {
-      release();
-      throw;
-   }
-   release();
-   co_return;
-}
 
 transaction::impl::impl(forge::db::core::transaction active_value,
                         forge::db::core::family family_value,
@@ -72,9 +38,9 @@ transaction::impl::impl(forge::db::core::transaction active_value,
       family{std::move(family_value)},
       ensure_registered{std::move(ensure)},
       allocate_id{std::move(allocate)},
-      rollback{std::make_shared<rollback_state>(std::move(seal), std::move(release))},
+      participant{std::make_shared<detail::transaction_participant_impl>(
+         family, std::move(seal), std::move(observers_value), std::move(release))},
       interceptors{std::move(interceptors_value)},
-      observers{std::move(observers_value)},
       owns_commit{true} {}
 
 transaction::impl::impl(forge::db::core::transaction& active_value,
@@ -88,45 +54,12 @@ transaction::impl::impl(forge::db::core::transaction& active_value,
       family{std::move(family_value)},
       ensure_registered{std::move(ensure)},
       allocate_id{std::move(allocate)},
-      rollback{std::make_shared<rollback_state>(std::move(seal), transaction::release_fn{})},
-      interceptors{std::move(interceptors_value)},
-      observers{std::move(observers_value)} {}
-
-void transaction::impl::release() noexcept {
-   if (rollback) {
-      rollback->release();
-   }
-}
+      participant{std::make_shared<detail::transaction_participant_impl>(
+         family, std::move(seal), std::move(observers_value), transaction::release_fn{})},
+      interceptors{std::move(interceptors_value)} {}
 
 void transaction::impl::remember_allocation(forge::ids::object_id type, std::uint64_t next_instance) {
-   if (rollback) {
-      rollback->remember_allocation(type, next_instance);
-   }
-}
-
-boost::asio::awaitable<void> transaction::impl::after_rollback() {
-   finalized = true;
-   changes.mutations.clear();
-   if (rollback) {
-      co_await rollback->after_rollback();
-   }
-   co_return;
-}
-
-boost::asio::awaitable<void> transaction::impl::after_commit() {
-   finalized = true;
-   auto committed_changes = std::move(changes);
-   if (rollback) {
-      rollback->clear_allocations();
-   }
-   release();
-
-   if (!committed_changes.empty()) {
-      for (const auto& hook : observers) {
-         co_await hook->after_commit(committed_changes);
-      }
-   }
-   co_return;
+   participant->remember_allocation(type, next_instance);
 }
 
 transaction::transaction(forge::db::core::transaction&& active,
@@ -180,20 +113,14 @@ transaction::transaction(forge::db::core::transaction&& active,
          std::move(interceptors),
          std::move(observers),
          std::move(release))} {
-   auto weak_state = std::weak_ptr<impl>{impl_};
-   db_transaction().after_commit([weak_state]() mutable -> boost::asio::awaitable<void> {
-      if (auto state = weak_state.lock()) {
-         co_await state->after_commit();
-      }
+   db_transaction().attach_participant(impl_->participant);
+   auto participant = impl_->participant;
+   db_transaction().after_commit([participant]() mutable -> boost::asio::awaitable<void> {
+      co_await participant->after_commit();
       co_return;
    });
-   auto rollback_state = impl_->rollback;
-   db_transaction().after_rollback([weak_state, rollback_state]() mutable -> boost::asio::awaitable<void> {
-      if (auto state = weak_state.lock()) {
-         co_await state->after_rollback();
-      } else if (rollback_state) {
-         co_await rollback_state->after_rollback();
-      }
+   db_transaction().after_rollback([participant]() mutable -> boost::asio::awaitable<void> {
+      co_await participant->after_rollback();
       co_return;
    });
 }
@@ -244,13 +171,14 @@ transaction::transaction(forge::db::core::transaction& active,
          std::move(seal),
          std::move(interceptors),
          std::move(observers))} {
-   auto state = impl_;
-   db_transaction().after_commit([state]() mutable -> boost::asio::awaitable<void> {
-      co_await state->after_commit();
+   db_transaction().attach_participant(impl_->participant);
+   auto participant = impl_->participant;
+   db_transaction().after_commit([participant]() mutable -> boost::asio::awaitable<void> {
+      co_await participant->after_commit();
       co_return;
    });
-   db_transaction().after_rollback([state]() mutable -> boost::asio::awaitable<void> {
-      co_await state->after_rollback();
+   db_transaction().after_rollback([participant]() mutable -> boost::asio::awaitable<void> {
+      co_await participant->after_rollback();
       co_return;
    });
 }
@@ -273,7 +201,7 @@ forge::db::core::transaction& transaction::db_transaction() const {
 }
 
 forge::db::core::transaction& transaction::active_transaction() const {
-   if (!impl_ || !impl_->active || !impl_->active->active() || impl_->finalized) {
+   if (!impl_ || !impl_->active || !impl_->active->active() || impl_->participant->finalized()) {
       FORGE_THROW_EXCEPTION(exceptions::transaction_closed, "db object transaction is closed");
    }
    return *impl_->active;
@@ -283,7 +211,7 @@ change_set& transaction::changes() const {
    if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::transaction_closed, "db object transaction is closed");
    }
-   return impl_->changes;
+   return impl_->participant->changes();
 }
 
 void transaction::ensure_registered_type(forge::ids::object_id type, std::type_index model) const {
@@ -329,7 +257,7 @@ boost::asio::awaitable<forge::db::core::record_page> transaction::scan_records(f
 }
 
 boost::asio::awaitable<void> transaction::commit() {
-   if (!impl_ || impl_->finalized) {
+   if (!impl_ || impl_->participant->finalized()) {
       co_return;
    }
    if (!impl_->owns_commit) {
@@ -340,7 +268,7 @@ boost::asio::awaitable<void> transaction::commit() {
 }
 
 boost::asio::awaitable<void> transaction::rollback() {
-   if (!impl_ || impl_->finalized) {
+   if (!impl_ || impl_->participant->finalized()) {
       co_return;
    }
    if (!impl_->owns_commit) {
