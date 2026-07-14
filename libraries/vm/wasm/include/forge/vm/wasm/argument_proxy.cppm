@@ -112,7 +112,10 @@ template <typename T, std::size_t LegacyAlign> struct argument_proxy<span<T>, Le
 
  private:
    inline static constexpr bool is_aligned(void* ptr) {
-      return reinterpret_cast<std::uintptr_t>(ptr) % LegacyAlign == 0;
+      if constexpr (LegacyAlign == 0)
+         return false;
+      else
+         return reinterpret_cast<std::uintptr_t>(ptr) % LegacyAlign == 0;
    }
    void* original_ptr;
    std::unique_ptr<std::remove_cv_t<T>[]> copy = nullptr;

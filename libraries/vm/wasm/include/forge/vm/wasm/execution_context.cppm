@@ -918,7 +918,7 @@ template <typename Host> class execution_context : public execution_context_base
 
  private:
    template <typename... Args> void push_args(Args&&... args) {
-      auto tc = detail::type_converter_t<Host>{_host, get_interface()};
+      auto tc = detail::type_converter_t<Host>{_state.host, get_interface()};
       (void)tc;
       (..., push_operand(detail::resolve_result(tc, std::forward<Args>(args))));
    }
@@ -1015,6 +1015,5 @@ template <typename Host> class execution_context : public execution_context_base
    uint32_t _last_op_index = 0;
    call_stack _as = {_base_allocator};
    opcode _halt;
-   host_type* _host = nullptr;
 };
 } // namespace forge::vm::wasm

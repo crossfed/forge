@@ -1,5 +1,6 @@
 #include "test_prelude.hpp"
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -25,6 +26,44 @@ struct empty_span_host {
 
    bool called = false;
 };
+
+struct conversion_host {
+   std::uint32_t offset = 0;
+};
+
+struct converted_argument {
+   std::uint32_t value = 0;
+};
+
+struct active_host_converter : wasm::type_converter<conversion_host> {
+   using type_converter::to_wasm;
+   using type_converter::type_converter;
+
+   std::uint32_t to_wasm(converted_argument value) {
+      return this->host ? value.value + this->get_host().offset : 0;
+   }
+};
+
+using conversion_functions =
+    wasm::registered_host_functions<conversion_host, wasm::execution_interface, active_host_converter>;
+
+template <typename Implementation> void check_active_host_conversion() {
+   auto code = wasm::wasm_code{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,             // header
+                               0x01, 0x06, 0x01, 0x60, 0x01, 0x7f, 0x01, 0x7f,             // function type
+                               0x03, 0x02, 0x01, 0x00,                                     // function
+                               0x07, 0x08, 0x01, 0x04, 0x65, 0x63, 0x68, 0x6f, 0x00, 0x00, // export echo
+                               0x0a, 0x06, 0x01, 0x04, 0x00, 0x20, 0x00, 0x0b};            // return argument
+   using runtime = wasm::backend<conversion_functions, Implementation>;
+   auto host = conversion_host{7};
+   auto memory = wasm::wasm_allocator{};
+   {
+      auto instance = runtime{code, host, &memory};
+      const auto result = instance.call_with_return(host, "env", "echo", converted_argument{5});
+
+      BOOST_TEST(result->to_ui32() == 12U);
+   }
+   memory.free();
+}
 
 template <typename Implementation> void check_oversized_memory_grow() {
    auto code = wasm::wasm_code{
@@ -61,6 +100,17 @@ TEST_CASE("function type equality includes non-void result types", "[func_type]"
    const auto rhs = wasm::func_type{wasm::func, std::move(rhs_parameters), 1, wasm::i64};
 
    BOOST_TEST(static_cast<bool>(lhs != rhs));
+}
+
+TEST_CASE("default span proxies copy and write back without an alignment divisor", "[argument_proxy]") {
+   auto values = std::array<std::uint32_t, 2>{1, 2};
+   {
+      auto proxy = wasm::argument_proxy<wasm::span<std::uint32_t>>{values.data(), values.size()};
+      BOOST_TEST(proxy.data() != values.data());
+      proxy[0] = 9;
+   }
+
+   BOOST_TEST(values[0] == 9U);
 }
 
 TEST_CASE("function type equality ignores absent result types", "[func_type]") {
@@ -134,6 +184,10 @@ TEST_CASE("memory grow treats its operand as an unsigned page count", "[executio
    check_oversized_memory_grow<wasm::interpreter>();
 }
 
+TEST_CASE("interpreter argument conversion receives the active host", "[execution_context]") {
+   check_active_host_conversion<wasm::interpreter>();
+}
+
 #if defined(__x86_64__)
 TEST_CASE("jit reports a missing export before function type lookup", "[execution_context]") {
    auto code = wasm::wasm_code{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00};
@@ -145,5 +199,9 @@ TEST_CASE("jit reports a missing export before function type lookup", "[executio
 
 TEST_CASE("jit memory grow treats its operand as an unsigned page count", "[execution_context]") {
    check_oversized_memory_grow<wasm::jit>();
+}
+
+TEST_CASE("jit argument conversion receives the active host", "[execution_context]") {
+   check_active_host_conversion<wasm::jit>();
 }
 #endif
