@@ -262,7 +262,7 @@ class backend {
    }
 
    inline backend& initialize(host_t* host = nullptr) {
-      if (memory_alloc) {
+      if (memory_alloc || !ctx->has_linear_memory()) {
          ctx->reset();
          ctx->execute_start(host, interpret_visitor(*ctx));
       }

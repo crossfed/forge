@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -18,6 +19,11 @@ import forge.vm.wasm.vector;
 #define FORGE_VM_WASM_TEST_FILE port_regression_tests
 
 namespace wasm = forge::vm::wasm;
+
+static_assert(!std::is_copy_constructible_v<wasm::wasm_allocator>);
+static_assert(!std::is_copy_assignable_v<wasm::wasm_allocator>);
+static_assert(!std::is_move_constructible_v<wasm::wasm_allocator>);
+static_assert(!std::is_move_assignable_v<wasm::wasm_allocator>);
 
 namespace {
 struct empty_span_host {
@@ -102,6 +108,25 @@ template <typename Implementation> void check_oversized_memory_grow() {
       BOOST_TEST(size->to_ui32() == 1U);
    }
    memory.free();
+}
+
+template <typename Implementation> void check_start_without_memory() {
+   auto code = wasm::wasm_code{
+       0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,                         // header
+       0x01, 0x08, 0x02, 0x60, 0x00, 0x00, 0x60, 0x00, 0x01, 0x7f,             // function types
+       0x03, 0x03, 0x02, 0x00, 0x01,                                           // start and getter functions
+       0x06, 0x06, 0x01, 0x7f, 0x01, 0x41, 0x00, 0x0b,                         // mutable i32 global
+       0x07, 0x07, 0x01, 0x03, 0x67, 0x65, 0x74, 0x00, 0x01,                   // export get
+       0x08, 0x01, 0x00,                                                       // start function 0
+       0x0a, 0x0d, 0x02, 0x06, 0x00, 0x41, 0x07, 0x24, 0x00, 0x0b, 0x04, 0x00, // set global to 7
+       0x23, 0x00, 0x0b                                                        // return global
+   };
+   using runtime = wasm::backend<std::nullptr_t, Implementation>;
+   auto instance = runtime{code, static_cast<wasm::wasm_allocator*>(nullptr)};
+
+   const auto result = instance.call_with_return("env", "get");
+   BOOST_REQUIRE(result.has_value());
+   BOOST_TEST(result->to_ui32() == 7U);
 }
 } // namespace
 
@@ -270,6 +295,10 @@ TEST_CASE("interpreter execute all supplies the active host", "[backend]") {
    check_execute_all_with_host<wasm::interpreter>();
 }
 
+TEST_CASE("interpreter executes start functions without linear memory", "[backend]") {
+   check_start_without_memory<wasm::interpreter>();
+}
+
 #if FORGE_VM_WASM_HAS_JIT && !defined(FORGE_VM_WASM_TEST_INTERPRETER_ONLY)
 TEST_CASE("jit reports a missing export before function type lookup", "[execution_context]") {
    auto code = wasm::wasm_code{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00};
@@ -289,5 +318,9 @@ TEST_CASE("jit argument conversion receives the active host", "[execution_contex
 
 TEST_CASE("jit execute all supplies the active host", "[backend]") {
    check_execute_all_with_host<wasm::jit>();
+}
+
+TEST_CASE("jit executes start functions without linear memory", "[backend]") {
+   check_start_without_memory<wasm::jit>();
 }
 #endif

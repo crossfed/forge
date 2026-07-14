@@ -464,6 +464,11 @@ class wasm_allocator {
    int32_t page = 0;
 
  public:
+   wasm_allocator(const wasm_allocator&) = delete;
+   wasm_allocator& operator=(const wasm_allocator&) = delete;
+   wasm_allocator(wasm_allocator&&) = delete;
+   wasm_allocator& operator=(wasm_allocator&&) = delete;
+
    template <typename T> void alloc(size_t size = 1 /*in pages*/) {
       if (size == 0)
          return;

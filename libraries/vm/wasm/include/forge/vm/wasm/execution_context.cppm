@@ -93,6 +93,14 @@ template <typename Derived, typename Host, bool IsJit> class execution_context_b
       }
    }
 
+   inline bool has_linear_memory() const {
+      if constexpr (IsJit) {
+         return _mod->jit_mod->memories.size() != 0;
+      } else {
+         return _mod->memories.size() != 0;
+      }
+   }
+
    template <typename Module> inline void initialize_globals_impl(const Module& mod) {
       detail::check<exceptions::memory>((_globals.empty()), "initialize_globals called on non-empty _globals");
       _globals.reserve(mod.globals.size());
@@ -172,13 +180,18 @@ template <typename Derived, typename Host, bool IsJit> class execution_context_b
       // greater than initial_stack_size
       _os.reset_capacity();
 
-      _linear_memory = _wasm_alloc->get_base_ptr<char>();
       if (mod.memories.size()) {
+         detail::check<exceptions::allocation>((_wasm_alloc != nullptr), "linear memory requires an allocator");
+         _linear_memory = _wasm_alloc->get_base_ptr<char>();
          detail::check<exceptions::allocation>((mod.memories[0].limits.initial <= _max_pages),
                                                "Cannot allocate initial linear memory.");
          _wasm_alloc->reset(mod.memories[0].limits.initial);
-      } else
+      } else if (_wasm_alloc) {
+         _linear_memory = _wasm_alloc->get_base_ptr<char>();
          _wasm_alloc->reset();
+      } else {
+         _linear_memory = nullptr;
+      }
 
       for (uint32_t i = 0; i < mod.data.size(); i++) {
          const auto& data_seg = mod.data[i];
