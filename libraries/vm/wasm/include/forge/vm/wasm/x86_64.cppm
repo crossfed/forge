@@ -2226,10 +2226,10 @@ template <typename Context> class machine_code_writer {
    }
 
    void emit_check_call_depth() {
-      // decl %ebx
-      emit_bytes(0xff, 0xcb);
-      // jz stack_overflow
-      emit_bytes(0x0f, 0x84);
+      // subl $1, %ebx
+      emit_bytes(0x83, 0xeb, 0x01);
+      // jbe stack_overflow: reject both zero and the existing depth boundary.
+      emit_bytes(0x0f, 0x86);
       fix_branch(emit_branch_target32(), stack_overflow_handler);
    }
    void emit_check_call_depth_end() {

@@ -42,6 +42,10 @@ struct converted_argument {
    std::uint32_t value = 0;
 };
 
+struct zero_call_depth_options {
+   std::uint32_t max_call_depth = 0;
+};
+
 struct active_host_converter : wasm::type_converter<conversion_host> {
    using type_converter::to_wasm;
    using type_converter::type_converter;
@@ -70,6 +74,20 @@ template <typename Implementation> void check_active_host_conversion() {
       BOOST_TEST(result->to_ui32() == 12U);
    }
    memory.free();
+}
+
+template <typename Implementation, typename Exception> void check_zero_call_depth() {
+   auto code = wasm::wasm_code{
+       0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,       // header
+       0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f,             // () -> i32
+       0x03, 0x02, 0x01, 0x00,                               // one function
+       0x07, 0x07, 0x01, 0x03, 0x72, 0x75, 0x6e, 0x00, 0x00, // export run
+       0x0a, 0x06, 0x01, 0x04, 0x00, 0x41, 0x2a, 0x0b        // return 42
+   };
+   using runtime = wasm::backend<std::nullptr_t, Implementation, zero_call_depth_options>;
+   auto instance = runtime{code, static_cast<wasm::wasm_allocator*>(nullptr), zero_call_depth_options{}};
+
+   BOOST_CHECK_THROW(instance.call_with_return("env", "run"), Exception);
 }
 
 template <typename Implementation> void check_execute_all_with_host() {
@@ -374,6 +392,10 @@ TEST_CASE("shared modules accept non-owning execution contexts", "[backend]") {
    memory.free();
 }
 
+TEST_CASE("interpreter rejects zero call depth", "[execution_context]") {
+   check_zero_call_depth<wasm::interpreter, wasm::exceptions::vector_out_of_bounds>();
+}
+
 #if FORGE_VM_WASM_HAS_JIT && !defined(FORGE_VM_WASM_TEST_INTERPRETER_ONLY)
 TEST_CASE("jit reports a missing export before function type lookup", "[execution_context]") {
    auto code = wasm::wasm_code{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00};
@@ -397,5 +419,9 @@ TEST_CASE("jit execute all supplies the active host", "[backend]") {
 
 TEST_CASE("jit executes start functions without linear memory", "[backend]") {
    check_start_without_memory<wasm::jit>();
+}
+
+TEST_CASE("jit rejects zero call depth", "[execution_context]") {
+   check_zero_call_depth<wasm::jit, wasm::exceptions::interpreter>();
 }
 #endif
