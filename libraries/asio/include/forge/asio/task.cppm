@@ -137,6 +137,8 @@ class scheduler {
    [[nodiscard]] metrics snapshot() const;
    [[nodiscard]] runtime& runtime_context() noexcept;
 
+   void request_stop();
+   boost::asio::awaitable<void> shutdown();
    void stop();
 
  private:

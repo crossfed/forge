@@ -324,8 +324,8 @@ The external transaction remains the atomic owner:
 ```cpp
 auto tx = co_await driver->begin_transaction();
 
-auto revision_tx = co_await revisions.join(tx);
 auto object_tx = co_await objects.join(tx);
+auto revision_tx = co_await revisions.join(object_tx);
 auto blob_tx = blobs.join(tx);
 
 co_await object_tx.insert(metadata);
@@ -336,8 +336,11 @@ const auto candidate = revision_tx.id();
 co_await tx.commit();
 ```
 
-`revisions.join(tx)` is asynchronous because it must read and validate persisted
-revision state before assigning the candidate ID and parent.
+`revisions.join(object_tx)` is asynchronous because it must read and validate
+persisted revision state before assigning the candidate ID and parent. The Object
+writer lane is always acquired before that row lock. The raw Core overload first
+attaches the Revision store's Object participant and is intended for Core/Blob-only
+work; callers that mutate objects join Object first and pass that facade.
 
 The returned revision transaction is a non-owning facade:
 

@@ -15,9 +15,12 @@
 #include <boost/test/unit_test.hpp>
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
+#include <boost/asio/use_future.hpp>
 
 import forge.asio.blocking;
 import forge.asio.runtime;
@@ -432,6 +435,109 @@ BOOST_AUTO_TEST_CASE(task_stop_cancels_pending_and_waits_for_active_awaitable_ta
    wait_task(runtime, active);
    BOOST_CHECK_THROW(wait_task(runtime, pending), forge::asio::exceptions::canceled);
    BOOST_CHECK(scheduler.snapshot().stopped);
+}
+
+BOOST_AUTO_TEST_CASE(task_async_shutdown_does_not_block_single_runtime_worker) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto scheduler = scheduler_type{runtime, scheduler_type::options{
+      .max_blocking_tasks = 1,
+      .max_awaitable_tasks = 1,
+      .max_pending_tasks = 4,
+   }};
+   auto started = std::atomic_bool{false};
+
+   auto active = scheduler.submit(awaitable_work{
+      .priority = priority{1},
+      .name = "active",
+      .work = [&](context&) -> boost::asio::awaitable<void> {
+         started.store(true, std::memory_order_release);
+         auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+         timer.expires_after(std::chrono::milliseconds{10});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      },
+   });
+
+   wait_until_true(started);
+   forge::asio::blocking::run(runtime, scheduler.shutdown());
+   wait_task(runtime, active);
+
+   BOOST_CHECK(scheduler.snapshot().stopped);
+   BOOST_CHECK_EQUAL(scheduler.snapshot().running_awaitable, 0U);
+}
+
+BOOST_AUTO_TEST_CASE(task_request_stop_cancels_pending_work_before_async_drain) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto scheduler = scheduler_type{runtime, scheduler_type::options{
+      .max_blocking_tasks = 1,
+      .max_awaitable_tasks = 1,
+      .max_pending_tasks = 4,
+   }};
+   auto active_started = std::atomic_bool{false};
+   auto release_active = std::atomic_bool{false};
+   auto pending_ran = std::atomic_bool{false};
+
+   auto active = scheduler.submit(awaitable_work{
+      .priority = priority{1},
+      .name = "active",
+      .work = [&](context&) -> boost::asio::awaitable<void> {
+         active_started.store(true, std::memory_order_release);
+         auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+         while (!release_active.load(std::memory_order_acquire)) {
+            timer.expires_after(std::chrono::milliseconds{1});
+            co_await timer.async_wait(boost::asio::use_awaitable);
+         }
+      },
+   });
+   wait_until_true(active_started);
+
+   auto pending = scheduler.submit_after(
+      task{
+         .priority = priority{1},
+         .name = "pending",
+         .work = [&] { pending_ran.store(true, std::memory_order_release); },
+      },
+      std::chrono::seconds{1});
+
+   scheduler.request_stop();
+   BOOST_CHECK(scheduler.snapshot().stopped);
+   BOOST_CHECK_EQUAL(scheduler.snapshot().pending, 0U);
+   BOOST_CHECK_THROW(wait_task(runtime, pending), forge::asio::exceptions::canceled);
+   BOOST_CHECK(!pending_ran.load(std::memory_order_acquire));
+
+   release_active.store(true, std::memory_order_release);
+   forge::asio::blocking::run(runtime, scheduler.shutdown());
+   wait_task(runtime, active);
+}
+
+BOOST_AUTO_TEST_CASE(task_async_shutdown_serializes_drain_waiter_on_multi_worker_runtime) {
+   for (auto iteration = 0; iteration < 64; ++iteration) {
+      auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+      auto scheduler = scheduler_type{runtime, scheduler_type::options{
+         .max_blocking_tasks = 1,
+         .max_awaitable_tasks = 1,
+         .max_pending_tasks = 4,
+      }};
+      auto started = std::atomic_bool{false};
+      auto release = std::atomic_bool{false};
+
+      auto active = scheduler.submit(awaitable_work{
+         .priority = priority{1},
+         .name = "racing-active",
+         .work = [&](context&) -> boost::asio::awaitable<void> {
+            started.store(true, std::memory_order_release);
+            while (!release.load(std::memory_order_acquire)) {
+               co_await boost::asio::post(boost::asio::use_awaitable);
+            }
+         },
+      });
+      wait_until_true(started);
+
+      auto shutdown = boost::asio::co_spawn(runtime.context(), scheduler.shutdown(), boost::asio::use_future);
+      release.store(true, std::memory_order_release);
+      shutdown.get();
+      wait_task(runtime, active);
+      BOOST_CHECK_EQUAL(scheduler.snapshot().running_awaitable, 0U);
+   }
 }
 
 BOOST_AUTO_TEST_CASE(task_supports_host_owned_awaitable_reschedule_loop) {

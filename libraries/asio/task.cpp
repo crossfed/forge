@@ -3,11 +3,13 @@ module;
 #include "details/stop_state.hxx"
 
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/dispatch.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/strand.hpp>
+#include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
 
 #include <algorithm>
@@ -31,6 +33,26 @@ import forge.asio.exceptions;
 
 namespace forge::asio::task {
 namespace {
+
+struct drain_waiter {
+   explicit drain_waiter(boost::asio::any_io_executor executor)
+       : strand{boost::asio::make_strand(std::move(executor))},
+         timer{strand, boost::asio::steady_timer::time_point::max()} {}
+
+   boost::asio::strand<boost::asio::any_io_executor> strand;
+   boost::asio::steady_timer timer;
+};
+
+void wake(const std::shared_ptr<drain_waiter>& waiter) noexcept {
+   boost::asio::dispatch(waiter->strand, [waiter] {
+      try {
+         waiter->timer.expires_at(boost::asio::steady_timer::time_point::min());
+         waiter->timer.cancel();
+      } catch (...) {
+         // Completion and shutdown paths must stay noexcept.
+      }
+   });
+}
 
 std::exception_ptr make_error(exceptions::code code, std::string message) {
    switch (code) {
@@ -313,27 +335,30 @@ struct scheduler::impl : std::enable_shared_from_this<scheduler::impl> {
       return snapshot;
    }
 
-   void stop() {
+   void request_stop() {
       auto canceled = std::vector<std::shared_ptr<handle::state>>{};
       auto timer_to_cancel = std::shared_ptr<boost::asio::steady_timer>{};
+      auto drained = std::vector<std::shared_ptr<drain_waiter>>{};
       {
          const auto lock = std::scoped_lock{mutex};
-         if (stopped) {
-            return;
+         if (!stopped) {
+            stopped = true;
+            for (auto& task : ready_heap) {
+               canceled.push_back(task.state);
+            }
+            for (auto& task : delayed_heap) {
+               canceled.push_back(task.state);
+            }
+            ready_heap.clear();
+            delayed_heap.clear();
+            timer_to_cancel = std::move(ready_timer);
+            ready_timer_deadline = (std::chrono::steady_clock::time_point::max)();
+            current_metrics.canceled += canceled.size();
+            refresh_metrics_locked();
          }
-         stopped = true;
-         for (auto& task : ready_heap) {
-            canceled.push_back(task.state);
+         if (drained_locked()) {
+            drained.swap(drain_waiters);
          }
-         for (auto& task : delayed_heap) {
-            canceled.push_back(task.state);
-         }
-         ready_heap.clear();
-         delayed_heap.clear();
-         timer_to_cancel = std::move(ready_timer);
-         ready_timer_deadline = (std::chrono::steady_clock::time_point::max)();
-         current_metrics.canceled += canceled.size();
-         refresh_metrics_locked();
       }
 
       for (const auto& state : canceled) {
@@ -344,9 +369,48 @@ struct scheduler::impl : std::enable_shared_from_this<scheduler::impl> {
       if (timer_to_cancel != nullptr) {
          boost::asio::post(strand, [timer = std::move(timer_to_cancel)] { timer->cancel(); });
       }
+      for (const auto& waiter : drained) {
+         wake(waiter);
+      }
+      active_done.notify_all();
+   }
+
+   void stop() {
+      request_stop();
 
       auto lock = std::unique_lock{mutex};
-      active_done.wait(lock, [this] { return running_blocking_tasks == 0 && running_awaitable_tasks == 0; });
+      active_done.wait(lock, [this] { return drained_locked(); });
+   }
+
+   boost::asio::awaitable<void> shutdown() {
+      request_stop();
+      co_await wait_for_drain();
+   }
+
+   static boost::asio::awaitable<void> shutdown_owned(std::shared_ptr<impl> owner) {
+      co_await owner->shutdown();
+   }
+
+   boost::asio::awaitable<void> wait_for_drain() {
+      const auto executor = co_await boost::asio::this_coro::executor;
+      auto waiter = std::make_shared<drain_waiter>(executor);
+      {
+         const auto lock = std::scoped_lock{mutex};
+         if (drained_locked()) {
+            co_return;
+         }
+         drain_waiters.push_back(waiter);
+      }
+      auto switch_error = boost::system::error_code{};
+      co_await boost::asio::dispatch(waiter->strand,
+                                     boost::asio::redirect_error(boost::asio::use_awaitable, switch_error));
+      if (switch_error) {
+         throw exceptions::internal{"failed to arm task scheduler drain wait"};
+      }
+      auto error = boost::system::error_code{};
+      co_await waiter->timer.async_wait(
+         boost::asio::redirect_error(boost::asio::use_awaitable, error));
+      static_cast<void>(error);
    }
 
    void drain() {
@@ -422,6 +486,7 @@ struct scheduler::impl : std::enable_shared_from_this<scheduler::impl> {
 
    void finish_task_value(queued_task& task) {
       const auto completed_ok = task.state->complete_value();
+      auto drained = std::vector<std::shared_ptr<drain_waiter>>{};
 
       {
          const auto lock = std::scoped_lock{mutex};
@@ -429,14 +494,21 @@ struct scheduler::impl : std::enable_shared_from_this<scheduler::impl> {
             ++current_metrics.completed;
          }
          complete_active_task_locked(task);
+         if (drained_locked()) {
+            drained.swap(drain_waiters);
+         }
       }
 
       active_done.notify_all();
+      for (const auto& waiter : drained) {
+         wake(waiter);
+      }
       schedule_drain();
    }
 
    void finish_task_exception(queued_task& task, std::exception_ptr error) {
       const auto completed_error = task.state->complete_exception(std::move(error));
+      auto drained = std::vector<std::shared_ptr<drain_waiter>>{};
 
       {
          const auto lock = std::scoped_lock{mutex};
@@ -448,9 +520,15 @@ struct scheduler::impl : std::enable_shared_from_this<scheduler::impl> {
             }
          }
          complete_active_task_locked(task);
+         if (drained_locked()) {
+            drained.swap(drain_waiters);
+         }
       }
 
       active_done.notify_all();
+      for (const auto& waiter : drained) {
+         wake(waiter);
+      }
       schedule_drain();
    }
 
@@ -575,6 +653,10 @@ struct scheduler::impl : std::enable_shared_from_this<scheduler::impl> {
       return ready_heap.size() + delayed_heap.size();
    }
 
+   [[nodiscard]] bool drained_locked() const noexcept {
+      return running_blocking_tasks == 0 && running_awaitable_tasks == 0;
+   }
+
    void refresh_metrics_locked() const {
       current_metrics.pending = pending_count_locked();
       current_metrics.running_blocking = running_blocking_tasks;
@@ -590,6 +672,7 @@ struct scheduler::impl : std::enable_shared_from_this<scheduler::impl> {
    std::condition_variable active_done;
    std::vector<queued_task> ready_heap;
    std::vector<queued_task> delayed_heap;
+   std::vector<std::shared_ptr<drain_waiter>> drain_waiters;
    std::atomic_uint64_t next_task_id = 1;
    std::atomic_uint64_t next_sequence = 1;
    std::size_t running_blocking_tasks = 0;
@@ -635,6 +718,14 @@ scheduler::metrics scheduler::snapshot() const {
 
 runtime& scheduler::runtime_context() noexcept {
    return impl_->runtime_ref;
+}
+
+void scheduler::request_stop() {
+   impl_->request_stop();
+}
+
+boost::asio::awaitable<void> scheduler::shutdown() {
+   return impl::shutdown_owned(impl_);
 }
 
 void scheduler::stop() {

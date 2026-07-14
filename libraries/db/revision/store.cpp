@@ -9,6 +9,7 @@ module;
 module forge.db.revision.store;
 
 import forge.db.core.record;
+import forge.db.object.system;
 
 #include "details/store_impl.hxx"
 
@@ -26,7 +27,19 @@ store::open(std::shared_ptr<forge::db::core::driver> driver,
 }
 
 boost::asio::awaitable<scope> store::join(forge::db::core::transaction& active) {
+   impl_->require_joinable(active);
+   if (!forge::db::object::system::access::joined(impl_->objects, active)) {
+      auto objects = co_await impl_->objects.join(active);
+      static_cast<void>(objects);
+   }
    co_return scope{co_await impl_->join(active)};
+}
+
+boost::asio::awaitable<scope> store::join(forge::db::object::transaction& active) {
+   impl_->require_joinable(active.db_transaction());
+   auto objects = co_await impl_->objects.join(active);
+   static_cast<void>(objects);
+   co_return scope{co_await impl_->join(active.db_transaction())};
 }
 
 boost::asio::awaitable<transaction> store::begin_transaction() {
@@ -50,14 +63,43 @@ boost::asio::awaitable<transaction> store::begin_transaction() {
 
 boost::asio::awaitable<void>
 store::revert(forge::db::core::transaction& active, revision_id_t expected_head) {
+   impl_->require_control(active);
+   if (!forge::db::object::system::access::joined(impl_->objects, active)) {
+      auto objects = co_await impl_->objects.join(active);
+      static_cast<void>(objects);
+   }
    co_await impl_->revert(active, expected_head);
+}
+
+boost::asio::awaitable<void>
+store::revert(forge::db::object::transaction& active, revision_id_t expected_head) {
+   impl_->require_control(active.db_transaction());
+   auto objects = co_await impl_->objects.join(active);
+   static_cast<void>(objects);
+   co_await impl_->revert(active.db_transaction(), expected_head);
 }
 
 boost::asio::awaitable<prune_result>
 store::prune_through(forge::db::core::transaction& active,
                      revision_id_t inclusive_boundary,
                      prune_options options) {
+   impl_->require_control(active);
+   if (!forge::db::object::system::access::joined(impl_->objects, active)) {
+      auto objects = co_await impl_->objects.join(active);
+      static_cast<void>(objects);
+   }
    co_return co_await impl_->prune_through(active, inclusive_boundary, options);
+}
+
+boost::asio::awaitable<prune_result>
+store::prune_through(forge::db::object::transaction& active,
+                     revision_id_t inclusive_boundary,
+                     prune_options options) {
+   impl_->require_control(active.db_transaction());
+   auto objects = co_await impl_->objects.join(active);
+   static_cast<void>(objects);
+   co_return co_await impl_->prune_through(
+      active.db_transaction(), inclusive_boundary, options);
 }
 
 } // namespace forge::db::revision

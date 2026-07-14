@@ -68,9 +68,10 @@ The lifecycle order is fixed:
 8. plugins start;
 9. `request_stop()` is issued synchronously;
 10. plugins shut down in reverse order.
-11. the task scheduler stops;
-12. the optional compute pool drains and joins;
-13. the Asio runtime stops.
+11. task scheduler admission stops and queued work is canceled;
+12. the optional compute pool drains while already-running scheduler continuations remain runnable;
+13. the task scheduler asynchronously drains;
+14. the Asio runtime stops.
 
 All heavy lifecycle methods return `boost::asio::awaitable<void>`. `request_stop`
 is intentionally synchronous/noexcept: it signals intent, it does not perform

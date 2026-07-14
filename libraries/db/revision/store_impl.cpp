@@ -177,6 +177,8 @@ boost::asio::awaitable<void> store::impl::initialize() {
    auto active = co_await driver->begin_transaction();
    auto error = std::exception_ptr{};
    try {
+      auto object_scope = co_await objects.join(active);
+      static_cast<void>(object_scope);
       if (!active.capabilities().record_locks) {
          FORGE_THROW_EXCEPTION(exceptions::unsupported_operation,
                                "db revision requires backend record locks");
@@ -204,14 +206,22 @@ boost::asio::awaitable<void> store::impl::initialize() {
 
 boost::asio::awaitable<revision_id_t>
 store::impl::join(forge::db::core::transaction& active) {
-   if (active.has_participant("forge.db.revision")) {
-      FORGE_THROW_EXCEPTION(exceptions::unsupported_operation,
-                            "db transaction already has a revision scope");
-   }
+   require_joinable(active);
    auto current = co_await lock_state(active, family);
    auto participant = std::make_shared<detail::transaction_impl>(family, std::move(current));
    active.attach_participant(participant);
    co_return participant->id();
+}
+
+void store::impl::require_joinable(const forge::db::core::transaction& active) const {
+   if (active.has_participant("forge.db.revision")) {
+      FORGE_THROW_EXCEPTION(exceptions::unsupported_operation,
+                            "db transaction already has a revision scope");
+   }
+}
+
+void store::impl::require_control(const forge::db::core::transaction& active) const {
+   require_control_transaction(active);
 }
 
 boost::asio::awaitable<void>

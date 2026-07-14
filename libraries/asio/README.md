@@ -409,9 +409,13 @@ threads that sleep and poll shared state.
 
 ### Shut Down Deterministically
 
-Call `stop()` when the owning service is stopping. Pending work is canceled,
-running work is allowed to finish through its normal function body, and handles
-can still be awaited by tests.
+Coroutine owners call `shutdown()` when the service is stopping. Pending work
+is canceled, running work is allowed to finish through its normal function
+body, and the wait does not block the Asio worker needed by active awaitables.
+Owners that must stop admission before draining another executor call
+`request_stop()` first and await `shutdown()` after that executor has drained.
+The synchronous `stop()` is reserved for host-side/destructor boundaries where
+another runtime worker can still make progress.
 
 ```cpp
 boost::asio::awaitable<void> stop_with_pending_work(forge::asio::task::scheduler& scheduler) {
@@ -419,7 +423,7 @@ boost::asio::awaitable<void> stop_with_pending_work(forge::asio::task::scheduler
       {.priority = forge::asio::task::priority{0}, .name = "slow-retry", .work = [] { retry(); }},
       std::chrono::minutes{1});
 
-   scheduler.stop();
+   co_await scheduler.shutdown();
    co_await pending.wait();
 
    auto metrics = scheduler.snapshot();
@@ -435,14 +439,18 @@ boost::asio::awaitable<void> stop_with_pending_work(forge::asio::task::scheduler
 `scheduler::options::max_pending_tasks` is a correctness knob. Saturated
 queues reject work instead of growing without bound. Blocking and awaitable
 budgets are separate, so a daemon can prevent blocking pool exhaustion without
-accidentally throttling coroutine progress. `stop()` cancels pending work and
-waits for both blocking and awaitable running counts to reach zero.
+accidentally throttling coroutine progress. `request_stop()` rejects new work
+and cancels queued work without waiting. `shutdown()` performs the same stop
+request idempotently and asynchronously waits for both blocking and awaitable
+running counts to reach zero. `stop()` provides the equivalent blocking
+host-side boundary.
 
 `compute::pool::request_stop()` rejects waiting/new submissions, cancels pending
 jobs and requests cooperative stop from running jobs. `shutdown()` awaits every
 running callable, runs worker stop hooks and joins the underlying
-`boost::asio::thread_pool`. The App owner stops plugins first, then the task
-scheduler, then compute, and finally the Asio runtime.
+`boost::asio::thread_pool`. The App owner stops plugins first, requests task
+scheduler stop, drains compute while already-running scheduler continuations
+can finish, then drains the scheduler and finally stops the Asio runtime.
 
 ## Runtime Risks And Anti-Patterns
 

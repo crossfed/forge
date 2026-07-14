@@ -36,6 +36,7 @@ import forge.db.core.exceptions;
 import forge.db.core.record;
 import forge.db.object.store;
 import forge.db.object.system;
+import forge.db.object.transaction;
 import forge.db.object.hooks;
 import forge.db.object.index;
 import forge.db.object.object;
@@ -136,6 +137,7 @@ class memory_session final : public forge::db::core::session {
             if (!state_->record_locked) {
                state_->record_locked = true;
                record_lock_owned_ = true;
+               working_ = state_->records;
             } else {
                state_->lock_waiters.push_back(waiter);
             }
@@ -490,19 +492,15 @@ BOOST_AUTO_TEST_CASE(db_revision_serializes_concurrent_candidates_and_rechecks_l
          boost::asio::detached);
 
       auto wait = boost::asio::steady_timer{executor};
-      auto queued = false;
-      for (auto attempt = 0; attempt < 200 && !queued; ++attempt) {
-         {
-            auto lock = std::scoped_lock{state->mutex};
-            queued = !state->lock_waiters.empty();
-         }
-         if (!queued) {
-            wait.expires_after(std::chrono::milliseconds{1});
-            co_await wait.async_wait(boost::asio::use_awaitable);
-         }
+      for (auto attempt = 0; attempt < 50; ++attempt) {
+         wait.expires_after(std::chrono::milliseconds{1});
+         co_await wait.async_wait(boost::asio::use_awaitable);
       }
-      BOOST_REQUIRE(queued);
       BOOST_CHECK(!second_done.load(std::memory_order_acquire));
+      {
+         const auto lock = std::scoped_lock{state->mutex};
+         BOOST_CHECK(state->lock_waiters.empty());
+      }
 
       co_await first.commit();
 
@@ -517,6 +515,107 @@ BOOST_AUTO_TEST_CASE(db_revision_serializes_concurrent_candidates_and_rechecks_l
          std::rethrow_exception(second_error);
       }
       BOOST_CHECK_EQUAL(second_id, 2U);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_revision_join_reserves_object_writer_lane_before_locking_state) {
+   auto runtime = forge::asio::runtime{};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto env = co_await open_environment();
+      auto first = co_await env.driver->begin_transaction();
+      const auto revision = co_await env.revisions.join(first);
+      BOOST_CHECK_EQUAL(revision.id(), 1U);
+      BOOST_CHECK_THROW(co_await env.revisions.join(first),
+                        forge::db::revision::exceptions::unsupported_operation);
+
+      auto second = co_await env.driver->begin_transaction();
+      auto second_objects = std::optional<forge::db::object::transaction>{};
+      auto second_error = std::exception_ptr{};
+      auto second_joined = std::atomic_bool{false};
+      const auto executor = co_await boost::asio::this_coro::executor;
+      boost::asio::co_spawn(
+         executor,
+         [&]() -> boost::asio::awaitable<void> {
+            try {
+               second_objects.emplace(co_await env.objects.join(second));
+            } catch (...) {
+               second_error = std::current_exception();
+            }
+            second_joined.store(true, std::memory_order_release);
+            co_return;
+         },
+         boost::asio::detached);
+
+      auto timer = boost::asio::steady_timer{executor};
+      for (auto attempt = 0;
+           attempt < 50 && !second_joined.load(std::memory_order_acquire);
+           ++attempt) {
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+      const auto joined_before_revision_closed =
+         second_joined.load(std::memory_order_acquire);
+
+      co_await first.rollback();
+      for (auto attempt = 0;
+           attempt < 500 && !second_joined.load(std::memory_order_acquire);
+           ++attempt) {
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+      BOOST_REQUIRE(second_joined.load(std::memory_order_acquire));
+      if (second_error) {
+         std::rethrow_exception(second_error);
+      }
+      BOOST_REQUIRE(second_objects.has_value());
+      co_await second.rollback();
+
+      BOOST_CHECK(!joined_before_revision_closed);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_revision_core_join_reuses_existing_object_writer_lane) {
+   auto runtime = forge::asio::runtime{};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto env = co_await open_environment();
+      env.objects.register_object<db_revision_tests::account_object>();
+      auto active = co_await env.driver->begin_transaction();
+      auto objects = co_await env.objects.join(active);
+      const auto revision = co_await env.revisions.join(active);
+
+      BOOST_CHECK_EQUAL(revision.id(), 1U);
+      const auto created = co_await objects.create<db_revision_tests::account>(
+         [](db_revision_tests::account& value) { value.name = "joined-first"; });
+      co_await active.commit();
+
+      const auto stored = co_await env.objects.get(created.id);
+      BOOST_CHECK_EQUAL(stored.name, "joined-first");
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_revision_core_join_does_not_reuse_non_object_family_owner) {
+   auto runtime = forge::asio::runtime{};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto env = co_await open_environment();
+      auto blobs = forge::db::blob::store{
+         env.driver,
+         forge::db::blob::store::config{
+            .data_family = env.objects.family(),
+            .refs_family = forge::db::core::family{"blob.refs"},
+         }};
+
+      auto active = co_await env.driver->begin_transaction();
+      auto blob_tx = blobs.join(active);
+      static_cast<void>(blob_tx);
+      BOOST_CHECK_THROW(co_await env.revisions.join(active),
+                        forge::db::core::exceptions::participant_conflict);
+      co_await active.rollback();
       co_return;
    }());
 }
@@ -776,8 +875,8 @@ BOOST_AUTO_TEST_CASE(db_revision_coexists_with_independent_object_and_blob_parti
       auto blobs = forge::db::blob::store{env.driver};
 
       auto active = co_await env.driver->begin_transaction();
-      auto revision = co_await env.revisions.join(active);
       auto objects = co_await env.objects.join(active);
+      auto revision = co_await env.revisions.join(objects);
       auto blob_tx = blobs.join(active);
 
       const auto created = co_await objects.create<db_revision_tests::account>(
@@ -847,12 +946,13 @@ BOOST_AUTO_TEST_CASE(db_revision_reverts_generated_object_without_reusing_id_or_
       auto observer = std::make_shared<db_revision_tests::counting_observer>();
       env.objects.add_observer(observer);
 
-      auto revision = co_await env.revisions.begin_transaction();
-      auto objects = co_await env.objects.join(revision.db_transaction());
+      auto active = co_await env.driver->begin_transaction();
+      auto objects = co_await env.objects.join(active);
+      auto revision = co_await env.revisions.join(objects);
       const auto created = co_await objects.create<db_revision_tests::account>(
          [](db_revision_tests::account& value) { value.name = "alice"; });
       BOOST_CHECK_EQUAL(created.id.instance, 0U);
-      co_await revision.commit();
+      co_await active.commit();
 
       BOOST_CHECK_EQUAL(observer->calls, 1U);
       BOOST_CHECK_EQUAL(observer->mutation_count, 1U);

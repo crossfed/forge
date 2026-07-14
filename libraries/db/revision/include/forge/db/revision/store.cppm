@@ -8,6 +8,7 @@ export module forge.db.revision.store;
 
 import forge.db.core.driver;
 import forge.db.object.store;
+import forge.db.object.transaction;
 import forge.db.revision.transaction;
 import forge.db.revision.types;
 
@@ -20,13 +21,20 @@ class store {
         forge::db::object::store objects);
 
    boost::asio::awaitable<scope> join(forge::db::core::transaction& active);
+   boost::asio::awaitable<scope> join(forge::db::object::transaction& active);
    boost::asio::awaitable<transaction> begin_transaction();
 
    boost::asio::awaitable<void>
    revert(forge::db::core::transaction& active, revision_id_t expected_head);
+   boost::asio::awaitable<void>
+   revert(forge::db::object::transaction& active, revision_id_t expected_head);
 
    boost::asio::awaitable<prune_result>
    prune_through(forge::db::core::transaction& active,
+                 revision_id_t inclusive_boundary,
+                 prune_options options);
+   boost::asio::awaitable<prune_result>
+   prune_through(forge::db::object::transaction& active,
                  revision_id_t inclusive_boundary,
                  prune_options options);
 

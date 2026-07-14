@@ -537,6 +537,12 @@ struct pool_state::impl {
          }
          drain_waiters.push_back(waiter);
       }
+      auto switch_error = boost::system::error_code{};
+      co_await boost::asio::dispatch(waiter->strand,
+                                     boost::asio::redirect_error(boost::asio::use_awaitable, switch_error));
+      if (switch_error) {
+         throw exceptions::internal{"failed to arm compute pool drain wait"};
+      }
       auto error = boost::system::error_code{};
       co_await waiter->timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
       static_cast<void>(error);

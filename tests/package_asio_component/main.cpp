@@ -11,6 +11,6 @@ int main() {
    const auto result = forge::asio::blocking::run(
        runtime, compute.get_executor().execute({.name = "package-smoke"}, [] { return 42; }));
    forge::asio::blocking::run(runtime, compute.shutdown());
-   scheduler.stop();
+   forge::asio::blocking::run(runtime, scheduler.shutdown());
    return result == 42 ? 0 : 1;
 }

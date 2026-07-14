@@ -55,14 +55,19 @@ read-only Object API while application mutation APIs cannot modify them.
 
 ```cpp
 auto tx = co_await driver->begin_transaction();
-auto revision = co_await revisions.join(tx);
 auto object_tx = co_await objects.join(tx);
+auto revision = co_await revisions.join(object_tx);
 auto blob_tx = blobs.join(tx);
 
 co_await object_tx.insert(metadata);
 co_await blob_tx.retain(content, owner);
 co_await tx.commit();
 ```
+
+Revision locking follows one order everywhere: the Object writer lane is acquired
+before the persisted revision-state row lock. Pass an existing Object transaction
+when application objects participate. The raw Core overload acquires and retains
+the Object participant itself for Core/Blob-only revision work.
 
 Savepoint rollback discards the corresponding pending revision deltas. Savepoint
 release merges them into the outer revision. Generated Object IDs remain

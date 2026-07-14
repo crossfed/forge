@@ -7,12 +7,14 @@
 #include <forge/api/core/macros.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iterator>
 #include <memory>
 #include <mutex>
@@ -20,6 +22,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 import forge.app.exceptions;
@@ -1364,6 +1367,84 @@ BOOST_AUTO_TEST_CASE(application_shell_keeps_compute_available_through_plugin_sh
    BOOST_CHECK_THROW(
       forge::asio::blocking::run(app.runtime(), compute.submit({.name = "after-stop"}, [] {})),
       forge::asio::exceptions::rejected);
+}
+
+BOOST_AUTO_TEST_CASE(application_shell_stops_compute_before_waiting_for_scheduled_awaitables) {
+   auto app = forge::app::application_shell{forge::app::application_shell_options{
+      .runtime = {.worker_threads = 1, .thread_name = "shutdown-order-test"},
+      .compute = forge::asio::compute::pool::options{.worker_threads = 1},
+   }};
+   forge::asio::blocking::run(app.runtime(), app.startup());
+
+   auto compute_started = std::atomic_bool{false};
+   auto delayed_ran = std::atomic_bool{false};
+   auto scheduled = app.scheduler().submit(forge::asio::task::awaitable{
+      .priority = forge::asio::task::priority{1},
+      .name = "scheduled-compute",
+      .work = [&](forge::asio::task::context&) -> boost::asio::awaitable<void> {
+         try {
+            co_await app.compute().execute(
+               {.name = "cooperative-shutdown"},
+               [&](forge::asio::compute::context& context) {
+                  compute_started.store(true, std::memory_order_release);
+                  while (!context.stop_requested()) {
+                     std::this_thread::sleep_for(std::chrono::milliseconds{1});
+                  }
+                  std::this_thread::sleep_for(std::chrono::milliseconds{50});
+               });
+         } catch (const forge::asio::exceptions::canceled&) {
+         }
+
+         auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+         timer.expires_after(std::chrono::milliseconds{10});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      },
+   });
+   auto delayed = app.scheduler().submit_after(
+      forge::asio::task::task{
+         .priority = forge::asio::task::priority{1},
+         .name = "must-not-start-during-compute-drain",
+         .work = [&] { delayed_ran.store(true, std::memory_order_release); },
+      },
+      std::chrono::milliseconds{10});
+
+   forge::asio::blocking::run(app.runtime(), [&]() -> boost::asio::awaitable<void> {
+      auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+      for (auto attempt = 0;
+           attempt < 500 && !compute_started.load(std::memory_order_acquire);
+           ++attempt) {
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+      co_return;
+   }());
+   BOOST_REQUIRE(compute_started.load(std::memory_order_acquire));
+
+   auto shutdown = std::async(std::launch::async, [&] {
+      forge::asio::blocking::run(app.runtime(), app.shutdown());
+   });
+   const auto completed_without_fallback =
+      shutdown.wait_for(std::chrono::milliseconds{250}) == std::future_status::ready;
+   if (!completed_without_fallback) {
+      // Keep the regression finite on broken implementations: a second caller
+      // can run the continuation that the sole runtime worker is blocking.
+      const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+      while (shutdown.wait_for(std::chrono::milliseconds{0}) != std::future_status::ready &&
+             std::chrono::steady_clock::now() < deadline) {
+         if (app.runtime().context().poll_one() == 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{1});
+         }
+      }
+   }
+   BOOST_REQUIRE(shutdown.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready);
+   shutdown.get();
+
+   BOOST_CHECK(completed_without_fallback);
+   BOOST_CHECK(app.scheduler().snapshot().stopped);
+   BOOST_CHECK(!delayed_ran.load(std::memory_order_acquire));
+   BOOST_CHECK_THROW(forge::asio::blocking::run(app.runtime(), delayed.wait()),
+                     forge::asio::exceptions::canceled);
+   forge::asio::blocking::run(app.runtime(), scheduled.wait());
 }
 
 BOOST_AUTO_TEST_CASE(application_shell_initialize_failure_transitions_to_stopped) {
