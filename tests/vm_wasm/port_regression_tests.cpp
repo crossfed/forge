@@ -323,6 +323,31 @@ TEST_CASE("interpreter executes start functions without linear memory", "[backen
    check_start_without_memory<wasm::interpreter>();
 }
 
+TEST_CASE("interpreter rejects linear memory without an allocator", "[backend]") {
+   auto code = wasm::wasm_code{
+       0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,       // header
+       0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f,             // () -> i32
+       0x03, 0x02, 0x01, 0x00,                               // one function
+       0x05, 0x03, 0x01, 0x00, 0x01,                         // one-page linear memory
+       0x07, 0x07, 0x01, 0x03, 0x72, 0x75, 0x6e, 0x00, 0x00, // export run
+       0x0a, 0x06, 0x01, 0x04, 0x00, 0x41, 0x00, 0x0b        // return 0
+   };
+   using runtime = wasm::backend<std::nullptr_t, wasm::interpreter>;
+   auto instance = runtime{code, static_cast<wasm::wasm_allocator*>(nullptr)};
+
+   BOOST_CHECK_THROW(instance.initialize(), wasm::exceptions::allocation);
+   BOOST_CHECK_THROW(instance.call_with_return("env", "run"), wasm::exceptions::allocation);
+
+   auto memory = wasm::wasm_allocator{};
+   instance.set_wasm_allocator(&memory);
+   BOOST_CHECK_THROW(instance.call_with_return("env", "run"), wasm::exceptions::interpreter);
+   instance.initialize();
+   const auto result = instance.call_with_return("env", "run");
+   BOOST_REQUIRE(result.has_value());
+   BOOST_TEST(result->to_ui32() == 0u);
+   memory.free();
+}
+
 #if FORGE_VM_WASM_HAS_JIT && !defined(FORGE_VM_WASM_TEST_INTERPRETER_ONLY)
 TEST_CASE("jit reports a missing export before function type lookup", "[execution_context]") {
    auto code = wasm::wasm_code{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00};

@@ -125,7 +125,9 @@ class backend {
          if constexpr (std::is_same_v<Impl, null_backend>) {
             detail::check<exceptions::interpreter>((mod->error == nullptr), mod->error);
          } else {
-            initialize(host);
+            if (memory_alloc || !ctx->has_linear_memory()) {
+               initialize(host);
+            }
          }
       }
    }
@@ -262,10 +264,10 @@ class backend {
    }
 
    inline backend& initialize(host_t* host = nullptr) {
-      if (memory_alloc || !ctx->has_linear_memory()) {
-         ctx->reset();
-         ctx->execute_start(host, interpret_visitor(*ctx));
-      }
+      initialized = false;
+      ctx->reset();
+      ctx->execute_start(host, interpret_visitor(*ctx));
+      initialized = true;
       return *this;
    }
 
@@ -274,6 +276,7 @@ class backend {
    }
 
    template <typename... Args> inline bool call_indirect(host_t* host, uint32_t func_index, Args&&... args) {
+      require_execution_ready();
       if constexpr (wasm_debug) {
          ctx->execute_func_table(host, debug_visitor(*ctx), func_index, std::forward<Args>(args)...);
       } else {
@@ -283,6 +286,7 @@ class backend {
    }
 
    template <typename... Args> inline bool call(host_t* host, uint32_t func_index, Args&&... args) {
+      require_execution_ready();
       if constexpr (wasm_debug) {
          ctx->execute(host, debug_visitor(*ctx), func_index, std::forward<Args>(args)...);
       } else {
@@ -293,6 +297,7 @@ class backend {
 
    template <typename... Args>
    inline bool call(host_t& host, const std::string_view& mod, const std::string_view& func, Args&&... args) {
+      require_execution_ready();
       if constexpr (wasm_debug) {
          ctx->execute(&host, debug_visitor(*ctx), func, std::forward<Args>(args)...);
       } else {
@@ -303,6 +308,7 @@ class backend {
 
    template <typename... Args>
    inline bool call(const std::string_view& mod, const std::string_view& func, Args&&... args) {
+      require_execution_ready();
       if constexpr (wasm_debug) {
          ctx->execute(nullptr, debug_visitor(*ctx), func, std::forward<Args>(args)...);
       } else {
@@ -314,6 +320,7 @@ class backend {
    template <typename... Args>
    inline auto call_with_return(host_t& host, const std::string_view& mod, const std::string_view& func,
                                 Args&&... args) {
+      require_execution_ready();
       if constexpr (wasm_debug) {
          return ctx->execute(&host, debug_visitor(*ctx), func, std::forward<Args>(args)...);
       } else {
@@ -323,6 +330,7 @@ class backend {
 
    template <typename... Args>
    inline auto call_with_return(const std::string_view& mod, const std::string_view& func, Args&&... args) {
+      require_execution_ready();
       if constexpr (wasm_debug) {
          return ctx->execute(nullptr, debug_visitor(*ctx), func, std::forward<Args>(args)...);
       } else {
@@ -359,16 +367,19 @@ class backend {
    }
 
    template <typename Watchdog> inline void execute_all(Watchdog&& wd, host_t& host) {
+      require_execution_ready();
       timed_run(std::forward<Watchdog>(wd), [&]() { execute_exports(&host); });
    }
 
    template <typename Watchdog> inline void execute_all(Watchdog&& wd) {
+      require_execution_ready();
       timed_run(std::forward<Watchdog>(wd), [&]() { execute_exports(nullptr); });
    }
 
    inline void set_wasm_allocator(wasm_allocator* alloc) {
       memory_alloc = alloc;
       ctx->set_wasm_allocator(memory_alloc);
+      initialized = false;
    }
 
    inline module& get_module() {
@@ -386,6 +397,12 @@ class backend {
    }
 
  private:
+   void require_execution_ready() const {
+      detail::check<exceptions::allocation>((memory_alloc != nullptr || !ctx->has_linear_memory()),
+                                            "linear memory requires an allocator");
+      detail::check<exceptions::interpreter>(initialized, "backend is not initialized");
+   }
+
    void execute_exports(host_t* host) {
       const auto execute = [&](const auto& exports) {
          for (std::size_t index = 0; index < exports.size(); ++index) {
@@ -412,6 +429,7 @@ class backend {
    DebugInfo debug;
    maybe_unique_ptr<context_t> ctx = nullptr;
    bool mod_sharable = false; // true if mod is sharable (compiled by the backend)
+   bool initialized = false;
    uint32_t initial_max_call_depth = 0;
    uint32_t initial_max_pages = 0;
 };
