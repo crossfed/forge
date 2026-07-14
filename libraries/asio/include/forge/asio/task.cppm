@@ -90,6 +90,7 @@ class handle {
    struct state;
    std::shared_ptr<state> state_;
 
+   static boost::asio::awaitable<void> wait_owned(std::shared_ptr<state> state);
    explicit handle(std::shared_ptr<state> state);
 
    friend class scheduler;

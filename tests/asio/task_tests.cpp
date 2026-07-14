@@ -128,6 +128,22 @@ BOOST_AUTO_TEST_CASE(task_orders_by_numeric_priority_then_fifo) {
    BOOST_CHECK_EQUAL(scheduler.snapshot().completed, 4U);
 }
 
+BOOST_AUTO_TEST_CASE(task_handle_wait_owns_state_before_suspension) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto scheduler = scheduler_type{runtime};
+   auto ran = std::atomic_bool{false};
+
+   auto submitted = scheduler.submit(task{
+       .name = "owned-wait",
+       .work = [&] { ran.store(true, std::memory_order_release); },
+   });
+   auto waiting = submitted.wait();
+   submitted = handle{};
+
+   forge::asio::blocking::run(runtime, std::move(waiting));
+   BOOST_CHECK(ran.load(std::memory_order_acquire));
+}
+
 BOOST_AUTO_TEST_CASE(task_runs_delayed_tasks_when_due) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    auto scheduler = scheduler_type{runtime, scheduler_type::options{.max_blocking_tasks = 1, .max_pending_tasks = 4}};

@@ -919,8 +919,16 @@ void pool::request_stop() noexcept {
    state_->request_stop();
 }
 
+namespace {
+
+boost::asio::awaitable<void> shutdown_owned(std::shared_ptr<detail::pool_state> state) {
+   co_await state->shutdown();
+}
+
+} // namespace
+
 boost::asio::awaitable<void> pool::shutdown() {
-   co_await state_->shutdown();
+   return shutdown_owned(state_);
 }
 
 } // namespace forge::asio::compute

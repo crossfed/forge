@@ -152,17 +152,21 @@ bool handle::cancel() noexcept {
 }
 
 boost::asio::awaitable<void> handle::wait() const {
-   if (state_ == nullptr) {
+   return wait_owned(state_);
+}
+
+boost::asio::awaitable<void> handle::wait_owned(std::shared_ptr<state> state) {
+   if (state == nullptr) {
       throw exceptions::invalid_state{"task handle is empty"};
    }
 
-   while (!state_->completed.load(std::memory_order_acquire)) {
+   while (!state->completed.load(std::memory_order_acquire)) {
       auto error = boost::system::error_code{};
-      co_await state_->completion_timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
+      co_await state->completion_timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
       static_cast<void>(error);
    }
 
-   if (auto error = state_->error()) {
+   if (auto error = state->error()) {
       std::rethrow_exception(error);
    }
 }

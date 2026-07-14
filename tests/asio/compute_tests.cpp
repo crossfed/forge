@@ -3,14 +3,17 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <functional>
 #include <future>
 #include <memory>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <stop_token>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #if defined(__APPLE__) || defined(__linux__)
@@ -65,19 +68,54 @@ struct awaitable_work {
 };
 
 struct cancel_parent_on_copy {
-   cancel_parent_on_copy(std::stop_source& parent_value, std::atomic_bool& ran_value)
-       : parent{&parent_value}, ran{&ran_value} {}
+   cancel_parent_on_copy(std::function<void()> on_copy_value, std::atomic_bool& ran_value)
+       : on_copy{std::move(on_copy_value)}, ran{&ran_value} {}
 
-   cancel_parent_on_copy(const cancel_parent_on_copy& other) : parent{other.parent}, ran{other.ran} {
-      static_cast<void>(parent->request_stop());
+   cancel_parent_on_copy(const cancel_parent_on_copy& other) : on_copy{other.on_copy}, ran{other.ran} {
+      on_copy();
    }
+
+   cancel_parent_on_copy(cancel_parent_on_copy&&) noexcept = default;
 
    void operator()() const {
       ran->store(true, std::memory_order_release);
    }
 
-   std::stop_source* parent = nullptr;
+   std::function<void()> on_copy;
    std::atomic_bool* ran = nullptr;
+};
+
+struct callable_lifetime {
+   std::atomic_size_t live{0};
+   std::atomic_bool ran{false};
+};
+
+struct move_only_work {
+   move_only_work(std::shared_ptr<callable_lifetime> lifetime_value, int result_value)
+       : lifetime{std::move(lifetime_value)}, result{std::make_unique<int>(result_value)} {
+      lifetime->live.fetch_add(1, std::memory_order_relaxed);
+   }
+
+   move_only_work(const move_only_work&) = delete;
+   move_only_work& operator=(const move_only_work&) = delete;
+
+   move_only_work(move_only_work&& other) noexcept
+       : lifetime{std::move(other.lifetime)}, result{std::move(other.result)} {}
+   move_only_work& operator=(move_only_work&&) = delete;
+
+   ~move_only_work() {
+      if (lifetime != nullptr) {
+         lifetime->live.fetch_sub(1, std::memory_order_relaxed);
+      }
+   }
+
+   std::unique_ptr<int> operator()() {
+      lifetime->ran.store(true, std::memory_order_release);
+      return std::move(result);
+   }
+
+   std::shared_ptr<callable_lifetime> lifetime;
+   std::unique_ptr<int> result;
 };
 
 template <typename Work>
@@ -105,6 +143,47 @@ BOOST_AUTO_TEST_CASE(compute_execute_returns_values_and_propagates_exceptions) {
    BOOST_CHECK_EQUAL(pool.snapshot().completed, 1U);
    BOOST_CHECK_EQUAL(pool.snapshot().failed, 1U);
 
+   forge::asio::blocking::run(runtime, pool.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(compute_awaitables_own_temporary_executor_and_move_only_work) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto pool = forge::asio::compute::pool{forge::asio::compute::pool::options{.worker_threads = 1}};
+
+   auto submit_lifetime = std::make_shared<callable_lifetime>();
+   auto submission = pool.get_executor().submit({.name = "owned-submit"}, move_only_work{submit_lifetime, 41});
+   BOOST_REQUIRE_EQUAL(submit_lifetime->live.load(std::memory_order_relaxed), 1U);
+
+   auto operation = forge::asio::blocking::run(runtime, std::move(submission));
+   auto submitted_result = forge::asio::blocking::run(runtime, std::move(operation).wait());
+   BOOST_REQUIRE(submitted_result != nullptr);
+   BOOST_CHECK_EQUAL(*submitted_result, 41);
+   BOOST_CHECK(submit_lifetime->ran.load(std::memory_order_acquire));
+   BOOST_CHECK_EQUAL(submit_lifetime->live.load(std::memory_order_relaxed), 0U);
+
+   auto execute_lifetime = std::make_shared<callable_lifetime>();
+   auto execution = pool.get_executor().execute({.name = "owned-execute"}, move_only_work{execute_lifetime, 42});
+   BOOST_REQUIRE_EQUAL(execute_lifetime->live.load(std::memory_order_relaxed), 1U);
+
+   auto executed_result = forge::asio::blocking::run(runtime, std::move(execution));
+   BOOST_REQUIRE(executed_result != nullptr);
+   BOOST_CHECK_EQUAL(*executed_result, 42);
+   BOOST_CHECK(execute_lifetime->ran.load(std::memory_order_acquire));
+   BOOST_CHECK_EQUAL(execute_lifetime->live.load(std::memory_order_relaxed), 0U);
+
+   forge::asio::blocking::run(runtime, pool.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(compute_operation_wait_owns_state_before_suspension) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto pool = forge::asio::compute::pool{forge::asio::compute::pool::options{.worker_threads = 1}};
+
+   auto operation = forge::asio::blocking::run(
+       runtime, pool.get_executor().submit({.name = "owned-wait"}, [] { return 42; }));
+   auto waiting = std::move(operation).wait();
+   operation = {};
+
+   BOOST_CHECK_EQUAL(forge::asio::blocking::run(runtime, std::move(waiting)), 42);
    forge::asio::blocking::run(runtime, pool.shutdown());
 }
 
@@ -382,55 +461,52 @@ BOOST_AUTO_TEST_CASE(compute_hands_off_capacity_when_parent_cancels_after_reserv
        .max_waiting_submissions = 2,
    }};
    auto executor = pool.get_executor();
-   auto active_started = std::atomic_bool{false};
-   auto release_active = std::atomic_bool{false};
    auto canceled_ran = std::atomic_bool{false};
    auto successor_ran = std::atomic_bool{false};
-
-   auto active = forge::asio::blocking::run(runtime, executor.submit({.name = "active"}, [&] {
-      active_started.store(true, std::memory_order_release);
-      while (!release_active.load(std::memory_order_acquire)) {
-         std::this_thread::sleep_for(std::chrono::milliseconds{1});
-      }
-   }));
-   BOOST_REQUIRE(wait_for_true(active_started));
-
    auto parent = std::stop_source{};
-   auto canceling_work = cancel_parent_on_copy{parent, canceled_ran};
-   auto canceled = boost::asio::co_spawn(
-       runtime.context(),
-       executor.execute({.name = "cancel-after-reserve", .parent_stop_token = parent.get_token()}, canceling_work),
-       boost::asio::use_future);
-   BOOST_REQUIRE(wait_until([&] { return pool.snapshot().waiting == 1; }));
+   auto successor = std::optional<std::future<void>>{};
+   auto successor_waiting = std::atomic_bool{false};
+   auto canceling_work = cancel_parent_on_copy{
+       [&] {
+          successor.emplace(boost::asio::co_spawn(
+              runtime.context(),
+              executor.execute({.name = "successor"}, [&] {
+                 successor_ran.store(true, std::memory_order_release);
+              }),
+              boost::asio::use_future));
+          successor_waiting.store(wait_until([&] { return pool.snapshot().waiting == 1; }),
+                                  std::memory_order_release);
+          static_cast<void>(parent.request_stop());
+       },
+       canceled_ran};
 
-   auto successor = boost::asio::co_spawn(
-       runtime.context(),
-       executor.execute({.name = "successor"}, [&] { successor_ran.store(true, std::memory_order_release); }),
-       boost::asio::use_future);
-   BOOST_REQUIRE(wait_until([&] { return pool.snapshot().waiting == 2; }));
+   auto canceled = executor.try_submit(
+       {.name = "cancel-after-reserve", .parent_stop_token = parent.get_token()}, canceling_work);
+   BOOST_REQUIRE(canceled.has_value());
+   BOOST_REQUIRE(successor.has_value());
+   BOOST_REQUIRE(successor_waiting.load(std::memory_order_acquire));
 
-   release_active.store(true, std::memory_order_release);
-   BOOST_CHECK_THROW(static_cast<void>(canceled.get()), forge::asio::exceptions::canceled);
+   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, std::move(*canceled).wait()),
+                     forge::asio::exceptions::canceled);
    BOOST_CHECK(parent.stop_requested());
    BOOST_CHECK(!canceled_ran.load(std::memory_order_acquire));
 
-   const auto successor_ready = successor.wait_for(std::chrono::milliseconds{250}) == std::future_status::ready;
+   const auto successor_ready = successor->wait_for(std::chrono::milliseconds{250}) == std::future_status::ready;
    BOOST_CHECK(successor_ready);
    if (successor_ready) {
-      successor.get();
+      successor->get();
       BOOST_CHECK(successor_ran.load(std::memory_order_acquire));
    } else {
       pool.request_stop();
-      BOOST_CHECK_THROW(static_cast<void>(successor.get()), forge::asio::exceptions::rejected);
+      BOOST_CHECK_THROW(static_cast<void>(successor->get()), forge::asio::exceptions::rejected);
    }
 
-   forge::asio::blocking::run(runtime, std::move(active).wait());
    const auto final = pool.snapshot();
    BOOST_CHECK_EQUAL(final.waiting, 0U);
    BOOST_CHECK_EQUAL(final.running, 0U);
    if (successor_ready) {
-      BOOST_CHECK_EQUAL(final.submitted, 3U);
-      BOOST_CHECK_EQUAL(final.completed, 2U);
+      BOOST_CHECK_EQUAL(final.submitted, 2U);
+      BOOST_CHECK_EQUAL(final.completed, 1U);
       BOOST_CHECK_EQUAL(final.canceled, 1U);
    }
    forge::asio::blocking::run(runtime, pool.shutdown());

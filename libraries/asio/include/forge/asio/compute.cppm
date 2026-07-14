@@ -219,14 +219,18 @@ export template <typename T> class operation {
    }
 
    boost::asio::awaitable<T> wait() && {
-      if (state_ == nullptr) {
-         throw exceptions::invalid_state{"compute operation is empty"};
-      }
-      co_await state_->wait();
-      co_return state_->take_result();
+      return wait_owned(state_);
    }
 
  private:
+   static boost::asio::awaitable<T> wait_owned(std::shared_ptr<detail::result_state<T>> state) {
+      if (state == nullptr) {
+         throw exceptions::invalid_state{"compute operation is empty"};
+      }
+      co_await state->wait();
+      co_return state->take_result();
+   }
+
    explicit operation(std::shared_ptr<detail::result_state<T>> state) : state_{std::move(state)} {}
 
    std::shared_ptr<detail::result_state<T>> state_;
@@ -260,13 +264,17 @@ export template <> class operation<void> {
    }
 
    boost::asio::awaitable<void> wait() && {
-      if (state_ == nullptr) {
-         throw exceptions::invalid_state{"compute operation is empty"};
-      }
-      co_await state_->wait();
+      return wait_owned(state_);
    }
 
  private:
+   static boost::asio::awaitable<void> wait_owned(std::shared_ptr<detail::result_state<void>> state) {
+      if (state == nullptr) {
+         throw exceptions::invalid_state{"compute operation is empty"};
+      }
+      co_await state->wait();
+   }
+
    explicit operation(std::shared_ptr<detail::result_state<void>> state) : state_{std::move(state)} {}
 
    std::shared_ptr<detail::result_state<void>> state_;
@@ -287,8 +295,9 @@ export class executor {
    boost::asio::awaitable<operation<detail::work_result_t<std::remove_cvref_t<Work>>>> submit(task_options options,
                                                                                               Work&& work) const {
       require_valid();
-      auto reservation = co_await state_->reserve(options.parent_stop_token);
-      co_return submit_reserved(std::move(reservation), std::move(options), std::forward<Work>(work));
+      using work_type = std::remove_cvref_t<Work>;
+      auto callable = std::make_shared<work_type>(std::forward<Work>(work));
+      return submit_owned(state_, std::move(options), std::move(callable));
    }
 
    template <typename Work>
@@ -296,11 +305,13 @@ export class executor {
    std::optional<operation<detail::work_result_t<std::remove_cvref_t<Work>>>> try_submit(task_options options,
                                                                                          Work&& work) const {
       require_valid();
-      auto reservation = state_->try_reserve(options.parent_stop_token);
+      auto state = state_;
+      auto reservation = state->try_reserve(options.parent_stop_token);
       if (!reservation.has_value()) {
          return std::nullopt;
       }
-      return submit_reserved(std::move(*reservation), std::move(options), std::forward<Work>(work));
+      return submit_reserved_materialized(std::move(state), std::move(*reservation), std::move(options),
+                                          std::forward<Work>(work));
    }
 
    template <typename Work>
@@ -308,12 +319,7 @@ export class executor {
    boost::asio::awaitable<detail::work_result_t<std::remove_cvref_t<Work>>> execute(task_options options,
                                                                                     Work&& work) const {
       using result_type = detail::work_result_t<std::remove_cvref_t<Work>>;
-      auto submitted = co_await submit(std::move(options), std::forward<Work>(work));
-      if constexpr (std::is_void_v<result_type>) {
-         co_await std::move(submitted).wait();
-      } else {
-         co_return co_await std::move(submitted).wait();
-      }
+      return execute_owned<result_type>(submit(std::move(options), std::forward<Work>(work)));
    }
 
  private:
@@ -325,17 +331,60 @@ export class executor {
       }
    }
 
+   template <typename Result>
+   static boost::asio::awaitable<Result>
+   execute_owned(boost::asio::awaitable<operation<Result>> submission) {
+      auto submitted = co_await std::move(submission);
+      if constexpr (std::is_void_v<Result>) {
+         co_await std::move(submitted).wait();
+      } else {
+         co_return co_await std::move(submitted).wait();
+      }
+   }
+
    template <typename Work>
-   operation<detail::work_result_t<std::remove_cvref_t<Work>>>
-   submit_reserved(detail::reservation reservation, task_options options, Work&& work) const {
+   static boost::asio::awaitable<operation<detail::work_result_t<Work>>>
+   submit_owned(std::shared_ptr<detail::pool_state> state, task_options options, std::shared_ptr<Work> callable) {
+      auto reservation = co_await state->reserve(options.parent_stop_token);
+      co_return submit_reserved_owned(std::move(state), std::move(reservation), std::move(options),
+                                      std::move(callable));
+   }
+
+   template <typename Work>
+   static operation<detail::work_result_t<std::remove_cvref_t<Work>>>
+   submit_reserved_materialized(std::shared_ptr<detail::pool_state> state, detail::reservation reservation,
+                                task_options options, Work&& work) {
       using work_type = std::remove_cvref_t<Work>;
       using result_type = detail::work_result_t<work_type>;
 
-      auto result = std::make_shared<detail::result_state<result_type>>(state_, reservation.id());
+      auto result = std::make_shared<detail::result_state<result_type>>(state, reservation.id());
       result->link_parent(options.parent_stop_token);
       auto callable = std::make_shared<work_type>(std::forward<Work>(work));
+      return submit_linked(std::move(state), std::move(reservation), std::move(options), std::move(result),
+                           std::move(callable));
+   }
+
+   template <typename Work>
+   static operation<detail::work_result_t<Work>>
+   submit_reserved_owned(std::shared_ptr<detail::pool_state> state, detail::reservation reservation,
+                         task_options options, std::shared_ptr<Work> callable) {
+      using result_type = detail::work_result_t<Work>;
+
+      auto result = std::make_shared<detail::result_state<result_type>>(state, reservation.id());
+      result->link_parent(options.parent_stop_token);
+      return submit_linked(std::move(state), std::move(reservation), std::move(options), std::move(result),
+                           std::move(callable));
+   }
+
+   template <typename Work>
+   static operation<detail::work_result_t<Work>>
+   submit_linked(std::shared_ptr<detail::pool_state> state, detail::reservation reservation, task_options options,
+                 std::shared_ptr<detail::result_state<detail::work_result_t<Work>>> result,
+                 std::shared_ptr<Work> callable) {
+      using result_type = detail::work_result_t<Work>;
+
       auto invoke = [callable = std::move(callable), result](context& work_context) mutable {
-         if constexpr (detail::work_traits<work_type>::with_context) {
+         if constexpr (detail::work_traits<Work>::with_context) {
             if constexpr (std::is_void_v<result_type>) {
                std::invoke(*callable, work_context);
             } else {
@@ -349,7 +398,7 @@ export class executor {
             }
          }
       };
-      state_->submit(std::move(reservation), std::move(options.name), result, std::move(invoke));
+      state->submit(std::move(reservation), std::move(options.name), result, std::move(invoke));
       return operation<result_type>{std::move(result)};
    }
 
