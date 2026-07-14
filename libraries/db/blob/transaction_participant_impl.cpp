@@ -59,7 +59,7 @@ transaction_participant_impl::classify(const forge::db::core::family& family,
    const auto prefix = std::to_integer<std::uint8_t>(key.bytes().front());
    if (family.name == families_[0].name && prefix == 0x10U) {
       return kind == forge::db::core::mutation_kind::erase
-                ? forge::db::core::mutation_policy::forbidden
+                ? forge::db::core::mutation_policy::forbidden_when_captured
                 : forge::db::core::mutation_policy::excluded;
    }
    if (family.name == families_[1].name && prefix == 0x20U) {

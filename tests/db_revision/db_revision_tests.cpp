@@ -812,6 +812,32 @@ BOOST_AUTO_TEST_CASE(db_revision_rejects_blob_payload_deletion_for_any_join_orde
    }());
 }
 
+BOOST_AUTO_TEST_CASE(db_revision_rejects_blob_collection_before_scan_or_erase) {
+   auto runtime = forge::asio::runtime{};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto env = co_await open_environment();
+      auto blobs = forge::db::blob::store{env.driver};
+      const auto value = co_await blobs.put(bytes("retained"));
+      co_await blobs.retain(value, forge::db::blob::owner_ref{"doc:retained"});
+
+      auto active = co_await env.driver->begin_transaction();
+      auto blob_tx = blobs.join(active);
+      auto revision = co_await env.revisions.join(active);
+      BOOST_CHECK_EQUAL(revision.id(), 1U);
+
+      BOOST_CHECK_THROW(co_await blob_tx.collect_unreferenced({.limit = 0U}),
+                        forge::db::core::exceptions::mutation_forbidden);
+      BOOST_CHECK_THROW(co_await blob_tx.collect_unreferenced({.limit = 10U}),
+                        forge::db::core::exceptions::mutation_forbidden);
+
+      co_await active.rollback();
+      BOOST_CHECK(co_await blobs.has(value));
+      BOOST_CHECK_EQUAL(co_await blobs.ref_count(value), 1U);
+      co_return;
+   }());
+}
+
 BOOST_AUTO_TEST_CASE(db_revision_reverts_generated_object_without_reusing_id_or_refiring_observer) {
    auto runtime = forge::asio::runtime{};
 

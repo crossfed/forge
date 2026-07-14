@@ -28,6 +28,9 @@ import forge.db.core.record;
 
 namespace {
 
+static_assert(static_cast<unsigned>(forge::db::core::mutation_policy::forbidden) == 3U);
+static_assert(static_cast<unsigned>(forge::db::core::mutation_policy::forbidden_when_captured) == 4U);
+
 using record_map = std::map<forge::db::core::record_key, std::vector<std::byte>>;
 using family_map = std::map<std::string, record_map>;
 
@@ -304,6 +307,32 @@ class unclaimed_participant final : public forge::db::core::transaction_particip
    std::string name_;
 };
 
+class policy_participant final : public forge::db::core::transaction_participant {
+ public:
+   policy_participant(std::string name,
+                      forge::db::core::family protected_family,
+                      forge::db::core::mutation_policy policy)
+       : name_{std::move(name)}, protected_family_{std::move(protected_family)}, policy_{policy} {}
+
+   [[nodiscard]] std::string_view name() const noexcept override {
+      return name_;
+   }
+
+   [[nodiscard]] forge::db::core::mutation_policy
+   classify(const forge::db::core::family& family,
+            const forge::db::core::record_key&,
+            forge::db::core::mutation_kind) const noexcept override {
+      return family.name == protected_family_.name
+                ? policy_
+                : forge::db::core::mutation_policy::inherit;
+   }
+
+ private:
+   std::string name_;
+   forge::db::core::family protected_family_;
+   forge::db::core::mutation_policy policy_;
+};
+
 class memory_driver final : public forge::db::core::driver {
  public:
    explicit memory_driver(std::shared_ptr<memory_state> state) : state_{std::move(state)} {}
@@ -448,6 +477,94 @@ BOOST_AUTO_TEST_CASE(db_transaction_participant_claims_preserve_default_and_name
          tx.attach_participant(std::make_shared<unclaimed_participant>("unclaimed-first")),
          forge::db::core::exceptions::participant_conflict);
       co_await tx.rollback();
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_transaction_forbidden_policy_blocks_without_capture) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   auto driver = std::make_shared<memory_driver>(state);
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto protected_family = forge::db::core::family{"protected"};
+      const auto allowed_family = forge::db::core::family{"allowed"};
+
+      auto seed = co_await driver->begin_transaction();
+      co_await seed.put(protected_family, key("existing"), bytes("seed"));
+      co_await seed.commit();
+
+      auto tx = co_await driver->begin_transaction();
+      tx.attach_participant(std::make_shared<policy_participant>(
+         "forbidden", protected_family, forge::db::core::mutation_policy::forbidden));
+
+      BOOST_CHECK_THROW(co_await tx.put(protected_family, key("new"), bytes("blocked")),
+                        forge::db::core::exceptions::mutation_forbidden);
+      BOOST_CHECK_THROW(co_await tx.erase(protected_family, key("existing")),
+                        forge::db::core::exceptions::mutation_forbidden);
+
+      BOOST_CHECK(tx.active());
+      BOOST_CHECK(!(co_await tx.get(protected_family, key("new"))).has_value());
+      BOOST_CHECK_EQUAL(text(*(co_await tx.get(protected_family, key("existing")))), "seed");
+      co_await tx.put(allowed_family, key("continued"), bytes("yes"));
+      co_await tx.commit();
+
+      auto read = co_await driver->begin_read();
+      BOOST_CHECK(!(co_await read.get(protected_family, key("new"))).has_value());
+      BOOST_CHECK_EQUAL(text(*(co_await read.get(protected_family, key("existing")))), "seed");
+      BOOST_CHECK_EQUAL(text(*(co_await read.get(allowed_family, key("continued")))), "yes");
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_transaction_capture_forbidden_policy_only_blocks_active_capture) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   auto driver = std::make_shared<memory_driver>(state);
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto protected_family = forge::db::core::family{"protected"};
+      const auto allowed_family = forge::db::core::family{"allowed"};
+
+      auto seed = co_await driver->begin_transaction();
+      co_await seed.put(protected_family, key("erasable"), bytes("seed"));
+      co_await seed.commit();
+
+      auto uncaptured = co_await driver->begin_transaction();
+      uncaptured.attach_participant(std::make_shared<policy_participant>(
+         "capture-policy-only",
+         protected_family,
+         forge::db::core::mutation_policy::forbidden_when_captured));
+      BOOST_CHECK(!uncaptured.captures_mutations());
+      co_await uncaptured.put(protected_family, key("permitted"), bytes("outside capture"));
+      co_await uncaptured.erase(protected_family, key("erasable"));
+      co_await uncaptured.commit();
+
+      auto capturing = co_await driver->begin_transaction();
+      capturing.attach_participant(std::make_shared<policy_participant>(
+         "capture-policy",
+         protected_family,
+         forge::db::core::mutation_policy::forbidden_when_captured));
+      auto tracker = std::make_shared<tracking_participant>();
+      capturing.attach_participant(tracker);
+      BOOST_CHECK(capturing.captures_mutations());
+
+      BOOST_CHECK_THROW(co_await capturing.put(protected_family, key("blocked"), bytes("captured")),
+                        forge::db::core::exceptions::mutation_forbidden);
+      BOOST_CHECK_THROW(co_await capturing.erase(protected_family, key("permitted")),
+                        forge::db::core::exceptions::mutation_forbidden);
+      BOOST_CHECK_EQUAL(tracker->captured(), 0U);
+      BOOST_CHECK(capturing.active());
+      co_await capturing.put(allowed_family, key("continued"), bytes("yes"));
+      BOOST_CHECK_EQUAL(tracker->captured(), 1U);
+      co_await capturing.commit();
+      BOOST_CHECK(!capturing.captures_mutations());
+
+      auto read = co_await driver->begin_read();
+      BOOST_CHECK_EQUAL(text(*(co_await read.get(protected_family, key("permitted")))), "outside capture");
+      BOOST_CHECK(!(co_await read.get(protected_family, key("erasable"))).has_value());
+      BOOST_CHECK(!(co_await read.get(protected_family, key("blocked"))).has_value());
+      BOOST_CHECK_EQUAL(text(*(co_await read.get(allowed_family, key("continued")))), "yes");
       co_return;
    }());
 }

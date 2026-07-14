@@ -77,8 +77,13 @@ Higher-level DB libraries attach `transaction_participant` implementations to
 keep their in-memory state aligned with native savepoints and final
 commit/rollback. Participants are retained by the Core transaction, prepare
 before commit and classify record mutations as reversible, excluded or
-forbidden. This contract is implementer-facing; savepoints themselves do not
-create durable revisions.
+forbidden. `forbidden` always rejects the mutation, including for a standalone
+non-capturing participant. `forbidden_when_captured` rejects only while at
+least one participant captures mutations, allowing storage layers to protect
+operations that cannot be represented in a captured history. This contract is
+implementer-facing; savepoints themselves do not create durable revisions.
+Higher-level operation guards can use `transaction::captures_mutations()`
+without depending on a participant name or concrete revision implementation.
 
 Participants that own a physical record layout declare their
 `exclusive_families()`. Core rejects overlapping claims before the first
