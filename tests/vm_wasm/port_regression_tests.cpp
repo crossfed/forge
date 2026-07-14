@@ -214,6 +214,25 @@ TEST_CASE("data segments reject unsupported memory indexes", "[parser]") {
    BOOST_CHECK_THROW(parse(), wasm::exceptions::parse);
 }
 
+TEST_CASE("null backend rejects deferred instantiation errors", "[null_backend]") {
+   auto code = wasm::wasm_code{
+       0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,       // header
+       0x01, 0x04, 0x01, 0x60, 0x00, 0x00,                   // one function type
+       0x03, 0x02, 0x01, 0x00,                               // one function
+       0x04, 0x04, 0x01, 0x70, 0x00, 0x01,                   // table with one element
+       0x09, 0x07, 0x01, 0x00, 0x41, 0x01, 0x0b, 0x01, 0x00, // segment starts past the table
+       0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b                    // empty function body
+   };
+   using validator = wasm::backend<std::nullptr_t, wasm::null_backend>;
+
+   const auto validate = [&] {
+      auto instance = validator{code, static_cast<wasm::wasm_allocator*>(nullptr)};
+      static_cast<void>(instance);
+   };
+
+   BOOST_CHECK_THROW(validate(), wasm::exceptions::interpreter);
+}
+
 TEST_CASE("zero length host spans do not probe guest memory", "[execution_interface]") {
    auto code = wasm::wasm_code{
        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,                         // header

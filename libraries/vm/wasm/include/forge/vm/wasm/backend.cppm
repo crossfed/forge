@@ -122,8 +122,11 @@ class backend {
          HostFunctions::resolve(*mod);
       // FIXME: should not hard code knowledge of null_backend here
       if (ctx.owns) {
-         if constexpr (!std::is_same_v<Impl, null_backend>)
+         if constexpr (std::is_same_v<Impl, null_backend>) {
+            detail::check<exceptions::interpreter>((mod->error == nullptr), mod->error);
+         } else {
             initialize(host);
+         }
       }
    }
 
