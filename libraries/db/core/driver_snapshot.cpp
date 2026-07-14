@@ -15,7 +15,11 @@ import forge.db.core.exceptions;
 
 namespace forge::db::core {
 
-snapshot::snapshot(std::unique_ptr<session> active) : active_{std::move(active)} {
+snapshot::snapshot(std::unique_ptr<session> active)
+    : snapshot{std::move(active), {}} {}
+
+snapshot::snapshot(std::unique_ptr<session> active, std::shared_ptr<const void> origin)
+    : active_{std::move(active)}, origin_{std::move(origin)} {
    if (!active_) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db snapshot session is null");
    }
@@ -27,6 +31,14 @@ snapshot::snapshot(std::unique_ptr<session> active) : active_{std::move(active)}
 
 bool snapshot::active() const noexcept {
    return static_cast<bool>(active_);
+}
+
+bool snapshot::belongs_to(const driver& owner) const noexcept {
+   if (!origin_ || !owner.snapshot_origin_) {
+      return false;
+   }
+   return !origin_.owner_before(owner.snapshot_origin_) &&
+          !owner.snapshot_origin_.owner_before(origin_);
 }
 
 boost::asio::awaitable<std::optional<std::vector<std::byte>>> snapshot::get(family column_family, record_key key) {

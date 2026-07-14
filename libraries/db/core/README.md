@@ -36,6 +36,19 @@ capabilities:
 `transaction` owns commit/rollback and participant cleanup hooks. Higher-level
 libraries can join the same transaction and share one backend commit boundary.
 
+## Snapshot Ownership
+
+Snapshots opened by `driver::begin_read()` carry the identity of that driver.
+Higher-level stores use `snapshot::belongs_to(driver)` to reject accidental
+joins across physical databases. The compatibility constructor taking a raw
+`session` remains available, but creates an origin-less snapshot that cannot be
+joined to DB Object or DB Blob.
+
+Copies share ownership of one backend snapshot. The backend session and native
+snapshot remain alive until the last copy is destroyed. Snapshot-capable
+sessions must therefore support concurrent read operations through copies of
+the same Core snapshot; write sessions receive no new concurrency requirement.
+
 ## Savepoints And Participants
 
 Savepoints are transient LIFO boundaries inside one active transaction:

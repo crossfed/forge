@@ -1,9 +1,9 @@
 # Forge DB State Services v1
 
-Status: savepoints, durable revisions and optional DB Store integration are
-implemented. This document classifies the remaining adjacent DB mechanisms and
-keeps read, checkpoint and migration concerns from becoming an unbounded
-database framework rewrite.
+Status: savepoints, durable revisions, optional DB Store revision integration
+and the shared Object/Blob read view are implemented. This document classifies
+the remaining adjacent DB mechanisms and keeps checkpoint and migration
+concerns from becoming an unbounded database framework rewrite.
 
 Related designs:
 
@@ -31,7 +31,7 @@ failure modes and donor patterns.
 
 | Mechanism | Generic value | Immediate requirement | Recommended ownership | Current decision |
 | --- | --- | --- | --- | --- |
-| Shared read view | Consistent Object/Blob/Core reads | Strong for metadata/content runtimes; optional for many state-machine consumers | DB Core snapshot plus Object/Blob read views | Design accepted in principle, implementation separate unless branch scope remains small |
+| Shared read view | Consistent Object/Blob/Core reads | Strong for metadata/content runtimes; optional for many state-machine consumers | DB Core snapshot plus Object/Blob read views | Implemented in the DB libraries and `plugins.db.store` |
 | Physical checkpoint | Local openable backend copy | Useful for backup, recovery and rapid local bootstrap | Separate DB checkpoint capability/library | Separate design and PR |
 | Logical export/import | Portable typed state artifact | Product-dependent | Product/chain state layer over DB iteration | Not a DB Core feature |
 | Generic migration runner | Ordered resumable schema/data upgrades | Not yet proven | Future DB migration library | Deferred pending real requirements and donors |
@@ -39,21 +39,14 @@ failure modes and donor patterns.
 
 ## 1. Shared High-Level Read View
 
-### Current Surface
+### Implemented Surface
 
-`forge::db::core::driver::begin_read()` returns one backend snapshot and
-`forge::db::object::store::begin_read()` returns an Object snapshot.
+`forge::db::core::driver::begin_read()` returns one backend snapshot carrying a
+driver-origin identity. DB Object and DB Blob validate that identity before
+joining the snapshot. DB Store opens one Core snapshot and exposes both logical
+views over that same committed point.
 
-The missing composition surface is:
-
-- DB Object cannot join an externally supplied Core snapshot through `store`;
-- DB Blob has no read-only snapshot/view type;
-- DB Store plugin cannot open one snapshot and expose all configured layers over
-  it.
-
-Independent calls may therefore observe different committed points.
-
-### Candidate Library API
+### Library API
 
 ```cpp
 auto read = co_await driver->begin_read();
@@ -65,14 +58,14 @@ auto metadata = co_await object_view.get(file_id);
 auto payload = co_await blob_view.get(metadata.content);
 ```
 
-Required additions:
+Available API:
 
 ```cpp
 forge::db::object::snapshot
-forge::db::object::store::join(forge::db::core::snapshot)
+forge::db::object::store::join(const forge::db::core::snapshot&)
 
 forge::db::blob::snapshot
-forge::db::blob::store::join(forge::db::core::snapshot)
+forge::db::blob::store::join(const forge::db::core::snapshot&)
 ```
 
 The Core snapshot may be copied as a lightweight shared-session handle. Every
@@ -152,18 +145,19 @@ lifetime of a daemon or mount.
 
 ### Shared Read View In The Plugin
 
-If implemented, DB Store may add a read wrapper:
+DB Store provides a read wrapper:
 
 ```cpp
 auto read = co_await handle.begin_read();
-auto object_view = handle.objects().join(read);
-auto blob_view = handle.blobs().join(read);
+auto object_view = read.objects();
+auto blob_view = read.blobs();
 ```
 
-The wrapper owns one `forge::db::core::snapshot`. It does not own lifecycle of
-the physical store and becomes invalid after plugin close.
+The wrapper owns one `forge::db::core::snapshot`. New snapshots cannot be opened
+after plugin close, but an already opened wrapper remains usable until its last
+copy is destroyed.
 
-### Required Tests
+### Verified Behavior
 
 - Object and Blob views read from one Core snapshot;
 - a concurrent commit is invisible to both joined views;
@@ -177,11 +171,9 @@ the physical store and becomes invalid after plugin close.
 
 ### Decision
 
-The API shape is generic and useful. It should be a separate focused change from
-savepoint/revision unless implementation proves limited to thin reuse of the
-existing Core and Object snapshot paths.
-
-It is not required to validate the revision design.
+The API is implemented as a focused extension that reuses the existing Core and
+Object snapshot paths and adds a read-only Blob view. It remains independent of
+revision capture.
 
 ## 2. Durable Checkpoint, Export And Restore
 
@@ -463,12 +455,7 @@ in per transaction through `revisions().join(tx)`.
 6. Revision commit, head-only revert and bounded prune.
 7. Object ID and Blob retention correctness.
 8. DB Store optional Revision layer and named-store transaction ownership.
-
-### Separate Follow-Up
-
-1. Shared high-level read view over one Core snapshot.
-
-The read view retains its own public API, lifecycle and review boundary.
+9. Shared DB Object/Blob read view over one Core snapshot.
 
 ### Separate Future PR
 

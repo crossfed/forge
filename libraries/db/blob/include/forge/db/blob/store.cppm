@@ -11,6 +11,7 @@ module;
 export module forge.db.blob.store;
 
 import forge.db.blob.ref;
+import forge.db.blob.snapshot;
 import forge.db.blob.transaction;
 import forge.db.blob.types;
 import forge.db.core.driver;
@@ -29,6 +30,8 @@ class store {
    store(std::shared_ptr<forge::db::core::driver> driver, config settings);
 
    boost::asio::awaitable<transaction> begin_transaction();
+   boost::asio::awaitable<snapshot> begin_read();
+   [[nodiscard]] snapshot join(const forge::db::core::snapshot& active);
    [[nodiscard]] transaction join(forge::db::core::transaction& active);
 
    template <typename SharedTransaction>

@@ -45,6 +45,10 @@ class package_session final : public forge::db::core::session {
 
 int main() {
    static_assert(std::derived_from<package_session, forge::db::core::session>);
+   static_assert(requires(const forge::db::core::snapshot& view,
+                          const forge::db::core::driver& driver) {
+      { view.belongs_to(driver) } -> std::same_as<bool>;
+   });
    auto family = forge::db::core::family{"package"};
    return family.name == "package" ? 0 : 1;
 }

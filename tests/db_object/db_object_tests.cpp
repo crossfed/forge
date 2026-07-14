@@ -191,6 +191,7 @@ struct memory_state {
    mutable std::mutex mutex;
    std::map<forge::db::core::record_key, std::vector<std::byte>, byte_less> records;
    std::size_t scan_calls = 0;
+   std::size_t snapshot_calls = 0;
    std::size_t commit_calls = 0;
    std::size_t fail_commits = 0;
    std::size_t active_writes = 0;
@@ -694,6 +695,11 @@ class memory_driver : public forge::db::core::driver {
       return state_->scan_calls;
    }
 
+   [[nodiscard]] std::size_t snapshot_calls() const noexcept {
+      auto guard = std::scoped_lock{state_->mutex};
+      return state_->snapshot_calls;
+   }
+
    [[nodiscard]] std::size_t record_count() const noexcept {
       auto guard = std::scoped_lock{state_->mutex};
       return state_->records.size();
@@ -764,6 +770,10 @@ class memory_driver : public forge::db::core::driver {
    }
 
    boost::asio::awaitable<std::unique_ptr<forge::db::core::session>> open_snapshot() override {
+      {
+         auto guard = std::scoped_lock{state_->mutex};
+         ++state_->snapshot_calls;
+      }
       co_return std::make_unique<memory_snapshot_session>(state_);
    }
 
@@ -2343,6 +2353,56 @@ BOOST_AUTO_TEST_CASE(db_object_memory_snapshot_preserves_old_state_across_writes
       BOOST_CHECK_EQUAL(new_value.name, "alice-new");
       BOOST_CHECK_EQUAL(new_value.balance, 200U);
 
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_store_joins_external_snapshot_without_opening_another_view) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = co_await make_store(driver);
+      co_await store.insert(make_account(42, "alice", 100, 3));
+
+      auto core_view = co_await driver->begin_read();
+      BOOST_CHECK_EQUAL(driver->snapshot_calls(), 1U);
+      auto view = store.join(core_view);
+      BOOST_CHECK_EQUAL(driver->snapshot_calls(), 1U);
+
+      co_await store.modify(account::id_t{42}, [](account& value) {
+         value.name = "bob";
+         value.balance = 200;
+      });
+
+      const auto old_value = co_await view.get(account::id_t{42});
+      BOOST_CHECK_EQUAL(old_value.name, "alice");
+      BOOST_CHECK_EQUAL(old_value.balance, 100U);
+      const auto old_index = co_await view.index<account_object, by_name>().find(std::string{"alice"});
+      BOOST_REQUIRE(old_index.has_value());
+      BOOST_CHECK_EQUAL(old_index->id.instance, 42U);
+      BOOST_CHECK(!(co_await view.index<account_object, by_name>().find(std::string{"bob"})).has_value());
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_store_rejects_foreign_closed_and_originless_snapshots) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   auto foreign_driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto store = co_await make_store(driver);
+      auto foreign = co_await foreign_driver->begin_read();
+      BOOST_CHECK_THROW(static_cast<void>(store.join(foreign)),
+                        forge::db::object::exceptions::invalid_descriptor);
+
+      auto closed = forge::db::core::snapshot{};
+      BOOST_CHECK_THROW(static_cast<void>(store.join(closed)),
+                        forge::db::object::exceptions::transaction_closed);
+
+      auto originless = forge::db::core::snapshot{
+         std::make_unique<memory_snapshot_session>(std::make_shared<memory_state>())};
+      BOOST_CHECK_THROW(static_cast<void>(store.join(originless)),
+                        forge::db::object::exceptions::invalid_descriptor);
       co_return;
    }());
 }

@@ -19,6 +19,7 @@ export import forge.plugins.db.store.types;
 
 import forge.api.core.binding;
 import forge.db.blob.ref;
+import forge.db.blob.snapshot;
 import forge.db.blob.store;
 import forge.db.blob.transaction;
 import forge.db.blob.types;
@@ -36,6 +37,29 @@ import forge.db.revision.transaction;
 import forge.db.revision.types;
 
 export namespace forge::plugins::db::store {
+
+class snapshot {
+ public:
+   snapshot() = default;
+
+   [[nodiscard]] bool active() const noexcept;
+   [[nodiscard]] std::string name() const;
+   [[nodiscard]] forge::db::object::snapshot objects() const;
+   [[nodiscard]] forge::db::blob::snapshot blobs() const;
+
+ private:
+   snapshot(forge::db::core::snapshot active,
+            std::string store_name,
+            std::optional<forge::db::object::snapshot> objects,
+            std::optional<forge::db::blob::snapshot> blobs);
+
+   forge::db::core::snapshot active_;
+   std::string store_name_;
+   std::optional<forge::db::object::snapshot> objects_;
+   std::optional<forge::db::blob::snapshot> blobs_;
+
+   friend class store_handle_state;
+};
 
 class transaction {
  public:
@@ -76,6 +100,7 @@ class store_handle_state {
    [[nodiscard]] virtual std::shared_ptr<forge::db::blob::store> require_blobs() const = 0;
    [[nodiscard]] virtual std::shared_ptr<forge::db::revision::store> require_revisions() const;
    virtual boost::asio::awaitable<transaction> begin_transaction() const = 0;
+   virtual boost::asio::awaitable<snapshot> begin_read() const;
 };
 
 class object_handle {
@@ -206,6 +231,7 @@ class blob_handle {
    [[nodiscard]] std::string name() const;
 
    boost::asio::awaitable<forge::db::blob::transaction> begin_transaction() const;
+   boost::asio::awaitable<forge::db::blob::snapshot> begin_read() const;
    [[nodiscard]] forge::db::blob::transaction join(forge::db::core::transaction& active) const;
    [[nodiscard]] forge::db::blob::transaction join(transaction& active) const;
 
@@ -319,6 +345,7 @@ class store_handle {
    [[nodiscard]] std::string name() const;
 
    boost::asio::awaitable<transaction> begin_transaction() const;
+   boost::asio::awaitable<snapshot> begin_read() const;
 
    [[nodiscard]] object_handle objects() const;
    [[nodiscard]] blob_handle blobs() const;
@@ -351,4 +378,4 @@ class api : public forge::api::core::contract<api, forge::api::core::surface::lo
 
 namespace store_plugin_api = ::forge::plugins::db::store;
 
-FORGE_EXPORT_API(store_plugin_api::api, FORGE_API_CONTRACT("forge.plugins.db.store", 1, 1))
+FORGE_EXPORT_API(store_plugin_api::api, FORGE_API_CONTRACT("forge.plugins.db.store", 1, 2))

@@ -145,8 +145,19 @@ boost::asio::awaitable<snapshot> store::begin_read() {
    } catch (const forge::db::core::exceptions::unsupported_operation&) {
       FORGE_THROW_EXCEPTION(exceptions::unsupported_operation, "db object driver does not support snapshot reads");
    }
-   co_return snapshot{
-      std::move(active),
+   co_return join(active);
+}
+
+snapshot store::join(const forge::db::core::snapshot& active) {
+   if (!active.active()) {
+      FORGE_THROW_EXCEPTION(exceptions::transaction_closed, "db object snapshot is closed");
+   }
+   if (!active.belongs_to(*impl_->driver)) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor,
+                            "db object snapshot belongs to another driver");
+   }
+   return snapshot{
+      active,
       impl_->config.family,
       [impl = impl_](forge::ids::object_id type, std::type_index model) {
          impl->ensure_registered_type(type, model);
