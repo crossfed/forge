@@ -2,10 +2,12 @@ module;
 
 #include <atomic>
 #include <cassert>
+#include <cstddef>
 #include <exception>
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <system_error>
 #include <vector>
@@ -354,25 +356,11 @@ class backend {
    }
 
    template <typename Watchdog> inline void execute_all(Watchdog&& wd, host_t& host) {
-      timed_run(std::forward<Watchdog>(wd), [&]() {
-         for (int i = 0; i < mod->exports.size(); i++) {
-            if (mod->exports[i].kind == external_kind::Function) {
-               std::string s{(const char*)mod->exports[i].field_str.raw(), mod->exports[i].field_str.size()};
-               ctx->execute(&host, interpret_visitor(*ctx), s);
-            }
-         }
-      });
+      timed_run(std::forward<Watchdog>(wd), [&]() { execute_exports(&host); });
    }
 
    template <typename Watchdog> inline void execute_all(Watchdog&& wd) {
-      timed_run(std::forward<Watchdog>(wd), [&]() {
-         for (int i = 0; i < mod->exports.size(); i++) {
-            if (mod->exports[i].kind == external_kind::Function) {
-               std::string s{(const char*)mod->exports[i].field_str.raw(), mod->exports[i].field_str.size()};
-               ctx->execute(nullptr, interpret_visitor(*ctx), s);
-            }
-         }
-      });
+      timed_run(std::forward<Watchdog>(wd), [&]() { execute_exports(nullptr); });
    }
 
    inline void set_wasm_allocator(wasm_allocator* alloc) {
@@ -395,6 +383,27 @@ class backend {
    }
 
  private:
+   void execute_exports(host_t* host) {
+      const auto execute = [&](const auto& exports) {
+         for (std::size_t index = 0; index < exports.size(); ++index) {
+            const auto& entry = exports[index];
+            if (entry.kind == external_kind::Function) {
+               const auto name =
+                   std::string{reinterpret_cast<const char*>(entry.field_str.data()), entry.field_str.size()};
+               if constexpr (Impl::is_jit)
+                  ctx->execute(host, jit_visitor(*ctx), name);
+               else
+                  ctx->execute(host, interpret_visitor(*ctx), name);
+            }
+         }
+      };
+
+      if constexpr (Impl::is_jit)
+         execute(mod->jit_mod->exports);
+      else
+         execute(mod->exports);
+   }
+
    wasm_allocator* memory_alloc = nullptr; // non owning pointer
    std::shared_ptr<module> mod = nullptr;
    DebugInfo debug;
