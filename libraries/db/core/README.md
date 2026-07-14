@@ -61,6 +61,11 @@ before commit and classify record mutations as reversible, excluded or
 forbidden. This contract is implementer-facing; savepoints themselves do not
 create durable revisions.
 
+Participants that own a physical record layout declare their
+`exclusive_families()`. Core rejects overlapping claims before the first
+mutation or savepoint, while observer participants can keep the default empty
+claim and coexist with storage layers.
+
 ## Families
 
 `forge::db::core::family` is a logical record space inside one driver. RocksDB maps it

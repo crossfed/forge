@@ -275,6 +275,21 @@ void transaction::attach_participant(std::shared_ptr<transaction_participant> pa
       if (existing == participant || existing->name() == participant->name()) {
          FORGE_THROW_EXCEPTION(exceptions::participant_conflict, "db transaction participant is already attached");
       }
+
+      for (const auto& claimed : participant->exclusive_families()) {
+         const auto existing_claims = existing->exclusive_families();
+         const auto overlap = std::find_if(
+            existing_claims.begin(), existing_claims.end(),
+            [&claimed](const family& value) { return value.name == claimed.name; });
+         if (overlap != existing_claims.end()) {
+            FORGE_THROW_EXCEPTION(
+               exceptions::participant_conflict,
+               "db transaction family is already claimed by another participant",
+               forge::exceptions::ctx("family", claimed.name),
+               forge::exceptions::ctx("participant", participant->name()),
+               forge::exceptions::ctx("existing-participant", existing->name()));
+         }
+      }
    }
    impl_->participants.push_back(std::move(participant));
 }

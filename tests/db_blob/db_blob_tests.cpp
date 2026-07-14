@@ -864,6 +864,67 @@ BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_rejects_duplicate_store_families
    }());
 }
 
+BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_rejects_overlapping_store_families) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto expect_conflict = [&](forge::db::blob::store::config first_config,
+                                       forge::db::blob::store::config second_config)
+         -> boost::asio::awaitable<void> {
+         auto first = forge::db::blob::store{driver, std::move(first_config)};
+         auto second = forge::db::blob::store{driver, std::move(second_config)};
+         auto shared = co_await driver->begin_transaction();
+         auto first_tx = first.join(shared);
+         BOOST_CHECK_THROW(static_cast<void>(second.join(shared)),
+                           forge::db::core::exceptions::participant_conflict);
+         co_await shared.rollback();
+      };
+
+      co_await expect_conflict(
+         {.data_family = forge::db::core::family{"shared.data"},
+          .refs_family = forge::db::core::family{"first.refs"}},
+         {.data_family = forge::db::core::family{"shared.data"},
+          .refs_family = forge::db::core::family{"second.refs"}});
+      co_await expect_conflict(
+         {.data_family = forge::db::core::family{"first.data"},
+          .refs_family = forge::db::core::family{"shared.refs"}},
+         {.data_family = forge::db::core::family{"second.data"},
+          .refs_family = forge::db::core::family{"shared.refs"}});
+      co_await expect_conflict(
+         {.data_family = forge::db::core::family{"first.data"},
+          .refs_family = forge::db::core::family{"cross-role"}},
+         {.data_family = forge::db::core::family{"cross-role"},
+          .refs_family = forge::db::core::family{"second.refs"}});
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_rejects_object_family_overlap) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   auto blobs = forge::db::blob::store{
+      driver,
+      forge::db::blob::store::config{
+         .data_family = forge::db::core::family{"shared.records"},
+         .refs_family = forge::db::core::family{"blob.refs"},
+      }};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto objects = co_await forge::db::object::store::open(
+         driver,
+         forge::db::object::store::config{.family = forge::db::core::family{"shared.records"}});
+      objects.register_object<document_object>();
+
+      auto shared = co_await driver->begin_transaction();
+      auto object_tx = objects.join(shared);
+      BOOST_CHECK_THROW(static_cast<void>(blobs.join(shared)),
+                        forge::db::core::exceptions::participant_conflict);
+      co_await shared.rollback();
+      co_return;
+   }());
+}
+
 BOOST_AUTO_TEST_CASE(db_blob_join_shares_commit_boundary_with_db_object_metadata) {
    auto runtime = forge::asio::runtime{};
    auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());

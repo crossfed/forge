@@ -69,6 +69,10 @@ class transaction_participant {
 
    [[nodiscard]] virtual std::string_view name() const noexcept = 0;
 
+   [[nodiscard]] virtual std::span<const family> exclusive_families() const noexcept {
+      return {};
+   }
+
    [[nodiscard]] virtual mutation_policy
    classify(const family&, const record_key&, mutation_kind) const noexcept {
       return mutation_policy::inherit;

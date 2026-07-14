@@ -37,10 +37,15 @@ std::string participant_name(const forge::db::core::family& data,
 
 transaction_participant_impl::transaction_participant_impl(forge::db::core::family data,
                                                            forge::db::core::family refs)
-    : name_{participant_name(data, refs)}, data_{std::move(data)}, refs_{std::move(refs)} {}
+    : name_{participant_name(data, refs)}, families_{std::move(data), std::move(refs)} {}
 
 std::string_view transaction_participant_impl::name() const noexcept {
    return name_;
+}
+
+std::span<const forge::db::core::family>
+transaction_participant_impl::exclusive_families() const noexcept {
+   return families_;
 }
 
 forge::db::core::mutation_policy
@@ -52,15 +57,15 @@ transaction_participant_impl::classify(const forge::db::core::family& family,
    }
 
    const auto prefix = std::to_integer<std::uint8_t>(key.bytes().front());
-   if (family.name == data_.name && prefix == 0x10U) {
+   if (family.name == families_[0].name && prefix == 0x10U) {
       return kind == forge::db::core::mutation_kind::erase
                 ? forge::db::core::mutation_policy::forbidden
                 : forge::db::core::mutation_policy::excluded;
    }
-   if (family.name == refs_.name && prefix == 0x20U) {
+   if (family.name == families_[1].name && prefix == 0x20U) {
       return forge::db::core::mutation_policy::reversible;
    }
-   if (family.name == refs_.name && prefix == 0x30U) {
+   if (family.name == families_[1].name && prefix == 0x30U) {
       return forge::db::core::mutation_policy::excluded;
    }
    return forge::db::core::mutation_policy::inherit;
@@ -70,7 +75,7 @@ std::optional<forge::db::core::record_address>
 transaction_participant_impl::make_retention_guard(
    const forge::db::core::record_mutation& mutation,
    std::span<const std::byte> token) const {
-   if (mutation.column_family.name != refs_.name ||
+   if (mutation.column_family.name != families_[1].name ||
        mutation.kind != forge::db::core::mutation_kind::erase ||
        !mutation.before.has_value()) {
       return std::nullopt;
@@ -79,7 +84,7 @@ transaction_participant_impl::make_retention_guard(
    if (!key) {
       return std::nullopt;
    }
-   return forge::db::core::record_address{.column_family = refs_, .key = std::move(*key)};
+   return forge::db::core::record_address{.column_family = families_[1], .key = std::move(*key)};
 }
 
 } // namespace forge::db::blob::detail

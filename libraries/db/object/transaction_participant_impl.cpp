@@ -7,6 +7,7 @@ module;
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -45,6 +46,11 @@ transaction_participant_impl::transaction_participant_impl(
 
 std::string_view transaction_participant_impl::name() const noexcept {
    return name_;
+}
+
+std::span<const forge::db::core::family>
+transaction_participant_impl::exclusive_families() const noexcept {
+   return {std::addressof(family_), 1};
 }
 
 forge::db::core::mutation_policy

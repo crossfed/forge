@@ -5,6 +5,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -19,6 +20,8 @@ class transaction_participant_impl final : public forge::db::core::transaction_p
                                 transaction::release_fn release);
 
    [[nodiscard]] std::string_view name() const noexcept override;
+   [[nodiscard]] std::span<const forge::db::core::family>
+   exclusive_families() const noexcept override;
    [[nodiscard]] forge::db::core::mutation_policy
    classify(const forge::db::core::family& family,
             const forge::db::core::record_key& key,

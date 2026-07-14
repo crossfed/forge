@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <optional>
 #include <span>
 #include <string>
@@ -12,6 +13,8 @@ class transaction_participant_impl final : public forge::db::core::transaction_p
    transaction_participant_impl(forge::db::core::family data, forge::db::core::family refs);
 
    [[nodiscard]] std::string_view name() const noexcept override;
+   [[nodiscard]] std::span<const forge::db::core::family>
+   exclusive_families() const noexcept override;
    [[nodiscard]] forge::db::core::mutation_policy
    classify(const forge::db::core::family& family,
             const forge::db::core::record_key& key,
@@ -22,8 +25,7 @@ class transaction_participant_impl final : public forge::db::core::transaction_p
 
  private:
    std::string name_;
-   forge::db::core::family data_;
-   forge::db::core::family refs_;
+   std::array<forge::db::core::family, 2> families_;
 };
 
 } // namespace forge::db::blob::detail

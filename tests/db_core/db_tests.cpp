@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -267,6 +268,38 @@ class tracking_participant final : public forge::db::core::transaction_participa
    std::vector<forge::db::core::record_mutation> captured_;
 };
 
+class claiming_participant final : public forge::db::core::transaction_participant {
+ public:
+   explicit claiming_participant(std::string name,
+                                 std::vector<forge::db::core::family> families = {})
+       : name_{std::move(name)}, families_{std::move(families)} {}
+
+   [[nodiscard]] std::string_view name() const noexcept override {
+      return name_;
+   }
+
+   [[nodiscard]] std::span<const forge::db::core::family>
+   exclusive_families() const noexcept override {
+      return families_;
+   }
+
+ private:
+   std::string name_;
+   std::vector<forge::db::core::family> families_;
+};
+
+class unclaimed_participant final : public forge::db::core::transaction_participant {
+ public:
+   explicit unclaimed_participant(std::string name) : name_{std::move(name)} {}
+
+   [[nodiscard]] std::string_view name() const noexcept override {
+      return name_;
+   }
+
+ private:
+   std::string name_;
+};
+
 class memory_driver final : public forge::db::core::driver {
  public:
    explicit memory_driver(std::shared_ptr<memory_state> state) : state_{std::move(state)} {}
@@ -359,6 +392,58 @@ BOOST_AUTO_TEST_CASE(db_transaction_savepoint_restores_participant_and_prepares_
       BOOST_CHECK_EQUAL(participant->captured(), 1U);
       co_await tx.commit();
       BOOST_CHECK(participant->prepared);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_transaction_participants_reject_overlapping_exclusive_families) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto tx = co_await driver->begin_transaction();
+      tx.attach_participant(std::make_shared<claiming_participant>(
+         "first", std::vector{forge::db::core::family{"one"}, forge::db::core::family{"shared"}}));
+      tx.attach_participant(std::make_shared<claiming_participant>(
+         "independent", std::vector{forge::db::core::family{"two"}}));
+
+      try {
+         tx.attach_participant(std::make_shared<claiming_participant>(
+            "overlapping", std::vector{forge::db::core::family{"shared"}}));
+         BOOST_FAIL("overlapping participant family was accepted");
+      } catch (const forge::db::core::exceptions::participant_conflict& error) {
+         const auto context_value = [&error](std::string_view key_value) -> std::string_view {
+            const auto& context = error.context();
+            const auto field = std::find_if(context.begin(), context.end(), [&](const auto& value) {
+               return value.key == key_value;
+            });
+            return field == context.end() ? std::string_view{} : std::string_view{field->value};
+         };
+         BOOST_CHECK_EQUAL(context_value("family"), "shared");
+         BOOST_CHECK_EQUAL(context_value("participant"), "overlapping");
+         BOOST_CHECK_EQUAL(context_value("existing-participant"), "first");
+      }
+
+      tx.attach_participant(std::make_shared<claiming_participant>(
+         "still-independent", std::vector{forge::db::core::family{"three"}}));
+      co_await tx.rollback();
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_transaction_participant_claims_preserve_default_and_name_duplicate_behavior) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto tx = co_await driver->begin_transaction();
+      tx.attach_participant(std::make_shared<unclaimed_participant>("unclaimed-first"));
+      tx.attach_participant(std::make_shared<unclaimed_participant>("unclaimed-second"));
+
+      BOOST_CHECK_THROW(
+         tx.attach_participant(std::make_shared<unclaimed_participant>("unclaimed-first")),
+         forge::db::core::exceptions::participant_conflict);
+      co_await tx.rollback();
       co_return;
    }());
 }

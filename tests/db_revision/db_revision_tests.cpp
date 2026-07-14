@@ -760,6 +760,31 @@ BOOST_AUTO_TEST_CASE(db_revision_blob_retention_barrier_survives_collect_until_r
    }());
 }
 
+BOOST_AUTO_TEST_CASE(db_revision_coexists_with_independent_object_and_blob_participants) {
+   auto runtime = forge::asio::runtime{};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto env = co_await open_environment();
+      env.objects.register_object<db_revision_tests::account_object>();
+      auto blobs = forge::db::blob::store{env.driver};
+
+      auto active = co_await env.driver->begin_transaction();
+      auto revision = co_await env.revisions.join(active);
+      auto objects = env.objects.join(active);
+      auto blob_tx = blobs.join(active);
+
+      const auto created = co_await objects.create<db_revision_tests::account>(
+         [](db_revision_tests::account& value) { value.name = "shared"; });
+      const auto payload = co_await blob_tx.put(bytes("payload"));
+      co_await active.commit();
+
+      BOOST_CHECK_EQUAL(revision.id(), 1U);
+      BOOST_CHECK_EQUAL((co_await env.objects.get(created.id)).name, "shared");
+      BOOST_CHECK(co_await blobs.has(payload));
+      co_return;
+   }());
+}
+
 BOOST_AUTO_TEST_CASE(db_revision_rejects_blob_payload_deletion_for_any_join_order) {
    auto runtime = forge::asio::runtime{};
 
