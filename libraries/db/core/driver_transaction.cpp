@@ -330,6 +330,16 @@ bool transaction::claims_family(const family& column_family) const noexcept {
       });
 }
 
+bool transaction::captures_mutations() const noexcept {
+   if (!active()) {
+      return false;
+   }
+   return std::any_of(
+      impl_->participants.begin(),
+      impl_->participants.end(),
+      [](const auto& participant) { return participant && participant->captures_mutations(); });
+}
+
 boost::asio::awaitable<savepoint_id_t> transaction::create_savepoint() {
    if (!active()) {
       FORGE_THROW_EXCEPTION(exceptions::transaction_closed, "db transaction is closed");

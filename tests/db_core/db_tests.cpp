@@ -535,6 +535,7 @@ BOOST_AUTO_TEST_CASE(db_transaction_capture_forbidden_policy_only_blocks_active_
          "capture-policy-only",
          protected_family,
          forge::db::core::mutation_policy::forbidden_when_captured));
+      BOOST_CHECK(!uncaptured.captures_mutations());
       co_await uncaptured.put(protected_family, key("permitted"), bytes("outside capture"));
       co_await uncaptured.erase(protected_family, key("erasable"));
       co_await uncaptured.commit();
@@ -546,6 +547,7 @@ BOOST_AUTO_TEST_CASE(db_transaction_capture_forbidden_policy_only_blocks_active_
          forge::db::core::mutation_policy::forbidden_when_captured));
       auto tracker = std::make_shared<tracking_participant>();
       capturing.attach_participant(tracker);
+      BOOST_CHECK(capturing.captures_mutations());
 
       BOOST_CHECK_THROW(co_await capturing.put(protected_family, key("blocked"), bytes("captured")),
                         forge::db::core::exceptions::mutation_forbidden);
@@ -556,6 +558,7 @@ BOOST_AUTO_TEST_CASE(db_transaction_capture_forbidden_policy_only_blocks_active_
       co_await capturing.put(allowed_family, key("continued"), bytes("yes"));
       BOOST_CHECK_EQUAL(tracker->captured(), 1U);
       co_await capturing.commit();
+      BOOST_CHECK(!capturing.captures_mutations());
 
       auto read = co_await driver->begin_read();
       BOOST_CHECK_EQUAL(text(*(co_await read.get(protected_family, key("permitted")))), "outside capture");

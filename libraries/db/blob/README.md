@@ -136,4 +136,5 @@ barrier atomically with the corresponding revision history.
 Payload puts are excluded from revision history. Payload erase and explicit
 collection are forbidden inside an active revision scope, because physically
 removing content required by a before-image would make revert incomplete.
+Collection is rejected before scanning, including zero-limit or no-op calls.
 Automatic garbage collection remains outside the library.

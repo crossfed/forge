@@ -244,6 +244,11 @@ transaction::has_retention_barrier_encoded(std::string algorithm, std::vector<st
 }
 
 boost::asio::awaitable<collect_result> transaction::collect_unreferenced(collect_options options) {
+   if (impl_->transaction().captures_mutations()) {
+      FORGE_THROW_EXCEPTION(forge::db::core::exceptions::mutation_forbidden,
+                            "db blob collection is forbidden while mutation capture is active");
+   }
+
    auto result = collect_result{};
    if (options.limit == 0) {
       co_return result;
