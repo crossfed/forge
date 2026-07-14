@@ -64,6 +64,22 @@ struct awaitable_work {
    }
 };
 
+struct cancel_parent_on_copy {
+   cancel_parent_on_copy(std::stop_source& parent_value, std::atomic_bool& ran_value)
+       : parent{&parent_value}, ran{&ran_value} {}
+
+   cancel_parent_on_copy(const cancel_parent_on_copy& other) : parent{other.parent}, ran{other.ran} {
+      static_cast<void>(parent->request_stop());
+   }
+
+   void operator()() const {
+      ran->store(true, std::memory_order_release);
+   }
+
+   std::stop_source* parent = nullptr;
+   std::atomic_bool* ran = nullptr;
+};
+
 template <typename Work>
 concept compute_work =
     requires(forge::asio::compute::executor executor, Work work) { executor.try_submit({}, std::move(work)); };
@@ -355,6 +371,68 @@ BOOST_AUTO_TEST_CASE(compute_hands_off_a_canceled_granted_reservation_to_the_nex
    BOOST_CHECK_EQUAL(final.waiting, 0U);
    BOOST_CHECK_EQUAL(final.running, 0U);
    BOOST_CHECK_GE(final.canceled, 1U);
+   forge::asio::blocking::run(runtime, pool.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(compute_hands_off_capacity_when_parent_cancels_after_reserve) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto pool = forge::asio::compute::pool{forge::asio::compute::pool::options{
+       .worker_threads = 1,
+       .max_pending_tasks = 0,
+       .max_waiting_submissions = 2,
+   }};
+   auto executor = pool.get_executor();
+   auto active_started = std::atomic_bool{false};
+   auto release_active = std::atomic_bool{false};
+   auto canceled_ran = std::atomic_bool{false};
+   auto successor_ran = std::atomic_bool{false};
+
+   auto active = forge::asio::blocking::run(runtime, executor.submit({.name = "active"}, [&] {
+      active_started.store(true, std::memory_order_release);
+      while (!release_active.load(std::memory_order_acquire)) {
+         std::this_thread::sleep_for(std::chrono::milliseconds{1});
+      }
+   }));
+   BOOST_REQUIRE(wait_for_true(active_started));
+
+   auto parent = std::stop_source{};
+   auto canceling_work = cancel_parent_on_copy{parent, canceled_ran};
+   auto canceled = boost::asio::co_spawn(
+       runtime.context(),
+       executor.execute({.name = "cancel-after-reserve", .parent_stop_token = parent.get_token()}, canceling_work),
+       boost::asio::use_future);
+   BOOST_REQUIRE(wait_until([&] { return pool.snapshot().waiting == 1; }));
+
+   auto successor = boost::asio::co_spawn(
+       runtime.context(),
+       executor.execute({.name = "successor"}, [&] { successor_ran.store(true, std::memory_order_release); }),
+       boost::asio::use_future);
+   BOOST_REQUIRE(wait_until([&] { return pool.snapshot().waiting == 2; }));
+
+   release_active.store(true, std::memory_order_release);
+   BOOST_CHECK_THROW(static_cast<void>(canceled.get()), forge::asio::exceptions::canceled);
+   BOOST_CHECK(parent.stop_requested());
+   BOOST_CHECK(!canceled_ran.load(std::memory_order_acquire));
+
+   const auto successor_ready = successor.wait_for(std::chrono::milliseconds{250}) == std::future_status::ready;
+   BOOST_CHECK(successor_ready);
+   if (successor_ready) {
+      successor.get();
+      BOOST_CHECK(successor_ran.load(std::memory_order_acquire));
+   } else {
+      pool.request_stop();
+      BOOST_CHECK_THROW(static_cast<void>(successor.get()), forge::asio::exceptions::rejected);
+   }
+
+   forge::asio::blocking::run(runtime, std::move(active).wait());
+   const auto final = pool.snapshot();
+   BOOST_CHECK_EQUAL(final.waiting, 0U);
+   BOOST_CHECK_EQUAL(final.running, 0U);
+   if (successor_ready) {
+      BOOST_CHECK_EQUAL(final.submitted, 3U);
+      BOOST_CHECK_EQUAL(final.completed, 2U);
+      BOOST_CHECK_EQUAL(final.canceled, 1U);
+   }
    forge::asio::blocking::run(runtime, pool.shutdown());
 }
 

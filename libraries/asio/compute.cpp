@@ -731,6 +731,7 @@ void pool_state::submit(reservation reservation_value, std::string name, std::sh
                         std::function<void(context&)> work) {
    const auto id = reservation_value.id();
    auto jobs = std::vector<impl::job>{};
+   auto granted = std::vector<std::shared_ptr<admission_waiter>>{};
    auto reject = false;
    auto cancel_before_start = false;
    {
@@ -747,6 +748,7 @@ void pool_state::submit(reservation reservation_value, std::string name, std::sh
          if (operation->stop_requested()) {
             ++impl_->current_metrics.canceled;
             cancel_before_start = true;
+            granted = impl_->grant_waiters_locked();
          } else {
             impl_->pending.push_back(impl::job{
                 .id = id,
@@ -765,6 +767,9 @@ void pool_state::submit(reservation reservation_value, std::string name, std::sh
    }
    if (cancel_before_start) {
       operation->complete_exception(canceled_error());
+      for (const auto& waiter : granted) {
+         wake(waiter);
+      }
       return;
    }
    impl_->post_jobs(shared_from_this(), std::move(jobs));
