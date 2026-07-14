@@ -23,9 +23,9 @@ struct type_converter32 {
       float f;
    } data;
 
-   explicit type_converter32(std::uint32_t value) { data.ui = value; }
-   std::uint32_t to_ui() const { return data.ui; }
-   float to_f() const { return data.f; }
+   explicit inline type_converter32(std::uint32_t value) { data.ui = value; }
+   inline std::uint32_t to_ui() const { return data.ui; }
+   inline float to_f() const { return data.f; }
 };
 
 struct type_converter64 {
@@ -34,9 +34,9 @@ struct type_converter64 {
       double f;
    } data;
 
-   explicit type_converter64(std::uint64_t value) { data.ui = value; }
-   std::uint64_t to_ui() const { return data.ui; }
-   double to_f() const { return data.f; }
+   explicit inline type_converter64(std::uint64_t value) { data.ui = value; }
+   inline std::uint64_t to_ui() const { return data.ui; }
+   inline double to_f() const { return data.f; }
 };
 
 template <typename T, typename U>

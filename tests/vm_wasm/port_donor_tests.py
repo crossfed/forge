@@ -266,21 +266,28 @@ def replace_live_symbols(text: str) -> str:
 
 def transform_text(text: str, relative: pathlib.Path) -> str:
     text = replace_live_symbols(text)
-    internal_module = None
-    if relative.name == "varint_tests.cpp":
-        internal_module = "forge.vm.wasm.tests.leb128"
-    elif relative.name == "signals_tests.cpp":
-        internal_module = "forge.vm.wasm.tests.signals"
-    module_name = internal_module or "forge.vm.wasm.backend"
+    internal = relative.name in {"varint_tests.cpp", "signals_tests.cpp"}
     prefix = re.sub(r"[^a-zA-Z0-9_]", "_", relative.with_suffix("").as_posix())
-    internal_define = "#define FORGE_VM_WASM_INTERNAL_TESTS\n" if internal_module else ""
-    heading = (
-        f'#include "test_prelude.hpp"\n'
-        f"import {module_name};\n"
-        f"{internal_define}"
-        f'#include "test_support.hpp"\n\n'
-        f"#define FORGE_VM_WASM_TEST_FILE {prefix}\n\n"
-    )
+    if internal:
+        include_pattern = r"^[ \t]*#[ \t]*include[ \t]*[<\"][^>\"]+[>\"][ \t]*$"
+        includes = re.findall(include_pattern, text, flags=re.M)
+        text = re.sub(include_pattern, "", text, flags=re.M)
+        heading = (
+            "module;\n\n"
+            f'#include "test_prelude.hpp"\n'
+            + "\n".join(includes)
+            + "\n\nmodule forge.vm.wasm.backend;\n\n"
+            "#define FORGE_VM_WASM_INTERNAL_TESTS\n"
+            f'#include "test_support.hpp"\n\n'
+            f"#define FORGE_VM_WASM_TEST_FILE {prefix}\n\n"
+        )
+    else:
+        heading = (
+            f'#include "test_prelude.hpp"\n'
+            "import forge.vm.wasm.backend;\n"
+            f'#include "test_support.hpp"\n\n'
+            f"#define FORGE_VM_WASM_TEST_FILE {prefix}\n\n"
+        )
     transformed = heading + text.lstrip()
     lines = [line.rstrip() for line in transformed.splitlines()]
     while lines and not lines[-1]:

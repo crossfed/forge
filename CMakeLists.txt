@@ -586,12 +586,6 @@ install(
 )
 
 install(
-   DIRECTORY libraries/vm/wasm/details/
-   DESTINATION ${CMAKE_INSTALL_LIBDIR}/forge/internal/vm_wasm/details
-   COMPONENT dev
-   EXCLUDE_FROM_ALL
-)
-install(
    DIRECTORY vendor/softfloat/source/include/
    DESTINATION ${CMAKE_INSTALL_LIBDIR}/forge/internal/vm_wasm/softfloat
    COMPONENT dev

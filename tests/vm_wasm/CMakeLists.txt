@@ -31,19 +31,10 @@ add_executable(
    main.cpp
    ${FORGE_VM_WASM_DONOR_INTERNAL_SOURCES}
 )
-target_sources(
-   test_forge_vm_wasm_internal
-   PRIVATE
-      FILE_SET CXX_MODULES
-      FILES
-         internal/leb128.cppm
-         internal/signals.cppm
-)
 target_include_directories(
    test_forge_vm_wasm_internal
    PRIVATE
       ${FORGE_VM_WASM_TEST_INCLUDE_DIRS}
-      ${CMAKE_SOURCE_DIR}/libraries/vm/wasm
 )
 target_compile_definitions(test_forge_vm_wasm_internal PRIVATE ${FORGE_VM_WASM_TEST_DEFINITIONS})
 target_link_libraries(test_forge_vm_wasm_internal PRIVATE forge_vm_wasm Boost::included_unit_test_framework)

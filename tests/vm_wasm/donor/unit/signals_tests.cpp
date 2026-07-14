@@ -1,14 +1,18 @@
+module;
+
 #include "test_prelude.hpp"
-import forge.vm.wasm.tests.signals;
-#define FORGE_VM_WASM_INTERNAL_TESTS
-#include "test_support.hpp"
-
-#define FORGE_VM_WASM_TEST_FILE signals_tests
-
 #include <chrono>
 #include <csignal>
 #include <thread>
 #include <iostream>
+
+
+module forge.vm.wasm.backend;
+
+#define FORGE_VM_WASM_INTERNAL_TESTS
+#include "test_support.hpp"
+
+#define FORGE_VM_WASM_TEST_FILE signals_tests
 
 struct test_exception {};
 

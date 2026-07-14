@@ -1,6 +1,7 @@
 module;
 
-#include <details/prelude.hxx>
+#include <condition_variable>
+#include <mutex>
 
 module forge.vm.wasm.watchdog;
 
