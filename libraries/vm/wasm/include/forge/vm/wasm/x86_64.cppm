@@ -2748,7 +2748,7 @@ template <typename Context> class machine_code_writer {
       return context->current_linear_memory();
    }
 
-   static int32_t grow_memory(Context* context /*rdi*/, int32_t pages) {
+   static int32_t grow_memory(Context* context /*rdi*/, uint32_t pages) {
       return context->grow_linear_memory(pages);
    }
 

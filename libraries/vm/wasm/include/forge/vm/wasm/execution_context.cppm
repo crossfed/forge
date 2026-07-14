@@ -101,7 +101,7 @@ template <typename Derived, typename Host, bool IsJit> class execution_context_b
       }
    }
 
-   inline int32_t grow_linear_memory(int32_t pages) {
+   inline int32_t grow_linear_memory(uint32_t pages) {
       if constexpr (IsJit) {
          return grow_linear_memory_impl(*_mod->jit_mod, pages);
       } else {
@@ -109,19 +109,19 @@ template <typename Derived, typename Host, bool IsJit> class execution_context_b
       }
    }
 
-   template <typename Module> inline int32_t grow_linear_memory_impl(const Module& mod, int32_t pages) {
-      const int32_t sz = _wasm_alloc->get_current_page();
-      if (pages < 0) {
-         if (sz + pages < 0)
+   template <typename Module> inline int32_t grow_linear_memory_impl(const Module& mod, uint32_t pages) {
+      const auto size = static_cast<uint32_t>(_wasm_alloc->get_current_page());
+      if (!mod.memories.size() || size > _max_pages || pages > _max_pages - size)
+         return -1;
+
+      if (mod.memories[0].limits.flags) {
+         const auto maximum = mod.memories[0].limits.maximum;
+         if (size > maximum || pages > maximum - size)
             return -1;
-         _wasm_alloc->free<char>(-pages);
-      } else {
-         if (!mod.memories.size() || _max_pages - sz < static_cast<uint32_t>(pages) ||
-             (mod.memories[0].limits.flags && (static_cast<int32_t>(mod.memories[0].limits.maximum) - sz < pages)))
-            return -1;
-         _wasm_alloc->alloc<char>(pages);
       }
-      return sz;
+
+      _wasm_alloc->alloc<char>(pages);
+      return static_cast<int32_t>(size);
    }
 
    inline int32_t current_linear_memory() const {
