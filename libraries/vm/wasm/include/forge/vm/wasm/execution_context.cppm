@@ -390,6 +390,7 @@ class jit_execution_context : public frame_info_holder<EnableBacktrace>,
             std::reverse(args_raw + 0, args_raw + sizeof...(Args));
             result = call_host_function(args_raw, func_index);
          } else {
+            detail::check<exceptions::interpreter>(_remaining_call_depth > 0, "stack overflow");
             std::size_t maximum_stack_usage =
                 (_mod->maximum_stack + 2 /*frame ptr + return ptr*/) * (_remaining_call_depth + 1) + sizeof...(Args) +
                 4 /* scratch space */;
