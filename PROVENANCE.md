@@ -35,7 +35,8 @@ Forge carries regression-tested correctness fixes over the pinned donor:
 function-type equality checks non-void result types, `vector_to_string` sizes
 its destination before indexed writes, alternate-stack allocation rejects
 `MAP_FAILED`, data segments reject unsupported memory indexes, and zero-length
-guest spans do not probe outside their empty range. These changes harden
+guest spans do not probe outside their empty range. JIT execution also rejects
+missing exports before looking up their function type. These changes harden
 invalid-input and allocation-failure paths; the unmodified donor test bodies
 remain the compatibility oracle.
 

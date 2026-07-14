@@ -81,7 +81,7 @@ if(FORGE_VM_WASM_DONOR_ROOT)
    set_tests_properties(test_forge_vm_wasm_donor_mapping PROPERTIES LABELS vm_wasm)
 endif()
 
-add_executable(forge_vm_wasm_spec_test_generator EXCLUDE_FROM_ALL spec_test_generator.cpp)
+add_executable(forge_vm_wasm_spec_test_generator spec_test_generator.cpp)
 add_custom_target(
    test_forge_vm_wasm_spec_generator_mapping
    COMMAND

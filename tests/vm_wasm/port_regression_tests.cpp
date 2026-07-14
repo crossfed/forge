@@ -106,3 +106,13 @@ TEST_CASE("zero length host spans do not probe guest memory", "[execution_interf
 
    BOOST_TEST(host.called);
 }
+
+#if defined(__x86_64__)
+TEST_CASE("jit reports a missing export before function type lookup", "[execution_context]") {
+   auto code = wasm::wasm_code{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00};
+   using runtime = wasm::backend<std::nullptr_t, wasm::jit>;
+   auto instance = runtime{code, static_cast<wasm::wasm_allocator*>(nullptr)};
+
+   BOOST_CHECK_THROW(instance("env", "missing"), wasm::exceptions::interpreter);
+}
+#endif

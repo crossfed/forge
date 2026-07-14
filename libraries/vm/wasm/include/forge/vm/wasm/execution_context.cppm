@@ -349,6 +349,9 @@ class jit_execution_context : public frame_info_holder<EnableBacktrace>,
 
    template <typename... Args>
    inline std::optional<operand_stack_elem> execute(host_type* host, jit_visitor, uint32_t func_index, Args&&... args) {
+      detail::check<exceptions::interpreter>((func_index < std::numeric_limits<uint32_t>::max()),
+                                             "cannot execute function, function not found");
+
       auto saved_host = _host;
       auto saved_os_size = get_operand_stack().size();
       auto g = scope_guard([&]() {
