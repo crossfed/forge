@@ -212,6 +212,24 @@ README в `libraries/<lib>` является быстрым guide по конк�
 `/docs` хранит только сквозные решения, которые проходят через несколько
 библиотек.
 
+## Версионирование
+
+FORGE использует версию `MAJOR.MINOR.PATCH` вместе с явным статусом контрактов:
+
+- `Stable` является статусом по умолчанию; его несовместимое изменение требует
+  нового `MAJOR` release.
+- `Preview` и `Experimental` должны быть явно отмечены в README владельца.
+  Их source API может документированно меняться в `MINOR` release.
+- `PATCH` release не содержит намеренных несовместимых изменений.
+- Wire и persisted storage contracts оцениваются отдельно: нестабильность C++
+  API сама по себе не разрешает менять байты или сохранённые данные.
+
+Каждое разрешённое несовместимое изменение Preview/Experimental API должно быть
+описано в release notes вместе с migration path.
+
+Текущие изменения и переходы описаны в
+[Forge 8.2.0 release notes](docs/releases/8.2.0.md).
+
 ## Совместимость
 
 - `forge::raw::pack/unpack` сохраняет старый byte layout для retained primitive,

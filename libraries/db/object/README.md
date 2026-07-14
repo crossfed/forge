@@ -4,6 +4,13 @@
 object descriptors, primary and secondary index maintenance, object
 serialization, async transactions and stable read snapshots.
 
+## Stability
+
+The DB Object public C++ API is **Preview** in Forge 8.x. It may receive
+documented source-incompatible refinements in a MINOR release. Persisted object
+and index layouts are a separate compatibility boundary and are not made
+unstable by this source API status.
+
 It is backend-free. Physical persistence is supplied by a shared
 `forge::db::core::driver`, so DB Object can run over in-memory test drivers, RocksDB
 through `forge_db_rocksdb`, and future backends without importing them.
