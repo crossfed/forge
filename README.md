@@ -166,7 +166,7 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [crypto](libraries/crypto/README.md) | `forge_crypto` | Hashes, encodings, keys, signatures, OpenSSL 3.0+ crypto. | OpenSSL::Crypto, GMP, secp256k1, BLS. |
 | [log](libraries/log/README.md) | `forge_log` | Logging core, messages, console/appender boundary. | `forge_variant`, Boost.DLL privately. |
 | [otlp](libraries/otlp/README.md) | `forge_otlp` | OTLP/HTTP JSON log export and crash-spool resend. | `forge_log`, `forge_net_http`, `forge_asio`. |
-| [asio](libraries/asio/README.md) | `forge_asio` | Asio runtime, blocking boundary, priority scheduler. | Boost.Asio, threads. |
+| [asio](libraries/asio/README.md) | `forge_asio` | Asio runtime, priority task scheduler and bounded CPU compute pool. | Boost.Asio, threads. |
 | [app](libraries/app/README.md) | `forge_app` | Opinionated application shell, plugins, ports, config and diagnostics. | `forge_asio`, `forge_config_core`. |
 | [net/http](libraries/net/http/README.md) | `forge_net_http` | HTTP target/base URL, router, middleware, client/server. | Boost.Beast/URL/Asio, OpenSSL. |
 | [net/websocket](libraries/net/websocket/README.md) | `forge_net_websocket` | WebSocket connection/client primitives. | Boost.Beast/Asio, OpenSSL. |
@@ -180,6 +180,7 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [db/core](libraries/db/core/README.md) | `forge_db_core` | Shared record driver, transaction and snapshot contract. | Boost.Asio, `forge_exceptions`. |
 | [db/object](libraries/db/object/README.md) | `forge_db_object` | Typed object/index store over the shared DB driver. | Boost.Asio, `forge_db_core`, `forge_ids`, `forge_raw`, `forge_exceptions`. |
 | [db/blob](libraries/db/blob/README.md) | `forge_db_blob` | Content-addressed blob store with typed refs and explicit retention primitives. | Boost.Asio, `forge_db_core`, `forge_crypto`, `forge_raw`, `forge_variant`, `forge_exceptions`. |
+| [db/revision](libraries/db/revision/README.md) | `forge_db_revision` | Durable before-image revisions with strict-head revert and bounded whole-revision prune. | Boost.Asio, `forge_db_core`, `forge_db_object`, `forge_raw`, `forge_exceptions`. |
 | [rocksdb](libraries/rocksdb/README.md) | `forge_rocksdb` | Optional RocksDB TransactionDB wrapper. | RocksDB privately, `forge_exceptions`, `forge_schema`. |
 | [db/rocksdb](libraries/db/rocksdb/README.md) | `forge_db_rocksdb` | RocksDB implementation of the shared DB driver contract. | `forge_db_core`, `forge_rocksdb`. |
 | [plugins](plugins/README.md) | `forge_plugins`, `forge_plugins_*_*` | Official infrastructure plugins: P2P node, API resolver, diagnostics, PubSub facade, crypto signer/secrets, named DB Store and RocksDB services. | `forge_app`, `forge_api_core`, focused plugin targets. |
@@ -210,6 +211,24 @@ it.
 README в `libraries/<lib>` является быстрым guide по конкретной библиотеке.
 `/docs` хранит только сквозные решения, которые проходят через несколько
 библиотек.
+
+## Версионирование
+
+FORGE использует версию `MAJOR.MINOR.PATCH` вместе с явным статусом контрактов:
+
+- `Stable` является статусом по умолчанию; его несовместимое изменение требует
+  нового `MAJOR` release.
+- `Preview` и `Experimental` должны быть явно отмечены в README владельца.
+  Их source API может документированно меняться в `MINOR` release.
+- `PATCH` release не содержит намеренных несовместимых изменений.
+- Wire и persisted storage contracts оцениваются отдельно: нестабильность C++
+  API сама по себе не разрешает менять байты или сохранённые данные.
+
+Каждое разрешённое несовместимое изменение Preview/Experimental API должно быть
+описано в release notes вместе с migration path.
+
+Текущие изменения и переходы описаны в
+[Forge 8.3.0 release notes](docs/releases/8.3.0.md).
 
 ## Совместимость
 

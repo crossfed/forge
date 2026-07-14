@@ -109,6 +109,61 @@ BOOST_AUTO_TEST_CASE(db_rocksdb_transaction_writes_across_families_atomically) {
    std::filesystem::remove_all(root);
 }
 
+BOOST_AUTO_TEST_CASE(db_rocksdb_transaction_savepoint_restores_all_families_and_continues) {
+   const auto root = make_test_root("forge_db_rocksdb_savepoint");
+   auto runtime = forge::asio::runtime{};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto driver = forge::db::rocksdb::driver{config_for(root / "store")};
+      const auto objects = forge::db::core::family{"objectdb"};
+      const auto blobs = forge::db::core::family{"blobdb.data"};
+      const auto refs = forge::db::core::family{"blobdb.refs"};
+
+      auto tx = co_await driver.begin_transaction();
+      co_await tx.put(objects, key("before"), bytes("kept"));
+      const auto point = co_await tx.create_savepoint();
+      co_await tx.put(objects, key("object"), bytes("discarded"));
+      co_await tx.put(blobs, key("blob"), bytes("discarded"));
+      co_await tx.put(refs, key("ref"), bytes("discarded"));
+      co_await tx.rollback_to_savepoint(point);
+      co_await tx.put(objects, key("after"), bytes("continued"));
+      co_await tx.commit();
+
+      auto read = co_await driver.begin_read();
+      BOOST_CHECK_EQUAL(text(*(co_await read.get(objects, key("before")))), "kept");
+      BOOST_CHECK_EQUAL(text(*(co_await read.get(objects, key("after")))), "continued");
+      BOOST_CHECK(!(co_await read.get(objects, key("object"))).has_value());
+      BOOST_CHECK(!(co_await read.get(blobs, key("blob"))).has_value());
+      BOOST_CHECK(!(co_await read.get(refs, key("ref"))).has_value());
+      co_return;
+   }());
+
+   std::filesystem::remove_all(root);
+}
+
+BOOST_AUTO_TEST_CASE(db_rocksdb_transaction_get_for_update_locks_and_returns_state) {
+   const auto root = make_test_root("forge_db_rocksdb_get_for_update");
+   auto runtime = forge::asio::runtime{};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto driver = forge::db::rocksdb::driver{config_for(root / "store")};
+      const auto objects = forge::db::core::family{"objectdb"};
+      auto seed = co_await driver.begin_transaction();
+      co_await seed.put(objects, key("state"), bytes("current"));
+      co_await seed.commit();
+
+      auto tx = co_await driver.begin_transaction();
+      const auto current = co_await tx.get_for_update(objects, key("state"));
+      BOOST_REQUIRE(current.has_value());
+      BOOST_CHECK_EQUAL(text(*current), "current");
+      BOOST_CHECK(!(co_await tx.get_for_update(objects, key("missing"))).has_value());
+      co_await tx.rollback();
+      co_return;
+   }());
+
+   std::filesystem::remove_all(root);
+}
+
 BOOST_AUTO_TEST_CASE(db_rocksdb_snapshot_preserves_old_records_and_scan_pages) {
    const auto root = make_test_root("forge_db_rocksdb_snapshot");
    auto runtime = forge::asio::runtime{};

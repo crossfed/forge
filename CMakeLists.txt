@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.31)
 
-project(forge VERSION 8.1.0 LANGUAGES C CXX ASM)
+project(forge VERSION 8.3.0 LANGUAGES C CXX ASM)
 
 include(GNUInstallDirs)
 include(CheckCXXSourceCompiles)
@@ -211,6 +211,7 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/rocksdb/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/object/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/blob/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/revision/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec/json/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/config/core/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec/yaml/include"
@@ -395,6 +396,7 @@ set(
    forge_db_core
    forge_db_object
    forge_db_blob
+   forge_db_revision
    forge_config_core
    forge_codec_json
    forge_codec_yaml
@@ -494,6 +496,7 @@ install(
              libraries/db/core/include/forge
              libraries/db/object/include/forge
              libraries/db/blob/include/forge
+             libraries/db/revision/include/forge
              libraries/codec/json/include/forge
              libraries/config/core/include/forge
              libraries/codec/yaml/include/forge

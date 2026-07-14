@@ -12,6 +12,7 @@ module forge.plugins.db.store.plugin;
 import forge.db.blob.store;
 import forge.db.core.driver;
 import forge.db.object.store;
+import forge.db.revision.store;
 import forge.plugins.db.store.exceptions;
 
 #include "details/plugin_impl.hxx"
@@ -60,6 +61,19 @@ std::shared_ptr<forge::db::blob::store> plugin::store_handle_state_impl::require
    return opened.blobs;
 }
 
+std::shared_ptr<forge::db::revision::store> plugin::store_handle_state_impl::require_revisions() const {
+   const auto owner = owner_.lock();
+   if (!owner) {
+      FORGE_THROW_EXCEPTION(exceptions::stopped, "db store plugin is stopped");
+   }
+   auto opened = owner->require_started_store(name_);
+   if (!opened.revisions) {
+      FORGE_THROW_EXCEPTION(exceptions::unavailable_layer, "db store revision layer is not configured",
+                            forge::exceptions::ctx("store", name_));
+   }
+   return opened.revisions;
+}
+
 boost::asio::awaitable<transaction> plugin::store_handle_state_impl::begin_transaction() const {
    const auto owner = owner_.lock();
    if (!owner) {
@@ -67,9 +81,9 @@ boost::asio::awaitable<transaction> plugin::store_handle_state_impl::begin_trans
    }
    auto opened = owner->require_started_store(name_);
    if (opened.objects) {
-      co_return transaction{co_await opened.objects->begin_transaction()};
+      co_return transaction{co_await opened.objects->begin_transaction(), name_};
    }
-   co_return transaction{co_await opened.driver->begin_transaction()};
+   co_return transaction{co_await opened.driver->begin_transaction(), name_};
 }
 
 } // namespace forge::plugins::db::store

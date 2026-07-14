@@ -15,6 +15,7 @@ enum class code : std::uint16_t {
    digest_mismatch = 3,
    transaction_closed = 4,
    unsupported_operation = 5,
+   invalid_descriptor = 6,
 };
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(code, "forge.db.blob")
@@ -24,5 +25,6 @@ using not_found = forge::exceptions::coded_exception<code, code::not_found>;
 using digest_mismatch = forge::exceptions::coded_exception<code, code::digest_mismatch>;
 using transaction_closed = forge::exceptions::coded_exception<code, code::transaction_closed>;
 using unsupported_operation = forge::exceptions::coded_exception<code, code::unsupported_operation>;
+using invalid_descriptor = forge::exceptions::coded_exception<code, code::invalid_descriptor>;
 
 } // namespace forge::db::blob::exceptions

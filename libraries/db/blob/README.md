@@ -72,7 +72,7 @@ DB Object:
 
 ```cpp
 auto tx = co_await driver->begin_transaction();
-auto object_tx = objects.join(tx);
+auto object_tx = co_await objects.join(tx);
 auto blob_tx = blobs.join(tx);
 
 auto digest = co_await blob_tx.put(bytes);
@@ -85,9 +85,56 @@ co_await tx.commit();
 Joined DB Blob transactions do not own commit/rollback. Standalone
 `blobs.begin_transaction()` remains the convenience path.
 
+If multiple components need Blob access through the same Core transaction,
+reuse the first Blob transaction instead of attaching a second participant:
+
+```cpp
+auto first = blobs.join(tx);
+auto second = blobs.join(first);
+```
+
+Both facades share the existing Blob participant and remain non-owning. Calling
+`blobs.join(tx)` again is intentionally rejected as a duplicate raw Core join;
+passing a Blob transaction from another store is rejected as well.
+
+## Read Snapshots
+
+`forge.db.blob.snapshot` provides a read-only view over one Core snapshot:
+
+```cpp
+auto read = co_await driver->begin_read();
+auto view = blobs.join(read);
+
+auto payload = co_await view.get(content);
+auto owners = co_await view.ref_count(content);
+```
+
+`store::begin_read()` is the standalone convenience path. The snapshot exposes
+`get`, `has`, `stat_blob`, `verify` and `ref_count`; mutation, collection and
+commit operations are intentionally absent. Joining validates that the Core
+snapshot is active and belongs to the same driver. Payload size/digest checks
+are identical to transaction reads.
+
+Copies share the native snapshot and may be read concurrently when the backend
+advertises snapshot support. Long-lived snapshots retain old record versions
+and may retain RocksDB SST and Blob files, so callers should scope them to one
+operation or a bounded batch.
+
 ## Retention
 
 `retain`, `release`, `ref_count` and `collect_unreferenced(limit)` are library
 mechanisms. Runtime policy such as when to collect, what owners are live, how
 much to delete per pass and how to report metrics belongs to plugins or
 products.
+
+When a DB Revision participant is attached, owner-ref changes remain
+reversible. Removing an owner ref creates an internal retention barrier when a
+future revert may need the payload. Barriers are not included in public
+`ref_count()`, but the collector honors them. Revert or prune removes the
+barrier atomically with the corresponding revision history.
+
+Payload puts are excluded from revision history. Payload erase and explicit
+collection are forbidden inside an active revision scope, because physically
+removing content required by a before-image would make revert incomplete.
+Collection is rejected before scanning, including zero-limit or no-op calls.
+Automatic garbage collection remains outside the library.

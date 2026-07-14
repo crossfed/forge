@@ -1,25 +1,12 @@
 #pragma once
 
 #include "managed_store.hxx"
+#include "opened_store.hxx"
+#include "pending_open.hxx"
 #include "phase.hxx"
 
 namespace forge::plugins::db::store {
 struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
-   struct pending_open {
-      std::string name;
-      std::optional<store_config> config;
-      store_options options;
-      std::shared_ptr<forge::db::core::driver> driver;
-      std::shared_ptr<forge::db::object::store> objects;
-      std::shared_ptr<forge::db::blob::store> blobs;
-   };
-
-   struct opened_store {
-      std::shared_ptr<forge::db::core::driver> driver;
-      std::shared_ptr<forge::db::object::store> objects;
-      std::shared_ptr<forge::db::blob::store> blobs;
-   };
-
    mutable std::mutex mutex;
    config settings;
    std::unordered_map<std::string, std::shared_ptr<managed_store>> stores;
@@ -38,8 +25,8 @@ struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
                   store_options options);
    [[nodiscard]] std::shared_ptr<managed_store> find_store(const std::string& name) const;
    [[nodiscard]] std::shared_ptr<managed_store> require_store(const std::string& name) const;
-   [[nodiscard]] opened_store require_setup_store(const std::string& name) const;
-   [[nodiscard]] opened_store require_started_store(const std::string& name) const;
+   [[nodiscard]] ::forge::plugins::db::store::opened_store require_setup_store(const std::string& name) const;
+   [[nodiscard]] ::forge::plugins::db::store::opened_store require_started_store(const std::string& name) const;
    [[nodiscard]] status current_status() const;
 
  private:

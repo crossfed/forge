@@ -2,12 +2,20 @@
 
 `forge::plugins::db::store` owns configured named physical DB stores for
 applications. Each named store owns one `forge::db::core::driver` and may expose
-`forge::db::object::store`, `forge::db::blob::store`, or both as logical layers.
+`forge::db::object::store`, `forge::db::blob::store` and
+`forge::db::revision::store` as optional logical layers.
 
 - Target: `forge_plugins_db_store`
 - Package component: `plugins_db_store`
 - Runtime id and API id: `forge.plugins.db.store`
 - Config section: `plugins.db.store`
+
+## Stability
+
+The DB Store plugin C++ API and local API contract are **Preview** in Forge 8.x.
+They may receive documented source-incompatible refinements in a MINOR release.
+Configured database layouts and persisted records remain separate compatibility
+boundaries.
 
 The plugin handles physical store setup, lifecycle, status and flushing. It does
 not describe C++ object schemas or blob retention policy in YAML. Domain code
@@ -33,7 +41,12 @@ plugins:
             data-blobs:
               enable-blob-files: true
               min-blob-size: 4096
+          revision: {}
 ```
+
+`revision: {}` explicitly enables durable revisions. It requires `object:`,
+uses the same Object family for its system rows and does not create another
+RocksDB column family. Omitting `revision:` leaves the layer disabled.
 
 `driver: rocksdb` is available when Forge is built with RocksDB support. Custom
 drivers are added programmatically through the local API during plugin
@@ -50,13 +63,27 @@ auto witness = co_await db->store("witness");
 witness.objects().register_object<witness_object>();
 
 auto tx = co_await witness.begin_transaction();
-auto objects = witness.objects().join(tx);
+auto revision = co_await witness.revisions().join(tx);
+auto objects = co_await witness.objects().join(tx);
 auto blobs = witness.blobs().join(tx);
 
 auto content = co_await blobs.put(bytes);
 co_await objects.insert(witness_record{.content = content});
 co_await tx.commit();
 ```
+
+`begin_transaction()` does not create a revision automatically. Callers opt in
+with `revisions().join(tx)` before the first mutation or savepoint. The returned
+scope exposes its candidate revision ID, while commit ownership remains with the
+plugin transaction. `revisions().revert(tx, head)` and
+`revisions().prune_through(tx, boundary, limits)` likewise operate only on a
+transaction created by the same named store.
+
+When the named store has an Object layer, `begin_transaction()` reserves that
+layer's writer lane. `objects().join(tx)` reuses the already attached Object
+participant. The first `blobs().join(tx)` attaches Blob state to the same Core
+transaction and later joins reuse that participant. A transaction created by
+another named store is rejected.
 
 Use `add_store(name, driver, options)` during setup when an application provides
 its own `forge::db::core::driver`. Once every plugin has initialized, DB Store
@@ -79,4 +106,37 @@ after plugin startup. In `ready`, `objects()` permits only object registration,
 interceptor registration and observer registration. Transactions, reads,
 writes, indexes, Blob access and flushes remain unavailable until startup. New
 stores are rejected from `ready` onward, while opened handles remain available
-until shutdown closes the physical store.
+until shutdown closes the physical store. Revision access is also runtime-only:
+`revisions()` throws the typed stopped error in `ready` and becomes available in
+`started` and `stopping`. A store without the layer reports
+`unavailable_layer`.
+
+Revision state, entries and deltas are DB Object system models. They are
+readable through the configured Object store, but application Object mutation
+APIs cannot modify them. Object, Blob and Revision operations joined to one
+plugin transaction commit or roll back through the same Core driver.
+
+## Shared Reads
+
+`store_handle::begin_read()` opens one Core snapshot and eagerly binds every
+configured Object and Blob layer to it:
+
+```cpp
+auto read = co_await witness.begin_read();
+auto objects = read.objects();
+auto blobs = read.blobs();
+
+auto metadata = co_await objects.get(file_id);
+auto payload = co_await blobs.get(metadata.content);
+```
+
+Both views observe the same committed point, including Object indexes and Blob
+owner references. `objects()` or `blobs()` reports `unavailable_layer` when the
+named store does not configure that layer. The wrapper deliberately does not
+expose its raw Core snapshot.
+
+New reads are accepted only in `started` and `stopping`. A snapshot opened
+before shutdown owns its backend session and remains usable until its last copy
+is destroyed, even after plugin shutdown. Keep snapshots operation-scoped or
+bounded: old RocksDB versions and Blob files remain live while a snapshot is
+held.

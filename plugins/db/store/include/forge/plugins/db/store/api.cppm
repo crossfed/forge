@@ -19,6 +19,7 @@ export import forge.plugins.db.store.types;
 
 import forge.api.core.binding;
 import forge.db.blob.ref;
+import forge.db.blob.snapshot;
 import forge.db.blob.store;
 import forge.db.blob.transaction;
 import forge.db.blob.types;
@@ -31,14 +32,40 @@ import forge.db.object.object;
 import forge.db.object.snapshot;
 import forge.db.object.store;
 import forge.db.object.transaction;
+import forge.db.revision.store;
+import forge.db.revision.transaction;
+import forge.db.revision.types;
 
 export namespace forge::plugins::db::store {
+
+class snapshot {
+ public:
+   snapshot() = default;
+
+   [[nodiscard]] bool active() const noexcept;
+   [[nodiscard]] std::string name() const;
+   [[nodiscard]] forge::db::object::snapshot objects() const;
+   [[nodiscard]] forge::db::blob::snapshot blobs() const;
+
+ private:
+   snapshot(forge::db::core::snapshot active,
+            std::string store_name,
+            std::optional<forge::db::object::snapshot> objects,
+            std::optional<forge::db::blob::snapshot> blobs);
+
+   forge::db::core::snapshot active_;
+   std::string store_name_;
+   std::optional<forge::db::object::snapshot> objects_;
+   std::optional<forge::db::blob::snapshot> blobs_;
+
+   friend class store_handle_state;
+};
 
 class transaction {
  public:
    transaction() = default;
-   explicit transaction(forge::db::core::transaction active);
-   explicit transaction(forge::db::object::transaction active);
+   explicit transaction(forge::db::core::transaction active, std::string store_name = {});
+   explicit transaction(forge::db::object::transaction active, std::string store_name = {});
    transaction(const transaction&) = delete;
    transaction& operator=(const transaction&) = delete;
    transaction(transaction&&) noexcept = default;
@@ -52,8 +79,16 @@ class transaction {
    boost::asio::awaitable<void> rollback();
 
  private:
-   std::optional<forge::db::core::transaction> core_;
+   void require_named_store(const std::string& expected) const;
+
+   std::unique_ptr<forge::db::core::transaction> core_;
    std::optional<forge::db::object::transaction> object_;
+   std::optional<forge::db::blob::transaction> blob_;
+   std::string store_name_;
+
+   friend class blob_handle;
+   friend class object_handle;
+   friend class revision_handle;
 };
 
 class store_handle_state {
@@ -64,7 +99,9 @@ class store_handle_state {
    [[nodiscard]] virtual std::shared_ptr<forge::db::core::driver> require_driver() const = 0;
    [[nodiscard]] virtual std::shared_ptr<forge::db::object::store> require_objects() const = 0;
    [[nodiscard]] virtual std::shared_ptr<forge::db::blob::store> require_blobs() const = 0;
+   [[nodiscard]] virtual std::shared_ptr<forge::db::revision::store> require_revisions() const;
    virtual boost::asio::awaitable<transaction> begin_transaction() const = 0;
+   virtual boost::asio::awaitable<snapshot> begin_read() const;
 };
 
 class object_handle {
@@ -88,23 +125,24 @@ class object_handle {
 
    boost::asio::awaitable<forge::db::object::transaction> begin_transaction() const;
    boost::asio::awaitable<forge::db::object::snapshot> begin_read() const;
-   [[nodiscard]] forge::db::object::transaction join(forge::db::core::transaction& active) const;
+   boost::asio::awaitable<forge::db::object::transaction> join(forge::db::core::transaction& active) const;
+   boost::asio::awaitable<forge::db::object::transaction> join(transaction& active) const;
 
    template <typename SharedTransaction>
       requires requires(SharedTransaction& active) {
          { active.db_transaction() } -> std::same_as<forge::db::core::transaction&>;
       }
-   [[nodiscard]] forge::db::object::transaction join(SharedTransaction& active) const {
-      return join(active.db_transaction());
+   boost::asio::awaitable<forge::db::object::transaction> join(SharedTransaction& active) const {
+      co_return co_await join(active.db_transaction());
    }
 
    template <forge::ids::typed_id_like Id>
-   boost::asio::awaitable<typename forge::db::object::object_index_for_id_t<Id>::value_type> get(Id id) const {
+   boost::asio::awaitable<typename forge::db::object::index_for_id_t<Id>::value_type> get(Id id) const {
       co_return co_await require_store()->get(id);
    }
 
    template <forge::ids::typed_id_like Id>
-   boost::asio::awaitable<std::optional<typename forge::db::object::object_index_for_id_t<Id>::value_type>>
+   boost::asio::awaitable<std::optional<typename forge::db::object::index_for_id_t<Id>::value_type>>
    find(Id id) const {
       co_return co_await require_store()->find(id);
    }
@@ -130,13 +168,13 @@ class object_handle {
    }
 
    template <forge::ids::typed_id_like Id, typename Fn>
-      requires forge::db::object::application_object_model<forge::db::object::object_index_for_id_t<Id>>
+      requires forge::db::object::application_object_model<forge::db::object::index_for_id_t<Id>>
    boost::asio::awaitable<void> modify(Id id, Fn&& fn) const {
       co_await require_store()->modify(id, std::forward<Fn>(fn));
    }
 
    template <forge::ids::typed_id_like Id>
-      requires forge::db::object::application_object_model<forge::db::object::object_index_for_id_t<Id>>
+      requires forge::db::object::application_object_model<forge::db::object::index_for_id_t<Id>>
    boost::asio::awaitable<void> erase(Id id) const {
       co_await require_store()->erase(id);
    }
@@ -194,7 +232,9 @@ class blob_handle {
    [[nodiscard]] std::string name() const;
 
    boost::asio::awaitable<forge::db::blob::transaction> begin_transaction() const;
+   boost::asio::awaitable<forge::db::blob::snapshot> begin_read() const;
    [[nodiscard]] forge::db::blob::transaction join(forge::db::core::transaction& active) const;
+   [[nodiscard]] forge::db::blob::transaction join(transaction& active) const;
 
    template <typename SharedTransaction>
       requires requires(SharedTransaction& active) {
@@ -267,6 +307,33 @@ class blob_handle {
    friend class store_handle;
 };
 
+class revision_handle {
+ public:
+   revision_handle() = default;
+   explicit revision_handle(std::shared_ptr<store_handle_state> state) : state_{std::move(state)} {}
+
+   [[nodiscard]] explicit operator bool() const noexcept {
+      return static_cast<bool>(state_);
+   }
+
+   [[nodiscard]] std::string name() const;
+
+   boost::asio::awaitable<forge::db::revision::scope> join(transaction& active) const;
+   boost::asio::awaitable<void>
+   revert(transaction& active, forge::db::revision::revision_id_t expected_head) const;
+   boost::asio::awaitable<forge::db::revision::prune_result>
+   prune_through(transaction& active,
+                 forge::db::revision::revision_id_t inclusive_boundary,
+                 forge::db::revision::prune_options options) const;
+
+ private:
+   [[nodiscard]] std::shared_ptr<forge::db::revision::store> require_store() const;
+
+   std::shared_ptr<store_handle_state> state_;
+
+   friend class store_handle;
+};
+
 class store_handle {
  public:
    store_handle() = default;
@@ -279,9 +346,11 @@ class store_handle {
    [[nodiscard]] std::string name() const;
 
    boost::asio::awaitable<transaction> begin_transaction() const;
+   boost::asio::awaitable<snapshot> begin_read() const;
 
    [[nodiscard]] object_handle objects() const;
    [[nodiscard]] blob_handle blobs() const;
+   [[nodiscard]] revision_handle revisions() const;
 
  private:
    [[nodiscard]] std::shared_ptr<forge::db::core::driver> require_driver() const;
@@ -310,4 +379,4 @@ class api : public forge::api::core::contract<api, forge::api::core::surface::lo
 
 namespace store_plugin_api = ::forge::plugins::db::store;
 
-FORGE_EXPORT_API(store_plugin_api::api, FORGE_API_CONTRACT("forge.plugins.db.store", 1, 0))
+FORGE_EXPORT_API(store_plugin_api::api, FORGE_API_CONTRACT("forge.plugins.db.store", 1, 2))

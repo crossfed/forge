@@ -26,6 +26,7 @@ import forge.db.core.driver;
 import forge.db.core.record;
 import forge.exceptions;
 import forge.db.object.store;
+import forge.db.revision.store;
 import forge.plugins.db.store.exceptions;
 import forge.plugins.db.store.types;
 
@@ -99,6 +100,11 @@ void plugin::impl::add_store(std::string name,
    }
    if (!driver) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_argument, "db store driver must not be null",
+                            forge::exceptions::ctx("store", name));
+   }
+   if (options.revision && !options.object) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_argument,
+                            "db store revision layer requires object layer",
                             forge::exceptions::ctx("store", name));
    }
    if (!options.object && !options.blob) {
@@ -180,6 +186,15 @@ boost::asio::awaitable<void> plugin::impl::open() {
                item.options.object->runtime);
             item.objects = std::make_shared<forge::db::object::store>(std::move(objects));
          }
+         if (item.options.revision) {
+            if (!item.objects) {
+               FORGE_THROW_EXCEPTION(exceptions::initialize_failed,
+                                     "db store revision layer requires object layer",
+                                     forge::exceptions::ctx("store", item.name));
+            }
+            auto revisions = co_await forge::db::revision::store::open(item.driver, *item.objects);
+            item.revisions = std::make_shared<forge::db::revision::store>(std::move(revisions));
+         }
          if (item.options.blob) {
             item.blobs = std::make_shared<forge::db::blob::store>(
                item.driver,
@@ -208,6 +223,7 @@ boost::asio::awaitable<void> plugin::impl::open() {
          record->driver = std::move(item.driver);
          record->objects = std::move(item.objects);
          record->blobs = std::move(item.blobs);
+         record->revisions = std::move(item.revisions);
          record->opened = true;
          record->started = false;
       }
@@ -252,6 +268,7 @@ void plugin::impl::request_stop() noexcept {
 void plugin::impl::close() {
    auto lock = std::scoped_lock{mutex};
    for (auto& [_, record] : stores) {
+      record->revisions.reset();
       record->objects.reset();
       record->blobs.reset();
       record->driver.reset();
@@ -279,7 +296,7 @@ std::shared_ptr<managed_store> plugin::impl::require_store(const std::string& na
    return record;
 }
 
-plugin::impl::opened_store plugin::impl::require_setup_store(const std::string& name) const {
+opened_store plugin::impl::require_setup_store(const std::string& name) const {
    auto lock = std::scoped_lock{mutex};
    const auto found = stores.find(name);
    if (found == stores.end()) {
@@ -295,10 +312,15 @@ plugin::impl::opened_store plugin::impl::require_setup_store(const std::string& 
                             forge::exceptions::ctx("store", name));
    }
 
-   return opened_store{.driver = record->driver, .objects = record->objects, .blobs = record->blobs};
+   return opened_store{
+      .driver = record->driver,
+      .objects = record->objects,
+      .blobs = record->blobs,
+      .revisions = record->revisions,
+   };
 }
 
-plugin::impl::opened_store plugin::impl::require_started_store(const std::string& name) const {
+opened_store plugin::impl::require_started_store(const std::string& name) const {
    auto lock = std::scoped_lock{mutex};
    const auto found = stores.find(name);
    if (found == stores.end()) {
@@ -314,7 +336,12 @@ plugin::impl::opened_store plugin::impl::require_started_store(const std::string
                             forge::exceptions::ctx("store", name));
    }
 
-   return opened_store{.driver = record->driver, .objects = record->objects, .blobs = record->blobs};
+   return opened_store{
+      .driver = record->driver,
+      .objects = record->objects,
+      .blobs = record->blobs,
+      .revisions = record->revisions,
+   };
 }
 
 status plugin::impl::current_status() const {
@@ -328,6 +355,7 @@ status plugin::impl::current_status() const {
          .path = record->path,
          .object = record->options.object.has_value(),
          .blob = record->options.blob.has_value(),
+         .revision = record->options.revision.has_value(),
          .started = record->started,
       });
    }

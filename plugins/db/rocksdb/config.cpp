@@ -19,7 +19,7 @@ module;
 
 module forge.plugins.db.rocksdb.plugin;
 
-import forge.asio.task_scheduler;
+import forge.asio.task;
 import forge.config.core.component;
 import forge.config.core.decode;
 import forge.exceptions;

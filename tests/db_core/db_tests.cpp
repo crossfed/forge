@@ -1,15 +1,20 @@
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/test/unit_test.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <exception>
 #include <map>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -18,9 +23,13 @@
 import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.db.core.driver;
+import forge.db.core.exceptions;
 import forge.db.core.record;
 
 namespace {
+
+static_assert(static_cast<unsigned>(forge::db::core::mutation_policy::forbidden) == 3U);
+static_assert(static_cast<unsigned>(forge::db::core::mutation_policy::forbidden_when_captured) == 4U);
 
 using record_map = std::map<forge::db::core::record_key, std::vector<std::byte>>;
 using family_map = std::map<std::string, record_map>;
@@ -55,6 +64,8 @@ struct memory_state {
    bool fail_rollback = false;
    std::size_t rollback_calls = 0;
    std::size_t destroyed_sessions = 0;
+   bool support_savepoints = true;
+   bool support_record_locks = true;
 };
 
 class memory_session final : public forge::db::core::session {
@@ -67,7 +78,12 @@ class memory_session final : public forge::db::core::session {
    }
 
    [[nodiscard]] forge::db::core::capabilities capabilities() const noexcept override {
-      return forge::db::core::capabilities{.snapshot_reads = snapshot_, .writes = writable_};
+      return forge::db::core::capabilities{
+         .snapshot_reads = snapshot_,
+         .writes = writable_,
+         .savepoints = writable_ && state_->support_savepoints,
+         .record_locks = writable_ && state_->support_record_locks,
+      };
    }
 
    boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(forge::db::core::family family,
@@ -81,6 +97,11 @@ class memory_session final : public forge::db::core::session {
          co_return std::nullopt;
       }
       co_return found->second;
+   }
+
+   boost::asio::awaitable<std::optional<std::vector<std::byte>>>
+   get_for_update(forge::db::core::family family, forge::db::core::record_key record) override {
+      co_return co_await get(std::move(family), std::move(record));
    }
 
    boost::asio::awaitable<void> put(forge::db::core::family family,
@@ -133,6 +154,28 @@ class memory_session final : public forge::db::core::session {
       co_return result;
    }
 
+   boost::asio::awaitable<void> create_savepoint() override {
+      savepoints_.push_back(working_);
+      co_return;
+   }
+
+   boost::asio::awaitable<void> rollback_to_savepoint() override {
+      if (savepoints_.empty()) {
+         throw std::logic_error{"db test savepoint stack is empty"};
+      }
+      working_ = std::move(savepoints_.back());
+      savepoints_.pop_back();
+      co_return;
+   }
+
+   boost::asio::awaitable<void> release_savepoint() override {
+      if (savepoints_.empty()) {
+         throw std::logic_error{"db test savepoint stack is empty"};
+      }
+      savepoints_.pop_back();
+      co_return;
+   }
+
    boost::asio::awaitable<void> commit() override {
       if (state_->fail_commit) {
          throw std::runtime_error{"db test commit failure"};
@@ -154,8 +197,140 @@ class memory_session final : public forge::db::core::session {
  private:
    std::shared_ptr<memory_state> state_;
    family_map working_;
+   std::vector<family_map> savepoints_;
    bool snapshot_ = false;
    bool writable_ = false;
+};
+
+class tracking_participant final : public forge::db::core::transaction_participant {
+ public:
+   [[nodiscard]] std::string_view name() const noexcept override {
+      return "db-test-tracking";
+   }
+
+   [[nodiscard]] bool captures_mutations() const noexcept override {
+      return true;
+   }
+
+   boost::asio::awaitable<void> prepare_mutation(const forge::db::core::record_mutation& mutation) override {
+      pending_ = mutation;
+      co_return;
+   }
+
+   void publish_mutation() noexcept override {
+      captured_.push_back(std::move(*pending_));
+      pending_.reset();
+   }
+
+   void discard_mutation() noexcept override {
+      pending_.reset();
+   }
+
+   boost::asio::awaitable<void> prepare_savepoint(forge::db::core::savepoint_id_t) override {
+      pending_frame_ = captured_.size();
+      co_return;
+   }
+
+   void publish_savepoint(forge::db::core::savepoint_id_t) noexcept override {
+      frames_.push_back(*pending_frame_);
+      pending_frame_.reset();
+   }
+
+   void discard_savepoint(forge::db::core::savepoint_id_t) noexcept override {
+      pending_frame_.reset();
+   }
+
+   boost::asio::awaitable<void>
+   rollback_to_savepoint(forge::db::core::savepoint_id_t, forge::db::core::participant_access&) override {
+      captured_.resize(frames_.back());
+      frames_.pop_back();
+      if (fail_restore) {
+         throw std::runtime_error{"db test participant restore failure"};
+      }
+      co_return;
+   }
+
+   boost::asio::awaitable<void>
+   release_savepoint(forge::db::core::savepoint_id_t, forge::db::core::participant_access&) override {
+      frames_.pop_back();
+      co_return;
+   }
+
+   boost::asio::awaitable<void> prepare_commit(forge::db::core::participant_access&) override {
+      prepared = true;
+      co_return;
+   }
+
+   [[nodiscard]] std::size_t captured() const noexcept {
+      return captured_.size();
+   }
+
+   bool fail_restore = false;
+   bool prepared = false;
+
+ private:
+   std::optional<forge::db::core::record_mutation> pending_;
+   std::optional<std::size_t> pending_frame_;
+   std::vector<std::size_t> frames_;
+   std::vector<forge::db::core::record_mutation> captured_;
+};
+
+class claiming_participant final : public forge::db::core::transaction_participant {
+ public:
+   explicit claiming_participant(std::string name,
+                                 std::vector<forge::db::core::family> families = {})
+       : name_{std::move(name)}, families_{std::move(families)} {}
+
+   [[nodiscard]] std::string_view name() const noexcept override {
+      return name_;
+   }
+
+   [[nodiscard]] std::span<const forge::db::core::family>
+   exclusive_families() const noexcept override {
+      return families_;
+   }
+
+ private:
+   std::string name_;
+   std::vector<forge::db::core::family> families_;
+};
+
+class unclaimed_participant final : public forge::db::core::transaction_participant {
+ public:
+   explicit unclaimed_participant(std::string name) : name_{std::move(name)} {}
+
+   [[nodiscard]] std::string_view name() const noexcept override {
+      return name_;
+   }
+
+ private:
+   std::string name_;
+};
+
+class policy_participant final : public forge::db::core::transaction_participant {
+ public:
+   policy_participant(std::string name,
+                      forge::db::core::family protected_family,
+                      forge::db::core::mutation_policy policy)
+       : name_{std::move(name)}, protected_family_{std::move(protected_family)}, policy_{policy} {}
+
+   [[nodiscard]] std::string_view name() const noexcept override {
+      return name_;
+   }
+
+   [[nodiscard]] forge::db::core::mutation_policy
+   classify(const forge::db::core::family& family,
+            const forge::db::core::record_key&,
+            forge::db::core::mutation_kind) const noexcept override {
+      return family.name == protected_family_.name
+                ? policy_
+                : forge::db::core::mutation_policy::inherit;
+   }
+
+ private:
+   std::string name_;
+   forge::db::core::family protected_family_;
+   forge::db::core::mutation_policy policy_;
 };
 
 class memory_driver final : public forge::db::core::driver {
@@ -181,6 +356,274 @@ class memory_driver final : public forge::db::core::driver {
 } // namespace
 
 BOOST_AUTO_TEST_SUITE(db_test_suite)
+
+BOOST_AUTO_TEST_CASE(db_transaction_savepoint_rolls_back_suffix_and_remains_active) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto meta = forge::db::core::family{"meta"};
+      auto tx = co_await driver->begin_transaction();
+      co_await tx.put(meta, key("a"), bytes("kept"));
+      const auto point = co_await tx.create_savepoint();
+      co_await tx.put(meta, key("b"), bytes("discarded"));
+
+      co_await tx.rollback_to_savepoint(point);
+      BOOST_CHECK(tx.active());
+      BOOST_CHECK(!(co_await tx.get(meta, key("b"))).has_value());
+      co_await tx.put(meta, key("c"), bytes("continued"));
+      co_await tx.commit();
+
+      auto read = co_await driver->begin_read();
+      BOOST_CHECK_EQUAL(text(*(co_await read.get(meta, key("a")))), "kept");
+      BOOST_CHECK(!(co_await read.get(meta, key("b"))).has_value());
+      BOOST_CHECK_EQUAL(text(*(co_await read.get(meta, key("c")))), "continued");
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_transaction_nested_savepoints_enforce_lifo_and_release_semantics) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto meta = forge::db::core::family{"meta"};
+      auto tx = co_await driver->begin_transaction();
+      const auto outer = co_await tx.create_savepoint();
+      co_await tx.put(meta, key("a"), bytes("outer"));
+      const auto inner = co_await tx.create_savepoint();
+      co_await tx.put(meta, key("b"), bytes("inner"));
+
+      BOOST_CHECK_THROW(co_await tx.rollback_to_savepoint(outer), forge::db::core::exceptions::invalid_savepoint);
+      co_await tx.release_savepoint(inner);
+      BOOST_CHECK_THROW(co_await tx.release_savepoint(inner), forge::db::core::exceptions::invalid_savepoint);
+      co_await tx.rollback_to_savepoint(outer);
+      co_await tx.commit();
+
+      auto read = co_await driver->begin_read();
+      BOOST_CHECK(!(co_await read.get(meta, key("a"))).has_value());
+      BOOST_CHECK(!(co_await read.get(meta, key("b"))).has_value());
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_transaction_savepoint_restores_participant_and_prepares_commit) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto meta = forge::db::core::family{"meta"};
+      auto participant = std::make_shared<tracking_participant>();
+      auto tx = co_await driver->begin_transaction();
+      tx.attach_participant(participant);
+      co_await tx.put(meta, key("a"), bytes("kept"));
+      const auto point = co_await tx.create_savepoint();
+      co_await tx.put(meta, key("b"), bytes("discarded"));
+      BOOST_CHECK_EQUAL(participant->captured(), 2U);
+
+      co_await tx.rollback_to_savepoint(point);
+      BOOST_CHECK_EQUAL(participant->captured(), 1U);
+      co_await tx.commit();
+      BOOST_CHECK(participant->prepared);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_transaction_participants_reject_overlapping_exclusive_families) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto tx = co_await driver->begin_transaction();
+      tx.attach_participant(std::make_shared<claiming_participant>(
+         "first", std::vector{forge::db::core::family{"one"}, forge::db::core::family{"shared"}}));
+      tx.attach_participant(std::make_shared<claiming_participant>(
+         "independent", std::vector{forge::db::core::family{"two"}}));
+
+      try {
+         tx.attach_participant(std::make_shared<claiming_participant>(
+            "overlapping", std::vector{forge::db::core::family{"shared"}}));
+         BOOST_FAIL("overlapping participant family was accepted");
+      } catch (const forge::db::core::exceptions::participant_conflict& error) {
+         const auto context_value = [&error](std::string_view key_value) -> std::string_view {
+            const auto& context = error.context();
+            const auto field = std::find_if(context.begin(), context.end(), [&](const auto& value) {
+               return value.key == key_value;
+            });
+            return field == context.end() ? std::string_view{} : std::string_view{field->value};
+         };
+         BOOST_CHECK_EQUAL(context_value("family"), "shared");
+         BOOST_CHECK_EQUAL(context_value("participant"), "overlapping");
+         BOOST_CHECK_EQUAL(context_value("existing-participant"), "first");
+      }
+
+      tx.attach_participant(std::make_shared<claiming_participant>(
+         "still-independent", std::vector{forge::db::core::family{"three"}}));
+      co_await tx.rollback();
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_transaction_participant_claims_preserve_default_and_name_duplicate_behavior) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto tx = co_await driver->begin_transaction();
+      tx.attach_participant(std::make_shared<unclaimed_participant>("unclaimed-first"));
+      tx.attach_participant(std::make_shared<unclaimed_participant>("unclaimed-second"));
+
+      BOOST_CHECK_THROW(
+         tx.attach_participant(std::make_shared<unclaimed_participant>("unclaimed-first")),
+         forge::db::core::exceptions::participant_conflict);
+      co_await tx.rollback();
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_transaction_forbidden_policy_blocks_without_capture) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   auto driver = std::make_shared<memory_driver>(state);
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto protected_family = forge::db::core::family{"protected"};
+      const auto allowed_family = forge::db::core::family{"allowed"};
+
+      auto seed = co_await driver->begin_transaction();
+      co_await seed.put(protected_family, key("existing"), bytes("seed"));
+      co_await seed.commit();
+
+      auto tx = co_await driver->begin_transaction();
+      tx.attach_participant(std::make_shared<policy_participant>(
+         "forbidden", protected_family, forge::db::core::mutation_policy::forbidden));
+
+      BOOST_CHECK_THROW(co_await tx.put(protected_family, key("new"), bytes("blocked")),
+                        forge::db::core::exceptions::mutation_forbidden);
+      BOOST_CHECK_THROW(co_await tx.erase(protected_family, key("existing")),
+                        forge::db::core::exceptions::mutation_forbidden);
+
+      BOOST_CHECK(tx.active());
+      BOOST_CHECK(!(co_await tx.get(protected_family, key("new"))).has_value());
+      BOOST_CHECK_EQUAL(text(*(co_await tx.get(protected_family, key("existing")))), "seed");
+      co_await tx.put(allowed_family, key("continued"), bytes("yes"));
+      co_await tx.commit();
+
+      auto read = co_await driver->begin_read();
+      BOOST_CHECK(!(co_await read.get(protected_family, key("new"))).has_value());
+      BOOST_CHECK_EQUAL(text(*(co_await read.get(protected_family, key("existing")))), "seed");
+      BOOST_CHECK_EQUAL(text(*(co_await read.get(allowed_family, key("continued")))), "yes");
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_transaction_capture_forbidden_policy_only_blocks_active_capture) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   auto driver = std::make_shared<memory_driver>(state);
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto protected_family = forge::db::core::family{"protected"};
+      const auto allowed_family = forge::db::core::family{"allowed"};
+
+      auto seed = co_await driver->begin_transaction();
+      co_await seed.put(protected_family, key("erasable"), bytes("seed"));
+      co_await seed.commit();
+
+      auto uncaptured = co_await driver->begin_transaction();
+      uncaptured.attach_participant(std::make_shared<policy_participant>(
+         "capture-policy-only",
+         protected_family,
+         forge::db::core::mutation_policy::forbidden_when_captured));
+      BOOST_CHECK(!uncaptured.captures_mutations());
+      co_await uncaptured.put(protected_family, key("permitted"), bytes("outside capture"));
+      co_await uncaptured.erase(protected_family, key("erasable"));
+      co_await uncaptured.commit();
+
+      auto capturing = co_await driver->begin_transaction();
+      capturing.attach_participant(std::make_shared<policy_participant>(
+         "capture-policy",
+         protected_family,
+         forge::db::core::mutation_policy::forbidden_when_captured));
+      auto tracker = std::make_shared<tracking_participant>();
+      capturing.attach_participant(tracker);
+      BOOST_CHECK(capturing.captures_mutations());
+
+      BOOST_CHECK_THROW(co_await capturing.put(protected_family, key("blocked"), bytes("captured")),
+                        forge::db::core::exceptions::mutation_forbidden);
+      BOOST_CHECK_THROW(co_await capturing.erase(protected_family, key("permitted")),
+                        forge::db::core::exceptions::mutation_forbidden);
+      BOOST_CHECK_EQUAL(tracker->captured(), 0U);
+      BOOST_CHECK(capturing.active());
+      co_await capturing.put(allowed_family, key("continued"), bytes("yes"));
+      BOOST_CHECK_EQUAL(tracker->captured(), 1U);
+      co_await capturing.commit();
+      BOOST_CHECK(!capturing.captures_mutations());
+
+      auto read = co_await driver->begin_read();
+      BOOST_CHECK_EQUAL(text(*(co_await read.get(protected_family, key("permitted")))), "outside capture");
+      BOOST_CHECK(!(co_await read.get(protected_family, key("erasable"))).has_value());
+      BOOST_CHECK(!(co_await read.get(protected_family, key("blocked"))).has_value());
+      BOOST_CHECK_EQUAL(text(*(co_await read.get(allowed_family, key("continued")))), "yes");
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_transaction_reports_claimed_families) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto claimed = forge::db::core::family{"claimed"};
+      auto tx = co_await driver->begin_transaction();
+      BOOST_CHECK(!tx.claims_family(claimed));
+
+      tx.attach_participant(std::make_shared<claiming_participant>(
+         "owner", std::vector{claimed}));
+      BOOST_CHECK(tx.claims_family(claimed));
+      BOOST_CHECK(!tx.claims_family(forge::db::core::family{"other"}));
+
+      co_await tx.rollback();
+      BOOST_CHECK(!tx.claims_family(claimed));
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_transaction_participant_restore_failure_marks_rollback_only) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto meta = forge::db::core::family{"meta"};
+      auto participant = std::make_shared<tracking_participant>();
+      auto tx = co_await driver->begin_transaction();
+      tx.attach_participant(participant);
+      const auto point = co_await tx.create_savepoint();
+      co_await tx.put(meta, key("a"), bytes("discarded"));
+      participant->fail_restore = true;
+
+      BOOST_CHECK_THROW(co_await tx.rollback_to_savepoint(point), std::runtime_error);
+      BOOST_CHECK_THROW(co_await tx.put(meta, key("b"), bytes("rejected")),
+                        forge::db::core::exceptions::transaction_rollback_only);
+      BOOST_CHECK_THROW(co_await tx.commit(), forge::db::core::exceptions::transaction_rollback_only);
+      co_await tx.rollback();
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_transaction_savepoint_requires_backend_capability) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   state->support_savepoints = false;
+   auto driver = std::make_shared<memory_driver>(state);
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto tx = co_await driver->begin_transaction();
+      BOOST_CHECK_THROW(co_await tx.create_savepoint(), forge::db::core::exceptions::unsupported_operation);
+      co_await tx.rollback();
+      co_return;
+   }());
+}
 
 BOOST_AUTO_TEST_CASE(db_transaction_commit_and_rollback_are_atomic) {
    auto runtime = forge::asio::runtime{};
@@ -231,6 +674,110 @@ BOOST_AUTO_TEST_CASE(db_snapshot_reads_preserve_precommit_state) {
       auto after = co_await driver->begin_read();
       BOOST_CHECK_EQUAL(text(*(co_await after.get(meta, key("a")))), "new");
       co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_snapshot_origin_is_stable_across_copies_and_driver_scoped) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   auto driver = std::make_shared<memory_driver>(state);
+   auto foreign = std::make_shared<memory_driver>(state);
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto active = co_await driver->begin_read();
+      auto copy = active;
+      BOOST_CHECK(active.belongs_to(*driver));
+      BOOST_CHECK(copy.belongs_to(*driver));
+      BOOST_CHECK(!active.belongs_to(*foreign));
+
+      auto unbound = forge::db::core::snapshot{
+         std::make_unique<memory_session>(state, true, false)};
+      BOOST_CHECK(unbound.active());
+      BOOST_CHECK(!unbound.belongs_to(*driver));
+      BOOST_CHECK(!unbound.belongs_to(*foreign));
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_snapshot_session_lives_until_last_copy_is_released) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   auto driver = std::make_shared<memory_driver>(state);
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto active = co_await driver->begin_read();
+      auto copy = active;
+      active = {};
+      BOOST_CHECK_EQUAL(state->destroyed_sessions, 0U);
+
+      copy = {};
+      BOOST_CHECK_EQUAL(state->destroyed_sessions, 1U);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_snapshot_copies_support_parallel_reads) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto meta = forge::db::core::family{"meta"};
+      auto tx = co_await driver->begin_transaction();
+      co_await tx.put(meta, key("a"), bytes("first"));
+      co_await tx.put(meta, key("b"), bytes("second"));
+      co_await tx.commit();
+
+      auto first = co_await driver->begin_read();
+      auto second = first;
+      auto completed = std::make_shared<std::atomic_size_t>(0U);
+      auto first_value = std::make_shared<std::optional<std::vector<std::byte>>>();
+      auto second_value = std::make_shared<std::optional<std::vector<std::byte>>>();
+      auto first_error = std::make_shared<std::exception_ptr>();
+      auto second_error = std::make_shared<std::exception_ptr>();
+      const auto executor = co_await boost::asio::this_coro::executor;
+
+      boost::asio::co_spawn(
+         executor,
+         [first = std::move(first), meta, first_value, first_error, completed]() mutable
+            -> boost::asio::awaitable<void> {
+            try {
+               *first_value = co_await first.get(meta, key("a"));
+            } catch (...) {
+               *first_error = std::current_exception();
+            }
+            completed->fetch_add(1U, std::memory_order_release);
+         },
+         boost::asio::detached);
+      boost::asio::co_spawn(
+         executor,
+         [second = std::move(second), meta, second_value, second_error, completed]() mutable
+            -> boost::asio::awaitable<void> {
+            try {
+               *second_value = co_await second.get(meta, key("b"));
+            } catch (...) {
+               *second_error = std::current_exception();
+            }
+            completed->fetch_add(1U, std::memory_order_release);
+         },
+         boost::asio::detached);
+
+      auto timer = boost::asio::steady_timer{executor};
+      while (completed->load(std::memory_order_acquire) != 2U) {
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+
+      if (*first_error) {
+         std::rethrow_exception(*first_error);
+      }
+      if (*second_error) {
+         std::rethrow_exception(*second_error);
+      }
+
+      BOOST_REQUIRE(first_value->has_value());
+      BOOST_REQUIRE(second_value->has_value());
+      BOOST_CHECK_EQUAL(text(**first_value), "first");
+      BOOST_CHECK_EQUAL(text(**second_value), "second");
    }());
 }
 

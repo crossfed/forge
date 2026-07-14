@@ -2,8 +2,8 @@
 
 `forge_app` is the opinionated application shell for FORGE services. It owns the
 runtime objects that every daemon tends to duplicate by hand: `runtime`,
-`task_scheduler`, API registry, signal bus, event bus, diagnostics, plugin
-registry, plugin context and lifecycle runtime.
+`scheduler`, optional `compute::pool`, API registry, signal bus, event bus,
+diagnostics, plugin registry, plugin context and lifecycle runtime.
 
 The preferred production entrypoint is `forge::app::application_builder`, which
 returns an `application_shell` without asking the application to subclass the shell.
@@ -50,6 +50,14 @@ Target: `forge_app`.
 
 Dependencies: `forge_asio`, `forge_config_core`, `forge_codec_yaml`, `forge_config_env`,
 `forge_config_program_options`, Boost headers.
+
+## Stability
+
+The scheduler and compute integration in `application_shell_options`,
+`application_builder`, `application_context` and `application_shell` is Preview
+in Forge 8.x. MINOR releases may make documented source-level changes to that
+surface. The remaining App public contracts are Stable unless their owning
+documentation marks them otherwise.
 
 ## Examples
 
@@ -366,6 +374,32 @@ options.wait_for_stop = [](forge::app::application_shell& app) -> boost::asio::a
    co_await timer.async_wait(boost::asio::use_awaitable);
 };
 ```
+
+## Optional Compute Pool
+
+The shell creates no CPU worker pool by default. Applications that run bounded
+synchronous CPU work opt in through the builder or shell options:
+
+```cpp
+auto builder = forge::app::application_builder{};
+builder.name("service")
+   .compute(forge::asio::compute::pool::options{
+      .worker_threads = 4,
+      .max_pending_tasks = 256,
+   });
+auto app = std::move(builder).build();
+```
+
+`application_context`, `plugin_context` and `application_shell` expose
+`has_compute()` and a copyable `compute()` executor. Plugins receive the
+executor; they do not own or stop worker threads. During shutdown, plugins run
+first, then the shell requests scheduler stop so no queued work can start after
+plugin shutdown. The compute pool drains while scheduler continuations that
+were already running can still finish, then the task scheduler drains, and only
+then may the Asio runtime stop. Scheduler drain is awaited rather than blocking
+a runtime worker, so active awaitable tasks can finish even with the default
+single-worker runtime. This keeps compute available for final plugin cleanup
+without detached execution or a scheduler/compute shutdown deadlock.
 
 ## Daemon Runner
 

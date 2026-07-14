@@ -13,7 +13,8 @@ module;
 export module forge.app.application_builder;
 
 import forge.asio.runtime;
-import forge.asio.task_scheduler;
+import forge.asio.compute;
+import forge.asio.task;
 import forge.config.core.key_path;
 import forge.config.core.value;
 import forge.config.core.document;
@@ -38,7 +39,8 @@ class application_builder {
 
    application_builder& name(std::string value);
    application_builder& runtime(forge::asio::runtime_options value);
-   application_builder& scheduler(forge::asio::task_scheduler::options value);
+   application_builder& scheduler(forge::asio::task::scheduler::options value);
+   application_builder& compute(forge::asio::compute::pool::options value);
 
    application_builder& plugin(plugin_descriptor descriptor);
    application_builder& describe_config(forge::config::core::component_descriptor descriptor);

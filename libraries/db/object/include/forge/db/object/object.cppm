@@ -19,6 +19,13 @@ enum class object_kind : std::uint8_t {
 
 inline constexpr std::uint8_t system_space = 0;
 
+namespace system::type_id {
+inline constexpr std::uint16_t header = 0;
+inline constexpr std::uint16_t revision_state = 1;
+inline constexpr std::uint16_t revision_entry = 2;
+inline constexpr std::uint16_t revision_delta = 3;
+} // namespace system::type_id
+
 template <typename Derived, std::uint8_t Space, std::uint16_t Type, object_kind Kind = object_kind::application>
 struct object {
    static_assert(Kind == object_kind::system || Space != system_space,
@@ -84,6 +91,9 @@ template <typename T>
 concept system_object_value = object_value<T> && std::remove_cvref_t<T>::kind == object_kind::system;
 
 template <typename Id>
-using object_index_for_id_t = forge::ids::type_for_id_t<Id>;
+struct index_for_id;
+
+template <typename Id>
+using index_for_id_t = typename index_for_id<std::remove_cvref_t<Id>>::type;
 
 } // namespace forge::db::object

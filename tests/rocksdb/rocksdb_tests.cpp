@@ -221,6 +221,41 @@ BOOST_AUTO_TEST_CASE(rocksdb_store_batch_and_transactions_are_atomic) {
    BOOST_TEST(to_string(*db.get(data, make_u64_key(8))) == "commit");
 }
 
+BOOST_AUTO_TEST_CASE(rocksdb_transaction_savepoints_rollback_and_release_native_state) {
+   const auto root = root_guard{};
+   auto db = store{config_for(root.root / "store")};
+   const auto meta = family{"meta"};
+
+   auto transaction = db.begin(write_options{.sync = true});
+   transaction.put(meta, make_key("before"), to_bytes("kept"));
+   transaction.create_savepoint();
+   transaction.put(meta, make_key("rolled-back"), to_bytes("discarded"));
+   transaction.rollback_to_savepoint();
+
+   transaction.create_savepoint();
+   transaction.put(meta, make_key("released"), to_bytes("kept"));
+   transaction.release_savepoint();
+   transaction.commit();
+
+   BOOST_TEST(to_string(*db.get(meta, make_key("before"))) == "kept");
+   BOOST_TEST(!db.get(meta, make_key("rolled-back")).has_value());
+   BOOST_TEST(to_string(*db.get(meta, make_key("released"))) == "kept");
+}
+
+BOOST_AUTO_TEST_CASE(rocksdb_transaction_get_for_update_returns_locked_value) {
+   const auto root = root_guard{};
+   auto db = store{config_for(root.root / "store")};
+   const auto meta = family{"meta"};
+   db.put(meta, make_key("state"), to_bytes("current"));
+
+   auto transaction = db.begin();
+   const auto value = transaction.get_for_update(meta, make_key("state"));
+   BOOST_REQUIRE(value.has_value());
+   BOOST_TEST(to_string(*value) == "current");
+   BOOST_TEST(!transaction.get_for_update(meta, make_key("missing")).has_value());
+   transaction.rollback();
+}
+
 BOOST_AUTO_TEST_CASE(rocksdb_snapshot_preserves_old_values_and_scan_pages_after_commit) {
    const auto root = root_guard{};
    auto db = store{config_for(root.root / "store")};

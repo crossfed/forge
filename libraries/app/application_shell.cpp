@@ -13,8 +13,10 @@ module;
 module forge.app.application_shell;
 
 import forge.asio.blocking;
+import forge.asio.compute;
+import forge.asio.exceptions;
 import forge.asio.runtime;
-import forge.asio.task_scheduler;
+import forge.asio.task;
 import forge.config.core.key_path;
 import forge.config.core.value;
 import forge.config.core.document;
@@ -117,18 +119,30 @@ void publish_application_event(event_bus& events, event_severity severity, std::
 
 } // namespace
 
-application_context::application_context(forge::asio::runtime& runtime, forge::asio::task_scheduler& scheduler,
+application_context::application_context(forge::asio::runtime& runtime, forge::asio::task::scheduler& scheduler,
                                          forge::api::core::registry& apis, signal_bus& signals,
-                                         event_bus& events, diagnostics_store& diagnostics)
-    : runtime_{&runtime}, scheduler_{&scheduler}, apis_{&apis}, signals_{&signals},
+                                         event_bus& events, diagnostics_store& diagnostics,
+                                         forge::asio::compute::executor compute)
+    : runtime_{&runtime}, scheduler_{&scheduler}, compute_{std::move(compute)}, apis_{&apis}, signals_{&signals},
       events_{&events}, diagnostics_{&diagnostics} {}
 
 forge::asio::runtime& application_context::runtime() noexcept {
    return *runtime_;
 }
 
-forge::asio::task_scheduler& application_context::scheduler() noexcept {
+forge::asio::task::scheduler& application_context::scheduler() noexcept {
    return *scheduler_;
+}
+
+bool application_context::has_compute() const noexcept {
+   return compute_.valid();
+}
+
+forge::asio::compute::executor application_context::compute() const {
+   if (!has_compute()) {
+      throw forge::asio::exceptions::invalid_state{"application compute pool is not configured"};
+   }
+   return compute_;
 }
 
 forge::api::core::installer application_context::apis() noexcept {
@@ -164,7 +178,33 @@ forge::config::core::component_view configure_context::view(std::string section)
 struct application_shell::impl {
    explicit impl(application_shell_options input)
        : options{std::move(input)}, runtime{options.runtime}, scheduler{runtime, options.scheduler},
-         context{runtime, scheduler, apis, signals, events, diagnostics} {}
+         compute_pool{make_compute_pool(options.compute)},
+         context{runtime, scheduler, apis, signals, events, diagnostics,
+                 compute_pool == nullptr ? forge::asio::compute::executor{} : compute_pool->get_executor()} {}
+
+   static std::unique_ptr<forge::asio::compute::pool>
+   make_compute_pool(const std::optional<forge::asio::compute::pool::options>& options) {
+      if (!options.has_value()) {
+         return nullptr;
+      }
+      return std::make_unique<forge::asio::compute::pool>(*options);
+   }
+
+   boost::asio::awaitable<void> stop_execution() {
+      scheduler.request_stop();
+      auto failure = std::exception_ptr{};
+      if (compute_pool != nullptr) {
+         try {
+            co_await compute_pool->shutdown();
+         } catch (...) {
+            failure = std::current_exception();
+         }
+      }
+      co_await scheduler.shutdown();
+      if (failure) {
+         std::rethrow_exception(failure);
+      }
+   }
 
    void require_created(const char* operation) const {
       if (state != application_state::created) {
@@ -174,7 +214,8 @@ struct application_shell::impl {
 
    application_shell_options options;
    forge::asio::runtime runtime;
-   forge::asio::task_scheduler scheduler;
+   forge::asio::task::scheduler scheduler;
+   std::unique_ptr<forge::asio::compute::pool> compute_pool;
    forge::api::core::registry apis;
    signal_bus signals;
    event_bus events;
@@ -226,8 +267,9 @@ void application_shell::instantiate_plugins(const forge::config::core::document&
    ensure_plugins_registered();
    impl_->plugin_runtime.reset();
    impl_->plugin_context_value.reset();
-   impl_->plugin_context_value =
-       std::make_unique<plugin_context>(impl_->scheduler, impl_->apis, impl_->signals, impl_->events, &impl_->diagnostics);
+   impl_->plugin_context_value = std::make_unique<plugin_context>(
+      impl_->scheduler, impl_->apis, impl_->signals, impl_->events, &impl_->diagnostics, config_view{},
+      impl_->compute_pool == nullptr ? forge::asio::compute::executor{} : impl_->compute_pool->get_executor());
    impl_->plugin_runtime = std::make_unique<application_runtime>(
       *impl_->plugin_context_value,
       impl_->registry.instantiate_enabled(plugin_selection_from_document(impl_->registry, document)),
@@ -242,8 +284,9 @@ forge::config::core::component_registry application_shell::collect_config() {
       registry.add(plugin_selection_descriptor(impl_->registry));
    }
 
-   auto plugin_context_value =
-       plugin_context{impl_->scheduler, impl_->apis, impl_->signals, impl_->events, &impl_->diagnostics};
+   auto plugin_context_value = plugin_context{
+      impl_->scheduler, impl_->apis, impl_->signals, impl_->events, &impl_->diagnostics, config_view{},
+      impl_->compute_pool == nullptr ? forge::asio::compute::executor{} : impl_->compute_pool->get_executor()};
    auto plugin_runtime = application_runtime{
       plugin_context_value,
       impl_->registry.instantiate_enabled(enabled_config_for_all_plugins(impl_->registry)),
@@ -316,7 +359,7 @@ boost::asio::awaitable<void> application_shell::initialize() {
       impl_->diagnostics.set_application_state(lifecycle_state::failed, "initialize", failure_message);
       publish_application_event(impl_->events, event_severity::error, impl_->options.name, "failed",
                                 failure_message);
-      impl_->scheduler.stop();
+      co_await impl_->stop_execution();
       std::rethrow_exception(failure);
    }
 }
@@ -373,7 +416,7 @@ boost::asio::awaitable<void> application_shell::shutdown() {
    impl_->diagnostics.set_application_state(lifecycle_state::stopped, "shutdown");
    impl_->signals.application_stopped(application_signal{.name = impl_->options.name});
    publish_application_event(impl_->events, event_severity::info, impl_->options.name, "stopped");
-   impl_->scheduler.stop();
+   co_await impl_->stop_execution();
 }
 
 void application_shell::request_stop() noexcept {
@@ -394,8 +437,19 @@ forge::asio::runtime& application_shell::runtime() noexcept {
    return impl_->runtime;
 }
 
-forge::asio::task_scheduler& application_shell::scheduler() noexcept {
+forge::asio::task::scheduler& application_shell::scheduler() noexcept {
    return impl_->scheduler;
+}
+
+bool application_shell::has_compute() const noexcept {
+   return impl_->compute_pool != nullptr;
+}
+
+forge::asio::compute::executor application_shell::compute() const {
+   if (!has_compute()) {
+      throw forge::asio::exceptions::invalid_state{"application compute pool is not configured"};
+   }
+   return impl_->compute_pool->get_executor();
 }
 
 forge::api::core::registry& application_shell::apis() noexcept {

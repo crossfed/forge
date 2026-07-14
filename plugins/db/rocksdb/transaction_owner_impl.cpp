@@ -8,7 +8,7 @@ module;
 
 module forge.plugins.db.rocksdb.plugin;
 
-import forge.asio.task_scheduler;
+import forge.asio.task;
 import forge.plugins.db.rocksdb.exceptions;
 import forge.rocksdb.store;
 
@@ -21,7 +21,7 @@ namespace forge::plugins::db::rocksdb {
 plugin::transaction_owner_impl::transaction_owner_impl(std::shared_ptr<impl> owner)
    : owner_{std::move(owner)} {}
 
-std::pair<std::shared_ptr<forge::rocksdb::store>, forge::asio::task_scheduler*>
+std::pair<std::shared_ptr<forge::rocksdb::store>, forge::asio::task::scheduler*>
 plugin::transaction_owner_impl::require_running() const {
    if (owner_ == nullptr) {
       FORGE_THROW_EXCEPTION(exceptions::stopped, "rocksdb plugin is not started");

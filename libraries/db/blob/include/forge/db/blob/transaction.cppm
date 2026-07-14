@@ -43,6 +43,10 @@ void require_payload_matches(const ref<Digest>& value, std::span<const std::byte
 
 export namespace forge::db::blob {
 
+namespace detail {
+class transaction_access;
+}
+
 class transaction {
  public:
    transaction() = default;
@@ -147,9 +151,24 @@ class transaction {
                                                 std::uint64_t size,
                                                 owner_ref owner);
    boost::asio::awaitable<std::uint64_t> ref_count_encoded(std::string algorithm, std::vector<std::byte> digest);
+   boost::asio::awaitable<bool> has_retention_barrier_encoded(std::string algorithm,
+                                                              std::vector<std::byte> digest);
 
    struct impl;
    std::shared_ptr<impl> impl_;
+
+   friend class detail::transaction_access;
 };
+
+namespace detail {
+
+class transaction_access {
+ public:
+   static void bind_store(transaction& active, std::shared_ptr<const void> identity);
+   [[nodiscard]] static bool belongs_to(const transaction& active, const void* identity) noexcept;
+   [[nodiscard]] static transaction joined(transaction& active);
+};
+
+} // namespace detail
 
 } // namespace forge::db::blob

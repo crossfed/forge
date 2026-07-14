@@ -14,7 +14,7 @@ module;
 
 module forge.plugins.db.rocksdb.plugin;
 
-import forge.asio.task_scheduler;
+import forge.asio.task;
 import forge.exceptions;
 import forge.plugins.db.rocksdb.exceptions;
 import forge.rocksdb.store;
@@ -27,7 +27,7 @@ namespace forge::plugins::db::rocksdb {
 
 namespace {
 
-std::pair<std::shared_ptr<forge::rocksdb::store>, forge::asio::task_scheduler*>
+std::pair<std::shared_ptr<forge::rocksdb::store>, forge::asio::task::scheduler*>
 require_transaction_owner(const std::shared_ptr<native_transaction_state>& state) {
    if (state == nullptr || state->owner == nullptr) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_argument, "invalid RocksDB transaction construction");
@@ -43,7 +43,7 @@ require_transaction_owner(const std::shared_ptr<native_transaction_state>& state
    return owner->require_running();
 }
 
-forge::asio::task_scheduler& require_transaction_scheduler(const std::shared_ptr<native_transaction_state>& state) {
+forge::asio::task::scheduler& require_transaction_scheduler(const std::shared_ptr<native_transaction_state>& state) {
    auto running = require_transaction_owner(state);
    return *running.second;
 }

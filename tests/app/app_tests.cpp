@@ -7,12 +7,14 @@
 #include <forge/api/core/macros.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <cstdlib>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <iterator>
 #include <memory>
 #include <mutex>
@@ -20,6 +22,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 import forge.app.exceptions;
@@ -44,8 +47,9 @@ import forge.api.core.registry;
 import forge.api.core.binding;
 import forge.api.core.dispatcher;
 import forge.asio.blocking;
+import forge.asio.compute;
 import forge.asio.runtime;
-import forge.asio.task_scheduler;
+import forge.asio.task;
 import forge.config.core.key_path;
 import forge.config.core.value;
 import forge.config.core.document;
@@ -512,8 +516,8 @@ class scheduler_cleanup_plugin final : public forge::app::plugin {
    }
 
    boost::asio::awaitable<void> shutdown() override {
-      auto handle = scheduler_->submit(forge::asio::task{
-         .priority = forge::asio::priority{1},
+      auto handle = scheduler_->submit(forge::asio::task::task{
+         .priority = forge::asio::task::priority{1},
          .name = "cleanup-flush",
          .work = [this] {
             log_->entries.push_back("cleanup.scheduler.work");
@@ -525,7 +529,41 @@ class scheduler_cleanup_plugin final : public forge::app::plugin {
 
  private:
    lifecycle_log* log_ = nullptr;
-   forge::asio::task_scheduler* scheduler_ = nullptr;
+   forge::asio::task::scheduler* scheduler_ = nullptr;
+};
+
+class compute_cleanup_plugin final : public forge::app::plugin {
+ public:
+   explicit compute_cleanup_plugin(lifecycle_log& log) : log_{&log} {}
+
+   forge::app::plugin_id id() const override {
+      return forge::app::plugin_id{.value = "compute-cleanup"};
+   }
+
+   std::string version() const override {
+      return "1";
+   }
+
+   boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
+      BOOST_REQUIRE(context.has_compute());
+      compute_ = context.compute();
+      log_->entries.push_back("initialize:compute-cleanup");
+      co_return;
+   }
+
+   boost::asio::awaitable<void> startup() override {
+      co_return;
+   }
+
+   boost::asio::awaitable<void> shutdown() override {
+      co_await compute_.execute({.name = "plugin-finalize"},
+                                [this] { log_->entries.push_back("cleanup.compute.work"); });
+      log_->entries.push_back("shutdown:compute-cleanup");
+   }
+
+ private:
+   lifecycle_log* log_ = nullptr;
+   forge::asio::compute::executor compute_;
 };
 
 class failing_initialize_plugin final : public forge::app::plugin {
@@ -817,6 +855,32 @@ class shell_scheduler_cleanup_application final : public forge::app::application
    lifecycle_log* log_ = nullptr;
 };
 
+class shell_compute_cleanup_application final : public forge::app::application_shell {
+ public:
+   explicit shell_compute_cleanup_application(lifecycle_log& log)
+       : forge::app::application_shell{forge::app::application_shell_options{
+            .runtime = {.worker_threads = 1, .thread_name = "compute-app-test"},
+            .compute = forge::asio::compute::pool::options{
+               .worker_threads = 1,
+               .max_pending_tasks = 2,
+            },
+         }},
+         log_{&log} {}
+
+ protected:
+   void on_register_plugins(forge::app::plugin_registry& registry) override {
+      registry.register_plugin(forge::app::plugin_descriptor{
+         .id = forge::app::plugin_id{.value = "compute-cleanup"},
+         .factory = [this] {
+            return std::make_unique<compute_cleanup_plugin>(*log_);
+         },
+      });
+   }
+
+ private:
+   lifecycle_log* log_ = nullptr;
+};
+
 class shell_slow_shutdown_application final : public forge::app::application_shell {
  public:
    shell_slow_shutdown_application(lifecycle_log& log, std::shared_ptr<slow_shutdown_state> state)
@@ -1038,7 +1102,7 @@ BOOST_AUTO_TEST_CASE(plugin_registry_orders_dependencies_and_rejects_bad_graphs)
 
 BOOST_AUTO_TEST_CASE(application_runtime_rolls_back_and_shutdown_is_idempotent) {
    auto runtime = forge::asio::runtime{};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
    auto context = forge::app::plugin_context{scheduler, signals, events};
@@ -1065,7 +1129,7 @@ BOOST_AUTO_TEST_CASE(application_runtime_rolls_back_and_shutdown_is_idempotent) 
 
 BOOST_AUTO_TEST_CASE(application_runtime_rejects_startup_after_shutdown) {
    auto runtime = forge::asio::runtime{};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
    auto context = forge::app::plugin_context{scheduler, signals, events};
@@ -1091,7 +1155,7 @@ BOOST_AUTO_TEST_CASE(application_runtime_rejects_startup_after_shutdown) {
 
 BOOST_AUTO_TEST_CASE(application_runtime_records_diagnostics_and_events) {
    auto runtime = forge::asio::runtime{};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
    auto diagnostics = forge::app::diagnostics_store{};
@@ -1118,7 +1182,7 @@ BOOST_AUTO_TEST_CASE(application_runtime_records_diagnostics_and_events) {
 
 BOOST_AUTO_TEST_CASE(application_runtime_records_failed_plugin_diagnostics) {
    auto runtime = forge::asio::runtime{};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
    auto diagnostics = forge::app::diagnostics_store{};
@@ -1140,7 +1204,7 @@ BOOST_AUTO_TEST_CASE(application_runtime_records_failed_plugin_diagnostics) {
 
 BOOST_AUTO_TEST_CASE(application_runtime_collects_and_applies_plugin_config_before_initialize) {
    auto runtime = forge::asio::runtime{};
-   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto scheduler = forge::asio::task::scheduler{runtime};
    auto signals = forge::app::signal_bus{};
    auto events = forge::app::event_bus{};
    auto context = forge::app::plugin_context{scheduler, signals, events};
@@ -1277,6 +1341,110 @@ BOOST_AUTO_TEST_CASE(application_shell_keeps_scheduler_available_until_shutdown_
    BOOST_REQUIRE(cleanup != log.entries.end());
    BOOST_REQUIRE(shutdown != log.entries.end());
    BOOST_CHECK(cleanup < shutdown);
+}
+
+BOOST_AUTO_TEST_CASE(application_shell_compute_is_opt_in) {
+   auto app = forge::app::application_shell{};
+   BOOST_CHECK(!app.has_compute());
+   BOOST_CHECK_THROW(static_cast<void>(app.compute()), forge::asio::exceptions::invalid_state);
+}
+
+BOOST_AUTO_TEST_CASE(application_shell_keeps_compute_available_through_plugin_shutdown) {
+   auto log = lifecycle_log{};
+   auto app = shell_compute_cleanup_application{log};
+
+   BOOST_REQUIRE(app.has_compute());
+   auto compute = app.compute();
+   forge::asio::blocking::run(app.runtime(), app.startup());
+   forge::asio::blocking::run(app.runtime(), app.shutdown());
+
+   const auto expected = std::vector<std::string>{
+      "initialize:compute-cleanup",
+      "cleanup.compute.work",
+      "shutdown:compute-cleanup",
+   };
+   BOOST_TEST(log.entries == expected, boost::test_tools::per_element());
+   BOOST_CHECK_THROW(
+      forge::asio::blocking::run(app.runtime(), compute.submit({.name = "after-stop"}, [] {})),
+      forge::asio::exceptions::rejected);
+}
+
+BOOST_AUTO_TEST_CASE(application_shell_stops_compute_before_waiting_for_scheduled_awaitables) {
+   auto app = forge::app::application_shell{forge::app::application_shell_options{
+      .runtime = {.worker_threads = 1, .thread_name = "shutdown-order-test"},
+      .compute = forge::asio::compute::pool::options{.worker_threads = 1},
+   }};
+   forge::asio::blocking::run(app.runtime(), app.startup());
+
+   auto compute_started = std::atomic_bool{false};
+   auto delayed_ran = std::atomic_bool{false};
+   auto scheduled = app.scheduler().submit(forge::asio::task::awaitable{
+      .priority = forge::asio::task::priority{1},
+      .name = "scheduled-compute",
+      .work = [&](forge::asio::task::context&) -> boost::asio::awaitable<void> {
+         try {
+            co_await app.compute().execute(
+               {.name = "cooperative-shutdown"},
+               [&](forge::asio::compute::context& context) {
+                  compute_started.store(true, std::memory_order_release);
+                  while (!context.stop_requested()) {
+                     std::this_thread::sleep_for(std::chrono::milliseconds{1});
+                  }
+                  std::this_thread::sleep_for(std::chrono::milliseconds{50});
+               });
+         } catch (const forge::asio::exceptions::canceled&) {
+         }
+
+         auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+         timer.expires_after(std::chrono::milliseconds{10});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      },
+   });
+   auto delayed = app.scheduler().submit_after(
+      forge::asio::task::task{
+         .priority = forge::asio::task::priority{1},
+         .name = "must-not-start-during-compute-drain",
+         .work = [&] { delayed_ran.store(true, std::memory_order_release); },
+      },
+      std::chrono::milliseconds{10});
+
+   forge::asio::blocking::run(app.runtime(), [&]() -> boost::asio::awaitable<void> {
+      auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+      for (auto attempt = 0;
+           attempt < 500 && !compute_started.load(std::memory_order_acquire);
+           ++attempt) {
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+      co_return;
+   }());
+   BOOST_REQUIRE(compute_started.load(std::memory_order_acquire));
+
+   auto shutdown = std::async(std::launch::async, [&] {
+      forge::asio::blocking::run(app.runtime(), app.shutdown());
+   });
+   const auto completed_without_fallback =
+      shutdown.wait_for(std::chrono::milliseconds{250}) == std::future_status::ready;
+   if (!completed_without_fallback) {
+      // Keep the regression finite on broken implementations: a second caller
+      // can run the continuation that the sole runtime worker is blocking.
+      const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+      while (shutdown.wait_for(std::chrono::milliseconds{0}) != std::future_status::ready &&
+             std::chrono::steady_clock::now() < deadline) {
+         if (app.runtime().context().poll_one() == 0) {
+            std::this_thread::sleep_for(std::chrono::milliseconds{1});
+         }
+      }
+   }
+   BOOST_REQUIRE(shutdown.wait_for(std::chrono::milliseconds{0}) == std::future_status::ready);
+   shutdown.get();
+
+   BOOST_CHECK(completed_without_fallback);
+   BOOST_CHECK(app.scheduler().snapshot().stopped);
+   BOOST_CHECK(!delayed_ran.load(std::memory_order_acquire));
+   BOOST_CHECK_THROW(forge::asio::blocking::run(app.runtime(), delayed.wait()),
+                     forge::asio::exceptions::canceled);
+   forge::asio::blocking::run(app.runtime(), scheduled.wait());
 }
 
 BOOST_AUTO_TEST_CASE(application_shell_initialize_failure_transitions_to_stopped) {
@@ -1980,6 +2148,7 @@ BOOST_AUTO_TEST_CASE(application_builder_creates_shell_and_applies_config_handle
    auto builder = forge::app::application_builder{};
    builder.name("builder-test")
       .runtime(forge::asio::runtime_options{.worker_threads = 1, .thread_name = "builder-test"})
+      .compute(forge::asio::compute::pool::options{.worker_threads = 1})
       .config<shell_service_config>("service", [&](forge::app::configure_context& context, const shell_service_config& config)
                                     -> boost::asio::awaitable<void> {
          workers = config.workers;
@@ -1992,6 +2161,7 @@ BOOST_AUTO_TEST_CASE(application_builder_creates_shell_and_applies_config_handle
          log.entries.push_back("configure.extra");
       })
       .provide([&](forge::app::application_context& context) {
+         BOOST_REQUIRE(context.has_compute());
          context.apis().install<sample_api>(sample_api::describe(), std::make_shared<sample_api_impl>(workers));
          log.entries.push_back("provide");
       })
@@ -2020,6 +2190,7 @@ BOOST_AUTO_TEST_CASE(application_builder_creates_shell_and_applies_config_handle
       });
 
    auto app = std::move(builder).build();
+   BOOST_REQUIRE(app->has_compute());
    const auto registry = app->describe_config();
    BOOST_REQUIRE_EQUAL(registry.components().size(), 1U);
    BOOST_TEST(registry.components()[0].section == "service");

@@ -20,10 +20,13 @@ import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.db.blob.exceptions;
 import forge.db.blob.ref;
+import forge.db.blob.snapshot;
 import forge.db.blob.store;
+import forge.db.blob.transaction;
 import forge.db.blob.types;
 import forge.crypto.hex;
 import forge.crypto.sha256;
+import forge.db.core.exceptions;
 import forge.db.core.driver;
 import forge.db.core.record;
 import forge.ids.object_id;
@@ -73,7 +76,11 @@ class memory_session final : public forge::db::core::session {
        : state_{std::move(state)}, working_{state_->records}, snapshot_{snapshot}, writable_{writable} {}
 
    [[nodiscard]] forge::db::core::capabilities capabilities() const noexcept override {
-      return forge::db::core::capabilities{.snapshot_reads = snapshot_, .writes = writable_};
+      return forge::db::core::capabilities{
+         .snapshot_reads = snapshot_,
+         .writes = writable_,
+         .savepoints = writable_,
+      };
    }
 
    boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(forge::db::core::family family,
@@ -98,6 +105,28 @@ class memory_session final : public forge::db::core::session {
 
    boost::asio::awaitable<void> erase(forge::db::core::family family, forge::db::core::record_key key) override {
       working_[family.name].erase(key);
+      co_return;
+   }
+
+   boost::asio::awaitable<void> create_savepoint() override {
+      savepoints_.push_back(working_);
+      co_return;
+   }
+
+   boost::asio::awaitable<void> rollback_to_savepoint() override {
+      if (savepoints_.empty()) {
+         throw std::logic_error{"db blob test savepoint stack is empty"};
+      }
+      working_ = std::move(savepoints_.back());
+      savepoints_.pop_back();
+      co_return;
+   }
+
+   boost::asio::awaitable<void> release_savepoint() override {
+      if (savepoints_.empty()) {
+         throw std::logic_error{"db blob test savepoint stack is empty"};
+      }
+      savepoints_.pop_back();
       co_return;
    }
 
@@ -156,6 +185,7 @@ class memory_session final : public forge::db::core::session {
  private:
    std::shared_ptr<memory_state> state_;
    family_map working_;
+   std::vector<family_map> savepoints_;
    bool snapshot_ = false;
    bool writable_ = false;
 };
@@ -365,6 +395,18 @@ struct digest_traits<capped_digest> {
 
 FORGE_DB_OBJECT(document_object)
 
+template <typename View>
+concept mutable_blob_snapshot = requires(View& view,
+                                         forge::db::blob::ref<> value,
+                                         forge::db::blob::owner_ref owner) {
+   view.erase(value);
+   view.retain(value, owner);
+   view.release(value, owner);
+   view.collect_unreferenced();
+};
+
+static_assert(!mutable_blob_snapshot<forge::db::blob::snapshot>);
+
 BOOST_AUTO_TEST_SUITE(db_blob_test_suite)
 
 BOOST_AUTO_TEST_CASE(db_blob_ref_defaults_to_sha256_and_variant_uses_text_form) {
@@ -541,6 +583,70 @@ BOOST_AUTO_TEST_CASE(db_blob_put_returns_default_ref_and_default_operations_use_
    }());
 }
 
+BOOST_AUTO_TEST_CASE(db_blob_snapshot_preserves_payload_and_refs_across_collection) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   auto blobs = forge::db::blob::store{driver};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto owner = forge::db::blob::owner_ref{"doc:snapshot"};
+      const auto value = co_await blobs.put(bytes("snapshot-payload"));
+      co_await blobs.retain(value, owner);
+
+      auto view = co_await blobs.begin_read();
+      BOOST_CHECK(view.active());
+
+      auto wrong_size = value;
+      ++wrong_size.size;
+      BOOST_CHECK(!(co_await view.has(wrong_size)));
+      BOOST_CHECK_THROW((void)(co_await view.get(wrong_size)),
+                        forge::db::blob::exceptions::digest_mismatch);
+      BOOST_CHECK_THROW((void)(co_await view.stat_blob(wrong_size)),
+                        forge::db::blob::exceptions::digest_mismatch);
+      BOOST_CHECK_THROW(co_await view.verify(wrong_size),
+                        forge::db::blob::exceptions::digest_mismatch);
+
+      co_await blobs.release(value, owner);
+      const auto collected = co_await blobs.collect_unreferenced({.limit = 10});
+      BOOST_CHECK_EQUAL(collected.removed, 1U);
+      BOOST_CHECK(!(co_await blobs.has(value)));
+      BOOST_CHECK_EQUAL(co_await blobs.ref_count(value), 0U);
+
+      BOOST_CHECK(co_await view.has(value));
+      BOOST_CHECK_EQUAL(text(co_await view.get(value)), "snapshot-payload");
+      const auto state = co_await view.stat_blob(value);
+      BOOST_CHECK_EQUAL(state.size, value.size);
+      BOOST_CHECK_EQUAL(state.refs, 1U);
+      BOOST_CHECK_EQUAL(co_await view.ref_count(value), 1U);
+      co_await view.verify(value);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_store_rejects_foreign_closed_and_originless_snapshots) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   auto driver = std::make_shared<memory_driver>(state);
+   auto foreign_driver = std::make_shared<memory_driver>(state);
+   auto blobs = forge::db::blob::store{driver};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto foreign = co_await foreign_driver->begin_read();
+      BOOST_CHECK_THROW(static_cast<void>(blobs.join(foreign)),
+                        forge::db::blob::exceptions::invalid_descriptor);
+
+      auto closed = forge::db::core::snapshot{};
+      BOOST_CHECK_THROW(static_cast<void>(blobs.join(closed)),
+                        forge::db::blob::exceptions::transaction_closed);
+
+      auto originless = forge::db::core::snapshot{
+         std::make_unique<memory_session>(state, true, false)};
+      BOOST_CHECK_THROW(static_cast<void>(blobs.join(originless)),
+                        forge::db::blob::exceptions::invalid_descriptor);
+      co_return;
+   }());
+}
+
 BOOST_AUTO_TEST_CASE(db_blob_put_as_supports_custom_digest_without_templated_store) {
    static_assert(forge::db::blob::digest_algorithm<toy_digest>);
    static_assert(forge::db::blob::digest_algorithm<strict_digest>);
@@ -586,6 +692,25 @@ BOOST_AUTO_TEST_CASE(db_blob_refs_and_collection_are_explicit_mechanisms) {
 
       co_await blobs.release(kept, forge::db::blob::owner_ref{"doc:1"});
       BOOST_CHECK_EQUAL(co_await blobs.ref_count(kept), 0U);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_collection_rejects_closed_transaction_before_zero_limit_return) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   auto blobs = forge::db::blob::store{driver};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto closed = forge::db::blob::transaction{};
+      BOOST_CHECK_THROW(co_await closed.collect_unreferenced({.limit = 0}),
+                        forge::db::blob::exceptions::transaction_closed);
+
+      auto active = co_await blobs.begin_transaction();
+      auto moved = std::move(active);
+      BOOST_CHECK_THROW(co_await active.collect_unreferenced({.limit = 0}),
+                        forge::db::blob::exceptions::transaction_closed);
+      co_await moved.rollback();
       co_return;
    }());
 }
@@ -747,6 +872,205 @@ BOOST_AUTO_TEST_CASE(db_blob_retain_release_and_collect_roll_back_with_transacti
    }());
 }
 
+BOOST_AUTO_TEST_CASE(db_blob_savepoint_rollback_restores_payload_refs_and_collection) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   auto blobs = forge::db::blob::store{driver};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto owner = forge::db::blob::owner_ref{"doc:savepoint"};
+      const auto kept = co_await blobs.put(bytes("kept"));
+      const auto free = co_await blobs.put(bytes("free"));
+      co_await blobs.retain(kept, owner);
+
+      auto tx = co_await blobs.begin_transaction();
+      const auto point = co_await tx.db_transaction().create_savepoint();
+      co_await tx.release(kept, owner);
+      const auto transient = co_await tx.put(bytes("transient"));
+      const auto collected = co_await tx.collect_unreferenced({.limit = 10});
+      BOOST_CHECK_EQUAL(collected.removed, 3U);
+      co_await tx.db_transaction().rollback_to_savepoint(point);
+
+      BOOST_CHECK_EQUAL(co_await tx.ref_count(kept), 1U);
+      BOOST_CHECK(co_await tx.has(kept));
+      BOOST_CHECK(co_await tx.has(free));
+      BOOST_CHECK(!(co_await tx.has(transient)));
+      co_await tx.commit();
+
+      BOOST_CHECK_EQUAL(co_await blobs.ref_count(kept), 1U);
+      BOOST_CHECK(co_await blobs.has(free));
+      BOOST_CHECK(!(co_await blobs.has(transient)));
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_supports_distinct_store_families) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   auto first = forge::db::blob::store{
+      driver,
+      forge::db::blob::store::config{
+         .data_family = forge::db::core::family{"blobs.first.data"},
+         .refs_family = forge::db::core::family{"blobs.first.refs"},
+      }};
+   auto second = forge::db::blob::store{
+      driver,
+      forge::db::blob::store::config{
+         .data_family = forge::db::core::family{"blobs.second.data"},
+         .refs_family = forge::db::core::family{"blobs.second.refs"},
+      }};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto shared = co_await driver->begin_transaction();
+      auto first_tx = first.join(shared);
+      auto second_tx = second.join(shared);
+
+      const auto first_kept = co_await first_tx.put(bytes("first-kept"));
+      const auto point = co_await shared.create_savepoint();
+      const auto first_rolled_back = co_await first_tx.put(bytes("first-rolled-back"));
+      const auto second_rolled_back = co_await second_tx.put(bytes("second-rolled-back"));
+      co_await shared.rollback_to_savepoint(point);
+      const auto second_kept = co_await second_tx.put(bytes("second-kept"));
+      co_await shared.commit();
+
+      BOOST_CHECK(co_await first.has(first_kept));
+      BOOST_CHECK(!(co_await first.has(first_rolled_back)));
+      BOOST_CHECK(!(co_await second.has(second_rolled_back)));
+      BOOST_CHECK(co_await second.has(second_kept));
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_reuses_existing_store_transaction) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   auto blobs = forge::db::blob::store{driver};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto shared = co_await driver->begin_transaction();
+      auto first = blobs.join(shared);
+      auto second = blobs.join(first);
+
+      const auto kept = co_await first.put(bytes("kept"));
+      const auto point = co_await shared.create_savepoint();
+      const auto rolled_back = co_await second.put(bytes("rolled-back"));
+      co_await shared.rollback_to_savepoint(point);
+      const auto also_kept = co_await second.put(bytes("also-kept"));
+
+      BOOST_CHECK_THROW(co_await second.commit(),
+                        forge::db::blob::exceptions::unsupported_operation);
+      BOOST_CHECK_THROW(co_await second.rollback(),
+                        forge::db::blob::exceptions::unsupported_operation);
+
+      co_await shared.commit();
+      BOOST_CHECK(co_await blobs.has(kept));
+      BOOST_CHECK(!(co_await blobs.has(rolled_back)));
+      BOOST_CHECK(co_await blobs.has(also_kept));
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_rejects_foreign_store_rejoin) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   const auto config = forge::db::blob::store::config{
+      .data_family = forge::db::core::family{"blobs.shared.data"},
+      .refs_family = forge::db::core::family{"blobs.shared.refs"},
+   };
+   auto first = forge::db::blob::store{driver, config};
+   auto foreign = forge::db::blob::store{driver, config};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto shared = co_await driver->begin_transaction();
+      auto first_tx = first.join(shared);
+      BOOST_CHECK_THROW(static_cast<void>(foreign.join(first_tx)),
+                        forge::db::blob::exceptions::invalid_descriptor);
+      co_await shared.rollback();
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_rejects_duplicate_store_families) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   const auto config = forge::db::blob::store::config{
+      .data_family = forge::db::core::family{"blobs.shared.data"},
+      .refs_family = forge::db::core::family{"blobs.shared.refs"},
+   };
+   auto first = forge::db::blob::store{driver, config};
+   auto duplicate = forge::db::blob::store{driver, config};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto shared = co_await driver->begin_transaction();
+      auto first_tx = first.join(shared);
+      BOOST_CHECK_THROW(static_cast<void>(duplicate.join(shared)),
+                        forge::db::core::exceptions::participant_conflict);
+      co_await shared.rollback();
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_rejects_overlapping_store_families) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto expect_conflict = [&](forge::db::blob::store::config first_config,
+                                       forge::db::blob::store::config second_config)
+         -> boost::asio::awaitable<void> {
+         auto first = forge::db::blob::store{driver, std::move(first_config)};
+         auto second = forge::db::blob::store{driver, std::move(second_config)};
+         auto shared = co_await driver->begin_transaction();
+         auto first_tx = first.join(shared);
+         BOOST_CHECK_THROW(static_cast<void>(second.join(shared)),
+                           forge::db::core::exceptions::participant_conflict);
+         co_await shared.rollback();
+      };
+
+      co_await expect_conflict(
+         {.data_family = forge::db::core::family{"shared.data"},
+          .refs_family = forge::db::core::family{"first.refs"}},
+         {.data_family = forge::db::core::family{"shared.data"},
+          .refs_family = forge::db::core::family{"second.refs"}});
+      co_await expect_conflict(
+         {.data_family = forge::db::core::family{"first.data"},
+          .refs_family = forge::db::core::family{"shared.refs"}},
+         {.data_family = forge::db::core::family{"second.data"},
+          .refs_family = forge::db::core::family{"shared.refs"}});
+      co_await expect_conflict(
+         {.data_family = forge::db::core::family{"first.data"},
+          .refs_family = forge::db::core::family{"cross-role"}},
+         {.data_family = forge::db::core::family{"cross-role"},
+          .refs_family = forge::db::core::family{"second.refs"}});
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_rejects_object_family_overlap) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   auto blobs = forge::db::blob::store{
+      driver,
+      forge::db::blob::store::config{
+         .data_family = forge::db::core::family{"shared.records"},
+         .refs_family = forge::db::core::family{"blob.refs"},
+      }};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto objects = co_await forge::db::object::store::open(
+         driver,
+         forge::db::object::store::config{.family = forge::db::core::family{"shared.records"}});
+      objects.register_object<document_object>();
+
+      auto shared = co_await driver->begin_transaction();
+      auto object_tx = co_await objects.join(shared);
+      BOOST_CHECK_THROW(static_cast<void>(blobs.join(shared)),
+                        forge::db::core::exceptions::participant_conflict);
+      co_await shared.rollback();
+      co_return;
+   }());
+}
+
 BOOST_AUTO_TEST_CASE(db_blob_join_shares_commit_boundary_with_db_object_metadata) {
    auto runtime = forge::asio::runtime{};
    auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
@@ -756,7 +1080,7 @@ BOOST_AUTO_TEST_CASE(db_blob_join_shares_commit_boundary_with_db_object_metadata
       auto objects = co_await forge::db::object::store::open(driver);
       objects.register_object<document_object>();
       auto db_tx = co_await driver->begin_transaction();
-      auto object_tx = objects.join(db_tx);
+      auto object_tx = co_await objects.join(db_tx);
       auto blob_tx = blobs.join(db_tx);
 
       auto id = co_await blob_tx.put(bytes("payload"));

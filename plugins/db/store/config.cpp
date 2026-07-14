@@ -50,7 +50,11 @@ forge::db::object::store::options parse_object_options(const object_layer_config
 }
 
 store_options parse_options(const store_config& value) {
-   auto options = store_options{.object = std::nullopt, .blob = std::nullopt};
+   auto options = store_options{
+      .object = std::nullopt,
+      .blob = std::nullopt,
+      .revision = std::nullopt,
+   };
    if (value.object) {
       options.object = object_layer_options{
          .family = forge::db::core::family{value.object->family},
@@ -62,6 +66,9 @@ store_options parse_options(const store_config& value) {
          .data_family = forge::db::core::family{value.blob->data_family},
          .refs_family = forge::db::core::family{value.blob->refs_family},
       };
+   }
+   if (value.revision) {
+      options.revision = revision_layer_options{};
    }
    return options;
 }
@@ -79,6 +86,17 @@ void validate_options(const store_options& value, const std::string& store_name,
                             forge::exceptions::ctx("store", store_name),
                             forge::exceptions::ctx("family", family));
    };
+
+   if (value.revision && !value.object) {
+      if (programmatic) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_argument,
+                               "db store revision layer requires object layer",
+                               forge::exceptions::ctx("store", store_name));
+      }
+      FORGE_THROW_EXCEPTION(exceptions::invalid_config,
+                            "db store revision layer requires object layer",
+                            forge::exceptions::ctx("store", store_name));
+   }
 
    if (value.object && value.blob) {
       if (value.object->family.name == value.blob->data_family.name) {
@@ -113,6 +131,11 @@ void validate_config(const config& value) {
       }
       if (!item.object && !item.blob) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_config, "db store must configure object or blob layer",
+                               forge::exceptions::ctx("store", item.name));
+      }
+      if (item.revision && !item.object) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_config,
+                               "db store revision layer requires object layer",
                                forge::exceptions::ctx("store", item.name));
       }
       if (item.object && item.object->family.empty()) {

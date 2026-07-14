@@ -26,6 +26,7 @@ target_link_libraries(
       forge_db_core
       forge_db_object
       forge_db_blob
+      forge_db_revision
       forge_exceptions
       Boost::asio
 )

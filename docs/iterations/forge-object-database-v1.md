@@ -43,8 +43,8 @@ descriptors, deterministic key layout and async store/index access:
   storage behavior;
 - `object_index<T, indexed_by<...>>` is the schema descriptor;
 - `primary_unique<Tag>` is shorthand for the base `id`;
-- `FORGE_DB_OBJECT(Object)` creates the inverse compile-time mapping from
-  typed id to object descriptor;
+- `FORGE_DB_OBJECT(Object)` specializes `forge::db::object::index_for_id` with
+  the inverse compile-time mapping from typed id to object descriptor;
 - `ordered_unique` and `ordered_non_unique` describe persisted ordered index
   entries independently from their extractors;
 - `member`, `const_mem_fun` and `global_fun` extract scalar values;

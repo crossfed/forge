@@ -15,14 +15,14 @@ template <> struct scheduled_result<void> {
 
 template <typename Fn>
 boost::asio::awaitable<std::invoke_result_t<Fn&>> run_scheduled(
-   forge::asio::task_scheduler& scheduler,
+   forge::asio::task::scheduler& scheduler,
    std::string name,
    Fn fn) {
    using result_type = std::invoke_result_t<Fn&>;
    auto state = std::make_shared<scheduled_result<result_type>>();
    auto handle = scheduler.submit(
-      forge::asio::task{
-         .priority = forge::asio::priority{},
+      forge::asio::task::task{
+         .priority = forge::asio::task::priority{},
          .name = std::move(name),
          .work =
             [state, fn = std::move(fn)]() mutable {

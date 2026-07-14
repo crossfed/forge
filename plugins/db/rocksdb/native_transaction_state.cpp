@@ -7,7 +7,7 @@ module;
 
 module forge.plugins.db.rocksdb.plugin;
 
-import forge.asio.task_scheduler;
+import forge.asio.task;
 import forge.rocksdb.store;
 
 #include "details/native_transaction_state.hxx"
