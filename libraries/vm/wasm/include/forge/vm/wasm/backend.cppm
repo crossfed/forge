@@ -222,7 +222,8 @@ class backend {
       assert(from.mod_sharable); // `from` backend's mod is sharable
       assert(!mod_sharable);     // `to` backend's mod must not be sharable
       mod = from.mod;
-      ctx.owns = from.ctx.owns;
+      ctx.owns = false;
+      initialized = false;
       initial_max_call_depth = from.initial_max_call_depth;
       initial_max_pages = from.initial_max_pages;
    }
@@ -231,6 +232,7 @@ class backend {
       // ctx cannot be set if it is created by the backend
       assert(!ctx.owns);
       ctx.reset(ctx_ptr, false);
+      initialized = false;
    }
 
    inline void reset_max_call_depth() {

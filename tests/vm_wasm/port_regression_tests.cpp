@@ -348,6 +348,32 @@ TEST_CASE("interpreter rejects linear memory without an allocator", "[backend]")
    memory.free();
 }
 
+TEST_CASE("shared modules accept non-owning execution contexts", "[backend]") {
+   auto code = wasm::wasm_code{
+       0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,       // header
+       0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f,             // () -> i32
+       0x03, 0x02, 0x01, 0x00,                               // one function
+       0x07, 0x07, 0x01, 0x03, 0x72, 0x75, 0x6e, 0x00, 0x00, // export run
+       0x0a, 0x06, 0x01, 0x04, 0x00, 0x41, 0x2a, 0x0b        // return 42
+   };
+   using runtime = wasm::backend<std::nullptr_t, wasm::interpreter>;
+   auto source = runtime{code, static_cast<wasm::wasm_allocator*>(nullptr)};
+   auto shared = runtime{};
+   shared.share(source);
+
+   using context = std::remove_cvref_t<decltype(source.get_context())>;
+   auto execution = context{shared.get_module(), 1024};
+   auto memory = wasm::wasm_allocator{};
+   shared.set_context(&execution);
+   shared.set_wasm_allocator(&memory);
+   shared.initialize();
+
+   const auto result = shared.call_with_return("env", "run");
+   BOOST_REQUIRE(result.has_value());
+   BOOST_TEST(result->to_ui32() == 42u);
+   memory.free();
+}
+
 #if FORGE_VM_WASM_HAS_JIT && !defined(FORGE_VM_WASM_TEST_INTERPRETER_ONLY)
 TEST_CASE("jit reports a missing export before function type lookup", "[execution_context]") {
    auto code = wasm::wasm_code{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00};

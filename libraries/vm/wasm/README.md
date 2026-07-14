@@ -106,7 +106,7 @@ valid bytes for the complete parse.
 ## Cookbook: Register Host Functions Once
 
 Host functions are the guest's capability boundary. Keep the host type narrow,
-validate product permissions before exposing side effects, and register the
+validate application policy before exposing side effects, and register the
 exact module/name/signature expected by the WASM imports.
 
 ```cpp
@@ -118,15 +118,15 @@ import forge.vm.wasm.backend;
 namespace wasm = forge::vm::wasm;
 
 struct invocation_host {
-   std::uint64_t account = 0;
+   std::uint64_t id = 0;
 
-   std::uint64_t current_account() const {
-      return account;
+   std::uint64_t invocation_id() const {
+      return id;
    }
 
    void write_log(wasm::span<const char> text) {
       const auto message = std::string_view{text.data(), text.size()};
-      // Send message to the product logger. Do not retain text.data().
+      // Send message to the application logger. Do not retain text.data().
    }
 };
 
@@ -134,7 +134,7 @@ using host_functions = wasm::registered_host_functions<invocation_host>;
 
 void register_host_functions() {
    static const bool registered = [] {
-      host_functions::add<&invocation_host::current_account>("env", "current_account");
+      host_functions::add<&invocation_host::invocation_id>("env", "invocation_id");
       host_functions::add<&invocation_host::write_log>("env", "write_log");
       return true;
    }();
