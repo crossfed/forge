@@ -491,6 +491,7 @@ struct pool_state::impl {
 
    void cancel_waiter(const std::shared_ptr<admission_waiter>& waiter, bool rejected) noexcept {
       auto should_wake = false;
+      auto granted = std::vector<std::shared_ptr<admission_waiter>>{};
       {
          const auto lock = std::scoped_lock{mutex};
          if (waiter->state == admission_state::queued) {
@@ -514,11 +515,15 @@ struct pool_state::impl {
             } else {
                ++current_metrics.canceled;
             }
+            granted = grant_waiters_locked();
             should_wake = true;
          }
       }
       if (should_wake) {
          wake(waiter);
+      }
+      for (const auto& next : granted) {
+         wake(next);
       }
    }
 

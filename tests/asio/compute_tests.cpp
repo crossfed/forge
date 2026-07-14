@@ -3,6 +3,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstdint>
+#include <future>
 #include <memory>
 #include <map>
 #include <mutex>
@@ -21,6 +22,7 @@
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
@@ -276,6 +278,83 @@ BOOST_AUTO_TEST_CASE(compute_admits_waiting_submissions_in_fifo_order_and_bounds
 
    const auto expected = std::vector<int>{2, 3};
    BOOST_TEST(order == expected, boost::test_tools::per_element());
+   forge::asio::blocking::run(runtime, pool.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(compute_hands_off_a_canceled_granted_reservation_to_the_next_waiter) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto pool = forge::asio::compute::pool{forge::asio::compute::pool::options{
+       .worker_threads = 1,
+       .max_pending_tasks = 0,
+       .max_waiting_submissions = 2,
+   }};
+   auto executor = pool.get_executor();
+   auto active_started = std::atomic_bool{false};
+   auto release_active = std::atomic_bool{false};
+   auto runtime_blocked = std::atomic_bool{false};
+   auto release_runtime = std::atomic_bool{false};
+   auto canceled_ran = std::atomic_bool{false};
+   auto successor_ran = std::atomic_bool{false};
+
+   auto active = forge::asio::blocking::run(runtime, executor.submit({.name = "active"}, [&] {
+      active_started.store(true, std::memory_order_release);
+      while (!release_active.load(std::memory_order_acquire)) {
+         std::this_thread::sleep_for(std::chrono::milliseconds{1});
+      }
+   }));
+   BOOST_REQUIRE(wait_for_true(active_started));
+
+   auto canceled_source = std::stop_source{};
+   auto canceled = boost::asio::co_spawn(
+       runtime.context(),
+       executor.execute({.name = "canceled", .parent_stop_token = canceled_source.get_token()},
+                        [&] { canceled_ran.store(true, std::memory_order_release); }),
+       boost::asio::use_future);
+   BOOST_REQUIRE(wait_until([&] { return pool.snapshot().waiting == 1; }));
+
+   auto successor = boost::asio::co_spawn(
+       runtime.context(),
+       executor.execute({.name = "successor"}, [&] { successor_ran.store(true, std::memory_order_release); }),
+       boost::asio::use_future);
+   BOOST_REQUIRE(wait_until([&] { return pool.snapshot().waiting == 2; }));
+
+   boost::asio::post(runtime.context(), [&] {
+      runtime_blocked.store(true, std::memory_order_release);
+      while (!release_runtime.load(std::memory_order_acquire)) {
+         std::this_thread::sleep_for(std::chrono::milliseconds{1});
+      }
+   });
+   BOOST_REQUIRE(wait_for_true(runtime_blocked));
+
+   release_active.store(true, std::memory_order_release);
+   BOOST_REQUIRE(wait_until([&] {
+      const auto current = pool.snapshot();
+      return current.running == 0 && current.waiting == 1;
+   }));
+   BOOST_REQUIRE(canceled_source.request_stop());
+
+   const auto handed_off = wait_until([&] { return pool.snapshot().waiting == 0; }, std::chrono::milliseconds{250});
+   release_runtime.store(true, std::memory_order_release);
+   BOOST_CHECK(handed_off);
+   if (!handed_off) {
+      pool.request_stop();
+   }
+
+   BOOST_CHECK_THROW(static_cast<void>(canceled.get()), forge::asio::exceptions::canceled);
+   BOOST_CHECK(!canceled_ran.load(std::memory_order_acquire));
+   if (handed_off) {
+      BOOST_REQUIRE(successor.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+      successor.get();
+      BOOST_CHECK(successor_ran.load(std::memory_order_acquire));
+   } else {
+      BOOST_CHECK_THROW(static_cast<void>(successor.get()), forge::asio::exceptions::rejected);
+   }
+
+   forge::asio::blocking::run(runtime, std::move(active).wait());
+   const auto final = pool.snapshot();
+   BOOST_CHECK_EQUAL(final.waiting, 0U);
+   BOOST_CHECK_EQUAL(final.running, 0U);
+   BOOST_CHECK_GE(final.canceled, 1U);
    forge::asio::blocking::run(runtime, pool.shutdown());
 }
 
