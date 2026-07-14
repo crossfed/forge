@@ -879,7 +879,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_commits_object_metadata_and
    handle.objects().register_object<file_object>();
 
    auto tx = forge::asio::blocking::run(runtime, handle.begin_transaction());
-   auto object_tx = handle.objects().join(tx);
+   auto object_tx = forge::asio::blocking::run(runtime, handle.objects().join(tx));
    auto blob_tx = handle.blobs().join(tx);
 
    auto content = forge::asio::blocking::run(runtime, blob_tx.put(bytes("shared payload")));
@@ -947,6 +947,50 @@ BOOST_AUTO_TEST_CASE(store_plugin_begin_transaction_preserves_object_single_writ
    forge::asio::blocking::run(app->runtime(), app->shutdown());
 }
 
+BOOST_AUTO_TEST_CASE(store_plugin_rejects_object_join_from_another_named_store) {
+   auto runtime = forge::asio::runtime{};
+   auto scheduler = forge::asio::task_scheduler{runtime};
+   auto apis = forge::api::core::registry{};
+   auto signals = forge::app::signal_bus{};
+   auto events = forge::app::event_bus{};
+   auto plugin = store_plugin::plugin{};
+   auto driver = std::make_shared<memory_driver>();
+
+   auto document = forge::config::core::document{};
+   forge::asio::blocking::run(
+      runtime,
+      plugin.configure(forge::config::core::component_view{document, "plugins.db.store"}));
+   auto provider = forge::api::core::installer{apis};
+   forge::asio::blocking::run(runtime, plugin.provide(provider));
+   auto context = forge::app::plugin_context{scheduler, apis, signals, events};
+   forge::asio::blocking::run(runtime, plugin.initialize(context));
+
+   auto first_options = store_plugin::store_options{};
+   first_options.object = store_plugin::object_layer_options{
+      .family = forge::db::core::family{"objects.first"},
+   };
+   auto second_options = store_plugin::store_options{};
+   second_options.object = store_plugin::object_layer_options{
+      .family = forge::db::core::family{"objects.second"},
+   };
+
+   auto api = apis.get<store_plugin::api>(store_plugin::api::ref());
+   forge::asio::blocking::run(runtime, api->add_store("first", driver, first_options));
+   forge::asio::blocking::run(runtime, api->add_store("second", driver, second_options));
+   forge::asio::blocking::run(runtime, plugin.after_initialize());
+   forge::asio::blocking::run(runtime, plugin.startup());
+
+   auto first = forge::asio::blocking::run(runtime, api->store("first"));
+   auto second = forge::asio::blocking::run(runtime, api->store("second"));
+   auto tx = forge::asio::blocking::run(runtime, first.begin_transaction());
+   BOOST_CHECK_THROW(
+      forge::asio::blocking::run(runtime, second.objects().join(tx)),
+      store_plugin::exceptions::invalid_argument);
+   forge::asio::blocking::run(runtime, tx.rollback());
+
+   forge::asio::blocking::run(runtime, plugin.shutdown());
+}
+
 BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_rollback_hides_object_and_blob) {
    auto runtime = forge::asio::runtime{};
    auto scheduler = forge::asio::task_scheduler{runtime};
@@ -975,7 +1019,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_rollback_hides_object_and_b
    handle.objects().register_object<file_object>();
 
    auto tx = forge::asio::blocking::run(runtime, handle.begin_transaction());
-   auto object_tx = handle.objects().join(tx);
+   auto object_tx = forge::asio::blocking::run(runtime, handle.objects().join(tx));
    auto blob_tx = handle.blobs().join(tx);
 
    auto content = forge::asio::blocking::run(runtime, blob_tx.put(bytes("rollback payload")));
@@ -1017,7 +1061,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_shared_transaction_object_failure_rolls_back_b
    forge::asio::blocking::run(runtime, handle.objects().insert(make_file(1, "/duplicate.txt", {})));
 
    auto tx = forge::asio::blocking::run(runtime, handle.begin_transaction());
-   auto object_tx = handle.objects().join(tx);
+   auto object_tx = forge::asio::blocking::run(runtime, handle.objects().join(tx));
    auto blob_tx = handle.blobs().join(tx);
 
    auto content = forge::asio::blocking::run(runtime, blob_tx.put(bytes("orphan candidate")));
@@ -1191,7 +1235,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_configured_rocksdb_store_persists_object_and_b
       handle.objects().register_object<file_object>();
 
       auto tx = forge::asio::blocking::run(app->runtime(), handle.begin_transaction());
-      auto object_tx = handle.objects().join(tx);
+      auto object_tx = forge::asio::blocking::run(app->runtime(), handle.objects().join(tx));
       auto blob_tx = handle.blobs().join(tx);
 
       const auto content = forge::asio::blocking::run(app->runtime(), blob_tx.put(bytes("configured rocksdb blob")));

@@ -304,6 +304,25 @@ bool transaction::has_participant(std::string_view name) const noexcept {
       [name](const auto& participant) { return participant && participant->name() == name; });
 }
 
+bool transaction::claims_family(const family& column_family) const noexcept {
+   if (!active()) {
+      return false;
+   }
+   return std::any_of(
+      impl_->participants.begin(),
+      impl_->participants.end(),
+      [&column_family](const auto& participant) {
+         if (!participant) {
+            return false;
+         }
+         const auto claims = participant->exclusive_families();
+         return std::any_of(
+            claims.begin(),
+            claims.end(),
+            [&column_family](const family& claimed) { return claimed.name == column_family.name; });
+      });
+}
+
 boost::asio::awaitable<savepoint_id_t> transaction::create_savepoint() {
    if (!active()) {
       FORGE_THROW_EXCEPTION(exceptions::transaction_closed, "db transaction is closed");

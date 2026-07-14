@@ -26,7 +26,7 @@ import forge.db.object.exceptions;
 
 namespace forge::db::object {
 
-transaction::impl::impl(forge::db::core::transaction active_value,
+transaction::impl::impl(forge::db::core::transaction&& active_value,
                         forge::db::core::family family_value,
                         transaction::ensure_registered_fn ensure,
                         transaction::allocate_id_fn allocate,
@@ -41,8 +41,7 @@ transaction::impl::impl(forge::db::core::transaction active_value,
       allocate_id{std::move(allocate)},
       participant{std::make_shared<detail::transaction_participant_impl>(
          family, std::move(seal), std::move(observers_value), std::move(release))},
-      interceptors{std::move(interceptors_value)},
-      owns_commit{true} {}
+      interceptors{std::move(interceptors_value)} {}
 
 transaction::impl::impl(forge::db::core::transaction& active_value,
                         forge::db::core::family family_value,
@@ -50,13 +49,14 @@ transaction::impl::impl(forge::db::core::transaction& active_value,
                         transaction::allocate_id_fn allocate,
                         transaction::seal_allocations_fn seal,
                         std::vector<std::shared_ptr<interceptor>> interceptors_value,
-                        std::vector<std::shared_ptr<observer>> observers_value)
+                        std::vector<std::shared_ptr<observer>> observers_value,
+                        transaction::release_fn release)
     : active{&active_value},
       family{std::move(family_value)},
       ensure_registered{std::move(ensure)},
       allocate_id{std::move(allocate)},
       participant{std::make_shared<detail::transaction_participant_impl>(
-         family, std::move(seal), std::move(observers_value), transaction::release_fn{})},
+         family, std::move(seal), std::move(observers_value), std::move(release))},
       interceptors{std::move(interceptors_value)} {}
 
 void transaction::impl::remember_allocation(forge::ids::object_id type, std::uint64_t next_instance) {
@@ -114,6 +114,7 @@ transaction::transaction(forge::db::core::transaction&& active,
          std::move(interceptors),
          std::move(observers),
          std::move(release))} {
+   owns_commit_ = true;
    db_transaction().attach_participant(impl_->participant);
    auto participant = impl_->participant;
    db_transaction().after_commit([participant]() mutable -> boost::asio::awaitable<void> {
@@ -157,13 +158,31 @@ transaction::transaction(forge::db::core::transaction& active,
                   std::move(interceptors),
                   std::move(observers)) {}
 
+transaction::transaction(std::shared_ptr<impl> implementation) : impl_{std::move(implementation)} {}
+
+void detail::transaction_access::bind_store(transaction& active, std::shared_ptr<const void> identity) {
+   if (active.impl_) {
+      active.impl_->store_identity = std::move(identity);
+   }
+}
+
+bool detail::transaction_access::belongs_to(const transaction& active, const void* identity) noexcept {
+   return active.impl_ && active.impl_->store_identity.get() == identity;
+}
+
+transaction detail::transaction_access::joined(transaction& active) {
+   (void)active.active_transaction();
+   return transaction{active.impl_};
+}
+
 transaction::transaction(forge::db::core::transaction& active,
                          forge::db::core::family family,
                          ensure_registered_fn ensure,
                          allocate_id_fn allocate,
                          seal_allocations_fn seal,
                          std::vector<std::shared_ptr<interceptor>> interceptors,
-                         std::vector<std::shared_ptr<observer>> observers)
+                         std::vector<std::shared_ptr<observer>> observers,
+                         release_fn release)
     : impl_{std::make_shared<impl>(
          active,
          std::move(family),
@@ -171,7 +190,8 @@ transaction::transaction(forge::db::core::transaction& active,
          std::move(allocate),
          std::move(seal),
          std::move(interceptors),
-         std::move(observers))} {
+         std::move(observers),
+         std::move(release))} {
    db_transaction().attach_participant(impl_->participant);
    auto participant = impl_->participant;
    db_transaction().after_commit([participant]() mutable -> boost::asio::awaitable<void> {
@@ -261,7 +281,7 @@ boost::asio::awaitable<void> transaction::commit() {
    if (!impl_ || impl_->participant->finalized()) {
       co_return;
    }
-   if (!impl_->owns_commit) {
+   if (!owns_commit_) {
       FORGE_THROW_EXCEPTION(exceptions::unsupported_operation, "joined db object transaction does not own commit");
    }
    co_await active_transaction().commit();
@@ -272,7 +292,7 @@ boost::asio::awaitable<void> transaction::rollback() {
    if (!impl_ || impl_->participant->finalized()) {
       co_return;
    }
-   if (!impl_->owns_commit) {
+   if (!owns_commit_) {
       FORGE_THROW_EXCEPTION(exceptions::unsupported_operation, "joined db object transaction does not own rollback");
    }
    co_await active_transaction().rollback();

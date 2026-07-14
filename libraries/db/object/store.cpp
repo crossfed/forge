@@ -116,7 +116,7 @@ boost::asio::awaitable<transaction> store::begin_transaction() {
       release = [owned_ticket]() mutable { owned_ticket->reset(); };
    }
 
-   co_return transaction{
+   auto result = transaction{
       std::move(active),
       impl_->config.family,
       [impl = impl_](forge::ids::object_id type, std::type_index model) {
@@ -134,6 +134,8 @@ boost::asio::awaitable<transaction> store::begin_transaction() {
       impl_->observers,
       std::move(release),
       executor};
+   detail::transaction_access::bind_store(result, impl_);
+   co_return result;
 }
 
 boost::asio::awaitable<snapshot> store::begin_read() {
@@ -151,8 +153,24 @@ boost::asio::awaitable<snapshot> store::begin_read() {
       }};
 }
 
-transaction store::join(forge::db::core::transaction& active) {
-   return transaction{
+boost::asio::awaitable<transaction> store::join(forge::db::core::transaction& active) {
+   if (active.claims_family(impl_->config.family)) {
+      FORGE_THROW_EXCEPTION(forge::db::core::exceptions::participant_conflict,
+                            "db object family is already attached to the transaction");
+   }
+
+   auto ticket = std::optional<detail::write_gate::ticket>{};
+   if (impl_->settings.writes == write_policy::single_writer) {
+      ticket.emplace(co_await impl_->runtime->write_gate->acquire());
+   }
+
+   auto release = transaction::release_fn{};
+   if (ticket.has_value()) {
+      auto owned_ticket = std::make_shared<std::optional<detail::write_gate::ticket>>(std::move(ticket));
+      release = [owned_ticket]() mutable { owned_ticket->reset(); };
+   }
+
+   auto result = transaction{
       active,
       impl_->config.family,
       [impl = impl_](forge::ids::object_id type, std::type_index model) {
@@ -167,7 +185,18 @@ transaction store::join(forge::db::core::transaction& active) {
          co_return;
       },
       impl_->interceptors,
-      impl_->observers};
+      impl_->observers,
+      std::move(release)};
+   detail::transaction_access::bind_store(result, impl_);
+   co_return result;
+}
+
+boost::asio::awaitable<transaction> store::join(transaction& active) {
+   if (!detail::transaction_access::belongs_to(active, impl_.get())) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor,
+                            "db object transaction belongs to another store");
+   }
+   co_return detail::transaction_access::joined(active);
 }
 
 void store::register_object_type(forge::ids::object_id type, std::type_index model) {

@@ -50,13 +50,18 @@ auto witness = co_await db->store("witness");
 witness.objects().register_object<witness_object>();
 
 auto tx = co_await witness.begin_transaction();
-auto objects = witness.objects().join(tx);
+auto objects = co_await witness.objects().join(tx);
 auto blobs = witness.blobs().join(tx);
 
 auto content = co_await blobs.put(bytes);
 co_await objects.insert(witness_record{.content = content});
 co_await tx.commit();
 ```
+
+When the named store has an Object layer, `begin_transaction()` reserves that
+layer's writer lane. `objects().join(tx)` reuses the already attached Object
+participant, while `blobs().join(tx)` attaches Blob state to the same Core
+transaction. A transaction created by another named store is rejected.
 
 Use `add_store(name, driver, options)` during setup when an application provides
 its own `forge::db::core::driver`. Once every plugin has initialized, DB Store

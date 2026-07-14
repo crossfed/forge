@@ -777,7 +777,7 @@ BOOST_AUTO_TEST_CASE(db_revision_coexists_with_independent_object_and_blob_parti
 
       auto active = co_await env.driver->begin_transaction();
       auto revision = co_await env.revisions.join(active);
-      auto objects = env.objects.join(active);
+      auto objects = co_await env.objects.join(active);
       auto blob_tx = blobs.join(active);
 
       const auto created = co_await objects.create<db_revision_tests::account>(
@@ -822,7 +822,7 @@ BOOST_AUTO_TEST_CASE(db_revision_reverts_generated_object_without_reusing_id_or_
       env.objects.add_observer(observer);
 
       auto revision = co_await env.revisions.begin_transaction();
-      auto objects = env.objects.join(revision.db_transaction());
+      auto objects = co_await env.objects.join(revision.db_transaction());
       const auto created = co_await objects.create<db_revision_tests::account>(
          [](db_revision_tests::account& value) { value.name = "alice"; });
       BOOST_CHECK_EQUAL(created.id.instance, 0U);

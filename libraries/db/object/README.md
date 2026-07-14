@@ -192,7 +192,7 @@ DB Blob share one backend commit boundary:
 ```cpp
 auto db_tx = co_await driver->begin_transaction();
 
-auto object_tx = objects.join(db_tx);
+auto object_tx = co_await objects.join(db_tx);
 auto blob_tx = blobs.join(db_tx);
 
 auto digest = co_await blob_tx.put(bytes);
@@ -202,7 +202,13 @@ co_await db_tx.commit();
 ```
 
 `store.begin_transaction()` is the convenience owning path. `store.join(tx)` is
-the shared path and does not own commit/rollback.
+the shared path and does not own commit/rollback. Joining is asynchronous:
+`write_policy::single_writer` waits for the store writer lane and keeps it until
+the outer Core transaction commits, rolls back or is dropped. Joining an
+existing Object transaction from the same store reuses its participant and
+returns another non-owning facade; it never acquires a second writer ticket.
+`write_policy::backend` delegates serialization to the backend and does not wait
+on the Object writer lane.
 
 ## Reads And Indexes
 

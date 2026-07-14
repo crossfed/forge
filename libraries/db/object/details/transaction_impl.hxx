@@ -9,7 +9,7 @@ class transaction_participant_impl;
 }
 
 struct transaction::impl {
-   impl(forge::db::core::transaction active_value,
+   impl(forge::db::core::transaction&& active_value,
         forge::db::core::family family_value,
         transaction::ensure_registered_fn ensure,
         transaction::allocate_id_fn allocate,
@@ -24,7 +24,8 @@ struct transaction::impl {
         transaction::allocate_id_fn allocate,
         transaction::seal_allocations_fn seal,
         std::vector<std::shared_ptr<interceptor>> interceptors_value,
-        std::vector<std::shared_ptr<observer>> observers_value);
+        std::vector<std::shared_ptr<observer>> observers_value,
+        transaction::release_fn release);
 
    std::optional<forge::db::core::transaction> owned;
    forge::db::core::transaction* active = nullptr;
@@ -33,7 +34,7 @@ struct transaction::impl {
    transaction::allocate_id_fn allocate_id;
    std::shared_ptr<detail::transaction_participant_impl> participant;
    std::vector<std::shared_ptr<interceptor>> interceptors;
-   bool owns_commit = false;
+   std::shared_ptr<const void> store_identity;
    void remember_allocation(forge::ids::object_id type, std::uint64_t next_instance);
 };
 

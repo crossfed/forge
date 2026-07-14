@@ -393,7 +393,7 @@ auto state = co_await db->store("state");
 
 auto tx = co_await state.begin_transaction();
 auto revision = co_await state.revisions().join(tx);
-auto objects = state.objects().join(tx);
+auto objects = co_await state.objects().join(tx);
 auto blobs = state.blobs().join(tx);
 
 co_await objects.insert(metadata);

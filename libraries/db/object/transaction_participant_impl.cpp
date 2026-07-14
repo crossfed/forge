@@ -44,6 +44,10 @@ transaction_participant_impl::transaction_participant_impl(
       observers_{std::move(observers)},
       release_{std::move(release)} {}
 
+transaction_participant_impl::~transaction_participant_impl() {
+   release_writer();
+}
+
 std::string_view transaction_participant_impl::name() const noexcept {
    return name_;
 }

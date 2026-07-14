@@ -35,6 +35,10 @@ import forge.raw.raw;
 
 export namespace forge::db::object {
 
+namespace detail {
+class transaction_access;
+}
+
 class transaction {
  public:
    using ensure_registered_fn = std::function<void(forge::ids::object_id, std::type_index)>;
@@ -55,7 +59,8 @@ class transaction {
    transaction(forge::db::core::transaction& active, forge::db::core::family family, ensure_registered_fn ensure,
                allocate_id_fn allocate, seal_allocations_fn seal,
                std::vector<std::shared_ptr<interceptor>> interceptors,
-               std::vector<std::shared_ptr<observer>> observers);
+               std::vector<std::shared_ptr<observer>> observers,
+               release_fn release = {});
    transaction(forge::db::core::transaction& active, forge::db::core::family family, ensure_registered_fn ensure,
                allocate_id_fn allocate, std::vector<std::shared_ptr<interceptor>> interceptors,
                std::vector<std::shared_ptr<observer>> observers);
@@ -69,6 +74,11 @@ class transaction {
    transaction(forge::db::core::transaction& active, forge::db::core::family family, ensure_registered_fn ensure,
                std::vector<std::shared_ptr<interceptor>> interceptors,
                std::vector<std::shared_ptr<observer>> observers);
+
+   transaction(const transaction&) = delete;
+   transaction& operator=(const transaction&) = delete;
+   transaction(transaction&&) noexcept = default;
+   transaction& operator=(transaction&&) noexcept = default;
 
    template <forge::ids::typed_id_like Id>
    boost::asio::awaitable<typename index_for_id_t<Id>::value_type> get(Id id);
@@ -108,6 +118,9 @@ class transaction {
 
  private:
    class access;
+   struct impl;
+
+   explicit transaction(std::shared_ptr<impl> implementation);
 
    [[nodiscard]] change_set& changes() const;
    [[nodiscard]] forge::db::core::transaction& active_transaction() const;
@@ -121,9 +134,22 @@ class transaction {
    boost::asio::awaitable<forge::db::core::record_page> scan_records(forge::db::core::record_range range,
                                                                      forge::db::core::page_request request) const;
 
-   struct impl;
    std::shared_ptr<impl> impl_;
+   bool owns_commit_ = false;
+
+   friend class detail::transaction_access;
 };
+
+namespace detail {
+
+class transaction_access {
+ public:
+   static void bind_store(transaction& active, std::shared_ptr<const void> identity);
+   [[nodiscard]] static bool belongs_to(const transaction& active, const void* identity) noexcept;
+   [[nodiscard]] static transaction joined(transaction& active);
+};
+
+} // namespace detail
 
 } // namespace forge::db::object
 
@@ -480,9 +506,10 @@ boost::asio::awaitable<void> transaction::erase(forge::ids::object_id id) {
 
 template <object_model Object, typename Tag> [[nodiscard]] index_view<Object, Tag> transaction::index() const {
    access{*this}.template ensure_registered<Object>();
-   return index_view<Object, Tag>{[owner = *this](forge::db::core::record_range range,
-                                                  forge::db::core::page_request request) mutable
+   return index_view<Object, Tag>{[implementation = impl_](forge::db::core::record_range range,
+                                                           forge::db::core::page_request request) mutable
                                       -> boost::asio::awaitable<object_page<typename Object::value_type>> {
+      auto owner = transaction{implementation};
       co_return co_await detail::page_transaction_objects<Object>(access{owner}, std::move(range), std::move(request));
    }};
 }

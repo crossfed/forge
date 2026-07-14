@@ -37,8 +37,8 @@ export namespace forge::plugins::db::store {
 class transaction {
  public:
    transaction() = default;
-   explicit transaction(forge::db::core::transaction active);
-   explicit transaction(forge::db::object::transaction active);
+   explicit transaction(forge::db::core::transaction active, std::string store_name = {});
+   explicit transaction(forge::db::object::transaction active, std::string store_name = {});
    transaction(const transaction&) = delete;
    transaction& operator=(const transaction&) = delete;
    transaction(transaction&&) noexcept = default;
@@ -54,6 +54,9 @@ class transaction {
  private:
    std::optional<forge::db::core::transaction> core_;
    std::optional<forge::db::object::transaction> object_;
+   std::string store_name_;
+
+   friend class object_handle;
 };
 
 class store_handle_state {
@@ -88,14 +91,15 @@ class object_handle {
 
    boost::asio::awaitable<forge::db::object::transaction> begin_transaction() const;
    boost::asio::awaitable<forge::db::object::snapshot> begin_read() const;
-   [[nodiscard]] forge::db::object::transaction join(forge::db::core::transaction& active) const;
+   boost::asio::awaitable<forge::db::object::transaction> join(forge::db::core::transaction& active) const;
+   boost::asio::awaitable<forge::db::object::transaction> join(transaction& active) const;
 
    template <typename SharedTransaction>
       requires requires(SharedTransaction& active) {
          { active.db_transaction() } -> std::same_as<forge::db::core::transaction&>;
       }
-   [[nodiscard]] forge::db::object::transaction join(SharedTransaction& active) const {
-      return join(active.db_transaction());
+   boost::asio::awaitable<forge::db::object::transaction> join(SharedTransaction& active) const {
+      co_return co_await join(active.db_transaction());
    }
 
    template <forge::ids::typed_id_like Id>

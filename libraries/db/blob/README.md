@@ -72,7 +72,7 @@ DB Object:
 
 ```cpp
 auto tx = co_await driver->begin_transaction();
-auto object_tx = objects.join(tx);
+auto object_tx = co_await objects.join(tx);
 auto blob_tx = blobs.join(tx);
 
 auto digest = co_await blob_tx.put(bytes);

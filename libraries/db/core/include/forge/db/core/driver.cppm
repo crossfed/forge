@@ -74,6 +74,7 @@ class transaction {
 
    void attach_participant(std::shared_ptr<transaction_participant> participant);
    [[nodiscard]] bool has_participant(std::string_view name) const noexcept;
+   [[nodiscard]] bool claims_family(const family& column_family) const noexcept;
 
    boost::asio::awaitable<savepoint_id_t> create_savepoint();
    boost::asio::awaitable<void> rollback_to_savepoint(savepoint_id_t savepoint);

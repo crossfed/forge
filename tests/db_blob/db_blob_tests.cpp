@@ -917,7 +917,7 @@ BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_rejects_object_family_overlap) {
       objects.register_object<document_object>();
 
       auto shared = co_await driver->begin_transaction();
-      auto object_tx = objects.join(shared);
+      auto object_tx = co_await objects.join(shared);
       BOOST_CHECK_THROW(static_cast<void>(blobs.join(shared)),
                         forge::db::core::exceptions::participant_conflict);
       co_await shared.rollback();
@@ -934,7 +934,7 @@ BOOST_AUTO_TEST_CASE(db_blob_join_shares_commit_boundary_with_db_object_metadata
       auto objects = co_await forge::db::object::store::open(driver);
       objects.register_object<document_object>();
       auto db_tx = co_await driver->begin_transaction();
-      auto object_tx = objects.join(db_tx);
+      auto object_tx = co_await objects.join(db_tx);
       auto blob_tx = blobs.join(db_tx);
 
       auto id = co_await blob_tx.put(bytes("payload"));

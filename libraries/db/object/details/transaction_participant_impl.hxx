@@ -18,6 +18,7 @@ class transaction_participant_impl final : public forge::db::core::transaction_p
                                 transaction::seal_allocations_fn seal,
                                 std::vector<std::shared_ptr<observer>> observers,
                                 transaction::release_fn release);
+   ~transaction_participant_impl() override;
 
    [[nodiscard]] std::string_view name() const noexcept override;
    [[nodiscard]] std::span<const forge::db::core::family>

@@ -893,7 +893,9 @@ make_store(const std::shared_ptr<memory_driver>& driver) {
 
 } // namespace db_object_tests
 
-FORGE_DB_OBJECT(db_object_tests::account_object)
+using db_object_tests::account_object;
+
+FORGE_DB_OBJECT(account_object)
 FORGE_DB_OBJECT(db_object_tests::document_object)
 
 using namespace db_object_tests;
@@ -906,6 +908,8 @@ static_assert(std::same_as<forge::db::object::id_t_of<account_object>, forge::id
 static_assert(std::same_as<forge::db::object::index_for_id_t<account::id_t>, account_object>);
 static_assert(std::same_as<forge::db::object::index_for_id_t<forge::db::object::header::id_t>,
                            forge::db::object::header_index>);
+static_assert(std::movable<forge::db::object::transaction>);
+static_assert(!std::copy_constructible<forge::db::object::transaction>);
 static_assert(std::same_as<forge::db::object::index_by_tag<account_object, by_name>,
                            forge::db::object::ordered_unique<by_name, forge::db::object::member<&account::name>>>);
 static_assert(forge::db::object::index_id_by_tag<account_object, by_id> == 0);
@@ -1562,8 +1566,8 @@ BOOST_AUTO_TEST_CASE(db_object_shared_transaction_supports_distinct_store_famili
       second.add_observer(second_observer);
 
       auto shared = co_await driver->begin_transaction();
-      auto first_tx = first.join(shared);
-      auto second_tx = second.join(shared);
+      auto first_tx = co_await first.join(shared);
+      auto second_tx = co_await second.join(shared);
 
       co_await first_tx.insert(make_account(10, "first-kept", 10, 1));
       const auto point = co_await shared.create_savepoint();
@@ -1596,10 +1600,184 @@ BOOST_AUTO_TEST_CASE(db_object_shared_transaction_rejects_duplicate_store_family
       auto duplicate = co_await forge::db::object::store::open(driver, config);
 
       auto shared = co_await driver->begin_transaction();
-      auto first_tx = first.join(shared);
-      BOOST_CHECK_THROW(static_cast<void>(duplicate.join(shared)),
+      auto first_tx = co_await first.join(shared);
+      BOOST_CHECK_THROW(co_await duplicate.join(shared),
                         forge::db::core::exceptions::participant_conflict);
       co_await shared.rollback();
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_join_attach_failure_releases_writer_gate) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = co_await make_store(driver);
+      auto invalid = co_await driver->begin_transaction();
+      co_await invalid.put(
+         forge::db::core::family{"unrelated"},
+         forge::db::core::record_key{std::vector<std::byte>{std::byte{0x01}}},
+         std::vector<std::byte>{std::byte{0x02}});
+
+      BOOST_CHECK_THROW(co_await store.join(invalid),
+                        forge::db::core::exceptions::participant_conflict);
+      co_await invalid.rollback();
+
+      auto valid = co_await driver->begin_transaction();
+      auto joined = co_await store.join(valid);
+      co_await valid.rollback();
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_single_writer_serializes_joined_core_transactions) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = co_await make_store(driver);
+      auto first_core = co_await driver->begin_transaction();
+      auto first = co_await store.join(first_core);
+
+      auto second_started = std::make_shared<std::atomic_bool>(false);
+      auto second_finished = std::make_shared<std::atomic_bool>(false);
+      auto second_error = std::make_shared<std::exception_ptr>();
+      const auto executor = co_await boost::asio::this_coro::executor;
+      boost::asio::co_spawn(
+         executor,
+         [driver, store, second_started, second_finished,
+          second_error]() mutable -> boost::asio::awaitable<void> {
+            try {
+               auto second_core = co_await driver->begin_transaction();
+               auto second = co_await store.join(second_core);
+               second_started->store(true, std::memory_order_release);
+               co_await second_core.rollback();
+            } catch (...) {
+               *second_error = std::current_exception();
+            }
+            second_finished->store(true, std::memory_order_release);
+            co_return;
+         },
+         boost::asio::detached);
+
+      auto timer = boost::asio::steady_timer{executor};
+      timer.expires_after(std::chrono::milliseconds{50});
+      co_await timer.async_wait(boost::asio::use_awaitable);
+      BOOST_CHECK(!second_started->load(std::memory_order_acquire));
+
+      co_await first_core.rollback();
+      for (auto attempt = 0; attempt != 100 && !second_finished->load(std::memory_order_acquire); ++attempt) {
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+
+      if (*second_error) {
+         std::rethrow_exception(*second_error);
+      }
+      BOOST_CHECK(second_started->load(std::memory_order_acquire));
+      BOOST_CHECK(second_finished->load(std::memory_order_acquire));
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_backend_policy_does_not_serialize_joined_core_transactions) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = co_await forge::db::object::store::open(
+         driver,
+         forge::db::object::store::options{.writes = forge::db::object::write_policy::backend});
+      store.register_object<account_object>();
+
+      auto first_core = co_await driver->begin_transaction();
+      auto second_core = co_await driver->begin_transaction();
+      auto first = co_await store.join(first_core);
+      auto second = co_await store.join(second_core);
+
+      co_await first_core.rollback();
+      co_await second_core.rollback();
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_joined_facade_reuses_store_participant_without_commit_ownership) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = co_await make_store(driver);
+      auto owner = co_await store.begin_transaction();
+      auto joined = co_await store.join(owner);
+
+      BOOST_CHECK_THROW(co_await joined.commit(), forge::db::object::exceptions::unsupported_operation);
+      BOOST_CHECK_THROW(co_await joined.rollback(), forge::db::object::exceptions::unsupported_operation);
+      co_await joined.insert(make_account(77, "joined", 10, 1));
+      co_await owner.commit();
+
+      BOOST_CHECK_EQUAL((co_await store.get(account::id_t{77})).name, "joined");
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_cancelled_join_does_not_lose_writer_gate) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = co_await make_store(driver);
+      auto first_core = co_await driver->begin_transaction();
+      auto first = co_await store.join(first_core);
+
+      auto waiting = std::make_shared<std::atomic_bool>(false);
+      auto cancelled = std::make_shared<std::atomic_bool>(false);
+      auto finished = std::make_shared<std::atomic_bool>(false);
+      auto error = std::make_shared<std::exception_ptr>();
+      auto cancellation = std::make_shared<boost::asio::cancellation_signal>();
+      const auto executor = co_await boost::asio::this_coro::executor;
+      boost::asio::co_spawn(
+         executor,
+         [driver, store, waiting, cancelled, finished,
+          error]() mutable -> boost::asio::awaitable<void> {
+            try {
+               co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::enable_total_cancellation{});
+               auto second_core = co_await driver->begin_transaction();
+               waiting->store(true, std::memory_order_release);
+               auto second = co_await store.join(second_core);
+               co_await second_core.rollback();
+            } catch (const boost::system::system_error& failure) {
+               if (failure.code() == boost::asio::error::operation_aborted) {
+                  cancelled->store(true, std::memory_order_release);
+               } else {
+                  *error = std::current_exception();
+               }
+            } catch (...) {
+               *error = std::current_exception();
+            }
+            finished->store(true, std::memory_order_release);
+            co_return;
+         },
+         boost::asio::bind_cancellation_slot(cancellation->slot(), boost::asio::detached));
+
+      auto timer = boost::asio::steady_timer{executor};
+      while (!waiting->load(std::memory_order_acquire)) {
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+      timer.expires_after(std::chrono::milliseconds{25});
+      co_await timer.async_wait(boost::asio::use_awaitable);
+      cancellation->emit(boost::asio::cancellation_type::all);
+
+      for (auto attempt = 0; attempt != 100 && !finished->load(std::memory_order_acquire); ++attempt) {
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+      if (*error) {
+         std::rethrow_exception(*error);
+      }
+      BOOST_CHECK(cancelled->load(std::memory_order_acquire));
+      BOOST_CHECK(finished->load(std::memory_order_acquire));
+
+      co_await first_core.rollback();
+      auto third_core = co_await driver->begin_transaction();
+      auto third = co_await store.join(third_core);
+      co_await third_core.rollback();
       co_return;
    }());
 }
@@ -1822,7 +2000,7 @@ BOOST_AUTO_TEST_CASE(db_object_create_joined_transaction_rollback_consumes_id) {
       auto store = co_await make_store(driver);
 
       auto shared = co_await driver->begin_transaction();
-      auto object_tx = store.join(shared);
+      auto object_tx = co_await store.join(shared);
       auto draft = co_await object_tx.create<account>([](account& value) { value.name = "joined"; });
       BOOST_CHECK_EQUAL(draft.id.instance, 0U);
       co_await shared.rollback();
@@ -1843,7 +2021,7 @@ BOOST_AUTO_TEST_CASE(db_object_create_joined_transaction_rollback_seals_id_acros
          auto store = co_await make_store(driver);
 
          auto shared = co_await driver->begin_transaction();
-         auto object_tx = store.join(shared);
+         auto object_tx = co_await store.join(shared);
          auto draft = co_await object_tx.create<account>([](account& value) { value.name = "joined"; });
          BOOST_CHECK_EQUAL(draft.id.instance, 0U);
          co_await shared.rollback();
@@ -1867,7 +2045,7 @@ BOOST_AUTO_TEST_CASE(db_object_create_joined_transaction_drop_before_rollback_se
          auto store = co_await make_store(driver);
          auto shared = co_await driver->begin_transaction();
          {
-            auto object_tx = store.join(shared);
+            auto object_tx = co_await store.join(shared);
             auto draft = co_await object_tx.create<account>([](account& value) { value.name = "joined"; });
             BOOST_CHECK_EQUAL(draft.id.instance, 0U);
          }

@@ -448,6 +448,26 @@ BOOST_AUTO_TEST_CASE(db_transaction_participant_claims_preserve_default_and_name
    }());
 }
 
+BOOST_AUTO_TEST_CASE(db_transaction_reports_claimed_families) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto claimed = forge::db::core::family{"claimed"};
+      auto tx = co_await driver->begin_transaction();
+      BOOST_CHECK(!tx.claims_family(claimed));
+
+      tx.attach_participant(std::make_shared<claiming_participant>(
+         "owner", std::vector{claimed}));
+      BOOST_CHECK(tx.claims_family(claimed));
+      BOOST_CHECK(!tx.claims_family(forge::db::core::family{"other"}));
+
+      co_await tx.rollback();
+      BOOST_CHECK(!tx.claims_family(claimed));
+      co_return;
+   }());
+}
+
 BOOST_AUTO_TEST_CASE(db_transaction_participant_restore_failure_marks_rollback_only) {
    auto runtime = forge::asio::runtime{};
    auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());

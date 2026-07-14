@@ -325,7 +325,7 @@ The external transaction remains the atomic owner:
 auto tx = co_await driver->begin_transaction();
 
 auto revision_tx = co_await revisions.join(tx);
-auto object_tx = objects.join(tx);
+auto object_tx = co_await objects.join(tx);
 auto blob_tx = blobs.join(tx);
 
 co_await object_tx.insert(metadata);

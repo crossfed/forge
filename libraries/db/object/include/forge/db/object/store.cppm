@@ -70,14 +70,15 @@ class store {
 
    boost::asio::awaitable<transaction> begin_transaction();
    boost::asio::awaitable<snapshot> begin_read();
-   [[nodiscard]] transaction join(forge::db::core::transaction& active);
+   boost::asio::awaitable<transaction> join(forge::db::core::transaction& active);
+   boost::asio::awaitable<transaction> join(transaction& active);
 
    template <typename SharedTransaction>
       requires requires(SharedTransaction& active) {
          { active.db_transaction() } -> std::same_as<forge::db::core::transaction&>;
       }
-   [[nodiscard]] transaction join(SharedTransaction& active) {
-      return join(active.db_transaction());
+   boost::asio::awaitable<transaction> join(SharedTransaction& active) {
+      co_return co_await join(active.db_transaction());
    }
 
    template <forge::ids::typed_id_like Id>
