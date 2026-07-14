@@ -65,6 +65,22 @@ template <typename Implementation> void check_active_host_conversion() {
    memory.free();
 }
 
+template <typename Implementation> void check_execute_all_with_host() {
+   auto code = wasm::wasm_code{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // header
+                               0x01, 0x04, 0x01, 0x60, 0x00, 0x00,             // function type
+                               0x03, 0x02, 0x01, 0x00,                         // function
+                               0x07, 0x07, 0x01, 0x03, 0x72, 0x75, 0x6e, 0x00, // export run
+                               0x00, 0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b};      // empty body
+   using runtime = wasm::backend<conversion_functions, Implementation>;
+   auto host = conversion_host{};
+   auto memory = wasm::wasm_allocator{};
+   {
+      auto instance = runtime{code, host, &memory};
+      instance.execute_all(wasm::null_watchdog{}, host);
+   }
+   memory.free();
+}
+
 template <typename Implementation> void check_oversized_memory_grow() {
    auto code = wasm::wasm_code{
        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,                                     // header
@@ -188,6 +204,10 @@ TEST_CASE("interpreter argument conversion receives the active host", "[executio
    check_active_host_conversion<wasm::interpreter>();
 }
 
+TEST_CASE("interpreter execute all supplies the active host", "[backend]") {
+   check_execute_all_with_host<wasm::interpreter>();
+}
+
 #if defined(__x86_64__)
 TEST_CASE("jit reports a missing export before function type lookup", "[execution_context]") {
    auto code = wasm::wasm_code{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00};
@@ -203,5 +223,9 @@ TEST_CASE("jit memory grow treats its operand as an unsigned page count", "[exec
 
 TEST_CASE("jit argument conversion receives the active host", "[execution_context]") {
    check_active_host_conversion<wasm::jit>();
+}
+
+TEST_CASE("jit execute all supplies the active host", "[backend]") {
+   check_execute_all_with_host<wasm::jit>();
 }
 #endif

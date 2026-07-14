@@ -358,7 +358,7 @@ class backend {
          for (int i = 0; i < mod->exports.size(); i++) {
             if (mod->exports[i].kind == external_kind::Function) {
                std::string s{(const char*)mod->exports[i].field_str.raw(), mod->exports[i].field_str.size()};
-               ctx->execute(host, interpret_visitor(*ctx), s);
+               ctx->execute(&host, interpret_visitor(*ctx), s);
             }
          }
       });
