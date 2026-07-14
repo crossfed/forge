@@ -16,7 +16,9 @@ stack_allocator::stack_allocator(std::size_t min_size) {
 #ifdef MAP_STACK
       flags |= MAP_STACK;
 #endif
-      _ptr = ::mmap(nullptr, _size, PROT_READ | PROT_WRITE, flags, -1, 0);
+      auto* ptr = ::mmap(nullptr, _size, PROT_READ | PROT_WRITE, flags, -1, 0);
+      detail::check<exceptions::allocation>((ptr != MAP_FAILED), "failed to allocate alternate stack");
+      _ptr = ptr;
    }
 }
 

@@ -1,6 +1,7 @@
 module;
 
 #include <algorithm>
+#include <cstddef>
 #include <string>
 #include <utility>
 #include <vector>
@@ -122,8 +123,8 @@ template <typename T> using unmanaged_vector = std::vector<T>;
 
 template <typename T> std::string vector_to_string(T&& vec) {
    std::string str;
-   str.reserve(vec.size());
-   for (int i = 0; i < vec.size(); i++)
+   str.resize(vec.size());
+   for (std::size_t i = 0; i < vec.size(); ++i)
       str[i] = vec[i];
    return str;
 }

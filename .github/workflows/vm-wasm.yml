@@ -30,6 +30,7 @@ jobs:
             -print0 | xargs -0 clang-format-22 --dry-run --Werror
           printf '%s\0' \
             tests/vm_wasm/main.cpp \
+            tests/vm_wasm/port_regression_tests.cpp \
             tests/vm_wasm/watchdog_regression_tests.cpp \
             tests/vm_wasm/test_prelude.hpp \
             tests/vm_wasm/test_support.hpp \

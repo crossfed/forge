@@ -50,7 +50,7 @@ struct func_type {
 inline bool operator==(const func_type& lhs, const func_type& rhs) {
    return lhs.form == rhs.form && lhs.param_types.size() == rhs.param_types.size() &&
           std::equal(lhs.param_types.raw(), lhs.param_types.raw() + lhs.param_types.size(), rhs.param_types.raw()) &&
-          lhs.return_count == rhs.return_count && (lhs.return_count || lhs.return_type == rhs.return_type);
+          lhs.return_count == rhs.return_count && (lhs.return_count == 0 || lhs.return_type == rhs.return_type);
 }
 
 union expr_value {
