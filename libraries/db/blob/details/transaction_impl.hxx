@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <optional>
 
 namespace forge::db::blob {
@@ -21,12 +22,18 @@ struct transaction::impl {
         forge::db::core::transaction& active_value,
         forge::db::core::family data,
         forge::db::core::family refs);
+   impl(borrowed_tag,
+        forge::db::core::transaction& active_value,
+        forge::db::core::family data,
+        forge::db::core::family refs,
+        std::shared_ptr<forge::db::core::transaction_participant> participant_value);
 
    std::optional<forge::db::core::transaction> owned;
    forge::db::core::transaction* active = nullptr;
    forge::db::core::family data_family;
    forge::db::core::family refs_family;
-   std::shared_ptr<detail::transaction_participant_impl> participant;
+   std::shared_ptr<forge::db::core::transaction_participant> participant;
+   std::shared_ptr<const void> store_identity;
    bool owns_commit = false;
 
    [[nodiscard]] forge::db::core::transaction& transaction();

@@ -81,8 +81,9 @@ class transaction {
  private:
    void require_named_store(const std::string& expected) const;
 
-   std::optional<forge::db::core::transaction> core_;
+   std::unique_ptr<forge::db::core::transaction> core_;
    std::optional<forge::db::object::transaction> object_;
+   std::optional<forge::db::blob::transaction> blob_;
    std::string store_name_;
 
    friend class blob_handle;

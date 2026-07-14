@@ -81,8 +81,9 @@ transaction created by the same named store.
 
 When the named store has an Object layer, `begin_transaction()` reserves that
 layer's writer lane. `objects().join(tx)` reuses the already attached Object
-participant, while `blobs().join(tx)` attaches Blob state to the same Core
-transaction. A transaction created by another named store is rejected.
+participant. The first `blobs().join(tx)` attaches Blob state to the same Core
+transaction and later joins reuse that participant. A transaction created by
+another named store is rejected.
 
 Use `add_store(name, driver, options)` during setup when an application provides
 its own `forge::db::core::driver`. Once every plugin has initialized, DB Store

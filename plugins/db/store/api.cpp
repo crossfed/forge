@@ -17,6 +17,7 @@ import forge.db.blob.snapshot;
 import forge.db.blob.store;
 import forge.db.blob.transaction;
 import forge.db.blob.types;
+import forge.db.blob.exceptions;
 import forge.db.core.driver;
 import forge.db.object.exceptions;
 import forge.db.object.hooks;
@@ -98,7 +99,8 @@ boost::asio::awaitable<snapshot> store_handle_state::begin_read() const {
 }
 
 transaction::transaction(forge::db::core::transaction active, std::string store_name)
-   : core_{std::move(active)}, store_name_{std::move(store_name)} {}
+   : core_{std::make_unique<forge::db::core::transaction>(std::move(active))},
+     store_name_{std::move(store_name)} {}
 
 transaction::transaction(forge::db::object::transaction active, std::string store_name)
    : object_{std::move(active)}, store_name_{std::move(store_name)} {}
@@ -111,14 +113,14 @@ void transaction::require_named_store(const std::string& expected) const {
 }
 
 bool transaction::active() const noexcept {
-   return object_.has_value() || (core_.has_value() && core_->active());
+   return object_.has_value() || (core_ && core_->active());
 }
 
 forge::db::core::transaction& transaction::db_transaction() {
    if (object_.has_value()) {
       return object_->db_transaction();
    }
-   if (core_.has_value()) {
+   if (core_) {
       return *core_;
    }
    FORGE_THROW_EXCEPTION(exceptions::stopped, "db store transaction is closed");
@@ -127,11 +129,13 @@ forge::db::core::transaction& transaction::db_transaction() {
 boost::asio::awaitable<void> transaction::commit() {
    if (object_.has_value()) {
       co_await object_->commit();
+      blob_.reset();
       object_.reset();
       co_return;
    }
-   if (core_.has_value()) {
+   if (core_) {
       co_await core_->commit();
+      blob_.reset();
       core_.reset();
    }
 }
@@ -139,11 +143,13 @@ boost::asio::awaitable<void> transaction::commit() {
 boost::asio::awaitable<void> transaction::rollback() {
    if (object_.has_value()) {
       co_await object_->rollback();
+      blob_.reset();
       object_.reset();
       co_return;
    }
-   if (core_.has_value()) {
+   if (core_) {
       co_await core_->rollback();
+      blob_.reset();
       core_.reset();
    }
 }
@@ -235,7 +241,18 @@ forge::db::blob::transaction blob_handle::join(forge::db::core::transaction& act
 
 forge::db::blob::transaction blob_handle::join(transaction& active) const {
    active.require_named_store(name());
-   return join(active.db_transaction());
+   auto blobs = require_store();
+   if (active.blob_.has_value()) {
+      try {
+         return blobs->join(*active.blob_);
+      } catch (const forge::db::blob::exceptions::invalid_descriptor&) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_argument,
+                               "db store transaction belongs to another blob store");
+      }
+   }
+
+   active.blob_.emplace(blobs->join(active.db_transaction()));
+   return blobs->join(*active.blob_);
 }
 
 boost::asio::awaitable<forge::db::blob::ref<forge::db::blob::digest>>

@@ -40,10 +40,12 @@ store::store(std::shared_ptr<forge::db::core::driver> driver, config settings)
 
 boost::asio::awaitable<transaction> store::begin_transaction() {
    auto active = co_await impl_->driver->begin_transaction();
-   co_return transaction{
+   auto result = transaction{
       std::move(active),
       impl_->config.data_family,
       impl_->config.refs_family};
+   detail::transaction_access::bind_store(result, impl_);
+   co_return result;
 }
 
 boost::asio::awaitable<snapshot> store::begin_read() {
@@ -73,10 +75,20 @@ snapshot store::join(const forge::db::core::snapshot& active) {
 }
 
 transaction store::join(forge::db::core::transaction& active) {
-   return transaction{
+   auto result = transaction{
       active,
       impl_->config.data_family,
       impl_->config.refs_family};
+   detail::transaction_access::bind_store(result, impl_);
+   return result;
+}
+
+transaction store::join(transaction& active) {
+   if (!detail::transaction_access::belongs_to(active, impl_.get())) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor,
+                            "db blob transaction belongs to another store");
+   }
+   return detail::transaction_access::joined(active);
 }
 
 boost::asio::awaitable<ref<digest>> store::put(std::vector<std::byte> payload) {
