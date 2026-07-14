@@ -90,6 +90,21 @@ template <typename Implementation, typename Exception> void check_zero_call_dept
    BOOST_CHECK_THROW(instance.call_with_return("env", "run"), Exception);
 }
 
+template <typename Implementation> void check_numeric_function_index() {
+   auto code = wasm::wasm_code{
+       0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,       // header
+       0x01, 0x05, 0x01, 0x60, 0x00, 0x01, 0x7f,             // () -> i32
+       0x03, 0x02, 0x01, 0x00,                               // one function
+       0x07, 0x07, 0x01, 0x03, 0x72, 0x75, 0x6e, 0x00, 0x00, // export run
+       0x0a, 0x06, 0x01, 0x04, 0x00, 0x41, 0x2a, 0x0b        // return 42
+   };
+   using runtime = wasm::backend<std::nullptr_t, Implementation>;
+   auto instance = runtime{code, static_cast<wasm::wasm_allocator*>(nullptr)};
+
+   BOOST_TEST(instance.call(static_cast<std::nullptr_t*>(nullptr), 0U));
+   BOOST_CHECK_THROW(instance.call(static_cast<std::nullptr_t*>(nullptr), 1U), wasm::exceptions::interpreter);
+}
+
 template <typename Implementation> void check_execute_all_with_host() {
    auto code = wasm::wasm_code{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // header
                                0x01, 0x04, 0x01, 0x60, 0x00, 0x00,             // function type
@@ -396,6 +411,10 @@ TEST_CASE("interpreter rejects zero call depth", "[execution_context]") {
    check_zero_call_depth<wasm::interpreter, wasm::exceptions::vector_out_of_bounds>();
 }
 
+TEST_CASE("interpreter rejects out-of-range numeric function indexes", "[execution_context]") {
+   check_numeric_function_index<wasm::interpreter>();
+}
+
 #if FORGE_VM_WASM_HAS_JIT && !defined(FORGE_VM_WASM_TEST_INTERPRETER_ONLY)
 TEST_CASE("jit reports a missing export before function type lookup", "[execution_context]") {
    auto code = wasm::wasm_code{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00};
@@ -423,5 +442,9 @@ TEST_CASE("jit executes start functions without linear memory", "[backend]") {
 
 TEST_CASE("jit rejects zero call depth", "[execution_context]") {
    check_zero_call_depth<wasm::jit, wasm::exceptions::interpreter>();
+}
+
+TEST_CASE("jit rejects out-of-range numeric function indexes", "[execution_context]") {
+   check_numeric_function_index<wasm::jit>();
 }
 #endif

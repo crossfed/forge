@@ -362,7 +362,9 @@ class jit_execution_context : public frame_info_holder<EnableBacktrace>,
 
    template <typename... Args>
    inline std::optional<operand_stack_elem> execute(host_type* host, jit_visitor, uint32_t func_index, Args&&... args) {
-      detail::check<exceptions::interpreter>((func_index < std::numeric_limits<uint32_t>::max()),
+      const auto imported_functions = _mod->jit_mod->get_imported_functions_size();
+      const auto function_count = static_cast<std::size_t>(imported_functions) + _mod->jit_mod->functions.size();
+      detail::check<exceptions::interpreter>((static_cast<std::size_t>(func_index) < function_count),
                                              "cannot execute function, function not found");
 
       auto saved_host = _host;
@@ -386,7 +388,7 @@ class jit_execution_context : public frame_info_holder<EnableBacktrace>,
 #pragma GCC diagnostic pop
 
       try {
-         if (func_index < _mod->jit_mod->get_imported_functions_size()) {
+         if (func_index < imported_functions) {
             std::reverse(args_raw + 0, args_raw + sizeof...(Args));
             result = call_host_function(args_raw, func_index);
          } else {
@@ -401,8 +403,7 @@ class jit_execution_context : public frame_info_holder<EnableBacktrace>,
                stack = static_cast<char*>(stack) - 24;
             }
             auto fn = reinterpret_cast<native_value (*)(void*, void*)>(
-                _mod->jit_mod->jit_code_offset[func_index - _mod->jit_mod->get_imported_functions_size()] +
-                _mod->allocator._code_base);
+                _mod->jit_mod->jit_code_offset[func_index - imported_functions] + _mod->allocator._code_base);
 
             if constexpr (EnableBacktrace) {
                sigset_t block_mask;
@@ -865,7 +866,7 @@ template <typename Host> class execution_context : public execution_context_base
    template <typename Visitor, typename... Args>
    inline std::optional<operand_stack_elem> execute(host_type* host, Visitor&& visitor, uint32_t func_index,
                                                     Args&&... args) {
-      detail::check<exceptions::interpreter>((func_index < std::numeric_limits<uint32_t>::max()),
+      detail::check<exceptions::interpreter>((func_index < _mod->get_functions_total()),
                                              "cannot execute function, function not found");
 
       auto last_last_op_index = _last_op_index;
