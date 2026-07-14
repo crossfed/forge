@@ -1377,6 +1377,7 @@ BOOST_AUTO_TEST_CASE(application_shell_stops_compute_before_waiting_for_schedule
    forge::asio::blocking::run(app.runtime(), app.startup());
 
    auto compute_started = std::atomic_bool{false};
+   auto delayed_ran = std::atomic_bool{false};
    auto scheduled = app.scheduler().submit(forge::asio::task::awaitable{
       .priority = forge::asio::task::priority{1},
       .name = "scheduled-compute",
@@ -1389,6 +1390,7 @@ BOOST_AUTO_TEST_CASE(application_shell_stops_compute_before_waiting_for_schedule
                   while (!context.stop_requested()) {
                      std::this_thread::sleep_for(std::chrono::milliseconds{1});
                   }
+                  std::this_thread::sleep_for(std::chrono::milliseconds{50});
                });
          } catch (const forge::asio::exceptions::canceled&) {
          }
@@ -1398,6 +1400,13 @@ BOOST_AUTO_TEST_CASE(application_shell_stops_compute_before_waiting_for_schedule
          co_await timer.async_wait(boost::asio::use_awaitable);
       },
    });
+   auto delayed = app.scheduler().submit_after(
+      forge::asio::task::task{
+         .priority = forge::asio::task::priority{1},
+         .name = "must-not-start-during-compute-drain",
+         .work = [&] { delayed_ran.store(true, std::memory_order_release); },
+      },
+      std::chrono::milliseconds{10});
 
    forge::asio::blocking::run(app.runtime(), [&]() -> boost::asio::awaitable<void> {
       auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
@@ -1432,6 +1441,9 @@ BOOST_AUTO_TEST_CASE(application_shell_stops_compute_before_waiting_for_schedule
 
    BOOST_CHECK(completed_without_fallback);
    BOOST_CHECK(app.scheduler().snapshot().stopped);
+   BOOST_CHECK(!delayed_ran.load(std::memory_order_acquire));
+   BOOST_CHECK_THROW(forge::asio::blocking::run(app.runtime(), delayed.wait()),
+                     forge::asio::exceptions::canceled);
    forge::asio::blocking::run(app.runtime(), scheduled.wait());
 }
 

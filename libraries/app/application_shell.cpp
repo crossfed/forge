@@ -191,6 +191,7 @@ struct application_shell::impl {
    }
 
    boost::asio::awaitable<void> stop_execution() {
+      scheduler.request_stop();
       auto failure = std::exception_ptr{};
       if (compute_pool != nullptr) {
          try {

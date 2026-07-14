@@ -401,6 +401,12 @@ struct scheduler::impl : std::enable_shared_from_this<scheduler::impl> {
          }
          drain_waiters.push_back(waiter);
       }
+      auto switch_error = boost::system::error_code{};
+      co_await boost::asio::dispatch(waiter->strand,
+                                     boost::asio::redirect_error(boost::asio::use_awaitable, switch_error));
+      if (switch_error) {
+         throw exceptions::internal{"failed to arm task scheduler drain wait"};
+      }
       auto error = boost::system::error_code{};
       co_await waiter->timer.async_wait(
          boost::asio::redirect_error(boost::asio::use_awaitable, error));
@@ -712,6 +718,10 @@ scheduler::metrics scheduler::snapshot() const {
 
 runtime& scheduler::runtime_context() noexcept {
    return impl_->runtime_ref;
+}
+
+void scheduler::request_stop() {
+   impl_->request_stop();
 }
 
 boost::asio::awaitable<void> scheduler::shutdown() {
