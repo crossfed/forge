@@ -16,6 +16,7 @@ Documents below explain cross-library architecture decisions.
 | [releases/8.2.0.md](releases/8.2.0.md) | Forge 8.2.0 changes, Preview API status and source migration notes. |
 | [roadmap.md](roadmap.md) | Post-1.0 direction, architecture gates and framework boundaries. |
 | [runtime/asio-app.md](runtime/asio-app.md) | Runtime ownership, bounded scheduler, plugin lifecycle and rollback. |
+| [runtime/compute-and-snapshots.md](runtime/compute-and-snapshots.md) | Separate CPU execution domain, snapshot readers with an ordered writer, and the boundary for future speculative execution. |
 | [web/http-websocket.md](web/http-websocket.md) | HTTP/WebSocket layering, routing, upgrade, retry and backpressure rules. |
 | [web/http-fastapi-style-parameters.md](web/http-fastapi-style-parameters.md) | FastAPI-style HTTP parameter binding for multi-argument FORGE API methods. |
 | [web/http-files-and-s3.md](web/http-files-and-s3.md) | HTTP file upload/download gaps, Beast capabilities and S3-ready substrate plan. |

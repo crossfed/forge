@@ -1,5 +1,6 @@
 add_library(
    forge_asio STATIC
+   compute.cpp
    runtime.cpp
    stop_state.cpp
    task.cpp
