@@ -6,9 +6,6 @@ module;
 #include <limits>
 #include <vector>
 
-
-
-
 module forge.vm.wasm.backend;
 
 #define FORGE_VM_WASM_INTERNAL_TESTS

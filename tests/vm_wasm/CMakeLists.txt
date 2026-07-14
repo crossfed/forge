@@ -15,6 +15,7 @@ set(FORGE_VM_WASM_TEST_DEFINITIONS
 add_executable(
    test_forge_vm_wasm_unit
    main.cpp
+   watchdog_regression_tests.cpp
    ${FORGE_VM_WASM_DONOR_UNIT_SOURCES}
 )
 target_include_directories(test_forge_vm_wasm_unit PRIVATE ${FORGE_VM_WASM_TEST_INCLUDE_DIRS})

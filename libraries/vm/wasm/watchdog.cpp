@@ -10,7 +10,9 @@ namespace forge::vm::wasm {
 watchdog::guard::~guard() {
    {
       auto lock = std::unique_lock(_mutex);
-      _run_state = stopped;
+      if (_run_state == running && std::chrono::steady_clock::now() < _start + _duration) {
+         _run_state = stopped;
+      }
    }
    _cond.notify_one();
    _timer.join();
