@@ -29,8 +29,7 @@ void signal_handler(int signal, siginfo_t* info, void* context) {
          siglongjmp(*destination, signal);
       }
       if (address >= code_memory_range.data() && address < code_memory_range.data() + code_memory_range.size()) {
-         if ((signal == SIGSEGV || signal == SIGBUS) &&
-             !timed_run_has_timed_out.load(std::memory_order_acquire)) {
+         if ((signal == SIGSEGV || signal == SIGBUS) && !timed_run_has_timed_out.load(std::memory_order_acquire)) {
             return;
          }
          siglongjmp(*destination, signal);
@@ -39,17 +38,17 @@ void signal_handler(int signal, siginfo_t* info, void* context) {
 
    struct sigaction* previous = nullptr;
    switch (signal) {
-      case SIGSEGV:
-         previous = &prev_signal_handler<SIGSEGV>;
-         break;
-      case SIGBUS:
-         previous = &prev_signal_handler<SIGBUS>;
-         break;
-      case SIGFPE:
-         previous = &prev_signal_handler<SIGFPE>;
-         break;
-      default:
-         std::abort();
+   case SIGSEGV:
+      previous = &prev_signal_handler<SIGSEGV>;
+      break;
+   case SIGBUS:
+      previous = &prev_signal_handler<SIGBUS>;
+      break;
+   case SIGFPE:
+      previous = &prev_signal_handler<SIGFPE>;
+      break;
+   default:
+      std::abort();
    }
 
    if (previous->sa_flags & SA_SIGINFO) {
@@ -63,7 +62,7 @@ void signal_handler(int signal, siginfo_t* info, void* context) {
 }
 
 void setup_signal_handler_impl() {
-   struct sigaction action {};
+   struct sigaction action{};
    action.sa_sigaction = &signal_handler;
    sigemptyset(&action.sa_mask);
    sigaddset(&action.sa_mask, SIGPROF);

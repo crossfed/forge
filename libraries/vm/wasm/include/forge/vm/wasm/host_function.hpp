@@ -4,11 +4,9 @@
 
 #define FORGE_VM_WASM_FROM_WASM(TYPE, PARAMS)                                                                          \
    template <typename T>                                                                                               \
-   auto from_wasm FORGE_VM_WASM_FROM_WASM_ADD_TAG PARAMS const                                                        \
-      -> std::enable_if_t<std::is_same_v<T, TYPE>, TYPE>
+   auto from_wasm FORGE_VM_WASM_FROM_WASM_ADD_TAG PARAMS const->std::enable_if_t<std::is_same_v<T, TYPE>, TYPE>
 
-#define FORGE_VM_WASM_INVOKE_ON(TYPE, CONDITION)                                                                       \
-   ::forge::vm::wasm::invoke_on<false, TYPE>(CONDITION, args...)
+#define FORGE_VM_WASM_INVOKE_ON(TYPE, CONDITION) ::forge::vm::wasm::invoke_on<false, TYPE>(CONDITION, args...)
 
 #define FORGE_VM_WASM_INVOKE_ON_ALL(CONDITION)                                                                         \
    ::forge::vm::wasm::invoke_on<false, ::forge::vm::wasm::invoke_on_all_t>(CONDITION, args...)

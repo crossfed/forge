@@ -6,11 +6,7 @@ export module forge.vm.wasm.options;
 
 export namespace forge::vm::wasm {
 
-enum class max_func_local_bytes_flags_t {
-   params = 1,
-   locals = 2,
-   stack  = 4
-};
+enum class max_func_local_bytes_flags_t { params = 1, locals = 2, stack = 4 };
 constexpr max_func_local_bytes_flags_t operator|(max_func_local_bytes_flags_t lhs, max_func_local_bytes_flags_t rhs) {
    return static_cast<max_func_local_bytes_flags_t>(static_cast<int>(lhs) | static_cast<int>(rhs));
 }
@@ -59,11 +55,11 @@ struct options {
    bool allow_invalid_empty_local_set = false;
    bool allow_zero_blocktype = false;
    // Determines which components are counted towards max_function_local_bytes
-   max_func_local_bytes_flags_t max_func_local_bytes_flags = max_func_local_bytes_flags_t::locals | max_func_local_bytes_flags_t::stack;
+   max_func_local_bytes_flags_t max_func_local_bytes_flags =
+       max_func_local_bytes_flags_t::locals | max_func_local_bytes_flags_t::stack;
 };
 
-struct default_options {
-};
+struct default_options {};
 
 struct compatibility_options {
    static constexpr std::uint32_t max_mutable_global_bytes = 1024;
@@ -74,13 +70,13 @@ struct compatibility_options {
    static constexpr std::uint32_t max_import_section_elements = 1023;
    static constexpr std::uint32_t max_element_segment_elements = 8191;
    static constexpr std::uint32_t max_data_segment_bytes = 8191;
-   static constexpr std::uint32_t max_linear_memory_init = 64*1024;
+   static constexpr std::uint32_t max_linear_memory_init = 64 * 1024;
    static constexpr std::uint32_t max_func_local_bytes = 8192;
    static constexpr std::uint32_t max_local_sets = 1023;
    static constexpr std::uint32_t max_control_depth = 1023;
    static constexpr std::uint32_t max_br_table_elements = 8191;
    static constexpr std::uint32_t max_symbol_bytes = 8191;
-   static constexpr std::uint32_t max_memory_offset = (33*1024*1024 - 1);
+   static constexpr std::uint32_t max_memory_offset = (33 * 1024 * 1024 - 1);
    static constexpr std::uint32_t max_pages = 528; // 33 MiB
    static constexpr std::uint32_t max_call_depth = 251;
 
@@ -91,4 +87,4 @@ struct compatibility_options {
    static constexpr bool allow_zero_blocktype = true;
 };
 
-}
+} // namespace forge::vm::wasm

@@ -27,8 +27,7 @@ class profile_instr_map {
       uint32_t wasm_addr;
    };
 
-public:
-
+ public:
    struct builder {
       void on_code_start(const void* compiled_base, const void* wasm_code_start);
       void on_function_start(const void* code_addr, const void* wasm_addr);
@@ -52,7 +51,8 @@ public:
 
    // Cannot use most of the standard library as the STL is not async-signal-safe
    std::uint32_t translate(const void* pc) const;
-private:
+
+ private:
    const void* base_address = nullptr;
    std::size_t code_size = 0;
 
