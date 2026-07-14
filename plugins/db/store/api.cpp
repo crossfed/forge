@@ -5,6 +5,7 @@ module;
 
 #include <cstddef>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -12,6 +13,7 @@ module;
 module forge.plugins.db.store.api;
 
 import forge.db.blob.ref;
+import forge.db.blob.snapshot;
 import forge.db.blob.store;
 import forge.db.blob.transaction;
 import forge.db.blob.types;
@@ -28,8 +30,71 @@ import forge.plugins.db.store.exceptions;
 
 namespace forge::plugins::db::store {
 
+snapshot::snapshot(forge::db::core::snapshot active,
+                   std::string store_name,
+                   std::optional<forge::db::object::snapshot> objects,
+                   std::optional<forge::db::blob::snapshot> blobs)
+    : active_{std::move(active)},
+      store_name_{std::move(store_name)},
+      objects_{std::move(objects)},
+      blobs_{std::move(blobs)} {}
+
+bool snapshot::active() const noexcept {
+   return active_.active();
+}
+
+std::string snapshot::name() const {
+   return store_name_;
+}
+
+forge::db::object::snapshot snapshot::objects() const {
+   if (!objects_.has_value()) {
+      FORGE_THROW_EXCEPTION(exceptions::unavailable_layer,
+                            "db store object layer is not configured",
+                            forge::exceptions::ctx("store", store_name_));
+   }
+   return *objects_;
+}
+
+forge::db::blob::snapshot snapshot::blobs() const {
+   if (!blobs_.has_value()) {
+      FORGE_THROW_EXCEPTION(exceptions::unavailable_layer,
+                            "db store blob layer is not configured",
+                            forge::exceptions::ctx("store", store_name_));
+   }
+   return *blobs_;
+}
+
 std::shared_ptr<forge::db::revision::store> store_handle_state::require_revisions() const {
    return {};
+}
+
+boost::asio::awaitable<snapshot> store_handle_state::begin_read() const {
+   auto driver = require_driver();
+   auto objects = std::shared_ptr<forge::db::object::store>{};
+   auto blobs = std::shared_ptr<forge::db::blob::store>{};
+
+   try {
+      objects = require_objects();
+   } catch (const exceptions::unavailable_layer&) {
+   }
+   try {
+      blobs = require_blobs();
+   } catch (const exceptions::unavailable_layer&) {
+   }
+
+   auto active = co_await driver->begin_read();
+   auto object_view = std::optional<forge::db::object::snapshot>{};
+   auto blob_view = std::optional<forge::db::blob::snapshot>{};
+   if (objects) {
+      object_view.emplace(objects->join(active));
+   }
+   if (blobs) {
+      blob_view.emplace(blobs->join(active));
+   }
+
+   co_return snapshot{
+      std::move(active), name(), std::move(object_view), std::move(blob_view)};
 }
 
 transaction::transaction(forge::db::core::transaction active, std::string store_name)
@@ -160,6 +225,10 @@ boost::asio::awaitable<forge::db::blob::transaction> blob_handle::begin_transact
    co_return co_await require_store()->begin_transaction();
 }
 
+boost::asio::awaitable<forge::db::blob::snapshot> blob_handle::begin_read() const {
+   co_return co_await require_store()->begin_read();
+}
+
 forge::db::blob::transaction blob_handle::join(forge::db::core::transaction& active) const {
    return require_store()->join(active);
 }
@@ -240,6 +309,13 @@ boost::asio::awaitable<transaction> store_handle::begin_transaction() const {
       FORGE_THROW_EXCEPTION(exceptions::stopped, "db store handle is empty");
    }
    co_return co_await state_->begin_transaction();
+}
+
+boost::asio::awaitable<snapshot> store_handle::begin_read() const {
+   if (!state_) {
+      FORGE_THROW_EXCEPTION(exceptions::stopped, "db store handle is empty");
+   }
+   co_return co_await state_->begin_read();
 }
 
 object_handle store_handle::objects() const {

@@ -114,3 +114,28 @@ Revision state, entries and deltas are DB Object system models. They are
 readable through the configured Object store, but application Object mutation
 APIs cannot modify them. Object, Blob and Revision operations joined to one
 plugin transaction commit or roll back through the same Core driver.
+
+## Shared Reads
+
+`store_handle::begin_read()` opens one Core snapshot and eagerly binds every
+configured Object and Blob layer to it:
+
+```cpp
+auto read = co_await witness.begin_read();
+auto objects = read.objects();
+auto blobs = read.blobs();
+
+auto metadata = co_await objects.get(file_id);
+auto payload = co_await blobs.get(metadata.content);
+```
+
+Both views observe the same committed point, including Object indexes and Blob
+owner references. `objects()` or `blobs()` reports `unavailable_layer` when the
+named store does not configure that layer. The wrapper deliberately does not
+expose its raw Core snapshot.
+
+New reads are accepted only in `started` and `stopping`. A snapshot opened
+before shutdown owns its backend session and remains usable until its last copy
+is destroyed, even after plugin shutdown. Keep snapshots operation-scoped or
+bounded: old RocksDB versions and Blob files remain live while a snapshot is
+held.

@@ -39,7 +39,7 @@ forge::app::plugin_id plugin::id() const {
 }
 
 std::string plugin::version() const {
-   return "1.1.0";
+   return "1.2.0";
 }
 
 std::optional<forge::config::core::component_descriptor> plugin::describe_config() const {
