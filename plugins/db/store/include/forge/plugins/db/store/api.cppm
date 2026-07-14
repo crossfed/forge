@@ -55,10 +55,13 @@ class transaction {
    boost::asio::awaitable<void> rollback();
 
  private:
+   void require_named_store(const std::string& expected) const;
+
    std::optional<forge::db::core::transaction> core_;
    std::optional<forge::db::object::transaction> object_;
    std::string store_name_;
 
+   friend class blob_handle;
    friend class object_handle;
    friend class revision_handle;
 };
@@ -204,6 +207,7 @@ class blob_handle {
 
    boost::asio::awaitable<forge::db::blob::transaction> begin_transaction() const;
    [[nodiscard]] forge::db::blob::transaction join(forge::db::core::transaction& active) const;
+   [[nodiscard]] forge::db::blob::transaction join(transaction& active) const;
 
    template <typename SharedTransaction>
       requires requires(SharedTransaction& active) {
@@ -297,7 +301,6 @@ class revision_handle {
 
  private:
    [[nodiscard]] std::shared_ptr<forge::db::revision::store> require_store() const;
-   void require_own_transaction(const transaction& active) const;
 
    std::shared_ptr<store_handle_state> state_;
 

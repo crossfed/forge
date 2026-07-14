@@ -1253,7 +1253,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_begin_transaction_preserves_object_single_writ
    forge::asio::blocking::run(app->runtime(), app->shutdown());
 }
 
-BOOST_AUTO_TEST_CASE(store_plugin_rejects_object_join_from_another_named_store) {
+BOOST_AUTO_TEST_CASE(store_plugin_rejects_layer_joins_from_another_named_store) {
    auto runtime = forge::asio::runtime{};
    auto scheduler = forge::asio::task_scheduler{runtime};
    auto apis = forge::api::core::registry{};
@@ -1275,9 +1275,18 @@ BOOST_AUTO_TEST_CASE(store_plugin_rejects_object_join_from_another_named_store) 
    first_options.object = store_plugin::object_layer_options{
       .family = forge::db::core::family{"objects.first"},
    };
+   first_options.blob = store_plugin::blob_layer_options{
+      .data_family = forge::db::core::family{"blobs.first.data"},
+      .refs_family = forge::db::core::family{"blobs.first.refs"},
+   };
+   first_options.revision = store_plugin::revision_layer_options{};
    auto second_options = store_plugin::store_options{};
    second_options.object = store_plugin::object_layer_options{
       .family = forge::db::core::family{"objects.second"},
+   };
+   second_options.blob = store_plugin::blob_layer_options{
+      .data_family = forge::db::core::family{"blobs.second.data"},
+      .refs_family = forge::db::core::family{"blobs.second.refs"},
    };
 
    auto api = apis.get<store_plugin::api>(store_plugin::api::ref());
@@ -1289,10 +1298,18 @@ BOOST_AUTO_TEST_CASE(store_plugin_rejects_object_join_from_another_named_store) 
    auto first = forge::asio::blocking::run(runtime, api->store("first"));
    auto second = forge::asio::blocking::run(runtime, api->store("second"));
    auto tx = forge::asio::blocking::run(runtime, first.begin_transaction());
+   BOOST_TEST(forge::asio::blocking::run(runtime, first.revisions().join(tx)).id() == 1U);
    BOOST_CHECK_THROW(
       forge::asio::blocking::run(runtime, second.objects().join(tx)),
       store_plugin::exceptions::invalid_argument);
+   BOOST_CHECK_THROW(
+      (void)second.blobs().join(tx),
+      store_plugin::exceptions::invalid_argument);
+
+   auto blobs = first.blobs().join(tx);
+   const auto content = forge::asio::blocking::run(runtime, blobs.put(bytes("owned payload")));
    forge::asio::blocking::run(runtime, tx.rollback());
+   BOOST_TEST(!forge::asio::blocking::run(runtime, first.blobs().has(content)));
 
    forge::asio::blocking::run(runtime, plugin.shutdown());
 }
