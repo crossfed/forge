@@ -1,31 +1,7 @@
 name: VM WASM
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/vm-wasm.yml"
-      - ".gitmodules"
-      - "CMakeLists.txt"
-      - "cmake/ForgeConfig.cmake.in"
-      - "libraries/vm/**"
-      - "libraries/exceptions/**"
-      - "tests/CMakeLists.txt"
-      - "tests/package_vm_wasm_component/**"
-      - "tests/vm_wasm/**"
-      - "vendor/softfloat"
-  push:
-    branches: [dev]
-    paths:
-      - ".github/workflows/vm-wasm.yml"
-      - ".gitmodules"
-      - "CMakeLists.txt"
-      - "cmake/ForgeConfig.cmake.in"
-      - "libraries/vm/**"
-      - "libraries/exceptions/**"
-      - "tests/CMakeLists.txt"
-      - "tests/package_vm_wasm_component/**"
-      - "tests/vm_wasm/**"
-      - "vendor/softfloat"
+  workflow_dispatch:
 
 permissions:
   contents: read
