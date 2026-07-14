@@ -56,6 +56,7 @@ Each library guide must be useful without reading source first:
 - [db_core](../libraries/db/core/README.md)
 - [db_object](../libraries/db/object/README.md)
 - [db_blob](../libraries/db/blob/README.md)
+- [db_revision](../libraries/db/revision/README.md)
 - [db_rocksdb](../libraries/db/rocksdb/README.md)
 - [json](../libraries/codec/json/README.md)
 - [yaml](../libraries/codec/yaml/README.md)
