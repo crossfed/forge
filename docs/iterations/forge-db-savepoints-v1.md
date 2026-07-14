@@ -693,4 +693,3 @@ Savepoints may be declared shipped only when:
 - final commit/rollback and dropped cleanup remain deterministic;
 - public API contains no RocksDB or downstream product vocabulary;
 - the required Core/Object/Blob/RocksDB package and behavior tests pass.
-
