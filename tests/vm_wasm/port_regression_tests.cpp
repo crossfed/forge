@@ -315,6 +315,40 @@ TEST_CASE("null backend rejects deferred instantiation errors", "[null_backend]"
    BOOST_CHECK_THROW(validate(), wasm::exceptions::interpreter);
 }
 
+TEST_CASE("data segments must fit declared linear memory", "[null_backend]") {
+   auto invalid_code = wasm::wasm_code{
+       0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,      // header
+       0x05, 0x03, 0x01, 0x00, 0x00,                        // zero-page linear memory
+       0x0b, 0x07, 0x01, 0x00, 0x41, 0x00, 0x0b, 0x01, 0x2a // one byte at offset zero
+   };
+   using validator = wasm::backend<std::nullptr_t, wasm::null_backend>;
+   using interpreter = wasm::backend<std::nullptr_t, wasm::interpreter>;
+
+   const auto validate = [&] {
+      auto code = invalid_code;
+      auto instance = validator{code, static_cast<wasm::wasm_allocator*>(nullptr)};
+      static_cast<void>(instance);
+   };
+   BOOST_CHECK_THROW(validate(), wasm::exceptions::memory);
+
+   auto memory = wasm::wasm_allocator{};
+   const auto instantiate = [&] {
+      auto code = invalid_code;
+      auto instance = interpreter{code, &memory};
+      static_cast<void>(instance);
+   };
+   BOOST_CHECK_THROW(instantiate(), wasm::exceptions::memory);
+   memory.free();
+
+   auto valid_code = wasm::wasm_code{
+       0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,      // header
+       0x05, 0x03, 0x01, 0x00, 0x01,                        // one-page linear memory
+       0x0b, 0x07, 0x01, 0x00, 0x41, 0x00, 0x0b, 0x01, 0x2a // one byte at offset zero
+   };
+   auto valid = validator{valid_code, static_cast<wasm::wasm_allocator*>(nullptr)};
+   static_cast<void>(valid);
+}
+
 TEST_CASE("zero length host spans do not probe guest memory", "[execution_interface]") {
    auto code = wasm::wasm_code{
        0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,                         // header

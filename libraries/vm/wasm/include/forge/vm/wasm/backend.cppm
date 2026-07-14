@@ -124,6 +124,7 @@ class backend {
       if (ctx.owns) {
          if constexpr (std::is_same_v<Impl, null_backend>) {
             detail::check<exceptions::interpreter>((mod->error == nullptr), mod->error);
+            detail::validate_data_segments(*mod);
          } else {
             if (memory_alloc || !ctx->has_linear_memory()) {
                initialize(host);

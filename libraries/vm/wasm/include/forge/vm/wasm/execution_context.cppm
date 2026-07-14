@@ -73,6 +73,17 @@ template <> struct host_invoker<std::nullptr_t> {
    using type = null_host_functions;
 };
 template <typename HF> using host_invoker_t = typename host_invoker<HF>::type;
+
+template <typename Module> inline void validate_data_segments(const Module& mod) {
+   const auto available_memory =
+       mod.memories.size() == 0 ? 0 : mod.memories[0].limits.initial * static_cast<std::uint64_t>(page_size);
+   for (std::uint32_t i = 0; i < mod.data.size(); ++i) {
+      const auto& segment = mod.data[i];
+      const std::uint32_t offset = segment.offset.value.i32; // force to unsigned
+      const auto required_memory = static_cast<std::uint64_t>(offset) + segment.data.size();
+      detail::check<exceptions::memory>((required_memory <= available_memory), "data out of range");
+   }
+}
 } // namespace detail
 
 template <typename Derived, typename Host, bool IsJit> class execution_context_base {
@@ -193,12 +204,10 @@ template <typename Derived, typename Host, bool IsJit> class execution_context_b
          _linear_memory = nullptr;
       }
 
+      detail::validate_data_segments(mod);
       for (uint32_t i = 0; i < mod.data.size(); i++) {
          const auto& data_seg = mod.data[i];
          uint32_t offset = data_seg.offset.value.i32; // force to unsigned
-         auto available_memory = mod.memories[0].limits.initial * static_cast<uint64_t>(page_size);
-         auto required_memory = static_cast<uint64_t>(offset) + data_seg.data.size();
-         detail::check<exceptions::memory>((required_memory <= available_memory), "data out of range");
          auto addr = _linear_memory + offset;
          if (data_seg.data.size())
             memcpy((char*)(addr), data_seg.data.data(), data_seg.data.size());
