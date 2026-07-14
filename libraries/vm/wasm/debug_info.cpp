@@ -51,8 +51,13 @@ std::uint32_t profile_instr_map::translate(const void* pc) const {
       return 0xFFFFFFFFu;
    }
 
-   const auto diff =
-       static_cast<std::size_t>(reinterpret_cast<const char*>(pc) - reinterpret_cast<const char*>(base_address));
+   const auto address = reinterpret_cast<std::uintptr_t>(pc);
+   const auto base = reinterpret_cast<std::uintptr_t>(base_address);
+   if (address < base) {
+      return 0xFFFFFFFFu;
+   }
+
+   const auto diff = static_cast<std::size_t>(address - base);
    if (diff >= code_size || diff < offset_to_addr[0].offset) {
       return 0xFFFFFFFFu;
    }

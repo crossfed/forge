@@ -156,6 +156,24 @@ TEST_CASE("empty profile maps translate to the unknown address", "[debug_info]")
    BOOST_TEST(map.translate(code.data()) == std::numeric_limits<std::uint32_t>::max());
 }
 
+TEST_CASE("profile maps reject program counters outside their code range", "[debug_info]") {
+   auto code = std::array<char, 8>{};
+   auto wasm_code = std::array<char, 8>{};
+   auto builder = wasm::profile_instr_map::builder{};
+   builder.on_code_start(code.data(), wasm_code.data());
+   builder.on_function_start(code.data() + 2, wasm_code.data() + 5);
+   builder.on_code_end(code.data() + 6, wasm_code.data() + 6);
+
+   auto map = wasm::profile_instr_map{};
+   map.set(std::move(builder));
+
+   const auto before = reinterpret_cast<const void*>(reinterpret_cast<std::uintptr_t>(code.data()) - 1);
+   BOOST_TEST(map.translate(before) == std::numeric_limits<std::uint32_t>::max());
+   BOOST_TEST(map.translate(code.data() + 1) == std::numeric_limits<std::uint32_t>::max());
+   BOOST_TEST(map.translate(code.data() + 2) == 5U);
+   BOOST_TEST(map.translate(code.data() + 6) == std::numeric_limits<std::uint32_t>::max());
+}
+
 TEST_CASE("default span proxies copy and write back without an alignment divisor", "[argument_proxy]") {
    auto values = std::array<std::uint32_t, 2>{1, 2};
    {
@@ -194,6 +212,12 @@ TEST_CASE("managed vectors preserve values across growth", "[managed_vector]") {
    values.push_back(7U);
    values.emplace_back(9U);
    values.push_back(11U);
+
+   BOOST_TEST(values.size() == 3U);
+   BOOST_TEST(values[0] == 7U);
+   BOOST_TEST(values[1] == 9U);
+   BOOST_TEST(values[2] == 11U);
+
    values.emplace_back(13U);
 
    BOOST_TEST(values.size() == 4U);
