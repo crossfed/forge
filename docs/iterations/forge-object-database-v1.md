@@ -28,11 +28,10 @@ The donor baseline is tracked separately in
 That note records which serious database systems influence each DB Object
 component class.
 
-The first prototype implementation has been quarantined under
-`legacy/objectdb/`. It is archival reference material only: it is not built,
-installed, exported as a package component or tested. New work should use this
-document and the donor baseline instead of treating the quarantined prototype as
-the public API shape.
+The first prototype implementation was removed from the active tree after being
+quarantined in commit `76e4c68`. Git history remains the archival reference. New
+work should use this document and the donor baseline instead of treating that
+prototype as the public API shape.
 
 ## Active First Slice
 
