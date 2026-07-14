@@ -13,7 +13,7 @@ Documents below explain cross-library architecture decisions.
 
 | Document | Purpose |
 | --- | --- |
-| [releases/8.2.0.md](releases/8.2.0.md) | Forge 8.2.0 changes, Preview API status and source migration notes. |
+| [releases/8.3.0.md](releases/8.3.0.md) | Forge 8.3.0 changes, Preview API status and source migration notes. |
 | [roadmap.md](roadmap.md) | Post-1.0 direction, architecture gates and framework boundaries. |
 | [runtime/asio-app.md](runtime/asio-app.md) | Runtime ownership, bounded scheduler, plugin lifecycle and rollback. |
 | [web/http-websocket.md](web/http-websocket.md) | HTTP/WebSocket layering, routing, upgrade, retry and backpressure rules. |
