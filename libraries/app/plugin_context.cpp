@@ -6,6 +6,8 @@ module;
 
 module forge.app.plugin_context;
 
+import forge.asio.exceptions;
+
 namespace forge::app {
 namespace {
 
@@ -16,17 +18,31 @@ forge::api::core::registry& default_api_registry() {
 
 } // namespace
 
-plugin_context::plugin_context(forge::asio::task::scheduler& scheduler, forge::api::core::registry& apis, signal_bus& signals,
-                               event_bus& events, diagnostics_store* diagnostics, config_view config)
-    : scheduler_{&scheduler}, apis_{&apis}, signals_{&signals}, events_{&events}, diagnostics_{diagnostics},
-      config_{std::move(config)} {}
+plugin_context::plugin_context(forge::asio::task::scheduler& scheduler, forge::api::core::registry& apis,
+                               signal_bus& signals, event_bus& events, diagnostics_store* diagnostics,
+                               config_view config, forge::asio::compute::executor compute)
+    : scheduler_{&scheduler}, compute_{std::move(compute)}, apis_{&apis}, signals_{&signals}, events_{&events},
+      diagnostics_{diagnostics}, config_{std::move(config)} {}
 
 plugin_context::plugin_context(forge::asio::task::scheduler& scheduler, signal_bus& signals, event_bus& events,
-                               diagnostics_store* diagnostics, config_view config)
-    : plugin_context{scheduler, default_api_registry(), signals, events, diagnostics, std::move(config)} {}
+                               diagnostics_store* diagnostics, config_view config,
+                               forge::asio::compute::executor compute)
+    : plugin_context{scheduler, default_api_registry(), signals, events, diagnostics, std::move(config),
+                     std::move(compute)} {}
 
 forge::asio::task::scheduler& plugin_context::scheduler() noexcept {
    return *scheduler_;
+}
+
+bool plugin_context::has_compute() const noexcept {
+   return compute_.valid();
+}
+
+forge::asio::compute::executor plugin_context::compute() const {
+   if (!has_compute()) {
+      throw forge::asio::exceptions::invalid_state{"application compute pool is not configured"};
+   }
+   return compute_;
 }
 
 forge::api::core::view plugin_context::apis() const noexcept {

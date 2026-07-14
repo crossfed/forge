@@ -13,6 +13,7 @@ module;
 module forge.app.application_builder;
 
 import forge.asio.runtime;
+import forge.asio.compute;
 import forge.asio.task;
 import forge.config.core.key_path;
 import forge.config.core.value;
@@ -109,6 +110,11 @@ application_builder& application_builder::runtime(forge::asio::runtime_options v
 
 application_builder& application_builder::scheduler(forge::asio::task::scheduler::options value) {
    impl_->state.options.scheduler = std::move(value);
+   return *this;
+}
+
+application_builder& application_builder::compute(forge::asio::compute::pool::options value) {
+   impl_->state.options.compute = std::move(value);
    return *this;
 }
 

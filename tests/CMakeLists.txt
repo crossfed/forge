@@ -485,6 +485,22 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
+   test_forge_package_asio_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_asio_component
+      ${CMAKE_BINARY_DIR}/forge-package-asio-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options
+         ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_Ngtcp2=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_glaze=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_Notcurses=ON
+      --test-command forge_package_asio_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
    test_forge_package_config_core_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
@@ -1021,6 +1037,22 @@ add_test(
       --test-command forge_package_core_lightweight
 )
 set_tests_properties(test_forge_package_core_lightweight PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_asio_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_asio_component
+      ${CMAKE_BINARY_DIR}/forge-package-asio-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options
+         ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_Ngtcp2=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_glaze=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_Notcurses=ON
+      --test-command forge_package_asio_component
+)
+set_tests_properties(test_forge_package_asio_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_config_core_component
    COMMAND ${CMAKE_CTEST_COMMAND}

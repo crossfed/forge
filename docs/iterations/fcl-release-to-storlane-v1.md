@@ -89,7 +89,7 @@ ctest --test-dir build/fcl-release-hardening-debug --output-on-failure \
 Static gates:
 
 ```bash
-rg "import fcl\\.asio|fcl_asio|task_scheduler" libraries/log
+rg "import fcl\\.asio|fcl_asio|scheduler" libraries/log
 rg "boost::stacktrace|std::stacktrace" libraries/log/include tests/package_consumer
 rg "legacy FC logging macro names" libraries tests docs README.md AGENTS.md
 git diff --check

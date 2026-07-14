@@ -24,7 +24,7 @@ foreground daemon
   -> forge_config_core::document
   -> forge_app::application_shell
   -> plugins configured through component_view
-  -> forge_asio runtime / task_scheduler for async work
+  -> forge_asio runtime / task scheduler / optional compute pool
 ```
 
 `run_daemon(...)` is the high-level foreground-daemon entrypoint. It owns
@@ -35,18 +35,24 @@ remains the lower-level lifecycle runner for tests, embedded hosts and custom
 product shells that already have a `config::core::document`.
 
 `application_runtime` remains a lower-level escape hatch, while
-`application_shell` is the preferred production owner of runtime, scheduler,
-API registry, events, signals, diagnostics, plugin registry and plugin context.
+`application_shell` is the preferred production owner of runtime, task
+scheduler, optional compute pool, API registry, events, signals, diagnostics,
+plugin registry and plugin context.
 
 ## Runtime Ownership
 
-- `forge_asio::runtime` owns `boost::asio::io_context` and worker threads.
-- `forge_asio::task_scheduler` owns bounded pending queues, numeric priority,
+- `forge::asio::runtime` owns `boost::asio::io_context` and worker threads.
+- `forge::asio::task::scheduler` owns bounded pending queues, numeric priority,
   delayed tasks, cancellation handles and metrics.
+- `forge::asio::compute::pool` optionally owns bounded synchronous CPU work on
+  a joined `boost::asio::thread_pool`.
 - Priority names are product/program policy. FORGE only orders numeric priority and
   FIFO within equal priority.
 - Blocking work must cross an explicit boundary; it must not be hidden inside
   unrelated coroutine code.
+- CPU-heavy synchronous work crosses the compute boundary rather than occupying
+  runtime workers. The snapshot/concurrency direction is documented in
+  [`compute-and-snapshots.md`](compute-and-snapshots.md).
 
 ## Application Lifecycle
 
@@ -62,6 +68,9 @@ The lifecycle order is fixed:
 8. plugins start;
 9. `request_stop()` is issued synchronously;
 10. plugins shut down in reverse order.
+11. the task scheduler stops;
+12. the optional compute pool drains and joins;
+13. the Asio runtime stops.
 
 All heavy lifecycle methods return `boost::asio::awaitable<void>`. `request_stop`
 is intentionally synchronous/noexcept: it signals intent, it does not perform
@@ -137,6 +146,7 @@ For smaller applications and tests, `application_builder` creates an
 ```cpp
 auto builder = forge::app::application_builder{};
 builder.name("service")
+   .compute(forge::asio::compute::pool::options{.worker_threads = 4})
    .config<service_config>("service", [&](const service_config& config) {
       configure_service(config);
    })
@@ -188,10 +198,12 @@ Rejected:
 - `std::async` as product-grade daemon/runtime worker substrate.
 - Unbounded event subscribers or "fire and forget" detached work.
 - CLI parser types inside plugin core.
+- Global read/write windows when immutable backend snapshots permit readers and
+  an ordered writer to coexist.
 
 ## Verification
 
 - `test_forge_asio`: priority ordering, delayed tasks, cancellation, queue bounds
-  and shutdown.
+  plus compute admission, parallel CPU work, cancellation and shutdown.
 - `test_forge_app`: config collection, configure-before-initialize, dependency
   ordering, rollback, diagnostics and reverse shutdown.
