@@ -84,6 +84,31 @@ EXCEPTION_RENAMES = {
     "wasm_vector_oob_exception": "exceptions::vector_out_of_bounds",
 }
 
+VM_HEADER_MODULES = {
+    "allocator": "forge.vm.wasm.allocator",
+    "argument_proxy": "forge.vm.wasm.argument_proxy",
+    "backend": "forge.vm.wasm.backend",
+    "guarded_ptr": "forge.vm.wasm.guarded_ptr",
+    "host_function": "forge.vm.wasm.host_function",
+    "stack_elem": "forge.vm.wasm.stack_elem",
+    "types": "forge.vm.wasm.types",
+    "utils": "forge.vm.wasm.utils",
+    "variant": "forge.vm.wasm.variant",
+    "vector": "forge.vm.wasm.vector",
+    "watchdog": "forge.vm.wasm.watchdog",
+}
+
+VM_HEADER_PARTITIONS = {
+    "leb128": ":leb128",
+    "signals": ":signals",
+}
+
+TEST_SUPPORT_MODULES = (
+    "forge.vm.wasm.allocator",
+    "forge.vm.wasm.stack_elem",
+    "forge.vm.wasm.utils",
+)
+
 
 def sha256(path: pathlib.Path) -> str:
     digest = hashlib.sha256()
@@ -264,7 +289,28 @@ def replace_live_symbols(text: str) -> str:
     return text
 
 
+def required_imports(text: str, relative: pathlib.Path) -> tuple[list[str], list[str]]:
+    headers = re.findall(r'^\s*#\s*include\s*[<"]eosio/vm/([^>"]+)\.hpp[>"]\s*$', text, flags=re.M)
+    modules = list(TEST_SUPPORT_MODULES)
+    partitions: list[str] = []
+
+    for header in headers:
+        if header in VM_HEADER_MODULES:
+            modules.append(VM_HEADER_MODULES[header])
+        elif header in VM_HEADER_PARTITIONS:
+            partitions.append(VM_HEADER_PARTITIONS[header])
+        else:
+            raise RuntimeError(f"{relative}: no Forge module mapping for eosio/vm/{header}.hpp")
+
+    if partitions and relative.name not in {"varint_tests.cpp", "signals_tests.cpp"}:
+        raise RuntimeError(f"{relative}: backend partition import requires an internal module test")
+
+    return list(dict.fromkeys(modules)), list(dict.fromkeys(partitions))
+
+
 def transform_text(text: str, relative: pathlib.Path) -> str:
+    modules, partitions = required_imports(text, relative)
+    uses_backend = "BACKEND_TEST_CASE" in text
     text = replace_live_symbols(text)
     internal = relative.name in {"varint_tests.cpp", "signals_tests.cpp"}
     prefix = re.sub(r"[^a-zA-Z0-9_]", "_", relative.with_suffix("").as_posix())
@@ -277,15 +323,20 @@ def transform_text(text: str, relative: pathlib.Path) -> str:
             f'#include "test_prelude.hpp"\n'
             + "\n".join(includes)
             + "\n\nmodule forge.vm.wasm.backend;\n\n"
+            + "\n".join(f"import {name};" for name in partitions + modules)
+            + "\n\n"
             "#define FORGE_VM_WASM_INTERNAL_TESTS\n"
             f'#include "test_support.hpp"\n\n'
             f"#define FORGE_VM_WASM_TEST_FILE {prefix}\n\n"
         )
     else:
+        backend_marker = "#define FORGE_VM_WASM_TEST_USES_BACKEND\n" if uses_backend else ""
         heading = (
             f'#include "test_prelude.hpp"\n'
-            "import forge.vm.wasm.backend;\n"
-            f'#include "test_support.hpp"\n\n'
+            + "\n".join(f"import {name};" for name in modules)
+            + "\n"
+            + backend_marker
+            + f'#include "test_support.hpp"\n\n'
             f"#define FORGE_VM_WASM_TEST_FILE {prefix}\n\n"
         )
     transformed = heading + text.lstrip()

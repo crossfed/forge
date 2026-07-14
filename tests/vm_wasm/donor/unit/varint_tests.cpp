@@ -8,6 +8,12 @@ module;
 
 module forge.vm.wasm.backend;
 
+import :leb128;
+import forge.vm.wasm.allocator;
+import forge.vm.wasm.stack_elem;
+import forge.vm.wasm.utils;
+import forge.vm.wasm.types;
+
 #define FORGE_VM_WASM_INTERNAL_TESTS
 #include "test_support.hpp"
 

@@ -8,6 +8,11 @@ module;
 
 module forge.vm.wasm.backend;
 
+import :signals;
+import forge.vm.wasm.allocator;
+import forge.vm.wasm.stack_elem;
+import forge.vm.wasm.utils;
+
 #define FORGE_VM_WASM_INTERNAL_TESTS
 #include "test_support.hpp"
 

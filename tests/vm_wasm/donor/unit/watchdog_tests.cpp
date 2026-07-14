@@ -1,5 +1,8 @@
 #include "test_prelude.hpp"
-import forge.vm.wasm.backend;
+import forge.vm.wasm.allocator;
+import forge.vm.wasm.stack_elem;
+import forge.vm.wasm.utils;
+import forge.vm.wasm.watchdog;
 #include "test_support.hpp"
 
 #define FORGE_VM_WASM_TEST_FILE watchdog_tests

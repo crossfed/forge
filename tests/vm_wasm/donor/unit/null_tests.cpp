@@ -1,4 +1,7 @@
 #include "test_prelude.hpp"
+import forge.vm.wasm.allocator;
+import forge.vm.wasm.stack_elem;
+import forge.vm.wasm.utils;
 import forge.vm.wasm.backend;
 #include "test_support.hpp"
 

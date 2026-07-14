@@ -6,9 +6,9 @@
 
 #define TEST_CASE(name, tags) BOOST_AUTO_TEST_CASE(FORGE_VM_WASM_TEST_NAME(__LINE__))
 
-#if !defined(FORGE_VM_WASM_INTERNAL_TESTS) && FORGE_VM_WASM_HAS_JIT && !defined(FORGE_VM_WASM_TEST_INTERPRETER_ONLY)
+#if defined(FORGE_VM_WASM_TEST_USES_BACKEND) && FORGE_VM_WASM_HAS_JIT && !defined(FORGE_VM_WASM_TEST_INTERPRETER_ONLY)
 using forge_vm_wasm_backend_types = boost::mpl::list<forge::vm::wasm::interpreter, forge::vm::wasm::jit>;
-#elif !defined(FORGE_VM_WASM_INTERNAL_TESTS)
+#elif defined(FORGE_VM_WASM_TEST_USES_BACKEND)
 using forge_vm_wasm_backend_types = boost::mpl::list<forge::vm::wasm::interpreter>;
 #endif
 

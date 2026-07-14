@@ -12,8 +12,10 @@ SOURCE_SUFFIXES = {".cpp", ".cppm", ".hpp", ".hxx"}
 LAYOUT_ROOTS = ("libraries", "plugins")
 SCAN_ROOTS = ("libraries", "plugins", "tests")
 EXCLUDED_PARTS = {".git", "legacy", "vendor", "__pycache__"}
-MODULE_DECLARATION = re.compile(r"^\s*export\s+module\s+(forge(?:\.[A-Za-z_][A-Za-z0-9_]*)+)\s*;")
-MODULE_IMPORT = re.compile(r"^\s*(?:export\s+)?import\s+(forge(?:\.[A-Za-z_][A-Za-z0-9_]*)+)\s*;")
+MODULE_NAME = r"forge(?:\.[A-Za-z_][A-Za-z0-9_]*)+(?::[A-Za-z_][A-Za-z0-9_]*)?"
+MODULE_DECLARATION = re.compile(rf"^\s*export\s+module\s+({MODULE_NAME})\s*;")
+MODULE_UNIT = re.compile(rf"^\s*(?:export\s+)?module\s+({MODULE_NAME})\s*;")
+MODULE_IMPORT = re.compile(rf"^\s*(?:export\s+)?import\s+({MODULE_NAME}|:[A-Za-z_][A-Za-z0-9_]*)\s*;")
 INCLUDE = re.compile(r'^\s*#\s*include\s*([<"][^>"]+[>"])')
 BROAD_EXPORT = re.compile(r"^\s*export\s*\{")
 CONDITIONAL_START = re.compile(r"^\s*#\s*(?:if|ifdef|ifndef)\b")
@@ -167,6 +169,11 @@ def check_vm_wasm_boundaries(root: Path, errors: list[str]) -> None:
          included = INCLUDE.match(line)
          if included and (".hxx" in included.group(1) or "details/" in included.group(1)):
             errors.append(f"{relative}:{line_number}: public VM module includes a private source header")
+         if included and "forge/vm/wasm/" in included.group(1) and included.group(1) not in {
+            "<forge/vm/wasm/host_function.hpp>",
+            "<forge/vm/wasm/opcode_macros.hpp>",
+         }:
+            errors.append(f"{relative}:{line_number}: VM components must use module imports")
          if VM_WASM_EXPORT.search(line):
             errors.append(f"{relative}:{line_number}: FORGE_VM_WASM_EXPORT is forbidden")
 
@@ -188,12 +195,15 @@ def check_modules(root: Path, files: list[Path], errors: list[str]) -> None:
 
    for path in files:
       relative = path.relative_to(root)
+      source_lines = path.read_text(errors="ignore").splitlines()
+      unit_name = next((match.group(1) for line in source_lines if (match := MODULE_UNIT.match(line))), None)
+      unit_primary = unit_name.split(":", 1)[0] if unit_name else None
       seen_imports: dict[str, int] = {}
       seen_includes: dict[tuple[str, tuple[tuple[int, int], ...]], int] = {}
       conditional_stack: list[list[int]] = []
       next_conditional = 0
 
-      for line_number, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
+      for line_number, line in enumerate(source_lines, 1):
          if CONDITIONAL_START.match(line):
             next_conditional += 1
             conditional_stack.append([next_conditional, 0])
@@ -209,6 +219,11 @@ def check_modules(root: Path, files: list[Path], errors: list[str]) -> None:
          imported = MODULE_IMPORT.match(line)
          if imported:
             name = imported.group(1)
+            if name.startswith(":"):
+               if unit_primary is None:
+                  errors.append(f"{relative}:{line_number}: relative import has no owning module")
+                  continue
+               name = f"{unit_primary}{name}"
             imports.append((name, relative, line_number))
             if name in seen_imports:
                errors.append(

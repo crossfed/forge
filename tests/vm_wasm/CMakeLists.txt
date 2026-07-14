@@ -58,6 +58,17 @@ set_tests_properties(test_forge_vm_wasm_spec PROPERTIES LABELS vm_wasm)
 
 if(FORGE_VM_WASM_DONOR_ROOT)
    add_test(
+      NAME test_forge_vm_wasm_donor_source_mapping
+      COMMAND
+         ${Python3_EXECUTABLE}
+         ${CMAKE_CURRENT_SOURCE_DIR}/verify_donor_sources.py
+         --donor ${FORGE_VM_WASM_DONOR_ROOT}
+         --root ${PROJECT_SOURCE_DIR}
+         --check
+   )
+   set_tests_properties(test_forge_vm_wasm_donor_source_mapping PROPERTIES LABELS vm_wasm)
+
+   add_test(
       NAME test_forge_vm_wasm_donor_mapping
       COMMAND
          ${Python3_EXECUTABLE}
