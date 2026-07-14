@@ -11,6 +11,8 @@ module;
 #include <utility>
 #include <vector>
 
+#include "details/snapshot_access.hxx"
+
 module forge.db.blob.store;
 
 import forge.db.blob.exceptions;
@@ -64,7 +66,7 @@ snapshot store::join(const forge::db::core::snapshot& active) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor,
                             "db blob snapshot belongs to another driver");
    }
-   return detail::snapshot_access::make(
+   return detail::snapshot_access::make<snapshot>(
       active,
       impl_->config.data_family,
       impl_->config.refs_family);

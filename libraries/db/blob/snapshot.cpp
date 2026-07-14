@@ -36,14 +36,6 @@ snapshot::snapshot(forge::db::core::snapshot active,
     : impl_{std::make_shared<impl>(
          std::move(active), std::move(data_family), std::move(refs_family))} {}
 
-snapshot detail::snapshot_access::make(
-   forge::db::core::snapshot active,
-   forge::db::core::family data_family,
-   forge::db::core::family refs_family) {
-   return snapshot{
-      std::move(active), std::move(data_family), std::move(refs_family)};
-}
-
 bool snapshot::active() const noexcept {
    return impl_ && impl_->active.active();
 }

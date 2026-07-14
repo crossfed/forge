@@ -2,6 +2,8 @@ module;
 
 #include <forge/exceptions/macros.hpp>
 
+#include "snapshot_access.hxx"
+
 #include <boost/asio/awaitable.hpp>
 
 #include <cstddef>
@@ -44,10 +46,6 @@ void require_snapshot_payload_matches(const ref<Digest>& value,
 } // namespace forge::db::blob::detail
 
 export namespace forge::db::blob {
-
-namespace detail {
-class snapshot_access;
-}
 
 class snapshot {
  public:
@@ -119,17 +117,5 @@ class snapshot {
 
    friend class detail::snapshot_access;
 };
-
-namespace detail {
-
-class snapshot_access {
- public:
-   [[nodiscard]] static snapshot make(
-      forge::db::core::snapshot active,
-      forge::db::core::family data_family,
-      forge::db::core::family refs_family);
-};
-
-} // namespace detail
 
 } // namespace forge::db::blob
