@@ -409,9 +409,11 @@ threads that sleep and poll shared state.
 
 ### Shut Down Deterministically
 
-Call `stop()` when the owning service is stopping. Pending work is canceled,
-running work is allowed to finish through its normal function body, and handles
-can still be awaited by tests.
+Coroutine owners call `shutdown()` when the service is stopping. Pending work
+is canceled, running work is allowed to finish through its normal function
+body, and the wait does not block the Asio worker needed by active awaitables.
+The synchronous `stop()` is reserved for host-side/destructor boundaries where
+another runtime worker can still make progress.
 
 ```cpp
 boost::asio::awaitable<void> stop_with_pending_work(forge::asio::task::scheduler& scheduler) {
@@ -419,7 +421,7 @@ boost::asio::awaitable<void> stop_with_pending_work(forge::asio::task::scheduler
       {.priority = forge::asio::task::priority{0}, .name = "slow-retry", .work = [] { retry(); }},
       std::chrono::minutes{1});
 
-   scheduler.stop();
+   co_await scheduler.shutdown();
    co_await pending.wait();
 
    auto metrics = scheduler.snapshot();
@@ -435,8 +437,9 @@ boost::asio::awaitable<void> stop_with_pending_work(forge::asio::task::scheduler
 `scheduler::options::max_pending_tasks` is a correctness knob. Saturated
 queues reject work instead of growing without bound. Blocking and awaitable
 budgets are separate, so a daemon can prevent blocking pool exhaustion without
-accidentally throttling coroutine progress. `stop()` cancels pending work and
-waits for both blocking and awaitable running counts to reach zero.
+accidentally throttling coroutine progress. `shutdown()` cancels pending work
+and asynchronously waits for both blocking and awaitable running counts to
+reach zero. `stop()` provides the equivalent blocking host-side boundary.
 
 `compute::pool::request_stop()` rejects waiting/new submissions, cancels pending
 jobs and requests cooperative stop from running jobs. `shutdown()` awaits every

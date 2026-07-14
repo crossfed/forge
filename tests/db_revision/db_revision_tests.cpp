@@ -577,6 +577,49 @@ BOOST_AUTO_TEST_CASE(db_revision_join_reserves_object_writer_lane_before_locking
    }());
 }
 
+BOOST_AUTO_TEST_CASE(db_revision_core_join_reuses_existing_object_writer_lane) {
+   auto runtime = forge::asio::runtime{};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto env = co_await open_environment();
+      env.objects.register_object<db_revision_tests::account_object>();
+      auto active = co_await env.driver->begin_transaction();
+      auto objects = co_await env.objects.join(active);
+      const auto revision = co_await env.revisions.join(active);
+
+      BOOST_CHECK_EQUAL(revision.id(), 1U);
+      const auto created = co_await objects.create<db_revision_tests::account>(
+         [](db_revision_tests::account& value) { value.name = "joined-first"; });
+      co_await active.commit();
+
+      const auto stored = co_await env.objects.get(created.id);
+      BOOST_CHECK_EQUAL(stored.name, "joined-first");
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_revision_core_join_does_not_reuse_non_object_family_owner) {
+   auto runtime = forge::asio::runtime{};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto env = co_await open_environment();
+      auto blobs = forge::db::blob::store{
+         env.driver,
+         forge::db::blob::store::config{
+            .data_family = env.objects.family(),
+            .refs_family = forge::db::core::family{"blob.refs"},
+         }};
+
+      auto active = co_await env.driver->begin_transaction();
+      auto blob_tx = blobs.join(active);
+      static_cast<void>(blob_tx);
+      BOOST_CHECK_THROW(co_await env.revisions.join(active),
+                        forge::db::core::exceptions::participant_conflict);
+      co_await active.rollback();
+      co_return;
+   }());
+}
+
 BOOST_AUTO_TEST_CASE(db_revision_savepoint_discard_and_release_preserve_correct_before_image) {
    auto runtime = forge::asio::runtime{};
 

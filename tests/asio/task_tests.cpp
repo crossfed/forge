@@ -434,6 +434,34 @@ BOOST_AUTO_TEST_CASE(task_stop_cancels_pending_and_waits_for_active_awaitable_ta
    BOOST_CHECK(scheduler.snapshot().stopped);
 }
 
+BOOST_AUTO_TEST_CASE(task_async_shutdown_does_not_block_single_runtime_worker) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto scheduler = scheduler_type{runtime, scheduler_type::options{
+      .max_blocking_tasks = 1,
+      .max_awaitable_tasks = 1,
+      .max_pending_tasks = 4,
+   }};
+   auto started = std::atomic_bool{false};
+
+   auto active = scheduler.submit(awaitable_work{
+      .priority = priority{1},
+      .name = "active",
+      .work = [&](context&) -> boost::asio::awaitable<void> {
+         started.store(true, std::memory_order_release);
+         auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+         timer.expires_after(std::chrono::milliseconds{10});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      },
+   });
+
+   wait_until_true(started);
+   forge::asio::blocking::run(runtime, scheduler.shutdown());
+   wait_task(runtime, active);
+
+   BOOST_CHECK(scheduler.snapshot().stopped);
+   BOOST_CHECK_EQUAL(scheduler.snapshot().running_awaitable, 0U);
+}
+
 BOOST_AUTO_TEST_CASE(task_supports_host_owned_awaitable_reschedule_loop) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    auto scheduler = scheduler_type{runtime, scheduler_type::options{.max_blocking_tasks = 1, .max_pending_tasks = 4}};

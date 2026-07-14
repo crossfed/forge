@@ -395,7 +395,9 @@ auto app = std::move(builder).build();
 executor; they do not own or stop worker threads. During shutdown, plugins run
 first, then the compute pool drains and joins while scheduler continuations can
 still run, then the task scheduler stops, and only then may the Asio runtime
-stop. This keeps compute available for final plugin cleanup without detached
+stop. Scheduler shutdown is awaited rather than blocking a runtime worker, so
+active awaitable tasks can finish even with the default single-worker runtime.
+This keeps compute available for final plugin cleanup without detached
 execution or a scheduler/compute shutdown deadlock.
 
 ## Daemon Runner

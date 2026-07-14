@@ -199,7 +199,7 @@ struct application_shell::impl {
             failure = std::current_exception();
          }
       }
-      scheduler.stop();
+      co_await scheduler.shutdown();
       if (failure) {
          std::rethrow_exception(failure);
       }
