@@ -10,6 +10,13 @@ applications. Each named store owns one `forge::db::core::driver` and may expose
 - Runtime id and API id: `forge.plugins.db.store`
 - Config section: `plugins.db.store`
 
+## Stability
+
+The DB Store plugin C++ API and local API contract are **Preview** in Forge 8.x.
+They may receive documented source-incompatible refinements in a MINOR release.
+Configured database layouts and persisted records remain separate compatibility
+boundaries.
+
 The plugin handles physical store setup, lifecycle, status and flushing. It does
 not describe C++ object schemas or blob retention policy in YAML. Domain code
 still declares object/index descriptors in C++ and registers them on

@@ -35,6 +35,31 @@ The repository must stay neutral. Public APIs must not contain downstream produc
   maintenance tasks requested by the maintainer, such as creating this branch
   policy before `dev` exists.
 
+## Versioning And Stability
+
+- The project version is a FORGE release-train version. FORGE uses
+  `MAJOR.MINOR.PATCH` with explicit contract stability rather than treating
+  every source change in every evolving library as a new architectural
+  generation.
+- Public contracts are `Stable` by default. A contract is `Preview` or
+  `Experimental` only when its owning library or plugin README says so
+  explicitly. New APIs do not become unstable merely because they are new.
+- `PATCH` releases contain compatible fixes only. They must not intentionally
+  break public source APIs, package components, wire formats or persisted
+  storage formats at any stability level.
+- `MINOR` releases may add compatible functionality. They may also contain
+  documented source-incompatible changes to contracts explicitly marked
+  `Preview` or `Experimental` before the release.
+- `MAJOR` releases are required for incompatible changes to `Stable` public
+  source APIs, package contracts, wire formats or persisted storage formats,
+  and for broad architectural-generation changes.
+- Source, wire and storage stability are independent. Marking a C++ API as
+  `Preview` does not make its documented wire or persisted storage layout
+  unstable. Any non-stable wire or storage contract must be marked separately
+  and needs explicit migration or compatibility notes when changed.
+- Every intentional incompatible change allowed in a `MINOR` release must be
+  called out in release notes with the affected contract and migration path.
+
 ## Language And Toolchain
 
 - Target language: C++23.

@@ -4,6 +4,12 @@
 record-oriented contract used by higher-level stores such as DB Object and DB
 Blob.
 
+## Stability
+
+The savepoint, participant and record-lock source APIs are **Preview** in Forge
+8.x. They may receive documented source-incompatible refinements in a MINOR
+release. This status does not relax backend data or transaction correctness.
+
 ## Scope
 
 - `forge::db::core::record_key`, `record_range`, `record_entry`, `record_page`,

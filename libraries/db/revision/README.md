@@ -5,6 +5,13 @@ It captures before-images from one active `forge::db::core::transaction`, commit
 the application changes and journal atomically, and can later revert only the
 current committed revision.
 
+## Stability
+
+The DB Revision public C++ API is **Preview** in Forge 8.x. It may receive
+documented source-incompatible refinements in a MINOR release. Its persisted
+journal format is a separate compatibility boundary and must not change without
+explicit versioning and migration handling.
+
 ## Package
 
 - CMake target: `forge_db_revision`
