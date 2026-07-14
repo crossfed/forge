@@ -29,6 +29,17 @@ Target: `forge_asio`.
 
 Dependencies: Boost.Asio and threads.
 
+## Stability
+
+The `forge.asio.task` and `forge.asio.compute` public C++ APIs are Preview in
+Forge 8.x. MINOR releases may make documented source-level changes to these
+surfaces. Runtime ownership, bounded admission and deterministic shutdown are
+production requirements, but the exact scheduler and compute type vocabulary
+may still evolve before it is declared Stable.
+
+The 8.3 migration from `forge.asio.task_scheduler` to `forge.asio.task` is
+documented in the Forge 8.3 release notes.
+
 ## Examples
 
 ### Own A Runtime

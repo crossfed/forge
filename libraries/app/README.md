@@ -51,6 +51,14 @@ Target: `forge_app`.
 Dependencies: `forge_asio`, `forge_config_core`, `forge_codec_yaml`, `forge_config_env`,
 `forge_config_program_options`, Boost headers.
 
+## Stability
+
+The scheduler and compute integration in `application_shell_options`,
+`application_builder`, `application_context` and `application_shell` is Preview
+in Forge 8.x. MINOR releases may make documented source-level changes to that
+surface. The remaining App public contracts are Stable unless their owning
+documentation marks them otherwise.
+
 ## Examples
 
 The examples below show the intended production shape: app-owned config stays
