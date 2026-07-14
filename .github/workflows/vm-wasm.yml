@@ -102,7 +102,7 @@ jobs:
           test_forge_vm_wasm_internal
           test_forge_vm_wasm_spec
           test_forge_vm_wasm_spec_generator_mapping
-          -j 2
+          -j 4
 
       - name: Run interpreter and JIT matrix
         run: ctest --test-dir build/vm-wasm -L vm_wasm --output-on-failure
@@ -147,7 +147,7 @@ jobs:
           test_forge_vm_wasm_internal
           test_forge_vm_wasm_spec
           test_forge_vm_wasm_spec_generator_mapping
-          -j 2
+          -j 4
 
       - name: Run interpreter suite
         run: ctest --test-dir build/vm-wasm-arm64 -L vm_wasm --output-on-failure
@@ -201,7 +201,7 @@ jobs:
           test_forge_vm_wasm_unit
           test_forge_vm_wasm_internal
           test_forge_vm_wasm_spec
-          -j 2
+          -j 4
 
       - name: Run sanitizer tests
         env:
@@ -251,7 +251,7 @@ jobs:
             -DBUILD_TESTING=ON
 
       - name: Build installed package consumer
-        run: cmake --build build/vm-wasm-package --target test_forge_package_vm_wasm_component -j 2
+        run: cmake --build build/vm-wasm-package --target test_forge_package_vm_wasm_component -j 4
 
   donor-oracle:
     name: ubuntu-24.04 / original Catch2 bodies
@@ -289,7 +289,7 @@ jobs:
           -DENABLE_SPEC_TESTS=ON
 
       - name: Build donor Catch2 suite
-        run: cmake --build build/eos-vm-oracle-build --target unit_tests eos_vm_spec_tests -j 2
+        run: cmake --build build/eos-vm-oracle-build --target unit_tests eos_vm_spec_tests -j 4
 
       - name: Run donor Catch2 suite
         shell: bash
