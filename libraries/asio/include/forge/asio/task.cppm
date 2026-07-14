@@ -2,21 +2,21 @@ module;
 
 #include <boost/asio/awaitable.hpp>
 
-#include <atomic>
 #include <chrono>
 #include <compare>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <stop_token>
 #include <string>
 
-export module forge.asio.task_scheduler;
+export module forge.asio.task;
 
 export import forge.asio.exceptions;
 import forge.asio.runtime;
 
-export namespace forge::asio {
+export namespace forge::asio::task {
 
 class priority {
  public:
@@ -49,35 +49,36 @@ struct task {
    std::function<void()> work;
 };
 
-class task_context {
+class context {
  public:
    [[nodiscard]] bool cancel_requested() const noexcept;
+   [[nodiscard]] std::stop_token stop_token() const noexcept;
    void throw_if_cancel_requested() const;
 
  private:
-   explicit task_context(std::atomic_bool& cancel_requested) noexcept;
+   explicit context(std::stop_token stop_token) noexcept;
 
-   std::atomic_bool* cancel_requested_ = nullptr;
+   std::stop_token stop_token_;
 
-   friend class task_scheduler;
+   friend class scheduler;
 };
 
-struct awaitable_task {
+struct awaitable {
    priority priority{};
    std::string name;
-   std::function<boost::asio::awaitable<void>(task_context&)> work;
+   std::function<boost::asio::awaitable<void>(context&)> work;
 };
 
-class task_handle {
+class handle {
  public:
-   task_handle();
-   ~task_handle();
+   handle();
+   ~handle();
 
-   task_handle(task_handle&&) noexcept;
-   task_handle& operator=(task_handle&&) noexcept;
+   handle(handle&&) noexcept;
+   handle& operator=(handle&&) noexcept;
 
-   task_handle(const task_handle&) = delete;
-   task_handle& operator=(const task_handle&) = delete;
+   handle(const handle&) = delete;
+   handle& operator=(const handle&) = delete;
 
    [[nodiscard]] bool valid() const noexcept;
    [[nodiscard]] std::uint64_t id() const noexcept;
@@ -89,12 +90,13 @@ class task_handle {
    struct state;
    std::shared_ptr<state> state_;
 
-   explicit task_handle(std::shared_ptr<state> state);
+   static boost::asio::awaitable<void> wait_owned(std::shared_ptr<state> state);
+   explicit handle(std::shared_ptr<state> state);
 
-   friend class task_scheduler;
+   friend class scheduler;
 };
 
-class task_scheduler {
+class scheduler {
  public:
    struct options {
       std::size_t max_blocking_tasks = 2;
@@ -115,20 +117,20 @@ class task_scheduler {
       bool stopped = false;
    };
 
-   explicit task_scheduler(runtime& runtime);
-   task_scheduler(runtime& runtime, options options);
-   ~task_scheduler();
+   explicit scheduler(runtime& runtime);
+   scheduler(runtime& runtime, options options);
+   ~scheduler();
 
-   task_scheduler(const task_scheduler&) = delete;
-   task_scheduler& operator=(const task_scheduler&) = delete;
+   scheduler(const scheduler&) = delete;
+   scheduler& operator=(const scheduler&) = delete;
 
-   task_scheduler(task_scheduler&&) = delete;
-   task_scheduler& operator=(task_scheduler&&) = delete;
+   scheduler(scheduler&&) = delete;
+   scheduler& operator=(scheduler&&) = delete;
 
-   task_handle submit(task value);
-   task_handle submit_after(task value, std::chrono::milliseconds delay);
-   task_handle submit(awaitable_task value);
-   task_handle submit_after(awaitable_task value, std::chrono::milliseconds delay);
+   handle submit(task value);
+   handle submit_after(task value, std::chrono::milliseconds delay);
+   handle submit(awaitable value);
+   handle submit_after(awaitable value, std::chrono::milliseconds delay);
 
    [[nodiscard]] std::size_t pending_count() const;
    [[nodiscard]] std::size_t pending_count(priority priority) const;
@@ -142,4 +144,4 @@ class task_scheduler {
    std::shared_ptr<impl> impl_;
 };
 
-} // namespace forge::asio
+} // namespace forge::asio::task

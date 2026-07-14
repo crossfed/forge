@@ -2,18 +2,19 @@
 
 `forge_asio` owns the shared async runtime primitives used by FORGE networking and
 applications. It wraps Boost.Asio with explicit runtime ownership, blocking
-boundaries and a priority task scheduler.
+boundaries, a priority task scheduler and a bounded CPU compute pool.
 
 ## When To Use
 
 - A library needs an owned `boost::asio::io_context` runtime.
 - Background work needs bounded queues, cancellation and deterministic shutdown.
+- Long synchronous CPU work must not occupy runtime workers.
 - Blocking code must be isolated from coroutine-first paths.
 
 ## When Not To Use
 
 - Do not use it as a generic global job system.
-- Do not encode application priority names here; `forge::asio::priority` is numeric.
+- Do not encode application priority names here; `forge::asio::task::priority` is numeric.
 - Do not expose `std::future` as public async API. FORGE async APIs use
   `boost::asio::awaitable<T>`.
 
@@ -21,7 +22,8 @@ boundaries and a priority task scheduler.
 
 - `forge.asio.runtime` — owned `io_context` and worker threads.
 - `forge.asio.blocking` — explicit blocking boundary helpers.
-- `forge.asio.task_scheduler` — bounded priority scheduler and task handles.
+- `forge.asio.task` — bounded priority scheduler and task handles.
+- `forge.asio.compute` — bounded FIFO execution for synchronous CPU work.
 
 Target: `forge_asio`.
 
@@ -90,19 +92,19 @@ if (!completed) {
 ```cpp
 #include <boost/asio/awaitable.hpp>
 
-import forge.asio.task_scheduler;
+import forge.asio.task;
 
 boost::asio::awaitable<void> submit_metadata_refresh(forge::asio::runtime& runtime) {
-   auto scheduler = forge::asio::task_scheduler{
+   auto scheduler = forge::asio::task::scheduler{
       runtime,
-      forge::asio::task_scheduler::options{
+      forge::asio::task::scheduler::options{
          .max_blocking_tasks = 4,
          .max_awaitable_tasks = 1024,
          .max_pending_tasks = 4096,
       },
    };
    auto refresh = scheduler.submit({
-      .priority = forge::asio::priority{100},
+      .priority = forge::asio::task::priority{100},
       .name = "metadata-refresh",
       .work = [] { refresh_metadata(); },
    });
@@ -113,12 +115,12 @@ boost::asio::awaitable<void> submit_metadata_refresh(forge::asio::runtime& runti
 
 ### Runnable Semantics
 
-`task_scheduler` has one delayed/ready priority queue. Runnable work is selected
+`scheduler` has one delayed/ready priority queue. Runnable work is selected
 by numeric priority and FIFO order within the same priority, but admission uses
 separate budgets:
 
 - `max_blocking_tasks` limits blocking `task` functions until `.work()` returns.
-- `max_awaitable_tasks` limits in-flight `awaitable_task` coroutines until the
+- `max_awaitable_tasks` limits in-flight `awaitable` coroutines until the
   coroutine completes.
 - `max_pending_tasks` limits not-yet-started work across both task types.
 
@@ -131,6 +133,62 @@ This matters for re-entrant workflows: an awaitable pass may submit a short
 blocking companion task to the same scheduler and wait for it. That must not
 deadlock just because the awaitable itself is already in flight.
 
+### Delegate CPU Work To Compute
+
+`task::scheduler` owns orchestration, numeric priority and delayed admission.
+`compute::pool` owns parallel synchronous CPU execution. It has no priority or
+deadline policy. A scheduler task explicitly captures a compute executor and
+passes its cancellation token:
+
+```cpp
+#include <boost/asio/awaitable.hpp>
+
+import forge.asio.compute;
+import forge.asio.task;
+
+boost::asio::awaitable<void> execute_vm(
+    forge::asio::task::scheduler& scheduler,
+    forge::asio::compute::executor compute) {
+   auto scheduled = scheduler.submit(forge::asio::task::awaitable{
+      .priority = forge::asio::task::priority{100},
+      .name = "vm",
+      .work = [compute](forge::asio::task::context& task_context)
+          -> boost::asio::awaitable<void> {
+         co_await compute.execute(
+            {
+               .name = "vm-exec",
+               .parent_stop_token = task_context.stop_token(),
+            },
+            [](forge::asio::compute::context& compute_context) {
+               run_vm(compute_context.stop_token());
+            });
+      },
+   });
+
+   co_await scheduled.wait();
+}
+```
+
+The coroutine suspends while the callable runs on a compute worker. Timers,
+network continuations and database coroutines remain runnable on the original
+Asio runtime. Completion is dispatched back to the executor that awaited the
+operation.
+
+Independent jobs can be submitted before they are awaited:
+
+```cpp
+auto left = co_await compute.submit({.name = "left"}, [] { return calculate_left(); });
+auto right = co_await compute.submit({.name = "right"}, [] { return calculate_right(); });
+
+auto left_value = co_await std::move(left).wait();
+auto right_value = co_await std::move(right).wait();
+```
+
+`max_pending_tasks` bounds admitted jobs beyond the running workers.
+`max_waiting_submissions` separately bounds coroutines waiting for admission.
+`try_submit()` never waits. Cancellation removes pending work; running work sees
+a `std::stop_token` and must cooperate. FORGE never terminates a worker thread.
+
 ### Isolate Blocking Work Behind The Scheduler
 
 The scheduler is the boundary for short blocking functions that should not run
@@ -140,11 +198,11 @@ wait handle instead of `std::future`.
 ```cpp
 #include <boost/asio/awaitable.hpp>
 
-import forge.asio.task_scheduler;
+import forge.asio.task;
 
-boost::asio::awaitable<void> refresh_index(forge::asio::task_scheduler& scheduler) {
+boost::asio::awaitable<void> refresh_index(forge::asio::task::scheduler& scheduler) {
    auto index_job = scheduler.submit({
-      .priority = forge::asio::priority{25},
+      .priority = forge::asio::task::priority{25},
       .name = "index-refresh",
       .work = [] {
          rebuild_small_index_from_disk();
@@ -160,23 +218,23 @@ finish before the referenced object goes away.
 
 ### Schedule Coroutine Work
 
-Use `awaitable_task` when a background pass needs to call coroutine APIs while
+Use `awaitable` when a background pass needs to call coroutine APIs while
 still using the scheduler's bounded queue, priority, cancellation and metrics.
 The task remains single-shot.
 
 ```cpp
 #include <boost/asio/awaitable.hpp>
 
-import forge.asio.task_scheduler;
+import forge.asio.task;
 
 boost::asio::awaitable<void> refresh_remote_index();
 
-boost::asio::awaitable<void> refresh_once(forge::asio::task_scheduler& scheduler) {
-   auto handle = scheduler.submit(forge::asio::awaitable_task{
-      .priority = forge::asio::priority{-25},
+boost::asio::awaitable<void> refresh_once(forge::asio::task::scheduler& scheduler) {
+   auto handle = scheduler.submit(forge::asio::task::awaitable{
+      .priority = forge::asio::task::priority{-25},
       .name = "remote-index-refresh",
       .work =
-         [](forge::asio::task_context& context) -> boost::asio::awaitable<void> {
+         [](forge::asio::task::context& context) -> boost::asio::awaitable<void> {
          context.throw_if_cancel_requested();
          co_await refresh_remote_index();
       },
@@ -197,11 +255,11 @@ completes.
 
 #include <chrono>
 
-import forge.asio.task_scheduler;
+import forge.asio.task;
 
 class scrub_worker {
  public:
-   explicit scrub_worker(forge::asio::task_scheduler& scheduler) : scheduler_{&scheduler} {}
+   explicit scrub_worker(forge::asio::task::scheduler& scheduler) : scheduler_{&scheduler} {}
 
    void start() {
       running_ = true;
@@ -232,11 +290,11 @@ class scrub_worker {
       }
 
       handle_ = scheduler_->submit_after(
-         forge::asio::awaitable_task{
-            .priority = forge::asio::priority{-50},
+         forge::asio::task::awaitable{
+            .priority = forge::asio::task::priority{-50},
             .name = "scrub-pass",
             .work =
-               [this](forge::asio::task_context& context) -> boost::asio::awaitable<void> {
+               [this](forge::asio::task::context& context) -> boost::asio::awaitable<void> {
                context.throw_if_cancel_requested();
                co_await run_one_pass();
                schedule_next();
@@ -247,8 +305,8 @@ class scrub_worker {
 
    boost::asio::awaitable<void> run_one_pass();
 
-   forge::asio::task_scheduler* scheduler_ = nullptr;
-   forge::asio::task_handle handle_;
+   forge::asio::task::scheduler* scheduler_ = nullptr;
+   forge::asio::task::handle handle_;
    bool running_ = false;
 };
 ```
@@ -260,16 +318,16 @@ instead of assuming the queue can grow forever.
 
 ```cpp
 boost::asio::awaitable<void> run_small_job(forge::asio::runtime& runtime) {
-   auto scheduler = forge::asio::task_scheduler{
+   auto scheduler = forge::asio::task::scheduler{
       runtime,
-      forge::asio::task_scheduler::options{
+      forge::asio::task::scheduler::options{
          .max_blocking_tasks = 1,
          .max_pending_tasks = 2,
       },
    };
 
    auto accepted = scheduler.submit({
-      .priority = forge::asio::priority{0},
+      .priority = forge::asio::task::priority{0},
       .name = "small-job",
       .work = [] { do_small_job(); },
    });
@@ -292,8 +350,8 @@ near the component that owns those meanings.
 
 ```cpp
 namespace priorities {
-   inline constexpr auto foreground = forge::asio::priority{500};
-   inline constexpr auto background = forge::asio::priority{-100};
+   inline constexpr auto foreground = forge::asio::task::priority{500};
+   inline constexpr auto background = forge::asio::task::priority{-100};
 }
 
 auto hot = scheduler.submit({
@@ -313,7 +371,7 @@ auto cold = scheduler.submit({
 
 ```cpp
 auto handle = scheduler.submit_after(
-   {.priority = forge::asio::priority{0}, .name = "retry", .work = [] { retry(); }},
+   {.priority = forge::asio::task::priority{0}, .name = "retry", .work = [] { retry(); }},
    std::chrono::milliseconds{250});
 
 handle.cancel();
@@ -345,9 +403,9 @@ running work is allowed to finish through its normal function body, and handles
 can still be awaited by tests.
 
 ```cpp
-boost::asio::awaitable<void> stop_with_pending_work(forge::asio::task_scheduler& scheduler) {
+boost::asio::awaitable<void> stop_with_pending_work(forge::asio::task::scheduler& scheduler) {
    auto pending = scheduler.submit_after(
-      {.priority = forge::asio::priority{0}, .name = "slow-retry", .work = [] { retry(); }},
+      {.priority = forge::asio::task::priority{0}, .name = "slow-retry", .work = [] { retry(); }},
       std::chrono::minutes{1});
 
    scheduler.stop();
@@ -363,11 +421,17 @@ boost::asio::awaitable<void> stop_with_pending_work(forge::asio::task_scheduler&
 
 ## Backpressure And Shutdown
 
-`task_scheduler::options::max_pending_tasks` is a correctness knob. Saturated
+`scheduler::options::max_pending_tasks` is a correctness knob. Saturated
 queues reject work instead of growing without bound. Blocking and awaitable
 budgets are separate, so a daemon can prevent blocking pool exhaustion without
 accidentally throttling coroutine progress. `stop()` cancels pending work and
 waits for both blocking and awaitable running counts to reach zero.
+
+`compute::pool::request_stop()` rejects waiting/new submissions, cancels pending
+jobs and requests cooperative stop from running jobs. `shutdown()` awaits every
+running callable, runs worker stop hooks and joins the underlying
+`boost::asio::thread_pool`. The App owner stops plugins first, then the task
+scheduler, then compute, and finally the Asio runtime.
 
 ## Runtime Risks And Anti-Patterns
 
@@ -375,13 +439,15 @@ waits for both blocking and awaitable running counts to reach zero.
   cancellation, metrics and deterministic shutdown.
 - Do not use `std::async` as a daemon worker pool. It has no FORGE backpressure or
   lifecycle integration.
+- Do not submit long CPU work as a synchronous scheduler task. Delegate it to a
+  compute executor from an awaitable scheduler task.
 - Do not sleep in polling loops on runtime threads. Use timers, task handles and
   explicit cancellation.
 - Do not make blocking tasks wait for awaitable work that can only resume on the
   same saturated runtime. Keep blocking sections short, or move the wait back to
   an awaitable task.
 - Do not build product-local `steady_timer` plus `co_spawn` scheduling loops for
-  plugin background work. Use `awaitable_task` and resubmit single-shot passes
+  plugin background work. Use `awaitable` and resubmit single-shot passes
   through the scheduler so backpressure, cancellation and metrics remain visible.
 - Do not call `stop()` before consumers have awaited cleanup handles. A stopped
   scheduler rejects new cleanup work by design.
@@ -398,5 +464,6 @@ waits for both blocking and awaitable running counts to reach zero.
 ## Tests
 
 `test_forge_asio` covers priority/FIFO ordering, delayed execution, cancellation,
-queue saturation, separated blocking/awaitable budgets and shutdown
-cancellation.
+queue saturation, separated blocking/awaitable budgets, compute parallelism,
+bounded admission, continuation placement, cooperative cancellation, worker
+hooks and deterministic shutdown.

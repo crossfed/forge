@@ -21,7 +21,7 @@ module forge.plugins.db.rocksdb.plugin;
 
 import forge.api.core.binding;
 import forge.app.plugin_context;
-import forge.asio.task_scheduler;
+import forge.asio.task;
 import forge.config.core.component;
 import forge.config.core.decode;
 import forge.exceptions;
@@ -43,7 +43,7 @@ void plugin::impl::configure(config value) {
    current.store(phase::configured);
 }
 
-void plugin::impl::set_scheduler(forge::asio::task_scheduler& value) {
+void plugin::impl::set_scheduler(forge::asio::task::scheduler& value) {
    auto lock = std::scoped_lock{mutex};
    scheduler = &value;
    current.store(phase::initialized);
@@ -110,7 +110,7 @@ void plugin::impl::release_transactions() noexcept {
    }
 }
 
-std::pair<std::shared_ptr<forge::rocksdb::store>, forge::asio::task_scheduler*> plugin::impl::require_running() const {
+std::pair<std::shared_ptr<forge::rocksdb::store>, forge::asio::task::scheduler*> plugin::impl::require_running() const {
    auto lock = std::scoped_lock{mutex};
    if (current.load() != phase::started || store == nullptr || scheduler == nullptr) {
       FORGE_THROW_EXCEPTION(exceptions::stopped, "rocksdb plugin is not started");

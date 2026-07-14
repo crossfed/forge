@@ -21,7 +21,7 @@ import forge.app.plugin_context;
 import forge.app.signals;
 import forge.asio.blocking;
 import forge.asio.runtime;
-import forge.asio.task_scheduler;
+import forge.asio.task;
 import forge.config.core.component;
 import forge.config.core.document;
 import forge.config.core.value;
@@ -136,7 +136,7 @@ class fake_collector {
 
 struct plugin_harness {
    forge::asio::runtime runtime;
-   forge::asio::task_scheduler scheduler;
+   forge::asio::task::scheduler scheduler;
    forge::api::core::registry apis;
    forge::app::signal_bus signals;
    forge::app::event_bus events;

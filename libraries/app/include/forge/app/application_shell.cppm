@@ -3,12 +3,14 @@ module;
 #include <boost/asio/awaitable.hpp>
 
 #include <memory>
+#include <optional>
 #include <string>
 
 export module forge.app.application_shell;
 
 import forge.asio.runtime;
-import forge.asio.task_scheduler;
+import forge.asio.compute;
+import forge.asio.task;
 import forge.api.core.exceptions;
 import forge.api.core.types;
 import forge.api.core.descriptor;
@@ -35,17 +37,20 @@ export namespace forge::app {
 struct application_shell_options {
    std::string name = "forge-app";
    forge::asio::runtime_options runtime{};
-   forge::asio::task_scheduler::options scheduler{};
+   forge::asio::task::scheduler::options scheduler{};
+   std::optional<forge::asio::compute::pool::options> compute;
 };
 
 class application_context {
  public:
-   application_context(forge::asio::runtime& runtime, forge::asio::task_scheduler& scheduler,
+   application_context(forge::asio::runtime& runtime, forge::asio::task::scheduler& scheduler,
                        forge::api::core::registry& apis, signal_bus& signals, event_bus& events,
-                       diagnostics_store& diagnostics);
+                       diagnostics_store& diagnostics, forge::asio::compute::executor compute = {});
 
    [[nodiscard]] forge::asio::runtime& runtime() noexcept;
-   [[nodiscard]] forge::asio::task_scheduler& scheduler() noexcept;
+   [[nodiscard]] forge::asio::task::scheduler& scheduler() noexcept;
+   [[nodiscard]] bool has_compute() const noexcept;
+   [[nodiscard]] forge::asio::compute::executor compute() const;
    [[nodiscard]] forge::api::core::installer apis() noexcept;
    [[nodiscard]] forge::api::core::view api_view() const noexcept;
    [[nodiscard]] signal_bus& signals() noexcept;
@@ -54,7 +59,8 @@ class application_context {
 
  private:
    forge::asio::runtime* runtime_ = nullptr;
-   forge::asio::task_scheduler* scheduler_ = nullptr;
+   forge::asio::task::scheduler* scheduler_ = nullptr;
+   forge::asio::compute::executor compute_;
    forge::api::core::registry* apis_ = nullptr;
    signal_bus* signals_ = nullptr;
    event_bus* events_ = nullptr;
@@ -90,7 +96,9 @@ class application_shell : public application_base {
    [[nodiscard]] int run();
    [[nodiscard]] application_state state() const noexcept;
    [[nodiscard]] forge::asio::runtime& runtime() noexcept;
-   [[nodiscard]] forge::asio::task_scheduler& scheduler() noexcept;
+   [[nodiscard]] forge::asio::task::scheduler& scheduler() noexcept;
+   [[nodiscard]] bool has_compute() const noexcept;
+   [[nodiscard]] forge::asio::compute::executor compute() const;
    [[nodiscard]] forge::api::core::registry& apis() noexcept;
    [[nodiscard]] signal_bus& signals() noexcept;
    [[nodiscard]] event_bus& events() noexcept;

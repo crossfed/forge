@@ -14,7 +14,7 @@ module forge.plugins.db.rocksdb.plugin;
 import forge.api.core.binding;
 import forge.app.plugin;
 import forge.app.plugin_context;
-import forge.asio.task_scheduler;
+import forge.asio.task;
 import forge.config.core.component;
 import forge.config.core.decode;
 import forge.rocksdb.store;
