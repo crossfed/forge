@@ -48,6 +48,8 @@ scopes restore the outer memory ranges. JIT `execute_all` traverses the copied
 JIT export table after parser storage is released. The unmodified donor test
 bodies remain the compatibility oracle. The imported `f32` sign operations use
 explicit unsigned masks so their bit-level semantics remain defined in C++.
+Arena-backed managed vectors retain appended elements when they grow and reject
+empty pops before their write index can underflow.
 
 The initial standalone import (`02ef01e Initial standalone storlane-fc import`)
 contained FC-style code under `include/fc` and `src`. That import carried the

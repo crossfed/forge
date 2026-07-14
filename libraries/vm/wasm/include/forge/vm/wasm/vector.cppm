@@ -24,7 +24,11 @@ template <typename T, typename Allocator> class vector {
 
    constexpr inline void resize(size_t size) {
       if (size > _size) {
-         _data = _allocator->template alloc<T>(size);
+         auto* data = _allocator->template alloc<T>(size);
+         if (_index != 0) {
+            std::move(_data, _data + _index, data);
+         }
+         _data = data;
       } else {
          _allocator->template reclaim<T>(_data + size, _size - size);
       }
@@ -49,7 +53,7 @@ template <typename T, typename Allocator> class vector {
    }
 
    constexpr inline void pop_back() {
-      detail::check<exceptions::vector_out_of_bounds>((_index >= 0), "vector pop out of bounds");
+      detail::check<exceptions::vector_out_of_bounds>((_index > 0), "vector pop out of bounds");
       _index--;
    }
 

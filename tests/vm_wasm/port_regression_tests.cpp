@@ -162,14 +162,34 @@ TEST_CASE("vector to string sizes its destination", "[vector_to_string]") {
    BOOST_TEST(wasm::vector_to_string(input) == "wasm");
 }
 
-TEST_CASE("managed vectors grow from zero capacity", "[managed_vector]") {
+TEST_CASE("managed vectors preserve values across growth", "[managed_vector]") {
    auto allocator = wasm::growable_allocator{64};
    auto values = wasm::managed_vector<std::uint32_t, wasm::growable_allocator>{allocator};
 
    values.push_back(7U);
+   values.emplace_back(9U);
+   values.push_back(11U);
+   values.emplace_back(13U);
 
-   BOOST_TEST(values.size() == 1U);
+   BOOST_TEST(values.size() == 4U);
    BOOST_TEST(values[0] == 7U);
+   BOOST_TEST(values[1] == 9U);
+   BOOST_TEST(values[2] == 11U);
+   BOOST_TEST(values[3] == 13U);
+}
+
+TEST_CASE("managed vector rejects empty pops without changing its index", "[managed_vector]") {
+   auto allocator = wasm::growable_allocator{64};
+   auto values = wasm::managed_vector<std::uint32_t, wasm::growable_allocator>{allocator};
+
+   BOOST_CHECK_THROW(values.pop_back(), wasm::exceptions::vector_out_of_bounds);
+
+   values.push_back(7U);
+   values.pop_back();
+   BOOST_CHECK_THROW(values.pop_back(), wasm::exceptions::vector_out_of_bounds);
+
+   values.push_back(9U);
+   BOOST_TEST(values[0] == 9U);
 }
 
 TEST_CASE("alternate stack allocation reports mapping failure", "[stack_allocator]") {
