@@ -35,11 +35,11 @@ template <typename ElemT, size_t ElemSz, typename Allocator = nullptr_t> class s
    }
 
    ElemT& get(uint32_t index) const {
-      detail::check<exceptions::interpreter>((index <= _index), "invalid stack index");
+      detail::check<exceptions::interpreter>((index < _index), "invalid stack index");
       return (ElemT&)_store[index];
    }
    void set(uint32_t index, const ElemT& el) {
-      detail::check<exceptions::interpreter>((index <= _index), "invalid stack index");
+      detail::check<exceptions::interpreter>((index < _index), "invalid stack index");
       _store[index] = el;
    }
    void eat(uint32_t index) {

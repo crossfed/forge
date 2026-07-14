@@ -13,6 +13,7 @@ import forge.vm.wasm.backend;
 import forge.vm.wasm.debug_info;
 import forge.vm.wasm.types;
 import forge.vm.wasm.vector;
+import forge.vm.wasm.wasm_stack;
 
 #include "test_support.hpp"
 
@@ -347,6 +348,22 @@ TEST_CASE("data segments must fit declared linear memory", "[null_backend]") {
    };
    auto valid = validator{valid_code, static_cast<wasm::wasm_allocator*>(nullptr)};
    static_cast<void>(valid);
+}
+
+TEST_CASE("stack rejects indexes outside its live range", "[stack]") {
+   auto values = wasm::stack<std::uint32_t, 4>{};
+
+   BOOST_CHECK_THROW(values.get(0), wasm::exceptions::interpreter);
+   BOOST_CHECK_THROW(values.set(0, 7), wasm::exceptions::interpreter);
+
+   values.push(11);
+   BOOST_TEST(values.get(0) == 11U);
+   BOOST_CHECK_THROW(values.get(1), wasm::exceptions::interpreter);
+   BOOST_CHECK_THROW(values.set(1, 13), wasm::exceptions::interpreter);
+   BOOST_TEST(values.size() == 1U);
+
+   values.set(0, 17);
+   BOOST_TEST(values.get(0) == 17U);
 }
 
 TEST_CASE("zero length host spans do not probe guest memory", "[execution_interface]") {
