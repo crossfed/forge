@@ -51,12 +51,18 @@ class transaction {
    [[nodiscard]] std::optional<std::vector<std::byte>>
    get(family column_family, std::vector<std::byte> key, read_options options = {});
 
+   [[nodiscard]] std::optional<std::vector<std::byte>>
+   get_for_update(family column_family, std::vector<std::byte> key, read_options options = {});
+
    [[nodiscard]] std::vector<entry> scan(family column_family, std::vector<std::byte> prefix, read_options options = {});
    [[nodiscard]] scan_result scan_page(family column_family, scan_request request);
 
    void lock(family column_family, std::vector<std::byte> key, read_options options = {});
    void put(family column_family, std::vector<std::byte> key, std::vector<std::byte> value);
    void erase(family column_family, std::vector<std::byte> key);
+   void create_savepoint();
+   void rollback_to_savepoint();
+   void release_savepoint();
    void commit();
    void rollback();
 

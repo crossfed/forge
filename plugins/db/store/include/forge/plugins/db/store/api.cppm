@@ -37,8 +37,8 @@ export namespace forge::plugins::db::store {
 class transaction {
  public:
    transaction() = default;
-   explicit transaction(forge::db::core::transaction active);
-   explicit transaction(forge::db::object::transaction active);
+   explicit transaction(forge::db::core::transaction active, std::string store_name = {});
+   explicit transaction(forge::db::object::transaction active, std::string store_name = {});
    transaction(const transaction&) = delete;
    transaction& operator=(const transaction&) = delete;
    transaction(transaction&&) noexcept = default;
@@ -54,6 +54,9 @@ class transaction {
  private:
    std::optional<forge::db::core::transaction> core_;
    std::optional<forge::db::object::transaction> object_;
+   std::string store_name_;
+
+   friend class object_handle;
 };
 
 class store_handle_state {
@@ -88,23 +91,24 @@ class object_handle {
 
    boost::asio::awaitable<forge::db::object::transaction> begin_transaction() const;
    boost::asio::awaitable<forge::db::object::snapshot> begin_read() const;
-   [[nodiscard]] forge::db::object::transaction join(forge::db::core::transaction& active) const;
+   boost::asio::awaitable<forge::db::object::transaction> join(forge::db::core::transaction& active) const;
+   boost::asio::awaitable<forge::db::object::transaction> join(transaction& active) const;
 
    template <typename SharedTransaction>
       requires requires(SharedTransaction& active) {
          { active.db_transaction() } -> std::same_as<forge::db::core::transaction&>;
       }
-   [[nodiscard]] forge::db::object::transaction join(SharedTransaction& active) const {
-      return join(active.db_transaction());
+   boost::asio::awaitable<forge::db::object::transaction> join(SharedTransaction& active) const {
+      co_return co_await join(active.db_transaction());
    }
 
    template <forge::ids::typed_id_like Id>
-   boost::asio::awaitable<typename forge::db::object::object_index_for_id_t<Id>::value_type> get(Id id) const {
+   boost::asio::awaitable<typename forge::db::object::index_for_id_t<Id>::value_type> get(Id id) const {
       co_return co_await require_store()->get(id);
    }
 
    template <forge::ids::typed_id_like Id>
-   boost::asio::awaitable<std::optional<typename forge::db::object::object_index_for_id_t<Id>::value_type>>
+   boost::asio::awaitable<std::optional<typename forge::db::object::index_for_id_t<Id>::value_type>>
    find(Id id) const {
       co_return co_await require_store()->find(id);
    }
@@ -130,13 +134,13 @@ class object_handle {
    }
 
    template <forge::ids::typed_id_like Id, typename Fn>
-      requires forge::db::object::application_object_model<forge::db::object::object_index_for_id_t<Id>>
+      requires forge::db::object::application_object_model<forge::db::object::index_for_id_t<Id>>
    boost::asio::awaitable<void> modify(Id id, Fn&& fn) const {
       co_await require_store()->modify(id, std::forward<Fn>(fn));
    }
 
    template <forge::ids::typed_id_like Id>
-      requires forge::db::object::application_object_model<forge::db::object::object_index_for_id_t<Id>>
+      requires forge::db::object::application_object_model<forge::db::object::index_for_id_t<Id>>
    boost::asio::awaitable<void> erase(Id id) const {
       co_await require_store()->erase(id);
    }

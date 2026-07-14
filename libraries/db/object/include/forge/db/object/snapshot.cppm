@@ -34,10 +34,10 @@ class snapshot {
    snapshot(forge::db::core::snapshot active, forge::db::core::family family, ensure_registered_fn ensure);
 
    template <forge::ids::typed_id_like Id>
-   boost::asio::awaitable<typename object_index_for_id_t<Id>::value_type> get(Id id);
+   boost::asio::awaitable<typename index_for_id_t<Id>::value_type> get(Id id);
 
    template <forge::ids::typed_id_like Id>
-   boost::asio::awaitable<std::optional<typename object_index_for_id_t<Id>::value_type>> find(Id id);
+   boost::asio::awaitable<std::optional<typename index_for_id_t<Id>::value_type>> find(Id id);
 
    template <object_model Object>
    boost::asio::awaitable<typename Object::value_type> get(forge::ids::object_id id);
@@ -158,13 +158,13 @@ boost::asio::awaitable<object_page<typename Object::value_type>> page_snapshot_o
 export namespace forge::db::object {
 
 template <forge::ids::typed_id_like Id>
-boost::asio::awaitable<typename object_index_for_id_t<Id>::value_type> snapshot::get(Id id) {
-   co_return co_await get<object_index_for_id_t<Id>>(id.as_object_id());
+boost::asio::awaitable<typename index_for_id_t<Id>::value_type> snapshot::get(Id id) {
+   co_return co_await get<index_for_id_t<Id>>(id.as_object_id());
 }
 
 template <forge::ids::typed_id_like Id>
-boost::asio::awaitable<std::optional<typename object_index_for_id_t<Id>::value_type>> snapshot::find(Id id) {
-   co_return co_await find<object_index_for_id_t<Id>>(id.as_object_id());
+boost::asio::awaitable<std::optional<typename index_for_id_t<Id>::value_type>> snapshot::find(Id id) {
+   co_return co_await find<index_for_id_t<Id>>(id.as_object_id());
 }
 
 template <object_model Object>

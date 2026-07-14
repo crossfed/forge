@@ -5,7 +5,9 @@ add_library(
    snapshot.cpp
    store.cpp
    store_impl.cpp
+   system.cpp
    transaction.cpp
+   transaction_participant_impl.cpp
    write_gate.cpp
 )
 forge_target_modules_at(forge_db_object db/object)

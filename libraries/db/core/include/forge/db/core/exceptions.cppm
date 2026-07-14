@@ -15,6 +15,11 @@ enum class code : std::uint16_t {
    not_found = 3,
    transaction_closed = 4,
    unsupported_operation = 5,
+   invalid_savepoint = 6,
+   savepoint_overflow = 7,
+   transaction_rollback_only = 8,
+   participant_conflict = 9,
+   mutation_forbidden = 10,
 };
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(code, "forge.db.core")
@@ -24,5 +29,10 @@ using invalid_cursor = forge::exceptions::coded_exception<code, code::invalid_cu
 using not_found = forge::exceptions::coded_exception<code, code::not_found>;
 using transaction_closed = forge::exceptions::coded_exception<code, code::transaction_closed>;
 using unsupported_operation = forge::exceptions::coded_exception<code, code::unsupported_operation>;
+using invalid_savepoint = forge::exceptions::coded_exception<code, code::invalid_savepoint>;
+using savepoint_overflow = forge::exceptions::coded_exception<code, code::savepoint_overflow>;
+using transaction_rollback_only = forge::exceptions::coded_exception<code, code::transaction_rollback_only>;
+using participant_conflict = forge::exceptions::coded_exception<code, code::participant_conflict>;
+using mutation_forbidden = forge::exceptions::coded_exception<code, code::mutation_forbidden>;
 
 } // namespace forge::db::core::exceptions

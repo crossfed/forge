@@ -12,8 +12,8 @@ import forge.db.object.object;
 
 export namespace forge::db::object {
 
-struct header : system_object<header, 0> {
-   using base_type = system_object<header, 0>;
+struct header : system_object<header, system::type_id::header> {
+   using base_type = system_object<header, system::type_id::header>;
 
    static constexpr std::uint32_t current_version = 1;
    static constexpr std::uint32_t minimum_version = 1;
@@ -31,12 +31,8 @@ using header_index = object_index<header, indexed_by<primary_unique<header_by_id
 
 inline constexpr auto header_id = header::id_t{0};
 
-} // namespace forge::db::object
-
-export namespace forge::ids {
-
-template <> struct type_for_id<forge::db::object::header::id_t> {
-   using type = forge::db::object::header_index;
+template <> struct index_for_id<header::id_t> {
+   using type = header_index;
 };
 
-} // namespace forge::ids
+} // namespace forge::db::object

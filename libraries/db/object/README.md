@@ -57,9 +57,11 @@ FORGE_DB_OBJECT(account_object)
 ```
 
 `object_index<T, indexed_by<...>>` is a schema descriptor, not a base class.
-User values remain described C++ structs. `FORGE_DB_OBJECT(...)` creates
-the compile-time mapping from `typed_id<Space, Type>` to the descriptor, so
-typed-id operations do not require spelling the object type again.
+User values remain described C++ structs. `FORGE_DB_OBJECT(...)` specializes
+`forge::db::object::index_for_id` with the compile-time mapping from
+`typed_id<Space, Type>` to the descriptor, so typed-id operations do not require
+spelling the object type again. The macro declares no `forge::ids` symbols and
+does not perform runtime registration.
 
 Ordered descriptors follow the Boost.MultiIndex separation between index kind
 and key extraction. `member`, `const_mem_fun` and `global_fun` extract scalar
@@ -131,6 +133,12 @@ mutate the header are rejected at compile time. Bootstrap and future migration
 code use a private path that does not invoke application interceptors or
 observers.
 
+`forge.db.object.system` owns the central catalog of reserved system type IDs
+and the infrastructure-only access path used by DB family libraries. DB
+Revision uses this path for its state, entry and delta models. Those rows remain
+readable through normal Object reads and indexes but cannot be mutated through
+application write APIs.
+
 The default write policy is `single_writer`, which serializes DB Object
 mutations at the store layer. `write_policy::backend` is available for drivers
 that intentionally own write concurrency.
@@ -184,7 +192,7 @@ DB Blob share one backend commit boundary:
 ```cpp
 auto db_tx = co_await driver->begin_transaction();
 
-auto object_tx = objects.join(db_tx);
+auto object_tx = co_await objects.join(db_tx);
 auto blob_tx = blobs.join(db_tx);
 
 auto digest = co_await blob_tx.put(bytes);
@@ -194,7 +202,13 @@ co_await db_tx.commit();
 ```
 
 `store.begin_transaction()` is the convenience owning path. `store.join(tx)` is
-the shared path and does not own commit/rollback.
+the shared path and does not own commit/rollback. Joining is asynchronous:
+`write_policy::single_writer` waits for the store writer lane and keeps it until
+the outer Core transaction commits, rolls back or is dropped. Joining an
+existing Object transaction from the same store reuses its participant and
+returns another non-owning facade; it never acquires a second writer ticket.
+`write_policy::backend` delegates serialization to the backend and does not wait
+on the Object writer lane.
 
 ## Reads And Indexes
 
@@ -240,6 +254,8 @@ failed commit. Hooks are DB Object-level and do not expose backend write batches
 
 - `forge.db.object.object`: base object and descriptor mapping.
 - `forge.db.object.header`: persisted format header and its system descriptor.
+- `forge.db.object.system`: reserved system type catalog and infrastructure
+  registration/access contract.
 - `forge.db.object.index`: index declarations, views, range queries and streams.
 - `forge.db.object.cursor`: DB Object pagination validation over
   `forge.db.core.record` request types.

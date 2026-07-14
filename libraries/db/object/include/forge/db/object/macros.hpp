@@ -1,9 +1,9 @@
 #pragma once
 
-#define FORGE_DB_OBJECT(object_index_type)                                                                             \
-   namespace forge::ids {                                                                                              \
-   template <>                                                                                                          \
-   struct type_for_id<typename object_index_type::id_t> {                                                               \
-      using type = object_index_type;                                                                                   \
+#define FORGE_DB_OBJECT(index_type)                                                                                    \
+   namespace forge::db::object {                                                                                       \
+   template <>                                                                                                         \
+   struct index_for_id<typename index_type::id_t> {                                                                    \
+      using type = index_type;                                                                                         \
    };                                                                                                                   \
    }

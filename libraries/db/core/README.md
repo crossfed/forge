@@ -10,8 +10,8 @@ Blob.
   `cursor`, `page_request` and `family`.
 - `forge::db::core::session`: backend-owned async record session.
 - `forge::db::core::driver`: opens write transactions and read snapshots.
-- `forge::db::core::transaction`: move-only commit/rollback boundary with participant
-  hooks.
+- `forge::db::core::transaction`: move-only commit/rollback boundary with
+  savepoints, optional record locks and participant hooks.
 - `forge::db::core::snapshot`: stable read-only view.
 
 `forge_db_core` does not know about objects, blobs, RocksDB, plugins, paths, WAL
@@ -29,6 +29,42 @@ capabilities:
 
 `transaction` owns commit/rollback and participant cleanup hooks. Higher-level
 libraries can join the same transaction and share one backend commit boundary.
+
+## Savepoints And Participants
+
+Savepoints are transient LIFO boundaries inside one active transaction:
+
+```cpp
+auto tx = co_await driver->begin_transaction();
+
+co_await tx.put(records, key_a, value_a);
+const auto point = co_await tx.create_savepoint();
+co_await tx.put(records, key_b, value_b);
+
+co_await tx.rollback_to_savepoint(point);
+co_await tx.commit();
+```
+
+Only the top savepoint can be rolled back or released, and either operation
+consumes it. Rolling back a savepoint removes its suffix of changes while the
+outer transaction remains active. Releasing it keeps the changes and removes
+only the boundary. Outer commit and rollback close every remaining frame.
+
+Backends advertise savepoint and record-lock support through `capabilities`.
+Unsupported operations, stale or non-top IDs, ID overflow and operations on a
+rollback-only transaction fail with typed DB Core exceptions.
+
+Higher-level DB libraries attach `transaction_participant` implementations to
+keep their in-memory state aligned with native savepoints and final
+commit/rollback. Participants are retained by the Core transaction, prepare
+before commit and classify record mutations as reversible, excluded or
+forbidden. This contract is implementer-facing; savepoints themselves do not
+create durable revisions.
+
+Participants that own a physical record layout declare their
+`exclusive_families()`. Core rejects overlapping claims before the first
+mutation or savepoint, while observer participants can keep the default empty
+claim and coexist with storage layers.
 
 ## Families
 

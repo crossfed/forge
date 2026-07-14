@@ -21,6 +21,7 @@ import forge.db.core.exceptions;
 
 #include "details/key_codec.hxx"
 #include "details/transaction_impl.hxx"
+#include "details/transaction_participant_impl.hxx"
 
 namespace forge::db::blob {
 
@@ -54,20 +55,22 @@ detail::encoded_ref ref_from_data_key(const forge::db::core::record_key& key) {
 transaction::impl::impl(owned_tag,
                         forge::db::core::transaction active_value,
                         forge::db::core::family data,
-                        forge::db::core::family refs) noexcept
+                        forge::db::core::family refs)
     : owned{std::move(active_value)},
       active{&*owned},
       data_family{std::move(data)},
       refs_family{std::move(refs)},
+      participant{std::make_shared<detail::transaction_participant_impl>(data_family, refs_family)},
       owns_commit{true} {}
 
 transaction::impl::impl(borrowed_tag,
                         forge::db::core::transaction& active_value,
                         forge::db::core::family data,
-                        forge::db::core::family refs) noexcept
+                        forge::db::core::family refs)
     : active{&active_value},
       data_family{std::move(data)},
-      refs_family{std::move(refs)} {}
+      refs_family{std::move(refs)},
+      participant{std::make_shared<detail::transaction_participant_impl>(data_family, refs_family)} {}
 
 forge::db::core::transaction& transaction::impl::transaction() {
    if (active == nullptr || !active->active()) {
@@ -83,7 +86,9 @@ transaction::transaction(forge::db::core::transaction&& active,
          impl::owned_tag{},
          std::move(active),
          std::move(data_family),
-         std::move(refs_family))} {}
+         std::move(refs_family))} {
+   impl_->transaction().attach_participant(impl_->participant);
+}
 
 transaction::transaction(forge::db::core::transaction& active,
                          forge::db::core::family data_family,
@@ -92,7 +97,9 @@ transaction::transaction(forge::db::core::transaction& active,
          impl::borrowed_tag{},
          active,
          std::move(data_family),
-         std::move(refs_family))} {}
+         std::move(refs_family))} {
+   impl_->transaction().attach_participant(impl_->participant);
+}
 
 forge::db::core::transaction& transaction::db_transaction() const {
    if (!impl_) {
@@ -226,6 +233,17 @@ boost::asio::awaitable<std::uint64_t> transaction::ref_count_encoded(std::string
    co_return count;
 }
 
+boost::asio::awaitable<bool>
+transaction::has_retention_barrier_encoded(std::string algorithm, std::vector<std::byte> digest) {
+   require_encoded_ref(algorithm, digest);
+   const auto prefix = detail::retention_barrier_prefix(algorithm, digest);
+   const auto page = co_await impl_->transaction().scan_page(
+      impl_->refs_family,
+      forge::db::core::record_range{.begin = prefix, .prefix = prefix, .has_end = false},
+      forge::db::core::page_request{.limit = 1});
+   co_return !page.entries.empty();
+}
+
 boost::asio::awaitable<collect_result> transaction::collect_unreferenced(collect_options options) {
    auto result = collect_result{};
    if (options.limit == 0) {
@@ -241,7 +259,8 @@ boost::asio::awaitable<collect_result> transaction::collect_unreferenced(collect
          request);
       for (const auto& entry : page.entries) {
          auto key_ref = ref_from_data_key(entry.key);
-         if ((co_await ref_count_encoded(key_ref.algorithm, key_ref.digest)) == 0) {
+         if ((co_await ref_count_encoded(key_ref.algorithm, key_ref.digest)) == 0 &&
+             !(co_await has_retention_barrier_encoded(key_ref.algorithm, key_ref.digest))) {
             co_await erase_stored_encoded(std::move(key_ref.algorithm), std::move(key_ref.digest));
             ++result.removed;
             if (result.removed >= options.limit) {

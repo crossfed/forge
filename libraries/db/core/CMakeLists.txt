@@ -3,6 +3,7 @@ add_library(
    driver.cpp
    driver_snapshot.cpp
    driver_transaction.cpp
+   participant_access_impl.cpp
 )
 forge_target_modules_at(forge_db_core db/core)
 

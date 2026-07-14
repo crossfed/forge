@@ -56,8 +56,9 @@ int main() {
    static_assert(forge::db::object::system_object_model<forge::db::object::header_index>);
    static_assert(!forge::db::object::application_object_value<forge::db::object::header>);
    static_assert(forge::db::object::sortable_key<external_key>);
-   static_assert(std::same_as<forge::ids::type_for_id_t<account::id_t>, account_object>);
-   static_assert(std::same_as<forge::db::object::object_index_for_id_t<account::id_t>, account_object>);
+   static_assert(std::same_as<forge::db::object::index_for_id_t<account::id_t>, account_object>);
+   static_assert(std::same_as<forge::db::object::index_for_id_t<forge::db::object::header::id_t>,
+                              forge::db::object::header_index>);
    constexpr auto type = forge::db::object::object_id_of<account_object>::value;
    const auto key = forge::db::core::record_key{std::vector<std::byte>{std::byte{0x01}}};
    return type.space == 1 && type.type == 7 && !key.empty() ? 0 : 1;

@@ -16,6 +16,7 @@ import forge.db.blob.store;
 import forge.db.blob.transaction;
 import forge.db.blob.types;
 import forge.db.core.driver;
+import forge.db.object.exceptions;
 import forge.db.object.hooks;
 import forge.db.object.snapshot;
 import forge.db.object.store;
@@ -24,9 +25,11 @@ import forge.plugins.db.store.exceptions;
 
 namespace forge::plugins::db::store {
 
-transaction::transaction(forge::db::core::transaction active) : core_{std::move(active)} {}
+transaction::transaction(forge::db::core::transaction active, std::string store_name)
+   : core_{std::move(active)}, store_name_{std::move(store_name)} {}
 
-transaction::transaction(forge::db::object::transaction active) : object_{std::move(active)} {}
+transaction::transaction(forge::db::object::transaction active, std::string store_name)
+   : object_{std::move(active)}, store_name_{std::move(store_name)} {}
 
 bool transaction::active() const noexcept {
    return object_.has_value() || (core_.has_value() && core_->active());
@@ -104,8 +107,28 @@ boost::asio::awaitable<forge::db::object::snapshot> object_handle::begin_read() 
    co_return co_await require_store()->begin_read();
 }
 
-forge::db::object::transaction object_handle::join(forge::db::core::transaction& active) const {
-   return require_store()->join(active);
+boost::asio::awaitable<forge::db::object::transaction>
+object_handle::join(forge::db::core::transaction& active) const {
+   co_return co_await require_store()->join(active);
+}
+
+boost::asio::awaitable<forge::db::object::transaction>
+object_handle::join(transaction& active) const {
+   if (active.store_name_.empty() || active.store_name_ != name()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_argument,
+                            "db store transaction belongs to another named store");
+   }
+
+   auto objects = require_store();
+   if (active.object_.has_value()) {
+      try {
+         co_return co_await objects->join(*active.object_);
+      } catch (const forge::db::object::exceptions::invalid_descriptor&) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_argument,
+                               "db store transaction belongs to another object store");
+      }
+   }
+   co_return co_await objects->join(active.db_transaction());
 }
 
 std::string blob_handle::name() const {

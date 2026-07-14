@@ -20,6 +20,7 @@ set(
    db_core
    db_object
    db_blob
+   db_revision
    db_rocksdb
    codec_json
    codec_yaml
@@ -111,6 +112,12 @@ macro(_forge_add_component component)
          _forge_add_component(crypto)
          _forge_add_component(raw)
          _forge_add_component(variant)
+      elseif("${component}" STREQUAL "db_revision")
+         _forge_add_component(db_core)
+         _forge_add_component(db_object)
+         _forge_add_component(exceptions)
+         _forge_add_component(ids)
+         _forge_add_component(raw)
       elseif("${component}" STREQUAL "db_rocksdb")
          if(NOT Forge_BUILT_WITH_ROCKSDB)
             set(Forge_db_rocksdb_FOUND FALSE)

@@ -5,11 +5,20 @@
 
 #include <functional>
 #include <memory>
+#include <cstdint>
 #include <vector>
 
 namespace forge::db::core {
 
 struct transaction::impl {
+   enum class phase : std::uint8_t {
+      active,
+      preparing,
+      prepared,
+      rollback_only,
+      closed,
+   };
+
    explicit impl(std::unique_ptr<session> active_value, boost::asio::any_io_executor executor) noexcept;
    ~impl();
 
@@ -20,6 +29,11 @@ struct transaction::impl {
    boost::asio::any_io_executor cleanup_executor;
    std::vector<after_commit_fn> after_commit_hooks;
    std::vector<after_rollback_fn> after_rollback_hooks;
+   std::vector<std::shared_ptr<transaction_participant>> participants;
+   std::vector<savepoint_id_t> savepoints;
+   savepoint_id_t next_savepoint = 1;
+   phase current = phase::active;
+   bool mutation_started = false;
    bool closed = false;
    bool committed = false;
 };

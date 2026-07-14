@@ -67,9 +67,9 @@ boost::asio::awaitable<transaction> plugin::store_handle_state_impl::begin_trans
    }
    auto opened = owner->require_started_store(name_);
    if (opened.objects) {
-      co_return transaction{co_await opened.objects->begin_transaction()};
+      co_return transaction{co_await opened.objects->begin_transaction(), name_};
    }
-   co_return transaction{co_await opened.driver->begin_transaction()};
+   co_return transaction{co_await opened.driver->begin_transaction(), name_};
 }
 
 } // namespace forge::plugins::db::store

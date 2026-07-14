@@ -15,7 +15,7 @@ auto generic = account.as_object_id(); // {space=1, type=2, instance=42}
 
 ## Public Modules
 
-- `forge.ids.object_id` defines `forge::ids::object_id`, `typed_id<Space, Type>`, typed-id traits, generic `type_for_id` binding, conversion helpers, string formatting, raw serialization, and variant conversion.
+- `forge.ids.object_id` defines `forge::ids::object_id`, `typed_id<Space, Type>`, typed-id traits, a generic `type_for_id` extension point, conversion helpers, string formatting, raw serialization, and variant conversion.
 
 ## Identity Model
 
@@ -39,4 +39,4 @@ Variant conversion for `object_id` uses an object with `space`, `type`, and `ins
 
 ## Boundaries
 
-This library does not define database tables, indexes, repositories, sessions, transactions, or backend storage. Higher-level libraries can build those concepts on top of `forge_ids`, but identity stays here.
+This library does not define database tables, indexes, repositories, sessions, transactions, or backend storage. Higher-level libraries can build those concepts on top of `forge_ids`, but identity stays here. DB Object owns its separate `index_for_id` mapping; `type_for_id` does not imply database or index semantics.

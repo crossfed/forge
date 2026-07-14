@@ -1,0 +1,68 @@
+#pragma once
+
+#include <boost/asio/awaitable.hpp>
+
+#include <map>
+#include <memory>
+#include <optional>
+#include <span>
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace forge::db::object::detail {
+
+class transaction_participant_impl final : public forge::db::core::transaction_participant {
+ public:
+   transaction_participant_impl(forge::db::core::family family,
+                                transaction::seal_allocations_fn seal,
+                                std::vector<std::shared_ptr<observer>> observers,
+                                transaction::release_fn release);
+   ~transaction_participant_impl() override;
+
+   [[nodiscard]] std::string_view name() const noexcept override;
+   [[nodiscard]] std::span<const forge::db::core::family>
+   exclusive_families() const noexcept override;
+   [[nodiscard]] forge::db::core::mutation_policy
+   classify(const forge::db::core::family& family,
+            const forge::db::core::record_key& key,
+            forge::db::core::mutation_kind kind) const noexcept override;
+
+   boost::asio::awaitable<void> prepare_savepoint(forge::db::core::savepoint_id_t id) override;
+   void publish_savepoint(forge::db::core::savepoint_id_t id) noexcept override;
+   void discard_savepoint(forge::db::core::savepoint_id_t id) noexcept override;
+   boost::asio::awaitable<void>
+   rollback_to_savepoint(forge::db::core::savepoint_id_t id,
+                         forge::db::core::participant_access& access) override;
+   boost::asio::awaitable<void>
+   release_savepoint(forge::db::core::savepoint_id_t id,
+                     forge::db::core::participant_access& access) override;
+
+   void remember_allocation(forge::ids::object_id type, std::uint64_t next_instance);
+   [[nodiscard]] change_set& changes() noexcept;
+   [[nodiscard]] bool finalized() const noexcept;
+
+   boost::asio::awaitable<void> after_rollback();
+   boost::asio::awaitable<void> after_commit();
+
+ private:
+   struct savepoint_frame {
+      forge::db::core::savepoint_id_t id = 0;
+      std::size_t mutation_count = 0;
+   };
+
+   void release_writer() noexcept;
+
+   std::string name_;
+   forge::db::core::family family_;
+   transaction::seal_allocations_fn seal_allocations_;
+   transaction::allocation_seal_map allocation_seals_;
+   std::vector<std::shared_ptr<observer>> observers_;
+   transaction::release_fn release_;
+   change_set changes_;
+   std::optional<savepoint_frame> pending_savepoint_;
+   std::vector<savepoint_frame> savepoints_;
+   bool finalized_ = false;
+};
+
+} // namespace forge::db::object::detail

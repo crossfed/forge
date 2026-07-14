@@ -72,7 +72,7 @@ DB Object:
 
 ```cpp
 auto tx = co_await driver->begin_transaction();
-auto object_tx = objects.join(tx);
+auto object_tx = co_await objects.join(tx);
 auto blob_tx = blobs.join(tx);
 
 auto digest = co_await blob_tx.put(bytes);
@@ -91,3 +91,14 @@ Joined DB Blob transactions do not own commit/rollback. Standalone
 mechanisms. Runtime policy such as when to collect, what owners are live, how
 much to delete per pass and how to report metrics belongs to plugins or
 products.
+
+When a DB Revision participant is attached, owner-ref changes remain
+reversible. Removing an owner ref creates an internal retention barrier when a
+future revert may need the payload. Barriers are not included in public
+`ref_count()`, but the collector honors them. Revert or prune removes the
+barrier atomically with the corresponding revision history.
+
+Payload puts are excluded from revision history. Payload erase and explicit
+collection are forbidden inside an active revision scope, because physically
+removing content required by a before-image would make revert incomplete.
+Automatic garbage collection remains outside the library.
