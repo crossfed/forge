@@ -46,7 +46,8 @@ sentinel, and interpreter-only test lanes do not instantiate JIT regressions.
 Zero-capacity managed vectors grow before their first write, and nested signal
 scopes restore the outer memory ranges. JIT `execute_all` traverses the copied
 JIT export table after parser storage is released. The unmodified donor test
-bodies remain the compatibility oracle.
+bodies remain the compatibility oracle. The imported `f32` sign operations use
+explicit unsigned masks so their bit-level semantics remain defined in C++.
 
 The initial standalone import (`02ef01e Initial standalone storlane-fc import`)
 contained FC-style code under `include/fc` and `src`. That import carried the

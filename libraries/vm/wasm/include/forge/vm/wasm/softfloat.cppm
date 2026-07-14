@@ -74,22 +74,22 @@ inline float _wasm_f32_max(float af, float bf) {
 inline float _wasm_f32_copysign(float af, float bf) {
    float32_t a = to_softfloat32(af);
    float32_t b = to_softfloat32(bf);
-   a.v &= ~(1 << 31);               // clear the sign bit
-   a.v = a.v | ((b.v >> 31) << 31); // add the sign of b
+   a.v &= ~(std::uint32_t{1} << 31); // clear the sign bit
+   a.v = a.v | ((b.v >> 31) << 31);  // add the sign of b
    return from_softfloat32(a);
 }
 
 inline float _wasm_f32_abs(float af) {
    float32_t a = to_softfloat32(af);
-   a.v &= ~(1 << 31);
+   a.v &= ~(std::uint32_t{1} << 31);
    return from_softfloat32(a);
 }
 
 inline float _wasm_f32_neg(float af) {
    float32_t a = to_softfloat32(af);
-   uint32_t sign = a.v >> 31;
-   a.v &= ~(1 << 31);
-   a.v |= (!sign << 31);
+   const auto sign = a.v >> 31;
+   a.v &= ~(std::uint32_t{1} << 31);
+   a.v |= std::uint32_t{!sign} << 31;
    return from_softfloat32(a);
 }
 
