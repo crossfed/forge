@@ -55,7 +55,7 @@ detail::encoded_ref ref_from_data_key(const forge::db::core::record_key& key) {
 transaction::impl::impl(owned_tag,
                         forge::db::core::transaction active_value,
                         forge::db::core::family data,
-                        forge::db::core::family refs) noexcept
+                        forge::db::core::family refs)
     : owned{std::move(active_value)},
       active{&*owned},
       data_family{std::move(data)},
@@ -66,7 +66,7 @@ transaction::impl::impl(owned_tag,
 transaction::impl::impl(borrowed_tag,
                         forge::db::core::transaction& active_value,
                         forge::db::core::family data,
-                        forge::db::core::family refs) noexcept
+                        forge::db::core::family refs)
     : active{&active_value},
       data_family{std::move(data)},
       refs_family{std::move(refs)},

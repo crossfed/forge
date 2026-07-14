@@ -24,6 +24,7 @@ import forge.db.blob.store;
 import forge.db.blob.types;
 import forge.crypto.hex;
 import forge.crypto.sha256;
+import forge.db.core.exceptions;
 import forge.db.core.driver;
 import forge.db.core.record;
 import forge.ids.object_id;
@@ -802,6 +803,63 @@ BOOST_AUTO_TEST_CASE(db_blob_savepoint_rollback_restores_payload_refs_and_collec
       BOOST_CHECK_EQUAL(co_await blobs.ref_count(kept), 1U);
       BOOST_CHECK(co_await blobs.has(free));
       BOOST_CHECK(!(co_await blobs.has(transient)));
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_supports_distinct_store_families) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   auto first = forge::db::blob::store{
+      driver,
+      forge::db::blob::store::config{
+         .data_family = forge::db::core::family{"blobs.first.data"},
+         .refs_family = forge::db::core::family{"blobs.first.refs"},
+      }};
+   auto second = forge::db::blob::store{
+      driver,
+      forge::db::blob::store::config{
+         .data_family = forge::db::core::family{"blobs.second.data"},
+         .refs_family = forge::db::core::family{"blobs.second.refs"},
+      }};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto shared = co_await driver->begin_transaction();
+      auto first_tx = first.join(shared);
+      auto second_tx = second.join(shared);
+
+      const auto first_kept = co_await first_tx.put(bytes("first-kept"));
+      const auto point = co_await shared.create_savepoint();
+      const auto first_rolled_back = co_await first_tx.put(bytes("first-rolled-back"));
+      const auto second_rolled_back = co_await second_tx.put(bytes("second-rolled-back"));
+      co_await shared.rollback_to_savepoint(point);
+      const auto second_kept = co_await second_tx.put(bytes("second-kept"));
+      co_await shared.commit();
+
+      BOOST_CHECK(co_await first.has(first_kept));
+      BOOST_CHECK(!(co_await first.has(first_rolled_back)));
+      BOOST_CHECK(!(co_await second.has(second_rolled_back)));
+      BOOST_CHECK(co_await second.has(second_kept));
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_rejects_duplicate_store_families) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   const auto config = forge::db::blob::store::config{
+      .data_family = forge::db::core::family{"blobs.shared.data"},
+      .refs_family = forge::db::core::family{"blobs.shared.refs"},
+   };
+   auto first = forge::db::blob::store{driver, config};
+   auto duplicate = forge::db::blob::store{driver, config};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto shared = co_await driver->begin_transaction();
+      auto first_tx = first.join(shared);
+      BOOST_CHECK_THROW(static_cast<void>(duplicate.join(shared)),
+                        forge::db::core::exceptions::participant_conflict);
+      co_await shared.rollback();
       co_return;
    }());
 }

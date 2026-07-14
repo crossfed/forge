@@ -15,12 +15,12 @@ struct transaction::impl {
    impl(owned_tag,
         forge::db::core::transaction active_value,
         forge::db::core::family data,
-        forge::db::core::family refs) noexcept;
+        forge::db::core::family refs);
 
    impl(borrowed_tag,
         forge::db::core::transaction& active_value,
         forge::db::core::family data,
-        forge::db::core::family refs) noexcept;
+        forge::db::core::family refs);
 
    std::optional<forge::db::core::transaction> owned;
    forge::db::core::transaction* active = nullptr;

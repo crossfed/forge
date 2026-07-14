@@ -5,6 +5,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -15,7 +16,7 @@ class transaction_participant_impl final : public forge::db::core::transaction_p
    transaction_participant_impl(forge::db::core::family family,
                                 transaction::seal_allocations_fn seal,
                                 std::vector<std::shared_ptr<observer>> observers,
-                                transaction::release_fn release) noexcept;
+                                transaction::release_fn release);
 
    [[nodiscard]] std::string_view name() const noexcept override;
    [[nodiscard]] forge::db::core::mutation_policy
@@ -48,6 +49,7 @@ class transaction_participant_impl final : public forge::db::core::transaction_p
 
    void release_writer() noexcept;
 
+   std::string name_;
    forge::db::core::family family_;
    transaction::seal_allocations_fn seal_allocations_;
    transaction::allocation_seal_map allocation_seals_;

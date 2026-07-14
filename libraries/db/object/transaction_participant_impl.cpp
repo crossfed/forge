@@ -7,6 +7,7 @@ module;
 #include <map>
 #include <memory>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -19,18 +20,31 @@ module forge.db.object.transaction;
 
 namespace forge::db::object::detail {
 
+namespace {
+
+std::string participant_name(const forge::db::core::family& family) {
+   auto result = std::string{"forge.db.object:"};
+   result.append(std::to_string(family.name.size()));
+   result.push_back(':');
+   result.append(family.name);
+   return result;
+}
+
+} // namespace
+
 transaction_participant_impl::transaction_participant_impl(
    forge::db::core::family family,
    transaction::seal_allocations_fn seal,
    std::vector<std::shared_ptr<observer>> observers,
-   transaction::release_fn release) noexcept
-    : family_{std::move(family)},
+   transaction::release_fn release)
+    : name_{participant_name(family)},
+      family_{std::move(family)},
       seal_allocations_{std::move(seal)},
       observers_{std::move(observers)},
       release_{std::move(release)} {}
 
 std::string_view transaction_participant_impl::name() const noexcept {
-   return "forge.db.object";
+   return name_;
 }
 
 forge::db::core::mutation_policy

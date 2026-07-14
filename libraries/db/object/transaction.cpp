@@ -32,7 +32,7 @@ transaction::impl::impl(forge::db::core::transaction active_value,
                         transaction::seal_allocations_fn seal,
                         std::vector<std::shared_ptr<interceptor>> interceptors_value,
                         std::vector<std::shared_ptr<observer>> observers_value,
-                        transaction::release_fn release) noexcept
+                        transaction::release_fn release)
     : owned{std::move(active_value)},
       active{&*owned},
       family{std::move(family_value)},
@@ -49,7 +49,7 @@ transaction::impl::impl(forge::db::core::transaction& active_value,
                         transaction::allocate_id_fn allocate,
                         transaction::seal_allocations_fn seal,
                         std::vector<std::shared_ptr<interceptor>> interceptors_value,
-                        std::vector<std::shared_ptr<observer>> observers_value) noexcept
+                        std::vector<std::shared_ptr<observer>> observers_value)
     : active{&active_value},
       family{std::move(family_value)},
       ensure_registered{std::move(ensure)},

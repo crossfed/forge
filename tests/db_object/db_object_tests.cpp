@@ -40,6 +40,7 @@ import forge.asio.blocking;
 import forge.chain.protocol.fixed_key;
 import forge.crypto.hex;
 import forge.crypto.sha256;
+import forge.db.core.exceptions;
 import forge.ids.object_id;
 import forge.db.object.cursor;
 import forge.db.object.exceptions;
@@ -1539,6 +1540,65 @@ BOOST_AUTO_TEST_CASE(db_object_savepoint_rollback_restores_records_indexes_and_o
       BOOST_CHECK_EQUAL(observer->mutation_count, 1U);
       BOOST_REQUIRE(observer->last.has_value());
       BOOST_CHECK_EQUAL(observer->last->mutations.front().id.instance, 42U);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_shared_transaction_supports_distinct_store_families) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto first = co_await forge::db::object::store::open(
+         driver, forge::db::object::store::config{.family = forge::db::core::family{"objects.first"}});
+      auto second = co_await forge::db::object::store::open(
+         driver, forge::db::object::store::config{.family = forge::db::core::family{"objects.second"}});
+      first.register_object<account_object>();
+      second.register_object<account_object>();
+
+      auto first_observer = std::make_shared<counting_observer>();
+      auto second_observer = std::make_shared<counting_observer>();
+      first.add_observer(first_observer);
+      second.add_observer(second_observer);
+
+      auto shared = co_await driver->begin_transaction();
+      auto first_tx = first.join(shared);
+      auto second_tx = second.join(shared);
+
+      co_await first_tx.insert(make_account(10, "first-kept", 10, 1));
+      const auto point = co_await shared.create_savepoint();
+      co_await first_tx.insert(make_account(11, "first-rolled-back", 11, 1));
+      co_await second_tx.insert(make_account(20, "second-rolled-back", 20, 2));
+      co_await shared.rollback_to_savepoint(point);
+      co_await second_tx.insert(make_account(21, "second-kept", 21, 2));
+      co_await shared.commit();
+
+      BOOST_CHECK_EQUAL((co_await first.get(account::id_t{10})).name, "first-kept");
+      BOOST_CHECK(!(co_await first.find(account::id_t{11})).has_value());
+      BOOST_CHECK(!(co_await second.find(account::id_t{20})).has_value());
+      BOOST_CHECK_EQUAL((co_await second.get(account::id_t{21})).name, "second-kept");
+      BOOST_CHECK_EQUAL(first_observer->calls, 1U);
+      BOOST_CHECK_EQUAL(first_observer->mutation_count, 1U);
+      BOOST_CHECK_EQUAL(second_observer->calls, 1U);
+      BOOST_CHECK_EQUAL(second_observer->mutation_count, 1U);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_shared_transaction_rejects_duplicate_store_family) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      const auto config = forge::db::object::store::config{
+         .family = forge::db::core::family{"objects.shared"},
+      };
+      auto first = co_await forge::db::object::store::open(driver, config);
+      auto duplicate = co_await forge::db::object::store::open(driver, config);
+
+      auto shared = co_await driver->begin_transaction();
+      auto first_tx = first.join(shared);
+      BOOST_CHECK_THROW(static_cast<void>(duplicate.join(shared)),
+                        forge::db::core::exceptions::participant_conflict);
+      co_await shared.rollback();
       co_return;
    }());
 }

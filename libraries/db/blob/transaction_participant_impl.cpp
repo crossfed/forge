@@ -16,12 +16,31 @@ module forge.db.blob.transaction;
 
 namespace forge::db::blob::detail {
 
+namespace {
+
+void append_name_segment(std::string& result, std::string_view value) {
+   result.append(std::to_string(value.size()));
+   result.push_back(':');
+   result.append(value);
+}
+
+std::string participant_name(const forge::db::core::family& data,
+                             const forge::db::core::family& refs) {
+   auto result = std::string{"forge.db.blob:"};
+   append_name_segment(result, data.name);
+   result.push_back(':');
+   append_name_segment(result, refs.name);
+   return result;
+}
+
+} // namespace
+
 transaction_participant_impl::transaction_participant_impl(forge::db::core::family data,
-                                                           forge::db::core::family refs) noexcept
-    : data_{std::move(data)}, refs_{std::move(refs)} {}
+                                                           forge::db::core::family refs)
+    : name_{participant_name(data, refs)}, data_{std::move(data)}, refs_{std::move(refs)} {}
 
 std::string_view transaction_participant_impl::name() const noexcept {
-   return "forge.db.blob";
+   return name_;
 }
 
 forge::db::core::mutation_policy
