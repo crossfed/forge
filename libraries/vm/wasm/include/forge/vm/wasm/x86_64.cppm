@@ -6,6 +6,7 @@ module;
 #include <cstring>
 #include <cpuid.h>
 #include <forge/vm/wasm/opcode_macros.hpp>
+#include <softfloat.hpp>
 #include <variant>
 #include <vector>
 
