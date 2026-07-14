@@ -21,15 +21,29 @@ import forge.db.object.hooks;
 import forge.db.object.snapshot;
 import forge.db.object.store;
 import forge.db.object.transaction;
+import forge.db.revision.store;
+import forge.db.revision.transaction;
+import forge.db.revision.types;
 import forge.plugins.db.store.exceptions;
 
 namespace forge::plugins::db::store {
+
+std::shared_ptr<forge::db::revision::store> store_handle_state::require_revisions() const {
+   return {};
+}
 
 transaction::transaction(forge::db::core::transaction active, std::string store_name)
    : core_{std::move(active)}, store_name_{std::move(store_name)} {}
 
 transaction::transaction(forge::db::object::transaction active, std::string store_name)
    : object_{std::move(active)}, store_name_{std::move(store_name)} {}
+
+void transaction::require_named_store(const std::string& expected) const {
+   if (store_name_.empty() || store_name_ != expected) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_argument,
+                            "db store transaction belongs to another named store");
+   }
+}
 
 bool transaction::active() const noexcept {
    return object_.has_value() || (core_.has_value() && core_->active());
@@ -114,10 +128,7 @@ object_handle::join(forge::db::core::transaction& active) const {
 
 boost::asio::awaitable<forge::db::object::transaction>
 object_handle::join(transaction& active) const {
-   if (active.store_name_.empty() || active.store_name_ != name()) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_argument,
-                            "db store transaction belongs to another named store");
-   }
+   active.require_named_store(name());
 
    auto objects = require_store();
    if (active.object_.has_value()) {
@@ -153,6 +164,11 @@ forge::db::blob::transaction blob_handle::join(forge::db::core::transaction& act
    return require_store()->join(active);
 }
 
+forge::db::blob::transaction blob_handle::join(transaction& active) const {
+   active.require_named_store(name());
+   return join(active.db_transaction());
+}
+
 boost::asio::awaitable<forge::db::blob::ref<forge::db::blob::digest>>
 blob_handle::put(std::vector<std::byte> payload) const {
    co_return co_await require_store()->put(std::move(payload));
@@ -161,6 +177,48 @@ blob_handle::put(std::vector<std::byte> payload) const {
 boost::asio::awaitable<forge::db::blob::collect_result>
 blob_handle::collect_unreferenced(forge::db::blob::collect_options options) const {
    co_return co_await require_store()->collect_unreferenced(std::move(options));
+}
+
+std::string revision_handle::name() const {
+   if (!state_) {
+      return {};
+   }
+   return state_->name();
+}
+
+std::shared_ptr<forge::db::revision::store> revision_handle::require_store() const {
+   if (!state_) {
+      FORGE_THROW_EXCEPTION(exceptions::stopped, "db store revision handle is empty");
+   }
+   (void)state_->require_driver();
+   auto result = state_->require_revisions();
+   if (!result) {
+      FORGE_THROW_EXCEPTION(exceptions::unavailable_layer, "db store revision layer is not configured",
+                            forge::exceptions::ctx("store", name()));
+   }
+   return result;
+}
+
+boost::asio::awaitable<forge::db::revision::scope>
+revision_handle::join(transaction& active) const {
+   active.require_named_store(name());
+   co_return co_await require_store()->join(active.db_transaction());
+}
+
+boost::asio::awaitable<void>
+revision_handle::revert(transaction& active,
+                        forge::db::revision::revision_id_t expected_head) const {
+   active.require_named_store(name());
+   co_await require_store()->revert(active.db_transaction(), expected_head);
+}
+
+boost::asio::awaitable<forge::db::revision::prune_result>
+revision_handle::prune_through(transaction& active,
+                               forge::db::revision::revision_id_t inclusive_boundary,
+                               forge::db::revision::prune_options options) const {
+   active.require_named_store(name());
+   co_return co_await require_store()->prune_through(
+      active.db_transaction(), inclusive_boundary, options);
 }
 
 std::string store_handle::name() const {
@@ -192,6 +250,12 @@ object_handle store_handle::objects() const {
 
 blob_handle store_handle::blobs() const {
    auto handle = blob_handle{state_};
+   (void)handle.require_store();
+   return handle;
+}
+
+revision_handle store_handle::revisions() const {
+   auto handle = revision_handle{state_};
    (void)handle.require_store();
    return handle;
 }

@@ -2,7 +2,8 @@
 
 `forge::plugins::db::store` owns configured named physical DB stores for
 applications. Each named store owns one `forge::db::core::driver` and may expose
-`forge::db::object::store`, `forge::db::blob::store`, or both as logical layers.
+`forge::db::object::store`, `forge::db::blob::store` and
+`forge::db::revision::store` as optional logical layers.
 
 - Target: `forge_plugins_db_store`
 - Package component: `plugins_db_store`
@@ -33,7 +34,12 @@ plugins:
             data-blobs:
               enable-blob-files: true
               min-blob-size: 4096
+          revision: {}
 ```
+
+`revision: {}` explicitly enables durable revisions. It requires `object:`,
+uses the same Object family for its system rows and does not create another
+RocksDB column family. Omitting `revision:` leaves the layer disabled.
 
 `driver: rocksdb` is available when Forge is built with RocksDB support. Custom
 drivers are added programmatically through the local API during plugin
@@ -50,6 +56,7 @@ auto witness = co_await db->store("witness");
 witness.objects().register_object<witness_object>();
 
 auto tx = co_await witness.begin_transaction();
+auto revision = co_await witness.revisions().join(tx);
 auto objects = co_await witness.objects().join(tx);
 auto blobs = witness.blobs().join(tx);
 
@@ -57,6 +64,13 @@ auto content = co_await blobs.put(bytes);
 co_await objects.insert(witness_record{.content = content});
 co_await tx.commit();
 ```
+
+`begin_transaction()` does not create a revision automatically. Callers opt in
+with `revisions().join(tx)` before the first mutation or savepoint. The returned
+scope exposes its candidate revision ID, while commit ownership remains with the
+plugin transaction. `revisions().revert(tx, head)` and
+`revisions().prune_through(tx, boundary, limits)` likewise operate only on a
+transaction created by the same named store.
 
 When the named store has an Object layer, `begin_transaction()` reserves that
 layer's writer lane. `objects().join(tx)` reuses the already attached Object
@@ -84,4 +98,12 @@ after plugin startup. In `ready`, `objects()` permits only object registration,
 interceptor registration and observer registration. Transactions, reads,
 writes, indexes, Blob access and flushes remain unavailable until startup. New
 stores are rejected from `ready` onward, while opened handles remain available
-until shutdown closes the physical store.
+until shutdown closes the physical store. Revision access is also runtime-only:
+`revisions()` throws the typed stopped error in `ready` and becomes available in
+`started` and `stopping`. A store without the layer reports
+`unavailable_layer`.
+
+Revision state, entries and deltas are DB Object system models. They are
+readable through the configured Object store, but application Object mutation
+APIs cannot modify them. Object, Blob and Revision operations joined to one
+plugin transaction commit or roll back through the same Core driver.

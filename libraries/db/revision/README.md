@@ -108,5 +108,6 @@ Commit each batch and repeat until `result.complete` is true.
 
 The driver must provide record locks. Revision branches, reapply, historical
 checkout, automatic Blob collection policy, shared Object/Blob read views,
-migrations, physical checkpoints and plugin integration are outside this
-library.
+migrations and physical checkpoints are outside this library. Runtime
+configuration is available separately through the optional Revision layer in
+`plugins.db.store`; the Revision library does not depend on that plugin.

@@ -39,12 +39,15 @@ struct blob_layer_config {
    blob_data_options data_blobs;
 };
 
+struct revision_layer_config {};
+
 struct store_config {
    std::string name;
    std::string driver = "rocksdb";
    std::string path;
    std::optional<object_layer_config> object;
    std::optional<blob_layer_config> blob;
+   std::optional<revision_layer_config> revision;
    bool create_if_missing = true;
    bool create_missing_column_families = true;
 };
@@ -59,9 +62,12 @@ struct blob_layer_options {
    forge::db::core::family refs_family{"blobdb.refs"};
 };
 
+struct revision_layer_options {};
+
 struct store_options {
    std::optional<object_layer_options> object = object_layer_options{};
    std::optional<blob_layer_options> blob;
+   std::optional<revision_layer_options> revision;
 };
 
 struct config {
@@ -74,6 +80,7 @@ struct store_status {
    std::string path;
    bool object = false;
    bool blob = false;
+   bool revision = false;
    bool started = false;
 };
 
@@ -91,6 +98,7 @@ BOOST_DESCRIBE_STRUCT(blob_data_options,
                        enable_blob_garbage_collection,
                        blob_garbage_collection_age_cutoff))
 BOOST_DESCRIBE_STRUCT(blob_layer_config, (), (data_family, refs_family, data_blobs))
+BOOST_DESCRIBE_STRUCT(revision_layer_config, (), ())
 BOOST_DESCRIBE_STRUCT(store_config,
                       (),
                       (name,
@@ -98,10 +106,11 @@ BOOST_DESCRIBE_STRUCT(store_config,
                        path,
                        object,
                        blob,
+                       revision,
                        create_if_missing,
                        create_missing_column_families))
 BOOST_DESCRIBE_STRUCT(config, (), (stores))
-BOOST_DESCRIBE_STRUCT(store_status, (), (name, driver, path, object, blob, started))
+BOOST_DESCRIBE_STRUCT(store_status, (), (name, driver, path, object, blob, revision, started))
 BOOST_DESCRIBE_STRUCT(status, (), (stores))
 
 } // namespace forge::plugins::db::store
@@ -157,6 +166,12 @@ export template <> struct forge::schema::rules<forge::plugins::db::store::blob_l
    }
 };
 
+export template <> struct forge::schema::rules<forge::plugins::db::store::revision_layer_config> {
+   [[nodiscard]] static forge::schema::object_schema<forge::plugins::db::store::revision_layer_config> define() {
+      return forge::schema::object<forge::plugins::db::store::revision_layer_config>();
+   }
+};
+
 export template <> struct forge::schema::rules<forge::plugins::db::store::store_config> {
    [[nodiscard]] static forge::schema::object_schema<forge::plugins::db::store::store_config> define() {
       auto schema = forge::schema::object<forge::plugins::db::store::store_config>();
@@ -167,6 +182,7 @@ export template <> struct forge::schema::rules<forge::plugins::db::store::store_
       schema.field<&forge::plugins::db::store::store_config::path>("path").required().non_empty();
       schema.field<&forge::plugins::db::store::store_config::object>("object");
       schema.field<&forge::plugins::db::store::store_config::blob>("blob");
+      schema.field<&forge::plugins::db::store::store_config::revision>("revision");
       schema.field<&forge::plugins::db::store::store_config::create_if_missing>("create-if-missing")
          .default_value(true);
       schema.field<&forge::plugins::db::store::store_config::create_missing_column_families>(

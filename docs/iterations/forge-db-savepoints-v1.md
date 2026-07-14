@@ -1,9 +1,7 @@
 # Forge DB Savepoints v1
 
-Status: accepted design direction, implementation pending. This document fixes
-the required semantics and correctness boundaries. Public API spelling may still
-be refined during implementation, but an implementation must not weaken the
-invariants below.
+Status: implemented. This document records the shipped semantics and correctness
+boundaries. Future changes must not weaken the invariants below.
 
 ## Purpose
 

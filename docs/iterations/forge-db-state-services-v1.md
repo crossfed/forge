@@ -1,9 +1,9 @@
 # Forge DB State Services v1
 
-Status: architecture triage. This document classifies DB mechanisms adjacent to
-savepoints and durable revisions. It separates required revision work from
-independent read, checkpoint and migration concerns so one implementation branch
-does not silently become an unbounded database framework rewrite.
+Status: savepoints, durable revisions and optional DB Store integration are
+implemented. This document classifies the remaining adjacent DB mechanisms and
+keeps read, checkpoint and migration concerns from becoming an unbounded
+database framework rewrite.
 
 Related designs:
 
@@ -35,7 +35,7 @@ failure modes and donor patterns.
 | Physical checkpoint | Local openable backend copy | Useful for backup, recovery and rapid local bootstrap | Separate DB checkpoint capability/library | Separate design and PR |
 | Logical export/import | Portable typed state artifact | Product-dependent | Product/chain state layer over DB iteration | Not a DB Core feature |
 | Generic migration runner | Ordered resumable schema/data upgrades | Not yet proven | Future DB migration library | Deferred pending real requirements and donors |
-| Revision plugin layer | Runtime configuration/access to DB Revision | Required for runtime configuration, but not for the library contract | `plugins.db.store` optional layer | Separate follow-up after the revision library stabilizes |
+| Revision plugin layer | Runtime configuration/access to DB Revision | Required for runtime configuration, but not for the library contract | `plugins.db.store` optional layer | Implemented; enabled explicitly with `revision: {}` and requires Object |
 
 ## 1. Shared High-Level Read View
 
@@ -446,14 +446,14 @@ the same shared transaction implementation and add no policy.
 
 ### Decision
 
-Plugin revision integration is a separate follow-up after the DB Revision
-library stabilizes. The library implementation must not depend on plugin
-configuration or lifecycle, and this document preserves the intended runtime
-shape for that later PR.
+Plugin revision integration is implemented as an optional DB Store layer. The
+library remains independent from plugin configuration and lifecycle. A named
+store opens Revision over the same Core driver and Object store, and callers opt
+in per transaction through `revisions().join(tx)`.
 
-## Proposed Scope Of The Current Branch
+## Delivery Status
 
-### Required In This Branch
+### Implemented
 
 1. DB Core savepoints and participant state machine.
 2. RocksDB native savepoint mapping.
@@ -462,14 +462,13 @@ shape for that later PR.
 5. Core mutation capture and prepare-before-commit.
 6. Revision commit, head-only revert and bounded prune.
 7. Object ID and Blob retention correctness.
+8. DB Store optional Revision layer and named-store transaction ownership.
 
-### Separate Follow-Up, Not A Revision Blocker
+### Separate Follow-Up
 
 1. Shared high-level read view over one Core snapshot.
-2. DB Store optional revision layer.
 
-Neither mechanism is implemented in the savepoint/revision branch. They retain
-their own public API, lifecycle and review boundaries.
+The read view retains its own public API, lifecycle and review boundary.
 
 ### Separate Future PR
 

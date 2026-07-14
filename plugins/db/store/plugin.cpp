@@ -21,6 +21,7 @@ import forge.config.core.decode;
 import forge.db.blob.store;
 import forge.db.core.driver;
 import forge.db.object.store;
+import forge.db.revision.store;
 import forge.exceptions;
 import forge.plugins.db.store.exceptions;
 
@@ -38,7 +39,7 @@ forge::app::plugin_id plugin::id() const {
 }
 
 std::string plugin::version() const {
-   return "1.0.0";
+   return "1.1.0";
 }
 
 std::optional<forge::config::core::component_descriptor> plugin::describe_config() const {
