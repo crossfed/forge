@@ -6,6 +6,7 @@
 #include <vector>
 
 import forge.vm.wasm.allocator;
+import forge.vm.wasm.backend;
 import forge.vm.wasm.types;
 import forge.vm.wasm.vector;
 
@@ -14,6 +15,16 @@ import forge.vm.wasm.vector;
 #define FORGE_VM_WASM_TEST_FILE port_regression_tests
 
 namespace wasm = forge::vm::wasm;
+
+namespace {
+struct empty_span_host {
+   void accept(wasm::span<const char> value) {
+      called = value.empty();
+   }
+
+   bool called = false;
+};
+} // namespace
 
 TEST_CASE("function type equality includes non-void result types", "[func_type]") {
    auto lhs_allocator = wasm::growable_allocator{64};
@@ -53,4 +64,45 @@ TEST_CASE("alternate stack allocation reports mapping failure", "[stack_allocato
    constexpr auto impossible_size = std::numeric_limits<std::size_t>::max() / 2;
 
    BOOST_CHECK_THROW(wasm::stack_allocator{impossible_size}, wasm::exceptions::allocation);
+}
+
+TEST_CASE("data segments reject unsupported memory indexes", "[parser]") {
+   auto code = wasm::wasm_code{
+       0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // header
+       0x05, 0x03, 0x01, 0x00, 0x01,                   // one memory
+       0x0b, 0x06, 0x01, 0x01, 0x41, 0x00, 0x0b, 0x00  // data segment for memory index 1
+   };
+   using validator = wasm::backend<std::nullptr_t, wasm::null_backend>;
+
+   const auto parse = [&] {
+      auto instance = validator{code, static_cast<wasm::wasm_allocator*>(nullptr)};
+      static_cast<void>(instance);
+   };
+
+   BOOST_CHECK_THROW(parse(), wasm::exceptions::parse);
+}
+
+TEST_CASE("zero length host spans do not probe guest memory", "[execution_interface]") {
+   auto code = wasm::wasm_code{
+       0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,                         // header
+       0x01, 0x09, 0x02, 0x60, 0x02, 0x7f, 0x7f, 0x00, 0x60, 0x00, 0x00,       // function types
+       0x02, 0x0e, 0x01, 0x03, 0x65, 0x6e, 0x76, 0x06, 0x61, 0x63, 0x63, 0x65, // import env.accept
+       0x70, 0x74, 0x00, 0x00, 0x03, 0x02, 0x01, 0x01,                         // imported/local functions
+       0x05, 0x03, 0x01, 0x00, 0x01,                                           // one memory
+       0x07, 0x07, 0x01, 0x03, 0x72, 0x75, 0x6e, 0x00, 0x01,                   // export run
+       0x0a, 0x0a, 0x01, 0x08, 0x00, 0x41, 0x00, 0x41, 0x00, 0x10, 0x00, 0x0b  // accept(0, 0)
+   };
+   using host_functions = wasm::registered_host_functions<empty_span_host>;
+   using interpreter = wasm::backend<host_functions, wasm::interpreter>;
+   host_functions::add<&empty_span_host::accept>("env", "accept");
+
+   auto host = empty_span_host{};
+   auto memory = wasm::wasm_allocator{};
+   {
+      auto instance = interpreter{code, host, &memory};
+      instance(host, "env", "run");
+   }
+   memory.free();
+
+   BOOST_TEST(host.called);
 }

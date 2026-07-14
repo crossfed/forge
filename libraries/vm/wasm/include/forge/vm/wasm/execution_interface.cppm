@@ -40,6 +40,8 @@ struct execution_interface {
    template <typename T> inline void validate_pointer(const void* ptr, wasm_size_t len) const {
       detail::check<exceptions::interpreter>((len <= std::numeric_limits<wasm_size_t>::max() / (wasm_size_t)sizeof(T)),
                                              "length will overflow");
+      if (len == 0)
+         return;
       volatile auto check_addr = *(reinterpret_cast<const char*>(ptr) + (len * sizeof(T)) - 1);
       ignore_unused_variable_warning(check_addr);
    }

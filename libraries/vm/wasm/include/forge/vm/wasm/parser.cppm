@@ -1333,6 +1333,7 @@ class binary_parser {
    void parse_data_segment(wasm_code_ptr& code, data_segment& ds) {
       detail::check<exceptions::parse>((_mod->memories.size() != 0), "data requires memory");
       ds.index = parse_varuint32(code);
+      detail::check<exceptions::parse>((ds.index == 0), "only memory index of 0 is supported");
       parse_init_expr(code, ds.offset, types::i32);
       auto len = parse_varuint32(code);
       detail::check<exceptions::parse>((len <= detail::get_max_data_segment_bytes(_options)),

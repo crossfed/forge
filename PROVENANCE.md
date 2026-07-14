@@ -31,11 +31,13 @@ preparation step adds the nullable allocator overload and fixes forwarding
 reference classification in the donor host result conversion; no donor test or
 fixture is patched.
 
-Forge carries three regression-tested correctness fixes over the pinned donor:
+Forge carries regression-tested correctness fixes over the pinned donor:
 function-type equality checks non-void result types, `vector_to_string` sizes
-its destination before indexed writes, and alternate-stack allocation rejects
-`MAP_FAILED`. These changes harden invalid-input and allocation-failure paths;
-the unmodified donor test bodies remain the compatibility oracle.
+its destination before indexed writes, alternate-stack allocation rejects
+`MAP_FAILED`, data segments reject unsupported memory indexes, and zero-length
+guest spans do not probe outside their empty range. These changes harden
+invalid-input and allocation-failure paths; the unmodified donor test bodies
+remain the compatibility oracle.
 
 The initial standalone import (`02ef01e Initial standalone storlane-fc import`)
 contained FC-style code under `include/fc` and `src`. That import carried the
