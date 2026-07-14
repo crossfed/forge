@@ -14,6 +14,7 @@ module;
 module forge.db.blob.store;
 
 import forge.db.blob.exceptions;
+import forge.db.core.exceptions;
 
 #include "details/store_impl.hxx"
 
@@ -41,6 +42,32 @@ boost::asio::awaitable<transaction> store::begin_transaction() {
       std::move(active),
       impl_->config.data_family,
       impl_->config.refs_family};
+}
+
+boost::asio::awaitable<snapshot> store::begin_read() {
+   auto active = forge::db::core::snapshot{};
+   try {
+      active = co_await impl_->driver->begin_read();
+   } catch (const forge::db::core::exceptions::unsupported_operation&) {
+      FORGE_THROW_EXCEPTION(exceptions::unsupported_operation,
+                            "db blob driver does not support snapshot reads");
+   }
+   co_return join(active);
+}
+
+snapshot store::join(const forge::db::core::snapshot& active) {
+   if (!active.active()) {
+      FORGE_THROW_EXCEPTION(exceptions::transaction_closed,
+                            "db blob snapshot is closed");
+   }
+   if (!active.belongs_to(*impl_->driver)) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor,
+                            "db blob snapshot belongs to another driver");
+   }
+   return detail::snapshot_access::make(
+      active,
+      impl_->config.data_family,
+      impl_->config.refs_family);
 }
 
 transaction store::join(forge::db::core::transaction& active) {

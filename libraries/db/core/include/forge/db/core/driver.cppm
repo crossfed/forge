@@ -19,6 +19,8 @@ export import forge.db.core.participant;
 
 export namespace forge::db::core {
 
+class driver;
+
 struct capabilities {
    bool snapshot_reads = false;
    bool writes = true;
@@ -100,12 +102,18 @@ class snapshot {
    explicit snapshot(std::unique_ptr<session> active);
 
    [[nodiscard]] bool active() const noexcept;
+   [[nodiscard]] bool belongs_to(const driver& owner) const noexcept;
 
    boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(family column_family, record_key key);
    boost::asio::awaitable<record_page> scan_page(family column_family, record_range range, page_request request);
 
  private:
+   snapshot(std::unique_ptr<session> active, std::shared_ptr<const void> origin);
+
    std::shared_ptr<session> active_;
+   std::shared_ptr<const void> origin_;
+
+   friend class driver;
 };
 
 class driver {
@@ -119,6 +127,10 @@ class driver {
  private:
    virtual boost::asio::awaitable<std::unique_ptr<session>> open_transaction() = 0;
    virtual boost::asio::awaitable<std::unique_ptr<session>> open_snapshot() = 0;
+
+   std::shared_ptr<const void> snapshot_origin_ = std::make_shared<std::byte>();
+
+   friend class snapshot;
 };
 
 } // namespace forge::db::core

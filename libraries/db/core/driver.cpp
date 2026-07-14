@@ -36,7 +36,7 @@ boost::asio::awaitable<transaction> driver::begin_transaction() {
 }
 
 boost::asio::awaitable<snapshot> driver::begin_read() {
-   co_return snapshot{co_await open_snapshot()};
+   co_return snapshot{co_await open_snapshot(), snapshot_origin_};
 }
 
 } // namespace forge::db::core

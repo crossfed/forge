@@ -1,6 +1,7 @@
 add_library(
    forge_db_blob STATIC
    store.cpp
+   snapshot.cpp
    transaction.cpp
    transaction_participant_impl.cpp
 )

@@ -251,6 +251,21 @@ auto tail = store.index<account_object, by_region_balance>()
 `upper_bound` accept a non-empty ordered prefix. Variadic and tuple forms use
 the same key encoder. Streams keep one read snapshot for their whole lifecycle.
 
+An Object store can also join a Core snapshot opened by the same driver:
+
+```cpp
+auto read = co_await driver->begin_read();
+auto objects = object_store.join(read);
+
+auto account = co_await objects.get(account::id_t{42});
+auto by_name = co_await objects.index<account_object, by_name>().find("alice");
+```
+
+The joined view reuses the existing Object decoder, schema registration and
+index implementation. It does not open a second backend snapshot. Closed,
+origin-less and foreign-driver snapshots are rejected with typed DB Object
+exceptions.
+
 ## Hooks
 
 Interceptors run before mutation writes and may veto. Observers run after a

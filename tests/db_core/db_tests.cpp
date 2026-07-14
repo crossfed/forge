@@ -1,12 +1,16 @@
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/test/unit_test.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <exception>
 #include <map>
 #include <memory>
 #include <optional>
@@ -553,6 +557,110 @@ BOOST_AUTO_TEST_CASE(db_snapshot_reads_preserve_precommit_state) {
       auto after = co_await driver->begin_read();
       BOOST_CHECK_EQUAL(text(*(co_await after.get(meta, key("a")))), "new");
       co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_snapshot_origin_is_stable_across_copies_and_driver_scoped) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   auto driver = std::make_shared<memory_driver>(state);
+   auto foreign = std::make_shared<memory_driver>(state);
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto active = co_await driver->begin_read();
+      auto copy = active;
+      BOOST_CHECK(active.belongs_to(*driver));
+      BOOST_CHECK(copy.belongs_to(*driver));
+      BOOST_CHECK(!active.belongs_to(*foreign));
+
+      auto unbound = forge::db::core::snapshot{
+         std::make_unique<memory_session>(state, true, false)};
+      BOOST_CHECK(unbound.active());
+      BOOST_CHECK(!unbound.belongs_to(*driver));
+      BOOST_CHECK(!unbound.belongs_to(*foreign));
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_snapshot_session_lives_until_last_copy_is_released) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   auto driver = std::make_shared<memory_driver>(state);
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto active = co_await driver->begin_read();
+      auto copy = active;
+      active = {};
+      BOOST_CHECK_EQUAL(state->destroyed_sessions, 0U);
+
+      copy = {};
+      BOOST_CHECK_EQUAL(state->destroyed_sessions, 1U);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_snapshot_copies_support_parallel_reads) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto meta = forge::db::core::family{"meta"};
+      auto tx = co_await driver->begin_transaction();
+      co_await tx.put(meta, key("a"), bytes("first"));
+      co_await tx.put(meta, key("b"), bytes("second"));
+      co_await tx.commit();
+
+      auto first = co_await driver->begin_read();
+      auto second = first;
+      auto completed = std::make_shared<std::atomic_size_t>(0U);
+      auto first_value = std::make_shared<std::optional<std::vector<std::byte>>>();
+      auto second_value = std::make_shared<std::optional<std::vector<std::byte>>>();
+      auto first_error = std::make_shared<std::exception_ptr>();
+      auto second_error = std::make_shared<std::exception_ptr>();
+      const auto executor = co_await boost::asio::this_coro::executor;
+
+      boost::asio::co_spawn(
+         executor,
+         [first = std::move(first), meta, first_value, first_error, completed]() mutable
+            -> boost::asio::awaitable<void> {
+            try {
+               *first_value = co_await first.get(meta, key("a"));
+            } catch (...) {
+               *first_error = std::current_exception();
+            }
+            completed->fetch_add(1U, std::memory_order_release);
+         },
+         boost::asio::detached);
+      boost::asio::co_spawn(
+         executor,
+         [second = std::move(second), meta, second_value, second_error, completed]() mutable
+            -> boost::asio::awaitable<void> {
+            try {
+               *second_value = co_await second.get(meta, key("b"));
+            } catch (...) {
+               *second_error = std::current_exception();
+            }
+            completed->fetch_add(1U, std::memory_order_release);
+         },
+         boost::asio::detached);
+
+      auto timer = boost::asio::steady_timer{executor};
+      while (completed->load(std::memory_order_acquire) != 2U) {
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+
+      if (*first_error) {
+         std::rethrow_exception(*first_error);
+      }
+      if (*second_error) {
+         std::rethrow_exception(*second_error);
+      }
+
+      BOOST_REQUIRE(first_value->has_value());
+      BOOST_REQUIRE(second_value->has_value());
+      BOOST_CHECK_EQUAL(text(**first_value), "first");
+      BOOST_CHECK_EQUAL(text(**second_value), "second");
    }());
 }
 

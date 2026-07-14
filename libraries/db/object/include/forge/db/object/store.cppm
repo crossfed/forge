@@ -70,6 +70,7 @@ class store {
 
    boost::asio::awaitable<transaction> begin_transaction();
    boost::asio::awaitable<snapshot> begin_read();
+   [[nodiscard]] snapshot join(const forge::db::core::snapshot& active);
    boost::asio::awaitable<transaction> join(forge::db::core::transaction& active);
    boost::asio::awaitable<transaction> join(transaction& active);
 

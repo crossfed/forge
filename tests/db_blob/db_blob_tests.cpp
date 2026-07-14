@@ -20,6 +20,7 @@ import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.db.blob.exceptions;
 import forge.db.blob.ref;
+import forge.db.blob.snapshot;
 import forge.db.blob.store;
 import forge.db.blob.types;
 import forge.crypto.hex;
@@ -393,6 +394,18 @@ struct digest_traits<capped_digest> {
 
 FORGE_DB_OBJECT(document_object)
 
+template <typename View>
+concept mutable_blob_snapshot = requires(View& view,
+                                         forge::db::blob::ref<> value,
+                                         forge::db::blob::owner_ref owner) {
+   view.erase(value);
+   view.retain(value, owner);
+   view.release(value, owner);
+   view.collect_unreferenced();
+};
+
+static_assert(!mutable_blob_snapshot<forge::db::blob::snapshot>);
+
 BOOST_AUTO_TEST_SUITE(db_blob_test_suite)
 
 BOOST_AUTO_TEST_CASE(db_blob_ref_defaults_to_sha256_and_variant_uses_text_form) {
@@ -565,6 +578,70 @@ BOOST_AUTO_TEST_CASE(db_blob_put_returns_default_ref_and_default_operations_use_
       wrong.digest = forge::db::blob::hash<forge::db::blob::digest>{}(bytes("wrong"));
       BOOST_CHECK_THROW(co_await blobs.put(wrong, bytes("alpha")),
                         forge::db::blob::exceptions::digest_mismatch);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_snapshot_preserves_payload_and_refs_across_collection) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   auto blobs = forge::db::blob::store{driver};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto owner = forge::db::blob::owner_ref{"doc:snapshot"};
+      const auto value = co_await blobs.put(bytes("snapshot-payload"));
+      co_await blobs.retain(value, owner);
+
+      auto view = co_await blobs.begin_read();
+      BOOST_CHECK(view.active());
+
+      auto wrong_size = value;
+      ++wrong_size.size;
+      BOOST_CHECK(!(co_await view.has(wrong_size)));
+      BOOST_CHECK_THROW((void)(co_await view.get(wrong_size)),
+                        forge::db::blob::exceptions::digest_mismatch);
+      BOOST_CHECK_THROW((void)(co_await view.stat_blob(wrong_size)),
+                        forge::db::blob::exceptions::digest_mismatch);
+      BOOST_CHECK_THROW(co_await view.verify(wrong_size),
+                        forge::db::blob::exceptions::digest_mismatch);
+
+      co_await blobs.release(value, owner);
+      const auto collected = co_await blobs.collect_unreferenced({.limit = 10});
+      BOOST_CHECK_EQUAL(collected.removed, 1U);
+      BOOST_CHECK(!(co_await blobs.has(value)));
+      BOOST_CHECK_EQUAL(co_await blobs.ref_count(value), 0U);
+
+      BOOST_CHECK(co_await view.has(value));
+      BOOST_CHECK_EQUAL(text(co_await view.get(value)), "snapshot-payload");
+      const auto state = co_await view.stat_blob(value);
+      BOOST_CHECK_EQUAL(state.size, value.size);
+      BOOST_CHECK_EQUAL(state.refs, 1U);
+      BOOST_CHECK_EQUAL(co_await view.ref_count(value), 1U);
+      co_await view.verify(value);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_store_rejects_foreign_closed_and_originless_snapshots) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   auto driver = std::make_shared<memory_driver>(state);
+   auto foreign_driver = std::make_shared<memory_driver>(state);
+   auto blobs = forge::db::blob::store{driver};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto foreign = co_await foreign_driver->begin_read();
+      BOOST_CHECK_THROW(static_cast<void>(blobs.join(foreign)),
+                        forge::db::blob::exceptions::invalid_descriptor);
+
+      auto closed = forge::db::core::snapshot{};
+      BOOST_CHECK_THROW(static_cast<void>(blobs.join(closed)),
+                        forge::db::blob::exceptions::transaction_closed);
+
+      auto originless = forge::db::core::snapshot{
+         std::make_unique<memory_session>(state, true, false)};
+      BOOST_CHECK_THROW(static_cast<void>(blobs.join(originless)),
+                        forge::db::blob::exceptions::invalid_descriptor);
       co_return;
    }());
 }

@@ -85,6 +85,29 @@ co_await tx.commit();
 Joined DB Blob transactions do not own commit/rollback. Standalone
 `blobs.begin_transaction()` remains the convenience path.
 
+## Read Snapshots
+
+`forge.db.blob.snapshot` provides a read-only view over one Core snapshot:
+
+```cpp
+auto read = co_await driver->begin_read();
+auto view = blobs.join(read);
+
+auto payload = co_await view.get(content);
+auto owners = co_await view.ref_count(content);
+```
+
+`store::begin_read()` is the standalone convenience path. The snapshot exposes
+`get`, `has`, `stat_blob`, `verify` and `ref_count`; mutation, collection and
+commit operations are intentionally absent. Joining validates that the Core
+snapshot is active and belongs to the same driver. Payload size/digest checks
+are identical to transaction reads.
+
+Copies share the native snapshot and may be read concurrently when the backend
+advertises snapshot support. Long-lived snapshots retain old record versions
+and may retain RocksDB SST and Blob files, so callers should scope them to one
+operation or a bounded batch.
+
 ## Retention
 
 `retain`, `release`, `ref_count` and `collect_unreferenced(limit)` are library

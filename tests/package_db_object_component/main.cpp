@@ -8,10 +8,12 @@
 #include <forge/db/object/macros.hpp>
 
 import forge.ids.object_id;
+import forge.db.core.driver;
 import forge.db.core.record;
 import forge.db.object.header;
 import forge.db.object.index;
 import forge.db.object.object;
+import forge.db.object.snapshot;
 import forge.db.object.store;
 
 struct external_key {
@@ -59,6 +61,10 @@ int main() {
    static_assert(std::same_as<forge::db::object::index_for_id_t<account::id_t>, account_object>);
    static_assert(std::same_as<forge::db::object::index_for_id_t<forge::db::object::header::id_t>,
                               forge::db::object::header_index>);
+   static_assert(requires(forge::db::object::store& store,
+                          const forge::db::core::snapshot& view) {
+      { store.join(view) } -> std::same_as<forge::db::object::snapshot>;
+   });
    constexpr auto type = forge::db::object::object_id_of<account_object>::value;
    const auto key = forge::db::core::record_key{std::vector<std::byte>{std::byte{0x01}}};
    return type.space == 1 && type.type == 7 && !key.empty() ? 0 : 1;
