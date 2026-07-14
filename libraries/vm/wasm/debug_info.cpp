@@ -47,6 +47,10 @@ void profile_instr_map::relocate(const void* new_base) {
 }
 
 std::uint32_t profile_instr_map::translate(const void* pc) const {
+   if (offset_to_addr_len == 0) {
+      return 0xFFFFFFFFu;
+   }
+
    const auto diff =
        static_cast<std::size_t>(reinterpret_cast<const char*>(pc) - reinterpret_cast<const char*>(base_address));
    if (diff >= code_size || diff < offset_to_addr[0].offset) {

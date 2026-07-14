@@ -9,6 +9,7 @@
 
 import forge.vm.wasm.allocator;
 import forge.vm.wasm.backend;
+import forge.vm.wasm.debug_info;
 import forge.vm.wasm.types;
 import forge.vm.wasm.vector;
 
@@ -118,6 +119,18 @@ TEST_CASE("function type equality includes non-void result types", "[func_type]"
    BOOST_TEST(static_cast<bool>(lhs != rhs));
 }
 
+TEST_CASE("empty profile maps translate to the unknown address", "[debug_info]") {
+   auto code = std::array<char, 1>{};
+   auto builder = wasm::profile_instr_map::builder{};
+   builder.on_code_start(code.data(), code.data());
+   builder.on_code_end(code.data() + code.size(), code.data());
+
+   auto map = wasm::profile_instr_map{};
+   map.set(std::move(builder));
+
+   BOOST_TEST(map.translate(code.data()) == std::numeric_limits<std::uint32_t>::max());
+}
+
 TEST_CASE("default span proxies copy and write back without an alignment divisor", "[argument_proxy]") {
    auto values = std::array<std::uint32_t, 2>{1, 2};
    {
@@ -208,7 +221,7 @@ TEST_CASE("interpreter execute all supplies the active host", "[backend]") {
    check_execute_all_with_host<wasm::interpreter>();
 }
 
-#if defined(__x86_64__)
+#if FORGE_VM_WASM_HAS_JIT && !defined(FORGE_VM_WASM_TEST_INTERPRETER_ONLY)
 TEST_CASE("jit reports a missing export before function type lookup", "[execution_context]") {
    auto code = wasm::wasm_code{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00};
    using runtime = wasm::backend<std::nullptr_t, wasm::jit>;

@@ -41,8 +41,9 @@ interprets its operand as an unsigned page count. Default span proxies avoid a
 zero alignment divisor, and interpreter argument conversion receives the active
 host just like JIT. Hosted `execute_all` calls pass that host through the same
 pointer contract as individual calls. These changes harden invalid input and
-allocation-failure paths; the unmodified donor test bodies remain the
-compatibility oracle.
+allocation-failure paths. Empty profile maps return the unknown-address
+sentinel, and interpreter-only test lanes do not instantiate JIT regressions.
+The unmodified donor test bodies remain the compatibility oracle.
 
 The initial standalone import (`02ef01e Initial standalone storlane-fc import`)
 contained FC-style code under `include/fc` and `src`. That import carried the
