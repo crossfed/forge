@@ -705,9 +705,15 @@ struct index_aggregate_result {
    std::vector<std::uint64_t> sums;
 };
 
+struct index_rank_result {
+   std::uint64_t lower = 0;
+   std::uint64_t upper = 0;
+   std::uint64_t size = 0;
+};
+
 using index_aggregate_query = std::function<boost::asio::awaitable<index_aggregate_result>(
    forge::db::core::record_range)>;
-using index_rank_query = std::function<boost::asio::awaitable<std::pair<std::uint64_t, std::uint64_t>>(
+using index_rank_query = std::function<boost::asio::awaitable<index_rank_result>(
    forge::db::core::record_range)>;
 template <typename T>
 using index_nth_query = std::function<boost::asio::awaitable<std::optional<T>>(std::uint64_t)>;
@@ -812,7 +818,8 @@ template <object_model Object, typename Tag> class range_query {
       requires ranked_index<index_by_tag<Object, Tag>>
    {
       require_ranked_query();
-      co_return co_await ranks_(range_);
+      const auto result = co_await ranks_(range_);
+      co_return std::pair<std::uint64_t, std::uint64_t>{result.lower, result.upper};
    }
 
  private:
@@ -963,11 +970,12 @@ template <object_model Object, typename Tag> class index_view {
       requires(ranked_index<index_by_tag<Object, Tag>> &&
                detail::ordered_key::accepts_full_query<Object, Tag, std::tuple<Keys...>>())
    boost::asio::awaitable<std::uint64_t> find_rank(const std::tuple<Keys...>& key) {
-      auto bounds = co_await equal_range_rank(key);
-      if (bounds.first != bounds.second) {
-         co_return bounds.first;
+      require_ranked_query();
+      const auto result = co_await ranks_(detail::ordered_key::range_from_prefix<Object, Tag>(key));
+      if (result.lower != result.upper) {
+         co_return result.lower;
       }
-      co_return co_await count();
+      co_return result.size;
    }
 
    template <typename... Keys>
@@ -1073,7 +1081,7 @@ template <object_model Object, typename Tag> class index_view {
       auto guarded_ranks = index_rank_query{};
       if (ranks_) {
          guarded_ranks = [query = ranks_, guard](forge::db::core::record_range range) mutable
-            -> boost::asio::awaitable<std::pair<std::uint64_t, std::uint64_t>> {
+            -> boost::asio::awaitable<index_rank_result> {
             std::invoke(guard);
             co_return co_await query(std::move(range));
          };
@@ -1107,6 +1115,12 @@ template <object_model Object, typename Tag> class index_view {
 
    boost::asio::awaitable<std::pair<std::uint64_t, std::uint64_t>>
    query_rank_range(forge::db::core::record_range range) {
+      const auto result = co_await query_rank_result(std::move(range));
+      co_return std::pair<std::uint64_t, std::uint64_t>{result.lower, result.upper};
+   }
+
+   boost::asio::awaitable<index_rank_result>
+   query_rank_result(forge::db::core::record_range range) {
       require_ranked_query();
       co_return co_await ranks_(std::move(range));
    }

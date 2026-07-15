@@ -40,6 +40,12 @@ struct aggregate {
    std::vector<std::uint64_t> sums;
 };
 
+struct rank_result {
+   std::uint64_t lower = 0;
+   std::uint64_t upper = 0;
+   std::uint64_t size = 0;
+};
+
 struct layout {
    bytes root;
    std::vector<bytes> levels;
@@ -90,7 +96,7 @@ struct mutation_plan {
 boost::asio::awaitable<void> lock_root(const write_access& access, const layout& descriptor);
 boost::asio::awaitable<aggregate> query(const read_access& access, const layout& descriptor,
                                         const bounds& range);
-boost::asio::awaitable<std::pair<std::uint64_t, std::uint64_t>>
+boost::asio::awaitable<rank_result>
 query_ranks(const read_access& access, const layout& descriptor, const bounds& range);
 boost::asio::awaitable<std::optional<bytes>>
 nth_key(const read_access& access, const layout& descriptor, std::uint64_t position);

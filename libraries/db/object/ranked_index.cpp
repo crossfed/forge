@@ -531,23 +531,23 @@ boost::asio::awaitable<aggregate> query(const read_access& access, const layout&
    co_return linear(descriptor, {{&upper, 1}, {&lower, -1}}, false);
 }
 
-boost::asio::awaitable<std::pair<std::uint64_t, std::uint64_t>>
+boost::asio::awaitable<rank_result>
 query_ranks(const read_access& access, const layout& descriptor, const bounds& range) {
    const auto total = co_await load_total(access, descriptor);
    if (!total.has_value()) {
-      co_return std::pair<std::uint64_t, std::uint64_t>{0, 0};
+      co_return rank_result{};
    }
    if (range.lower_at_end) {
-      co_return std::pair<std::uint64_t, std::uint64_t>{total->count, total->count};
+      co_return rank_result{.lower = total->count, .upper = total->count, .size = total->count};
    }
    const auto lower = range.lower.empty() ? std::uint64_t{0}
       : (co_await prefix_aggregate(access, descriptor, range.lower)).count;
    if (range.upper.has_value() && *range.upper < range.lower) {
-      co_return std::pair<std::uint64_t, std::uint64_t>{lower, lower};
+      co_return rank_result{.lower = lower, .upper = lower, .size = total->count};
    }
    const auto upper = !range.upper.has_value() ? total->count
       : (co_await prefix_aggregate(access, descriptor, *range.upper)).count;
-   co_return std::pair<std::uint64_t, std::uint64_t>{lower, upper};
+   co_return rank_result{.lower = lower, .upper = upper, .size = total->count};
 }
 
 boost::asio::awaitable<std::optional<bytes>>

@@ -1241,7 +1241,9 @@ BOOST_AUTO_TEST_CASE(db_object_ranked_indexes_maintain_counts_sums_and_positions
       BOOST_CHECK((co_await states.equal_range_rank(1U)) ==
                   (std::pair<std::uint64_t, std::uint64_t>{0U, 2U}));
       BOOST_CHECK_EQUAL(co_await states.find_rank(1U), 0U);
+      const auto snapshots_before_missing_rank = driver->snapshot_calls();
       BOOST_CHECK_EQUAL(co_await states.find_rank(9U), 3U);
+      BOOST_CHECK_EQUAL(driver->snapshot_calls(), snapshots_before_missing_rank + 1U);
       BOOST_CHECK_EQUAL(co_await states.lower_bound_rank(2U), 2U);
       BOOST_CHECK_EQUAL(co_await states.upper_bound_rank(1U), 2U);
       BOOST_CHECK((co_await states.range_rank(1U, 2U)) ==

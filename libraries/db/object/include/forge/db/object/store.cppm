@@ -286,10 +286,10 @@ template <object_model Object, typename Tag>
          co_return co_await view.query_aggregate(std::move(range));
       };
       ranks = [owner = *this](forge::db::core::record_range range) mutable
-         -> boost::asio::awaitable<std::pair<std::uint64_t, std::uint64_t>> {
+         -> boost::asio::awaitable<index_rank_result> {
          auto read = co_await owner.begin_read();
          auto view = read.template index<Object, Tag>();
-         co_return co_await view.query_rank_range(std::move(range));
+         co_return co_await view.query_rank_result(std::move(range));
       };
       nth = [owner = *this](std::uint64_t position) mutable
          -> boost::asio::awaitable<std::optional<typename Object::value_type>> {

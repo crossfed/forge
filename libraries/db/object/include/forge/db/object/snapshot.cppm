@@ -223,13 +223,18 @@ query_snapshot_aggregate(Access view, forge::db::core::record_range range) {
 }
 
 template <object_model Object, typename Tag, typename Access>
-boost::asio::awaitable<std::pair<std::uint64_t, std::uint64_t>>
+boost::asio::awaitable<index_rank_result>
 query_snapshot_ranks(Access view, forge::db::core::record_range range) {
    try {
       const auto descriptor = detail::ordered_key::ranked_layout<Object, Tag>();
-      co_return co_await ranked_index::query_ranks(
+      const auto result = co_await ranked_index::query_ranks(
          make_ranked_read_access(view), descriptor,
          detail::ordered_key::ranked_bounds<Object, Tag>(descriptor, range));
+      co_return index_rank_result{
+         .lower = result.lower,
+         .upper = result.upper,
+         .size = result.size,
+      };
    } catch (const ranked_index::error& failure) {
       throw_ranked_error(failure);
    }
@@ -279,10 +284,10 @@ query_snapshot_exact_rank(Access view, const typename Object::value_type& value)
    }
    const auto bounds = co_await query_snapshot_ranks<Object, Tag>(
       view, detail::ordered_key::range_for_value<Object, Tag>(value));
-   if (bounds.second - bounds.first != 1U) {
+   if (bounds.upper - bounds.lower != 1U) {
       co_return std::nullopt;
    }
-   co_return bounds.first;
+   co_return bounds.lower;
 }
 
 } // namespace forge::db::object::detail
@@ -326,7 +331,7 @@ template <object_model Object, typename Tag>
          co_return co_await detail::query_snapshot_aggregate<Object, Tag>(access{owner}, std::move(range));
       };
       ranks = [owner = *this](forge::db::core::record_range range) mutable
-         -> boost::asio::awaitable<std::pair<std::uint64_t, std::uint64_t>> {
+         -> boost::asio::awaitable<index_rank_result> {
          co_return co_await detail::query_snapshot_ranks<Object, Tag>(access{owner}, std::move(range));
       };
       nth = [owner = *this](std::uint64_t position) mutable

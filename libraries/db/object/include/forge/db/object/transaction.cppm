@@ -390,15 +390,20 @@ query_transaction_aggregate(Access tx, forge::db::core::record_range range) {
 }
 
 template <object_model Object, typename Tag, typename Access>
-boost::asio::awaitable<std::pair<std::uint64_t, std::uint64_t>>
+boost::asio::awaitable<index_rank_result>
 query_transaction_ranks(Access tx, forge::db::core::record_range range) {
    using index = index_by_tag<Object, Tag>;
    static_assert(forge::db::object::ranked_index<index>);
    try {
       const auto descriptor = detail::ordered_key::ranked_layout<Object, Tag>();
-      co_return co_await ranked_index::query_ranks(
+      const auto result = co_await ranked_index::query_ranks(
          make_ranked_read_access(tx), descriptor,
          detail::ordered_key::ranked_bounds<Object, Tag>(descriptor, range));
+      co_return index_rank_result{
+         .lower = result.lower,
+         .upper = result.upper,
+         .size = result.size,
+      };
    } catch (const ranked_index::error& failure) {
       throw_ranked_error(failure);
    }
@@ -449,10 +454,10 @@ query_transaction_exact_rank(Access tx, const typename Object::value_type& value
    }
    const auto bounds = co_await query_transaction_ranks<Object, Tag>(
       tx, detail::ordered_key::range_for_value<Object, Tag>(value));
-   if (bounds.second - bounds.first != 1U) {
+   if (bounds.upper - bounds.lower != 1U) {
       co_return std::nullopt;
    }
-   co_return bounds.first;
+   co_return bounds.lower;
 }
 
 struct materialized_index {
@@ -781,7 +786,7 @@ template <object_model Object, typename Tag> [[nodiscard]] index_view<Object, Ta
          co_return co_await detail::query_transaction_aggregate<Object, Tag>(access{owner}, std::move(range));
       };
       ranks = [implementation = impl_](forge::db::core::record_range range) mutable
-         -> boost::asio::awaitable<std::pair<std::uint64_t, std::uint64_t>> {
+         -> boost::asio::awaitable<index_rank_result> {
          auto owner = transaction{implementation};
          co_return co_await detail::query_transaction_ranks<Object, Tag>(access{owner}, std::move(range));
       };
