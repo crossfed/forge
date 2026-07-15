@@ -925,7 +925,20 @@ BOOST_AUTO_TEST_CASE(store_plugin_object_handle_forwards_ranked_aggregates_and_s
    BOOST_CHECK_EQUAL(
       forge::asio::blocking::run(app->runtime(), snapshot_ranked.nth(2U))->id.instance, 3U);
 
+   auto stream = ranked.lower_bound(0U).stream({.page_size = 1U});
+   const auto first = forge::asio::blocking::run(app->runtime(), stream.next());
+   BOOST_REQUIRE(first.has_value());
+   BOOST_CHECK_EQUAL(first->id.instance, 1U);
+
    forge::asio::blocking::run(app->runtime(), app->shutdown());
+
+   const auto second = forge::asio::blocking::run(app->runtime(), stream.next());
+   BOOST_REQUIRE(second.has_value());
+   BOOST_CHECK_EQUAL(second->id.instance, 2U);
+
+   auto unopened = ranked.lower_bound(0U).stream({.page_size = 1U});
+   BOOST_CHECK_THROW(forge::asio::blocking::run(app->runtime(), unopened.next()),
+                     store_plugin::exceptions::stopped);
 }
 
 BOOST_AUTO_TEST_CASE(store_plugin_after_initialize_opens_store_for_central_object_registration) {

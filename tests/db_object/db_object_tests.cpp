@@ -1118,6 +1118,7 @@ static_assert(forge::db::object::sortable_key<forge::crypto::sha256>);
 static_assert(forge::db::object::sortable_key<toy_ordered>);
 static_assert(!forge::db::object::sortable_key<unsupported_key>);
 static_assert(forge::db::object::key_extractor<forge::db::object::member<&document::email>>);
+static_assert(forge::db::object::member<&document::email>::pointer == &document::email);
 static_assert(forge::db::object::key_extractor<forge::db::object::const_mem_fun<&document::email_key>>);
 static_assert(forge::db::object::key_extractor<forge::db::object::global_fun<&document_rank>>);
 

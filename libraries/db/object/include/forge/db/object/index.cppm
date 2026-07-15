@@ -177,7 +177,29 @@ struct sort_key<T> {
    }
 };
 
-template <auto First, auto... Rest> struct member {
+template <auto... Pointers> struct member;
+
+template <auto Pointer> struct member<Pointer> {
+ private:
+   template <typename Owner, typename Value>
+   static std::type_identity<Owner> owner_of(Value Owner::*);
+
+ public:
+   static_assert(std::is_member_object_pointer_v<decltype(Pointer)>,
+                 "forge::db::object::member requires a data-member pointer");
+
+   using owner_type = typename decltype(owner_of(Pointer))::type;
+   using value_type = std::remove_cvref_t<decltype(std::invoke(Pointer, std::declval<const owner_type&>()))>;
+   static constexpr auto pointer = Pointer;
+   static constexpr auto direction = sort_direction::ascending;
+
+   [[nodiscard]] static constexpr decltype(auto) get(const owner_type& value)
+      noexcept(noexcept(std::invoke(Pointer, value))) {
+      return std::invoke(Pointer, value);
+   }
+};
+
+template <auto First, auto Second, auto... Rest> struct member<First, Second, Rest...> {
  private:
    template <typename Owner, typename Value>
    static std::type_identity<Owner> owner_of(Value Owner::*);
@@ -193,16 +215,18 @@ template <auto First, auto... Rest> struct member {
 
  public:
    static_assert(std::is_member_object_pointer_v<decltype(First)> &&
+                 std::is_member_object_pointer_v<decltype(Second)> &&
                  (std::is_member_object_pointer_v<decltype(Rest)> && ...),
                  "forge::db::object::member requires data-member pointers");
 
    using owner_type = typename decltype(owner_of(First))::type;
-   using value_type = std::remove_cvref_t<decltype(apply<First, Rest...>(std::declval<const owner_type&>()))>;
+   using value_type =
+      std::remove_cvref_t<decltype(apply<First, Second, Rest...>(std::declval<const owner_type&>()))>;
    static constexpr auto direction = sort_direction::ascending;
 
    [[nodiscard]] static constexpr decltype(auto) get(const owner_type& value)
-      noexcept(noexcept(apply<First, Rest...>(value))) {
-      return apply<First, Rest...>(value);
+      noexcept(noexcept(apply<First, Second, Rest...>(value))) {
+      return apply<First, Second, Rest...>(value);
    }
 };
 
@@ -1062,11 +1086,16 @@ template <object_model Object, typename Tag> class index_view {
       if (stream_page_) {
          guarded_stream = [factory = stream_page_, guard]() mutable -> index_page_query<value_type> {
             auto query = factory();
-            return [query = std::move(query), guard](forge::db::core::record_range range,
-                                                     forge::db::core::page_request request) mutable
+            auto opened = std::make_shared<bool>(false);
+            return [query = std::move(query), guard, opened](forge::db::core::record_range range,
+                                                             forge::db::core::page_request request) mutable
                       -> boost::asio::awaitable<object_page<value_type>> {
-               std::invoke(guard);
-               co_return co_await query(std::move(range), std::move(request));
+               if (!*opened) {
+                  std::invoke(guard);
+               }
+               auto result = co_await query(std::move(range), std::move(request));
+               *opened = true;
+               co_return result;
             };
          };
       }
