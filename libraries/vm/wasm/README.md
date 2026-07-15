@@ -186,7 +186,7 @@ void execute(wasm::wasm_code code) {
 
    auto memory = wasm::wasm_allocator{};
    {
-      auto host = invocation_host{.account = 42};
+      auto host = invocation_host{.id = 42};
       auto vm = interpreter{code, host, &memory};
       auto deadline = wasm::watchdog{std::chrono::milliseconds{50}};
 

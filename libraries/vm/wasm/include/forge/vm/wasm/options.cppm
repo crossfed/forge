@@ -64,7 +64,7 @@ struct default_options {};
 struct compatibility_options {
    static constexpr std::uint32_t max_mutable_global_bytes = 1024;
    static constexpr std::uint32_t max_table_elements = 1024;
-   // maximum_section_elements in nodeos is a lie.
+   // Function and import sections use the narrower compatibility limits below.
    static constexpr std::uint32_t max_section_elements = 8191;
    static constexpr std::uint32_t max_function_section_elements = 1023;
    static constexpr std::uint32_t max_import_section_elements = 1023;
