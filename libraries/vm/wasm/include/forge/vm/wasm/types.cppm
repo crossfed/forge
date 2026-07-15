@@ -385,9 +385,10 @@ struct module {
    static uint32_t get_exported_function_impl(const Exports& exports, const std::string_view str) {
       uint32_t index = std::numeric_limits<uint32_t>::max();
       for (uint32_t i = 0; i < exports.size(); i++) {
-         if (exports[i].kind == external_kind::Function && exports[i].field_str.size() == str.size() &&
-             memcmp((const char*)str.data(), (const char*)exports[i].field_str.data(), exports[i].field_str.size()) ==
-                 0) {
+         const auto name_size = exports[i].field_str.size();
+         if (exports[i].kind == external_kind::Function && name_size == str.size() &&
+             (name_size == 0 ||
+              memcmp((const char*)str.data(), (const char*)exports[i].field_str.data(), name_size) == 0)) {
             index = exports[i].index;
             break;
          }
