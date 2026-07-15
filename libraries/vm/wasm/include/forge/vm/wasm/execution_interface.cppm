@@ -32,6 +32,7 @@ struct execution_interface {
    }
 
    template <typename T> inline void* validate_pointer(wasm_ptr_t ptr, wasm_size_t len) const {
+      detail::check<exceptions::memory>((memory != nullptr), "linear memory is not available");
       auto result = memory + ptr;
       validate_pointer<T>(result, len);
       return result;
@@ -42,17 +43,20 @@ struct execution_interface {
                                              "length will overflow");
       if (len == 0)
          return;
+      detail::check<exceptions::memory>((ptr != nullptr), "linear memory is not available");
       volatile auto check_addr = *(reinterpret_cast<const char*>(ptr) + (len * sizeof(T)) - 1);
       ignore_unused_variable_warning(check_addr);
    }
 
    inline void* validate_null_terminated_pointer(wasm_ptr_t ptr) const {
+      detail::check<exceptions::memory>((memory != nullptr), "linear memory is not available");
       auto result = memory + ptr;
       validate_null_terminated_pointer(result);
       return result;
    }
 
    inline void validate_null_terminated_pointer(const void* ptr) const {
+      detail::check<exceptions::memory>((ptr != nullptr), "linear memory is not available");
       volatile auto check_addr = std::strlen(static_cast<const char*>(ptr));
       ignore_unused_variable_warning(check_addr);
    }

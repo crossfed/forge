@@ -183,6 +183,16 @@ TEST_CASE("function type equality includes non-void result types", "[func_type]"
    BOOST_TEST(static_cast<bool>(lhs != rhs));
 }
 
+TEST_CASE("pointer validation rejects absent linear memory", "[execution_interface]") {
+   const auto interface = wasm::execution_interface{nullptr, nullptr};
+
+   BOOST_CHECK_THROW(interface.validate_pointer<char>(wasm::wasm_ptr_t{0}, wasm::wasm_size_t{1}),
+                     wasm::exceptions::memory);
+   BOOST_CHECK_THROW(interface.validate_pointer<char>(wasm::wasm_ptr_t{0}, wasm::wasm_size_t{0}),
+                     wasm::exceptions::memory);
+   BOOST_CHECK_THROW(interface.validate_null_terminated_pointer(wasm::wasm_ptr_t{0}), wasm::exceptions::memory);
+}
+
 TEST_CASE("empty profile maps translate to the unknown address", "[debug_info]") {
    auto code = std::array<char, 1>{};
    auto builder = wasm::profile_instr_map::builder{};
