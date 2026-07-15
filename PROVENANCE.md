@@ -3,7 +3,7 @@
 This file records source lineage and donor boundaries for FORGE. It is not a
 license by itself; see `LICENSE`, `NOTICE`, and `THIRD_PARTY_LICENSES`.
 
-Audit date: 2026-06-07.
+Audit date: 2026-07-16.
 
 ## Confirmed Derived Or Adapted Source
 
@@ -165,6 +165,11 @@ items include:
 - `vendor/pugixml`: Arseny Kapoulkine pugixml, MIT. FORGE compiles
   `vendor/pugixml/src/pugixml.cpp` directly into `forge_codec_xml` as a private XML
   backend; `pugi::*` types are not part of the public API.
+- `vendor/libmdbx`: unmodified libmdbx `v0.14.2` amalgamated C source and
+  public C header, Apache-2.0. The annotated tag resolves to commit
+  `c8780aecc3dea7f4f2cb83e88bb4d33a622774bd`. Archive and per-file hashes,
+  the exact imported file set, and the upstream mirror notice are recorded in
+  `vendor/libmdbx/MANIFEST.md`. Forge does not export the MDBX C API.
 
 Submodules may contain their own third-party dependency notices, such as
 Catch2 under `vendor/bn256/third-party`. Those notices remain with the vendored

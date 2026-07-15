@@ -6,6 +6,21 @@ permissively licensed code used by FORGE. See PROVENANCE.md for source-lineage
 classification and compatibility-only donor boundaries.
 
 
+libmdbx
+-------
+
+Vendored under `vendor/libmdbx` from release `v0.14.2` for the optional
+`forge_db_mdbx` backend.
+
+Copyright 2015-2026 Leonid Yuriev aka Leonid Yuriev <leo@yuriev.ru>
+SPDX-License-Identifier: Apache-2.0
+
+The complete Apache License 2.0, upstream NOTICE, license-change notes,
+credits and acknowledgements are preserved in `vendor/libmdbx/LICENSE`,
+`vendor/libmdbx/NOTICE` and `vendor/libmdbx/COPYRIGHT`. Installed Forge
+packages preserve those files under `share/doc/Forge/libmdbx`.
+
+
 FC / AntelopeIO / Spring / EOSIO lineage
 ----------------------------------------
 
