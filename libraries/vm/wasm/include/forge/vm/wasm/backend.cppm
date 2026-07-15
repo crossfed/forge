@@ -137,33 +137,42 @@ class backend {
    backend() {}
    backend(wasm_code&& code, host_t& host, wasm_allocator* alloc, const Options& options = Options{})
        : memory_alloc(alloc), mod(std::make_shared<module>()),
-         ctx(new context_t{parse_module(code, options), detail::get_max_call_depth(options)}), mod_sharable{true} {
-      ctx->set_max_pages(detail::get_max_pages(options));
+         ctx(new context_t{parse_module(code, options), detail::get_max_call_depth(options)}), mod_sharable{true},
+         initial_max_call_depth(detail::get_max_call_depth(options)),
+         initial_max_pages(detail::get_max_pages(options)) {
+      ctx->set_max_pages(initial_max_pages);
       construct(&host);
    }
    backend(wasm_code&& code, wasm_allocator* alloc, const Options& options = Options{})
        : memory_alloc(alloc), mod(std::make_shared<module>()),
-         ctx(new context_t{parse_module(code, options), detail::get_max_call_depth(options)}), mod_sharable{true} {
-      ctx->set_max_pages(detail::get_max_pages(options));
+         ctx(new context_t{parse_module(code, options), detail::get_max_call_depth(options)}), mod_sharable{true},
+         initial_max_call_depth(detail::get_max_call_depth(options)),
+         initial_max_pages(detail::get_max_pages(options)) {
+      ctx->set_max_pages(initial_max_pages);
       construct();
    }
    backend(wasm_code& code, host_t& host, wasm_allocator* alloc, const Options& options = Options{})
        : memory_alloc(alloc), mod(std::make_shared<module>()),
-         ctx(new context_t{parse_module(code, options), detail::get_max_call_depth(options)}), mod_sharable{true} {
-      ctx->set_max_pages(detail::get_max_pages(options));
+         ctx(new context_t{parse_module(code, options), detail::get_max_call_depth(options)}), mod_sharable{true},
+         initial_max_call_depth(detail::get_max_call_depth(options)),
+         initial_max_pages(detail::get_max_pages(options)) {
+      ctx->set_max_pages(initial_max_pages);
       construct(&host);
    }
    backend(wasm_code& code, wasm_allocator* alloc, const Options& options = Options{})
        : memory_alloc(alloc), mod(std::make_shared<module>()),
-         ctx(new context_t{(parse_module(code, options)), detail::get_max_call_depth(options)}), mod_sharable{true} {
-      ctx->set_max_pages(detail::get_max_pages(options));
+         ctx(new context_t{(parse_module(code, options)), detail::get_max_call_depth(options)}), mod_sharable{true},
+         initial_max_call_depth(detail::get_max_call_depth(options)),
+         initial_max_pages(detail::get_max_pages(options)) {
+      ctx->set_max_pages(initial_max_pages);
       construct();
    }
    backend(wasm_code_ptr& ptr, size_t sz, host_t& host, wasm_allocator* alloc, const Options& options = Options{})
        : memory_alloc(alloc), mod(std::make_shared<module>()),
          ctx(new context_t{parse_module2(ptr, sz, options, true), detail::get_max_call_depth(options)}),
-         mod_sharable{true} { // single parsing. original behavior {
-      ctx->set_max_pages(detail::get_max_pages(options));
+         mod_sharable{true}, initial_max_call_depth(detail::get_max_call_depth(options)),
+         initial_max_pages(detail::get_max_pages(options)) { // single parsing. original behavior {
+      ctx->set_max_pages(initial_max_pages);
       construct(&host);
    }
    // Leap:

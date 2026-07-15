@@ -47,6 +47,11 @@ struct zero_call_depth_options {
    std::uint32_t max_call_depth = 0;
 };
 
+struct shared_limits_options {
+   std::uint32_t max_call_depth = 17;
+   std::uint32_t max_pages = 2;
+};
+
 struct active_host_converter : wasm::type_converter<conversion_host> {
    using type_converter::to_wasm;
    using type_converter::type_converter;
@@ -440,8 +445,8 @@ TEST_CASE("shared modules accept non-owning execution contexts", "[backend]") {
        0x07, 0x07, 0x01, 0x03, 0x72, 0x75, 0x6e, 0x00, 0x00, // export run
        0x0a, 0x06, 0x01, 0x04, 0x00, 0x41, 0x2a, 0x0b        // return 42
    };
-   using runtime = wasm::backend<std::nullptr_t, wasm::interpreter>;
-   auto source = runtime{code, static_cast<wasm::wasm_allocator*>(nullptr)};
+   using runtime = wasm::backend<std::nullptr_t, wasm::interpreter, shared_limits_options>;
+   auto source = runtime{code, static_cast<wasm::wasm_allocator*>(nullptr), shared_limits_options{}};
    auto shared = runtime{};
    shared.share(source);
 
@@ -450,11 +455,32 @@ TEST_CASE("shared modules accept non-owning execution contexts", "[backend]") {
    auto memory = wasm::wasm_allocator{};
    shared.set_context(&execution);
    shared.set_wasm_allocator(&memory);
+   shared.reset_max_call_depth();
    shared.initialize();
 
    const auto result = shared.call_with_return("env", "run");
    BOOST_REQUIRE(result.has_value());
    BOOST_TEST(result->to_ui32() == 42u);
+   memory.free();
+}
+
+TEST_CASE("shared modules preserve their initial page limit", "[backend]") {
+   auto code = wasm::wasm_code{
+       0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // header
+       0x05, 0x03, 0x01, 0x00, 0x01                    // one-page linear memory
+   };
+   using runtime = wasm::backend<std::nullptr_t, wasm::interpreter, shared_limits_options>;
+   auto source = runtime{code, static_cast<wasm::wasm_allocator*>(nullptr), shared_limits_options{}};
+   auto shared = runtime{};
+   shared.share(source);
+
+   using context = std::remove_cvref_t<decltype(source.get_context())>;
+   auto execution = context{shared.get_module(), 1024};
+   auto memory = wasm::wasm_allocator{};
+   shared.set_context(&execution);
+   shared.set_wasm_allocator(&memory);
+   shared.reset_max_pages();
+   BOOST_CHECK_NO_THROW(shared.initialize());
    memory.free();
 }
 
