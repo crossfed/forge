@@ -529,6 +529,15 @@ TEST_CASE("jit exposes public call indirect", "[call_indirect]") {
    verify_public_call_indirect_rejects_empty_slot<wasm::jit>();
    verify_public_call_indirect_invokes_imported_only_table<wasm::jit>();
 }
+
+TEST_CASE("jit skips empty generated code regions", "[jit]") {
+   auto code = wasm::wasm_code{
+       0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // header
+       0x04, 0x04, 0x01, 0x70, 0x00, 0x00              // empty function table
+   };
+   auto instance = wasm::backend<std::nullptr_t, wasm::jit>{code, nullptr};
+   static_cast<void>(instance);
+}
 #endif
 
 TEST_CASE("data segments must fit declared linear memory", "[null_backend]") {

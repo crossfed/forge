@@ -90,14 +90,16 @@ template <typename Context, typename CpuFeatures = native_cpu_features> class ma
       // emit host functions
       const uint32_t num_imported = mod.get_imported_functions_size();
       const std::size_t host_functions_size = (40 + 10 * Context::async_backtrace()) * num_imported;
-      _code_start = _allocator.alloc<unsigned char>(host_functions_size);
-      _code_end = _code_start + host_functions_size;
-      // code already set
-      for (uint32_t i = 0; i < num_imported; ++i) {
-         start_function(code, i);
-         emit_host_call(i);
+      if (host_functions_size > 0) {
+         _code_start = _allocator.alloc<unsigned char>(host_functions_size);
+         _code_end = _code_start + host_functions_size;
+         // code already set
+         for (uint32_t i = 0; i < num_imported; ++i) {
+            start_function(code, i);
+            emit_host_call(i);
+         }
+         assert(code == _code_end);
       }
-      assert(code == _code_end);
 
       jmp_table = code;
       if (_mod.tables.size() > 0) {
@@ -106,33 +108,35 @@ template <typename Context, typename CpuFeatures = native_cpu_features> class ma
          // can use random access
          _table_element_size = 17;
          const std::size_t table_size = _table_element_size * _mod.tables[0].table.size();
-         _code_start = _allocator.alloc<unsigned char>(table_size);
-         _code_end = _code_start + table_size;
-         // code already set
-         for (uint32_t i = 0; i < _mod.tables[0].table.size(); ++i) {
-            uint32_t fn_idx = _mod.tables[0].table[i];
-            if (fn_idx < _mod.fast_functions.size()) {
-               // cmp _mod.fast_functions[fn_idx], %edx
-               emit_bytes(0x81, 0xfa);
-               emit_operand32(_mod.fast_functions[fn_idx]);
-               // je fn
-               emit_bytes(0x0f, 0x84);
-               register_call(emit_branch_target32(), fn_idx);
-               // jmp ERROR
-               emit_bytes(0xe9);
-               fix_branch(emit_branch_target32(), type_error_handler);
-            } else {
-               // jmp ERROR
-               emit_bytes(0xe9);
-               // default for out-of-range functions
-               fix_branch(emit_branch_target32(), call_indirect_handler);
-               // padding
-               emit_bytes(0xcc, 0xcc, 0xcc, 0xcc);
-               emit_bytes(0xcc, 0xcc, 0xcc, 0xcc);
-               emit_bytes(0xcc, 0xcc, 0xcc, 0xcc);
+         if (table_size > 0) {
+            _code_start = _allocator.alloc<unsigned char>(table_size);
+            _code_end = _code_start + table_size;
+            // code already set
+            for (uint32_t i = 0; i < _mod.tables[0].table.size(); ++i) {
+               uint32_t fn_idx = _mod.tables[0].table[i];
+               if (fn_idx < _mod.fast_functions.size()) {
+                  // cmp _mod.fast_functions[fn_idx], %edx
+                  emit_bytes(0x81, 0xfa);
+                  emit_operand32(_mod.fast_functions[fn_idx]);
+                  // je fn
+                  emit_bytes(0x0f, 0x84);
+                  register_call(emit_branch_target32(), fn_idx);
+                  // jmp ERROR
+                  emit_bytes(0xe9);
+                  fix_branch(emit_branch_target32(), type_error_handler);
+               } else {
+                  // jmp ERROR
+                  emit_bytes(0xe9);
+                  // default for out-of-range functions
+                  fix_branch(emit_branch_target32(), call_indirect_handler);
+                  // padding
+                  emit_bytes(0xcc, 0xcc, 0xcc, 0xcc);
+                  emit_bytes(0xcc, 0xcc, 0xcc, 0xcc);
+                  emit_bytes(0xcc, 0xcc, 0xcc, 0xcc);
+               }
             }
+            assert(code == _code_end);
          }
-         assert(code == _code_end);
       }
    }
    ~machine_code_writer() {
