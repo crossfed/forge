@@ -328,6 +328,9 @@ class growable_allocator {
    // TODO use Outcome library
    template <typename T> T* alloc(size_t size = 0) {
       static_assert(max_memory_size % alignof(T) == 0, "alignment must divide max_memory_size.");
+      if (size == 0)
+         return nullptr;
+
       detail::check<exceptions::allocation>((_capacity % alignof(T) == 0), "alignment must divide _capacity.");
       _offset = align_offset<alignof(T)>(_offset);
       // Evaluating the inequality in this form cannot cause integer overflow.

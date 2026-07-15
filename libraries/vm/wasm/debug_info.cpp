@@ -37,7 +37,13 @@ void profile_instr_map::set(builder&& value) {
    std::sort(data.begin(), data.end(),
              [](const addr_entry& lhs, const addr_entry& rhs) { return lhs.offset < rhs.offset; });
    base_address = value.code_base;
-   code_size = reinterpret_cast<const char*>(value.code_end) - reinterpret_cast<const char*>(base_address);
+   if (base_address == nullptr || value.code_end == nullptr) {
+      code_size = 0;
+   } else {
+      const auto base = reinterpret_cast<std::uintptr_t>(base_address);
+      const auto end = reinterpret_cast<std::uintptr_t>(value.code_end);
+      code_size = end >= base ? end - base : 0;
+   }
    offset_to_addr = data.data();
    offset_to_addr_len = data.size();
 }

@@ -216,6 +216,17 @@ TEST_CASE("empty profile maps translate to the unknown address", "[debug_info]")
    BOOST_TEST(map.translate(code.data()) == std::numeric_limits<std::uint32_t>::max());
 }
 
+TEST_CASE("profile maps accept modules without a code section", "[debug_info]") {
+   auto map = wasm::profile_instr_map{};
+   map.set(wasm::profile_instr_map::builder{});
+
+   BOOST_TEST(map.translate(nullptr) == std::numeric_limits<std::uint32_t>::max());
+
+   auto code = wasm::wasm_code{0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00};
+   auto instance = wasm::backend<std::nullptr_t, wasm::interpreter, wasm::default_options, wasm::profile_instr_map>{
+       code, static_cast<wasm::wasm_allocator*>(nullptr)};
+}
+
 TEST_CASE("profile maps reject program counters outside their code range", "[debug_info]") {
    auto code = std::array<char, 8>{};
    auto wasm_code = std::array<char, 8>{};
@@ -353,6 +364,14 @@ TEST_CASE("code protection failures surface as allocation errors", "[allocator]"
    BOOST_REQUIRE(!span.empty());
    BOOST_REQUIRE(::munmap(span.data(), span.size()) == 0);
    BOOST_CHECK_THROW(allocator.disable_code(), wasm::exceptions::allocation);
+}
+
+TEST_CASE("zero-sized allocations do not require mapped storage", "[allocator]") {
+   auto allocator = wasm::growable_allocator{};
+
+   BOOST_TEST(allocator.alloc<std::byte>(0) == nullptr);
+   allocator.use_fixed_memory(static_cast<std::size_t>(::sysconf(_SC_PAGESIZE)));
+   BOOST_TEST(allocator.alloc<std::uint64_t>(0) == nullptr);
 }
 
 TEST_CASE("alternate stack allocation reports mapping failure", "[stack_allocator]") {
