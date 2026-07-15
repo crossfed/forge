@@ -1405,6 +1405,27 @@ BOOST_AUTO_TEST_CASE(db_object_ranked_backend_policy_locks_family_coordinator_be
    }());
 }
 
+BOOST_AUTO_TEST_CASE(db_object_backend_join_rejects_late_coordinator_claim) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   driver->support_record_locks(true);
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = co_await forge::db::object::store::open(
+         driver, forge::db::object::store::options{.writes = forge::db::object::write_policy::backend});
+      store.register_object<ranked_upload_object>();
+
+      auto active = co_await driver->begin_transaction();
+      (void)co_await active.get_for_update(
+         forge::db::core::family{"preexisting"},
+         forge::db::core::record_key{std::vector<std::byte>{std::byte{0x01}}});
+
+      BOOST_CHECK_THROW(co_await store.join(active),
+                        forge::db::core::exceptions::participant_conflict);
+      BOOST_CHECK(!active.claims_family(forge::db::core::family{"objectdb"}));
+      co_await active.rollback();
+   }());
+}
+
 BOOST_AUTO_TEST_CASE(db_object_ranked_indexes_follow_snapshot_savepoint_and_overflow_contracts) {
    auto runtime = forge::asio::runtime{};
    auto driver = std::make_shared<memory_driver>();

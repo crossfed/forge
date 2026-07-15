@@ -104,7 +104,28 @@ transaction::transaction(forge::db::core::transaction&& active,
                          std::vector<std::shared_ptr<interceptor>> interceptors,
                          std::vector<std::shared_ptr<observer>> observers,
                          release_fn release,
-                         boost::asio::any_io_executor)
+                         boost::asio::any_io_executor cleanup_executor)
+    : transaction(std::move(active),
+                  std::move(family),
+                  std::move(ensure),
+                  std::move(allocate),
+                  std::move(seal),
+                  std::move(interceptors),
+                  std::move(observers),
+                  std::move(release),
+                  std::move(cleanup_executor),
+                  false) {}
+
+transaction::transaction(forge::db::core::transaction&& active,
+                         forge::db::core::family family,
+                         ensure_registered_fn ensure,
+                         allocate_id_fn allocate,
+                         seal_allocations_fn seal,
+                         std::vector<std::shared_ptr<interceptor>> interceptors,
+                         std::vector<std::shared_ptr<observer>> observers,
+                         release_fn release,
+                         boost::asio::any_io_executor,
+                         bool backend_writes)
     : impl_{std::make_shared<impl>(
          std::move(active),
          std::move(family),
@@ -115,6 +136,8 @@ transaction::transaction(forge::db::core::transaction&& active,
          std::move(observers),
          std::move(release))} {
    owns_commit_ = true;
+   impl_->backend_writes = backend_writes;
+   impl_->participant->use_backend_writes(backend_writes);
    db_transaction().attach_participant(impl_->participant);
    auto participant = impl_->participant;
    db_transaction().after_commit([participant]() mutable -> boost::asio::awaitable<void> {
@@ -160,16 +183,55 @@ transaction::transaction(forge::db::core::transaction& active,
 
 transaction::transaction(std::shared_ptr<impl> implementation) : impl_{std::move(implementation)} {}
 
+transaction detail::transaction_access::make_owned(
+   forge::db::core::transaction&& active,
+   forge::db::core::family family,
+   transaction::ensure_registered_fn ensure,
+   transaction::allocate_id_fn allocate,
+   transaction::seal_allocations_fn seal,
+   std::vector<std::shared_ptr<interceptor>> interceptors,
+   std::vector<std::shared_ptr<observer>> observers,
+   transaction::release_fn release,
+   boost::asio::any_io_executor cleanup_executor,
+   bool backend_writes) {
+   return transaction{
+      std::move(active),
+      std::move(family),
+      std::move(ensure),
+      std::move(allocate),
+      std::move(seal),
+      std::move(interceptors),
+      std::move(observers),
+      std::move(release),
+      std::move(cleanup_executor),
+      backend_writes};
+}
+
+transaction detail::transaction_access::make_joined(
+   forge::db::core::transaction& active,
+   forge::db::core::family family,
+   transaction::ensure_registered_fn ensure,
+   transaction::allocate_id_fn allocate,
+   transaction::seal_allocations_fn seal,
+   std::vector<std::shared_ptr<interceptor>> interceptors,
+   std::vector<std::shared_ptr<observer>> observers,
+   transaction::release_fn release,
+   bool backend_writes) {
+   return transaction{
+      active,
+      std::move(family),
+      std::move(ensure),
+      std::move(allocate),
+      std::move(seal),
+      std::move(interceptors),
+      std::move(observers),
+      std::move(release),
+      backend_writes};
+}
+
 void detail::transaction_access::bind_store(transaction& active, std::shared_ptr<const void> identity) {
    if (active.impl_) {
       active.impl_->store_identity = std::move(identity);
-   }
-}
-
-void detail::transaction_access::use_backend_writes(transaction& active, bool value) noexcept {
-   if (active.impl_) {
-      active.impl_->backend_writes = value;
-      active.impl_->participant->use_backend_writes(value);
    }
 }
 
@@ -190,6 +252,25 @@ transaction::transaction(forge::db::core::transaction& active,
                          std::vector<std::shared_ptr<interceptor>> interceptors,
                          std::vector<std::shared_ptr<observer>> observers,
                          release_fn release)
+    : transaction(active,
+                  std::move(family),
+                  std::move(ensure),
+                  std::move(allocate),
+                  std::move(seal),
+                  std::move(interceptors),
+                  std::move(observers),
+                  std::move(release),
+                  false) {}
+
+transaction::transaction(forge::db::core::transaction& active,
+                         forge::db::core::family family,
+                         ensure_registered_fn ensure,
+                         allocate_id_fn allocate,
+                         seal_allocations_fn seal,
+                         std::vector<std::shared_ptr<interceptor>> interceptors,
+                         std::vector<std::shared_ptr<observer>> observers,
+                         release_fn release,
+                         bool backend_writes)
     : impl_{std::make_shared<impl>(
          active,
          std::move(family),
@@ -199,6 +280,8 @@ transaction::transaction(forge::db::core::transaction& active,
          std::move(interceptors),
          std::move(observers),
          std::move(release))} {
+   impl_->backend_writes = backend_writes;
+   impl_->participant->use_backend_writes(backend_writes);
    db_transaction().attach_participant(impl_->participant);
    auto participant = impl_->participant;
    db_transaction().after_commit([participant]() mutable -> boost::asio::awaitable<void> {

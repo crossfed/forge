@@ -123,6 +123,16 @@ class transaction {
    struct impl;
 
    explicit transaction(std::shared_ptr<impl> implementation);
+   transaction(forge::db::core::transaction&& active, forge::db::core::family family,
+               ensure_registered_fn ensure, allocate_id_fn allocate, seal_allocations_fn seal,
+               std::vector<std::shared_ptr<interceptor>> interceptors,
+               std::vector<std::shared_ptr<observer>> observers, release_fn release,
+               boost::asio::any_io_executor cleanup_executor, bool backend_writes);
+   transaction(forge::db::core::transaction& active, forge::db::core::family family,
+               ensure_registered_fn ensure, allocate_id_fn allocate, seal_allocations_fn seal,
+               std::vector<std::shared_ptr<interceptor>> interceptors,
+               std::vector<std::shared_ptr<observer>> observers, release_fn release,
+               bool backend_writes);
 
    [[nodiscard]] change_set& changes() const;
    [[nodiscard]] forge::db::core::transaction& active_transaction() const;
@@ -148,8 +158,21 @@ namespace detail {
 
 class transaction_access {
  public:
+   [[nodiscard]] static transaction make_owned(
+      forge::db::core::transaction&& active, forge::db::core::family family,
+      transaction::ensure_registered_fn ensure, transaction::allocate_id_fn allocate,
+      transaction::seal_allocations_fn seal,
+      std::vector<std::shared_ptr<interceptor>> interceptors,
+      std::vector<std::shared_ptr<observer>> observers, transaction::release_fn release,
+      boost::asio::any_io_executor cleanup_executor, bool backend_writes);
+   [[nodiscard]] static transaction make_joined(
+      forge::db::core::transaction& active, forge::db::core::family family,
+      transaction::ensure_registered_fn ensure, transaction::allocate_id_fn allocate,
+      transaction::seal_allocations_fn seal,
+      std::vector<std::shared_ptr<interceptor>> interceptors,
+      std::vector<std::shared_ptr<observer>> observers, transaction::release_fn release,
+      bool backend_writes);
    static void bind_store(transaction& active, std::shared_ptr<const void> identity);
-   static void use_backend_writes(transaction& active, bool value) noexcept;
    [[nodiscard]] static bool belongs_to(const transaction& active, const void* identity) noexcept;
    [[nodiscard]] static transaction joined(transaction& active);
 };
