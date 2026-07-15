@@ -38,7 +38,7 @@ add_executable(
    signals_regression_tests.cpp
    ${FORGE_VM_WASM_DONOR_INTERNAL_SOURCES}
 )
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64|amd64)$" AND NOT FORGE_VM_WASM_TEST_INTERPRETER_ONLY)
    target_sources(test_forge_vm_wasm_internal PRIVATE x86_64_regression_tests.cpp)
 endif()
 target_include_directories(

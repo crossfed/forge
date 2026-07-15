@@ -366,11 +366,15 @@ class backend {
          }
       }};
       try {
-         auto wd_guard = std::forward<Watchdog>(wd).scoped_run([this, &_timed_out]() {
-            _timed_out.store(true, std::memory_order_release);
-            mod->allocator.disable_code();
-         });
-         std::forward<F>(f)();
+         {
+            auto wd_guard = std::forward<Watchdog>(wd).scoped_run([this, &_timed_out]() {
+               _timed_out.store(true, std::memory_order_release);
+               mod->allocator.disable_code();
+            });
+            std::forward<F>(f)();
+         }
+         if (_timed_out.load(std::memory_order_acquire))
+            throw exceptions::timeout{"execution timed out"};
       } catch (exceptions::memory&) {
          if (_timed_out.load(std::memory_order_acquire)) {
             throw exceptions::timeout{"execution timed out"};
