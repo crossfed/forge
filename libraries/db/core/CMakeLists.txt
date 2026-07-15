@@ -1,9 +1,11 @@
 add_library(
    forge_db_core STATIC
    driver.cpp
+   driver_state.cpp
    driver_snapshot.cpp
    driver_transaction.cpp
    participant_access_impl.cpp
+   tracked_session.cpp
 )
 forge_target_modules_at(forge_db_core db/core)
 

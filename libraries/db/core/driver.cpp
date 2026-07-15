@@ -6,12 +6,20 @@ module;
 #include <boost/asio/this_coro.hpp>
 
 #include <memory>
+#include <mutex>
+#include <utility>
 
 module forge.db.core.driver;
 
 import forge.db.core.exceptions;
 
+#include "details/driver_state.hxx"
+#include "details/tracked_session.hxx"
+
 namespace forge::db::core {
+
+driver::driver() : state_{std::make_shared<detail::driver_state>()} {}
+driver::~driver() = default;
 
 boost::asio::awaitable<std::optional<std::vector<std::byte>>>
 session::get_for_update(family, record_key) {
@@ -31,12 +39,44 @@ boost::asio::awaitable<void> session::release_savepoint() {
 }
 
 boost::asio::awaitable<transaction> driver::begin_transaction() {
+   auto admission = state_->admit_open();
    const auto executor = co_await boost::asio::this_coro::executor;
-   co_return transaction{co_await open_transaction(), executor};
+   auto active = co_await open_transaction();
+   if (!active) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db transaction session is null");
+   }
+   co_return transaction{
+      std::make_unique<detail::tracked_session>(std::move(active), std::move(admission)),
+      executor};
 }
 
 boost::asio::awaitable<snapshot> driver::begin_read() {
-   co_return snapshot{co_await open_snapshot(), snapshot_origin_};
+   auto admission = state_->admit_open();
+   auto active = co_await open_snapshot();
+   if (!active) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db snapshot session is null");
+   }
+   co_return snapshot{
+      std::make_unique<detail::tracked_session>(std::move(active), std::move(admission)),
+      snapshot_origin_};
+}
+
+boost::asio::awaitable<void> driver::async_close() {
+   const auto action = state_->admit_close();
+   if (action == detail::driver_state::close_action::already_closed) {
+      co_return;
+   }
+   try {
+      co_await close_driver();
+   } catch (...) {
+      state_->fail_close();
+      throw;
+   }
+   state_->finish_close();
+}
+
+boost::asio::awaitable<void> driver::close_driver() {
+   co_return;
 }
 
 } // namespace forge::db::core
