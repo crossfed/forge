@@ -45,6 +45,7 @@ struct layout {
    std::vector<bytes> levels;
    bytes source_prefix;
    bytes object_prefix;
+   bytes schema;
    std::vector<scalar_kind> sum_kinds;
 };
 

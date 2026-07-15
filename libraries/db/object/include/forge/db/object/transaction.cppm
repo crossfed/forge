@@ -414,6 +414,24 @@ nth_transaction_object(Access tx, std::uint64_t position) {
    }
 }
 
+template <object_model Object, typename Tag, typename Access>
+boost::asio::awaitable<std::optional<std::uint64_t>>
+query_transaction_exact_rank(Access tx, const typename Object::value_type& value) {
+   if (!(co_await detail::ordered_key::ranked_entry_exists<Object, Tag>(
+          tx, value,
+          [](const std::vector<std::byte>& encoded, const id_t_of<Object>& expected) {
+             return detail::unpack_value<id_t_of<Object>>(encoded) == expected;
+          }))) {
+      co_return std::nullopt;
+   }
+   const auto bounds = co_await query_transaction_ranks<Object, Tag>(
+      tx, detail::ordered_key::range_for_value<Object, Tag>(value));
+   if (bounds.second - bounds.first != 1U) {
+      co_return std::nullopt;
+   }
+   co_return bounds.first;
+}
+
 struct materialized_index {
    forge::db::core::record_key key;
    bool unique = false;
@@ -732,7 +750,7 @@ template <object_model Object, typename Tag> [[nodiscard]] index_view<Object, Ta
    auto aggregate = index_aggregate_query{};
    auto ranks = index_rank_query{};
    auto nth = index_nth_query<typename Object::value_type>{};
-   auto entry = index_entry_query<typename Object::value_type>{};
+   auto exact_rank = index_exact_rank_query<typename Object::value_type>{};
    if constexpr (ranked_index<index_by_tag<Object, Tag>>) {
       aggregate = [implementation = impl_](forge::db::core::record_range range) mutable
          -> boost::asio::awaitable<index_aggregate_result> {
@@ -749,14 +767,10 @@ template <object_model Object, typename Tag> [[nodiscard]] index_view<Object, Ta
          auto owner = transaction{implementation};
          co_return co_await detail::nth_transaction_object<Object, Tag>(access{owner}, position);
       };
-      entry = [implementation = impl_](const typename Object::value_type& value) mutable
-         -> boost::asio::awaitable<bool> {
+      exact_rank = [implementation = impl_](const typename Object::value_type& value) mutable
+         -> boost::asio::awaitable<std::optional<std::uint64_t>> {
          auto owner = transaction{implementation};
-         co_return co_await detail::ordered_key::ranked_entry_exists<Object, Tag>(
-            access{owner}, value,
-            [](const std::vector<std::byte>& encoded, const id_t_of<Object>& expected) {
-               return detail::unpack_value<id_t_of<Object>>(encoded) == expected;
-            });
+         co_return co_await detail::query_transaction_exact_rank<Object, Tag>(access{owner}, value);
       };
    }
    return index_view<Object, Tag>{
@@ -766,7 +780,7 @@ template <object_model Object, typename Tag> [[nodiscard]] index_view<Object, Ta
          auto owner = transaction{implementation};
          co_return co_await detail::page_transaction_objects<Object, Tag>(
             access{owner}, std::move(range), std::move(request));
-      }, {}, std::move(aggregate), std::move(ranks), std::move(nth), std::move(entry)};
+      }, {}, std::move(aggregate), std::move(ranks), std::move(nth), std::move(exact_rank)};
 }
 
 } // namespace forge::db::object

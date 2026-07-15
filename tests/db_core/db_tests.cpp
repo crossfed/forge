@@ -66,6 +66,7 @@ struct memory_state {
    std::size_t destroyed_sessions = 0;
    bool support_savepoints = true;
    bool support_record_locks = true;
+   std::vector<std::pair<std::string, forge::db::core::record_key>> lock_requests;
 };
 
 class memory_session final : public forge::db::core::session {
@@ -101,6 +102,7 @@ class memory_session final : public forge::db::core::session {
 
    boost::asio::awaitable<std::optional<std::vector<std::byte>>>
    get_for_update(forge::db::core::family family, forge::db::core::record_key record) override {
+      state_->lock_requests.emplace_back(family.name, record);
       co_return co_await get(std::move(family), std::move(record));
    }
 
@@ -307,6 +309,26 @@ class unclaimed_participant final : public forge::db::core::transaction_particip
    std::string name_;
 };
 
+class locking_participant final : public forge::db::core::transaction_participant {
+ public:
+   locking_participant(std::string name,
+                       std::vector<forge::db::core::record_lock_claim> locks)
+       : name_{std::move(name)}, locks_{std::move(locks)} {}
+
+   [[nodiscard]] std::string_view name() const noexcept override {
+      return name_;
+   }
+
+   [[nodiscard]] std::span<const forge::db::core::record_lock_claim>
+   prewrite_locks() const noexcept override {
+      return locks_;
+   }
+
+ private:
+   std::string name_;
+   std::vector<forge::db::core::record_lock_claim> locks_;
+};
+
 class policy_participant final : public forge::db::core::transaction_participant {
  public:
    policy_participant(std::string name,
@@ -478,6 +500,60 @@ BOOST_AUTO_TEST_CASE(db_transaction_participant_claims_preserve_default_and_name
          forge::db::core::exceptions::participant_conflict);
       co_await tx.rollback();
       co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_transaction_prewrite_locks_are_canonical_and_precede_mutation) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   auto driver = std::make_shared<memory_driver>(state);
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto tx = co_await driver->begin_transaction();
+      tx.attach_participant(std::make_shared<locking_participant>(
+         "locks-z",
+         std::vector<forge::db::core::record_lock_claim>{
+            {.column_family = forge::db::core::family{"z"}, .key = key("b")},
+            {.column_family = forge::db::core::family{"a"}, .key = key("c")},
+         }));
+      tx.attach_participant(std::make_shared<locking_participant>(
+         "locks-a",
+         std::vector<forge::db::core::record_lock_claim>{
+            {.column_family = forge::db::core::family{"a"}, .key = key("a")},
+         }));
+
+      co_await tx.put(forge::db::core::family{"data"}, key("value"), bytes("stored"));
+      co_await tx.put(forge::db::core::family{"data"}, key("other"), bytes("stored"));
+
+      BOOST_REQUIRE_EQUAL(state->lock_requests.size(), 3U);
+      BOOST_CHECK_EQUAL(state->lock_requests[0].first, "a");
+      BOOST_CHECK_EQUAL(text(state->lock_requests[0].second.bytes()), "a");
+      BOOST_CHECK_EQUAL(state->lock_requests[1].first, "a");
+      BOOST_CHECK_EQUAL(text(state->lock_requests[1].second.bytes()), "c");
+      BOOST_CHECK_EQUAL(state->lock_requests[2].first, "z");
+      BOOST_CHECK_EQUAL(text(state->lock_requests[2].second.bytes()), "b");
+      BOOST_CHECK_THROW(
+         tx.attach_participant(std::make_shared<unclaimed_participant>("too-late")),
+         forge::db::core::exceptions::participant_conflict);
+      co_await tx.rollback();
+
+      auto prepared = co_await driver->begin_transaction();
+      prepared.attach_participant(std::make_shared<locking_participant>(
+         "prepared-lock",
+         std::vector<forge::db::core::record_lock_claim>{
+            {.column_family = forge::db::core::family{"a"}, .key = key("a")},
+         }));
+      static_cast<void>(co_await prepared.get_for_update(
+         forge::db::core::family{"a"}, key("a")));
+      prepared.attach_participant(std::make_shared<unclaimed_participant>("late-observer"));
+      BOOST_CHECK_THROW(
+         prepared.attach_participant(std::make_shared<locking_participant>(
+            "late-lock",
+            std::vector<forge::db::core::record_lock_claim>{
+               {.column_family = forge::db::core::family{"b"}, .key = key("b")},
+            })),
+         forge::db::core::exceptions::participant_conflict);
+      co_await prepared.rollback();
    }());
 }
 

@@ -343,6 +343,19 @@ struct is_sum<sum<Tag, Projection, Accumulator>> : std::true_type {};
 
 template <typename T> inline constexpr bool is_sum_v = is_sum<T>::value;
 
+template <std::uint64_t Version> struct ranked_schema {
+   static_assert(Version > 0, "ranked schema version must be positive");
+   static constexpr std::uint64_t version = Version;
+};
+
+template <typename T> struct is_ranked_schema : std::false_type {};
+
+template <std::uint64_t Version>
+struct is_ranked_schema<ranked_schema<Version>> : std::true_type {};
+
+template <typename T>
+concept ranked_schema_descriptor = is_ranked_schema<T>::value;
+
 template <typename... Sums> struct unique_sum_tags;
 
 template <> struct unique_sum_tags<> : std::true_type {};
@@ -352,38 +365,44 @@ struct unique_sum_tags<First, Rest...>
     : std::bool_constant<(!std::same_as<typename First::tag_type, typename Rest::tag_type> && ...) &&
                          unique_sum_tags<Rest...>::value> {};
 
-template <typename Tag, typename... Sums> struct ranked_primary_unique {
+template <typename Tag, ranked_schema_descriptor Schema, typename... Sums>
+struct ranked_primary_unique {
    static_assert((is_sum_v<Sums> && ...), "ranked primary index accepts only sum descriptors");
    static_assert(unique_sum_tags<Sums...>::value, "ranked index sum tags must be unique");
 
    using tag_type = Tag;
    using key_spec = primary_key;
+   using schema_type = Schema;
    using sums_type = std::tuple<Sums...>;
 
    static constexpr index_kind kind = index_kind::primary_unique;
    static constexpr bool ranked = true;
 };
 
-template <typename Tag, ordered_key_spec Extractor, typename... Sums> struct ranked_unique {
+template <typename Tag, ordered_key_spec Extractor, ranked_schema_descriptor Schema, typename... Sums>
+struct ranked_unique {
    static_assert((is_sum_v<Sums> && ...), "ranked unique index accepts only sum descriptors");
    static_assert(unique_sum_tags<Sums...>::value, "ranked index sum tags must be unique");
 
    using tag_type = Tag;
    using owner_type = typename Extractor::owner_type;
    using key_spec = Extractor;
+   using schema_type = Schema;
    using sums_type = std::tuple<Sums...>;
 
    static constexpr index_kind kind = index_kind::ordered_unique;
    static constexpr bool ranked = true;
 };
 
-template <typename Tag, ordered_key_spec Extractor, typename... Sums> struct ranked_non_unique {
+template <typename Tag, ordered_key_spec Extractor, ranked_schema_descriptor Schema, typename... Sums>
+struct ranked_non_unique {
    static_assert((is_sum_v<Sums> && ...), "ranked non-unique index accepts only sum descriptors");
    static_assert(unique_sum_tags<Sums...>::value, "ranked index sum tags must be unique");
 
    using tag_type = Tag;
    using owner_type = typename Extractor::owner_type;
    using key_spec = Extractor;
+   using schema_type = Schema;
    using sums_type = std::tuple<Sums...>;
 
    static constexpr index_kind kind = index_kind::ordered_non_unique;
@@ -426,8 +445,8 @@ template <typename T> struct is_primary_index : std::false_type {};
 
 template <typename Tag> struct is_primary_index<primary_unique<Tag>> : std::true_type {};
 
-template <typename Tag, typename... Sums>
-struct is_primary_index<ranked_primary_unique<Tag, Sums...>> : std::true_type {};
+template <typename Tag, typename Schema, typename... Sums>
+struct is_primary_index<ranked_primary_unique<Tag, Schema, Sums...>> : std::true_type {};
 
 template <typename T> inline constexpr bool is_primary_index_v = is_primary_index<T>::value;
 
@@ -439,11 +458,11 @@ struct is_secondary_index<ordered_unique<Tag, Extractor>> : std::true_type {};
 template <typename Tag, typename Extractor>
 struct is_secondary_index<ordered_non_unique<Tag, Extractor>> : std::true_type {};
 
-template <typename Tag, typename Extractor, typename... Sums>
-struct is_secondary_index<ranked_unique<Tag, Extractor, Sums...>> : std::true_type {};
+template <typename Tag, typename Extractor, typename Schema, typename... Sums>
+struct is_secondary_index<ranked_unique<Tag, Extractor, Schema, Sums...>> : std::true_type {};
 
-template <typename Tag, typename Extractor, typename... Sums>
-struct is_secondary_index<ranked_non_unique<Tag, Extractor, Sums...>> : std::true_type {};
+template <typename Tag, typename Extractor, typename Schema, typename... Sums>
+struct is_secondary_index<ranked_non_unique<Tag, Extractor, Schema, Sums...>> : std::true_type {};
 
 template <typename T> inline constexpr bool is_secondary_index_v = is_secondary_index<T>::value;
 
@@ -462,6 +481,7 @@ concept secondary_index = index_model<T> && is_secondary_index_v<T>;
 
 template <typename T>
 concept ranked_index = index_model<T> && requires {
+   typename T::schema_type;
    typename T::sums_type;
    requires T::ranked;
 };
@@ -594,17 +614,17 @@ struct sum_lookup_impl {
    static constexpr std::size_t position = impl::position;
 };
 
-template <typename SumTag, typename Tag, typename... Sums>
-struct sum_lookup<ranked_primary_unique<Tag, Sums...>, SumTag>
-    : sum_lookup_impl<ranked_primary_unique<Tag, Sums...>, SumTag, Sums...> {};
+template <typename SumTag, typename Tag, typename Schema, typename... Sums>
+struct sum_lookup<ranked_primary_unique<Tag, Schema, Sums...>, SumTag>
+    : sum_lookup_impl<ranked_primary_unique<Tag, Schema, Sums...>, SumTag, Sums...> {};
 
-template <typename SumTag, typename Tag, typename Extractor, typename... Sums>
-struct sum_lookup<ranked_unique<Tag, Extractor, Sums...>, SumTag>
-    : sum_lookup_impl<ranked_unique<Tag, Extractor, Sums...>, SumTag, Sums...> {};
+template <typename SumTag, typename Tag, typename Extractor, typename Schema, typename... Sums>
+struct sum_lookup<ranked_unique<Tag, Extractor, Schema, Sums...>, SumTag>
+    : sum_lookup_impl<ranked_unique<Tag, Extractor, Schema, Sums...>, SumTag, Sums...> {};
 
-template <typename SumTag, typename Tag, typename Extractor, typename... Sums>
-struct sum_lookup<ranked_non_unique<Tag, Extractor, Sums...>, SumTag>
-    : sum_lookup_impl<ranked_non_unique<Tag, Extractor, Sums...>, SumTag, Sums...> {};
+template <typename SumTag, typename Tag, typename Extractor, typename Schema, typename... Sums>
+struct sum_lookup<ranked_non_unique<Tag, Extractor, Schema, Sums...>, SumTag>
+    : sum_lookup_impl<ranked_non_unique<Tag, Extractor, Schema, Sums...>, SumTag, Sums...> {};
 
 } // namespace forge::db::object::detail
 
@@ -692,7 +712,8 @@ using index_rank_query = std::function<boost::asio::awaitable<std::pair<std::uin
 template <typename T>
 using index_nth_query = std::function<boost::asio::awaitable<std::optional<T>>(std::uint64_t)>;
 template <typename T>
-using index_entry_query = std::function<boost::asio::awaitable<bool>(const T&)>;
+using index_exact_rank_query =
+   std::function<boost::asio::awaitable<std::optional<std::uint64_t>>(const T&)>;
 
 template <typename T> class index_stream {
  public:
@@ -816,9 +837,9 @@ template <object_model Object, typename Tag> class index_view {
 
    explicit index_view(index_page_query<value_type> page, index_stream_query_factory<value_type> stream_page = {},
                        index_aggregate_query aggregate = {}, index_rank_query ranks = {},
-                       index_nth_query<value_type> nth = {}, index_entry_query<value_type> entry = {})
+                       index_nth_query<value_type> nth = {}, index_exact_rank_query<value_type> exact_rank = {})
        : page_{std::move(page)}, stream_page_{std::move(stream_page)}, aggregate_{std::move(aggregate)},
-         ranks_{std::move(ranks)}, nth_{std::move(nth)}, entry_{std::move(entry)} {}
+         ranks_{std::move(ranks)}, nth_{std::move(nth)}, exact_rank_{std::move(exact_rank)} {}
 
    boost::asio::awaitable<object_page<value_type>> page(forge::db::core::record_range range,
                                                         forge::db::core::page_request request) {
@@ -931,14 +952,11 @@ template <object_model Object, typename Tag> class index_view {
       requires ranked_index<index_by_tag<Object, Tag>>
    {
       require_ranked_query();
-      if (!(co_await entry_(value))) {
+      const auto position = co_await exact_rank_(value);
+      if (!position.has_value()) {
          FORGE_THROW_EXCEPTION(exceptions::not_found, "db object ranked index entry was not found");
       }
-      auto bounds = co_await ranks_(detail::ordered_key::range_for_value<Object, Tag>(value));
-      if (bounds.second - bounds.first != 1U) {
-         FORGE_THROW_EXCEPTION(exceptions::not_found, "db object ranked index entry was not found");
-      }
-      co_return bounds.first;
+      co_return *position;
    }
 
    template <typename... Keys>
@@ -1056,14 +1074,14 @@ template <object_model Object, typename Tag> class index_view {
          std::invoke(guard);
          co_return co_await query(position);
       };
-      auto guarded_entry = [query = entry_, guard](const value_type& value) mutable
-         -> boost::asio::awaitable<bool> {
+      auto guarded_exact_rank = [query = exact_rank_, guard](const value_type& value) mutable
+         -> boost::asio::awaitable<std::optional<std::uint64_t>> {
          std::invoke(guard);
          co_return co_await query(value);
       };
       return index_view{std::move(guarded_page), std::move(guarded_stream),
                         std::move(guarded_aggregate), std::move(guarded_ranks), std::move(guarded_nth),
-                        std::move(guarded_entry)};
+                        std::move(guarded_exact_rank)};
    }
 
    boost::asio::awaitable<index_aggregate_result>
@@ -1078,9 +1096,9 @@ template <object_model Object, typename Tag> class index_view {
       co_return co_await ranks_(std::move(range));
    }
 
-   boost::asio::awaitable<bool> query_entry(const value_type& value) {
+   boost::asio::awaitable<std::optional<std::uint64_t>> query_exact_rank(const value_type& value) {
       require_ranked_query();
-      co_return co_await entry_(value);
+      co_return co_await exact_rank_(value);
    }
 
  private:
@@ -1090,7 +1108,7 @@ template <object_model Object, typename Tag> class index_view {
    }
 
    void require_ranked_query() const {
-      if (!aggregate_ || !ranks_ || !nth_ || !entry_) {
+      if (!aggregate_ || !ranks_ || !nth_ || !exact_rank_) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db object ranked index query is unavailable");
       }
    }
@@ -1100,7 +1118,7 @@ template <object_model Object, typename Tag> class index_view {
    index_aggregate_query aggregate_;
    index_rank_query ranks_;
    index_nth_query<value_type> nth_;
-   index_entry_query<value_type> entry_;
+   index_exact_rank_query<value_type> exact_rank_;
 };
 
 } // namespace forge::db::object

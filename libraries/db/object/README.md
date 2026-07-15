@@ -265,10 +265,12 @@ struct by_payload_bytes;
 using upload_object = forge::db::object::object_index<
    upload,
    forge::db::object::indexed_by<
-      forge::db::object::ranked_primary_unique<by_id>,
+      forge::db::object::ranked_primary_unique<
+         by_id, forge::db::object::ranked_schema<1>>,
       forge::db::object::ranked_non_unique<
          by_state,
          forge::db::object::member<&upload::state>,
+         forge::db::object::ranked_schema<1>,
          forge::db::object::sum<
             by_payload_bytes,
             forge::db::object::member<&upload::payload, &payload_ref::size>>>>>;
@@ -297,7 +299,8 @@ const auto active_bytes =
 `find_rank(key)` returns the first exact-match rank or the index size.
 `range_rank(lower, upper)` and `range(lower, upper)` use `[lower, upper)`.
 `nth(n)` returns `nullopt` outside the index. `rank(object)` checks the exact
-persisted entry, including the Object ID for unique indexes, and reports typed
+persisted entry and calculates its position through one Core snapshot or
+transaction, including the Object ID for unique indexes, and reports typed
 `not_found` for stale values.
 
 The persisted engine is a deterministic augmented skip-list. Root totals make
@@ -312,15 +315,26 @@ throws `aggregate_overflow` instead of wrapping.
 
 The default `single_writer` policy uses the Object writer lane. With
 `write_policy::backend`, a ranked mutation requires backend record locks and
-locks ranked roots in descriptor order before writing. A backend without
-`record_locks` rejects the mutation before changing Object state.
+the Object participant claims one private coordinator record for its physical
+family. Core acquires all participant coordinator claims in canonical
+`(family, key)` order before the transaction's first read-for-update or
+mutation; ranked roots are then locked in descriptor order. This deliberately
+serializes backend-policy Object writers per family, including across processes,
+and prevents opposite model or family mutation order from deadlocking. A
+backend without `record_locks` rejects the mutation before changing Object
+state.
 
-Ranked schema is persisted. Opening an empty type creates state on its first
-mutation. If Object rows already exist but ranked state is absent, reads and
-writes fail closed with `aggregate_rebuild_required`; Forge never performs a
-hidden startup scan. Incompatible or corrupt root/span data reports
-`aggregate_corruption`. Adding, removing or reordering ranked sums on populated
-storage therefore requires an explicit migration or rebuild outside this API.
+Every ranked descriptor requires `ranked_schema<Version>`. The root stores and
+exactly compares a canonical schema descriptor containing Object type, index
+ordinal and kind, key-layout version, explicit schema version, and ordered sum
+slot accumulator representations. Increase `Version` whenever the extractor,
+ordering, index kind, sum projection, accumulator or slot order changes.
+Opening an empty type creates state on its first mutation. If Object rows
+already exist but ranked state is absent, reads and writes fail closed with
+`aggregate_rebuild_required`; Forge never performs a hidden startup scan.
+Incompatible or corrupt root/span data reports `aggregate_corruption`. Any
+ranked schema change on populated storage therefore requires an explicit
+migration or rebuild outside this API.
 
 An Object store can also join a Core snapshot opened by the same driver:
 

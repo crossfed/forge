@@ -143,7 +143,45 @@ transaction::get_for_update(family column_family, record_key key) {
    if (!impl_->active->capabilities().record_locks) {
       FORGE_THROW_EXCEPTION(exceptions::unsupported_operation, "db transaction does not support record locks");
    }
+   co_await prepare_prewrite_locks();
    co_return co_await impl_->active->get_for_update(std::move(column_family), std::move(key));
+}
+
+boost::asio::awaitable<void> transaction::prepare_prewrite_locks() {
+   if (impl_->prewrite_locks_prepared) {
+      co_return;
+   }
+
+   auto claims = std::vector<record_lock_claim>{};
+   for (const auto& participant : impl_->participants) {
+      const auto participant_claims = participant->prewrite_locks();
+      claims.insert(claims.end(), participant_claims.begin(), participant_claims.end());
+   }
+   std::ranges::sort(claims, [](const record_lock_claim& left, const record_lock_claim& right) {
+      if (left.column_family.name != right.column_family.name) {
+         return left.column_family.name < right.column_family.name;
+      }
+      return left.key.bytes() < right.key.bytes();
+   });
+   claims.erase(std::unique(claims.begin(), claims.end(), [](const record_lock_claim& left,
+                                                             const record_lock_claim& right) {
+      return left.column_family.name == right.column_family.name && left.key == right.key;
+   }), claims.end());
+
+   if (!claims.empty() && !impl_->active->capabilities().record_locks) {
+      FORGE_THROW_EXCEPTION(exceptions::unsupported_operation,
+                            "db transaction participant prewrite locks are unsupported");
+   }
+
+   try {
+      for (const auto& claim : claims) {
+         (void)co_await impl_->active->get_for_update(claim.column_family, claim.key);
+      }
+   } catch (...) {
+      impl_->current = impl::phase::rollback_only;
+      throw;
+   }
+   impl_->prewrite_locks_prepared = true;
 }
 
 boost::asio::awaitable<void> transaction::put(family column_family, record_key key, std::vector<std::byte> value) {
@@ -165,6 +203,8 @@ transaction::mutate(family column_family, record_key key, std::optional<std::vec
    if (impl_->current != impl::phase::active) {
       FORGE_THROW_EXCEPTION(exceptions::participant_conflict, "db transaction is preparing or prepared");
    }
+
+   co_await prepare_prewrite_locks();
 
    const auto kind = after.has_value() ? mutation_kind::put : mutation_kind::erase;
    auto policy = mutation_policy::reversible;
@@ -274,9 +314,11 @@ void transaction::attach_participant(std::shared_ptr<transaction_participant> pa
    if (!participant) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db transaction participant is null");
    }
-   if (impl_->current != impl::phase::active || impl_->mutation_started || !impl_->savepoints.empty()) {
+   if (impl_->current != impl::phase::active || impl_->mutation_started ||
+       !impl_->savepoints.empty() ||
+       (impl_->prewrite_locks_prepared && !participant->prewrite_locks().empty())) {
       FORGE_THROW_EXCEPTION(exceptions::participant_conflict,
-                            "db transaction participants must attach before mutations or savepoints");
+                            "db transaction participants must attach before locks, mutations, or savepoints");
    }
    for (const auto& existing : impl_->participants) {
       if (existing == participant || existing->name() == participant->name()) {

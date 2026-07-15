@@ -167,10 +167,12 @@ using usage_object = forge::db::object::object_index<
    forge::db::object::indexed_by<
       forge::db::object::ranked_primary_unique<
          by_usage_id,
+         forge::db::object::ranked_schema<1>,
          forge::db::object::sum<by_usage_bytes, forge::db::object::member<&usage_record::bytes>>>,
       forge::db::object::ranked_non_unique<
          by_usage_state,
          forge::db::object::member<&usage_record::state>,
+         forge::db::object::ranked_schema<1>,
          forge::db::object::sum<by_usage_bytes, forge::db::object::member<&usage_record::bytes>>>>>;
 
 struct byte_less {

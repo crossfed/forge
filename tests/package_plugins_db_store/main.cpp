@@ -26,6 +26,7 @@ using usage_index = forge::db::object::object_index<
    usage_record,
    forge::db::object::indexed_by<forge::db::object::ranked_primary_unique<
       by_id,
+      forge::db::object::ranked_schema<1>,
       forge::db::object::sum<
          by_bytes,
          forge::db::object::member<&usage_record::bytes>>>>>;

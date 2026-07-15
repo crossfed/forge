@@ -10,6 +10,7 @@ enum class entry_kind : std::uint8_t {
    ordered_non_unique_index = 0x21,
    ranked_index_root = 0x30,
    ranked_index_level = 0x31,
+   ranked_index_coordinator = 0x32,
 };
 
 inline void append_byte(std::vector<std::byte>& out, std::uint8_t value) {
@@ -93,6 +94,11 @@ inline void append_application_prefix(std::vector<std::byte>& out, entry_kind ki
    append_be32(bytes, ordinal);
    append_byte(bytes, level);
    return bytes;
+}
+
+[[nodiscard]] inline forge::db::core::record_key ranked_coordinator() {
+   return forge::db::core::record_key{
+      std::vector<std::byte>{static_cast<std::byte>(entry_kind::ranked_index_coordinator)}};
 }
 
 } // namespace forge::db::object::detail::record_key

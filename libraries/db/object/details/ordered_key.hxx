@@ -382,6 +382,25 @@ template <typename Object, typename Tag>
    result.sum_kinds.reserve(std::tuple_size_v<sums>);
    append_ranked_sum_kinds<sums>(result.sum_kinds,
                                  std::make_index_sequence<std::tuple_size_v<sums>>{});
+
+   // Canonical persisted descriptor. Arbitrary C++ extractors cannot be named
+   // portably, so their semantic identity is owned by the explicit schema version.
+   constexpr auto key_layout_version = std::uint8_t{1};
+   result.schema.reserve(20U + result.source_prefix.size() + result.sum_kinds.size());
+   forge::db::object::detail::record_key::append_byte(result.schema, key_layout_version);
+   forge::db::object::detail::record_key::append_byte(
+      result.schema, static_cast<std::uint8_t>(index::kind));
+   forge::db::object::detail::record_key::append_byte(result.schema, type.space);
+   forge::db::object::detail::record_key::append_be16(result.schema, type.type);
+   forge::db::object::detail::record_key::append_be32(result.schema, ordinal);
+   forge::db::object::detail::record_key::append_be64(
+      result.schema, index::schema_type::version);
+   forge::db::object::detail::record_key::append_be32(
+      result.schema, static_cast<std::uint32_t>(result.sum_kinds.size()));
+   for (const auto kind : result.sum_kinds) {
+      forge::db::object::detail::record_key::append_byte(
+         result.schema, static_cast<std::uint8_t>(kind));
+   }
    return result;
 }
 

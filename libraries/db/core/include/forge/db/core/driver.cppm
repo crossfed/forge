@@ -90,6 +90,7 @@ class transaction {
    boost::asio::awaitable<void> rollback();
 
  private:
+   boost::asio::awaitable<void> prepare_prewrite_locks();
    boost::asio::awaitable<void>
    mutate(family column_family, record_key key, std::optional<std::vector<std::byte>> after);
 

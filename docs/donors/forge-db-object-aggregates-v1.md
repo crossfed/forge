@@ -82,6 +82,10 @@ Rejected:
 
 - `ranked_primary_unique`, `ranked_unique` and `ranked_non_unique` opt in
   declaratively beside existing indexes.
+- Every ranked descriptor requires an explicit `ranked_schema<Version>`. The
+  root persists and exactly compares canonical schema bytes; extractor,
+  ordering, index-kind, projection, accumulator or slot-order changes require
+  a version bump and an explicit migration or rebuild on populated storage.
 - `sum<Tag, Projection, Accumulator>` accepts member/function projections;
   variadic `member` supports nested fields.
 - Root totals answer global aggregates in O(1); span subtraction answers
@@ -93,7 +97,10 @@ Rejected:
 - Missing ranked state on populated storage fails closed with
   `aggregate_rebuild_required`; migration/rebuild is a separate operation.
 - `single_writer` reuses the Object writer lane. Backend-managed concurrency
-  requires record locks and canonical root-lock order.
+  requires record locks; Core canonically acquires one coordinator claim per
+  Object family before mutations, then ranked roots in descriptor order.
+- Public `rank(object)` validates the exact entry and computes its rank through
+  one snapshot or transaction view.
 - Core transactions, savepoints, snapshots and DB Revision remain the sole
   atomicity and visibility boundaries.
 
@@ -105,5 +112,7 @@ Rejected:
 - stable old ranks in snapshots after concurrent commit;
 - signed and unsigned overflow without partial writes;
 - fail-closed missing state and typed corruption;
+- reopen rejection for schema-version, index-kind and sum-layout mismatch;
 - RocksDB reopen and backend record-lock behavior;
+- canonical prewrite coordinator locking across model and family order;
 - instrumentation proving no Object scan and sublinear ranked reads.

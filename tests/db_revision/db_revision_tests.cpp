@@ -385,9 +385,11 @@ using usage_sum = forge::db::object::sum<
 using usage_object = forge::db::object::object_index<
    usage,
    forge::db::object::indexed_by<
-      forge::db::object::ranked_primary_unique<usage_by_id, usage_sum>,
+      forge::db::object::ranked_primary_unique<
+         usage_by_id, forge::db::object::ranked_schema<1>, usage_sum>,
       forge::db::object::ranked_non_unique<
-         usage_by_state, forge::db::object::member<&usage::state>, usage_sum>>>;
+         usage_by_state, forge::db::object::member<&usage::state>,
+         forge::db::object::ranked_schema<1>, usage_sum>>>;
 
 class counting_observer final : public forge::db::object::observer {
  public:

@@ -277,7 +277,7 @@ template <object_model Object, typename Tag>
    auto aggregate = index_aggregate_query{};
    auto ranks = index_rank_query{};
    auto nth = index_nth_query<typename Object::value_type>{};
-   auto entry = index_entry_query<typename Object::value_type>{};
+   auto exact_rank = index_exact_rank_query<typename Object::value_type>{};
    if constexpr (ranked_index<index_by_tag<Object, Tag>>) {
       aggregate = [owner = *this](forge::db::core::record_range range) mutable
          -> boost::asio::awaitable<index_aggregate_result> {
@@ -296,10 +296,10 @@ template <object_model Object, typename Tag>
          auto read = co_await owner.begin_read();
          co_return co_await read.template index<Object, Tag>().nth(position);
       };
-      entry = [owner = *this](const typename Object::value_type& value) mutable
-         -> boost::asio::awaitable<bool> {
+      exact_rank = [owner = *this](const typename Object::value_type& value) mutable
+         -> boost::asio::awaitable<std::optional<std::uint64_t>> {
          auto read = co_await owner.begin_read();
-         co_return co_await read.template index<Object, Tag>().query_entry(value);
+         co_return co_await read.template index<Object, Tag>().query_exact_rank(value);
       };
    }
 
@@ -320,7 +320,7 @@ template <object_model Object, typename Tag>
             auto view = active->value().template index<Object, Tag>();
             co_return co_await view.page(std::move(range), std::move(request));
          };
-      }, std::move(aggregate), std::move(ranks), std::move(nth), std::move(entry)};
+      }, std::move(aggregate), std::move(ranks), std::move(nth), std::move(exact_rank)};
 }
 
 } // namespace forge::db::object

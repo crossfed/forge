@@ -173,17 +173,41 @@ using score_total_sum = forge::db::object::sum<
 using ranked_upload_object = forge::db::object::object_index<
    ranked_upload,
    forge::db::object::indexed_by<
-      forge::db::object::ranked_primary_unique<by_ranked_id, payload_bytes_sum, score_total_sum>,
+      forge::db::object::ranked_primary_unique<
+         by_ranked_id, forge::db::object::ranked_schema<1>, payload_bytes_sum, score_total_sum>,
       forge::db::object::ranked_unique<
-         by_ranked_token, forge::db::object::member<&ranked_upload::token>, payload_bytes_sum>,
+         by_ranked_token, forge::db::object::member<&ranked_upload::token>,
+         forge::db::object::ranked_schema<1>, payload_bytes_sum>,
       forge::db::object::ranked_non_unique<
-         by_ranked_state, forge::db::object::member<&ranked_upload::state>, payload_bytes_sum>,
+         by_ranked_state, forge::db::object::member<&ranked_upload::state>,
+         forge::db::object::ranked_schema<1>, payload_bytes_sum>,
       forge::db::object::ranked_non_unique<
          by_ranked_tenant_score,
          forge::db::object::composite_key<
             forge::db::object::member<&ranked_upload::tenant>,
             forge::db::object::descending<forge::db::object::member<&ranked_upload::score>>>,
-         payload_bytes_sum>>>;
+         forge::db::object::ranked_schema<1>, payload_bytes_sum>>>;
+
+using ranked_upload_schema_v2_object = forge::db::object::object_index<
+   ranked_upload,
+   forge::db::object::indexed_by<
+      forge::db::object::ranked_primary_unique<
+         by_ranked_id, forge::db::object::ranked_schema<2>, payload_bytes_sum, score_total_sum>>>;
+
+using ranked_upload_kind_mismatch_object = forge::db::object::object_index<
+   ranked_upload,
+   forge::db::object::indexed_by<
+      forge::db::object::ranked_primary_unique<
+         by_ranked_id, forge::db::object::ranked_schema<1>, payload_bytes_sum, score_total_sum>,
+      forge::db::object::ranked_non_unique<
+         by_ranked_token, forge::db::object::member<&ranked_upload::token>,
+         forge::db::object::ranked_schema<1>, payload_bytes_sum>>>;
+
+using ranked_upload_sum_mismatch_object = forge::db::object::object_index<
+   ranked_upload,
+   forge::db::object::indexed_by<
+      forge::db::object::ranked_primary_unique<
+         by_ranked_id, forge::db::object::ranked_schema<1>, payload_bytes_sum>>>;
 
 struct ranked_reference {
    std::uint64_t id = 0;
@@ -273,6 +297,8 @@ struct memory_state {
    bool block_rollbacks = false;
    bool fail_rollbacks = false;
    bool rollback_started = false;
+   bool support_record_locks = false;
+   std::vector<forge::db::core::record_key> lock_requests;
 };
 
 class memory_session final : public forge::db::core::session {
@@ -291,7 +317,12 @@ class memory_session final : public forge::db::core::session {
    }
 
    [[nodiscard]] forge::db::core::capabilities capabilities() const noexcept override {
-      return forge::db::core::capabilities{.snapshot_reads = false, .writes = true, .savepoints = true};
+      return forge::db::core::capabilities{
+         .snapshot_reads = false,
+         .writes = true,
+         .savepoints = true,
+         .record_locks = state_->support_record_locks,
+      };
    }
 
    boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(forge::db::core::family,
@@ -301,6 +332,15 @@ class memory_session final : public forge::db::core::session {
          co_return std::nullopt;
       }
       co_return found->second;
+   }
+
+   boost::asio::awaitable<std::optional<std::vector<std::byte>>>
+   get_for_update(forge::db::core::family family, forge::db::core::record_key key) override {
+      {
+         auto guard = std::scoped_lock{state_->mutex};
+         state_->lock_requests.push_back(key);
+      }
+      co_return co_await get(std::move(family), std::move(key));
    }
 
    boost::asio::awaitable<void> put(forge::db::core::family, forge::db::core::record_key key,
@@ -772,6 +812,21 @@ class memory_driver : public forge::db::core::driver {
       return state_->snapshot_calls;
    }
 
+   void support_record_locks(bool value) {
+      auto guard = std::scoped_lock{state_->mutex};
+      state_->support_record_locks = value;
+   }
+
+   [[nodiscard]] std::vector<forge::db::core::record_key> lock_requests() const {
+      auto guard = std::scoped_lock{state_->mutex};
+      return state_->lock_requests;
+   }
+
+   void clear_lock_requests() {
+      auto guard = std::scoped_lock{state_->mutex};
+      state_->lock_requests.clear();
+   }
+
    [[nodiscard]] std::size_t record_count() const noexcept {
       auto guard = std::scoped_lock{state_->mutex};
       return state_->records.size();
@@ -1149,7 +1204,9 @@ BOOST_AUTO_TEST_CASE(db_object_ranked_indexes_maintain_counts_sums_and_positions
       BOOST_CHECK_EQUAL((co_await primary.nth(0))->id.instance, 10U);
       BOOST_CHECK_EQUAL((co_await primary.nth(2))->id.instance, 12U);
       BOOST_CHECK(!(co_await primary.nth(3)).has_value());
+      const auto snapshots_before_rank = driver->snapshot_calls();
       BOOST_CHECK_EQUAL(co_await primary.rank(second), 1U);
+      BOOST_CHECK_EQUAL(driver->snapshot_calls(), snapshots_before_rank + 1U);
       BOOST_CHECK_EQUAL(co_await tokens.find_rank(second.token), 1U);
       BOOST_CHECK_EQUAL(co_await tokens.rank(second), 1U);
       BOOST_CHECK_EQUAL(co_await tokens.sum<by_payload_bytes>(), 60U);
@@ -1232,6 +1289,29 @@ BOOST_AUTO_TEST_CASE(db_object_ranked_indexes_fail_closed_for_missing_or_corrupt
       auto corrupt_index = corrupt_store.index<ranked_upload_object, by_ranked_id>();
       BOOST_CHECK_THROW(co_await corrupt_index.count(),
                         forge::db::object::exceptions::aggregate_corruption);
+
+      auto schema_driver = std::make_shared<memory_driver>();
+      auto schema_store = co_await forge::db::object::store::open(schema_driver);
+      schema_store.register_object<ranked_upload_object>();
+      co_await schema_store.insert(make_ranked_upload(1, 1, 1, 1, 10));
+
+      auto version_store = co_await forge::db::object::store::open(schema_driver);
+      version_store.register_object<ranked_upload_schema_v2_object>();
+      BOOST_CHECK_THROW(
+         (co_await version_store.index<ranked_upload_schema_v2_object, by_ranked_id>().count()),
+         forge::db::object::exceptions::aggregate_corruption);
+
+      auto kind_store = co_await forge::db::object::store::open(schema_driver);
+      kind_store.register_object<ranked_upload_kind_mismatch_object>();
+      BOOST_CHECK_THROW(
+         (co_await kind_store.index<ranked_upload_kind_mismatch_object, by_ranked_token>().count()),
+         forge::db::object::exceptions::aggregate_corruption);
+
+      auto sum_store = co_await forge::db::object::store::open(schema_driver);
+      sum_store.register_object<ranked_upload_sum_mismatch_object>();
+      BOOST_CHECK_THROW(
+         (co_await sum_store.index<ranked_upload_sum_mismatch_object, by_ranked_id>().count()),
+         forge::db::object::exceptions::aggregate_corruption);
       co_return;
    }());
 }
@@ -1299,6 +1379,29 @@ BOOST_AUTO_TEST_CASE(db_object_ranked_backend_policy_requires_record_locks_befor
                         forge::db::object::exceptions::unsupported_operation);
       BOOST_CHECK(!(co_await store.find(value.id)).has_value());
       co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_ranked_backend_policy_locks_family_coordinator_before_roots) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   driver->support_record_locks(true);
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = co_await forge::db::object::store::open(
+         driver, forge::db::object::store::options{.writes = forge::db::object::write_policy::backend});
+      store.register_object<ranked_upload_object>();
+      driver->clear_lock_requests();
+
+      auto tx = co_await store.begin_transaction();
+      co_await tx.insert(make_ranked_upload(1, 1, 1, 1, 10));
+      const auto locks = driver->lock_requests();
+      BOOST_REQUIRE(!locks.empty());
+      BOOST_REQUIRE(!locks.front().empty());
+      BOOST_CHECK_EQUAL(std::to_integer<std::uint8_t>(locks.front().bytes().front()), 0x32U);
+      BOOST_CHECK(std::any_of(locks.begin(), locks.end(), [](const auto& value) {
+         return !value.empty() && std::to_integer<std::uint8_t>(value.bytes().front()) == 0x30U;
+      }));
+      co_await tx.rollback();
    }());
 }
 

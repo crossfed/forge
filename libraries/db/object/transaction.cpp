@@ -169,6 +169,7 @@ void detail::transaction_access::bind_store(transaction& active, std::shared_ptr
 void detail::transaction_access::use_backend_writes(transaction& active, bool value) noexcept {
    if (active.impl_) {
       active.impl_->backend_writes = value;
+      active.impl_->participant->use_backend_writes(value);
    }
 }
 

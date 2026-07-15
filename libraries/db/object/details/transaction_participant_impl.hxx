@@ -2,6 +2,7 @@
 
 #include <boost/asio/awaitable.hpp>
 
+#include <array>
 #include <map>
 #include <memory>
 #include <optional>
@@ -23,6 +24,8 @@ class transaction_participant_impl final : public forge::db::core::transaction_p
    [[nodiscard]] std::string_view name() const noexcept override;
    [[nodiscard]] std::span<const forge::db::core::family>
    exclusive_families() const noexcept override;
+   [[nodiscard]] std::span<const forge::db::core::record_lock_claim>
+   prewrite_locks() const noexcept override;
    [[nodiscard]] forge::db::core::mutation_policy
    classify(const forge::db::core::family& family,
             const forge::db::core::record_key& key,
@@ -39,6 +42,7 @@ class transaction_participant_impl final : public forge::db::core::transaction_p
                      forge::db::core::participant_access& access) override;
 
    void remember_allocation(forge::ids::object_id type, std::uint64_t next_instance);
+   void use_backend_writes(bool value) noexcept;
    [[nodiscard]] change_set& changes() noexcept;
    [[nodiscard]] bool finalized() const noexcept;
 
@@ -55,6 +59,7 @@ class transaction_participant_impl final : public forge::db::core::transaction_p
 
    std::string name_;
    forge::db::core::family family_;
+   std::array<forge::db::core::record_lock_claim, 1> prewrite_locks_;
    transaction::seal_allocations_fn seal_allocations_;
    transaction::allocation_seal_map allocation_seals_;
    std::vector<std::shared_ptr<observer>> observers_;
@@ -63,6 +68,7 @@ class transaction_participant_impl final : public forge::db::core::transaction_p
    std::optional<savepoint_frame> pending_savepoint_;
    std::vector<savepoint_frame> savepoints_;
    bool finalized_ = false;
+   bool backend_writes_ = false;
 };
 
 } // namespace forge::db::object::detail

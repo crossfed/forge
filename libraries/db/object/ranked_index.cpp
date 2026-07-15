@@ -23,7 +23,7 @@ namespace {
 constexpr auto root_magic = std::array<std::byte, 4>{
    static_cast<std::byte>('F'), static_cast<std::byte>('R'),
    static_cast<std::byte>('A'), static_cast<std::byte>('1')};
-constexpr auto format_version = std::uint8_t{1};
+constexpr auto format_version = std::uint8_t{2};
 constexpr auto crc64_ecma = std::uint8_t{1};
 
 using signed_wide = boost::multiprecision::int128_t;
@@ -149,16 +149,17 @@ aggregate decode_aggregate(const layout& descriptor, const bytes& encoded) {
 }
 
 bytes encode_root(const layout& descriptor, const aggregate& total) {
+   if (descriptor.schema.empty() || descriptor.schema.size() > std::numeric_limits<std::uint32_t>::max()) {
+      throw error{error_code::corruption, "ranked schema descriptor is invalid"};
+   }
    auto out = bytes{};
    out.insert(out.end(), root_magic.begin(), root_magic.end());
    out.push_back(static_cast<std::byte>(format_version));
    out.push_back(static_cast<std::byte>(crc64_ecma));
    out.push_back(static_cast<std::byte>(level_count));
    out.push_back(std::byte{0});
-   append_u32(out, static_cast<std::uint32_t>(descriptor.sum_kinds.size()));
-   for (const auto kind : descriptor.sum_kinds) {
-      out.push_back(static_cast<std::byte>(kind));
-   }
+   append_u32(out, static_cast<std::uint32_t>(descriptor.schema.size()));
+   out.insert(out.end(), descriptor.schema.begin(), descriptor.schema.end());
    const auto aggregate_bytes = encode_aggregate(descriptor, total);
    out.insert(out.end(), aggregate_bytes.begin(), aggregate_bytes.end());
    return out;
@@ -177,16 +178,12 @@ aggregate decode_root(const layout& descriptor, const bytes& encoded) {
    if (version != format_version || hash != crc64_ecma || levels != level_count) {
       throw error{error_code::corruption, "ranked root format configuration is incompatible"};
    }
-   const auto slots = read_u32(encoded, offset);
-   if (slots != descriptor.sum_kinds.size() || encoded.size() - offset < slots) {
-      throw error{error_code::corruption, "ranked root sum layout is incompatible"};
+   const auto schema_size = read_u32(encoded, offset);
+   if (schema_size != descriptor.schema.size() || encoded.size() - offset < schema_size ||
+       !std::equal(descriptor.schema.begin(), descriptor.schema.end(), encoded.begin() + offset)) {
+      throw error{error_code::corruption, "ranked root schema descriptor is incompatible"};
    }
-   for (auto slot = std::size_t{0}; slot < descriptor.sum_kinds.size(); ++slot) {
-      if (std::to_integer<std::uint8_t>(encoded[offset++]) !=
-          static_cast<std::uint8_t>(descriptor.sum_kinds[slot])) {
-         throw error{error_code::corruption, "ranked root sum signedness is incompatible"};
-      }
-   }
+   offset += schema_size;
    auto aggregate_bytes = bytes{encoded.begin() + static_cast<std::ptrdiff_t>(offset), encoded.end()};
    return decode_aggregate(descriptor, aggregate_bytes);
 }

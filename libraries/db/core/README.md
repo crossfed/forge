@@ -90,6 +90,17 @@ Participants that own a physical record layout declare their
 mutation or savepoint, while observer participants can keep the default empty
 claim and coexist with storage layers.
 
+Participants that require transaction-wide record-lock ordering declare
+`prewrite_locks()`. Before the first `get_for_update()` or mutation, Core
+collects every claim, sorts and deduplicates them by `(family, key)`, and
+acquires them in that canonical order. A participant with prewrite claims may
+not be attached after this preparation boundary; a claimless observer or
+storage layer may still attach until the first mutation or savepoint because it
+cannot change lock order. Claims must remain stable for the participant's
+lifetime. A partial preparation failure makes the transaction rollback-only;
+prepared locks remain owned by the backend transaction through savepoints until
+final commit, rollback or dropped cleanup.
+
 ## Families
 
 `forge::db::core::family` is a logical record space inside one driver. RocksDB maps it
