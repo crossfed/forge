@@ -346,7 +346,6 @@ class binary_parser {
             break;
          case section_id::function_section:
             parse_section<section_id::function_section>(code_ptr, mod.functions);
-            mod.normalize_types();
             break;
          case section_id::table_section:
             parse_section<section_id::table_section>(code_ptr, mod.tables);
@@ -368,6 +367,7 @@ class binary_parser {
             parse_section<section_id::element_section>(code_ptr, mod.elements);
             break;
          case section_id::code_section:
+            mod.normalize_types();
             parse_section<section_id::code_section>(code_ptr, mod.code);
             break;
          case section_id::data_section:

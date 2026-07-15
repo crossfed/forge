@@ -45,6 +45,16 @@ struct empty_span_host {
    bool called = false;
 };
 
+struct imported_table_host {
+   static void invoke() {
+      ++calls;
+   }
+
+   static inline std::uint32_t calls = 0;
+};
+
+using imported_table_functions = wasm::registered_host_functions<wasm::standalone_function_t>;
+
 struct conversion_host {
    std::uint32_t offset = 0;
 };
@@ -484,15 +494,40 @@ template <typename Impl> void verify_public_call_indirect_rejects_empty_slot() {
    allocator.free();
 }
 
+template <typename Impl> void verify_public_call_indirect_invokes_imported_only_table() {
+   static const auto registered = [] {
+      imported_table_functions::add<&imported_table_host::invoke>("env", "invoke");
+      return true;
+   }();
+   static_cast<void>(registered);
+
+   auto code = wasm::wasm_code{
+       0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,                         // header
+       0x01, 0x04, 0x01, 0x60, 0x00, 0x00,                                     // one function type
+       0x02, 0x0e, 0x01, 0x03, 0x65, 0x6e, 0x76, 0x06, 0x69, 0x6e, 0x76, 0x6f, // import env.invoke
+       0x6b, 0x65, 0x00, 0x00,                                                 // as function type zero
+       0x04, 0x04, 0x01, 0x70, 0x00, 0x01,                                     // table with one element
+       0x09, 0x07, 0x01, 0x00, 0x41, 0x00, 0x0b, 0x01, 0x00,                   // import at table index zero
+       0x0a, 0x01, 0x00                                                        // empty code section
+   };
+   imported_table_host::calls = 0;
+   auto instance = wasm::backend<imported_table_functions, Impl>{code, nullptr};
+
+   BOOST_TEST(instance.call_indirect(nullptr, 0));
+   BOOST_TEST(imported_table_host::calls == 1U);
+}
+
 TEST_CASE("interpreter exposes public call indirect", "[call_indirect]") {
    verify_public_call_indirect<wasm::interpreter>();
    verify_public_call_indirect_rejects_empty_slot<wasm::interpreter>();
+   verify_public_call_indirect_invokes_imported_only_table<wasm::interpreter>();
 }
 
 #if FORGE_VM_WASM_HAS_JIT
 TEST_CASE("jit exposes public call indirect", "[call_indirect]") {
    verify_public_call_indirect<wasm::jit>();
    verify_public_call_indirect_rejects_empty_slot<wasm::jit>();
+   verify_public_call_indirect_invokes_imported_only_table<wasm::jit>();
 }
 #endif
 

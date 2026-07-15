@@ -324,6 +324,9 @@ struct module {
    }
 
    void finalize() {
+      if (type_aliases.size() != types.size() || fast_functions.size() != get_functions_total()) {
+         normalize_types();
+      }
       import_functions.resize(get_imported_functions_size());
       allocator.finalize();
    }
