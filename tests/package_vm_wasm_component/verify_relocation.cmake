@@ -4,6 +4,7 @@ foreach(
    required
    IN ITEMS
       FORGE_PACKAGE_TEST_INSTALL_PREFIX
+      FORGE_PACKAGE_TEST_INSTALL_LIBDIR
       FORGE_PACKAGE_TEST_RELOCATED_PREFIX
       FORGE_PACKAGE_TEST_SOURCE_DIR
       FORGE_PACKAGE_TEST_BINARY_DIR
@@ -22,7 +23,7 @@ file(COPY "${FORGE_PACKAGE_TEST_INSTALL_PREFIX}/" DESTINATION "${FORGE_PACKAGE_T
 
 set(
    forbidden_details
-   "${FORGE_PACKAGE_TEST_RELOCATED_PREFIX}/lib/forge/internal/vm_wasm/details"
+   "${FORGE_PACKAGE_TEST_RELOCATED_PREFIX}/${FORGE_PACKAGE_TEST_INSTALL_LIBDIR}/forge/internal/vm_wasm/details"
 )
 if(EXISTS "${forbidden_details}")
    message(FATAL_ERROR "Installed vm_wasm package exposes private details: ${forbidden_details}")
@@ -30,7 +31,7 @@ endif()
 
 set(
    targets_file
-   "${FORGE_PACKAGE_TEST_RELOCATED_PREFIX}/lib/cmake/Forge/ForgeTargets.cmake"
+   "${FORGE_PACKAGE_TEST_RELOCATED_PREFIX}/${FORGE_PACKAGE_TEST_INSTALL_LIBDIR}/cmake/Forge/ForgeTargets.cmake"
 )
 file(READ "${targets_file}" targets_content)
 

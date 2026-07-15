@@ -55,13 +55,19 @@ class bounded_allocator {
 class stack_allocator {
  public:
    explicit stack_allocator(std::size_t min_size);
+   stack_allocator(const stack_allocator&) = delete;
+   stack_allocator& operator=(const stack_allocator&) = delete;
+   stack_allocator(stack_allocator&& other) noexcept;
+   stack_allocator& operator=(stack_allocator&& other) noexcept;
    ~stack_allocator();
 
    void* top() const;
 
  private:
+   void release() noexcept;
+
    void* _ptr = nullptr;
-   std::size_t _size;
+   std::size_t _size = 0;
 };
 
 class contiguous_allocator {

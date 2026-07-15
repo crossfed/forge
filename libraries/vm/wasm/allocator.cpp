@@ -3,6 +3,7 @@ module;
 #include <cstddef>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <utility>
 
 module forge.vm.wasm.allocator;
 
@@ -22,9 +23,27 @@ stack_allocator::stack_allocator(std::size_t min_size) {
    }
 }
 
+stack_allocator::stack_allocator(stack_allocator&& other) noexcept
+    : _ptr(std::exchange(other._ptr, nullptr)), _size(std::exchange(other._size, 0)) {}
+
+stack_allocator& stack_allocator::operator=(stack_allocator&& other) noexcept {
+   if (this != &other) {
+      release();
+      _ptr = std::exchange(other._ptr, nullptr);
+      _size = std::exchange(other._size, 0);
+   }
+   return *this;
+}
+
 stack_allocator::~stack_allocator() {
+   release();
+}
+
+void stack_allocator::release() noexcept {
    if (_ptr) {
       ::munmap(_ptr, _size);
+      _ptr = nullptr;
+      _size = 0;
    }
 }
 

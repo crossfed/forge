@@ -31,6 +31,10 @@ static_assert(!std::is_copy_constructible_v<wasm::growable_allocator>);
 static_assert(!std::is_copy_assignable_v<wasm::growable_allocator>);
 static_assert(!std::is_move_constructible_v<wasm::growable_allocator>);
 static_assert(!std::is_move_assignable_v<wasm::growable_allocator>);
+static_assert(!std::is_copy_constructible_v<wasm::stack_allocator>);
+static_assert(!std::is_copy_assignable_v<wasm::stack_allocator>);
+static_assert(std::is_nothrow_move_constructible_v<wasm::stack_allocator>);
+static_assert(std::is_nothrow_move_assignable_v<wasm::stack_allocator>);
 
 namespace {
 struct empty_span_host {
@@ -378,6 +382,21 @@ TEST_CASE("alternate stack allocation reports mapping failure", "[stack_allocato
    constexpr auto impossible_size = std::numeric_limits<std::size_t>::max() / 2;
 
    BOOST_CHECK_THROW(wasm::stack_allocator{impossible_size}, wasm::exceptions::allocation);
+}
+
+TEST_CASE("alternate stack ownership moves without sharing its mapping", "[stack_allocator]") {
+   auto source = wasm::stack_allocator{4 * 1024 * 1024 + 1};
+   auto* top = source.top();
+   BOOST_REQUIRE(top != nullptr);
+
+   auto destination = wasm::stack_allocator{std::move(source)};
+   BOOST_TEST(source.top() == nullptr);
+   BOOST_TEST(destination.top() == top);
+
+   auto assigned = wasm::stack_allocator{0};
+   assigned = std::move(destination);
+   BOOST_TEST(destination.top() == nullptr);
+   BOOST_TEST(assigned.top() == top);
 }
 
 TEST_CASE("data segments reject unsupported memory indexes", "[parser]") {

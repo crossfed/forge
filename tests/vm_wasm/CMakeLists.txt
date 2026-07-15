@@ -47,6 +47,9 @@ target_include_directories(
       ${FORGE_VM_WASM_TEST_INCLUDE_DIRS}
 )
 target_compile_definitions(test_forge_vm_wasm_internal PRIVATE ${FORGE_VM_WASM_TEST_DEFINITIONS})
+if(FORGE_VM_WASM_TEST_INTERPRETER_ONLY)
+   target_compile_definitions(test_forge_vm_wasm_internal PRIVATE FORGE_VM_WASM_TEST_INTERPRETER_ONLY=1)
+endif()
 target_link_libraries(test_forge_vm_wasm_internal PRIVATE forge_vm_wasm Boost::included_unit_test_framework)
 add_test(NAME test_forge_vm_wasm_internal COMMAND test_forge_vm_wasm_internal --catch_system_errors=no)
 set_tests_properties(test_forge_vm_wasm_internal PROPERTIES LABELS vm_wasm)
