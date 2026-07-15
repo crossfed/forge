@@ -276,6 +276,26 @@ TEST_CASE("managed vectors preserve values across growth", "[managed_vector]") {
    BOOST_TEST(values[3] == 13U);
 }
 
+TEST_CASE("managed vector back returns the last appended element", "[managed_vector]") {
+   auto allocator = wasm::growable_allocator{64};
+   auto values = wasm::managed_vector<std::uint32_t, wasm::growable_allocator>{allocator};
+
+   static_assert(std::is_same_v<decltype(values.back()), std::uint32_t&>);
+   BOOST_CHECK_THROW(values.back(), wasm::exceptions::vector_out_of_bounds);
+
+   values.push_back(7U);
+   BOOST_TEST(values.back() == 7U);
+
+   values.emplace_back(11U);
+   BOOST_TEST(values.back() == 11U);
+
+   values.back() = 13U;
+   BOOST_TEST(values[1] == 13U);
+
+   values.pop_back();
+   BOOST_TEST(values.back() == 7U);
+}
+
 TEST_CASE("managed vector rejects empty pops without changing its index", "[managed_vector]") {
    auto allocator = wasm::growable_allocator{64};
    auto values = wasm::managed_vector<std::uint32_t, wasm::growable_allocator>{allocator};
@@ -330,6 +350,51 @@ TEST_CASE("null backend rejects deferred instantiation errors", "[null_backend]"
 
    BOOST_CHECK_THROW(validate(), wasm::exceptions::interpreter);
 }
+
+template <typename Impl> void verify_public_call_indirect() {
+   auto code = wasm::wasm_code{
+       0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,       // header
+       0x01, 0x04, 0x01, 0x60, 0x00, 0x00,                   // one function type
+       0x03, 0x02, 0x01, 0x00,                               // one function
+       0x04, 0x04, 0x01, 0x70, 0x00, 0x01,                   // table with one element
+       0x09, 0x07, 0x01, 0x00, 0x41, 0x00, 0x0b, 0x01, 0x00, // function zero at table index zero
+       0x0a, 0x04, 0x01, 0x02, 0x00, 0x0b                    // empty function body
+   };
+   auto allocator = wasm::wasm_allocator{};
+   {
+      auto instance = wasm::backend<std::nullptr_t, Impl>{code, &allocator};
+
+      BOOST_TEST(instance.call_indirect(nullptr, 0));
+      BOOST_CHECK_THROW(instance.call_indirect(nullptr, 1), wasm::exceptions::interpreter);
+   }
+   allocator.free();
+}
+
+template <typename Impl> void verify_public_call_indirect_rejects_empty_slot() {
+   auto code = wasm::wasm_code{
+       0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // header
+       0x04, 0x04, 0x01, 0x70, 0x00, 0x01              // table with one empty element
+   };
+   auto allocator = wasm::wasm_allocator{};
+   {
+      auto instance = wasm::backend<std::nullptr_t, Impl>{code, &allocator};
+
+      BOOST_CHECK_THROW(instance.call_indirect(nullptr, 0), wasm::exceptions::interpreter);
+   }
+   allocator.free();
+}
+
+TEST_CASE("interpreter exposes public call indirect", "[call_indirect]") {
+   verify_public_call_indirect<wasm::interpreter>();
+   verify_public_call_indirect_rejects_empty_slot<wasm::interpreter>();
+}
+
+#if FORGE_VM_WASM_HAS_JIT
+TEST_CASE("jit exposes public call indirect", "[call_indirect]") {
+   verify_public_call_indirect<wasm::jit>();
+   verify_public_call_indirect_rejects_empty_slot<wasm::jit>();
+}
+#endif
 
 TEST_CASE("data segments must fit declared linear memory", "[null_backend]") {
    auto invalid_code = wasm::wasm_code{

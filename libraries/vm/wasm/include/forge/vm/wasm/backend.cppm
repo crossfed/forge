@@ -289,7 +289,9 @@ class backend {
 
    template <typename... Args> inline bool call_indirect(host_t* host, uint32_t func_index, Args&&... args) {
       require_execution_ready();
-      if constexpr (wasm_debug) {
+      if constexpr (Impl::is_jit) {
+         ctx->execute_func_table(host, jit_visitor(*ctx), func_index, std::forward<Args>(args)...);
+      } else if constexpr (wasm_debug) {
          ctx->execute_func_table(host, debug_visitor(*ctx), func_index, std::forward<Args>(args)...);
       } else {
          ctx->execute_func_table(host, interpret_visitor(*ctx), func_index, std::forward<Args>(args)...);

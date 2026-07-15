@@ -224,7 +224,7 @@ struct module {
       std::vector<jit_func_type> types;
       std::vector<jit_import_entry> imports;
       std::vector<uint32_t> functions;
-      // tables not needed during JIT execution
+      std::vector<uint32_t> table;
       std::vector<memory_type> memories;
       std::vector<global_variable> globals;
       std::vector<jit_export_entry> exports;
@@ -282,6 +282,11 @@ struct module {
 
       if (functions.size() > 0) {
          jit_mod->functions.assign(functions.data(), functions.data() + functions.size());
+      }
+
+      if (tables.size() > 0 && tables[0].table.size() > 0) {
+         const auto& source = tables[0].table;
+         jit_mod->table.assign(source.data(), source.data() + source.size());
       }
 
       if (globals.size() > 0) {

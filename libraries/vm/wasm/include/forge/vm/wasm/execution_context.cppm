@@ -458,6 +458,13 @@ class jit_execution_context : public frame_info_holder<EnableBacktrace>,
       __builtin_unreachable();
    }
 
+   template <typename... Args>
+   inline std::optional<operand_stack_elem> execute_func_table(host_type* host, jit_visitor visitor,
+                                                               uint32_t table_index, Args&&... args) {
+      detail::check<exceptions::interpreter>((table_index < _mod->jit_mod->table.size()), "call_indirect out of range");
+      return execute(host, visitor, _mod->jit_mod->table[table_index], std::forward<Args>(args)...);
+   }
+
 #ifdef __x86_64__
    int backtrace(void** out, int count, void* uc) const {
       static_assert(EnableBacktrace);
@@ -698,6 +705,8 @@ template <typename Host> class execution_context : public execution_context_base
    }
 
    inline uint32_t table_elem(uint32_t i) {
+      detail::check<exceptions::interpreter>((_mod->tables.size() > 0 && i < _mod->tables[0].table.size()),
+                                             "call_indirect out of range");
       return _mod->tables[0].table[i];
    }
    inline void push_operand(operand_stack_elem el) {

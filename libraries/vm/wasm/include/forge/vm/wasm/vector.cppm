@@ -48,8 +48,9 @@ template <typename T, typename Allocator> class vector {
       _size = std::max(_size, _index);
    }
 
-   constexpr inline void back() {
-      return _data[_index];
+   constexpr inline T& back() {
+      detail::check<exceptions::vector_out_of_bounds>((_index > 0), "vector back out of bounds");
+      return _data[_index - 1];
    }
 
    constexpr inline void pop_back() {
