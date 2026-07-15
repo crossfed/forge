@@ -174,6 +174,20 @@ class service_node {
 - Product blockchains may build runtime layers on top of the Chain family, but
   downstream product names and assumptions must not enter its public API.
 
+## VM Library Boundary
+
+- `forge::vm` is an empty family root; public symbols live in VM leaf
+  libraries such as `forge::vm::wasm`.
+- `forge::vm::wasm` owns neutral WebAssembly parsing, validation, execution,
+  host-function mechanics, guarded memory, deterministic floating point,
+  watchdog behavior and supported execution backends.
+- VM libraries must not contain blockchain controller behavior, state access,
+  contract policy, transaction/resource accounting, code-cache policy or
+  product-specific host functions.
+- Native ports must preserve donor behavior and licensing. Downstream
+  compatibility aliases, donor namespaces and donor macro families are not
+  public Forge API.
+
 ## Namespace And Target Naming
 
 FORGE uses deterministic namespace, target and module naming. Replace `::` with

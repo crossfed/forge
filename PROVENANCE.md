@@ -7,6 +7,54 @@ Audit date: 2026-06-07.
 
 ## Confirmed Derived Or Adapted Source
 
+### Native EOS VM Port
+
+`libraries/vm/wasm` is a source-derived C++23 module port of
+AntelopeIO/eos-vm commit `e5b1fc79c4b8d78f32749afa94a8d4c4d071f67f`.
+The port preserves the donor parser, validation, interpreter, host-function
+conversion, guarded allocator, watchdog, deterministic SoftFloat behavior and
+x86_64 JIT implementation while renaming the public API to
+`forge::vm::wasm` and mapping failures to Forge exceptions.
+
+The derived library is distributed under EOS VM License V1.0, preserved in
+`libraries/vm/wasm/LICENSE.eos-vm`. Donor tests are mapped mechanically to
+Boost.Test and verified against source and fixture hashes. Test fixtures come
+from EOSIO/eos-vm-test-wasms commit
+`ffbbb552e6020623d8ae148d81a152c8ef700325`.
+
+`vendor/softfloat` pins AntelopeIO/berkeley-softfloat-3 commit
+`19cbea6c254cdbb5d539584e5696675de997721d`; it remains a separate upstream
+dependency and its C types are not part of Forge's public VM API.
+
+The donor Catch2 oracle retains the original test bodies. A hash-checked CI
+preparation step adds the nullable allocator overload and fixes forwarding
+reference classification in the donor host result conversion; no donor test or
+fixture is patched.
+
+Forge carries regression-tested correctness fixes over the pinned donor:
+function-type equality checks non-void result types, `vector_to_string` sizes
+its destination before indexed writes, alternate-stack allocation rejects
+`MAP_FAILED`, data segments reject unsupported memory indexes, and zero-length
+guest spans do not probe outside their empty range. JIT execution also rejects
+missing exports before looking up their function type, and `memory.grow`
+interprets its operand as an unsigned page count. Default span proxies avoid a
+zero alignment divisor, and interpreter argument conversion receives the active
+host just like JIT. Hosted `execute_all` calls pass that host through the same
+pointer contract as individual calls. These changes harden invalid input and
+allocation-failure paths. Empty profile maps return the unknown-address
+sentinel, and interpreter-only test lanes do not instantiate JIT regressions.
+Zero-capacity managed vectors grow before their first write, and nested signal
+scopes restore the outer memory ranges. JIT `execute_all` traverses the copied
+JIT export table after parser storage is released. The unmodified donor test
+bodies remain the compatibility oracle. The imported `f32` sign operations use
+explicit unsigned masks so their bit-level semantics remain defined in C++.
+Arena-backed managed vectors retain appended elements when they grow and reject
+empty pops before their write index can underflow.
+VM tests preserve the donor's disabled POSIX signal handling policy so guarded
+guest-memory faults remain owned by the VM. AddressSanitizer instrumentation is
+disabled only for the native guest-memory read/write primitives because lowering
+a cross-guard-page store may mutate valid bytes before delivering the trap.
+
 The initial standalone import (`02ef01e Initial standalone storlane-fc import`)
 contained FC-style code under `include/fc` and `src`. That import carried the
 MIT notice for AntelopeIO/spring, EOS Network Foundation, and EOSIO/eos. Later

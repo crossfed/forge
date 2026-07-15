@@ -30,7 +30,7 @@ libraries/<lib>/                         # или <group>/<lib>/
 ## Расширения = семантика (строго)
 | Расширение | Где лежит | Значение |
 |---|---|---|
-| `.cppm` | `include/<ns_root>/<lib_path>/` | публичный модуль-интерфейс |
+| `.cppm` | `include/<ns_root>/<lib_path>/` | module interface unit или module interface partition |
 | `.hpp` | `include/<ns_root>/<lib_path>/` | публичный **не**-модульный хедер (только макросы / экспорт-шаблоны) |
 | `.hxx` | `details/` | приватный хедер |
 | `.cpp` | корень либы | реализация |
@@ -62,10 +62,20 @@ libraries/<lib>/                         # или <group>/<lib>/
 `constexpr`-кода. Нетривиальные non-template функции и методы реализуются out-of-line
 в парном `X.cpp`.
 
-**R4. Приватные внутренности → `details/X.hxx`.**
+Header-only module units и interface partitions всегда живут в `include/`. Partition
+может быть не re-exported основным module interface и тем самым не входить в публичный
+import-контракт, но её исходник всё равно нужен CMake для построения BMI и package
+consumer. `details/` для таких `.cppm` не используется; он предназначен только для
+настоящих текстовых `.hxx`.
+
+**R4. Приватные текстовые внутренности → `details/X.hxx`.**
 Внутренние хелперы/impl-хедеры идут в `details/` как `.hxx` (+ парный `X.cpp` в корне).
 Каждый private header владеет одной связной сущностью или одним связным компонентом.
 **Никогда** в корень либы, **никогда** `_X.hpp`, **никогда** `.hpp` для приватного.
+
+Если template/constexpr реализация является частью module graph и должна быть доступна
+при построении BMI, использовать interface partition `include/.../X.cppm`, а не
+маскировать её под приватный `.hxx`, включаемый из публичного module interface.
 
 **R5. Разбиение большого `.cpp`.**
 Если реализация компонента велика — дробить как `X.cpp` + `X_<aspect>.cpp`

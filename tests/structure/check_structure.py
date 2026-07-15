@@ -12,14 +12,17 @@ SOURCE_SUFFIXES = {".cpp", ".cppm", ".hpp", ".hxx"}
 LAYOUT_ROOTS = ("libraries", "plugins")
 SCAN_ROOTS = ("libraries", "plugins", "tests")
 EXCLUDED_PARTS = {".git", "legacy", "vendor", "__pycache__"}
-MODULE_DECLARATION = re.compile(r"^\s*export\s+module\s+(forge(?:\.[A-Za-z_][A-Za-z0-9_]*)+)\s*;")
-MODULE_IMPORT = re.compile(r"^\s*(?:export\s+)?import\s+(forge(?:\.[A-Za-z_][A-Za-z0-9_]*)+)\s*;")
+MODULE_NAME = r"forge(?:\.[A-Za-z_][A-Za-z0-9_]*)+(?::[A-Za-z_][A-Za-z0-9_]*)?"
+MODULE_DECLARATION = re.compile(rf"^\s*export\s+module\s+({MODULE_NAME})\s*;")
+MODULE_UNIT = re.compile(rf"^\s*(?:export\s+)?module\s+({MODULE_NAME})\s*;")
+MODULE_IMPORT = re.compile(rf"^\s*(?:export\s+)?import\s+({MODULE_NAME}|:[A-Za-z_][A-Za-z0-9_]*)\s*;")
 INCLUDE = re.compile(r'^\s*#\s*include\s*([<"][^>"]+[>"])')
 BROAD_EXPORT = re.compile(r"^\s*export\s*\{")
 CONDITIONAL_START = re.compile(r"^\s*#\s*(?:if|ifdef|ifndef)\b")
 CONDITIONAL_BRANCH = re.compile(r"^\s*#\s*(?:elif|else)\b")
 CONDITIONAL_END = re.compile(r"^\s*#\s*endif\b")
 PRIVATE_DECLARATION = re.compile(r"^(?:class|struct|enum(?:\s+class)?)\s+([A-Za-z_][A-Za-z0-9_:]*)")
+VM_WASM_EXPORT = re.compile(r"\bFORGE_VM_WASM_EXPORT\b")
 
 
 def source_files(root: Path, roots: tuple[str, ...]) -> list[Path]:
@@ -117,6 +120,64 @@ def check_pairing(root: Path, errors: list[str]) -> None:
          )
 
 
+def check_macro_only_header(root: Path, path: Path, errors: list[str]) -> None:
+   text = re.sub(r"/\*.*?\*/", "", path.read_text(errors="ignore"), flags=re.DOTALL)
+   in_macro = False
+
+   for line_number, line in enumerate(text.splitlines(), 1):
+      stripped = re.sub(r"//.*$", "", line).strip()
+      if in_macro:
+         in_macro = line.rstrip().endswith("\\")
+         continue
+      if not stripped:
+         continue
+      if stripped.startswith("#"):
+         if re.match(r"#\s*define\b", stripped):
+            in_macro = line.rstrip().endswith("\\")
+         continue
+      errors.append(
+         f"{path.relative_to(root)}:{line_number}: macro-only public header contains a C++ declaration"
+      )
+
+
+def check_vm_wasm_boundaries(root: Path, errors: list[str]) -> None:
+   component = root / "libraries" / "vm" / "wasm"
+   if not component.exists():
+      return
+
+   details = component / "details"
+   if details.exists():
+      errors.append(f"{details.relative_to(root)}: vm_wasm must not install or compile private source headers")
+
+   include = component / "include" / "forge" / "vm" / "wasm"
+   allowed_headers = {"host_function.hpp", "opcode_macros.hpp"}
+   headers = {path.name for path in include.glob("*.hpp")}
+   unexpected = headers - allowed_headers
+   if unexpected:
+      errors.append(f"{include.relative_to(root)}: unexpected public headers: {', '.join(sorted(unexpected))}")
+
+   for name in sorted(allowed_headers):
+      path = include / name
+      if not path.exists():
+         errors.append(f"{path.relative_to(root)}: required macro-only public header is missing")
+         continue
+      check_macro_only_header(root, path, errors)
+
+   for path in sorted(include.glob("*.cppm")):
+      relative = path.relative_to(root)
+      for line_number, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
+         included = INCLUDE.match(line)
+         if included and (".hxx" in included.group(1) or "details/" in included.group(1)):
+            errors.append(f"{relative}:{line_number}: public VM module includes a private source header")
+         if included and "forge/vm/wasm/" in included.group(1) and included.group(1) not in {
+            "<forge/vm/wasm/host_function.hpp>",
+            "<forge/vm/wasm/opcode_macros.hpp>",
+         }:
+            errors.append(f"{relative}:{line_number}: VM components must use module imports")
+         if VM_WASM_EXPORT.search(line):
+            errors.append(f"{relative}:{line_number}: FORGE_VM_WASM_EXPORT is forbidden")
+
+
 def check_plugin_impl_ownership(root: Path, errors: list[str]) -> None:
    for path in sorted((root / "plugins").rglob("details/plugin_impl.hxx")):
       for line_number, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
@@ -134,12 +195,15 @@ def check_modules(root: Path, files: list[Path], errors: list[str]) -> None:
 
    for path in files:
       relative = path.relative_to(root)
+      source_lines = path.read_text(errors="ignore").splitlines()
+      unit_name = next((match.group(1) for line in source_lines if (match := MODULE_UNIT.match(line))), None)
+      unit_primary = unit_name.split(":", 1)[0] if unit_name else None
       seen_imports: dict[str, int] = {}
       seen_includes: dict[tuple[str, tuple[tuple[int, int], ...]], int] = {}
       conditional_stack: list[list[int]] = []
       next_conditional = 0
 
-      for line_number, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
+      for line_number, line in enumerate(source_lines, 1):
          if CONDITIONAL_START.match(line):
             next_conditional += 1
             conditional_stack.append([next_conditional, 0])
@@ -155,6 +219,11 @@ def check_modules(root: Path, files: list[Path], errors: list[str]) -> None:
          imported = MODULE_IMPORT.match(line)
          if imported:
             name = imported.group(1)
+            if name.startswith(":"):
+               if unit_primary is None:
+                  errors.append(f"{relative}:{line_number}: relative import has no owning module")
+                  continue
+               name = f"{unit_primary}{name}"
             imports.append((name, relative, line_number))
             if name in seen_imports:
                errors.append(
@@ -202,6 +271,7 @@ def main() -> int:
    check_layout(root, errors)
    check_aggregates(root, errors)
    check_pairing(root, errors)
+   check_vm_wasm_boundaries(root, errors)
    check_plugin_impl_ownership(root, errors)
    check_modules(root, files, errors)
 
