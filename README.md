@@ -182,6 +182,7 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [db/object](libraries/db/object/README.md) | `forge_db_object` | Typed object/index store over the shared DB driver. | Boost.Asio, `forge_db_core`, `forge_ids`, `forge_raw`, `forge_exceptions`. |
 | [db/blob](libraries/db/blob/README.md) | `forge_db_blob` | Content-addressed blob store with typed refs and explicit retention primitives. | Boost.Asio, `forge_db_core`, `forge_crypto`, `forge_raw`, `forge_variant`, `forge_exceptions`. |
 | [db/revision](libraries/db/revision/README.md) | `forge_db_revision` | Durable before-image revisions with strict-head revert and bounded whole-revision prune. | Boost.Asio, `forge_db_core`, `forge_db_object`, `forge_raw`, `forge_exceptions`. |
+| [db/mdbx](libraries/db/mdbx/README.md) | `forge_db_mdbx` | Vendored libmdbx implementation of the shared DB driver contract. | `forge_asio`, `forge_db_core`, `forge_exceptions`; libmdbx privately. |
 | [rocksdb](libraries/rocksdb/README.md) | `forge_rocksdb` | Optional RocksDB TransactionDB wrapper. | RocksDB privately, `forge_exceptions`, `forge_schema`. |
 | [db/rocksdb](libraries/db/rocksdb/README.md) | `forge_db_rocksdb` | RocksDB implementation of the shared DB driver contract. | `forge_db_core`, `forge_rocksdb`. |
 | [plugins](plugins/README.md) | `forge_plugins`, `forge_plugins_*_*` | Official infrastructure plugins: P2P node, API resolver, diagnostics, PubSub facade, crypto signer/secrets, named DB Store and RocksDB services. | `forge_app`, `forge_api_core`, focused plugin targets. |

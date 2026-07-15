@@ -17,6 +17,10 @@ import forge.db.core.record;
 
 export import forge.db.core.participant;
 
+namespace forge::db::core::detail {
+class driver_state;
+}
+
 export namespace forge::db::core {
 
 class driver;
@@ -120,17 +124,26 @@ class snapshot {
 
 class driver {
  public:
-   virtual ~driver() = default;
+   driver();
+   virtual ~driver();
+
+   driver(const driver&) = delete;
+   driver& operator=(const driver&) = delete;
+   driver(driver&&) = delete;
+   driver& operator=(driver&&) = delete;
 
    boost::asio::awaitable<transaction> begin_transaction();
    boost::asio::awaitable<snapshot> begin_read();
+   boost::asio::awaitable<void> async_close();
    virtual boost::asio::awaitable<void> async_flush(bool sync) = 0;
 
  private:
    virtual boost::asio::awaitable<std::unique_ptr<session>> open_transaction() = 0;
    virtual boost::asio::awaitable<std::unique_ptr<session>> open_snapshot() = 0;
+   virtual boost::asio::awaitable<void> close_driver();
 
    std::shared_ptr<const void> snapshot_origin_ = std::make_shared<std::byte>();
+   std::shared_ptr<detail::driver_state> state_;
 
    friend class snapshot;
 };

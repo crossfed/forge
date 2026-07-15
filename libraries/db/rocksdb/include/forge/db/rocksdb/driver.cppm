@@ -32,6 +32,7 @@ class driver : public forge::db::core::driver {
  private:
    boost::asio::awaitable<std::unique_ptr<forge::db::core::session>> open_transaction() override;
    boost::asio::awaitable<std::unique_ptr<forge::db::core::session>> open_snapshot() override;
+   boost::asio::awaitable<void> close_driver() override;
 
    std::shared_ptr<forge::rocksdb::store> store_;
    forge::rocksdb::write_options write_;

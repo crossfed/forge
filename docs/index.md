@@ -26,6 +26,7 @@ Documents below explain cross-library architecture decisions.
 | [iterations/forge-db-revisions-migrations-v1.md](iterations/forge-db-revisions-migrations-v1.md) | Future schema migration boundary and its optional use of DB Revision and savepoints. |
 | [iterations/forge-db-savepoints-v1.md](iterations/forge-db-savepoints-v1.md) | Accepted DB Core savepoint semantics, backend mapping and Object/Blob/revision participant invariants. |
 | [iterations/forge-db-state-services-v1.md](iterations/forge-db-state-services-v1.md) | Scope decisions for shared read views, physical checkpoints, deferred migrations and DB Store revision integration. |
+| [iterations/forge-db-mdbx-v1.md](iterations/forge-db-mdbx-v1.md) | Production design for a libmdbx DB Core backend, including thread affinity, snapshot cloning, durability, geometry and parity requirements. |
 | [iterations/forge-net-family-restructure-v1.md](iterations/forge-net-family-restructure-v1.md) | Future direction for grouping network libraries under `forge::net::*`. |
 | [network/quic-p2p.md](network/quic-p2p.md) | QUIC transport, P2P peer identity, protocol streams and failure model. |
 | [tui/notcurses-component-library.md](tui/notcurses-component-library.md) | TUI value models, deterministic rendering, navigation and Notcurses boundary. |
