@@ -75,7 +75,6 @@ target_link_libraries(app PRIVATE
 | [`forge::plugins::crypto::secrets`](crypto/secrets/README.md) | `forge_plugins_crypto_secrets` | `plugins.crypto.secrets` | Provides bounded secret retrieval, derivation and symmetric encryption operations. |
 | [`forge::plugins::log::otlp`](log/otlp/README.md) | `forge_plugins_log_otlp` | `plugins.log.otlp` | Exports configured FORGE logger routes to OTLP/HTTP JSON. |
 | [`forge::plugins::db::store`](db/store/README.md) | `forge_plugins_db_store` | `plugins.db.store` | Owns configured named DB stores and exposes optional Object, Blob and Revision layers over one Core driver. |
-| [`forge::plugins::db::rocksdb`](db/rocksdb/README.md) | `forge_plugins_db_rocksdb` | `plugins.db.rocksdb` | Provides a local RocksDB TransactionDB service for infrastructure plugins that need durable key/value state. |
 
 The aggregate target `forge_plugins` and package component `plugins` are
 interface convenience dependencies. They own no compiled code and only
@@ -143,4 +142,4 @@ transport mutation APIs. Their public APIs are typed contribution surfaces:
   `test_forge_package_plugins_crypto_secrets`,
   `test_forge_package_plugins_log_otlp`,
   `test_forge_package_plugins_p2p_node` and
-  `test_forge_package_plugins_db_rocksdb` when RocksDB is enabled.
+  `test_forge_package_plugins_db_store`.

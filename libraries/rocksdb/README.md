@@ -116,8 +116,9 @@ unchanged.
 - `test_forge_package_rocksdb_component` verifies
   `find_package(Forge CONFIG REQUIRED COMPONENTS rocksdb)` and
   `Forge::forge_rocksdb`.
-- `test_forge_plugins_db_rocksdb` and `test_forge_quic_p2p` cover plugin and P2P
-  consumers over this backend.
+- `test_forge_plugins_db_store` covers configured RocksDB Object, Blob,
+  Revision and shared-snapshot persistence; `test_forge_quic_p2p` covers the
+  P2P consumer over this backend.
 
 ## Security And Durability Notes
 
