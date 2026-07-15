@@ -70,6 +70,11 @@ import forge.raw.raw;
 import forge.db.rocksdb.driver;
 #endif
 
+#if FORGE_HAS_MDBX
+import forge.asio.affine;
+import forge.db.mdbx.driver;
+#endif
+
 namespace {
 
 namespace store_plugin = forge::plugins::db::store;
@@ -1780,6 +1785,79 @@ BOOST_AUTO_TEST_CASE(store_plugin_unknown_store_fails_typed) {
 
    forge::asio::blocking::run(app->runtime(), app->shutdown());
 }
+
+#if FORGE_HAS_MDBX
+BOOST_AUTO_TEST_CASE(store_plugin_programmatic_mdbx_store_shares_all_db_layers) {
+   auto root = root_guard{};
+   auto runtime = forge::asio::runtime{};
+   auto lane = forge::asio::affine::lane{{.thread_name = "store-mdbx-test"}};
+   auto scheduler = forge::asio::task::scheduler{runtime};
+   auto apis = forge::api::core::registry{};
+   auto signals = forge::app::signal_bus{};
+   auto events = forge::app::event_bus{};
+   auto plugin = store_plugin::plugin{};
+
+   auto driver = forge::asio::blocking::run(
+      runtime,
+      forge::db::mdbx::driver::open(
+         forge::db::mdbx::config{
+            .path = (root.root / "mdbx-store").string(),
+            .families = {"objectdb", "blobdb.data", "blobdb.refs"},
+         },
+         lane.get_executor()));
+
+   auto document = forge::config::core::document{};
+   forge::asio::blocking::run(
+      runtime,
+      plugin.configure(forge::config::core::component_view{
+         document, "plugins.db.store"}));
+   auto provider = forge::api::core::installer{apis};
+   forge::asio::blocking::run(runtime, plugin.provide(provider));
+   auto context = forge::app::plugin_context{scheduler, apis, signals, events};
+   forge::asio::blocking::run(runtime, plugin.initialize(context));
+
+   auto options = store_plugin::store_options{};
+   options.blob = store_plugin::blob_layer_options{};
+   options.revision = store_plugin::revision_layer_options{};
+   auto api = apis.get<store_plugin::api>(store_plugin::api::ref());
+   forge::asio::blocking::run(
+      runtime, api->add_store("files", driver, options));
+   forge::asio::blocking::run(runtime, plugin.after_initialize());
+   auto handle = forge::asio::blocking::run(runtime, api->store("files"));
+   handle.objects().register_object<file_object>();
+   forge::asio::blocking::run(runtime, plugin.startup());
+
+   auto transaction = forge::asio::blocking::run(
+      runtime, handle.begin_transaction());
+   auto objects = forge::asio::blocking::run(
+      runtime, handle.objects().join(transaction));
+   auto blobs = handle.blobs().join(transaction);
+   const auto revision = forge::asio::blocking::run(
+      runtime, handle.revisions().join(transaction));
+   const auto content = forge::asio::blocking::run(
+      runtime, blobs.put(bytes("mdbx plugin payload")));
+   forge::asio::blocking::run(
+      runtime,
+      blobs.retain(content, forge::db::blob::owner_ref{"file:1"}));
+   forge::asio::blocking::run(
+      runtime, objects.insert(make_file(1, "/mdbx.bin", content)));
+   forge::asio::blocking::run(runtime, transaction.commit());
+   BOOST_TEST(revision.id() == 1U);
+
+   auto read = forge::asio::blocking::run(runtime, handle.begin_read());
+   const auto loaded = forge::asio::blocking::run(
+      runtime, read.objects().get(file_record::id_t{1}));
+   BOOST_TEST(loaded.path == "/mdbx.bin");
+   BOOST_TEST(forge::asio::blocking::run(
+      runtime, read.blobs().get(loaded.content)) == bytes("mdbx plugin payload"));
+
+   read = {};
+   forge::asio::blocking::run(runtime, plugin.shutdown());
+   forge::asio::blocking::run(runtime, driver->async_close());
+   driver.reset();
+   forge::asio::blocking::run(runtime, lane.shutdown());
+}
+#endif
 
 #if FORGE_HAS_ROCKSDB
 BOOST_AUTO_TEST_CASE(store_plugin_configured_rocksdb_store_persists_across_reopen) {

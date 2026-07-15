@@ -20,6 +20,7 @@ target_link_libraries(
    forge_db_mdbx PUBLIC
       forge_asio
       forge_db_core
+      forge_exceptions
    PRIVATE
       mdbx-internal
 )

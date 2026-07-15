@@ -2,11 +2,11 @@
 
 namespace forge::db::mdbx::detail {
 
-class environment;
+class driver_impl;
 
 class snapshot_session final : public forge::db::core::session {
  public:
-   snapshot_session(std::shared_ptr<environment> environment, MDBX_txn* anchor);
+   snapshot_session(std::shared_ptr<driver_impl> owner, MDBX_txn* anchor);
    ~snapshot_session() override;
 
    [[nodiscard]] forge::db::core::capabilities capabilities() const noexcept override;
@@ -46,7 +46,7 @@ class snapshot_session final : public forge::db::core::session {
    [[nodiscard]] clone acquire_clone();
    void recycle(MDBX_txn* transaction) noexcept;
 
-   std::shared_ptr<environment> environment_;
+   std::shared_ptr<driver_impl> owner_;
    MDBX_txn* anchor_ = nullptr;
    std::mutex clones_mutex_;
    std::vector<MDBX_txn*> clones_;

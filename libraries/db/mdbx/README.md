@@ -10,7 +10,8 @@ savepoint requirements.
 - Target: `forge_db_mdbx`
 - Package component: `db_mdbx`
 - Modules: `forge.db.mdbx.driver`, `forge.db.mdbx.exceptions`
-- Dependencies: `forge_asio`, `forge_db_core`; libmdbx is private and vendored
+- Dependencies: `forge_asio`, `forge_db_core`, `forge_exceptions`; libmdbx is
+  private and vendored
 - Build option: `FORGE_ENABLE_MDBX=ON`
 
 ## Usage
@@ -87,3 +88,17 @@ This library does not own Object, Blob, Revision, ranked-index or plugin
 policy. Those layers consume the neutral DB Core driver. MDBX configuration in
 `plugins.db.store` is a separate integration; this library can already be
 passed through the plugin's programmatic `add_store()` API.
+
+## Verification
+
+`test_forge_db_mdbx` covers Core CRUD and scan boundaries, FIFO writer
+admission, cancellation, native savepoints, snapshot clones, typed limits,
+geometry, close/reopen, Object ranked indexes, shared Object/Blob snapshots and
+Revision revert/prune. Its process-crash helper terminates without driver/lane
+cleanup and verifies every durable acknowledgement or a valid `safe_nosync`
+committed prefix after reopen.
+
+When RocksDB is available, `benchmark_forge_db_backends` provides an
+informational side-by-side run for point reads, scans, commits, savepoints,
+ranked queries and concurrent snapshots. It has no performance threshold and is
+not registered as a correctness test.

@@ -6,22 +6,27 @@ module;
 #include <boost/asio/awaitable.hpp>
 
 #include <cstddef>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
 module forge.db.mdbx.driver;
 
+import forge.asio.affine;
+import forge.asio.gate;
 import forge.db.core.driver;
 import forge.db.core.exceptions;
 import forge.db.core.record;
 
 #include "details/environment.hxx"
 #include "details/error.hxx"
+#include "details/driver_impl.hxx"
 #include "details/scan.hxx"
 #include "details/snapshot_session.hxx"
 
@@ -40,9 +45,9 @@ std::vector<std::byte> copy_value(const MDBX_val& value) {
 
 } // namespace
 
-snapshot_session::snapshot_session(std::shared_ptr<environment> environment,
+snapshot_session::snapshot_session(std::shared_ptr<driver_impl> owner,
                                    MDBX_txn* anchor)
-    : environment_{std::move(environment)}, anchor_{anchor} {}
+    : owner_{std::move(owner)}, anchor_{anchor} {}
 
 snapshot_session::~snapshot_session() {
    auto clones = std::vector<MDBX_txn*>{};
@@ -71,8 +76,8 @@ forge::db::core::capabilities snapshot_session::capabilities() const noexcept {
 boost::asio::awaitable<std::optional<std::vector<std::byte>>>
 snapshot_session::get(forge::db::core::family column_family,
                       forge::db::core::record_key key) {
-   environment_->validate_key(key);
-   const auto dbi = environment_->resolve(column_family);
+   owner_->environment_handle()->validate_key(key);
+   const auto dbi = owner_->environment_handle()->resolve(column_family);
    auto transaction = acquire_clone();
    auto native_key = native_value(key.bytes());
    auto value = MDBX_val{};
@@ -103,8 +108,8 @@ boost::asio::awaitable<forge::db::core::record_page>
 snapshot_session::scan_page(forge::db::core::family column_family,
                             forge::db::core::record_range range,
                             forge::db::core::page_request request) {
-   environment_->validate_range(range, request);
-   const auto dbi = environment_->resolve(column_family);
+   owner_->environment_handle()->validate_range(range, request);
+   const auto dbi = owner_->environment_handle()->resolve(column_family);
    auto transaction = acquire_clone();
    co_return scan_records(transaction.native(), dbi, range, request);
 }

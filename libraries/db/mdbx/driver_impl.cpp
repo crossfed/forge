@@ -76,7 +76,7 @@ std::unique_ptr<forge::db::core::session> driver_impl::open_snapshot() {
    require_mdbx_success(
       mdbx_txn_begin(environment_->native(), nullptr, MDBX_TXN_RDONLY, &anchor),
       "mdbx_txn_begin snapshot");
-   return std::make_unique<snapshot_session>(environment_, anchor);
+   return std::make_unique<snapshot_session>(shared_from_this(), anchor);
 }
 
 boost::asio::awaitable<void> driver_impl::flush(bool sync) {
@@ -87,6 +87,7 @@ boost::asio::awaitable<void> driver_impl::flush(bool sync) {
 }
 
 boost::asio::awaitable<void> driver_impl::close() {
+   auto ticket = co_await writer_gate_->acquire();
    co_await executor_.execute(
       {.name = "mdbx-close"},
       [environment = environment_] { environment->close(); });

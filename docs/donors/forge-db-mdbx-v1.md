@@ -1,7 +1,6 @@
 # DB MDBX Driver Donor Baseline v1
 
-Status: donor baseline accepted; implementation in progress on
-`forge-db-mdbx-v1`.
+Status: donor baseline implemented and verified on `forge-db-mdbx-v1`.
 
 This note records the evidence used to design a second
 `forge::db::core::driver` backend over libmdbx. It separates verified libmdbx
@@ -28,9 +27,10 @@ or write pattern benefits from an LSM tree.
 ## Sources Reviewed
 
 The upstream API documentation is rolling documentation. It was reviewed on
-2026-07-15 against the published 0.14.2.x documentation. The implementation PR
-must replace this moving reference with one exact release archive, version and
-SHA-256 before any source is vendored.
+2026-07-15 and the implementation is pinned to official libmdbx `v0.14.2`, tag
+commit `c8780aecc3dea7f4f2cb83e88bb4d33a622774bd`. The exact amalgamation file
+hashes and origin are recorded in `vendor/libmdbx/MANIFEST.md`, with matching
+Forge provenance and license records.
 
 ### Official libmdbx
 
@@ -162,8 +162,8 @@ not expose or enable this flag.
 
 ## License And Source Gate
 
-libmdbx 0.13 and later are Apache-2.0. No vendored code may land until the
-implementation records all of the following in one commit:
+libmdbx 0.13 and later are Apache-2.0. The vendoring commit records all of the
+following:
 
 1. exact release and upstream archive URL;
 2. archive SHA-256 from an independently verified download;
@@ -171,7 +171,21 @@ implementation records all of the following in one commit:
 4. upstream `LICENSE`, `NOTICE` and copyright material;
 5. Forge provenance and third-party notice entries.
 
-The docs-only design commit intentionally does not claim a source pin.
+The vendored amalgamation is built privately and requires no network or system
+MDBX package during configure.
+
+## Verified Forge Invariants
+
+- write begin, CRUD, savepoints, commit, rollback, flush and close execute on
+  the supplied affine lane;
+- writer admission remains FIFO and canceled waiters do not retain a ticket;
+- copied Core snapshots use same-snapshot clones and support concurrent reads;
+- Object ranked state, shared Object/Blob snapshots and Revision revert/prune
+  run through the unchanged backend-neutral layers;
+- process-kill recovery preserves every `durable_sync` acknowledgement and a
+  valid committed prefix for `safe_nosync`;
+- component `db_mdbx` builds from an installed Forge package without exposing
+  the private amalgamation target.
 
 ## Donor-Derived Test Obligations
 

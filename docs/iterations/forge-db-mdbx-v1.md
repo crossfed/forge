@@ -1,7 +1,7 @@
 # Forge DB MDBX Driver v1
 
-Status: implementation in progress on `forge-db-mdbx-v1`; design decisions are
-confirmed and tracked by backend-parity tests.
+Status: implemented on `forge-db-mdbx-v1`; backend-parity, process-crash and
+installed-package tests are complete pending review.
 
 Donor evidence is recorded in
 [DB MDBX Driver Donor Baseline v1](../donors/forge-db-mdbx-v1.md).
@@ -47,11 +47,11 @@ modules    forge.db.mdbx.driver
            forge.db.mdbx.exceptions
 ```
 
-`forge_db_mdbx` publicly links `forge_db_core` and the required Forge async
-execution contract. Vendored MDBX remains a private dependency. No native MDBX
+`forge_db_mdbx` publicly links `forge_db_core`, `forge_asio` and
+`forge_exceptions`. Vendored MDBX remains a private dependency. No native MDBX
 type appears in exported module declarations.
 
-## Public API Draft
+## Public API
 
 ```cpp
 namespace forge::db::mdbx {
@@ -74,7 +74,7 @@ struct config {
    std::string path;
    std::vector<std::string> families{"default"};
    durability durability_mode = durability::durable_sync;
-   geometry geometry;
+   geometry map;
    std::size_t max_readers = 128;
    bool create_if_missing = true;
    bool create_missing_families = true;
@@ -429,10 +429,10 @@ The benchmark is not a correctness gate, but the MDBX backend must demonstrate
 the read-latency reason for carrying a second backend before production
 adoption.
 
-## Delivery Order
+## Delivered Order
 
 1. Confirm the execution and durability decisions below.
-2. Add the reusable affine execution and async gate primitives if accepted.
+2. Add the reusable affine execution and async gate primitives.
 3. Vendor one official MDBX release with provenance and license evidence.
 4. Add typed config/errors and async environment open.
 5. Add snapshot anchor/clone pool and scan parity.
@@ -456,7 +456,7 @@ adoption.
 - replacing DB RocksDB;
 - backend-specific concepts in DB Core public records.
 
-## Implementation Decisions To Confirm
+## Confirmed Implementation Decisions
 
 ### 1. Thread-Affine Execution
 

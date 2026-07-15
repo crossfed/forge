@@ -41,6 +41,7 @@ void require_mdbx_success(int code, std::string_view operation) {
                                forge::exceptions::ctx("native-message", native_message));
       case MDBX_BUSY:
       case MDBX_TXN_OVERLAPPING:
+      case EAGAIN:
          FORGE_THROW_EXCEPTION(exceptions::environment_busy, message,
                                forge::exceptions::ctx("native-code", code),
                                forge::exceptions::ctx("native-message", native_message));
