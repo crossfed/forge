@@ -13,7 +13,7 @@ forge_target_modules_at(forge_db_mdbx db/mdbx)
 target_include_directories(forge_db_mdbx PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
 target_include_directories(
    forge_db_mdbx PRIVATE
-      "${CMAKE_SOURCE_DIR}/vendor/libmdbx"
+      "${PROJECT_SOURCE_DIR}/vendor/libmdbx"
 )
 
 target_link_libraries(

@@ -1011,10 +1011,27 @@ if(FORGE_HAS_MDBX)
          --test-command forge_package_db_mdbx_component
       DEPENDS test_forge_package_install
    )
+   add_custom_target(
+      test_forge_package_db_mdbx_add_subdirectory
+      COMMAND ${CMAKE_CTEST_COMMAND}
+         --build-and-test
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_db_mdbx_add_subdirectory
+         ${CMAKE_BINARY_DIR}/forge-package-db-mdbx-add-subdirectory
+         --build-generator ${CMAKE_GENERATOR}
+         --build-options
+            ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+            -DFORGE_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+         --build-target forge_db_mdbx_add_subdirectory
+         --test-command forge_db_mdbx_add_subdirectory
+   )
 else()
    add_custom_target(
       test_forge_package_db_mdbx_component
       COMMAND ${CMAKE_COMMAND} -E echo "Skipping test_forge_package_db_mdbx_component: MDBX is not available"
+   )
+   add_custom_target(
+      test_forge_package_db_mdbx_add_subdirectory
+      COMMAND ${CMAKE_COMMAND} -E echo "Skipping test_forge_package_db_mdbx_add_subdirectory: MDBX is not available"
    )
 endif()
 if(FORGE_HAS_ROCKSDB)
@@ -1601,10 +1618,27 @@ if(FORGE_HAS_MDBX)
       test_forge_package_db_mdbx_component
       PROPERTIES DEPENDS test_forge_package_install
    )
+   add_test(
+      NAME test_forge_package_db_mdbx_add_subdirectory
+      COMMAND ${CMAKE_CTEST_COMMAND}
+         --build-and-test
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_db_mdbx_add_subdirectory
+         ${CMAKE_BINARY_DIR}/forge-package-db-mdbx-add-subdirectory
+         --build-generator ${CMAKE_GENERATOR}
+         --build-options
+            ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+            -DFORGE_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+         --build-target forge_db_mdbx_add_subdirectory
+         --test-command forge_db_mdbx_add_subdirectory
+   )
 else()
    add_test(
       NAME test_forge_package_db_mdbx_component
       COMMAND ${CMAKE_COMMAND} -E echo "Skipping test_forge_package_db_mdbx_component: MDBX is not available"
+   )
+   add_test(
+      NAME test_forge_package_db_mdbx_add_subdirectory
+      COMMAND ${CMAKE_COMMAND} -E echo "Skipping test_forge_package_db_mdbx_add_subdirectory: MDBX is not available"
    )
 endif()
 if(FORGE_HAS_ROCKSDB)
