@@ -35,6 +35,10 @@ static_assert(!std::is_copy_constructible_v<wasm::stack_allocator>);
 static_assert(!std::is_copy_assignable_v<wasm::stack_allocator>);
 static_assert(std::is_nothrow_move_constructible_v<wasm::stack_allocator>);
 static_assert(std::is_nothrow_move_assignable_v<wasm::stack_allocator>);
+static_assert(!std::is_copy_constructible_v<wasm::contiguous_allocator>);
+static_assert(!std::is_copy_assignable_v<wasm::contiguous_allocator>);
+static_assert(std::is_nothrow_move_constructible_v<wasm::contiguous_allocator>);
+static_assert(std::is_nothrow_move_assignable_v<wasm::contiguous_allocator>);
 
 namespace {
 struct empty_span_host {
@@ -240,6 +244,20 @@ TEST_CASE("function type equality includes non-void result types", "[func_type]"
    const auto rhs = wasm::func_type{wasm::func, std::move(rhs_parameters), 1, wasm::i64};
 
    BOOST_TEST(static_cast<bool>(lhs != rhs));
+}
+
+TEST_CASE("contiguous allocator transfers mapping ownership", "[allocator]") {
+   auto source = wasm::contiguous_allocator{64};
+   auto* value = source.alloc<std::uint32_t>(1);
+   *value = 42;
+
+   auto moved = wasm::contiguous_allocator{std::move(source)};
+   BOOST_TEST(*value == 42U);
+
+   auto assigned = wasm::contiguous_allocator{64};
+   assigned = std::move(moved);
+   BOOST_TEST(*value == 42U);
+   *assigned.alloc<std::uint32_t>(1) = 7;
 }
 
 TEST_CASE("pointer validation rejects absent linear memory", "[execution_interface]") {

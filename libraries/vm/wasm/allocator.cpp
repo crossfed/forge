@@ -54,4 +54,36 @@ void* stack_allocator::top() const {
    return nullptr;
 }
 
+contiguous_allocator::contiguous_allocator(std::size_t size) : _size(align_to_page(size)) {
+   _base = static_cast<char*>(::mmap(nullptr, _size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+   detail::check<exceptions::allocation>((_base != MAP_FAILED), "mmap failed.");
+}
+
+contiguous_allocator::contiguous_allocator(contiguous_allocator&& other) noexcept
+    : _offset(std::exchange(other._offset, 0)), _size(std::exchange(other._size, 0)),
+      _base(std::exchange(other._base, nullptr)) {}
+
+contiguous_allocator& contiguous_allocator::operator=(contiguous_allocator&& other) noexcept {
+   if (this != &other) {
+      release();
+      _offset = std::exchange(other._offset, 0);
+      _size = std::exchange(other._size, 0);
+      _base = std::exchange(other._base, nullptr);
+   }
+   return *this;
+}
+
+contiguous_allocator::~contiguous_allocator() {
+   release();
+}
+
+void contiguous_allocator::release() noexcept {
+   if (_base) {
+      ::munmap(_base, _size);
+      _offset = 0;
+      _size = 0;
+      _base = nullptr;
+   }
+}
+
 } // namespace forge::vm::wasm

@@ -81,14 +81,12 @@ class contiguous_allocator {
       return (offset + pagesize - 1) & ~(pagesize - 1);
    }
 
-   contiguous_allocator(size_t size) {
-      _size = align_to_page(size);
-      _base = (char*)mmap(NULL, _size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-      detail::check<exceptions::allocation>((_base != MAP_FAILED), "mmap failed.");
-   }
-   ~contiguous_allocator() {
-      munmap(_base, align_to_page(_size));
-   }
+   contiguous_allocator(size_t size);
+   contiguous_allocator(const contiguous_allocator&) = delete;
+   contiguous_allocator& operator=(const contiguous_allocator&) = delete;
+   contiguous_allocator(contiguous_allocator&& other) noexcept;
+   contiguous_allocator& operator=(contiguous_allocator&& other) noexcept;
+   ~contiguous_allocator();
 
    template <typename T> T* alloc(size_t size = 0) {
       _offset = align_offset<alignof(T)>(_offset);
@@ -110,9 +108,11 @@ class contiguous_allocator {
    void free() { /* noop for now */ }
 
  private:
+   void release() noexcept;
+
    size_t _offset = 0;
    size_t _size = 0;
-   char* _base;
+   char* _base = nullptr;
 };
 
 class jit_allocator {
