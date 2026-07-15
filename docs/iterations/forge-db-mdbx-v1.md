@@ -1,8 +1,7 @@
 # Forge DB MDBX Driver v1
 
-Status: implementation design recorded; implementation pending. The decisions
-under [Implementation Decisions To Confirm](#implementation-decisions-to-confirm)
-must be confirmed before source work begins.
+Status: implementation in progress on `forge-db-mdbx-v1`; design decisions are
+confirmed and tracked by backend-parity tests.
 
 Donor evidence is recorded in
 [DB MDBX Driver Donor Baseline v1](../donors/forge-db-mdbx-v1.md).

@@ -210,6 +210,7 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/chain/protocol/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/vm/wasm/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/core/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/mdbx/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/rocksdb/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/object/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/blob/include"
@@ -482,6 +483,10 @@ if(TARGET forge_db_rocksdb)
    list(APPEND FORGE_LEAF_TARGETS forge_db_rocksdb)
 endif()
 
+if(TARGET forge_db_mdbx)
+   list(APPEND FORGE_LEAF_TARGETS forge_db_mdbx)
+endif()
+
 if(TARGET forge_plugins_db_rocksdb)
    list(APPEND FORGE_LEAF_TARGETS forge_plugins_db_rocksdb)
 endif()
@@ -590,6 +595,13 @@ endif()
 if(TARGET forge_db_rocksdb)
    install(
       DIRECTORY libraries/db/rocksdb/include/forge
+      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT dev EXCLUDE_FROM_ALL
+   )
+endif()
+
+if(TARGET forge_db_mdbx)
+   install(
+      DIRECTORY libraries/db/mdbx/include/forge
       DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT dev EXCLUDE_FROM_ALL
    )
 endif()

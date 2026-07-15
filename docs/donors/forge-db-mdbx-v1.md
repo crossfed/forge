@@ -1,6 +1,7 @@
 # DB MDBX Driver Donor Baseline v1
 
-Status: donor research recorded; implementation pending.
+Status: donor baseline accepted; implementation in progress on
+`forge-db-mdbx-v1`.
 
 This note records the evidence used to design a second
 `forge::db::core::driver` backend over libmdbx. It separates verified libmdbx
