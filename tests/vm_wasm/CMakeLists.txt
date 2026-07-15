@@ -8,7 +8,7 @@ set(FORGE_VM_WASM_TEST_INCLUDE_DIRS
    ${CMAKE_CURRENT_SOURCE_DIR}/donor/support
 )
 set(FORGE_VM_WASM_TEST_DEFINITIONS
-   FORGE_VM_WASM_FIXTURE_DIRECTORY="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/wasms/"
+   FORGE_VM_WASM_FIXTURE_DIRECTORY="${PROJECT_SOURCE_DIR}/vendor/eos-vm-test-wasms/"
    FORGE_VM_WASM_HOST_WASM="${CMAKE_CURRENT_SOURCE_DIR}/donor/support/host.wasm"
 )
 # The VM, not Boost.Test, owns SIGSEGV and SIGBUS while guarded guest memory is active.
@@ -86,7 +86,7 @@ if(FORGE_VM_WASM_DONOR_ROOT)
          ${Python3_EXECUTABLE}
          ${CMAKE_CURRENT_SOURCE_DIR}/port_donor_tests.py
          --donor ${FORGE_VM_WASM_DONOR_ROOT}
-         --fixtures ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/wasms
+         --fixtures ${PROJECT_SOURCE_DIR}/vendor/eos-vm-test-wasms
          --check
    )
    set_tests_properties(test_forge_vm_wasm_donor_mapping PROPERTIES LABELS vm_wasm)

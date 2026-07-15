@@ -13,6 +13,6 @@
 [submodule "vendor/softfloat"]
 	path = vendor/softfloat
 	url = https://github.com/AntelopeIO/berkeley-softfloat-3.git
-[submodule "tests/vm_wasm/fixtures/wasms"]
-	path = tests/vm_wasm/fixtures/wasms
+[submodule "vendor/eos-vm-test-wasms"]
+	path = vendor/eos-vm-test-wasms
 	url = https://github.com/EOSIO/eos-vm-test-wasms.git
