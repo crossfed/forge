@@ -396,6 +396,13 @@ behavior, and failure cleanup under concurrency.
 provides the bounded Spring/Antelope-compatible profile, including limits for
 memory pages, call depth, symbols, sections, locals, tables, and control depth.
 
+`max_control_depth` counts nested `block`, `loop`, and `if` frames; `else` does
+not open another frame. The compatibility profile also preserves the donor's
+`max_legacy_nested_structures` accounting, which counts `else`,
+because changing that limit would change Spring/Antelope module acceptance.
+Product-specific profiles should use `max_control_depth` for normal nesting
+policy and should not opt into the legacy counter.
+
 Products may define another options type with the same named static members or
 use the runtime `options` record. Do not default-construct `options` and leave
 its scalar fields uninitialized. Fill every field from validated policy before

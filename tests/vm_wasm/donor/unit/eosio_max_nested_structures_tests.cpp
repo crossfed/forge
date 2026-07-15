@@ -47,48 +47,48 @@ std::vector<uint8_t> nested_4_wasm_2 = {
 
 struct empty_options {};
 struct static_options_3 {
-   static constexpr std::uint32_t max_control_depth = 3;
+   static constexpr std::uint32_t max_legacy_nested_structures = 3;
 };
 struct static_options_4 {
-   static constexpr std::uint32_t max_control_depth = 4;
+   static constexpr std::uint32_t max_legacy_nested_structures = 4;
 };
 struct dynamic_options {
-   std::uint32_t max_control_depth;
+   std::uint32_t max_legacy_nested_structures;
 };
 
 }
 
-BACKEND_TEST_CASE("Test max_control_depth default", "[max_control_depth_test]") {
+BACKEND_TEST_CASE("Test max_legacy_nested_structures default", "[max_legacy_nested_structures_test]") {
    using backend_t = backend<std::nullptr_t, TestType>;
    backend_t backend(nested_4_wasm, &wa);
    backend_t backend2(nested_4_wasm_2, &wa);
 }
 
-BACKEND_TEST_CASE("Test max_control_depth unlimited", "[max_control_depth_test]") {
+BACKEND_TEST_CASE("Test max_legacy_nested_structures unlimited", "[max_legacy_nested_structures_test]") {
    using backend_t = backend<std::nullptr_t, TestType, empty_options>;
    backend_t backend(nested_4_wasm, &wa);
    backend_t backend2(nested_4_wasm_2, &wa);
 }
 
-BACKEND_TEST_CASE("Test max_control_depth static fail", "[max_control_depth_test]") {
+BACKEND_TEST_CASE("Test max_legacy_nested_structures static fail", "[max_legacy_nested_structures_test]") {
    using backend_t = backend<std::nullptr_t, TestType, static_options_3>;
    BOOST_CHECK_THROW(backend_t(nested_4_wasm, &wa), exceptions::parse);
    BOOST_CHECK_THROW(backend_t(nested_4_wasm_2, &wa), exceptions::parse);
 }
 
-BACKEND_TEST_CASE("Test max_control_depth static pass", "[max_control_depth_test]") {
+BACKEND_TEST_CASE("Test max_legacy_nested_structures static pass", "[max_legacy_nested_structures_test]") {
    using backend_t = backend<std::nullptr_t, TestType, static_options_4>;
    backend_t backend(nested_4_wasm, &wa);
    backend_t backend2(nested_4_wasm_2, &wa);
 }
 
-BACKEND_TEST_CASE("Test max_control_depth dynamic fail", "[max_control_depth_test]") {
+BACKEND_TEST_CASE("Test max_legacy_nested_structures dynamic fail", "[max_legacy_nested_structures_test]") {
    using backend_t = backend<std::nullptr_t, TestType, dynamic_options>;
    BOOST_CHECK_THROW(backend_t(nested_4_wasm, nullptr, dynamic_options{3}), exceptions::parse);
    BOOST_CHECK_THROW(backend_t(nested_4_wasm_2, nullptr, dynamic_options{3}), exceptions::parse);
 }
 
-BACKEND_TEST_CASE("Test max_control_depth dynamic pass", "[max_control_depth_test]") {
+BACKEND_TEST_CASE("Test max_legacy_nested_structures dynamic pass", "[max_legacy_nested_structures_test]") {
    using backend_t = backend<std::nullptr_t, TestType, dynamic_options>;
    backend_t backend(nested_4_wasm, nullptr, dynamic_options{4});
    backend_t backend2(nested_4_wasm_2, nullptr, dynamic_options{4});

@@ -275,7 +275,7 @@ def replace_live_symbols(text: str) -> str:
     text = text.replace("using namespace eosio;", "")
     text = text.replace("eosio::vm::", "forge::vm::wasm::")
     text = text.replace("eosio_options", "compatibility_options")
-    text = text.replace("eosio_max_nested_structures", "max_control_depth")
+    text = text.replace("eosio_max_nested_structures", "max_legacy_nested_structures")
     text = text.replace("EOS_VM_FROM_WASM", "FORGE_VM_WASM_FROM_WASM")
     text = text.replace("EOS_VM_PRECONDITION", "FORGE_VM_WASM_PRECONDITION")
     text = text.replace("EOS_VM_INVOKE_ON_ALL", "FORGE_VM_WASM_INVOKE_ON_ALL")

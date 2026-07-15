@@ -72,6 +72,10 @@ struct eight_stack_bytes_options {
    static constexpr auto max_func_local_bytes_flags = wasm::max_func_local_bytes_flags_t::stack;
 };
 
+struct one_control_depth_options {
+   static constexpr std::uint32_t max_control_depth = 1;
+};
+
 struct shared_limits_options {
    std::uint32_t max_call_depth = 17;
    std::uint32_t max_pages = 2;
@@ -207,6 +211,20 @@ template <typename Implementation> void check_empty_export_name() {
    const auto result = instance.call_with_return("env", "");
    BOOST_REQUIRE(result.has_value());
    BOOST_TEST(result->to_ui32() == 42U);
+}
+
+template <typename Implementation> void check_flat_control_depth() {
+   auto code = wasm::wasm_code{
+       0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // header
+       0x01, 0x04, 0x01, 0x60, 0x00, 0x00,             // () -> ()
+       0x03, 0x02, 0x01, 0x00,                         // one function
+       0x0a, 0x10, 0x01, 0x0e, 0x00,                   // code section and empty locals
+       0x41, 0x00, 0x04, 0x40, 0x05, 0x0b,             // first if/else
+       0x41, 0x00, 0x04, 0x40, 0x05, 0x0b, 0x0b        // second if/else and function end
+   };
+   using runtime = wasm::backend<std::nullptr_t, Implementation, one_control_depth_options>;
+
+   BOOST_CHECK_NO_THROW(runtime(code, static_cast<wasm::wasm_allocator*>(nullptr), one_control_depth_options{}));
 }
 } // namespace
 
@@ -739,6 +757,10 @@ TEST_CASE("interpreter rejects out-of-range numeric function indexes", "[executi
 
 TEST_CASE("interpreter resolves an empty export name", "[execution_context]") {
    check_empty_export_name<wasm::interpreter>();
+}
+
+TEST_CASE("sequential if else instructions do not increase control depth", "[parser]") {
+   check_flat_control_depth<wasm::interpreter>();
 }
 
 #if FORGE_VM_WASM_HAS_JIT && !defined(FORGE_VM_WASM_TEST_INTERPRETER_ONLY)

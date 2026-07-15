@@ -173,7 +173,6 @@ MAX_ELEMENTS(max_local_sets, 0xFFFFFFFFu)
 MAX_ELEMENTS(max_nested_structures, 0xFFFFFFFFu)
 MAX_ELEMENTS(max_br_table_elements, 0xFFFFFFFFu)
 
-// Matches the donor chain nested-control validation.
 template <typename Options, typename Enable = void> struct max_control_depth_checker {
    void on_control(const Options&) {}
    void on_end(const Options&) {}
@@ -184,13 +183,33 @@ struct max_control_depth_checker<Options, std::void_t<decltype(std::declval<Opti
       ++_count;
       detail::check<exceptions::parse>((_count <= options.max_control_depth), "Nested depth exceeded");
    }
-   void on_end(const Options& options) {
+   void on_end(const Options&) {
+      detail::check<exceptions::parse>((_count > 0), "control depth underflow");
+      --_count;
+   }
+   std::decay_t<decltype(std::declval<Options>().max_control_depth)> _count = 0;
+};
+
+// Preserves the donor compatibility profile, which counts an `else` as a
+// nested structure even though it does not increase WebAssembly control depth.
+template <typename Options, typename Enable = void> struct max_legacy_nested_structures_checker {
+   void on_control(const Options&) {}
+   void on_end(const Options&) {}
+};
+template <typename Options>
+struct max_legacy_nested_structures_checker<
+    Options, std::void_t<decltype(std::declval<Options>().max_legacy_nested_structures)>> {
+   void on_control(const Options& options) {
+      ++_count;
+      detail::check<exceptions::parse>((_count <= options.max_legacy_nested_structures), "Nested depth exceeded");
+   }
+   void on_end(const Options&) {
       if (_count == 0)
          ++_count;
       else
          --_count;
    }
-   std::decay_t<decltype(std::declval<Options>().max_control_depth)> _count = 0;
+   std::decay_t<decltype(std::declval<Options>().max_legacy_nested_structures)> _count = 0;
 };
 
 MAX_ELEMENTS(max_symbol_bytes, 0xFFFFFFFFu)
@@ -879,11 +898,14 @@ class binary_parser {
             break;
          case opcodes::end: {
             check_in_bounds();
+            const bool closes_control = pc_stack.size() > 1;
             exit_scope();
             detail::check<exceptions::parse>(
                 (detail::get_allow_code_after_function_end(_options) || !pc_stack.empty() || code.offset() == bounds),
                 "function too short");
-            _nested_checker.on_end(_options);
+            if (closes_control)
+               _control_depth_checker.on_end(_options);
+            _compatibility_nested_checker.on_end(_options);
             break;
          }
          case opcodes::return_: {
@@ -904,7 +926,8 @@ class binary_parser {
             pc_stack.push_back({op_stack.depth(), expected_result, expected_result, false, std::vector<branch_t>{}});
             code_writer.emit_block();
             op_stack.push_scope();
-            _nested_checker.on_control(_options);
+            _control_depth_checker.on_control(_options);
+            _compatibility_nested_checker.on_control(_options);
          } break;
          case opcodes::loop: {
             uint32_t expected_result = *code++;
@@ -917,7 +940,8 @@ class binary_parser {
             auto pos = code_writer.emit_loop();
             pc_stack.push_back({op_stack.depth(), expected_result, types::pseudo, false, pos});
             op_stack.push_scope();
-            _nested_checker.on_control(_options);
+            _control_depth_checker.on_control(_options);
+            _compatibility_nested_checker.on_control(_options);
          } break;
          case opcodes::if_: {
             check_in_bounds();
@@ -932,7 +956,8 @@ class binary_parser {
             op_stack.pop(types::i32);
             pc_stack.push_back({op_stack.depth(), expected_result, expected_result, true, std::vector{branch}});
             op_stack.push_scope();
-            _nested_checker.on_control(_options);
+            _control_depth_checker.on_control(_options);
+            _compatibility_nested_checker.on_control(_options);
          } break;
          case opcodes::else_: {
             check_in_bounds();
@@ -948,7 +973,7 @@ class binary_parser {
             // branches to the corresponding `end`
             relocations[0] = code_writer.emit_else(relocations[0]);
             old_index.is_if = false;
-            _nested_checker.on_control(_options);
+            _compatibility_nested_checker.on_control(_options);
             break;
          }
          case opcodes::br: {
@@ -1501,7 +1526,8 @@ class binary_parser {
    uint64_t _maximum_function_stack_usage = 0; // non-parameter locals + stack
    std::vector<std::pair<wasm_code_ptr, detail::max_func_local_bytes_stack_checker<Options>>> _function_bodies;
    detail::max_mutable_globals_checker<Options> _globals_checker;
-   detail::max_control_depth_checker<Options> _nested_checker;
+   detail::max_control_depth_checker<Options> _control_depth_checker;
+   detail::max_legacy_nested_structures_checker<Options> _compatibility_nested_checker;
    typename DebugInfo::builder imap;
 };
 } // namespace forge::vm::wasm
