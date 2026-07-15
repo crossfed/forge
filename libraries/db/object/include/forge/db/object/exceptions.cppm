@@ -20,6 +20,9 @@ enum class code : std::uint16_t {
    invalid_index_key = 8,
    invalid_header = 9,
    incompatible_version = 10,
+   aggregate_rebuild_required = 11,
+   aggregate_corruption = 12,
+   aggregate_overflow = 13,
 };
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(code, "forge.db.object")
@@ -34,5 +37,8 @@ using unsupported_operation = forge::exceptions::coded_exception<code, code::uns
 using invalid_index_key = forge::exceptions::coded_exception<code, code::invalid_index_key>;
 using invalid_header = forge::exceptions::coded_exception<code, code::invalid_header>;
 using incompatible_version = forge::exceptions::coded_exception<code, code::incompatible_version>;
+using aggregate_rebuild_required = forge::exceptions::coded_exception<code, code::aggregate_rebuild_required>;
+using aggregate_corruption = forge::exceptions::coded_exception<code, code::aggregate_corruption>;
+using aggregate_overflow = forge::exceptions::coded_exception<code, code::aggregate_overflow>;
 
 } // namespace forge::db::object::exceptions

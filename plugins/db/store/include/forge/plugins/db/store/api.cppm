@@ -187,28 +187,10 @@ class object_handle {
    template <forge::db::object::object_model Object, typename Tag>
    [[nodiscard]] forge::db::object::index_view<Object, Tag> index() const {
       auto state = state_;
-      using value_type = typename Object::value_type;
-      return forge::db::object::index_view<Object, Tag>{
-         [state](forge::db::core::record_range range,
-                 forge::db::core::page_request request) mutable
-            -> boost::asio::awaitable<forge::db::object::object_page<value_type>> {
-            auto handle = object_handle{state};
-            auto view = handle.require_store()->template index<Object, Tag>();
-            co_return co_await view.page(std::move(range), std::move(request));
-         },
-         [state]() mutable -> forge::db::object::index_page_query<value_type> {
-            auto active = std::make_shared<std::optional<forge::db::object::snapshot>>();
-            return [state = std::move(state), active](forge::db::core::record_range range,
-                                                      forge::db::core::page_request request) mutable
-                      -> boost::asio::awaitable<forge::db::object::object_page<value_type>> {
-               auto handle = object_handle{state};
-               if (!active->has_value()) {
-                  active->emplace(co_await handle.begin_read());
-               }
-               auto view = active->value().template index<Object, Tag>();
-               co_return co_await view.page(std::move(range), std::move(request));
-            };
-         }};
+      auto view = require_setup_store()->template index<Object, Tag>();
+      return view.guarded([state = std::move(state)] {
+         (void)object_handle{state}.require_store();
+      });
    }
 
  private:

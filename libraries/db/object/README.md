@@ -251,6 +251,77 @@ auto tail = store.index<account_object, by_region_balance>()
 `upper_bound` accept a non-empty ordered prefix. Variadic and tuple forms use
 the same key encoder. Streams keep one read snapshot for their whole lifecycle.
 
+## Ranked Indexes And Aggregates
+
+Ranked descriptors persist ordinal spans and aggregate totals beside the
+ordinary index records. `member` accepts a chain of member pointers, so a sum
+projection can reach nested fields without a product-specific extractor:
+
+```cpp
+struct by_id;
+struct by_state;
+struct by_payload_bytes;
+
+using upload_object = forge::db::object::object_index<
+   upload,
+   forge::db::object::indexed_by<
+      forge::db::object::ranked_primary_unique<by_id>,
+      forge::db::object::ranked_non_unique<
+         by_state,
+         forge::db::object::member<&upload::state>,
+         forge::db::object::sum<
+            by_payload_bytes,
+            forge::db::object::member<&upload::payload, &payload_ref::size>>>>>;
+```
+
+`ranked_unique` is the corresponding unique secondary descriptor. Every ranked
+index supports global and range aggregates plus the full ordinal surface:
+
+```cpp
+auto index = store.index<upload_object, by_state>();
+
+const auto total = co_await index.count();
+const auto bytes = co_await index.sum<by_payload_bytes>();
+const auto item = co_await index.nth(10);
+const auto position = co_await index.rank(*item);
+
+const auto lower = co_await index.lower_bound_rank(active);
+const auto upper = co_await index.upper_bound_rank(active);
+const auto [first, last] = co_await index.equal_range_rank(active);
+
+const auto active_count = co_await index.equal_range(active).count();
+const auto active_bytes =
+   co_await index.equal_range(active).sum<by_payload_bytes>();
+```
+
+`find_rank(key)` returns the first exact-match rank or the index size.
+`range_rank(lower, upper)` and `range(lower, upper)` use `[lower, upper)`.
+`nth(n)` returns `nullopt` outside the index. `rank(object)` checks the exact
+persisted entry, including the Object ID for unique indexes, and reports typed
+`not_found` for stale values.
+
+The persisted engine is a deterministic augmented skip-list. Root totals make
+global `count` and `sum` O(1); spans make `nth`, rank, bounds and range
+aggregates expected O(log N). Only `nth` loads an Object record. Aggregate and
+rank queries read index metadata and never scan or materialize all objects.
+
+Ranked records are updated in the same Core transaction as the Object and its
+ordinary index entries. Savepoints, rollback, snapshots and DB Revision follow
+the same state boundary. Arithmetic is checked before the first mutation and
+throws `aggregate_overflow` instead of wrapping.
+
+The default `single_writer` policy uses the Object writer lane. With
+`write_policy::backend`, a ranked mutation requires backend record locks and
+locks ranked roots in descriptor order before writing. A backend without
+`record_locks` rejects the mutation before changing Object state.
+
+Ranked schema is persisted. Opening an empty type creates state on its first
+mutation. If Object rows already exist but ranked state is absent, reads and
+writes fail closed with `aggregate_rebuild_required`; Forge never performs a
+hidden startup scan. Incompatible or corrupt root/span data reports
+`aggregate_corruption`. Adding, removing or reordering ranked sums on populated
+storage therefore requires an explicit migration or rebuild outside this API.
+
 An Object store can also join a Core snapshot opened by the same driver:
 
 ```cpp

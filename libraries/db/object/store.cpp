@@ -135,6 +135,7 @@ boost::asio::awaitable<transaction> store::begin_transaction() {
       std::move(release),
       executor};
    detail::transaction_access::bind_store(result, impl_);
+   detail::transaction_access::use_backend_writes(result, impl_->settings.writes == write_policy::backend);
    co_return result;
 }
 
@@ -199,6 +200,7 @@ boost::asio::awaitable<transaction> store::join(forge::db::core::transaction& ac
       impl_->observers,
       std::move(release)};
    detail::transaction_access::bind_store(result, impl_);
+   detail::transaction_access::use_backend_writes(result, impl_->settings.writes == write_policy::backend);
    co_return result;
 }
 

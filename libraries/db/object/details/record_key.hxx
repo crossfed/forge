@@ -8,6 +8,8 @@ enum class entry_kind : std::uint8_t {
    object_record = 0x10,
    ordered_unique_index = 0x20,
    ordered_non_unique_index = 0x21,
+   ranked_index_root = 0x30,
+   ranked_index_level = 0x31,
 };
 
 inline void append_byte(std::vector<std::byte>& out, std::uint8_t value) {
@@ -58,6 +60,39 @@ inline void append_application_prefix(std::vector<std::byte>& out, entry_kind ki
    }
    append_be64(bytes, id.instance);
    return forge::db::core::record_key{std::move(bytes)};
+}
+
+[[nodiscard]] inline std::vector<std::byte> object_prefix(forge::ids::object_id type) {
+   auto bytes = std::vector<std::byte>{};
+   if (type.space == forge::db::object::system_space) {
+      bytes.reserve(3U);
+      append_byte(bytes, static_cast<std::uint8_t>(entry_kind::system_record));
+      append_be16(bytes, type.type);
+   } else {
+      bytes.reserve(4U);
+      append_application_prefix(bytes, entry_kind::object_record, type);
+   }
+   return bytes;
+}
+
+[[nodiscard]] inline forge::db::core::record_key ranked_root(forge::ids::object_id type,
+                                                              std::uint32_t ordinal) {
+   auto bytes = std::vector<std::byte>{};
+   bytes.reserve(8U);
+   append_application_prefix(bytes, entry_kind::ranked_index_root, type);
+   append_be32(bytes, ordinal);
+   return forge::db::core::record_key{std::move(bytes)};
+}
+
+[[nodiscard]] inline std::vector<std::byte> ranked_level_prefix(forge::ids::object_id type,
+                                                                 std::uint32_t ordinal,
+                                                                 std::uint8_t level) {
+   auto bytes = std::vector<std::byte>{};
+   bytes.reserve(9U);
+   append_application_prefix(bytes, entry_kind::ranked_index_level, type);
+   append_be32(bytes, ordinal);
+   append_byte(bytes, level);
+   return bytes;
 }
 
 } // namespace forge::db::object::detail::record_key

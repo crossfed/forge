@@ -274,6 +274,35 @@ template <object_model Object, typename Tag>
 [[nodiscard]] index_view<Object, Tag> store::index() const {
    ensure_registered_type(object_id_of<Object>::value, std::type_index{typeid(Object)});
 
+   auto aggregate = index_aggregate_query{};
+   auto ranks = index_rank_query{};
+   auto nth = index_nth_query<typename Object::value_type>{};
+   auto entry = index_entry_query<typename Object::value_type>{};
+   if constexpr (ranked_index<index_by_tag<Object, Tag>>) {
+      aggregate = [owner = *this](forge::db::core::record_range range) mutable
+         -> boost::asio::awaitable<index_aggregate_result> {
+         auto read = co_await owner.begin_read();
+         auto view = read.template index<Object, Tag>();
+         co_return co_await view.query_aggregate(std::move(range));
+      };
+      ranks = [owner = *this](forge::db::core::record_range range) mutable
+         -> boost::asio::awaitable<std::pair<std::uint64_t, std::uint64_t>> {
+         auto read = co_await owner.begin_read();
+         auto view = read.template index<Object, Tag>();
+         co_return co_await view.query_rank_range(std::move(range));
+      };
+      nth = [owner = *this](std::uint64_t position) mutable
+         -> boost::asio::awaitable<std::optional<typename Object::value_type>> {
+         auto read = co_await owner.begin_read();
+         co_return co_await read.template index<Object, Tag>().nth(position);
+      };
+      entry = [owner = *this](const typename Object::value_type& value) mutable
+         -> boost::asio::awaitable<bool> {
+         auto read = co_await owner.begin_read();
+         co_return co_await read.template index<Object, Tag>().query_entry(value);
+      };
+   }
+
    return index_view<Object, Tag>{
       [owner = *this](forge::db::core::record_range range, forge::db::core::page_request request) mutable
          -> boost::asio::awaitable<object_page<typename Object::value_type>> {
@@ -291,7 +320,7 @@ template <object_model Object, typename Tag>
             auto view = active->value().template index<Object, Tag>();
             co_return co_await view.page(std::move(range), std::move(request));
          };
-      }};
+      }, std::move(aggregate), std::move(ranks), std::move(nth), std::move(entry)};
 }
 
 } // namespace forge::db::object

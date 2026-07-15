@@ -163,6 +163,49 @@ template <typename Object, typename Tag>
    return forge::db::core::record_key{std::move(bytes)};
 }
 
+template <typename Object, typename Tag>
+[[nodiscard]] std::vector<std::byte> index_record_prefix() {
+   static_assert(forge::db::object::object_model<Object>);
+   using index = forge::db::object::index_by_tag<Object, Tag>;
+   auto bytes = std::vector<std::byte>{};
+   if constexpr (forge::db::object::primary_index<index>) {
+      bytes = forge::db::object::detail::record_key::object_prefix(
+         forge::db::object::object_id_of<Object>::value);
+   } else {
+      constexpr auto kind = index::kind == forge::db::object::index_kind::ordered_unique
+                                ? entry_kind::ordered_unique_index
+                                : entry_kind::ordered_non_unique_index;
+      append_index_prefix(bytes, kind, forge::db::object::object_id_of<Object>::value,
+                          forge::db::object::index_id_by_tag<Object, Tag>);
+   }
+   return bytes;
+}
+
+template <typename Object, typename Tag>
+[[nodiscard]] std::vector<std::byte> logical_key(const typename Object::value_type& value) {
+   using index = forge::db::object::index_by_tag<Object, Tag>;
+   auto bytes = std::vector<std::byte>{};
+   if constexpr (forge::db::object::primary_index<index>) {
+      append_be64(bytes, value.id.instance);
+   } else {
+      key_encoder<typename index::key_spec>::append_object(bytes, value);
+      if constexpr (index::kind == forge::db::object::index_kind::ordered_non_unique) {
+         append_be64(bytes, value.id.instance);
+      }
+   }
+   return bytes;
+}
+
+inline forge::db::core::record_range prefix_range(std::vector<std::byte> prefix);
+
+template <typename Object, typename Tag>
+[[nodiscard]] forge::db::core::record_range range_for_value(const typename Object::value_type& value) {
+   auto bytes = index_record_prefix<Object, Tag>();
+   const auto logical = logical_key<Object, Tag>(value);
+   bytes.insert(bytes.end(), logical.begin(), logical.end());
+   return prefix_range(std::move(bytes));
+}
+
 inline forge::db::core::record_range prefix_range(std::vector<std::byte> prefix) {
    auto scan_prefix = prefix;
    auto end = prefix;
@@ -187,38 +230,67 @@ template <typename Object, typename Tag, typename Tuple>
 [[nodiscard]] forge::db::core::record_range range_from_prefix(const Tuple& values) {
    static_assert(forge::db::object::object_model<Object>);
    using index = forge::db::object::index_by_tag<Object, Tag>;
-   static_assert(forge::db::object::secondary_index<index>,
-                 "db object range_from_prefix is only valid for ordered indexes");
-
-   auto bytes = std::vector<std::byte>{};
-   constexpr auto kind = index::kind == forge::db::object::index_kind::ordered_unique
-                             ? entry_kind::ordered_unique_index
-                             : entry_kind::ordered_non_unique_index;
-   append_index_prefix(bytes, kind, forge::db::object::object_id_of<Object>::value,
-                       forge::db::object::index_id_by_tag<Object, Tag>);
-   key_encoder<typename index::key_spec>::append_prefix(bytes, values);
+   auto bytes = index_record_prefix<Object, Tag>();
+   if constexpr (forge::db::object::primary_index<index>) {
+      static_assert(std::tuple_size_v<std::remove_cvref_t<Tuple>> == 1U,
+                    "db object primary query requires one typed id");
+      using id_type = forge::db::object::id_t_of<Object>;
+      static_assert(std::constructible_from<id_type, decltype(std::get<0U>(values))>,
+                    "db object primary query requires its typed id");
+      const auto id = id_type(std::get<0U>(values));
+      append_be64(bytes, id.instance);
+   } else {
+      key_encoder<typename index::key_spec>::append_prefix(bytes, values);
+   }
    return prefix_range(std::move(bytes));
 }
 
 template <typename Object, typename Tag> [[nodiscard]] forge::db::core::record_range range_for_index() {
    static_assert(forge::db::object::object_model<Object>);
-   using index = forge::db::object::index_by_tag<Object, Tag>;
-   static_assert(forge::db::object::secondary_index<index>,
-                 "db object range_for_index is only valid for ordered indexes");
+   return prefix_range(index_record_prefix<Object, Tag>());
+}
 
-   auto bytes = std::vector<std::byte>{};
-   constexpr auto kind = index::kind == forge::db::object::index_kind::ordered_unique
-                             ? entry_kind::ordered_unique_index
-                             : entry_kind::ordered_non_unique_index;
-   append_index_prefix(bytes, kind, forge::db::object::object_id_of<Object>::value,
-                       forge::db::object::index_id_by_tag<Object, Tag>);
-   return prefix_range(std::move(bytes));
+template <typename Object, typename Tag, typename Access, typename MatchId>
+boost::asio::awaitable<bool>
+ranked_entry_exists(Access source, const typename Object::value_type& value, MatchId match_id) {
+   using index = forge::db::object::index_by_tag<Object, Tag>;
+   static_assert(forge::db::object::ranked_index<index>);
+
+   if (!(co_await source.get(object_record_key<Object>(value.id))).has_value()) {
+      co_return false;
+   }
+   if constexpr (forge::db::object::primary_index<index>) {
+      co_return true;
+   } else {
+      const auto encoded = co_await source.get(index_entry_key<Object, Tag>(value));
+      if (!encoded.has_value()) {
+         co_return false;
+      }
+      if constexpr (index::kind == forge::db::object::index_kind::ordered_unique) {
+         co_return std::invoke(match_id, *encoded, value.id);
+      }
+      co_return true;
+   }
+}
+
+template <typename Object, typename Tag, typename Lower, typename Upper>
+[[nodiscard]] forge::db::core::record_range range_between(const Lower& lower, const Upper& upper) {
+   auto result = range_for_index<Object, Tag>();
+   result.begin = range_from_prefix<Object, Tag>(lower).begin;
+   result.end = range_from_prefix<Object, Tag>(upper).begin;
+   result.has_end = true;
+   return result;
 }
 
 template <typename Object, typename Tag, typename Tuple> [[nodiscard]] consteval bool accepts_prefix_query() {
    using index = forge::db::object::index_by_tag<Object, Tag>;
-   if constexpr (!forge::db::object::secondary_index<index>) {
-      return false;
+   if constexpr (forge::db::object::primary_index<index>) {
+      if constexpr (std::tuple_size_v<std::remove_cvref_t<Tuple>> != 1U) {
+         return false;
+      } else {
+         return std::constructible_from<forge::db::object::id_t_of<Object>,
+                                        decltype(std::get<0U>(std::declval<const Tuple&>()))>;
+      }
    } else {
       return key_encoder<typename index::key_spec>::template accepts_prefix<Tuple>();
    }
@@ -226,12 +298,103 @@ template <typename Object, typename Tag, typename Tuple> [[nodiscard]] consteval
 
 template <typename Object, typename Tag, typename Tuple> [[nodiscard]] consteval bool accepts_full_query() {
    using index = forge::db::object::index_by_tag<Object, Tag>;
-   if constexpr (!forge::db::object::secondary_index<index>) {
-      return false;
+   if constexpr (forge::db::object::primary_index<index>) {
+      return accepts_prefix_query<Object, Tag, Tuple>();
    } else {
       return key_encoder<typename index::key_spec>::size == std::tuple_size_v<std::remove_cvref_t<Tuple>> &&
              key_encoder<typename index::key_spec>::template accepts_prefix<Tuple>();
    }
+}
+
+template <typename Sum>
+[[nodiscard]] consteval forge::db::object::detail::ranked_index::scalar_kind ranked_sum_kind() {
+   if constexpr (std::same_as<typename Sum::accumulator_type, std::int64_t>) {
+      return forge::db::object::detail::ranked_index::scalar_kind::signed_value;
+   } else {
+      return forge::db::object::detail::ranked_index::scalar_kind::unsigned_value;
+   }
+}
+
+template <typename Tuple, std::size_t... Indexes>
+void append_ranked_sum_kinds(std::vector<forge::db::object::detail::ranked_index::scalar_kind>& out,
+                             std::index_sequence<Indexes...>) {
+   (out.push_back(ranked_sum_kind<std::tuple_element_t<Indexes, Tuple>>()), ...);
+}
+
+template <typename Accumulator, std::integral Value>
+   requires(!std::same_as<Value, bool>)
+[[nodiscard]] std::uint64_t ranked_contribution_word(Value value) {
+   if constexpr (std::same_as<Accumulator, std::int64_t>) {
+      if constexpr (std::unsigned_integral<Value>) {
+         if (value > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+            throw forge::db::object::detail::ranked_index::error{
+               forge::db::object::detail::ranked_index::error_code::overflow,
+               "ranked sum projection exceeds signed accumulator"};
+         }
+      }
+      return std::bit_cast<std::uint64_t>(static_cast<std::int64_t>(value));
+   } else {
+      if constexpr (std::signed_integral<Value>) {
+         if (value < 0) {
+            throw forge::db::object::detail::ranked_index::error{
+               forge::db::object::detail::ranked_index::error_code::overflow,
+               "ranked sum projection is negative for unsigned accumulator"};
+         }
+      }
+      return static_cast<std::uint64_t>(value);
+   }
+}
+
+template <typename Sums, typename Value, std::size_t... Indexes>
+void append_ranked_contributions(forge::db::object::detail::ranked_index::aggregate& out,
+                                 const Value& value, std::index_sequence<Indexes...>) {
+   (out.sums.push_back(ranked_contribution_word<
+       typename std::tuple_element_t<Indexes, Sums>::accumulator_type>(
+       std::tuple_element_t<Indexes, Sums>::projection::get(value))), ...);
+}
+
+template <typename Index, typename Value>
+[[nodiscard]] forge::db::object::detail::ranked_index::aggregate
+ranked_contribution(const Value& value) {
+   using sums = typename Index::sums_type;
+   auto result = forge::db::object::detail::ranked_index::aggregate{.count = 1U};
+   result.sums.reserve(std::tuple_size_v<sums>);
+   append_ranked_contributions<sums>(result, value,
+                                     std::make_index_sequence<std::tuple_size_v<sums>>{});
+   return result;
+}
+
+template <typename Object, typename Tag>
+[[nodiscard]] forge::db::object::detail::ranked_index::layout ranked_layout() {
+   using index = forge::db::object::index_by_tag<Object, Tag>;
+   static_assert(forge::db::object::ranked_index<index>);
+   auto result = forge::db::object::detail::ranked_index::layout{};
+   const auto type = forge::db::object::object_id_of<Object>::value;
+   const auto ordinal = forge::db::object::index_id_by_tag<Object, Tag>;
+   result.root = forge::db::object::detail::record_key::ranked_root(type, ordinal).bytes();
+   result.levels.reserve(forge::db::object::detail::ranked_index::level_count);
+   for (auto level = std::uint8_t{0}; level < forge::db::object::detail::ranked_index::level_count; ++level) {
+      result.levels.push_back(forge::db::object::detail::record_key::ranked_level_prefix(type, ordinal, level));
+   }
+   result.source_prefix = index_record_prefix<Object, Tag>();
+   result.object_prefix = forge::db::object::detail::record_key::object_prefix(type);
+   using sums = typename index::sums_type;
+   result.sum_kinds.reserve(std::tuple_size_v<sums>);
+   append_ranked_sum_kinds<sums>(result.sum_kinds,
+                                 std::make_index_sequence<std::tuple_size_v<sums>>{});
+   return result;
+}
+
+template <typename Object, typename Tag>
+[[nodiscard]] forge::db::object::detail::ranked_index::bounds
+ranked_bounds(const forge::db::object::detail::ranked_index::layout& descriptor,
+              const forge::db::core::record_range& range) {
+   auto end = std::optional<std::vector<std::byte>>{};
+   if (range.has_end) {
+      end = range.end.bytes();
+   }
+   return forge::db::object::detail::ranked_index::bounds_from_source_range(
+      descriptor, range.begin.bytes(), end);
 }
 
 } // namespace forge::db::object::detail::ordered_key

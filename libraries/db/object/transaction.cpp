@@ -166,6 +166,12 @@ void detail::transaction_access::bind_store(transaction& active, std::shared_ptr
    }
 }
 
+void detail::transaction_access::use_backend_writes(transaction& active, bool value) noexcept {
+   if (active.impl_) {
+      active.impl_->backend_writes = value;
+   }
+}
+
 bool detail::transaction_access::belongs_to(const transaction& active, const void* identity) noexcept {
    return active.impl_ && active.impl_->store_identity.get() == identity;
 }
@@ -271,6 +277,21 @@ boost::asio::awaitable<void> transaction::put_record(forge::db::core::record_key
 
 boost::asio::awaitable<void> transaction::erase_record(forge::db::core::record_key key) const {
    co_await active_transaction().erase(impl_->family, std::move(key));
+}
+
+boost::asio::awaitable<std::optional<std::vector<std::byte>>>
+transaction::lock_record(forge::db::core::record_key key) const {
+   if (!impl_ || !impl_->active) {
+      FORGE_THROW_EXCEPTION(exceptions::transaction_closed, "db object transaction is closed");
+   }
+   if (!impl_->backend_writes) {
+      co_return co_await impl_->active->get(impl_->family, std::move(key));
+   }
+   if (!impl_->active->capabilities().record_locks) {
+      FORGE_THROW_EXCEPTION(exceptions::unsupported_operation,
+                            "ranked db object indexes require backend record locks");
+   }
+   co_return co_await impl_->active->get_for_update(impl_->family, std::move(key));
 }
 
 boost::asio::awaitable<forge::db::core::record_page> transaction::scan_records(forge::db::core::record_range range, forge::db::core::page_request request) const {

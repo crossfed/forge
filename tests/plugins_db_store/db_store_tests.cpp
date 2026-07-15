@@ -77,6 +77,9 @@ namespace store_plugin = forge::plugins::db::store;
 struct by_id;
 struct by_name;
 struct by_path;
+struct by_usage_id;
+struct by_usage_state;
+struct by_usage_bytes;
 
 struct account : forge::db::object::object<account, 1, 7> {
    std::string name;
@@ -149,6 +152,26 @@ using file_object =
                                       forge::db::object::primary_unique<by_id>,
                                       forge::db::object::ordered_unique<
                                          by_path, forge::db::object::member<&file_record::path>>>>;
+
+struct usage_record : forge::db::object::object<usage_record, 1, 9> {
+   std::uint32_t state = 0;
+   std::uint64_t bytes = 0;
+
+   bool operator==(const usage_record&) const = default;
+};
+
+BOOST_DESCRIBE_STRUCT(usage_record, (forge::db::object::object<usage_record, 1, 9>), (state, bytes))
+
+using usage_object = forge::db::object::object_index<
+   usage_record,
+   forge::db::object::indexed_by<
+      forge::db::object::ranked_primary_unique<
+         by_usage_id,
+         forge::db::object::sum<by_usage_bytes, forge::db::object::member<&usage_record::bytes>>>,
+      forge::db::object::ranked_non_unique<
+         by_usage_state,
+         forge::db::object::member<&usage_record::state>,
+         forge::db::object::sum<by_usage_bytes, forge::db::object::member<&usage_record::bytes>>>>>;
 
 struct byte_less {
    bool operator()(const forge::db::core::record_key& left, const forge::db::core::record_key& right) const {
@@ -527,6 +550,7 @@ struct root_guard {
 
 FORGE_DB_OBJECT(account_object)
 FORGE_DB_OBJECT(file_object)
+FORGE_DB_OBJECT(usage_object)
 
 template <typename Handle>
 concept can_register_system_header = requires(const Handle& handle) {
@@ -865,6 +889,41 @@ BOOST_AUTO_TEST_CASE(store_plugin_custom_driver_store_handle_reads_writes_flushe
    forge::asio::blocking::run(app->runtime(), app->shutdown());
    BOOST_CHECK_THROW(forge::asio::blocking::run(app->runtime(), handle.objects().find(decltype(account{}.id){42})),
                      store_plugin::exceptions::stopped);
+}
+
+BOOST_AUTO_TEST_CASE(store_plugin_object_handle_forwards_ranked_aggregates_and_snapshot_ranks) {
+   auto driver = std::make_shared<memory_driver>();
+   auto app = make_app({}, driver);
+   auto api = app->apis().get<store_plugin::api>(store_plugin::api::ref());
+   auto handle = forge::asio::blocking::run(app->runtime(), api->store("accounts"));
+   handle.objects().register_object<usage_object>();
+
+   auto insert = [&handle, &app](std::uint64_t id, std::uint32_t state, std::uint64_t bytes) {
+      auto value = usage_record{};
+      value.id = usage_record::id_t{id};
+      value.state = state;
+      value.bytes = bytes;
+      forge::asio::blocking::run(app->runtime(), handle.objects().insert(value));
+   };
+   insert(1U, 1U, 10U);
+   insert(2U, 1U, 20U);
+   insert(3U, 2U, 30U);
+
+   auto ranked = handle.objects().index<usage_object, by_usage_state>();
+   BOOST_CHECK_EQUAL(forge::asio::blocking::run(app->runtime(), ranked.count()), 3U);
+   BOOST_CHECK_EQUAL(
+      forge::asio::blocking::run(app->runtime(), ranked.sum<by_usage_bytes>()), 60U);
+   BOOST_CHECK_EQUAL(
+      forge::asio::blocking::run(app->runtime(), ranked.equal_range(1U).count()), 2U);
+   BOOST_CHECK_EQUAL(
+      forge::asio::blocking::run(app->runtime(), ranked.lower_bound_rank(2U)), 2U);
+
+   auto read = forge::asio::blocking::run(app->runtime(), handle.begin_read());
+   auto snapshot_ranked = read.objects().index<usage_object, by_usage_state>();
+   BOOST_CHECK_EQUAL(
+      forge::asio::blocking::run(app->runtime(), snapshot_ranked.nth(2U))->id.instance, 3U);
+
+   forge::asio::blocking::run(app->runtime(), app->shutdown());
 }
 
 BOOST_AUTO_TEST_CASE(store_plugin_after_initialize_opens_store_for_central_object_registration) {
