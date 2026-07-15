@@ -298,6 +298,33 @@ BOOST_AUTO_TEST_CASE(db_mdbx_async_close_is_fail_fast_and_retryable) {
    std::filesystem::remove_all(root);
 }
 
+BOOST_AUTO_TEST_CASE(db_mdbx_managed_lane_owns_execution_lifetime) {
+   const auto root = make_test_root("forge_db_mdbx_managed_lane");
+   auto runtime = forge::asio::runtime{};
+   auto driver = forge::asio::blocking::run(
+      runtime,
+      forge::db::mdbx::driver::open(
+         config_for(root / "store"),
+         forge::asio::affine::lane::options{.thread_name = "mdbx-managed"}));
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto objects = forge::db::core::family{"objectdb"};
+      auto transaction = co_await driver->begin_transaction();
+      co_await transaction.put(objects, key("managed"), bytes("alive"));
+      co_await transaction.commit();
+
+      auto snapshot = co_await driver->begin_read();
+      BOOST_CHECK_EQUAL(text(*(co_await snapshot.get(objects, key("managed")))),
+                        "alive");
+      snapshot = {};
+
+      co_await driver->async_close();
+   }());
+
+   driver.reset();
+   std::filesystem::remove_all(root);
+}
+
 BOOST_AUTO_TEST_CASE(db_mdbx_snapshot_copies_support_parallel_reads) {
    const auto root = make_test_root("forge_db_mdbx_parallel_snapshot");
    auto runtime = forge::asio::runtime{};

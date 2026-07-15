@@ -6,9 +6,12 @@ module;
 #include <boost/asio/awaitable.hpp>
 
 #include <functional>
+#include <limits>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -25,6 +28,71 @@ import forge.db.mdbx.exceptions;
 #include "details/environment.hxx"
 
 namespace forge::db::mdbx {
+namespace {
+
+void validate_config(const config& value) {
+   if (value.path.empty()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_config, "MDBX path must not be empty");
+   }
+   if (value.families.empty()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_config, "MDBX requires at least one family");
+   }
+   if (value.families.size() > MDBX_MAX_DBI) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_config, "MDBX family count is too large",
+                            forge::exceptions::ctx("families", value.families.size()),
+                            forge::exceptions::ctx("max", MDBX_MAX_DBI));
+   }
+   if (value.max_readers == 0 ||
+       value.max_readers > static_cast<std::size_t>(std::numeric_limits<unsigned>::max())) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_config, "MDBX max_readers is out of range",
+                            forge::exceptions::ctx("max-readers", value.max_readers));
+   }
+
+   auto names = std::set<std::string>{};
+   for (const auto& family : value.families) {
+      if (family.empty()) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_config, "MDBX family name must not be empty");
+      }
+      if (!names.insert(family).second) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_config, "MDBX family names must be unique",
+                               forge::exceptions::ctx("family", family));
+      }
+   }
+
+   const auto ordered = [](const auto& lower, const auto& upper) {
+      return !lower.has_value() || !upper.has_value() || *lower <= *upper;
+   };
+   if (!ordered(value.map.lower_size, value.map.current_size) ||
+       !ordered(value.map.current_size, value.map.upper_size) ||
+       !ordered(value.map.lower_size, value.map.upper_size)) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_config,
+                            "MDBX geometry must satisfy lower <= current <= upper");
+   }
+
+   if (value.map.page_size.has_value()) {
+      const auto page_size = *value.map.page_size;
+      if (page_size < static_cast<std::uint32_t>(mdbx_limits_pgsize_min()) ||
+          page_size > static_cast<std::uint32_t>(mdbx_limits_pgsize_max()) ||
+          (page_size & (page_size - 1U)) != 0U) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_config,
+                               "MDBX page size is unsupported",
+                               forge::exceptions::ctx("page-size", page_size));
+      }
+
+      const auto aligned = [page_size](const auto& size) {
+         return !size.has_value() || *size == 0 || (*size % page_size) == 0;
+      };
+      if (!aligned(value.map.lower_size) || !aligned(value.map.current_size) ||
+          !aligned(value.map.upper_size) || !aligned(value.map.growth_step) ||
+          !aligned(value.map.shrink_threshold)) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_config,
+                               "MDBX geometry must align to configured page size",
+                               forge::exceptions::ctx("page-size", page_size));
+      }
+   }
+}
+
+} // namespace
 
 driver::driver(std::shared_ptr<detail::driver_impl> impl)
     : impl_{std::move(impl)} {}
@@ -33,6 +101,24 @@ driver::~driver() = default;
 
 boost::asio::awaitable<std::shared_ptr<driver>>
 driver::open(config value, forge::asio::affine::executor executor) {
+   validate_config(value);
+   co_return co_await open_managed(std::move(value), std::move(executor), {});
+}
+
+boost::asio::awaitable<std::shared_ptr<driver>>
+driver::open(config value, forge::asio::affine::lane::options lane_options) {
+   validate_config(value);
+   auto lane = std::make_shared<forge::asio::affine::lane>(
+      std::move(lane_options));
+   auto executor = lane->get_executor();
+   co_return co_await open_managed(std::move(value), std::move(executor),
+                                  std::move(lane));
+}
+
+boost::asio::awaitable<std::shared_ptr<driver>>
+driver::open_managed(config value,
+                     forge::asio::affine::executor executor,
+                     std::shared_ptr<forge::asio::affine::lane> lane) {
    if (!executor.valid()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_config,
                             "MDBX requires a valid affine executor");
@@ -45,7 +131,8 @@ driver::open(config value, forge::asio::affine::executor executor) {
                           std::this_thread::get_id()};
       });
    auto impl = std::make_shared<detail::driver_impl>(
-      std::move(executor), std::move(opened.first), opened.second);
+      std::move(executor), std::move(opened.first), opened.second,
+      std::move(lane));
    co_return std::shared_ptr<driver>{new driver{std::move(impl)}};
 }
 
@@ -65,6 +152,7 @@ driver::open_snapshot() {
 
 boost::asio::awaitable<void> driver::close_driver() {
    co_await impl_->close();
+   co_await impl_->shutdown_managed_lane();
 }
 
 } // namespace forge::db::mdbx

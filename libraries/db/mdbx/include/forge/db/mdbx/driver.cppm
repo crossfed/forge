@@ -52,12 +52,20 @@ class driver final : public forge::db::core::driver {
    static boost::asio::awaitable<std::shared_ptr<driver>>
    open(config value, forge::asio::affine::executor executor);
 
+   static boost::asio::awaitable<std::shared_ptr<driver>>
+   open(config value, forge::asio::affine::lane::options lane_options);
+
    ~driver() override;
 
    boost::asio::awaitable<void> async_flush(bool sync) override;
 
  private:
    explicit driver(std::shared_ptr<detail::driver_impl> impl);
+
+   static boost::asio::awaitable<std::shared_ptr<driver>>
+   open_managed(config value,
+                forge::asio::affine::executor executor,
+                std::shared_ptr<forge::asio::affine::lane> lane);
 
    boost::asio::awaitable<std::unique_ptr<forge::db::core::session>>
    open_transaction() override;

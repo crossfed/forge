@@ -8,7 +8,6 @@ module;
 #include <limits>
 #include <map>
 #include <memory>
-#include <set>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -59,68 +58,6 @@ MDBX_db_flags_t database_flags(bool create) {
    return create ? MDBX_CREATE : MDBX_DB_DEFAULTS;
 }
 
-void validate_config(const config& value) {
-   if (value.path.empty()) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_config, "MDBX path must not be empty");
-   }
-   if (value.families.empty()) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_config, "MDBX requires at least one family");
-   }
-   if (value.families.size() > MDBX_MAX_DBI) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_config, "MDBX family count is too large",
-                            forge::exceptions::ctx("families", value.families.size()),
-                            forge::exceptions::ctx("max", MDBX_MAX_DBI));
-   }
-   if (value.max_readers == 0 ||
-       value.max_readers > static_cast<std::size_t>(std::numeric_limits<unsigned>::max())) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_config, "MDBX max_readers is out of range",
-                            forge::exceptions::ctx("max-readers", value.max_readers));
-   }
-
-   auto names = std::set<std::string>{};
-   for (const auto& family : value.families) {
-      if (family.empty()) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_config, "MDBX family name must not be empty");
-      }
-      if (!names.insert(family).second) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_config, "MDBX family names must be unique",
-                               forge::exceptions::ctx("family", family));
-      }
-   }
-
-   const auto ordered = [](const auto& lower, const auto& upper) {
-      return !lower.has_value() || !upper.has_value() || *lower <= *upper;
-   };
-   if (!ordered(value.map.lower_size, value.map.current_size) ||
-       !ordered(value.map.current_size, value.map.upper_size) ||
-       !ordered(value.map.lower_size, value.map.upper_size)) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_config,
-                            "MDBX geometry must satisfy lower <= current <= upper");
-   }
-
-   if (value.map.page_size.has_value()) {
-      const auto page_size = *value.map.page_size;
-      if (page_size < static_cast<std::uint32_t>(mdbx_limits_pgsize_min()) ||
-          page_size > static_cast<std::uint32_t>(mdbx_limits_pgsize_max()) ||
-          (page_size & (page_size - 1U)) != 0U) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_config,
-                               "MDBX page size is unsupported",
-                               forge::exceptions::ctx("page-size", page_size));
-      }
-
-      const auto aligned = [page_size](const auto& size) {
-         return !size.has_value() || *size == 0 || (*size % page_size) == 0;
-      };
-      if (!aligned(value.map.lower_size) || !aligned(value.map.current_size) ||
-          !aligned(value.map.upper_size) || !aligned(value.map.growth_step) ||
-          !aligned(value.map.shrink_threshold)) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_config,
-                               "MDBX geometry must align to configured page size",
-                               forge::exceptions::ctx("page-size", page_size));
-      }
-   }
-}
-
 } // namespace
 
 environment::environment(MDBX_env* native,
@@ -131,8 +68,6 @@ environment::environment(MDBX_env* native,
       max_key_size_{max_key_size}, max_value_size_{max_value_size} {}
 
 std::shared_ptr<environment> environment::open(const config& value) {
-   validate_config(value);
-
    const auto path = std::filesystem::path{value.path};
    auto error = std::error_code{};
    const auto exists = std::filesystem::exists(path, error);

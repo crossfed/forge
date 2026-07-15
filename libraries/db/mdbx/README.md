@@ -20,12 +20,6 @@ savepoint requirements.
 import forge.asio.affine;
 import forge.db.mdbx.driver;
 
-forge::asio::affine::lane lane{
-   {.max_pending_operations = 1024,
-    .max_waiting_submissions = 1024,
-    .thread_name = "db-mdbx"}
-};
-
 auto driver = co_await forge::db::mdbx::driver::open(
    {
       .path = "./data/mdbx",
@@ -34,7 +28,9 @@ auto driver = co_await forge::db::mdbx::driver::open(
       .map = {.upper_size = 64ULL * 1024 * 1024 * 1024,
               .growth_step = 256ULL * 1024 * 1024},
    },
-   lane.get_executor());
+   {.max_pending_operations = 1024,
+    .max_waiting_submissions = 1024,
+    .thread_name = "db-mdbx"});
 
 auto transaction = co_await driver->begin_transaction();
 co_await transaction.put({"objectdb"}, key, value);
@@ -42,11 +38,18 @@ co_await transaction.commit();
 
 co_await driver->async_close();
 driver.reset();
-co_await lane.shutdown();
 ```
 
-The lane owner must outlive every driver and session. Call `async_close()` and
-release active transactions/snapshots before shutting the lane down.
+The lane-options overload makes the driver create and retain a managed lane
+through every native session. It is intended for runtime components such as DB
+Store that own both resources. The executor overload remains available when the
+application owns a longer-lived lane; in that form the lane owner must outlive
+every driver and session.
+
+Call `async_close()` and release active transactions/snapshots before an
+explicit shutdown of a caller-owned lane. A busy close is fail-fast and does
+not invalidate live sessions; the managed form keeps the environment and lane
+alive until the last session is released.
 
 ## Execution Contract
 
@@ -85,9 +88,10 @@ daemon-lifetime cache.
 ## Boundaries
 
 This library does not own Object, Blob, Revision, ranked-index or plugin
-policy. Those layers consume the neutral DB Core driver. MDBX configuration in
-`plugins.db.store` is a separate integration; this library can already be
-passed through the plugin's programmatic `add_store()` API.
+policy. Those layers consume the neutral DB Core driver. `plugins.db.store`
+provides typed configured MDBX ownership, while programmatic `add_store()`
+continues to accept a caller-owned MDBX driver without taking over its lane or
+close lifecycle.
 
 ## Verification
 

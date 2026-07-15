@@ -35,8 +35,10 @@ namespace forge::db::mdbx::detail {
 
 driver_impl::driver_impl(forge::asio::affine::executor executor,
                          std::shared_ptr<environment> environment,
-                         std::thread::id affine_thread)
-    : executor_{std::move(executor)},
+                         std::thread::id affine_thread,
+                         std::shared_ptr<forge::asio::affine::lane> lane_owner)
+    : lane_owner_{std::move(lane_owner)},
+      executor_{std::move(executor)},
       environment_{std::move(environment)},
       writer_gate_{std::make_shared<forge::asio::gate>()},
       affine_thread_{affine_thread} {}
@@ -91,6 +93,12 @@ boost::asio::awaitable<void> driver_impl::close() {
    co_await executor_.execute(
       {.name = "mdbx-close"},
       [environment = environment_] { environment->close(); });
+}
+
+boost::asio::awaitable<void> driver_impl::shutdown_managed_lane() {
+   if (lane_owner_) {
+      co_await lane_owner_->shutdown();
+   }
 }
 
 void driver_impl::abort_sync(std::vector<MDBX_txn*> transactions) noexcept {

@@ -1,7 +1,8 @@
 # Forge DB MDBX Driver v1
 
-Status: implemented on `forge-db-mdbx-v1`; backend-parity, process-crash and
-installed-package tests are complete pending review.
+Status: DB MDBX driver implemented and verified. Typed configured ownership in
+`plugins.db.store` is implemented by the focused follow-up
+`forge-db-store-mdbx-v1`.
 
 Donor evidence is recorded in
 [DB MDBX Driver Donor Baseline v1](../donors/forge-db-mdbx-v1.md).
@@ -490,10 +491,10 @@ destructor.
 
 ### 5. Plugin Scope
 
-Recommendation: keep configured `plugins.db.store` MDBX support out of the
-driver PR. Prove the driver through direct libraries and programmatic
-`add_store(...)`; then add typed MDBX plugin config in a focused follow-up once
-execution-lane ownership is available from application/plugin context.
+The driver PR intentionally proved direct library and programmatic
+`add_store(...)` use first. The focused `forge-db-store-mdbx-v1` follow-up adds
+typed MDBX configuration and one managed affine lane per named configured
+store. Programmatic drivers remain caller-owned.
 
 ### 6. Source Pin
 

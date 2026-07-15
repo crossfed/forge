@@ -49,6 +49,61 @@ forge::db::object::store::options parse_object_options(const object_layer_config
    return options;
 }
 
+namespace {
+
+[[nodiscard]] bool uses_rocksdb_blob_options(const blob_data_options& value) noexcept {
+   return value.enable_blob_files || value.min_blob_size != 0 ||
+          value.blob_file_size != default_blob_file_size ||
+          value.blob_compression_type != "none" ||
+          value.enable_blob_garbage_collection ||
+          value.blob_garbage_collection_age_cutoff != 0.25;
+}
+
+void validate_mdbx_options(const store_config& value) {
+   const auto options = value.mdbx.value_or(mdbx_driver_config{});
+   if (options.durability != "durable-sync" && options.durability != "safe-nosync") {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_config,
+                            "db store MDBX durability is unsupported",
+                            forge::exceptions::ctx("store", value.name),
+                            forge::exceptions::ctx("durability", options.durability));
+   }
+   if (options.max_readers == 0) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_config,
+                            "db store MDBX max-readers must be non-zero",
+                            forge::exceptions::ctx("store", value.name));
+   }
+   if (options.lane.max_pending_operations == 0 ||
+       options.lane.max_waiting_submissions == 0) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_config,
+                            "db store MDBX lane bounds must be non-zero",
+                            forge::exceptions::ctx("store", value.name));
+   }
+   if (options.lane.thread_name && options.lane.thread_name->empty()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_config,
+                            "db store MDBX lane thread-name must not be empty",
+                            forge::exceptions::ctx("store", value.name));
+   }
+
+   const auto ordered = [](const auto& lower, const auto& upper) {
+      return !lower || !upper || *lower <= *upper;
+   };
+   if (!ordered(options.map.lower_size, options.map.current_size) ||
+       !ordered(options.map.current_size, options.map.upper_size) ||
+       !ordered(options.map.lower_size, options.map.upper_size)) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_config,
+                            "db store MDBX map must satisfy lower <= current <= upper",
+                            forge::exceptions::ctx("store", value.name));
+   }
+
+   if (value.blob && uses_rocksdb_blob_options(value.blob->data_blobs)) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_config,
+                            "db store MDBX does not support RocksDB Blob-file options",
+                            forge::exceptions::ctx("store", value.name));
+   }
+}
+
+} // namespace
+
 store_options parse_options(const store_config& value) {
    auto options = store_options{
       .object = std::nullopt,
@@ -124,6 +179,14 @@ void validate_config(const config& value) {
       if (item.driver.empty()) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_config, "db store driver must not be empty",
                                forge::exceptions::ctx("store", item.name));
+      }
+      if (item.driver == "rocksdb" && item.mdbx) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_config,
+                               "db store MDBX options require driver mdbx",
+                               forge::exceptions::ctx("store", item.name));
+      }
+      if (item.driver == "mdbx") {
+         validate_mdbx_options(item);
       }
       if (item.path.empty()) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_config, "db store path must not be empty",
