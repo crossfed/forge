@@ -273,6 +273,11 @@ class jit_allocator {
 
 class growable_allocator {
  public:
+   growable_allocator(const growable_allocator&) = delete;
+   growable_allocator& operator=(const growable_allocator&) = delete;
+   growable_allocator(growable_allocator&&) = delete;
+   growable_allocator& operator=(growable_allocator&&) = delete;
+
    static constexpr size_t max_memory_size = 1024 * 1024 * 1024; // 1GB
    template <std::size_t align_amt> static constexpr size_t align_offset(size_t offset) {
       return (offset + align_amt - 1) & ~(align_amt - 1);

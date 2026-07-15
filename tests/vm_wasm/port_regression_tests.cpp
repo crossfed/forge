@@ -25,6 +25,10 @@ static_assert(!std::is_copy_constructible_v<wasm::wasm_allocator>);
 static_assert(!std::is_copy_assignable_v<wasm::wasm_allocator>);
 static_assert(!std::is_move_constructible_v<wasm::wasm_allocator>);
 static_assert(!std::is_move_assignable_v<wasm::wasm_allocator>);
+static_assert(!std::is_copy_constructible_v<wasm::growable_allocator>);
+static_assert(!std::is_copy_assignable_v<wasm::growable_allocator>);
+static_assert(!std::is_move_constructible_v<wasm::growable_allocator>);
+static_assert(!std::is_move_assignable_v<wasm::growable_allocator>);
 
 namespace {
 struct empty_span_host {
