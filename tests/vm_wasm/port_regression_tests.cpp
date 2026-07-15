@@ -523,6 +523,16 @@ TEST_CASE("interpreter exposes public call indirect", "[call_indirect]") {
    verify_public_call_indirect_invokes_imported_only_table<wasm::interpreter>();
 }
 
+TEST_CASE("empty element segments do not copy null storage", "[parser]") {
+   auto code = wasm::wasm_code{
+       0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // header
+       0x04, 0x04, 0x01, 0x70, 0x00, 0x00,             // empty function table
+       0x09, 0x06, 0x01, 0x00, 0x41, 0x00, 0x0b, 0x00  // empty element segment
+   };
+   auto instance = wasm::backend<std::nullptr_t, wasm::interpreter>{code, nullptr};
+   static_cast<void>(instance);
+}
+
 #if FORGE_VM_WASM_HAS_JIT
 TEST_CASE("jit exposes public call indirect", "[call_indirect]") {
    verify_public_call_indirect<wasm::jit>();

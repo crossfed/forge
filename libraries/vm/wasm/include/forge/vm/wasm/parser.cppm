@@ -595,7 +595,8 @@ class binary_parser {
       }
       uint32_t offset = static_cast<uint32_t>(es.offset.value.i32);
       if (static_cast<uint64_t>(size) + offset <= tt->table.size()) {
-         std::memcpy(tt->table.raw() + offset, elems.raw(), size * sizeof(uint32_t));
+         if (size > 0)
+            std::memcpy(tt->table.raw() + offset, elems.raw(), size * sizeof(uint32_t));
       } else {
          _mod->error = "elem out of range";
       }
