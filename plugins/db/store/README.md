@@ -135,6 +135,23 @@ owner references. `objects()` or `blobs()` reports `unavailable_layer` when the
 named store does not configure that layer. The wrapper deliberately does not
 expose its raw Core snapshot.
 
+The Object handle forwards ranked index operations without creating plugin
+state or a second transaction boundary. The same descriptor can be queried
+through a direct handle, a plugin transaction or the Object view of a unified
+read snapshot:
+
+```cpp
+auto usage = witness.objects().index<upload_object, by_state>();
+auto active = co_await usage.equal_range(upload_state::active).count();
+auto bytes = co_await usage.equal_range(upload_state::active)
+   .sum<by_payload_bytes>();
+
+auto read = co_await witness.begin_read();
+auto stable_rank = co_await read.objects()
+   .index<upload_object, by_state>()
+   .lower_bound_rank(upload_state::active);
+```
+
 New reads are accepted only in `started` and `stopping`. A snapshot opened
 before shutdown owns its backend session and remains usable until its last copy
 is destroyed, even after plugin shutdown. Keep snapshots operation-scoped or

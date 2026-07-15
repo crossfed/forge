@@ -350,6 +350,9 @@ namespace db_revision_tests {
 
 struct account_by_id;
 struct account_by_name;
+struct usage_by_id;
+struct usage_by_state;
+struct usage_bytes;
 
 struct account : forge::db::object::object<account, 1, 1> {
    std::string name;
@@ -367,6 +370,27 @@ using account_object = forge::db::object::object_index<
          account_by_name,
          forge::db::object::member<&account::name>>>>;
 
+struct usage : forge::db::object::object<usage, 1, 2> {
+   std::uint32_t state = 0;
+   std::uint64_t bytes = 0;
+
+   bool operator==(const usage&) const = default;
+};
+
+BOOST_DESCRIBE_STRUCT(usage, (forge::db::object::object<usage, 1, 2>), (state, bytes))
+
+using usage_sum = forge::db::object::sum<
+   usage_bytes, forge::db::object::member<&usage::bytes>>;
+
+using usage_object = forge::db::object::object_index<
+   usage,
+   forge::db::object::indexed_by<
+      forge::db::object::ranked_primary_unique<
+         usage_by_id, forge::db::object::ranked_schema<1>, usage_sum>,
+      forge::db::object::ranked_non_unique<
+         usage_by_state, forge::db::object::member<&usage::state>,
+         forge::db::object::ranked_schema<1>, usage_sum>>>;
+
 class counting_observer final : public forge::db::object::observer {
  public:
    boost::asio::awaitable<void>
@@ -383,6 +407,7 @@ class counting_observer final : public forge::db::object::observer {
 } // namespace db_revision_tests
 
 FORGE_DB_OBJECT(db_revision_tests::account_object)
+FORGE_DB_OBJECT(db_revision_tests::usage_object)
 
 static_assert(std::same_as<forge::db::object::index_for_id_t<forge::db::revision::state::id_t>,
                            forge::db::revision::state_index>);
@@ -979,6 +1004,57 @@ BOOST_AUTO_TEST_CASE(db_revision_reverts_generated_object_without_reusing_id_or_
          [](db_revision_tests::account& value) { value.name = "bob"; });
       BOOST_CHECK_EQUAL(next.id.instance, 1U);
       BOOST_CHECK_EQUAL(observer->calls, 2U);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_revision_revert_restores_ranked_positions_and_aggregates) {
+   auto runtime = forge::asio::runtime{};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto env = co_await open_environment();
+      env.objects.register_object<db_revision_tests::usage_object>();
+
+      auto baseline = db_revision_tests::usage{};
+      baseline.id = db_revision_tests::usage::id_t{1U};
+      baseline.state = 1U;
+      baseline.bytes = 10U;
+      co_await env.objects.insert(baseline);
+
+      auto active = co_await env.driver->begin_transaction();
+      auto objects = co_await env.objects.join(active);
+      auto revision = co_await env.revisions.join(objects);
+
+      auto moved = baseline;
+      moved.state = 3U;
+      moved.bytes = 15U;
+      co_await objects.replace(moved);
+
+      auto added = db_revision_tests::usage{};
+      added.id = db_revision_tests::usage::id_t{2U};
+      added.state = 2U;
+      added.bytes = 20U;
+      co_await objects.insert(added);
+      co_await active.commit();
+
+      auto current = env.objects.index<
+         db_revision_tests::usage_object, db_revision_tests::usage_by_state>();
+      BOOST_CHECK_EQUAL(co_await current.count(), 2U);
+      BOOST_CHECK_EQUAL(co_await current.sum<db_revision_tests::usage_bytes>(), 35U);
+      BOOST_CHECK_EQUAL((co_await current.nth(0))->id.instance, 2U);
+      BOOST_CHECK_EQUAL((co_await current.nth(1))->id.instance, 1U);
+
+      auto revert = co_await env.driver->begin_transaction();
+      co_await env.revisions.revert(revert, revision.id());
+      co_await revert.commit();
+
+      BOOST_CHECK_EQUAL(co_await current.count(), 1U);
+      BOOST_CHECK_EQUAL(co_await current.sum<db_revision_tests::usage_bytes>(), 10U);
+      const auto restored = co_await current.nth(0);
+      BOOST_REQUIRE(restored.has_value());
+      BOOST_CHECK_EQUAL(restored->id.instance, 1U);
+      BOOST_CHECK_EQUAL(restored->state, 1U);
+      BOOST_CHECK_EQUAL(restored->bytes, 10U);
       co_return;
    }());
 }

@@ -40,6 +40,9 @@ transaction_participant_impl::transaction_participant_impl(
    transaction::release_fn release)
     : name_{participant_name(family)},
       family_{std::move(family)},
+      prewrite_locks_{forge::db::core::record_lock_claim{
+         .column_family = family_,
+         .key = record_key::ranked_coordinator()}},
       seal_allocations_{std::move(seal)},
       observers_{std::move(observers)},
       release_{std::move(release)} {}
@@ -55,6 +58,14 @@ std::string_view transaction_participant_impl::name() const noexcept {
 std::span<const forge::db::core::family>
 transaction_participant_impl::exclusive_families() const noexcept {
    return {std::addressof(family_), 1};
+}
+
+std::span<const forge::db::core::record_lock_claim>
+transaction_participant_impl::prewrite_locks() const noexcept {
+   if (!backend_writes_) {
+      return {};
+   }
+   return prewrite_locks_;
 }
 
 forge::db::core::mutation_policy
@@ -126,6 +137,10 @@ void transaction_participant_impl::remember_allocation(forge::ids::object_id typ
    type.instance = 0;
    auto& existing = allocation_seals_[type];
    existing = std::max(existing, next_instance);
+}
+
+void transaction_participant_impl::use_backend_writes(bool value) noexcept {
+   backend_writes_ = value;
 }
 
 change_set& transaction_participant_impl::changes() noexcept {

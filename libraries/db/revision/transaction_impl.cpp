@@ -31,7 +31,24 @@ import forge.raw.raw;
 namespace forge::db::revision::detail {
 
 transaction_impl::transaction_impl(forge::db::core::family family, state initial)
-    : family_{std::move(family)}, state_{std::move(initial)}, candidate_{state_.next_revision} {}
+    : family_{std::move(family)},
+      state_{std::move(initial)},
+      candidate_{state_.next_revision},
+      prewrite_locks_{{.column_family = family_, .key = state_key()}} {}
+
+void transaction_impl::reset_state(state current) {
+   if (!deltas_.empty() || pending_mutation_ || pending_savepoint_ || !savepoints_.empty() || prepared_) {
+      FORGE_THROW_EXCEPTION(exceptions::corrupt_state,
+                            "db revision state cannot change after mutation capture");
+   }
+   state_ = std::move(current);
+   candidate_ = state_.next_revision;
+   valid_ = true;
+}
+
+void transaction_impl::invalidate() noexcept {
+   valid_ = false;
+}
 
 revision_id_t transaction_impl::id() const noexcept {
    return candidate_;
@@ -45,8 +62,16 @@ bool transaction_impl::captures_mutations() const noexcept {
    return true;
 }
 
+std::span<const forge::db::core::record_lock_claim>
+transaction_impl::prewrite_locks() const noexcept {
+   return prewrite_locks_;
+}
+
 std::optional<std::vector<std::byte>>
 transaction_impl::retention_token(const forge::db::core::record_mutation&) const {
+   if (!valid_) {
+      FORGE_THROW_EXCEPTION(exceptions::corrupt_state, "db revision participant is invalid");
+   }
    auto token = std::vector<std::byte>{};
    token.reserve(sizeof(candidate_));
    for (auto shift = 56; shift >= 0; shift -= 8) {
@@ -57,6 +82,9 @@ transaction_impl::retention_token(const forge::db::core::record_mutation&) const
 
 boost::asio::awaitable<void>
 transaction_impl::prepare_mutation(const forge::db::core::record_mutation& mutation) {
+   if (!valid_) {
+      FORGE_THROW_EXCEPTION(exceptions::corrupt_state, "db revision participant is invalid");
+   }
    if (pending_mutation_) {
       FORGE_THROW_EXCEPTION(exceptions::corrupt_state, "db revision mutation preparation overlaps");
    }
@@ -101,6 +129,9 @@ void transaction_impl::discard_mutation() noexcept {
 
 boost::asio::awaitable<void>
 transaction_impl::prepare_savepoint(forge::db::core::savepoint_id_t id) {
+   if (!valid_) {
+      FORGE_THROW_EXCEPTION(exceptions::corrupt_state, "db revision participant is invalid");
+   }
    pending_savepoint_ = savepoint_frame{.id = id, .delta_count = deltas_.size()};
    co_return;
 }
@@ -156,6 +187,9 @@ void transaction_impl::rebuild_index() {
 
 boost::asio::awaitable<void>
 transaction_impl::prepare_commit(forge::db::core::participant_access& access) {
+   if (!valid_) {
+      FORGE_THROW_EXCEPTION(exceptions::corrupt_state, "db revision participant is invalid");
+   }
    if (prepared_) {
       co_return;
    }

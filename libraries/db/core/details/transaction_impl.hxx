@@ -34,6 +34,7 @@ struct transaction::impl {
    savepoint_id_t next_savepoint = 1;
    phase current = phase::active;
    bool mutation_started = false;
+   bool prewrite_locks_prepared = false;
    bool closed = false;
    bool committed = false;
 };
