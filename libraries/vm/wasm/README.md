@@ -181,9 +181,11 @@ using interpreter = wasm::backend<
    wasm::interpreter,
    wasm::compatibility_options>;
 
-void execute(wasm::wasm_code code) {
+void initialize_vm() {
    register_host_functions();
+}
 
+void execute(wasm::wasm_code code) {
    auto memory = wasm::wasm_allocator{};
    {
       auto host = invocation_host{.id = 42};
@@ -200,6 +202,10 @@ void execute(wasm::wasm_code code) {
    memory.free();
 }
 ```
+
+Call `initialize_vm()` once during process startup, before worker threads begin
+constructing backends. The invocation path must not mutate the process-wide host
+function registry.
 
 `watchdog` starts one helper thread for each `scoped_run`. `backend::timed_run`
 is templated, so a high-concurrency service may supply a product scheduler-backed
