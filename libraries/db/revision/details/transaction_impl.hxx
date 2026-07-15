@@ -12,9 +12,14 @@ class transaction_impl final : public forge::db::core::transaction_participant {
  public:
    transaction_impl(forge::db::core::family family, state initial);
 
+   void reset_state(state current);
+   void invalidate() noexcept;
+
    [[nodiscard]] revision_id_t id() const noexcept;
    [[nodiscard]] std::string_view name() const noexcept override;
    [[nodiscard]] bool captures_mutations() const noexcept override;
+   [[nodiscard]] std::span<const forge::db::core::record_lock_claim>
+   prewrite_locks() const noexcept override;
    [[nodiscard]] std::optional<std::vector<std::byte>>
    retention_token(const forge::db::core::record_mutation& mutation) const override;
 
@@ -62,12 +67,14 @@ class transaction_impl final : public forge::db::core::transaction_participant {
    forge::db::core::family family_;
    state state_;
    revision_id_t candidate_ = 0;
+   std::vector<forge::db::core::record_lock_claim> prewrite_locks_;
    std::vector<captured_delta> deltas_;
    std::map<address, std::size_t> index_;
    std::optional<forge::db::core::record_mutation> pending_mutation_;
    std::optional<savepoint_frame> pending_savepoint_;
    std::vector<savepoint_frame> savepoints_;
    bool prepared_ = false;
+   bool valid_ = true;
 };
 
 } // namespace forge::db::revision::detail

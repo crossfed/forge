@@ -52,6 +52,17 @@ void validate_state(const state& value) {
 }
 
 boost::asio::awaitable<state>
+read_state(forge::db::core::transaction& active, const forge::db::core::family& family) {
+   const auto encoded = co_await active.get(family, detail::state_key());
+   if (!encoded) {
+      FORGE_THROW_EXCEPTION(exceptions::corrupt_state, "db revision state record is missing");
+   }
+   auto value = detail::decode<state>(*encoded, "state");
+   validate_state(value);
+   co_return value;
+}
+
+boost::asio::awaitable<state>
 lock_state(forge::db::core::transaction& active, const forge::db::core::family& family) {
    if (!active.capabilities().record_locks) {
       FORGE_THROW_EXCEPTION(exceptions::unsupported_operation,
@@ -207,9 +218,15 @@ boost::asio::awaitable<void> store::impl::initialize() {
 boost::asio::awaitable<revision_id_t>
 store::impl::join(forge::db::core::transaction& active) {
    require_joinable(active);
-   auto current = co_await lock_state(active, family);
+   auto current = co_await read_state(active, family);
    auto participant = std::make_shared<detail::transaction_impl>(family, std::move(current));
    active.attach_participant(participant);
+   try {
+      participant->reset_state(co_await lock_state(active, family));
+   } catch (...) {
+      participant->invalidate();
+      throw;
+   }
    co_return participant->id();
 }
 

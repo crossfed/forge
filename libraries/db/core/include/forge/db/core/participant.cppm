@@ -35,6 +35,11 @@ struct record_address {
    record_key key;
 };
 
+struct record_lock_claim {
+   family column_family;
+   record_key key;
+};
+
 struct record_mutation {
    mutation_kind kind = mutation_kind::put;
    family column_family;
@@ -71,6 +76,10 @@ class transaction_participant {
    [[nodiscard]] virtual std::string_view name() const noexcept = 0;
 
    [[nodiscard]] virtual std::span<const family> exclusive_families() const noexcept {
+      return {};
+   }
+
+   [[nodiscard]] virtual std::span<const record_lock_claim> prewrite_locks() const noexcept {
       return {};
    }
 

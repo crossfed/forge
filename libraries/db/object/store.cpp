@@ -116,7 +116,7 @@ boost::asio::awaitable<transaction> store::begin_transaction() {
       release = [owned_ticket]() mutable { owned_ticket->reset(); };
    }
 
-   auto result = transaction{
+   auto result = detail::transaction_access::make_owned(
       std::move(active),
       impl_->config.family,
       [impl = impl_](forge::ids::object_id type, std::type_index model) {
@@ -133,7 +133,8 @@ boost::asio::awaitable<transaction> store::begin_transaction() {
       impl_->interceptors,
       impl_->observers,
       std::move(release),
-      executor};
+      executor,
+      impl_->settings.writes == write_policy::backend);
    detail::transaction_access::bind_store(result, impl_);
    co_return result;
 }
@@ -181,7 +182,7 @@ boost::asio::awaitable<transaction> store::join(forge::db::core::transaction& ac
       release = [owned_ticket]() mutable { owned_ticket->reset(); };
    }
 
-   auto result = transaction{
+   auto result = detail::transaction_access::make_joined(
       active,
       impl_->config.family,
       [impl = impl_](forge::ids::object_id type, std::type_index model) {
@@ -197,7 +198,8 @@ boost::asio::awaitable<transaction> store::join(forge::db::core::transaction& ac
       },
       impl_->interceptors,
       impl_->observers,
-      std::move(release)};
+      std::move(release),
+      impl_->settings.writes == write_policy::backend);
    detail::transaction_access::bind_store(result, impl_);
    co_return result;
 }
