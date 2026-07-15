@@ -115,6 +115,9 @@ struct by_ranked_state;
 struct by_ranked_tenant_score;
 struct by_payload_bytes;
 struct by_score_total;
+struct by_conversion_id;
+struct by_signed_total;
+struct by_unsigned_total;
 struct reference_by_state_id;
 
 struct account : forge::db::object::object<account, 1, 7> {
@@ -208,6 +211,25 @@ using ranked_upload_sum_mismatch_object = forge::db::object::object_index<
    forge::db::object::indexed_by<
       forge::db::object::ranked_primary_unique<
          by_ranked_id, forge::db::object::ranked_schema<1>, payload_bytes_sum>>>;
+
+struct ranked_conversion : forge::db::object::object<ranked_conversion, 4, 12> {
+   std::uint64_t unsigned_value = 0;
+   std::int64_t signed_value = 0;
+};
+
+BOOST_DESCRIBE_STRUCT(ranked_conversion, (forge::db::object::object<ranked_conversion, 4, 12>),
+                      (unsigned_value, signed_value))
+
+using signed_total_sum = forge::db::object::sum<
+   by_signed_total, forge::db::object::member<&ranked_conversion::unsigned_value>, std::int64_t>;
+using unsigned_total_sum = forge::db::object::sum<
+   by_unsigned_total, forge::db::object::member<&ranked_conversion::signed_value>, std::uint64_t>;
+using ranked_conversion_object = forge::db::object::object_index<
+   ranked_conversion,
+   forge::db::object::indexed_by<
+      forge::db::object::ranked_primary_unique<
+         by_conversion_id, forge::db::object::ranked_schema<1>,
+         signed_total_sum, unsigned_total_sum>>>;
 
 struct ranked_reference {
    std::uint64_t id = 0;
@@ -1069,6 +1091,7 @@ using db_object_tests::account_object;
 FORGE_DB_OBJECT(account_object)
 FORGE_DB_OBJECT(db_object_tests::document_object)
 FORGE_DB_OBJECT(db_object_tests::ranked_upload_object)
+FORGE_DB_OBJECT(db_object_tests::ranked_conversion_object)
 
 using namespace db_object_tests;
 
@@ -1301,6 +1324,20 @@ BOOST_AUTO_TEST_CASE(db_object_guarded_transaction_index_stream_uses_page_fallba
    }());
 }
 
+BOOST_AUTO_TEST_CASE(db_object_guarded_non_ranked_index_preserves_missing_ranked_callbacks) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = co_await make_store(driver);
+      auto guarded = store.index<account_object, by_name>().guarded([] {});
+
+      BOOST_CHECK_THROW(
+         co_await guarded.query_aggregate(forge::db::core::record_range{}),
+         forge::db::object::exceptions::invalid_descriptor);
+      co_return;
+   }());
+}
+
 BOOST_AUTO_TEST_CASE(db_object_ranked_indexes_fail_closed_for_missing_or_corrupt_state) {
    auto runtime = forge::asio::runtime{};
    forge::asio::blocking::run(runtime, []() -> boost::asio::awaitable<void> {
@@ -1506,6 +1543,36 @@ BOOST_AUTO_TEST_CASE(db_object_ranked_indexes_follow_snapshot_savepoint_and_over
       BOOST_CHECK_EQUAL(co_await overflow_primary.sum<by_payload_bytes>(),
                         std::numeric_limits<std::uint64_t>::max());
 
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_ranked_projection_overflow_uses_public_exception) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = co_await forge::db::object::store::open(driver);
+      store.register_object<ranked_conversion_object>();
+
+      auto unsigned_overflow = ranked_conversion{};
+      unsigned_overflow.id = ranked_conversion::id_t{1};
+      unsigned_overflow.unsigned_value =
+         static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) + 1U;
+      BOOST_CHECK_THROW(
+         co_await store.insert(unsigned_overflow),
+         forge::db::object::exceptions::aggregate_overflow);
+      BOOST_CHECK(!(co_await store.find(unsigned_overflow.id)).has_value());
+
+      auto negative_signed = ranked_conversion{};
+      negative_signed.id = ranked_conversion::id_t{2};
+      negative_signed.signed_value = -1;
+      BOOST_CHECK_THROW(
+         co_await store.insert(negative_signed),
+         forge::db::object::exceptions::aggregate_overflow);
+      BOOST_CHECK(!(co_await store.find(negative_signed.id)).has_value());
+
+      auto primary = store.index<ranked_conversion_object, by_conversion_id>();
+      BOOST_CHECK_EQUAL(co_await primary.count(), 0U);
       co_return;
    }());
 }

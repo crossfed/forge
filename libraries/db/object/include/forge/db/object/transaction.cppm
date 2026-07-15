@@ -545,19 +545,19 @@ plan_ranked_indexes(const typename Object::value_type* before,
    if constexpr (Index < std::tuple_size_v<indexes>) {
       using index = std::tuple_element_t<Index, indexes>;
       if constexpr (forge::db::object::ranked_index<index>) {
-         auto old_entry = std::optional<ranked_index::entry>{};
-         auto new_entry = std::optional<ranked_index::entry>{};
-         if (before) {
-            old_entry.emplace(ranked_index::entry{
-               .key = detail::ordered_key::logical_key<Object, typename index::tag_type>(*before),
-               .contribution = detail::ordered_key::ranked_contribution<index>(*before)});
-         }
-         if (after) {
-            new_entry.emplace(ranked_index::entry{
-               .key = detail::ordered_key::logical_key<Object, typename index::tag_type>(*after),
-               .contribution = detail::ordered_key::ranked_contribution<index>(*after)});
-         }
          try {
+            auto old_entry = std::optional<ranked_index::entry>{};
+            auto new_entry = std::optional<ranked_index::entry>{};
+            if (before) {
+               old_entry.emplace(ranked_index::entry{
+                  .key = detail::ordered_key::logical_key<Object, typename index::tag_type>(*before),
+                  .contribution = detail::ordered_key::ranked_contribution<index>(*before)});
+            }
+            if (after) {
+               new_entry.emplace(ranked_index::entry{
+                  .key = detail::ordered_key::logical_key<Object, typename index::tag_type>(*after),
+                  .contribution = detail::ordered_key::ranked_contribution<index>(*after)});
+            }
             plans.push_back(co_await ranked_index::plan_change(
                access, detail::ordered_key::ranked_layout<Object, typename index::tag_type>(),
                std::move(old_entry), std::move(new_entry)));

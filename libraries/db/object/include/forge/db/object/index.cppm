@@ -1062,26 +1062,38 @@ template <object_model Object, typename Tag> class index_view {
             };
          };
       }
-      auto guarded_aggregate = [query = aggregate_, guard](forge::db::core::record_range range) mutable
-         -> boost::asio::awaitable<index_aggregate_result> {
-         std::invoke(guard);
-         co_return co_await query(std::move(range));
-      };
-      auto guarded_ranks = [query = ranks_, guard](forge::db::core::record_range range) mutable
-         -> boost::asio::awaitable<std::pair<std::uint64_t, std::uint64_t>> {
-         std::invoke(guard);
-         co_return co_await query(std::move(range));
-      };
-      auto guarded_nth = [query = nth_, guard](std::uint64_t position) mutable
-         -> boost::asio::awaitable<std::optional<value_type>> {
-         std::invoke(guard);
-         co_return co_await query(position);
-      };
-      auto guarded_exact_rank = [query = exact_rank_, guard](const value_type& value) mutable
-         -> boost::asio::awaitable<std::optional<std::uint64_t>> {
-         std::invoke(guard);
-         co_return co_await query(value);
-      };
+      auto guarded_aggregate = index_aggregate_query{};
+      if (aggregate_) {
+         guarded_aggregate = [query = aggregate_, guard](forge::db::core::record_range range) mutable
+            -> boost::asio::awaitable<index_aggregate_result> {
+            std::invoke(guard);
+            co_return co_await query(std::move(range));
+         };
+      }
+      auto guarded_ranks = index_rank_query{};
+      if (ranks_) {
+         guarded_ranks = [query = ranks_, guard](forge::db::core::record_range range) mutable
+            -> boost::asio::awaitable<std::pair<std::uint64_t, std::uint64_t>> {
+            std::invoke(guard);
+            co_return co_await query(std::move(range));
+         };
+      }
+      auto guarded_nth = index_nth_query<value_type>{};
+      if (nth_) {
+         guarded_nth = [query = nth_, guard](std::uint64_t position) mutable
+            -> boost::asio::awaitable<std::optional<value_type>> {
+            std::invoke(guard);
+            co_return co_await query(position);
+         };
+      }
+      auto guarded_exact_rank = index_exact_rank_query<value_type>{};
+      if (exact_rank_) {
+         guarded_exact_rank = [query = exact_rank_, guard](const value_type& value) mutable
+            -> boost::asio::awaitable<std::optional<std::uint64_t>> {
+            std::invoke(guard);
+            co_return co_await query(value);
+         };
+      }
       return index_view{std::move(guarded_page), std::move(guarded_stream),
                         std::move(guarded_aggregate), std::move(guarded_ranks), std::move(guarded_nth),
                         std::move(guarded_exact_rank)};
