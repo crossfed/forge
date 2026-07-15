@@ -1,0 +1,18 @@
+#pragma once
+
+#include <cstdint>
+
+namespace forge::contract::host {
+
+struct interface {
+   virtual ~interface() = default;
+
+#define FORGE_CONTRACT_INTRINSIC(version, identifier, wasm_module, wasm_name, result, parameters)                      \
+   virtual result identifier parameters = 0;
+#include <forge/contract/intrinsics.def>
+#undef FORGE_CONTRACT_INTRINSIC
+};
+
+inline constexpr std::uint32_t interface_version = 1;
+
+} // namespace forge::contract::host

@@ -13,11 +13,12 @@ module;
 
 export module forge.chain.protocol.transaction;
 
+export import forge.raw.varint;
+
 export import forge.chain.protocol.action;
 import forge.crypto.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
-import forge.raw.varint;
 import forge.variant.value;
 import forge.variant.described;
 

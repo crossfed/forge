@@ -1,5 +1,6 @@
 add_library(
    forge_chain_protocol STATIC
+   values.cpp
    types.cpp
    action.cpp
    action_receipt.cpp

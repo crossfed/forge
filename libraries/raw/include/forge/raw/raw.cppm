@@ -1,957 +1,518 @@
 module;
+
 #include <forge/core/macros.hpp>
 #include <forge/exceptions/macros.hpp>
-#include <boost/multiprecision/cpp_int.hpp>
+
 #include <boost/dynamic_bitset.hpp>
-#include <array>
+#include <boost/multiprecision/cpp_int.hpp>
+
 #include <chrono>
-#include <climits>
-#include <cstddef>
-#include <map>
 #include <deque>
-#include <list>
 #include <filesystem>
 #include <flat_map>
-#include <optional>
+#include <list>
+#include <map>
+#include <memory>
 #include <set>
-#include <span>
-#include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
-#include <variant>
-#include <vector>
 
 export module forge.raw.raw;
 
-import forge.reflect.reflect;
-import forge.core.type_name;
-import forge.raw.exceptions;
-import forge.raw.datastream;
-import forge.raw.varint;
-import forge.core.utility;
+export import forge.raw.codec;
+
 import forge.core.chrono;
+import forge.core.utility;
 import forge.core.uint128;
 import forge.exceptions;
-import forge.variant.static_variant;
-import forge.variant.exceptions;
-import forge.variant.value;
-import forge.variant.conversion;
-import forge.variant.containers;
+import forge.raw.datastream;
+import forge.raw.exceptions;
+import forge.raw.varint;
+import forge.reflect.reflect;
 import forge.variant.chrono;
-import forge.variant.multiprecision;
-import forge.variant.format;
+import forge.variant.containers;
+import forge.variant.conversion;
 import forge.variant.described;
 import forge.variant.dynamic_bitset;
+import forge.variant.exceptions;
+import forge.variant.format;
+import forge.variant.multiprecision;
+import forge.variant.static_variant;
+import forge.variant.value;
 
 export namespace forge::raw {
 
-using bytes = std::vector<std::uint8_t>;
-
-static_assert(CHAR_BIT == 8, "Forge raw serialization requires 8-bit bytes");
-
-namespace detail {
-
-template <typename Stream> inline void write_bytes(Stream& stream, std::span<const std::byte> value) {
-   stream.write(reinterpret_cast<const char*>(value.data()), value.size());
-}
-
-template <typename Stream> inline void read_bytes(Stream& stream, std::span<std::byte> value) {
-   stream.read(reinterpret_cast<char*>(value.data()), value.size());
-}
-
-template <typename Stream, typename T> inline void write_object(Stream& stream, const T& value) {
-   write_bytes(stream, std::as_bytes(std::span{&value, std::size_t{1}}));
-}
-
-template <typename Stream, typename T> inline void read_object(Stream& stream, T& value) {
-   read_bytes(stream, std::as_writable_bytes(std::span{&value, std::size_t{1}}));
-}
-
-} // namespace detail
-
-template <size_t Size>
+template <std::size_t Size>
 using UInt = boost::multiprecision::number<boost::multiprecision::cpp_int_backend<
     Size, Size, boost::multiprecision::unsigned_magnitude, boost::multiprecision::unchecked, void>>;
-template <size_t Size>
+
+template <std::size_t Size>
 using Int = boost::multiprecision::number<boost::multiprecision::cpp_int_backend<
     Size, Size, boost::multiprecision::signed_magnitude, boost::multiprecision::unchecked, void>>;
-template <typename Stream> void pack(Stream& s, const UInt<256>& n);
-template <typename Stream> void unpack(Stream& s, UInt<256>& n);
-template <typename Stream> void pack(Stream& s, const Int<256>& n);
-template <typename Stream> void unpack(Stream& s, Int<256>& n);
-template <typename Stream, typename T> void pack(Stream& s, const boost::multiprecision::number<T>& n);
-template <typename Stream, typename T> void unpack(Stream& s, boost::multiprecision::number<T>& n);
-template <typename Stream> void pack(Stream& s, const forge::dynamic_bitset& bs);
-template <typename Stream> void unpack(Stream& s, forge::dynamic_bitset& bs);
-template <class T>
-concept TrivialScalar = std::is_scalar_v<T> && !std::is_pointer_v<T>;
-
-template <class T>
-concept NotTrivialScalar = !TrivialScalar<T>;
-
-template <typename T> size_t pack_size(const T& v);
-template <typename Stream, typename T> void pack(Stream& s, const T& v);
-template <typename Stream, typename T> void unpack(Stream& s, T& v);
-template <typename Stream> void pack(Stream& s, const variant& v);
-template <typename Stream> void unpack(Stream& s, variant& v);
-template <typename Stream> void pack(Stream& s, const variant_object& v);
-template <typename Stream> void unpack(Stream& s, variant_object& v);
-template <typename Stream> void pack(Stream& s, const std::string&);
-template <typename Stream> void unpack(Stream& s, std::string&);
-template <typename Stream, typename T> void pack(Stream& s, const std::vector<T>& v);
-template <typename Stream, typename T> void unpack(Stream& s, std::vector<T>& v);
-template <typename Stream> void pack(Stream& s, const std::vector<char>& value);
-template <typename Stream> void unpack(Stream& s, std::vector<char>& value);
-template <typename Stream> void pack(Stream& s, const std::vector<std::uint8_t>& value);
-template <typename Stream> void unpack(Stream& s, std::vector<std::uint8_t>& value);
-template <typename Stream, typename K, typename V, typename Compare, typename KeyContainer, typename MappedContainer>
-void pack(Stream& s, const std::flat_map<K, V, Compare, KeyContainer, MappedContainer>& value);
-template <typename Stream, typename K, typename V, typename Compare, typename KeyContainer, typename MappedContainer>
-void unpack(Stream& s, std::flat_map<K, V, Compare, KeyContainer, MappedContainer>& value);
-template <typename Stream> void pack(Stream& s, const bool& v);
-template <typename Stream> void unpack(Stream& s, bool& v);
-template <typename Stream> void pack(Stream& s, const signed_int& v);
-template <typename Stream> void unpack(Stream& s, signed_int& vi);
-template <typename Stream> void pack(Stream& s, const unsigned_int& v);
-template <typename Stream> void unpack(Stream& s, unsigned_int& vi);
-template <typename Stream> void pack(Stream& s, const char* v);
-template <typename Stream> void unpack(Stream& s, std::chrono::sys_time<std::chrono::microseconds>&);
-template <typename Stream> void pack(Stream& s, const std::chrono::sys_time<std::chrono::microseconds>&);
-template <typename Stream> void unpack(Stream& s, std::chrono::sys_seconds&);
-template <typename Stream> void pack(Stream& s, const std::chrono::sys_seconds&);
-template <typename Stream> void unpack(Stream& s, std::chrono::microseconds&);
-template <typename Stream> void pack(Stream& s, const std::chrono::microseconds&);
-template <typename Stream, TrivialScalar T, std::size_t N> void pack(Stream& s, const std::array<T, N>& v);
-template <typename Stream, NotTrivialScalar T, std::size_t N> void pack(Stream& s, const std::array<T, N>& v);
-template <typename Stream, TrivialScalar T, std::size_t N> void unpack(Stream& s, std::array<T, N>& v);
-template <typename Stream, NotTrivialScalar T, std::size_t N> void unpack(Stream& s, std::array<T, N>& v);
-template <typename Stream, typename... T> void pack(Stream& s, const std::variant<T...>& sv);
-template <typename Stream, typename... T> void unpack(Stream& s, std::variant<T...>& sv);
 
 template <typename Stream> class variant_packer : public variant::visitor {
  public:
-   explicit variant_packer(Stream& _s) : s(_s) {}
+   explicit variant_packer(Stream& stream) : stream_(stream) {}
+
    void handle() const override {}
-   void handle(const int64_t& v) const override {
-      forge::raw::pack(s, v);
-   }
-   void handle(const uint64_t& v) const override {
-      forge::raw::pack(s, v);
-   }
-   void handle(const double& v) const override {
-      forge::raw::pack(s, v);
-   }
-   void handle(const bool& v) const override {
-      forge::raw::pack(s, v);
-   }
-   void handle(const std::string& v) const override {
-      forge::raw::pack(s, v);
-   }
-   void handle(const variant_object& v) const override {
-      forge::raw::pack(s, v);
-   }
-   void handle(const variants& v) const override {
-      forge::raw::pack(s, v);
-   }
-   void handle(const blob& v) const override {
-      forge::raw::pack(s, v);
+
+   void handle(const std::int64_t& value) const override {
+      pack(stream_, value);
    }
 
-   Stream& s;
+   void handle(const std::uint64_t& value) const override {
+      pack(stream_, value);
+   }
+
+   void handle(const double& value) const override {
+      pack(stream_, value);
+   }
+
+   void handle(const bool& value) const override {
+      pack(stream_, value);
+   }
+
+   void handle(const std::string& value) const override {
+      pack(stream_, value);
+   }
+
+   void handle(const variant_object& value) const override {
+      pack(stream_, value);
+   }
+
+   void handle(const variants& value) const override {
+      pack(stream_, value);
+   }
+
+   void handle(const blob& value) const override {
+      pack(stream_, value);
+   }
+
+ private:
+   Stream& stream_;
 };
 
-template <typename Stream> inline void pack(Stream& s, const variant& v) {
-   pack(s, uint8_t(v.get_type()));
-   v.visit(variant_packer<Stream>(s));
+template <typename Stream> void host_pack(Stream& stream, const variant& value) {
+   pack(stream, static_cast<std::uint8_t>(value.get_type()));
+   value.visit(variant_packer<Stream>{stream});
 }
 
-template <typename Stream> inline void unpack(Stream& s, variant& v) {
-   uint8_t t;
-   unpack(s, t);
-   switch (t) {
+template <typename Stream> void host_unpack(Stream& stream, variant& value) {
+   auto type = std::uint8_t{};
+   unpack(stream, type);
+   switch (type) {
    case variant::null_type:
+      value = variant{};
       return;
    case variant::int64_type: {
-      int64_t val;
-      raw::unpack(s, val);
-      v = val;
+      auto decoded = std::int64_t{};
+      unpack(stream, decoded);
+      value = decoded;
       return;
    }
    case variant::uint64_type: {
-      uint64_t val;
-      raw::unpack(s, val);
-      v = val;
+      auto decoded = std::uint64_t{};
+      unpack(stream, decoded);
+      value = decoded;
       return;
    }
    case variant::double_type: {
-      double val;
-      raw::unpack(s, val);
-      v = val;
+      auto decoded = double{};
+      unpack(stream, decoded);
+      value = decoded;
       return;
    }
    case variant::bool_type: {
-      bool val;
-      raw::unpack(s, val);
-      v = val;
+      auto decoded = false;
+      unpack(stream, decoded);
+      value = decoded;
       return;
    }
    case variant::string_type: {
-      std::string val;
-      raw::unpack(s, val);
-      v = std::move(val);
+      auto decoded = std::string{};
+      unpack(stream, decoded);
+      value = std::move(decoded);
       return;
    }
    case variant::array_type: {
-      variants val;
-      raw::unpack(s, val);
-      v = std::move(val);
+      auto decoded = variants{};
+      unpack(stream, decoded);
+      value = std::move(decoded);
       return;
    }
    case variant::object_type: {
-      variant_object val;
-      raw::unpack(s, val);
-      v = std::move(val);
+      auto decoded = variant_object{};
+      unpack(stream, decoded);
+      value = std::move(decoded);
       return;
    }
    case variant::blob_type: {
-      blob val;
-      raw::unpack(s, val);
-      v = std::move(val);
+      auto decoded = blob{};
+      unpack(stream, decoded);
+      value = std::move(decoded);
       return;
    }
    default:
       FORGE_THROW_EXCEPTION(forge::raw::exceptions::codec_error, "unknown variant type",
-                            forge::exceptions::ctx("t", t));
+                            forge::exceptions::ctx("type", type));
    }
 }
 
-template <typename Stream> inline void pack(Stream& s, const variant_object& v) {
-   unsigned_int vs = (uint32_t)v.size();
-   pack(s, vs);
-   for (auto itr = v.begin(); itr != v.end(); ++itr) {
-      pack(s, itr->key());
-      pack(s, itr->value());
-   }
-}
-
-template <typename Stream> inline void unpack(Stream& s, variant_object& v) {
-   unsigned_int vs;
-   unpack(s, vs);
-
-   mutable_variant_object mvo;
-   mvo.reserve(vs.value);
-   for (uint32_t i = 0; i < vs.value; ++i) {
-      std::string key;
-      forge::variant value;
-      forge::raw::unpack(s, key);
-      forge::raw::unpack(s, value);
-      mvo.set(std::move(key), std::move(value));
-   }
-   v = std::move(mvo);
-}
-
-template <typename Stream, typename Arg0, typename... Args>
-inline void pack(Stream& s, const Arg0& a0, const Args&... args) {
-   pack(s, a0);
-   pack(s, args...);
-}
-template <typename Stream, typename Arg0, typename... Args> inline void unpack(Stream& s, Arg0& a0, Args&... args) {
-   unpack(s, a0);
-   unpack(s, args...);
-}
-
-template <typename Stream> inline void pack(Stream& s, const std::filesystem::path& tp) {
-   forge::raw::pack(s, tp.generic_string());
-}
-
-template <typename Stream> inline void unpack(Stream& s, std::filesystem::path& tp) {
-   std::string p;
-   forge::raw::unpack(s, p);
-   tp = p;
-}
-
-template <typename Stream> inline void pack(Stream& s, const std::chrono::sys_seconds& tp) {
-   const uint32_t sec = forge::chrono::to_fc_time_point_sec_wire(tp);
-   detail::write_object(s, sec);
-}
-
-template <typename Stream> inline void unpack(Stream& s, std::chrono::sys_seconds& tp) {
-   try {
-      uint32_t sec;
-      detail::read_object(s, sec);
-      tp = forge::chrono::from_fc_time_point_sec_wire(sec);
-   }
-   FORGE_CAPTURE_AND_RETHROW("")
-}
-
-template <typename Stream> inline void pack(Stream& s, const std::chrono::sys_time<std::chrono::microseconds>& tp) {
-   const uint64_t usec = forge::chrono::to_fc_time_point_wire(tp);
-   detail::write_object(s, usec);
-}
-
-template <typename Stream> inline void unpack(Stream& s, std::chrono::sys_time<std::chrono::microseconds>& tp) {
-   try {
-      uint64_t usec;
-      detail::read_object(s, usec);
-      tp = forge::chrono::from_fc_time_point_wire(usec);
-   }
-   FORGE_CAPTURE_AND_RETHROW("")
-}
-
-template <typename Stream> inline void pack(Stream& s, const std::chrono::microseconds& usec) {
-   const uint64_t usec_as_int64 = forge::chrono::to_fc_microseconds_wire(usec);
-   detail::write_object(s, usec_as_int64);
-}
-
-template <typename Stream> inline void unpack(Stream& s, std::chrono::microseconds& usec) {
-   try {
-      uint64_t usec_as_int64;
-      detail::read_object(s, usec_as_int64);
-      usec = forge::chrono::from_fc_microseconds_wire(usec_as_int64);
-   }
-   FORGE_CAPTURE_AND_RETHROW("")
-}
-
-template <typename Stream> inline void pack(Stream& s, const forge::uint128& u) {
-   detail::write_object(s, u);
-}
-
-template <typename Stream> inline void unpack(Stream& s, forge::uint128& u) {
-   detail::read_object(s, u);
-}
-
-template <typename Stream, typename T, size_t N>
-   requires(!std::is_same_v<std::remove_cv_t<T>, char>)
-inline void pack(Stream& s, T (&v)[N]) {
-   forge::raw::pack(s, unsigned_int((uint32_t)N));
-   for (uint64_t i = 0; i < N; ++i)
-      forge::raw::pack(s, v[i]);
-}
-
-template <typename Stream, typename T, size_t N>
-   requires(!std::is_same_v<std::remove_cv_t<T>, char>)
-inline void unpack(Stream& s, T (&v)[N]) {
-   try {
-      unsigned_int size;
-      forge::raw::unpack(s, size);
-      FORGE_ASSERT(size.value == N);
-      for (uint64_t i = 0; i < N; ++i)
-         forge::raw::unpack(s, v[i]);
-   }
-   FORGE_CAPTURE_AND_RETHROW("array unpack failed", forge::exceptions::ctx("type", forge::get_typename<T>::name()),
-                           forge::exceptions::ctx("length", N))
-}
-
-template <typename Stream, typename T> inline void pack(Stream& s, const std::shared_ptr<T>& v) {
-   forge::raw::pack(s, bool(!!v));
-   if (!!v)
-      forge::raw::pack(s, *v);
-}
-
-template <typename Stream, typename T> inline void unpack(Stream& s, std::shared_ptr<T>& v) {
-   try {
-      bool b;
-      forge::raw::unpack(s, b);
-      if (b) {
-         // want to be able to unpack std::shared_ptr<const T>
-         auto tmp = std::make_shared<std::remove_const_t<T>>();
-         forge::raw::unpack(s, *tmp);
-         v = std::move(tmp);
-      } else {
-         v.reset();
-      }
-   }
-   FORGE_CAPTURE_AND_RETHROW("std::shared_ptr<T>", forge::exceptions::ctx("type", forge::get_typename<T>::name()))
-}
-
-template <typename Stream> inline void pack(Stream& s, const signed_int& v) {
-   uint32_t val = (v.value << 1) ^ (v.value >> 31); // apply zigzag encoding
-   do {
-      uint8_t b = uint8_t(val) & 0x7f;
-      val >>= 7;
-      b |= ((val > 0) << 7);
-      detail::write_object(s, b);
-   } while (val);
-}
-
-template <typename Stream> inline void pack(Stream& s, const unsigned_int& v) {
-   uint64_t val = v.value;
-   do {
-      uint8_t b = uint8_t(val) & 0x7f;
-      val >>= 7;
-      b |= ((val > 0) << 7);
-      detail::write_object(s, b);
-   } while (val);
-}
-
-template <typename Stream> inline void unpack(Stream& s, signed_int& vi) {
-   uint32_t v = 0;
-   char b = 0;
-   int by = 0;
-   do {
-      s.get(b);
-      v |= uint32_t(uint8_t(b) & 0x7f) << by;
-      by += 7;
-   } while (uint8_t(b) & 0x80);
-   vi.value = (v >> 1) ^ (~(v & 1) + 1ull); // reverse zigzag encoding
-}
-
-template <typename Stream> inline void unpack(Stream& s, unsigned_int& vi) {
-   uint64_t v = 0;
-   char b = 0;
-   uint8_t by = 0;
-   do {
-      s.get(b);
-      v |= uint32_t(uint8_t(b) & 0x7f) << by;
-      by += 7;
-   } while (uint8_t(b) & 0x80 && by < 32);
-   vi.value = static_cast<uint32_t>(v);
-}
-
-template <typename Stream> inline void pack(Stream& s, const char* v) {
-   size_t sz = std::strlen(v);
-   FORGE_ASSERT(sz <= MAX_SIZE_OF_BYTE_ARRAYS);
-   forge::raw::pack(s, unsigned_int(sz));
-   if (sz)
-      s.write(v, sz);
-}
-
-// optional
-template <typename Stream, typename T> void pack(Stream& s, const std::optional<T>& v) {
-   forge::raw::pack(s, v.has_value());
-   if (v)
-      forge::raw::pack(s, *v);
-}
-
-template <typename Stream, typename T> void unpack(Stream& s, std::optional<T>& v) {
-   try {
-      bool b;
-      forge::raw::unpack(s, b);
-      if (b) {
-         v = T();
-         forge::raw::unpack(s, *v);
-      } else {
-         v.reset();
-      } // in case v has already has a value
-   }
-   FORGE_CAPTURE_AND_RETHROW("optional<${type}>", forge::exceptions::ctx("type", forge::get_typename<T>::name()))
-}
-
-namespace detail {
-
-template <typename Stream, typename Byte> inline void pack_byte_vector(Stream& s, const std::vector<Byte>& value) {
-   FORGE_ASSERT(value.size() <= MAX_SIZE_OF_BYTE_ARRAYS);
-   forge::raw::pack(s, unsigned_int((uint32_t)value.size()));
-   if (value.size())
-      write_bytes(s, std::as_bytes(std::span{value}));
-}
-
-template <typename Stream, typename Byte> inline void unpack_byte_vector(Stream& s, std::vector<Byte>& value) {
-   unsigned_int size;
-   forge::raw::unpack(s, size);
-   FORGE_ASSERT(size.value <= MAX_SIZE_OF_BYTE_ARRAYS);
-   value.resize(size.value);
-   if (value.size())
-      read_bytes(s, std::as_writable_bytes(std::span{value}));
-}
-
-template <typename Container, typename T> inline void pack_to_container(Container& out, const T& value) {
-   datastream<size_t> ps;
-   forge::raw::pack(ps, value);
-   out.resize(ps.tellp());
-   if (!out.empty()) {
-      datastream<Container> ds(std::move(out));
-      forge::raw::pack(ds, value);
-      out = std::move(ds.storage());
-   }
-}
-
-} // namespace detail
-
-// byte vectors are raw byte blobs, not element-wise vectors.
-template <typename Stream> inline void pack(Stream& s, const std::vector<char>& value) {
-   detail::pack_byte_vector(s, value);
-}
-template <typename Stream> inline void unpack(Stream& s, std::vector<char>& value) {
-   detail::unpack_byte_vector(s, value);
-}
-template <typename Stream> inline void pack(Stream& s, const std::vector<std::uint8_t>& value) {
-   detail::pack_byte_vector(s, value);
-}
-template <typename Stream> inline void unpack(Stream& s, std::vector<std::uint8_t>& value) {
-   detail::unpack_byte_vector(s, value);
-}
-
-// forge::string
-template <typename Stream> inline void pack(Stream& s, const std::string& v) {
-   FORGE_ASSERT(v.size() <= MAX_SIZE_OF_BYTE_ARRAYS);
-   forge::raw::pack(s, unsigned_int((uint32_t)v.size()));
-   if (v.size())
-      s.write(v.c_str(), v.size());
-}
-
-template <typename Stream> inline void unpack(Stream& s, std::string& v) {
-   bytes tmp;
-   forge::raw::unpack(s, tmp);
-   if (tmp.size())
-      v = std::string(reinterpret_cast<const char*>(tmp.data()), tmp.size());
-   else
-      v = std::string();
-}
-// bool
-template <typename Stream> inline void pack(Stream& s, const bool& v) {
-   forge::raw::pack(s, uint8_t(v));
-}
-template <typename Stream> inline void unpack(Stream& s, bool& v) {
-   uint8_t b;
-   forge::raw::unpack(s, b);
-   FORGE_ASSERT((b & ~1) == 0);
-   v = (b != 0);
-}
-
-namespace detail {
-
-template <typename Stream, typename T> inline void pack_described_object(Stream& s, const T& v) {
-   forge::reflect::for_each_member<T>([&](const char*, auto member) { forge::raw::pack(s, v.*member); });
-}
-
-template <typename Stream, typename T> inline void unpack_described_object(Stream& s, T& v) {
-   forge::reflect::for_each_member<std::remove_const_t<T>>([&](const char* name, auto member) {
-      using member_type = std::remove_reference_t<decltype(v.*member)>;
-      try {
-         forge::raw::unpack(s, const_cast<std::remove_const_t<member_type>&>(v.*member));
-      }
-      FORGE_CAPTURE_AND_RETHROW("Error unpacking field ${field}", forge::exceptions::ctx("field", name))
-   });
-}
-
-template <typename IsClass = forge::true_type> struct if_class {
-   template <typename Stream, typename T> static inline void pack(Stream& s, const T& v) {
-      s << v;
-   }
-   template <typename Stream, typename T> static inline void unpack(Stream& s, T& v) {
-      s >> v;
-   }
-};
-
-template <> struct if_class<forge::false_type> {
-   template <typename Stream, typename T> static inline void pack(Stream& s, const T& v) {
-      write_object(s, v);
-   }
-   template <typename Stream, typename T> static inline void unpack(Stream& s, T& v) {
-      read_object(s, v);
-   }
-};
-
-} // namespace detail
-
-template <typename Stream, typename T> inline void pack(Stream& s, const std::unordered_set<T>& value) {
-   FORGE_ASSERT(value.size() <= MAX_NUM_ARRAY_ELEMENTS);
-   forge::raw::pack(s, unsigned_int((uint32_t)value.size()));
-   auto itr = value.begin();
-   auto end = value.end();
-   while (itr != end) {
-      forge::raw::pack(s, *itr);
-      ++itr;
-   }
-}
-template <typename Stream, typename T> inline void unpack(Stream& s, std::unordered_set<T>& value) {
-   unsigned_int size;
-   forge::raw::unpack(s, size);
-   FORGE_ASSERT(size.value <= MAX_NUM_ARRAY_ELEMENTS);
-   value.clear();
-   value.reserve(size.value);
-   for (uint32_t i = 0; i < size.value; ++i) {
-      T tmp;
-      forge::raw::unpack(s, tmp);
-      value.insert(std::move(tmp));
-   }
-}
-
-template <typename Stream, typename... Ts> inline void pack(Stream& s, const std::tuple<Ts...>& tup) {
-   auto l = [&s](const auto&... v) { forge::raw::pack(s, v...); };
-   std::apply(l, tup);
-}
-template <typename Stream, typename... Ts> inline void unpack(Stream& s, std::tuple<Ts...>& tup) {
-   auto l = [&s](auto&... v) { forge::raw::unpack(s, v...); };
-   std::apply(l, tup);
-}
-
-template <typename Stream, typename K, typename V> inline void pack(Stream& s, const std::pair<K, V>& value) {
-   forge::raw::pack(s, value.first);
-   forge::raw::pack(s, value.second);
-}
-template <typename Stream, typename K, typename V> inline void unpack(Stream& s, std::pair<K, V>& value) {
-   forge::raw::unpack(s, value.first);
-   forge::raw::unpack(s, value.second);
-}
-
-template <typename Stream, typename K, typename V> inline void pack(Stream& s, const std::unordered_map<K, V>& value) {
-   FORGE_ASSERT(value.size() <= MAX_NUM_ARRAY_ELEMENTS);
-   forge::raw::pack(s, unsigned_int((uint32_t)value.size()));
-   auto itr = value.begin();
-   auto end = value.end();
-   while (itr != end) {
-      forge::raw::pack(s, *itr);
-      ++itr;
-   }
-}
-template <typename Stream, typename K, typename V> inline void unpack(Stream& s, std::unordered_map<K, V>& value) {
-   unsigned_int size;
-   forge::raw::unpack(s, size);
-   FORGE_ASSERT(size.value <= MAX_NUM_ARRAY_ELEMENTS);
-   value.clear();
-   value.reserve(size.value);
-   for (uint32_t i = 0; i < size.value; ++i) {
-      std::pair<K, V> tmp;
-      forge::raw::unpack(s, tmp);
-      value.insert(std::move(tmp));
-   }
-}
-template <typename Stream, typename K, typename V> inline void pack(Stream& s, const std::map<K, V>& value) {
-   FORGE_ASSERT(value.size() <= MAX_NUM_ARRAY_ELEMENTS);
-   forge::raw::pack(s, unsigned_int((uint32_t)value.size()));
-   auto itr = value.begin();
-   auto end = value.end();
-   while (itr != end) {
-      forge::raw::pack(s, *itr);
-      ++itr;
-   }
-}
-template <typename Stream, typename K, typename V> inline void unpack(Stream& s, std::map<K, V>& value) {
-   unsigned_int size;
-   forge::raw::unpack(s, size);
-   FORGE_ASSERT(size.value <= MAX_NUM_ARRAY_ELEMENTS);
-   value.clear();
-   for (uint32_t i = 0; i < size.value; ++i) {
-      std::pair<K, V> tmp;
-      forge::raw::unpack(s, tmp);
-      value.insert(std::move(tmp));
-   }
-}
-
-template <typename Stream, typename K, typename V, typename Compare, typename KeyContainer, typename MappedContainer>
-inline void pack(Stream& s, const std::flat_map<K, V, Compare, KeyContainer, MappedContainer>& value) {
-   FORGE_ASSERT(value.size() <= MAX_NUM_ARRAY_ELEMENTS);
-   forge::raw::pack(s, unsigned_int(static_cast<std::uint32_t>(value.size())));
+template <typename Stream> void host_pack(Stream& stream, const variant_object& value) {
+   pack(stream, unsigned_int{value.size()});
    for (const auto& item : value) {
-      forge::raw::pack(s, item.first);
-      forge::raw::pack(s, item.second);
+      pack(stream, item.key());
+      pack(stream, item.value());
    }
 }
 
-template <typename Stream, typename K, typename V, typename Compare, typename KeyContainer, typename MappedContainer>
-inline void unpack(Stream& s, std::flat_map<K, V, Compare, KeyContainer, MappedContainer>& value) {
+template <typename Stream> void host_unpack(Stream& stream, variant_object& value) {
    auto size = unsigned_int{};
-   forge::raw::unpack(s, size);
-   FORGE_ASSERT(size.value <= MAX_NUM_ARRAY_ELEMENTS);
+   unpack(stream, size);
+   auto decoded = mutable_variant_object{};
+   decoded.reserve(size.value);
+   for (auto index = std::uint32_t{0}; index < size.value; ++index) {
+      auto key = std::string{};
+      auto item = variant{};
+      unpack(stream, key);
+      unpack(stream, item);
+      decoded.set(std::move(key), std::move(item));
+   }
+   value = std::move(decoded);
+}
+
+template <typename Stream> void host_pack(Stream& stream, const std::filesystem::path& value) {
+   pack(stream, value.generic_string());
+}
+
+template <typename Stream> void host_unpack(Stream& stream, std::filesystem::path& value) {
+   auto decoded = std::string{};
+   unpack(stream, decoded);
+   value = std::move(decoded);
+}
+
+template <typename Stream> void host_pack(Stream& stream, const std::chrono::sys_seconds& value) {
+   pack(stream, forge::chrono::to_fc_time_point_sec_wire(value));
+}
+
+template <typename Stream> void host_unpack(Stream& stream, std::chrono::sys_seconds& value) {
+   auto seconds = std::uint32_t{};
+   unpack(stream, seconds);
+   value = forge::chrono::from_fc_time_point_sec_wire(seconds);
+}
+
+template <typename Stream>
+void host_pack(Stream& stream, const std::chrono::sys_time<std::chrono::microseconds>& value) {
+   pack(stream, forge::chrono::to_fc_time_point_wire(value));
+}
+
+template <typename Stream> void host_unpack(Stream& stream, std::chrono::sys_time<std::chrono::microseconds>& value) {
+   auto microseconds = std::uint64_t{};
+   unpack(stream, microseconds);
+   value = forge::chrono::from_fc_time_point_wire(microseconds);
+}
+
+template <typename Stream> void host_pack(Stream& stream, const std::chrono::microseconds& value) {
+   pack(stream, forge::chrono::to_fc_microseconds_wire(value));
+}
+
+template <typename Stream> void host_unpack(Stream& stream, std::chrono::microseconds& value) {
+   auto microseconds = std::uint64_t{};
+   unpack(stream, microseconds);
+   value = forge::chrono::from_fc_microseconds_wire(microseconds);
+}
+
+template <typename Stream> void host_pack(Stream& stream, const forge::uint128& value) {
+   detail::write_object(stream, value);
+}
+
+template <typename Stream> void host_unpack(Stream& stream, forge::uint128& value) {
+   detail::read_object(stream, value);
+}
+
+template <typename Stream, typename T, std::size_t Size>
+   requires(!std::is_same_v<std::remove_cv_t<T>, char>)
+void host_pack(Stream& stream, const T (&value)[Size]) {
+   pack(stream, unsigned_int{Size});
+   for (const auto& item : value) {
+      pack(stream, item);
+   }
+}
+
+template <typename Stream, typename T, std::size_t Size>
+   requires(!std::is_same_v<std::remove_cv_t<T>, char>)
+void host_unpack(Stream& stream, T (&value)[Size]) {
+   auto size = unsigned_int{};
+   unpack(stream, size);
+   FORGE_ASSERT(size.value == Size);
+   for (auto& item : value) {
+      unpack(stream, item);
+   }
+}
+
+template <typename Stream, typename T> void host_pack(Stream& stream, const std::shared_ptr<T>& value) {
+   pack(stream, static_cast<bool>(value));
+   if (value) {
+      pack(stream, *value);
+   }
+}
+
+template <typename Stream, typename T> void host_unpack(Stream& stream, std::shared_ptr<T>& value) {
+   auto present = false;
+   unpack(stream, present);
+   if (!present) {
+      value.reset();
+      return;
+   }
+   auto decoded = std::make_shared<std::remove_const_t<T>>();
+   unpack(stream, *decoded);
+   value = std::move(decoded);
+}
+
+template <typename Stream, typename T> void host_pack(Stream& stream, const std::unordered_set<T>& value) {
+   FORGE_ASSERT(value.size() <= max_array_elements);
+   pack(stream, unsigned_int{value.size()});
+   for (const auto& item : value) {
+      pack(stream, item);
+   }
+}
+
+template <typename Stream, typename T> void host_unpack(Stream& stream, std::unordered_set<T>& value) {
+   auto size = unsigned_int{};
+   unpack(stream, size);
+   FORGE_ASSERT(size.value <= max_array_elements);
+   value.clear();
+   value.reserve(size.value);
+   for (auto index = std::uint32_t{0}; index < size.value; ++index) {
+      auto item = T{};
+      unpack(stream, item);
+      value.insert(std::move(item));
+   }
+}
+
+template <typename Stream, typename Key, typename Value>
+void host_pack(Stream& stream, const std::unordered_map<Key, Value>& value) {
+   FORGE_ASSERT(value.size() <= max_array_elements);
+   pack(stream, unsigned_int{value.size()});
+   for (const auto& item : value) {
+      pack(stream, item);
+   }
+}
+
+template <typename Stream, typename Key, typename Value>
+void host_unpack(Stream& stream, std::unordered_map<Key, Value>& value) {
+   auto size = unsigned_int{};
+   unpack(stream, size);
+   FORGE_ASSERT(size.value <= max_array_elements);
+   value.clear();
+   value.reserve(size.value);
+   for (auto index = std::uint32_t{0}; index < size.value; ++index) {
+      auto item = std::pair<Key, Value>{};
+      unpack(stream, item);
+      value.insert(std::move(item));
+   }
+}
+
+template <typename Stream, typename Key, typename Value>
+void host_pack(Stream& stream, const std::map<Key, Value>& value) {
+   FORGE_ASSERT(value.size() <= max_array_elements);
+   pack(stream, unsigned_int{value.size()});
+   for (const auto& item : value) {
+      pack(stream, item);
+   }
+}
+
+template <typename Stream, typename Key, typename Value> void host_unpack(Stream& stream, std::map<Key, Value>& value) {
+   auto size = unsigned_int{};
+   unpack(stream, size);
+   FORGE_ASSERT(size.value <= max_array_elements);
    value.clear();
    for (auto index = std::uint32_t{0}; index < size.value; ++index) {
-      auto item = std::pair<K, V>{};
-      forge::raw::unpack(s, item);
+      auto item = std::pair<Key, Value>{};
+      unpack(stream, item);
+      value.insert(std::move(item));
+   }
+}
+
+template <typename Stream, typename Key, typename Value, typename Compare, typename Keys, typename Values>
+void host_pack(Stream& stream, const std::flat_map<Key, Value, Compare, Keys, Values>& value) {
+   FORGE_ASSERT(value.size() <= max_array_elements);
+   pack(stream, unsigned_int{value.size()});
+   for (const auto& item : value) {
+      pack(stream, item);
+   }
+}
+
+template <typename Stream, typename Key, typename Value, typename Compare, typename Keys, typename Values>
+void host_unpack(Stream& stream, std::flat_map<Key, Value, Compare, Keys, Values>& value) {
+   auto size = unsigned_int{};
+   unpack(stream, size);
+   FORGE_ASSERT(size.value <= max_array_elements);
+   value.clear();
+   for (auto index = std::uint32_t{0}; index < size.value; ++index) {
+      auto item = std::pair<Key, Value>{};
+      unpack(stream, item);
       value.insert(value.end(), std::move(item));
    }
 }
 
-template <typename Stream, typename T> inline void pack(Stream& s, const std::deque<T>& value) {
-   FORGE_ASSERT(value.size() <= MAX_NUM_ARRAY_ELEMENTS);
-   forge::raw::pack(s, unsigned_int((uint32_t)value.size()));
-   for (const auto& i : value) {
-      forge::raw::pack(s, i);
+template <typename Stream, typename T> void host_pack(Stream& stream, const std::deque<T>& value) {
+   FORGE_ASSERT(value.size() <= max_array_elements);
+   pack(stream, unsigned_int{value.size()});
+   for (const auto& item : value) {
+      pack(stream, item);
    }
 }
 
-template <typename Stream, typename T> inline void unpack(Stream& s, std::deque<T>& value) {
-   unsigned_int size;
-   forge::raw::unpack(s, size);
-   FORGE_ASSERT(size.value <= MAX_NUM_ARRAY_ELEMENTS);
+template <typename Stream, typename T> void host_unpack(Stream& stream, std::deque<T>& value) {
+   auto size = unsigned_int{};
+   unpack(stream, size);
+   FORGE_ASSERT(size.value <= max_array_elements);
    value.resize(size.value);
-   for (auto& i : value) {
-      forge::raw::unpack(s, i);
+   for (auto& item : value) {
+      unpack(stream, item);
    }
 }
 
-template <typename Stream> inline void pack(Stream& s, const forge::dynamic_bitset& value) {
-   // pack the size of the bitset, not the number of blocks
-   const auto num_blocks = value.num_blocks();
-   FORGE_ASSERT(num_blocks <= MAX_NUM_ARRAY_ELEMENTS);
-   forge::raw::pack(s, unsigned_int(value.size()));
-   [[maybe_unused]] constexpr size_t word_size = sizeof(forge::dynamic_bitset::block_type) * CHAR_BIT;
-   assert(num_blocks == (value.size() + word_size - 1) / word_size);
-   // convert bitset to a vector of blocks
-   std::vector<forge::dynamic_bitset::block_type> blocks;
-   blocks.resize(num_blocks);
+template <typename Stream, typename T> void host_pack(Stream& stream, const std::list<T>& value) {
+   FORGE_ASSERT(value.size() <= max_array_elements);
+   pack(stream, unsigned_int{value.size()});
+   for (const auto& item : value) {
+      pack(stream, item);
+   }
+}
+
+template <typename Stream, typename T> void host_unpack(Stream& stream, std::list<T>& value) {
+   auto size = unsigned_int{};
+   unpack(stream, size);
+   FORGE_ASSERT(size.value <= max_array_elements);
+   value.clear();
+   for (auto index = std::uint32_t{0}; index < size.value; ++index) {
+      auto item = T{};
+      unpack(stream, item);
+      value.emplace_back(std::move(item));
+   }
+}
+
+template <typename Stream, typename T> void host_pack(Stream& stream, const std::set<T>& value) {
+   FORGE_ASSERT(value.size() <= max_array_elements);
+   pack(stream, unsigned_int{value.size()});
+   for (const auto& item : value) {
+      pack(stream, item);
+   }
+}
+
+template <typename Stream, typename T> void host_unpack(Stream& stream, std::set<T>& value) {
+   auto size = unsigned_int{};
+   unpack(stream, size);
+   FORGE_ASSERT(size.value <= max_array_elements);
+   value.clear();
+   for (auto index = std::uint32_t{0}; index < size.value; ++index) {
+      auto item = T{};
+      unpack(stream, item);
+      value.insert(std::move(item));
+   }
+}
+
+template <typename Stream> void host_pack(Stream& stream, const forge::dynamic_bitset& value) {
+   const auto block_count = value.num_blocks();
+   FORGE_ASSERT(block_count <= max_array_elements);
+   pack(stream, unsigned_int{value.size()});
+   auto blocks = std::vector<forge::dynamic_bitset::block_type>(block_count);
    boost::to_block_range(value, blocks.begin());
-   // pack the blocks
-   for (const auto& b : blocks) {
-      forge::raw::pack(s, b);
+   for (const auto block : blocks) {
+      pack(stream, block);
    }
 }
 
-template <typename Stream> inline void unpack(Stream& s, forge::dynamic_bitset& value) {
-   // the packed size is the number of bits in the set, not the number of blocks
-   unsigned_int size;
-   forge::raw::unpack(s, size);
-   constexpr size_t word_size = sizeof(forge::dynamic_bitset::block_type) * CHAR_BIT;
-   size_t num_blocks = (size + word_size - 1) / word_size;
-   FORGE_ASSERT(num_blocks <= MAX_NUM_ARRAY_ELEMENTS);
-   std::vector<forge::dynamic_bitset::block_type> blocks(num_blocks);
-   for (size_t i = 0; i < num_blocks; ++i) {
-      forge::raw::unpack(s, blocks[i]);
+template <typename Stream> void host_unpack(Stream& stream, forge::dynamic_bitset& value) {
+   auto size = unsigned_int{};
+   unpack(stream, size);
+   constexpr auto bits_per_block = sizeof(forge::dynamic_bitset::block_type) * CHAR_BIT;
+   const auto block_count = (size.value + bits_per_block - 1U) / bits_per_block;
+   FORGE_ASSERT(block_count <= max_array_elements);
+   auto blocks = std::vector<forge::dynamic_bitset::block_type>(block_count);
+   for (auto& block : blocks) {
+      unpack(stream, block);
    }
-   value = {blocks.cbegin(), blocks.cend()};
+   value = forge::dynamic_bitset{blocks.cbegin(), blocks.cend()};
    value.resize(size.value);
 }
 
-template <typename Stream, typename T> inline void pack(Stream& s, const std::vector<T>& value) {
-   FORGE_ASSERT(value.size() <= MAX_NUM_ARRAY_ELEMENTS);
-   forge::raw::pack(s, unsigned_int((uint32_t)value.size()));
-   for (const auto& i : value) {
-      forge::raw::pack(s, i);
+template <typename Stream, typename T> void host_pack(Stream& stream, const boost::multiprecision::number<T>& value) {
+   static_assert(sizeof(value) == (std::numeric_limits<boost::multiprecision::number<T>>::digits + 1) / 8,
+                 "unexpected multiprecision padding");
+   detail::write_object(stream, value);
+}
+
+template <typename Stream, typename T> void host_unpack(Stream& stream, boost::multiprecision::number<T>& value) {
+   static_assert(sizeof(value) == (std::numeric_limits<boost::multiprecision::number<T>>::digits + 1) / 8,
+                 "unexpected multiprecision padding");
+   detail::read_object(stream, value);
+}
+
+template <typename Stream> void host_pack(Stream& stream, const UInt<256>& value) {
+   pack(stream, static_cast<UInt<128>>(value));
+   pack(stream, static_cast<UInt<128>>(value >> 128U));
+}
+
+template <typename Stream> void host_unpack(Stream& stream, UInt<256>& value) {
+   auto words = std::array<UInt<128>, 2>{};
+   unpack(stream, words[0]);
+   unpack(stream, words[1]);
+   value = words[1];
+   value <<= 128U;
+   value |= words[0];
+}
+
+namespace detail {
+
+template <typename T>
+concept host_codec = requires(forge::datastream<std::size_t>& writer, forge::datastream<const std::uint8_t*>& reader,
+                              const T& input, T& output) {
+   host_pack(writer, input);
+   host_unpack(reader, output);
+};
+
+} // namespace detail
+
+template <typename T>
+   requires detail::host_codec<T>
+struct codec_traits<T> {
+   template <typename Stream> static void pack(Stream& stream, const T& value) {
+      host_pack(stream, value);
    }
-}
 
-template <typename Stream, typename T> inline void unpack(Stream& s, std::vector<T>& value) {
-   unsigned_int size;
-   forge::raw::unpack(s, size);
-   FORGE_ASSERT(size.value <= MAX_NUM_ARRAY_ELEMENTS);
-   value.resize(size.value);
-   for (auto& i : value) {
-      forge::raw::unpack(s, i);
+   template <typename Stream> static void unpack(Stream& stream, T& value) {
+      host_unpack(stream, value);
    }
-}
+};
 
-template <typename Stream, typename T> inline void pack(Stream& s, const std::list<T>& value) {
-   FORGE_ASSERT(value.size() <= MAX_NUM_ARRAY_ELEMENTS);
-   forge::raw::pack(s, unsigned_int((uint32_t)value.size()));
-   for (const auto& i : value) {
-      forge::raw::pack(s, i);
-   }
-}
-
-template <typename Stream, typename T> inline void unpack(Stream& s, std::list<T>& value) {
-   unsigned_int size;
-   forge::raw::unpack(s, size);
-   FORGE_ASSERT(size.value <= MAX_NUM_ARRAY_ELEMENTS);
-   value.clear();
-   while (size.value--) {
-      T i;
-      forge::raw::unpack(s, i);
-      value.emplace_back(std::move(i));
-   }
-}
-
-template <typename Stream, typename T> inline void pack(Stream& s, const std::set<T>& value) {
-   FORGE_ASSERT(value.size() <= MAX_NUM_ARRAY_ELEMENTS);
-   forge::raw::pack(s, unsigned_int((uint32_t)value.size()));
-   auto itr = value.begin();
-   auto end = value.end();
-   while (itr != end) {
-      forge::raw::pack(s, *itr);
-      ++itr;
-   }
-}
-
-template <typename Stream, typename T> inline void unpack(Stream& s, std::set<T>& value) {
-   unsigned_int size;
-   forge::raw::unpack(s, size);
-   FORGE_ASSERT(size.value <= MAX_NUM_ARRAY_ELEMENTS);
-   value.clear();
-   for (uint64_t i = 0; i < size.value; ++i) {
-      T tmp;
-      forge::raw::unpack(s, tmp);
-      value.insert(std::move(tmp));
-   }
-}
-
-template <typename Stream, TrivialScalar T, std::size_t S> inline void pack(Stream& s, const std::array<T, S>& value) {
-   static_assert(S <= MAX_NUM_ARRAY_ELEMENTS, "number of elements in array is too large");
-   detail::write_bytes(s, std::as_bytes(std::span{value}));
-}
-
-template <typename Stream, NotTrivialScalar T, std::size_t S>
-inline void pack(Stream& s, const std::array<T, S>& value) {
-   static_assert(S <= MAX_NUM_ARRAY_ELEMENTS, "number of elements in array is too large");
-   for (std::size_t i = 0; i < S; ++i) {
-      forge::raw::pack(s, value[i]);
-   }
-}
-
-template <typename Stream, TrivialScalar T, std::size_t S> inline void unpack(Stream& s, std::array<T, S>& value) {
-   static_assert(S <= MAX_NUM_ARRAY_ELEMENTS, "number of elements in array is too large");
-   detail::read_bytes(s, std::as_writable_bytes(std::span{value}));
-}
-
-template <typename Stream, NotTrivialScalar T, std::size_t S> inline void unpack(Stream& s, std::array<T, S>& value) {
-   static_assert(S <= MAX_NUM_ARRAY_ELEMENTS, "number of elements in array is too large");
-   for (std::size_t i = 0; i < S; ++i) {
-      forge::raw::unpack(s, value[i]);
-   }
-}
-
-template <typename Stream, typename T> inline void pack(Stream& s, const T& v) {
-   using clean = std::remove_cv_t<T>;
-   if constexpr (forge::reflect::is_described_enum_v<clean>) {
-      forge::raw::pack(s, static_cast<int64_t>(v));
-   } else if constexpr (forge::reflect::is_described_object_v<clean>) {
-      forge::raw::detail::pack_described_object(s, v);
-   } else {
-      forge::raw::detail::if_class<typename forge::is_class<T>::type>::pack(s, v);
-   }
-}
-template <typename Stream, typename T> inline void unpack(Stream& s, T& v) {
-   try {
-      using clean = std::remove_cv_t<T>;
-      if constexpr (forge::reflect::is_described_enum_v<clean>) {
-         int64_t value = 0;
-         forge::raw::unpack(s, value);
-         v = static_cast<T>(value);
-      } else if constexpr (forge::reflect::is_described_object_v<clean>) {
-         forge::raw::detail::unpack_described_object(s, v);
+template <typename T>
+   requires(!detail::host_codec<T> &&
+            (forge::reflect::is_described_enum_v<T> || forge::reflect::is_described_object_v<T>))
+struct codec_traits<T> {
+   template <typename Stream> static void pack(Stream& stream, const T& value) {
+      if constexpr (forge::reflect::is_described_enum_v<T>) {
+         forge::raw::pack(stream, static_cast<std::int64_t>(value));
       } else {
-         forge::raw::detail::if_class<typename forge::is_class<T>::type>::unpack(s, v);
+         forge::reflect::for_each_member<T>([&](const char*, auto member) { forge::raw::pack(stream, value.*member); });
       }
    }
-   FORGE_CAPTURE_AND_RETHROW("error unpacking ${type}", forge::exceptions::ctx("type", forge::type_name<T>()))
-}
 
-template <typename T> inline size_t pack_size(const T& v) {
-   datastream<size_t> ps;
-   forge::raw::pack(ps, v);
-   return ps.tellp();
-}
-
-template <typename T> inline bytes pack(const T& v) {
-   datastream<size_t> ps;
-   forge::raw::pack(ps, v);
-   bytes vec(ps.tellp());
-
-   if (vec.size()) {
-      datastream<std::uint8_t*> ds(vec.data(), size_t(vec.size()));
-      forge::raw::pack(ds, v);
-   }
-   return vec;
-}
-
-template <typename T> inline void pack(std::vector<std::uint8_t>& out, const T& v) {
-   detail::pack_to_container(out, v);
-}
-
-template <typename T, typename... Next> inline bytes pack(const T& v, Next... next) {
-   datastream<size_t> ps;
-   forge::raw::pack(ps, v, next...);
-   bytes vec(ps.tellp());
-
-   if (vec.size()) {
-      datastream<std::uint8_t*> ds(vec.data(), size_t(vec.size()));
-      forge::raw::pack(ds, v, next...);
-   }
-   return vec;
-}
-
-template <typename T> inline T unpack(std::span<const std::uint8_t> s) {
-   try {
-      T tmp;
-      datastream<const unsigned char*> ds(s.data(), size_t(s.size()));
-      forge::raw::unpack(ds, tmp);
-      return tmp;
-   }
-   FORGE_CAPTURE_AND_RETHROW("error unpacking ${type}", forge::exceptions::ctx("type", forge::type_name<T>()))
-}
-
-template <typename T> inline void unpack(std::span<const std::uint8_t> s, T& tmp) {
-   try {
-      datastream<const unsigned char*> ds(s.data(), size_t(s.size()));
-      forge::raw::unpack(ds, tmp);
-   }
-   FORGE_CAPTURE_AND_RETHROW("error unpacking ${type}", forge::exceptions::ctx("type", forge::type_name<T>()))
-}
-
-template <typename T> inline T unpack(const std::vector<std::uint8_t>& s) {
-   return forge::raw::unpack<T>(std::span<const std::uint8_t>{s.data(), s.size()});
-}
-
-template <typename T> inline void unpack(const std::vector<std::uint8_t>& s, T& tmp) {
-   forge::raw::unpack(std::span<const std::uint8_t>{s.data(), s.size()}, tmp);
-}
-
-template <typename T> inline void pack(std::uint8_t* d, uint32_t s, const T& v) {
-   datastream<std::uint8_t*> ds(d, s);
-   forge::raw::pack(ds, v);
-}
-
-template <typename T> inline T unpack(const std::uint8_t* d, uint32_t s) {
-   try {
-      T v;
-      datastream<const std::uint8_t*> ds(d, s);
-      forge::raw::unpack(ds, v);
-      return v;
-   }
-   FORGE_CAPTURE_AND_RETHROW("error unpacking ${type}", forge::exceptions::ctx("type", forge::get_typename<T>::name()))
-}
-
-template <typename T> inline void unpack(const std::uint8_t* d, uint32_t s, T& v) {
-   try {
-      datastream<const std::uint8_t*> ds(d, s);
-      forge::raw::unpack(ds, v);
-   }
-   FORGE_CAPTURE_AND_RETHROW("error unpacking ${type}", forge::exceptions::ctx("type", forge::get_typename<T>::name()))
-}
-
-template <typename Stream> struct pack_static_variant {
-   Stream& stream;
-   pack_static_variant(Stream& s) : stream(s) {}
-
-   typedef void result_type;
-   template <typename T> void operator()(const T& v) const {
-      forge::raw::pack(stream, v);
+   template <typename Stream> static void unpack(Stream& stream, T& value) {
+      if constexpr (forge::reflect::is_described_enum_v<T>) {
+         auto encoded = std::int64_t{};
+         forge::raw::unpack(stream, encoded);
+         value = static_cast<T>(encoded);
+      } else {
+         forge::reflect::for_each_member<T>([&](const char*, auto member) {
+            using member_type = std::remove_reference_t<decltype(value.*member)>;
+            forge::raw::unpack(stream, const_cast<std::remove_const_t<member_type>&>(value.*member));
+         });
+      }
    }
 };
-
-template <typename Stream> struct unpack_static_variant {
-   Stream& stream;
-   unpack_static_variant(Stream& s) : stream(s) {}
-
-   typedef void result_type;
-   template <typename T> void operator()(T& v) const {
-      forge::raw::unpack(stream, v);
-   }
-};
-
-template <typename Stream, typename... T> void pack(Stream& s, const std::variant<T...>& sv) {
-   forge::raw::pack(s, unsigned_int(sv.index()));
-   std::visit(pack_static_variant<Stream>(s), sv);
-}
-
-template <typename Stream, typename... T> void unpack(Stream& s, std::variant<T...>& sv) {
-   unsigned_int w;
-   forge::raw::unpack(s, w);
-   forge::from_index(sv, w.value);
-   std::visit(unpack_static_variant<Stream>(s), sv);
-}
-
-template <typename Stream, typename T> void pack(Stream& s, const boost::multiprecision::number<T>& n) {
-   static_assert(sizeof(n) == (std::numeric_limits<boost::multiprecision::number<T>>::digits + 1) / 8,
-                 "unexpected padding");
-   detail::write_object(s, n);
-}
-template <typename Stream, typename T> void unpack(Stream& s, boost::multiprecision::number<T>& n) {
-   static_assert(sizeof(n) == (std::numeric_limits<boost::multiprecision::number<T>>::digits + 1) / 8,
-                 "unexpected padding");
-   detail::read_object(s, n);
-}
-
-template <typename Stream> void pack(Stream& s, const UInt<256>& n) {
-   pack(s, static_cast<UInt<128>>(n));
-   pack(s, static_cast<UInt<128>>(n >> 128));
-}
-template <typename Stream> void unpack(Stream& s, UInt<256>& n) {
-   UInt<128> tmp[2];
-   unpack(s, tmp[0]);
-   unpack(s, tmp[1]);
-   n = tmp[1];
-   n <<= 128;
-   n |= tmp[0];
-}
 
 } // namespace forge::raw
