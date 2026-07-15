@@ -192,6 +192,13 @@ BOOST_AUTO_TEST_CASE(asio_gate_close_rejects_waiters_and_future_acquires) {
    owner.release();
 }
 
+BOOST_AUTO_TEST_CASE(asio_gate_deferred_acquire_keeps_state_alive) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto deferred = forge::asio::gate{}.acquire();
+
+   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, std::move(deferred)), forge::asio::exceptions::rejected);
+}
+
 BOOST_AUTO_TEST_CASE(asio_gate_ticket_can_be_released_from_another_thread) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    auto gate = forge::asio::gate{};

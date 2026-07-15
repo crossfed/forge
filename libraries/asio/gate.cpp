@@ -16,6 +16,14 @@ module forge.asio.gate;
 
 namespace forge::asio {
 
+namespace {
+
+boost::asio::awaitable<gate::ticket> acquire_owned(std::shared_ptr<detail::gate_state> state) {
+   co_return co_await state->acquire();
+}
+
+} // namespace
+
 gate::gate() : state_{std::make_shared<detail::gate_state>()} {}
 
 gate::~gate() {
@@ -23,7 +31,7 @@ gate::~gate() {
 }
 
 boost::asio::awaitable<gate::ticket> gate::acquire() {
-   return state_->acquire();
+   return acquire_owned(state_);
 }
 
 void gate::close() noexcept {
