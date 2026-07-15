@@ -1265,6 +1265,42 @@ BOOST_AUTO_TEST_CASE(db_object_ranked_indexes_maintain_counts_sums_and_positions
    }());
 }
 
+BOOST_AUTO_TEST_CASE(db_object_ranked_upper_bound_accepts_source_end_sentinel) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = co_await forge::db::object::store::open(driver);
+      store.register_object<ranked_upload_object>();
+      co_await store.insert(make_ranked_upload(10, 1, 7, 20, 10));
+      co_await store.insert(make_ranked_upload(11, 1, 7, -10, 20));
+
+      auto primary = store.index<ranked_upload_object, by_ranked_id>();
+      const auto maximum = ranked_upload::id_t{std::numeric_limits<std::uint64_t>::max()};
+      BOOST_CHECK_EQUAL(co_await primary.upper_bound_rank(maximum), 2U);
+      BOOST_CHECK_EQUAL(co_await primary.upper_bound(maximum).count(), 0U);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_guarded_transaction_index_stream_uses_page_fallback) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = co_await forge::db::object::store::open(driver);
+      store.register_object<ranked_upload_object>();
+      co_await store.insert(make_ranked_upload(10, 1, 7, 20, 10));
+
+      auto tx = co_await store.begin_transaction();
+      auto guarded = tx.index<ranked_upload_object, by_ranked_id>().guarded([] {});
+      auto stream = guarded.lower_bound(ranked_upload::id_t{0}).stream({.page_size = 1});
+      const auto first = co_await stream.next();
+      BOOST_REQUIRE(first.has_value());
+      BOOST_CHECK_EQUAL(first->id.instance, 10U);
+      BOOST_CHECK(!(co_await stream.next()).has_value());
+      co_await tx.rollback();
+   }());
+}
+
 BOOST_AUTO_TEST_CASE(db_object_ranked_indexes_fail_closed_for_missing_or_corrupt_state) {
    auto runtime = forge::asio::runtime{};
    forge::asio::blocking::run(runtime, []() -> boost::asio::awaitable<void> {

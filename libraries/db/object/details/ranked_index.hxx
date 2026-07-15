@@ -52,6 +52,7 @@ struct layout {
 struct bounds {
    bytes lower;
    std::optional<bytes> upper;
+   bool lower_at_end = false;
 };
 
 struct record {

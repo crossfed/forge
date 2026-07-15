@@ -1050,15 +1050,18 @@ template <object_model Object, typename Tag> class index_view {
          std::invoke(guard);
          co_return co_await query(std::move(range), std::move(request));
       };
-      auto guarded_stream = [factory = stream_page_, guard]() mutable -> index_page_query<value_type> {
-         auto query = factory ? factory() : index_page_query<value_type>{};
-         return [query = std::move(query), guard](forge::db::core::record_range range,
-                                                  forge::db::core::page_request request) mutable
-                   -> boost::asio::awaitable<object_page<value_type>> {
-            std::invoke(guard);
-            co_return co_await query(std::move(range), std::move(request));
+      auto guarded_stream = index_stream_query_factory<value_type>{};
+      if (stream_page_) {
+         guarded_stream = [factory = stream_page_, guard]() mutable -> index_page_query<value_type> {
+            auto query = factory();
+            return [query = std::move(query), guard](forge::db::core::record_range range,
+                                                     forge::db::core::page_request request) mutable
+                      -> boost::asio::awaitable<object_page<value_type>> {
+               std::invoke(guard);
+               co_return co_await query(std::move(range), std::move(request));
+            };
          };
-      };
+      }
       auto guarded_aggregate = [query = aggregate_, guard](forge::db::core::record_range range) mutable
          -> boost::asio::awaitable<index_aggregate_result> {
          std::invoke(guard);

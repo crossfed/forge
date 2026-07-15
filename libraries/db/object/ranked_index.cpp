@@ -192,6 +192,19 @@ bool starts_with(const bytes& value, const bytes& prefix) {
    return value.size() >= prefix.size() && std::equal(prefix.begin(), prefix.end(), value.begin());
 }
 
+std::optional<bytes> prefix_end(bytes prefix) {
+   for (auto index = prefix.size(); index > 0U; --index) {
+      const auto value = std::to_integer<std::uint8_t>(prefix[index - 1U]);
+      if (value == 0xffU) {
+         continue;
+      }
+      prefix[index - 1U] = static_cast<std::byte>(value + 1U);
+      prefix.resize(index);
+      return prefix;
+   }
+   return std::nullopt;
+}
+
 bytes node_key(const layout& descriptor, std::uint8_t level, const bytes& logical) {
    auto result = descriptor.levels.at(level);
    result.insert(result.end(), logical.begin(), logical.end());
@@ -472,13 +485,24 @@ insert_entry(planner& state, const layout& descriptor, const entry& inserted, ag
 
 bounds bounds_from_source_range(const layout& descriptor, const bytes& begin,
                                 const std::optional<bytes>& end) {
-   if (!starts_with(begin, descriptor.source_prefix)) {
+   const auto source_end = prefix_end(descriptor.source_prefix);
+   auto result = bounds{};
+   if (starts_with(begin, descriptor.source_prefix)) {
+      result.lower = bytes{
+         begin.begin() + static_cast<std::ptrdiff_t>(descriptor.source_prefix.size()), begin.end()};
+   } else if (source_end.has_value() && begin == *source_end) {
+      result.lower_at_end = true;
+   } else {
       throw error{error_code::corruption, "ranked query begin is outside its source index"};
    }
-   auto result = bounds{
-      .lower = bytes{begin.begin() + static_cast<std::ptrdiff_t>(descriptor.source_prefix.size()), begin.end()}};
-   if (end.has_value() && starts_with(*end, descriptor.source_prefix)) {
-      result.upper = bytes{end->begin() + static_cast<std::ptrdiff_t>(descriptor.source_prefix.size()), end->end()};
+
+   if (end.has_value()) {
+      if (starts_with(*end, descriptor.source_prefix)) {
+         result.upper = bytes{
+            end->begin() + static_cast<std::ptrdiff_t>(descriptor.source_prefix.size()), end->end()};
+      } else if (!source_end.has_value() || *end != *source_end) {
+         throw error{error_code::corruption, "ranked query end is outside its source index"};
+      }
    }
    return result;
 }
@@ -496,7 +520,8 @@ boost::asio::awaitable<void> lock_root(const write_access& access, const layout&
 boost::asio::awaitable<aggregate> query(const read_access& access, const layout& descriptor,
                                         const bounds& range) {
    const auto total = co_await load_total(access, descriptor);
-   if (!total.has_value() || (range.upper.has_value() && *range.upper < range.lower)) {
+   if (!total.has_value() || range.lower_at_end ||
+       (range.upper.has_value() && *range.upper < range.lower)) {
       co_return zero(descriptor);
    }
    const auto lower = range.lower.empty() ? zero(descriptor)
@@ -511,6 +536,9 @@ query_ranks(const read_access& access, const layout& descriptor, const bounds& r
    const auto total = co_await load_total(access, descriptor);
    if (!total.has_value()) {
       co_return std::pair<std::uint64_t, std::uint64_t>{0, 0};
+   }
+   if (range.lower_at_end) {
+      co_return std::pair<std::uint64_t, std::uint64_t>{total->count, total->count};
    }
    const auto lower = range.lower.empty() ? std::uint64_t{0}
       : (co_await prefix_aggregate(access, descriptor, range.lower)).count;
