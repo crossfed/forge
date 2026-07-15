@@ -42,6 +42,7 @@
 
 import forge.asio.runtime;
 import forge.asio.blocking;
+import forge.asio.exceptions;
 import forge.chain.protocol.fixed_key;
 import forge.crypto.hex;
 import forge.crypto.sha256;
@@ -2318,12 +2319,8 @@ BOOST_AUTO_TEST_CASE(db_object_cancelled_join_does_not_lose_writer_gate) {
                waiting->store(true, std::memory_order_release);
                auto second = co_await store.join(second_core);
                co_await second_core.rollback();
-            } catch (const boost::system::system_error& failure) {
-               if (failure.code() == boost::asio::error::operation_aborted) {
-                  cancelled->store(true, std::memory_order_release);
-               } else {
-                  *error = std::current_exception();
-               }
+            } catch (const forge::asio::exceptions::canceled&) {
+               cancelled->store(true, std::memory_order_release);
             } catch (...) {
                *error = std::current_exception();
             }
@@ -2531,12 +2528,8 @@ BOOST_AUTO_TEST_CASE(db_object_create_owned_transaction_drop_rollback_failure_se
                 auto committed =
                     co_await reopened.create<account>([](account& value) { value.name = "after-rollback-failure"; });
                 *second_instance = committed.id.instance;
-             } catch (const boost::system::system_error& error) {
-                if (error.code() == boost::asio::error::operation_aborted) {
-                   second_cancelled->store(true, std::memory_order_release);
-                } else {
-                   *second_error = std::current_exception();
-                }
+             } catch (const forge::asio::exceptions::canceled&) {
+                second_cancelled->store(true, std::memory_order_release);
              } catch (...) {
                 *second_error = std::current_exception();
              }
@@ -2824,12 +2817,8 @@ BOOST_AUTO_TEST_CASE(db_object_explicit_rollback_failure_releases_writer_lane) {
                 auto second = co_await store.begin_transaction();
                 *second_started = true;
                 co_await second.commit();
-             } catch (const boost::system::system_error& error) {
-                if (error.code() == boost::asio::error::operation_aborted) {
-                   *second_cancelled = true;
-                } else {
-                   *second_error = std::current_exception();
-                }
+             } catch (const forge::asio::exceptions::canceled&) {
+                *second_cancelled = true;
              } catch (...) {
                 *second_error = std::current_exception();
              }
@@ -3077,12 +3066,8 @@ BOOST_AUTO_TEST_CASE(db_object_single_writer_cancelled_wait_does_not_acquire_gat
                 auto second = co_await store.begin_transaction();
                 *second_started = true;
                 co_await second.rollback();
-             } catch (const boost::system::system_error& error) {
-                if (error.code() == boost::asio::error::operation_aborted) {
-                   *second_cancelled = true;
-                } else {
-                   *second_error = std::current_exception();
-                }
+             } catch (const forge::asio::exceptions::canceled&) {
+                *second_cancelled = true;
              } catch (...) {
                 *second_error = std::current_exception();
              }
@@ -3148,12 +3133,8 @@ BOOST_AUTO_TEST_CASE(db_object_single_writer_cancelled_armed_wait_does_not_acqui
                 auto second = co_await store.begin_transaction();
                 second_started->store(true, std::memory_order_release);
                 co_await second.rollback();
-             } catch (const boost::system::system_error& error) {
-                if (error.code() == boost::asio::error::operation_aborted) {
-                   second_cancelled->store(true, std::memory_order_release);
-                } else {
-                   *second_error = std::current_exception();
-                }
+             } catch (const forge::asio::exceptions::canceled&) {
+                second_cancelled->store(true, std::memory_order_release);
              } catch (...) {
                 *second_error = std::current_exception();
              }
@@ -3220,12 +3201,8 @@ BOOST_AUTO_TEST_CASE(db_object_single_writer_early_cancelled_wait_does_not_need_
                 auto second = co_await store.begin_transaction();
                 second_started->store(true, std::memory_order_release);
                 co_await second.rollback();
-             } catch (const boost::system::system_error& error) {
-                if (error.code() == boost::asio::error::operation_aborted) {
-                   second_cancelled->store(true, std::memory_order_release);
-                } else {
-                   *second_error = std::current_exception();
-                }
+             } catch (const forge::asio::exceptions::canceled&) {
+                second_cancelled->store(true, std::memory_order_release);
              } catch (...) {
                 *second_error = std::current_exception();
              }
@@ -3316,12 +3293,8 @@ BOOST_AUTO_TEST_CASE(db_object_single_writer_precancelled_wait_does_not_hang) {
                 auto second = co_await store.begin_transaction();
                 second_started->store(true, std::memory_order_release);
                 co_await second.rollback();
-             } catch (const boost::system::system_error& error) {
-                if (error.code() == boost::asio::error::operation_aborted) {
-                   second_cancelled->store(true, std::memory_order_release);
-                } else {
-                   *second_error = std::current_exception();
-                }
+             } catch (const forge::asio::exceptions::canceled&) {
+                second_cancelled->store(true, std::memory_order_release);
              } catch (...) {
                 *second_error = std::current_exception();
              }

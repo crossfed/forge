@@ -1,14 +1,14 @@
 #pragma once
 
-#include "write_gate.hxx"
-
 #include <map>
 
 namespace forge::db::object {
 
 struct runtime_state {
-   std::shared_ptr<detail::write_gate> write_gate = std::make_shared<detail::write_gate>();
-   std::shared_ptr<detail::write_gate> allocator_gate = std::make_shared<detail::write_gate>();
+   runtime_state();
+
+   std::shared_ptr<forge::asio::gate> write_gate;
+   std::shared_ptr<forge::asio::gate> allocator_gate;
    std::map<forge::ids::object_id, std::uint64_t> next_instances;
 };
 

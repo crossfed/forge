@@ -148,7 +148,9 @@ application write APIs.
 
 The default write policy is `single_writer`, which serializes DB Object
 mutations at the store layer. `write_policy::backend` is available for drivers
-that intentionally own write concurrency.
+that intentionally own write concurrency. The writer and allocator lanes use
+the neutral FIFO `forge::asio::gate`; cancellation while waiting is reported as
+`forge::asio::exceptions::canceled` and never transfers ownership of a ticket.
 
 ## Transactions And Direct Calls
 
@@ -215,7 +217,9 @@ the outer Core transaction commits, rolls back or is dropped. Joining an
 existing Object transaction from the same store reuses its participant and
 returns another non-owning facade; it never acquires a second writer ticket.
 `write_policy::backend` delegates serialization to the backend and does not wait
-on the Object writer lane.
+on the Object writer lane. Store instances over the same driver and family share
+the same neutral gate, so dropped-transaction cleanup and a reopened store cannot
+overlap backend writes.
 
 ## Reads And Indexes
 
