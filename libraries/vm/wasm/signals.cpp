@@ -2,6 +2,7 @@ module;
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <setjmp.h>
@@ -23,14 +24,14 @@ __attribute__((visibility("default"))) thread_local std::exception_ptr saved_exc
 void signal_handler(int signal, siginfo_t* info, void* context) {
    auto* destination = std::atomic_load(&signal_dest);
    if (destination) {
-      const void* address = info->si_addr;
+      const auto address = reinterpret_cast<std::uintptr_t>(info->si_addr);
       if (code_memory_range.empty() && memory_range.empty()) {
          siglongjmp(*destination, signal);
       }
-      if (address >= memory_range.data() && address < memory_range.data() + memory_range.size()) {
+      if (detail::contains_address(memory_range, address)) {
          siglongjmp(*destination, signal);
       }
-      if (address >= code_memory_range.data() && address < code_memory_range.data() + code_memory_range.size()) {
+      if (detail::contains_address(code_memory_range, address)) {
          if ((signal == SIGSEGV || signal == SIGBUS) && !timed_run_has_timed_out.load(std::memory_order_acquire)) {
             return;
          }

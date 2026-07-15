@@ -1,6 +1,7 @@
 module;
 
 #include <atomic>
+#include <cstdint>
 #include <cstdlib>
 #include <exception>
 #include <setjmp.h>
@@ -20,6 +21,16 @@ import forge.vm.wasm.types;
 import forge.vm.wasm.watchdog;
 
 namespace forge::vm::wasm {
+
+namespace detail {
+inline bool contains_address(std::span<const std::byte> range, std::uintptr_t address) noexcept {
+   if (range.empty())
+      return false;
+
+   const auto start = reinterpret_cast<std::uintptr_t>(range.data());
+   return address >= start && address - start < range.size();
+}
+} // namespace detail
 
 // Fixes a duplicate symbol build issue when building with `-fvisibility=hidden`
 __attribute__((visibility("default"))) extern thread_local std::atomic<sigjmp_buf*> signal_dest;

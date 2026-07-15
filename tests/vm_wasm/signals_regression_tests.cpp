@@ -2,6 +2,8 @@ module;
 
 #include "test_prelude.hpp"
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 
@@ -75,6 +77,18 @@ TEST_CASE("nested signal scopes restore the outer memory range", "[signals]") {
 
    outer_memory.free();
    inner_memory.free();
+}
+
+TEST_CASE("signal ranges classify addresses without pointer ordering", "[signals]") {
+   auto bytes = std::array<std::byte, 8>{};
+   const auto range = std::span<const std::byte>{bytes};
+   const auto start = reinterpret_cast<std::uintptr_t>(range.data());
+
+   BOOST_TEST(wasm::detail::contains_address(range, start));
+   BOOST_TEST(wasm::detail::contains_address(range, start + range.size() - 1));
+   BOOST_TEST(!wasm::detail::contains_address(range, start - 1));
+   BOOST_TEST(!wasm::detail::contains_address(range, start + range.size()));
+   BOOST_TEST(!wasm::detail::contains_address({}, start));
 }
 
 TEST_CASE("interpreter re-exported host imports translate guest memory faults", "[signals]") {
