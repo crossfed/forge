@@ -1,6 +1,7 @@
 module;
 
 #include <cassert>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -26,6 +27,39 @@ import :softfloat;
 #if defined(__x86_64__)
 namespace forge::vm::wasm {
 
+struct native_cpu_features {
+   static bool has_tzcnt() {
+      static const bool result = [] {
+         unsigned a, b, c, d;
+         return __get_cpuid_count(7, 0, &a, &b, &c, &d) && (b & bit_BMI) && __get_cpuid(0x80000001, &a, &b, &c, &d) &&
+                (c & bit_LZCNT);
+      }();
+      return result;
+   }
+
+   static bool has_popcnt() {
+      static const bool result = [] {
+         unsigned a, b, c, d;
+         return __get_cpuid(1, &a, &b, &c, &d) && (c & bit_POPCNT);
+      }();
+      return result;
+   }
+};
+
+#if defined(__clang__) || defined(__GNUC__)
+__attribute__((target("no-popcnt")))
+#endif
+std::uint32_t portable_popcount(std::uint32_t value) noexcept {
+   return std::popcount(value);
+}
+
+#if defined(__clang__) || defined(__GNUC__)
+__attribute__((target("no-popcnt")))
+#endif
+std::uint64_t portable_popcount(std::uint64_t value) noexcept {
+   return std::popcount(value);
+}
+
 // Random notes:
 // - branch instructions return the address that will need to be updated
 // - label instructions return the address of the target
@@ -36,7 +70,7 @@ namespace forge::vm::wasm {
 // - The base of memory is stored in rsi
 //
 // - FIXME: Factor the machine instructions into a separate assembler class.
-template <typename Context> class machine_code_writer {
+template <typename Context, typename CpuFeatures = native_cpu_features> class machine_code_writer {
  public:
    machine_code_writer(growable_allocator& alloc, std::size_t source_bytes, module& mod)
        : _mod(mod), _allocator(alloc), _code_segment_base(_allocator.start_code()) {
@@ -1084,20 +1118,9 @@ template <typename Context> class machine_code_writer {
 
    // --------------- i32 unops ----------------------
 
-   bool has_tzcnt_impl() {
-      unsigned a, b, c, d;
-      return __get_cpuid_count(7, 0, &a, &b, &c, &d) && (b & bit_BMI) && __get_cpuid(0x80000001, &a, &b, &c, &d) &&
-             (c & bit_LZCNT);
-   }
-
-   bool has_tzcnt() {
-      static bool result = has_tzcnt_impl();
-      return result;
-   }
-
    void emit_i32_clz() {
-      auto icount = fixed_size_instr(has_tzcnt() ? 6 : 18);
-      if (!has_tzcnt()) {
+      auto icount = fixed_size_instr(CpuFeatures::has_tzcnt() ? 6 : 18);
+      if (!CpuFeatures::has_tzcnt()) {
          // pop %rax
          emit_bytes(0x58);
          // mov $-1, %ecx
@@ -1123,8 +1146,8 @@ template <typename Context> class machine_code_writer {
    }
 
    void emit_i32_ctz() {
-      auto icount = fixed_size_instr(has_tzcnt() ? 6 : 13);
-      if (!has_tzcnt()) {
+      auto icount = fixed_size_instr(CpuFeatures::has_tzcnt() ? 6 : 13);
+      if (!CpuFeatures::has_tzcnt()) {
          // pop %rax
          emit_bytes(0x58);
          // mov $32, %ecx
@@ -1146,6 +1169,9 @@ template <typename Context> class machine_code_writer {
    }
 
    void emit_i32_popcnt() {
+      if (!CpuFeatures::has_popcnt()) {
+         return emit_native_unop(static_cast<std::uint32_t (*)(std::uint32_t)>(&portable_popcount));
+      }
       auto icount = fixed_size_instr(6);
       // popq %rax
       emit_bytes(0x58);
@@ -1245,8 +1271,8 @@ template <typename Context> class machine_code_writer {
    // --------------- i64 unops ----------------------
 
    void emit_i64_clz() {
-      auto icount = fixed_size_instr(has_tzcnt() ? 7 : 24);
-      if (!has_tzcnt()) {
+      auto icount = fixed_size_instr(CpuFeatures::has_tzcnt() ? 7 : 24);
+      if (!CpuFeatures::has_tzcnt()) {
          // pop %rax
          emit_bytes(0x58);
          // mov $-1, %ecx
@@ -1272,8 +1298,8 @@ template <typename Context> class machine_code_writer {
    }
 
    void emit_i64_ctz() {
-      auto icount = fixed_size_instr(has_tzcnt() ? 7 : 17);
-      if (!has_tzcnt()) {
+      auto icount = fixed_size_instr(CpuFeatures::has_tzcnt() ? 7 : 17);
+      if (!CpuFeatures::has_tzcnt()) {
          // pop %rax
          emit_bytes(0x58);
          // mov $64, %ecx
@@ -1295,6 +1321,9 @@ template <typename Context> class machine_code_writer {
    }
 
    void emit_i64_popcnt() {
+      if (!CpuFeatures::has_popcnt()) {
+         return emit_native_unop(static_cast<std::uint64_t (*)(std::uint64_t)>(&portable_popcount));
+      }
       auto icount = fixed_size_instr(7);
       // popq %rax
       emit_bytes(0x58);
@@ -2338,7 +2367,7 @@ template <typename Context> class machine_code_writer {
       emit_bytes(0x52);
    }
 
-   template <typename T, typename U> void emit_softfloat_unop(T (*softfloatfun)(U)) {
+   template <typename T, typename U> void emit_native_unop(T (*function)(U)) {
       auto extra = emit_setup_backtrace();
       // pushq %rdi
       emit_bytes(0x57);
@@ -2352,9 +2381,9 @@ template <typename Context> class machine_code_writer {
          emit_bytes(0x48, 0x8b, 0x7c, 0x24, 0x10 + extra);
       }
       emit_align_stack();
-      // movabsq $softfloatfun, %rax
+      // movabsq $function, %rax
       emit_bytes(0x48, 0xb8);
-      emit_operand_ptr(softfloatfun);
+      emit_operand_ptr(function);
       // callq *%rax
       emit_bytes(0xff, 0xd0);
       emit_restore_stack();
@@ -2371,6 +2400,10 @@ template <typename Context> class machine_code_writer {
          // movq %rax, (%rsp)
          emit_bytes(0x48, 0x89, 0x04, 0x24);
       }
+   }
+
+   template <typename T, typename U> void emit_softfloat_unop(T (*softfloatfun)(U)) {
+      emit_native_unop(softfloatfun);
    }
 
    void emit_f32_binop_softfloat(float32_t (*softfloatfun)(float32_t, float32_t)) {
