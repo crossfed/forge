@@ -51,6 +51,11 @@ struct zero_call_depth_options {
    std::uint32_t max_call_depth = 0;
 };
 
+struct eight_stack_bytes_options {
+   static constexpr std::uint32_t max_func_local_bytes = 8;
+   static constexpr auto max_func_local_bytes_flags = wasm::max_func_local_bytes_flags_t::stack;
+};
+
 struct shared_limits_options {
    std::uint32_t max_call_depth = 17;
    std::uint32_t max_pages = 2;
@@ -353,6 +358,23 @@ TEST_CASE("null backend rejects deferred instantiation errors", "[null_backend]"
    };
 
    BOOST_CHECK_THROW(validate(), wasm::exceptions::interpreter);
+}
+
+TEST_CASE("unreachable operands do not consume the live stack byte limit", "[max_func_local_bytes]") {
+   auto code = wasm::wasm_code{
+       0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, // header
+       0x01, 0x04, 0x01, 0x60, 0x00, 0x00,             // one function type
+       0x03, 0x02, 0x01, 0x00,                         // one function
+       0x0a, 0x0e, 0x01, 0x0c, 0x00,                   // code section and empty locals
+       0x02, 0x40,                                     // block with no result
+       0x42, 0x00,                                     // i64.const 0
+       0x0c, 0x00,                                     // br 0 discards the i64
+       0x0b,                                           // end block
+       0x42, 0x00, 0x1a,                               // i64.const 0; drop
+       0x0b                                            // end function
+   };
+
+   auto instance = wasm::backend<std::nullptr_t, wasm::interpreter, eight_stack_bytes_options>{code, nullptr};
 }
 
 template <typename Impl> void verify_public_call_indirect() {

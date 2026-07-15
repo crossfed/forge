@@ -734,8 +734,10 @@ class binary_parser {
       }
       void start_unreachable() {
          while (!state.empty() && state.back() != scope_tag) {
-            if (state.back() != unreachable_tag)
+            if (state.back() != unreachable_tag) {
+               local_bytes_checker.pop_stack(options, state.back());
                --operand_depth;
+            }
             state.pop_back();
          }
          local_bytes_checker.push_unreachable();
