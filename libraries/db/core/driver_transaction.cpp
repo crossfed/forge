@@ -399,6 +399,8 @@ boost::asio::awaitable<savepoint_id_t> transaction::create_savepoint() {
       FORGE_THROW_EXCEPTION(exceptions::savepoint_overflow, "db transaction savepoint id is exhausted");
    }
 
+   co_await prepare_prewrite_locks();
+
    const auto savepoint = impl_->next_savepoint;
    try {
       for (const auto& participant : impl_->participants) {

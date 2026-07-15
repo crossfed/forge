@@ -67,6 +67,7 @@ struct memory_state {
    bool support_savepoints = true;
    bool support_record_locks = true;
    std::vector<std::pair<std::string, forge::db::core::record_key>> lock_requests;
+   std::vector<std::string> events;
 };
 
 class memory_session final : public forge::db::core::session {
@@ -102,6 +103,7 @@ class memory_session final : public forge::db::core::session {
 
    boost::asio::awaitable<std::optional<std::vector<std::byte>>>
    get_for_update(forge::db::core::family family, forge::db::core::record_key record) override {
+      state_->events.push_back("lock:" + family.name + ":" + text(record.bytes()));
       state_->lock_requests.emplace_back(family.name, record);
       co_return co_await get(std::move(family), std::move(record));
    }
@@ -157,6 +159,7 @@ class memory_session final : public forge::db::core::session {
    }
 
    boost::asio::awaitable<void> create_savepoint() override {
+      state_->events.push_back("savepoint");
       savepoints_.push_back(working_);
       co_return;
    }
@@ -554,6 +557,31 @@ BOOST_AUTO_TEST_CASE(db_transaction_prewrite_locks_are_canonical_and_precede_mut
             })),
          forge::db::core::exceptions::participant_conflict);
       co_await prepared.rollback();
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_transaction_prewrite_locks_precede_native_savepoint) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   auto driver = std::make_shared<memory_driver>(state);
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto tx = co_await driver->begin_transaction();
+      tx.attach_participant(std::make_shared<locking_participant>(
+         "savepoint-lock",
+         std::vector<forge::db::core::record_lock_claim>{
+            {.column_family = forge::db::core::family{"objectdb"}, .key = key("coordinator")},
+         }));
+
+      const auto point = co_await tx.create_savepoint();
+      BOOST_REQUIRE_EQUAL(state->events.size(), 2U);
+      BOOST_CHECK_EQUAL(state->events[0], "lock:objectdb:coordinator");
+      BOOST_CHECK_EQUAL(state->events[1], "savepoint");
+
+      co_await tx.rollback_to_savepoint(point);
+      co_await tx.put(forge::db::core::family{"objectdb"}, key("value"), bytes("stored"));
+      BOOST_CHECK_EQUAL(state->lock_requests.size(), 1U);
+      co_await tx.rollback();
    }());
 }
 
