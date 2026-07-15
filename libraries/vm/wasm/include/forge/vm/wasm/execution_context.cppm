@@ -399,7 +399,9 @@ class jit_execution_context : public frame_info_holder<EnableBacktrace>,
       try {
          if (func_index < imported_functions) {
             std::reverse(args_raw + 0, args_raw + sizeof...(Args));
-            result = call_host_function(args_raw, func_index);
+            ::forge::vm::wasm::invoke_with_signal_handler([&]() { result = call_host_function(args_raw, func_index); },
+                                                          &handle_signal, _mod->allocator,
+                                                          base_type::get_wasm_allocator());
          } else {
             detail::check<exceptions::interpreter>(_remaining_call_depth > 0, "stack overflow");
             std::size_t maximum_stack_usage =
@@ -900,7 +902,9 @@ template <typename Host> class execution_context : public execution_context_base
       push_call<true>(func_index);
 
       if (func_index < _mod->get_imported_functions_size()) {
-         _rhf(_state.host, get_interface(), _mod->import_functions[func_index]);
+         ::forge::vm::wasm::invoke_with_signal_handler(
+             [&]() { _rhf(_state.host, get_interface(), _mod->import_functions[func_index]); }, &handle_signal,
+             _mod->allocator, base_type::get_wasm_allocator());
       } else {
          _state.pc = _mod->get_function_pc(func_index);
          setup_locals(func_index);
