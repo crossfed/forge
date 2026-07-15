@@ -16,6 +16,8 @@
 #include <boost/asio/cancellation_state.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
+#include <boost/asio/redirect_error.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_future.hpp>
 
@@ -88,6 +90,28 @@ expect_affine_rejected(forge::asio::affine::executor executor, std::atomic_bool&
    } catch (const forge::asio::exceptions::rejected&) {
       observed.store(true, std::memory_order_release);
    }
+}
+
+boost::asio::awaitable<bool> execute_after_precancel(forge::asio::affine::executor executor,
+                                                     std::atomic_bool& ready,
+                                                     std::atomic_bool& invoked) {
+   co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::enable_total_cancellation{});
+   co_await boost::asio::this_coro::throw_if_cancelled(false);
+   const auto current = co_await boost::asio::this_coro::executor;
+   auto timer = boost::asio::steady_timer{current, boost::asio::steady_timer::time_point::max()};
+   ready.store(true, std::memory_order_release);
+   auto error = boost::system::error_code{};
+   co_await timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
+   if (error != boost::asio::error::operation_aborted) {
+      throw std::runtime_error{"test pre-cancel wait was not canceled"};
+   }
+
+   try {
+      co_await executor.execute({.name = "pre-canceled"}, [&] { invoked.store(true, std::memory_order_release); });
+   } catch (const forge::asio::exceptions::canceled&) {
+      co_return true;
+   }
+   co_return false;
 }
 
 } // namespace
@@ -224,6 +248,25 @@ BOOST_AUTO_TEST_CASE(asio_affine_cancels_before_start_and_completion_wins_after_
    const auto metrics = lane.snapshot();
    BOOST_CHECK_EQUAL(metrics.completed, 2U);
    BOOST_CHECK_EQUAL(metrics.canceled, 1U);
+   forge::asio::blocking::run(runtime, lane.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(asio_affine_rejects_precanceled_submission_before_admission) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto lane = forge::asio::affine::lane{};
+   auto ready = std::atomic_bool{false};
+   auto invoked = std::atomic_bool{false};
+   auto cancellation = boost::asio::cancellation_signal{};
+   auto result = boost::asio::co_spawn(
+      runtime.context(),
+      execute_after_precancel(lane.get_executor(), ready, invoked),
+      boost::asio::bind_cancellation_slot(cancellation.slot(), boost::asio::use_future));
+
+   BOOST_REQUIRE(wait_until([&] { return ready.load(std::memory_order_acquire); }));
+   cancellation.emit(boost::asio::cancellation_type::all);
+   BOOST_CHECK(result.get());
+   BOOST_CHECK(!invoked.load(std::memory_order_acquire));
+   BOOST_CHECK_EQUAL(lane.snapshot().canceled, 1U);
    forge::asio::blocking::run(runtime, lane.shutdown());
 }
 

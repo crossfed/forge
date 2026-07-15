@@ -215,10 +215,15 @@ class executor {
    static boost::asio::awaitable<Result>
    execute_owned(std::shared_ptr<detail::lane_state> state,
                  std::shared_ptr<detail::result_state<Work, Result>> operation) {
+      auto cancellation = co_await boost::asio::this_coro::cancellation_state;
+      if (cancellation.cancelled() != boost::asio::cancellation_type::none) {
+         static_cast<void>(operation->cancel_before_start());
+         throw exceptions::canceled{"affine operation was canceled before execution"};
+      }
       co_await boost::asio::this_coro::reset_cancellation_state(
          boost::asio::enable_total_cancellation{},
          detail::operation_cancellation_filter{operation});
-      auto cancellation = co_await boost::asio::this_coro::cancellation_state;
+      cancellation = co_await boost::asio::this_coro::cancellation_state;
       if (cancellation.cancelled() != boost::asio::cancellation_type::none) {
          static_cast<void>(operation->cancel_before_start());
       }
