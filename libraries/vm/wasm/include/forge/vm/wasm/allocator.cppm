@@ -374,7 +374,8 @@ class growable_allocator {
    // Make code pages unexecutable so deadline timer can kill an
    // execution (in both JIT and Interpreter)
    void disable_code() {
-      mprotect(_code_base, _code_size, PROT_NONE);
+      const auto error = mprotect(_code_base, _code_size, PROT_NONE);
+      detail::check<exceptions::allocation>((error == 0), "mprotect failed");
    }
 
    const void* get_code_start() const {

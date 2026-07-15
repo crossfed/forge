@@ -4,7 +4,9 @@
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <sys/mman.h>
 #include <type_traits>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -317,6 +319,40 @@ TEST_CASE("managed vector rejects empty pops without changing its index", "[mana
 
    values.push_back(9U);
    BOOST_TEST(values[0] == 9U);
+}
+
+TEST_CASE("managed vector copy preserves the next insertion position", "[managed_vector]") {
+   auto allocator = wasm::growable_allocator{64};
+   auto values = wasm::managed_vector<std::uint32_t, wasm::growable_allocator>{allocator};
+   auto source = std::array<std::uint32_t, 2>{7U, 9U};
+
+   values.copy(source.data(), 0);
+   BOOST_REQUIRE_THROW(values.pop_back(), wasm::exceptions::vector_out_of_bounds);
+   values.push_back(5U);
+   BOOST_TEST(values.size() == 1U);
+   BOOST_TEST(values.back() == 5U);
+
+   values.copy(source.data(), source.size());
+   BOOST_TEST(values.back() == 9U);
+   values.push_back(11U);
+   BOOST_TEST(values.size() == 3U);
+   BOOST_TEST(values[0] == 7U);
+   BOOST_TEST(values[1] == 9U);
+   BOOST_TEST(values[2] == 11U);
+}
+
+TEST_CASE("code protection failures surface as allocation errors", "[allocator]") {
+   const auto page_size = static_cast<std::size_t>(::sysconf(_SC_PAGESIZE));
+   auto allocator = wasm::growable_allocator{};
+   allocator.use_fixed_memory(page_size);
+   auto* code = allocator.start_code();
+   static_cast<void>(allocator.alloc<std::byte>(1));
+   allocator.end_code<false>(code);
+   const auto span = allocator.get_code_span();
+
+   BOOST_REQUIRE(!span.empty());
+   BOOST_REQUIRE(::munmap(span.data(), span.size()) == 0);
+   BOOST_CHECK_THROW(allocator.disable_code(), wasm::exceptions::allocation);
 }
 
 TEST_CASE("alternate stack allocation reports mapping failure", "[stack_allocator]") {

@@ -105,8 +105,9 @@ template <typename T, typename Allocator> class vector {
    }
    constexpr inline void copy(T* data, size_t size) {
       resize(size);
-      std::copy_n(data, size, _data);
-      _index = size - 1;
+      if (size != 0)
+         std::copy_n(data, size, _data);
+      _index = size;
    }
 
  private:
