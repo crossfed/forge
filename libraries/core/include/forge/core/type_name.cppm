@@ -1,4 +1,5 @@
 module;
+#include <cstdint>
 #include <deque>
 #include <map>
 #include <optional>

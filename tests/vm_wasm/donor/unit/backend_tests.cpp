@@ -1,0 +1,36 @@
+#include "test_prelude.hpp"
+import forge.vm.wasm.allocator;
+import forge.vm.wasm.stack_elem;
+import forge.vm.wasm.utils;
+import forge.vm.wasm.backend;
+#define FORGE_VM_WASM_TEST_USES_BACKEND
+#include "test_support.hpp"
+
+#define FORGE_VM_WASM_TEST_FILE backend_tests
+
+using namespace forge::vm::wasm;
+
+extern wasm_allocator wa;
+
+BACKEND_TEST_CASE("Tests that the arguments of top level calls are validated",
+                  "[call_typecheck]") {
+   /*
+    * (module
+    *  (func (export "f0"))
+    *  (func (export "f1") (param i32))
+    * )
+    */
+   std::vector<uint8_t> code = { 0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x60,
+                                 0x00, 0x00, 0x60, 0x01, 0x7f, 0x00, 0x03, 0x03, 0x02, 0x00, 0x01, 0x07,
+                                 0x0b, 0x02, 0x02, 0x66, 0x30, 0x00, 0x00, 0x02, 0x66, 0x31, 0x00, 0x01,
+                                 0x0a, 0x07, 0x02, 0x02, 0x00, 0x0b, 0x02, 0x00, 0x0b
+   };
+
+   using backend_t = backend<std::nullptr_t, TestType>;
+   backend_t bkend(code, &wa);
+
+   BOOST_CHECK_THROW(bkend.call("env", "f0", 0), std::exception); // too many arguments
+   BOOST_CHECK_THROW(bkend.call("env", "f1"), std::exception); // too few arguments
+   BOOST_CHECK_THROW(bkend.call("env", "f1", UINT64_C(0)), std::exception); // wrong type of argument
+   BOOST_CHECK_THROW(bkend.call("env", "f1", UINT32_C(0), UINT32_C(0)), std::exception); // too many arguments
+}

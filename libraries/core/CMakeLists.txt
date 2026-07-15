@@ -19,7 +19,7 @@ forge_target_modules(forge_core core)
 target_include_directories(
    forge_core
    PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS}
-   PRIVATE "${PROJECT_SOURCE_DIR}/vendor/utf8cpp"
+   PRIVATE "$<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/vendor/utf8cpp>"
 )
 target_link_libraries(
    forge_core PRIVATE

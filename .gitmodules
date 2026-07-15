@@ -10,3 +10,9 @@
 [submodule "vendor/pugixml"]
 	path = vendor/pugixml
 	url = https://github.com/zeux/pugixml
+[submodule "vendor/softfloat"]
+	path = vendor/softfloat
+	url = https://github.com/AntelopeIO/berkeley-softfloat-3.git
+[submodule "vendor/eos-vm-test-wasms"]
+	path = vendor/eos-vm-test-wasms
+	url = https://github.com/EOSIO/eos-vm-test-wasms.git
