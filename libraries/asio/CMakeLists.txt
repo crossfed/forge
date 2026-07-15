@@ -1,9 +1,13 @@
 add_library(
    forge_asio STATIC
+   affine.cpp
+   async_waiter.cpp
    compute.cpp
+   gate.cpp
    runtime.cpp
    stop_state.cpp
    task.cpp
+   thread_name.cpp
 )
 forge_target_modules(forge_asio asio)
 

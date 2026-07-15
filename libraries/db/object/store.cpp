@@ -18,6 +18,7 @@ module;
 
 module forge.db.object.store;
 
+import forge.asio.gate;
 import forge.db.core.driver;
 import forge.db.core.exceptions;
 import forge.db.object.exceptions;
@@ -99,7 +100,7 @@ void store::add_observer(std::shared_ptr<observer> value) {
 
 boost::asio::awaitable<transaction> store::begin_transaction() {
    const auto executor = co_await boost::asio::this_coro::executor;
-   auto ticket = std::optional<detail::write_gate::ticket>{};
+   auto ticket = std::optional<forge::asio::gate::ticket>{};
    if (impl_->settings.writes == write_policy::single_writer) {
       ticket.emplace(co_await impl_->runtime->write_gate->acquire());
    }
@@ -112,7 +113,7 @@ boost::asio::awaitable<transaction> store::begin_transaction() {
    }
    auto release = transaction::release_fn{};
    if (ticket.has_value()) {
-      auto owned_ticket = std::make_shared<std::optional<detail::write_gate::ticket>>(std::move(ticket));
+      auto owned_ticket = std::make_shared<std::optional<forge::asio::gate::ticket>>(std::move(ticket));
       release = [owned_ticket]() mutable { owned_ticket->reset(); };
    }
 
@@ -171,14 +172,14 @@ boost::asio::awaitable<transaction> store::join(forge::db::core::transaction& ac
                             "db object family is already attached to the transaction");
    }
 
-   auto ticket = std::optional<detail::write_gate::ticket>{};
+   auto ticket = std::optional<forge::asio::gate::ticket>{};
    if (impl_->settings.writes == write_policy::single_writer) {
       ticket.emplace(co_await impl_->runtime->write_gate->acquire());
    }
 
    auto release = transaction::release_fn{};
    if (ticket.has_value()) {
-      auto owned_ticket = std::make_shared<std::optional<detail::write_gate::ticket>>(std::move(ticket));
+      auto owned_ticket = std::make_shared<std::optional<forge::asio::gate::ticket>>(std::move(ticket));
       release = [owned_ticket]() mutable { owned_ticket->reset(); };
    }
 

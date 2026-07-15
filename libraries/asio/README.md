@@ -2,7 +2,8 @@
 
 `forge_asio` owns the shared async runtime primitives used by FORGE networking and
 applications. It wraps Boost.Asio with explicit runtime ownership, blocking
-boundaries, a priority task scheduler and a bounded CPU compute pool.
+boundaries, a priority task scheduler, a bounded CPU compute pool, FIFO gates
+and single-thread affine execution.
 
 ## When To Use
 
@@ -24,6 +25,8 @@ boundaries, a priority task scheduler and a bounded CPU compute pool.
 - `forge.asio.blocking` — explicit blocking boundary helpers.
 - `forge.asio.task` — bounded priority scheduler and task handles.
 - `forge.asio.compute` — bounded FIFO execution for synchronous CPU work.
+- `forge.asio.gate` — cancellation-aware FIFO admission with RAII tickets.
+- `forge.asio.affine` — bounded synchronous execution on one owned OS thread.
 
 Target: `forge_asio`.
 
@@ -31,11 +34,11 @@ Dependencies: Boost.Asio and threads.
 
 ## Stability
 
-The `forge.asio.task` and `forge.asio.compute` public C++ APIs are Preview in
-Forge 8.x. MINOR releases may make documented source-level changes to these
-surfaces. Runtime ownership, bounded admission and deterministic shutdown are
-production requirements, but the exact scheduler and compute type vocabulary
-may still evolve before it is declared Stable.
+The `forge.asio.task`, `forge.asio.compute`, `forge.asio.gate` and
+`forge.asio.affine` public C++ APIs are Preview in Forge 8.x. MINOR releases may
+make documented source-level changes to these surfaces. Runtime ownership,
+bounded admission and deterministic shutdown are production requirements, but
+the exact type vocabulary may still evolve before it is declared Stable.
 
 The 8.3 migration from `forge.asio.task_scheduler` to `forge.asio.task` is
 documented in the Forge 8.3 release notes.
@@ -199,6 +202,61 @@ auto right_value = co_await std::move(right).wait();
 `max_waiting_submissions` separately bounds coroutines waiting for admission.
 `try_submit()` never waits. Cancellation removes pending work; running work sees
 a `std::stop_token` and must cooperate. FORGE never terminates a worker thread.
+
+### Serialize Async Ownership With A Gate
+
+`gate` is a neutral FIFO admission primitive. Its move-only ticket releases
+automatically, including exception paths. Cancellation before a grant throws
+`forge::asio::exceptions::canceled`; closing the gate rejects queued and future
+acquisitions.
+
+```cpp
+import forge.asio.gate;
+
+forge::asio::gate writer_gate;
+
+auto ticket = co_await writer_gate.acquire();
+co_await mutate_shared_state();
+// ticket releases here
+```
+
+The gate does not start detached work and does not own an executor. Waiting
+coroutines remain owned by their callers. A ticket may be released from another
+thread.
+
+### Execute Thread-Affine Native Work
+
+`affine::lane` owns exactly one OS thread and gives consumers a copyable
+executor. It is intended for native libraries whose handles or transactions
+must remain on one thread. Callables are synchronous; returning an Asio
+`awaitable` is rejected at compile time.
+
+```cpp
+import forge.asio.affine;
+
+forge::asio::affine::lane lane{{
+   .max_pending_operations = 1024,
+   .max_waiting_submissions = 1024,
+   .thread_name = "native-db",
+}};
+
+auto executor = lane.get_executor();
+auto value = co_await executor.execute(
+   {.name = "native-read"},
+   [] { return perform_native_read(); });
+
+co_await lane.shutdown();
+```
+
+Admission is FIFO and bounded independently for accepted pending operations and
+submissions waiting for capacity. Cancellation before execution removes the
+operation and throws `canceled`. Once the callable starts, completion wins: its
+value or exception is returned. `request_stop()` rejects new and waiting work,
+cancels pending work and lets the running callable finish; `shutdown()` then
+joins the worker. Completions resume on the executor that awaited `execute()`.
+`snapshot()` reports queue depths, terminal outcomes and accumulated queue and
+execution time. The lane owner is the lifecycle boundary: it must outlive all
+consumers of its executor and shut them down before calling `lane.shutdown()`.
 
 ### Isolate Blocking Work Behind The Scheduler
 
@@ -452,6 +510,11 @@ running callable, runs worker stop hooks and joins the underlying
 scheduler stop, drains compute while already-running scheduler continuations
 can finish, then drains the scheduler and finally stops the Asio runtime.
 
+`affine::lane` has a stricter single-worker lifecycle: its owner must stop all
+native sessions using the copyable executor before awaiting lane shutdown.
+Long-running callables delay shutdown by design, so native operations must stay
+bounded.
+
 ## Runtime Risks And Anti-Patterns
 
 - Do not detach raw `std::thread` workers around the scheduler. That bypasses
@@ -484,5 +547,6 @@ can finish, then drains the scheduler and finally stops the Asio runtime.
 
 `test_forge_asio` covers priority/FIFO ordering, delayed execution, cancellation,
 queue saturation, separated blocking/awaitable budgets, compute parallelism,
-bounded admission, continuation placement, cooperative cancellation, worker
-hooks and deterministic shutdown.
+bounded admission, gate grant races, thread affinity, continuation placement,
+completion-wins cancellation, cooperative cancellation, worker hooks and
+deterministic shutdown.
