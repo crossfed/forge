@@ -453,6 +453,9 @@ struct registered_host_functions {
    }
 
    void operator()(Cls* host, Execution_Interface ei, uint32_t index) {
+      if constexpr (!std::is_same_v<Cls, standalone_function_t>) {
+         detail::check<exceptions::interpreter>((host != nullptr), "stateful host instance is required");
+      }
       const auto& _func = mappings::get().functions[index];
       auto tc = Type_Converter{host, std::move(ei)};
       std::invoke(_func, host, tc);

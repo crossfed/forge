@@ -670,6 +670,9 @@ TEST_CASE("zero length host spans do not probe guest memory", "[execution_interf
    auto memory = wasm::wasm_allocator{};
    {
       auto instance = interpreter{code, host, &memory};
+      BOOST_CHECK_THROW(instance.call("env", "run"), wasm::exceptions::interpreter);
+      BOOST_CHECK_THROW(instance.call_with_return("env", "run"), wasm::exceptions::interpreter);
+      BOOST_CHECK_THROW(instance.execute_all(wasm::null_watchdog{}), wasm::exceptions::interpreter);
       instance(host, "env", "run");
    }
    memory.free();

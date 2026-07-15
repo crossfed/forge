@@ -175,12 +175,9 @@ class backend {
       ctx->set_max_pages(initial_max_pages);
       construct(&host);
    }
-   // Leap:
-   //  * Contract validation only needs single parsing as the instantiated module is not cached.
-   //  * JIT execution needs single parsing only.
-   //  * Interpreter execution requires two-passes parsing to prevent memory mappings exhaustion
-   //  * Leap reuses execution context per thread; ctx.owns is set
-   //  to false when a backend is constructued
+   // Single-pass parsing is sufficient when the instantiated module is not cached and for JIT execution.
+   // Interpreter integrations may use two-pass parsing to limit memory-mapping pressure. Execution contexts can be
+   // supplied and reused by the caller; ctx.owns is false when the backend does not own its context.
    backend(wasm_code_ptr& ptr, size_t sz, wasm_allocator* alloc, const Options& options = Options{},
            bool single_parsing = true, bool exec_ctx_by_backend = true)
        : memory_alloc(alloc), mod(std::make_shared<module>()), ctx(nullptr, exec_ctx_by_backend), mod_sharable{true},
@@ -325,6 +322,7 @@ class backend {
    template <typename... Args>
    inline bool call(const std::string_view& mod, const std::string_view& func, Args&&... args) {
       require_execution_ready();
+      require_hostless_call();
       if constexpr (wasm_debug) {
          ctx->execute(nullptr, debug_visitor(*ctx), func, std::forward<Args>(args)...);
       } else {
@@ -347,6 +345,7 @@ class backend {
    template <typename... Args>
    inline auto call_with_return(const std::string_view& mod, const std::string_view& func, Args&&... args) {
       require_execution_ready();
+      require_hostless_call();
       if constexpr (wasm_debug) {
          return ctx->execute(nullptr, debug_visitor(*ctx), func, std::forward<Args>(args)...);
       } else {
@@ -393,6 +392,7 @@ class backend {
 
    template <typename Watchdog> inline void execute_all(Watchdog&& wd) {
       require_execution_ready();
+      require_hostless_call();
       timed_run(std::forward<Watchdog>(wd), [&]() { execute_exports(nullptr); });
    }
 
@@ -417,6 +417,11 @@ class backend {
    }
 
  private:
+   static void require_hostless_call() {
+      detail::check<exceptions::interpreter>(std::is_same_v<host_t, standalone_function_t>,
+                                             "stateful host instance is required");
+   }
+
    void require_execution_ready() const {
       detail::check<exceptions::allocation>((memory_alloc != nullptr || !ctx->has_linear_memory()),
                                             "linear memory requires an allocator");
