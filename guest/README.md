@@ -143,10 +143,14 @@ Ricardian source files can be attached without custom commands:
 forge_add_contract(
    token
    SOURCES token.cpp
-   RICARDIAN_CONTRACTS "${CMAKE_CURRENT_SOURCE_DIR}/token.contracts.md"
-   RICARDIAN_CLAUSES "${CMAKE_CURRENT_SOURCE_DIR}/token.clauses.md"
+   RICARDIAN_CONTRACTS token.contracts.md
+   RICARDIAN_CLAUSES token.clauses.md
 )
 ```
+
+Relative Ricardian paths are resolved from the consumer source directory. The
+generated ABI tracks contract sources, included headers and Ricardian inputs,
+so an incremental build cannot retain stale ABI metadata.
 
 Invalid or ambiguous annotations fail the build. ABI is parsed again by
 `contract-check`; it is not accepted merely because JSON syntax is valid.

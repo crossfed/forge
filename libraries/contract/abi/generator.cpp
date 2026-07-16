@@ -776,9 +776,9 @@ class consumer final : public clang::ASTConsumer {
 class action final : public clang::ASTFrontendAction {
  public:
    action(schema& output, bool& found, bool& dispatch_source_found, std::string_view contract_name,
-          std::filesystem::path dispatch_source)
+          std::filesystem::path dispatch_source, std::set<std::filesystem::path>& dependencies)
        : output_(output), found_(found), dispatch_source_found_(dispatch_source_found), contract_name_(contract_name),
-         dispatch_source_(std::move(dispatch_source)) {}
+         dispatch_source_(std::move(dispatch_source)), dependencies_(dependencies) {}
 
    std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance& compiler,
                                                          llvm::StringRef input_file) override {
@@ -787,23 +787,14 @@ class action final : public clang::ASTFrontendAction {
                                         contract_name_, input == dispatch_source_);
    }
 
- private:
-   schema& output_;
-   bool& found_;
-   bool& dispatch_source_found_;
-   std::string contract_name_;
-   std::filesystem::path dispatch_source_;
-};
-
-class action_factory final : public clang::tooling::FrontendActionFactory {
- public:
-   action_factory(schema& output, bool& found, bool& dispatch_source_found, std::string_view contract_name,
-                  std::filesystem::path dispatch_source)
-       : output_(output), found_(found), dispatch_source_found_(dispatch_source_found), contract_name_(contract_name),
-         dispatch_source_(std::move(dispatch_source)) {}
-
-   std::unique_ptr<clang::FrontendAction> create() override {
-      return std::make_unique<action>(output_, found_, dispatch_source_found_, contract_name_, dispatch_source_);
+   void EndSourceFileAction() override {
+      const auto& source_manager = getCompilerInstance().getSourceManager();
+      for (auto iterator = source_manager.fileinfo_begin(); iterator != source_manager.fileinfo_end(); ++iterator) {
+         const auto path = std::filesystem::path{iterator->first.getName().str()};
+         if (!path.empty() && std::filesystem::exists(path)) {
+            dependencies_.insert(std::filesystem::weakly_canonical(path));
+         }
+      }
    }
 
  private:
@@ -812,6 +803,28 @@ class action_factory final : public clang::tooling::FrontendActionFactory {
    bool& dispatch_source_found_;
    std::string contract_name_;
    std::filesystem::path dispatch_source_;
+   std::set<std::filesystem::path>& dependencies_;
+};
+
+class action_factory final : public clang::tooling::FrontendActionFactory {
+ public:
+   action_factory(schema& output, bool& found, bool& dispatch_source_found, std::string_view contract_name,
+                  std::filesystem::path dispatch_source, std::set<std::filesystem::path>& dependencies)
+       : output_(output), found_(found), dispatch_source_found_(dispatch_source_found), contract_name_(contract_name),
+         dispatch_source_(std::move(dispatch_source)), dependencies_(dependencies) {}
+
+   std::unique_ptr<clang::FrontendAction> create() override {
+      return std::make_unique<action>(output_, found_, dispatch_source_found_, contract_name_, dispatch_source_,
+                                      dependencies_);
+   }
+
+ private:
+   schema& output_;
+   bool& found_;
+   bool& dispatch_source_found_;
+   std::string contract_name_;
+   std::filesystem::path dispatch_source_;
+   std::set<std::filesystem::path>& dependencies_;
 };
 
 std::string read_text(const std::filesystem::path& path) {
@@ -828,6 +841,39 @@ void write_text(const std::filesystem::path& path, std::string_view text) {
    if (!stream || !(stream << text)) {
       throw std::runtime_error{"cannot write generated contract file: " + path.string()};
    }
+}
+
+std::string depfile_path(const std::filesystem::path& path) {
+   auto result = std::string{};
+   for (const auto value : path.generic_string()) {
+      switch (value) {
+      case ' ':
+      case '#':
+         result += '\\';
+         result += value;
+         break;
+      case '$':
+         result += "$$";
+         break;
+      default:
+         result += value;
+         break;
+      }
+   }
+   return result;
+}
+
+void write_depfile(const forge::contract::abi::request& options, const std::set<std::filesystem::path>& dependencies) {
+   if (options.depfile.empty()) {
+      return;
+   }
+   auto output = std::ostringstream{};
+   output << depfile_path(options.abi) << ':';
+   for (const auto& dependency : dependencies) {
+      output << " \\\n  " << depfile_path(dependency);
+   }
+   output << '\n';
+   write_text(options.depfile, output.str());
 }
 
 std::string trim_lines(std::string value) {
@@ -1014,8 +1060,9 @@ artifacts generate(const request& options) {
    auto output = schema{};
    auto found = false;
    auto dispatch_source_found = false;
+   auto dependencies = std::set<std::filesystem::path>{};
    const auto dispatch_source = std::filesystem::weakly_canonical(options.sources.front());
-   auto factory = action_factory{output, found, dispatch_source_found, options.contract, dispatch_source};
+   auto factory = action_factory{output, found, dispatch_source_found, options.contract, dispatch_source, dependencies};
    const auto result = tool.run(&factory);
    if (result != 0 || output.failed) {
       throw std::runtime_error{"contract source analysis failed"};
@@ -1035,6 +1082,7 @@ artifacts generate(const request& options) {
    canonicalize(output);
    write_abi(output, options);
    write_dispatcher(output, options);
+   write_depfile(options, dependencies);
    return {.abi = options.abi, .dispatcher = options.dispatcher};
 }
 

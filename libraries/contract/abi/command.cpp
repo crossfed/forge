@@ -28,6 +28,8 @@ request parse(int argc, const char* const* argv) {
          result.abi = next();
       } else if (option == "--dispatch") {
          result.dispatcher = next();
+      } else if (option == "--depfile") {
+         result.depfile = next();
       } else if (option == "--attribute-plugin") {
          result.attribute_plugin = next();
       } else if (option == "--sysroot") {
@@ -46,8 +48,8 @@ request parse(int argc, const char* const* argv) {
          result.sources.emplace_back(option);
       }
    }
-   if (result.contract.empty() || result.abi.empty() || result.dispatcher.empty() ||
-       result.attribute_plugin.empty() || result.sysroot.empty() || result.sources.empty()) {
+   if (result.contract.empty() || result.abi.empty() || result.dispatcher.empty() || result.attribute_plugin.empty() ||
+       result.sysroot.empty() || result.sources.empty()) {
       throw std::runtime_error{
           "--contract, --abi, --dispatch, --attribute-plugin, --sysroot and contract sources are required"};
    }

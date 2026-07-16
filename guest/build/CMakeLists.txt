@@ -27,6 +27,7 @@ set(_runtime "${FORGE_CONTRACT_DATA_DIR}/runtime")
 set(_generated "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(_abi "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_NAME}.abi")
 set(_dispatcher "${_generated}/${FORGE_CONTRACT_NAME}.dispatcher.cpp")
+set(_depfile "${_generated}/${FORGE_CONTRACT_NAME}.abi.d")
 set(_wasm "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_NAME}.wasm")
 set(_manifest "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_NAME}.contract.json")
 
@@ -114,6 +115,7 @@ set(_abigen_command
    --contract "${FORGE_CONTRACT_NAME}"
    --abi "${_abi}"
    --dispatch "${_dispatcher}"
+   --depfile "${_depfile}"
    --attribute-plugin "${FORGE_CONTRACT_ATTR_PLUGIN}"
    --sysroot "${CMAKE_SYSROOT}"
    --include "${_include}"
@@ -128,12 +130,19 @@ if(FORGE_CONTRACT_RICARDIAN_CLAUSES)
    list(APPEND _abigen_command --ricardian-clauses "${FORGE_CONTRACT_RICARDIAN_CLAUSES}")
 endif()
 list(APPEND _abigen_command ${FORGE_CONTRACT_SOURCES})
+set(_abigen_dependencies forge_guest_contract ${FORGE_CONTRACT_SOURCES})
+foreach(_ricardian_file FORGE_CONTRACT_RICARDIAN_CONTRACTS FORGE_CONTRACT_RICARDIAN_CLAUSES)
+   if(NOT "${${_ricardian_file}}" STREQUAL "")
+      list(APPEND _abigen_dependencies "${${_ricardian_file}}")
+   endif()
+endforeach()
 
 add_custom_command(
    OUTPUT "${_abi}" "${_dispatcher}"
    COMMAND ${CMAKE_COMMAND} -E make_directory "${_generated}"
    COMMAND ${_abigen_command}
-   DEPENDS forge_guest_contract ${FORGE_CONTRACT_SOURCES}
+   DEPENDS ${_abigen_dependencies}
+   DEPFILE "${_depfile}"
    COMMAND_EXPAND_LISTS
    VERBATIM
 )

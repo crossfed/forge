@@ -22,8 +22,11 @@ The first request source is the dispatch source and must declare the selected
 contract. The generator verifies this rule and includes its canonical path, so
 quoted includes keep normal C++ lookup semantics. `forge_add_contract` selects
 the only source automatically; multi-source contracts must name
-`DISPATCH_SOURCE` explicitly. Integer ABI names are selected from the Clang
-target model; in wasm32, `long` is 32 bits. Following CDT
+`DISPATCH_SOURCE` explicitly. When `request::depfile` is set, the generator
+writes compiler-derived dependencies for every source/header opened during
+analysis; Contract SDK CMake combines them with direct Ricardian dependencies
+to prevent stale incremental ABI output. Integer ABI names are selected from
+the Clang target model; in wasm32, `long` is 32 bits. Following CDT
 `EOSIO_DISPATCH`, generated local actions execute only when `code == receiver`;
 notifications require an explicit notification dispatcher. The library contains
 no CLI `main`, compiler patches or guest runtime. Its tests are the pinned CDT

@@ -41,6 +41,32 @@ function(forge_add_contract target)
    list(INSERT _sources 0 "${_dispatch_source}")
    string(JOIN "|" _encoded_sources ${_sources})
 
+   set(_ricardian_contracts "")
+   if(ARG_RICARDIAN_CONTRACTS)
+      get_filename_component(
+         _ricardian_contracts
+         "${ARG_RICARDIAN_CONTRACTS}"
+         REALPATH
+         BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+      )
+      if(NOT EXISTS "${_ricardian_contracts}")
+         message(FATAL_ERROR "Ricardian contracts file does not exist: ${_ricardian_contracts}")
+      endif()
+   endif()
+
+   set(_ricardian_clauses "")
+   if(ARG_RICARDIAN_CLAUSES)
+      get_filename_component(
+         _ricardian_clauses
+         "${ARG_RICARDIAN_CLAUSES}"
+         REALPATH
+         BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+      )
+      if(NOT EXISTS "${_ricardian_clauses}")
+         message(FATAL_ERROR "Ricardian clauses file does not exist: ${_ricardian_clauses}")
+      endif()
+   endif()
+
    set(_binary_dir "${CMAKE_CURRENT_BINARY_DIR}/${target}.contract")
    ExternalProject_Add(
       ${target}
@@ -70,8 +96,8 @@ function(forge_add_contract target)
          -DFORGE_CONTRACT_INTRINSIC_VERSION=${ForgeContract_INTRINSIC_VERSION}
          -DFORGE_CONTRACT_PROFILE=${ForgeContract_PROFILE}
          -DFORGE_CONTRACT_REPRODUCIBLE=${ForgeContract_REPRODUCIBLE}
-         -DFORGE_CONTRACT_RICARDIAN_CONTRACTS=${ARG_RICARDIAN_CONTRACTS}
-         -DFORGE_CONTRACT_RICARDIAN_CLAUSES=${ARG_RICARDIAN_CLAUSES}
+         -DFORGE_CONTRACT_RICARDIAN_CONTRACTS=${_ricardian_contracts}
+         -DFORGE_CONTRACT_RICARDIAN_CLAUSES=${_ricardian_clauses}
       BUILD_BYPRODUCTS
          "${CMAKE_CURRENT_BINARY_DIR}/${target}.wasm"
          "${CMAKE_CURRENT_BINARY_DIR}/${target}.abi"

@@ -12,6 +12,7 @@ struct request {
    std::string contract;
    std::filesystem::path abi;
    std::filesystem::path dispatcher;
+   std::filesystem::path depfile;
    std::filesystem::path attribute_plugin;
    std::filesystem::path sysroot;
    std::filesystem::path ricardian_contracts;
