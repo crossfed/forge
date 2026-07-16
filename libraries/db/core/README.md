@@ -45,10 +45,10 @@ Backend destructors remain no-throw fallbacks, not substitutes for this awaited
 ordering boundary.
 
 Backend-specific public operations that do not pass through `begin_transaction()`
-or `begin_read()`, such as a driver's flush operation, must call the protected
-`driver::require_open()` admission guard before accessing backend state. Once a
-close request starts, that guard reports `driver_closed`; operations admitted
-before the request may complete according to the backend's serialization rules.
+or `begin_read()`, such as a driver's flush operation, must hold the protected
+`driver::admit_operation()` result until backend access finishes. Once a close
+request starts, new admissions report `driver_closed`; an admitted operation makes
+close report `driver_busy` until its admission is released.
 
 ## Snapshot Ownership
 

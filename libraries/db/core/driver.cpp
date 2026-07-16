@@ -21,6 +21,33 @@ namespace forge::db::core {
 driver::driver() : state_{std::make_shared<detail::driver_state>()} {}
 driver::~driver() = default;
 
+driver::operation_admission::operation_admission(
+   std::shared_ptr<detail::driver_state> state) noexcept
+    : state_{std::move(state)} {}
+
+driver::operation_admission::~operation_admission() {
+   release();
+}
+
+driver::operation_admission::operation_admission(operation_admission&& other) noexcept
+    : state_{std::move(other.state_)} {}
+
+driver::operation_admission&
+driver::operation_admission::operator=(operation_admission&& other) noexcept {
+   if (this != &other) {
+      release();
+      state_ = std::move(other.state_);
+   }
+   return *this;
+}
+
+void driver::operation_admission::release() noexcept {
+   if (state_) {
+      state_->release_operation();
+      state_.reset();
+   }
+}
+
 boost::asio::awaitable<std::optional<std::vector<std::byte>>>
 session::get_for_update(family, record_key) {
    FORGE_THROW_EXCEPTION(exceptions::unsupported_operation, "db session does not support record locks");
@@ -75,8 +102,9 @@ boost::asio::awaitable<void> driver::async_close() {
    state_->finish_close();
 }
 
-void driver::require_open() const {
-   state_->require_open();
+driver::operation_admission driver::admit_operation() const {
+   state_->admit_operation();
+   return operation_admission{state_};
 }
 
 boost::asio::awaitable<void> driver::close_driver() {

@@ -29,7 +29,8 @@ class driver_state final : public std::enable_shared_from_this<driver_state> {
    };
 
    open_admission admit_open();
-   void require_open();
+   void admit_operation();
+   void release_operation() noexcept;
    close_action admit_close();
    void finish_close() noexcept;
    void fail_close() noexcept;
@@ -48,6 +49,7 @@ class driver_state final : public std::enable_shared_from_this<driver_state> {
    std::mutex mutex_;
    std::size_t opening_ = 0;
    std::size_t active_ = 0;
+   std::size_t operations_ = 0;
    phase phase_ = phase::open;
    bool close_running_ = false;
 

@@ -56,11 +56,19 @@ driver_state::open_admission driver_state::admit_open() {
    return open_admission{shared_from_this()};
 }
 
-void driver_state::require_open() {
+void driver_state::admit_operation() {
    auto lock = std::lock_guard{mutex_};
    if (phase_ != phase::open) {
       FORGE_THROW_EXCEPTION(exceptions::driver_closed,
                             "db driver is closing or closed");
+   }
+   ++operations_;
+}
+
+void driver_state::release_operation() noexcept {
+   auto lock = std::lock_guard{mutex_};
+   if (operations_ != 0) {
+      --operations_;
    }
 }
 
@@ -70,8 +78,9 @@ driver_state::close_action driver_state::admit_close() {
       return close_action::already_closed;
    }
    phase_ = phase::closing;
-   if (close_running_ || opening_ != 0 || active_ != 0) {
-      FORGE_THROW_EXCEPTION(exceptions::driver_busy, "db driver still owns active or opening sessions");
+   if (close_running_ || opening_ != 0 || active_ != 0 || operations_ != 0) {
+      FORGE_THROW_EXCEPTION(exceptions::driver_busy,
+                            "db driver still owns active sessions or operations");
    }
    close_running_ = true;
    return close_action::run;
