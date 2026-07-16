@@ -131,7 +131,8 @@ def check_features(abi):
     variants = by_name(abi["variants"])
     assert variants["variant_uint64_str"]["types"] == ["uint64", "str"]
     tables = by_name(abi["tables"])
-    assert set(tables) == {"indextable", "owned", "records", "singletn"}
+    assert set(tables) == {"default_record", "indextable", "owned", "records", "singletn"}
+    assert tables["default_record"]["type"] == "default_record"
     assert tables["records"]["type"] == "record"
     assert tables["owned"]["type"] == "owned_record"
     assert tables["indextable"]["type"] == "indexed_record"

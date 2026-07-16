@@ -561,7 +561,7 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
          return true;
       }
       if (const auto table = annotation(*declaration, "forge.table"); table.has_value()) {
-         if (!table->empty() && belongs_to_selected_contract(*declaration)) {
+         if (belongs_to_selected_contract(*declaration)) {
             encoder_.add_table(*declaration, *table);
          }
          return true;

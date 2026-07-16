@@ -61,6 +61,10 @@ class [[forge::contract("abifixture")]] abifixture : public forge::contract::con
       std::array<std::int32_t, 32> values{};
    };
 
+   struct [[forge::table]] default_record {
+      std::uint64_t id = 0;
+   };
+
    [[forge::action]] void alias(std::variant<std::uint64_t, str> arg0) {
       static_cast<void>(arg0);
    }
