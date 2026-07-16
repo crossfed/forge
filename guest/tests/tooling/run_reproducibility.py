@@ -38,10 +38,14 @@ def build(args, root):
             str(binary),
             "-G",
             "Ninja",
+            "-DCMAKE_BUILD_TYPE=Release",
             f"-DForgeContract_DIR={args.package}",
         ]
     )
     run([str(args.cmake), "--build", str(binary), "--target", "hello", "-j", "4"])
+    cache = (binary / "hello.contract" / "CMakeCache.txt").read_text(encoding="utf-8")
+    if "CMAKE_BUILD_TYPE:STRING=Release" not in cache:
+        raise RuntimeError("forge_add_contract did not propagate the parent Release build type")
     return binary
 
 
