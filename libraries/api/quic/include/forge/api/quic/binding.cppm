@@ -4,6 +4,7 @@ module;
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <utility>
 
 export module forge.api.quic.binding;

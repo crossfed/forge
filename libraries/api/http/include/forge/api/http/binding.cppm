@@ -11,6 +11,7 @@ module;
 #include <cctype>
 #include <cstdlib>
 #include <cstring>
+#include <cstdint>
 #include <functional>
 #include <limits>
 #include <memory>
