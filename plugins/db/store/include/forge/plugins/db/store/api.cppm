@@ -25,7 +25,7 @@ import forge.db.blob.transaction;
 import forge.db.blob.types;
 import forge.db.core.driver;
 import forge.db.core.record;
-import forge.ids.object_id;
+import forge.db.ids.object_id;
 import forge.db.object.hooks;
 import forge.db.object.index;
 import forge.db.object.object;
@@ -136,24 +136,24 @@ class object_handle {
       co_return co_await join(active.db_transaction());
    }
 
-   template <forge::ids::typed_id_like Id>
+   template <forge::db::ids::typed_id_like Id>
    boost::asio::awaitable<typename forge::db::object::index_for_id_t<Id>::value_type> get(Id id) const {
       co_return co_await require_store()->get(id);
    }
 
-   template <forge::ids::typed_id_like Id>
+   template <forge::db::ids::typed_id_like Id>
    boost::asio::awaitable<std::optional<typename forge::db::object::index_for_id_t<Id>::value_type>>
    find(Id id) const {
       co_return co_await require_store()->find(id);
    }
 
    template <forge::db::object::object_model Object>
-   boost::asio::awaitable<typename Object::value_type> get(forge::ids::object_id id) const {
+   boost::asio::awaitable<typename Object::value_type> get(forge::db::ids::object_id id) const {
       co_return co_await require_store()->template get<Object>(id);
    }
 
    template <forge::db::object::object_model Object>
-   boost::asio::awaitable<std::optional<typename Object::value_type>> find(forge::ids::object_id id) const {
+   boost::asio::awaitable<std::optional<typename Object::value_type>> find(forge::db::ids::object_id id) const {
       co_return co_await require_store()->template find<Object>(id);
    }
 
@@ -167,20 +167,20 @@ class object_handle {
       co_await require_store()->replace(std::move(value));
    }
 
-   template <forge::ids::typed_id_like Id, typename Fn>
+   template <forge::db::ids::typed_id_like Id, typename Fn>
       requires forge::db::object::application_object_model<forge::db::object::index_for_id_t<Id>>
    boost::asio::awaitable<void> modify(Id id, Fn&& fn) const {
       co_await require_store()->modify(id, std::forward<Fn>(fn));
    }
 
-   template <forge::ids::typed_id_like Id>
+   template <forge::db::ids::typed_id_like Id>
       requires forge::db::object::application_object_model<forge::db::object::index_for_id_t<Id>>
    boost::asio::awaitable<void> erase(Id id) const {
       co_await require_store()->erase(id);
    }
 
    template <forge::db::object::application_object_model Object>
-   boost::asio::awaitable<void> erase(forge::ids::object_id id) const {
+   boost::asio::awaitable<void> erase(forge::db::ids::object_id id) const {
       co_await require_store()->template erase<Object>(id);
    }
 

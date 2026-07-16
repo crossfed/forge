@@ -9,7 +9,7 @@ module;
 
 export module forge.db.object.hooks;
 
-import forge.ids.object_id;
+import forge.db.ids.object_id;
 
 export namespace forge::db::object {
 
@@ -22,7 +22,7 @@ enum class mutation_kind : std::uint8_t {
 
 struct object_mutation {
    mutation_kind kind = mutation_kind::insert;
-   forge::ids::object_id id;
+   forge::db::ids::object_id id;
    std::optional<std::vector<std::byte>> before;
    std::optional<std::vector<std::byte>> after;
 };

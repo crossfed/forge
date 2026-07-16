@@ -41,7 +41,7 @@ import forge.asio.task;
 import forge.config.core.component;
 import forge.config.core.document;
 import forge.config.core.value;
-import forge.ids.object_id;
+import forge.db.ids.object_id;
 import forge.db.blob.ref;
 import forge.db.blob.snapshot;
 import forge.db.blob.store;
@@ -1839,7 +1839,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_store_handle_remains_valid_during_dependent_sh
    forge::asio::blocking::run(runtime, handle.objects().replace(make_account(9, "shutdown", 77)));
    forge::asio::blocking::run(runtime, api->flush("shutdown", true));
    const auto loaded = forge::asio::blocking::run(
-      runtime, handle.objects().get<account_object>(forge::ids::object_id{.space = 1, .type = 7, .instance = 9}));
+      runtime, handle.objects().get<account_object>(forge::db::ids::object_id{.space = 1, .type = 7, .instance = 9}));
    BOOST_TEST(loaded.balance == 77U);
    BOOST_TEST(driver->flush_calls() == 1U);
 

@@ -41,7 +41,7 @@ class transaction_participant_impl final : public forge::db::core::transaction_p
    release_savepoint(forge::db::core::savepoint_id_t id,
                      forge::db::core::participant_access& access) override;
 
-   void remember_allocation(forge::ids::object_id type, std::uint64_t next_instance);
+   void remember_allocation(forge::db::ids::object_id type, std::uint64_t next_instance);
    void use_backend_writes(bool value) noexcept;
    [[nodiscard]] change_set& changes() noexcept;
    [[nodiscard]] bool finalized() const noexcept;

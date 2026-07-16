@@ -43,7 +43,7 @@ import forge.db.object.object;
 import forge.db.revision.exceptions;
 import forge.db.revision.store;
 import forge.db.revision.types;
-import forge.ids.object_id;
+import forge.db.ids.object_id;
 
 namespace {
 

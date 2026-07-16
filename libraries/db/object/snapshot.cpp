@@ -28,7 +28,7 @@ snapshot::impl::impl(forge::db::core::snapshot active_value,
 snapshot::snapshot(forge::db::core::snapshot active, forge::db::core::family family, ensure_registered_fn ensure)
     : impl_{std::make_shared<impl>(std::move(active), std::move(family), std::move(ensure))} {}
 
-void snapshot::ensure_registered_type(forge::ids::object_id type, std::type_index model) const {
+void snapshot::ensure_registered_type(forge::db::ids::object_id type, std::type_index model) const {
    if (!impl_ || !impl_->ensure_registered) {
       FORGE_THROW_EXCEPTION(exceptions::transaction_closed, "db object snapshot is closed");
    }

@@ -1,13 +1,15 @@
-# forge_ids
+# forge_db_ids
 
-`forge_ids` provides compact object identifiers shared by Forge libraries that need stable object identity without owning a database, storage backend, or application runtime.
+`forge_db_ids` is the DB-family leaf library for compact database object
+identifiers. It provides stable object identity without depending on a driver,
+transaction, Object store or application runtime.
 
 Use it when a type needs a BitShares/Storlane-style object identity:
 
 ```cpp
-import forge.ids.object_id;
+import forge.db.ids.object_id;
 
-using account_id = forge::ids::typed_id<1, 2>;
+using account_id = forge::db::ids::typed_id<1, 2>;
 
 auto account = account_id{42};
 auto generic = account.as_object_id(); // {space=1, type=2, instance=42}
@@ -15,7 +17,9 @@ auto generic = account.as_object_id(); // {space=1, type=2, instance=42}
 
 ## Public Modules
 
-- `forge.ids.object_id` defines `forge::ids::object_id`, `typed_id<Space, Type>`, typed-id traits, a generic `type_for_id` extension point, conversion helpers, string formatting, raw serialization, and variant conversion.
+- `forge.db.ids.object_id` defines `forge::db::ids::object_id`, `typed_id<Space, Type>`, typed-id traits, a generic `type_for_id` extension point, conversion helpers, string formatting, raw serialization, and variant conversion.
+
+The CMake target is `forge_db_ids`; the installed Forge component is `db_ids`.
 
 ## Identity Model
 
@@ -39,4 +43,7 @@ Variant conversion for `object_id` uses an object with `space`, `type`, and `ins
 
 ## Boundaries
 
-This library does not define database tables, indexes, repositories, sessions, transactions, or backend storage. Higher-level libraries can build those concepts on top of `forge_ids`, but identity stays here. DB Object owns its separate `index_for_id` mapping; `type_for_id` does not imply database or index semantics.
+This library does not define tables, indexes, sessions, transactions or backend
+storage. DB Object, Blob and Revision build on its value types. DB Object owns
+its separate `index_for_id` mapping; `type_for_id` does not imply an index or
+persisted model registration.

@@ -145,7 +145,6 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [reflect](libraries/reflect/README.md) | `forge_reflect` | Thin Boost.Describe traversal helpers. | Boost.Describe via Boost headers. |
 | [variant](libraries/variant/README.md) | `forge_variant` | Dynamic value/object model and described conversions. | `forge_core`, `forge_reflect`, Boost.MultiIndex/multiprecision. |
 | [raw](libraries/raw/README.md) | `forge_raw` | Byte-compatible binary serialization. | `forge_core`, `forge_reflect`, `forge_variant`, `forge_exceptions`. |
-| [ids](libraries/ids/README.md) | `forge_ids` | Compact object IDs and typed ID bindings. | `forge_raw`, `forge_variant`. |
 | [compression](libraries/compression/README.md) | `forge_compression` | Bounded zlib compression/decompression helpers. | Boost.Iostreams, ZLIB, `forge_exceptions`. |
 | [chain/core](libraries/chain/core/README.md) | `forge_chain_core` | Fundamental chain digest and Merkle primitives. | `forge_crypto`, `forge_exceptions`, `forge_raw`. |
 | [chain/protocol](libraries/chain/protocol/README.md) | `forge_chain_protocol` | Canonical protocol values, ordered keys, transactions, blocks, ABI and signing rules. | `forge_chain_core`, `forge_compression`, `forge_raw`, `forge_variant`, `forge_crypto`. |
@@ -178,8 +177,9 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [net/quic](libraries/net/quic/README.md) | `forge_net_quic` | QUIC endpoint, listener, connector, framed streams. | ngtcp2, OpenSSL 3.0+, Boost.Asio. |
 | [multiformats](libraries/multiformats/README.md) | `forge_multiformats` | libp2p-compatible varint, multicodec, multihash, multibase and multiaddr. | `forge_crypto`, `forge_exceptions`. |
 | [net/p2p](libraries/net/p2p/README.md) | `forge_net_p2p` | Peer identity, sessions, discovery, relay, DHT, rendezvous and GossipSub. | `forge_net_transport`, `forge_multiformats`, `forge_net_quic`, `forge_net_yamux`. |
+| [db/ids](libraries/db/ids/README.md) | `forge_db_ids` | Compact database object IDs and typed ID bindings. | `forge_raw`, `forge_variant`. |
 | [db/core](libraries/db/core/README.md) | `forge_db_core` | Shared record driver, transaction and snapshot contract. | Boost.Asio, `forge_exceptions`. |
-| [db/object](libraries/db/object/README.md) | `forge_db_object` | Typed object/index store over the shared DB driver. | Boost.Asio, `forge_db_core`, `forge_ids`, `forge_raw`, `forge_exceptions`. |
+| [db/object](libraries/db/object/README.md) | `forge_db_object` | Typed object/index store over the shared DB driver. | Boost.Asio, `forge_db_core`, `forge_db_ids`, `forge_raw`, `forge_exceptions`. |
 | [db/blob](libraries/db/blob/README.md) | `forge_db_blob` | Content-addressed blob store with typed refs and explicit retention primitives. | Boost.Asio, `forge_db_core`, `forge_crypto`, `forge_raw`, `forge_variant`, `forge_exceptions`. |
 | [db/revision](libraries/db/revision/README.md) | `forge_db_revision` | Durable before-image revisions with strict-head revert and bounded whole-revision prune. | Boost.Asio, `forge_db_core`, `forge_db_object`, `forge_raw`, `forge_exceptions`. |
 | [db/mdbx](libraries/db/mdbx/README.md) | `forge_db_mdbx` | Vendored libmdbx implementation of the shared DB driver contract. | `forge_asio`, `forge_db_core`, `forge_exceptions`; libmdbx privately. |
@@ -223,6 +223,10 @@ FORGE использует версию `MAJOR.MINOR.PATCH` вместе с яв
 - `Preview` и `Experimental` должны быть явно отмечены в README владельца.
   Их source API может документированно меняться в `MINOR` release.
 - `PATCH` release не содержит намеренных несовместимых изменений.
+- До объявления source-контрактов Forge стабилизированными maintainer может
+  разрешить один явно ограниченный source/package break в `MINOR` release.
+  Release notes обязаны перечислить удалённые поверхности и механический путь
+  миграции; wire и persisted storage formats этим исключением не ослабляются.
 - Wire и persisted storage contracts оцениваются отдельно: нестабильность C++
   API сама по себе не разрешает менять байты или сохранённые данные.
 
@@ -230,7 +234,7 @@ FORGE использует версию `MAJOR.MINOR.PATCH` вместе с яв
 описано в release notes вместе с migration path.
 
 Текущие изменения и переходы описаны в
-[Forge 8.3.0 release notes](docs/releases/8.3.0.md).
+[Forge 8.8.0 release notes](docs/releases/8.8.0.md).
 
 ## Совместимость
 

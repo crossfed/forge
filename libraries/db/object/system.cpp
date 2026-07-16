@@ -32,7 +32,7 @@ bool access::joined(const store& value,
    return active.has_participant(participant);
 }
 
-forge::db::core::record_key access::record_key(forge::ids::object_id id) {
+forge::db::core::record_key access::record_key(forge::db::ids::object_id id) {
    return detail::record_key::object(id);
 }
 

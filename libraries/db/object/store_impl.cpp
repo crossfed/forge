@@ -211,7 +211,7 @@ store::impl::initialize_header(forge::db::core::transaction& active) const {
    co_return decoded;
 }
 
-boost::asio::awaitable<forge::ids::object_id> store::impl::allocate_id(forge::ids::object_id type,
+boost::asio::awaitable<forge::db::ids::object_id> store::impl::allocate_id(forge::db::ids::object_id type,
                                                                        forge::db::core::transaction& active) {
    const auto ticket = co_await runtime->allocator_gate->acquire();
    auto allocated = type;
@@ -292,14 +292,14 @@ boost::asio::awaitable<void> store::impl::seal_allocations(transaction::allocati
    co_return;
 }
 
-void store::impl::register_object_type(forge::ids::object_id type, std::type_index model) {
+void store::impl::register_object_type(forge::db::ids::object_id type, std::type_index model) {
    if (registered.contains(type)) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db object type is already registered");
    }
    registered.emplace(type, model);
 }
 
-void store::impl::ensure_registered_type(forge::ids::object_id type, std::type_index model) const {
+void store::impl::ensure_registered_type(forge::db::ids::object_id type, std::type_index model) const {
    const auto found = registered.find(type);
    if (found == registered.end() || found->second != model) {
       FORGE_THROW_EXCEPTION(exceptions::unregistered_object, "db object type is not registered");

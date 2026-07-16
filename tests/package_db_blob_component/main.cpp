@@ -9,11 +9,11 @@ import forge.db.blob.store;
 import forge.db.blob.types;
 import forge.crypto.sha256;
 import forge.db.core.record;
-import forge.ids.object_id;
+import forge.db.ids.object_id;
 import forge.variant.value;
 
 int main() {
-   using owner_id = forge::ids::typed_id<7, 11>;
+   using owner_id = forge::db::ids::typed_id<7, 11>;
    static_assert(std::constructible_from<forge::db::blob::owner_ref, owner_id>);
    static_assert(!std::convertible_to<owner_id, forge::db::blob::owner_ref>);
    static_assert(requires(forge::db::blob::snapshot& view,

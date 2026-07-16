@@ -6,7 +6,7 @@ module;
 
 export module forge.db.object.header;
 
-import forge.ids.object_id;
+import forge.db.ids.object_id;
 import forge.db.object.index;
 import forge.db.object.object;
 

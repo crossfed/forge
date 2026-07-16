@@ -90,12 +90,12 @@ target_link_libraries(test_forge_raw forge Boost::included_unit_test_framework)
 add_test(NAME test_forge_raw COMMAND test_forge_raw WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
-   test_forge_ids
+   test_forge_db_ids
    unit/main.cpp
-   ids/ids_tests.cpp
+   db_ids/db_ids_tests.cpp
 )
-target_link_libraries(test_forge_ids forge_ids forge Boost::included_unit_test_framework)
-add_test(NAME test_forge_ids COMMAND test_forge_ids WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+target_link_libraries(test_forge_db_ids forge_db_ids forge Boost::included_unit_test_framework)
+add_test(NAME test_forge_db_ids COMMAND test_forge_db_ids WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
    test_forge_chain_core
@@ -763,14 +763,14 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
-   test_forge_package_ids_component
+   test_forge_package_db_ids_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
-      ${CMAKE_CURRENT_SOURCE_DIR}/package_ids_component
-      ${CMAKE_BINARY_DIR}/forge-package-ids-component
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_db_ids_component
+      ${CMAKE_BINARY_DIR}/forge-package-db-ids-component
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
-      --test-command forge_package_ids_component
+      --test-command forge_package_db_ids_component
    DEPENDS test_forge_package_install
 )
 add_custom_target(
@@ -1352,16 +1352,16 @@ add_test(
 )
 set_tests_properties(test_forge_package_api_p2p_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
-   NAME test_forge_package_ids_component
+   NAME test_forge_package_db_ids_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
-      ${CMAKE_CURRENT_SOURCE_DIR}/package_ids_component
-      ${CMAKE_BINARY_DIR}/forge-package-ids-component
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_db_ids_component
+      ${CMAKE_BINARY_DIR}/forge-package-db-ids-component
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
-      --test-command forge_package_ids_component
+      --test-command forge_package_db_ids_component
 )
-set_tests_properties(test_forge_package_ids_component PROPERTIES DEPENDS test_forge_package_install)
+set_tests_properties(test_forge_package_db_ids_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_compression_component
    COMMAND ${CMAKE_CTEST_COMMAND}
