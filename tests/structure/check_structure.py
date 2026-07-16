@@ -215,7 +215,11 @@ def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
       errors.append(f"{path.relative_to(root)}: cannot locate pull_request path filters")
       return
 
-   for required in ('      - "CMakeLists.txt"', '      - "cmake/**"'):
+   for required in (
+      '      - "CMakeLists.txt"',
+      '      - "cmake/**"',
+      '      - "libraries/exceptions/**"',
+   ):
       if required not in pull_request:
          errors.append(
             f"{path.relative_to(root)}: pull_request paths must include {required.strip()[2:]}"

@@ -431,7 +431,10 @@ endif()
 
 set(_FORGE_NEEDS_BOOST FALSE)
 foreach(_forge_component IN LISTS _FORGE_COMPONENTS)
-   if(NOT "${_forge_component}" STREQUAL "tui")
+   if(
+      NOT "${_forge_component}" STREQUAL "tui"
+      AND NOT "${_forge_component}" STREQUAL "contract_attributes"
+   )
       set(_FORGE_NEEDS_BOOST TRUE)
    endif()
 endforeach()
