@@ -78,9 +78,9 @@ hello.contract.json
 
 import forge.contract;
 
-class [[forge::contract("hello")]] hello : public forge::contract::base {
+class [[forge::contract("hello")]] hello : public forge::contract::context {
  public:
-   using base::base;
+   using context::context;
 
    [[forge::action]] void greet(std::string user, std::vector<std::uint32_t> values) {
       forge::contract::check(!user.empty(), "user must not be empty");
@@ -89,7 +89,7 @@ class [[forge::contract("hello")]] hello : public forge::contract::base {
 };
 ```
 
-`forge::contract::base` provides `get_self()`, `get_first_receiver()` and the
+`forge::contract::context` provides `get_self()`, `get_first_receiver()` and the
 action-data datastream. The generated `apply` dispatcher reads action bytes
 through the same target-neutral `forge.raw` codec used by host applications.
 

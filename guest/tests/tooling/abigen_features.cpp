@@ -41,9 +41,9 @@ template <std::uint64_t Name, typename Value> struct singleton {
    Value value{};
 };
 
-class [[forge::contract("abifixture")]] abifixture : public forge::contract::base {
+class [[forge::contract("abifixture")]] abifixture : public forge::contract::context {
  public:
-   using base::base;
+   using context::context;
 
    using index_fixture = multi_index<8417982951132397568ULL, indexed_record>;
    using singleton_fixture = singleton<14098176321150517248ULL, indexed_record>;

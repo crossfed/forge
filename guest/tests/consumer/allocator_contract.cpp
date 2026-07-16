@@ -6,9 +6,9 @@
 
 import forge.contract;
 
-class [[forge::contract("allocatortst")]] allocator_contract : public forge::contract::base {
+class [[forge::contract("allocatortst")]] allocator_contract : public forge::contract::context {
  public:
-   using base::base;
+   using context::context;
 
    [[forge::action]] void donorpass() {
       auto* byte = static_cast<volatile char*>(std::malloc(1));

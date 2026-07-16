@@ -10,11 +10,11 @@ export import forge.raw.stream;
 
 export namespace forge::contract {
 
-class base {
+class context {
  public:
    using stream_type = forge::datastream<const char*>;
 
-   constexpr base(chain::protocol::name self, chain::protocol::name first_receiver, stream_type stream) noexcept
+   constexpr context(chain::protocol::name self, chain::protocol::name first_receiver, stream_type stream) noexcept
        : self_(self), first_receiver_(first_receiver), stream_(stream) {}
 
    [[nodiscard]] constexpr chain::protocol::name get_self() const noexcept {

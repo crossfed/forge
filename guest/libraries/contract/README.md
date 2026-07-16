@@ -1,16 +1,16 @@
 # Guest Contract
 
 `forge_guest_contract` is the modern C++23 contract API for wasm32. The primary
-module `forge.contract` owns `forge::contract::base` and the core contract API.
+module `forge.contract` owns `forge::contract::context` and the core contract API.
 Focused modules are `forge.contract.intrinsics` and
 `forge.contract.dispatcher`; there is no aggregate-only module.
 
 ```cpp
 import forge.contract;
 
-class [[forge::contract("hello")]] hello : public forge::contract::base {
+class [[forge::contract("hello")]] hello : public forge::contract::context {
  public:
-   using base::base;
+   using context::context;
 
    [[forge::action]] std::uint32_t add(std::uint32_t a, std::uint32_t b) {
       return a + b;

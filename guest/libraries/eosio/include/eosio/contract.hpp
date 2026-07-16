@@ -4,9 +4,9 @@ import forge.contract;
 
 namespace eosio {
 
-class contract : public forge::contract::base {
+class contract : public forge::contract::context {
  public:
-   using base::base;
+   using context::context;
 };
 
 } // namespace eosio

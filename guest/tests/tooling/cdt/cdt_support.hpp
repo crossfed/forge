@@ -5,7 +5,7 @@
 
 namespace eosio {
 
-using contract = forge::contract::base;
+using contract = forge::contract::context;
 using forge::chain::protocol::asset;
 using forge::chain::protocol::name;
 

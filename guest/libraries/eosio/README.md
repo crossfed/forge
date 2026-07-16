@@ -1,7 +1,7 @@
 # EOSIO Compatibility Veneer
 
 `forge_guest_eosio` is a header-only compatibility surface over
-`forge_guest_contract`. `eosio::contract` adapts `forge::contract::base`, value
+`forge_guest_contract`. `eosio::contract` adapts `forge::contract::context`, value
 types alias `forge::chain::protocol`, and contract checks and action decoding
 reuse the Forge modules.
 
@@ -27,7 +27,7 @@ later compatibility block.
 
 The INTERFACE target depends only on `forge_guest_contract`; aliases point to
 the same guest protocol values and dispatcher templates. The currently shipped
-base contract, value aliases, checks and `EOSIO_DISPATCH` are compatibility
+contract context, value aliases, checks and `EOSIO_DISPATCH` are compatibility
 surfaces. Header coverage grows only with donor-backed tests.
 
 The legacy consumer is compiled from the relocated SDK and executed beside the

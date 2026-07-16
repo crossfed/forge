@@ -12,7 +12,7 @@ entry points live in `tools/`. It currently delivers:
 - release and developer toolchain profiles;
 - pinned upstream libc++, libc++abi and compiler-rt sysroot construction;
 - target-neutral raw codec and guest-safe chain value modules;
-- contract base, generated dispatcher and the initial versioned intrinsic set;
+- contract context, generated dispatcher and the initial versioned intrinsic set;
 - modern Forge and minimal EOSIO source vocabularies;
 - Clang attribute plugin, ABI generator, structural checker and build manifest;
 - CMake `find_package(ForgeContract)` and `forge_add_contract()`;
