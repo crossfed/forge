@@ -47,7 +47,7 @@ import forge.chain.protocol.fixed_key;
 import forge.crypto.hex;
 import forge.crypto.sha256;
 import forge.db.core.exceptions;
-import forge.ids.object_id;
+import forge.db.ids.object_id;
 import forge.db.object.cursor;
 import forge.db.object.exceptions;
 import forge.db.object.header;
@@ -1102,7 +1102,7 @@ static_assert(forge::db::object::object_model<ranked_upload_object>);
 static_assert(std::same_as<payload_bytes_sum::accumulator_type, std::uint64_t>);
 static_assert(!forge::db::object::object_model<bad_object>);
 static_assert(!forge::db::object::object_model<duplicate_tag_object>);
-static_assert(std::same_as<forge::db::object::id_t_of<account_object>, forge::ids::typed_id<1, 7>>);
+static_assert(std::same_as<forge::db::object::id_t_of<account_object>, forge::db::ids::typed_id<1, 7>>);
 static_assert(std::same_as<forge::db::object::index_for_id_t<account::id_t>, account_object>);
 static_assert(std::same_as<forge::db::object::index_for_id_t<forge::db::object::header::id_t>,
                            forge::db::object::header_index>);
@@ -3346,10 +3346,10 @@ BOOST_AUTO_TEST_CASE(db_object_session_runtime_object_id_requires_explicit_objec
       auto store = co_await make_store(driver);
 
       co_await store.insert(make_account(42, "alice", 100, 3));
-      const auto generic = forge::ids::object_id{.space = 1, .type = 7, .instance = 42};
+      const auto generic = forge::db::ids::object_id{.space = 1, .type = 7, .instance = 42};
       BOOST_CHECK_EQUAL((co_await store.get<account_object>(generic)).name, "alice");
 
-      const auto wrong = forge::ids::object_id{.space = 1, .type = 8, .instance = 42};
+      const auto wrong = forge::db::ids::object_id{.space = 1, .type = 8, .instance = 42};
       BOOST_CHECK_THROW((void)(co_await store.get<account_object>(wrong)),
                         forge::db::object::exceptions::invalid_descriptor);
 

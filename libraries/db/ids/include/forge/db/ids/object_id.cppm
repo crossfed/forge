@@ -2,18 +2,17 @@ module;
 
 #include <compare>
 #include <cstdint>
-#include <limits>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
 
-export module forge.ids.object_id;
+export module forge.db.ids.object_id;
 
 import forge.raw.raw;
 import forge.variant.value;
 
-export namespace forge::ids {
+export namespace forge::db::ids {
 
 struct object_id
 {
@@ -25,28 +24,8 @@ struct object_id
    auto operator<=>(const object_id&) const = default;
 };
 
-inline void to_variant(const object_id& value, forge::variant& out) {
-   out = forge::mutable_variant_object{}("space", static_cast<std::uint64_t>(value.space))(
-      "type",
-      static_cast<std::uint64_t>(value.type))("instance", value.instance);
-}
-
-inline void from_variant(const forge::variant& input, object_id& out) {
-   const auto& object = input.get_object();
-   auto decoded_space = std::uint64_t{};
-   auto decoded_type = std::uint64_t{};
-   forge::from_variant(object["space"], decoded_space);
-   forge::from_variant(object["type"], decoded_type);
-   forge::from_variant(object["instance"], out.instance);
-   if (decoded_space > std::numeric_limits<std::uint8_t>::max()) {
-      throw std::invalid_argument("object_id space exceeds uint8 range");
-   }
-   if (decoded_type > std::numeric_limits<std::uint16_t>::max()) {
-      throw std::invalid_argument("object_id type exceeds uint16 range");
-   }
-   out.space = static_cast<std::uint8_t>(decoded_space);
-   out.type = static_cast<std::uint16_t>(decoded_type);
-}
+void to_variant(const object_id& value, forge::variant& out);
+void from_variant(const forge::variant& input, object_id& out);
 
 template <typename Stream> Stream& operator<<(Stream& stream, const object_id& value) {
    forge::raw::pack(stream, value.space);
@@ -122,10 +101,7 @@ template <std::uint8_t Space, std::uint16_t Type>
    return typed_id<Space, Type>{value};
 }
 
-[[nodiscard]] inline std::string to_string(object_id value) {
-   return std::to_string(static_cast<std::uint64_t>(value.space)) + "/"
-        + std::to_string(static_cast<std::uint64_t>(value.type)) + "/" + std::to_string(value.instance);
-}
+[[nodiscard]] std::string to_string(object_id value);
 
 template <std::uint8_t Space, std::uint16_t Type> [[nodiscard]] std::string to_string(typed_id<Space, Type> value) {
    return std::to_string(static_cast<std::uint64_t>(Space)) + "/"
@@ -156,4 +132,4 @@ Stream& operator>>(Stream& stream, typed_id<Space, Type>& value) {
    return stream;
 }
 
-} // namespace forge::ids
+} // namespace forge::db::ids

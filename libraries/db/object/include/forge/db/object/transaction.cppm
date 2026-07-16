@@ -25,7 +25,7 @@ module;
 
 export module forge.db.object.transaction;
 
-import forge.ids.object_id;
+import forge.db.ids.object_id;
 import forge.db.core.driver;
 import forge.db.core.record;
 import forge.db.object.cursor;
@@ -43,10 +43,10 @@ class transaction_access;
 
 class transaction {
  public:
-   using ensure_registered_fn = std::function<void(forge::ids::object_id, std::type_index)>;
-   using allocate_id_fn = std::function<boost::asio::awaitable<forge::ids::object_id>(forge::ids::object_id,
+   using ensure_registered_fn = std::function<void(forge::db::ids::object_id, std::type_index)>;
+   using allocate_id_fn = std::function<boost::asio::awaitable<forge::db::ids::object_id>(forge::db::ids::object_id,
                                                                                       forge::db::core::transaction&)>;
-   using allocation_seal_map = std::map<forge::ids::object_id, std::uint64_t>;
+   using allocation_seal_map = std::map<forge::db::ids::object_id, std::uint64_t>;
    using seal_allocations_fn = std::function<boost::asio::awaitable<void>(allocation_seal_map)>;
    using release_fn = std::function<void()>;
 
@@ -82,16 +82,16 @@ class transaction {
    transaction(transaction&&) noexcept = default;
    transaction& operator=(transaction&&) noexcept = default;
 
-   template <forge::ids::typed_id_like Id>
+   template <forge::db::ids::typed_id_like Id>
    boost::asio::awaitable<typename index_for_id_t<Id>::value_type> get(Id id);
 
-   template <forge::ids::typed_id_like Id>
+   template <forge::db::ids::typed_id_like Id>
    boost::asio::awaitable<std::optional<typename index_for_id_t<Id>::value_type>> find(Id id);
 
-   template <object_model Object> boost::asio::awaitable<typename Object::value_type> get(forge::ids::object_id id);
+   template <object_model Object> boost::asio::awaitable<typename Object::value_type> get(forge::db::ids::object_id id);
 
    template <object_model Object>
-   boost::asio::awaitable<std::optional<typename Object::value_type>> find(forge::ids::object_id id);
+   boost::asio::awaitable<std::optional<typename Object::value_type>> find(forge::db::ids::object_id id);
 
    template <application_object_value Value> boost::asio::awaitable<void> insert(Value value);
 
@@ -101,15 +101,15 @@ class transaction {
 
    template <application_object_value Value> boost::asio::awaitable<void> replace(Value value);
 
-   template <forge::ids::typed_id_like Id, typename Fn>
+   template <forge::db::ids::typed_id_like Id, typename Fn>
       requires application_object_model<index_for_id_t<Id>>
    boost::asio::awaitable<void> modify(Id id, Fn&& fn);
 
-   template <forge::ids::typed_id_like Id>
+   template <forge::db::ids::typed_id_like Id>
       requires application_object_model<index_for_id_t<Id>>
    boost::asio::awaitable<void> erase(Id id);
 
-   template <application_object_model Object> boost::asio::awaitable<void> erase(forge::ids::object_id id);
+   template <application_object_model Object> boost::asio::awaitable<void> erase(forge::db::ids::object_id id);
 
    template <object_model Object, typename Tag> [[nodiscard]] index_view<Object, Tag> index() const;
 
@@ -137,9 +137,9 @@ class transaction {
    [[nodiscard]] change_set& changes() const;
    [[nodiscard]] forge::db::core::transaction& active_transaction() const;
 
-   void ensure_registered_type(forge::ids::object_id type, std::type_index model) const;
+   void ensure_registered_type(forge::db::ids::object_id type, std::type_index model) const;
    boost::asio::awaitable<void> before_mutation(const object_mutation& mutation) const;
-   boost::asio::awaitable<forge::ids::object_id> allocate_id(forge::ids::object_id type) const;
+   boost::asio::awaitable<forge::db::ids::object_id> allocate_id(forge::db::ids::object_id type) const;
    boost::asio::awaitable<std::optional<std::vector<std::byte>>> get_record(forge::db::core::record_key key) const;
    boost::asio::awaitable<void> put_record(forge::db::core::record_key key, std::vector<std::byte> value) const;
    boost::asio::awaitable<void> erase_record(forge::db::core::record_key key) const;
@@ -220,7 +220,7 @@ class transaction::access {
       return owner_.before_mutation(mutation);
    }
 
-   boost::asio::awaitable<forge::ids::object_id> allocate_id(forge::ids::object_id type) const {
+   boost::asio::awaitable<forge::db::ids::object_id> allocate_id(forge::db::ids::object_id type) const {
       co_return co_await owner_.allocate_id(type);
    }
 
@@ -326,8 +326,8 @@ ranked_index::write_access make_ranked_write_access(Access source) {
    return result;
 }
 
-template <object_model Object> id_t_of<Object> typed_id_from(forge::ids::object_id id) {
-   if (!forge::ids::matches<id_t_of<Object>::space, id_t_of<Object>::type>(id)) {
+template <object_model Object> id_t_of<Object> typed_id_from(forge::db::ids::object_id id) {
+   if (!forge::db::ids::matches<id_t_of<Object>::space, id_t_of<Object>::type>(id)) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "object_id does not match db object type");
    }
    return id_t_of<Object>{id};
@@ -335,7 +335,7 @@ template <object_model Object> id_t_of<Object> typed_id_from(forge::ids::object_
 
 template <object_model Object, typename Access>
 boost::asio::awaitable<std::optional<typename Object::value_type>> read_transaction_object(Access tx,
-                                                                                           forge::ids::object_id id) {
+                                                                                           forge::db::ids::object_id id) {
    tx.template ensure_registered<Object>();
    const auto typed = typed_id_from<Object>(id);
    const auto key = detail::ordered_key::object_record_key<Object>(typed);
@@ -657,7 +657,7 @@ boost::asio::awaitable<void> replace_object(Access tx, Value value, mutation_kin
 }
 
 template <application_object_model Object, typename Access>
-boost::asio::awaitable<void> erase_object(Access tx, forge::ids::object_id id) {
+boost::asio::awaitable<void> erase_object(Access tx, forge::db::ids::object_id id) {
    tx.template ensure_registered<Object>();
    const auto typed = typed_id_from<Object>(id);
    const auto existing = co_await read_transaction_object<Object>(tx, typed.as_object_id());
@@ -708,18 +708,18 @@ boost::asio::awaitable<Value> create_object(Access tx, Fn&& fn) {
 
 export namespace forge::db::object {
 
-template <forge::ids::typed_id_like Id>
+template <forge::db::ids::typed_id_like Id>
 boost::asio::awaitable<typename index_for_id_t<Id>::value_type> transaction::get(Id id) {
    co_return co_await get<index_for_id_t<Id>>(id.as_object_id());
 }
 
-template <forge::ids::typed_id_like Id>
+template <forge::db::ids::typed_id_like Id>
 boost::asio::awaitable<std::optional<typename index_for_id_t<Id>::value_type>> transaction::find(Id id) {
    co_return co_await find<index_for_id_t<Id>>(id.as_object_id());
 }
 
 template <object_model Object>
-boost::asio::awaitable<typename Object::value_type> transaction::get(forge::ids::object_id id) {
+boost::asio::awaitable<typename Object::value_type> transaction::get(forge::db::ids::object_id id) {
    const auto value = co_await find<Object>(id);
    if (!value.has_value()) {
       FORGE_THROW_EXCEPTION(exceptions::not_found, "db object was not found");
@@ -728,7 +728,7 @@ boost::asio::awaitable<typename Object::value_type> transaction::get(forge::ids:
 }
 
 template <object_model Object>
-boost::asio::awaitable<std::optional<typename Object::value_type>> transaction::find(forge::ids::object_id id) {
+boost::asio::awaitable<std::optional<typename Object::value_type>> transaction::find(forge::db::ids::object_id id) {
    co_return co_await detail::read_transaction_object<Object>(access{*this}, id);
 }
 
@@ -748,7 +748,7 @@ template <application_object_value Value> boost::asio::awaitable<void> transacti
    co_return;
 }
 
-template <forge::ids::typed_id_like Id, typename Fn>
+template <forge::db::ids::typed_id_like Id, typename Fn>
    requires application_object_model<index_for_id_t<Id>>
 boost::asio::awaitable<void> transaction::modify(Id id, Fn&& fn) {
    using object_model_type = index_for_id_t<Id>;
@@ -760,7 +760,7 @@ boost::asio::awaitable<void> transaction::modify(Id id, Fn&& fn) {
    co_return;
 }
 
-template <forge::ids::typed_id_like Id>
+template <forge::db::ids::typed_id_like Id>
    requires application_object_model<index_for_id_t<Id>>
 boost::asio::awaitable<void> transaction::erase(Id id) {
    co_await erase<index_for_id_t<Id>>(id.as_object_id());
@@ -768,7 +768,7 @@ boost::asio::awaitable<void> transaction::erase(Id id) {
 }
 
 template <application_object_model Object>
-boost::asio::awaitable<void> transaction::erase(forge::ids::object_id id) {
+boost::asio::awaitable<void> transaction::erase(forge::db::ids::object_id id) {
    co_await detail::erase_object<Object>(access{*this}, id);
    co_return;
 }

@@ -29,7 +29,7 @@ import forge.crypto.sha256;
 import forge.db.core.exceptions;
 import forge.db.core.driver;
 import forge.db.core.record;
-import forge.ids.object_id;
+import forge.db.ids.object_id;
 import forge.db.object.index;
 import forge.db.object.object;
 import forge.db.object.store;
@@ -410,8 +410,8 @@ static_assert(!mutable_blob_snapshot<forge::db::blob::snapshot>);
 BOOST_AUTO_TEST_SUITE(db_blob_test_suite)
 
 BOOST_AUTO_TEST_CASE(db_blob_owner_ref_uses_binary_object_id_identity) {
-   const auto object = forge::ids::object_id{.space = 201, .type = 7, .instance = 42};
-   const auto typed = forge::ids::typed_id<201, 7>{42};
+   const auto object = forge::db::ids::object_id{.space = 201, .type = 7, .instance = 42};
+   const auto typed = forge::db::ids::typed_id<201, 7>{42};
    const auto packed = forge::raw::pack(object);
    const auto expected = std::vector<std::byte>{
       reinterpret_cast<const std::byte*>(packed.data()),
@@ -421,14 +421,14 @@ BOOST_AUTO_TEST_CASE(db_blob_owner_ref_uses_binary_object_id_identity) {
    const auto typed_owner = forge::db::blob::owner_ref{typed};
    BOOST_CHECK(object_owner.bytes == expected);
    BOOST_CHECK(typed_owner == object_owner);
-   BOOST_CHECK(!forge::db::blob::owner_ref{forge::ids::object_id{}}.empty());
+   BOOST_CHECK(!forge::db::blob::owner_ref{forge::db::ids::object_id{}}.empty());
 
    const auto other_space = forge::db::blob::owner_ref{
-      forge::ids::object_id{.space = 200, .type = 7, .instance = 42}};
+      forge::db::ids::object_id{.space = 200, .type = 7, .instance = 42}};
    const auto other_type = forge::db::blob::owner_ref{
-      forge::ids::object_id{.space = 201, .type = 8, .instance = 42}};
+      forge::db::ids::object_id{.space = 201, .type = 8, .instance = 42}};
    const auto other_instance = forge::db::blob::owner_ref{
-      forge::ids::object_id{.space = 201, .type = 7, .instance = 43}};
+      forge::db::ids::object_id{.space = 201, .type = 7, .instance = 43}};
    BOOST_CHECK(other_space != object_owner);
    BOOST_CHECK(other_type != object_owner);
    BOOST_CHECK(other_instance != object_owner);
@@ -440,7 +440,7 @@ BOOST_AUTO_TEST_CASE(db_blob_object_id_owner_interoperates_with_legacy_binary_ow
    auto blobs = forge::db::blob::store{driver};
 
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
-      const auto id = forge::ids::typed_id<201, 7>{42};
+      const auto id = forge::db::ids::typed_id<201, 7>{42};
       const auto packed = forge::raw::pack(id.as_object_id());
       const auto legacy_bytes = std::vector<std::byte>{
          reinterpret_cast<const std::byte*>(packed.data()),

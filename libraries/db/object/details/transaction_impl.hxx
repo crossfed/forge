@@ -36,7 +36,7 @@ struct transaction::impl {
    std::vector<std::shared_ptr<interceptor>> interceptors;
    std::shared_ptr<const void> store_identity;
    bool backend_writes = false;
-   void remember_allocation(forge::ids::object_id type, std::uint64_t next_instance);
+   void remember_allocation(forge::db::ids::object_id type, std::uint64_t next_instance);
 };
 
 } // namespace forge::db::object

@@ -7,7 +7,7 @@
 #include <boost/describe.hpp>
 #include <forge/db/object/macros.hpp>
 
-import forge.ids.object_id;
+import forge.db.ids.object_id;
 import forge.db.core.driver;
 import forge.db.core.record;
 import forge.db.object.header;

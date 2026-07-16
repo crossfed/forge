@@ -21,7 +21,7 @@ module;
 
 export module forge.db.object.snapshot;
 
-import forge.ids.object_id;
+import forge.db.ids.object_id;
 import forge.db.core.driver;
 import forge.db.core.record;
 import forge.db.object.cursor;
@@ -34,22 +34,22 @@ export namespace forge::db::object {
 
 class snapshot {
  public:
-   using ensure_registered_fn = std::function<void(forge::ids::object_id, std::type_index)>;
+   using ensure_registered_fn = std::function<void(forge::db::ids::object_id, std::type_index)>;
 
    snapshot() = default;
    snapshot(forge::db::core::snapshot active, forge::db::core::family family, ensure_registered_fn ensure);
 
-   template <forge::ids::typed_id_like Id>
+   template <forge::db::ids::typed_id_like Id>
    boost::asio::awaitable<typename index_for_id_t<Id>::value_type> get(Id id);
 
-   template <forge::ids::typed_id_like Id>
+   template <forge::db::ids::typed_id_like Id>
    boost::asio::awaitable<std::optional<typename index_for_id_t<Id>::value_type>> find(Id id);
 
    template <object_model Object>
-   boost::asio::awaitable<typename Object::value_type> get(forge::ids::object_id id);
+   boost::asio::awaitable<typename Object::value_type> get(forge::db::ids::object_id id);
 
    template <object_model Object>
-   boost::asio::awaitable<std::optional<typename Object::value_type>> find(forge::ids::object_id id);
+   boost::asio::awaitable<std::optional<typename Object::value_type>> find(forge::db::ids::object_id id);
 
    template <object_model Object, typename Tag>
    [[nodiscard]] index_view<Object, Tag> index() const;
@@ -57,7 +57,7 @@ class snapshot {
  private:
    class access;
 
-   void ensure_registered_type(forge::ids::object_id type, std::type_index model) const;
+   void ensure_registered_type(forge::db::ids::object_id type, std::type_index model) const;
    boost::asio::awaitable<std::optional<std::vector<std::byte>>> get_record(forge::db::core::record_key key) const;
    boost::asio::awaitable<forge::db::core::record_page> scan_records(forge::db::core::record_range range, forge::db::core::page_request request) const;
 
@@ -160,8 +160,8 @@ ranked_index::read_access make_ranked_read_access(Access source) {
 }
 
 template <object_model Object>
-id_t_of<Object> typed_id_from(forge::ids::object_id id) {
-   if (!forge::ids::matches<id_t_of<Object>::space, id_t_of<Object>::type>(id)) {
+id_t_of<Object> typed_id_from(forge::db::ids::object_id id) {
+   if (!forge::db::ids::matches<id_t_of<Object>::space, id_t_of<Object>::type>(id)) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "object_id does not match db object type");
    }
    return id_t_of<Object>{id};
@@ -169,7 +169,7 @@ id_t_of<Object> typed_id_from(forge::ids::object_id id) {
 
 template <object_model Object, typename Access>
 boost::asio::awaitable<std::optional<typename Object::value_type>> read_snapshot_object(Access view,
-                                                                                        forge::ids::object_id id) {
+                                                                                        forge::db::ids::object_id id) {
    view.template ensure_registered<Object>();
    const auto typed = typed_id_from<Object>(id);
    const auto key = object_record_key<Object>(typed);
@@ -294,18 +294,18 @@ query_snapshot_exact_rank(Access view, const typename Object::value_type& value)
 
 export namespace forge::db::object {
 
-template <forge::ids::typed_id_like Id>
+template <forge::db::ids::typed_id_like Id>
 boost::asio::awaitable<typename index_for_id_t<Id>::value_type> snapshot::get(Id id) {
    co_return co_await get<index_for_id_t<Id>>(id.as_object_id());
 }
 
-template <forge::ids::typed_id_like Id>
+template <forge::db::ids::typed_id_like Id>
 boost::asio::awaitable<std::optional<typename index_for_id_t<Id>::value_type>> snapshot::find(Id id) {
    co_return co_await find<index_for_id_t<Id>>(id.as_object_id());
 }
 
 template <object_model Object>
-boost::asio::awaitable<typename Object::value_type> snapshot::get(forge::ids::object_id id) {
+boost::asio::awaitable<typename Object::value_type> snapshot::get(forge::db::ids::object_id id) {
    const auto value = co_await find<Object>(id);
    if (!value.has_value()) {
       FORGE_THROW_EXCEPTION(exceptions::not_found, "db object was not found");
@@ -314,7 +314,7 @@ boost::asio::awaitable<typename Object::value_type> snapshot::get(forge::ids::ob
 }
 
 template <object_model Object>
-boost::asio::awaitable<std::optional<typename Object::value_type>> snapshot::find(forge::ids::object_id id) {
+boost::asio::awaitable<std::optional<typename Object::value_type>> snapshot::find(forge::db::ids::object_id id) {
    co_return co_await detail::read_snapshot_object<Object>(access{*this}, id);
 }
 

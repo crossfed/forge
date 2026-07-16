@@ -120,11 +120,11 @@ boost::asio::awaitable<transaction> store::begin_transaction() {
    auto result = detail::transaction_access::make_owned(
       std::move(active),
       impl_->config.family,
-      [impl = impl_](forge::ids::object_id type, std::type_index model) {
+      [impl = impl_](forge::db::ids::object_id type, std::type_index model) {
          impl->ensure_registered_type(type, model);
       },
-      [impl = impl_](forge::ids::object_id type,
-                     forge::db::core::transaction& active) -> boost::asio::awaitable<forge::ids::object_id> {
+      [impl = impl_](forge::db::ids::object_id type,
+                     forge::db::core::transaction& active) -> boost::asio::awaitable<forge::db::ids::object_id> {
          co_return co_await impl->allocate_id(type, active);
       },
       [impl = impl_](transaction::allocation_seal_map seals) -> boost::asio::awaitable<void> {
@@ -161,7 +161,7 @@ snapshot store::join(const forge::db::core::snapshot& active) {
    return snapshot{
       active,
       impl_->config.family,
-      [impl = impl_](forge::ids::object_id type, std::type_index model) {
+      [impl = impl_](forge::db::ids::object_id type, std::type_index model) {
          impl->ensure_registered_type(type, model);
       }};
 }
@@ -186,11 +186,11 @@ boost::asio::awaitable<transaction> store::join(forge::db::core::transaction& ac
    auto result = detail::transaction_access::make_joined(
       active,
       impl_->config.family,
-      [impl = impl_](forge::ids::object_id type, std::type_index model) {
+      [impl = impl_](forge::db::ids::object_id type, std::type_index model) {
          impl->ensure_registered_type(type, model);
       },
-      [impl = impl_](forge::ids::object_id type,
-                     forge::db::core::transaction& active) -> boost::asio::awaitable<forge::ids::object_id> {
+      [impl = impl_](forge::db::ids::object_id type,
+                     forge::db::core::transaction& active) -> boost::asio::awaitable<forge::db::ids::object_id> {
          co_return co_await impl->allocate_id(type, active);
       },
       [impl = impl_](transaction::allocation_seal_map seals) -> boost::asio::awaitable<void> {
@@ -213,11 +213,11 @@ boost::asio::awaitable<transaction> store::join(transaction& active) {
    co_return detail::transaction_access::joined(active);
 }
 
-void store::register_object_type(forge::ids::object_id type, std::type_index model) {
+void store::register_object_type(forge::db::ids::object_id type, std::type_index model) {
    impl_->register_object_type(type, model);
 }
 
-void store::register_system_object_type(forge::ids::object_id type, std::type_index model) {
+void store::register_system_object_type(forge::db::ids::object_id type, std::type_index model) {
    const auto found = impl_->registered.find(type);
    if (found == impl_->registered.end()) {
       impl_->registered.emplace(type, model);
@@ -228,7 +228,7 @@ void store::register_system_object_type(forge::ids::object_id type, std::type_in
    }
 }
 
-void store::ensure_registered_type(forge::ids::object_id type, std::type_index model) const {
+void store::ensure_registered_type(forge::db::ids::object_id type, std::type_index model) const {
    impl_->ensure_registered_type(type, model);
 }
 

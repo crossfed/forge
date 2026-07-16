@@ -6,7 +6,7 @@ module;
 
 export module forge.db.object.system;
 
-import forge.ids.object_id;
+import forge.db.ids.object_id;
 import forge.db.core.driver;
 import forge.db.core.record;
 import forge.db.object.index;
@@ -20,7 +20,7 @@ class access final {
    [[nodiscard]] static forge::db::core::family family(const store& value);
    [[nodiscard]] static bool joined(const store& value,
                                     const forge::db::core::transaction& active);
-   [[nodiscard]] static forge::db::core::record_key record_key(forge::ids::object_id id);
+   [[nodiscard]] static forge::db::core::record_key record_key(forge::db::ids::object_id id);
 
    template <system_object_model Object>
    static void register_object(store& value) {

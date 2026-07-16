@@ -30,7 +30,7 @@ product code.
 ## Object Declaration
 
 Objects derive from `forge::db::object::object<Derived, Space, Type>`. The base
-owns `id` as `forge::ids::typed_id<Space, Type>` and contains no storage
+owns `id` as `forge::db::ids::typed_id<Space, Type>` and contains no storage
 behavior.
 
 ```cpp
@@ -67,7 +67,7 @@ FORGE_DB_OBJECT(account_object)
 User values remain described C++ structs. `FORGE_DB_OBJECT(...)` specializes
 `forge::db::object::index_for_id` with the compile-time mapping from
 `typed_id<Space, Type>` to the descriptor, so typed-id operations do not require
-spelling the object type again. The macro declares no `forge::ids` symbols and
+spelling the object type again. The macro declares no `forge::db::ids` symbols and
 does not perform runtime registration.
 
 Ordered descriptors follow the Boost.MultiIndex separation between index kind

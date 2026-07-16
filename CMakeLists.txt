@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.31)
 
-project(forge VERSION 8.7.0 LANGUAGES C CXX ASM)
+project(forge VERSION 8.8.0 LANGUAGES C CXX ASM)
 
 include(GNUInstallDirs)
 include(CheckCXXSourceCompiles)
@@ -202,13 +202,13 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/exceptions/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/reflect/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/schema/include"
-	   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/variant/include"
-	   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/raw/include"
-	   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/ids/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/variant/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/raw/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/compression/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/chain/core/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/chain/protocol/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/vm/wasm/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/ids/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/core/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/mdbx/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/rocksdb/include"
@@ -395,7 +395,6 @@ add_subdirectory(libraries/reflect)
 add_subdirectory(libraries/schema)
 add_subdirectory(libraries/variant)
 add_subdirectory(libraries/raw)
-add_subdirectory(libraries/ids)
 add_subdirectory(libraries/compression)
 add_subdirectory(libraries/chain)
 add_subdirectory(libraries/vm)
@@ -424,13 +423,13 @@ set(
    forge_exceptions
    forge_reflect
    forge_schema
-	   forge_variant
-	   forge_raw
-	   forge_ids
+   forge_variant
+   forge_raw
    forge_compression
    forge_chain_core
    forge_chain_protocol
    forge_vm_wasm
+   forge_db_ids
    forge_db_core
    forge_db_object
    forge_db_blob
@@ -530,13 +529,13 @@ install(
              libraries/exceptions/include/forge
              libraries/reflect/include/forge
              libraries/schema/include/forge
-	             libraries/variant/include/forge
-	             libraries/raw/include/forge
-	             libraries/ids/include/forge
+             libraries/variant/include/forge
+             libraries/raw/include/forge
              libraries/compression/include/forge
              libraries/chain/core/include/forge
              libraries/chain/protocol/include/forge
              libraries/vm/wasm/include/forge
+             libraries/db/ids/include/forge
              libraries/db/core/include/forge
              libraries/db/object/include/forge
              libraries/db/blob/include/forge

@@ -32,7 +32,7 @@ target_link_libraries(
       Boost::asio
       forge_db_core
       forge_exceptions
-      forge_ids
+      forge_db_ids
       forge_raw
    PRIVATE
       forge_asio
