@@ -13,6 +13,8 @@ on:
       - "guest/**"
       - "tools/**"
   push:
+    branches:
+      - "contract-sdk-toolchain-v1-ci"
     tags:
       - "v*"
   workflow_dispatch:
