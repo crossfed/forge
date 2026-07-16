@@ -221,6 +221,12 @@ def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
             f"{path.relative_to(root)}: pull_request paths must include {required.strip()[2:]}"
          )
 
+   sysroot_cache_inputs = "hashFiles('guest/sysroot/build.sh', 'guest/sysroot/include/**')"
+   if sysroot_cache_inputs not in source:
+      errors.append(
+         f"{path.relative_to(root)}: contract sysroot cache key must hash its build script and headers"
+      )
+
 
 def check_modules(root: Path, files: list[Path], errors: list[str]) -> None:
    declarations: dict[str, list[tuple[Path, int]]] = defaultdict(list)

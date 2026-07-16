@@ -97,7 +97,7 @@ jobs:
         id: sysroot
         with:
           path: build/contract-sysroot
-          key: contract-sysroot-${{ runner.os }}-${{ runner.arch }}-${{ env.LLVM_COMMIT }}
+          key: contract-sysroot-${{ runner.os }}-${{ runner.arch }}-${{ env.LLVM_COMMIT }}-${{ hashFiles('guest/sysroot/build.sh', 'guest/sysroot/include/**') }}
 
       - name: Build pinned wasm32 sysroot
         if: steps.sysroot.outputs.cache-hit != 'true'
