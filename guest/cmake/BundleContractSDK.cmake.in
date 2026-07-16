@@ -40,6 +40,7 @@ endforeach()
 if(APPLE)
    find_program(_install_name_tool install_name_tool REQUIRED)
    find_program(_otool otool REQUIRED)
+   find_program(_codesign codesign REQUIRED)
    set(_binaries ${_executables} "${_plugin}" ${_bundled})
    foreach(_binary IN LISTS _binaries)
       execute_process(COMMAND "${_otool}" -L "${_binary}" OUTPUT_VARIABLE _linked COMMAND_ERROR_IS_FATAL ANY)
@@ -58,6 +59,12 @@ if(APPLE)
       get_filename_component(_name "${_library}" NAME)
       execute_process(
          COMMAND "${_install_name_tool}" -id "@rpath/${_name}" "${_library}"
+         COMMAND_ERROR_IS_FATAL ANY
+      )
+   endforeach()
+   foreach(_binary IN LISTS _binaries)
+      execute_process(
+         COMMAND "${_codesign}" --force --sign - "${_binary}"
          COMMAND_ERROR_IS_FATAL ANY
       )
    endforeach()
