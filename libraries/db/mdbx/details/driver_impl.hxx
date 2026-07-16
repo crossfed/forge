@@ -28,6 +28,7 @@ class driver_impl final : public std::enable_shared_from_this<driver_impl> {
    void abort_sync(std::vector<MDBX_txn*> transactions) noexcept;
 
  private:
+   void require_open() const;
    void close_sync() noexcept;
    void run_sync(std::string name, std::function<void()> operation) noexcept;
 
@@ -36,6 +37,7 @@ class driver_impl final : public std::enable_shared_from_this<driver_impl> {
    std::shared_ptr<environment> environment_;
    std::shared_ptr<forge::asio::gate> writer_gate_;
    std::thread::id affine_thread_;
+   std::atomic_bool closed_ = false;
 };
 
 } // namespace forge::db::mdbx::detail

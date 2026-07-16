@@ -3,6 +3,7 @@ module;
 #include <forge/exceptions/macros.hpp>
 #include <mdbx.h>
 
+#include <array>
 #include <cerrno>
 #include <string>
 #include <string_view>
@@ -29,7 +30,9 @@ void require_mdbx_success(int code, std::string_view operation) {
    }
 
    const auto message = std::string{operation} + " failed";
-   const auto native_message = std::string{mdbx_strerror(code)};
+   auto native_buffer = std::array<char, 1024>{};
+   const auto native_message = std::string{
+      mdbx_strerror_r(code, native_buffer.data(), native_buffer.size())};
    switch (code) {
       case MDBX_MAP_FULL:
          FORGE_THROW_EXCEPTION(exceptions::map_full, message,

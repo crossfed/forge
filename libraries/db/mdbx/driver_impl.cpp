@@ -1,5 +1,6 @@
 module;
 
+#include <forge/exceptions/macros.hpp>
 #include <mdbx.h>
 
 #include <boost/asio/awaitable.hpp>
@@ -7,6 +8,7 @@ module;
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/use_future.hpp>
 
+#include <atomic>
 #include <functional>
 #include <future>
 #include <map>
@@ -23,6 +25,7 @@ module forge.db.mdbx.driver;
 import forge.asio.affine;
 import forge.asio.gate;
 import forge.db.core.driver;
+import forge.db.core.exceptions;
 import forge.db.core.record;
 
 #include "details/driver_impl.hxx"
@@ -82,17 +85,26 @@ std::unique_ptr<forge::db::core::session> driver_impl::open_snapshot() {
 }
 
 boost::asio::awaitable<void> driver_impl::flush(bool sync) {
+   require_open();
    auto ticket = co_await writer_gate_->acquire();
+   require_open();
    co_await executor_.execute(
       {.name = sync ? "mdbx-flush-sync" : "mdbx-flush-poll"},
       [environment = environment_, sync] { environment->flush(sync); });
 }
 
 boost::asio::awaitable<void> driver_impl::close() {
+   if (closed_.load(std::memory_order_acquire)) {
+      co_return;
+   }
    auto ticket = co_await writer_gate_->acquire();
+   if (closed_.load(std::memory_order_acquire)) {
+      co_return;
+   }
    co_await executor_.execute(
       {.name = "mdbx-close"},
       [environment = environment_] { environment->close(); });
+   closed_.store(true, std::memory_order_release);
 }
 
 boost::asio::awaitable<void> driver_impl::shutdown_managed_lane() {
@@ -113,6 +125,13 @@ void driver_impl::abort_sync(std::vector<MDBX_txn*> transactions) noexcept {
             }
          }
       });
+}
+
+void driver_impl::require_open() const {
+   if (closed_.load(std::memory_order_acquire)) {
+      FORGE_THROW_EXCEPTION(forge::db::core::exceptions::driver_closed,
+                            "MDBX driver is closed");
+   }
 }
 
 void driver_impl::close_sync() noexcept {

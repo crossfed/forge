@@ -319,6 +319,14 @@ BOOST_AUTO_TEST_CASE(db_mdbx_managed_lane_owns_execution_lifetime) {
       snapshot = {};
 
       co_await driver->async_close();
+
+      auto flush_rejected_as_closed = false;
+      try {
+         co_await driver->async_flush(true);
+      } catch (const forge::db::core::exceptions::driver_closed&) {
+         flush_rejected_as_closed = true;
+      }
+      BOOST_CHECK(flush_rejected_as_closed);
    }());
 
    driver.reset();
