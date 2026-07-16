@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Forge CONFIG REQUIRED COMPONENTS db_ids)
+find_package(Forge 8.8 CONFIG REQUIRED COMPONENTS db_ids)
 
 add_executable(forge_package_db_ids_component main.cpp)
 target_link_libraries(forge_package_db_ids_component PRIVATE Forge::forge_db_ids)
