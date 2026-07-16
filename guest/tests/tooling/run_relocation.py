@@ -146,6 +146,12 @@ def main() -> None:
         expected_llvm = {"version": command_output(str(sdk / "bin" / "clang++"), "--version").splitlines()[0]}
     if manifest["llvm"] != expected_llvm:
         raise RuntimeError(f"contract manifest has the wrong toolchain identity: {manifest['llvm']!r}")
+    if manifest["sysroot"]["schema_version"] != 1 or isinstance(manifest["sysroot"]["schema_version"], bool):
+        raise RuntimeError("contract manifest sysroot schema version is not the numeric version 1")
+    if manifest["intrinsics"]["interface_version"] != 1 or isinstance(
+        manifest["intrinsics"]["interface_version"], bool
+    ):
+        raise RuntimeError("contract manifest intrinsic interface version is not the numeric version 1")
 
     abi_path = build / "hello.abi"
     initial_abi = read_abi(abi_path)

@@ -1,5 +1,6 @@
 module;
 
+#include <cstdint>
 #include <filesystem>
 #include <string>
 
@@ -17,9 +18,9 @@ struct request {
    bool reproducible = false;
    std::string llvm_version;
    std::string llvm_commit;
-   std::string sysroot_version;
+   std::uint64_t sysroot_version = 0;
    std::string sysroot_hash;
-   std::string intrinsic_version;
+   std::uint64_t intrinsic_version = 0;
 };
 
 void generate(const request& options);

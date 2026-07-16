@@ -1,10 +1,13 @@
 module;
 
+#include <charconv>
+#include <cstdint>
 #include <iostream>
 #include <map>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 module forge.contract.manifest.command;
 
@@ -53,6 +56,17 @@ bool parse_bool(std::string_view value) {
    throw std::runtime_error{"invalid boolean value: " + std::string{value}};
 }
 
+std::uint64_t parse_version(std::string_view value) {
+   auto result = std::uint64_t{};
+   const auto* begin = value.data();
+   const auto* end = begin + value.size();
+   const auto [position, error] = std::from_chars(begin, end, result);
+   if (error != std::errc{} || position != end) {
+      throw std::runtime_error{"invalid numeric version: " + std::string{value}};
+   }
+   return result;
+}
+
 } // namespace
 
 int run(int argc, const char* const* argv) {
@@ -68,9 +82,9 @@ int run(int argc, const char* const* argv) {
           .reproducible = parse_bool(require(values, "reproducible")),
           .llvm_version = require(values, "llvm-version"),
           .llvm_commit = optional(values, "llvm-commit"),
-          .sysroot_version = require(values, "sysroot-version"),
+          .sysroot_version = parse_version(require(values, "sysroot-version")),
           .sysroot_hash = require(values, "sysroot-hash"),
-          .intrinsic_version = require(values, "intrinsic-version"),
+          .intrinsic_version = parse_version(require(values, "intrinsic-version")),
       });
       return 0;
    } catch (const std::exception& error) {
