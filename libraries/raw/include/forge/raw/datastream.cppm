@@ -25,11 +25,21 @@ class datastream<StreamBuffer,
    template <typename... Args> explicit datastream(Args&&... args) : buffer_(std::forward<Args>(args)...) {}
 
    std::size_t read(char* data, std::size_t size) {
-      return static_cast<std::size_t>(buffer_.sgetn(data, static_cast<std::streamsize>(size)));
+      const auto read_size = buffer_.sgetn(data, static_cast<std::streamsize>(size));
+      if (read_size < 0 || static_cast<std::size_t>(read_size) != size) {
+         const auto consumed = read_size > 0 ? std::min(size, static_cast<std::size_t>(read_size)) : 0U;
+         raw::detail::raise_stream_range("read", consumed, static_cast<std::int64_t>(size - consumed));
+      }
+      return size;
    }
 
    std::size_t write(const char* data, std::size_t size) {
-      return static_cast<std::size_t>(buffer_.sputn(data, static_cast<std::streamsize>(size)));
+      const auto written_size = buffer_.sputn(data, static_cast<std::streamsize>(size));
+      if (written_size < 0 || static_cast<std::size_t>(written_size) != size) {
+         const auto consumed = written_size > 0 ? std::min(size, static_cast<std::size_t>(written_size)) : 0U;
+         raw::detail::raise_stream_range("write", consumed, static_cast<std::int64_t>(size - consumed));
+      }
+      return size;
    }
 
    std::size_t tellp() {
@@ -42,7 +52,7 @@ class datastream<StreamBuffer,
    }
 
    bool get(char& value) {
-      value = static_cast<char>(buffer_.sbumpc());
+      read(&value, 1U);
       return true;
    }
 
