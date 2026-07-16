@@ -115,8 +115,9 @@ EOSIO_DISPATCH(hello, (greet))
 dispatcher, raw codec and intrinsic imports. The veneer is not a second
 runtime. `EOSIO_DISPATCH` expands directly to the Forge dispatcher template;
 when it is present, `abigen` includes the source without generating a second
-`apply` entry point. The unchanged EOSIO header corpus, `multi_index` and database
-intrinsics belong to the next compatibility block.
+`apply` entry point. The database C ABI is already available through generated
+`<eosio/db.h>`. The unchanged EOSIO C++ header corpus and `multi_index` belong
+to the next compatibility block.
 
 ## ABI, Tables And Ricardian Text
 
@@ -184,7 +185,8 @@ sockets, threads, clocks or random device.
 
 ## Intrinsics And Validation
 
-Interface version 1 permits only:
+Interface version 1 contains 67 imports. Its seven lifecycle and action-data
+functions are:
 
 ```text
 env.eosio_assert
@@ -195,6 +197,13 @@ env.action_data_size
 env.read_action_data
 env.set_action_return_value
 ```
+
+The same version also includes the 60 Spring/CDT database imports: the ten
+primary `db_*_i64` operations and ten operations for each of `idx64`, `idx128`,
+`idx256`, `idx_double` and `idx_long_double`. `<forge/contract/intrinsics.h>`
+is canonical; `<eosio/db.h>` is a thin generated include over it. This block
+defines signatures only. Iterator behavior, authorization, RAM accounting,
+floating-key checks and storage are supplied by the future blockchain host.
 
 The declarative registry generates guest declarations and the compatibility
 manifest consumed by `contract-check`. Validation rejects unknown or
@@ -248,8 +257,8 @@ Release mode builds the exact pinned LLVM and guest runtimes from source. Use
   guest check intrinsic without duplicating those implementations.
 - Spring and CDT are pinned compatibility donors and test oracles, never build
   dependencies of a released SDK.
-- Blockchain controller bindings, deployment, database intrinsics and
-  `multi_index` are intentionally outside this first vertical block.
+- Blockchain controller bindings, deployment, executable database host
+  bindings and `multi_index` are intentionally outside this vertical block.
 
 See `docs/iterations/forge-contract-sdk-toolchain-v1.md` for the accepted
 design, donor pins and compatibility scope.

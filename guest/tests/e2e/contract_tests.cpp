@@ -6,6 +6,8 @@
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <map>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -20,6 +22,67 @@ namespace {
 
 namespace protocol = forge::chain::protocol;
 namespace wasm = forge::vm::wasm;
+
+struct intrinsic_signature {
+   std::vector<wasm::value_type> parameters;
+   std::optional<wasm::value_type> result;
+
+   bool operator==(const intrinsic_signature&) const = default;
+};
+
+wasm::value_type parse_value_type(std::string_view value) {
+   if (value == "i32") {
+      return wasm::i32;
+   }
+   if (value == "i64") {
+      return wasm::i64;
+   }
+   throw std::runtime_error{"unsupported golden WASM value type"};
+}
+
+std::map<std::string, intrinsic_signature> read_database_intrinsic_golden() {
+   auto input = std::ifstream{FORGE_CONTRACT_TEST_DB_GOLDEN};
+   if (!input) {
+      throw std::runtime_error{"cannot open database intrinsic golden fixture"};
+   }
+
+   auto result = std::map<std::string, intrinsic_signature>{};
+   for (auto line = std::string{}; std::getline(input, line);) {
+      if (line.empty() || line.front() == '#') {
+         continue;
+      }
+      const auto first = line.find('|');
+      const auto second = line.find('|', first + 1);
+      if (first == std::string::npos || second == std::string::npos) {
+         throw std::runtime_error{"invalid database intrinsic golden fixture"};
+      }
+
+      auto signature = intrinsic_signature{};
+      auto parameters = std::string_view{line}.substr(first + 1, second - first - 1);
+      while (!parameters.empty()) {
+         const auto separator = parameters.find(',');
+         signature.parameters.push_back(parse_value_type(parameters.substr(0, separator)));
+         if (separator == std::string_view::npos) {
+            break;
+         }
+         parameters.remove_prefix(separator + 1);
+      }
+      const auto return_type = std::string_view{line}.substr(second + 1);
+      if (!return_type.empty()) {
+         signature.result = parse_value_type(return_type);
+      }
+
+      const auto [_, inserted] = result.emplace(line.substr(0, first), std::move(signature));
+      if (!inserted) {
+         throw std::runtime_error{"duplicate database intrinsic golden entry"};
+      }
+   }
+   return result;
+}
+
+std::string import_text(const wasm::guarded_vector<std::uint8_t>& value) {
+   return {reinterpret_cast<const char*>(value.data()), value.size()};
+}
 
 class contract_abort : public std::runtime_error {
  public:
@@ -199,6 +262,33 @@ BOOST_AUTO_TEST_CASE(legacy_contract_uses_the_same_runtime_and_wire_codec) {
    };
 
    BOOST_CHECK_NO_THROW(apply(code, host, "legacyhello", "greet"));
+}
+
+BOOST_AUTO_TEST_CASE(cdt_database_fixture_imports_the_spring_database_interface) {
+   auto code = read_contract(FORGE_CONTRACT_TEST_DB_WASM);
+   using validator = wasm::backend<std::nullptr_t, wasm::null_backend, wasm::compatibility_options>;
+   auto parsed = validator{code, static_cast<wasm::wasm_allocator*>(nullptr)};
+   const auto& module = parsed.get_module();
+   const auto expected = read_database_intrinsic_golden();
+   auto actual = std::map<std::string, intrinsic_signature>{};
+
+   for (std::uint32_t index = 0; index < module.imports.size(); ++index) {
+      const auto& entry = module.imports[index];
+      BOOST_TEST(entry.kind == wasm::external_kind::Function);
+      BOOST_TEST(import_text(entry.module_str) == "env");
+
+      const auto& type = module.get_function_type(index);
+      auto signature = intrinsic_signature{};
+      signature.parameters.assign(type.param_types.data(), type.param_types.data() + type.param_types.size());
+      if (type.return_count != 0) {
+         signature.result = type.return_type;
+      }
+      const auto [_, inserted] = actual.emplace(import_text(entry.field_str), std::move(signature));
+      BOOST_TEST(inserted);
+   }
+
+   BOOST_TEST(actual.size() == 60U);
+   BOOST_CHECK(actual == expected);
 }
 
 #if defined(__x86_64__) || defined(_M_X64)

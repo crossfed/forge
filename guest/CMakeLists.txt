@@ -254,8 +254,9 @@ set(_intrinsic_registry "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/include/
 set(_intrinsic_manifest "${_generated_dir}/intrinsics.json")
 set(_forge_intrinsics "${_generated_dir}/include/forge/contract/intrinsics.h")
 set(_eosio_intrinsics "${_generated_dir}/include/eosio/action.h")
+set(_eosio_db_intrinsics "${_generated_dir}/include/eosio/db.h")
 add_custom_command(
-   OUTPUT "${_intrinsic_manifest}" "${_forge_intrinsics}" "${_eosio_intrinsics}"
+   OUTPUT "${_intrinsic_manifest}" "${_forge_intrinsics}" "${_eosio_intrinsics}" "${_eosio_db_intrinsics}"
    COMMAND
       ${Python3_EXECUTABLE}
       "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate_intrinsic_manifest.py"
@@ -263,12 +264,13 @@ add_custom_command(
       --output "${_intrinsic_manifest}"
       --forge-header "${_forge_intrinsics}"
       --eosio-header "${_eosio_intrinsics}"
+      --eosio-db-header "${_eosio_db_intrinsics}"
    DEPENDS "${_intrinsic_registry}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate_intrinsic_manifest.py"
    VERBATIM
 )
 add_custom_target(
    forge_contract_intrinsic_manifest ALL
-   DEPENDS "${_intrinsic_manifest}" "${_forge_intrinsics}" "${_eosio_intrinsics}"
+   DEPENDS "${_intrinsic_manifest}" "${_forge_intrinsics}" "${_eosio_intrinsics}" "${_eosio_db_intrinsics}"
 )
 
 configure_file(cmake/host.hpp.in "${_generated_dir}/include/forge/contract/host.hpp" COPYONLY)

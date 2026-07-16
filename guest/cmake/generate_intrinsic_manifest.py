@@ -103,6 +103,7 @@ def main() -> None:
     parser.add_argument("--output", required=True, type=pathlib.Path)
     parser.add_argument("--forge-header", type=pathlib.Path)
     parser.add_argument("--eosio-header", type=pathlib.Path)
+    parser.add_argument("--eosio-db-header", type=pathlib.Path)
     args = parser.parse_args()
 
     source = args.registry.read_text(encoding="utf-8").replace("\\\n", " ")
@@ -145,6 +146,8 @@ def main() -> None:
         write_c_header(args.forge_header, entries)
     if args.eosio_header is not None:
         write_eosio_header(args.eosio_header)
+    if args.eosio_db_header is not None:
+        write_eosio_header(args.eosio_db_header)
 
 
 if __name__ == "__main__":

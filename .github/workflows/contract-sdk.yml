@@ -169,7 +169,8 @@ jobs:
             -DForge_DIR="$GITHUB_WORKSPACE/build/forge-prefix/lib/cmake/Forge" \
             -DFORGE_CONTRACT_TEST_WASM="$GITHUB_WORKSPACE/build/contract-consumer/hello.wasm" \
             -DFORGE_CONTRACT_TEST_ALLOCATOR_WASM="$GITHUB_WORKSPACE/build/contract-consumer/allocatortst.wasm" \
-            -DFORGE_CONTRACT_TEST_LEGACY_WASM="$GITHUB_WORKSPACE/build/contract-consumer/legacyhello.wasm"
+            -DFORGE_CONTRACT_TEST_LEGACY_WASM="$GITHUB_WORKSPACE/build/contract-consumer/legacyhello.wasm" \
+            -DFORGE_CONTRACT_TEST_DB_WASM="$GITHUB_WORKSPACE/build/contract-consumer/dbintrinsics.wasm"
           cmake --build build/contract-e2e -j 4
           ctest --test-dir build/contract-e2e --output-on-failure
 
@@ -269,7 +270,8 @@ jobs:
             -DForge_DIR="$GITHUB_WORKSPACE/build/forge-prefix/lib/cmake/Forge" \
             -DFORGE_CONTRACT_TEST_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/hello.wasm" \
             -DFORGE_CONTRACT_TEST_ALLOCATOR_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/allocatortst.wasm" \
-            -DFORGE_CONTRACT_TEST_LEGACY_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/legacyhello.wasm"
+            -DFORGE_CONTRACT_TEST_LEGACY_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/legacyhello.wasm" \
+            -DFORGE_CONTRACT_TEST_DB_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/dbintrinsics.wasm"
           cmake --build build/contract-release-e2e -j 4
           ctest --test-dir build/contract-release-e2e --output-on-failure
 
