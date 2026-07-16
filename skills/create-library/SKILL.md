@@ -12,6 +12,10 @@ description: Use when creating, extending, refactoring, or reviewing a library u
 **Когда применять:** создание новой библиотеки или добавление файла в существующую;
 ревью структуры либы; нормализация «поехавшего» стиля.
 
+Правила также обязательны для `guest/libraries/*`. Guest-код меняет target и
+dependency boundary, но не физическую семантику `.cppm/.hpp/.hxx/.cpp` и не
+парный инвариант.
+
 ## Каноническая структура
 ```
 libraries/<lib>/                         # или <group>/<lib>/
@@ -46,6 +50,10 @@ libraries/<lib>/                         # или <group>/<lib>/
   (макросы, экспортируемые шаблоны). По умолчанию — `.cppm`. `.hpp` — исключение.
 - Приватные хедеры — только в `details/` и только `.hxx`.
 - Реализация (`.cpp`) — только в корне либы. Не в `include/`, не в `details/`, не в `src/`.
+- Узкое исключение для EOSIO compatibility veneer: публичные `.hpp/.h` могут
+  содержать module imports, targeted aliases и compatibility macros. Они не
+  могут содержать самостоятельную реализацию, runtime state, serialization,
+  allocator или dispatcher algorithms.
 
 **R2. Парный инвариант.**
 Каждый `X.cpp` в корне парен по базовому имени **ровно с одним** хедером:

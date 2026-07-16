@@ -91,7 +91,7 @@ struct block_timestamp {
    detail::fail_value(message);
 }
 
-inline std::uint64_t encode_name(std::string_view text) {
+constexpr std::uint64_t encode_name(std::string_view text) {
    constexpr auto alphabet = std::string_view{".12345abcdefghijklmnopqrstuvwxyz"};
    if (text.size() > 13U) {
       fail_invalid_argument("chain name is longer than 13 characters");
@@ -135,7 +135,7 @@ inline std::string decode_name(std::uint64_t raw) {
    return result;
 }
 
-inline name make_name(std::string_view value) {
+constexpr name make_name(std::string_view value) {
    return name{encode_name(value)};
 }
 

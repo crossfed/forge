@@ -7,7 +7,9 @@ on:
       - "libraries/chain/protocol/**"
       - "libraries/raw/**"
       - "libraries/vm/wasm/**"
-      - "sdk/contract/**"
+      - "libraries/contract/**"
+      - "guest/**"
+      - "tools/**"
   push:
     tags:
       - "v*"
@@ -99,7 +101,7 @@ jobs:
         if: steps.sysroot.outputs.cache-hit != 'true'
         shell: bash
         run: >-
-          sdk/contract/ci/build_sysroot.sh
+          guest/sysroot/build.sh
           "$GITHUB_WORKSPACE/build/llvm-project"
           "$GITHUB_WORKSPACE/build/contract-runtimes"
           "$GITHUB_WORKSPACE/build/contract-sysroot"
@@ -117,6 +119,9 @@ jobs:
             -DFORGE_ENABLE_MODULES=ON \
             -DFORGE_ENABLE_ROCKSDB=OFF \
             -DFORGE_ENABLE_TUI=OFF \
+            -DFORGE_ENABLE_CONTRACT_TOOLING=ON \
+            -DClang_DIR="$LLVM_ROOT/lib/cmake/clang" \
+            -DLLVM_DIR="$LLVM_ROOT/lib/cmake/llvm" \
             -DBUILD_TESTING=OFF
           cmake --build build/forge -j 4
           cmake --install build/forge
@@ -129,7 +134,7 @@ jobs:
           else
             wasm_ld="$(brew --prefix lld)/bin/wasm-ld"
           fi
-          cmake -S sdk/contract -B build/contract-sdk -G Ninja \
+          cmake -S guest -B build/contract-sdk -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER="$CC" \
             -DCMAKE_CXX_COMPILER="$CXX" \
@@ -150,14 +155,14 @@ jobs:
       - name: Build contracts and tooling fixtures
         shell: bash
         run: |
-          cmake -S sdk/contract/tests/consumer -B build/contract-consumer -G Ninja \
+          cmake -S guest/tests/consumer -B build/contract-consumer -G Ninja \
             -DForgeContract_DIR="$GITHUB_WORKSPACE/build/contract-sdk-prefix/lib/cmake/ForgeContract"
           cmake --build build/contract-consumer -j 4
 
       - name: Execute generated contracts in Forge VM
         shell: bash
         run: |
-          cmake -S sdk/contract/tests/e2e -B build/contract-e2e -G Ninja \
+          cmake -S guest/tests/e2e -B build/contract-e2e -G Ninja \
             -DCMAKE_C_COMPILER="$CC" \
             -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
@@ -189,9 +194,18 @@ jobs:
         run: |
           if [[ "$RUNNER_OS" == "Linux" ]]; then
             sudo apt-get update
-            sudo apt-get install -y clang lld libc++-dev libc++abi-dev
-            echo "CC=/usr/bin/clang" >> "$GITHUB_ENV"
-            echo "CXX=/usr/bin/clang++" >> "$GITHUB_ENV"
+            sudo apt-get install -y ca-certificates gnupg wget
+            wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+              | sudo gpg --dearmor -o /usr/share/keyrings/apt.llvm.org.gpg
+            echo "deb [signed-by=/usr/share/keyrings/apt.llvm.org.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" \
+              | sudo tee /etc/apt/sources.list.d/llvm-22.list
+            sudo apt-get update
+            sudo apt-get install -y \
+              clang-22 clang-tools-22 lld-22 llvm-22-dev libclang-22-dev libclang-cpp22-dev \
+              libc++-22-dev libc++abi-22-dev
+            echo "LLVM_ROOT=/usr/lib/llvm-22" >> "$GITHUB_ENV"
+            echo "CC=/usr/bin/clang-22" >> "$GITHUB_ENV"
+            echo "CXX=/usr/bin/clang++-22" >> "$GITHUB_ENV"
             echo "CXXFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
             echo "LDFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
             if ! command -v brew >/dev/null 2>&1; then
@@ -201,6 +215,7 @@ jobs:
             fi
           else
             brew install llvm
+            echo "LLVM_ROOT=$(brew --prefix llvm)" >> "$GITHUB_ENV"
             echo "CC=$(brew --prefix llvm)/bin/clang" >> "$GITHUB_ENV"
             echo "CXX=$(brew --prefix llvm)/bin/clang++" >> "$GITHUB_ENV"
           fi
@@ -219,6 +234,9 @@ jobs:
             -DFORGE_ENABLE_MODULES=ON \
             -DFORGE_ENABLE_ROCKSDB=OFF \
             -DFORGE_ENABLE_TUI=OFF \
+            -DFORGE_ENABLE_CONTRACT_TOOLING=ON \
+            -DClang_DIR="$LLVM_ROOT/lib/cmake/clang" \
+            -DLLVM_DIR="$LLVM_ROOT/lib/cmake/llvm" \
             -DBUILD_TESTING=OFF
           cmake --build build/forge -j 4
           cmake --install build/forge
@@ -226,7 +244,7 @@ jobs:
       - name: Build exact LLVM SDK archive and relocation gate
         shell: bash
         run: |
-          cmake -S sdk/contract -B build/contract-sdk-release -G Ninja \
+          cmake -S guest -B build/contract-sdk-release -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER="$CC" \
             -DCMAKE_CXX_COMPILER="$CXX" \
@@ -241,10 +259,10 @@ jobs:
           archive="$(find build/contract-sdk-release -maxdepth 1 -name 'forge-contract-sdk-*.tar.gz' -print -quit)"
           mkdir -p build/contract-sdk-release-prefix
           tar -xzf "$archive" -C build/contract-sdk-release-prefix --strip-components=1
-          cmake -S sdk/contract/tests/consumer -B build/contract-release-consumer -G Ninja \
+          cmake -S guest/tests/consumer -B build/contract-release-consumer -G Ninja \
             -DForgeContract_DIR="$GITHUB_WORKSPACE/build/contract-sdk-release-prefix/lib/cmake/ForgeContract"
           cmake --build build/contract-release-consumer --target hello allocatortst legacyhello -j 4
-          cmake -S sdk/contract/tests/e2e -B build/contract-release-e2e -G Ninja \
+          cmake -S guest/tests/e2e -B build/contract-release-e2e -G Ninja \
             -DCMAKE_C_COMPILER="$CC" \
             -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \

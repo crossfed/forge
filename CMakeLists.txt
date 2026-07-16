@@ -21,6 +21,7 @@ option(FORGE_ENABLE_VENDOR_TESTS "Build donor dependency tests and benchmarks" O
 option(FORGE_ENABLE_TUI "Build FORGE Notcurses-backed terminal UI library when notcurses-core is available" ON)
 option(FORGE_ENABLE_LIBP2P_INTEROP "Run live go-libp2p/rust-libp2p interoperability tests" OFF)
 option(FORGE_ENABLE_ROCKSDB "Build RocksDB-backed optional FORGE features when RocksDB is available" ON)
+option(FORGE_ENABLE_CONTRACT_TOOLING "Build optional Forge Contract host libraries" OFF)
 
 set(FORGE_LIBP2P_DONORS_ROOT "" CACHE PATH "Path to workspace donors directory containing go-libp2p, rust-libp2p and libp2p-specs")
 if(NOT FORGE_LIBP2P_DONORS_ROOT)
@@ -243,6 +244,17 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/app/include"
 )
 
+if(FORGE_ENABLE_CONTRACT_TOOLING)
+   find_package(Clang 22.1 CONFIG REQUIRED)
+   list(APPEND
+      FORGE_SOURCE_INCLUDE_DIRS
+      "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/abi/include"
+      "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/attributes/include"
+      "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/validation/include"
+      "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/manifest/include"
+   )
+endif()
+
 set(FORGE_PLUGINS_CRYPTO_SIGNER_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/crypto/signer/include")
 set(FORGE_PLUGINS_CRYPTO_SECRETS_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/crypto/secrets/include")
 set(FORGE_PLUGINS_P2P_NODE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/p2p/node/include")
@@ -385,6 +397,9 @@ if(FORGE_HAS_ROCKSDB)
 endif()
 add_subdirectory(libraries/net)
 add_subdirectory(libraries/app)
+if(FORGE_ENABLE_CONTRACT_TOOLING)
+   add_subdirectory(libraries/contract)
+endif()
 add_subdirectory(plugins)
 if(FORGE_ENABLE_TUI AND FORGE_TUI_NOTCURSES_TARGET)
    add_subdirectory(libraries/tui)
@@ -460,6 +475,16 @@ endif()
 
 if(TARGET forge_tui)
    list(APPEND FORGE_LEAF_TARGETS forge_tui)
+endif()
+
+if(FORGE_ENABLE_CONTRACT_TOOLING)
+   list(
+      APPEND FORGE_LEAF_TARGETS
+      forge_contract_abi
+      forge_contract_attributes
+      forge_contract_validation
+      forge_contract_manifest
+   )
 endif()
 
 add_library(forge STATIC forge.cpp)
@@ -546,6 +571,16 @@ install(
              plugins/db/store/include/forge
    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT dev EXCLUDE_FROM_ALL
 )
+
+if(FORGE_ENABLE_CONTRACT_TOOLING)
+   install(
+      DIRECTORY libraries/contract/abi/include/forge
+                libraries/contract/attributes/include/forge
+                libraries/contract/validation/include/forge
+                libraries/contract/manifest/include/forge
+      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT dev EXCLUDE_FROM_ALL
+   )
+endif()
 
 if(TARGET forge_rocksdb)
    install(

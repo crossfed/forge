@@ -5,8 +5,9 @@ implemented on `contract-sdk-toolchain-v1`.
 
 ## Implementation Snapshot
 
-The first vertical lives under `sdk/contract`, not the earlier conceptual
-`guest/` and `tools/` paths used below. It currently delivers:
+The first vertical is split by ownership: wasm32 code and SDK assembly live in
+`guest/`, reusable host services live in `libraries/contract`, and thin command
+entry points live in `tools/`. It currently delivers:
 
 - release and developer toolchain profiles;
 - pinned upstream libc++, libc++abi and compiler-rt sysroot construction;
@@ -108,29 +109,39 @@ forge/
     chain/                      # Selected protocol values shared with guests
     vm/wasm/                    # Released host VM engine
     asio/                       # Host-only runtime libraries
+    contract/                   # Empty host tooling family
+      abi/                      # AST, ABI and dispatcher generation
+      attributes/               # Clang attribute registration
+      validation/               # ABI/WASM/import validation
+      manifest/                 # Deterministic build manifests
   guest/                        # Self-contained wasm32 CMake project
     libraries/
-      runtime/                  # forge.guest.runtime
-      contract/                 # forge.contract.* and EOSIO veneer
+      runtime/                  # allocator and freestanding shims
+      contract/                 # forge.contract.* implementation
+      eosio/                    # compatibility veneer only
     examples/                   # SDK example contracts
     tests/                      # Contracts executed through forge.vm.wasm
     sysroot/                    # Pinned LLVM-based freestanding sysroot
     cmake/                      # Toolchain and add_contract()
   tools/
-    forge-abigen/               # Host ABI and dispatch generator
-    forge-attr-plugin/          # Host Clang attribute plugin
+    abigen/                     # Thin ABI command entry point
+    attr-plugin/                # Thin Clang plugin entry point
+    contract-check/             # Thin validation command entry point
+    contract-manifest/          # Thin manifest command entry point
 ```
 
-The host build never enters `guest/`. The guest build is a separate CMake
-project driven by the WASM toolchain. Dual-target libraries remain under
-`libraries/`; the guest project compiles the same sources for `wasm32`.
+The normal host build never enters `guest/` or `tools/`. Optional host contract
+libraries are built only with `FORGE_ENABLE_CONTRACT_TOOLING=ON`. The guest
+build is a separate CMake project driven by the WASM toolchain. Dual-target
+libraries remain under `libraries/`; the guest project compiles the same
+sources for `wasm32`.
 
 C++ module binary interfaces are target-specific and are never distributed.
 The SDK distributes module sources.
 
 ## Vanilla Clang Toolchain
 
-`guest/cmake/forge-cdt.toolchain.cmake` owns the contract compilation policy:
+`guest/cmake/ForgeContractToolchain.cmake` owns the contract compilation policy:
 
 - `--target=wasm32`, not WASI;
 - `-nostdlib`;
@@ -167,7 +178,7 @@ The canonical retained form is:
 [[clang::annotate("forge.on_notify", "account::action")]]
 ```
 
-`forge-attr-plugin` is a standard Clang `ParsedAttrInfo` plugin loaded with
+`attr-plugin` is a standard Clang `ParsedAttrInfo` plugin loaded with
 `-fplugin`. It registers both EOSIO and Forge spellings and lowers them to the
 same annotation payload. It is built against the pinned Clang release and is
 not a compiler fork.
@@ -191,7 +202,7 @@ EOSIO C API headers such as `<eosio/db.h>` are generated from the intrinsic
 registry.
 
 Explicit `EOSIO_DISPATCH` instantiates the Forge template dispatcher.
-Attribute-only contracts use `forge-abigen --gen-dispatch` to generate the
+Attribute-only contracts use `abigen --gen-dispatch` to generate the
 `apply` translation unit when the contract defines neither `apply` nor the
 dispatch macro.
 
@@ -326,8 +337,8 @@ The SDK adds production safety beyond CDT parity:
 ```text
 sources
   |-- pinned clang + attr plugin + wasm32 feature policy --> objects
-  |-- forge-abigen reads canonical annotations -----------> ABI
-  `-- forge-abigen --gen-dispatch, when required ----------> dispatch.cpp
+  |-- abigen reads canonical annotations -----------> ABI
+  `-- abigen --gen-dispatch, when required ----------> dispatch.cpp
 
 objects + optional dispatch.cpp
   `-- pinned wasm-ld ---------------------------------------> contract.wasm
@@ -345,7 +356,7 @@ The Forge Contract SDK distribution is hermetic and contains:
 - the wasm32 sysroot;
 - guest module sources;
 - dual-target Forge library sources;
-- `forge-abigen` and `forge-attr-plugin`;
+- `abigen` and `attr-plugin`;
 - CMake toolchain and `add_contract()` support.
 
 Contract developers consume the SDK artifact and do not need a Forge source
@@ -366,7 +377,7 @@ This track does not implement:
 - VM engine changes;
 - a Rust SDK.
 
-`forge-abigen` and `forge-attr-plugin` are host tools under `tools/`, not guest
+`abigen` and `attr-plugin` are host tools under `tools/`, not guest
 libraries. Tier A contract tests use the released VM with mock intrinsic
 implementations and do not alter the engine.
 
@@ -410,7 +421,7 @@ Host and guest builds of `forge::raw` pass identical golden byte vectors.
 3. Make `forge::raw` and the selected `forge::chain` values dual-target, with
    host/guest golden vectors.
 4. Port `multi_index` and implement the common dispatcher.
-5. Add `forge-attr-plugin`, `forge-abigen`, dispatch generation and complete
+5. Add `attr-plugin`, `abigen`, dispatch generation and complete
    `add_contract()` end-to-end behavior.
 6. Add EOSIO veneer headers and the unchanged legacy contract corpus gate.
 7. Add the safety, clang-tidy and development UBSan profiles.

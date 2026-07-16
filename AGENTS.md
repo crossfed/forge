@@ -10,6 +10,9 @@ The repository must stay neutral. Public APIs must not contain downstream produc
 
 - Before creating, extending, moving, renaming or reviewing a library under
   `libraries/`, load and apply `create-library`.
+- Apply the same `create-library` rules to libraries under `guest/libraries/`.
+  Guest targeting changes dependencies and compiler flags, not file ownership
+  or pairing rules.
 - Before creating, renaming, moving, refactoring or reviewing an official plugin
   under `plugins/`, load and apply `create-plugin`; it extends
   `create-library`.
@@ -187,6 +190,25 @@ class service_node {
 - Native ports must preserve donor behavior and licensing. Downstream
   compatibility aliases, donor namespaces and donor macro families are not
   public Forge API.
+
+## Contract Build Boundary
+
+- `libraries/contract` is an empty host-library family. It has no aggregate
+  target or module. ABI generation, attributes, validation and manifests are
+  independent optional package components.
+- Host contract libraries are enabled by `FORGE_ENABLE_CONTRACT_TOOLING`.
+  Only ABI and attribute components may depend on Clang/LLVM.
+- `guest/` owns wasm32 code, the sysroot, contract examples and guest tests.
+  Normal Forge configuration must not enter this project or build LLVM.
+- `tools/` owns thin host programs. Programs may parse no domain model and
+  must delegate to a matching `libraries/contract/*` command API.
+- `guest/libraries/eosio` is a compatibility veneer over
+  `guest/libraries/contract`. It may expose imports, targeted aliases and
+  compatibility macros, but owns no allocator, serialization, dispatcher or
+  protocol implementation.
+- `guest/libraries/contract/intrinsics.hpp` is the only intrinsic signature
+  registry. Generated guest C declarations, EOSIO headers, host skeletons and
+  import manifests must derive from it.
 
 ## Namespace And Target Naming
 

@@ -63,7 +63,7 @@ preserved at `libraries/vm/wasm/LICENSE.eos-vm`.
 AntelopeIO CDT Contract Allocator
 ---------------------------------
 
-`sdk/contract/runtime/allocator.cpp` is derived from AntelopeIO/cdt commit
+`guest/libraries/runtime/details/allocator.hxx` is derived from AntelopeIO/cdt commit
 `69599db279b7b93d0688502720c15c6962a1401b`, which is based on
 EOSIO/eosio.cdt.
 

@@ -9,8 +9,8 @@ from pathlib import Path
 
 
 SOURCE_SUFFIXES = {".cpp", ".cppm", ".hpp", ".hxx"}
-LAYOUT_ROOTS = ("libraries", "plugins")
-SCAN_ROOTS = ("libraries", "plugins", "tests")
+LAYOUT_ROOTS = ("libraries", "plugins", "guest/libraries")
+SCAN_ROOTS = ("libraries", "plugins", "guest/libraries", "tests")
 EXCLUDED_PARTS = {".git", "legacy", "vendor", "__pycache__"}
 MODULE_NAME = r"forge(?:\.[A-Za-z_][A-Za-z0-9_]*)+(?::[A-Za-z_][A-Za-z0-9_]*)?"
 MODULE_DECLARATION = re.compile(rf"^\s*export\s+module\s+({MODULE_NAME})\s*;")

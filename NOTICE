@@ -17,7 +17,7 @@ boundaries are documented in PROVENANCE.md.
 distributed under EOS VM License V1.0. The complete license is preserved in
 `libraries/vm/wasm/LICENSE.eos-vm`.
 
-`sdk/contract/runtime/allocator.cpp` is derived from AntelopeIO/cdt and
+`guest/libraries/runtime/details/allocator.hxx` is derived from AntelopeIO/cdt and
 EOSIO/eosio.cdt under the MIT License. Forge Contract SDK release archives also
 redistribute an unmodified LLVM/Clang/lld/libc++/compiler-rt toolchain under the
 upstream Apache License 2.0 with LLVM Exceptions. Exact pins and boundaries are

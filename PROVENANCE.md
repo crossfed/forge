@@ -7,18 +7,24 @@ Audit date: 2026-06-07.
 
 ## Forge Contract SDK
 
-`sdk/contract` is Forge's native C++23 smart-contract toolchain. Release
+`guest` is Forge's native C++23 smart-contract toolchain assembly. Release
 archives build unmodified LLVM `llvmorg-22.1.8` from commit
 `ca7933e47d3a3451d81e72ac174dcb5aa28b59d1`, including Clang, lld, libc++,
 libc++abi and compiler-rt for the freestanding `wasm32` target. LLVM remains an
 upstream toolchain; Forge carries no compiler patches.
 
-`sdk/contract/runtime/allocator.cpp` is source-derived from
+`guest/libraries/runtime/details/allocator.hxx` is source-derived from
 AntelopeIO/cdt commit `69599db279b7b93d0688502720c15c6962a1401b`, file
 `libraries/eosiolib/malloc.cpp`. Forge preserves the donor allocation, reuse,
 coalescing, reallocation and WebAssembly memory-growth algorithms while
 adapting the error policy, naming and integration to the versioned Forge
 intrinsic surface. The derived file remains under the donor MIT license.
+
+The macro-only EOSIO dispatcher veneer derives its parenthesized action-sequence
+expansion from the same CDT commit, files
+`libraries/eosiolib/contracts/eosio/dispatcher.hpp` and
+`libraries/meta_refl/include/bluegrass/meta/preprocessor.hpp`. Action decoding
+and invocation are implemented only by `forge::contract::execute_action`.
 
 The attribute plugin, ABI generator, contract checker, manifest generator,
 CMake package and guest runtime integration are Forge implementations.
