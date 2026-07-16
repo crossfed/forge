@@ -2,6 +2,7 @@ module;
 #include <forge/exceptions/macros.hpp>
 #include <array>
 #include <boost/describe.hpp>
+#include <cstdint>
 #include <memory>
 #include <span>
 #include <utility>

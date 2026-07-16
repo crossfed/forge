@@ -7,6 +7,7 @@ module;
 #include <boost/multiprecision/cpp_int.hpp>
 
 #include <chrono>
+#include <cstdint>
 #include <deque>
 #include <filesystem>
 #include <flat_map>

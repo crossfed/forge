@@ -5,6 +5,7 @@ module;
 
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <utility>
 

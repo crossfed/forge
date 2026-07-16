@@ -1,6 +1,7 @@
 module;
 #include <forge/exceptions/macros.hpp>
 #include <array>
+#include <cstdint>
 #include <string>
 #include <tuple>
 #include <vector>
