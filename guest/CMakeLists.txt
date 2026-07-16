@@ -242,12 +242,31 @@ else()
    if(FORGE_CONTRACT_FORGE_DIR)
       find_package(
          Forge CONFIG REQUIRED
-         COMPONENTS chain_protocol codec_json crypto vm_wasm
+         COMPONENTS
+            chain_protocol
+            codec_json
+            crypto
+            vm_wasm
+            contract_abi
+            contract_attributes
+            contract_validation
+            contract_manifest
          PATHS "${FORGE_CONTRACT_FORGE_DIR}"
          NO_DEFAULT_PATH
       )
    else()
-      find_package(Forge CONFIG REQUIRED COMPONENTS chain_protocol codec_json crypto vm_wasm)
+      find_package(
+         Forge CONFIG REQUIRED
+         COMPONENTS
+            chain_protocol
+            codec_json
+            crypto
+            vm_wasm
+            contract_abi
+            contract_attributes
+            contract_validation
+            contract_manifest
+      )
    endif()
    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../tools" "${CMAKE_CURRENT_BINARY_DIR}/tools")
 endif()

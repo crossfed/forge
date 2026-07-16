@@ -228,6 +228,35 @@ def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
       )
 
 
+def check_contract_sdk_components(root: Path, errors: list[str]) -> None:
+   path = root / "guest" / "CMakeLists.txt"
+   if not path.exists():
+      return
+
+   source = path.read_text(errors="ignore")
+   try:
+      developer_profile = source.split(
+         'else()\n   find_package(Clang 22.1 CONFIG REQUIRED)', 1
+      )[1].split(
+         'endif()\n\nset(_generated_dir', 1
+      )[0]
+   except IndexError:
+      errors.append(f"{path.relative_to(root)}: cannot locate developer Contract SDK profile")
+      return
+
+   for component in (
+      "contract_abi",
+      "contract_attributes",
+      "contract_validation",
+      "contract_manifest",
+   ):
+      if developer_profile.count(component) != 2:
+         errors.append(
+            f"{path.relative_to(root)}: developer Contract SDK must request {component} "
+            "with and without an explicit Forge_DIR"
+         )
+
+
 def check_eosio_veneer(root: Path, errors: list[str]) -> None:
    path = root / "guest" / "libraries" / "eosio" / "include" / "eosio" / "dispatcher.hpp"
    if not path.exists():
@@ -338,6 +367,7 @@ def main() -> int:
    check_vm_wasm_boundaries(root, errors)
    check_plugin_impl_ownership(root, errors)
    check_contract_sdk_workflow(root, errors)
+   check_contract_sdk_components(root, errors)
    check_eosio_veneer(root, errors)
    check_modules(root, files, errors)
 
