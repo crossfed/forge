@@ -127,6 +127,20 @@ mechanisms. Runtime policy such as when to collect, what owners are live, how
 much to delete per pass and how to report metrics belongs to plugins or
 products.
 
+Object-backed metadata can use its canonical Forge ID directly as the owner:
+
+```cpp
+co_await blobs.retain(content, forge::db::blob::owner_ref{metadata.id});
+co_await blobs.release(content, forge::db::blob::owner_ref{metadata.id});
+```
+
+Both `forge::ids::object_id` and `forge::ids::typed_id` are supported. Their
+owner identity is exactly `forge::raw::pack(object_id)`, with no textual,
+prefix or version bytes. This preserves byte compatibility with callers that
+already construct the same binary owner explicitly. Custom string or binary
+owner schemes remain responsible for using identities distinct from Object
+IDs.
+
 When a DB Revision participant is attached, owner-ref changes remain
 reversible. Removing an owner ref creates an internal retention barrier when a
 future revert may need the payload. Barriers are not included in public

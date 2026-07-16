@@ -13,6 +13,7 @@ export module forge.db.blob.types;
 
 import forge.crypto.sha256;
 import forge.db.core.record;
+import forge.ids.object_id;
 
 export namespace forge::db::blob {
 
@@ -25,6 +26,10 @@ class owner_ref final {
    explicit owner_ref(std::string value)
        : bytes(reinterpret_cast<const std::byte*>(value.data()),
                reinterpret_cast<const std::byte*>(value.data() + value.size())) {}
+   explicit owner_ref(forge::ids::object_id value);
+
+   template <forge::ids::typed_id_like Id>
+   explicit owner_ref(Id value) : owner_ref{value.as_object_id()} {}
 
    [[nodiscard]] bool empty() const noexcept {
       return bytes.empty();

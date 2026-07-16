@@ -409,6 +409,59 @@ static_assert(!mutable_blob_snapshot<forge::db::blob::snapshot>);
 
 BOOST_AUTO_TEST_SUITE(db_blob_test_suite)
 
+BOOST_AUTO_TEST_CASE(db_blob_owner_ref_uses_binary_object_id_identity) {
+   const auto object = forge::ids::object_id{.space = 201, .type = 7, .instance = 42};
+   const auto typed = forge::ids::typed_id<201, 7>{42};
+   const auto packed = forge::raw::pack(object);
+   const auto expected = std::vector<std::byte>{
+      reinterpret_cast<const std::byte*>(packed.data()),
+      reinterpret_cast<const std::byte*>(packed.data() + packed.size())};
+
+   const auto object_owner = forge::db::blob::owner_ref{object};
+   const auto typed_owner = forge::db::blob::owner_ref{typed};
+   BOOST_CHECK(object_owner.bytes == expected);
+   BOOST_CHECK(typed_owner == object_owner);
+   BOOST_CHECK(!forge::db::blob::owner_ref{forge::ids::object_id{}}.empty());
+
+   const auto other_space = forge::db::blob::owner_ref{
+      forge::ids::object_id{.space = 200, .type = 7, .instance = 42}};
+   const auto other_type = forge::db::blob::owner_ref{
+      forge::ids::object_id{.space = 201, .type = 8, .instance = 42}};
+   const auto other_instance = forge::db::blob::owner_ref{
+      forge::ids::object_id{.space = 201, .type = 7, .instance = 43}};
+   BOOST_CHECK(other_space != object_owner);
+   BOOST_CHECK(other_type != object_owner);
+   BOOST_CHECK(other_instance != object_owner);
+}
+
+BOOST_AUTO_TEST_CASE(db_blob_object_id_owner_interoperates_with_legacy_binary_owner) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
+   auto blobs = forge::db::blob::store{driver};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      const auto id = forge::ids::typed_id<201, 7>{42};
+      const auto packed = forge::raw::pack(id.as_object_id());
+      const auto legacy_bytes = std::vector<std::byte>{
+         reinterpret_cast<const std::byte*>(packed.data()),
+         reinterpret_cast<const std::byte*>(packed.data() + packed.size())};
+      const auto legacy = forge::db::blob::owner_ref{legacy_bytes};
+      const auto object_owner = forge::db::blob::owner_ref{id};
+      const auto content = co_await blobs.put(bytes("object-owned payload"));
+
+      co_await blobs.retain(content, legacy);
+      BOOST_CHECK_EQUAL(co_await blobs.ref_count(content), 1U);
+      co_await blobs.release(content, object_owner);
+      BOOST_CHECK_EQUAL(co_await blobs.ref_count(content), 0U);
+
+      co_await blobs.retain(content, object_owner);
+      BOOST_CHECK_EQUAL(co_await blobs.ref_count(content), 1U);
+      co_await blobs.release(content, legacy);
+      BOOST_CHECK_EQUAL(co_await blobs.ref_count(content), 0U);
+      co_return;
+   }());
+}
+
 BOOST_AUTO_TEST_CASE(db_blob_ref_defaults_to_sha256_and_variant_uses_text_form) {
    using ref_type = forge::db::blob::ref<>;
 
