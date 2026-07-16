@@ -289,6 +289,13 @@ def main():
     invoke(args, "duplicate", args.fixtures / "duplicate_table.cpp", args.output / "duplicate-table", succeeds=False)
     invoke(
         args,
+        "aliasclash",
+        args.fixtures / "conflicting_type_alias.cpp",
+        args.output / "conflicting-type-alias",
+        succeeds=False,
+    )
+    invoke(
+        args,
         "unnamedaction",
         args.fixtures / "unnamed_action_parameter.cpp",
         args.output / "unnamed-action-parameter",
