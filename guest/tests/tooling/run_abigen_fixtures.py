@@ -272,6 +272,9 @@ def main():
     legacy = invoke(args, "parity", args.fixtures / "parity_legacy.cpp", args.output)
     if modern != legacy:
         raise RuntimeError("forge and eosio attribute spellings produced different canonical ABI")
+    modern_dispatcher = (args.output / "parity_modern.dispatcher.cpp").read_text(encoding="utf-8")
+    if not modern_dispatcher.startswith("#include <cstdint>\n"):
+        raise RuntimeError("generated dispatcher does not declare its fixed-width integer dependency")
 
     invoke(args, "empty", args.fixtures / "empty_contract.cpp", args.output, succeeds=False)
     invoke(args, "missing", args.fixtures / "wrong_contract.cpp", args.output, succeeds=False)

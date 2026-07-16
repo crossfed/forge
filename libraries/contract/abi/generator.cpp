@@ -994,6 +994,7 @@ void write_abi(const schema& input, const forge::contract::abi::request& options
 void write_dispatcher(const schema& input, const forge::contract::abi::request& options) {
    auto output = std::ostringstream{};
    if (!input.has_apply) {
+      output << "#include <cstdint>\n";
       output << "import forge.contract.dispatcher;\n";
    }
    const auto source = std::filesystem::weakly_canonical(options.sources.front()).generic_string();
