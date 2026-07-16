@@ -2,6 +2,7 @@ module;
 #include <optional>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 export module forge.variant.described;
 
