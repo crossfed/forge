@@ -20,8 +20,10 @@ auto result = forge::contract::abi::generate({
 
 The generated dispatcher includes the canonical first source path, so quoted
 includes keep normal C++ lookup semantics. Integer ABI names are selected from
-the Clang target model; in wasm32, `long` is 32 bits. The library contains no
-CLI `main`, compiler patches or guest runtime. Its tests are the pinned CDT
+the Clang target model; in wasm32, `long` is 32 bits. Following CDT
+`EOSIO_DISPATCH`, generated local actions execute only when `code == receiver`;
+notifications require an explicit notification dispatcher. The library contains
+no CLI `main`, compiler patches or guest runtime. Its tests are the pinned CDT
 pass/fail fixtures plus local-include and wasm32-width regressions.
 
 ## Dependencies

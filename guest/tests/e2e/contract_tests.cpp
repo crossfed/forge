@@ -95,13 +95,24 @@ struct allocator {
 };
 
 template <typename implementation>
-void apply_with(const wasm::wasm_code& code, invocation& host, std::string_view contract, std::string_view action) {
+void apply_with(const wasm::wasm_code& code, invocation& host, std::string_view receiver,
+                std::string_view first_receiver, std::string_view action) {
    static thread_local auto memory = allocator{};
    auto mutable_code = code;
    auto vm =
        wasm::backend<host_functions, implementation, wasm::compatibility_options>{mutable_code, host, &memory.value};
-   vm(host, "env", "apply", protocol::make_name(contract).value, protocol::make_name(contract).value,
+   vm(host, "env", "apply", protocol::make_name(receiver).value, protocol::make_name(first_receiver).value,
       protocol::make_name(action).value);
+}
+
+template <typename implementation>
+void apply_with(const wasm::wasm_code& code, invocation& host, std::string_view contract, std::string_view action) {
+   apply_with<implementation>(code, host, contract, contract, action);
+}
+
+void apply(const wasm::wasm_code& code, invocation& host, std::string_view receiver, std::string_view first_receiver,
+           std::string_view action) {
+   apply_with<wasm::interpreter>(code, host, receiver, first_receiver, action);
 }
 
 void apply(const wasm::wasm_code& code, invocation& host, std::string_view contract, std::string_view action) {
@@ -154,6 +165,18 @@ BOOST_AUTO_TEST_CASE(wasm32_long_and_non_void_action_result_share_the_raw_codec)
 
    BOOST_CHECK_NO_THROW(apply(code, host, "hello", "add"));
    BOOST_TEST(host.return_value == forge::raw::pack(std::int32_t{42}), boost::test_tools::per_element());
+}
+
+BOOST_AUTO_TEST_CASE(generated_and_legacy_dispatchers_ignore_foreign_notifications) {
+   register_intrinsics();
+   const auto modern_code = read_contract(FORGE_CONTRACT_TEST_WASM);
+   const auto legacy_code = read_contract(FORGE_CONTRACT_TEST_LEGACY_WASM);
+   auto modern_host = invocation{.action_data = forge::raw::pack(std::int32_t{20}, std::int32_t{22})};
+   auto legacy_host = invocation{.action_data = {0x05, 'a'}};
+
+   BOOST_CHECK_NO_THROW(apply(modern_code, modern_host, "hello", "foreign", "add"));
+   BOOST_CHECK_NO_THROW(apply(legacy_code, legacy_host, "legacyhello", "foreign", "greet"));
+   BOOST_TEST(modern_host.return_value.empty());
 }
 
 BOOST_AUTO_TEST_CASE(contract_check_failure_reaches_the_host) {

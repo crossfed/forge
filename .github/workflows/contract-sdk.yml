@@ -124,7 +124,7 @@ jobs:
             -DLLVM_DIR="$LLVM_ROOT/lib/cmake/llvm" \
             -DBUILD_TESTING=OFF
           cmake --build build/forge -j 4
-          cmake --install build/forge
+          cmake --install build/forge --component dev
 
       - name: Build developer SDK and relocatable archive
         shell: bash
@@ -239,7 +239,7 @@ jobs:
             -DLLVM_DIR="$LLVM_ROOT/lib/cmake/llvm" \
             -DBUILD_TESTING=OFF
           cmake --build build/forge -j 4
-          cmake --install build/forge
+          cmake --install build/forge --component dev
 
       - name: Build exact LLVM SDK archive and relocation gate
         shell: bash

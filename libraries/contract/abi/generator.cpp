@@ -943,6 +943,9 @@ void write_dispatcher(const schema& input, const forge::contract::abi::request& 
    output << "extern \"C\" [[gnu::visibility(\"default\")]] void apply("
              "std::uint64_t receiver, std::uint64_t code, std::uint64_t action) {\n";
    output << "   using forge::chain::protocol::name;\n";
+   output << "   if (code != receiver) {\n";
+   output << "      return;\n";
+   output << "   }\n";
    output << "   switch (action) {\n";
    for (const auto& entry : input.actions) {
       output << "      case " << protocol::make_name(entry.name).value << "ULL:\n";
