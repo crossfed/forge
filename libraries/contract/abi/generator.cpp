@@ -559,7 +559,7 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
          return true;
       }
       if (const auto table = annotation(*declaration, "forge.table"); table.has_value()) {
-         if (!table->empty()) {
+         if (!table->empty() && belongs_to_selected_contract(*declaration)) {
             encoder_.add_table(*declaration, *table);
          }
          return true;
@@ -653,6 +653,13 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
    }
 
    bool belongs_to_selected_contract(const clang::Decl& declaration) const {
+      if (const auto* record = llvm::dyn_cast<clang::CXXRecordDecl>(&declaration); record != nullptr) {
+         const auto contract = annotation(*record, "forge.contract");
+         if (contract.has_value()) {
+            const auto declared_name = contract->empty() ? record->getNameAsString() : *contract;
+            return declared_name == contract_name_;
+         }
+      }
       for (auto* context = declaration.getDeclContext(); context != nullptr; context = context->getParent()) {
          const auto* record = llvm::dyn_cast<clang::CXXRecordDecl>(context);
          if (record == nullptr) {

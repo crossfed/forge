@@ -41,6 +41,14 @@ template <std::uint64_t Name, typename Value> struct singleton {
    Value value{};
 };
 
+struct [[forge::table("owned"), forge::contract("abifixture")]] owned_record {
+   std::uint64_t id = 0;
+};
+
+struct [[forge::table("foreign"), forge::contract("otherfixture")]] foreign_record {
+   std::uint64_t id = 0;
+};
+
 class [[forge::contract("abifixture")]] abifixture : public forge::contract::context {
  public:
    using context::context;

@@ -148,16 +148,19 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
       message(FATAL_ERROR "Release profile requires -DFORGE_CONTRACT_FORGE_DIR=<installed Forge package>")
    endif()
    set(_host_tools_install "${CMAKE_BINARY_DIR}/host-tools")
+   string(REPLACE ";" "|" _forge_contract_prefix_path "${CMAKE_PREFIX_PATH}")
    ExternalProject_Add(
       forge_contract_tools
       DEPENDS forge_contract_llvm
       SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tools"
       CMAKE_GENERATOR Ninja
+      LIST_SEPARATOR "|"
       CMAKE_ARGS
          -DCMAKE_BUILD_TYPE=Release
          -DCMAKE_INSTALL_PREFIX=${_host_tools_install}
          -DCMAKE_C_COMPILER=${_llvm_install}/bin/clang
          -DCMAKE_CXX_COMPILER=${_llvm_install}/bin/clang++
+         -DCMAKE_PREFIX_PATH:PATH=${_forge_contract_prefix_path}
          -DClang_DIR=${_llvm_install}/lib/cmake/clang
          -DLLVM_DIR=${_llvm_install}/lib/cmake/llvm
          -DForge_DIR=${FORGE_CONTRACT_FORGE_DIR}
