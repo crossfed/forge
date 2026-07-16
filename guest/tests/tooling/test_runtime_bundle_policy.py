@@ -15,6 +15,9 @@ class RuntimeBundlePolicyTests(unittest.TestCase):
         self.assertTrue(is_linux_sdk_runtime("/usr/lib/llvm-22/lib/libc++.so.1"))
         self.assertTrue(is_linux_sdk_runtime("/usr/lib/llvm-22/lib/libc++abi.so.1"))
         self.assertTrue(is_linux_sdk_runtime("/lib/x86_64-linux-gnu/libunwind.so.1"))
+        self.assertTrue(is_linux_sdk_runtime("/usr/lib/llvm-22/lib/libLLVM.so.22.1"))
+        self.assertTrue(is_linux_sdk_runtime("/usr/lib/llvm-22/lib/libclang-cpp.so.22.1"))
+        self.assertTrue(is_linux_sdk_runtime("/usr/lib/llvm-22/lib/liblldWasm.so.22.1"))
 
     def test_baseline_system_runtimes_remain_external(self) -> None:
         self.assertFalse(is_linux_sdk_runtime("/usr/lib/x86_64-linux-gnu/libc.so.6"))

@@ -6,8 +6,10 @@ module;
 #include <clang/AST/TypeLoc.h>
 #include <clang/Frontend/CompilerInstance.h>
 #include <clang/Frontend/FrontendAction.h>
+#include <clang/Index/USRGeneration.h>
 #include <clang/Tooling/CompilationDatabase.h>
 #include <clang/Tooling/Tooling.h>
+#include <llvm/ADT/SmallString.h>
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/Support/DynamicLibrary.h>
 
@@ -91,8 +93,8 @@ struct schema {
    std::set<std::string> struct_names;
    std::set<std::string> variant_names;
    std::set<std::string> table_names;
-   std::set<std::string> action_names;
-   std::set<std::string> call_names;
+   std::map<std::string, std::string> action_declarations;
+   std::map<std::string, std::string> call_declarations;
    bool has_apply = false;
    bool failed = false;
 };
@@ -689,6 +691,14 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       std::string result;
    };
 
+   std::string declaration_identity(const clang::CXXMethodDecl& method) const {
+      auto identity = llvm::SmallString<128>{};
+      if (!clang::index::generateUSRForDecl(&method, identity) && !identity.empty()) {
+         return identity.str().str();
+      }
+      return method.getQualifiedNameAsString() + ':' + method.getType().getCanonicalType().getAsString();
+   }
+
    method_shape add_method(const clang::CXXMethodDecl& method, std::string_view annotated_name) {
       if (method.isStatic()) {
          report(method.getLocation(), "contract entry point must be a non-static member function");
@@ -715,7 +725,12 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
    void add_action(const clang::CXXRecordDecl& declaration, const clang::CXXMethodDecl& method,
                    std::string_view annotated_name) {
       const auto method_info = add_method(method, annotated_name);
-      if (!output_.action_names.insert(method_info.name).second) {
+      const auto identity = declaration_identity(method);
+      const auto [existing, inserted] = output_.action_declarations.try_emplace(method_info.name, identity);
+      if (!inserted && existing->second == identity) {
+         return;
+      }
+      if (!inserted) {
          report(method.getLocation(), "duplicate contract action name");
          return;
       }
@@ -730,7 +745,12 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
 
    void add_call(const clang::CXXMethodDecl& method, std::string_view annotated_name) {
       const auto method_info = add_method(method, annotated_name);
-      if (!output_.call_names.insert(method_info.name).second) {
+      const auto identity = declaration_identity(method);
+      const auto [existing, inserted] = output_.call_declarations.try_emplace(method_info.name, identity);
+      if (!inserted && existing->second == identity) {
+         return;
+      }
+      if (!inserted) {
          report(method.getLocation(), "duplicate synchronous call name");
          return;
       }

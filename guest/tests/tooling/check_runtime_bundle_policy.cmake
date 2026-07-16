@@ -9,14 +9,18 @@ foreach(
    "libc++.so.1"
    "/usr/lib/llvm-22/lib/libc++abi.so.1"
    "/lib/x86_64-linux-gnu/libunwind.so.1"
+   "/usr/lib/llvm-22/lib/libLLVM.so.22.1"
+   "/usr/lib/x86_64-linux-gnu/libLLVM-22.so.1"
+   "/usr/lib/llvm-22/lib/libclang-cpp.so.22.1"
+   "/usr/lib/llvm-22/lib/liblldWasm.so.22.1"
 )
-   if(NOT _dependency MATCHES "${FORGE_CONTRACT_LLVM_CXX_RUNTIME_REGEX}")
-      message(FATAL_ERROR "LLVM C++ runtime is not selected for bundling: ${_dependency}")
+   if(NOT _dependency MATCHES "${FORGE_CONTRACT_LLVM_RUNTIME_REGEX}")
+      message(FATAL_ERROR "LLVM runtime is not selected for bundling: ${_dependency}")
    endif()
 endforeach()
 
 foreach(_dependency "libc.so.6" "/usr/lib/x86_64-linux-gnu/libm.so.6" "libstdc++.so.6")
-   if(_dependency MATCHES "${FORGE_CONTRACT_LLVM_CXX_RUNTIME_REGEX}")
+   if(_dependency MATCHES "${FORGE_CONTRACT_LLVM_RUNTIME_REGEX}")
       message(FATAL_ERROR "system runtime is incorrectly selected for bundling: ${_dependency}")
    endif()
 endforeach()

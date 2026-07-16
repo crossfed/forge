@@ -9,7 +9,14 @@ import tarfile
 import time
 from pathlib import Path
 
-LINUX_SDK_RUNTIME_PREFIXES = ("libc++.so", "libc++abi.so", "libunwind.so")
+LINUX_SDK_RUNTIME_PREFIXES = (
+    "libc++.so",
+    "libc++abi.so",
+    "libunwind.so",
+    "libLLVM",
+    "libclang-cpp",
+    "liblld",
+)
 
 
 def is_linux_sdk_runtime(dependency: str) -> bool:
@@ -85,7 +92,7 @@ def verify_runtime_dependencies(sdk: Path) -> None:
                     continue
                 dependency = line.split("=>", 1)[1].strip().split(" ", 1)[0]
                 if dependency.startswith("/") and is_linux_sdk_runtime(dependency) and not dependency.startswith(sdk_prefix):
-                    raise RuntimeError(f"SDK tool uses an external LLVM C++ runtime: {tool}: {dependency}")
+                    raise RuntimeError(f"SDK tool uses an external LLVM runtime: {tool}: {dependency}")
                 if dependency.startswith("/") and not dependency.startswith(
                     (sdk_prefix, "/lib/", "/lib64/", "/usr/lib/")
                 ):

@@ -267,18 +267,22 @@ def main():
     invoke(
         args,
         "multisource",
-        multi_source_helper,
+        args.fixtures / "empty_contract.cpp",
         args.output / "multi-source-invalid",
         succeeds=False,
         additional_sources=(multi_source_contract,),
     )
-    invoke(
+    multi_source = invoke(
         args,
         "multisource",
         multi_source_contract,
         args.output / "multi-source-valid",
         additional_sources=(multi_source_helper,),
     )
+    if [action["name"] for action in multi_source["actions"]] != ["next"]:
+        raise RuntimeError("shared multi-source action was not de-duplicated")
+
+    invoke(args, "duplicate", args.fixtures / "duplicate_action.cpp", args.output / "duplicate-action", succeeds=False)
 
     modern = invoke(args, "parity", args.fixtures / "parity_modern.cpp", args.output)
     legacy = invoke(args, "parity", args.fixtures / "parity_legacy.cpp", args.output)
