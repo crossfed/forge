@@ -34,6 +34,11 @@ bool starts_with(const std::vector<std::byte>& value,
           std::equal(prefix.begin(), prefix.end(), value.begin());
 }
 
+const std::vector<std::byte>& lower_bound(
+   const forge::db::core::record_range& range) noexcept {
+   return range.begin.empty() ? range.prefix.bytes() : range.begin.bytes();
+}
+
 bool within_range(const std::vector<std::byte>& key,
                   const forge::db::core::record_range& range) noexcept {
    if (!starts_with(key, range.prefix.bytes())) {
@@ -52,8 +57,8 @@ int seek(MDBX_cursor* cursor,
          MDBX_val& value) {
    if (request.after.has_value()) {
       const auto& boundary = request.after->boundary.bytes();
-      const auto& lower_bound = range.begin.bytes();
-      const auto& start = boundary < lower_bound ? lower_bound : boundary;
+      const auto& lower = lower_bound(range);
+      const auto& start = boundary < lower ? lower : boundary;
       key = native_value(start);
       auto code = mdbx_cursor_get(cursor, &key, &value, MDBX_SET_RANGE);
       if (code != MDBX_SUCCESS) {
@@ -65,10 +70,11 @@ int seek(MDBX_cursor* cursor,
       return code;
    }
 
-   if (range.begin.empty()) {
+   const auto& lower = lower_bound(range);
+   if (lower.empty()) {
       return mdbx_cursor_get(cursor, &key, &value, MDBX_FIRST);
    }
-   key = native_value(range.begin.bytes());
+   key = native_value(lower);
    return mdbx_cursor_get(cursor, &key, &value, MDBX_SET_RANGE);
 }
 

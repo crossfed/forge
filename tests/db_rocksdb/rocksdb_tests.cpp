@@ -248,6 +248,16 @@ BOOST_AUTO_TEST_CASE(db_rocksdb_snapshot_scans_prefixless_half_open_ranges) {
       BOOST_REQUIRE_EQUAL(narrowed.entries.size(), 2U);
       BOOST_CHECK_EQUAL(text(narrowed.entries[0].value), "b");
       BOOST_CHECK_EQUAL(text(narrowed.entries[1].value), "y");
+
+      auto prefix_only = co_await snapshot.scan_page(
+         objects,
+         forge::db::core::record_range{.prefix = key("a"), .has_end = false},
+         forge::db::core::page_request{
+            .after = forge::db::core::cursor{.boundary = empty_key()},
+            .limit = 10});
+      BOOST_REQUIRE_EQUAL(prefix_only.entries.size(), 2U);
+      BOOST_CHECK_EQUAL(text(prefix_only.entries[0].value), "a");
+      BOOST_CHECK_EQUAL(text(prefix_only.entries[1].value), "aa");
       co_return;
    }());
 

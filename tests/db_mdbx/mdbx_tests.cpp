@@ -221,6 +221,28 @@ BOOST_AUTO_TEST_CASE(db_mdbx_snapshot_preserves_old_state_and_scan_contract) {
       BOOST_CHECK_EQUAL(text(narrowed.entries[0].value), "b");
       BOOST_CHECK_EQUAL(text(narrowed.entries[1].value), "y");
 
+      const auto prefix_range = forge::db::core::record_range{
+         .prefix = key("a"),
+         .has_end = false,
+      };
+      auto prefix_only = co_await snapshot.scan_page(
+         objects,
+         prefix_range,
+         forge::db::core::page_request{.limit = 10});
+      BOOST_REQUIRE_EQUAL(prefix_only.entries.size(), 2U);
+      BOOST_CHECK_EQUAL(text(prefix_only.entries[0].value), "a");
+      BOOST_CHECK_EQUAL(text(prefix_only.entries[1].value), "aa");
+
+      auto resumed_prefix = co_await snapshot.scan_page(
+         objects,
+         prefix_range,
+         forge::db::core::page_request{
+            .after = forge::db::core::cursor{.boundary = empty_key()},
+            .limit = 10});
+      BOOST_REQUIRE_EQUAL(resumed_prefix.entries.size(), 2U);
+      BOOST_CHECK_EQUAL(text(resumed_prefix.entries[0].value), "a");
+      BOOST_CHECK_EQUAL(text(resumed_prefix.entries[1].value), "aa");
+
       auto bounded = co_await snapshot.scan_page(
          objects,
          forge::db::core::record_range{.begin = key("a"), .end = key("b")},
