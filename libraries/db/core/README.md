@@ -36,6 +36,20 @@ capabilities:
 `transaction` owns commit/rollback and participant cleanup hooks. Higher-level
 libraries can join the same transaction and share one backend commit boundary.
 
+Drivers also expose an awaited, fail-fast `async_close()` boundary. Its first
+call permanently rejects new transactions and snapshots. If sessions are still
+opening or alive, close reports typed `driver_busy` without invalidating them;
+the owner releases those handles and retries. A successful close is idempotent,
+and every new open after close has started reports typed `driver_closed`.
+Backend destructors remain no-throw fallbacks, not substitutes for this awaited
+ordering boundary.
+
+Backend-specific public operations that do not pass through `begin_transaction()`
+or `begin_read()`, such as a driver's flush operation, must hold the protected
+`driver::admit_operation()` result until backend access finishes. Once a close
+request starts, new admissions report `driver_closed`; an admitted operation makes
+close report `driver_busy` until its admission is released.
+
 ## Snapshot Ownership
 
 Snapshots opened by `driver::begin_read()` carry the identity of that driver.

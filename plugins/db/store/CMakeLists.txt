@@ -31,11 +31,18 @@ target_link_libraries(
       Boost::asio
 )
 
+target_link_libraries(forge_plugins_db_store PRIVATE forge_asio)
+
 target_compile_definitions(
    forge_plugins_db_store PRIVATE
       FORGE_PLUGINS_DB_STORE_HAS_ROCKSDB=$<BOOL:${FORGE_HAS_ROCKSDB}>
+      FORGE_PLUGINS_DB_STORE_HAS_MDBX=$<BOOL:${FORGE_HAS_MDBX}>
 )
 
 if(TARGET forge_db_rocksdb)
    target_link_libraries(forge_plugins_db_store PRIVATE forge_db_rocksdb)
+endif()
+
+if(TARGET forge_db_mdbx)
+   target_link_libraries(forge_plugins_db_store PRIVATE forge_db_mdbx)
 endif()

@@ -18,7 +18,7 @@ struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
    boost::asio::awaitable<void> open();
    void start();
    void request_stop() noexcept;
-   void close();
+   boost::asio::awaitable<void> close();
 
    void add_store(std::string name,
                   std::shared_ptr<forge::db::core::driver> driver,
@@ -30,7 +30,8 @@ struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
    [[nodiscard]] status current_status() const;
 
  private:
-   [[nodiscard]] static std::shared_ptr<forge::db::core::driver> make_configured_driver(const store_config& value);
+   [[nodiscard]] static boost::asio::awaitable<std::shared_ptr<forge::db::core::driver>>
+   make_configured_driver(const store_config& value);
    void reject_started_setup() const;
    void reject_duplicate_name(const std::string& name) const;
 };

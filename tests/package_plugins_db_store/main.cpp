@@ -66,9 +66,17 @@ int main() {
       .max_revisions = 1U,
       .max_deltas = 1U,
    };
+   const auto mdbx = forge::plugins::db::store::mdbx_driver_config{
+      .durability = "safe-nosync",
+      .max_readers = 64U,
+      .map = {.upper_size = 64ULL * 1024ULL * 1024ULL},
+      .lane = {.max_pending_operations = 32U,
+               .max_waiting_submissions = 32U},
+   };
    return descriptor.id.value == "forge.plugins.db.store" &&
                  api.version.major == 1U && api.version.revision == 2U &&
-                 options.max_revisions == 1U
+                 options.max_revisions == 1U &&
+                 mdbx.max_readers == 64U
              ? 0
              : 1;
 }

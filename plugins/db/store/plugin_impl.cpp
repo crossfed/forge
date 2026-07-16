@@ -19,10 +19,12 @@ module forge.plugins.db.store.plugin;
 
 import forge.api.core.binding;
 import forge.app.plugin_context;
+import forge.asio.affine;
 import forge.config.core.component;
 import forge.config.core.decode;
 import forge.db.blob.store;
 import forge.db.core.driver;
+import forge.db.core.exceptions;
 import forge.db.core.record;
 import forge.exceptions;
 import forge.db.object.store;
@@ -33,6 +35,10 @@ import forge.plugins.db.store.types;
 #if FORGE_PLUGINS_DB_STORE_HAS_ROCKSDB
 import forge.db.rocksdb.driver;
 import forge.rocksdb.types;
+#endif
+
+#if FORGE_PLUGINS_DB_STORE_HAS_MDBX
+import forge.db.mdbx.driver;
 #endif
 
 #include "details/plugin_impl.hxx"
@@ -152,6 +158,7 @@ boost::asio::awaitable<void> plugin::impl::open() {
          auto item = pending_open{
             .name = name,
             .options = record->options,
+            .owns_driver = record->owns_driver,
             .driver = record->driver,
          };
          if (!item.driver) {
@@ -173,7 +180,8 @@ boost::asio::awaitable<void> plugin::impl::open() {
    try {
       for (auto& item : pending) {
          if (!item.driver) {
-            item.driver = make_configured_driver(*item.config);
+            item.driver = co_await make_configured_driver(*item.config);
+            item.owns_driver = true;
          }
          if (!item.driver) {
             FORGE_THROW_EXCEPTION(exceptions::initialize_failed, "db store has no driver",
@@ -220,6 +228,7 @@ boost::asio::awaitable<void> plugin::impl::open() {
                                   forge::exceptions::ctx("store", item.name));
          }
          auto& record = found->second;
+         record->owns_driver = item.owns_driver;
          record->driver = std::move(item.driver);
          record->objects = std::move(item.objects);
          record->blobs = std::move(item.blobs);
@@ -265,17 +274,43 @@ void plugin::impl::request_stop() noexcept {
    current.store(phase::stopping);
 }
 
-void plugin::impl::close() {
-   auto lock = std::scoped_lock{mutex};
-   for (auto& [_, record] : stores) {
-      record->revisions.reset();
-      record->objects.reset();
-      record->blobs.reset();
-      record->driver.reset();
-      record->opened = false;
-      record->started = false;
+boost::asio::awaitable<void> plugin::impl::close() {
+   auto owned = std::vector<std::shared_ptr<forge::db::core::driver>>{};
+   {
+      auto lock = std::scoped_lock{mutex};
+      owned.reserve(stores.size());
+      for (auto& [_, record] : stores) {
+         record->revisions.reset();
+         record->objects.reset();
+         record->blobs.reset();
+         if (record->owns_driver && record->driver) {
+            owned.push_back(std::move(record->driver));
+         } else {
+            record->driver.reset();
+         }
+         record->owns_driver = false;
+         record->opened = false;
+         record->started = false;
+      }
+      current.store(phase::stopped);
    }
-   current.store(phase::stopped);
+
+   auto first_error = std::exception_ptr{};
+   for (auto& driver : owned) {
+      try {
+         co_await driver->async_close();
+      } catch (const forge::db::core::exceptions::driver_busy&) {
+         // Existing sessions keep the backend and any managed lane alive.
+      } catch (...) {
+         if (!first_error) {
+            first_error = std::current_exception();
+         }
+      }
+   }
+
+   if (first_error) {
+      std::rethrow_exception(first_error);
+   }
 }
 
 std::shared_ptr<managed_store> plugin::impl::find_store(const std::string& name) const {
@@ -437,12 +472,59 @@ void add_family_once(std::vector<forge::rocksdb::column_family_config>& families
 }
 #endif
 
+#if FORGE_PLUGINS_DB_STORE_HAS_MDBX
+[[nodiscard]] std::vector<std::string> configured_family_names(const store_config& value) {
+   auto families = std::vector<std::string>{};
+   const auto add = [&](const std::string& family) {
+      if (std::ranges::find(families, family) == families.end()) {
+         families.push_back(family);
+      }
+   };
+   if (value.object) {
+      add(value.object->family);
+   }
+   if (value.blob) {
+      add(value.blob->data_family);
+      add(value.blob->refs_family);
+   }
+   return families;
+}
+
+[[nodiscard]] forge::db::mdbx::durability parse_mdbx_durability(const std::string& value) {
+   if (value == "durable-sync") {
+      return forge::db::mdbx::durability::durable_sync;
+   }
+   return forge::db::mdbx::durability::safe_nosync;
+}
+
+[[nodiscard]] forge::db::mdbx::config configured_mdbx(const store_config& value) {
+   const auto options = value.mdbx.value_or(mdbx_driver_config{});
+   return forge::db::mdbx::config{
+      .path = value.path,
+      .families = configured_family_names(value),
+      .durability_mode = parse_mdbx_durability(options.durability),
+      .map = forge::db::mdbx::geometry{
+         .lower_size = options.map.lower_size,
+         .current_size = options.map.current_size,
+         .upper_size = options.map.upper_size,
+         .growth_step = options.map.growth_step,
+         .shrink_threshold = options.map.shrink_threshold,
+         .page_size = options.map.page_size,
+      },
+      .max_readers = options.max_readers,
+      .create_if_missing = value.create_if_missing,
+      .create_missing_families = value.create_missing_column_families,
+   };
+}
+#endif
+
 } // namespace
 
-std::shared_ptr<forge::db::core::driver> plugin::impl::make_configured_driver(const store_config& value) {
+boost::asio::awaitable<std::shared_ptr<forge::db::core::driver>>
+plugin::impl::make_configured_driver(const store_config& value) {
    if (value.driver == "rocksdb") {
 #if FORGE_PLUGINS_DB_STORE_HAS_ROCKSDB
-      return std::make_shared<forge::db::rocksdb::driver>(
+      co_return std::make_shared<forge::db::rocksdb::driver>(
          forge::db::rocksdb::config{
             .path = value.path,
             .families = configured_families(value),
@@ -451,6 +533,24 @@ std::shared_ptr<forge::db::core::driver> plugin::impl::make_configured_driver(co
          });
 #else
       FORGE_THROW_EXCEPTION(exceptions::invalid_config, "db store rocksdb driver is not available in this build",
+                            forge::exceptions::ctx("store", value.name));
+#endif
+   }
+
+   if (value.driver == "mdbx") {
+#if FORGE_PLUGINS_DB_STORE_HAS_MDBX
+      auto native = configured_mdbx(value);
+      const auto options = value.mdbx.value_or(mdbx_driver_config{});
+      co_return co_await forge::db::mdbx::driver::open(
+         std::move(native),
+         forge::asio::affine::lane::options{
+            .max_pending_operations = options.lane.max_pending_operations,
+            .max_waiting_submissions = options.lane.max_waiting_submissions,
+            .thread_name = options.lane.thread_name.value_or("db-mdbx-" + value.name),
+         });
+#else
+      FORGE_THROW_EXCEPTION(exceptions::invalid_config,
+                            "db store MDBX driver is not available in this build",
                             forge::exceptions::ctx("store", value.name));
 #endif
    }

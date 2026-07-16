@@ -19,6 +19,7 @@ module;
 
 module forge.db.object.store;
 
+import forge.asio.gate;
 import forge.db.core.exceptions;
 import forge.db.object.exceptions;
 import forge.db.object.header;
@@ -28,6 +29,9 @@ import forge.raw.raw;
 #include "details/record_key.hxx"
 
 namespace forge::db::object {
+
+runtime_state::runtime_state()
+    : write_gate{std::make_shared<forge::asio::gate>()}, allocator_gate{std::make_shared<forge::asio::gate>()} {}
 
 namespace {
 

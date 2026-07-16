@@ -49,6 +49,9 @@ int main() {
                           const forge::db::core::driver& driver) {
       { view.belongs_to(driver) } -> std::same_as<bool>;
    });
+   static_assert(requires(forge::db::core::driver& driver) {
+      driver.async_close();
+   });
    auto family = forge::db::core::family{"package"};
    return family.name == "package" ? 0 : 1;
 }

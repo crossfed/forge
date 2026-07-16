@@ -10,7 +10,6 @@ add_library(
    system.cpp
    transaction.cpp
    transaction_participant_impl.cpp
-   write_gate.cpp
 )
 forge_target_modules_at(forge_db_object db/object)
 
@@ -35,4 +34,6 @@ target_link_libraries(
       forge_exceptions
       forge_ids
       forge_raw
+   PRIVATE
+      forge_asio
 )

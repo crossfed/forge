@@ -62,6 +62,17 @@ struct memory_state {
    family_map records;
    bool fail_commit = false;
    bool fail_rollback = false;
+   bool fail_close = false;
+   std::atomic_bool block_open = false;
+   std::atomic_bool open_started = false;
+   std::atomic_bool release_open = false;
+   std::atomic_bool block_close = false;
+   std::atomic_bool close_started = false;
+   std::atomic_bool release_close = false;
+   std::atomic_bool block_flush = false;
+   std::atomic_bool flush_started = false;
+   std::atomic_bool release_flush = false;
+   std::size_t close_calls = 0;
    std::size_t rollback_calls = 0;
    std::size_t destroyed_sessions = 0;
    bool support_savepoints = true;
@@ -363,16 +374,49 @@ class memory_driver final : public forge::db::core::driver {
    explicit memory_driver(std::shared_ptr<memory_state> state) : state_{std::move(state)} {}
 
    boost::asio::awaitable<void> async_flush(bool) override {
+      auto admission = admit_operation();
+      if (state_->block_flush.load(std::memory_order_acquire)) {
+         state_->flush_started.store(true, std::memory_order_release);
+         auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+         while (!state_->release_flush.load(std::memory_order_acquire)) {
+            timer.expires_after(std::chrono::milliseconds{1});
+            co_await timer.async_wait(boost::asio::use_awaitable);
+         }
+      }
       co_return;
    }
 
  private:
    boost::asio::awaitable<std::unique_ptr<forge::db::core::session>> open_transaction() override {
+      if (state_->block_open.load(std::memory_order_acquire)) {
+         state_->open_started.store(true, std::memory_order_release);
+         auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+         while (!state_->release_open.load(std::memory_order_acquire)) {
+            timer.expires_after(std::chrono::milliseconds{1});
+            co_await timer.async_wait(boost::asio::use_awaitable);
+         }
+      }
       co_return std::make_unique<memory_session>(state_, false, true);
    }
 
    boost::asio::awaitable<std::unique_ptr<forge::db::core::session>> open_snapshot() override {
       co_return std::make_unique<memory_session>(state_, true, false);
+   }
+
+   boost::asio::awaitable<void> close_driver() override {
+      ++state_->close_calls;
+      if (state_->block_close.load(std::memory_order_acquire)) {
+         state_->close_started.store(true, std::memory_order_release);
+         auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+         while (!state_->release_close.load(std::memory_order_acquire)) {
+            timer.expires_after(std::chrono::milliseconds{1});
+            co_await timer.async_wait(boost::asio::use_awaitable);
+         }
+      }
+      if (state_->fail_close) {
+         throw std::runtime_error{"db test close failure"};
+      }
+      co_return;
    }
 
    std::shared_ptr<memory_state> state_;
@@ -381,6 +425,196 @@ class memory_driver final : public forge::db::core::driver {
 } // namespace
 
 BOOST_AUTO_TEST_SUITE(db_test_suite)
+
+BOOST_AUTO_TEST_CASE(db_driver_close_is_idempotent_and_rejects_new_sessions) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   auto driver = std::make_shared<memory_driver>(state);
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      co_await driver->async_close();
+      co_await driver->async_close();
+
+      BOOST_CHECK_EQUAL(state->close_calls, 1U);
+      BOOST_CHECK_THROW(co_await driver->begin_transaction(), forge::db::core::exceptions::driver_closed);
+      BOOST_CHECK_THROW(co_await driver->begin_read(), forge::db::core::exceptions::driver_closed);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_driver_close_with_active_sessions_is_retryable) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   auto driver = std::make_shared<memory_driver>(state);
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto transaction = co_await driver->begin_transaction();
+      auto snapshot = co_await driver->begin_read();
+      auto snapshot_copy = snapshot;
+
+      BOOST_CHECK_THROW(co_await driver->async_close(), forge::db::core::exceptions::driver_busy);
+      BOOST_CHECK_THROW(co_await driver->begin_transaction(), forge::db::core::exceptions::driver_closed);
+
+      const auto records = forge::db::core::family{"records"};
+      co_await transaction.put(records, key("active"), bytes("usable"));
+      co_await transaction.rollback();
+      snapshot = {};
+      BOOST_CHECK_THROW(co_await driver->async_close(), forge::db::core::exceptions::driver_busy);
+      snapshot_copy = {};
+
+      co_await driver->async_close();
+      BOOST_CHECK_EQUAL(state->close_calls, 1U);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_driver_close_rejects_opening_session_without_invalidating_it) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   state->block_open.store(true, std::memory_order_release);
+   auto driver = std::make_shared<memory_driver>(state);
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto opened = std::make_shared<std::optional<forge::db::core::transaction>>();
+      auto completed = std::make_shared<std::atomic_bool>(false);
+      auto failure = std::make_shared<std::exception_ptr>();
+      const auto executor = co_await boost::asio::this_coro::executor;
+      boost::asio::co_spawn(
+         executor,
+         [driver, opened, completed, failure]() -> boost::asio::awaitable<void> {
+            try {
+               opened->emplace(co_await driver->begin_transaction());
+            } catch (...) {
+               *failure = std::current_exception();
+            }
+            completed->store(true, std::memory_order_release);
+         },
+         boost::asio::detached);
+
+      auto timer = boost::asio::steady_timer{executor};
+      while (!state->open_started.load(std::memory_order_acquire)) {
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+
+      BOOST_CHECK_THROW(co_await driver->async_close(), forge::db::core::exceptions::driver_busy);
+      state->release_open.store(true, std::memory_order_release);
+      while (!completed->load(std::memory_order_acquire)) {
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+
+      BOOST_CHECK(!*failure);
+      BOOST_REQUIRE(opened->has_value());
+      co_await opened->value().rollback();
+      opened->reset();
+      co_await driver->async_close();
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_driver_close_rejects_admitted_backend_operation) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   state->block_flush.store(true, std::memory_order_release);
+   auto driver = std::make_shared<memory_driver>(state);
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto completed = std::make_shared<std::atomic_bool>(false);
+      auto failure = std::make_shared<std::exception_ptr>();
+      const auto executor = co_await boost::asio::this_coro::executor;
+      boost::asio::co_spawn(
+         executor,
+         [driver, completed, failure]() -> boost::asio::awaitable<void> {
+            try {
+               co_await driver->async_flush(true);
+            } catch (...) {
+               *failure = std::current_exception();
+            }
+            completed->store(true, std::memory_order_release);
+         },
+         boost::asio::detached);
+
+      auto timer = boost::asio::steady_timer{executor};
+      while (!state->flush_started.load(std::memory_order_acquire)) {
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+
+      BOOST_CHECK_THROW(co_await driver->async_close(), forge::db::core::exceptions::driver_busy);
+      BOOST_CHECK_THROW(co_await driver->async_flush(true), forge::db::core::exceptions::driver_closed);
+
+      state->release_flush.store(true, std::memory_order_release);
+      while (!completed->load(std::memory_order_acquire)) {
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+
+      BOOST_CHECK(!*failure);
+      co_await driver->async_close();
+      BOOST_CHECK_EQUAL(state->close_calls, 1U);
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_driver_concurrent_close_is_fail_fast) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   state->block_close.store(true, std::memory_order_release);
+   auto driver = std::make_shared<memory_driver>(state);
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto completed = std::make_shared<std::atomic_bool>(false);
+      auto failure = std::make_shared<std::exception_ptr>();
+      const auto executor = co_await boost::asio::this_coro::executor;
+      boost::asio::co_spawn(
+         executor,
+         [driver, completed, failure]() -> boost::asio::awaitable<void> {
+            try {
+               co_await driver->async_close();
+            } catch (...) {
+               *failure = std::current_exception();
+            }
+            completed->store(true, std::memory_order_release);
+         },
+         boost::asio::detached);
+
+      auto timer = boost::asio::steady_timer{executor};
+      while (!state->close_started.load(std::memory_order_acquire)) {
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+
+      BOOST_CHECK_THROW(co_await driver->async_close(), forge::db::core::exceptions::driver_busy);
+      state->release_close.store(true, std::memory_order_release);
+      while (!completed->load(std::memory_order_acquire)) {
+         timer.expires_after(std::chrono::milliseconds{1});
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      }
+
+      BOOST_CHECK(!*failure);
+      BOOST_CHECK_EQUAL(state->close_calls, 1U);
+      co_await driver->async_close();
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_driver_close_failure_keeps_close_retryable) {
+   auto runtime = forge::asio::runtime{};
+   auto state = std::make_shared<memory_state>();
+   state->fail_close = true;
+   auto driver = std::make_shared<memory_driver>(state);
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      BOOST_CHECK_THROW(co_await driver->async_close(), std::runtime_error);
+      BOOST_CHECK_THROW(co_await driver->begin_read(), forge::db::core::exceptions::driver_closed);
+
+      state->fail_close = false;
+      co_await driver->async_close();
+      BOOST_CHECK_EQUAL(state->close_calls, 2U);
+      co_return;
+   }());
+}
 
 BOOST_AUTO_TEST_CASE(db_transaction_savepoint_rolls_back_suffix_and_remains_active) {
    auto runtime = forge::asio::runtime{};

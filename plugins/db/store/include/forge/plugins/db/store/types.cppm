@@ -2,6 +2,7 @@ module;
 
 #include <boost/describe.hpp>
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -41,6 +42,28 @@ struct blob_layer_config {
 
 struct revision_layer_config {};
 
+struct mdbx_map_config {
+   std::optional<std::uint64_t> lower_size;
+   std::optional<std::uint64_t> current_size;
+   std::optional<std::uint64_t> upper_size;
+   std::optional<std::uint64_t> growth_step;
+   std::optional<std::uint64_t> shrink_threshold;
+   std::optional<std::uint32_t> page_size;
+};
+
+struct mdbx_lane_config {
+   std::size_t max_pending_operations = 1024;
+   std::size_t max_waiting_submissions = 1024;
+   std::optional<std::string> thread_name;
+};
+
+struct mdbx_driver_config {
+   std::string durability = "durable-sync";
+   std::size_t max_readers = 128;
+   mdbx_map_config map;
+   mdbx_lane_config lane;
+};
+
 struct store_config {
    std::string name;
    std::string driver = "rocksdb";
@@ -48,6 +71,7 @@ struct store_config {
    std::optional<object_layer_config> object;
    std::optional<blob_layer_config> blob;
    std::optional<revision_layer_config> revision;
+   std::optional<mdbx_driver_config> mdbx;
    bool create_if_missing = true;
    bool create_missing_column_families = true;
 };
@@ -99,6 +123,20 @@ BOOST_DESCRIBE_STRUCT(blob_data_options,
                        blob_garbage_collection_age_cutoff))
 BOOST_DESCRIBE_STRUCT(blob_layer_config, (), (data_family, refs_family, data_blobs))
 BOOST_DESCRIBE_STRUCT(revision_layer_config, (), ())
+BOOST_DESCRIBE_STRUCT(mdbx_map_config,
+                      (),
+                      (lower_size,
+                       current_size,
+                       upper_size,
+                       growth_step,
+                       shrink_threshold,
+                       page_size))
+BOOST_DESCRIBE_STRUCT(mdbx_lane_config,
+                      (),
+                      (max_pending_operations,
+                       max_waiting_submissions,
+                       thread_name))
+BOOST_DESCRIBE_STRUCT(mdbx_driver_config, (), (durability, max_readers, map, lane))
 BOOST_DESCRIBE_STRUCT(store_config,
                       (),
                       (name,
@@ -107,6 +145,7 @@ BOOST_DESCRIBE_STRUCT(store_config,
                        object,
                        blob,
                        revision,
+                       mdbx,
                        create_if_missing,
                        create_missing_column_families))
 BOOST_DESCRIBE_STRUCT(config, (), (stores))
@@ -172,6 +211,47 @@ export template <> struct forge::schema::rules<forge::plugins::db::store::revisi
    }
 };
 
+export template <> struct forge::schema::rules<forge::plugins::db::store::mdbx_map_config> {
+   [[nodiscard]] static forge::schema::object_schema<forge::plugins::db::store::mdbx_map_config> define() {
+      auto schema = forge::schema::object<forge::plugins::db::store::mdbx_map_config>();
+      schema.field<&forge::plugins::db::store::mdbx_map_config::lower_size>("lower-size");
+      schema.field<&forge::plugins::db::store::mdbx_map_config::current_size>("current-size");
+      schema.field<&forge::plugins::db::store::mdbx_map_config::upper_size>("upper-size");
+      schema.field<&forge::plugins::db::store::mdbx_map_config::growth_step>("growth-step");
+      schema.field<&forge::plugins::db::store::mdbx_map_config::shrink_threshold>("shrink-threshold");
+      schema.field<&forge::plugins::db::store::mdbx_map_config::page_size>("page-size");
+      return schema;
+   }
+};
+
+export template <> struct forge::schema::rules<forge::plugins::db::store::mdbx_lane_config> {
+   [[nodiscard]] static forge::schema::object_schema<forge::plugins::db::store::mdbx_lane_config> define() {
+      auto schema = forge::schema::object<forge::plugins::db::store::mdbx_lane_config>();
+      schema.field<&forge::plugins::db::store::mdbx_lane_config::max_pending_operations>(
+         "max-pending-operations").default_value(std::size_t{1024});
+      schema.field<&forge::plugins::db::store::mdbx_lane_config::max_waiting_submissions>(
+         "max-waiting-submissions").default_value(std::size_t{1024});
+      schema.field<&forge::plugins::db::store::mdbx_lane_config::thread_name>("thread-name");
+      return schema;
+   }
+};
+
+export template <> struct forge::schema::rules<forge::plugins::db::store::mdbx_driver_config> {
+   [[nodiscard]] static forge::schema::object_schema<forge::plugins::db::store::mdbx_driver_config> define() {
+      auto schema = forge::schema::object<forge::plugins::db::store::mdbx_driver_config>();
+      schema.field<&forge::plugins::db::store::mdbx_driver_config::durability>("durability")
+         .default_value("durable-sync")
+         .non_empty();
+      schema.field<&forge::plugins::db::store::mdbx_driver_config::max_readers>("max-readers")
+         .default_value(std::size_t{128});
+      schema.field<&forge::plugins::db::store::mdbx_driver_config::map>("map")
+         .default_value(forge::plugins::db::store::mdbx_map_config{});
+      schema.field<&forge::plugins::db::store::mdbx_driver_config::lane>("lane")
+         .default_value(forge::plugins::db::store::mdbx_lane_config{});
+      return schema;
+   }
+};
+
 export template <> struct forge::schema::rules<forge::plugins::db::store::store_config> {
    [[nodiscard]] static forge::schema::object_schema<forge::plugins::db::store::store_config> define() {
       auto schema = forge::schema::object<forge::plugins::db::store::store_config>();
@@ -183,6 +263,7 @@ export template <> struct forge::schema::rules<forge::plugins::db::store::store_
       schema.field<&forge::plugins::db::store::store_config::object>("object");
       schema.field<&forge::plugins::db::store::store_config::blob>("blob");
       schema.field<&forge::plugins::db::store::store_config::revision>("revision");
+      schema.field<&forge::plugins::db::store::store_config::mdbx>("mdbx");
       schema.field<&forge::plugins::db::store::store_config::create_if_missing>("create-if-missing")
          .default_value(true);
       schema.field<&forge::plugins::db::store::store_config::create_missing_column_families>(

@@ -139,6 +139,49 @@ target_compile_definitions(test_forge_db_object PRIVATE FORGE_HAS_ROCKSDB=$<BOOL
 if(FORGE_HAS_ROCKSDB)
    target_link_libraries(test_forge_db_object forge_db_rocksdb)
 endif()
+
+if(FORGE_HAS_MDBX)
+   add_executable(
+      test_forge_db_mdbx
+      unit/main.cpp
+      db_mdbx/mdbx_crash_tests.cpp
+      db_mdbx/mdbx_tests.cpp
+      db_mdbx/mdbx_layers_tests.cpp
+   )
+   add_executable(
+      forge_db_mdbx_crash_helper
+      db_mdbx/mdbx_crash_helper.cpp
+   )
+   target_link_libraries(forge_db_mdbx_crash_helper forge_db_mdbx)
+   add_dependencies(test_forge_db_mdbx forge_db_mdbx_crash_helper)
+   target_compile_definitions(
+      test_forge_db_mdbx PRIVATE
+      FORGE_DB_MDBX_CRASH_HELPER="$<TARGET_FILE:forge_db_mdbx_crash_helper>"
+   )
+   target_link_libraries(
+      test_forge_db_mdbx
+      forge_db_mdbx
+      forge_db_core
+      forge_db_object
+      forge_db_blob
+      forge_db_revision
+      Boost::included_unit_test_framework
+   )
+   add_test(NAME test_forge_db_mdbx COMMAND test_forge_db_mdbx WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+   if(FORGE_HAS_ROCKSDB)
+      add_executable(
+         benchmark_forge_db_backends
+         db_mdbx/mdbx_rocksdb_benchmark.cpp
+      )
+      target_link_libraries(
+         benchmark_forge_db_backends
+         forge_db_mdbx
+         forge_db_rocksdb
+         forge_db_object
+      )
+   endif()
+endif()
 add_test(NAME test_forge_db_object COMMAND test_forge_db_object WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
@@ -205,10 +248,12 @@ add_test(NAME test_forge_multiformats COMMAND test_forge_multiformats WORKING_DI
 add_executable(
    test_forge_asio
    unit/main.cpp
+   asio/affine_tests.cpp
    asio/compute_tests.cpp
+   asio/gate_tests.cpp
    asio/task_tests.cpp
 )
-target_link_libraries(test_forge_asio forge Boost::included_unit_test_framework)
+target_link_libraries(test_forge_asio forge_asio Boost::included_unit_test_framework)
 add_test(NAME test_forge_asio COMMAND test_forge_asio WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
@@ -397,10 +442,14 @@ add_executable(
    unit/main.cpp
    plugins_db_store/db_store_tests.cpp
 )
-target_link_libraries(test_forge_plugins_db_store forge_plugins_db_store forge Boost::included_unit_test_framework)
+target_link_libraries(test_forge_plugins_db_store forge_plugins_db_store Boost::included_unit_test_framework)
 target_compile_definitions(test_forge_plugins_db_store PRIVATE FORGE_HAS_ROCKSDB=$<BOOL:${FORGE_HAS_ROCKSDB}>)
+target_compile_definitions(test_forge_plugins_db_store PRIVATE FORGE_HAS_MDBX=$<BOOL:${FORGE_HAS_MDBX}>)
 if(FORGE_HAS_ROCKSDB)
    target_link_libraries(test_forge_plugins_db_store forge_db_rocksdb)
+endif()
+if(FORGE_HAS_MDBX)
+   target_link_libraries(test_forge_plugins_db_store forge_db_mdbx)
 endif()
 add_test(NAME test_forge_plugins_db_store COMMAND test_forge_plugins_db_store WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
@@ -422,16 +471,8 @@ if(FORGE_HAS_ROCKSDB)
    target_link_libraries(test_forge_rocksdb forge_rocksdb forge Boost::included_unit_test_framework)
    add_test(NAME test_forge_rocksdb COMMAND test_forge_rocksdb WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
-   add_executable(
-      test_forge_plugins_db_rocksdb
-      unit/main.cpp
-      plugins_db_rocksdb/rocksdb_tests.cpp
-   )
-   target_link_libraries(test_forge_plugins_db_rocksdb forge_plugins_db_rocksdb forge Boost::included_unit_test_framework)
-   add_test(NAME test_forge_plugins_db_rocksdb COMMAND test_forge_plugins_db_rocksdb WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 else()
    message(STATUS "Skipping test_forge_rocksdb: RocksDB is not available")
-   message(STATUS "Skipping test_forge_plugins_db_rocksdb: RocksDB is not available")
 endif()
 
 if(TARGET forge_tui)
@@ -950,6 +991,41 @@ add_custom_target(
       --test-command forge_package_plugins_db_store
    DEPENDS test_forge_package_install
 )
+if(FORGE_HAS_MDBX)
+   add_custom_target(
+      test_forge_package_db_mdbx_component
+      COMMAND ${CMAKE_CTEST_COMMAND}
+         --build-and-test
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_db_mdbx_component
+         ${CMAKE_BINARY_DIR}/forge-package-db-mdbx-component
+         --build-generator ${CMAKE_GENERATOR}
+         --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         --test-command forge_package_db_mdbx_component
+      DEPENDS test_forge_package_install
+   )
+   add_custom_target(
+      test_forge_package_db_mdbx_add_subdirectory
+      COMMAND ${CMAKE_CTEST_COMMAND}
+         --build-and-test
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_db_mdbx_add_subdirectory
+         ${CMAKE_BINARY_DIR}/forge-package-db-mdbx-add-subdirectory
+         --build-generator ${CMAKE_GENERATOR}
+         --build-options
+            ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+            -DFORGE_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+         --build-target forge_db_mdbx_add_subdirectory
+         --test-command forge_db_mdbx_add_subdirectory
+   )
+else()
+   add_custom_target(
+      test_forge_package_db_mdbx_component
+      COMMAND ${CMAKE_COMMAND} -E echo "Skipping test_forge_package_db_mdbx_component: MDBX is not available"
+   )
+   add_custom_target(
+      test_forge_package_db_mdbx_add_subdirectory
+      COMMAND ${CMAKE_COMMAND} -E echo "Skipping test_forge_package_db_mdbx_add_subdirectory: MDBX is not available"
+   )
+endif()
 if(FORGE_HAS_ROCKSDB)
    add_custom_target(
       test_forge_package_db_rocksdb_component
@@ -975,17 +1051,6 @@ if(FORGE_HAS_ROCKSDB)
       DEPENDS test_forge_package_install
    )
 
-   add_custom_target(
-      test_forge_package_plugins_db_rocksdb
-      COMMAND ${CMAKE_CTEST_COMMAND}
-         --build-and-test
-         ${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_db_rocksdb
-         ${CMAKE_BINARY_DIR}/forge-package-plugins-db-rocksdb
-         --build-generator ${CMAKE_GENERATOR}
-         --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
-         --test-command forge_package_plugins_db_rocksdb
-      DEPENDS test_forge_package_install
-   )
 else()
    add_custom_target(
       test_forge_package_db_rocksdb_component
@@ -994,10 +1059,6 @@ else()
    add_custom_target(
       test_forge_package_rocksdb_component
       COMMAND ${CMAKE_COMMAND} -E echo "Skipping test_forge_package_rocksdb_component: RocksDB is not available"
-   )
-   add_custom_target(
-      test_forge_package_plugins_db_rocksdb
-      COMMAND ${CMAKE_COMMAND} -E echo "Skipping test_forge_package_plugins_db_rocksdb: RocksDB is not available"
    )
 endif()
 add_custom_target(
@@ -1519,6 +1580,44 @@ add_test(
       --test-command forge_package_plugins_db_store
 )
 set_tests_properties(test_forge_package_plugins_db_store PROPERTIES DEPENDS test_forge_package_install)
+if(FORGE_HAS_MDBX)
+   add_test(
+      NAME test_forge_package_db_mdbx_component
+      COMMAND ${CMAKE_CTEST_COMMAND}
+         --build-and-test
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_db_mdbx_component
+         ${CMAKE_BINARY_DIR}/forge-package-db-mdbx-component
+         --build-generator ${CMAKE_GENERATOR}
+         --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         --test-command forge_package_db_mdbx_component
+   )
+   set_tests_properties(
+      test_forge_package_db_mdbx_component
+      PROPERTIES DEPENDS test_forge_package_install
+   )
+   add_test(
+      NAME test_forge_package_db_mdbx_add_subdirectory
+      COMMAND ${CMAKE_CTEST_COMMAND}
+         --build-and-test
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_db_mdbx_add_subdirectory
+         ${CMAKE_BINARY_DIR}/forge-package-db-mdbx-add-subdirectory
+         --build-generator ${CMAKE_GENERATOR}
+         --build-options
+            ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+            -DFORGE_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+         --build-target forge_db_mdbx_add_subdirectory
+         --test-command forge_db_mdbx_add_subdirectory
+   )
+else()
+   add_test(
+      NAME test_forge_package_db_mdbx_component
+      COMMAND ${CMAKE_COMMAND} -E echo "Skipping test_forge_package_db_mdbx_component: MDBX is not available"
+   )
+   add_test(
+      NAME test_forge_package_db_mdbx_add_subdirectory
+      COMMAND ${CMAKE_COMMAND} -E echo "Skipping test_forge_package_db_mdbx_add_subdirectory: MDBX is not available"
+   )
+endif()
 if(FORGE_HAS_ROCKSDB)
    add_test(
       NAME test_forge_package_db_rocksdb_component
@@ -1544,17 +1643,6 @@ if(FORGE_HAS_ROCKSDB)
    )
    set_tests_properties(test_forge_package_rocksdb_component PROPERTIES DEPENDS test_forge_package_install)
 
-   add_test(
-      NAME test_forge_package_plugins_db_rocksdb
-      COMMAND ${CMAKE_CTEST_COMMAND}
-         --build-and-test
-         ${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_db_rocksdb
-         ${CMAKE_BINARY_DIR}/forge-package-plugins-db-rocksdb
-         --build-generator ${CMAKE_GENERATOR}
-         --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
-         --test-command forge_package_plugins_db_rocksdb
-   )
-   set_tests_properties(test_forge_package_plugins_db_rocksdb PROPERTIES DEPENDS test_forge_package_install)
 else()
    add_test(
       NAME test_forge_package_db_rocksdb_component
@@ -1563,10 +1651,6 @@ else()
    add_test(
       NAME test_forge_package_rocksdb_component
       COMMAND ${CMAKE_COMMAND} -E echo "Skipping test_forge_package_rocksdb_component: RocksDB is not available"
-   )
-   add_test(
-      NAME test_forge_package_plugins_db_rocksdb
-      COMMAND ${CMAKE_COMMAND} -E echo "Skipping test_forge_package_plugins_db_rocksdb: RocksDB is not available"
    )
 endif()
 add_test(

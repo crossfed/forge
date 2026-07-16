@@ -1,6 +1,8 @@
 module;
 
 #include "details/stop_state.hxx"
+#include "details/async_waiter.hxx"
+#include "details/thread_name.hxx"
 
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
@@ -36,10 +38,6 @@ module;
 #include <utility>
 #include <vector>
 
-#if defined(__APPLE__) || defined(__linux__)
-#include <pthread.h>
-#endif
-
 module forge.asio.compute;
 
 import forge.asio.exceptions;
@@ -55,51 +53,17 @@ enum class admission_state : std::uint8_t {
    completed,
 };
 
-struct async_waiter {
-   explicit async_waiter(boost::asio::any_io_executor executor)
-       : strand{boost::asio::make_strand(std::move(executor))},
-         timer{strand, boost::asio::steady_timer::time_point::max()} {}
-
-   boost::asio::strand<boost::asio::any_io_executor> strand;
-   boost::asio::steady_timer timer;
-};
-
-struct admission_waiter : async_waiter {
+struct admission_waiter : forge::asio::detail::async_waiter {
    admission_waiter(boost::asio::any_io_executor executor, std::uint64_t waiter_id)
-       : async_waiter{std::move(executor)}, id{waiter_id} {}
+       : forge::asio::detail::async_waiter{std::move(executor)}, id{waiter_id} {}
 
    std::uint64_t id = 0;
    admission_state state = admission_state::queued;
    forge::asio::detail::stop_state stop_state;
 };
 
-void wake(const std::shared_ptr<async_waiter>& waiter) noexcept {
-   boost::asio::dispatch(waiter->strand, [waiter] {
-      try {
-         waiter->timer.expires_at(boost::asio::steady_timer::time_point::min());
-         waiter->timer.cancel();
-      } catch (...) {
-         // Completion and shutdown paths must stay noexcept.
-      }
-   });
-}
-
 std::exception_ptr canceled_error(std::string message = "compute operation was canceled") {
    return std::make_exception_ptr(exceptions::canceled{std::move(message)});
-}
-
-void set_current_thread_name(const std::string& name) noexcept {
-   if (name.empty()) {
-      return;
-   }
-#if defined(__APPLE__)
-   static_cast<void>(pthread_setname_np(name.c_str()));
-#elif defined(__linux__)
-   auto limited = name.substr(0, 15);
-   static_cast<void>(pthread_setname_np(pthread_self(), limited.c_str()));
-#else
-   static_cast<void>(name);
-#endif
 }
 
 thread_local std::optional<std::size_t> current_worker_index;
@@ -135,7 +99,7 @@ struct operation_state::impl {
    bool completed = false;
    bool wait_started = false;
    std::exception_ptr error;
-   std::shared_ptr<async_waiter> waiter;
+   std::shared_ptr<forge::asio::detail::async_waiter> waiter;
 };
 
 operation_state::operation_state(std::shared_ptr<pool_state> owner, std::uint64_t id)
@@ -179,7 +143,7 @@ void operation_state::request_stop_only() noexcept {
 }
 
 bool operation_state::complete_value() noexcept {
-   auto waiter = std::shared_ptr<async_waiter>{};
+   auto waiter = std::shared_ptr<forge::asio::detail::async_waiter>{};
    {
       const auto lock = std::scoped_lock{impl_->mutex};
       if (impl_->completed) {
@@ -189,13 +153,13 @@ bool operation_state::complete_value() noexcept {
       waiter = impl_->waiter;
    }
    if (waiter != nullptr) {
-      wake(waiter);
+      waiter->wake();
    }
    return true;
 }
 
 bool operation_state::complete_exception(std::exception_ptr error) noexcept {
-   auto waiter = std::shared_ptr<async_waiter>{};
+   auto waiter = std::shared_ptr<forge::asio::detail::async_waiter>{};
    {
       const auto lock = std::scoped_lock{impl_->mutex};
       if (impl_->completed) {
@@ -206,7 +170,7 @@ bool operation_state::complete_exception(std::exception_ptr error) noexcept {
       waiter = impl_->waiter;
    }
    if (waiter != nullptr) {
-      wake(waiter);
+      waiter->wake();
    }
    return true;
 }
@@ -214,7 +178,7 @@ bool operation_state::complete_exception(std::exception_ptr error) noexcept {
 boost::asio::awaitable<void> operation_state::wait() {
    const auto executor = co_await boost::asio::this_coro::executor;
    auto cancellation = co_await boost::asio::this_coro::cancellation_state;
-   auto waiter = std::make_shared<async_waiter>(executor);
+   auto waiter = std::make_shared<forge::asio::detail::async_waiter>(executor);
    auto self = shared_from_this();
 
    {
@@ -250,20 +214,7 @@ boost::asio::awaitable<void> operation_state::wait() {
       throw exceptions::canceled{"compute operation wait was canceled"};
    }
 
-   auto switch_error = boost::system::error_code{};
-   co_await boost::asio::dispatch(waiter->strand,
-                                  boost::asio::redirect_error(boost::asio::use_awaitable, switch_error));
-   if (switch_error) {
-      static_cast<void>(cancel());
-      if (slot.is_connected()) {
-         slot.clear();
-      }
-      throw exceptions::internal{"failed to arm compute operation wait"};
-   }
-
-   auto wait_error = boost::system::error_code{};
-   co_await waiter->timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, wait_error));
-   static_cast<void>(wait_error);
+   static_cast<void>(co_await waiter->wait());
 
    const auto wait_canceled = cancellation.cancelled() != boost::asio::cancellation_type::none;
    if (slot.is_connected()) {
@@ -356,7 +307,7 @@ struct pool_state::impl {
       for (std::size_t index = 0; index < worker_threads; ++index) {
          boost::asio::post(native_pool->get_executor(), [&, index] {
             current_worker_index = index;
-            set_current_thread_name(config.thread_name);
+            forge::asio::detail::set_current_thread_name(config.thread_name);
             try {
                if (config.on_worker_start) {
                   config.on_worker_start(index);
@@ -457,7 +408,7 @@ struct pool_state::impl {
 
       auto jobs = std::vector<job>{};
       auto granted = std::vector<std::shared_ptr<admission_waiter>>{};
-      auto drain = std::vector<std::shared_ptr<async_waiter>>{};
+      auto drain = std::vector<std::shared_ptr<forge::asio::detail::async_waiter>>{};
       {
          const auto lock = std::scoped_lock{mutex};
          running_operations.erase(current.id);
@@ -481,10 +432,10 @@ struct pool_state::impl {
 
       post_jobs(owner, std::move(jobs));
       for (const auto& waiter : granted) {
-         wake(waiter);
+         waiter->wake();
       }
       for (const auto& waiter : drain) {
-         wake(waiter);
+         waiter->wake();
       }
       drained_cv.notify_all();
    }
@@ -520,16 +471,16 @@ struct pool_state::impl {
          }
       }
       if (should_wake) {
-         wake(waiter);
+         waiter->wake();
       }
       for (const auto& next : granted) {
-         wake(next);
+         next->wake();
       }
    }
 
    boost::asio::awaitable<void> wait_for_drain() {
       const auto executor = co_await boost::asio::this_coro::executor;
-      auto waiter = std::make_shared<async_waiter>(executor);
+      auto waiter = std::make_shared<forge::asio::detail::async_waiter>(executor);
       {
          const auto lock = std::scoped_lock{mutex};
          if (drained_locked()) {
@@ -537,15 +488,7 @@ struct pool_state::impl {
          }
          drain_waiters.push_back(waiter);
       }
-      auto switch_error = boost::system::error_code{};
-      co_await boost::asio::dispatch(waiter->strand,
-                                     boost::asio::redirect_error(boost::asio::use_awaitable, switch_error));
-      if (switch_error) {
-         throw exceptions::internal{"failed to arm compute pool drain wait"};
-      }
-      auto error = boost::system::error_code{};
-      co_await waiter->timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
-      static_cast<void>(error);
+      static_cast<void>(co_await waiter->wait());
    }
 
    void finalize() {
@@ -603,7 +546,7 @@ struct pool_state::impl {
    std::unordered_set<std::uint64_t> reservations;
    std::deque<job> pending;
    std::unordered_map<std::uint64_t, std::shared_ptr<operation_state>> running_operations;
-   std::vector<std::shared_ptr<async_waiter>> drain_waiters;
+   std::vector<std::shared_ptr<forge::asio::detail::async_waiter>> drain_waiters;
    std::atomic_uint64_t next_id = 1;
    bool stopping = false;
    mutable metrics_snapshot current_metrics{};
@@ -671,13 +614,8 @@ boost::asio::awaitable<reservation> pool_state::reserve(std::stop_token parent) 
       impl_->cancel_waiter(waiter, false);
    }
 
-   auto switch_error = boost::system::error_code{};
-   co_await boost::asio::dispatch(waiter->strand,
-                                  boost::asio::redirect_error(boost::asio::use_awaitable, switch_error));
-   if (!switch_error && cancellation.cancelled() == boost::asio::cancellation_type::none) {
-      auto wait_error = boost::system::error_code{};
-      co_await waiter->timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, wait_error));
-      static_cast<void>(wait_error);
+   if (cancellation.cancelled() == boost::asio::cancellation_type::none) {
+      static_cast<void>(co_await waiter->wait());
    }
 
    const auto canceled_after_wait = cancellation.cancelled() != boost::asio::cancellation_type::none;
@@ -729,7 +667,7 @@ void pool_state::release_reservation(std::uint64_t id) noexcept {
       granted = impl_->grant_waiters_locked();
    }
    for (const auto& waiter : granted) {
-      wake(waiter);
+      waiter->wake();
    }
 }
 
@@ -774,7 +712,7 @@ void pool_state::submit(reservation reservation_value, std::string name, std::sh
    if (cancel_before_start) {
       operation->complete_exception(canceled_error());
       for (const auto& waiter : granted) {
-         wake(waiter);
+         waiter->wake();
       }
       return;
    }
@@ -802,7 +740,7 @@ bool pool_state::cancel(std::uint64_t id) noexcept {
       operation->complete_exception(canceled_error());
    }
    for (const auto& waiter : granted) {
-      wake(waiter);
+      waiter->wake();
    }
    return operation != nullptr || found_running;
 }
@@ -811,7 +749,7 @@ void pool_state::request_stop() noexcept {
    auto waiting = std::vector<std::shared_ptr<admission_waiter>>{};
    auto pending = std::vector<std::shared_ptr<operation_state>>{};
    auto running = std::vector<std::shared_ptr<operation_state>>{};
-   auto drain = std::vector<std::shared_ptr<async_waiter>>{};
+   auto drain = std::vector<std::shared_ptr<forge::asio::detail::async_waiter>>{};
    {
       const auto lock = std::scoped_lock{impl_->mutex};
       if (impl_->stopping) {
@@ -846,7 +784,7 @@ void pool_state::request_stop() noexcept {
    }
 
    for (const auto& waiter : waiting) {
-      wake(waiter);
+      waiter->wake();
    }
    for (const auto& operation : pending) {
       operation->request_stop_only();
@@ -856,7 +794,7 @@ void pool_state::request_stop() noexcept {
       operation->request_stop_only();
    }
    for (const auto& waiter : drain) {
-      wake(waiter);
+      waiter->wake();
    }
 
    // Running operations own themselves through the native jobs. Requesting stop

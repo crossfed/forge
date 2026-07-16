@@ -70,6 +70,11 @@ import forge.raw.raw;
 import forge.db.rocksdb.driver;
 #endif
 
+#if FORGE_HAS_MDBX
+import forge.asio.affine;
+import forge.db.mdbx.driver;
+#endif
+
 namespace {
 
 namespace store_plugin = forge::plugins::db::store;
@@ -358,6 +363,10 @@ class memory_driver final : public forge::db::core::driver {
       return state_->overlapping_writes;
    }
 
+   [[nodiscard]] std::size_t close_calls() const noexcept {
+      return close_calls_;
+   }
+
    void seed_record(forge::db::core::family family,
                     forge::db::core::record_key key,
                     std::vector<std::byte> value) {
@@ -374,7 +383,13 @@ class memory_driver final : public forge::db::core::driver {
       co_return std::make_unique<memory_session>(state_, false);
    }
 
+   boost::asio::awaitable<void> close_driver() override {
+      ++close_calls_;
+      co_return;
+   }
+
    std::shared_ptr<memory_state> state_ = std::make_shared<memory_state>();
+   std::size_t close_calls_ = 0;
 };
 
 class installer_plugin final : public forge::app::plugin {
@@ -527,9 +542,68 @@ configured_object_blob_store(std::string name,
    return forge::config::core::value{std::move(object)};
 }
 
+[[nodiscard]] forge::config::core::value
+configured_mdbx_store(std::string name,
+                      std::filesystem::path path,
+                      bool blob = false,
+                      bool revision = true,
+                      std::string durability = "durable-sync") {
+   auto object = forge::config::core::value::object_type{};
+   object.emplace("name", forge::config::core::value{std::move(name)});
+   object.emplace("driver", forge::config::core::value{std::string{"mdbx"}});
+   object.emplace("path", forge::config::core::value{path.string()});
+
+   auto lane = forge::config::core::value::object_type{};
+   lane.emplace("max-pending-operations", forge::config::core::value{std::uint64_t{64U}});
+   lane.emplace("max-waiting-submissions", forge::config::core::value{std::uint64_t{64U}});
+   lane.emplace("thread-name", forge::config::core::value{std::string{"store-mdbx-test"}});
+
+   auto map = forge::config::core::value::object_type{};
+   map.emplace("upper-size", forge::config::core::value{std::uint64_t{64U * 1024U * 1024U}});
+   map.emplace("growth-step", forge::config::core::value{std::uint64_t{1024U * 1024U}});
+
+   auto mdbx = forge::config::core::value::object_type{};
+   mdbx.emplace("durability", forge::config::core::value{std::move(durability)});
+   mdbx.emplace("max-readers", forge::config::core::value{std::uint64_t{64U}});
+   mdbx.emplace("map", forge::config::core::value{std::move(map)});
+   mdbx.emplace("lane", forge::config::core::value{std::move(lane)});
+   object.emplace("mdbx", forge::config::core::value{std::move(mdbx)});
+
+   auto object_layer = forge::config::core::value::object_type{};
+   object_layer.emplace("family", forge::config::core::value{std::string{"objectdb"}});
+   object_layer.emplace("write-policy", forge::config::core::value{std::string{"single-writer"}});
+   object.emplace("object", forge::config::core::value{std::move(object_layer)});
+
+   if (blob) {
+      auto blob_layer = forge::config::core::value::object_type{};
+      blob_layer.emplace("data-family", forge::config::core::value{std::string{"blobdb.data"}});
+      blob_layer.emplace("refs-family", forge::config::core::value{std::string{"blobdb.refs"}});
+      object.emplace("blob", forge::config::core::value{std::move(blob_layer)});
+   }
+   if (revision) {
+      object.emplace("revision", forge::config::core::value{forge::config::core::value::object_type{}});
+   }
+
+   return forge::config::core::value{std::move(object)};
+}
+
 [[nodiscard]] forge::config::core::document document_for_rocksdb(const std::filesystem::path& path) {
    auto document = forge::config::core::document{};
    document.set("plugins.db.store.stores", forge::config::core::value::array_type{configured_store("accounts", path)});
+   return document;
+}
+
+[[nodiscard]] forge::config::core::document
+document_for_mdbx(const std::filesystem::path& path,
+                  bool blob = false,
+                  bool revision = true,
+                  std::string durability = "durable-sync") {
+   auto document = forge::config::core::document{};
+   document.set(
+      "plugins.db.store.stores",
+      forge::config::core::value::array_type{
+         configured_mdbx_store("files", path, blob, revision,
+                               std::move(durability))});
    return document;
 }
 
@@ -572,7 +646,7 @@ BOOST_AUTO_TEST_SUITE(store_plugin_test_suite)
 BOOST_AUTO_TEST_CASE(store_plugin_descriptor_api_and_config_are_nested) {
    auto plugin = store_plugin::plugin{};
    BOOST_TEST(plugin.id().value == "forge.plugins.db.store");
-   BOOST_TEST(plugin.version() == "1.2.0");
+   BOOST_TEST(plugin.version() == "1.3.0");
    BOOST_TEST(store_plugin::api::ref().id.value == "forge.plugins.db.store");
 
    const auto descriptor = plugin.describe_config();
@@ -809,6 +883,69 @@ BOOST_AUTO_TEST_CASE(store_plugin_rejects_configured_overlapping_layer_families)
    expect_invalid("objectdb", "blob.shared", "blob.shared");
 }
 
+BOOST_AUTO_TEST_CASE(store_plugin_rejects_invalid_mdbx_configuration) {
+   auto runtime = forge::asio::runtime{};
+   const auto expect_invalid = [&](forge::config::core::value store) {
+      auto plugin = store_plugin::plugin{};
+      auto document = forge::config::core::document{};
+      document.set("plugins.db.store.stores",
+                   forge::config::core::value::array_type{std::move(store)});
+      BOOST_CHECK_THROW(
+         forge::asio::blocking::run(
+            runtime,
+            plugin.configure(forge::config::core::component_view{
+               document, "plugins.db.store"})),
+         store_plugin::exceptions::invalid_config);
+   };
+
+   {
+      auto store = forge::config::core::value::object_type{};
+      store.emplace("name", forge::config::core::value{std::string{"rocks-with-mdbx"}});
+      store.emplace("driver", forge::config::core::value{std::string{"rocksdb"}});
+      store.emplace("path", forge::config::core::value{std::string{"/tmp/rocks-with-mdbx"}});
+      store.emplace("object", forge::config::core::value{forge::config::core::value::object_type{}});
+      store.emplace("mdbx", forge::config::core::value{forge::config::core::value::object_type{}});
+      expect_invalid(forge::config::core::value{std::move(store)});
+   }
+   {
+      auto store = forge::config::core::value::object_type{};
+      store.emplace("name", forge::config::core::value{std::string{"bad-durability"}});
+      store.emplace("driver", forge::config::core::value{std::string{"mdbx"}});
+      store.emplace("path", forge::config::core::value{std::string{"/tmp/bad-durability"}});
+      store.emplace("object", forge::config::core::value{forge::config::core::value::object_type{}});
+      auto mdbx = forge::config::core::value::object_type{};
+      mdbx.emplace("durability", forge::config::core::value{std::string{"unsafe"}});
+      store.emplace("mdbx", forge::config::core::value{std::move(mdbx)});
+      expect_invalid(forge::config::core::value{std::move(store)});
+   }
+   {
+      auto store = forge::config::core::value::object_type{};
+      store.emplace("name", forge::config::core::value{std::string{"zero-lane"}});
+      store.emplace("driver", forge::config::core::value{std::string{"mdbx"}});
+      store.emplace("path", forge::config::core::value{std::string{"/tmp/zero-lane"}});
+      store.emplace("object", forge::config::core::value{forge::config::core::value::object_type{}});
+      auto lane = forge::config::core::value::object_type{};
+      lane.emplace("max-pending-operations", forge::config::core::value{std::uint64_t{0U}});
+      auto mdbx = forge::config::core::value::object_type{};
+      mdbx.emplace("lane", forge::config::core::value{std::move(lane)});
+      store.emplace("mdbx", forge::config::core::value{std::move(mdbx)});
+      expect_invalid(forge::config::core::value{std::move(store)});
+   }
+   {
+      auto store = forge::config::core::value::object_type{};
+      store.emplace("name", forge::config::core::value{std::string{"mdbx-blob-files"}});
+      store.emplace("driver", forge::config::core::value{std::string{"mdbx"}});
+      store.emplace("path", forge::config::core::value{std::string{"/tmp/mdbx-blob-files"}});
+      auto blob_files = forge::config::core::value::object_type{};
+      blob_files.emplace("enable-blob-files", forge::config::core::value{true});
+      auto blob = forge::config::core::value::object_type{};
+      blob.emplace("data-blobs", forge::config::core::value{std::move(blob_files)});
+      store.emplace("blob", forge::config::core::value{std::move(blob)});
+      store.emplace("mdbx", forge::config::core::value{forge::config::core::value::object_type{}});
+      expect_invalid(forge::config::core::value{std::move(store)});
+   }
+}
+
 BOOST_AUTO_TEST_CASE(store_plugin_rejects_configure_after_stop_or_shutdown) {
    auto runtime = forge::asio::runtime{};
    auto document = forge::config::core::document{};
@@ -889,6 +1026,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_custom_driver_store_handle_reads_writes_flushe
    BOOST_TEST(status.stores.front().started);
 
    forge::asio::blocking::run(app->runtime(), app->shutdown());
+   BOOST_TEST(driver->close_calls() == 0U);
    BOOST_CHECK_THROW(forge::asio::blocking::run(app->runtime(), handle.objects().find(decltype(account{}.id){42})),
                      store_plugin::exceptions::stopped);
 }
@@ -1780,6 +1918,212 @@ BOOST_AUTO_TEST_CASE(store_plugin_unknown_store_fails_typed) {
 
    forge::asio::blocking::run(app->runtime(), app->shutdown());
 }
+
+#if FORGE_HAS_MDBX
+BOOST_AUTO_TEST_CASE(store_plugin_programmatic_mdbx_store_shares_all_db_layers) {
+   auto root = root_guard{};
+   auto runtime = forge::asio::runtime{};
+   auto lane = forge::asio::affine::lane{{.thread_name = "store-mdbx-test"}};
+   auto scheduler = forge::asio::task::scheduler{runtime};
+   auto apis = forge::api::core::registry{};
+   auto signals = forge::app::signal_bus{};
+   auto events = forge::app::event_bus{};
+   auto plugin = store_plugin::plugin{};
+
+   auto driver = forge::asio::blocking::run(
+      runtime,
+      forge::db::mdbx::driver::open(
+         forge::db::mdbx::config{
+            .path = (root.root / "mdbx-store").string(),
+            .families = {"objectdb", "blobdb.data", "blobdb.refs"},
+         },
+         lane.get_executor()));
+
+   auto document = forge::config::core::document{};
+   forge::asio::blocking::run(
+      runtime,
+      plugin.configure(forge::config::core::component_view{
+         document, "plugins.db.store"}));
+   auto provider = forge::api::core::installer{apis};
+   forge::asio::blocking::run(runtime, plugin.provide(provider));
+   auto context = forge::app::plugin_context{scheduler, apis, signals, events};
+   forge::asio::blocking::run(runtime, plugin.initialize(context));
+
+   auto options = store_plugin::store_options{};
+   options.blob = store_plugin::blob_layer_options{};
+   options.revision = store_plugin::revision_layer_options{};
+   auto api = apis.get<store_plugin::api>(store_plugin::api::ref());
+   forge::asio::blocking::run(
+      runtime, api->add_store("files", driver, options));
+   forge::asio::blocking::run(runtime, plugin.after_initialize());
+   auto handle = forge::asio::blocking::run(runtime, api->store("files"));
+   handle.objects().register_object<file_object>();
+   forge::asio::blocking::run(runtime, plugin.startup());
+
+   auto transaction = forge::asio::blocking::run(
+      runtime, handle.begin_transaction());
+   auto objects = forge::asio::blocking::run(
+      runtime, handle.objects().join(transaction));
+   auto blobs = handle.blobs().join(transaction);
+   const auto revision = forge::asio::blocking::run(
+      runtime, handle.revisions().join(transaction));
+   const auto content = forge::asio::blocking::run(
+      runtime, blobs.put(bytes("mdbx plugin payload")));
+   forge::asio::blocking::run(
+      runtime,
+      blobs.retain(content, forge::db::blob::owner_ref{"file:1"}));
+   forge::asio::blocking::run(
+      runtime, objects.insert(make_file(1, "/mdbx.bin", content)));
+   forge::asio::blocking::run(runtime, transaction.commit());
+   BOOST_TEST(revision.id() == 1U);
+
+   auto read = forge::asio::blocking::run(runtime, handle.begin_read());
+   const auto loaded = forge::asio::blocking::run(
+      runtime, read.objects().get(file_record::id_t{1}));
+   BOOST_TEST(loaded.path == "/mdbx.bin");
+   BOOST_TEST(forge::asio::blocking::run(
+      runtime, read.blobs().get(loaded.content)) == bytes("mdbx plugin payload"));
+
+   read = {};
+   forge::asio::blocking::run(runtime, plugin.shutdown());
+   forge::asio::blocking::run(runtime, driver->async_close());
+   driver.reset();
+   forge::asio::blocking::run(runtime, lane.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(store_plugin_configured_mdbx_store_persists_all_layers) {
+   auto root = root_guard{};
+   const auto path = root.root / "configured-mdbx";
+   auto content = forge::db::blob::ref<>{};
+
+   {
+      auto app = make_app(document_for_mdbx(path, true, true, "safe-nosync"));
+      auto api = app->apis().get<store_plugin::api>(store_plugin::api::ref());
+      auto handle = forge::asio::blocking::run(app->runtime(), api->store("files"));
+      handle.objects().register_object<file_object>();
+      handle.objects().register_object<usage_object>();
+
+      auto transaction = forge::asio::blocking::run(
+         app->runtime(), handle.begin_transaction());
+      const auto revision = forge::asio::blocking::run(
+         app->runtime(), handle.revisions().join(transaction));
+      auto objects = forge::asio::blocking::run(
+         app->runtime(), handle.objects().join(transaction));
+      auto blobs = handle.blobs().join(transaction);
+      content = forge::asio::blocking::run(
+         app->runtime(), blobs.put(bytes("configured mdbx payload")));
+      forge::asio::blocking::run(
+         app->runtime(),
+         blobs.retain(content, forge::db::blob::owner_ref{"file:7"}));
+      forge::asio::blocking::run(
+         app->runtime(), objects.insert(make_file(7, "/configured.bin", content)));
+
+      auto usage = usage_record{};
+      usage.id = usage_record::id_t{7};
+      usage.state = 2U;
+      usage.bytes = content.size;
+      forge::asio::blocking::run(app->runtime(), objects.insert(usage));
+      forge::asio::blocking::run(app->runtime(), transaction.commit());
+      BOOST_TEST(revision.id() == 1U);
+
+      auto ranked = handle.objects().index<usage_object, by_usage_state>();
+      BOOST_TEST(forge::asio::blocking::run(app->runtime(), ranked.count()) == 1U);
+      BOOST_TEST(forge::asio::blocking::run(
+                    app->runtime(), ranked.sum<by_usage_bytes>()) == content.size);
+      forge::asio::blocking::run(app->runtime(), api->flush_all(true));
+      forge::asio::blocking::run(app->runtime(), app->shutdown());
+   }
+
+   {
+      auto app = make_app(document_for_mdbx(path, true));
+      auto api = app->apis().get<store_plugin::api>(store_plugin::api::ref());
+      auto handle = forge::asio::blocking::run(app->runtime(), api->store("files"));
+      handle.objects().register_object<file_object>();
+      handle.objects().register_object<usage_object>();
+
+      auto read = forge::asio::blocking::run(app->runtime(), handle.begin_read());
+      const auto file = forge::asio::blocking::run(
+         app->runtime(), read.objects().get(file_record::id_t{7}));
+      BOOST_TEST(file.path == "/configured.bin");
+      BOOST_TEST(forge::asio::blocking::run(
+                    app->runtime(), read.blobs().get(file.content)) ==
+                 bytes("configured mdbx payload"));
+      const auto state = forge::asio::blocking::run(
+         app->runtime(), read.objects().get(forge::db::revision::state_id));
+      BOOST_REQUIRE(state.head.has_value());
+      BOOST_TEST(*state.head == 1U);
+
+      auto ranked = read.objects().index<usage_object, by_usage_state>();
+      BOOST_TEST(forge::asio::blocking::run(app->runtime(), ranked.count()) == 1U);
+      BOOST_TEST(forge::asio::blocking::run(
+                    app->runtime(), ranked.sum<by_usage_bytes>()) == content.size);
+
+      read = {};
+      forge::asio::blocking::run(app->runtime(), app->shutdown());
+   }
+}
+
+BOOST_AUTO_TEST_CASE(store_plugin_configured_mdbx_snapshot_defers_physical_close) {
+   auto root = root_guard{};
+   const auto path = root.root / "deferred-close";
+   auto read = store_plugin::snapshot{};
+   auto content = forge::db::blob::ref<>{};
+
+   {
+      auto app = make_app(document_for_mdbx(path, true, false));
+      auto api = app->apis().get<store_plugin::api>(store_plugin::api::ref());
+      auto handle = forge::asio::blocking::run(app->runtime(), api->store("files"));
+      handle.objects().register_object<file_object>();
+
+      auto transaction = forge::asio::blocking::run(
+         app->runtime(), handle.begin_transaction());
+      auto objects = forge::asio::blocking::run(
+         app->runtime(), handle.objects().join(transaction));
+      auto blobs = handle.blobs().join(transaction);
+      content = forge::asio::blocking::run(
+         app->runtime(), blobs.put(bytes("snapshot survives shutdown")));
+      forge::asio::blocking::run(
+         app->runtime(), objects.insert(make_file(1, "/snapshot.bin", content)));
+      forge::asio::blocking::run(app->runtime(), transaction.commit());
+
+      read = forge::asio::blocking::run(app->runtime(), handle.begin_read());
+      forge::asio::blocking::run(app->runtime(), app->shutdown());
+      BOOST_CHECK_THROW(
+         forge::asio::blocking::run(app->runtime(), handle.begin_read()),
+         store_plugin::exceptions::stopped);
+      BOOST_TEST(forge::asio::blocking::run(
+                    app->runtime(), read.objects().get(file_record::id_t{1})).path ==
+                 "/snapshot.bin");
+      BOOST_TEST(forge::asio::blocking::run(
+                    app->runtime(), read.blobs().get(content)) ==
+                 bytes("snapshot survives shutdown"));
+   }
+
+   auto runtime = forge::asio::runtime{};
+   BOOST_CHECK_THROW(
+      forge::asio::blocking::run(
+         runtime,
+         forge::db::mdbx::driver::open(
+            forge::db::mdbx::config{
+               .path = path.string(),
+               .families = {"objectdb", "blobdb.data", "blobdb.refs"},
+            },
+            forge::asio::affine::lane::options{
+               .thread_name = "mdbx-competing-open"})),
+      forge::db::mdbx::exceptions::environment_busy);
+
+   read = {};
+
+   auto reopened = make_app(document_for_mdbx(path, true, false));
+   auto api = reopened->apis().get<store_plugin::api>(store_plugin::api::ref());
+   auto handle = forge::asio::blocking::run(reopened->runtime(), api->store("files"));
+   handle.objects().register_object<file_object>();
+   BOOST_TEST(forge::asio::blocking::run(
+                 reopened->runtime(), handle.objects().get(file_record::id_t{1})).path ==
+              "/snapshot.bin");
+   forge::asio::blocking::run(reopened->runtime(), reopened->shutdown());
+}
+#endif
 
 #if FORGE_HAS_ROCKSDB
 BOOST_AUTO_TEST_CASE(store_plugin_configured_rocksdb_store_persists_across_reopen) {

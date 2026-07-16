@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.31)
 
-project(forge VERSION 8.5.0 LANGUAGES C CXX ASM)
+project(forge VERSION 8.6.0 LANGUAGES C CXX ASM)
 
 include(GNUInstallDirs)
 include(CheckCXXSourceCompiles)
@@ -21,6 +21,7 @@ option(FORGE_ENABLE_VENDOR_TESTS "Build donor dependency tests and benchmarks" O
 option(FORGE_ENABLE_TUI "Build FORGE Notcurses-backed terminal UI library when notcurses-core is available" ON)
 option(FORGE_ENABLE_LIBP2P_INTEROP "Run live go-libp2p/rust-libp2p interoperability tests" OFF)
 option(FORGE_ENABLE_ROCKSDB "Build RocksDB-backed optional FORGE features when RocksDB is available" ON)
+option(FORGE_ENABLE_MDBX "Build the vendored MDBX-backed FORGE database driver" ON)
 
 set(FORGE_LIBP2P_DONORS_ROOT "" CACHE PATH "Path to workspace donors directory containing go-libp2p, rust-libp2p and libp2p-specs")
 if(NOT FORGE_LIBP2P_DONORS_ROOT)
@@ -209,6 +210,7 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/chain/protocol/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/vm/wasm/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/core/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/mdbx/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/rocksdb/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/object/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/blob/include"
@@ -252,7 +254,6 @@ set(FORGE_PLUGINS_P2P_PUBSUB_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/p2
 set(FORGE_PLUGINS_HTTP_SERVER_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/http/server/include")
 set(FORGE_PLUGINS_LOG_OTLP_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/log/otlp/include")
 set(FORGE_PLUGINS_DB_STORE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/db/store/include")
-set(FORGE_PLUGINS_DB_ROCKSDB_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/db/rocksdb/include")
 
 if(FORGE_ENABLE_TUI AND FORGE_TUI_NOTCURSES_TARGET)
    list(APPEND FORGE_SOURCE_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/libraries/tui/include")
@@ -324,6 +325,33 @@ target_include_directories(
       "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
 target_link_libraries(secp256k1 PRIVATE secp256k1-internal)
+
+set(FORGE_HAS_MDBX ${FORGE_ENABLE_MDBX})
+if(FORGE_ENABLE_MDBX)
+   add_library(mdbx-internal STATIC vendor/libmdbx/mdbx.c)
+   set_target_properties(
+      mdbx-internal PROPERTIES
+      C_STANDARD 11
+      C_STANDARD_REQUIRED ON
+      C_EXTENSIONS OFF
+      EXPORT_NAME db_mdbx_internal
+      POSITION_INDEPENDENT_CODE ON
+   )
+   target_include_directories(
+      mdbx-internal PRIVATE
+         "${CMAKE_CURRENT_SOURCE_DIR}/vendor/libmdbx"
+   )
+   target_compile_definitions(
+      mdbx-internal PRIVATE
+         MDBX_BUILD_SHARED_LIBRARY=0
+         MDBX_BUILD_TIMESTAMP="2026-05-14T18:24:33Z"
+         MDBX_BUILD_TARGET="forge-vendored"
+         MDBX_BUILD_TYPE="vendored"
+         MDBX_BUILD_FLAGS="Forge-CMake"
+         MDBX_BUILD_METADATA="forge-v0.14.2"
+   )
+   target_link_libraries(mdbx-internal PUBLIC Threads::Threads)
+endif()
 
 if(FORGE_ENABLE_VENDOR_TESTS)
    add_executable(secp256k1-bench vendor/secp256k1/src/bench.c)
@@ -454,8 +482,8 @@ if(TARGET forge_db_rocksdb)
    list(APPEND FORGE_LEAF_TARGETS forge_db_rocksdb)
 endif()
 
-if(TARGET forge_plugins_db_rocksdb)
-   list(APPEND FORGE_LEAF_TARGETS forge_plugins_db_rocksdb)
+if(TARGET forge_db_mdbx)
+   list(APPEND FORGE_LEAF_TARGETS forge_db_mdbx)
 endif()
 
 if(TARGET forge_tui)
@@ -484,8 +512,13 @@ install(
    FILE_SET CXX_MODULES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT dev EXCLUDE_FROM_ALL
 )
 
+set(FORGE_INTERNAL_TARGETS secp256k1-internal secp256k1 bls12-381 softfloat)
+if(TARGET mdbx-internal)
+   list(APPEND FORGE_INTERNAL_TARGETS mdbx-internal)
+endif()
+
 install(
-   TARGETS secp256k1-internal secp256k1 bls12-381 softfloat
+   TARGETS ${FORGE_INTERNAL_TARGETS}
    EXPORT ForgeTargets
    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev EXCLUDE_FROM_ALL
    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev EXCLUDE_FROM_ALL
@@ -561,9 +594,9 @@ if(TARGET forge_db_rocksdb)
    )
 endif()
 
-if(TARGET forge_plugins_db_rocksdb)
+if(TARGET forge_db_mdbx)
    install(
-      DIRECTORY plugins/db/rocksdb/include/forge
+      DIRECTORY libraries/db/mdbx/include/forge
       DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT dev EXCLUDE_FROM_ALL
    )
 endif()
@@ -607,6 +640,18 @@ install(
    COMPONENT dev
    EXCLUDE_FROM_ALL
 )
+
+if(TARGET mdbx-internal)
+   install(
+      FILES
+         "${CMAKE_CURRENT_SOURCE_DIR}/vendor/libmdbx/LICENSE"
+         "${CMAKE_CURRENT_SOURCE_DIR}/vendor/libmdbx/NOTICE"
+         "${CMAKE_CURRENT_SOURCE_DIR}/vendor/libmdbx/COPYRIGHT"
+      DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/Forge/libmdbx"
+      COMPONENT dev
+      EXCLUDE_FROM_ALL
+   )
+endif()
 
 install(
    EXPORT ForgeTargets
