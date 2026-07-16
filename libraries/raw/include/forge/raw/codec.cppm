@@ -302,14 +302,15 @@ template <typename Stream> void pack(Stream& stream, const unsigned_int& value) 
 
 template <typename Stream> void unpack(Stream& stream, signed_int& value) {
    auto encoded = std::uint32_t{0};
-   auto byte = std::uint8_t{0};
+   auto byte = char{0};
    auto shift = std::uint8_t{0};
    do {
       detail::require(shift < 35U, "raw signed varint is too long");
       stream.get(byte);
-      encoded |= static_cast<std::uint32_t>(byte & 0x7fU) << shift;
+      const auto octet = static_cast<std::uint8_t>(byte);
+      encoded |= static_cast<std::uint32_t>(octet & 0x7fU) << shift;
       shift += 7U;
-   } while ((byte & 0x80U) != 0U);
+   } while ((static_cast<std::uint8_t>(byte) & 0x80U) != 0U);
    value.value = static_cast<std::int32_t>((encoded >> 1U) ^ (0U - (encoded & 1U)));
 }
 

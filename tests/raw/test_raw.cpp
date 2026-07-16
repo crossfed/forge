@@ -195,6 +195,26 @@ BOOST_AUTO_TEST_CASE(deque_and_streambuf_datastreams_read_varint_prefixed_values
    BOOST_CHECK_EQUAL(streambuf.remaining(), 0U);
 }
 
+BOOST_AUTO_TEST_CASE(deque_and_streambuf_datastreams_read_signed_varints) {
+   auto uint8_stream = forge::datastream<std::deque<std::uint8_t>>{std::deque<std::uint8_t>{0x81, 0x01}};
+   auto uint8_value = forge::signed_int{};
+   forge::raw::unpack(uint8_stream, uint8_value);
+   BOOST_CHECK_EQUAL(uint8_value.value, -65);
+   BOOST_CHECK_EQUAL(uint8_stream.remaining(), 0U);
+
+   auto char_stream = forge::datastream<std::deque<char>>{std::deque<char>{static_cast<char>(0x81), char{0x01}}};
+   auto char_value = forge::signed_int{};
+   forge::raw::unpack(char_stream, char_value);
+   BOOST_CHECK_EQUAL(char_value.value, -65);
+   BOOST_CHECK_EQUAL(char_stream.remaining(), 0U);
+
+   auto streambuf = forge::datastream<std::stringbuf>{std::string{"\x81\x01", 2}, std::ios_base::in};
+   auto streambuf_value = forge::signed_int{};
+   forge::raw::unpack(streambuf, streambuf_value);
+   BOOST_CHECK_EQUAL(streambuf_value.value, -65);
+   BOOST_CHECK_EQUAL(streambuf.remaining(), 0U);
+}
+
 BOOST_AUTO_TEST_CASE(streambuf_datastream_rejects_truncated_reads) {
    auto truncated_value = forge::datastream<std::stringbuf>{std::string{"\x03ra", 3}, std::ios_base::in};
    auto value = std::string{};
