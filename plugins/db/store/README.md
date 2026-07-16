@@ -55,9 +55,9 @@ plugins:
   db:
     store:
       stores:
-        - name: "consensus"
+        - name: "catalog"
           driver: "mdbx"
-          path: "./data/mdbx/consensus"
+          path: "./data/mdbx/catalog"
           object:
             family: "objectdb"
           blob:
@@ -73,7 +73,7 @@ plugins:
             lane:
               max-pending-operations: 1024
               max-waiting-submissions: 1024
-              thread-name: "db-consensus"
+              thread-name: "db-catalog"
 ```
 
 `durable-sync` is the safe default. `safe-nosync` is an explicit replayable
