@@ -1401,6 +1401,7 @@ if(FORGE_ENABLE_CONTRACT_TOOLING)
             ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
             -DClang_DIR=${Clang_DIR}
             -DLLVM_DIR=${LLVM_DIR}
+            -DCMAKE_DISABLE_FIND_PACKAGE_Boost=TRUE
          --test-command forge_package_contract_attributes_component
    )
    set_tests_properties(test_forge_package_contract_attributes_component PROPERTIES DEPENDS test_forge_package_install)
