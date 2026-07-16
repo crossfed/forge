@@ -61,7 +61,7 @@ class [[forge::contract("abifixture")]] abifixture : public forge::contract::con
       std::array<std::int32_t, 32> values{};
    };
 
-   struct [[forge::table]] default_record {
+   struct [[forge::table]] defaultrec {
       std::uint64_t id = 0;
    };
 

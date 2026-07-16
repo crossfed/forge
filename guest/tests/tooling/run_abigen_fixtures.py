@@ -131,8 +131,8 @@ def check_features(abi):
     variants = by_name(abi["variants"])
     assert variants["variant_uint64_str"]["types"] == ["uint64", "str"]
     tables = by_name(abi["tables"])
-    assert set(tables) == {"default_record", "indextable", "owned", "records", "singletn"}
-    assert tables["default_record"]["type"] == "default_record"
+    assert set(tables) == {"defaultrec", "indextable", "owned", "records", "singletn"}
+    assert tables["defaultrec"]["type"] == "defaultrec"
     assert tables["records"]["type"] == "record"
     assert tables["owned"]["type"] == "owned_record"
     assert tables["indextable"]["type"] == "indexed_record"
@@ -286,6 +286,7 @@ def main():
     invoke(args, "duplicate", args.fixtures / "duplicate_action.cpp", args.output / "duplicate-action", succeeds=False)
     invoke(args, "overloaded", args.fixtures / "overloaded_action.cpp", args.output / "overloaded-action", succeeds=False)
     invoke(args, "duplicate", args.fixtures / "duplicate_struct.cpp", args.output / "duplicate-struct", succeeds=False)
+    invoke(args, "duplicate", args.fixtures / "duplicate_table.cpp", args.output / "duplicate-table", succeeds=False)
 
     modern = invoke(args, "parity", args.fixtures / "parity_modern.cpp", args.output)
     legacy = invoke(args, "parity", args.fixtures / "parity_legacy.cpp", args.output)

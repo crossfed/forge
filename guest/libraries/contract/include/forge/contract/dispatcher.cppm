@@ -46,4 +46,31 @@ void execute_action(chain::protocol::name self, chain::protocol::name first_rece
    }
 }
 
+struct dispatch_entry {
+   std::uint64_t name = 0;
+   void (*invoke)(chain::protocol::name, chain::protocol::name) = nullptr;
+};
+
+template <typename Contract, auto Method> constexpr dispatch_entry make_dispatch_entry(std::uint64_t name) {
+   return {
+       name,
+       [](chain::protocol::name self, chain::protocol::name first_receiver) {
+          execute_action<Contract>(self, first_receiver, Method);
+       },
+   };
+}
+
+void dispatch(chain::protocol::name receiver, chain::protocol::name code, std::uint64_t action,
+              const dispatch_entry* entries, std::size_t size);
+
+template <std::size_t Size>
+void dispatch(chain::protocol::name receiver, chain::protocol::name code, std::uint64_t action,
+              const dispatch_entry (&entries)[Size]) {
+   dispatch(receiver, code, action, entries, Size);
+}
+
+inline void dispatch(chain::protocol::name receiver, chain::protocol::name code, std::uint64_t action) {
+   dispatch(receiver, code, action, nullptr, 0U);
+}
+
 } // namespace forge::contract

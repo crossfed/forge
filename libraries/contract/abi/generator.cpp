@@ -92,7 +92,9 @@ struct schema {
    std::set<std::string> type_names;
    std::map<std::string, std::string> struct_declarations;
    std::set<std::string> variant_names;
-   std::set<std::string> table_names;
+   std::map<std::string, std::string> table_declarations;
+   std::map<std::string, std::string> inferred_table_names;
+   std::set<std::string> explicit_table_declarations;
    std::map<std::string, std::string> action_declarations;
    std::map<std::string, std::string> action_methods;
    std::map<std::string, std::string> call_declarations;
@@ -195,14 +197,41 @@ class type_encoder {
       return source == nullptr ? encode(declaration.getType()) : encode_location(source->getTypeLoc());
    }
 
-   void add_table(const clang::CXXRecordDecl& declaration, std::string name) {
+   void add_table(const clang::CXXRecordDecl& declaration, std::string name, bool inferred = false) {
+      const auto identity = declaration_identity(declaration);
+      if (inferred && output_.explicit_table_declarations.contains(identity)) {
+         return;
+      }
+      if (!inferred) {
+         output_.explicit_table_declarations.insert(identity);
+         if (const auto existing = output_.inferred_table_names.find(identity);
+             existing != output_.inferred_table_names.end()) {
+            const auto inferred_name = existing->second;
+            output_.tables.erase(std::remove_if(output_.tables.begin(), output_.tables.end(),
+                                                [&](const table_shape& table) { return table.name == inferred_name; }),
+                                 output_.tables.end());
+            output_.table_declarations.erase(inferred_name);
+            output_.inferred_table_names.erase(existing);
+         }
+      }
       if (name.empty()) {
          name = record_name(declaration);
       }
-      if (!output_.table_names.insert(name).second) {
+      const auto [existing, inserted] = output_.table_declarations.try_emplace(name, identity);
+      if (!inserted && existing->second == identity) {
+         return;
+      }
+      if (!inserted) {
+         const auto id = context_.getDiagnostics().getCustomDiagID(clang::DiagnosticsEngine::Error,
+                                                                   "duplicate contract ABI table name '%0'");
+         context_.getDiagnostics().Report(declaration.getLocation(), id) << name;
+         output_.failed = true;
          return;
       }
       output_.tables.push_back(table_shape{std::move(name), encode_record(declaration)});
+      if (inferred) {
+         output_.inferred_table_names.try_emplace(identity, output_.tables.back().name);
+      }
    }
 
  private:
@@ -591,7 +620,7 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       }
       if (const auto table = annotation(*declaration, "forge.table"); table.has_value()) {
          if (belongs_to_selected_contract(*declaration)) {
-            encoder_.add_table(*declaration, *table);
+            encoder_.add_table(*declaration, *table, table->empty());
          }
          return true;
       }
@@ -1066,19 +1095,17 @@ void write_dispatcher(const schema& input, const forge::contract::abi::request& 
    output << "extern \"C\" [[gnu::visibility(\"default\")]] void apply("
              "std::uint64_t receiver, std::uint64_t code, std::uint64_t action) {\n";
    output << "   using forge::chain::protocol::name;\n";
-   output << "   if (code != receiver) {\n";
-   output << "      return;\n";
-   output << "   }\n";
-   output << "   switch (action) {\n";
-   for (const auto& entry : input.actions) {
-      output << "      case " << protocol::make_name(entry.name).value << "ULL:\n";
-      output << "         forge::contract::execute_action<" << entry.class_name << ">(";
-      output << "name{receiver}, name{code}, &" << entry.class_name << "::" << entry.method_name << ");\n";
-      output << "         return;\n";
+   if (!input.actions.empty()) {
+      output << "   static constexpr forge::contract::dispatch_entry entries[] = {\n";
+      for (const auto& entry : input.actions) {
+         output << "      forge::contract::make_dispatch_entry<" << entry.class_name << ", &" << entry.class_name
+                << "::" << entry.method_name << ">(" << protocol::make_name(entry.name).value << "ULL),\n";
+      }
+      output << "   };\n";
+      output << "   forge::contract::dispatch(name{receiver}, name{code}, action, entries);\n";
+   } else {
+      output << "   forge::contract::dispatch(name{receiver}, name{code}, action);\n";
    }
-   output << "      default:\n";
-   output << "         return;\n";
-   output << "   }\n";
    output << "}\n";
    write_text(options.dispatcher, output.str());
 }

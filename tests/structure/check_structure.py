@@ -228,6 +228,31 @@ def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
       )
 
 
+def check_eosio_veneer(root: Path, errors: list[str]) -> None:
+   path = root / "guest" / "libraries" / "eosio" / "include" / "eosio" / "dispatcher.hpp"
+   if not path.exists():
+      return
+
+   source = path.read_text(errors="ignore")
+   for forbidden in ("switch (action)", "execute_action<"):
+      if forbidden in source:
+         errors.append(f"{path.relative_to(root)}: EOSIO veneer must not own dispatcher algorithms")
+   if "::forge::contract::dispatch(" not in source:
+      errors.append(f"{path.relative_to(root)}: EOSIO dispatcher must delegate to forge.contract.dispatcher")
+
+   generator = root / "libraries" / "contract" / "abi" / "generator.cpp"
+   generated_source = generator.read_text(errors="ignore")
+   for forbidden in ('output << "   switch (action)', 'execute_action<'):
+      if forbidden in generated_source:
+         errors.append(
+            f"{generator.relative_to(root)}: generated dispatcher must delegate to forge.contract.dispatcher"
+         )
+   if 'forge::contract::dispatch(name{receiver}' not in generated_source:
+      errors.append(
+         f"{generator.relative_to(root)}: generated dispatcher does not delegate to forge.contract.dispatcher"
+      )
+
+
 def check_modules(root: Path, files: list[Path], errors: list[str]) -> None:
    declarations: dict[str, list[tuple[Path, int]]] = defaultdict(list)
    imports: list[tuple[str, Path, int]] = []
@@ -313,6 +338,7 @@ def main() -> int:
    check_vm_wasm_boundaries(root, errors)
    check_plugin_impl_ownership(root, errors)
    check_contract_sdk_workflow(root, errors)
+   check_eosio_veneer(root, errors)
    check_modules(root, files, errors)
 
    if errors:

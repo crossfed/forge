@@ -62,7 +62,7 @@ add_library(
 )
 target_include_directories(forge_guest_runtime PRIVATE "${_runtime}")
 
-add_library(forge_guest_contract STATIC)
+add_library(forge_guest_contract STATIC "${_runtime}/dispatcher.cpp")
 target_sources(
    forge_guest_contract
    PUBLIC

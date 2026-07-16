@@ -14,13 +14,13 @@ import forge.contract.dispatcher;
 #define FORGE_EOSIO_DETAIL_EXPAND(value) FORGE_EOSIO_DETAIL_EXPAND_I(value)
 #define FORGE_EOSIO_DETAIL_EXPAND_I(value) value
 
-#define FORGE_EOSIO_DETAIL_GET_NTH_ARG(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16,  \
-                                       _17, _18, _19, _20, _21, _22, _23, _24, _25, _26, _27, _28, _29, _30, _31, \
-                                       _32, _33, name, ...)                                                           \
+#define FORGE_EOSIO_DETAIL_GET_NTH_ARG(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17,     \
+                                       _18, _19, _20, _21, _22, _23, _24, _25, _26, _27, _28, _29, _30, _31, _32, _33, \
+                                       name, ...)                                                                      \
    name
 
 #define FORGE_EOSIO_DETAIL_SEQ_SIZE(sequence) FORGE_EOSIO_DETAIL_SEQ_SIZE_I(sequence)
-#define FORGE_EOSIO_DETAIL_SEQ_SIZE_I(sequence)                                                                     \
+#define FORGE_EOSIO_DETAIL_SEQ_SIZE_I(sequence)                                                                        \
    FORGE_EOSIO_DETAIL_CAT(FORGE_EOSIO_DETAIL_SEQ_SIZE_, FORGE_EOSIO_DETAIL_SEQ_SIZE_0 sequence)
 #define FORGE_EOSIO_DETAIL_SEQ_SIZE_0(_) FORGE_EOSIO_DETAIL_SEQ_SIZE_1
 #define FORGE_EOSIO_DETAIL_SEQ_SIZE_1(_) FORGE_EOSIO_DETAIL_SEQ_SIZE_2
@@ -91,7 +91,7 @@ import forge.contract.dispatcher;
 #define FORGE_EOSIO_DETAIL_SEQ_SIZE_FORGE_EOSIO_DETAIL_SEQ_SIZE_32 32
 
 #define FORGE_EOSIO_DETAIL_SEQ_ENUM(sequence) FORGE_EOSIO_DETAIL_SEQ_ENUM_I(sequence)
-#define FORGE_EOSIO_DETAIL_SEQ_ENUM_I(sequence)                                                                    \
+#define FORGE_EOSIO_DETAIL_SEQ_ENUM_I(sequence)                                                                        \
    FORGE_EOSIO_DETAIL_CAT(FORGE_EOSIO_DETAIL_SEQ_ENUM_, FORGE_EOSIO_DETAIL_SEQ_SIZE(sequence)) sequence
 #define FORGE_EOSIO_DETAIL_SEQ_ENUM_1(value) value
 #define FORGE_EOSIO_DETAIL_SEQ_ENUM_2(value) value, FORGE_EOSIO_DETAIL_SEQ_ENUM_1
@@ -128,101 +128,94 @@ import forge.contract.dispatcher;
 
 #define FORGE_EOSIO_DETAIL_FE0(macro, ...)
 #define FORGE_EOSIO_DETAIL_FE1(macro, data, value) macro(data, value)
-#define FORGE_EOSIO_DETAIL_FE2(macro, data, value, ...)                                                             \
+#define FORGE_EOSIO_DETAIL_FE2(macro, data, value, ...)                                                                \
    macro(data, value) FORGE_EOSIO_DETAIL_FE1(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE3(macro, data, value, ...)                                                             \
+#define FORGE_EOSIO_DETAIL_FE3(macro, data, value, ...)                                                                \
    macro(data, value) FORGE_EOSIO_DETAIL_FE2(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE4(macro, data, value, ...)                                                             \
+#define FORGE_EOSIO_DETAIL_FE4(macro, data, value, ...)                                                                \
    macro(data, value) FORGE_EOSIO_DETAIL_FE3(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE5(macro, data, value, ...)                                                             \
+#define FORGE_EOSIO_DETAIL_FE5(macro, data, value, ...)                                                                \
    macro(data, value) FORGE_EOSIO_DETAIL_FE4(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE6(macro, data, value, ...)                                                             \
+#define FORGE_EOSIO_DETAIL_FE6(macro, data, value, ...)                                                                \
    macro(data, value) FORGE_EOSIO_DETAIL_FE5(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE7(macro, data, value, ...)                                                             \
+#define FORGE_EOSIO_DETAIL_FE7(macro, data, value, ...)                                                                \
    macro(data, value) FORGE_EOSIO_DETAIL_FE6(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE8(macro, data, value, ...)                                                             \
+#define FORGE_EOSIO_DETAIL_FE8(macro, data, value, ...)                                                                \
    macro(data, value) FORGE_EOSIO_DETAIL_FE7(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE9(macro, data, value, ...)                                                             \
+#define FORGE_EOSIO_DETAIL_FE9(macro, data, value, ...)                                                                \
    macro(data, value) FORGE_EOSIO_DETAIL_FE8(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE10(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE10(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE9(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE11(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE11(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE10(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE12(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE12(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE11(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE13(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE13(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE12(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE14(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE14(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE13(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE15(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE15(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE14(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE16(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE16(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE15(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE17(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE17(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE16(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE18(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE18(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE17(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE19(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE19(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE18(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE20(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE20(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE19(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE21(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE21(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE20(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE22(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE22(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE21(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE23(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE23(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE22(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE24(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE24(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE23(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE25(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE25(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE24(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE26(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE26(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE25(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE27(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE27(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE26(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE28(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE28(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE27(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE29(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE29(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE28(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE30(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE30(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE29(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE31(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE31(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE30(macro, data, __VA_ARGS__)
-#define FORGE_EOSIO_DETAIL_FE32(macro, data, value, ...)                                                            \
+#define FORGE_EOSIO_DETAIL_FE32(macro, data, value, ...)                                                               \
    macro(data, value) FORGE_EOSIO_DETAIL_FE31(macro, data, __VA_ARGS__)
 
-#define FORGE_EOSIO_DETAIL_FOREACH_SEQ_ARGS(macro, data, sequence)                                                  \
-   (macro, data, FORGE_EOSIO_DETAIL_SEQ_ENUM(sequence))
-#define FORGE_EOSIO_DETAIL_GET_NTH_ARG_SEQ_ARGS(...)                                                                \
-   ("ignored", FORGE_EOSIO_DETAIL_SEQ_ENUM(__VA_ARGS__), FORGE_EOSIO_DETAIL_FE32, FORGE_EOSIO_DETAIL_FE31,       \
-    FORGE_EOSIO_DETAIL_FE30, FORGE_EOSIO_DETAIL_FE29, FORGE_EOSIO_DETAIL_FE28, FORGE_EOSIO_DETAIL_FE27,           \
-    FORGE_EOSIO_DETAIL_FE26, FORGE_EOSIO_DETAIL_FE25, FORGE_EOSIO_DETAIL_FE24, FORGE_EOSIO_DETAIL_FE23,           \
-    FORGE_EOSIO_DETAIL_FE22, FORGE_EOSIO_DETAIL_FE21, FORGE_EOSIO_DETAIL_FE20, FORGE_EOSIO_DETAIL_FE19,           \
-    FORGE_EOSIO_DETAIL_FE18, FORGE_EOSIO_DETAIL_FE17, FORGE_EOSIO_DETAIL_FE16, FORGE_EOSIO_DETAIL_FE15,           \
-    FORGE_EOSIO_DETAIL_FE14, FORGE_EOSIO_DETAIL_FE13, FORGE_EOSIO_DETAIL_FE12, FORGE_EOSIO_DETAIL_FE11,           \
-    FORGE_EOSIO_DETAIL_FE10, FORGE_EOSIO_DETAIL_FE9, FORGE_EOSIO_DETAIL_FE8, FORGE_EOSIO_DETAIL_FE7,              \
-    FORGE_EOSIO_DETAIL_FE6, FORGE_EOSIO_DETAIL_FE5, FORGE_EOSIO_DETAIL_FE4, FORGE_EOSIO_DETAIL_FE3,               \
+#define FORGE_EOSIO_DETAIL_FOREACH_SEQ_ARGS(macro, data, sequence) (macro, data, FORGE_EOSIO_DETAIL_SEQ_ENUM(sequence))
+#define FORGE_EOSIO_DETAIL_GET_NTH_ARG_SEQ_ARGS(...)                                                                   \
+   ("ignored", FORGE_EOSIO_DETAIL_SEQ_ENUM(__VA_ARGS__), FORGE_EOSIO_DETAIL_FE32, FORGE_EOSIO_DETAIL_FE31,             \
+    FORGE_EOSIO_DETAIL_FE30, FORGE_EOSIO_DETAIL_FE29, FORGE_EOSIO_DETAIL_FE28, FORGE_EOSIO_DETAIL_FE27,                \
+    FORGE_EOSIO_DETAIL_FE26, FORGE_EOSIO_DETAIL_FE25, FORGE_EOSIO_DETAIL_FE24, FORGE_EOSIO_DETAIL_FE23,                \
+    FORGE_EOSIO_DETAIL_FE22, FORGE_EOSIO_DETAIL_FE21, FORGE_EOSIO_DETAIL_FE20, FORGE_EOSIO_DETAIL_FE19,                \
+    FORGE_EOSIO_DETAIL_FE18, FORGE_EOSIO_DETAIL_FE17, FORGE_EOSIO_DETAIL_FE16, FORGE_EOSIO_DETAIL_FE15,                \
+    FORGE_EOSIO_DETAIL_FE14, FORGE_EOSIO_DETAIL_FE13, FORGE_EOSIO_DETAIL_FE12, FORGE_EOSIO_DETAIL_FE11,                \
+    FORGE_EOSIO_DETAIL_FE10, FORGE_EOSIO_DETAIL_FE9, FORGE_EOSIO_DETAIL_FE8, FORGE_EOSIO_DETAIL_FE7,                   \
+    FORGE_EOSIO_DETAIL_FE6, FORGE_EOSIO_DETAIL_FE5, FORGE_EOSIO_DETAIL_FE4, FORGE_EOSIO_DETAIL_FE3,                    \
     FORGE_EOSIO_DETAIL_FE2, FORGE_EOSIO_DETAIL_FE1, FORGE_EOSIO_DETAIL_FE0)
-#define FORGE_EOSIO_DETAIL_FOREACH_SEQ(macro, data, ...)                                                            \
-   FORGE_EOSIO_DETAIL_EXPAND(FORGE_EOSIO_DETAIL_EXPAND(                                                            \
-       FORGE_EOSIO_DETAIL_GET_NTH_ARG FORGE_EOSIO_DETAIL_GET_NTH_ARG_SEQ_ARGS(__VA_ARGS__))                        \
-                                 FORGE_EOSIO_DETAIL_FOREACH_SEQ_ARGS(macro, data, __VA_ARGS__))
+#define FORGE_EOSIO_DETAIL_FOREACH_SEQ(macro, data, ...)                                                               \
+   FORGE_EOSIO_DETAIL_EXPAND(                                                                                          \
+       FORGE_EOSIO_DETAIL_EXPAND(FORGE_EOSIO_DETAIL_GET_NTH_ARG FORGE_EOSIO_DETAIL_GET_NTH_ARG_SEQ_ARGS(__VA_ARGS__))  \
+           FORGE_EOSIO_DETAIL_FOREACH_SEQ_ARGS(macro, data, __VA_ARGS__))
 
-#define FORGE_EOSIO_DETAIL_DISPATCH_ACTION(type, member)                                                            \
-   case ::forge::chain::protocol::make_name(FORGE_EOSIO_DETAIL_STRINGIZE(member)).value:                           \
-      ::forge::contract::execute_action<type>(::forge::chain::protocol::name{receiver},                             \
-                                              ::forge::chain::protocol::name{code}, &type::member);                 \
-      return;
+#define FORGE_EOSIO_DETAIL_DISPATCH_ACTION(type, member)                                                               \
+   ::forge::contract::make_dispatch_entry<type, &type::member>(                                                        \
+       ::forge::chain::protocol::make_name(FORGE_EOSIO_DETAIL_STRINGIZE(member)).value),
 
-#define EOSIO_DISPATCH(type, members)                                                                               \
-   extern "C" [[gnu::visibility("default")]] void apply(std::uint64_t receiver, std::uint64_t code,              \
-                                                           std::uint64_t action) {                                  \
-      if (code != receiver) {                                                                                       \
-         return;                                                                                                    \
-      }                                                                                                             \
-      switch (action) {                                                                                             \
-         FORGE_EOSIO_DETAIL_FOREACH_SEQ(FORGE_EOSIO_DETAIL_DISPATCH_ACTION, type, members)                          \
-      default:                                                                                                      \
-         return;                                                                                                    \
-      }                                                                                                             \
+#define EOSIO_DISPATCH(type, members)                                                                                  \
+   extern "C" [[gnu::visibility("default")]] void apply(std::uint64_t receiver, std::uint64_t code,                    \
+                                                        std::uint64_t action) {                                        \
+      static constexpr ::forge::contract::dispatch_entry entries[] = {                                                 \
+          FORGE_EOSIO_DETAIL_FOREACH_SEQ(FORGE_EOSIO_DETAIL_DISPATCH_ACTION, type, members)};                          \
+      ::forge::contract::dispatch(::forge::chain::protocol::name{receiver}, ::forge::chain::protocol::name{code},      \
+                                  action, entries);                                                                    \
    }

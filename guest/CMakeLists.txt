@@ -340,6 +340,7 @@ install(
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/raw/stream.cpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/raw/codec.cpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/values.cpp"
+      libraries/contract/dispatcher.cpp
    DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/runtime"
 )
 install(

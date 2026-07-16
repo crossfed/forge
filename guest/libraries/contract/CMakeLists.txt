@@ -1,4 +1,4 @@
-add_library(forge_guest_contract STATIC)
+add_library(forge_guest_contract STATIC dispatcher.cpp)
 target_sources(
    forge_guest_contract
    PUBLIC
