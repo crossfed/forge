@@ -1,6 +1,7 @@
 add_library(
    forge_db_blob STATIC
    details/snapshot_access.hxx
+   types.cpp
    store.cpp
    snapshot.cpp
    transaction.cpp
@@ -28,6 +29,7 @@ target_link_libraries(
       forge_crypto
       forge_db_core
       forge_exceptions
+      forge_ids
       forge_raw
       forge_variant
 )

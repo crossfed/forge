@@ -1,4 +1,5 @@
 #include <cstddef>
+#include <concepts>
 #include <string>
 #include <vector>
 
@@ -8,9 +9,13 @@ import forge.db.blob.store;
 import forge.db.blob.types;
 import forge.crypto.sha256;
 import forge.db.core.record;
+import forge.ids.object_id;
 import forge.variant.value;
 
 int main() {
+   using owner_id = forge::ids::typed_id<7, 11>;
+   static_assert(std::constructible_from<forge::db::blob::owner_ref, owner_id>);
+   static_assert(!std::convertible_to<owner_id, forge::db::blob::owner_ref>);
    static_assert(requires(forge::db::blob::snapshot& view,
                           forge::db::blob::ref<> reference) {
       view.get(reference);
@@ -33,5 +38,11 @@ int main() {
    forge::to_variant(reference, encoded);
    auto decoded = forge::db::blob::ref<forge::db::blob::digest>{};
    forge::from_variant(encoded, decoded);
-   return decoded.size != reference.size || decoded.digest != reference.digest ? 1 : 0;
+   const auto typed_id = owner_id{42};
+   const auto typed_owner = forge::db::blob::owner_ref{typed_id};
+   const auto object_owner = forge::db::blob::owner_ref{typed_id.as_object_id()};
+   return decoded.size != reference.size || decoded.digest != reference.digest ||
+                 typed_owner.empty() || typed_owner != object_owner
+            ? 1
+            : 0;
 }
