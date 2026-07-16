@@ -146,6 +146,17 @@ void validate_signature(const wasm::func_type& actual, const intrinsic_signature
    }
 }
 
+void validate_required_export_signature(std::string_view name, const wasm::func_type& actual) {
+   if (name != "apply") {
+      return;
+   }
+
+   if (actual.param_types.size() != 3U || actual.param_types[0] != wasm::i64 || actual.param_types[1] != wasm::i64 ||
+       actual.param_types[2] != wasm::i64 || actual.return_count != 0U) {
+      throw std::runtime_error{"contract apply export has the wrong signature: expected (i64, i64, i64) -> void"};
+   }
+}
+
 } // namespace
 
 namespace forge::contract::validation {
@@ -178,6 +189,7 @@ void validate(const request& options) {
    for (std::size_t index = 0; index < module.exports.size(); ++index) {
       const auto& entry = module.exports[index];
       if (entry.kind == wasm::external_kind::Function && text(entry.field_str) == options.required_export) {
+         validate_required_export_signature(options.required_export, module.get_function_type(entry.index));
          return;
       }
    }

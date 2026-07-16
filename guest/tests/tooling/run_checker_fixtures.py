@@ -97,6 +97,13 @@ def main():
     malformed_wasm.write_bytes(b"not wasm")
     check(args, malformed_wasm, args.abi, args.imports, succeeds=False)
 
+    wrong_apply_source = args.output / "wrong-apply.c"
+    wrong_apply_source.write_text("void apply(void) {}\n", encoding="utf-8")
+    wrong_apply_wasm = args.output / "wrong-apply.wasm"
+    compile_wasm(args, wrong_apply_source, wrong_apply_wasm, "-x", "c")
+    check(args, wrong_apply_wasm, args.abi, args.imports, succeeds=False,
+          contains="apply export has the wrong signature")
+
     malformed_registry = args.output / "malformed-registry.json"
     malformed_registry.write_text("{", encoding="utf-8")
     check(args, args.wasm, args.abi, malformed_registry, succeeds=False, contains="intrinsic manifest")

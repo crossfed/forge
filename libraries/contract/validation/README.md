@@ -17,8 +17,9 @@ forge::contract::validation::validate({
 
 Validation uses `forge.vm.wasm` and `forge.chain.protocol`; it does not invoke
 Clang and the package component does not pull Clang transitively. Unknown or
-wrongly typed imports, WASI, malformed ABI/WASM and a missing `apply` export are
-errors. The command adapter maps exceptions to process exit codes.
+wrongly typed imports, WASI, malformed ABI/WASM, a missing `apply` export and an
+`apply` export other than `(i64, i64, i64) -> void` are errors. The command
+adapter maps exceptions to process exit codes.
 
 ## Dependencies
 
@@ -31,4 +32,5 @@ Clang/LLVM.
 The validation request is experimental; accepted feature/import policy is a
 versioned SDK contract. Tests cover valid contracts, malformed ABI and WASM,
 unknown or mismatched imports, WASI, disabled features, missing exports,
-standalone package consumption and the generated SDK artifacts.
+wrongly typed `apply`, standalone package consumption and the generated SDK
+artifacts.
