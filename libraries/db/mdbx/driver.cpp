@@ -138,6 +138,7 @@ driver::open_managed(config value,
 }
 
 boost::asio::awaitable<void> driver::async_flush(bool sync) {
+   auto admission = admit_operation();
    co_await impl_->flush(sync);
 }
 

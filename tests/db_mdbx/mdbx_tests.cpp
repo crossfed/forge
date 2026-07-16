@@ -213,6 +213,14 @@ BOOST_AUTO_TEST_CASE(db_mdbx_snapshot_preserves_old_state_and_scan_contract) {
       BOOST_CHECK_EQUAL(text(second.entries[2].value), "b");
       BOOST_REQUIRE(second.next.has_value());
 
+      auto narrowed = co_await snapshot.scan_page(
+         objects,
+         forge::db::core::record_range{.begin = key("b"), .end = key("z")},
+         forge::db::core::page_request{.after = first.next, .limit = 2});
+      BOOST_REQUIRE_EQUAL(narrowed.entries.size(), 2U);
+      BOOST_CHECK_EQUAL(text(narrowed.entries[0].value), "b");
+      BOOST_CHECK_EQUAL(text(narrowed.entries[1].value), "y");
+
       auto bounded = co_await snapshot.scan_page(
          objects,
          forge::db::core::record_range{.begin = key("a"), .end = key("b")},
@@ -289,6 +297,15 @@ BOOST_AUTO_TEST_CASE(db_mdbx_async_close_is_fail_fast_and_retryable) {
 
       co_await transaction.rollback();
       transaction = {};
+
+      auto flush_closed = false;
+      try {
+         co_await driver->async_flush(true);
+      } catch (const forge::db::core::exceptions::driver_closed&) {
+         flush_closed = true;
+      }
+      BOOST_CHECK(flush_closed);
+
       co_await driver->async_close();
       co_await driver->async_close();
       driver.reset();

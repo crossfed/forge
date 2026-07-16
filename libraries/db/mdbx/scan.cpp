@@ -39,6 +39,9 @@ bool within_range(const std::vector<std::byte>& key,
    if (!starts_with(key, range.prefix.bytes())) {
       return false;
    }
+   if (key < range.begin.bytes()) {
+      return false;
+   }
    return !range.has_end || key < range.end.bytes();
 }
 
@@ -49,7 +52,9 @@ int seek(MDBX_cursor* cursor,
          MDBX_val& value) {
    if (request.after.has_value()) {
       const auto& boundary = request.after->boundary.bytes();
-      key = native_value(boundary);
+      const auto& lower_bound = range.begin.bytes();
+      const auto& start = boundary < lower_bound ? lower_bound : boundary;
+      key = native_value(start);
       auto code = mdbx_cursor_get(cursor, &key, &value, MDBX_SET_RANGE);
       if (code != MDBX_SUCCESS) {
          return code;

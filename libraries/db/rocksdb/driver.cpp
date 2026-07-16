@@ -206,6 +206,7 @@ boost::asio::awaitable<void> driver::async_flush(bool sync) {
 }
 
 void driver::flush(bool sync) {
+   auto admission = admit_operation();
    if (!store_) {
       FORGE_THROW_EXCEPTION(forge::db::core::exceptions::driver_closed, "db RocksDB driver is closed");
    }

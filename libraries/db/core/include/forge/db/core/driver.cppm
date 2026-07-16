@@ -137,6 +137,27 @@ class driver {
    boost::asio::awaitable<void> async_close();
    virtual boost::asio::awaitable<void> async_flush(bool sync) = 0;
 
+ protected:
+   class operation_admission {
+    public:
+      ~operation_admission();
+
+      operation_admission(const operation_admission&) = delete;
+      operation_admission& operator=(const operation_admission&) = delete;
+      operation_admission(operation_admission&& other) noexcept;
+      operation_admission& operator=(operation_admission&& other) noexcept;
+
+    private:
+      explicit operation_admission(std::shared_ptr<detail::driver_state> state) noexcept;
+      void release() noexcept;
+
+      std::shared_ptr<detail::driver_state> state_;
+
+      friend class driver;
+   };
+
+   [[nodiscard]] operation_admission admit_operation() const;
+
  private:
    virtual boost::asio::awaitable<std::unique_ptr<session>> open_transaction() = 0;
    virtual boost::asio::awaitable<std::unique_ptr<session>> open_snapshot() = 0;
