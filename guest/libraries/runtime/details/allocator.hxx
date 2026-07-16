@@ -9,6 +9,9 @@
 #define GROW_MEMORY(pages) __builtin_wasm_memory_grow(0, pages)
 
 namespace forge::contract::runtime {
+struct aligned_allocation_header;
+aligned_allocation_header* aligned_header(void* ptr);
+
 void* sbrk(size_t num_bytes) {
    constexpr size_t NBPPL2 = 16U;
    constexpr size_t NBBP = 65536U;
@@ -55,6 +58,7 @@ class memory_manager // NOTE: Should never allocate another instance of memory_m
    friend void* ::calloc(size_t count, size_t size);
    friend void* ::realloc(void* ptr, size_t size);
    friend void ::free(void* ptr);
+   friend aligned_allocation_header* aligned_header(void* ptr);
 
  public:
    memory_manager()
@@ -214,6 +218,32 @@ class memory_manager // NOTE: Should never allocate another instance of memory_m
       }
    }
 
+   bool mark_aligned(void* ptr) {
+      if (ptr == nullptr)
+         return false;
+
+      auto* const candidate = static_cast<char*>(ptr);
+      for (memory* heap = _available_heaps; heap < _available_heaps + _heaps_actual_size && heap->is_init(); ++heap) {
+         if (heap->mark_aligned(candidate))
+            return true;
+      }
+      return false;
+   }
+
+   bool aligned_allocation_size(const void* ptr, size_t& size) const {
+      if (ptr == nullptr)
+         return false;
+
+      const auto* const candidate = static_cast<const char*>(ptr);
+      for (const memory* heap = _available_heaps; heap < _available_heaps + _heaps_actual_size && heap->is_init();
+           ++heap) {
+         bool aligned = false;
+         if (heap->allocation(candidate, size, aligned))
+            return aligned;
+      }
+      return false;
+   }
+
    static bool adjust_to_mem_block(size_t& size) {
       constexpr auto maximum_size = _alloc_memory_mask - _mem_block;
       if (size > maximum_size)
@@ -335,6 +365,34 @@ class memory_manager // NOTE: Should never allocate another instance of memory_m
          to_free.mark_free();
       }
 
+      bool mark_aligned(char* ptr) {
+         size_t size = 0;
+         bool aligned = false;
+         if (!allocation(ptr, size, aligned))
+            return false;
+
+         buffer_ptr block(ptr, _heap + _offset);
+         block.mark_aligned();
+         return true;
+      }
+
+      bool allocation(const char* ptr, size_t& size, bool& aligned) const {
+         const char* const initialized_end = _heap + _offset;
+         char* current = _heap + _size_marker;
+         while (current != nullptr && current < initialized_end) {
+            buffer_ptr block(current, initialized_end);
+            if (current == ptr) {
+               if (!block.is_alloc() || block.end() > initialized_end)
+                  return false;
+               size = block.size();
+               aligned = block.is_aligned();
+               return true;
+            }
+            current = block.next_ptr();
+         }
+         return false;
+      }
+
       void cleanup_remaining() {
          if (_offset == _heap_size)
             return;
@@ -360,7 +418,7 @@ class memory_manager // NOTE: Should never allocate another instance of memory_m
        public:
          buffer_ptr(void* ptr, const char* const heap_end)
              : _ptr(static_cast<char*>(ptr)),
-               _size(*reinterpret_cast<size_t*>(static_cast<char*>(ptr) - _size_marker) & ~_alloc_memory_mask),
+               _size(*reinterpret_cast<size_t*>(static_cast<char*>(ptr) - _size_marker) & ~_memory_state_mask),
                _heap_end(heap_end) {}
 
          buffer_ptr(void* ptr, size_t buff_size, const char* const heap_end)
@@ -383,7 +441,7 @@ class memory_manager // NOTE: Should never allocate another instance of memory_m
 
          void size(size_t val) {
             // keep the same state (allocated or free) as was set before
-            const size_t memory_state = *reinterpret_cast<size_t*>(_ptr - _size_marker) & _alloc_memory_mask;
+            const size_t memory_state = *reinterpret_cast<size_t*>(_ptr - _size_marker) & _memory_state_mask;
             *reinterpret_cast<size_t*>(_ptr - _size_marker) = val | memory_state;
             _size = val;
          }
@@ -397,15 +455,24 @@ class memory_manager // NOTE: Should never allocate another instance of memory_m
          }
 
          void mark_alloc() {
-            *reinterpret_cast<size_t*>(_ptr - _size_marker) |= _alloc_memory_mask;
+            auto& marker = *reinterpret_cast<size_t*>(_ptr - _size_marker);
+            marker = (marker & ~_memory_state_mask) | _alloc_memory_mask;
          }
 
          void mark_free() {
-            *reinterpret_cast<size_t*>(_ptr - _size_marker) &= ~_alloc_memory_mask;
+            *reinterpret_cast<size_t*>(_ptr - _size_marker) &= ~_memory_state_mask;
+         }
+
+         void mark_aligned() {
+            *reinterpret_cast<size_t*>(_ptr - _size_marker) |= _aligned_memory_mask;
          }
 
          bool is_alloc() const {
             return *reinterpret_cast<const size_t*>(_ptr - _size_marker) & _alloc_memory_mask;
+         }
+
+         bool is_aligned() const {
+            return *reinterpret_cast<const size_t*>(_ptr - _size_marker) & _aligned_memory_mask;
          }
 
          bool merge_contiguous_if_available(size_t needed_size) {
@@ -429,7 +496,7 @@ class memory_manager // NOTE: Should never allocate another instance of memory_m
                if (next_mem_flag_size & _alloc_memory_mask)
                   break;
 
-               possible_size += (next_mem_flag_size & ~_alloc_memory_mask) + _size_marker;
+               possible_size += (next_mem_flag_size & ~_memory_state_mask) + _size_marker;
             }
 
             if (all_or_nothing && possible_size < needed_size)
@@ -464,11 +531,13 @@ class memory_manager // NOTE: Should never allocate another instance of memory_m
    static const size_t _initial_heap_size = 8192; // 32768;
    // if sbrk is not called outside of this file, then this is the max times we can call it
    static const size_t _heaps_size = 16;
+   static const size_t _aligned_memory_mask = 1U;
    alignas(std::max_align_t) char _initial_heap[_initial_heap_size];
    memory _available_heaps[_heaps_size];
    size_t _heaps_actual_size;
    size_t _active_heap;
    static const size_t _alloc_memory_mask = size_t(1) << 31;
+   static const size_t _memory_state_mask = _alloc_memory_mask | _aligned_memory_mask;
 };
 
 memory_manager memory_heap;
@@ -488,7 +557,21 @@ aligned_allocation_header* aligned_header(void* ptr) {
 
    auto* header =
        reinterpret_cast<aligned_allocation_header*>(static_cast<char*>(ptr) - sizeof(aligned_allocation_header));
-   return header->magic == aligned_allocation_header::magic_value ? header : nullptr;
+   if (header->magic != aligned_allocation_header::magic_value) {
+      return nullptr;
+   }
+
+   size_t allocation_size = 0;
+   if (!memory_heap.aligned_allocation_size(header->base, allocation_size))
+      return nullptr;
+
+   const auto base = reinterpret_cast<std::uintptr_t>(header->base);
+   const auto result = reinterpret_cast<std::uintptr_t>(ptr);
+   if (result < base || result - base < sizeof(aligned_allocation_header) || result - base > allocation_size ||
+       header->size > allocation_size - (result - base)) {
+      return nullptr;
+   }
+   return header;
 }
 } // namespace forge::contract::runtime
 
@@ -520,6 +603,10 @@ void* aligned_alloc(size_t alignment, size_t size) {
    auto* header = reinterpret_cast<forge::contract::runtime::aligned_allocation_header*>(
        static_cast<char*>(result) - sizeof(forge::contract::runtime::aligned_allocation_header));
    *header = {.base = base, .size = size};
+   if (!forge::contract::runtime::memory_heap.mark_aligned(base)) {
+      forge::contract::runtime::memory_heap.free(base);
+      return nullptr;
+   }
    return result;
 }
 

@@ -353,3 +353,11 @@ BOOST_AUTO_TEST_CASE(cdt_allocator_rejects_exhaustion) {
 BOOST_AUTO_TEST_CASE(contract_allocator_rejects_overflow_without_mutation) {
    run_allocator_action("overflows");
 }
+
+BOOST_AUTO_TEST_CASE(contract_allocator_rejects_forged_aligned_metadata) {
+   run_allocator_action("alignedguard");
+}
+
+BOOST_AUTO_TEST_CASE(contract_runtime_provides_guest_errno_storage) {
+   run_allocator_action("errnovalue");
+}

@@ -58,6 +58,7 @@ add_library(
    forge_guest_runtime STATIC
    "${_runtime}/allocator.cpp"
    "${_runtime}/allocator_new_delete.cpp"
+   "${_runtime}/errno.cpp"
    "${_runtime}/memory.cpp"
 )
 target_include_directories(forge_guest_runtime PRIVATE "${_runtime}")

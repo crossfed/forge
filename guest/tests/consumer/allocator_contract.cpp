@@ -1,3 +1,4 @@
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -147,6 +148,72 @@ class [[forge::contract("allocatortst")]] allocator_contract : public forge::con
          forge::contract::check(value[index] == 0xa5, "failed realloc modified its source allocation");
       }
       std::free(value);
+   }
+
+   [[forge::action]] void alignedguard() {
+      struct forged_header {
+         std::uint32_t magic;
+         void* base;
+         std::size_t size;
+      };
+      static_assert(sizeof(forged_header) <= alignof(std::max_align_t) - sizeof(std::size_t));
+
+      constexpr auto magic = std::uint32_t{0xa1196e4dU};
+      const auto forge_header = [magic](void* ptr, void* base, std::size_t size) {
+         auto* header = reinterpret_cast<forged_header*>(static_cast<std::uint8_t*>(ptr) - sizeof(forged_header));
+         *header = {.magic = magic, .base = base, .size = size};
+      };
+
+      auto* free_decoy = std::malloc(64U);
+      auto* ordinary = std::malloc(64U);
+      forge::contract::check(free_decoy != nullptr && ordinary != nullptr, "aligned free guard setup failed");
+      std::memset(free_decoy, 0x5a, 64U);
+      forge_header(ordinary, free_decoy, 64U);
+      std::free(ordinary);
+      auto* reused = std::malloc(64U);
+      forge::contract::check(reused != nullptr && reused != free_decoy,
+                             "ordinary free followed forged aligned metadata");
+      std::memset(reused, 0xa5, 64U);
+      for (auto index = std::size_t{0}; index < 64U; ++index) {
+         forge::contract::check(static_cast<std::uint8_t*>(free_decoy)[index] == 0x5a,
+                                "ordinary free released the forged aligned base");
+      }
+      std::free(free_decoy);
+      std::free(reused);
+
+      auto* realloc_decoy = std::malloc(64U);
+      ordinary = std::malloc(64U);
+      auto* guard = std::malloc(64U);
+      forge::contract::check(realloc_decoy != nullptr && ordinary != nullptr && guard != nullptr,
+                             "aligned realloc guard setup failed");
+      std::memset(realloc_decoy, 0x5a, 64U);
+      std::memset(ordinary, 0xa5, 64U);
+      forge_header(ordinary, realloc_decoy, 64U);
+      auto* resized = std::realloc(ordinary, 128U);
+      forge::contract::check(resized != nullptr, "ordinary realloc failed");
+      for (auto index = std::size_t{0}; index < 64U; ++index) {
+         forge::contract::check(static_cast<std::uint8_t*>(resized)[index] == 0xa5,
+                                "ordinary realloc lost data after forged aligned metadata");
+      }
+      reused = std::malloc(64U);
+      forge::contract::check(reused != nullptr && reused != realloc_decoy,
+                             "ordinary realloc followed forged aligned metadata");
+      std::memset(reused, 0x3c, 64U);
+      for (auto index = std::size_t{0}; index < 64U; ++index) {
+         forge::contract::check(static_cast<std::uint8_t*>(realloc_decoy)[index] == 0x5a,
+                                "ordinary realloc released the forged aligned base");
+      }
+      std::free(realloc_decoy);
+      std::free(guard);
+      std::free(resized);
+      std::free(reused);
+   }
+
+   [[forge::action]] void errnovalue() {
+      errno = ERANGE;
+      forge::contract::check(errno == ERANGE, "guest errno did not preserve its value");
+      errno = 0;
+      forge::contract::check(errno == 0, "guest errno did not reset");
    }
 
  private:
