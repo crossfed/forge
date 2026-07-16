@@ -25,6 +25,12 @@ libraries; guest code and the SDK assembly remain under `guest/`.
   dependencies of all shipped tools; they do not retain links to the build
   machine's LLVM installation.
 
+The host tools use the platform C++ ABI of their LLVM and dependency packages:
+`libc++` on macOS and `libstdc++` on Linux. Linux archives bundle the selected
+`libstdc++` runtime so C++23 library support does not depend on the destination
+machine. Contract code is independent of that host choice and always uses the
+pinned wasm32 libc++ sysroot shipped by the SDK.
+
 SDK and Forge versions are identical. The sysroot schema and intrinsic
 interface have independent versions because either contract can evolve without
 changing C++ source compatibility.

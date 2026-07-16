@@ -236,8 +236,19 @@ def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
    for incompatible_flag in ('CXXFLAGS=-stdlib=libc++', 'LDFLAGS=-stdlib=libc++'):
       if incompatible_flag in source:
          errors.append(
-            f"{path.relative_to(root)}: Linux host tooling must use the C++ ABI of its Clang package; "
+            f"{path.relative_to(root)}: Linux host tooling must not override its packaged C++ ABI; "
             f"remove {incompatible_flag}"
+         )
+
+   for required in (
+      "ppa:ubuntu-toolchain-r/test",
+      "g++-15",
+      "FORGE_CONTRACT_LLVM_SOURCE_DIR",
+      "--target forge_contract_llvm -j 4",
+   ):
+      if required not in source:
+         errors.append(
+            f"{path.relative_to(root)}: Contract SDK workflow is missing {required}"
          )
 
 

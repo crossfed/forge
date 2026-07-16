@@ -43,6 +43,13 @@ struct A {
 };
 BOOST_DESCRIBE_STRUCT(A, (), (x, y, z))
 
+class short_write_streambuf final : public std::streambuf {
+ protected:
+   std::streamsize xsputn(const char*, std::streamsize size) override {
+      return size > 0 ? size - 1 : 0;
+   }
+};
+
 enum class described_mode : int64_t { read = 7, write = 9 };
 BOOST_DESCRIBE_ENUM(described_mode, read, write)
 
@@ -186,6 +193,19 @@ BOOST_AUTO_TEST_CASE(deque_and_streambuf_datastreams_read_varint_prefixed_values
    forge::raw::unpack(streambuf, streambuf_value);
    BOOST_CHECK_EQUAL(streambuf_value, "raw");
    BOOST_CHECK_EQUAL(streambuf.remaining(), 0U);
+}
+
+BOOST_AUTO_TEST_CASE(streambuf_datastream_rejects_truncated_reads) {
+   auto truncated_value = forge::datastream<std::stringbuf>{std::string{"\x03ra", 3}, std::ios_base::in};
+   auto value = std::string{};
+   BOOST_CHECK_THROW(forge::raw::unpack(truncated_value, value), forge::raw::exceptions::range_error);
+
+   auto truncated_varint = forge::datastream<std::stringbuf>{std::string{"\x80", 1}, std::ios_base::in};
+   auto varint = forge::unsigned_int{};
+   BOOST_CHECK_THROW(forge::raw::unpack(truncated_varint, varint), forge::raw::exceptions::range_error);
+
+   auto truncated_write = forge::datastream<short_write_streambuf>{};
+   BOOST_CHECK_THROW(truncated_write.write("raw", 3U), forge::raw::exceptions::range_error);
 }
 
 BOOST_AUTO_TEST_CASE(char_and_uint8_values_preserve_spring_wire_bits) {

@@ -28,6 +28,7 @@ set(FORGE_CONTRACT_CLANG "" CACHE FILEPATH "Developer-mode clang++")
 set(FORGE_CONTRACT_WASM_LD "" CACHE FILEPATH "Developer-mode wasm-ld")
 set(FORGE_CONTRACT_LLVM_AR "" CACHE FILEPATH "Developer-mode llvm-ar")
 set(FORGE_CONTRACT_LLVM_RANLIB "" CACHE FILEPATH "Developer-mode llvm-ranlib")
+set(FORGE_CONTRACT_LLVM_SOURCE_DIR "" CACHE PATH "Existing pinned LLVM source checkout used by release mode")
 set(FORGE_CONTRACT_JOBS 4 CACHE STRING "Parallel jobs used by SDK superbuilds")
 
 set(FORGE_CONTRACT_LLVM_TAG "llvmorg-22.1.8")
@@ -41,18 +42,61 @@ find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 if(FORGE_CONTRACT_PROFILE STREQUAL "release")
    set(_llvm_install "${CMAKE_BINARY_DIR}/toolchain")
+   if(FORGE_CONTRACT_LLVM_SOURCE_DIR)
+      file(REAL_PATH "${FORGE_CONTRACT_LLVM_SOURCE_DIR}" _llvm_source)
+      if(NOT EXISTS "${_llvm_source}/llvm/CMakeLists.txt")
+         message(FATAL_ERROR "FORGE_CONTRACT_LLVM_SOURCE_DIR is not an llvm-project checkout: ${_llvm_source}")
+      endif()
+      find_package(Git REQUIRED)
+      execute_process(
+         COMMAND "${GIT_EXECUTABLE}" rev-parse HEAD
+         WORKING_DIRECTORY "${_llvm_source}"
+         OUTPUT_VARIABLE _llvm_source_commit
+         OUTPUT_STRIP_TRAILING_WHITESPACE
+         COMMAND_ERROR_IS_FATAL ANY
+      )
+      if(NOT _llvm_source_commit STREQUAL FORGE_CONTRACT_LLVM_COMMIT)
+         message(
+            FATAL_ERROR
+            "release LLVM checkout is ${_llvm_source_commit}, expected ${FORGE_CONTRACT_LLVM_COMMIT}"
+         )
+      endif()
+      set(
+         _llvm_source_arguments
+         SOURCE_DIR "${_llvm_source}"
+         DOWNLOAD_COMMAND ""
+         UPDATE_COMMAND ""
+         PATCH_COMMAND ""
+      )
+   else()
+      set(_llvm_source "${CMAKE_BINARY_DIR}/forge_contract_llvm-prefix/src/forge_contract_llvm")
+      set(
+         _llvm_source_arguments
+         GIT_REPOSITORY https://github.com/llvm/llvm-project.git
+         GIT_TAG ${FORGE_CONTRACT_LLVM_COMMIT}
+         GIT_SHALLOW FALSE
+      )
+   endif()
+   if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
+      set(_llvm_host_target AArch64)
+   else()
+      set(_llvm_host_target X86)
+   endif()
    ExternalProject_Add(
       forge_contract_llvm
-      GIT_REPOSITORY https://github.com/llvm/llvm-project.git
-      GIT_TAG ${FORGE_CONTRACT_LLVM_COMMIT}
-      GIT_SHALLOW FALSE
+      ${_llvm_source_arguments}
       SOURCE_SUBDIR llvm
       CMAKE_GENERATOR Ninja
       CMAKE_ARGS
          -DCMAKE_BUILD_TYPE=Release
          -DCMAKE_INSTALL_PREFIX=${_llvm_install}
+         -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+         -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
          -DLLVM_ENABLE_PROJECTS=clang\;lld
-         -DLLVM_TARGETS_TO_BUILD=WebAssembly\;AArch64\;X86
+         -DLLVM_TARGETS_TO_BUILD=WebAssembly\;${_llvm_host_target}
+         -DLLVM_BUILD_LLVM_DYLIB=ON
+         -DLLVM_LINK_LLVM_DYLIB=ON
+         -DCLANG_LINK_CLANG_DYLIB=ON
          -DLLVM_ENABLE_TERMINFO=OFF
          -DLLVM_ENABLE_ZLIB=OFF
          -DLLVM_ENABLE_ZSTD=OFF
@@ -69,7 +113,6 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
    set(FORGE_CONTRACT_LLVM_RANLIB "${_llvm_install}/bin/llvm-ranlib")
    set(FORGE_CONTRACT_CLANG_RESOURCE_DIR "${_llvm_install}/lib/clang/22")
    set(FORGE_CONTRACT_SYSROOT "${CMAKE_BINARY_DIR}/sysroot")
-   set(_llvm_source "${CMAKE_BINARY_DIR}/forge_contract_llvm-prefix/src/forge_contract_llvm")
 
    ExternalProject_Add(
       forge_contract_sysroot
