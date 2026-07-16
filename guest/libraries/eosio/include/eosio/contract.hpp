@@ -1,6 +1,6 @@
 #pragma once
 
-import forge.contract.base;
+import forge.contract;
 
 namespace eosio {
 

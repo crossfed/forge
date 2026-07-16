@@ -69,9 +69,8 @@ target_sources(
       BASE_DIRS "${_modules}"
       FILES
          "${_modules}/forge/contract/intrinsics.cppm"
-         "${_modules}/forge/contract/base.cppm"
-         "${_modules}/forge/contract/dispatcher.cppm"
          "${_modules}/forge/contract/contract.cppm"
+         "${_modules}/forge/contract/dispatcher.cppm"
 )
 target_link_libraries(
    forge_guest_contract
@@ -107,9 +106,8 @@ set(_module_arguments
    "forge.raw.codec=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_raw.dir/forge.raw.codec.pcm"
    "forge.chain.protocol.values=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.values.pcm"
    "forge.contract.intrinsics=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.intrinsics.pcm"
-   "forge.contract.base=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.base.pcm"
-   "forge.contract.dispatcher=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.dispatcher.pcm"
    "forge.contract=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.pcm"
+   "forge.contract.dispatcher=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.dispatcher.pcm"
 )
 set(_abigen_command
    "${FORGE_CONTRACT_ABIGEN}"

@@ -1,8 +1,9 @@
 # Guest Contract
 
-`forge_guest_contract` is the modern C++23 contract API for wasm32. Its modules
-are `forge.contract.base`, `forge.contract.intrinsics`,
-`forge.contract.dispatcher` and the one-import facade `forge.contract`.
+`forge_guest_contract` is the modern C++23 contract API for wasm32. The primary
+module `forge.contract` owns `forge::contract::base` and the core contract API.
+Focused modules are `forge.contract.intrinsics` and
+`forge.contract.dispatcher`; there is no aggregate-only module.
 
 ```cpp
 import forge.contract;
@@ -33,6 +34,6 @@ or blockchain state API.
 ## Stability And Tests
 
 Intrinsic interface v1 and raw action/result bytes are compatibility contracts;
-the C++23 facade is experimental until the first SDK release. Modern void and
+the C++23 API is experimental until the first SDK release. Modern void and
 non-void actions, malformed input, return values, checks, package relocation
 and execution in `forge.vm.wasm` are tested end to end.

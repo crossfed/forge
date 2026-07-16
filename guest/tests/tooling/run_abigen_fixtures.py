@@ -15,9 +15,8 @@ MODULES = (
     "forge.raw.codec",
     "forge.chain.protocol.values",
     "forge.contract.intrinsics",
-    "forge.contract.base",
-    "forge.contract.dispatcher",
     "forge.contract",
+    "forge.contract.dispatcher",
 )
 
 MODULE_TARGETS = {
@@ -26,9 +25,8 @@ MODULE_TARGETS = {
     "forge.raw.codec": "forge_guest_raw",
     "forge.chain.protocol.values": "forge_guest_chain_protocol",
     "forge.contract.intrinsics": "forge_guest_contract",
-    "forge.contract.base": "forge_guest_contract",
-    "forge.contract.dispatcher": "forge_guest_contract",
     "forge.contract": "forge_guest_contract",
+    "forge.contract.dispatcher": "forge_guest_contract",
 }
 
 PASS_FIXTURES = {

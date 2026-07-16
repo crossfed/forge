@@ -70,6 +70,20 @@ def check_aggregates(root: Path, errors: list[str]) -> None:
          if anchor.search(line):
             errors.append(f"{path.relative_to(root)}:{line_number}: dummy anchor symbol is forbidden")
 
+   comments = re.compile(r"//[^\n]*|/\*.*?\*/", re.DOTALL)
+   module_line = re.compile(rf"^\s*(?:export\s+)?module(?:\s+{MODULE_NAME})?\s*;\s*$", re.MULTILINE)
+   import_line = re.compile(rf"^\s*(?:export\s+)?import\s+(?:{MODULE_NAME}|:[A-Za-z_]\w*)\s*;\s*$", re.MULTILINE)
+   include_line = re.compile(r"^\s*#\s*include\s*[<\"][^>\"]+[>\"]\s*$", re.MULTILINE)
+   for path in source_files(root, LAYOUT_ROOTS):
+      if path.suffix != ".cppm":
+         continue
+      source = comments.sub("", path.read_text(errors="ignore"))
+      if import_line.search(source) is None:
+         continue
+      remainder = include_line.sub("", import_line.sub("", module_line.sub("", source))).strip()
+      if not remainder:
+         errors.append(f"{path.relative_to(root)}: aggregate-only module is forbidden")
+
 
 def component_roots(root: Path) -> list[Path]:
    roots: list[Path] = []

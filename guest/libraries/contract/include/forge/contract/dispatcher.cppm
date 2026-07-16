@@ -11,8 +11,7 @@ module;
 
 export module forge.contract.dispatcher;
 
-export import forge.contract.base;
-export import forge.contract.intrinsics;
+export import forge.contract;
 export import forge.raw.codec;
 
 export namespace forge::contract {

@@ -6,7 +6,6 @@ target_sources(
       BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
       FILES
          include/forge/contract/intrinsics.cppm
-         include/forge/contract/base.cppm
          include/forge/contract/contract.cppm
          include/forge/contract/dispatcher.cppm
 )

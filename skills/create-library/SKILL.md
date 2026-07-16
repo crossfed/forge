@@ -109,6 +109,10 @@ Convenience target, который только транзитивно соби�
 target-ов, объявляется `INTERFACE`. Добавлять фиктивный `.cpp`, пустой namespace,
 `aggregate_anchor`, `dummy_anchor` или другой placeholder symbol запрещено.
 
+Публичный `.cppm`, который состоит только из `import` / `export import`, запрещён.
+Основной модуль библиотеки владеет собственными declarations; удобное объединение
+нескольких leaf-модулей остаётся на уровне CMake/package component.
+
 ## Куда положить новый файл (решение)
 1. Публичный интерфейс? → `include/<ns_root>/<lib_path>/<entity>.cppm`
    (макросы/шаблоны, не выразимые модулем → `<entity>.hpp` там же).
