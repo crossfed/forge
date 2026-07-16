@@ -227,6 +227,12 @@ def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
          f"{path.relative_to(root)}: contract sysroot cache key must hash its build script and headers"
       )
 
+   macos_sdkroot = 'echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"'
+   if macos_sdkroot not in source:
+      errors.append(
+         f"{path.relative_to(root)}: macOS jobs must export the selected SDKROOT"
+      )
+
 
 def check_contract_sdk_components(root: Path, errors: list[str]) -> None:
    path = root / "guest" / "CMakeLists.txt"
