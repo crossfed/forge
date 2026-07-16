@@ -206,3 +206,16 @@ MDBX package during configure.
   CRUD calls;
 - scan pagination preserves empty keys, half-open end bounds and continuation
   semantics already required from DB RocksDB.
+
+## Deferred Donor Work
+
+Large Blob payload support is not inferred from MDBX's ability to store a large
+value. A follow-up must compare MDBX overflow-page behavior with RocksDB Blob
+files and external-value-store designs, then prove bounded memory, snapshot
+retention, collection, Revision and crash semantics before exposing a policy.
+
+Public diagnostics are also deferred. libmdbx provides environment, transaction
+and reader information that can inform the implementation, but Forge must not
+export native structs as its contract. A follow-up donor pass must separate
+portable DB health from MDBX-specific counters and define bounded observation
+during active writes, long-lived readers and environment close.

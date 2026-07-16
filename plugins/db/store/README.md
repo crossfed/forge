@@ -48,7 +48,42 @@ plugins:
 uses the same Object family for its system rows and does not create another
 RocksDB column family. Omitting `revision:` leaves the layer disabled.
 
-`driver: rocksdb` is available when Forge is built with RocksDB support. Custom
+MDBX is configured on the same named-store surface:
+
+```yaml
+plugins:
+  db:
+    store:
+      stores:
+        - name: "catalog"
+          driver: "mdbx"
+          path: "./data/mdbx/catalog"
+          object:
+            family: "objectdb"
+          blob:
+            data-family: "blobdb.data"
+            refs-family: "blobdb.refs"
+          revision: {}
+          mdbx:
+            durability: "durable-sync"
+            max-readers: 256
+            map:
+              upper-size: 68719476736
+              growth-step: 268435456
+            lane:
+              max-pending-operations: 1024
+              max-waiting-submissions: 1024
+              thread-name: "db-catalog"
+```
+
+`durable-sync` is the safe default. `safe-nosync` is an explicit replayable
+state policy and may lose the unsteady committed tail after an operating-system
+crash. Each configured MDBX store owns one bounded affine lane and one exclusive
+MDBX environment. RocksDB Blob-file options are rejected for MDBX; Blob payloads
+remain ordinary records in this backend.
+
+`driver: rocksdb` and `driver: mdbx` are available when Forge is built with the
+corresponding DB backend. RocksDB remains the default configured driver. Custom
 drivers are added programmatically through the local API during plugin
 `initialize()`, before the DB Store `after_initialize()` phase opens every
 configured layer.
@@ -154,6 +189,13 @@ auto stable_rank = co_await read.objects()
 
 New reads are accepted only in `started` and `stopping`. A snapshot opened
 before shutdown owns its backend session and remains usable until its last copy
-is destroyed, even after plugin shutdown. Keep snapshots operation-scoped or
-bounded: old RocksDB versions and Blob files remain live while a snapshot is
-held.
+is destroyed, even after plugin shutdown. Configured MDBX stores defer physical
+environment/lane cleanup when such a session is still alive. Keep snapshots
+operation-scoped or bounded: old RocksDB versions and Blob files or old MDBX
+MVCC pages remain live while a snapshot is held.
+
+Configured drivers are plugin-owned and are closed during shutdown. A live
+session makes close fail fast internally, keeps its backend operational and
+finishes physical cleanup when the last session is released. Drivers supplied
+through `add_store()` remain caller-owned: the plugin never closes them or
+their execution runtime.

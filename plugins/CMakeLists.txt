@@ -7,9 +7,6 @@ add_subdirectory(p2p/pubsub)
 add_subdirectory(http/server)
 add_subdirectory(log/otlp)
 add_subdirectory(db/store)
-if(FORGE_HAS_ROCKSDB)
-   add_subdirectory(db/rocksdb)
-endif()
 
 add_library(forge_plugins INTERFACE)
 
@@ -27,7 +24,3 @@ target_link_libraries(
       forge_plugins_log_otlp
       forge_plugins_db_store
 )
-
-if(TARGET forge_plugins_db_rocksdb)
-   target_link_libraries(forge_plugins INTERFACE forge_plugins_db_rocksdb)
-endif()

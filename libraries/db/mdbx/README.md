@@ -20,12 +20,6 @@ savepoint requirements.
 import forge.asio.affine;
 import forge.db.mdbx.driver;
 
-forge::asio::affine::lane lane{
-   {.max_pending_operations = 1024,
-    .max_waiting_submissions = 1024,
-    .thread_name = "db-mdbx"}
-};
-
 auto driver = co_await forge::db::mdbx::driver::open(
    {
       .path = "./data/mdbx",
@@ -34,7 +28,9 @@ auto driver = co_await forge::db::mdbx::driver::open(
       .map = {.upper_size = 64ULL * 1024 * 1024 * 1024,
               .growth_step = 256ULL * 1024 * 1024},
    },
-   lane.get_executor());
+   {.max_pending_operations = 1024,
+    .max_waiting_submissions = 1024,
+    .thread_name = "db-mdbx"});
 
 auto transaction = co_await driver->begin_transaction();
 co_await transaction.put({"objectdb"}, key, value);
@@ -42,11 +38,18 @@ co_await transaction.commit();
 
 co_await driver->async_close();
 driver.reset();
-co_await lane.shutdown();
 ```
 
-The lane owner must outlive every driver and session. Call `async_close()` and
-release active transactions/snapshots before shutting the lane down.
+The lane-options overload makes the driver create and retain a managed lane
+through every native session. It is intended for runtime components such as DB
+Store that own both resources. The executor overload remains available when the
+application owns a longer-lived lane; in that form the lane owner must outlive
+every driver and session.
+
+Call `async_close()` and release active transactions/snapshots before an
+explicit shutdown of a caller-owned lane. A busy close is fail-fast and does
+not invalidate live sessions; the managed form keeps the environment and lane
+alive until the last session is released.
 
 ## Execution Contract
 
@@ -85,9 +88,28 @@ daemon-lifetime cache.
 ## Boundaries
 
 This library does not own Object, Blob, Revision, ranked-index or plugin
-policy. Those layers consume the neutral DB Core driver. MDBX configuration in
-`plugins.db.store` is a separate integration; this library can already be
-passed through the plugin's programmatic `add_store()` API.
+policy. Those layers consume the neutral DB Core driver. `plugins.db.store`
+provides typed configured MDBX ownership, while programmatic `add_store()`
+continues to accept a caller-owned MDBX driver without taking over its lane or
+close lifecycle.
+
+Ordinary DB Blob records are supported, but MDBX v1 does not provide a
+large-payload storage policy comparable to RocksDB Blob files. Values cross the
+DB Core boundary as owned byte vectors and consume MDBX map space directly.
+Deployments with large or unbounded payloads should keep the payload layer on a
+backend designed for that workload until a separate policy defines thresholds,
+streaming or external-value ownership, snapshot retention, garbage collection,
+Revision interaction and crash recovery. This is not a correctness blocker for
+bounded Object, Revision and ordinary Blob records.
+
+MDBX v1 also keeps backend diagnostics private. It reports operational failures
+through typed exceptions, but does not expose a stable public status surface for
+map usage, reader slots, oldest-reader lag, retired pages, affine-lane queues or
+close progress. A future diagnostics API must separate backend-neutral health
+from MDBX-specific counters, avoid exposing native handles and paths, and prove
+that observation does not interfere with writer or snapshot lifetimes. Operators
+must size geometry and bound snapshot lifetimes from configuration until that
+surface is delivered.
 
 ## Verification
 

@@ -39,7 +39,7 @@ forge::app::plugin_id plugin::id() const {
 }
 
 std::string plugin::version() const {
-   return "1.2.0";
+   return "1.3.0";
 }
 
 std::optional<forge::config::core::component_descriptor> plugin::describe_config() const {
@@ -101,8 +101,7 @@ void plugin::request_stop() noexcept {
 }
 
 boost::asio::awaitable<void> plugin::shutdown() {
-   impl_->close();
-   co_return;
+   co_await impl_->close();
 }
 
 forge::app::plugin_descriptor descriptor() {

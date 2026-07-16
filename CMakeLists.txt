@@ -254,7 +254,6 @@ set(FORGE_PLUGINS_P2P_PUBSUB_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/p2
 set(FORGE_PLUGINS_HTTP_SERVER_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/http/server/include")
 set(FORGE_PLUGINS_LOG_OTLP_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/log/otlp/include")
 set(FORGE_PLUGINS_DB_STORE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/db/store/include")
-set(FORGE_PLUGINS_DB_ROCKSDB_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/plugins/db/rocksdb/include")
 
 if(FORGE_ENABLE_TUI AND FORGE_TUI_NOTCURSES_TARGET)
    list(APPEND FORGE_SOURCE_INCLUDE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/libraries/tui/include")
@@ -487,10 +486,6 @@ if(TARGET forge_db_mdbx)
    list(APPEND FORGE_LEAF_TARGETS forge_db_mdbx)
 endif()
 
-if(TARGET forge_plugins_db_rocksdb)
-   list(APPEND FORGE_LEAF_TARGETS forge_plugins_db_rocksdb)
-endif()
-
 if(TARGET forge_tui)
    list(APPEND FORGE_LEAF_TARGETS forge_tui)
 endif()
@@ -602,13 +597,6 @@ endif()
 if(TARGET forge_db_mdbx)
    install(
       DIRECTORY libraries/db/mdbx/include/forge
-      DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT dev EXCLUDE_FROM_ALL
-   )
-endif()
-
-if(TARGET forge_plugins_db_rocksdb)
-   install(
-      DIRECTORY plugins/db/rocksdb/include/forge
       DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT dev EXCLUDE_FROM_ALL
    )
 endif()
