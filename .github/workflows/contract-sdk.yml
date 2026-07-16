@@ -262,7 +262,9 @@ jobs:
           tar -xzf "$archive" -C build/contract-sdk-release-prefix --strip-components=1
           cmake -S guest/tests/consumer -B build/contract-release-consumer -G Ninja \
             -DForgeContract_DIR="$GITHUB_WORKSPACE/build/contract-sdk-release-prefix/lib/cmake/ForgeContract"
-          cmake --build build/contract-release-consumer --target hello allocatortst legacyhello -j 4
+          cmake --build build/contract-release-consumer \
+            --target hello allocatortst legacyhello multisource forge_contract_database_intrinsic_fixtures \
+            -j 4
           cmake -S guest/tests/e2e -B build/contract-release-e2e -G Ninja \
             -DCMAKE_C_COMPILER="$CC" \
             -DCMAKE_CXX_COMPILER="$CXX" \

@@ -754,47 +754,64 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
 
 class consumer final : public clang::ASTConsumer {
  public:
-   consumer(clang::ASTContext& context, schema& output, bool& found, std::string_view contract_name)
-       : visitor_(context, output, contract_name), found_(found) {}
+   consumer(clang::ASTContext& context, schema& output, bool& found, bool& dispatch_source_found,
+            std::string_view contract_name, bool is_dispatch_source)
+       : visitor_(context, output, contract_name), found_(found), dispatch_source_found_(dispatch_source_found),
+         is_dispatch_source_(is_dispatch_source) {}
 
    void HandleTranslationUnit(clang::ASTContext& context) override {
       visitor_.TraverseDecl(context.getTranslationUnitDecl());
-      found_ = found_ || visitor_.found_contract();
+      const auto found = visitor_.found_contract();
+      found_ = found_ || found;
+      dispatch_source_found_ = dispatch_source_found_ || (is_dispatch_source_ && found);
    }
 
  private:
    visitor visitor_;
    bool& found_;
+   bool& dispatch_source_found_;
+   bool is_dispatch_source_ = false;
 };
 
 class action final : public clang::ASTFrontendAction {
  public:
-   action(schema& output, bool& found, std::string_view contract_name)
-       : output_(output), found_(found), contract_name_(contract_name) {}
+   action(schema& output, bool& found, bool& dispatch_source_found, std::string_view contract_name,
+          std::filesystem::path dispatch_source)
+       : output_(output), found_(found), dispatch_source_found_(dispatch_source_found), contract_name_(contract_name),
+         dispatch_source_(std::move(dispatch_source)) {}
 
-   std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance& compiler, llvm::StringRef) override {
-      return std::make_unique<consumer>(compiler.getASTContext(), output_, found_, contract_name_);
+   std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance& compiler,
+                                                         llvm::StringRef input_file) override {
+      const auto input = std::filesystem::weakly_canonical(std::filesystem::path{input_file.str()});
+      return std::make_unique<consumer>(compiler.getASTContext(), output_, found_, dispatch_source_found_,
+                                        contract_name_, input == dispatch_source_);
    }
 
  private:
    schema& output_;
    bool& found_;
+   bool& dispatch_source_found_;
    std::string contract_name_;
+   std::filesystem::path dispatch_source_;
 };
 
 class action_factory final : public clang::tooling::FrontendActionFactory {
  public:
-   action_factory(schema& output, bool& found, std::string_view contract_name)
-       : output_(output), found_(found), contract_name_(contract_name) {}
+   action_factory(schema& output, bool& found, bool& dispatch_source_found, std::string_view contract_name,
+                  std::filesystem::path dispatch_source)
+       : output_(output), found_(found), dispatch_source_found_(dispatch_source_found), contract_name_(contract_name),
+         dispatch_source_(std::move(dispatch_source)) {}
 
    std::unique_ptr<clang::FrontendAction> create() override {
-      return std::make_unique<action>(output_, found_, contract_name_);
+      return std::make_unique<action>(output_, found_, dispatch_source_found_, contract_name_, dispatch_source_);
    }
 
  private:
    schema& output_;
    bool& found_;
+   bool& dispatch_source_found_;
    std::string contract_name_;
+   std::filesystem::path dispatch_source_;
 };
 
 std::string read_text(const std::filesystem::path& path) {
@@ -996,13 +1013,19 @@ artifacts generate(const request& options) {
    auto tool = clang::tooling::ClangTool{compilation, source_paths};
    auto output = schema{};
    auto found = false;
-   auto factory = action_factory{output, found, options.contract};
+   auto dispatch_source_found = false;
+   const auto dispatch_source = std::filesystem::weakly_canonical(options.sources.front());
+   auto factory = action_factory{output, found, dispatch_source_found, options.contract, dispatch_source};
    const auto result = tool.run(&factory);
    if (result != 0 || output.failed) {
       throw std::runtime_error{"contract source analysis failed"};
    }
    if (!found) {
       throw std::runtime_error{"contract '" + options.contract + "' was not found"};
+   }
+   if (!dispatch_source_found) {
+      throw std::runtime_error{"first contract source must declare contract '" + options.contract +
+                               "': " + dispatch_source.string()};
    }
    if (output.actions.empty() && output.calls.empty() && output.tables.empty()) {
       throw std::runtime_error{"contract '" + options.contract + "' has no ABI entries"};

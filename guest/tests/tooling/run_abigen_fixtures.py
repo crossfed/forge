@@ -48,7 +48,17 @@ FAIL_FIXTURES = {
 }
 
 
-def invoke(args, contract, source, output, *, succeeds=True, ricardian_contracts=None, ricardian_clauses=None):
+def invoke(
+    args,
+    contract,
+    source,
+    output,
+    *,
+    succeeds=True,
+    additional_sources=(),
+    ricardian_contracts=None,
+    ricardian_clauses=None,
+):
     output.mkdir(parents=True, exist_ok=True)
     abi = output / f"{source.stem}.abi"
     dispatch = output / f"{source.stem}.dispatcher.cpp"
@@ -74,7 +84,7 @@ def invoke(args, contract, source, output, *, succeeds=True, ricardian_contracts
         command.extend(("--ricardian-contracts", str(ricardian_contracts)))
     if ricardian_clauses is not None:
         command.extend(("--ricardian-clauses", str(ricardian_clauses)))
-    command.append(str(source))
+    command.extend((str(source), *(str(item) for item in additional_sources)))
 
     result = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
     if succeeds and result.returncode != 0:
@@ -239,6 +249,24 @@ def main():
         ricardian_clauses=args.fixtures / "ricardian.clauses.md",
     )
     check_features(features)
+
+    multi_source_contract = args.fixtures / "multi_source_contract.cpp"
+    multi_source_helper = args.fixtures / "multi_source_helper.cpp"
+    invoke(
+        args,
+        "multisource",
+        multi_source_helper,
+        args.output / "multi-source-invalid",
+        succeeds=False,
+        additional_sources=(multi_source_contract,),
+    )
+    invoke(
+        args,
+        "multisource",
+        multi_source_contract,
+        args.output / "multi-source-valid",
+        additional_sources=(multi_source_helper,),
+    )
 
     modern = invoke(args, "parity", args.fixtures / "parity_modern.cpp", args.output)
     legacy = invoke(args, "parity", args.fixtures / "parity_legacy.cpp", args.output)

@@ -1,7 +1,7 @@
 include(ExternalProject)
 
 function(forge_add_contract target)
-   cmake_parse_arguments(ARG "" "RICARDIAN_CONTRACTS;RICARDIAN_CLAUSES" "SOURCES" ${ARGN})
+   cmake_parse_arguments(ARG "" "DISPATCH_SOURCE;RICARDIAN_CONTRACTS;RICARDIAN_CLAUSES" "SOURCES" ${ARGN})
    if(NOT ARG_SOURCES)
       message(FATAL_ERROR "forge_add_contract(${target}) requires SOURCES")
    endif()
@@ -17,6 +17,28 @@ function(forge_add_contract target)
       endif()
       list(APPEND _sources "${_absolute}")
    endforeach()
+
+   list(LENGTH _sources _source_count)
+   if(NOT ARG_DISPATCH_SOURCE)
+      if(_source_count GREATER 1)
+         message(FATAL_ERROR "forge_add_contract(${target}) requires DISPATCH_SOURCE when SOURCES has multiple files")
+      endif()
+      list(GET _sources 0 _dispatch_source)
+   else()
+      get_filename_component(
+         _dispatch_source
+         "${ARG_DISPATCH_SOURCE}"
+         ABSOLUTE
+         BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+      )
+      list(FIND _sources "${_dispatch_source}" _dispatch_source_index)
+      if(_dispatch_source_index EQUAL -1)
+         message(FATAL_ERROR "forge_add_contract(${target}) DISPATCH_SOURCE must also be listed in SOURCES")
+      endif()
+   endif()
+
+   list(REMOVE_ITEM _sources "${_dispatch_source}")
+   list(INSERT _sources 0 "${_dispatch_source}")
    string(JOIN "|" _encoded_sources ${_sources})
 
    set(_binary_dir "${CMAKE_CURRENT_BINARY_DIR}/${target}.contract")

@@ -73,6 +73,9 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
       forge_contract_sysroot
       DEPENDS forge_contract_llvm
       SOURCE_DIR "${_llvm_source}/runtimes"
+      DOWNLOAD_COMMAND ""
+      UPDATE_COMMAND ""
+      PATCH_COMMAND ""
       CMAKE_GENERATOR Ninja
       CMAKE_ARGS
          -DCMAKE_BUILD_TYPE=Release
@@ -362,7 +365,11 @@ install(
        file(COPY_FILE \"${FORGE_CONTRACT_LLVM_AR}\" \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/bin/llvm-ar\" ONLY_IF_DIFFERENT)
        file(COPY_FILE \"${FORGE_CONTRACT_LLVM_RANLIB}\" \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/bin/llvm-ranlib\" ONLY_IF_DIFFERENT)"
 )
-file(REAL_PATH "${FORGE_CONTRACT_WASM_LD}" _forge_contract_wasm_ld)
+if(EXISTS "${FORGE_CONTRACT_WASM_LD}")
+   file(REAL_PATH "${FORGE_CONTRACT_WASM_LD}" _forge_contract_wasm_ld)
+else()
+   set(_forge_contract_wasm_ld "${FORGE_CONTRACT_WASM_LD}")
+endif()
 get_filename_component(_forge_contract_wasm_ld_bin "${_forge_contract_wasm_ld}" DIRECTORY)
 file(GLOB
    _forge_contract_lld_runtime
@@ -380,6 +387,11 @@ if(_forge_contract_lld_runtime)
    install(FILES ${_forge_contract_lld_runtime} DESTINATION lib)
 endif()
 if(FORGE_CONTRACT_PROFILE STREQUAL "release")
+   configure_file(
+      cmake/BundleContractSDK.cmake.in
+      "${CMAKE_CURRENT_BINARY_DIR}/BundleContractSDK.cmake"
+      @ONLY
+   )
    install(
       DIRECTORY "${_llvm_install}/lib/"
       DESTINATION lib
@@ -397,7 +409,7 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
          "${_llvm_source}/compiler-rt/LICENSE.TXT"
       DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/forge-contract"
    )
-   install(SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/cmake/BundleContractSDK.cmake")
+   install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/BundleContractSDK.cmake")
 else()
    install(FILES "${FORGE_CONTRACT_CLANG_CPP_RUNTIME}" "${FORGE_CONTRACT_LLVM_RUNTIME}" DESTINATION lib)
 endif()

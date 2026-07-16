@@ -53,6 +53,17 @@ forge_add_contract(
 )
 ```
 
+For multiple translation units, identify the source that declares the contract
+class. Other sources remain ordinary separately compiled implementation files:
+
+```cmake
+forge_add_contract(
+   token
+   SOURCES token_helpers.cpp token.cpp
+   DISPATCH_SOURCE token.cpp
+)
+```
+
 Configure the host project normally. `forge_add_contract` creates an isolated
 wasm32 sub-build, so the parent project does not use the SDK toolchain file:
 

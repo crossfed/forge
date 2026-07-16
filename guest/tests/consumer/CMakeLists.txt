@@ -26,6 +26,12 @@ forge_add_contract(
 )
 
 forge_add_contract(
+   multisource
+   SOURCES multi_source_helper.cpp multi_source.cpp
+   DISPATCH_SOURCE multi_source.cpp
+)
+
+forge_add_contract(
    allocatortst
    SOURCES allocator_contract.cpp
 )

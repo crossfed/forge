@@ -1,10 +1,11 @@
 set(_prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+set(_library_dir "${_prefix}/@CMAKE_INSTALL_LIBDIR@")
 set(_executables
    "${_prefix}/bin/abigen"
    "${_prefix}/bin/contract-check"
    "${_prefix}/bin/contract-manifest"
 )
-set(_plugin "${_prefix}/lib/forge-contract/attr-plugin${CMAKE_SHARED_MODULE_SUFFIX}")
+set(_plugin "${_library_dir}/forge-contract/attr-plugin@CMAKE_SHARED_MODULE_SUFFIX@")
 
 foreach(_path IN LISTS _executables _plugin)
    if(NOT EXISTS "${_path}")
@@ -17,7 +18,7 @@ file(GET_RUNTIME_DEPENDENCIES
    UNRESOLVED_DEPENDENCIES_VAR _unresolved
    EXECUTABLES ${_executables}
    LIBRARIES "${_plugin}"
-   DIRECTORIES "${_prefix}/lib"
+   DIRECTORIES "${_library_dir}"
    PRE_EXCLUDE_REGEXES
       "^/System/Library/"
       "^/usr/lib/"
@@ -27,11 +28,11 @@ if(_unresolved)
    message(FATAL_ERROR "unresolved Forge Contract SDK runtime dependencies: ${_unresolved}")
 endif()
 
-file(MAKE_DIRECTORY "${_prefix}/lib")
+file(MAKE_DIRECTORY "${_library_dir}")
 set(_bundled)
 foreach(_dependency IN LISTS _dependencies)
    get_filename_component(_name "${_dependency}" NAME)
-   set(_destination "${_prefix}/lib/${_name}")
+   set(_destination "${_library_dir}/${_name}")
    file(COPY_FILE "${_dependency}" "${_destination}" ONLY_IF_DIFFERENT)
    list(APPEND _bundled "${_destination}")
 endforeach()
