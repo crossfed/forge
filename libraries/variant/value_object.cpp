@@ -4,6 +4,7 @@ module;
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 module forge.variant.value;
 
