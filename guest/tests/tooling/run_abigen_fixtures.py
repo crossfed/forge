@@ -296,6 +296,20 @@ def main():
     )
     invoke(
         args,
+        "foreignscope",
+        args.fixtures / "foreign_contract_attribute.cpp",
+        args.output / "foreign-contract-attribute",
+        succeeds=False,
+    )
+    invoke(
+        args,
+        "foreignscope",
+        args.fixtures / "foreign_action_attribute.cpp",
+        args.output / "foreign-action-attribute",
+        succeeds=False,
+    )
+    invoke(
+        args,
         "unnamedaction",
         args.fixtures / "unnamed_action_parameter.cpp",
         args.output / "unnamed-action-parameter",

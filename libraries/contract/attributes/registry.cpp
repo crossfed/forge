@@ -46,8 +46,11 @@ bool require_declaration(clang::Sema& sema, const ParsedAttr& attribute, clang::
 }
 
 bool require_scope(clang::Sema& sema, const ParsedAttr& attribute) {
-   if (attribute.getScopeName() != nullptr) {
-      return true;
+   if (const auto* scope = attribute.getScopeName(); scope != nullptr) {
+      const auto name = scope->getName();
+      if (name == "forge" || name == "eosio") {
+         return true;
+      }
    }
    const auto diagnostic = sema.getDiagnostics().getCustomDiagID(
        clang::DiagnosticsEngine::Error, "Forge contract attributes require the 'forge' or 'eosio' namespace");
