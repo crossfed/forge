@@ -140,17 +140,18 @@ template <typename Stream> void pack_unsigned_int(Stream& stream, std::uint32_t 
 
 template <typename Stream> std::uint32_t unpack_unsigned_int(Stream& stream) {
    auto encoded = std::uint32_t{0};
-   auto byte = std::uint8_t{0};
+   auto byte = char{0};
    auto shift = std::uint8_t{0};
    do {
       require(shift < 35U, "raw unsigned varint is too long");
       stream.get(byte);
+      const auto octet = static_cast<std::uint8_t>(byte);
       if (shift == 28U) {
-         require((byte & 0xf0U) == 0U, "raw unsigned varint overflows uint32");
+         require((octet & 0xf0U) == 0U, "raw unsigned varint overflows uint32");
       }
-      encoded |= static_cast<std::uint32_t>(byte & 0x7fU) << shift;
+      encoded |= static_cast<std::uint32_t>(octet & 0x7fU) << shift;
       shift += 7U;
-   } while ((byte & 0x80U) != 0U);
+   } while ((static_cast<std::uint8_t>(byte) & 0x80U) != 0U);
    return encoded;
 }
 
