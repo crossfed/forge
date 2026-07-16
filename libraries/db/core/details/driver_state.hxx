@@ -29,6 +29,7 @@ class driver_state final : public std::enable_shared_from_this<driver_state> {
    };
 
    open_admission admit_open();
+   void require_open();
    close_action admit_close();
    void finish_close() noexcept;
    void fail_close() noexcept;

@@ -75,6 +75,10 @@ boost::asio::awaitable<void> driver::async_close() {
    state_->finish_close();
 }
 
+void driver::require_open() const {
+   state_->require_open();
+}
+
 boost::asio::awaitable<void> driver::close_driver() {
    co_return;
 }

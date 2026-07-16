@@ -44,6 +44,12 @@ and every new open after close has started reports typed `driver_closed`.
 Backend destructors remain no-throw fallbacks, not substitutes for this awaited
 ordering boundary.
 
+Backend-specific public operations that do not pass through `begin_transaction()`
+or `begin_read()`, such as a driver's flush operation, must call the protected
+`driver::require_open()` admission guard before accessing backend state. Once a
+close request starts, that guard reports `driver_closed`; operations admitted
+before the request may complete according to the backend's serialization rules.
+
 ## Snapshot Ownership
 
 Snapshots opened by `driver::begin_read()` carry the identity of that driver.

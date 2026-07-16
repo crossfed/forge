@@ -238,6 +238,16 @@ BOOST_AUTO_TEST_CASE(db_rocksdb_snapshot_scans_prefixless_half_open_ranges) {
       BOOST_REQUIRE_EQUAL(second.entries.size(), 1U);
       BOOST_CHECK_EQUAL(text(second.entries.front().value), "y");
       BOOST_CHECK(!second.next.has_value());
+
+      auto narrowed = co_await snapshot.scan_page(
+         objects,
+         forge::db::core::record_range{.begin = key("b"), .end = key("z")},
+         forge::db::core::page_request{
+            .after = forge::db::core::cursor{.boundary = key("a")},
+            .limit = 2});
+      BOOST_REQUIRE_EQUAL(narrowed.entries.size(), 2U);
+      BOOST_CHECK_EQUAL(text(narrowed.entries[0].value), "b");
+      BOOST_CHECK_EQUAL(text(narrowed.entries[1].value), "y");
       co_return;
    }());
 

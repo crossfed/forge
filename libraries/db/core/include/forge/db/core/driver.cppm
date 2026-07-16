@@ -137,6 +137,9 @@ class driver {
    boost::asio::awaitable<void> async_close();
    virtual boost::asio::awaitable<void> async_flush(bool sync) = 0;
 
+ protected:
+   void require_open() const;
+
  private:
    virtual boost::asio::awaitable<std::unique_ptr<session>> open_transaction() = 0;
    virtual boost::asio::awaitable<std::unique_ptr<session>> open_snapshot() = 0;

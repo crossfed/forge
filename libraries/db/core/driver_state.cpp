@@ -56,6 +56,14 @@ driver_state::open_admission driver_state::admit_open() {
    return open_admission{shared_from_this()};
 }
 
+void driver_state::require_open() {
+   auto lock = std::lock_guard{mutex_};
+   if (phase_ != phase::open) {
+      FORGE_THROW_EXCEPTION(exceptions::driver_closed,
+                            "db driver is closing or closed");
+   }
+}
+
 driver_state::close_action driver_state::admit_close() {
    auto lock = std::lock_guard{mutex_};
    if (phase_ == phase::closed) {
