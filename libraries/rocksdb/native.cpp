@@ -52,21 +52,24 @@ scan_result read_scan_page(std::unique_ptr<::rocksdb::Iterator> iterator,
       return result;
    }
    const auto has_cursor = request.has_cursor || !request.cursor.empty();
-   if (!request.lower_bound.empty() && !starts_with(request.lower_bound, request.prefix)) {
+   const auto& lower_bound = request.lower_bound.empty()
+                                ? request.prefix
+                                : request.lower_bound;
+   if (!lower_bound.empty() && !starts_with(lower_bound, request.prefix)) {
       return result;
    }
    const auto cursor_before_lower_bound =
-      has_cursor && request.cursor < request.lower_bound;
+      has_cursor && request.cursor < lower_bound;
    if (has_cursor && !cursor_before_lower_bound &&
        !starts_with(request.cursor, request.prefix)) {
       return result;
    }
 
    if (!has_cursor) {
-      iterator->Seek(to_slice(request.lower_bound.empty() ? request.prefix : request.lower_bound));
+      iterator->Seek(to_slice(lower_bound));
    } else {
       iterator->Seek(to_slice(cursor_before_lower_bound
-                                 ? request.lower_bound
+                                 ? lower_bound
                                  : request.cursor));
       if (iterator->Valid()) {
          const auto key = bytes_from_slice(iterator->key());
