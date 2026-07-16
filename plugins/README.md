@@ -42,7 +42,7 @@ registry.register_plugin(forge::plugins::p2p::node::descriptor());
 registry.register_plugin(forge::plugins::crypto::signer::descriptor());
 registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 registry.register_plugin(forge::plugins::log::otlp::descriptor());
-registry.register_plugin(forge::plugins::db::rocksdb::descriptor());
+registry.register_plugin(forge::plugins::db::store::descriptor());
 ```
 
 ```cpp

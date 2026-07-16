@@ -16,15 +16,17 @@ not expose `::rocksdb::*`; native handles, options and iterators stay private.
 - A plugin wants to expose database operations while keeping RocksDB mechanics
 below the plugin boundary.
 
-Use `forge::plugins::db::rocksdb` instead when the database should be configured
-from an application config section and exposed as a local Forge API.
+Use `forge::plugins::db::store` with `driver: rocksdb` instead when Object,
+Blob and Revision layers should be configured from an application config
+section and exposed through the DB Store API.
 
 ## When Not To Use
 
 - Do not use `forge_rocksdb` as a generic database abstraction. It is the
   concrete RocksDB backend.
 - Do not call it directly from application plugins that should depend on a
-  configured database service. Use `forge::plugins::db::rocksdb`.
+  configured database service. Use `forge::plugins::db::store` with
+  `driver: rocksdb`.
 - Do not put product schema, replication, authorization or retention policy in
   this library.
 - Do not use it for async scheduling. Offload blocking work in the caller or in
@@ -151,6 +153,7 @@ unchanged.
 - Filesystem and RocksDB failures are mapped to typed `forge.rocksdb`
   exceptions before crossing the public boundary.
 - App config, scheduler offload and plugin lifecycle belong to
-  `forge::plugins::db::rocksdb`, not this library.
+  `forge::plugins::db::store`, not this library. Select this backend with
+  `driver: rocksdb`.
 - Product storage policy, replication, auth and data placement are outside this
   library.
