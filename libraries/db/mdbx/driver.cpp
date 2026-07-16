@@ -5,6 +5,7 @@ module;
 
 #include <boost/asio/awaitable.hpp>
 
+#include <atomic>
 #include <functional>
 #include <limits>
 #include <map>
