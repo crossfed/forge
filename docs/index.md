@@ -54,7 +54,7 @@ Each library guide must be useful without reading source first:
 - [reflect](../libraries/reflect/README.md)
 - [variant](../libraries/variant/README.md)
 - [raw](../libraries/raw/README.md)
-- [ids](../libraries/ids/README.md)
+- [db_ids](../libraries/db/ids/README.md)
 - [compression](../libraries/compression/README.md)
 - [chain](../libraries/chain/README.md)
 - [db_core](../libraries/db/core/README.md)
