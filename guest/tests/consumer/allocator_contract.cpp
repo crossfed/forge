@@ -2,6 +2,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <new>
 
 import forge.contract;
@@ -130,6 +131,22 @@ class [[forge::contract("allocatortst")]] allocator_contract : public forge::con
 
    [[forge::action]] void donorfail() {
       forge::contract::check(std::malloc(33U * 1024U * 1024U) != nullptr, "failed to allocate pages");
+   }
+
+   [[forge::action]] void overflows() {
+      auto* value = static_cast<std::uint8_t*>(std::malloc(64U));
+      forge::contract::check(value != nullptr, "overflow test setup failed");
+      std::memset(value, 0xa5, 64U);
+
+      const auto maximum = std::numeric_limits<std::size_t>::max();
+      forge::contract::check(std::malloc(maximum) == nullptr, "oversized malloc succeeded");
+      forge::contract::check(std::calloc(maximum, 2U) == nullptr, "overflowing calloc succeeded");
+      forge::contract::check(std::aligned_alloc(64U, maximum - 63U) == nullptr, "oversized aligned_alloc succeeded");
+      forge::contract::check(std::realloc(value, maximum) == nullptr, "oversized realloc succeeded");
+      for (auto index = std::size_t{0}; index < 64U; ++index) {
+         forge::contract::check(value[index] == 0xa5, "failed realloc modified its source allocation");
+      }
+      std::free(value);
    }
 
  private:

@@ -336,3 +336,7 @@ BOOST_AUTO_TEST_CASE(cdt_allocator_rejects_exhaustion) {
       return std::string_view{error.what()} == "failed to allocate pages";
    });
 }
+
+BOOST_AUTO_TEST_CASE(contract_allocator_rejects_overflow_without_mutation) {
+   run_allocator_action("overflows");
+}

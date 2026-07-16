@@ -11,7 +11,8 @@ allocator mechanics are paired under `details/*.hxx`; there is no fake public
 module because the external C ABI comes from generated sysroot headers.
 
 Allocator fragmentation, alignment, reuse, growth and exhaustion are exercised
-by guest contracts and then executed through `forge.vm.wasm`.
+by guest contracts and then executed through `forge.vm.wasm`. Oversized
+requests and arithmetic overflow fail without changing existing allocations.
 
 ## Dependencies And Boundary
 

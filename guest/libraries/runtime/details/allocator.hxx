@@ -20,7 +20,7 @@ void* sbrk(size_t num_bytes) {
       initialized = true;
    }
 
-   if (num_bytes > INT32_MAX)
+   if (num_bytes > INT32_MAX || num_bytes > std::numeric_limits<size_t>::max() - 7U)
       return reinterpret_cast<void*>(-1);
 
    const size_t prev_num_bytes = sbrk_bytes;
@@ -29,8 +29,12 @@ void* sbrk(size_t num_bytes) {
    // round the absolute value of num_bytes to an alignment boundary
    num_bytes = (num_bytes + 7U) & ~7U;
 
+   if (num_bytes > std::numeric_limits<size_t>::max() - sbrk_bytes)
+      return reinterpret_cast<void*>(-1);
+
    // update the number of bytes allocated, and compute the number of pages needed
-   const size_t num_desired_pages = (sbrk_bytes + num_bytes + NBBP - 1) >> NBPPL2;
+   const size_t desired_bytes = sbrk_bytes + num_bytes;
+   const size_t num_desired_pages = (desired_bytes >> NBPPL2) + ((desired_bytes & (NBBP - 1U)) != 0U);
 
    if (num_desired_pages > current_pages) {
       if (GROW_MEMORY(num_desired_pages - current_pages) == -1)
@@ -74,13 +78,9 @@ class memory_manager // NOTE: Should never allocate another instance of memory_m
 
       // grab up to the end of the current WASM memory page provided that it has 1KiB remaining, otherwise
       //  grow to end of next page
-      size_t heap_adj;
-      if (current_memory_size % wasm_page_size <= wasm_page_size - 1024)
-         heap_adj =
-             (current_memory_size + wasm_page_size) - (current_memory_size % wasm_page_size) - current_memory_size;
-      else
-         heap_adj = (current_memory_size + wasm_page_size * 2) - (current_memory_size % (wasm_page_size * 2)) -
-                    current_memory_size;
+      const auto page_remainder = current_memory_size % wasm_page_size;
+      const auto page_remaining = wasm_page_size - page_remainder;
+      const auto heap_adj = page_remaining >= 1024U ? page_remaining : page_remaining + wasm_page_size;
       char* new_memory_start = reinterpret_cast<char*>(sbrk(heap_adj));
       if (new_memory_start == reinterpret_cast<char*>(-1)) {
          // ensure that any remaining unallocated memory gets cleaned up
@@ -111,7 +111,8 @@ class memory_manager // NOTE: Should never allocate another instance of memory_m
       if (_heaps_actual_size == 0)
          _heaps_actual_size = _heaps_size;
 
-      adjust_to_mem_block(size);
+      if (!adjust_to_mem_block(size))
+         return nullptr;
 
       const auto reuse_freed = [&]() -> char* {
          const auto heap_count = std::min(_active_heap + 1U, _heaps_actual_size);
@@ -166,7 +167,8 @@ class memory_manager // NOTE: Should never allocate another instance of memory_m
          return nullptr;
       }
 
-      adjust_to_mem_block(size);
+      if (!adjust_to_mem_block(size))
+         return nullptr;
 
       char* realloc_ptr = nullptr;
       size_t orig_ptr_size = 0;
@@ -212,11 +214,13 @@ class memory_manager // NOTE: Should never allocate another instance of memory_m
       }
    }
 
-   void adjust_to_mem_block(size_t& size) {
-      const size_t remainder = (size + _size_marker) & _rem_mem_block_mask;
-      if (remainder > 0) {
-         size += _mem_block - remainder;
-      }
+   static bool adjust_to_mem_block(size_t& size) {
+      constexpr auto maximum_size = _alloc_memory_mask - _mem_block;
+      if (size > maximum_size)
+         return false;
+
+      size = (size + _rem_mem_block_mask) & ~_rem_mem_block_mask;
+      return true;
    }
 
    class memory {
@@ -239,17 +243,17 @@ class memory_manager // NOTE: Should never allocate another instance of memory_m
       }
 
       size_t is_capacity_remaining() const {
-         return _offset + _size_marker < _heap_size;
+         return _offset < _heap_size && _size_marker < _heap_size - _offset;
       }
 
       char* malloc(size_t size) {
-         size_t used_up_size = _offset + size + _size_marker;
-         if (used_up_size > _heap_size) {
+         if (_offset > _heap_size || size > _heap_size - _offset || _size_marker > _heap_size - _offset - size) {
             return nullptr;
          }
 
+         const size_t used_up_size = _offset + size + _size_marker;
          buffer_ptr new_buff(&_heap[_offset + _size_marker], size, _heap + _heap_size);
-         _offset += size + _size_marker;
+         _offset = used_up_size;
          new_buff.mark_alloc();
          return new_buff.ptr();
       }
@@ -286,7 +290,7 @@ class memory_manager // NOTE: Should never allocate another instance of memory_m
             return nullptr;
          }
 
-         if (ptr > end_of_buffer - size) {
+         if (size > static_cast<size_t>(end_of_buffer - ptr)) {
             // cannot resize in place
             return nullptr;
          }
