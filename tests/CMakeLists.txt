@@ -15,6 +15,17 @@ add_test(
    COMMAND ${Python3_EXECUTABLE} ${FORGE_STRUCTURE_CHECK} ${CMAKE_SOURCE_DIR}
    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
+add_test(
+   NAME test_forge_contract_sdk_cmake_runtime_policy
+   COMMAND
+      ${CMAKE_COMMAND}
+      -DFORGE_CONTRACT_RUNTIME_POLICY=${CMAKE_SOURCE_DIR}/guest/cmake/ContractSDKRuntimeDependencies.cmake
+      -P ${CMAKE_SOURCE_DIR}/guest/tests/tooling/check_runtime_bundle_policy.cmake
+)
+add_test(
+   NAME test_forge_contract_sdk_relocation_runtime_policy
+   COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/guest/tests/tooling/test_runtime_bundle_policy.py
+)
 
 add_executable(
    test_forge

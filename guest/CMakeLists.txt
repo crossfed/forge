@@ -423,6 +423,11 @@ configure_file(
    "${CMAKE_CURRENT_BINARY_DIR}/BundleContractSDK.cmake"
    @ONLY
 )
+configure_file(
+   cmake/ContractSDKRuntimeDependencies.cmake
+   "${CMAKE_CURRENT_BINARY_DIR}/ContractSDKRuntimeDependencies.cmake"
+   COPYONLY
+)
 if(FORGE_CONTRACT_PROFILE STREQUAL "release")
    install(
       DIRECTORY "${_llvm_install}/lib/"
