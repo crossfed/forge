@@ -4,7 +4,7 @@
 identifiers. It provides stable object identity without depending on a driver,
 transaction, Object store or application runtime.
 
-Use it when a type needs a BitShares/Storlane-style object identity:
+Use it when a type needs a compact, typed `space/type/instance` identity:
 
 ```cpp
 import forge.db.ids.object_id;
