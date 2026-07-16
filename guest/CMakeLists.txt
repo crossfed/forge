@@ -32,6 +32,8 @@ set(FORGE_CONTRACT_JOBS 4 CACHE STRING "Parallel jobs used by SDK superbuilds")
 
 set(FORGE_CONTRACT_LLVM_TAG "llvmorg-22.1.8")
 set(FORGE_CONTRACT_LLVM_COMMIT "ca7933e47d3a3451d81e72ac174dcb5aa28b59d1")
+set(FORGE_CONTRACT_MANIFEST_LLVM_VERSION "${FORGE_CONTRACT_LLVM_TAG}")
+set(FORGE_CONTRACT_MANIFEST_LLVM_COMMIT "${FORGE_CONTRACT_LLVM_COMMIT}")
 set(FORGE_CONTRACT_SYSROOT_SCHEMA_VERSION 1)
 set(FORGE_CONTRACT_INTRINSIC_VERSION 1)
 
@@ -222,6 +224,17 @@ else()
       OUTPUT_STRIP_TRAILING_WHITESPACE
       COMMAND_ERROR_IS_FATAL ANY
    )
+   execute_process(
+      COMMAND "${FORGE_CONTRACT_CLANG}" --version
+      OUTPUT_VARIABLE _forge_contract_clang_version
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      COMMAND_ERROR_IS_FATAL ANY
+   )
+   string(REGEX MATCH "^[^\r\n]+" FORGE_CONTRACT_MANIFEST_LLVM_VERSION "${_forge_contract_clang_version}")
+   if(FORGE_CONTRACT_MANIFEST_LLVM_VERSION STREQUAL "")
+      message(FATAL_ERROR "cannot determine the selected developer Clang version")
+   endif()
+   set(FORGE_CONTRACT_MANIFEST_LLVM_COMMIT "")
    set(FORGE_CONTRACT_REPRODUCIBLE false)
    if(FORGE_CONTRACT_FORGE_DIR)
       find_package(
@@ -370,12 +383,6 @@ if(EXISTS "${FORGE_CONTRACT_WASM_LD}")
 else()
    set(_forge_contract_wasm_ld "${FORGE_CONTRACT_WASM_LD}")
 endif()
-get_filename_component(_forge_contract_wasm_ld_bin "${_forge_contract_wasm_ld}" DIRECTORY)
-file(GLOB
-   _forge_contract_lld_runtime
-   LIST_DIRECTORIES FALSE
-   "${_forge_contract_wasm_ld_bin}/../lib/liblld*${CMAKE_SHARED_LIBRARY_SUFFIX}"
-)
 install(
    CODE
       "file(REMOVE \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/bin/wasm-ld\")
@@ -383,21 +390,44 @@ install(
        file(CHMOD \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/bin/wasm-ld\"
             PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)"
 )
-if(_forge_contract_lld_runtime)
-   install(FILES ${_forge_contract_lld_runtime} DESTINATION lib)
+if(NOT FORGE_CONTRACT_PROFILE STREQUAL "release")
+   function(_forge_contract_install_runtime path)
+      file(REAL_PATH "${path}" _runtime_path)
+      get_filename_component(_runtime_name "${path}" NAME)
+      get_filename_component(_real_name "${_runtime_path}" NAME)
+      install(FILES "${_runtime_path}" DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+      if(NOT "${_runtime_name}" STREQUAL "${_real_name}")
+         install(
+            CODE
+               "file(MAKE_DIRECTORY \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}\")
+                file(REMOVE \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${_runtime_name}\")
+                file(CREATE_LINK \"${_real_name}\" \"\$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/${_runtime_name}\" SYMBOLIC)"
+         )
+      endif()
+   endfunction()
+
+   _forge_contract_install_runtime("${FORGE_CONTRACT_CLANG_CPP_RUNTIME}")
+   _forge_contract_install_runtime("${FORGE_CONTRACT_LLVM_RUNTIME}")
+   get_filename_component(_forge_contract_wasm_ld_bin "${_forge_contract_wasm_ld}" DIRECTORY)
+   file(GLOB _forge_contract_lld_runtime LIST_DIRECTORIES FALSE
+        "${_forge_contract_wasm_ld_bin}/../lib/liblld*${CMAKE_SHARED_LIBRARY_SUFFIX}")
+   foreach(_runtime IN LISTS _forge_contract_lld_runtime)
+      _forge_contract_install_runtime("${_runtime}")
+   endforeach()
 endif()
+configure_file(
+   cmake/BundleContractSDK.cmake.in
+   "${CMAKE_CURRENT_BINARY_DIR}/BundleContractSDK.cmake"
+   @ONLY
+)
 if(FORGE_CONTRACT_PROFILE STREQUAL "release")
-   configure_file(
-      cmake/BundleContractSDK.cmake.in
-      "${CMAKE_CURRENT_BINARY_DIR}/BundleContractSDK.cmake"
-      @ONLY
-   )
    install(
       DIRECTORY "${_llvm_install}/lib/"
-      DESTINATION lib
+      DESTINATION "${CMAKE_INSTALL_LIBDIR}"
       FILES_MATCHING
          PATTERN "libLLVM*"
          PATTERN "libclang-cpp*"
+         PATTERN "liblld*"
    )
    install(DIRECTORY "${_host_tools_install}/bin/" DESTINATION bin USE_SOURCE_PERMISSIONS)
    install(DIRECTORY "${_host_tools_install}/${CMAKE_INSTALL_LIBDIR}/forge-contract/"
@@ -409,10 +439,8 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
          "${_llvm_source}/compiler-rt/LICENSE.TXT"
       DESTINATION "${CMAKE_INSTALL_DATADIR}/licenses/forge-contract"
    )
-   install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/BundleContractSDK.cmake")
-else()
-   install(FILES "${FORGE_CONTRACT_CLANG_CPP_RUNTIME}" "${FORGE_CONTRACT_LLVM_RUNTIME}" DESTINATION lib)
 endif()
+install(SCRIPT "${CMAKE_CURRENT_BINARY_DIR}/BundleContractSDK.cmake")
 
 if(APPLE)
    set(_forge_contract_package_os macos)

@@ -72,10 +72,16 @@ def main():
     assert manifest["schema_version"] == 1
     assert manifest["sdk"]["profile"] in {"developer", "release"}
     assert manifest["sdk"]["reproducible"] == (manifest["sdk"]["profile"] == "release")
-    assert manifest["llvm"] == {
-        "version": "llvmorg-22.1.8",
-        "commit": "ca7933e47d3a3451d81e72ac174dcb5aa28b59d1",
-    }
+    if manifest["sdk"]["profile"] == "release":
+        assert manifest["llvm"] == {
+            "version": "llvmorg-22.1.8",
+            "commit": "ca7933e47d3a3451d81e72ac174dcb5aa28b59d1",
+        }
+    else:
+        clang_version = subprocess.run(
+            [str(args.clang), "--version"], check=True, text=True, stdout=subprocess.PIPE
+        ).stdout.splitlines()[0]
+        assert manifest["llvm"] == {"version": clang_version}
     assert manifest["wasm"]["sha256"] == hashlib.sha256(args.wasm.read_bytes()).hexdigest()
     assert manifest["abi"]["sha256"] == hashlib.sha256(args.abi.read_bytes()).hexdigest()
     assert manifest["wasm"]["features"] == ["mvp"]

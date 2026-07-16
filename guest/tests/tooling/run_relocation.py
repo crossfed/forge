@@ -2,6 +2,7 @@
 
 import argparse
 import json
+import platform
 import shutil
 import subprocess
 import tarfile
@@ -28,6 +29,57 @@ def contains_path(path: Path, needle: bytes) -> bool:
 
 def read_abi(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def command_output(*command: str) -> str:
+    return subprocess.run(command, check=True, text=True, stdout=subprocess.PIPE).stdout
+
+
+def sdk_tools(sdk: Path) -> list[Path]:
+    return [
+        sdk / "bin" / "clang++",
+        sdk / "bin" / "clang-scan-deps",
+        sdk / "bin" / "llvm-ar",
+        sdk / "bin" / "llvm-ranlib",
+        sdk / "bin" / "wasm-ld",
+        sdk / "bin" / "abigen",
+        sdk / "bin" / "contract-check",
+        sdk / "bin" / "contract-manifest",
+        sdk / "lib" / "forge-contract" / "attr-plugin.so",
+    ]
+
+
+def verify_runtime_dependencies(sdk: Path) -> None:
+    dangling = [path for path in sdk.rglob("*") if path.is_symlink() and not path.exists()]
+    if dangling:
+        raise RuntimeError(f"SDK contains a dangling symlink: {dangling[0]}")
+
+    tools = [path for path in sdk_tools(sdk) if path.exists()]
+    if len(tools) != len(sdk_tools(sdk)):
+        raise RuntimeError("SDK runtime tool set is incomplete")
+
+    system = platform.system()
+    if system == "Darwin":
+        for tool in tools:
+            for line in command_output("otool", "-L", str(tool)).splitlines()[1:]:
+                dependency = line.strip().split(" ", 1)[0]
+                if dependency.startswith("@rpath/"):
+                    bundled = sdk / "lib" / Path(dependency).name
+                    if not bundled.is_file():
+                        raise RuntimeError(f"SDK does not bundle {dependency} required by {tool}")
+                elif dependency.startswith("/") and not dependency.startswith(("/System/Library/", "/usr/lib/")):
+                    raise RuntimeError(f"SDK tool retains an external runtime dependency: {tool}: {dependency}")
+    elif system == "Linux":
+        sdk_prefix = str(sdk.resolve()) + "/"
+        for tool in tools:
+            for line in command_output("ldd", str(tool)).splitlines():
+                if "not found" in line:
+                    raise RuntimeError(f"SDK tool has an unresolved runtime dependency: {tool}: {line.strip()}")
+                if "=>" not in line:
+                    continue
+                dependency = line.split("=>", 1)[1].strip().split(" ", 1)[0]
+                if dependency.startswith("/") and not dependency.startswith((sdk_prefix, "/lib/", "/lib64/", "/usr/lib/")):
+                    raise RuntimeError(f"SDK tool retains an external runtime dependency: {tool}: {dependency}")
 
 
 def type_target(abi: dict, name: str) -> str:
@@ -61,6 +113,7 @@ def main() -> None:
     if len(roots) != 1:
         raise RuntimeError(f"expected one SDK root, found {len(roots)}")
     sdk = roots[0]
+    verify_runtime_dependencies(sdk)
 
     config = sdk / "lib" / "cmake" / "ForgeContract" / "ForgeContractConfig.cmake"
     release = 'set(ForgeContract_PROFILE "release")' in config.read_text()
@@ -82,6 +135,17 @@ def main() -> None:
         artifact = build / f"hello.{suffix}"
         if not artifact.is_file() or artifact.stat().st_size == 0:
             raise RuntimeError(f"missing relocated SDK artifact: {artifact}")
+
+    manifest = json.loads((build / "hello.contract.json").read_text(encoding="utf-8"))
+    if manifest["sdk"]["profile"] == "release":
+        expected_llvm = {
+            "version": "llvmorg-22.1.8",
+            "commit": "ca7933e47d3a3451d81e72ac174dcb5aa28b59d1",
+        }
+    else:
+        expected_llvm = {"version": command_output(str(sdk / "bin" / "clang++"), "--version").splitlines()[0]}
+    if manifest["llvm"] != expected_llvm:
+        raise RuntimeError(f"contract manifest has the wrong toolchain identity: {manifest['llvm']!r}")
 
     abi_path = build / "hello.abi"
     initial_abi = read_abi(abi_path)

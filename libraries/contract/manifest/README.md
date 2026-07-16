@@ -19,8 +19,11 @@ forge::contract::manifest::generate({
 ```
 
 The manifest records artifact hashes, imported functions, enabled WASM
-features and toolchain identity without modifying WASM bytes. This library does
-not require Clang and does not validate policy; use `contract_validation` first.
+features and toolchain identity without modifying WASM bytes. Reproducible
+release profiles record the pinned LLVM tag and commit. Developer profiles
+record the selected Clang version line and omit the unknown source commit.
+This library does not require Clang and does not validate policy; use
+`contract_validation` first.
 
 ## Dependencies
 

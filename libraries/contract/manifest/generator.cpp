@@ -80,7 +80,11 @@ void generate(const request& options) {
    root("schema_version", std::uint64_t{1});
    root("sdk", forge::mutable_variant_object{}("version", options.sdk_version)("profile", options.profile)(
                    "reproducible", options.reproducible));
-   root("llvm", forge::mutable_variant_object{}("version", options.llvm_version)("commit", options.llvm_commit));
+   auto llvm = forge::mutable_variant_object{}("version", options.llvm_version);
+   if (!options.llvm_commit.empty()) {
+      llvm("commit", options.llvm_commit);
+   }
+   root("llvm", std::move(llvm));
    root("sysroot",
         forge::mutable_variant_object{}("schema_version", options.sysroot_version)("sha256", options.sysroot_hash));
    root("intrinsics", forge::mutable_variant_object{}("interface_version",

@@ -38,6 +38,11 @@ const std::string& require(const std::map<std::string, std::string>& values, std
    return found->second;
 }
 
+std::string optional(const std::map<std::string, std::string>& values, std::string_view name) {
+   const auto found = values.find(std::string{name});
+   return found == values.end() ? std::string{} : found->second;
+}
+
 bool parse_bool(std::string_view value) {
    if (value == "true" || value == "1" || value == "ON") {
       return true;
@@ -62,7 +67,7 @@ int run(int argc, const char* const* argv) {
           .profile = require(values, "profile"),
           .reproducible = parse_bool(require(values, "reproducible")),
           .llvm_version = require(values, "llvm-version"),
-          .llvm_commit = require(values, "llvm-commit"),
+          .llvm_commit = optional(values, "llvm-commit"),
           .sysroot_version = require(values, "sysroot-version"),
           .sysroot_hash = require(values, "sysroot-hash"),
           .intrinsic_version = require(values, "intrinsic-version"),

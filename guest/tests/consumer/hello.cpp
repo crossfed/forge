@@ -1,4 +1,8 @@
 #include <cstdint>
+#include <deque>
+#include <list>
+#include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -24,5 +28,14 @@ class [[forge::contract("hello")]] hello : public forge::contract::context {
 
    [[forge::action]] long add(long left, long right) {
       return contract_fixture::add(left, right);
+   }
+
+   [[forge::action]] void containers(std::map<std::string, std::string> values, std::set<std::uint32_t> ordered,
+                                     std::deque<std::uint32_t> queued, std::list<std::uint32_t> linked) {
+      const auto found = values.find("answer");
+      forge::contract::check(found != values.end() && found->second == "42", "unexpected map value");
+      forge::contract::check(ordered.size() == 2 && ordered.contains(1) && ordered.contains(2), "unexpected set value");
+      forge::contract::check(queued.size() == 2 && queued.front() == 3 && queued.back() == 4, "unexpected deque value");
+      forge::contract::check(linked.size() == 2 && linked.front() == 5 && linked.back() == 6, "unexpected list value");
    }
 };

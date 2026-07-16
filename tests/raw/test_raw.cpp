@@ -4,7 +4,10 @@
 #include <chrono>
 #include <concepts>
 #include <cstdint>
+#include <deque>
 #include <flat_map>
+#include <list>
+#include <map>
 #include <optional>
 #include <set>
 #include <span>
@@ -175,12 +178,30 @@ BOOST_AUTO_TEST_CASE(std_flat_map_preserves_spring_sorted_map_wire_layout) {
    BOOST_CHECK((forge::raw::unpack<std::flat_map<std::uint32_t, std::uint32_t>>(packed) == value));
 }
 
+BOOST_AUTO_TEST_CASE(target_neutral_containers_preserve_spring_wire_layout) {
+   const auto map = std::map<std::uint32_t, std::uint32_t>{{2U, 12U}, {1U, 11U}};
+   const auto set = std::set<std::uint32_t>{1U, 2U};
+   const auto deque = std::deque<std::uint32_t>{1U, 2U};
+   const auto list = std::list<std::uint32_t>{1U, 2U};
+   const auto expected_map = std::string{"02010000000b000000020000000c000000"};
+   const auto expected_sequence = std::string{"020100000002000000"};
+
+   BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::raw::pack(map)), expected_map);
+   BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::raw::pack(set)), expected_sequence);
+   BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::raw::pack(deque)), expected_sequence);
+   BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::raw::pack(list)), expected_sequence);
+   BOOST_CHECK((forge::raw::unpack<decltype(map)>(forge::raw::pack(map)) == map));
+   BOOST_CHECK((forge::raw::unpack<decltype(set)>(forge::raw::pack(set)) == set));
+   BOOST_CHECK((forge::raw::unpack<decltype(deque)>(forge::raw::pack(deque)) == deque));
+   BOOST_CHECK((forge::raw::unpack<decltype(list)>(forge::raw::pack(list)) == list));
+}
+
 BOOST_AUTO_TEST_CASE(unknown_variant_wire_type_throws_codec_error) {
    const std::vector<std::uint8_t> invalid_variant{0xff};
    BOOST_CHECK_EXCEPTION((void)forge::raw::unpack<forge::variant>(invalid_variant), forge::raw::exceptions::codec_error,
                          [](const forge::raw::exceptions::codec_error& error) {
-      return error.code().category().name() == std::string_view{"forge.raw"};
-   });
+                            return error.code().category().name() == std::string_view{"forge.raw"};
+                         });
 }
 
 BOOST_AUTO_TEST_CASE(std_chrono_preserves_old_fc_raw_layout) {

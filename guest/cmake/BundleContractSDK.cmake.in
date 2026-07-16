@@ -1,6 +1,11 @@
 set(_prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
 set(_library_dir "${_prefix}/@CMAKE_INSTALL_LIBDIR@")
 set(_executables
+   "${_prefix}/bin/clang++"
+   "${_prefix}/bin/clang-scan-deps"
+   "${_prefix}/bin/llvm-ar"
+   "${_prefix}/bin/llvm-ranlib"
+   "${_prefix}/bin/wasm-ld"
    "${_prefix}/bin/abigen"
    "${_prefix}/bin/contract-check"
    "${_prefix}/bin/contract-manifest"
@@ -13,10 +18,25 @@ foreach(_path IN LISTS _executables _plugin)
    endif()
 endforeach()
 
+set(_executable_dependencies)
+set(_executable_unresolved)
+foreach(_executable IN LISTS _executables)
+   file(GET_RUNTIME_DEPENDENCIES
+      RESOLVED_DEPENDENCIES_VAR _resolved
+      UNRESOLVED_DEPENDENCIES_VAR _unresolved
+      EXECUTABLES "${_executable}"
+      DIRECTORIES "${_library_dir}"
+      PRE_EXCLUDE_REGEXES
+         "^/System/Library/"
+         "^/usr/lib/"
+         "^/lib/"
+   )
+   list(APPEND _executable_dependencies ${_resolved})
+   list(APPEND _executable_unresolved ${_unresolved})
+endforeach()
 file(GET_RUNTIME_DEPENDENCIES
-   RESOLVED_DEPENDENCIES_VAR _dependencies
-   UNRESOLVED_DEPENDENCIES_VAR _unresolved
-   EXECUTABLES ${_executables}
+   RESOLVED_DEPENDENCIES_VAR _plugin_dependencies
+   UNRESOLVED_DEPENDENCIES_VAR _plugin_unresolved
    LIBRARIES "${_plugin}"
    DIRECTORIES "${_library_dir}"
    PRE_EXCLUDE_REGEXES
@@ -24,6 +44,10 @@ file(GET_RUNTIME_DEPENDENCIES
       "^/usr/lib/"
       "^/lib/"
 )
+set(_dependencies ${_executable_dependencies} ${_plugin_dependencies})
+set(_unresolved ${_executable_unresolved} ${_plugin_unresolved})
+list(REMOVE_DUPLICATES _dependencies)
+list(REMOVE_DUPLICATES _unresolved)
 if(_unresolved)
    message(FATAL_ERROR "unresolved Forge Contract SDK runtime dependencies: ${_unresolved}")
 endif()
@@ -33,6 +57,8 @@ set(_bundled)
 foreach(_dependency IN LISTS _dependencies)
    get_filename_component(_name "${_dependency}" NAME)
    set(_destination "${_library_dir}/${_name}")
+   # COPY_FILE follows symlinks, so every dependency is self-contained even
+   # when the selected LLVM installation exposes an unversioned link.
    file(COPY_FILE "${_dependency}" "${_destination}" ONLY_IF_DIFFERENT)
    list(APPEND _bundled "${_destination}")
 endforeach()

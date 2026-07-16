@@ -4,10 +4,13 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <fstream>
+#include <list>
 #include <map>
 #include <optional>
+#include <set>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -228,6 +231,16 @@ BOOST_AUTO_TEST_CASE(wasm32_long_and_non_void_action_result_share_the_raw_codec)
 
    BOOST_CHECK_NO_THROW(apply(code, host, "hello", "add"));
    BOOST_TEST(host.return_value == forge::raw::pack(std::int32_t{42}), boost::test_tools::per_element());
+}
+
+BOOST_AUTO_TEST_CASE(cdt_standard_containers_use_the_shared_guest_codec) {
+   register_intrinsics();
+   const auto code = read_contract(FORGE_CONTRACT_TEST_WASM);
+   auto host = invocation{.action_data = forge::raw::pack(
+                              std::map<std::string, std::string>{{"answer", "42"}}, std::set<std::uint32_t>{2U, 1U},
+                              std::deque<std::uint32_t>{3U, 4U}, std::list<std::uint32_t>{5U, 6U})};
+
+   BOOST_CHECK_NO_THROW(apply(code, host, "hello", "containers"));
 }
 
 BOOST_AUTO_TEST_CASE(generated_and_legacy_dispatchers_ignore_foreign_notifications) {

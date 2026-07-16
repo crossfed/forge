@@ -20,7 +20,10 @@ libraries; guest code and the SDK assembly remain under `guest/`.
   Release archives are reproducible and relocatable.
 - `developer` uses an installed Clang/lld and a compatible upstream wasm32
   sysroot. It is faster for SDK development, but manifests explicitly contain
-  `"reproducible": false`.
+  `"reproducible": false`, report the selected Clang version line and omit an
+  unknown source commit. Developer archives bundle the discovered runtime
+  dependencies of all shipped tools; they do not retain links to the build
+  machine's LLVM installation.
 
 SDK and Forge versions are identical. The sysroot schema and intrinsic
 interface have independent versions because either contract can evolve without

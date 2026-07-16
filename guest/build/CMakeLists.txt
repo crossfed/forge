@@ -217,6 +217,11 @@ foreach(_library _libcxxabi _libc _builtins)
 endforeach()
 target_link_libraries(${FORGE_CONTRACT_NAME} PRIVATE ${_guest_libraries})
 
+set(_manifest_llvm_commit_args)
+if(NOT FORGE_CONTRACT_LLVM_COMMIT STREQUAL "")
+   list(APPEND _manifest_llvm_commit_args --llvm-commit "${FORGE_CONTRACT_LLVM_COMMIT}")
+endif()
+
 set_target_properties(
    ${FORGE_CONTRACT_NAME} PROPERTIES
    OUTPUT_NAME "${FORGE_CONTRACT_NAME}"
@@ -241,7 +246,7 @@ add_custom_command(
       --output "${_manifest}"
       --sdk-version "${FORGE_CONTRACT_SDK_VERSION}"
       --llvm-version "${FORGE_CONTRACT_LLVM_VERSION}"
-      --llvm-commit "${FORGE_CONTRACT_LLVM_COMMIT}"
+      ${_manifest_llvm_commit_args}
       --sysroot-version "${FORGE_CONTRACT_SYSROOT_SCHEMA_VERSION}"
       --sysroot-hash "${FORGE_CONTRACT_SYSROOT_HASH}"
       --intrinsic-version "${FORGE_CONTRACT_INTRINSIC_VERSION}"

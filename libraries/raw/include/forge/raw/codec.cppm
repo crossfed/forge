@@ -5,7 +5,11 @@ module;
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <deque>
+#include <list>
+#include <map>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <tuple>
@@ -67,6 +71,16 @@ template <typename T> struct built_in_codec : std::false_type {};
 template <> struct built_in_codec<std::string> : std::true_type {};
 
 template <typename T, typename Allocator> struct built_in_codec<std::vector<T, Allocator>> : std::true_type {};
+
+template <typename T, typename Allocator> struct built_in_codec<std::deque<T, Allocator>> : std::true_type {};
+
+template <typename T, typename Allocator> struct built_in_codec<std::list<T, Allocator>> : std::true_type {};
+
+template <typename Key, typename Compare, typename Allocator>
+struct built_in_codec<std::set<Key, Compare, Allocator>> : std::true_type {};
+
+template <typename Key, typename Value, typename Compare, typename Allocator>
+struct built_in_codec<std::map<Key, Value, Compare, Allocator>> : std::true_type {};
 
 template <typename T> struct built_in_codec<std::optional<T>> : std::true_type {};
 
@@ -223,6 +237,28 @@ template <typename Stream, typename T> void pack(Stream& stream, const std::vect
 
 template <typename Stream, typename T> void unpack(Stream& stream, std::vector<T>& value);
 
+template <typename Stream, typename T, typename Allocator>
+void pack(Stream& stream, const std::deque<T, Allocator>& value);
+
+template <typename Stream, typename T, typename Allocator> void unpack(Stream& stream, std::deque<T, Allocator>& value);
+
+template <typename Stream, typename T, typename Allocator>
+void pack(Stream& stream, const std::list<T, Allocator>& value);
+
+template <typename Stream, typename T, typename Allocator> void unpack(Stream& stream, std::list<T, Allocator>& value);
+
+template <typename Stream, typename Key, typename Compare, typename Allocator>
+void pack(Stream& stream, const std::set<Key, Compare, Allocator>& value);
+
+template <typename Stream, typename Key, typename Compare, typename Allocator>
+void unpack(Stream& stream, std::set<Key, Compare, Allocator>& value);
+
+template <typename Stream, typename Key, typename Value, typename Compare, typename Allocator>
+void pack(Stream& stream, const std::map<Key, Value, Compare, Allocator>& value);
+
+template <typename Stream, typename Key, typename Value, typename Compare, typename Allocator>
+void unpack(Stream& stream, std::map<Key, Value, Compare, Allocator>& value);
+
 template <typename Stream, typename T> void pack(Stream& stream, const std::optional<T>& value);
 
 template <typename Stream, typename T> void unpack(Stream& stream, std::optional<T>& value);
@@ -376,6 +412,87 @@ template <typename Stream, typename T> void unpack(Stream& stream, std::vector<T
    value.resize(size);
    for (auto& item : value) {
       unpack(stream, item);
+   }
+}
+
+template <typename Stream, typename T, typename Allocator>
+void pack(Stream& stream, const std::deque<T, Allocator>& value) {
+   detail::require(value.size() <= max_array_elements, "raw deque exceeds the element limit");
+   detail::pack_unsigned_int(stream, static_cast<std::uint32_t>(value.size()));
+   for (const auto& item : value) {
+      pack(stream, item);
+   }
+}
+
+template <typename Stream, typename T, typename Allocator>
+void unpack(Stream& stream, std::deque<T, Allocator>& value) {
+   const auto size = detail::unpack_unsigned_int(stream);
+   detail::require(size <= max_array_elements, "raw deque exceeds the element limit");
+   value.resize(size);
+   for (auto& item : value) {
+      unpack(stream, item);
+   }
+}
+
+template <typename Stream, typename T, typename Allocator>
+void pack(Stream& stream, const std::list<T, Allocator>& value) {
+   detail::require(value.size() <= max_array_elements, "raw list exceeds the element limit");
+   detail::pack_unsigned_int(stream, static_cast<std::uint32_t>(value.size()));
+   for (const auto& item : value) {
+      pack(stream, item);
+   }
+}
+
+template <typename Stream, typename T, typename Allocator> void unpack(Stream& stream, std::list<T, Allocator>& value) {
+   const auto size = detail::unpack_unsigned_int(stream);
+   detail::require(size <= max_array_elements, "raw list exceeds the element limit");
+   value.clear();
+   for (auto index = std::uint32_t{0}; index < size; ++index) {
+      auto item = T{};
+      unpack(stream, item);
+      value.emplace_back(std::move(item));
+   }
+}
+
+template <typename Stream, typename Key, typename Compare, typename Allocator>
+void pack(Stream& stream, const std::set<Key, Compare, Allocator>& value) {
+   detail::require(value.size() <= max_array_elements, "raw set exceeds the element limit");
+   detail::pack_unsigned_int(stream, static_cast<std::uint32_t>(value.size()));
+   for (const auto& item : value) {
+      pack(stream, item);
+   }
+}
+
+template <typename Stream, typename Key, typename Compare, typename Allocator>
+void unpack(Stream& stream, std::set<Key, Compare, Allocator>& value) {
+   const auto size = detail::unpack_unsigned_int(stream);
+   detail::require(size <= max_array_elements, "raw set exceeds the element limit");
+   value.clear();
+   for (auto index = std::uint32_t{0}; index < size; ++index) {
+      auto item = Key{};
+      unpack(stream, item);
+      value.insert(std::move(item));
+   }
+}
+
+template <typename Stream, typename Key, typename Value, typename Compare, typename Allocator>
+void pack(Stream& stream, const std::map<Key, Value, Compare, Allocator>& value) {
+   detail::require(value.size() <= max_array_elements, "raw map exceeds the element limit");
+   detail::pack_unsigned_int(stream, static_cast<std::uint32_t>(value.size()));
+   for (const auto& item : value) {
+      pack(stream, item);
+   }
+}
+
+template <typename Stream, typename Key, typename Value, typename Compare, typename Allocator>
+void unpack(Stream& stream, std::map<Key, Value, Compare, Allocator>& value) {
+   const auto size = detail::unpack_unsigned_int(stream);
+   detail::require(size <= max_array_elements, "raw map exceeds the element limit");
+   value.clear();
+   for (auto index = std::uint32_t{0}; index < size; ++index) {
+      auto item = std::pair<Key, Value>{};
+      unpack(stream, item);
+      value.insert(std::move(item));
    }
 }
 

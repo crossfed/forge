@@ -314,27 +314,6 @@ void host_unpack(Stream& stream, std::unordered_map<Key, Value>& value) {
    }
 }
 
-template <typename Stream, typename Key, typename Value>
-void host_pack(Stream& stream, const std::map<Key, Value>& value) {
-   FORGE_ASSERT(value.size() <= max_array_elements);
-   pack(stream, unsigned_int{value.size()});
-   for (const auto& item : value) {
-      pack(stream, item);
-   }
-}
-
-template <typename Stream, typename Key, typename Value> void host_unpack(Stream& stream, std::map<Key, Value>& value) {
-   auto size = unsigned_int{};
-   unpack(stream, size);
-   FORGE_ASSERT(size.value <= max_array_elements);
-   value.clear();
-   for (auto index = std::uint32_t{0}; index < size.value; ++index) {
-      auto item = std::pair<Key, Value>{};
-      unpack(stream, item);
-      value.insert(std::move(item));
-   }
-}
-
 template <typename Stream, typename Key, typename Value, typename Compare, typename Keys, typename Values>
 void host_pack(Stream& stream, const std::flat_map<Key, Value, Compare, Keys, Values>& value) {
    FORGE_ASSERT(value.size() <= max_array_elements);
@@ -354,64 +333,6 @@ void host_unpack(Stream& stream, std::flat_map<Key, Value, Compare, Keys, Values
       auto item = std::pair<Key, Value>{};
       unpack(stream, item);
       value.insert(value.end(), std::move(item));
-   }
-}
-
-template <typename Stream, typename T> void host_pack(Stream& stream, const std::deque<T>& value) {
-   FORGE_ASSERT(value.size() <= max_array_elements);
-   pack(stream, unsigned_int{value.size()});
-   for (const auto& item : value) {
-      pack(stream, item);
-   }
-}
-
-template <typename Stream, typename T> void host_unpack(Stream& stream, std::deque<T>& value) {
-   auto size = unsigned_int{};
-   unpack(stream, size);
-   FORGE_ASSERT(size.value <= max_array_elements);
-   value.resize(size.value);
-   for (auto& item : value) {
-      unpack(stream, item);
-   }
-}
-
-template <typename Stream, typename T> void host_pack(Stream& stream, const std::list<T>& value) {
-   FORGE_ASSERT(value.size() <= max_array_elements);
-   pack(stream, unsigned_int{value.size()});
-   for (const auto& item : value) {
-      pack(stream, item);
-   }
-}
-
-template <typename Stream, typename T> void host_unpack(Stream& stream, std::list<T>& value) {
-   auto size = unsigned_int{};
-   unpack(stream, size);
-   FORGE_ASSERT(size.value <= max_array_elements);
-   value.clear();
-   for (auto index = std::uint32_t{0}; index < size.value; ++index) {
-      auto item = T{};
-      unpack(stream, item);
-      value.emplace_back(std::move(item));
-   }
-}
-
-template <typename Stream, typename T> void host_pack(Stream& stream, const std::set<T>& value) {
-   FORGE_ASSERT(value.size() <= max_array_elements);
-   pack(stream, unsigned_int{value.size()});
-   for (const auto& item : value) {
-      pack(stream, item);
-   }
-}
-
-template <typename Stream, typename T> void host_unpack(Stream& stream, std::set<T>& value) {
-   auto size = unsigned_int{};
-   unpack(stream, size);
-   FORGE_ASSERT(size.value <= max_array_elements);
-   value.clear();
-   for (auto index = std::uint32_t{0}; index < size.value; ++index) {
-      auto item = T{};
-      unpack(stream, item);
-      value.insert(std::move(item));
    }
 }
 
