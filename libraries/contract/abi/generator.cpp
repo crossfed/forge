@@ -843,7 +843,9 @@ std::string read_text(const std::filesystem::path& path) {
 }
 
 void write_text(const std::filesystem::path& path, std::string_view text) {
-   std::filesystem::create_directories(path.parent_path());
+   if (const auto parent = path.parent_path(); !parent.empty()) {
+      std::filesystem::create_directories(parent);
+   }
    auto stream = std::ofstream{path, std::ios::binary | std::ios::trunc};
    if (!stream || !(stream << text)) {
       throw std::runtime_error{"cannot write generated contract file: " + path.string()};

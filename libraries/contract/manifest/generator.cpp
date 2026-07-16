@@ -60,7 +60,9 @@ forge::variants imported_functions(const std::vector<std::uint8_t>& bytes) {
 }
 
 void write_text(const std::filesystem::path& path, std::string_view value) {
-   std::filesystem::create_directories(path.parent_path());
+   if (const auto parent = path.parent_path(); !parent.empty()) {
+      std::filesystem::create_directories(parent);
+   }
    auto output = std::ofstream{path, std::ios::binary | std::ios::trunc};
    if (!output || !(output << value)) {
       throw std::runtime_error{"cannot write contract manifest: " + path.string()};

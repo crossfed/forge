@@ -101,6 +101,7 @@ add_custom_target(
       "${Python3_EXECUTABLE}"
       "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/run_checker_fixtures.py"
       --checker "${ForgeContract_CHECK}"
+      --manifest-tool "${ForgeContract_MANIFEST}"
       --clang "${ForgeContract_CLANG}"
       --wasm "${CMAKE_CURRENT_BINARY_DIR}/hello.wasm"
       --abi "${CMAKE_CURRENT_BINARY_DIR}/hello.abi"

@@ -58,18 +58,21 @@ def invoke(
     additional_sources=(),
     ricardian_contracts=None,
     ricardian_clauses=None,
+    bare_outputs=False,
 ):
     output.mkdir(parents=True, exist_ok=True)
     abi = output / f"{source.stem}.abi"
     dispatch = output / f"{source.stem}.dispatcher.cpp"
+    abi_argument = abi.name if bare_outputs else abi
+    dispatch_argument = dispatch.name if bare_outputs else dispatch
     command = [
         str(args.abigen),
         "--contract",
         contract,
         "--abi",
-        str(abi),
+        str(abi_argument),
         "--dispatch",
-        str(dispatch),
+        str(dispatch_argument),
         "--attribute-plugin",
         str(args.plugin),
         "--sysroot",
@@ -86,7 +89,14 @@ def invoke(
         command.extend(("--ricardian-clauses", str(ricardian_clauses)))
     command.extend((str(source), *(str(item) for item in additional_sources)))
 
-    result = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+    result = subprocess.run(
+        command,
+        cwd=output if bare_outputs else None,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
     if succeeds and result.returncode != 0:
         raise RuntimeError(f"abigen failed for {source.name}:\n{result.stdout}{result.stderr}")
     if not succeeds and result.returncode == 0:
@@ -277,6 +287,19 @@ def main():
     modern_dispatcher = (args.output / "parity_modern.dispatcher.cpp").read_text(encoding="utf-8")
     if not modern_dispatcher.startswith("#include <cstdint>\n"):
         raise RuntimeError("generated dispatcher does not declare its fixed-width integer dependency")
+
+    bare_output = args.output / "bare-output"
+    invoke(
+        args,
+        "parity",
+        args.fixtures / "parity_modern.cpp",
+        bare_output,
+        bare_outputs=True,
+    )
+    if not (bare_output / "parity_modern.abi").is_file():
+        raise RuntimeError("abigen did not write a bare ABI output path")
+    if not (bare_output / "parity_modern.dispatcher.cpp").is_file():
+        raise RuntimeError("abigen did not write a bare dispatcher output path")
 
     invoke(args, "empty", args.fixtures / "empty_contract.cpp", args.output, succeeds=False)
     invoke(args, "missing", args.fixtures / "wrong_contract.cpp", args.output, succeeds=False)

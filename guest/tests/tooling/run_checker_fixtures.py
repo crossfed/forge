@@ -8,8 +8,15 @@ import subprocess
 import sys
 
 
-def run(command, *, succeeds, contains=None):
-    result = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False)
+def run(command, *, succeeds, contains=None, cwd=None):
+    result = subprocess.run(
+        command,
+        cwd=cwd,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        check=False,
+    )
     output = result.stdout + result.stderr
     if succeeds and result.returncode != 0:
         raise RuntimeError(f"command failed:\n{' '.join(map(str, command))}\n{output}")
@@ -59,6 +66,7 @@ def compile_wasm(args, source, output, *flags):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checker", required=True, type=pathlib.Path)
+    parser.add_argument("--manifest-tool", required=True, type=pathlib.Path)
     parser.add_argument("--clang", required=True, type=pathlib.Path)
     parser.add_argument("--wasm", required=True, type=pathlib.Path)
     parser.add_argument("--abi", required=True, type=pathlib.Path)
@@ -86,6 +94,40 @@ def main():
     assert manifest["abi"]["sha256"] == hashlib.sha256(args.abi.read_bytes()).hexdigest()
     assert manifest["wasm"]["features"] == ["mvp"]
     assert {entry["module"] for entry in manifest["wasm"]["imports"]} == {"env"}
+
+    bare_output = args.output / "bare-manifest"
+    bare_output.mkdir(parents=True, exist_ok=True)
+    run(
+        [
+            str(args.manifest_tool),
+            "--wasm",
+            str(args.wasm),
+            "--abi",
+            str(args.abi),
+            "--imports",
+            str(args.imports),
+            "--output",
+            "bare.contract.json",
+            "--sdk-version",
+            "test",
+            "--profile",
+            "developer",
+            "--reproducible",
+            "false",
+            "--llvm-version",
+            "test",
+            "--sysroot-version",
+            "1",
+            "--sysroot-hash",
+            "test",
+            "--intrinsic-version",
+            "1",
+        ],
+        cwd=bare_output,
+        succeeds=True,
+    )
+    if not (bare_output / "bare.contract.json").is_file():
+        raise RuntimeError("contract-manifest did not write a bare output path")
 
     check(args, args.wasm, args.abi, args.imports, succeeds=True)
     check(args, args.wasm, args.abi, args.imports, succeeds=False, contains="required contract export is missing",
