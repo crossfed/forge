@@ -108,6 +108,16 @@ Exceptions. Release archives preserve the exact upstream license files under
 `share/licenses/forge-contract`.
 
 
+GNU libstdc++ Runtime Library
+----------------------------
+
+Linux Forge Contract SDK archives bundle the selected GNU libstdc++ shared
+runtime so the host tools retain the C++23 standard-library baseline they were
+built against. libstdc++ is distributed under GNU GPLv3 with the GCC Runtime
+Library Exception 3.1. The installed distribution copyright and license notice
+is preserved as `share/licenses/forge-contract/libstdc++-copyright`.
+
+
 Berkeley SoftFloat Release 3e
 -----------------------------
 

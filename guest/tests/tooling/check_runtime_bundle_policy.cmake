@@ -19,7 +19,11 @@ foreach(
    endif()
 endforeach()
 
-foreach(_dependency "libc.so.6" "/usr/lib/x86_64-linux-gnu/libm.so.6" "libstdc++.so.6")
+if(NOT "libstdc++.so.6" MATCHES "${FORGE_CONTRACT_LINUX_CXX_RUNTIME_REGEX}")
+   message(FATAL_ERROR "Linux C++ runtime is not selected for bundling")
+endif()
+
+foreach(_dependency "libc.so.6" "/usr/lib/x86_64-linux-gnu/libm.so.6")
    if(_dependency MATCHES "${FORGE_CONTRACT_LLVM_RUNTIME_REGEX}")
       message(FATAL_ERROR "system runtime is incorrectly selected for bundling: ${_dependency}")
    endif()

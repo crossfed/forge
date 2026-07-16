@@ -90,4 +90,33 @@ if(APPLE)
          COMMAND_ERROR_IS_FATAL ANY
       )
    endforeach()
+elseif(UNIX)
+   find_program(_patchelf patchelf REQUIRED)
+   foreach(_executable IN LISTS _executables)
+      execute_process(
+         COMMAND "${_patchelf}" --set-rpath "$ORIGIN/../lib" "${_executable}"
+         COMMAND_ERROR_IS_FATAL ANY
+      )
+   endforeach()
+   execute_process(
+      COMMAND "${_patchelf}" --set-rpath "$ORIGIN/.." "${_plugin}"
+      COMMAND_ERROR_IS_FATAL ANY
+   )
+   foreach(_library IN LISTS _bundled)
+      execute_process(
+         COMMAND "${_patchelf}" --set-rpath "$ORIGIN" "${_library}"
+         COMMAND_ERROR_IS_FATAL ANY
+      )
+   endforeach()
+   set(_libstdcxx_license "/usr/share/doc/libstdc++6/copyright")
+   if(NOT EXISTS "${_libstdcxx_license}")
+      message(FATAL_ERROR "cannot find the libstdc++ redistribution notice: ${_libstdcxx_license}")
+   endif()
+   file(MAKE_DIRECTORY "${_prefix}/share/licenses/forge-contract")
+   file(
+      COPY_FILE
+      "${_libstdcxx_license}"
+      "${_prefix}/share/licenses/forge-contract/libstdc++-copyright"
+      ONLY_IF_DIFFERENT
+   )
 endif()

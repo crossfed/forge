@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 
 LINUX_SDK_RUNTIME_PREFIXES = (
+    "libstdc++.so",
     "libc++.so",
     "libc++abi.so",
     "libunwind.so",
