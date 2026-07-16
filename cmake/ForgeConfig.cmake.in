@@ -4,6 +4,7 @@ include(CMakeFindDependencyMacro)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/modules")
 set(Forge_BUILT_WITH_ROCKSDB @FORGE_HAS_ROCKSDB@)
+set(Forge_BUILT_WITH_TUI @FORGE_HAS_TUI@)
 set(Forge_BUILT_WITH_CONTRACT_TOOLING @FORGE_ENABLE_CONTRACT_TOOLING@)
 
 set(
@@ -70,6 +71,26 @@ set(
    tui
 )
 set(_FORGE_KNOWN_COMPONENTS ${_FORGE_ALL_COMPONENTS} all)
+if(NOT Forge_BUILT_WITH_ROCKSDB)
+   list(
+      REMOVE_ITEM _FORGE_ALL_COMPONENTS
+      rocksdb
+      db_rocksdb
+      plugins_db_rocksdb
+   )
+endif()
+if(NOT Forge_BUILT_WITH_TUI)
+   list(REMOVE_ITEM _FORGE_ALL_COMPONENTS tui)
+endif()
+if(NOT Forge_BUILT_WITH_CONTRACT_TOOLING)
+   list(
+      REMOVE_ITEM _FORGE_ALL_COMPONENTS
+      contract_abi
+      contract_attributes
+      contract_validation
+      contract_manifest
+   )
+endif()
 set(_FORGE_REQUESTED_COMPONENTS ${Forge_FIND_COMPONENTS})
 set(_FORGE_ALL_REQUESTED FALSE)
 
@@ -398,7 +419,7 @@ else()
          foreach(_forge_all_component IN LISTS _FORGE_ALL_COMPONENTS)
             _forge_add_component(${_forge_all_component})
          endforeach()
-      elseif("${_forge_component}" IN_LIST _FORGE_ALL_COMPONENTS)
+      elseif("${_forge_component}" IN_LIST _FORGE_KNOWN_COMPONENTS)
          set(Forge_${_forge_component}_FOUND TRUE)
          _forge_add_component(${_forge_component})
       else()
@@ -473,7 +494,10 @@ if("compression" IN_LIST _FORGE_COMPONENTS)
    _forge_require_package(ZLIB)
 endif()
 
-if("contract_abi" IN_LIST _FORGE_COMPONENTS OR "contract_attributes" IN_LIST _FORGE_COMPONENTS)
+if(
+   Forge_BUILT_WITH_CONTRACT_TOOLING
+   AND ("contract_abi" IN_LIST _FORGE_COMPONENTS OR "contract_attributes" IN_LIST _FORGE_COMPONENTS)
+)
    _forge_require_package(Clang 22.1 CONFIG)
 endif()
 
@@ -523,7 +547,7 @@ foreach(_forge_component IN LISTS _FORGE_REQUESTED_COMPONENTS)
       if(NOT TARGET Forge::forge)
          set(Forge_all_FOUND FALSE)
       endif()
-   elseif("${_forge_component}" IN_LIST _FORGE_ALL_COMPONENTS)
+   elseif("${_forge_component}" IN_LIST _FORGE_KNOWN_COMPONENTS)
       set(_forge_expected_target "Forge::forge_${_forge_component}")
       if(NOT TARGET ${_forge_expected_target})
          set(Forge_${_forge_component}_FOUND FALSE)

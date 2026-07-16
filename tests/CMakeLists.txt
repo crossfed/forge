@@ -1038,6 +1038,9 @@ add_custom_target(
       -DFORGE_PACKAGE_TEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
       -DFORGE_PACKAGE_TEST_C_COMPILER=${CMAKE_C_COMPILER}
       -DFORGE_PACKAGE_TEST_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}
+      -DFORGE_PACKAGE_TEST_CLANG_DIR=${Clang_DIR}
+      -DFORGE_PACKAGE_TEST_LLVM_DIR=${LLVM_DIR}
+      -DFORGE_PACKAGE_TEST_BUILT_WITH_TUI=${FORGE_HAS_TUI}
       -P ${CMAKE_CURRENT_SOURCE_DIR}/package_all_missing_dependency/expect_configure_failure.cmake
    DEPENDS test_forge_package_install
 )
@@ -1659,6 +1662,9 @@ add_test(
       -DFORGE_PACKAGE_TEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
       -DFORGE_PACKAGE_TEST_C_COMPILER=${CMAKE_C_COMPILER}
       -DFORGE_PACKAGE_TEST_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}
+      -DFORGE_PACKAGE_TEST_CLANG_DIR=${Clang_DIR}
+      -DFORGE_PACKAGE_TEST_LLVM_DIR=${LLVM_DIR}
+      -DFORGE_PACKAGE_TEST_BUILT_WITH_TUI=${FORGE_HAS_TUI}
       -P ${CMAKE_CURRENT_SOURCE_DIR}/package_all_missing_dependency/expect_configure_failure.cmake
 )
 set_tests_properties(test_forge_package_all_missing_dependency PROPERTIES DEPENDS test_forge_package_install)
