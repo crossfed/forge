@@ -2,6 +2,7 @@ add_library(
    forge_guest_runtime STATIC
    allocator.cpp
    allocator_new_delete.cpp
+   errno.cpp
    memory.cpp
 )
 

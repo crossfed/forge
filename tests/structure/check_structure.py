@@ -233,6 +233,13 @@ def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
          f"{path.relative_to(root)}: macOS jobs must export the selected SDKROOT"
       )
 
+   for incompatible_flag in ('CXXFLAGS=-stdlib=libc++', 'LDFLAGS=-stdlib=libc++'):
+      if incompatible_flag in source:
+         errors.append(
+            f"{path.relative_to(root)}: Linux host tooling must use the C++ ABI of its Clang package; "
+            f"remove {incompatible_flag}"
+         )
+
 
 def check_contract_sdk_components(root: Path, errors: list[str]) -> None:
    path = root / "guest" / "CMakeLists.txt"
