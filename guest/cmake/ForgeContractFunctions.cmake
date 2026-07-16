@@ -80,6 +80,7 @@ function(forge_add_contract target)
       CMAKE_GENERATOR "${CMAKE_GENERATOR}"
       CMAKE_ARGS
          -DCMAKE_TOOLCHAIN_FILE=${ForgeContract_TOOLCHAIN}
+         -DFORGE_CONTRACT_SDK_PREFIX:PATH=${ForgeContract_PREFIX}
          -DFORGE_CONTRACT_NAME=${target}
          -DFORGE_CONTRACT_SOURCES_ENCODED=${_encoded_sources}
          -DFORGE_CONTRACT_OUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}

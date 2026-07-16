@@ -55,6 +55,15 @@ bool require_scope(clang::Sema& sema, const ParsedAttr& attribute) {
    return false;
 }
 
+void preserve_attribute_scope(clang::Sema& sema, clang::Decl* declaration, const ParsedAttr& attribute,
+                              std::string_view kind) {
+   auto annotation = std::string{"forge.attribute_scope:"};
+   annotation += kind;
+   annotation += ':';
+   annotation += attribute.getScopeName()->getName();
+   declaration->addAttr(clang::AnnotateAttr::Create(sema.Context, annotation, nullptr, 0, attribute));
+}
+
 class contract_attribute final : public ParsedAttrInfo {
  public:
    contract_attribute() {
@@ -83,6 +92,7 @@ class contract_attribute final : public ParsedAttrInfo {
          annotation += attribute_argument(sema, attribute);
       }
       declaration->addAttr(clang::AnnotateAttr::Create(sema.Context, annotation, nullptr, 0, attribute));
+      preserve_attribute_scope(sema, declaration, attribute, "contract");
       return AttributeApplied;
    }
 };
@@ -123,6 +133,7 @@ class action_attribute final : public ParsedAttrInfo {
          annotation += attribute_argument(sema, attribute);
       }
       declaration->addAttr(clang::AnnotateAttr::Create(sema.Context, annotation, nullptr, 0, attribute));
+      preserve_attribute_scope(sema, declaration, attribute, "action");
       return AttributeApplied;
    }
 };
@@ -163,6 +174,7 @@ class call_attribute final : public ParsedAttrInfo {
          annotation += attribute_argument(sema, attribute);
       }
       declaration->addAttr(clang::AnnotateAttr::Create(sema.Context, annotation, nullptr, 0, attribute));
+      preserve_attribute_scope(sema, declaration, attribute, "call");
       return AttributeApplied;
    }
 };
@@ -194,6 +206,7 @@ class table_attribute final : public ParsedAttrInfo {
          annotation += attribute_argument(sema, attribute);
       }
       declaration->addAttr(clang::AnnotateAttr::Create(sema.Context, annotation, nullptr, 0, attribute));
+      preserve_attribute_scope(sema, declaration, attribute, "table");
       return AttributeApplied;
    }
 };

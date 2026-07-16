@@ -26,6 +26,16 @@ add_test(
    NAME test_forge_contract_sdk_relocation_runtime_policy
    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/guest/tests/tooling/test_runtime_bundle_policy.py
 )
+add_test(
+   NAME test_forge_contract_sdk_package_prefix
+   COMMAND
+      ${CMAKE_COMMAND}
+      -DFORGE_CONTRACT_CONFIG_TEMPLATE=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractConfig.cmake.in
+      -DFORGE_CONTRACT_TOOLCHAIN_TEMPLATE=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractToolchain.cmake.in
+      -DFORGE_CONTRACT_FUNCTIONS=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractFunctions.cmake
+      -DFORGE_CONTRACT_TEST_ROOT=${CMAKE_BINARY_DIR}/tests/contract-package-prefix
+      -P ${CMAKE_SOURCE_DIR}/guest/tests/tooling/check_package_prefix.cmake
+)
 
 add_executable(
    test_forge

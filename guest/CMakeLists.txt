@@ -294,6 +294,15 @@ add_custom_target(
 
 configure_file(cmake/host.hpp.in "${_generated_dir}/include/forge/contract/host.hpp" COPYONLY)
 
+set(_forge_contract_prefix_anchor "/__forge_contract_prefix")
+set(_forge_contract_config_install_dir
+    "${_forge_contract_prefix_anchor}/${CMAKE_INSTALL_LIBDIR}/cmake/ForgeContract")
+file(
+   RELATIVE_PATH
+   FORGE_CONTRACT_PREFIX_FROM_CONFIG_DIR
+   "${_forge_contract_config_install_dir}"
+   "${_forge_contract_prefix_anchor}"
+)
 configure_file(
    cmake/ForgeContractToolchain.cmake.in
    "${CMAKE_CURRENT_BINARY_DIR}/ForgeContractToolchain.cmake"

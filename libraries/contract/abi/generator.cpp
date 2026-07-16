@@ -144,6 +144,12 @@ std::optional<std::string> annotation(const clang::Decl& declaration, std::strin
    return std::nullopt;
 }
 
+bool has_annotation(const clang::Decl& declaration, std::string_view expected) {
+   const auto value = llvm::StringRef{expected.data(), expected.size()};
+   return std::ranges::any_of(declaration.specific_attrs<clang::AnnotateAttr>(),
+                              [&](const auto* attribute) { return attribute->getAnnotation() == value; });
+}
+
 std::string record_name(const clang::RecordDecl& declaration) {
    if (declaration.getIdentifier() == nullptr) {
       throw std::runtime_error{"anonymous records are not supported in contract ABI"};
@@ -749,7 +755,8 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       std::string result;
    };
 
-   method_shape add_method(const clang::CXXMethodDecl& method, std::string_view annotated_name) {
+   method_shape add_method(const clang::CXXMethodDecl& method, std::string_view annotated_name,
+                           bool allow_unnamed_parameters) {
       if (method.isStatic()) {
          report(method.getLocation(), "contract entry point must be a non-static member function");
       }
@@ -764,6 +771,10 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       for (std::size_t index = 0; index < method.getNumParams(); ++index) {
          const auto* parameter = method.getParamDecl(index);
          auto name = parameter->getNameAsString();
+         if (name.empty() && !allow_unnamed_parameters) {
+            report(parameter->getLocation(), "contract entry point parameters must be named");
+            continue;
+         }
          arguments.fields.push_back(field_shape{name, encoder_.encode(*parameter)});
       }
       if (claim_struct(output_, context_, arguments.name, "method:" + declaration_identity(method),
@@ -791,7 +802,8 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
          report(method.getLocation(), "overloaded contract action methods are not supported");
          return;
       }
-      const auto method_info = add_method(method, annotated_name);
+      const auto method_info =
+          add_method(method, annotated_name, has_annotation(method, "forge.attribute_scope:action:eosio"));
       output_.actions.push_back(action_shape{
           .name = method_info.name,
           .type = method_info.type,
@@ -812,7 +824,8 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
          report(method.getLocation(), "duplicate synchronous call name");
          return;
       }
-      const auto method_info = add_method(method, annotated_name);
+      const auto method_info =
+          add_method(method, annotated_name, has_annotation(method, "forge.attribute_scope:call:eosio"));
       auto identifier = std::uint64_t{5381U};
       for (const auto value : method_info.name) {
          identifier = identifier * 33U + static_cast<unsigned char>(value);

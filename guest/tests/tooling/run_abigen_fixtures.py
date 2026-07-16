@@ -287,6 +287,20 @@ def main():
     invoke(args, "overloaded", args.fixtures / "overloaded_action.cpp", args.output / "overloaded-action", succeeds=False)
     invoke(args, "duplicate", args.fixtures / "duplicate_struct.cpp", args.output / "duplicate-struct", succeeds=False)
     invoke(args, "duplicate", args.fixtures / "duplicate_table.cpp", args.output / "duplicate-table", succeeds=False)
+    invoke(
+        args,
+        "unnamedaction",
+        args.fixtures / "unnamed_action_parameter.cpp",
+        args.output / "unnamed-action-parameter",
+        succeeds=False,
+    )
+    invoke(
+        args,
+        "unnamedcall",
+        args.fixtures / "unnamed_call_parameter.cpp",
+        args.output / "unnamed-call-parameter",
+        succeeds=False,
+    )
 
     modern = invoke(args, "parity", args.fixtures / "parity_modern.cpp", args.output)
     legacy = invoke(args, "parity", args.fixtures / "parity_legacy.cpp", args.output)

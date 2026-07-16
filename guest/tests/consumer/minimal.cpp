@@ -4,5 +4,7 @@ class [[forge::contract("minimal")]] minimal : public forge::contract::context {
  public:
    using context::context;
 
-   [[forge::action]] void ping(unsigned long long) {}
+   [[forge::action]] void ping(unsigned long long value) {
+      static_cast<void>(value);
+   }
 };

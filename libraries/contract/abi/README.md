@@ -32,6 +32,10 @@ notifications require an explicit notification dispatcher. The library contains
 no CLI `main`, compiler patches or guest runtime. Its tests are the pinned CDT
 pass/fail fixtures plus local-include and wasm32-width regressions.
 
+Modern `[[forge::action]]` and `[[forge::call]]` parameters must be named so
+their ABI fields are usable by clients. The EOSIO spelling preserves CDT's
+legacy unnamed-parameter output for source and ABI compatibility.
+
 ## Dependencies
 
 - `forge_chain_protocol` and `forge_codec_json` for canonical ABI values;
