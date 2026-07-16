@@ -5,6 +5,7 @@ module;
 #include <arpa/inet.h>
 #include <charconv>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <limits>
 #include <optional>
