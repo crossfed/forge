@@ -13,7 +13,7 @@ export module forge.db.revision.types;
 import forge.db.object.index;
 import forge.db.object.object;
 import forge.db.object.system;
-import forge.ids.object_id;
+import forge.db.ids.object_id;
 
 export namespace forge::db::revision {
 

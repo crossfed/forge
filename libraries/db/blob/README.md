@@ -134,7 +134,7 @@ co_await blobs.retain(content, forge::db::blob::owner_ref{metadata.id});
 co_await blobs.release(content, forge::db::blob::owner_ref{metadata.id});
 ```
 
-Both `forge::ids::object_id` and `forge::ids::typed_id` are supported. Their
+Both `forge::db::ids::object_id` and `forge::db::ids::typed_id` are supported. Their
 owner identity is exactly `forge::raw::pack(object_id)`, with no textual,
 prefix or version bytes. This preserves byte compatibility with callers that
 already construct the same binary owner explicitly. Custom string or binary

@@ -127,11 +127,11 @@ struct key_encoder<forge::db::object::composite_key<Extractors...>> {
    }
 };
 
-inline void append_record_prefix(std::vector<std::byte>& out, entry_kind kind, forge::ids::object_id type) {
+inline void append_record_prefix(std::vector<std::byte>& out, entry_kind kind, forge::db::ids::object_id type) {
    forge::db::object::detail::record_key::append_application_prefix(out, kind, type);
 }
 
-inline void append_index_prefix(std::vector<std::byte>& out, entry_kind kind, forge::ids::object_id type,
+inline void append_index_prefix(std::vector<std::byte>& out, entry_kind kind, forge::db::ids::object_id type,
                                 std::uint32_t ordinal) {
    append_record_prefix(out, kind, type);
    append_be32(out, ordinal);

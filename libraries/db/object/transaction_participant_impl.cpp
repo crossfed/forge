@@ -132,7 +132,7 @@ transaction_participant_impl::release_savepoint(forge::db::core::savepoint_id_t 
    co_return;
 }
 
-void transaction_participant_impl::remember_allocation(forge::ids::object_id type,
+void transaction_participant_impl::remember_allocation(forge::db::ids::object_id type,
                                                        std::uint64_t next_instance) {
    type.instance = 0;
    auto& existing = allocation_seals_[type];

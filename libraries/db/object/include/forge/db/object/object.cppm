@@ -8,7 +8,7 @@ module;
 
 export module forge.db.object.object;
 
-import forge.ids.object_id;
+import forge.db.ids.object_id;
 
 export namespace forge::db::object {
 
@@ -34,7 +34,7 @@ struct object {
                  "forge::db::object system objects must use the reserved system space");
 
    using derived_type = Derived;
-   using id_t = forge::ids::typed_id<Space, Type>;
+   using id_t = forge::db::ids::typed_id<Space, Type>;
    using object_base_type = object<Derived, Space, Type, Kind>;
 
    static constexpr std::uint8_t space = Space;
@@ -65,7 +65,7 @@ template <typename Derived, std::uint8_t Space, std::uint16_t Type, object_kind 
 struct object_base_traits<object<Derived, Space, Type, Kind>> {
    static constexpr bool is_object_base = true;
    using derived_type = Derived;
-   using id_t = forge::ids::typed_id<Space, Type>;
+   using id_t = forge::db::ids::typed_id<Space, Type>;
    static constexpr std::uint8_t space = Space;
    static constexpr std::uint16_t type = Type;
    static constexpr object_kind kind = Kind;
@@ -78,7 +78,7 @@ concept object_value = requires {
    { std::remove_cvref_t<T>::space } -> std::convertible_to<std::uint8_t>;
    { std::remove_cvref_t<T>::type } -> std::convertible_to<std::uint16_t>;
    { std::remove_cvref_t<T>::kind } -> std::convertible_to<object_kind>;
-} && forge::ids::typed_id_traits<typename std::remove_cvref_t<T>::id_t>::is_typed_id &&
+} && forge::db::ids::typed_id_traits<typename std::remove_cvref_t<T>::id_t>::is_typed_id &&
    object_base_traits<typename std::remove_cvref_t<T>::object_base_type>::is_object_base &&
    std::same_as<typename object_base_traits<typename std::remove_cvref_t<T>::object_base_type>::derived_type,
                 std::remove_cvref_t<T>> &&

@@ -23,7 +23,7 @@ module;
 
 export module forge.db.object.index;
 
-import forge.ids.object_id;
+import forge.db.ids.object_id;
 import forge.db.core.record;
 import forge.db.object.cursor;
 import forge.db.object.exceptions;
@@ -119,8 +119,8 @@ template <> struct sort_key<std::string_view> {
    }
 };
 
-template <> struct sort_key<forge::ids::object_id> {
-   [[nodiscard]] sort_key_bytes operator()(forge::ids::object_id value) const {
+template <> struct sort_key<forge::db::ids::object_id> {
+   [[nodiscard]] sort_key_bytes operator()(forge::db::ids::object_id value) const {
       auto out = sort_key_bytes{};
       out.reserve(11U);
       out.push_back(static_cast<std::byte>(value.space));
@@ -132,14 +132,14 @@ template <> struct sort_key<forge::ids::object_id> {
    }
 };
 
-template <forge::ids::typed_id_like T> struct sort_key<T> {
+template <forge::db::ids::typed_id_like T> struct sort_key<T> {
    [[nodiscard]] sort_key_bytes operator()(const T& value) const {
-      return sort_key<forge::ids::object_id>{}(value.as_object_id());
+      return sort_key<forge::db::ids::object_id>{}(value.as_object_id());
    }
 };
 
 template <typename T>
-   requires(!forge::ids::typed_id_like<T> &&
+   requires(!forge::db::ids::typed_id_like<T> &&
             requires(const T& value) {
                { value.to_uint8_span() } -> std::convertible_to<std::span<const std::uint8_t>>;
             })
@@ -157,7 +157,7 @@ struct sort_key<T> {
 
 template <typename T>
    requires(
-       !forge::ids::typed_id_like<T> &&
+       !forge::db::ids::typed_id_like<T> &&
        !requires(const T& value) {
           { value.to_uint8_span() } -> std::convertible_to<std::span<const std::uint8_t>>;
        } &&
@@ -584,7 +584,7 @@ template <typename Object> struct valid_object_impl<Object, true> {
    static constexpr bool tags_unique = indexed && unique_tags<typename Object::indexes_type>::value;
    static constexpr bool value_has_base = object_value<typename Object::value_type>;
    static constexpr bool primary_is_typed =
-       forge::ids::typed_id_traits<std::remove_cvref_t<primary_id_t<Object>>>::is_typed_id;
+       forge::db::ids::typed_id_traits<std::remove_cvref_t<primary_id_t<Object>>>::is_typed_id;
 
  public:
    static constexpr bool value =
@@ -671,9 +671,9 @@ template <object_model Object> struct object_id_of {
    using id_t = std::remove_cvref_t<id_t_of<Object>>;
 
  public:
-   static constexpr std::uint8_t space = forge::ids::typed_id_traits<id_t>::space;
-   static constexpr std::uint16_t type = forge::ids::typed_id_traits<id_t>::type;
-   static constexpr forge::ids::object_id value{.space = space, .type = type, .instance = 0};
+   static constexpr std::uint8_t space = forge::db::ids::typed_id_traits<id_t>::space;
+   static constexpr std::uint16_t type = forge::db::ids::typed_id_traits<id_t>::type;
+   static constexpr forge::db::ids::object_id value{.space = space, .type = type, .instance = 0};
 };
 
 template <typename Object, typename Tag> struct index_lookup;

@@ -1,3 +1,4 @@
+add_subdirectory(ids)
 add_subdirectory(core)
 add_subdirectory(object)
 add_subdirectory(blob)

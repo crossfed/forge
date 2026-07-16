@@ -36,20 +36,20 @@ inline void append_be64(std::vector<std::byte>& out, std::uint64_t value) {
 }
 
 inline void append_application_prefix(std::vector<std::byte>& out, entry_kind kind,
-                                      forge::ids::object_id type) {
+                                      forge::db::ids::object_id type) {
    append_byte(out, static_cast<std::uint8_t>(kind));
    append_byte(out, type.space);
    append_be16(out, type.type);
 }
 
-[[nodiscard]] inline forge::db::core::record_key sequence(forge::ids::object_id type) {
+[[nodiscard]] inline forge::db::core::record_key sequence(forge::db::ids::object_id type) {
    auto bytes = std::vector<std::byte>{};
    bytes.reserve(4U);
    append_application_prefix(bytes, entry_kind::sequence_record, type);
    return forge::db::core::record_key{std::move(bytes)};
 }
 
-[[nodiscard]] inline forge::db::core::record_key object(forge::ids::object_id id) {
+[[nodiscard]] inline forge::db::core::record_key object(forge::db::ids::object_id id) {
    auto bytes = std::vector<std::byte>{};
    if (id.space == forge::db::object::system_space) {
       bytes.reserve(11U);
@@ -63,7 +63,7 @@ inline void append_application_prefix(std::vector<std::byte>& out, entry_kind ki
    return forge::db::core::record_key{std::move(bytes)};
 }
 
-[[nodiscard]] inline std::vector<std::byte> object_prefix(forge::ids::object_id type) {
+[[nodiscard]] inline std::vector<std::byte> object_prefix(forge::db::ids::object_id type) {
    auto bytes = std::vector<std::byte>{};
    if (type.space == forge::db::object::system_space) {
       bytes.reserve(3U);
@@ -76,7 +76,7 @@ inline void append_application_prefix(std::vector<std::byte>& out, entry_kind ki
    return bytes;
 }
 
-[[nodiscard]] inline forge::db::core::record_key ranked_root(forge::ids::object_id type,
+[[nodiscard]] inline forge::db::core::record_key ranked_root(forge::db::ids::object_id type,
                                                               std::uint32_t ordinal) {
    auto bytes = std::vector<std::byte>{};
    bytes.reserve(8U);
@@ -85,7 +85,7 @@ inline void append_application_prefix(std::vector<std::byte>& out, entry_kind ki
    return forge::db::core::record_key{std::move(bytes)};
 }
 
-[[nodiscard]] inline std::vector<std::byte> ranked_level_prefix(forge::ids::object_id type,
+[[nodiscard]] inline std::vector<std::byte> ranked_level_prefix(forge::db::ids::object_id type,
                                                                  std::uint32_t ordinal,
                                                                  std::uint8_t level) {
    auto bytes = std::vector<std::byte>{};

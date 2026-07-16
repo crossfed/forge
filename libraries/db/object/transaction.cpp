@@ -59,7 +59,7 @@ transaction::impl::impl(forge::db::core::transaction& active_value,
          family, std::move(seal), std::move(observers_value), std::move(release))},
       interceptors{std::move(interceptors_value)} {}
 
-void transaction::impl::remember_allocation(forge::ids::object_id type, std::uint64_t next_instance) {
+void transaction::impl::remember_allocation(forge::db::ids::object_id type, std::uint64_t next_instance) {
    participant->remember_allocation(type, next_instance);
 }
 
@@ -325,7 +325,7 @@ change_set& transaction::changes() const {
    return impl_->participant->changes();
 }
 
-void transaction::ensure_registered_type(forge::ids::object_id type, std::type_index model) const {
+void transaction::ensure_registered_type(forge::db::ids::object_id type, std::type_index model) const {
    if (!impl_ || !impl_->ensure_registered) {
       FORGE_THROW_EXCEPTION(exceptions::transaction_closed, "db object transaction is closed");
    }
@@ -342,7 +342,7 @@ boost::asio::awaitable<void> transaction::before_mutation(const object_mutation&
    co_return;
 }
 
-boost::asio::awaitable<forge::ids::object_id> transaction::allocate_id(forge::ids::object_id type) const {
+boost::asio::awaitable<forge::db::ids::object_id> transaction::allocate_id(forge::db::ids::object_id type) const {
    if (!impl_ || !impl_->allocate_id) {
       FORGE_THROW_EXCEPTION(exceptions::unsupported_operation, "db object transaction cannot allocate ids");
    }
