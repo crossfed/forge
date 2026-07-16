@@ -66,8 +66,6 @@ jobs:
             echo "LLVM_ROOT=/usr/lib/llvm-22" >> "$GITHUB_ENV"
             echo "CC=/usr/bin/clang-22" >> "$GITHUB_ENV"
             echo "CXX=/usr/bin/clang++-22" >> "$GITHUB_ENV"
-            echo "CXXFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
-            echo "LDFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
             if ! command -v brew >/dev/null 2>&1; then
               NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
               eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
@@ -211,8 +209,6 @@ jobs:
             echo "LLVM_ROOT=/usr/lib/llvm-22" >> "$GITHUB_ENV"
             echo "CC=/usr/bin/clang-22" >> "$GITHUB_ENV"
             echo "CXX=/usr/bin/clang++-22" >> "$GITHUB_ENV"
-            echo "CXXFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
-            echo "LDFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
             if ! command -v brew >/dev/null 2>&1; then
               NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
               eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
