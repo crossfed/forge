@@ -11,6 +11,7 @@
 #include <optional>
 #include <set>
 #include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -163,6 +164,28 @@ BOOST_AUTO_TEST_CASE(uint8_vector_datastream_reads_varint_prefixed_values) {
 
    BOOST_CHECK_EQUAL(value, "raw");
    BOOST_CHECK_EQUAL(stream.remaining(), 0U);
+}
+
+BOOST_AUTO_TEST_CASE(deque_and_streambuf_datastreams_read_varint_prefixed_values) {
+   auto uint8_stream = forge::datastream<std::deque<std::uint8_t>>{std::deque<std::uint8_t>{
+       0x03, static_cast<std::uint8_t>('r'), static_cast<std::uint8_t>('a'), static_cast<std::uint8_t>('w')}};
+   auto uint8_value = std::string{};
+   forge::raw::unpack(uint8_stream, uint8_value);
+   BOOST_CHECK_EQUAL(uint8_value, "raw");
+   BOOST_CHECK_EQUAL(uint8_stream.remaining(), 0U);
+
+   auto char_stream =
+       forge::datastream<std::deque<char>>{std::deque<char>{char{0x03}, char{'r'}, char{'a'}, char{'w'}}};
+   auto char_value = std::string{};
+   forge::raw::unpack(char_stream, char_value);
+   BOOST_CHECK_EQUAL(char_value, "raw");
+   BOOST_CHECK_EQUAL(char_stream.remaining(), 0U);
+
+   auto streambuf = forge::datastream<std::stringbuf>{std::string{"\x03raw", 4}, std::ios_base::in};
+   auto streambuf_value = std::string{};
+   forge::raw::unpack(streambuf, streambuf_value);
+   BOOST_CHECK_EQUAL(streambuf_value, "raw");
+   BOOST_CHECK_EQUAL(streambuf.remaining(), 0U);
 }
 
 BOOST_AUTO_TEST_CASE(char_and_uint8_values_preserve_spring_wire_bits) {
