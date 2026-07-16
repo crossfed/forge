@@ -284,6 +284,8 @@ def main():
         raise RuntimeError("shared multi-source action was not de-duplicated")
 
     invoke(args, "duplicate", args.fixtures / "duplicate_action.cpp", args.output / "duplicate-action", succeeds=False)
+    invoke(args, "overloaded", args.fixtures / "overloaded_action.cpp", args.output / "overloaded-action", succeeds=False)
+    invoke(args, "duplicate", args.fixtures / "duplicate_struct.cpp", args.output / "duplicate-struct", succeeds=False)
 
     modern = invoke(args, "parity", args.fixtures / "parity_modern.cpp", args.output)
     legacy = invoke(args, "parity", args.fixtures / "parity_legacy.cpp", args.output)

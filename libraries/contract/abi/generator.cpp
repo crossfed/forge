@@ -90,14 +90,43 @@ struct schema {
    std::vector<protocol::clause_pair> clauses;
    std::vector<call_shape> calls;
    std::set<std::string> type_names;
-   std::set<std::string> struct_names;
+   std::map<std::string, std::string> struct_declarations;
    std::set<std::string> variant_names;
    std::set<std::string> table_names;
    std::map<std::string, std::string> action_declarations;
+   std::map<std::string, std::string> action_methods;
    std::map<std::string, std::string> call_declarations;
    bool has_apply = false;
    bool failed = false;
 };
+
+std::string declaration_identity(const clang::NamedDecl& declaration) {
+   auto identity = llvm::SmallString<128>{};
+   if (!clang::index::generateUSRForDecl(&declaration, identity) && !identity.empty()) {
+      return identity.str().str();
+   }
+   auto fallback = declaration.getQualifiedNameAsString();
+   if (const auto* value = llvm::dyn_cast<clang::ValueDecl>(&declaration); value != nullptr) {
+      fallback += ':' + value->getType().getCanonicalType().getAsString();
+   }
+   return fallback;
+}
+
+bool claim_struct(schema& output, clang::ASTContext& context, const std::string& name, std::string identity,
+                  clang::SourceLocation location = {}) {
+   const auto [existing, inserted] = output.struct_declarations.try_emplace(name, std::move(identity));
+   if (inserted) {
+      return true;
+   }
+   if (existing->second == identity) {
+      return false;
+   }
+   const auto id = context.getDiagnostics().getCustomDiagID(clang::DiagnosticsEngine::Error,
+                                                            "duplicate contract ABI struct name '%0'");
+   context.getDiagnostics().Report(location, id) << name;
+   output.failed = true;
+   return false;
+}
 
 std::optional<std::string> annotation(const clang::Decl& declaration, std::string_view prefix) {
    const auto expected = llvm::StringRef{prefix.data(), prefix.size()};
@@ -508,14 +537,14 @@ class type_encoder {
    }
 
    void add_synthetic_struct(std::string name, std::vector<field_shape> fields) {
-      if (!output_.struct_names.insert(name).second) {
+      if (!claim_struct(output_, context_, name, "synthetic:" + name)) {
          return;
       }
       output_.structs.push_back(struct_shape{.name = std::move(name), .fields = std::move(fields)});
    }
 
    void add_struct(const clang::RecordDecl& declaration, const std::string& name) {
-      if (!output_.struct_names.insert(name).second) {
+      if (!claim_struct(output_, context_, name, declaration_identity(declaration), declaration.getLocation())) {
          return;
       }
 
@@ -691,14 +720,6 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       std::string result;
    };
 
-   std::string declaration_identity(const clang::CXXMethodDecl& method) const {
-      auto identity = llvm::SmallString<128>{};
-      if (!clang::index::generateUSRForDecl(&method, identity) && !identity.empty()) {
-         return identity.str().str();
-      }
-      return method.getQualifiedNameAsString() + ':' + method.getType().getCanonicalType().getAsString();
-   }
-
    method_shape add_method(const clang::CXXMethodDecl& method, std::string_view annotated_name) {
       if (method.isStatic()) {
          report(method.getLocation(), "contract entry point must be a non-static member function");
@@ -716,7 +737,8 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
          auto name = parameter->getNameAsString();
          arguments.fields.push_back(field_shape{name, encoder_.encode(*parameter)});
       }
-      if (output_.struct_names.insert(arguments.name).second) {
+      if (claim_struct(output_, context_, arguments.name, "method:" + declaration_identity(method),
+                       method.getLocation())) {
          output_.structs.push_back(std::move(arguments));
       }
       return shape;
@@ -724,9 +746,9 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
 
    void add_action(const clang::CXXRecordDecl& declaration, const clang::CXXMethodDecl& method,
                    std::string_view annotated_name) {
-      const auto method_info = add_method(method, annotated_name);
       const auto identity = declaration_identity(method);
-      const auto [existing, inserted] = output_.action_declarations.try_emplace(method_info.name, identity);
+      const auto action_name = annotated_name.empty() ? method.getNameAsString() : std::string{annotated_name};
+      const auto [existing, inserted] = output_.action_declarations.try_emplace(action_name, identity);
       if (!inserted && existing->second == identity) {
          return;
       }
@@ -734,6 +756,13 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
          report(method.getLocation(), "duplicate contract action name");
          return;
       }
+      const auto dispatch_name = declaration.getQualifiedNameAsString() + "::" + method.getNameAsString();
+      const auto [dispatch, dispatch_inserted] = output_.action_methods.try_emplace(dispatch_name, identity);
+      if (!dispatch_inserted && dispatch->second != identity) {
+         report(method.getLocation(), "overloaded contract action methods are not supported");
+         return;
+      }
+      const auto method_info = add_method(method, annotated_name);
       output_.actions.push_back(action_shape{
           .name = method_info.name,
           .type = method_info.type,
@@ -744,9 +773,9 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
    }
 
    void add_call(const clang::CXXMethodDecl& method, std::string_view annotated_name) {
-      const auto method_info = add_method(method, annotated_name);
       const auto identity = declaration_identity(method);
-      const auto [existing, inserted] = output_.call_declarations.try_emplace(method_info.name, identity);
+      const auto call_name = annotated_name.empty() ? method.getNameAsString() : std::string{annotated_name};
+      const auto [existing, inserted] = output_.call_declarations.try_emplace(call_name, identity);
       if (!inserted && existing->second == identity) {
          return;
       }
@@ -754,6 +783,7 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
          report(method.getLocation(), "duplicate synchronous call name");
          return;
       }
+      const auto method_info = add_method(method, annotated_name);
       auto identifier = std::uint64_t{5381U};
       for (const auto value : method_info.name) {
          identifier = identifier * 33U + static_cast<unsigned char>(value);
