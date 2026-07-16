@@ -93,6 +93,24 @@ provides typed configured MDBX ownership, while programmatic `add_store()`
 continues to accept a caller-owned MDBX driver without taking over its lane or
 close lifecycle.
 
+Ordinary DB Blob records are supported, but MDBX v1 does not provide a
+large-payload storage policy comparable to RocksDB Blob files. Values cross the
+DB Core boundary as owned byte vectors and consume MDBX map space directly.
+Deployments with large or unbounded payloads should keep the payload layer on a
+backend designed for that workload until a separate policy defines thresholds,
+streaming or external-value ownership, snapshot retention, garbage collection,
+Revision interaction and crash recovery. This is not a correctness blocker for
+bounded Object, Revision and ordinary Blob records.
+
+MDBX v1 also keeps backend diagnostics private. It reports operational failures
+through typed exceptions, but does not expose a stable public status surface for
+map usage, reader slots, oldest-reader lag, retired pages, affine-lane queues or
+close progress. A future diagnostics API must separate backend-neutral health
+from MDBX-specific counters, avoid exposing native handles and paths, and prove
+that observation does not interfere with writer or snapshot lifetimes. Operators
+must size geometry and bound snapshot lifetimes from configuration until that
+surface is delivered.
+
 ## Verification
 
 `test_forge_db_mdbx` covers Core CRUD and scan boundaries, FIFO writer

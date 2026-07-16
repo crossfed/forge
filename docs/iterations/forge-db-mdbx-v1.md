@@ -453,8 +453,8 @@ adoption.
 - custom MDBX comparators;
 - `MDBX_WRITEMAP`;
 - Blob-file replacement or large Blob payload policy;
-- automatic plugin config support for `driver: mdbx`;
 - replacing DB RocksDB;
+- public backend diagnostics and metrics;
 - backend-specific concepts in DB Core public records.
 
 ## Confirmed Implementation Decisions
@@ -502,3 +502,48 @@ Recommendation: choose the latest stable official 0.14.x release that passes
 the Forge toolchain matrix, verify its official archive checksum independently,
 and record it before source import. Do not pin a rolling generated docs build or
 an unverified GitHub mirror snapshot.
+
+## Deferred Production Follow-Ups
+
+These items are intentionally outside MDBX v1 and do not block the current
+Object, Revision, ranked-index or bounded Blob workloads.
+
+### Large Blob Payload Policy
+
+MDBX currently stores DB Blob payloads as ordinary values. This is correct and
+transactional, but every payload consumes map space and crosses DB Core as an
+owned byte vector. The implementation does not claim RocksDB Blob-file-like
+separation, streaming reads or suitability for unbounded payload sizes.
+
+A production large-payload extension must first define:
+
+- the size threshold and whether payloads remain in MDBX or move to an external
+  value store;
+- streaming write/read and digest verification without whole-value
+  materialization;
+- ownership, retention barriers, explicit collection and Revision revert/prune
+  behavior;
+- snapshot visibility and physical-file lifetime;
+- atomic crash recovery across metadata and payload storage;
+- workload benchmarks and hard capacity limits.
+
+Until then, choose RocksDB Blob files or another purpose-built payload backend
+for large or unbounded values. MDBX remains supported for bounded DB Blob
+records that fit the configured geometry.
+
+### Backend Diagnostics
+
+The driver maps native failures to typed exceptions but exports no stable
+diagnostics snapshot. The future surface should cover map geometry and usage,
+reader-slot pressure, oldest-reader lag, retired pages, writer admission and
+affine-lane queue state, durability mode, flush state and close progress.
+
+The design must keep DB Core backend-neutral: common health belongs in a neutral
+contract, while MDBX-only counters belong in an optional backend diagnostics
+view. Native handles, raw return codes and filesystem paths remain private.
+Diagnostics reads must be bounded, race-safe during close and demonstrably
+non-blocking for normal snapshot reads and the serialized writer lane.
+
+Required acceptance tests include map/readers pressure, a deliberately
+long-lived snapshot, concurrent diagnostics during commit/flush/close, path
+redaction and behavior after the driver enters closing or closed state.
