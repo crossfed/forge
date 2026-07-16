@@ -89,7 +89,7 @@ struct schema {
    std::vector<table_shape> tables;
    std::vector<protocol::clause_pair> clauses;
    std::vector<call_shape> calls;
-   std::set<std::string> type_names;
+   std::map<std::string, std::string> type_declarations;
    std::map<std::string, std::string> struct_declarations;
    std::set<std::string> variant_names;
    std::map<std::string, std::string> table_declarations;
@@ -176,7 +176,7 @@ class type_encoder {
          if (!context_.getSourceManager().isInSystemHeader(declaration->getLocation())) {
             const auto name = declaration->getNameAsString();
             const auto target = encode(declaration->getUnderlyingType());
-            add_alias(name, target);
+            add_alias(name, target, declaration->getLocation());
             return name.empty() ? target : name;
          }
          type = alias->desugar().getUnqualifiedType();
@@ -525,9 +525,20 @@ class type_encoder {
       return result;
    }
 
-   void add_alias(const std::string& name, const std::string& target) {
-      if (!name.empty() && name != target && output_.type_names.insert(name).second) {
+   void add_alias(const std::string& name, const std::string& target, clang::SourceLocation location = {}) {
+      if (name.empty() || name == target) {
+         return;
+      }
+      const auto [existing, inserted] = output_.type_declarations.try_emplace(name, target);
+      if (inserted) {
          output_.types.push_back(type_shape{name, target});
+         return;
+      }
+      if (existing->second != target) {
+         const auto id = context_.getDiagnostics().getCustomDiagID(
+             clang::DiagnosticsEngine::Error, "conflicting contract ABI type alias '%0' maps to both '%1' and '%2'");
+         context_.getDiagnostics().Report(location, id) << name << existing->second << target;
+         output_.failed = true;
       }
    }
 
