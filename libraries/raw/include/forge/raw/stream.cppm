@@ -187,6 +187,11 @@ class datastream<std::vector<Byte, Allocator>,
       return true;
    }
 
+   bool get(std::uint8_t& value) {
+      read(reinterpret_cast<char*>(&value), 1);
+      return true;
+   }
+
    std::size_t remaining() const {
       return storage_.size() - position_;
    }

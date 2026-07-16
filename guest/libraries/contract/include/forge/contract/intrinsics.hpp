@@ -1,5 +1,6 @@
 #pragma once
 
+// `db_get_i64` keeps CDT's historical const-qualified output buffer for source compatibility.
 #define FORGE_CONTRACT_INTRINSICS(FORGE_CONTRACT_INTRINSIC)                                                            \
    FORGE_CONTRACT_INTRINSIC(1, eosio_assert, env, eosio_assert, void, (std::uint32_t test, const char* message))       \
    FORGE_CONTRACT_INTRINSIC(1, eosio_assert_message, env, eosio_assert_message, void,                                  \

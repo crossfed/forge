@@ -154,6 +154,17 @@ BOOST_AUTO_TEST_CASE(raw_pack_uses_canonical_uint8_byte_container) {
    BOOST_CHECK(forge::raw::unpack<macro_serialized_record>(view) == value);
 }
 
+BOOST_AUTO_TEST_CASE(uint8_vector_datastream_reads_varint_prefixed_values) {
+   auto stream = forge::datastream<std::vector<std::uint8_t>>{std::vector<std::uint8_t>{
+       0x03, static_cast<std::uint8_t>('r'), static_cast<std::uint8_t>('a'), static_cast<std::uint8_t>('w')}};
+   auto value = std::string{};
+
+   forge::raw::unpack(stream, value);
+
+   BOOST_CHECK_EQUAL(value, "raw");
+   BOOST_CHECK_EQUAL(stream.remaining(), 0U);
+}
+
 BOOST_AUTO_TEST_CASE(char_and_uint8_values_preserve_spring_wire_bits) {
    const auto chars = std::vector<char>{char{0x00}, char{0x7f}, static_cast<char>(0x80), static_cast<char>(0xff)};
    const auto octets = std::vector<std::uint8_t>{0x00, 0x7f, 0x80, 0xff};
