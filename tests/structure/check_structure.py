@@ -203,6 +203,25 @@ def check_plugin_impl_ownership(root: Path, errors: list[str]) -> None:
             )
 
 
+def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
+   path = root / ".github" / "workflows" / "contract-sdk.yml"
+   if not path.exists():
+      return
+
+   source = path.read_text(errors="ignore")
+   try:
+      pull_request = source.split("  pull_request:\n", 1)[1].split("  push:\n", 1)[0]
+   except IndexError:
+      errors.append(f"{path.relative_to(root)}: cannot locate pull_request path filters")
+      return
+
+   for required in ('      - "CMakeLists.txt"', '      - "cmake/**"'):
+      if required not in pull_request:
+         errors.append(
+            f"{path.relative_to(root)}: pull_request paths must include {required.strip()[2:]}"
+         )
+
+
 def check_modules(root: Path, files: list[Path], errors: list[str]) -> None:
    declarations: dict[str, list[tuple[Path, int]]] = defaultdict(list)
    imports: list[tuple[str, Path, int]] = []
@@ -287,6 +306,7 @@ def main() -> int:
    check_pairing(root, errors)
    check_vm_wasm_boundaries(root, errors)
    check_plugin_impl_ownership(root, errors)
+   check_contract_sdk_workflow(root, errors)
    check_modules(root, files, errors)
 
    if errors:

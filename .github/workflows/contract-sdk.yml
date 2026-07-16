@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - ".github/workflows/contract-sdk.yml"
+      - "CMakeLists.txt"
+      - "cmake/**"
       - "libraries/chain/protocol/**"
       - "libraries/raw/**"
       - "libraries/vm/wasm/**"
