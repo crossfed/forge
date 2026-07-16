@@ -23,11 +23,13 @@ void* memcpy(void* destination, const void* source, std::size_t size) {
 void* memmove(void* destination, const void* source, std::size_t size) {
    auto* output = static_cast<std::uint8_t*>(destination);
    const auto* input = static_cast<const std::uint8_t*>(source);
-   if (output < input) {
+   const auto output_address = reinterpret_cast<std::uintptr_t>(output);
+   const auto input_address = reinterpret_cast<std::uintptr_t>(input);
+   if (output_address < input_address) {
       for (auto index = std::size_t{0}; index < size; ++index) {
          output[index] = input[index];
       }
-   } else if (output > input) {
+   } else if (output_address > input_address) {
       for (auto index = size; index != 0U; --index) {
          output[index - 1U] = input[index - 1U];
       }

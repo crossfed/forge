@@ -216,6 +216,33 @@ class [[forge::contract("allocatortst")]] allocator_contract : public forge::con
       forge::contract::check(errno == 0, "guest errno did not reset");
    }
 
+   [[forge::action]] void memmoves() {
+      constexpr auto size = std::size_t{16};
+      auto* source = static_cast<std::uint8_t*>(std::malloc(size));
+      auto* destination = static_cast<std::uint8_t*>(std::malloc(size));
+      forge::contract::check(source != nullptr && destination != nullptr, "memmove allocation failed");
+      for (auto index = std::size_t{0}; index < size; ++index) {
+         source[index] = static_cast<std::uint8_t>(index + 1U);
+         destination[index] = 0U;
+      }
+      std::memmove(destination, source, size);
+      forge::contract::check(std::memcmp(destination, source, size) == 0, "memmove failed for separate allocations");
+
+      std::uint8_t values[8] = {0U, 1U, 2U, 3U, 4U, 5U, 6U, 7U};
+      std::memmove(values + 2, values, 6U);
+      constexpr std::uint8_t backward[8] = {0U, 1U, 0U, 1U, 2U, 3U, 4U, 5U};
+      forge::contract::check(std::memcmp(values, backward, sizeof(values)) == 0, "memmove failed for backward overlap");
+
+      for (auto index = std::size_t{0}; index < sizeof(values); ++index) {
+         values[index] = static_cast<std::uint8_t>(index);
+      }
+      std::memmove(values, values + 2, 6U);
+      constexpr std::uint8_t forward[8] = {2U, 3U, 4U, 5U, 6U, 7U, 6U, 7U};
+      forge::contract::check(std::memcmp(values, forward, sizeof(values)) == 0, "memmove failed for forward overlap");
+      std::free(source);
+      std::free(destination);
+   }
+
  private:
    template <typename T> static void check_malloc_alignment() {
       auto* first = std::malloc(sizeof(T));
