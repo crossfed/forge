@@ -669,6 +669,9 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
           declaration->getIdentifier() == nullptr || declaration->getIdentifier()->getName() != "apply") {
          return true;
       }
+      if (!declaration->isExternC() || !declaration->hasExternalFormalLinkage()) {
+         return true;
+      }
       if (!declaration->getReturnType()->isVoidType() || declaration->getNumParams() != 3U) {
          report(declaration->getLocation(), "contract apply entry point must be void(uint64_t, uint64_t, uint64_t)");
          return true;

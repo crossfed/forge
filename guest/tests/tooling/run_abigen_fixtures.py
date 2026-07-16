@@ -331,6 +331,24 @@ def main():
     if not modern_dispatcher.startswith("#include <cstdint>\n"):
         raise RuntimeError("generated dispatcher does not declare its fixed-width integer dependency")
 
+    for fixture in ("static_apply", "cpp_linkage_apply"):
+        invoke(args, fixture, args.fixtures / f"{fixture}.cpp", args.output)
+        dispatcher = (args.output / f"{fixture}.dispatcher.cpp").read_text(encoding="utf-8")
+        if 'extern "C" [[gnu::visibility("default")]] void apply(' not in dispatcher:
+            raise RuntimeError(f"{fixture} suppressed the generated contract dispatcher")
+
+    invoke(args, "custom_apply", args.fixtures / "custom_apply.cpp", args.output)
+    custom_dispatcher = (args.output / "custom_apply.dispatcher.cpp").read_text(encoding="utf-8")
+    if 'extern "C" [[gnu::visibility("default")]] void apply(' in custom_dispatcher:
+        raise RuntimeError("exported custom apply received a duplicate generated dispatcher")
+    invoke(
+        args,
+        "invalid_exported_apply",
+        args.fixtures / "invalid_exported_apply.cpp",
+        args.output,
+        succeeds=False,
+    )
+
     bare_output = args.output / "bare-output"
     invoke(
         args,
