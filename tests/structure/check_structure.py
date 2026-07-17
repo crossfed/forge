@@ -275,6 +275,17 @@ def check_contract_sdk_components(root: Path, errors: list[str]) -> None:
       return
 
    source = path.read_text(errors="ignore")
+   tools_project = re.search(
+      r"ExternalProject_Add\(\s*forge_contract_tools(?P<body>.*?)\n\s*\)", source, re.DOTALL
+   )
+   if (
+      tools_project is None
+      or "-DCMAKE_INSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}" not in tools_project.group("body")
+   ):
+      errors.append(
+         f"{path.relative_to(root)}: release tools must inherit the SDK install libdir"
+      )
+
    try:
       developer_profile = source.split(
          'else()\n   find_package(Clang 22.1 CONFIG REQUIRED)', 1

@@ -201,6 +201,7 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
       CMAKE_ARGS
          -DCMAKE_BUILD_TYPE=Release
          -DCMAKE_INSTALL_PREFIX=${_host_tools_install}
+         -DCMAKE_INSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}
          -DCMAKE_C_COMPILER=${_llvm_install}/bin/clang
          -DCMAKE_CXX_COMPILER=${_llvm_install}/bin/clang++
          -DCMAKE_PREFIX_PATH:PATH=${_forge_contract_prefix_path}
