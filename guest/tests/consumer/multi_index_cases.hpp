@@ -231,6 +231,9 @@ inline void run(name self, std::uint32_t scenario) {
       static_cast<void>(exhausted.available_primary_key());
       return;
    }
+   case 33:
+      table.modify(table.require_find(1), "alice"_n, [](record& row) { row.value = "new primary payer"; });
+      return;
 #elif FORGE_CONTRACT_MULTI_INDEX_SUITE == 1
    case 11:
       static_cast<void>(table.require_find(999));

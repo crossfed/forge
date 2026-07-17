@@ -527,6 +527,10 @@ BOOST_AUTO_TEST_CASE(multi_index_and_singleton_execute_over_the_objectdb_host) {
       invoke_success(core, 9);
       BOOST_TEST(host.find_primary(account, account, table_name, 1)->payer == payer_before);
 
+      invoke_success(core, 33);
+      BOOST_TEST(host.find_primary(account, account, table_name, 1)->payer == protocol::make_name("alice").value);
+      BOOST_TEST(host.find_index64(account, account, secondary_name(0), 1)->payer == payer_before);
+
       invoke_failure(core, 10, "next primary key in table is at autoincrement limit");
       BOOST_TEST(!host.find_table(account, account, protocol::make_name("exhaust").value).has_value());
 

@@ -86,6 +86,12 @@ read reports the stored value size, while a non-zero read returns the number of
 bytes actually copied. The executable fixture covers both forms and truncated
 reads.
 
+CDT `multi_index::modify` updates a secondary row only when the extracted
+secondary key changes. A payer-only modification therefore updates the primary
+row payer while preserving the existing secondary-row payer. Forge keeps this
+observable behavior for Spring/CDT RAM-billing compatibility and covers it with
+an ObjectDB-backed contract regression.
+
 ## Product Runtime Boundary
 
 The future blockchain host binding remains responsible for:

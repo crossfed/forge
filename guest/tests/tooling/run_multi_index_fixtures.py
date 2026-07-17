@@ -66,6 +66,12 @@ def main() -> None:
         modern = json.loads(modern_path.read_text(encoding="utf-8"))
         legacy = json.loads(legacy_path.read_text(encoding="utf-8"))
         assert modern == legacy, f"modern and EOSIO ABI differ: {modern_path.name}, {legacy_path.name}"
+        tables = {table["name"]: table for table in modern["tables"]}
+        assert tables["records"]["type"] == "record"
+        structs = {shape["name"]: shape for shape in modern["structs"]}
+        fields = {field["name"]: field["type"] for field in structs["record"]["fields"]}
+        assert fields["secondary256"] == "checksum256"
+        assert fields["secondary_long_double"] == "float128"
 
 
 if __name__ == "__main__":

@@ -397,6 +397,8 @@ class type_encoder {
          return "float32";
       case clang::BuiltinType::Double:
          return "float64";
+      case clang::BuiltinType::LongDouble:
+         return "float128";
       default:
          break;
       }
@@ -431,7 +433,13 @@ class type_encoder {
 
       if (const auto* specialization = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record)) {
          const auto template_name = specialization->getSpecializedTemplate()->getNameAsString();
+         const auto template_qualified = specialization->getSpecializedTemplate()->getQualifiedNameAsString();
          const auto arguments = flatten(specialization->getTemplateArgs());
+         if (template_qualified == "forge::chain::protocol::fixed_key" && arguments.size() >= 1U &&
+             arguments[0].getKind() == clang::TemplateArgument::Integral &&
+             arguments[0].getAsIntegral().getZExtValue() == 32U) {
+            return "checksum256";
+         }
          if ((template_name == "vector" || template_name == "set" || template_name == "deque" ||
               template_name == "list") &&
              arguments.size() >= 1U && arguments[0].getKind() == clang::TemplateArgument::Type) {
@@ -670,7 +678,9 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
          return true;
       }
       if (const auto table = annotation(*declaration, "forge.table"); table.has_value()) {
-         if (belongs_to_selected_contract(*declaration)) {
+         const auto owner = owning_contract(*declaration);
+         const auto selected = owner.has_value() && *owner == contract_name_;
+         if (selected || (!owner.has_value() && !table->empty())) {
             encoder_.add_table(*declaration, *table, table->empty());
          }
          return true;
@@ -771,12 +781,11 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       return record == nullptr ? nullptr : record->getDefinition();
    }
 
-   bool belongs_to_selected_contract(const clang::Decl& declaration) const {
+   std::optional<std::string> owning_contract(const clang::Decl& declaration) const {
       if (const auto* record = llvm::dyn_cast<clang::CXXRecordDecl>(&declaration); record != nullptr) {
          const auto contract = annotation(*record, "forge.contract");
          if (contract.has_value()) {
-            const auto declared_name = contract->empty() ? record->getNameAsString() : *contract;
-            return declared_name == contract_name_;
+            return contract->empty() ? record->getNameAsString() : *contract;
          }
       }
       for (auto* context = declaration.getDeclContext(); context != nullptr; context = context->getParent()) {
@@ -786,11 +795,15 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
          }
          const auto contract = annotation(*record, "forge.contract");
          if (contract.has_value()) {
-            const auto declared_name = contract->empty() ? record->getNameAsString() : *contract;
-            return declared_name == contract_name_;
+            return contract->empty() ? record->getNameAsString() : *contract;
          }
       }
-      return false;
+      return std::nullopt;
+   }
+
+   bool belongs_to_selected_contract(const clang::Decl& declaration) const {
+      const auto owner = owning_contract(declaration);
+      return owner.has_value() && *owner == contract_name_;
    }
 
    void add_table(const clang::ClassTemplateSpecializationDecl& declaration) {

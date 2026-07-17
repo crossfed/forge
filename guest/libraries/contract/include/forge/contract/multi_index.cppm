@@ -888,6 +888,7 @@ template <name::raw TableName, table_row T, class... Indices> class multi_index 
       (
           [&] {
              const auto current = secondary_type<Number>{extract_secondary<Number>(value)};
+             // CDT updates a secondary row, including its payer, only when its key changes.
              if (!detail::secondary_equal(std::get<Number>(old_values), current)) {
                 ensure_secondary_iterator<Number>(value);
                 check(value.secondary_iterators[Number] >= 0, "unable to find secondary key");
