@@ -127,9 +127,7 @@ jobs:
             -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
             -DFORGE_ENABLE_MODULES=ON \
-            -DFORGE_ENABLE_ROCKSDB=OFF \
-            -DFORGE_ENABLE_TUI=OFF \
-            -DFORGE_ENABLE_CONTRACT_TOOLING=ON \
+            -DFORGE_BUILD_PROFILE=contract-sdk-host \
             -DClang_DIR="$LLVM_ROOT/lib/cmake/clang" \
             -DLLVM_DIR="$LLVM_ROOT/lib/cmake/llvm" \
             -DBUILD_TESTING=OFF
@@ -275,9 +273,7 @@ jobs:
             -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
             -DFORGE_ENABLE_MODULES=ON \
-            -DFORGE_ENABLE_ROCKSDB=OFF \
-            -DFORGE_ENABLE_TUI=OFF \
-            -DFORGE_ENABLE_CONTRACT_TOOLING=ON \
+            -DFORGE_BUILD_PROFILE=contract-sdk-host \
             -DClang_DIR="$LLVM_ROOT/lib/cmake/clang" \
             -DLLVM_DIR="$LLVM_ROOT/lib/cmake/llvm" \
             -DBUILD_TESTING=OFF

@@ -23,6 +23,21 @@ option(FORGE_ENABLE_LIBP2P_INTEROP "Run live go-libp2p/rust-libp2p interoperabil
 option(FORGE_ENABLE_ROCKSDB "Build RocksDB-backed optional FORGE features when RocksDB is available" ON)
 option(FORGE_ENABLE_CONTRACT_TOOLING "Build optional Forge Contract host libraries" OFF)
 
+set(FORGE_BUILD_PROFILE "full" CACHE STRING "Forge build profile")
+set_property(CACHE FORGE_BUILD_PROFILE PROPERTY STRINGS full contract-sdk-host)
+if(NOT FORGE_BUILD_PROFILE STREQUAL "full" AND NOT FORGE_BUILD_PROFILE STREQUAL "contract-sdk-host")
+   message(FATAL_ERROR "Unknown FORGE_BUILD_PROFILE: ${FORGE_BUILD_PROFILE}")
+endif()
+
+set(FORGE_CONTRACT_SDK_HOST_PROFILE OFF)
+if(FORGE_BUILD_PROFILE STREQUAL "contract-sdk-host")
+   set(FORGE_CONTRACT_SDK_HOST_PROFILE ON)
+   set(FORGE_ENABLE_CONTRACT_TOOLING ON CACHE BOOL "Build optional Forge Contract host libraries" FORCE)
+   set(FORGE_ENABLE_ROCKSDB OFF CACHE BOOL "Build RocksDB-backed optional FORGE features" FORCE)
+   set(FORGE_ENABLE_TUI OFF CACHE BOOL "Build Forge terminal UI library" FORCE)
+   set(FORGE_ENABLE_LIBP2P_INTEROP OFF CACHE BOOL "Run libp2p interoperability tests" FORCE)
+endif()
+
 set(FORGE_LIBP2P_DONORS_ROOT "" CACHE PATH "Path to workspace donors directory containing go-libp2p, rust-libp2p and libp2p-specs")
 if(NOT FORGE_LIBP2P_DONORS_ROOT)
    set(_forge_default_donors_root "/Users/vladimirtarnakin/.openclaw/workspace/Projects/Storlane/donors")
@@ -57,32 +72,39 @@ set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
 set(THREADS_PREFER_PTHREAD_FLAG TRUE)
 find_package(Threads REQUIRED)
 
-find_package(
-   Boost 1.90 REQUIRED CONFIG
-   COMPONENTS headers date_time iostreams url program_options
-)
+set(_forge_boost_components headers date_time iostreams)
+if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
+   list(APPEND _forge_boost_components url program_options)
+endif()
+find_package(Boost 1.90 REQUIRED CONFIG COMPONENTS ${_forge_boost_components})
 find_package(ZLIB REQUIRED)
-find_package(boost_stacktrace_basic CONFIG QUIET)
-check_cxx_source_compiles(
-   "#include <stacktrace>
-   #ifndef __cpp_lib_stacktrace
-   #error no std stacktrace feature macro
-   #endif
-   int main() { auto trace = std::stacktrace::current(); return static_cast<int>(trace.size()); }"
-   FORGE_HAS_STD_STACKTRACE
-)
-if(FORGE_HAS_STD_STACKTRACE)
-   message(STATUS "FORGE log stacktrace backend: std::stacktrace")
-elseif(TARGET Boost::stacktrace_basic)
-   message(STATUS "FORGE log stacktrace backend: Boost::stacktrace_basic")
-else()
-   message(STATUS "FORGE log stacktrace backend: unavailable")
+if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
+   find_package(boost_stacktrace_basic CONFIG QUIET)
+   check_cxx_source_compiles(
+      "#include <stacktrace>
+      #ifndef __cpp_lib_stacktrace
+      #error no std stacktrace feature macro
+      #endif
+      int main() { auto trace = std::stacktrace::current(); return static_cast<int>(trace.size()); }"
+      FORGE_HAS_STD_STACKTRACE
+   )
+   if(FORGE_HAS_STD_STACKTRACE)
+      message(STATUS "FORGE log stacktrace backend: std::stacktrace")
+   elseif(TARGET Boost::stacktrace_basic)
+      message(STATUS "FORGE log stacktrace backend: Boost::stacktrace_basic")
+   else()
+      message(STATUS "FORGE log stacktrace backend: unavailable")
+   endif()
 endif()
 
-find_package(OpenSSL 3 REQUIRED COMPONENTS SSL Crypto)
-find_package(Ngtcp2 REQUIRED)
+if(FORGE_CONTRACT_SDK_HOST_PROFILE)
+   find_package(OpenSSL 3 REQUIRED COMPONENTS Crypto)
+else()
+   find_package(OpenSSL 3 REQUIRED COMPONENTS SSL Crypto)
+   find_package(Ngtcp2 REQUIRED)
+endif()
 set(FORGE_HAS_ROCKSDB OFF)
-if(FORGE_ENABLE_ROCKSDB)
+if(FORGE_ENABLE_ROCKSDB AND NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
    find_package(RocksDB QUIET)
    if(TARGET RocksDB::rocksdb)
       set(FORGE_HAS_ROCKSDB ON)
@@ -102,7 +124,7 @@ endif()
 
 set(FORGE_HAS_TUI OFF)
 set(FORGE_TUI_NOTCURSES_TARGET "")
-if(FORGE_ENABLE_TUI)
+if(FORGE_ENABLE_TUI AND NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
    find_package(Notcurses CONFIG QUIET)
    if(TARGET Notcurses::notcurses-core)
       set(FORGE_TUI_NOTCURSES_TARGET Notcurses::notcurses-core)
@@ -385,27 +407,12 @@ add_subdirectory(libraries/ids)
 add_subdirectory(libraries/compression)
 add_subdirectory(libraries/chain)
 add_subdirectory(libraries/vm)
-add_subdirectory(libraries/db)
-add_subdirectory(libraries/config)
-add_subdirectory(libraries/codec)
-add_subdirectory(libraries/api)
-add_subdirectory(libraries/log)
+add_subdirectory(libraries/db/core)
+add_subdirectory(libraries/db/object)
+add_subdirectory(libraries/config/core)
+add_subdirectory(libraries/codec/json)
 add_subdirectory(libraries/crypto)
-add_subdirectory(libraries/multiformats)
 add_subdirectory(libraries/asio)
-add_subdirectory(libraries/otlp)
-if(FORGE_HAS_ROCKSDB)
-   add_subdirectory(libraries/rocksdb)
-endif()
-add_subdirectory(libraries/net)
-add_subdirectory(libraries/app)
-if(FORGE_ENABLE_CONTRACT_TOOLING)
-   add_subdirectory(libraries/contract)
-endif()
-add_subdirectory(plugins)
-if(FORGE_ENABLE_TUI AND FORGE_TUI_NOTCURSES_TARGET)
-   add_subdirectory(libraries/tui)
-endif()
 
 set(
    FORGE_LEAF_TARGETS
@@ -413,55 +420,86 @@ set(
    forge_exceptions
    forge_reflect
    forge_schema
-	   forge_variant
-	   forge_raw
-	   forge_ids
+   forge_variant
+   forge_raw
+   forge_ids
    forge_compression
    forge_chain_core
    forge_chain_protocol
    forge_vm_wasm
    forge_db_core
    forge_db_object
-   forge_db_blob
-   forge_db_revision
    forge_config_core
    forge_codec_json
-   forge_codec_yaml
-   forge_codec_xml
-   forge_config_program_options
-   forge_config_env
-   forge_api_core
-   forge_api_stream
-   forge_api_transport
-   forge_api_quic
-   forge_api_websocket
-   forge_api_p2p
-   forge_log
-   forge_otlp
    forge_crypto
-   forge_multiformats
    forge_asio
-   forge_net_http
-   forge_api_http
-   forge_net_websocket
-   forge_net_transport
-   forge_net_tcp
-   forge_net_stcp
-   forge_net_yamux
-   forge_net_quic
-   forge_net_p2p
-   forge_app
-   forge_plugins_crypto_signer
-   forge_plugins_crypto_secrets
-   forge_plugins_p2p_node
-   forge_plugins_p2p_resolver
-   forge_plugins_p2p_diagnostics
-   forge_plugins_p2p_pubsub
-   forge_plugins_http_server
-   forge_plugins_log_otlp
-   forge_plugins_db_store
-   forge_plugins
 )
+
+if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
+   add_subdirectory(libraries/db/blob)
+   add_subdirectory(libraries/db/revision)
+   add_subdirectory(libraries/config/env)
+   add_subdirectory(libraries/config/program_options)
+   add_subdirectory(libraries/codec/yaml)
+   add_subdirectory(libraries/codec/xml)
+   add_subdirectory(libraries/api)
+   add_subdirectory(libraries/log)
+   add_subdirectory(libraries/multiformats)
+   add_subdirectory(libraries/otlp)
+   if(FORGE_HAS_ROCKSDB)
+      add_subdirectory(libraries/rocksdb)
+      add_subdirectory(libraries/db/rocksdb)
+   endif()
+   add_subdirectory(libraries/net)
+   add_subdirectory(libraries/app)
+   add_subdirectory(plugins)
+   if(FORGE_ENABLE_TUI AND FORGE_TUI_NOTCURSES_TARGET)
+      add_subdirectory(libraries/tui)
+   endif()
+
+   list(
+      APPEND FORGE_LEAF_TARGETS
+      forge_db_blob
+      forge_db_revision
+      forge_codec_yaml
+      forge_codec_xml
+      forge_config_program_options
+      forge_config_env
+      forge_api_core
+      forge_api_stream
+      forge_api_transport
+      forge_api_quic
+      forge_api_websocket
+      forge_api_p2p
+      forge_log
+      forge_otlp
+      forge_multiformats
+      forge_net_http
+      forge_api_http
+      forge_net_websocket
+      forge_net_transport
+      forge_net_tcp
+      forge_net_stcp
+      forge_net_yamux
+      forge_net_quic
+      forge_net_p2p
+      forge_app
+      forge_plugins_crypto_signer
+      forge_plugins_crypto_secrets
+      forge_plugins_p2p_node
+      forge_plugins_p2p_resolver
+      forge_plugins_p2p_diagnostics
+      forge_plugins_p2p_pubsub
+      forge_plugins_http_server
+      forge_plugins_log_otlp
+      forge_plugins_db_store
+      forge_plugins
+   )
+endif()
+
+if(FORGE_ENABLE_CONTRACT_TOOLING)
+   add_subdirectory(libraries/contract)
+endif()
 
 if(TARGET forge_rocksdb)
    list(APPEND FORGE_LEAF_TARGETS forge_rocksdb)
@@ -489,6 +527,88 @@ if(FORGE_ENABLE_CONTRACT_TOOLING)
    )
 endif()
 
+set(
+   FORGE_BUILT_COMPONENTS
+   core
+   exceptions
+   reflect
+   schema
+   variant
+   raw
+   ids
+   compression
+   chain_core
+   chain_protocol
+   vm_wasm
+   db_core
+   db_object
+   config_core
+   codec_json
+   crypto
+   asio
+)
+if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
+   list(
+      APPEND FORGE_BUILT_COMPONENTS
+      db_blob
+      db_revision
+      codec_yaml
+      codec_xml
+      config_program_options
+      config_env
+      api_core
+      api_stream
+      api_transport
+      api_quic
+      api_websocket
+      api_p2p
+      log
+      otlp
+      multiformats
+      net_transport
+      net_tcp
+      net_stcp
+      net_yamux
+      app
+      net_http
+      api_http
+      net_websocket
+      net_quic
+      net_p2p
+      plugins_crypto_signer
+      plugins_crypto_secrets
+      plugins_p2p_node
+      plugins_p2p_resolver
+      plugins_p2p_diagnostics
+      plugins_p2p_pubsub
+      plugins_http_server
+      plugins_log_otlp
+      plugins_db_store
+      plugins
+   )
+endif()
+if(TARGET forge_rocksdb)
+   list(APPEND FORGE_BUILT_COMPONENTS rocksdb)
+endif()
+if(TARGET forge_db_rocksdb)
+   list(APPEND FORGE_BUILT_COMPONENTS db_rocksdb)
+endif()
+if(TARGET forge_plugins_db_rocksdb)
+   list(APPEND FORGE_BUILT_COMPONENTS plugins_db_rocksdb)
+endif()
+if(TARGET forge_tui)
+   list(APPEND FORGE_BUILT_COMPONENTS tui)
+endif()
+if(FORGE_ENABLE_CONTRACT_TOOLING)
+   list(
+      APPEND FORGE_BUILT_COMPONENTS
+      contract_abi
+      contract_attributes
+      contract_validation
+      contract_manifest
+   )
+endif()
+
 add_library(forge STATIC forge.cpp)
 
 target_include_directories(forge PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
@@ -498,7 +618,7 @@ target_link_libraries(
       ${FORGE_LEAF_TARGETS}
 )
 
-if(DEFINED BUILD_TESTING AND BUILD_TESTING)
+if(DEFINED BUILD_TESTING AND BUILD_TESTING AND NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
    add_subdirectory(tests)
 endif()
 
@@ -519,58 +639,67 @@ install(
    PUBLIC_HEADER DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/bls12-381 COMPONENT dev EXCLUDE_FROM_ALL
 )
 
+set(
+   FORGE_INSTALL_INCLUDE_DIRS
+   libraries/core/include/forge
+   libraries/exceptions/include/forge
+   libraries/reflect/include/forge
+   libraries/schema/include/forge
+   libraries/variant/include/forge
+   libraries/raw/include/forge
+   libraries/ids/include/forge
+   libraries/compression/include/forge
+   libraries/chain/core/include/forge
+   libraries/chain/protocol/include/forge
+   libraries/vm/wasm/include/forge
+   libraries/db/core/include/forge
+   libraries/db/object/include/forge
+   libraries/codec/json/include/forge
+   libraries/config/core/include/forge
+   libraries/crypto/include/forge
+   libraries/asio/include/forge
+)
+if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
+   list(
+      APPEND FORGE_INSTALL_INCLUDE_DIRS
+      libraries/db/blob/include/forge
+      libraries/db/revision/include/forge
+      libraries/codec/yaml/include/forge
+      libraries/codec/xml/include/forge
+      libraries/config/program_options/include/forge
+      libraries/config/env/include/forge
+      libraries/api/core/include/forge
+      libraries/api/http/include/forge
+      libraries/api/stream/include/forge
+      libraries/api/transport/include/forge
+      libraries/api/quic/include/forge
+      libraries/api/websocket/include/forge
+      libraries/api/p2p/include/forge
+      libraries/log/include/forge
+      libraries/otlp/include/forge
+      libraries/multiformats/include/forge
+      libraries/net/http/include/forge
+      libraries/net/websocket/include/forge
+      libraries/net/transport/include/forge
+      libraries/net/tcp/include/forge
+      libraries/net/yamux/include/forge
+      libraries/net/quic/include/forge
+      libraries/net/stcp/include/forge
+      libraries/net/p2p/include/forge
+      libraries/app/include/forge
+      plugins/crypto/signer/include/forge
+      plugins/crypto/secrets/include/forge
+      plugins/p2p/node/include/forge
+      plugins/p2p/resolver/include/forge
+      plugins/p2p/diagnostics/include/forge
+      plugins/p2p/pubsub/include/forge
+      plugins/http/server/include/forge
+      plugins/log/otlp/include/forge
+      plugins/db/store/include/forge
+   )
+endif()
 install(
-   DIRECTORY libraries/core/include/forge
-             libraries/exceptions/include/forge
-             libraries/reflect/include/forge
-             libraries/schema/include/forge
-	             libraries/variant/include/forge
-	             libraries/raw/include/forge
-	             libraries/ids/include/forge
-             libraries/compression/include/forge
-             libraries/chain/core/include/forge
-             libraries/chain/protocol/include/forge
-             libraries/vm/wasm/include/forge
-             libraries/db/core/include/forge
-             libraries/db/object/include/forge
-             libraries/db/blob/include/forge
-             libraries/db/revision/include/forge
-             libraries/codec/json/include/forge
-             libraries/config/core/include/forge
-             libraries/codec/yaml/include/forge
-             libraries/codec/xml/include/forge
-             libraries/config/program_options/include/forge
-             libraries/config/env/include/forge
-             libraries/api/core/include/forge
-             libraries/api/http/include/forge
-             libraries/api/stream/include/forge
-             libraries/api/transport/include/forge
-             libraries/api/quic/include/forge
-             libraries/api/websocket/include/forge
-             libraries/api/p2p/include/forge
-             libraries/log/include/forge
-             libraries/otlp/include/forge
-             libraries/crypto/include/forge
-             libraries/multiformats/include/forge
-             libraries/asio/include/forge
-             libraries/net/http/include/forge
-             libraries/net/websocket/include/forge
-             libraries/net/transport/include/forge
-             libraries/net/tcp/include/forge
-             libraries/net/yamux/include/forge
-             libraries/net/quic/include/forge
-             libraries/net/stcp/include/forge
-             libraries/net/p2p/include/forge
-             libraries/app/include/forge
-             plugins/crypto/signer/include/forge
-             plugins/crypto/secrets/include/forge
-             plugins/p2p/node/include/forge
-             plugins/p2p/resolver/include/forge
-             plugins/p2p/diagnostics/include/forge
-             plugins/p2p/pubsub/include/forge
-             plugins/http/server/include/forge
-             plugins/log/otlp/include/forge
-             plugins/db/store/include/forge
+   DIRECTORY ${FORGE_INSTALL_INCLUDE_DIRS}
    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT dev EXCLUDE_FROM_ALL
 )
 

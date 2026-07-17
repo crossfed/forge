@@ -6,9 +6,14 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/modules")
 set(Forge_BUILT_WITH_ROCKSDB @FORGE_HAS_ROCKSDB@)
 set(Forge_BUILT_WITH_TUI @FORGE_HAS_TUI@)
 set(Forge_BUILT_WITH_CONTRACT_TOOLING @FORGE_ENABLE_CONTRACT_TOOLING@)
+set(Forge_BUILD_PROFILE "@FORGE_BUILD_PROFILE@")
 
 set(
    _FORGE_ALL_COMPONENTS
+   @FORGE_BUILT_COMPONENTS@
+)
+set(
+   _FORGE_KNOWN_COMPONENTS
    core
    exceptions
    reflect
@@ -69,28 +74,8 @@ set(
    plugins_db_rocksdb
    plugins
    tui
+   all
 )
-set(_FORGE_KNOWN_COMPONENTS ${_FORGE_ALL_COMPONENTS} all)
-if(NOT Forge_BUILT_WITH_ROCKSDB)
-   list(
-      REMOVE_ITEM _FORGE_ALL_COMPONENTS
-      rocksdb
-      db_rocksdb
-      plugins_db_rocksdb
-   )
-endif()
-if(NOT Forge_BUILT_WITH_TUI)
-   list(REMOVE_ITEM _FORGE_ALL_COMPONENTS tui)
-endif()
-if(NOT Forge_BUILT_WITH_CONTRACT_TOOLING)
-   list(
-      REMOVE_ITEM _FORGE_ALL_COMPONENTS
-      contract_abi
-      contract_attributes
-      contract_validation
-      contract_manifest
-   )
-endif()
 set(_FORGE_REQUESTED_COMPONENTS ${Forge_FIND_COMPONENTS})
 set(_FORGE_ALL_REQUESTED FALSE)
 
@@ -420,8 +405,16 @@ else()
             _forge_add_component(${_forge_all_component})
          endforeach()
       elseif("${_forge_component}" IN_LIST _FORGE_KNOWN_COMPONENTS)
-         set(Forge_${_forge_component}_FOUND TRUE)
-         _forge_add_component(${_forge_component})
+         if("${_forge_component}" IN_LIST _FORGE_ALL_COMPONENTS)
+            set(Forge_${_forge_component}_FOUND TRUE)
+            _forge_add_component(${_forge_component})
+         else()
+            set(Forge_${_forge_component}_FOUND FALSE)
+            set(
+               Forge_NOT_FOUND_MESSAGE
+               "Forge component ${_forge_component} was not built by profile ${Forge_BUILD_PROFILE}"
+            )
+         endif()
       else()
          set(Forge_${_forge_component}_FOUND FALSE)
          set(Forge_NOT_FOUND_MESSAGE "Unknown FORGE component: ${_forge_component}")
