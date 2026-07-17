@@ -216,6 +216,15 @@ BOOST_AUTO_TEST_CASE(deque_and_streambuf_datastreams_read_signed_varints) {
    BOOST_CHECK_EQUAL(streambuf.remaining(), 0U);
 }
 
+BOOST_AUTO_TEST_CASE(signed_varint_rejects_uint32_overflow) {
+   auto stream = forge::datastream<std::stringbuf>{std::string{"\xff\xff\xff\xff\x10", 5}, std::ios_base::in};
+   auto value = forge::signed_int{};
+   BOOST_CHECK_EXCEPTION(forge::raw::unpack(stream, value), forge::raw::exceptions::codec_error,
+                         [](const forge::raw::exceptions::codec_error& error) {
+                            return error.message() == "raw signed varint overflows int32";
+                         });
+}
+
 BOOST_AUTO_TEST_CASE(streambuf_datastream_rejects_truncated_reads) {
    auto truncated_value = forge::datastream<std::stringbuf>{std::string{"\x03ra", 3}, std::ios_base::in};
    auto value = std::string{};

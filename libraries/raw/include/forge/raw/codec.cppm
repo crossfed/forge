@@ -308,6 +308,9 @@ template <typename Stream> void unpack(Stream& stream, signed_int& value) {
       detail::require(shift < 35U, "raw signed varint is too long");
       stream.get(byte);
       const auto octet = static_cast<std::uint8_t>(byte);
+      if (shift == 28U) {
+         detail::require((octet & 0xf0U) == 0U, "raw signed varint overflows int32");
+      }
       encoded |= static_cast<std::uint32_t>(octet & 0x7fU) << shift;
       shift += 7U;
    } while ((static_cast<std::uint8_t>(byte) & 0x80U) != 0U);

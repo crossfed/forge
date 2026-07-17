@@ -611,6 +611,13 @@ BOOST_AUTO_TEST_CASE(database_host_rejects_invalid_operations_without_partial_st
    const auto misaligned = misaligned_host.find_index256(account, database_scope, 15, 1);
    BOOST_REQUIRE(misaligned.has_value());
    BOOST_TEST(static_cast<bool>(misaligned->secondary.get_array()[0] == static_cast<unsigned __int128>(42)));
+
+   auto overflow_host = forge::contract::testing::host{};
+   BOOST_CHECK_EXCEPTION(invoke_database(overflow_host, code, "dbhost", 20),
+                         forge::contract::testing::exceptions::assertion_failure,
+                         [](const forge::contract::testing::exceptions::assertion_failure& error) {
+                            return error.message() == "raw signed varint overflows int32";
+                         });
 }
 
 BOOST_AUTO_TEST_CASE(database_host_rejects_foreign_iterators_and_resets_iterator_cache) {

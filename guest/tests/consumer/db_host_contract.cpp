@@ -1,11 +1,13 @@
 #include <forge/contract/intrinsics.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <initializer_list>
 #include <limits>
 
 import forge.contract;
+import forge.raw.codec;
 
 namespace {
 
@@ -105,6 +107,9 @@ class [[forge::contract("dbhost")]] dbhost : public forge::contract::context {
       case 19:
          removediterator();
          return;
+      case 20:
+         signedoverflow();
+         return;
       default:
          forge::contract::check(false, "unknown database host scenario");
       }
@@ -168,6 +173,14 @@ class [[forge::contract("dbhost")]] dbhost : public forge::contract::context {
       constexpr char value[] = "exit";
       db_store_i64(primary_scope, 9, get_self().value, 77, value, sizeof(value));
       forge::contract::exit(0);
+   }
+
+   void signedoverflow() {
+      constexpr auto encoded = std::array<std::uint8_t, 5>{0xffU, 0xffU, 0xffU, 0xffU, 0x10U};
+      auto stream = forge::datastream<const std::uint8_t*>{encoded.data(), encoded.size()};
+      auto value = forge::signed_int{};
+      forge::raw::unpack(stream, value);
+      forge::contract::check(false, "overflowing signed varint was accepted");
    }
 
    void badpayer() {
