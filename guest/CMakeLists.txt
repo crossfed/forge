@@ -112,7 +112,7 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
    set(FORGE_CONTRACT_LLVM_AR "${_llvm_install}/bin/llvm-ar")
    set(FORGE_CONTRACT_LLVM_RANLIB "${_llvm_install}/bin/llvm-ranlib")
    set(FORGE_CONTRACT_CLANG_RESOURCE_DIR "${_llvm_install}/lib/clang/22")
-   set(FORGE_CONTRACT_SYSROOT "${CMAKE_BINARY_DIR}/sysroot")
+   set(FORGE_CONTRACT_SYSROOT "${CMAKE_BINARY_DIR}/sysroot-base")
 
    ExternalProject_Add(
       forge_contract_sysroot
@@ -314,23 +314,30 @@ else()
    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../tools" "${CMAKE_CURRENT_BINARY_DIR}/tools")
 endif()
 
-set(_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
-set(_sysroot_hash "${_generated_dir}/sysroot.sha256")
-set(_sysroot_hash_dependencies)
+set(_forge_contract_input_sysroot "${FORGE_CONTRACT_SYSROOT}")
+set(FORGE_CONTRACT_SYSROOT "${CMAKE_BINARY_DIR}/sdk-sysroot")
+set(_forge_contract_sysroot_stage_stamp "${CMAKE_BINARY_DIR}/forge-contract-sysroot.stamp")
+set(_forge_contract_sysroot_stage_dependencies)
 if(TARGET forge_contract_sysroot)
-   list(APPEND _sysroot_hash_dependencies forge_contract_sysroot)
+   list(APPEND _forge_contract_sysroot_stage_dependencies forge_contract_sysroot)
 endif()
-add_custom_target(
-   forge_contract_sysroot_hash ALL
+add_custom_command(
+   OUTPUT "${_forge_contract_sysroot_stage_stamp}"
    COMMAND
-      ${Python3_EXECUTABLE}
-      "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hash_tree.py"
-      --root "${FORGE_CONTRACT_SYSROOT}"
-      --output "${_sysroot_hash}"
-   DEPENDS ${_sysroot_hash_dependencies} "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hash_tree.py"
-   BYPRODUCTS "${_sysroot_hash}"
+      ${CMAKE_COMMAND}
+      -DSOURCE=${_forge_contract_input_sysroot}
+      -DDESTINATION=${FORGE_CONTRACT_SYSROOT}
+      -DSTAMP=${_forge_contract_sysroot_stage_stamp}
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stage_sysroot.cmake"
+   DEPENDS
+      ${_forge_contract_sysroot_stage_dependencies}
+      "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stage_sysroot.cmake"
    VERBATIM
 )
+add_custom_target(forge_contract_stage_sysroot DEPENDS "${_forge_contract_sysroot_stage_stamp}")
+
+set(_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
+set(_sysroot_hash "${_generated_dir}/sysroot.sha256")
 set(_intrinsic_registry "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/include/forge/contract/intrinsics.hpp")
 set(_intrinsic_manifest "${_generated_dir}/intrinsics.json")
 set(_forge_intrinsics "${_generated_dir}/include/forge/contract/intrinsics.h")
@@ -352,6 +359,43 @@ add_custom_command(
 add_custom_target(
    forge_contract_intrinsic_manifest ALL
    DEPENDS "${_intrinsic_manifest}" "${_forge_intrinsics}" "${_eosio_intrinsics}" "${_eosio_db_intrinsics}"
+)
+
+ExternalProject_Add(
+   forge_contract_guest_runtime
+   DEPENDS forge_contract_stage_sysroot forge_contract_intrinsic_manifest
+   SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libraries/runtime"
+   DOWNLOAD_COMMAND ""
+   UPDATE_COMMAND ""
+   PATCH_COMMAND ""
+   CMAKE_GENERATOR Ninja
+   CMAKE_ARGS
+      -DCMAKE_BUILD_TYPE=Release
+      -DCMAKE_INSTALL_PREFIX=${FORGE_CONTRACT_SYSROOT}
+      -DCMAKE_SYSTEM_NAME=Generic
+      -DCMAKE_SYSTEM_PROCESSOR=wasm32
+      -DCMAKE_SYSROOT=${FORGE_CONTRACT_SYSROOT}
+      -DCMAKE_CXX_COMPILER=${FORGE_CONTRACT_CLANG}
+      -DCMAKE_CXX_COMPILER_TARGET=wasm32
+      -DCMAKE_AR=${FORGE_CONTRACT_LLVM_AR}
+      -DCMAKE_RANLIB=${FORGE_CONTRACT_LLVM_RANLIB}
+      -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
+      -DFORGE_GUEST_INCLUDE_DIR=${_generated_dir}/include
+   BUILD_ALWAYS TRUE
+   BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> -j ${FORGE_CONTRACT_JOBS}
+   INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
+)
+
+add_custom_target(
+   forge_contract_sysroot_hash ALL
+   COMMAND
+      ${Python3_EXECUTABLE}
+      "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hash_tree.py"
+      --root "${FORGE_CONTRACT_SYSROOT}"
+      --output "${_sysroot_hash}"
+   DEPENDS forge_contract_guest_runtime "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hash_tree.py"
+   BYPRODUCTS "${_sysroot_hash}"
+   VERBATIM
 )
 
 configure_file(cmake/host.hpp.in "${_generated_dir}/include/forge/contract/host.hpp" COPYONLY)
@@ -399,13 +443,6 @@ install(
 )
 install(DIRECTORY libraries/eosio/include/ DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/include")
 install(DIRECTORY "${_generated_dir}/include/" DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/include")
-install(
-   DIRECTORY libraries/runtime/
-   DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/runtime"
-   FILES_MATCHING
-      PATTERN "*.cpp"
-      PATTERN "*.hxx"
-)
 install(
    FILES
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/raw/stream.cpp"

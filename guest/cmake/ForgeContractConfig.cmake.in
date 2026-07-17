@@ -12,6 +12,7 @@ set(ForgeContract_PREFIX "${PACKAGE_PREFIX_DIR}")
 set(ForgeContract_CLANG "${ForgeContract_PREFIX}/bin/clang++")
 set(ForgeContract_WASM_LD "${ForgeContract_PREFIX}/bin/wasm-ld")
 set(ForgeContract_SYSROOT "${ForgeContract_PREFIX}/sysroot")
+set(ForgeContract_RUNTIME_ARCHIVE "${ForgeContract_SYSROOT}/lib/libforge_guest_runtime.a")
 set(ForgeContract_DATA_DIR "${ForgeContract_PREFIX}/@CMAKE_INSTALL_DATADIR@/forge-contract")
 file(READ "${ForgeContract_DATA_DIR}/sysroot.sha256" ForgeContract_SYSROOT_HASH)
 string(STRIP "${ForgeContract_SYSROOT_HASH}" ForgeContract_SYSROOT_HASH)
@@ -27,6 +28,7 @@ foreach(_required
    ForgeContract_CLANG
    ForgeContract_WASM_LD
    ForgeContract_SYSROOT
+   ForgeContract_RUNTIME_ARCHIVE
    ForgeContract_DATA_DIR
    ForgeContract_ABIGEN
    ForgeContract_ATTR_PLUGIN

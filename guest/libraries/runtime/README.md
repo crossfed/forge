@@ -7,9 +7,13 @@ integration.
 
 The allocator supports aligned allocation, reuse, coalescing, `calloc` and
 `realloc`. Allocation failures terminate through the canonical contract check
-intrinsic. It owns no files, sockets, threads, clocks or host heap. Private
-allocator mechanics are paired under `details/*.hxx`; there is no fake public
-module because the external C ABI comes from generated sysroot headers.
+intrinsic. It owns no files, sockets, threads, clocks or host heap. The
+implementation is compiled once while assembling the SDK and installed as
+`sysroot/lib/libforge_guest_runtime.a`. Contract sub-builds link that archive;
+they do not compile allocator or C runtime sources again. Private
+`details/*.hxx` contain declarations only and are not installed. There is no
+fake public module because the external C ABI comes from generated sysroot
+headers.
 
 Allocator fragmentation, alignment, reuse, growth and exhaustion are exercised
 by guest contracts and then executed through `forge.vm.wasm`. Oversized
@@ -23,6 +27,11 @@ The target uses only the wasm32 compiler builtins, generated intrinsic C API
 and the configured guest sysroot. It has no C++ module because its public ABI is
 the standard C/runtime surface consumed by libc++ and contract code.
 
+The SDK first copies the configured libc++/libc++abi/compiler-rt sysroot into a
+build-owned staging directory. The runtime archive is installed into that copy,
+and the final sysroot hash includes it. Developer mode therefore never writes
+to the caller's input sysroot.
+
 ## Stability And Tests
 
 Allocation and C memory semantics are production compatibility contracts;
@@ -31,3 +40,5 @@ allocation, split/coalesced blocks, growable memory, `calloc`, `realloc`,
 new/delete and deterministic exhaustion through the real VM memory export.
 The E2E suite also links and executes `<cerrno>` reads and writes, proving that
 `errno` does not escape as an undeclared host import.
+Relocation tests verify that an installed consumer sees the archive but no
+runtime `.cpp` or private `.hxx` files.

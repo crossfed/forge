@@ -1,5 +1,5 @@
 #include <__config>
-#include <eosio/action.h>
+#include <forge/contract/intrinsics.h>
 
 #include <cstddef>
 #include <cstdint>

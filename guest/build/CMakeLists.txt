@@ -24,6 +24,7 @@ list(REMOVE_AT _implementation_sources 0)
 set(_modules "${FORGE_CONTRACT_DATA_DIR}/modules")
 set(_include "${FORGE_CONTRACT_DATA_DIR}/include")
 set(_runtime "${FORGE_CONTRACT_DATA_DIR}/runtime")
+set(_runtime_archive "${CMAKE_SYSROOT}/lib/libforge_guest_runtime.a")
 set(_generated "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(_abi "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_NAME}.abi")
 set(_dispatcher "${_generated}/${FORGE_CONTRACT_NAME}.dispatcher.cpp")
@@ -54,14 +55,11 @@ target_sources(
 )
 target_link_libraries(forge_guest_chain_protocol PUBLIC forge_guest_raw)
 
-add_library(
-   forge_guest_runtime STATIC
-   "${_runtime}/allocator.cpp"
-   "${_runtime}/allocator_new_delete.cpp"
-   "${_runtime}/errno.cpp"
-   "${_runtime}/memory.cpp"
-)
-target_include_directories(forge_guest_runtime PRIVATE "${_runtime}")
+if(NOT EXISTS "${_runtime_archive}")
+   message(FATAL_ERROR "Forge Contract sysroot is missing ${_runtime_archive}")
+endif()
+add_library(forge_guest_runtime STATIC IMPORTED GLOBAL)
+set_target_properties(forge_guest_runtime PROPERTIES IMPORTED_LOCATION "${_runtime_archive}")
 
 add_library(forge_guest_contract STATIC "${_runtime}/dispatcher.cpp")
 target_sources(
@@ -79,14 +77,13 @@ target_link_libraries(
    PUBLIC
       forge_guest_raw
       forge_guest_chain_protocol
-      forge_guest_runtime
 )
 
 add_library(forge_guest_eosio INTERFACE)
 target_include_directories(forge_guest_eosio INTERFACE "${_include}")
 target_link_libraries(forge_guest_eosio INTERFACE forge_guest_contract)
 
-foreach(_target forge_guest_raw forge_guest_chain_protocol forge_guest_runtime forge_guest_contract)
+foreach(_target forge_guest_raw forge_guest_chain_protocol forge_guest_contract)
    target_include_directories(${_target} PRIVATE "${_include}")
    target_compile_definitions(${_target} PRIVATE FORGE_CONTRACT_GUEST=1)
    target_compile_options(
@@ -210,7 +207,7 @@ endif()
 if(FORGE_CONTRACT_PROFILE STREQUAL "release" AND (NOT _libcxxabi OR NOT _builtins))
    message(FATAL_ERROR "release Forge Contract sysroot requires libc++abi and compiler-rt builtins")
 endif()
-set(_guest_libraries "${_libcxx}")
+set(_guest_libraries forge_guest_runtime "${_libcxx}")
 foreach(_library _libcxxabi _libc _builtins)
    if(${_library})
       list(APPEND _guest_libraries "${${_library}}")
