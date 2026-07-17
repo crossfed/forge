@@ -569,14 +569,17 @@ template <typename Stream, typename... T> void unpack(Stream& stream, std::varia
    std::visit([&](auto& item) { unpack(stream, item); }, value);
 }
 
-template <typename Stream, typename First, typename... Rest>
-void pack(Stream& stream, const First& first, const Rest&... rest) {
+template <typename Stream, typename First, typename Second, typename... Rest>
+void pack(Stream& stream, const First& first, const Second& second, const Rest&... rest) {
    pack(stream, first);
+   pack(stream, second);
    (pack(stream, rest), ...);
 }
 
-template <typename Stream, typename First, typename... Rest> void unpack(Stream& stream, First& first, Rest&... rest) {
+template <typename Stream, typename First, typename Second, typename... Rest>
+void unpack(Stream& stream, First& first, Second& second, Rest&... rest) {
    unpack(stream, first);
+   unpack(stream, second);
    (unpack(stream, rest), ...);
 }
 

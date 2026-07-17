@@ -7,6 +7,8 @@ module;
 
 export module forge.contract.intrinsics;
 
+import forge.chain.protocol.values;
+
 export namespace forge::contract {
 
 [[noreturn]] inline void abort(std::string_view message) {
@@ -35,6 +37,10 @@ inline std::uint32_t read_action_data(void* destination, std::uint32_t size) {
 
 inline void set_action_return_value(const void* value, std::uint32_t size) {
    ::set_action_return_value(value, size);
+}
+
+inline chain::protocol::name current_receiver() {
+   return chain::protocol::name{::current_receiver()};
 }
 
 } // namespace forge::contract

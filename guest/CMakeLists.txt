@@ -420,7 +420,9 @@ install(
 install(DIRECTORY build DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract")
 install(DIRECTORY libraries/contract/include/ DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/modules")
 install(
-   FILES libraries/contract/include/forge/contract/intrinsics.hpp
+   FILES
+      libraries/contract/include/forge/contract/intrinsics.hpp
+      libraries/contract/include/forge/contract/serialize.hpp
    DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/include/forge/contract"
 )
 install(DIRECTORY libraries/eosio/include/ DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/include")

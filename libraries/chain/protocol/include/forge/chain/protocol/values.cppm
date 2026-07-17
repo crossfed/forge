@@ -18,9 +18,36 @@ using int128_t = __int128;
 using uint128_t = unsigned __int128;
 
 struct name {
+   enum class raw : std::uint64_t {};
+
    std::uint64_t value = 0;
 
    constexpr name(std::uint64_t raw = 0) : value(raw) {}
+   constexpr explicit name(name::raw raw_value) : value(static_cast<std::uint64_t>(raw_value)) {}
+
+   constexpr operator raw() const noexcept {
+      return raw{value};
+   }
+
+   constexpr explicit operator bool() const noexcept {
+      return value != 0;
+   }
+
+   [[nodiscard]] constexpr std::uint8_t length() const noexcept {
+      constexpr auto mask = std::uint64_t{0xf800000000000000ULL};
+      if (value == 0U) {
+         return 0U;
+      }
+
+      auto result = std::uint8_t{};
+      auto current = value;
+      for (auto index = std::uint8_t{}; index < 13U; ++index, current <<= 5U) {
+         if ((current & mask) != 0U) {
+            result = index;
+         }
+      }
+      return static_cast<std::uint8_t>(result + 1U);
+   }
 
    constexpr bool operator==(const name&) const = default;
    constexpr auto operator<=>(const name&) const = default;
@@ -141,6 +168,14 @@ inline std::string decode_name(std::uint64_t raw) {
 constexpr name make_name(std::string_view value) {
    return name{encode_name(value)};
 }
+
+namespace literals {
+
+consteval name operator""_n(const char* value, std::size_t size) {
+   return make_name(std::string_view{value, size});
+}
+
+} // namespace literals
 
 inline std::string to_string(const name& value) {
    return decode_name(value.value);

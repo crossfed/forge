@@ -8,6 +8,8 @@ target_sources(
          include/forge/contract/intrinsics.cppm
          include/forge/contract/contract.cppm
          include/forge/contract/dispatcher.cppm
+         include/forge/contract/multi_index.cppm
+         include/forge/contract/singleton.cppm
 )
 target_include_directories(
    forge_guest_contract

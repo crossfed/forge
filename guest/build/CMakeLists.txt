@@ -73,6 +73,8 @@ target_sources(
          "${_modules}/forge/contract/intrinsics.cppm"
          "${_modules}/forge/contract/contract.cppm"
          "${_modules}/forge/contract/dispatcher.cppm"
+         "${_modules}/forge/contract/multi_index.cppm"
+         "${_modules}/forge/contract/singleton.cppm"
 )
 target_link_libraries(
    forge_guest_contract
@@ -106,10 +108,13 @@ set(_module_arguments
    "forge.raw.varint_value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_raw.dir/forge.raw.varint_value.pcm"
    "forge.raw.codec=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_raw.dir/forge.raw.codec.pcm"
    "forge.chain.protocol.values=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.values.pcm"
+   "forge.chain.protocol.fixed_key:value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.fixed_key-value.pcm"
    "forge.chain.protocol.fixed_key=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.fixed_key.pcm"
    "forge.contract.intrinsics=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.intrinsics.pcm"
    "forge.contract=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.pcm"
    "forge.contract.dispatcher=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.dispatcher.pcm"
+   "forge.contract.multi_index=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.multi_index.pcm"
+   "forge.contract.singleton=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.singleton.pcm"
 )
 set(_abigen_command
    "${FORGE_CONTRACT_ABIGEN}"

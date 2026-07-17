@@ -13,6 +13,7 @@
                             (void* destination, std::uint32_t size))                                                   \
    FORGE_CONTRACT_INTRINSIC(1, set_action_return_value, env, set_action_return_value, void,                            \
                             (const void* value, std::uint32_t size))                                                   \
+   FORGE_CONTRACT_INTRINSIC(1, current_receiver, env, current_receiver, std::uint64_t, ())                             \
    FORGE_CONTRACT_INTRINSIC(1, db_store_i64, env, db_store_i64, std::int32_t,                                          \
                             (std::uint64_t scope, std::uint64_t table, std::uint64_t payer, std::uint64_t id,          \
                              const void* data, std::uint32_t len))                                                     \
