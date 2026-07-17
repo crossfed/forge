@@ -218,9 +218,10 @@ if (!migrated.ok()) {
 ## Ingestion-Only Fields
 
 `field_descriptor::ingestion_only` is reserved for migration tombstones. Source
-adapters recognize such a field so removed operator input can fail explicitly,
-but defaults and generated configuration surfaces must not publish it. Typed
-schema fields should not use this flag for active configuration.
+adapters recognize such fields, then `validate_ingestion()` reports supplied
+canonical names or aliases as fatal `config.removed` diagnostics after source
+merge. Defaults and generated configuration surfaces never publish them. Typed
+schema fields must not use this flag for active configuration.
 
 ## Risks And Anti-Patterns
 

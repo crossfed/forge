@@ -588,6 +588,12 @@ int run_daemon(daemon_factory make_app, int argc, char** argv, daemon_options op
          std::cout << daemon_help(options, app_registry);
          return 0;
       }
+
+      append_diagnostics(diagnostics, forge::config::core::validate_ingestion(effective, registry));
+      if (has_errors(diagnostics)) {
+         return fail_with_diagnostics(diagnostics);
+      }
+
       if (configure) {
          if (!options.allow_configure) {
             std::cerr << "error: --configure is disabled for this daemon\n";

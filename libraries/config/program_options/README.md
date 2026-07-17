@@ -111,7 +111,8 @@ about why a value won.
 
 Registry fields marked `ingestion_only` remain parseable migration tombstones,
 but `help()` omits them so removed options are not advertised as supported
-configuration.
+configuration. Config Core rejects any supplied tombstone through
+`validate_ingestion()` after all input sources are merged.
 
 ## Diagnostics
 

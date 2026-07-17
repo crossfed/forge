@@ -299,7 +299,13 @@ forge::config::core::component_registry application_shell::collect_config() {
 
 forge::config::core::document application_shell::make_effective_config(const forge::config::core::document& document) {
    auto registry = collect_config();
-   return forge::config::core::merge({forge::config::core::defaults_for(registry), document});
+   auto effective = forge::config::core::merge({forge::config::core::defaults_for(registry), document});
+   const auto diagnostics = forge::config::core::validate_ingestion(effective, registry);
+   if (!diagnostics.empty()) {
+      const auto& error = diagnostics.front();
+      throw std::invalid_argument{error.path + ": " + error.message};
+   }
+   return effective;
 }
 
 boost::asio::awaitable<void> application_shell::apply_effective_config(forge::config::core::document document) {

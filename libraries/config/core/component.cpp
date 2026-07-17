@@ -92,4 +92,35 @@ document defaults_for(const component_registry& registry) {
    return output;
 }
 
+std::vector<schema::diagnostic> validate_ingestion(const document& input, const component_registry& registry) {
+   auto diagnostics = std::vector<schema::diagnostic>{};
+   for (const auto& component : registry.components()) {
+      for (const auto& field : component.fields) {
+         if (!field.ingestion_only) {
+            continue;
+         }
+
+         const auto inspect = [&](std::string_view name) {
+            auto path = field_path(component.section, name);
+            if (!input.try_get(path)) {
+               return;
+            }
+            diagnostics.push_back(schema::diagnostic{
+               .path = std::move(path),
+               .code = "config.removed",
+               .level = schema::severity::error,
+               .message = field.deprecated_message.empty() ? "removed config field is not supported"
+                                                           : field.deprecated_message,
+            });
+         };
+
+         inspect(field.name);
+         for (const auto& alias : field.aliases) {
+            inspect(alias);
+         }
+      }
+   }
+   return diagnostics;
+}
+
 } // namespace forge::config::core

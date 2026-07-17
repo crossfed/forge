@@ -119,5 +119,7 @@ class component_view {
 
 [[nodiscard]] document redact(document input, const component_registry& registry);
 [[nodiscard]] document defaults_for(const component_registry& registry);
+[[nodiscard]] std::vector<schema::diagnostic> validate_ingestion(const document& input,
+                                                                 const component_registry& registry);
 
 } // namespace forge::config::core

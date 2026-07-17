@@ -416,7 +416,15 @@ class shell_config_plugin final : public forge::app::plugin {
    }
 
    std::optional<forge::config::core::component_descriptor> describe_config() const override {
-      return forge::config::core::describe_component<shell_plugin_config>("http");
+      auto descriptor = forge::config::core::describe_component<shell_plugin_config>("http");
+      descriptor.fields.push_back(forge::config::core::field_descriptor{
+         .name = "removed-output",
+         .kind = forge::schema::value_kind::string,
+         .deprecated = true,
+         .deprecated_message = "http removed-output was removed",
+         .ingestion_only = true,
+      });
+      return descriptor;
    }
 
    boost::asio::awaitable<void> configure(forge::config::core::component_view view) override {
@@ -1269,6 +1277,23 @@ BOOST_AUTO_TEST_CASE(application_shell_owns_config_plugin_lifecycle_and_context)
    BOOST_TEST(log.entries == expected, boost::test_tools::per_element());
 }
 
+BOOST_AUTO_TEST_CASE(application_shell_rejects_ingestion_only_fields_before_configure_callbacks) {
+   auto log = lifecycle_log{};
+   auto app = shell_test_application{log};
+   auto document = forge::config::core::document{};
+   document.set("http.removed-output", "legacy-value");
+
+   BOOST_CHECK_EXCEPTION(
+      app.configure(document),
+      std::invalid_argument,
+      [](const std::invalid_argument& error) {
+         const auto message = std::string_view{error.what()};
+         return message.find("http.removed-output") != std::string_view::npos &&
+                message.find("http removed-output was removed") != std::string_view::npos;
+      });
+   BOOST_TEST(log.entries.empty());
+}
+
 BOOST_AUTO_TEST_CASE(application_shell_publishes_api_before_plugin_initialize) {
    auto log = lifecycle_log{};
    auto app = shell_api_application{log};
@@ -2055,6 +2080,36 @@ BOOST_AUTO_TEST_CASE(run_daemon_print_effective_config_redacts_secret_fields) {
    const auto text = output.text();
    BOOST_TEST(text.find("super-secret") == std::string::npos);
    BOOST_TEST(text.find("<redacted>") != std::string::npos);
+   BOOST_TEST(state.log.entries.empty());
+}
+
+BOOST_AUTO_TEST_CASE(run_daemon_print_effective_config_rejects_ingestion_only_fields) {
+   auto state = daemon_test_state{};
+   const auto dir = make_temp_dir("forge-daemon-print-removed");
+   const auto config = dir / "config.yml";
+   write_text(
+      config,
+      R"(http:
+  removed-output: legacy-value
+)"
+   );
+   auto output = stream_capture{std::cout};
+   auto errors = stream_capture{std::cerr};
+
+   const auto exit_code = run_test_daemon(
+      {
+         "testd",
+         "--config",
+         config.string(),
+         "--print-effective-config",
+      },
+      state);
+
+   BOOST_TEST(exit_code == 1);
+   BOOST_TEST(output.text().empty());
+   BOOST_TEST(errors.text().find("config.removed") != std::string::npos);
+   BOOST_TEST(errors.text().find("http.removed-output") != std::string::npos);
+   BOOST_TEST(errors.text().find("http removed-output was removed") != std::string::npos);
    BOOST_TEST(state.log.entries.empty());
 }
 
