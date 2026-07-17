@@ -262,7 +262,11 @@ Developer mode requires a Forge host package, Clang 22.1 tools and a compatible
 upstream wasm32 sysroot:
 
 ```bash
+LLVM_PREFIX=/path/to/llvm-22.1
 cmake -S guest -B build/contract-sdk -G Ninja \
+  -DCMAKE_C_COMPILER="$LLVM_PREFIX/bin/clang" \
+  -DCMAKE_CXX_COMPILER="$LLVM_PREFIX/bin/clang++" \
+  -DCMAKE_PREFIX_PATH="$LLVM_PREFIX" \
   -DFORGE_CONTRACT_PROFILE=developer \
   -DFORGE_CONTRACT_FORGE_DIR="$PWD/build/forge-prefix/lib/cmake/Forge" \
   -DFORGE_CONTRACT_SYSROOT="$PWD/build/wasm32-sysroot"
@@ -270,6 +274,13 @@ cmake --build build/contract-sdk -j 4
 cmake --build build/contract-sdk --target forge_contract_sdk_archive -j 4
 cmake --build build/contract-sdk --target forge_contract_sdk_relocation -j 4
 ```
+
+`LLVM_PREFIX` identifies the same Clang 22.1 installation used to build the
+Forge host package. The guest compiler, dependency scanner, archiver and
+ranlib are selected from that LLVM package rather than from an unrelated
+program found earlier in `PATH`. `FORGE_CONTRACT_CLANG` remains an explicit
+override for controlled developer environments. `wasm-ld` may be supplied by
+a separate lld package, as it is in Homebrew.
 
 Developer mode copies `FORGE_CONTRACT_SYSROOT` into a build-owned staged
 sysroot before adding `libforge_guest_runtime.a`. The supplied directory is

@@ -227,28 +227,8 @@ else()
       REQUIRED
       NO_DEFAULT_PATH
    )
-   if(NOT FORGE_CONTRACT_CLANG)
-      find_program(FORGE_CONTRACT_CLANG NAMES clang++ REQUIRED)
-   endif()
-   get_filename_component(_clang_bin "${FORGE_CONTRACT_CLANG}" DIRECTORY)
-   find_program(
-      FORGE_CONTRACT_CLANG_SCAN_DEPS
-      NAMES clang-scan-deps
-      HINTS "${_clang_bin}"
-      REQUIRED
-      NO_DEFAULT_PATH
-   )
-   if(NOT FORGE_CONTRACT_WASM_LD)
-      find_program(FORGE_CONTRACT_WASM_LD NAMES wasm-ld REQUIRED)
-   endif()
-   if(NOT EXISTS "${FORGE_CONTRACT_LLVM_AR}")
-      find_program(_forge_contract_llvm_ar NAMES llvm-ar HINTS "${_clang_bin}" REQUIRED NO_DEFAULT_PATH)
-      set(FORGE_CONTRACT_LLVM_AR "${_forge_contract_llvm_ar}" CACHE FILEPATH "Developer-mode llvm-ar" FORCE)
-   endif()
-   if(NOT EXISTS "${FORGE_CONTRACT_LLVM_RANLIB}")
-      find_program(_forge_contract_llvm_ranlib NAMES llvm-ranlib HINTS "${_clang_bin}" REQUIRED NO_DEFAULT_PATH)
-      set(FORGE_CONTRACT_LLVM_RANLIB "${_forge_contract_llvm_ranlib}" CACHE FILEPATH "Developer-mode llvm-ranlib" FORCE)
-   endif()
+   include(cmake/select_developer_toolchain.cmake)
+   forge_contract_select_developer_toolchain()
    foreach(
       _tool
       FORGE_CONTRACT_CLANG
@@ -371,6 +351,7 @@ ExternalProject_Add(
    CMAKE_GENERATOR Ninja
    CMAKE_ARGS
       -DCMAKE_BUILD_TYPE=Release
+      -DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
       -DCMAKE_INSTALL_PREFIX=${FORGE_CONTRACT_SYSROOT}
       -DCMAKE_SYSTEM_NAME=Generic
       -DCMAKE_SYSTEM_PROCESSOR=wasm32

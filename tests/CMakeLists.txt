@@ -47,6 +47,14 @@ add_test(
       -DFORGE_CONTRACT_TEST_ROOT=${CMAKE_BINARY_DIR}/tests/contract-package-prefix
       -P ${CMAKE_SOURCE_DIR}/guest/tests/tooling/check_package_prefix.cmake
 )
+add_test(
+   NAME test_forge_contract_sdk_developer_toolchain
+   COMMAND
+      ${CMAKE_COMMAND}
+      -DFORGE_CONTRACT_TOOLCHAIN_SELECTOR=${CMAKE_SOURCE_DIR}/guest/cmake/select_developer_toolchain.cmake
+      -DFORGE_CONTRACT_TEST_ROOT=${CMAKE_BINARY_DIR}/tests/contract-developer-toolchain
+      -P ${CMAKE_SOURCE_DIR}/guest/tests/tooling/check_developer_toolchain.cmake
+)
 
 add_executable(
    test_forge
