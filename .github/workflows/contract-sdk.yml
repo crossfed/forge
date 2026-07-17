@@ -130,7 +130,7 @@ jobs:
             -DClang_DIR="$LLVM_ROOT/lib/cmake/clang" \
             -DLLVM_DIR="$LLVM_ROOT/lib/cmake/llvm" \
             -DBUILD_TESTING=OFF
-          cmake --build build/forge -j 4
+          cmake --build build/forge -j 4 -- -k 0
           cmake --install build/forge --component dev
 
       - name: Build developer SDK and relocatable archive
