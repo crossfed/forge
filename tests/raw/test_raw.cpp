@@ -1,6 +1,7 @@
 #include <boost/describe.hpp>
 #include <boost/test/unit_test.hpp>
 #include <forge/raw/serialization.hpp>
+#include <array>
 #include <chrono>
 #include <concepts>
 #include <cstdint>
@@ -240,6 +241,11 @@ BOOST_AUTO_TEST_CASE(char_and_uint8_values_preserve_spring_wire_bits) {
    BOOST_CHECK_EQUAL(forge::crypto::to_hex(char_wire), "ff");
    BOOST_CHECK_EQUAL(static_cast<unsigned char>(forge::raw::unpack<char>(char_wire)), 0xffU);
    BOOST_CHECK_EQUAL(forge::raw::unpack<std::uint8_t>(octet_wire), 0xffU);
+}
+
+BOOST_AUTO_TEST_CASE(std_array_pointer_elements_use_element_codec) {
+   const auto values = std::array<const char*, 2>{"a", "bc"};
+   BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::raw::pack(values)), "0161026263");
 }
 
 BOOST_AUTO_TEST_CASE(std_flat_map_preserves_spring_sorted_map_wire_layout) {

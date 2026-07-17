@@ -538,7 +538,7 @@ template <typename Stream, typename... T> void unpack(Stream& stream, std::tuple
 
 template <typename Stream, typename T, std::size_t Size> void pack(Stream& stream, const std::array<T, Size>& value) {
    static_assert(Size <= max_array_elements, "raw array exceeds the element limit");
-   if constexpr (std::is_scalar_v<T> && !std::is_same_v<std::remove_cv_t<T>, bool>) {
+   if constexpr ((std::is_arithmetic_v<T> || std::is_enum_v<T>) && !std::is_same_v<std::remove_cv_t<T>, bool>) {
       detail::write_bytes(stream, std::as_bytes(std::span{value}));
    } else {
       for (const auto& item : value) {
@@ -549,7 +549,7 @@ template <typename Stream, typename T, std::size_t Size> void pack(Stream& strea
 
 template <typename Stream, typename T, std::size_t Size> void unpack(Stream& stream, std::array<T, Size>& value) {
    static_assert(Size <= max_array_elements, "raw array exceeds the element limit");
-   if constexpr (std::is_scalar_v<T> && !std::is_same_v<std::remove_cv_t<T>, bool>) {
+   if constexpr ((std::is_arithmetic_v<T> || std::is_enum_v<T>) && !std::is_same_v<std::remove_cv_t<T>, bool>) {
       detail::read_bytes(stream, std::as_writable_bytes(std::span{value}));
    } else {
       for (auto& item : value) {
