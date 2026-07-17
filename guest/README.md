@@ -44,8 +44,9 @@ tar -xzf forge-contract-sdk-8.5.0-macos-arm64.tar.gz
 export ForgeContract_DIR="$PWD/forge-contract-sdk-8.5.0-macos-arm64/lib/cmake/ForgeContract"
 ```
 
-The archive includes pinned compiler tools, the wasm32 sysroot, Forge contract
-modules, ABI tools, validation tools, and an example under
+The archive includes pinned compiler tools, the wasm32 sysroot with the
+prebuilt `libforge_guest_runtime.a`, Forge contract modules, ABI tools,
+validation tools, and an example under
 `share/forge-contract/examples/hello`.
 
 ## Build A Contract
@@ -179,7 +180,8 @@ iterators, algorithms, tuples, optional, variant, span, string views, concepts,
 numeric types and utilities.
 
 Dynamic allocation uses the CDT-derived linear-memory allocator behind normal
-C++ and C APIs:
+C++ and C APIs. The allocator is compiled once into the SDK sysroot; each
+contract links the finished archive instead of rebuilding its sources:
 
 ```cpp
 #include <cstddef>
@@ -225,9 +227,12 @@ env.set_action_return_value
 The same version also includes the 60 Spring/CDT database imports: the ten
 primary `db_*_i64` operations and ten operations for each of `idx64`, `idx128`,
 `idx256`, `idx_double` and `idx_long_double`. `<forge/contract/intrinsics.h>`
-is canonical; `<eosio/db.h>` is a thin generated include over it. This block
-defines signatures only. Iterator behavior, authorization, RAM accounting,
-floating-key checks and storage are supplied by the future blockchain host.
+is canonical; `<eosio/db.h>` is a thin generated include over it. The shipped
+interface defines signatures only. Forge's non-installed test host executes all
+60 DB functions against `forge.db.object` to prove iterator, transaction, index
+and rollback semantics against Spring scenarios. It is a test oracle, not a
+product host binding. Authorization, RAM accounting and the blockchain-owned
+storage schema remain responsibilities of the future blockchain runtime.
 
 The declarative registry generates guest declarations and the compatibility
 manifest consumed by `contract-check`. Validation rejects unknown or
@@ -266,6 +271,11 @@ cmake --build build/contract-sdk --target forge_contract_sdk_archive -j 4
 cmake --build build/contract-sdk --target forge_contract_sdk_relocation -j 4
 ```
 
+Developer mode copies `FORGE_CONTRACT_SYSROOT` into a build-owned staged
+sysroot before adding `libforge_guest_runtime.a`. The supplied directory is
+never modified. The staged archive is included in `sysroot.sha256` and checked
+by `ForgeContractConfig.cmake` when a consumer loads the package.
+
 Release mode builds the exact pinned LLVM and guest runtimes from source. Use
 `FORGE_CONTRACT_JOBS=4` to bound superbuild parallelism.
 
@@ -281,8 +291,9 @@ Release mode builds the exact pinned LLVM and guest runtimes from source. Use
   guest check intrinsic without duplicating those implementations.
 - Spring and CDT are pinned compatibility donors and test oracles, never build
   dependencies of a released SDK.
-- Blockchain controller bindings, deployment, executable database host
-  bindings and `multi_index` are intentionally outside this vertical block.
+- Blockchain controller bindings, deployment and `multi_index` are outside
+  this vertical block. The executable DB host under `guest/tests/host` is
+  intentionally test-only and is never installed or exported.
 
 See `docs/iterations/forge-contract-sdk-toolchain-v1.md` for the accepted
 design, donor pins and compatibility scope.

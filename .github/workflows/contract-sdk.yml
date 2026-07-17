@@ -7,8 +7,10 @@ on:
       - "CMakeLists.txt"
       - "cmake/**"
       - "libraries/chain/protocol/**"
+      - "libraries/asio/**"
       - "libraries/codec/json/**"
       - "libraries/crypto/**"
+      - "libraries/db/**"
       - "libraries/exceptions/**"
       - "libraries/raw/**"
       - "libraries/vm/wasm/**"
@@ -42,6 +44,7 @@ env:
 jobs:
   developer:
     name: developer / ${{ matrix.os }}
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -178,7 +181,8 @@ jobs:
             -DFORGE_CONTRACT_TEST_WASM="$GITHUB_WORKSPACE/build/contract-consumer/hello.wasm" \
             -DFORGE_CONTRACT_TEST_ALLOCATOR_WASM="$GITHUB_WORKSPACE/build/contract-consumer/allocatortst.wasm" \
             -DFORGE_CONTRACT_TEST_LEGACY_WASM="$GITHUB_WORKSPACE/build/contract-consumer/legacyhello.wasm" \
-            -DFORGE_CONTRACT_TEST_DB_WASM="$GITHUB_WORKSPACE/build/contract-consumer/dbintrinsics.wasm"
+            -DFORGE_CONTRACT_TEST_DB_WASM="$GITHUB_WORKSPACE/build/contract-consumer/dbintrinsics.wasm" \
+            -DFORGE_CONTRACT_TEST_DB_HOST_WASM="$GITHUB_WORKSPACE/build/contract-consumer/dbhost.wasm"
           cmake --build build/contract-e2e -j 4
           ctest --test-dir build/contract-e2e --output-on-failure
 
@@ -293,7 +297,7 @@ jobs:
           cmake -S guest/tests/consumer -B build/contract-release-consumer -G Ninja \
             -DForgeContract_DIR="$GITHUB_WORKSPACE/build/contract-sdk-release-prefix/lib/cmake/ForgeContract"
           cmake --build build/contract-release-consumer \
-            --target hello allocatortst legacyhello multisource forge_contract_database_intrinsic_fixtures \
+            --target hello allocatortst legacyhello multisource dbhost forge_contract_database_intrinsic_fixtures \
             -j 4
           cmake -S guest/tests/e2e -B build/contract-release-e2e -G Ninja \
             -DCMAKE_C_COMPILER="$CC" \
@@ -303,7 +307,8 @@ jobs:
             -DFORGE_CONTRACT_TEST_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/hello.wasm" \
             -DFORGE_CONTRACT_TEST_ALLOCATOR_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/allocatortst.wasm" \
             -DFORGE_CONTRACT_TEST_LEGACY_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/legacyhello.wasm" \
-            -DFORGE_CONTRACT_TEST_DB_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/dbintrinsics.wasm"
+            -DFORGE_CONTRACT_TEST_DB_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/dbintrinsics.wasm" \
+            -DFORGE_CONTRACT_TEST_DB_HOST_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/dbhost.wasm"
           cmake --build build/contract-release-e2e -j 4
           ctest --test-dir build/contract-release-e2e --output-on-failure
 

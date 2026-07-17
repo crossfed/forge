@@ -11,8 +11,14 @@ the donors remain test oracles and are not build dependencies of the SDK.
   - `tests/unit/test_contracts/capi/db.c`.
 - Spring commit `e6a99f68b67abc4d89fe716755b2e1394a4991f7`:
   - `libraries/chain/webassembly/database.cpp`;
+  - `libraries/chain/include/eosio/chain/apply_context.hpp`;
+  - `libraries/chain/apply_context.cpp`;
+  - `libraries/chain/webassembly/cf_system.cpp`;
   - `libraries/chain/webassembly/runtimes/eos-vm.cpp`;
-  - `unittests/test-contracts/test_api_db/test_api_db.cpp`.
+  - `unittests/test-contracts/test_api_db/test_api_db.cpp`;
+  - `unittests/test-contracts/test_api_multi_index/test_api_multi_index.cpp`;
+  - `unittests/contracts/test_wasts.hpp`;
+  - `unittests/api_tests.cpp`.
 
 ## Accepted Interface
 
@@ -33,10 +39,47 @@ The canonical registry generates `<forge/contract/intrinsics.h>`, the thin
 `spring_db_intrinsics.txt` fixture is an independent list of expected WASM
 signatures and is not generated from the Forge registry.
 
-## Deferred Runtime Behavior
+## Executable Test Oracle
 
-This block intentionally does not implement database execution. The blockchain
-host binding remains responsible for:
+`guest/tests/host` provides a non-installed executable oracle over
+`forge.db.object`. It is intentionally narrower than a blockchain host:
+
+- one ObjectDB transaction spans one WASM invocation;
+- successful `apply` and `eosio_exit` commit;
+- assertion, DB and VM failures roll back;
+- ranked ObjectDB indexes implement bounds, traversal and uniqueness;
+- the iterator cache is discarded after every invocation;
+- a test-local Core driver stores only ordered records and contains no table or
+  iterator logic.
+
+The Spring-to-Forge scenario mapping is:
+
+| Spring donor case | Forge proof |
+|---|---|
+| `primary_i64_general`, `primary_i64_lowerbound`, `primary_i64_upperbound` | `database_host_commits_primary_and_secondary_objectdb_state` scenario 0 |
+| `idx64_general`, `idx64_lowerbound`, `idx64_upperbound` | scenario 1 preserves the donor data set, operation order, duplicate-secondary traversal and bound results |
+| `idx128_general` and the `test_api_multi_index` modify-order case | scenario 1 traverses the donor ordering after updating primary key 3 |
+| `idx256_general` and duplicate-secondary traversal | scenario 1 verifies two-word keys, bounds, duplicate ordering and removal |
+| `idx_double_general` plus `test_api_multi_index` floating ordering | scenario 1 traverses the donor ten-row order and verifies lower/upper bounds |
+| `idx_long_double_general` plus `test_api_multi_index` floating ordering | scenario 1 repeats the donor order with fixed 128-bit representations |
+| aligned and unaligned overlapping lower/upper-bound output pointers in `test_api_db` | scenario 1 verifies Spring's primary-then-secondary host write order |
+| `test_invalid_access` and iterator-cache checks in `apply_context` | `database_host_rejects_foreign_iterators_and_resets_iterator_cache` and wrong-kind scenario 16 |
+| `idx_double_nan_create_fail`, `idx_double_nan_modify_fail`, `idx_double_nan_lookup_fail` | invalid scenarios 9 and 12-15 |
+| `misaligned_secondary_key256_tests` | successful scenario 11 |
+| `api_tests.cpp::db_tests` failure rollback plus `cf_system.cpp`/`test_wasts.hpp` `eosio_exit` | `database_host_rolls_back_assertions_and_commits_exit` |
+
+The mappings preserve the donor operation order and observable result while
+using Forge ObjectDB models instead of chainbase. They are not copied Catch2 or
+Boost test bodies.
+
+`db_get_i64` also follows Spring's historical return contract: a zero-sized
+read reports the stored value size, while a non-zero read returns the number of
+bytes actually copied. The executable fixture covers both forms and truncated
+reads.
+
+## Product Runtime Boundary
+
+The future blockchain host binding remains responsible for:
 
 - iterator lifetime, end iterators and invalid iterator errors;
 - write authorization and RAM payer accounting;
@@ -44,9 +87,10 @@ host binding remains responsible for:
 - the `idx256.data_len == 2` requirement;
 - NaN rejection and deterministic floating secondary-key ordering.
 
-`multi_index`, `singleton`, an executable test database and product host
-bindings are separate follow-up work. Forge does not depend on `forge.db` for
-the guest C ABI.
+The executable oracle proves all items except authorization and RAM accounting;
+it does not make these policies part of Forge. `multi_index`, `singleton` and
+product host bindings are separate follow-up work. The guest C ABI remains
+independent of `forge.db`.
 
 ## Verification
 
@@ -58,3 +102,7 @@ the guest C ABI.
   floating signatures in the generated host interface.
 - Existing modern and legacy contracts execute without acquiring unused
   database imports.
+- A generated contract calls all 60 DB functions through `forge.vm.wasm` and
+  validates committed ObjectDB state independently of the host iterator cache.
+- Rollback, duplicate keys, ownership, payer, wrong-kind/stale iterators,
+  `idx256` length and alignment, and floating NaN are executable regressions.

@@ -3,6 +3,8 @@
 #include <boost/test/included/unit_test.hpp>
 
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
@@ -18,6 +20,8 @@
 #include <vector>
 
 import forge.chain.protocol.values;
+import forge.contract.testing.host;
+import forge.db.object.index;
 import forge.raw.codec;
 import forge.vm.wasm.backend;
 
@@ -192,7 +196,25 @@ void run_allocator_action(std::string_view action) {
    apply(code, host, "allocatortst", action);
 }
 
+forge::contract::testing::invocation_result invoke_database(forge::contract::testing::host& host,
+                                                            const wasm::wasm_code& code, std::string_view receiver,
+                                                            std::uint32_t scenario) {
+   const auto account = protocol::make_name(receiver).value;
+   return host.invoke({code.data(), code.size()}, account, account, protocol::make_name("run").value,
+                      forge::raw::pack(scenario));
+}
+
+constexpr auto database_scope = std::uint64_t{1};
+
 } // namespace
+
+static_assert(forge::db::object::object_model<forge::contract::testing::table_index>);
+static_assert(forge::db::object::object_model<forge::contract::testing::key_value_index>);
+static_assert(forge::db::object::object_model<forge::contract::testing::index64_index>);
+static_assert(forge::db::object::object_model<forge::contract::testing::index128_index>);
+static_assert(forge::db::object::object_model<forge::contract::testing::index256_index>);
+static_assert(forge::db::object::object_model<forge::contract::testing::index_double_index>);
+static_assert(forge::db::object::object_model<forge::contract::testing::index_long_double_index>);
 
 BOOST_AUTO_TEST_CASE(host_and_guest_share_action_argument_bytes) {
    register_intrinsics();
@@ -302,6 +324,151 @@ BOOST_AUTO_TEST_CASE(cdt_database_fixture_imports_the_spring_database_interface)
 
    BOOST_TEST(actual.size() == 60U);
    BOOST_CHECK(actual == expected);
+}
+
+BOOST_AUTO_TEST_CASE(executable_database_fixture_imports_and_calls_the_full_spring_interface) {
+   auto code = read_contract(FORGE_CONTRACT_TEST_DB_HOST_WASM);
+   using validator = wasm::backend<std::nullptr_t, wasm::null_backend, wasm::compatibility_options>;
+   auto parsed = validator{code, static_cast<wasm::wasm_allocator*>(nullptr)};
+   const auto& module = parsed.get_module();
+   const auto expected = read_database_intrinsic_golden();
+   auto actual = std::map<std::string, intrinsic_signature>{};
+
+   for (std::uint32_t index = 0; index < module.imports.size(); ++index) {
+      const auto& entry = module.imports[index];
+      const auto name = import_text(entry.field_str);
+      if (!expected.contains(name)) {
+         continue;
+      }
+      const auto& type = module.get_function_type(index);
+      auto signature = intrinsic_signature{};
+      signature.parameters.assign(type.param_types.data(), type.param_types.data() + type.param_types.size());
+      if (type.return_count != 0) {
+         signature.result = type.return_type;
+      }
+      actual.emplace(name, std::move(signature));
+   }
+
+   BOOST_TEST(actual.size() == 60U);
+   BOOST_CHECK(actual == expected);
+}
+
+BOOST_AUTO_TEST_CASE(database_host_commits_primary_and_secondary_objectdb_state) {
+   const auto code = read_contract(FORGE_CONTRACT_TEST_DB_HOST_WASM);
+   auto host = forge::contract::testing::host{};
+   const auto account = protocol::make_name("dbhost").value;
+
+   BOOST_CHECK_NO_THROW(invoke_database(host, code, "dbhost", 0));
+   const auto primary = host.find_primary(account, database_scope, 2, 30);
+   BOOST_REQUIRE(primary.has_value());
+   const auto expected = std::vector<std::uint8_t>{'u', 'p', 'd', 'a', 't', 'e', 'd', 0};
+   BOOST_TEST(primary->value == expected, boost::test_tools::per_element());
+   BOOST_TEST(primary->payer == account);
+   const auto primary_table = host.find_table(account, database_scope, 2);
+   BOOST_REQUIRE(primary_table.has_value());
+   BOOST_TEST(primary_table->count == 1U);
+
+   try {
+      invoke_database(host, code, "dbhost", 1);
+   } catch (const std::exception& error) {
+      BOOST_FAIL("database donor scenario failed: " << error.what());
+   }
+   const auto row64 = host.find_index64(account, database_scope, 3, 30);
+   const auto row128 = host.find_index128(account, database_scope, 4, 30);
+   const auto row256 = host.find_index256(account, database_scope, 5, 30);
+   const auto row_double = host.find_index_double(account, database_scope, 6, 30);
+   const auto row_long_double = host.find_index_long_double(account, database_scope, 7, 30);
+   BOOST_REQUIRE(row64.has_value());
+   BOOST_REQUIRE(row128.has_value());
+   BOOST_REQUIRE(row256.has_value());
+   BOOST_REQUIRE(row_double.has_value());
+   BOOST_REQUIRE(row_long_double.has_value());
+   BOOST_TEST(row64->secondary == 50U);
+   BOOST_TEST(static_cast<bool>(row128->secondary == static_cast<unsigned __int128>(50)));
+   BOOST_TEST(static_cast<bool>(row256->secondary.get_array()[0] == static_cast<unsigned __int128>(50)));
+   BOOST_TEST(row_double->secondary.bits == std::bit_cast<std::uint64_t>(50.0));
+   BOOST_TEST(
+       static_cast<bool>(row_long_double->secondary.words[0] != 0U || row_long_double->secondary.words[1] != 0U));
+   BOOST_TEST(row64->payer == account);
+   BOOST_TEST(row128->payer == account);
+   BOOST_TEST(row256->payer == account);
+   BOOST_TEST(row_double->payer == account);
+   BOOST_TEST(row_long_double->payer == account);
+
+   for (const auto table_name : {3U, 4U, 5U, 6U, 7U}) {
+      const auto value = host.find_table(account, database_scope, table_name);
+      BOOST_REQUIRE(value.has_value());
+      BOOST_TEST(value->count == 1U);
+   }
+
+   BOOST_CHECK_NO_THROW(invoke_database(host, code, "dbhost", 17));
+   const auto negative_zero = host.find_index_double(account, database_scope, 19, 10);
+   const auto positive_zero = host.find_index_double(account, database_scope, 19, 20);
+   BOOST_REQUIRE(negative_zero.has_value());
+   BOOST_REQUIRE(positive_zero.has_value());
+   BOOST_TEST(negative_zero->secondary.bits == std::bit_cast<std::uint64_t>(-0.0));
+   BOOST_TEST(positive_zero->secondary.bits == std::bit_cast<std::uint64_t>(0.0));
+
+   BOOST_CHECK_NO_THROW(invoke_database(host, code, "dbhost", 18));
+   BOOST_TEST(!host.find_table(account, database_scope, 20).has_value());
+}
+
+BOOST_AUTO_TEST_CASE(database_host_rolls_back_assertions_and_commits_exit) {
+   const auto code = read_contract(FORGE_CONTRACT_TEST_DB_HOST_WASM);
+   auto host = forge::contract::testing::host{};
+   const auto account = protocol::make_name("dbhost").value;
+
+   BOOST_CHECK_THROW(invoke_database(host, code, "dbhost", 2), forge::contract::testing::exceptions::assertion_failure);
+   BOOST_TEST(!host.find_table(account, database_scope, 8).has_value());
+
+   const auto result = invoke_database(host, code, "dbhost", 3);
+   BOOST_REQUIRE(result.exit_code.has_value());
+   BOOST_TEST(*result.exit_code == 0);
+   BOOST_TEST(host.find_primary(account, database_scope, 9, 77).has_value());
+}
+
+BOOST_AUTO_TEST_CASE(database_host_rejects_invalid_operations_without_partial_state) {
+   const auto code = read_contract(FORGE_CONTRACT_TEST_DB_HOST_WASM);
+   const auto account = protocol::make_name("dbhost").value;
+
+   constexpr auto cases = std::array{
+       std::pair{4U, 10U},  std::pair{5U, 11U},  std::pair{6U, 0U},   std::pair{8U, 12U},
+       std::pair{9U, 13U},  std::pair{10U, 14U}, std::pair{12U, 16U}, std::pair{13U, 16U},
+       std::pair{14U, 16U}, std::pair{15U, 17U}, std::pair{16U, 18U}, std::pair{19U, 21U},
+   };
+   for (const auto [scenario, table_name] : cases) {
+      auto host = forge::contract::testing::host{};
+      BOOST_CHECK_THROW(invoke_database(host, code, "dbhost", scenario), std::exception);
+      if (table_name != 0U) {
+         BOOST_TEST(!host.find_table(account, database_scope, table_name).has_value());
+      }
+   }
+
+   auto duplicate_host = forge::contract::testing::host{};
+   BOOST_CHECK_THROW(invoke_database(duplicate_host, code, "dbhost", 5),
+                     forge::contract::testing::exceptions::database_error);
+   BOOST_TEST(!duplicate_host.find_table(account, database_scope, 11).has_value());
+
+   auto misaligned_host = forge::contract::testing::host{};
+   BOOST_CHECK_NO_THROW(invoke_database(misaligned_host, code, "dbhost", 11));
+   const auto misaligned = misaligned_host.find_index256(account, database_scope, 15, 1);
+   BOOST_REQUIRE(misaligned.has_value());
+   BOOST_TEST(static_cast<bool>(misaligned->secondary.get_array()[0] == static_cast<unsigned __int128>(42)));
+}
+
+BOOST_AUTO_TEST_CASE(database_host_rejects_foreign_iterators_and_resets_iterator_cache) {
+   const auto code = read_contract(FORGE_CONTRACT_TEST_DB_HOST_WASM);
+   auto host = forge::contract::testing::host{};
+   const auto account = protocol::make_name("dbhost").value;
+
+   invoke_database(host, code, "dbhost", 0);
+   BOOST_CHECK_THROW(invoke_database(host, code, "dbhost", 6), forge::contract::testing::exceptions::invalid_iterator);
+   BOOST_CHECK_THROW(invoke_database(host, code, "foreign", 7), forge::contract::testing::exceptions::database_error);
+
+   const auto row = host.find_primary(account, database_scope, 2, 30);
+   BOOST_REQUIRE(row.has_value());
+   const auto expected = std::vector<std::uint8_t>{'u', 'p', 'd', 'a', 't', 'e', 'd', 0};
+   BOOST_TEST(row->value == expected, boost::test_tools::per_element());
 }
 
 #if defined(__x86_64__) || defined(_M_X64)

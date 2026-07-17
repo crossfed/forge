@@ -46,6 +46,11 @@ forge_add_contract(
    SOURCES legacy_hello.cpp
 )
 
+forge_add_contract(
+   dbhost
+   SOURCES db_host_contract.cpp
+)
+
 set(_db_intrinsics_wasm "${CMAKE_CURRENT_BINARY_DIR}/dbintrinsics.wasm")
 add_custom_target(
    forge_contract_database_intrinsic_fixtures ALL

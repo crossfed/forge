@@ -18,9 +18,14 @@ endif()
 if(NOT FORGE_CONTRACT_TEST_DB_WASM OR NOT EXISTS "${FORGE_CONTRACT_TEST_DB_WASM}")
    message(FATAL_ERROR "FORGE_CONTRACT_TEST_DB_WASM must name the database intrinsic contract")
 endif()
+if(NOT FORGE_CONTRACT_TEST_DB_HOST_WASM OR NOT EXISTS "${FORGE_CONTRACT_TEST_DB_HOST_WASM}")
+   message(FATAL_ERROR "FORGE_CONTRACT_TEST_DB_HOST_WASM must name the executable database host contract")
+endif()
 
-find_package(Forge CONFIG REQUIRED COMPONENTS chain_protocol raw vm_wasm)
+find_package(Forge CONFIG REQUIRED COMPONENTS asio chain_protocol db_core db_object exceptions raw vm_wasm)
 find_package(Boost REQUIRED)
+
+add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../host" "${CMAKE_CURRENT_BINARY_DIR}/host")
 
 add_executable(forge_contract_e2e_tests contract_tests.cpp)
 target_link_libraries(
@@ -29,6 +34,7 @@ target_link_libraries(
       Forge::forge_chain_protocol
       Forge::forge_raw
       Forge::forge_vm_wasm
+      forge_contract_test_host
       Boost::headers
 )
 target_compile_definitions(
@@ -38,6 +44,7 @@ target_compile_definitions(
       FORGE_CONTRACT_TEST_ALLOCATOR_WASM="${FORGE_CONTRACT_TEST_ALLOCATOR_WASM}"
       FORGE_CONTRACT_TEST_LEGACY_WASM="${FORGE_CONTRACT_TEST_LEGACY_WASM}"
       FORGE_CONTRACT_TEST_DB_WASM="${FORGE_CONTRACT_TEST_DB_WASM}"
+      FORGE_CONTRACT_TEST_DB_HOST_WASM="${FORGE_CONTRACT_TEST_DB_HOST_WASM}"
       FORGE_CONTRACT_TEST_DB_GOLDEN="${CMAKE_CURRENT_SOURCE_DIR}/../tooling/spring_db_intrinsics.txt"
 )
 

@@ -9,8 +9,8 @@ from pathlib import Path
 
 
 SOURCE_SUFFIXES = {".cpp", ".cppm", ".hpp", ".hxx"}
-LAYOUT_ROOTS = ("libraries", "plugins", "guest/libraries")
-SCAN_ROOTS = ("libraries", "plugins", "guest/libraries", "tests")
+LAYOUT_ROOTS = ("libraries", "plugins", "guest/libraries", "guest/tests/host")
+SCAN_ROOTS = ("libraries", "plugins", "guest/libraries", "guest/tests/host", "tests")
 EXCLUDED_PARTS = {".git", "legacy", "vendor", "__pycache__"}
 MODULE_NAME = r"forge(?:\.[A-Za-z_][A-Za-z0-9_]*)+(?::[A-Za-z_][A-Za-z0-9_]*)?"
 MODULE_DECLARATION = re.compile(rf"^\s*export\s+module\s+({MODULE_NAME})\s*;")
@@ -268,7 +268,7 @@ def check_contract_sdk_components(root: Path, errors: list[str]) -> None:
       developer_profile = source.split(
          'else()\n   find_package(Clang 22.1 CONFIG REQUIRED)', 1
       )[1].split(
-         'endif()\n\nset(_generated_dir', 1
+         'endif()\n\nset(_forge_contract_input_sysroot', 1
       )[0]
    except IndexError:
       errors.append(f"{path.relative_to(root)}: cannot locate developer Contract SDK profile")

@@ -229,9 +229,11 @@ This is the single source of truth for names, signatures and interface
 versions.
 
 Interface version 1 currently contains seven lifecycle/action-data functions
-and all 60 Spring/CDT database functions. The DB portion is a declarative ABI,
-not a storage implementation. Its exact donor surface and deferred runtime
-semantics are recorded in `docs/donors/forge-contract-db-intrinsics-v1.md`.
+and all 60 Spring/CDT database functions. The distributed DB portion is a
+declarative ABI, not a storage implementation. A non-installed executable test
+host validates that ABI against `forge.db.object`; its exact donor surface and
+runtime scenario mapping are recorded in
+`docs/donors/forge-contract-db-intrinsics-v1.md`.
 
 ## Dual-Target Libraries
 
@@ -360,6 +362,7 @@ The Forge Contract SDK distribution is hermetic and contains:
 
 - pinned, unmodified Clang and lld binaries;
 - the wasm32 sysroot;
+- prebuilt `sysroot/lib/libforge_guest_runtime.a`;
 - guest module sources;
 - dual-target Forge library sources;
 - `abigen` and `attr-plugin`;
@@ -373,6 +376,12 @@ checkout. The release manifest identifies:
 ```
 
 This version triple is part of reproducible source-to-WASM verification.
+
+The input sysroot is copied to a build-owned staging directory before the guest
+runtime is compiled and installed. Contract consumer builds link that archive
+before libc++/libc++abi/compiler-rt and never compile runtime sources. The
+archive participates in the sysroot hash; runtime `.cpp` and private `.hxx`
+files are not distributed.
 
 ## Repository Boundaries
 
@@ -433,9 +442,9 @@ Host and guest builds of `forge::raw` pass identical golden byte vectors.
 7. Add the safety, clang-tidy and development UBSan profiles.
 
 The first build-foundation implementation completed steps 1-3 and 5, plus the
-database C ABI portion required before step 4. The next compatibility block is
-an executable test host followed by C++23 `multi_index` and `singleton` over
-the canonical C ABI.
+database C ABI portion required before step 4. The executable test host now
+proves that ABI over Forge ObjectDB. The next compatibility block is C++23
+`multi_index` and `singleton` over the canonical C ABI.
 
 Each stage must leave one executable acceptance proof. Compatibility is not
 deferred to the final stage.
