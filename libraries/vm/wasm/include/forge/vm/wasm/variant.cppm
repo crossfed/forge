@@ -3,6 +3,7 @@ module;
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <tuple>
 #include <type_traits>
