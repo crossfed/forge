@@ -30,6 +30,12 @@ if(NOT _runtime_directory_count EQUAL 4)
    message(FATAL_ERROR "runtime dependency search directories were not normalized: ${_runtime_directories}")
 endif()
 
+set(_runtime_dependency "${_runtime_test_root}/readonly-runtime")
+file(WRITE "${_runtime_dependency}" "runtime")
+file(CHMOD "${_runtime_dependency}" PERMISSIONS OWNER_READ GROUP_READ WORLD_READ)
+forge_contract_sdk_prepare_runtime_dependency("${_runtime_dependency}")
+file(APPEND "${_runtime_dependency}" "-writable")
+
 foreach(
    _dependency
    "libc++.so.1"
