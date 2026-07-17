@@ -7,6 +7,7 @@ module;
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <exception>
 #include <limits>
 #include <map>
