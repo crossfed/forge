@@ -298,7 +298,8 @@ jobs:
           cmake -S guest/tests/consumer -B build/contract-release-consumer -G Ninja \
             -DForgeContract_DIR="$GITHUB_WORKSPACE/build/contract-sdk-release-prefix/lib/cmake/ForgeContract"
           cmake --build build/contract-release-consumer \
-            --target hello allocatortst legacyhello multisource dbhost forge_contract_database_intrinsic_fixtures \
+            --target hello recordtest allocatortst legacyhello multisource dbhost \
+                     forge_contract_database_intrinsic_fixtures \
             -j 4
           cmake -S guest/tests/e2e -B build/contract-release-e2e -G Ninja \
             -DCMAKE_C_COMPILER="$CC" \

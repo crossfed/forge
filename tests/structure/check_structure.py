@@ -257,6 +257,17 @@ def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
             f"{path.relative_to(root)}: Contract SDK workflow is missing {required}"
          )
 
+   release_build = re.search(
+      r"cmake --build build/contract-release-consumer\s+\\\n"
+      r"\s+--target (?P<targets>(?:[^\n]|\\\n)+?)\s+\\\n"
+      r"\s+-j 4",
+      source,
+   )
+   if release_build is None or "recordtest" not in release_build.group("targets").split():
+      errors.append(
+         f"{path.relative_to(root)}: release consumer must build recordtest before E2E configuration"
+      )
+
 
 def check_contract_sdk_components(root: Path, errors: list[str]) -> None:
    path = root / "guest" / "CMakeLists.txt"
