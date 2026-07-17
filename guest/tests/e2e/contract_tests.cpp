@@ -255,6 +255,15 @@ BOOST_AUTO_TEST_CASE(wasm32_long_and_non_void_action_result_share_the_raw_codec)
    BOOST_TEST(host.return_value == forge::raw::pack(std::int32_t{42}), boost::test_tools::per_element());
 }
 
+BOOST_AUTO_TEST_CASE(generated_dispatcher_executes_zero_argument_action_with_empty_payload) {
+   register_intrinsics();
+   const auto code = read_contract(FORGE_CONTRACT_TEST_WASM);
+   auto host = invocation{};
+
+   BOOST_CHECK_NO_THROW(apply(code, host, "hello", "answer"));
+   BOOST_TEST(host.return_value == forge::raw::pack(std::uint32_t{42}), boost::test_tools::per_element());
+}
+
 BOOST_AUTO_TEST_CASE(cdt_standard_containers_use_the_shared_guest_codec) {
    register_intrinsics();
    const auto code = read_contract(FORGE_CONTRACT_TEST_WASM);

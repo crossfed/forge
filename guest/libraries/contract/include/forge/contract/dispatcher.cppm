@@ -24,14 +24,16 @@ void execute_action(chain::protocol::name self, chain::protocol::name first_rece
    if (size != 0U) {
       check(read_action_data(bytes.data(), size) == size, "failed to read complete action data");
    }
+   const auto empty = std::uint8_t{};
+   const auto* data = bytes.empty() ? &empty : bytes.data();
 
    auto arguments = std::tuple<std::decay_t<Arguments>...>{};
-   auto stream = forge::datastream<const std::uint8_t*>{bytes.data(), bytes.size()};
+   auto stream = forge::datastream<const std::uint8_t*>{data, bytes.size()};
    forge::raw::unpack(stream, arguments);
    check(stream.remaining() == 0U, "action data contains trailing bytes");
 
    auto contract_stream = typename Contract::stream_type{
-       reinterpret_cast<const char*>(bytes.data()),
+       reinterpret_cast<const char*>(data),
        bytes.size(),
    };
    auto instance = Contract{self, first_receiver, contract_stream};
