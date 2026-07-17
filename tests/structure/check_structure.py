@@ -218,6 +218,8 @@ def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
    for required in (
       '      - "CMakeLists.txt"',
       '      - "cmake/**"',
+      '      - "libraries/codec/json/**"',
+      '      - "libraries/crypto/**"',
       '      - "libraries/exceptions/**"',
    ):
       if required not in pull_request:

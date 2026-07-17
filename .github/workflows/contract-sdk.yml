@@ -7,6 +7,8 @@ on:
       - "CMakeLists.txt"
       - "cmake/**"
       - "libraries/chain/protocol/**"
+      - "libraries/codec/json/**"
+      - "libraries/crypto/**"
       - "libraries/exceptions/**"
       - "libraries/raw/**"
       - "libraries/vm/wasm/**"
