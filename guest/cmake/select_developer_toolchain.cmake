@@ -15,15 +15,21 @@ function(forge_contract_select_developer_toolchain)
    endif()
 
    get_filename_component(_forge_contract_clang_bin "${FORGE_CONTRACT_CLANG}" DIRECTORY)
-   find_program(
-      _forge_contract_clang_scan_deps
-      NAMES clang-scan-deps
-      HINTS "${_forge_contract_clang_bin}"
-      REQUIRED
-      NO_DEFAULT_PATH
-      NO_CACHE
-   )
-   set(FORGE_CONTRACT_CLANG_SCAN_DEPS "${_forge_contract_clang_scan_deps}" PARENT_SCOPE)
+   if(NOT FORGE_CONTRACT_CLANG_SCAN_DEPS)
+      find_program(
+         _forge_contract_clang_scan_deps
+         NAMES clang-scan-deps
+         HINTS "${_forge_contract_clang_bin}"
+         REQUIRED
+         NO_DEFAULT_PATH
+         NO_CACHE
+      )
+      set(FORGE_CONTRACT_CLANG_SCAN_DEPS "${_forge_contract_clang_scan_deps}")
+   endif()
+   if(NOT EXISTS "${FORGE_CONTRACT_CLANG_SCAN_DEPS}" OR IS_DIRECTORY "${FORGE_CONTRACT_CLANG_SCAN_DEPS}")
+      message(FATAL_ERROR "Developer profile requires a valid FORGE_CONTRACT_CLANG_SCAN_DEPS: "
+                          "${FORGE_CONTRACT_CLANG_SCAN_DEPS}")
+   endif()
 
    if(NOT FORGE_CONTRACT_WASM_LD)
       find_program(
@@ -59,6 +65,7 @@ function(forge_contract_select_developer_toolchain)
    endif()
 
    set(FORGE_CONTRACT_CLANG "${FORGE_CONTRACT_CLANG}" PARENT_SCOPE)
+   set(FORGE_CONTRACT_CLANG_SCAN_DEPS "${FORGE_CONTRACT_CLANG_SCAN_DEPS}" PARENT_SCOPE)
    set(FORGE_CONTRACT_WASM_LD "${FORGE_CONTRACT_WASM_LD}" PARENT_SCOPE)
    set(FORGE_CONTRACT_LLVM_AR "${FORGE_CONTRACT_LLVM_AR}" PARENT_SCOPE)
    set(FORGE_CONTRACT_LLVM_RANLIB "${FORGE_CONTRACT_LLVM_RANLIB}" PARENT_SCOPE)

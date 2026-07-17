@@ -106,6 +106,7 @@ struct schema {
    std::map<std::string, std::string> action_methods;
    std::map<std::string, std::string> call_declarations;
    bool has_apply = false;
+   bool has_eosio_dispatch = false;
    bool failed = false;
 };
 
@@ -698,6 +699,10 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
    }
 
    bool VisitFunctionDecl(clang::FunctionDecl* declaration) {
+      if (declaration->isThisDeclarationADefinition() && has_annotation(*declaration, "forge.eosio_dispatch")) {
+         output_.has_eosio_dispatch = true;
+         return true;
+      }
       if (!declaration->isThisDeclarationADefinition() || !is_global_function(*declaration) ||
           declaration->getIdentifier() == nullptr || declaration->getIdentifier()->getName() != "apply") {
          return true;
@@ -716,6 +721,7 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
          }
       }
       output_.has_apply = true;
+      output_.has_eosio_dispatch = output_.has_eosio_dispatch || has_annotation(*declaration, "forge.eosio_dispatch");
       return true;
    }
 
@@ -1142,13 +1148,19 @@ void write_abi(const schema& input, const forge::contract::abi::request& options
 
 void write_dispatcher(const schema& input, const forge::contract::abi::request& options) {
    auto output = std::ostringstream{};
-   if (!input.has_apply) {
+   if (!input.has_apply || input.has_eosio_dispatch) {
       output << "#include <cstdint>\n";
       output << "import forge.contract.dispatcher;\n";
    }
+   if (input.has_eosio_dispatch) {
+      output << "#define FORGE_CONTRACT_DEFER_EOSIO_DISPATCH 1\n";
+   }
    const auto source = std::filesystem::weakly_canonical(options.sources.front()).generic_string();
    output << "#include " << std::quoted(source) << "\n";
-   if (input.has_apply) {
+   if (input.has_eosio_dispatch) {
+      output << "#undef FORGE_CONTRACT_DEFER_EOSIO_DISPATCH\n";
+   }
+   if (input.has_apply && !input.has_eosio_dispatch) {
       write_text(options.dispatcher, output.str());
       return;
    }
@@ -1173,6 +1185,14 @@ void write_dispatcher(const schema& input, const forge::contract::abi::request& 
       }
       output << "   }\n";
       output << "};\n";
+   }
+   if (input.has_eosio_dispatch) {
+      output << "extern \"C\" [[gnu::visibility(\"default\")]] void apply("
+                "std::uint64_t receiver, std::uint64_t code, std::uint64_t action) {\n";
+      output << "   forge::contract::detail::eosio_dispatch_definition<void>::invoke(receiver, code, action);\n";
+      output << "}\n";
+      write_text(options.dispatcher, output.str());
+      return;
    }
    output << "extern \"C\" [[gnu::visibility(\"default\")]] void apply("
              "std::uint64_t receiver, std::uint64_t code, std::uint64_t action) {\n";
@@ -1211,6 +1231,7 @@ artifacts generate(const request& options) {
        "-ffreestanding",
        "--sysroot=" + options.sysroot.string(),
        "-mcpu=mvp",
+       "-DFORGE_CONTRACT_DEFER_EOSIO_DISPATCH=1",
    };
    for (const auto& path : options.include_paths) {
       arguments.push_back("-I" + path.string());

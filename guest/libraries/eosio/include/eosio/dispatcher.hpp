@@ -211,6 +211,24 @@ import forge.contract.dispatcher;
    ::forge::contract::make_dispatch_entry<type, &type::member>(                                                        \
        ::forge::chain::protocol::make_name(FORGE_EOSIO_DETAIL_STRINGIZE(member)).value),
 
+#define FORGE_EOSIO_DETAIL_DEFERRED_DISPATCH_ACTION(type, member)                                                      \
+   ::forge::contract::detail::make_deferred_dispatch_entry<Deferred, type, &type::member>(                             \
+       ::forge::chain::protocol::make_name(FORGE_EOSIO_DETAIL_STRINGIZE(member)).value),
+
+#if defined(FORGE_CONTRACT_DEFER_EOSIO_DISPATCH)
+#define EOSIO_DISPATCH(type, members)                                                                                  \
+   namespace forge::contract::detail {                                                                                 \
+   template <typename Deferred> struct eosio_dispatch_definition {                                                     \
+      [[clang::annotate("forge.eosio_dispatch")]] static void invoke(std::uint64_t receiver, std::uint64_t code,       \
+                                                                     std::uint64_t action) {                           \
+         static constexpr ::forge::contract::dispatch_entry entries[] = {                                              \
+             FORGE_EOSIO_DETAIL_FOREACH_SEQ(FORGE_EOSIO_DETAIL_DEFERRED_DISPATCH_ACTION, type, members)};              \
+         ::forge::contract::dispatch(::forge::chain::protocol::name{receiver}, ::forge::chain::protocol::name{code},   \
+                                     action, entries);                                                                 \
+      }                                                                                                                \
+   };                                                                                                                  \
+   }
+#else
 #define EOSIO_DISPATCH(type, members)                                                                                  \
    extern "C" [[gnu::visibility("default")]] void apply(std::uint64_t receiver, std::uint64_t code,                    \
                                                         std::uint64_t action) {                                        \
@@ -219,3 +237,4 @@ import forge.contract.dispatcher;
       ::forge::contract::dispatch(::forge::chain::protocol::name{receiver}, ::forge::chain::protocol::name{code},      \
                                   action, entries);                                                                    \
    }
+#endif

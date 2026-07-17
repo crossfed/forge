@@ -62,6 +62,16 @@ template <typename Contract, auto Method> constexpr dispatch_entry make_dispatch
    };
 }
 
+namespace detail {
+
+template <typename Deferred, typename Contract, auto Method>
+constexpr dispatch_entry make_deferred_dispatch_entry(std::uint64_t name) {
+   static_cast<void>(sizeof(Deferred*));
+   return make_dispatch_entry<Contract, Method>(name);
+}
+
+} // namespace detail
+
 void dispatch(chain::protocol::name receiver, chain::protocol::name code, std::uint64_t action,
               const dispatch_entry* entries, std::size_t size);
 

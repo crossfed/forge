@@ -39,6 +39,10 @@ Fields are encoded in declaration order after the single public, non-virtual
 base, matching the generated ABI. Unions, inaccessible fields, references,
 const fields, bit-fields and multiple or virtual bases are rejected instead of
 producing an ABI that the guest dispatcher cannot execute.
+Legacy `EOSIO_DISPATCH` sources use the same generated codecs: their macro
+dispatch is deferred until after the codec specializations are declared.
+Hand-written `apply` functions remain fully author-owned and are included
+without generated dispatch code.
 
 Modern `[[forge::action]]` and `[[forge::call]]` parameters must be named so
 their ABI fields are usable by clients. The EOSIO spelling preserves CDT's

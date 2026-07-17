@@ -274,6 +274,16 @@ BOOST_AUTO_TEST_CASE(generated_dispatcher_serializes_user_defined_action_records
    BOOST_TEST(host.return_value == record, boost::test_tools::per_element());
 }
 
+BOOST_AUTO_TEST_CASE(legacy_dispatcher_serializes_user_defined_action_records) {
+   register_intrinsics();
+   const auto code = read_contract(FORGE_CONTRACT_TEST_LEGACY_WASM);
+   const auto record = forge::raw::pack(std::string{"alice"}, std::vector<std::uint32_t>{7U, 11U, 42U});
+   auto host = invocation{.action_data = record};
+
+   BOOST_CHECK_NO_THROW(apply(code, host, "legacyhello", "echo"));
+   BOOST_TEST(host.return_value == record, boost::test_tools::per_element());
+}
+
 BOOST_AUTO_TEST_CASE(cdt_standard_containers_use_the_shared_guest_codec) {
    register_intrinsics();
    const auto code = read_contract(FORGE_CONTRACT_TEST_WASM);
