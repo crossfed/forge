@@ -4,6 +4,32 @@ endif()
 
 include("${FORGE_CONTRACT_RUNTIME_POLICY}")
 
+set(_runtime_test_root "${CMAKE_CURRENT_BINARY_DIR}/contract-runtime-search")
+file(REMOVE_RECURSE "${_runtime_test_root}")
+file(MAKE_DIRECTORY "${_runtime_test_root}/prefix/lib" "${_runtime_test_root}/prefix/lib64")
+forge_contract_sdk_runtime_search_directories(
+   _runtime_directories
+   INSTALL_LIBRARY_DIR "${_runtime_test_root}/sdk/lib"
+   PREFIXES "${_runtime_test_root}/prefix" "${_runtime_test_root}/missing"
+   DIRECTORIES "${_runtime_test_root}/custom" "${_runtime_test_root}/custom"
+)
+foreach(
+   _expected
+   "${_runtime_test_root}/sdk/lib"
+   "${_runtime_test_root}/prefix/lib"
+   "${_runtime_test_root}/prefix/lib64"
+   "${_runtime_test_root}/custom"
+)
+   list(FIND _runtime_directories "${_expected}" _position)
+   if(_position EQUAL -1)
+      message(FATAL_ERROR "runtime dependency search directory is missing: ${_expected}")
+   endif()
+endforeach()
+list(LENGTH _runtime_directories _runtime_directory_count)
+if(NOT _runtime_directory_count EQUAL 4)
+   message(FATAL_ERROR "runtime dependency search directories were not normalized: ${_runtime_directories}")
+endif()
+
 foreach(
    _dependency
    "libc++.so.1"
