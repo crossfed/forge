@@ -8,6 +8,7 @@ module;
 #include <cpuid.h>
 #include <forge/vm/wasm/opcode_macros.hpp>
 #include <softfloat.hpp>
+#include <type_traits>
 #include <variant>
 #include <vector>
 
