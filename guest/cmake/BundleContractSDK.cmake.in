@@ -2,6 +2,14 @@ set(_prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
 set(_library_dir "${_prefix}/@CMAKE_INSTALL_LIBDIR@")
 include("${CMAKE_CURRENT_LIST_DIR}/ContractSDKRuntimeDependencies.cmake")
 forge_contract_sdk_runtime_dependency_filters(_runtime_dependency_filters)
+set(_runtime_prefixes "@CMAKE_PREFIX_PATH@")
+set(_configured_runtime_directories "@CMAKE_LIBRARY_PATH@")
+forge_contract_sdk_runtime_search_directories(
+   _runtime_dependency_directories
+   INSTALL_LIBRARY_DIR "${_library_dir}"
+   PREFIXES ${_runtime_prefixes}
+   DIRECTORIES ${_configured_runtime_directories}
+)
 set(_executables
    "${_prefix}/bin/clang++"
    "${_prefix}/bin/clang-scan-deps"
@@ -27,7 +35,7 @@ foreach(_executable IN LISTS _executables)
       RESOLVED_DEPENDENCIES_VAR _resolved
       UNRESOLVED_DEPENDENCIES_VAR _unresolved
       EXECUTABLES "${_executable}"
-      DIRECTORIES "${_library_dir}"
+      DIRECTORIES ${_runtime_dependency_directories}
       ${_runtime_dependency_filters}
    )
    list(APPEND _executable_dependencies ${_resolved})
@@ -37,7 +45,7 @@ file(GET_RUNTIME_DEPENDENCIES
    RESOLVED_DEPENDENCIES_VAR _plugin_dependencies
    UNRESOLVED_DEPENDENCIES_VAR _plugin_unresolved
    MODULES "${_plugin}"
-   DIRECTORIES "${_library_dir}"
+   DIRECTORIES ${_runtime_dependency_directories}
    ${_runtime_dependency_filters}
 )
 set(_dependencies ${_executable_dependencies} ${_plugin_dependencies})
