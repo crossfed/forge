@@ -4,6 +4,7 @@ module;
 #include <cstddef>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 
 export module forge.vm.wasm.host_function:function_traits;
 

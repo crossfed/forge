@@ -16,6 +16,7 @@ module;
 #include <signal.h>
 #include <string_view>
 #include <system_error>
+#include <type_traits>
 #include <ucontext.h>
 #include <utility>
 #include <vector>

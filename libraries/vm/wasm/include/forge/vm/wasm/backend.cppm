@@ -3,6 +3,7 @@ module;
 #include <atomic>
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <iostream>
 #include <memory>
@@ -10,6 +11,8 @@ module;
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 export module forge.vm.wasm.backend;
