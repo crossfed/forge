@@ -84,7 +84,7 @@ void require_ordered(float128 value) {
 }
 
 void require_ordered(std::uint64_t) {}
-void require_ordered(unsigned __int128) {}
+void require_ordered(const uint128&) {}
 void require_ordered(const uint256&) {}
 
 boost::asio::awaitable<std::optional<table>> lookup_table(forge::db::object::transaction& transaction,
@@ -605,8 +605,8 @@ std::uint64_t to_key(std::uint64_t value) {
    return value;
 }
 
-unsigned __int128 to_key(unsigned __int128 value) {
-   return value;
+uint128 to_key(unsigned __int128 value) {
+   return uint128{std::array<uint128::word_type, uint128::num_words()>{value}};
 }
 
 float64 to_key(double value) {
@@ -621,8 +621,8 @@ void from_key(std::uint64_t& output, std::uint64_t value) {
    output = value;
 }
 
-void from_key(unsigned __int128& output, unsigned __int128 value) {
-   output = value;
+void from_key(unsigned __int128& output, const uint128& value) {
+   output = value.get_array()[0];
 }
 
 void from_key(double& output, float64 value) {

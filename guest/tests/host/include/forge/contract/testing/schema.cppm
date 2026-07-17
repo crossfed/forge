@@ -36,6 +36,7 @@ struct float128 {
 BOOST_DESCRIBE_STRUCT(float128, (), (words))
 
 using uint256 = forge::chain::protocol::key256;
+using uint128 = forge::chain::protocol::fixed_key<16>;
 
 struct table : forge::db::object::object<table, schema_space, 1> {
    std::uint64_t code = 0;
@@ -69,7 +70,7 @@ struct index128 : forge::db::object::object<index128, schema_space, 4> {
    table::id_t table_id;
    std::uint64_t primary = 0;
    std::uint64_t payer = 0;
-   unsigned __int128 secondary = 0;
+   uint128 secondary{};
 
    BOOST_DESCRIBE_CLASS(index128, (object_base_type), (table_id, primary, payer, secondary), (), ())
 };

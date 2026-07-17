@@ -17,8 +17,10 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
+import forge.chain.protocol.fixed_key;
 import forge.chain.protocol.values;
 import forge.contract.testing.host;
 import forge.db.object.index;
@@ -215,6 +217,8 @@ static_assert(forge::db::object::object_model<forge::contract::testing::index128
 static_assert(forge::db::object::object_model<forge::contract::testing::index256_index>);
 static_assert(forge::db::object::object_model<forge::contract::testing::index_double_index>);
 static_assert(forge::db::object::object_model<forge::contract::testing::index_long_double_index>);
+static_assert(
+    std::is_same_v<decltype(forge::contract::testing::index128::secondary), forge::chain::protocol::fixed_key<16>>);
 
 BOOST_AUTO_TEST_CASE(host_and_guest_share_action_argument_bytes) {
    register_intrinsics();
@@ -413,7 +417,7 @@ BOOST_AUTO_TEST_CASE(database_host_commits_primary_and_secondary_objectdb_state)
    BOOST_REQUIRE(row_double.has_value());
    BOOST_REQUIRE(row_long_double.has_value());
    BOOST_TEST(row64->secondary == 50U);
-   BOOST_TEST(static_cast<bool>(row128->secondary == static_cast<unsigned __int128>(50)));
+   BOOST_TEST(static_cast<bool>(row128->secondary.get_array()[0] == static_cast<unsigned __int128>(50)));
    BOOST_TEST(static_cast<bool>(row256->secondary.get_array()[0] == static_cast<unsigned __int128>(50)));
    BOOST_TEST(row_double->secondary.bits == std::bit_cast<std::uint64_t>(50.0));
    BOOST_TEST(
