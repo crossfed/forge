@@ -18,6 +18,7 @@ module;
 #include <system_error>
 #include <ucontext.h>
 #include <utility>
+#include <vector>
 
 export module forge.vm.wasm.backend:execution_context;
 

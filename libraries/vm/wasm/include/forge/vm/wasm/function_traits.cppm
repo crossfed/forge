@@ -1,6 +1,7 @@
 module;
 
 #include <forge/vm/wasm/host_function.hpp>
+#include <cstddef>
 #include <tuple>
 #include <type_traits>
 
