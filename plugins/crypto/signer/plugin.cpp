@@ -79,6 +79,7 @@ std::optional<forge::config::core::component_descriptor> plugin::describe_config
       .deprecated = true,
       .deprecated_message = "removed in Forge 8.9; format typed signer results at the consumer boundary",
       .description = "Removed migration tombstone; supplied values are rejected",
+      .ingestion_only = true,
    });
    return descriptor;
 }

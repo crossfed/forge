@@ -2071,6 +2071,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_config_is_redacted_and_local_only) {
    BOOST_TEST(static_cast<int>(keys.kind) == static_cast<int>(forge::schema::value_kind::object_list));
    const auto& removed_output_profile = require_field(*descriptor, "default-output-profile");
    BOOST_TEST(removed_output_profile.deprecated);
+   BOOST_TEST(removed_output_profile.ingestion_only);
 
    auto registry = forge::config::core::component_registry{};
    registry.add(*descriptor);
@@ -2133,6 +2134,25 @@ BOOST_AUTO_TEST_CASE(crypto_signer_rejects_removed_default_output_profile) {
          runtime,
          plugin.configure(forge::config::core::component_view{from_env.value, "plugins.crypto.signer"})),
       crypto_signer::exceptions::invalid_config);
+
+   const char* argv[] = {"tool", "--plugins.crypto.signer.default-output-profile=forge"};
+   const auto from_cli = forge::config::program_options::parse(2, argv, registry);
+   BOOST_TEST(from_cli.ok());
+   BOOST_REQUIRE(from_cli.document.try_get("plugins.crypto.signer.default-output-profile") != nullptr);
+   BOOST_CHECK_THROW(
+      forge::asio::blocking::run(
+         runtime,
+         plugin.configure(forge::config::core::component_view{from_cli.document, "plugins.crypto.signer"})),
+      crypto_signer::exceptions::invalid_config);
+
+   const auto help = forge::config::program_options::help(registry, "FORGE options");
+   BOOST_TEST(help.find("default-output-profile") == std::string::npos);
+   const auto example = forge::config::env::write_example(registry, {.prefix = "FORGE"});
+   BOOST_TEST(example.ok());
+   BOOST_TEST(example.text.find("FORGE_PLUGINS_CRYPTO_SIGNER_DEFAULT_OUTPUT_PROFILE") == std::string::npos);
+   const auto written = forge::config::env::write_document(from_env.value, registry, {.prefix = "FORGE"});
+   BOOST_TEST(written.ok());
+   BOOST_TEST(written.text.find("FORGE_PLUGINS_CRYPTO_SIGNER_DEFAULT_OUTPUT_PROFILE") == std::string::npos);
 }
 
 BOOST_AUTO_TEST_CASE(crypto_signer_structured_keys_are_not_cli_or_env_fields) {

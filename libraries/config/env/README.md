@@ -227,6 +227,10 @@ Common diagnostic codes:
 Unknown prefixed variables warn by default and can be made fatal with
 `unknown_variable_policy::error`.
 
+Registry fields marked `ingestion_only` are accepted while reading legacy
+input, but are omitted from `write_document()` and generated `.env.example`
+output. They are intended only for explicit migration failures.
+
 ## Security Notes
 
 - Treat `.env` as local secret material and usually gitignore it.
