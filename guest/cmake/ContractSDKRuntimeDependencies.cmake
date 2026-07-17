@@ -29,6 +29,16 @@ function(forge_contract_sdk_runtime_search_directories output)
    set(${output} "${_directories}" PARENT_SCOPE)
 endfunction()
 
+function(forge_contract_sdk_prepare_runtime_dependency path)
+   if(NOT EXISTS "${path}")
+      message(FATAL_ERROR "runtime dependency does not exist: ${path}")
+   endif()
+   file(
+      CHMOD "${path}"
+      PERMISSIONS OWNER_READ OWNER_WRITE GROUP_READ WORLD_READ
+   )
+endfunction()
+
 function(forge_contract_sdk_runtime_dependency_filters output)
    set(
       _filters

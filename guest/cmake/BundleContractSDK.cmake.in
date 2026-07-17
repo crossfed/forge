@@ -64,6 +64,7 @@ foreach(_dependency IN LISTS _dependencies)
    # COPY_FILE follows symlinks, so every dependency is self-contained even
    # when the selected LLVM installation exposes an unversioned link.
    file(COPY_FILE "${_dependency}" "${_destination}" ONLY_IF_DIFFERENT)
+   forge_contract_sdk_prepare_runtime_dependency("${_destination}")
    list(APPEND _bundled "${_destination}")
 endforeach()
 
