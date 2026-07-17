@@ -1,9 +1,11 @@
 module;
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <string_view>
 #include <vector>
 

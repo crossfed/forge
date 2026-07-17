@@ -8,6 +8,7 @@ module;
 #include <memory>
 #include <optional>
 #include <string>
+#include <tuple>
 #include <vector>
 
 export module forge.vm.wasm.utils;

@@ -2,7 +2,10 @@ module;
 
 #include <algorithm>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
+#include <limits>
 #include <utility>
 #include <variant>
 #include <vector>
