@@ -142,6 +142,10 @@ import forge.schema.diagnostic;
 import forge.schema.value_kind;
 import forge.schema.object;
 import forge.schema.enums;
+import forge.variant.value;
+import forge.variant.conversion;
+import forge.variant.containers;
+import forge.variant.described;
 
 template <typename T>
 concept accepts_raw_http_binding = requires(T& api, forge::api::http::binding_plan binding) {
@@ -2309,6 +2313,28 @@ BOOST_AUTO_TEST_CASE(crypto_signer_returns_typed_k1_result) {
 
    const auto signature_text = forge::crypto::asymmetric::encoding::antelope().format(response.signature);
    BOOST_TEST(signature_text.starts_with("SIG_K1_"));
+}
+
+BOOST_AUTO_TEST_CASE(crypto_signer_algorithm_roundtrips_through_described_dto_paths) {
+   const auto original = crypto_signer::options{
+      .purpose = "api.auth",
+      .required_algorithm = forge::crypto::asymmetric::algorithm::secp256k1,
+   };
+
+   auto encoded = forge::variant{};
+   forge::to_variant(original, encoded);
+   BOOST_TEST(encoded.get_object()["required_algorithm"].as_string() == "secp256k1");
+
+   auto decoded = crypto_signer::options{};
+   forge::from_variant(encoded, decoded);
+   BOOST_TEST(decoded.purpose == original.purpose);
+   BOOST_REQUIRE(decoded.required_algorithm.has_value());
+   BOOST_TEST(static_cast<int>(*decoded.required_algorithm) ==
+              static_cast<int>(*original.required_algorithm));
+
+   auto parsed = forge::crypto::asymmetric::algorithm::rsa;
+   BOOST_TEST(forge::schema::enum_from_string("p256", parsed));
+   BOOST_TEST(static_cast<int>(parsed) == static_cast<int>(forge::crypto::asymmetric::algorithm::p256));
 }
 
 BOOST_AUTO_TEST_CASE(crypto_signer_supports_p256_ed25519_and_rsa_binary_results) {

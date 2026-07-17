@@ -54,6 +54,8 @@ enum class algorithm {
    rsa,
 };
 
+BOOST_DESCRIBE_ENUM(algorithm, secp256k1, p256, ed25519, rsa)
+
 class signature;
 class public_key;
 
