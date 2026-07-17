@@ -37,7 +37,9 @@ to the caller's input sysroot.
 Allocation and C memory semantics are production compatibility contracts;
 private block layout is not API. Tests cover fragmentation, reuse, aligned
 allocation, split/coalesced blocks, growable memory, `calloc`, `realloc`,
-new/delete and deterministic exhaustion through the real VM memory export.
+new/delete, deterministic exhaustion and the complete declared C string surface
+through the real VM memory export. Error strings are stable symbolic errno names
+rather than host-localized messages.
 The E2E suite also links and executes `<cerrno>` reads and writes, proving that
 `errno` does not escape as an undeclared host import.
 Relocation tests verify that an installed consumer sees the archive but no

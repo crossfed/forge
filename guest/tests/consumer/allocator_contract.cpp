@@ -216,6 +216,28 @@ class [[forge::contract("allocatortst")]] allocator_contract : public forge::con
       forge::contract::check(errno == 0, "guest errno did not reset");
    }
 
+   [[forge::action]] void stringapi() {
+      char output[32]{};
+      std::strcpy(output, "forge");
+      std::strcat(output, "-");
+      std::strncat(output, "contract-runtime", 8U);
+      forge::contract::check(std::strcmp(output, "forge-contract") == 0, "string concatenation failed");
+
+      char copied[8]{};
+      std::strncpy(copied, "vm", sizeof(copied));
+      forge::contract::check(copied[0] == 'v' && copied[1] == 'm' && copied[2] == '\0' && copied[7] == '\0',
+                             "bounded string copy failed");
+      forge::contract::check(std::strchr(output, '-') == output + 5, "forward character search failed");
+      forge::contract::check(std::strrchr(output, 't') == output + 13, "reverse character search failed");
+      forge::contract::check(std::strspn("abc123", "abc") == 3U, "accepted span failed");
+      forge::contract::check(std::strcspn("abc123", "0123456789") == 3U, "rejected span failed");
+      const char sample[] = "forge";
+      forge::contract::check(std::strpbrk(sample, "xyzr") == sample + 2, "set search failed");
+      forge::contract::check(std::strstr(output, "contract") == output + 6, "substring search failed");
+      forge::contract::check(std::strcmp(std::strerror(EINVAL), "EINVAL") == 0, "known error name failed");
+      forge::contract::check(std::strcmp(std::strerror(-1), "Unknown error") == 0, "unknown error name failed");
+   }
+
    [[forge::action]] void memmoves() {
       constexpr auto size = std::size_t{16};
       auto* source = static_cast<std::uint8_t*>(std::malloc(size));

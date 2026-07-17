@@ -558,6 +558,10 @@ BOOST_AUTO_TEST_CASE(contract_runtime_provides_guest_errno_storage) {
    run_allocator_action("errnovalue");
 }
 
+BOOST_AUTO_TEST_CASE(contract_runtime_provides_declared_string_api) {
+   run_allocator_action("stringapi");
+}
+
 BOOST_AUTO_TEST_CASE(contract_runtime_memmove_handles_distinct_and_overlapping_objects) {
    run_allocator_action("memmoves");
 }
