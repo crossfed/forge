@@ -2295,6 +2295,20 @@ BOOST_AUTO_TEST_CASE(crypto_signer_supports_p256_ed25519_and_rsa_binary_results)
    auto api = apis.get<crypto_signer::api>(crypto_signer::api::ref());
 
    const auto digest = forge::crypto::sha256::hash("auth-payload");
+   const auto check_raw_roundtrip = [](const crypto_signer::response& expected) {
+      const auto public_key = forge::raw::unpack<forge::crypto::asymmetric::public_key>(
+         forge::raw::pack(expected.public_key));
+      const auto signature = forge::raw::unpack<forge::crypto::asymmetric::signature>(
+         forge::raw::pack(expected.signature));
+      const auto response = forge::raw::unpack<crypto_signer::response>(forge::raw::pack(expected));
+
+      BOOST_CHECK(public_key == expected.public_key);
+      BOOST_CHECK(signature == expected.signature);
+      BOOST_TEST(response.key_id == expected.key_id);
+      BOOST_CHECK(response.public_key == expected.public_key);
+      BOOST_CHECK(response.signature == expected.signature);
+   };
+
    const auto p256 = forge::asio::blocking::run(
       runtime,
       api->sign(crypto_signer::request{
@@ -2306,6 +2320,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_supports_p256_ed25519_and_rsa_binary_results)
    BOOST_CHECK(p256.public_key == p256_key.get_public_key());
    const auto p256_recovered = forge::crypto::asymmetric::public_key{p256.signature, digest, true};
    BOOST_CHECK(p256_recovered == p256.public_key);
+   check_raw_roundtrip(p256);
 
    const auto ed25519 = forge::asio::blocking::run(
       runtime,
@@ -2317,6 +2332,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_supports_p256_ed25519_and_rsa_binary_results)
       }));
    BOOST_CHECK(ed25519.public_key == ed25519_key.get_public_key());
    BOOST_TEST(ed25519.public_key.verify(digest.to_uint8_span(), ed25519.signature));
+   check_raw_roundtrip(ed25519);
 
    const auto rsa = forge::asio::blocking::run(
       runtime,
@@ -2328,6 +2344,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_supports_p256_ed25519_and_rsa_binary_results)
       }));
    BOOST_CHECK(rsa.public_key == rsa_key.get_public_key());
    BOOST_TEST(rsa.public_key.verify(digest.to_uint8_span(), rsa.signature));
+   check_raw_roundtrip(rsa);
 }
 
 BOOST_AUTO_TEST_CASE(crypto_signer_supports_custom_input_profile) {
