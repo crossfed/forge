@@ -32,6 +32,14 @@ notifications require an explicit notification dispatcher. The library contains
 no CLI `main`, compiler patches or guest runtime. Its tests are the pinned CDT
 pass/fail fixtures plus local-include and wasm32-width regressions.
 
+For generated dispatchers, `abigen` also emits memberwise `forge.raw` codecs
+for user-defined ABI records, including records used by action parameters and
+results.
+Fields are encoded in declaration order after the single public, non-virtual
+base, matching the generated ABI. Unions, inaccessible fields, references,
+const fields, bit-fields and multiple or virtual bases are rejected instead of
+producing an ABI that the guest dispatcher cannot execute.
+
 Modern `[[forge::action]]` and `[[forge::call]]` parameters must be named so
 their ABI fields are usable by clients. The EOSIO spelling preserves CDT's
 legacy unnamed-parameter output for source and ABI compatibility.

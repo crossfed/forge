@@ -51,6 +51,12 @@ struct struct_shape {
    std::vector<field_shape> fields;
 };
 
+struct record_codec_shape {
+   std::string name;
+   std::string base;
+   std::vector<std::string> fields;
+};
+
 struct action_shape {
    std::string name;
    std::string type;
@@ -84,6 +90,7 @@ struct call_shape {
 struct schema {
    std::vector<type_shape> types;
    std::vector<struct_shape> structs;
+   std::vector<record_codec_shape> record_codecs;
    std::vector<action_shape> actions;
    std::vector<variant_shape> variants;
    std::vector<table_shape> tables;
@@ -595,23 +602,49 @@ class type_encoder {
       }
 
       auto shape = struct_shape{.name = name};
+      auto codec = record_codec_shape{};
       const auto* record = &declaration;
       if (const auto* cpp = llvm::dyn_cast<clang::CXXRecordDecl>(record); cpp != nullptr) {
          if (const auto* definition = cpp->getDefinition(); definition != nullptr) {
             record = definition;
          }
       }
+      if (record->isUnion()) {
+         fail("union record", declaration.getLocation());
+         return;
+      }
+      codec.name = "::" + record->getQualifiedNameAsString();
       if (const auto* cpp = llvm::dyn_cast<clang::CXXRecordDecl>(record); cpp != nullptr && cpp->hasDefinition()) {
          if (cpp->getNumBases() > 1U) {
             fail("multiple ABI base classes", declaration.getLocation());
          } else if (cpp->getNumBases() == 1U) {
-            shape.base = encode(cpp->bases_begin()->getType());
+            const auto& base = *cpp->bases_begin();
+            const auto implicit_public = base.getAccessSpecifier() == clang::AS_none && cpp->isStruct();
+            if (base.isVirtual() || (base.getAccessSpecifier() != clang::AS_public && !implicit_public)) {
+               fail("non-public or virtual ABI base class", base.getBeginLoc());
+               return;
+            }
+            const auto* base_record = base.getType()->getAsCXXRecordDecl();
+            if (base_record == nullptr) {
+               fail("ABI base class", base.getBeginLoc());
+               return;
+            }
+            shape.base = encode(base.getType());
+            codec.base = "::" + base_record->getQualifiedNameAsString();
          }
       }
       for (const auto* field : record->fields()) {
+         if (field->getIdentifier() == nullptr || field->isBitField() || field->getType().isConstQualified() ||
+             field->getType()->isReferenceType() ||
+             (field->getAccess() != clang::AS_public && field->getAccess() != clang::AS_none)) {
+            fail("non-public, unnamed, const, reference, or bit-field ABI member", field->getLocation());
+            return;
+         }
          shape.fields.push_back(field_shape{field->getNameAsString(), encode(*field)});
+         codec.fields.push_back(field->getNameAsString());
       }
       output_.structs.push_back(std::move(shape));
+      output_.record_codecs.push_back(std::move(codec));
    }
 
    void fail(std::string_view type, clang::SourceLocation location) const {
@@ -1040,6 +1073,7 @@ void canonicalize(schema& output) {
    const auto by_name = [](const auto& left, const auto& right) { return left.name < right.name; };
    std::ranges::sort(output.types, by_name);
    std::ranges::sort(output.structs, by_name);
+   std::ranges::sort(output.record_codecs, by_name);
    std::ranges::sort(output.actions, by_name);
    std::ranges::sort(output.variants, by_name);
    std::ranges::sort(output.tables, by_name);
@@ -1119,6 +1153,27 @@ void write_dispatcher(const schema& input, const forge::contract::abi::request& 
       return;
    }
    output << "#line 1 \"contract generated dispatcher\"\n";
+   for (const auto& record : input.record_codecs) {
+      output << "template <> struct forge::raw::codec_traits<" << record.name << "> {\n";
+      output << "   template <typename Stream> static void pack(Stream& stream, const " << record.name
+             << "& value) {\n";
+      if (!record.base.empty()) {
+         output << "      forge::raw::pack(stream, static_cast<const " << record.base << "&>(value));\n";
+      }
+      for (const auto& field : record.fields) {
+         output << "      forge::raw::pack(stream, value." << field << ");\n";
+      }
+      output << "   }\n";
+      output << "   template <typename Stream> static void unpack(Stream& stream, " << record.name << "& value) {\n";
+      if (!record.base.empty()) {
+         output << "      forge::raw::unpack(stream, static_cast<" << record.base << "&>(value));\n";
+      }
+      for (const auto& field : record.fields) {
+         output << "      forge::raw::unpack(stream, value." << field << ");\n";
+      }
+      output << "   }\n";
+      output << "};\n";
+   }
    output << "extern \"C\" [[gnu::visibility(\"default\")]] void apply("
              "std::uint64_t receiver, std::uint64_t code, std::uint64_t action) {\n";
    output << "   using forge::chain::protocol::name;\n";
