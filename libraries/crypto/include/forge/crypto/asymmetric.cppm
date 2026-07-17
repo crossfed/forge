@@ -21,6 +21,7 @@ import forge.crypto.secp256k1;
 import forge.crypto.sha256;
 export import forge.exceptions;
 import forge.reflect.reflect;
+import forge.raw.raw;
 import forge.variant.exceptions;
 import forge.variant.value;
 import forge.variant.conversion;
@@ -47,7 +48,7 @@ using invalid_options = forge::exceptions::coded_exception<code, code::invalid_o
 
 } // namespace exceptions
 
-enum class algorithm {
+enum class algorithm : std::int32_t {
    secp256k1,
    p256,
    ed25519,
@@ -277,6 +278,12 @@ void to_variant(const signature& var, forge::variant& vo,
 void from_variant(const forge::variant& var, signature& vo);
 
 } // namespace forge::crypto::asymmetric
+
+export namespace forge::raw {
+template <> struct enum_wire_type<forge::crypto::asymmetric::algorithm> {
+   using type = std::int32_t;
+};
+} // namespace forge::raw
 
 export namespace std {
 template <> struct hash<forge::crypto::asymmetric::signature> {

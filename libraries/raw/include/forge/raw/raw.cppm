@@ -16,6 +16,7 @@ module;
 #include <set>
 #include <span>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <variant>
@@ -46,6 +47,13 @@ import forge.variant.dynamic_bitset;
 export namespace forge::raw {
 
 using bytes = std::vector<std::uint8_t>;
+
+template <typename Enum> struct enum_wire_type {
+   static_assert(std::is_enum_v<Enum>);
+   using type = std::int64_t;
+};
+
+template <typename Enum> using enum_wire_type_t = typename enum_wire_type<Enum>::type;
 
 static_assert(CHAR_BIT == 8, "Forge raw serialization requires 8-bit bytes");
 
@@ -792,7 +800,7 @@ template <typename Stream, NotTrivialScalar T, std::size_t S> inline void unpack
 template <typename Stream, typename T> inline void pack(Stream& s, const T& v) {
    using clean = std::remove_cv_t<T>;
    if constexpr (forge::reflect::is_described_enum_v<clean>) {
-      forge::raw::pack(s, static_cast<int64_t>(v));
+      forge::raw::pack(s, static_cast<enum_wire_type_t<clean>>(v));
    } else if constexpr (forge::reflect::is_described_object_v<clean>) {
       forge::raw::detail::pack_described_object(s, v);
    } else {
@@ -803,7 +811,7 @@ template <typename Stream, typename T> inline void unpack(Stream& s, T& v) {
    try {
       using clean = std::remove_cv_t<T>;
       if constexpr (forge::reflect::is_described_enum_v<clean>) {
-         int64_t value = 0;
+         enum_wire_type_t<clean> value = 0;
          forge::raw::unpack(s, value);
          v = static_cast<T>(value);
       } else if constexpr (forge::reflect::is_described_object_v<clean>) {
