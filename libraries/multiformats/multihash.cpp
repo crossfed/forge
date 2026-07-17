@@ -1,7 +1,8 @@
 module;
 
-#include <string>
+#include <cstdint>
 #include <span>
+#include <string>
 
 module forge.multiformats.multihash;
 
