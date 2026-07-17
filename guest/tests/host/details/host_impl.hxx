@@ -28,6 +28,7 @@ struct host::impl {
    std::optional<table> find_table(std::uint64_t code, std::uint64_t scope, std::uint64_t table_name);
    std::optional<key_value> find_primary(std::uint64_t code, std::uint64_t scope, std::uint64_t table_name,
                                          std::uint64_t primary);
+   [[nodiscard]] std::vector<std::uint8_t> snapshot() const;
    template <typename Row, typename Index>
    std::optional<Row> find_secondary(std::uint64_t code, std::uint64_t scope, std::uint64_t table_name,
                                      std::uint64_t primary);
@@ -39,6 +40,7 @@ struct host::impl {
    std::uint32_t action_data_size() const;
    std::uint32_t read_action_data(forge::vm::wasm::span<char> destination) const;
    void set_action_return_value(forge::vm::wasm::span<const char> value);
+   std::uint64_t current_receiver() const;
 
    std::int32_t db_store_i64(std::uint64_t scope, std::uint64_t table_name, std::uint64_t payer, std::uint64_t primary,
                              forge::vm::wasm::span<const char> value);

@@ -12,6 +12,7 @@ class memory_driver final : public forge::db::core::driver {
    ~memory_driver() override;
 
    boost::asio::awaitable<void> async_flush(bool sync) override;
+   [[nodiscard]] std::vector<std::uint8_t> snapshot() const;
 
  private:
    boost::asio::awaitable<std::unique_ptr<forge::db::core::session>> open_transaction() override;

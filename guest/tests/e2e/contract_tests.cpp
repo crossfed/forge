@@ -446,6 +446,130 @@ BOOST_AUTO_TEST_CASE(database_host_commits_primary_and_secondary_objectdb_state)
    BOOST_TEST(!host.find_table(account, database_scope, 20).has_value());
 }
 
+BOOST_AUTO_TEST_CASE(multi_index_and_singleton_execute_over_the_objectdb_host) {
+   const auto modern = read_contract(FORGE_CONTRACT_TEST_MULTI_INDEX_WASM);
+   const auto legacy = read_contract(FORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_WASM);
+   const auto modern_errors = read_contract(FORGE_CONTRACT_TEST_MULTI_INDEX_ERRORS_WASM);
+   const auto legacy_errors = read_contract(FORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_ERRORS_WASM);
+   const auto modern_extended = read_contract(FORGE_CONTRACT_TEST_MULTI_INDEX_EXTENDED_WASM);
+   const auto legacy_extended = read_contract(FORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_EXTENDED_WASM);
+
+   const auto exercise = [](const wasm::wasm_code& core, const wasm::wasm_code& errors, const wasm::wasm_code& extended,
+                            std::string_view account_name) {
+      auto host = forge::contract::testing::host{};
+      const auto account = protocol::make_name(account_name).value;
+      const auto table_name = protocol::make_name("records").value;
+      const auto secondary_name = [table_name](std::uint64_t number) {
+         return (table_name & 0xffff'ffff'ffff'fff0ULL) | number;
+      };
+
+      const auto invoke_success = [&](const wasm::wasm_code& code, std::uint32_t scenario) {
+         const auto result = invoke_database(host, code, account_name, scenario);
+         const auto expected = forge::raw::pack(scenario);
+         BOOST_TEST(result.return_value == expected, boost::test_tools::per_element());
+      };
+      const auto donor_error = [](std::string_view expected) {
+         return [expected](const forge::contract::testing::exceptions::assertion_failure& error) {
+            return error.message() == expected;
+         };
+      };
+      const auto invoke_failure = [&](const wasm::wasm_code& code, std::uint32_t scenario, std::string_view message) {
+         BOOST_CHECK_EXCEPTION(invoke_database(host, code, account_name, scenario),
+                               forge::contract::testing::exceptions::assertion_failure, donor_error(message));
+      };
+
+      invoke_success(core, 0);
+      BOOST_REQUIRE(host.find_primary(account, account, table_name, 1).has_value());
+      BOOST_REQUIRE(host.find_primary(account, account, table_name, 2).has_value());
+      BOOST_REQUIRE(host.find_primary(account, account, table_name, 3).has_value());
+
+      const auto index64 = host.find_index64(account, account, secondary_name(0), 1);
+      const auto index128 = host.find_index128(account, account, secondary_name(1), 1);
+      const auto index256 = host.find_index256(account, account, secondary_name(2), 1);
+      const auto index_double = host.find_index_double(account, account, secondary_name(3), 1);
+      const auto index_long_double = host.find_index_long_double(account, account, secondary_name(4), 1);
+      BOOST_REQUIRE(index64.has_value());
+      BOOST_REQUIRE(index128.has_value());
+      BOOST_REQUIRE(index256.has_value());
+      BOOST_REQUIRE(index_double.has_value());
+      BOOST_REQUIRE(index_long_double.has_value());
+      BOOST_TEST(index64->secondary == 20U);
+      BOOST_TEST(static_cast<bool>(index128->secondary.get_array()[0] == static_cast<unsigned __int128>(200)));
+      BOOST_TEST(static_cast<bool>(index256->secondary ==
+                                   protocol::key256::make_from_word_sequence(std::uint64_t{0}, std::uint64_t{0},
+                                                                             std::uint64_t{0}, std::uint64_t{20})));
+      BOOST_TEST(index_double->secondary.bits == std::bit_cast<std::uint64_t>(2.0));
+
+      invoke_success(core, 1);
+      const auto modified = host.find_primary(account, account, table_name, 1);
+      BOOST_REQUIRE(modified.has_value());
+      BOOST_TEST(!host.find_primary(account, account, table_name, 2).has_value());
+      const auto reindexed = host.find_index64(account, account, secondary_name(0), 1);
+      BOOST_REQUIRE(reindexed.has_value());
+      BOOST_TEST(reindexed->secondary == 5U);
+
+      invoke_success(extended, 2);
+      BOOST_TEST(host.find_table(account, account, protocol::make_name("settings").value).has_value());
+      invoke_success(core, 3);
+      invoke_success(core, 4);
+
+      invoke_failure(core, 5, "cannot increment end iterator");
+      invoke_failure(core, 6, "updater cannot change primary key when modifying an object");
+      BOOST_TEST(host.find_primary(account, account, table_name, 1)->value == modified->value,
+                 boost::test_tools::per_element());
+      BOOST_TEST(!host.find_primary(account, account, table_name, 100).has_value());
+      BOOST_TEST(host.find_index64(account, account, secondary_name(0), 1)->secondary == 5U);
+      invoke_failure(core, 7, "object passed to iterator_to is not in multi_index");
+      invoke_failure(core, 8, "rollback marker");
+      BOOST_TEST(!host.find_primary(account, account, table_name, 10).has_value());
+
+      const auto payer_before = host.find_primary(account, account, table_name, 1)->payer;
+      invoke_success(core, 9);
+      BOOST_TEST(host.find_primary(account, account, table_name, 1)->payer == payer_before);
+
+      invoke_failure(core, 10, "next primary key in table is at autoincrement limit");
+      BOOST_TEST(!host.find_table(account, account, protocol::make_name("exhaust").value).has_value());
+
+      constexpr auto failures = std::array{
+          std::pair{11U, std::string_view{"unable to find key"}},
+          std::pair{12U, std::string_view{"unable to find primary key in require_find"}},
+          std::pair{13U, std::string_view{"unable to find secondary key"}},
+          std::pair{14U, std::string_view{"unable to find sec key"}},
+          std::pair{15U, std::string_view{"cannot decrement iterator at beginning of table"}},
+          std::pair{16U, std::string_view{"cannot increment end iterator"}},
+          std::pair{17U, std::string_view{"cannot decrement iterator at beginning of index"}},
+          std::pair{18U, std::string_view{"cannot pass end iterator to modify"}},
+          std::pair{19U, std::string_view{"cannot pass end iterator to erase"}},
+          std::pair{20U, std::string_view{"cannot pass end iterator to modify"}},
+          std::pair{21U, std::string_view{"cannot pass end iterator to erase"}},
+          std::pair{22U, std::string_view{"object passed to iterator_to is not in multi_index"}},
+          std::pair{23U, std::string_view{"object passed to modify is not in multi_index"}},
+          std::pair{24U, std::string_view{"object passed to erase is not in multi_index"}},
+          std::pair{30U, std::string_view{"object passed to iterator_to is not in multi_index"}},
+          std::pair{31U, std::string_view{"object passed to iterator_to is not in multi_index"}},
+      };
+      for (const auto& [scenario, message] : failures) {
+         invoke_failure(errors, scenario, message);
+      }
+
+      invoke_success(extended, 25);
+      invoke_success(extended, 26);
+      invoke_success(extended, 27);
+      invoke_success(extended, 28);
+      BOOST_TEST(!host.find_table(account, account, protocol::make_name("settings").value).has_value());
+      invoke_failure(extended, 29, "singleton does not exist");
+      invoke_success(extended, 32);
+      const auto named_table = protocol::make_name("named").value;
+      BOOST_REQUIRE(host.find_primary(account, account, named_table, protocol::make_name("alice").value).has_value());
+      BOOST_REQUIRE(host.find_primary(account, account, named_table, protocol::make_name("bob").value).has_value());
+      return host.snapshot();
+   };
+
+   const auto modern_state = exercise(modern, modern_errors, modern_extended, "midx");
+   const auto legacy_state = exercise(legacy, legacy_errors, legacy_extended, "midx");
+   BOOST_TEST(modern_state == legacy_state, boost::test_tools::per_element());
+}
+
 BOOST_AUTO_TEST_CASE(database_host_rolls_back_assertions_and_commits_exit) {
    const auto code = read_contract(FORGE_CONTRACT_TEST_DB_HOST_WASM);
    auto host = forge::contract::testing::host{};

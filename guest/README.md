@@ -136,9 +136,49 @@ EOSIO_DISPATCH(hello, (greet))
 dispatcher, raw codec and intrinsic imports. The veneer is not a second
 runtime. `EOSIO_DISPATCH` expands directly to the Forge dispatcher template;
 when it is present, `abigen` includes the source without generating a second
-`apply` entry point. The database C ABI is already available through generated
-`<eosio/db.h>`. The unchanged EOSIO C++ header corpus and `multi_index` belong
-to the next compatibility block.
+`apply` entry point. The database C ABI is available through generated
+`<eosio/db.h>`, while `<eosio/multi_index.hpp>`, `<eosio/singleton.hpp>` and
+`<eosio/fixed_bytes.hpp>` adapt the same C++23 implementation used by modern
+contracts. The remaining unchanged EOSIO header corpus grows only through
+donor-backed compatibility blocks.
+
+## Persistent Tables
+
+`forge.contract.multi_index` provides primary and up to 16 secondary indexes
+without a guest dependency on `forge.db`:
+
+```cpp
+#include <forge/contract/serialize.hpp>
+
+import forge.contract.multi_index;
+import forge.contract.singleton;
+
+using namespace forge::chain::protocol::literals;
+
+struct [[forge::table("orders")]] order {
+   std::uint64_t id = 0;
+   std::uint64_t customer = 0;
+   std::string memo;
+
+   std::uint64_t primary_key() const { return id; }
+   std::uint64_t by_customer() const { return customer; }
+
+   FORGE_SERIALIZE(order, &order::id, &order::customer, &order::memo)
+};
+
+using orders = forge::contract::multi_index<
+    "orders"_n, order,
+    forge::contract::indexed_by<
+        "bycustomer"_n,
+        forge::contract::const_mem_fun<order, std::uint64_t, &order::by_customer>>>;
+using settings = forge::contract::singleton<"settings"_n, std::string>;
+```
+
+The API supports primary and secondary lookup, bounds, bidirectional and reverse
+iteration, stable loaded-row references, `emplace`, `modify`, `erase`,
+`same_payer`, autoincrement and the complete singleton lifecycle. The host owns
+the transaction, authorization and RAM policy; a failed action rolls back its
+row and index mutations together.
 
 ## ABI, Tables And Ricardian Text
 
@@ -211,8 +251,8 @@ sockets, threads, clocks or random device.
 
 ## Intrinsics And Validation
 
-Interface version 1 contains 67 imports. Its seven lifecycle and action-data
-functions are:
+Interface version 1 contains 68 imports. Its eight lifecycle, action-data and
+context functions are:
 
 ```text
 env.eosio_assert
@@ -222,6 +262,7 @@ env.eosio_exit
 env.action_data_size
 env.read_action_data
 env.set_action_return_value
+env.current_receiver
 ```
 
 The same version also includes the 60 Spring/CDT database imports: the ten
@@ -302,8 +343,8 @@ Release mode builds the exact pinned LLVM and guest runtimes from source. Use
   guest check intrinsic without duplicating those implementations.
 - Spring and CDT are pinned compatibility donors and test oracles, never build
   dependencies of a released SDK.
-- Blockchain controller bindings, deployment and `multi_index` are outside
-  this vertical block. The executable DB host under `guest/tests/host` is
+- Blockchain controller bindings and deployment are outside this vertical
+  block. The executable DB host under `guest/tests/host` is
   intentionally test-only and is never installed or exported.
 
 See `docs/iterations/forge-contract-sdk-toolchain-v1.md` for the accepted

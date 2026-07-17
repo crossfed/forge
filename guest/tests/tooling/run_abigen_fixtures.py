@@ -14,9 +14,13 @@ MODULES = (
     "forge.raw.varint_value",
     "forge.raw.codec",
     "forge.chain.protocol.values",
+    "forge.chain.protocol.fixed_key:value",
+    "forge.chain.protocol.fixed_key",
     "forge.contract.intrinsics",
     "forge.contract",
     "forge.contract.dispatcher",
+    "forge.contract.multi_index",
+    "forge.contract.singleton",
 )
 
 MODULE_TARGETS = {
@@ -24,9 +28,17 @@ MODULE_TARGETS = {
     "forge.raw.varint_value": "forge_guest_raw",
     "forge.raw.codec": "forge_guest_raw",
     "forge.chain.protocol.values": "forge_guest_chain_protocol",
+    "forge.chain.protocol.fixed_key:value": "forge_guest_chain_protocol",
+    "forge.chain.protocol.fixed_key": "forge_guest_chain_protocol",
     "forge.contract.intrinsics": "forge_guest_contract",
     "forge.contract": "forge_guest_contract",
     "forge.contract.dispatcher": "forge_guest_contract",
+    "forge.contract.multi_index": "forge_guest_contract",
+    "forge.contract.singleton": "forge_guest_contract",
+}
+
+MODULE_FILES = {
+    "forge.chain.protocol.fixed_key:value": "forge.chain.protocol.fixed_key-value.pcm",
 }
 
 PASS_FIXTURES = {
@@ -82,7 +94,8 @@ def invoke(
     ]
     for module in MODULES:
         module_dir = args.build_dir / "CMakeFiles" / f"{MODULE_TARGETS[module]}.dir"
-        command.extend(("--module-file", f"{module}={module_dir / (module + '.pcm')}"))
+        module_file = MODULE_FILES.get(module, module + ".pcm")
+        command.extend(("--module-file", f"{module}={module_dir / module_file}"))
     if ricardian_contracts is not None:
         command.extend(("--ricardian-contracts", str(ricardian_contracts)))
     if ricardian_clauses is not None:

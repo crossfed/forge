@@ -56,6 +56,49 @@ forge_add_contract(
    SOURCES db_host_contract.cpp
 )
 
+forge_add_contract(
+   multiidx
+   SOURCES multi_index_contract.cpp
+)
+
+forge_add_contract(
+   legacymidx
+   SOURCES legacy_multi_index_contract.cpp
+)
+
+forge_add_contract(
+   midxerrors
+   SOURCES multi_index_errors_contract.cpp
+)
+
+forge_add_contract(
+   legmidxerr
+   SOURCES legacy_multi_index_errors_contract.cpp
+)
+
+forge_add_contract(
+   midxextend
+   SOURCES multi_index_extended_contract.cpp
+)
+
+forge_add_contract(
+   legmidxext
+   SOURCES legacy_multi_index_extended_contract.cpp
+)
+
+add_custom_target(
+   forge_contract_multi_index_fixtures ALL
+   COMMAND
+      "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/run_multi_index_fixtures.py"
+      --mapping "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/multi_index_donor_mapping.json"
+      --abi-pair "${CMAKE_CURRENT_BINARY_DIR}/multiidx.abi" "${CMAKE_CURRENT_BINARY_DIR}/legacymidx.abi"
+      --abi-pair "${CMAKE_CURRENT_BINARY_DIR}/midxerrors.abi" "${CMAKE_CURRENT_BINARY_DIR}/legmidxerr.abi"
+      --abi-pair "${CMAKE_CURRENT_BINARY_DIR}/midxextend.abi" "${CMAKE_CURRENT_BINARY_DIR}/legmidxext.abi"
+   DEPENDS multiidx legacymidx midxerrors legmidxerr midxextend legmidxext
+   VERBATIM
+)
+
 set(_db_intrinsics_wasm "${CMAKE_CURRENT_BINARY_DIR}/dbintrinsics.wasm")
 add_custom_target(
    forge_contract_database_intrinsic_fixtures ALL

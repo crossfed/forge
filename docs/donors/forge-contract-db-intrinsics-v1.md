@@ -39,6 +39,10 @@ The canonical registry generates `<forge/contract/intrinsics.h>`, the thin
 `spring_db_intrinsics.txt` fixture is an independent list of expected WASM
 signatures and is not generated from the Forge registry.
 
+The complete contract interface contains 68 functions. `current_receiver` is
+the eighth non-DB function and follows CDT's `eosio::current_receiver()` and
+Spring's active apply-context receiver.
+
 ## Executable Test Oracle
 
 `guest/tests/host` provides a non-installed executable oracle over
@@ -72,6 +76,11 @@ The mappings preserve the donor operation order and observable result while
 using Forge ObjectDB models instead of chainbase. They are not copied Catch2 or
 Boost test bodies.
 
+The C++ compatibility corpus is recorded in
+`guest/tests/tooling/multi_index_donor_mapping.json`. Every active action in
+Spring's `test_api_multi_index.cpp` maps to an executable modern and EOSIO
+scenario. The gate also compares the generated ABI for each modern/EOSIO pair.
+
 `db_get_i64` also follows Spring's historical return contract: a zero-sized
 read reports the stored value size, while a non-zero read returns the number of
 bytes actually copied. The executable fixture covers both forms and truncated
@@ -88,9 +97,9 @@ The future blockchain host binding remains responsible for:
 - NaN rejection and deterministic floating secondary-key ordering.
 
 The executable oracle proves all items except authorization and RAM accounting;
-it does not make these policies part of Forge. `multi_index`, `singleton` and
-product host bindings are separate follow-up work. The guest C ABI remains
-independent of `forge.db`.
+it does not make these policies part of Forge. `multi_index` and `singleton`
+are guest templates over the C ABI; product host bindings remain separate work.
+The guest API remains independent of `forge.db`.
 
 ## Verification
 
@@ -106,3 +115,5 @@ independent of `forge.db`.
   validates committed ObjectDB state independently of the host iterator cache.
 - Rollback, duplicate keys, ownership, payer, wrong-kind/stale iterators,
   `idx256` length and alignment, and floating NaN are executable regressions.
+- Modern and EOSIO `multi_index` corpora produce identical ABI, action return
+  bytes and complete committed ObjectDB snapshots.

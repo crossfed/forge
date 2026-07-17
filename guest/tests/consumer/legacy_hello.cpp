@@ -7,6 +7,8 @@
 struct legacy_record {
    std::string user;
    std::vector<std::uint32_t> values;
+
+   EOSLIB_SERIALIZE(legacy_record, (user)(values))
 };
 
 class [[eosio::contract("legacyhello")]] legacyhello : public eosio::contract {

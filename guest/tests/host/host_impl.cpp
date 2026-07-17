@@ -357,6 +357,14 @@ void host::impl::set_action_return_value(forge::vm::wasm::span<const char> value
                                reinterpret_cast<const std::uint8_t*>(value.data() + value.size()));
 }
 
+std::uint64_t host::impl::current_receiver() const {
+   return receiver_;
+}
+
+std::vector<std::uint8_t> host::impl::snapshot() const {
+   return driver_->snapshot();
+}
+
 std::int32_t host::impl::db_store_i64(std::uint64_t scope, std::uint64_t table_name, std::uint64_t payer,
                                       std::uint64_t primary, forge::vm::wasm::span<const char> value) {
    require_payer(payer);

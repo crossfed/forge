@@ -71,4 +71,8 @@ std::optional<index_long_double> host::find_index_long_double(std::uint64_t code
    return impl_->find_secondary<index_long_double, index_long_double_index>(code, scope, table_name, primary);
 }
 
+std::vector<std::uint8_t> host::snapshot() const {
+   return impl_->snapshot();
+}
+
 } // namespace forge::contract::testing

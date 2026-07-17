@@ -14,16 +14,18 @@ entry points live in `tools/`. It currently delivers:
 - target-neutral raw codec and guest-safe chain value modules;
 - contract context, generated dispatcher and the initial versioned intrinsic set;
 - complete Spring/CDT database C ABI in intrinsic interface v1;
+- C++23 `multi_index`, `singleton` and targeted EOSIO database veneer;
+- executable ObjectDB test host for all contract DB intrinsics;
 - modern Forge and minimal EOSIO source vocabularies;
 - Clang attribute plugin, ABI generator, structural checker and build manifest;
 - CMake `find_package(ForgeContract)` and `forge_add_contract()`;
 - allocator/runtime tests and execution in `forge.vm.wasm`;
 - reproducibility, negative validation, archive and relocation gates.
 
-The unchanged EOSIO C++ header corpus, `multi_index`, executable database host
-bindings and the full legacy contract corpus remain the next compatibility block. Statements
-below describing those surfaces are accepted target architecture, not claims
-that the first vertical already ships them.
+The remaining EOSIO C++ header corpus, production blockchain host bindings and
+the full legacy contract corpus remain later compatibility blocks. Statements
+below describing those surfaces are accepted target architecture unless the
+implementation snapshot above explicitly marks them complete.
 
 This document defines only the guest SDK and contract toolchain track.
 `forge.vm.wasm` is already released and is the execution and validation oracle
@@ -441,13 +443,29 @@ Host and guest builds of `forge::raw` pass identical golden byte vectors.
 6. Add EOSIO veneer headers and the unchanged legacy contract corpus gate.
 7. Add the safety, clang-tidy and development UBSan profiles.
 
-The first build-foundation implementation completed steps 1-3 and 5, plus the
-database C ABI portion required before step 4. The executable test host now
-proves that ABI over Forge ObjectDB. The next compatibility block is C++23
-`multi_index` and `singleton` over the canonical C ABI.
+The build foundation now completes steps 1-5 and the targeted EOSIO veneer from
+step 6. The executable test host proves the C ABI, C++23 `multi_index` and
+`singleton` over Forge ObjectDB. The next compatibility block expands the
+unchanged legacy contract corpus and adds the host surfaces it requires.
 
 Each stage must leave one executable acceptance proof. Compatibility is not
 deferred to the final stage.
+
+## Validation Cadence
+
+During active Contract SDK development, the primary iteration gate is the local
+macOS ARM64 lane. Every coherent feature or review fix must run the relevant
+unit tests, generated-contract VM E2E tests, donor mapping, package/relocation,
+structure, formatting and `git diff --check` gates locally before push. Codex
+review follows each pushed block, and valid findings return through the same
+local loop.
+
+The full GitHub matrix is not an every-review gate. Run it when a completed
+compatibility vertical reaches a milestone, when a change depends on another
+platform or the x86_64 JIT, when toolchain or release packaging changes, and
+before marking the PR ready or producing a release. The unchanged Spring/CDT
+contract corpus becomes the main integration oracle as compatibility expands;
+it supplements rather than replaces the final Linux/macOS and release matrix.
 
 ## Open Decisions
 

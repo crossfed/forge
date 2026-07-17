@@ -44,6 +44,7 @@ class host final {
                                                                std::uint64_t table_name, std::uint64_t primary);
    [[nodiscard]] std::optional<index_long_double>
    find_index_long_double(std::uint64_t code, std::uint64_t scope, std::uint64_t table_name, std::uint64_t primary);
+   [[nodiscard]] std::vector<std::uint8_t> snapshot() const;
 
  private:
    struct impl;

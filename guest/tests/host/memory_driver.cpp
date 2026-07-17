@@ -3,12 +3,14 @@ module;
 #include <boost/asio/awaitable.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -31,6 +33,23 @@ struct byte_less {
 
 using records = std::map<forge::db::core::record_key, std::vector<std::byte>, byte_less>;
 using families = std::map<std::string, records>;
+
+void append_size(std::vector<std::uint8_t>& output, std::size_t value) {
+   for (auto shift = 0U; shift < 64U; shift += 8U) {
+      output.push_back(static_cast<std::uint8_t>((static_cast<std::uint64_t>(value) >> shift) & 0xffU));
+   }
+}
+
+template <class Range> void append_bytes(std::vector<std::uint8_t>& output, const Range& value) {
+   append_size(output, value.size());
+   for (const auto byte : value) {
+      if constexpr (std::is_same_v<std::remove_cv_t<decltype(byte)>, std::byte>) {
+         output.push_back(std::to_integer<std::uint8_t>(byte));
+      } else {
+         output.push_back(static_cast<std::uint8_t>(byte));
+      }
+   }
+}
 
 class session final : public forge::db::core::session {
  public:
@@ -172,6 +191,21 @@ boost::asio::awaitable<void> session::rollback() {
 memory_driver::memory_driver() : state_{std::make_shared<state>()} {}
 
 memory_driver::~memory_driver() = default;
+
+std::vector<std::uint8_t> memory_driver::snapshot() const {
+   const auto lock = std::scoped_lock{state_->mutex};
+   auto result = std::vector<std::uint8_t>{};
+   append_size(result, state_->records.size());
+   for (const auto& [family, records] : state_->records) {
+      append_bytes(result, family);
+      append_size(result, records.size());
+      for (const auto& [key, value] : records) {
+         append_bytes(result, key.bytes());
+         append_bytes(result, value);
+      }
+   }
+   return result;
+}
 
 boost::asio::awaitable<void> memory_driver::async_flush(bool) {
    co_return;

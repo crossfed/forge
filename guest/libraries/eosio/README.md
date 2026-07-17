@@ -20,8 +20,21 @@ EOSIO_DISPATCH(hello, (greet))
 `EOSIO_DISPATCH` is a macro-only adapter that selects an action and invokes
 `forge::contract::execute_action`; it does not own a second decoder or runtime.
 The veneer must not acquire its own allocator, codec, dispatcher implementation
-or chain types. The full unchanged EOSIO header corpus and database APIs are a
-later compatibility block.
+or chain types. `<eosio/multi_index.hpp>`, `<eosio/singleton.hpp>` and
+`<eosio/fixed_bytes.hpp>` are targeted aliases over the production Forge
+templates and shared `key256`; they contain no second DB implementation.
+
+```cpp
+#include <eosio/eosio.hpp>
+
+struct [[eosio::table("items")]] item {
+   std::uint64_t id = 0;
+   std::uint64_t primary_key() const { return id; }
+   EOSLIB_SERIALIZE(item, (id))
+};
+
+using items = eosio::multi_index<"items"_n, item>;
+```
 
 ## Dependencies And Stability
 
@@ -32,4 +45,5 @@ surfaces. Header coverage grows only with donor-backed tests.
 
 The legacy consumer is compiled from the relocated SDK and executed beside the
 modern contract in the same `forge.vm.wasm` E2E suite. ABI parity tests prove
-that Forge and EOSIO attribute spellings produce the same canonical ABI.
+that Forge and EOSIO attribute spellings, `multi_index`, `singleton`, return
+values and committed ObjectDB state have the same observable result.

@@ -37,7 +37,7 @@ def main() -> None:
 
     assert manifest["schema_version"] == 1
     assert manifest["interface_version"] == 1
-    assert len(imports) == 67
+    assert len(imports) == 68
     assert len(names) == len(set(names))
     assert len(database) == 60
     assert database.keys() == golden.keys()

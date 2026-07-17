@@ -181,7 +181,13 @@ jobs:
             -DFORGE_CONTRACT_TEST_ALLOCATOR_WASM="$GITHUB_WORKSPACE/build/contract-consumer/allocatortst.wasm" \
             -DFORGE_CONTRACT_TEST_LEGACY_WASM="$GITHUB_WORKSPACE/build/contract-consumer/legacyhello.wasm" \
             -DFORGE_CONTRACT_TEST_DB_WASM="$GITHUB_WORKSPACE/build/contract-consumer/dbintrinsics.wasm" \
-            -DFORGE_CONTRACT_TEST_DB_HOST_WASM="$GITHUB_WORKSPACE/build/contract-consumer/dbhost.wasm"
+            -DFORGE_CONTRACT_TEST_DB_HOST_WASM="$GITHUB_WORKSPACE/build/contract-consumer/dbhost.wasm" \
+            -DFORGE_CONTRACT_TEST_MULTI_INDEX_WASM="$GITHUB_WORKSPACE/build/contract-consumer/multiidx.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_WASM="$GITHUB_WORKSPACE/build/contract-consumer/legacymidx.wasm" \
+            -DFORGE_CONTRACT_TEST_MULTI_INDEX_ERRORS_WASM="$GITHUB_WORKSPACE/build/contract-consumer/midxerrors.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_ERRORS_WASM="$GITHUB_WORKSPACE/build/contract-consumer/legmidxerr.wasm" \
+            -DFORGE_CONTRACT_TEST_MULTI_INDEX_EXTENDED_WASM="$GITHUB_WORKSPACE/build/contract-consumer/midxextend.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_EXTENDED_WASM="$GITHUB_WORKSPACE/build/contract-consumer/legmidxext.wasm"
           cmake --build build/contract-e2e -j 4
           ctest --test-dir build/contract-e2e --output-on-failure
 
@@ -295,7 +301,8 @@ jobs:
             -DForgeContract_DIR="$GITHUB_WORKSPACE/build/contract-sdk-release-prefix/lib/cmake/ForgeContract"
           cmake --build build/contract-release-consumer \
             --target hello recordtest allocatortst legacyhello multisource dbhost \
-                     forge_contract_database_intrinsic_fixtures \
+                     multiidx legacymidx midxerrors legmidxerr midxextend legmidxext \
+                     forge_contract_database_intrinsic_fixtures forge_contract_multi_index_fixtures \
             -j 4
           cmake -S guest/tests/e2e -B build/contract-release-e2e -G Ninja \
             -DCMAKE_C_COMPILER="$CC" \
@@ -307,7 +314,13 @@ jobs:
             -DFORGE_CONTRACT_TEST_ALLOCATOR_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/allocatortst.wasm" \
             -DFORGE_CONTRACT_TEST_LEGACY_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/legacyhello.wasm" \
             -DFORGE_CONTRACT_TEST_DB_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/dbintrinsics.wasm" \
-            -DFORGE_CONTRACT_TEST_DB_HOST_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/dbhost.wasm"
+            -DFORGE_CONTRACT_TEST_DB_HOST_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/dbhost.wasm" \
+            -DFORGE_CONTRACT_TEST_MULTI_INDEX_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/multiidx.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/legacymidx.wasm" \
+            -DFORGE_CONTRACT_TEST_MULTI_INDEX_ERRORS_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/midxerrors.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_ERRORS_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/legmidxerr.wasm" \
+            -DFORGE_CONTRACT_TEST_MULTI_INDEX_EXTENDED_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/midxextend.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_EXTENDED_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/legmidxext.wasm"
           cmake --build build/contract-release-e2e -j 4
           ctest --test-dir build/contract-release-e2e --output-on-failure
 

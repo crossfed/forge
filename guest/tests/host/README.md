@@ -6,7 +6,8 @@ and is neither installed nor exported as a Forge component.
 
 ## Responsibilities
 
-- Register all 67 functions from the canonical intrinsic registry.
+- Register all 68 functions from the canonical intrinsic registry, including
+  `current_receiver`.
 - Execute a contract invocation with one `forge::db::object::transaction`.
 - Commit successful `apply` and `eosio_exit`; roll back assertions, DB errors
   and VM traps.
@@ -37,7 +38,9 @@ models and use production Forge DB drivers.
 
 ## Tests
 
-`guest/tests/e2e/contract_tests.cpp` runs a real generated wasm32 contract
-through `forge.vm.wasm`. The cases cover all 60 DB imports, primary and
-secondary traversal, transaction commit/rollback, stale and wrong-kind
-iterators, payer and ownership checks, NaN, and unaligned `idx256` input.
+`guest/tests/e2e/contract_tests.cpp` runs real generated wasm32 contracts
+through `forge.vm.wasm`. The cases cover all 60 DB imports, C++23 `multi_index`
+and `singleton`, primary and secondary traversal, transaction commit/rollback,
+stale and wrong-kind iterators, payer and ownership checks, NaN, and unaligned
+`idx256` input. Test-only deterministic snapshots compare the complete modern
+and EOSIO ObjectDB result without exposing a public memory driver.
