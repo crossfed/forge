@@ -13,6 +13,7 @@ Documents below explain cross-library architecture decisions.
 
 | Document | Purpose |
 | --- | --- |
+| [releases/8.9.0.md](releases/8.9.0.md) | Forge 8.9.0 Crypto Signer binary API migration and compatibility guarantees. |
 | [releases/8.8.0.md](releases/8.8.0.md) | Forge 8.8.0 DB IDs family migration and compatibility guarantees. |
 | [releases/8.3.0.md](releases/8.3.0.md) | Forge 8.3.0 changes, Preview API status and source migration notes. |
 | [roadmap.md](roadmap.md) | Post-1.0 direction, architecture gates and framework boundaries. |
@@ -34,6 +35,7 @@ Documents below explain cross-library architecture decisions.
 | [codecs/json-yaml-glaze.md](codecs/json-yaml-glaze.md) | JSON/YAML API shape, Glaze backend isolation and diagnostics. |
 | [config/schema-config-program-options.md](config/schema-config-program-options.md) | Schema, config documents, env/CLI adapters, merge order and redaction. |
 | [iterations/fcl-secret-provider-v1.md](iterations/fcl-secret-provider-v1.md) | Local secret provider plugin: source loading, redaction, purpose-gated crypto operations and donor baseline. |
+| [donors/forge-crypto-signer-binary-v1.md](donors/forge-crypto-signer-binary-v1.md) | BitShares/Graphene donor evidence for typed binary signer results. |
 | [forge_concept_ru.md](forge_concept_ru.md) | Original Russian concept and long-form design motivation. |
 
 ## Blueprints

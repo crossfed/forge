@@ -68,11 +68,20 @@ forge::app::plugin_id plugin::id() const {
 }
 
 std::string plugin::version() const {
-   return "1.0.0";
+   return "2.0.0";
 }
 
 std::optional<forge::config::core::component_descriptor> plugin::describe_config() const {
-   return forge::config::core::describe_component<config>("plugins.crypto.signer");
+   auto descriptor = forge::config::core::describe_component<config>("plugins.crypto.signer");
+   descriptor.fields.push_back(forge::config::core::field_descriptor{
+      .name = "default-output-profile",
+      .kind = forge::schema::value_kind::string,
+      .deprecated = true,
+      .deprecated_message = "removed in Forge 8.9; format typed signer results at the consumer boundary",
+      .description = "Removed migration tombstone; supplied values are rejected",
+      .ingestion_only = true,
+   });
+   return descriptor;
 }
 
 boost::asio::awaitable<void> plugin::configure(forge::config::core::component_view view) {

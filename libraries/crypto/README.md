@@ -200,6 +200,10 @@ auto signature = private_key.sign(message);
 auto verified = public_key.verify(message, signature);
 ```
 
+`forge::crypto::asymmetric::algorithm` is a described enum, so schema and
+Variant boundaries use the stable names `secp256k1`, `p256`, `ed25519` and
+`rsa` rather than numeric values.
+
 ### Generate A P-256 Key Explicitly
 
 This snippet reuses the `signed_action` DTO from the secp256k1 example above.

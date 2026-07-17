@@ -109,6 +109,11 @@ CLI should be the last high-precedence source in a normal daemon bootstrap.
 Keep the precedence visible near the program entrypoint so operators can reason
 about why a value won.
 
+Registry fields marked `ingestion_only` remain parseable migration tombstones,
+but `help()` omits them so removed options are not advertised as supported
+configuration. Config Core rejects any supplied tombstone through
+`validate_ingestion()` after all input sources are merged.
+
 ## Diagnostics
 
 Conversion and parser failures return diagnostics such as

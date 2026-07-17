@@ -351,6 +351,32 @@ BOOST_AUTO_TEST_CASE(config_registry_rejects_duplicate_aliases) {
    BOOST_CHECK_THROW(registry.add(forge::config::core::describe_component<http_config>("http")), std::invalid_argument);
 }
 
+BOOST_AUTO_TEST_CASE(config_ingestion_only_fields_reject_canonical_and_alias_input) {
+   auto registry = forge::config::core::component_registry{};
+   registry.add(forge::config::core::component_descriptor{
+      .section = "service",
+      .fields = {forge::config::core::field_descriptor{
+         .name = "removed-option",
+         .aliases = {"legacy-option"},
+         .kind = forge::schema::value_kind::string,
+         .deprecated = true,
+         .deprecated_message = "removed in Forge 8.9",
+         .ingestion_only = true,
+      }},
+   });
+
+   auto document = forge::config::core::document{};
+   document.set("service.removed-option", "canonical");
+   document.set("service.legacy-option", "alias");
+
+   const auto diagnostics = forge::config::core::validate_ingestion(document, registry);
+   BOOST_REQUIRE_EQUAL(diagnostics.size(), 2U);
+   BOOST_TEST(has_diagnostic(diagnostics, "service.removed-option", "config.removed"));
+   BOOST_TEST(has_diagnostic(diagnostics, "service.legacy-option", "config.removed"));
+   BOOST_TEST(static_cast<int>(diagnostics.front().level) == static_cast<int>(forge::schema::severity::error));
+   BOOST_TEST(diagnostics.front().message == "removed in Forge 8.9");
+}
+
 BOOST_AUTO_TEST_CASE(config_registry_supports_empty_component_sections) {
    auto registry = forge::config::core::component_registry{};
    registry.add(forge::config::core::describe_component<flat_config>(""));

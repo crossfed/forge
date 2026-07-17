@@ -19,7 +19,6 @@ struct plugin::impl {
 
    profile_map profiles;
    std::map<std::string, loaded_key> keys;
-   std::string default_output_profile = "forge";
    bool stopping = false;
 };
 

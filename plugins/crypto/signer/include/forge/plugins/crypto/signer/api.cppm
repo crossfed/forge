@@ -42,13 +42,12 @@ class api : public forge::api::core::contract<api, forge::api::core::surface::lo
          .purpose = std::move(value.purpose),
          .digest = digest,
          .required_algorithm = value.required_algorithm,
-         .output_profile = std::move(value.output_profile),
       });
    }
 };
 
 } // namespace forge::plugins::crypto::signer
 
-FORGE_EXPORT_API(::forge::plugins::crypto::signer::api, FORGE_API_CONTRACT("forge.plugins.crypto.signer", 1, 0),
+FORGE_EXPORT_API(::forge::plugins::crypto::signer::api, FORGE_API_CONTRACT("forge.plugins.crypto.signer", 2, 0),
         FORGE_API_METHOD_TYPED(sign, ::forge::plugins::crypto::signer::request,
                              ::forge::plugins::crypto::signer::response))

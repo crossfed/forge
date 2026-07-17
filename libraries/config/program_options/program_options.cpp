@@ -53,11 +53,12 @@ void add_field_option(po::options_description& description, const std::string& n
 }
 
 [[nodiscard]] po::options_description build_description(const config::core::component_registry& registry,
-                                                        std::string caption) {
+                                                        std::string caption,
+                                                        bool include_ingestion_only) {
    auto description = po::options_description{std::move(caption)};
    for (const auto& component : registry.components()) {
       for (const auto& field : component.fields) {
-         if (!supports_field(field.kind)) {
+         if ((!include_ingestion_only && field.ingestion_only) || !supports_field(field.kind)) {
             continue;
          }
          add_field_option(description, option_name(component, field.name), field.kind, field.description);
@@ -172,7 +173,7 @@ bool pre_scan_result::present(std::string_view path) const {
 
 parse_result parse(int argc, const char* const* argv, const config::core::component_registry& registry) {
    auto result = parse_result{};
-   auto description = build_description(registry, "FORGE options");
+   auto description = build_description(registry, "FORGE options", true);
    try {
       auto parsed = po::command_line_parser(argc, argv).options(description).run();
       auto variables = po::variables_map{};
@@ -265,7 +266,7 @@ pre_scan_result pre_scan_reserved(int argc, const char* const* argv, const std::
 }
 
 std::string help(const config::core::component_registry& registry, std::string caption) {
-   auto description = build_description(registry, std::move(caption));
+   auto description = build_description(registry, std::move(caption), false);
    auto output = std::ostringstream{};
    output << description;
    return output.str();
