@@ -461,7 +461,7 @@ std::int32_t host::impl::db_find_i64(std::uint64_t code, std::uint64_t scope, st
    }
    const auto row = run(transaction_->index<key_value_index, by_scope_primary>().find(owner->id, primary));
    if (!row) {
-      return end(row_kind::primary, owner->id);
+      return -1;
    }
    return cache(row_kind::primary, row->id.as_object_id(), row->table_id);
 }

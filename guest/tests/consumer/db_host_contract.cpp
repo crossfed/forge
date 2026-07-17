@@ -127,6 +127,7 @@ class [[forge::contract("dbhost")]] dbhost : public forge::contract::context {
       expect(__builtin_memcmp(buffer, updated, sizeof(updated)) == 0, "primary get value failed");
 
       expect(db_find_i64(payer, primary_scope, primary_table, 10) == first_iterator, "primary find failed");
+      expect(db_find_i64(payer, primary_scope, primary_table, 20) == -1, "primary missing find sentinel failed");
       expect(db_lowerbound_i64(payer, primary_scope, primary_table, 11) == second_iterator,
              "primary lower bound failed");
       expect(db_upperbound_i64(payer, primary_scope, primary_table, 10) == second_iterator,
