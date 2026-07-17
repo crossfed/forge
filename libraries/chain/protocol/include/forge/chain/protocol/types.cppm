@@ -36,8 +36,6 @@ using signature = forge::crypto::asymmetric::signature;
 using weight = std::uint16_t;
 using block_num = std::uint32_t;
 using share = std::int64_t;
-using int128_t = __int128;
-using uint128_t = unsigned __int128;
 using extensions = std::vector<std::pair<std::uint16_t, bytes>>;
 
 void to_variant(const name& value, forge::variant& variant);

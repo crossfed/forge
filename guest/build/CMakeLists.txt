@@ -52,6 +52,8 @@ target_sources(
       BASE_DIRS "${_modules}"
       FILES
          "${_modules}/forge/chain/protocol/values.cppm"
+         "${_modules}/forge/chain/protocol/fixed_key_value.cppm"
+         "${_modules}/forge/chain/protocol/fixed_key.cppm"
 )
 target_link_libraries(forge_guest_chain_protocol PUBLIC forge_guest_raw)
 
@@ -104,6 +106,7 @@ set(_module_arguments
    "forge.raw.varint_value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_raw.dir/forge.raw.varint_value.pcm"
    "forge.raw.codec=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_raw.dir/forge.raw.codec.pcm"
    "forge.chain.protocol.values=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.values.pcm"
+   "forge.chain.protocol.fixed_key=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.fixed_key.pcm"
    "forge.contract.intrinsics=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.intrinsics.pcm"
    "forge.contract=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.pcm"
    "forge.contract.dispatcher=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.dispatcher.pcm"

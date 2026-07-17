@@ -14,6 +14,9 @@ namespace detail {
 [[noreturn]] void fail_value(const char* message);
 }
 
+using int128_t = __int128;
+using uint128_t = unsigned __int128;
+
 struct name {
    std::uint64_t value = 0;
 

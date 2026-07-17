@@ -458,7 +458,10 @@ install(
    DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/modules/forge/raw"
 )
 install(
-   FILES "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/values.cppm"
+   FILES
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/values.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/fixed_key.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/fixed_key_value.cppm"
    DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/modules/forge/chain/protocol"
 )
 
