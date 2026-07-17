@@ -2069,7 +2069,8 @@ BOOST_AUTO_TEST_CASE(crypto_signer_config_is_redacted_and_local_only) {
    const auto& keys = require_field(*descriptor, "keys");
    BOOST_TEST(keys.secret);
    BOOST_TEST(static_cast<int>(keys.kind) == static_cast<int>(forge::schema::value_kind::object_list));
-   BOOST_TEST(!has_field(*descriptor, "default-output-profile"));
+   const auto& removed_output_profile = require_field(*descriptor, "default-output-profile");
+   BOOST_TEST(removed_output_profile.deprecated);
 
    auto registry = forge::config::core::component_registry{};
    registry.add(*descriptor);
@@ -2117,6 +2118,20 @@ BOOST_AUTO_TEST_CASE(crypto_signer_rejects_removed_default_output_profile) {
       forge::asio::blocking::run(
          runtime,
          plugin.configure(forge::config::core::component_view{document, "plugins.crypto.signer"})),
+      crypto_signer::exceptions::invalid_config);
+
+   const auto descriptor = plugin.describe_config();
+   BOOST_REQUIRE(descriptor.has_value());
+   auto registry = forge::config::core::component_registry{};
+   registry.add(*descriptor);
+   const auto from_env = forge::config::env::read_document(
+      "FORGE_PLUGINS_CRYPTO_SIGNER_DEFAULT_OUTPUT_PROFILE=forge\n", registry, {.prefix = "FORGE"});
+   BOOST_TEST(from_env.ok());
+   BOOST_REQUIRE(from_env.value.try_get("plugins.crypto.signer.default-output-profile") != nullptr);
+   BOOST_CHECK_THROW(
+      forge::asio::blocking::run(
+         runtime,
+         plugin.configure(forge::config::core::component_view{from_env.value, "plugins.crypto.signer"})),
       crypto_signer::exceptions::invalid_config);
 }
 

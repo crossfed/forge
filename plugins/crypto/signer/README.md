@@ -67,6 +67,9 @@ plugins:
 `keys` is a secret object-list field. Load it from a protected config source;
 do not rely on generated CLI or environment options for key material.
 `input-profile` is used only while parsing configured private-key text.
+The removed `default-output-profile` name remains an ingestion-only migration
+tombstone so legacy YAML, CLI or environment configuration fails explicitly.
+It is not part of the public `config` type and cannot affect signer output.
 
 ## Examples
 
