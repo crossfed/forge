@@ -683,5 +683,5 @@ is updated after validation completes. The test can therefore observe a ready
 payload future and immediately sample `messages_delivered == 0`. This is a test
 synchronization defect, not evidence of a lost message. The test must wait on a
 deterministic post-validation/accounting condition; an arbitrary sleep is not an
-accepted fix. Track and fix this independently from Contract SDK work in
-[Forge issue #84](https://github.com/vbytemaster/forge/issues/84).
+accepted fix. Track and fix this independently from Contract SDK work as
+Forge issue #84.
