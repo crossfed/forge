@@ -22,6 +22,10 @@ import forge.plugins.crypto.signer.types;
 namespace forge::plugins::crypto::signer {
 
 config decode_config(const forge::config::core::component_view& view) {
+   if (view.source().try_get(std::string{view.section()} + ".default-output-profile") != nullptr) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_config,
+                          "crypto signer default-output-profile was removed; format typed results at the consumer boundary");
+   }
    auto decoded = forge::config::core::decode<config>(view.source(), view.section());
    if (!decoded.ok()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_config,
@@ -33,7 +37,6 @@ config decode_config(const forge::config::core::component_view& view) {
 
 void apply_config(plugin::impl& state, forge::config::core::component_view view) {
    auto config = decode_config(view);
-   (void)state.profile_by_name(config.default_output_profile);
    auto loaded = std::map<std::string, plugin::impl::loaded_key>{};
    for (auto& key : config.keys) {
       const auto& input_profile = state.profile_by_name(key.input_profile);
@@ -52,7 +55,6 @@ void apply_config(plugin::impl& state, forge::config::core::component_view view)
                              });
    }
    state.keys = std::move(loaded);
-   state.default_output_profile = std::move(config.default_output_profile);
    state.stopping = false;
 }
 

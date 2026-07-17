@@ -204,6 +204,10 @@ FORGE_IMPLEMENT_SERIALIZATION(action_payload)
 
 - Described member order is wire order. Changing `BOOST_DESCRIBE_*` order is a
   breaking binary change.
+- Described enums use the retained FC `int64_t` representation by default. If
+  an existing enum gains names after its wire format has shipped, its owning
+  domain must specialize `forge::raw::enum_wire_type` to the previous fixed
+  representation and retain a golden-byte regression.
 - `forge::raw::bytes` is the canonical owning wire buffer and uses
   `std::uint8_t`. A donor DTO may still contain `char` or `std::vector<char>`;
   those declared field types retain their existing one-byte raw format and are

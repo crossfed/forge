@@ -32,6 +32,7 @@ struct field_descriptor {
    bool deprecated = false;
    std::string deprecated_message;
    std::string description;
+   bool ingestion_only = false;
 };
 
 struct component_descriptor {

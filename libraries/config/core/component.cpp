@@ -78,7 +78,7 @@ document defaults_for(const component_registry& registry) {
    auto output = document{};
    for (const auto& component : registry.components()) {
       for (const auto& field : component.fields) {
-         if (!field.has_default) {
+         if (field.ingestion_only || !field.has_default) {
             continue;
          }
          auto path = component.section;

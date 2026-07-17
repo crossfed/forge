@@ -3,7 +3,6 @@ module;
 #include <forge/exceptions/macros.hpp>
 
 #include <algorithm>
-#include <cstdint>
 #include <map>
 #include <string>
 #include <string_view>
@@ -23,21 +22,6 @@ import forge.plugins.crypto.signer.types;
 
 namespace forge::plugins::crypto::signer {
 namespace {
-
-[[nodiscard]] key_algorithm to_key_algorithm(forge::crypto::asymmetric::algorithm value) noexcept {
-   using asymmetric_algorithm = forge::crypto::asymmetric::algorithm;
-   switch (value) {
-   case asymmetric_algorithm::secp256k1:
-      return key_algorithm::secp256k1;
-   case asymmetric_algorithm::p256:
-      return key_algorithm::p256;
-   case asymmetric_algorithm::ed25519:
-      return key_algorithm::ed25519;
-   case asymmetric_algorithm::rsa:
-      return key_algorithm::rsa;
-   }
-   return key_algorithm::any;
-}
 
 [[nodiscard]] bool purpose_allowed(const std::vector<std::string>& allowed, std::string_view value) noexcept {
    return std::ranges::find_if(allowed, [value](const auto& purpose) {
@@ -95,33 +79,14 @@ response plugin::impl::sign(request value) const {
                           forge::exceptions::ctx("purpose", value.purpose));
    }
 
-   const auto actual_algorithm = to_key_algorithm(key.private_key.type());
-   if (value.required_algorithm != key_algorithm::any && value.required_algorithm != actual_algorithm) {
+   if (value.required_algorithm && *value.required_algorithm != key.private_key.type()) {
       FORGE_THROW_EXCEPTION(exceptions::unsupported_algorithm, "signer key algorithm does not match request");
-   }
-
-   const auto profile_name =
-      value.output_profile.empty() ? std::string_view{default_output_profile} : std::string_view{value.output_profile};
-   const auto& output_profile = profile_by_name(profile_name);
-   auto signature = key.private_key.sign_digest(value.digest);
-   auto text_signature = std::string{};
-   auto public_key = std::string{};
-   try {
-      text_signature = output_profile.format(signature);
-      public_key = output_profile.format(key.private_key.get_public_key());
-   } catch (const forge::crypto::asymmetric::exceptions::invalid_options&) {
-      FORGE_THROW_EXCEPTION(exceptions::unsupported_profile,
-                          "signer output profile does not support this key algorithm",
-                          forge::exceptions::ctx("profile", std::string{profile_name}),
-                          forge::exceptions::ctx("key_id", key.key_id));
    }
 
    return response{
       .key_id = key.key_id,
-      .algorithm = actual_algorithm,
-      .output_profile = std::string{profile_name},
-      .public_key = std::move(public_key),
-      .signature = std::vector<std::uint8_t>(text_signature.begin(), text_signature.end()),
+      .public_key = key.private_key.get_public_key(),
+      .signature = key.private_key.sign_digest(value.digest),
    };
 }
 

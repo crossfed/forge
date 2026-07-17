@@ -1,10 +1,13 @@
 #include <boost/test/unit_test.hpp>
 #include <forge/exceptions/macros.hpp>
+#include <cstdint>
 #include <span>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 import forge.crypto.asymmetric;
+import forge.crypto.hex;
 import forge.crypto.secp256k1;
 import forge.crypto.p256;
 import forge.crypto.ed25519;
@@ -14,12 +17,21 @@ import forge.crypto.chacha20_poly1305;
 import forge.crypto.sha256;
 import forge.core.utility;
 import forge.exceptions;
+import forge.raw.raw;
 
 using namespace forge::crypto;
 using namespace forge::crypto::asymmetric;
 using namespace forge;
 
 BOOST_AUTO_TEST_SUITE(cypher_suites)
+
+BOOST_AUTO_TEST_CASE(asymmetric_algorithm_preserves_raw_int32_layout) {
+   static_assert(std::is_same_v<std::underlying_type_t<algorithm>, std::int32_t>);
+
+   const auto packed = forge::raw::pack(algorithm::rsa);
+   BOOST_TEST(forge::crypto::to_hex(packed) == "03000000");
+   BOOST_CHECK(forge::raw::unpack<algorithm>(packed) == algorithm::rsa);
+}
 
 #if defined(__clang__)
 #pragma clang diagnostic push

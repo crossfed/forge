@@ -226,7 +226,7 @@ void add_binding(binding_build_result& result, field_binding candidate, bool cas
    auto result = binding_build_result{};
    for (const auto& component : registry.components()) {
       for (const auto& field : component.fields) {
-         if (!supports_field(field.kind)) {
+         if (field.ingestion_only || !supports_field(field.kind)) {
             continue;
          }
          const auto canonical_env = env_name_for(options.prefix, component.section, field.name);
@@ -809,7 +809,7 @@ write_result write_document(const config::core::document& document, const config
 
    for (const auto& component : registry.components()) {
       for (const auto& field : component.fields) {
-         if (!supports_field(field.kind)) {
+         if (field.ingestion_only || !supports_field(field.kind)) {
             continue;
          }
          const auto path = path_for(component.section, field.name);
@@ -840,7 +840,7 @@ write_result write_example(const config::core::component_registry& registry, wri
 
    for (const auto& component : registry.components()) {
       for (const auto& field : component.fields) {
-         if (!supports_field(field.kind)) {
+         if (field.ingestion_only || !supports_field(field.kind)) {
             continue;
          }
          if (options.include_comments && !field.description.empty()) {
