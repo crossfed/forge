@@ -228,6 +228,7 @@ jobs:
             echo "LLVM_ROOT=$(brew --prefix llvm)" >> "$GITHUB_ENV"
             echo "CC=$(brew --prefix llvm)/bin/clang" >> "$GITHUB_ENV"
             echo "CXX=$(brew --prefix llvm)/bin/clang++" >> "$GITHUB_ENV"
+            echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
           fi
           brew install boost cmake glaze gmp libngtcp2 ninja openssl@3
           echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"

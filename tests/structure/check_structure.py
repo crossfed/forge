@@ -234,9 +234,9 @@ def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
       )
 
    macos_sdkroot = 'echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"'
-   if macos_sdkroot not in source:
+   if source.count(macos_sdkroot) < 2:
       errors.append(
-         f"{path.relative_to(root)}: macOS jobs must export the selected SDKROOT"
+         f"{path.relative_to(root)}: macOS developer and release jobs must export the selected SDKROOT"
       )
 
    for incompatible_flag in ('CXXFLAGS=-stdlib=libc++', 'LDFLAGS=-stdlib=libc++'):
