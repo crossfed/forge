@@ -20,6 +20,11 @@ import forge.raw.exceptions;
 
 namespace forge::chain::protocol::detail {
 
+template <typename Word>
+concept fixed_key_word =
+    !std::same_as<std::remove_cv_t<Word>, bool> &&
+    (std::unsigned_integral<std::remove_cv_t<Word>> || std::same_as<std::remove_cv_t<Word>, uint128_t>);
+
 template <std::size_t Size> [[nodiscard]] constexpr std::size_t fixed_key_num_words() noexcept {
    return (Size + sizeof(uint128_t) - 1U) / sizeof(uint128_t);
 }
@@ -28,9 +33,9 @@ template <std::size_t Size> [[nodiscard]] constexpr std::size_t fixed_key_padded
    return fixed_key_num_words<Size>() * sizeof(uint128_t) - Size;
 }
 
-template <std::size_t Size, std::unsigned_integral Word, std::size_t WordCount>
-   requires(!std::same_as<Word, bool> && sizeof(Word) <= sizeof(uint128_t) &&
-            sizeof(uint128_t) % sizeof(Word) == 0U && WordCount * sizeof(Word) <= Size)
+template <std::size_t Size, fixed_key_word Word, std::size_t WordCount>
+   requires(sizeof(Word) <= sizeof(uint128_t) && sizeof(uint128_t) % sizeof(Word) == 0U &&
+            WordCount * sizeof(Word) <= Size)
 [[nodiscard]] constexpr auto pack_fixed_key_words(const std::array<Word, WordCount>& input) noexcept {
    auto output = std::array<uint128_t, fixed_key_num_words<Size>()>{};
    auto output_index = std::size_t{};
@@ -136,15 +141,15 @@ template <std::size_t Size> class fixed_key {
    explicit constexpr fixed_key(const std::array<std::uint8_t, Size>& bytes)
        : words_{detail::pack_fixed_key_words<Size>(bytes)} {}
 
-   template <std::unsigned_integral Word, std::size_t WordCount>
-      requires(!std::same_as<Word, bool> && sizeof(Word) < sizeof(word_type) &&
-               sizeof(word_type) % sizeof(Word) == 0U && WordCount * sizeof(Word) <= Size)
+   template <detail::fixed_key_word Word, std::size_t WordCount>
+      requires(sizeof(Word) < sizeof(word_type) && sizeof(word_type) % sizeof(Word) == 0U &&
+               WordCount * sizeof(Word) <= Size)
    explicit constexpr fixed_key(const std::array<Word, WordCount>& words)
        : words_{detail::pack_fixed_key_words<Size>(words)} {}
 
-   template <std::unsigned_integral First, std::same_as<First>... Rest>
-      requires(!std::same_as<First, bool> && sizeof(First) <= sizeof(word_type) &&
-               sizeof(word_type) % sizeof(First) == 0U && (1U + sizeof...(Rest)) * sizeof(First) <= Size)
+   template <detail::fixed_key_word First, std::same_as<First>... Rest>
+      requires(sizeof(First) <= sizeof(word_type) && sizeof(word_type) % sizeof(First) == 0U &&
+               (1U + sizeof...(Rest)) * sizeof(First) <= Size)
    [[nodiscard]] static constexpr fixed_key make_from_word_sequence(First first, Rest... rest) {
       auto result = fixed_key{};
       result.words_ = detail::pack_fixed_key_words<Size>(std::array<First, 1U + sizeof...(Rest)>{first, rest...});

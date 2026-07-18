@@ -87,9 +87,15 @@ concept supports_single_word_factory = requires(Word word) {
    { Key::template make_from_word_sequence<Word>(word) } -> std::same_as<Key>;
 };
 
+template <typename Key, typename Word>
+concept supports_word_pair_factory = requires(Word first, Word second) {
+   { Key::template make_from_word_sequence<Word>(first, second) } -> std::same_as<Key>;
+};
+
 static_assert(std::constructible_from<protocol::key256, std::array<std::uint32_t, 5>>);
 static_assert(!std::constructible_from<protocol::key256, std::array<protocol::uint128_t, 1>>);
 static_assert(supports_single_word_factory<protocol::key256, protocol::uint128_t>);
+static_assert(supports_word_pair_factory<protocol::key256, protocol::uint128_t>);
 static_assert(!supports_single_word_factory<protocol::key256, std::int64_t>);
 static_assert(protocol::fixed_key<1>::num_words() == 1U && protocol::fixed_key<1>::padded_bytes() == 15U);
 static_assert(protocol::fixed_key<20>::num_words() == 2U && protocol::fixed_key<20>::padded_bytes() == 12U);
@@ -245,6 +251,8 @@ BOOST_AUTO_TEST_CASE(fixed_key_partial_word_sequences_match_cdt_fixed_bytes) {
    const auto u64_full = protocol::key256::make_from_word_sequence<std::uint64_t>(std::uint64_t{1U}, std::uint64_t{2U},
                                                                                   std::uint64_t{3U}, std::uint64_t{4U});
    const auto u128 = protocol::key256::make_from_word_sequence<protocol::uint128_t>(protocol::uint128_t{1U});
+   const auto u128_full =
+       protocol::key256::make_from_word_sequence<protocol::uint128_t>(protocol::uint128_t{1U}, protocol::uint128_t{2U});
 
    BOOST_TEST(backing_hex(u8) == "0100000000000000000000000000000000000000000000000000000000000000");
    BOOST_TEST(backing_hex(u16) == "0000000000000001000000000000000000000000000000000000000000000000");
@@ -256,6 +264,7 @@ BOOST_AUTO_TEST_CASE(fixed_key_partial_word_sequences_match_cdt_fixed_bytes) {
    BOOST_TEST(backing_hex(u64) == "0000000000000001000000000000000000000000000000000000000000000000");
    BOOST_TEST(backing_hex(u64_full) == "0000000000000001000000000000000200000000000000030000000000000004");
    BOOST_TEST(backing_hex(u128) == "0000000000000000000000000000000100000000000000000000000000000000");
+   BOOST_TEST(backing_hex(u128_full) == "0000000000000000000000000000000100000000000000000000000000000002");
 
    BOOST_TEST((u32_crossing == protocol::key256{std::array<std::uint32_t, 5>{1U, 2U, 3U, 4U, 5U}}));
    BOOST_TEST(hex(u64_full.extract_as_byte_array()) ==
@@ -470,8 +479,8 @@ BOOST_AUTO_TEST_CASE(savanna_action_receipt_digests_use_core_merkle) {
    second.recv_sequence = 10U;
 
    const auto digests = std::array{
-      protocol::calculate_savanna_action_digest(first, action),
-      protocol::calculate_savanna_action_digest(second, action),
+       protocol::calculate_savanna_action_digest(first, action),
+       protocol::calculate_savanna_action_digest(second, action),
    };
 
    BOOST_TEST(digests[0].str() == expected(spring::savanna_action_digest));
@@ -511,7 +520,8 @@ BOOST_AUTO_TEST_CASE(transaction_signature_preimage_digest_and_spring_signature_
    BOOST_TEST(protocol::signature_digest(chain_id, trx, cfd).str() == expected(spring::transaction_signature_digest));
 
    const auto signature = parse_spring_signature(spring::transaction_signature);
-   const auto recovered = protocol::public_key{signature, core::digest{std::string{spring::transaction_signature_digest}}};
+   const auto recovered =
+       protocol::public_key{signature, core::digest{std::string{spring::transaction_signature_digest}}};
    BOOST_TEST(format_spring_public_key(recovered) == expected(spring::test_public_key));
 }
 
@@ -648,9 +658,9 @@ BOOST_AUTO_TEST_CASE(transaction_mroot_uses_core_merkle_over_receipt_digests) {
    receipts.push_back(make_receipt(2U));
    receipts.push_back(make_receipt(3U));
    const auto digests = std::array{
-      receipts[0].digest(),
-      receipts[1].digest(),
-      receipts[2].digest(),
+       receipts[0].digest(),
+       receipts[1].digest(),
+       receipts[2].digest(),
    };
    BOOST_TEST(protocol::calculate_transaction_mroot(receipts) == core::calculate_merkle_root(digests));
 }
