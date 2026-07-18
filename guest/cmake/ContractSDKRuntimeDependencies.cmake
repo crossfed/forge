@@ -42,7 +42,7 @@ endfunction()
 function(forge_contract_sdk_runtime_dependency_filters output)
    set(
       _filters
-      PRE_EXCLUDE_REGEXES
+      POST_EXCLUDE_REGEXES
          "^/System/Library/"
          "^/usr/lib/"
          "^/lib/"
@@ -55,6 +55,9 @@ function(forge_contract_sdk_runtime_dependency_filters output)
       list(
          PREPEND _filters
          PRE_INCLUDE_REGEXES
+            "${FORGE_CONTRACT_LLVM_RUNTIME_REGEX}"
+            "${FORGE_CONTRACT_LINUX_CXX_RUNTIME_REGEX}"
+         POST_INCLUDE_REGEXES
             "${FORGE_CONTRACT_LLVM_RUNTIME_REGEX}"
             "${FORGE_CONTRACT_LINUX_CXX_RUNTIME_REGEX}"
       )
