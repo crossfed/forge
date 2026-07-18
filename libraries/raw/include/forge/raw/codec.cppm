@@ -98,6 +98,10 @@ template <> struct built_in_codec<signed_int> : std::true_type {};
 
 template <> struct built_in_codec<bool> : std::true_type {};
 
+template <> struct built_in_codec<__int128> : std::true_type {};
+
+template <> struct built_in_codec<unsigned __int128> : std::true_type {};
+
 template <typename T> inline constexpr auto built_in_codec_v = built_in_codec<std::remove_cv_t<T>>::value;
 
 template <typename Stream, typename T>
@@ -166,6 +170,22 @@ void pack(Stream& stream, const T& value) {
 template <typename Stream, typename T>
    requires(std::is_arithmetic_v<T> && !std::is_same_v<std::remove_cv_t<T>, bool>)
 void unpack(Stream& stream, T& value) {
+   detail::read_object(stream, value);
+}
+
+template <typename Stream> void pack(Stream& stream, const __int128& value) {
+   detail::write_object(stream, value);
+}
+
+template <typename Stream> void unpack(Stream& stream, __int128& value) {
+   detail::read_object(stream, value);
+}
+
+template <typename Stream> void pack(Stream& stream, const unsigned __int128& value) {
+   detail::write_object(stream, value);
+}
+
+template <typename Stream> void unpack(Stream& stream, unsigned __int128& value) {
    detail::read_object(stream, value);
 }
 

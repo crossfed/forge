@@ -252,6 +252,25 @@ BOOST_AUTO_TEST_CASE(char_and_uint8_values_preserve_spring_wire_bits) {
    BOOST_CHECK_EQUAL(forge::raw::unpack<std::uint8_t>(octet_wire), 0xffU);
 }
 
+BOOST_AUTO_TEST_CASE(int128_values_preserve_spring_wire_bits_for_all_streams) {
+   const auto unsigned_value = (static_cast<unsigned __int128>(0x0102030405060708ULL) << 64U) |
+                               static_cast<unsigned __int128>(0x1112131415161718ULL);
+   const auto unsigned_wire = forge::raw::pack(unsigned_value);
+
+   BOOST_CHECK_EQUAL(forge::crypto::to_hex(unsigned_wire), "18171615141312110807060504030201");
+   BOOST_CHECK(forge::raw::unpack<unsigned __int128>(unsigned_wire) == unsigned_value);
+
+   const auto signed_value = static_cast<__int128>(-2);
+   const auto signed_wire = forge::raw::pack(signed_value);
+   BOOST_CHECK_EQUAL(forge::crypto::to_hex(signed_wire), "feffffffffffffffffffffffffffffff");
+   BOOST_CHECK(forge::raw::unpack<__int128>(signed_wire) == signed_value);
+
+   auto digest_stream = forge::crypto::sha256::encoder{};
+   forge::raw::pack(digest_stream, unsigned_value);
+   BOOST_CHECK_EQUAL(digest_stream.result().str(),
+                     forge::crypto::sha256::hash(std::span<const std::uint8_t>{unsigned_wire}).str());
+}
+
 BOOST_AUTO_TEST_CASE(std_array_pointer_elements_use_element_codec) {
    const auto values = std::array<const char*, 2>{"a", "bc"};
    BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::raw::pack(values)), "0161026263");
