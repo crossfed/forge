@@ -34,7 +34,9 @@ pass/fail fixtures plus local-include and wasm32-width regressions.
 
 For generated dispatchers, `abigen` also emits memberwise `forge.raw` codecs
 for user-defined ABI records, including records used by action parameters and
-results.
+results. Namespace-scope record codecs are declared before the contract source,
+so action implementations can use `forge::raw::pack` and `unpack` without a
+separate serialization macro.
 Fields are encoded in declaration order after the single public, non-virtual
 base, matching the generated ABI. Unions, inaccessible fields, references,
 const fields, bit-fields and multiple or virtual bases are rejected instead of

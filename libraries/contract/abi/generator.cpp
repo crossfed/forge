@@ -4,6 +4,7 @@ module;
 #include <clang/AST/DeclCXX.h>
 #include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/AST/TypeLoc.h>
+#include <clang/Basic/Diagnostic.h>
 #include <clang/Frontend/CompilerInstance.h>
 #include <clang/Frontend/FrontendAction.h>
 #include <clang/Index/USRGeneration.h>
@@ -54,6 +55,7 @@ struct struct_shape {
 struct record_codec_shape {
    std::string name;
    std::string base;
+   std::string forward_declaration;
    std::vector<std::string> fields;
 };
 
@@ -109,6 +111,38 @@ struct schema {
    bool has_eosio_dispatch = false;
    bool failed = false;
 };
+
+std::string make_forward_declaration(const clang::RecordDecl& declaration) {
+   if (declaration.getIdentifier() == nullptr || llvm::isa<clang::ClassTemplateSpecializationDecl>(declaration)) {
+      return {};
+   }
+
+   auto namespaces = std::vector<const clang::NamespaceDecl*>{};
+   auto* context = declaration.getDeclContext();
+   while (const auto* current = llvm::dyn_cast<clang::NamespaceDecl>(context)) {
+      if (current->isAnonymousNamespace()) {
+         return {};
+      }
+      namespaces.push_back(current);
+      context = current->getDeclContext();
+   }
+   if (!context->isTranslationUnit()) {
+      return {};
+   }
+
+   auto output = std::ostringstream{};
+   for (auto iterator = namespaces.rbegin(); iterator != namespaces.rend(); ++iterator) {
+      if ((*iterator)->isInline()) {
+         output << "inline ";
+      }
+      output << "namespace " << (*iterator)->getNameAsString() << " { ";
+   }
+   output << (declaration.isClass() ? "class " : "struct ") << declaration.getNameAsString() << ';';
+   for (auto index = std::size_t{0}; index < namespaces.size(); ++index) {
+      output << " }";
+   }
+   return output.str();
+}
 
 std::string declaration_identity(const clang::NamedDecl& declaration) {
    auto identity = llvm::SmallString<128>{};
@@ -623,6 +657,7 @@ class type_encoder {
          return;
       }
       codec.name = "::" + record->getQualifiedNameAsString();
+      codec.forward_declaration = make_forward_declaration(*record);
       if (const auto* cpp = llvm::dyn_cast<clang::CXXRecordDecl>(record); cpp != nullptr && cpp->hasDefinition()) {
          if (cpp->getNumBases() > 1U) {
             fail("multiple ABI base classes", declaration.getLocation());
@@ -1158,11 +1193,76 @@ void write_abi(const schema& input, const forge::contract::abi::request& options
    write_text(options.abi, encoded.text + '\n');
 }
 
+void write_codec_declarations(std::ostream& output, const schema& input) {
+   for (const auto& record : input.record_codecs) {
+      if (!record.forward_declaration.empty()) {
+         output << record.forward_declaration << '\n';
+      }
+   }
+   for (const auto& record : input.record_codecs) {
+      if (record.forward_declaration.empty()) {
+         continue;
+      }
+      output << "template <> struct forge::raw::codec_traits<" << record.name << "> {\n";
+      output << "   template <typename Stream> static void pack(Stream& stream, const " << record.name << "& value);\n";
+      output << "   template <typename Stream> static void unpack(Stream& stream, " << record.name << "& value);\n";
+      output << "};\n";
+   }
+}
+
+void write_codec_definitions(std::ostream& output, const schema& input) {
+   for (const auto& record : input.record_codecs) {
+      const auto early_declaration = !record.forward_declaration.empty();
+      const auto body_indent = early_declaration ? "   " : "      ";
+      if (early_declaration) {
+         output << "template <typename Stream> void forge::raw::codec_traits<" << record.name
+                << ">::pack(Stream& stream, const " << record.name << "& value) {\n";
+      } else {
+         output << "template <> struct forge::raw::codec_traits<" << record.name << "> {\n";
+         output << "   template <typename Stream> static void pack(Stream& stream, const " << record.name
+                << "& value) {\n";
+      }
+      if (!record.base.empty()) {
+         output << body_indent << "forge::raw::pack(stream, static_cast<const " << record.base << "&>(value));\n";
+      }
+      for (const auto& field : record.fields) {
+         output << body_indent << "forge::raw::pack(stream, value." << field << ");\n";
+      }
+      output << (early_declaration ? "}\n" : "   }\n");
+
+      if (early_declaration) {
+         output << "template <typename Stream> void forge::raw::codec_traits<" << record.name
+                << ">::unpack(Stream& stream, " << record.name << "& value) {\n";
+      } else {
+         output << "   template <typename Stream> static void unpack(Stream& stream, " << record.name << "& value) {\n";
+      }
+      if (!record.base.empty()) {
+         output << body_indent << "forge::raw::unpack(stream, static_cast<" << record.base << "&>(value));\n";
+      }
+      for (const auto& field : record.fields) {
+         output << body_indent << "forge::raw::unpack(stream, value." << field << ");\n";
+      }
+      output << (early_declaration ? "}\n" : "   }\n};\n");
+   }
+}
+
+std::string make_codec_prelude(const schema& input) {
+   if (input.has_apply && !input.has_eosio_dispatch) {
+      return {};
+   }
+   auto output = std::ostringstream{};
+   output << "#pragma once\n";
+   output << "import forge.raw.codec;\n";
+   write_codec_declarations(output, input);
+   return output.str();
+}
+
 void write_dispatcher(const schema& input, const forge::contract::abi::request& options) {
    auto output = std::ostringstream{};
    if (!input.has_apply || input.has_eosio_dispatch) {
       output << "#include <cstdint>\n";
       output << "import forge.contract.dispatcher;\n";
+      write_codec_declarations(output, input);
    }
    if (input.has_eosio_dispatch) {
       output << "#define FORGE_CONTRACT_DEFER_EOSIO_DISPATCH 1\n";
@@ -1177,27 +1277,7 @@ void write_dispatcher(const schema& input, const forge::contract::abi::request& 
       return;
    }
    output << "#line 1 \"contract generated dispatcher\"\n";
-   for (const auto& record : input.record_codecs) {
-      output << "template <> struct forge::raw::codec_traits<" << record.name << "> {\n";
-      output << "   template <typename Stream> static void pack(Stream& stream, const " << record.name
-             << "& value) {\n";
-      if (!record.base.empty()) {
-         output << "      forge::raw::pack(stream, static_cast<const " << record.base << "&>(value));\n";
-      }
-      for (const auto& field : record.fields) {
-         output << "      forge::raw::pack(stream, value." << field << ");\n";
-      }
-      output << "   }\n";
-      output << "   template <typename Stream> static void unpack(Stream& stream, " << record.name << "& value) {\n";
-      if (!record.base.empty()) {
-         output << "      forge::raw::unpack(stream, static_cast<" << record.base << "&>(value));\n";
-      }
-      for (const auto& field : record.fields) {
-         output << "      forge::raw::unpack(stream, value." << field << ");\n";
-      }
-      output << "   }\n";
-      output << "};\n";
-   }
+   write_codec_definitions(output, input);
    if (input.has_eosio_dispatch) {
       output << "extern \"C\" [[gnu::visibility(\"default\")]] void apply("
                 "std::uint64_t receiver, std::uint64_t code, std::uint64_t action) {\n";
@@ -1258,13 +1338,37 @@ artifacts generate(const request& options) {
    for (const auto& source : options.sources) {
       source_paths.push_back(source.string());
    }
+
+   // Discover namespace-scope ABI records before the strict pass so contract code can use their generated codecs.
+   auto discovery_compilation = clang::tooling::FixedCompilationDatabase{".", arguments};
+   auto discovery_tool = clang::tooling::ClangTool{discovery_compilation, source_paths};
+   auto discovery = schema{};
+   auto discovery_found = false;
+   auto discovery_dispatch_source_found = false;
+   auto discovery_dependencies = std::set<std::filesystem::path>{};
+   const auto dispatch_source = std::filesystem::weakly_canonical(options.sources.front());
+   auto discovery_factory = action_factory{discovery,        discovery_found, discovery_dispatch_source_found,
+                                           options.contract, dispatch_source, discovery_dependencies};
+   auto ignored_diagnostics = clang::IgnoringDiagConsumer{};
+   discovery_tool.setDiagnosticConsumer(&ignored_diagnostics);
+   static_cast<void>(discovery_tool.run(&discovery_factory));
+
+   const auto codec_prelude = make_codec_prelude(discovery);
+   constexpr auto codec_prelude_path = "/__forge_contract_generated_codecs.hpp";
+   if (!codec_prelude.empty()) {
+      arguments.push_back("-include");
+      arguments.push_back(codec_prelude_path);
+   }
+
    auto compilation = clang::tooling::FixedCompilationDatabase{".", arguments};
    auto tool = clang::tooling::ClangTool{compilation, source_paths};
+   if (!codec_prelude.empty()) {
+      tool.mapVirtualFile(codec_prelude_path, codec_prelude);
+   }
    auto output = schema{};
    auto found = false;
    auto dispatch_source_found = false;
    auto dependencies = std::set<std::filesystem::path>{};
-   const auto dispatch_source = std::filesystem::weakly_canonical(options.sources.front());
    auto factory = action_factory{output, found, dispatch_source_found, options.contract, dispatch_source, dependencies};
    const auto result = tool.run(&factory);
    if (result != 0 || output.failed) {

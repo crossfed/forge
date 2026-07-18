@@ -1,22 +1,25 @@
 #include <cstdint>
-#include <forge/contract/serialize.hpp>
 #include <string>
 #include <vector>
 
 import forge.contract;
+import forge.raw.codec;
+
+namespace contract_types {
 
 struct record_value {
    std::string user;
    std::vector<std::uint32_t> values;
-
-   FORGE_SERIALIZE(record_value, &record_value::user, &record_value::values)
 };
+
+} // namespace contract_types
 
 class [[forge::contract("recordtest")]] record_contract : public forge::contract::context {
  public:
    using context::context;
 
-   [[forge::action]] record_value echo(record_value value) {
-      return value;
+   [[forge::action]] contract_types::record_value echo(contract_types::record_value value) {
+      const auto packed = forge::raw::pack(value);
+      return forge::raw::unpack_exact<contract_types::record_value>(packed);
    }
 };
