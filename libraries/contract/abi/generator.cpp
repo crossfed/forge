@@ -145,6 +145,39 @@ std::string make_forward_declaration(const clang::RecordDecl& declaration) {
    return output.str();
 }
 
+bool has_nameable_scope(const clang::RecordDecl& declaration) {
+   if (declaration.getIdentifier() == nullptr) {
+      return false;
+   }
+
+   auto* context = declaration.getDeclContext();
+   while (context != nullptr) {
+      if (context->isTranslationUnit()) {
+         return true;
+      }
+      if (const auto* current = llvm::dyn_cast<clang::NamespaceDecl>(context)) {
+         if (current->isAnonymousNamespace()) {
+            return false;
+         }
+         context = current->getParent();
+         continue;
+      }
+      if (const auto* current = llvm::dyn_cast<clang::RecordDecl>(context)) {
+         if (current->getIdentifier() == nullptr) {
+            return false;
+         }
+         context = current->getDeclContext();
+         continue;
+      }
+      if (const auto* current = llvm::dyn_cast<clang::LinkageSpecDecl>(context)) {
+         context = current->getParent();
+         continue;
+      }
+      return false;
+   }
+   return false;
+}
+
 std::string declaration_identity(const clang::NamedDecl& declaration) {
    auto identity = llvm::SmallString<128>{};
    if (!clang::index::generateUSRForDecl(&declaration, identity) && !identity.empty()) {
@@ -669,6 +702,14 @@ class type_encoder {
          if (const auto* definition = cpp->getDefinition(); definition != nullptr) {
             record = definition;
          }
+      }
+      if (!has_nameable_scope(*record)) {
+         auto& diagnostics = context_.getDiagnostics();
+         const auto id = diagnostics.getCustomDiagID(
+             clang::DiagnosticsEngine::Error, "contract ABI record '%0' is declared in an anonymous or local scope");
+         diagnostics.Report(declaration.getLocation(), id) << record_name(*record);
+         output_.failed = true;
+         return;
       }
       const auto codec_name = "::" + record->getQualifiedNameAsString();
       source_record_codecs_.insert(codec_name);

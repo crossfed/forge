@@ -338,6 +338,14 @@ def main():
     invoke(args, "duplicate", args.fixtures / "duplicate_table.cpp", args.output / "duplicate-table", succeeds=False)
     invoke(
         args,
+        "anonymous",
+        args.fixtures / "anonymous_record.cpp",
+        args.output / "anonymous-record",
+        succeeds=False,
+        error_contains="anonymous or local scope",
+    )
+    invoke(
+        args,
         "duplicateindex",
         args.fixtures / "duplicate_index_name.cpp",
         args.output / "duplicate-index-name",
