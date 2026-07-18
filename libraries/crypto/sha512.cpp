@@ -27,9 +27,6 @@ import forge.variant.described;
 
 namespace forge::crypto {
 
-sha512::sha512() {
-   memset(_hash, 0, sizeof(_hash));
-}
 sha512::sha512(const std::string& hex_str) {
    auto bytes_written = forge::crypto::from_hex(hex_str, (char*)_hash, sizeof(_hash));
    if (bytes_written < sizeof(_hash))
@@ -41,13 +38,6 @@ std::string sha512::str() const {
 }
 sha512::operator std::string() const {
    return str();
-}
-
-char* sha512::data() {
-   return (char*)&_hash[0];
-}
-const char* sha512::data() const {
-   return (const char*)&_hash[0];
 }
 
 struct sha512::encoder::impl {
@@ -78,7 +68,7 @@ void sha512::encoder::write(const char* d, uint32_t dlen) {
 }
 void sha512::encoder::write(std::span<const std::uint8_t> data) {
    forge::detail::evp_digest_update(my->ctx.get(), reinterpret_cast<const char*>(data.data()),
-                                  static_cast<std::uint32_t>(data.size()));
+                                    static_cast<std::uint32_t>(data.size()));
 }
 sha512 sha512::encoder::result() {
    sha512 h;
@@ -106,22 +96,6 @@ sha512 operator^(const sha512& h1, const sha512& h2) {
    result._hash[7] = h1._hash[7] ^ h2._hash[7];
    return result;
 }
-bool operator>=(const sha512& h1, const sha512& h2) {
-   return memcmp(h1._hash, h2._hash, sizeof(h1._hash)) >= 0;
-}
-bool operator>(const sha512& h1, const sha512& h2) {
-   return memcmp(h1._hash, h2._hash, sizeof(h1._hash)) > 0;
-}
-bool operator<(const sha512& h1, const sha512& h2) {
-   return memcmp(h1._hash, h2._hash, sizeof(h1._hash)) < 0;
-}
-bool operator!=(const sha512& h1, const sha512& h2) {
-   return memcmp(h1._hash, h2._hash, sizeof(h1._hash)) != 0;
-}
-bool operator==(const sha512& h1, const sha512& h2) {
-   return memcmp(h1._hash, h2._hash, sizeof(h1._hash)) == 0;
-}
-
 void to_variant(const sha512& bi, variant& v) {
    v = std::vector<char>((const char*)&bi, ((const char*)&bi) + sizeof(bi));
 }

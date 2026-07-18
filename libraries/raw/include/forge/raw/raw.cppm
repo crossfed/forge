@@ -14,6 +14,7 @@ module;
 #include <list>
 #include <map>
 #include <memory>
+#include <new>
 #include <set>
 #include <type_traits>
 #include <unordered_map>

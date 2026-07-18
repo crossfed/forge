@@ -1,5 +1,7 @@
 module;
 
+#include <compare>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -22,8 +24,9 @@ struct name {
 
    std::uint64_t value = 0;
 
-   constexpr name(std::uint64_t raw = 0) : value(raw) {}
+   constexpr name(std::uint64_t raw_value = 0) : value(raw_value) {}
    constexpr explicit name(name::raw raw_value) : value(static_cast<std::uint64_t>(raw_value)) {}
+   constexpr explicit name(std::string_view text);
 
    constexpr operator raw() const noexcept {
       return raw{value};
@@ -49,6 +52,8 @@ struct name {
       return static_cast<std::uint8_t>(result + 1U);
    }
 
+   [[nodiscard]] std::string to_string() const;
+
    constexpr bool operator==(const name&) const = default;
    constexpr auto operator<=>(const name&) const = default;
 };
@@ -69,52 +74,176 @@ struct permission_level {
 struct symbol_code {
    std::uint64_t value = 0;
 
-   constexpr explicit symbol_code(std::uint64_t raw = 0) : value(raw) {}
+   constexpr explicit symbol_code(std::uint64_t raw_value = 0) : value(raw_value) {}
 
-   constexpr std::uint64_t raw() const {
+   constexpr std::uint64_t raw() const noexcept {
       return value;
    }
 
+   [[nodiscard]] constexpr bool is_valid() const noexcept {
+      auto current = value;
+      if (current == 0U) {
+         return false;
+      }
+      for (auto index = std::size_t{0}; index < 7U; ++index) {
+         const auto character = static_cast<std::uint8_t>(current & 0xffU);
+         if (character == 0U) {
+            return (current >> 8U) == 0U;
+         }
+         if (character < 'A' || character > 'Z') {
+            return false;
+         }
+         current >>= 8U;
+      }
+      return current == 0U;
+   }
+
+   [[nodiscard]] constexpr std::uint32_t length() const noexcept {
+      auto current = value;
+      auto result = std::uint32_t{};
+      while ((current & 0xffU) != 0U && result < 7U) {
+         ++result;
+         current >>= 8U;
+      }
+      return result;
+   }
+
    constexpr bool operator==(const symbol_code&) const = default;
+   constexpr auto operator<=>(const symbol_code&) const = default;
 };
 
 struct symbol {
    std::uint64_t value = 0;
 
-   constexpr symbol(std::uint64_t raw = 0) : value(raw) {}
-
+   constexpr symbol(std::uint64_t raw_value = 0) : value(raw_value) {}
    constexpr symbol(symbol_code code, std::uint8_t precision) : value((code.raw() << 8U) | precision) {}
 
-   constexpr std::uint64_t raw() const {
+   constexpr std::uint64_t raw() const noexcept {
       return value;
    }
 
-   constexpr std::uint8_t precision() const {
+   constexpr std::uint8_t precision() const noexcept {
       return static_cast<std::uint8_t>(value & 0xffU);
    }
 
-   constexpr symbol_code code() const {
+   constexpr symbol_code code() const noexcept {
       return symbol_code{value >> 8U};
    }
 
+   [[nodiscard]] constexpr bool is_valid() const noexcept {
+      return code().is_valid();
+   }
+
    constexpr bool operator==(const symbol&) const = default;
+   constexpr auto operator<=>(const symbol&) const = default;
 };
 
 struct asset {
+   static constexpr std::int64_t max_amount = (std::int64_t{1} << 62U) - 1;
+
    std::int64_t amount = 0;
-   symbol sym{};
+   ::forge::chain::protocol::symbol symbol{};
 
-   constexpr asset(std::int64_t raw_amount = 0, symbol raw_symbol = {}) : amount(raw_amount), sym(raw_symbol) {}
+   constexpr asset() = default;
+   asset(std::int64_t raw_amount, ::forge::chain::protocol::symbol raw_symbol);
 
-   constexpr bool operator==(const asset&) const = default;
+   [[nodiscard]] constexpr bool is_amount_within_range() const noexcept {
+      return -max_amount <= amount && amount <= max_amount;
+   }
+
+   [[nodiscard]] constexpr bool is_valid() const noexcept {
+      return is_amount_within_range() && symbol.is_valid();
+   }
+
+   void set_amount(std::int64_t value);
+
+   asset operator-() const;
+   asset& operator+=(const asset& value);
+   asset& operator-=(const asset& value);
+   asset& operator*=(std::int64_t value);
+   asset& operator/=(std::int64_t value);
+
+   friend asset operator+(asset left, const asset& right) {
+      return left += right;
+   }
+
+   friend asset operator-(asset left, const asset& right) {
+      return left -= right;
+   }
+
+   friend asset operator*(asset value, std::int64_t multiplier) {
+      return value *= multiplier;
+   }
+
+   friend asset operator*(std::int64_t multiplier, asset value) {
+      return value *= multiplier;
+   }
+
+   friend asset operator/(asset value, std::int64_t divisor) {
+      return value /= divisor;
+   }
+
+   friend std::int64_t operator/(const asset& left, const asset& right);
+   friend bool operator==(const asset& left, const asset& right);
+   friend std::strong_ordering operator<=>(const asset& left, const asset& right);
 };
 
-struct block_timestamp {
-   std::uint32_t slot = 0;
+struct extended_symbol {
+   ::forge::chain::protocol::symbol symbol{};
+   account_name contract{};
 
-   constexpr block_timestamp(std::uint32_t raw_slot = 0) : slot(raw_slot) {}
+   constexpr extended_symbol() = default;
+   constexpr extended_symbol(::forge::chain::protocol::symbol raw_symbol, account_name raw_contract)
+       : symbol(raw_symbol), contract(raw_contract) {}
 
-   constexpr auto operator<=>(const block_timestamp&) const = default;
+   [[nodiscard]] constexpr auto get_symbol() const noexcept {
+      return symbol;
+   }
+
+   [[nodiscard]] constexpr auto get_contract() const noexcept {
+      return contract;
+   }
+
+   constexpr bool operator==(const extended_symbol&) const = default;
+   constexpr auto operator<=>(const extended_symbol&) const = default;
+};
+
+struct extended_asset {
+   asset quantity{};
+   account_name contract{};
+
+   constexpr extended_asset() = default;
+   extended_asset(std::int64_t amount, extended_symbol symbol);
+   constexpr extended_asset(asset value, account_name raw_contract) : quantity(value), contract(raw_contract) {}
+
+   [[nodiscard]] constexpr extended_symbol get_extended_symbol() const noexcept {
+      return {quantity.symbol, contract};
+   }
+
+   extended_asset operator-() const;
+   extended_asset& operator+=(const extended_asset& value);
+   extended_asset& operator-=(const extended_asset& value);
+   extended_asset& operator*=(std::int64_t value);
+   extended_asset& operator/=(std::int64_t value);
+
+   friend extended_asset operator+(extended_asset left, const extended_asset& right) {
+      return left += right;
+   }
+
+   friend extended_asset operator-(extended_asset left, const extended_asset& right) {
+      return left -= right;
+   }
+
+   friend extended_asset operator*(extended_asset value, std::int64_t multiplier) {
+      return value *= multiplier;
+   }
+
+   friend extended_asset operator/(extended_asset value, std::int64_t divisor) {
+      return value /= divisor;
+   }
+
+   friend bool operator==(const extended_asset& left, const extended_asset& right);
+   friend std::strong_ordering operator<=>(const extended_asset& left, const extended_asset& right);
 };
 
 [[noreturn]] inline void fail_invalid_argument(const char* message) {
@@ -150,6 +279,8 @@ constexpr std::uint64_t encode_name(std::string_view text) {
    return result;
 }
 
+constexpr name::name(std::string_view text) : value(encode_name(text)) {}
+
 inline std::string decode_name(std::uint64_t raw) {
    constexpr auto alphabet = std::string_view{".12345abcdefghijklmnopqrstuvwxyz"};
    auto result = std::string(13U, '.');
@@ -179,6 +310,10 @@ consteval name operator""_n(const char* value, std::size_t size) {
 
 inline std::string to_string(const name& value) {
    return decode_name(value.value);
+}
+
+inline std::string name::to_string() const {
+   return protocol::to_string(*this);
 }
 
 inline std::uint64_t encode_symbol_code(std::string_view code) {
@@ -259,20 +394,32 @@ template <typename Stream> void raw_unpack(Stream& stream, symbol& value) {
 
 template <typename Stream> void raw_pack(Stream& stream, const asset& value) {
    forge::raw::pack(stream, value.amount);
-   forge::raw::pack(stream, value.sym);
+   forge::raw::pack(stream, value.symbol);
 }
 
 template <typename Stream> void raw_unpack(Stream& stream, asset& value) {
    forge::raw::unpack(stream, value.amount);
-   forge::raw::unpack(stream, value.sym);
+   forge::raw::unpack(stream, value.symbol);
 }
 
-template <typename Stream> void raw_pack(Stream& stream, const block_timestamp& value) {
-   forge::raw::pack(stream, value.slot);
+template <typename Stream> void raw_pack(Stream& stream, const extended_symbol& value) {
+   forge::raw::pack(stream, value.symbol);
+   forge::raw::pack(stream, value.contract);
 }
 
-template <typename Stream> void raw_unpack(Stream& stream, block_timestamp& value) {
-   forge::raw::unpack(stream, value.slot);
+template <typename Stream> void raw_unpack(Stream& stream, extended_symbol& value) {
+   forge::raw::unpack(stream, value.symbol);
+   forge::raw::unpack(stream, value.contract);
+}
+
+template <typename Stream> void raw_pack(Stream& stream, const extended_asset& value) {
+   forge::raw::pack(stream, value.quantity);
+   forge::raw::pack(stream, value.contract);
+}
+
+template <typename Stream> void raw_unpack(Stream& stream, extended_asset& value) {
+   forge::raw::unpack(stream, value.quantity);
+   forge::raw::unpack(stream, value.contract);
 }
 
 } // namespace forge::chain::protocol

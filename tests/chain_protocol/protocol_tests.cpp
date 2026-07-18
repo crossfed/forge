@@ -7,6 +7,7 @@
 #include <deque>
 #include <flat_map>
 #include <iomanip>
+#include <limits>
 #include <span>
 #include <sstream>
 #include <string>
@@ -42,6 +43,10 @@ namespace {
 
 std::string expected(std::string_view value) {
    return std::string{value};
+}
+
+bool has_message(const std::exception& error, std::string_view message) {
+   return error.what() == message;
 }
 
 std::string hex(std::span<const std::uint8_t> bytes) {
@@ -385,17 +390,17 @@ BOOST_AUTO_TEST_CASE(symbol_and_asset_variant_parse_canonical_text) {
    protocol::from_variant(forge::variant{"0.0042 SYS"}, asset);
    const auto fractional_asset = protocol::asset{42, protocol::make_symbol("SYS", 4)};
    BOOST_TEST(asset.amount == fractional_asset.amount);
-   BOOST_TEST(asset.sym.raw() == fractional_asset.sym.raw());
+   BOOST_TEST(asset.symbol.raw() == fractional_asset.symbol.raw());
 
    protocol::from_variant(forge::variant{"42 SYS"}, asset);
    const auto whole_asset = protocol::asset{42, protocol::make_symbol("SYS", 0)};
    BOOST_TEST(asset.amount == whole_asset.amount);
-   BOOST_TEST(asset.sym.raw() == whole_asset.sym.raw());
+   BOOST_TEST(asset.symbol.raw() == whole_asset.symbol.raw());
 
    protocol::from_variant(forge::variant{"-0.0042 SYS"}, asset);
    const auto negative_asset = protocol::asset{-42, protocol::make_symbol("SYS", 4)};
    BOOST_TEST(asset.amount == negative_asset.amount);
-   BOOST_TEST(asset.sym.raw() == negative_asset.sym.raw());
+   BOOST_TEST(asset.symbol.raw() == negative_asset.symbol.raw());
 }
 
 BOOST_AUTO_TEST_CASE(asset_variant_parse_rejects_invalid_text) {
@@ -408,6 +413,64 @@ BOOST_AUTO_TEST_CASE(asset_variant_parse_rejects_invalid_text) {
    BOOST_CHECK_THROW(protocol::from_variant(forge::variant{"0.0042 SYS extra"}, asset), std::invalid_argument);
    BOOST_CHECK_THROW(protocol::from_variant(forge::variant{"+1 SYS"}, asset), std::invalid_argument);
    BOOST_CHECK_THROW(protocol::from_variant(forge::variant{"9223372036854775808 SYS"}, asset), std::invalid_argument);
+}
+
+BOOST_AUTO_TEST_CASE(asset_arithmetic_preserves_cdt_checks_and_errors) {
+   const auto sys = protocol::make_symbol("SYS", 4);
+   const auto eos = protocol::make_symbol("EOS", 4);
+
+   auto value = protocol::asset{42, sys};
+   value += protocol::asset{8, sys};
+   BOOST_TEST(value.amount == 50);
+   value -= protocol::asset{20, sys};
+   BOOST_TEST(value.amount == 30);
+   value *= 3;
+   BOOST_TEST(value.amount == 90);
+   value /= 2;
+   BOOST_TEST(value.amount == 45);
+
+   BOOST_CHECK_EXCEPTION((void)(protocol::asset{protocol::asset::max_amount, sys} + protocol::asset{1, sys}),
+                         std::invalid_argument,
+                         [](const auto& error) { return has_message(error, "addition overflow"); });
+   BOOST_CHECK_EXCEPTION((void)(protocol::asset{-protocol::asset::max_amount, sys} - protocol::asset{1, sys}),
+                         std::invalid_argument,
+                         [](const auto& error) { return has_message(error, "subtraction underflow"); });
+   BOOST_CHECK_EXCEPTION(
+       (void)(protocol::asset{1, sys} + protocol::asset{1, eos}), std::invalid_argument,
+       [](const auto& error) { return has_message(error, "attempt to add asset with different symbol"); });
+   BOOST_CHECK_EXCEPTION((void)(protocol::asset{1, sys} / 0), std::invalid_argument,
+                         [](const auto& error) { return has_message(error, "divide by zero"); });
+   BOOST_CHECK_EXCEPTION((void)(protocol::asset{1, sys} == protocol::asset{1, eos}), std::invalid_argument,
+                         [](const auto& error) {
+                            return has_message(error, "comparison of assets with different symbols is not allowed");
+                         });
+
+   const auto first = protocol::extended_asset{protocol::asset{42, sys}, protocol::make_name("eosio.token")};
+   const auto second = protocol::extended_asset{protocol::asset{1, sys}, protocol::make_name("other.token")};
+   BOOST_CHECK_EXCEPTION(first + second, std::invalid_argument,
+                         [](const auto& error) { return has_message(error, "type mismatch"); });
+}
+
+BOOST_AUTO_TEST_CASE(time_and_extended_asset_match_cdt_wire_layout) {
+   const auto point = protocol::time_point{protocol::microseconds{0x0102030405060708LL}};
+   const auto point_sec = protocol::time_point_sec{0x01020304U};
+   const auto timestamp = protocol::block_timestamp{0x01020304U};
+   const auto extended =
+       protocol::extended_asset{protocol::asset{42, protocol::make_symbol("SYS", 4)}, protocol::make_name("eosio")};
+
+   BOOST_TEST(pack_hex(point) == "0807060504030201");
+   BOOST_TEST(pack_hex(point_sec) == "04030201");
+   BOOST_TEST(pack_hex(timestamp) == "04030201");
+   BOOST_TEST(pack_hex(extended) == "2a0000000000000004535953000000000000000000ea3055");
+
+   const auto parsed = protocol::time_point::from_iso_string("2000-01-01T00:00:00");
+   BOOST_TEST(parsed.time_since_epoch().count() == 946'684'800'000'000LL);
+   BOOST_TEST(parsed.to_string() == "2000-01-01T00:00:00");
+   BOOST_TEST(protocol::block_timestamp{parsed}.slot == 0U);
+   BOOST_TEST(protocol::block_timestamp{parsed}.next().slot == 1U);
+   BOOST_CHECK_EXCEPTION((void)protocol::block_timestamp{std::numeric_limits<std::uint32_t>::max()}.next(),
+                         std::invalid_argument,
+                         [](const auto& error) { return has_message(error, "block timestamp overflow"); });
 }
 
 BOOST_AUTO_TEST_CASE(action_transaction_and_signed_transaction_match_spring_fixtures) {

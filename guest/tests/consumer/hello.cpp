@@ -23,7 +23,7 @@ class [[forge::contract("hello")]] hello : public forge::contract::context {
                                  forge::chain::protocol::asset quantity) {
       forge::contract::check(account.value == 6138663577826885632ULL, "unexpected name encoding");
       forge::contract::check(symbol.raw() == 1398362884ULL, "unexpected symbol encoding");
-      forge::contract::check(quantity.amount == 42 && quantity.sym == symbol, "unexpected asset encoding");
+      forge::contract::check(quantity.amount == 42 && quantity.symbol == symbol, "unexpected asset encoding");
    }
 
    [[forge::action]] long add(long left, long right) {

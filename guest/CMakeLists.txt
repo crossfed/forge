@@ -455,6 +455,7 @@ install(
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/raw/stream.cpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/raw/codec.cpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/values.cpp"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/time.cpp"
       libraries/contract/dispatcher.cpp
    DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/runtime"
 )
@@ -484,9 +485,33 @@ install(
 )
 install(
    FILES
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/include/forge/crypto/sha256.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/include/forge/crypto/sha256_value.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/include/forge/crypto/sha512.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/include/forge/crypto/sha512_value.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/include/forge/crypto/ripemd160.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/include/forge/crypto/ripemd160_value.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/include/forge/crypto/asymmetric.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/include/forge/crypto/asymmetric_value.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/include/forge/crypto/bls_values.cppm"
+   DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/modules/forge/crypto"
+)
+install(
+   FILES
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/values.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/time.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/types_value.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/types.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/fixed_key.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/fixed_key_value.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/action_value.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/action.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/transaction_value.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/authority_value.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/authority.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/producer_authority.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/system_value.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/system.cppm"
    DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/modules/forge/chain/protocol"
 )
 

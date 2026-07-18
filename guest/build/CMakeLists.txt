@@ -50,7 +50,26 @@ target_sources(
          "${_modules}/forge/raw/codec.cppm"
 )
 
-add_library(forge_guest_chain_protocol STATIC "${_runtime}/values.cpp")
+add_library(forge_guest_crypto STATIC)
+target_sources(
+   forge_guest_crypto
+   PUBLIC
+      FILE_SET forge_guest_crypto_modules TYPE CXX_MODULES
+      BASE_DIRS "${_modules}"
+      FILES
+         "${_modules}/forge/crypto/sha256_value.cppm"
+         "${_modules}/forge/crypto/sha256.cppm"
+         "${_modules}/forge/crypto/sha512_value.cppm"
+         "${_modules}/forge/crypto/sha512.cppm"
+         "${_modules}/forge/crypto/ripemd160_value.cppm"
+         "${_modules}/forge/crypto/ripemd160.cppm"
+         "${_modules}/forge/crypto/asymmetric_value.cppm"
+         "${_modules}/forge/crypto/asymmetric.cppm"
+         "${_modules}/forge/crypto/bls_values.cppm"
+)
+target_link_libraries(forge_guest_crypto PUBLIC forge_guest_raw)
+
+add_library(forge_guest_chain_protocol STATIC "${_runtime}/values.cpp" "${_runtime}/time.cpp")
 target_sources(
    forge_guest_chain_protocol
    PUBLIC
@@ -58,10 +77,21 @@ target_sources(
       BASE_DIRS "${_modules}"
       FILES
          "${_modules}/forge/chain/protocol/values.cppm"
+         "${_modules}/forge/chain/protocol/time.cppm"
+         "${_modules}/forge/chain/protocol/types_value.cppm"
+         "${_modules}/forge/chain/protocol/types.cppm"
          "${_modules}/forge/chain/protocol/fixed_key_value.cppm"
          "${_modules}/forge/chain/protocol/fixed_key.cppm"
+         "${_modules}/forge/chain/protocol/action_value.cppm"
+         "${_modules}/forge/chain/protocol/action.cppm"
+         "${_modules}/forge/chain/protocol/transaction_value.cppm"
+         "${_modules}/forge/chain/protocol/authority_value.cppm"
+         "${_modules}/forge/chain/protocol/authority.cppm"
+         "${_modules}/forge/chain/protocol/producer_authority.cppm"
+         "${_modules}/forge/chain/protocol/system_value.cppm"
+         "${_modules}/forge/chain/protocol/system.cppm"
 )
-target_link_libraries(forge_guest_chain_protocol PUBLIC forge_guest_raw)
+target_link_libraries(forge_guest_chain_protocol PUBLIC forge_guest_raw forge_guest_crypto)
 
 if(NOT EXISTS "${_runtime_archive}")
    message(FATAL_ERROR "Forge Contract sysroot is missing ${_runtime_archive}")
@@ -93,7 +123,7 @@ add_library(forge_guest_eosio INTERFACE)
 target_include_directories(forge_guest_eosio INTERFACE "${_include}")
 target_link_libraries(forge_guest_eosio INTERFACE forge_guest_contract)
 
-foreach(_target forge_guest_raw forge_guest_chain_protocol forge_guest_contract)
+foreach(_target forge_guest_raw forge_guest_crypto forge_guest_chain_protocol forge_guest_contract)
    target_include_directories(${_target} PRIVATE "${_include}")
    target_compile_definitions(${_target} PRIVATE FORGE_CONTRACT_GUEST=1)
    target_compile_options(
@@ -113,9 +143,29 @@ set(_module_arguments
    "forge.raw.stream=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_raw.dir/forge.raw.stream.pcm"
    "forge.raw.varint_value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_raw.dir/forge.raw.varint_value.pcm"
    "forge.raw.codec=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_raw.dir/forge.raw.codec.pcm"
+   "forge.crypto.sha256:value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_crypto.dir/forge.crypto.sha256-value.pcm"
+   "forge.crypto.sha256=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_crypto.dir/forge.crypto.sha256.pcm"
+   "forge.crypto.sha512:value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_crypto.dir/forge.crypto.sha512-value.pcm"
+   "forge.crypto.sha512=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_crypto.dir/forge.crypto.sha512.pcm"
+   "forge.crypto.ripemd160:value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_crypto.dir/forge.crypto.ripemd160-value.pcm"
+   "forge.crypto.ripemd160=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_crypto.dir/forge.crypto.ripemd160.pcm"
+   "forge.crypto.asymmetric:value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_crypto.dir/forge.crypto.asymmetric-value.pcm"
+   "forge.crypto.asymmetric=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_crypto.dir/forge.crypto.asymmetric.pcm"
+   "forge.crypto.bls.values=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_crypto.dir/forge.crypto.bls.values.pcm"
    "forge.chain.protocol.values=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.values.pcm"
+   "forge.chain.protocol.time=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.time.pcm"
+   "forge.chain.protocol.types:value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.types-value.pcm"
+   "forge.chain.protocol.types=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.types.pcm"
    "forge.chain.protocol.fixed_key:value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.fixed_key-value.pcm"
    "forge.chain.protocol.fixed_key=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.fixed_key.pcm"
+   "forge.chain.protocol.action:value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.action-value.pcm"
+   "forge.chain.protocol.action=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.action.pcm"
+   "forge.chain.protocol.transaction:value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.transaction-value.pcm"
+   "forge.chain.protocol.authority:value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.authority-value.pcm"
+   "forge.chain.protocol.authority=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.authority.pcm"
+   "forge.chain.protocol.producer_authority=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.producer_authority.pcm"
+   "forge.chain.protocol.system:value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.system-value.pcm"
+   "forge.chain.protocol.system=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.system.pcm"
    "forge.contract.intrinsics=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.intrinsics.pcm"
    "forge.contract=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.pcm"
    "forge.contract.dispatcher=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.dispatcher.pcm"
