@@ -12,12 +12,22 @@ set(_configured "${_root}/configured/bin")
 file(REMOVE_RECURSE "${_root}")
 file(MAKE_DIRECTORY "${_selected}" "${_path_toolchain}" "${_configured}")
 
-foreach(_tool clang++ clang-scan-deps wasm-ld llvm-ar llvm-ranlib)
+set(_selected_tools clang++ clang-scan-deps llvm-ar llvm-ranlib)
+if(NOT FORGE_CONTRACT_TEST_MISSING_WASM_LD)
+   list(APPEND _selected_tools wasm-ld)
+endif()
+foreach(_tool IN LISTS _selected_tools)
    file(WRITE "${_selected}/${_tool}" "#!/bin/sh\nexit 0\n")
-   file(WRITE "${_path_toolchain}/${_tool}" "#!/bin/sh\nexit 0\n")
    file(
       CHMOD
       "${_selected}/${_tool}"
+      PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+   )
+endforeach()
+foreach(_tool clang++ clang-scan-deps wasm-ld llvm-ar llvm-ranlib)
+   file(WRITE "${_path_toolchain}/${_tool}" "#!/bin/sh\nexit 0\n")
+   file(
+      CHMOD
       "${_path_toolchain}/${_tool}"
       PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
    )
@@ -40,6 +50,10 @@ set(FORGE_CONTRACT_LLVM_RANLIB "")
 include("${FORGE_CONTRACT_TOOLCHAIN_SELECTOR}")
 forge_contract_select_developer_toolchain()
 
+if(FORGE_CONTRACT_TEST_MISSING_WASM_LD)
+   return()
+endif()
+
 foreach(
    _binding
    "FORGE_CONTRACT_CLANG;clang++"
@@ -56,4 +70,22 @@ endforeach()
 
 if(NOT FORGE_CONTRACT_CLANG_SCAN_DEPS STREQUAL "${_configured}/clang-scan-deps")
    message(FATAL_ERROR "FORGE_CONTRACT_CLANG_SCAN_DEPS did not preserve the configured path")
+endif()
+
+execute_process(
+   COMMAND
+      "${CMAKE_COMMAND}"
+      -DFORGE_CONTRACT_TOOLCHAIN_SELECTOR=${FORGE_CONTRACT_TOOLCHAIN_SELECTOR}
+      -DFORGE_CONTRACT_TEST_ROOT=${_root}/missing-wasm-ld
+      -DFORGE_CONTRACT_TEST_MISSING_WASM_LD=ON
+      -P "${CMAKE_CURRENT_LIST_FILE}"
+   RESULT_VARIABLE _missing_wasm_ld_result
+   OUTPUT_VARIABLE _missing_wasm_ld_output
+   ERROR_VARIABLE _missing_wasm_ld_error
+)
+if(_missing_wasm_ld_result EQUAL 0)
+   message(FATAL_ERROR "Developer toolchain selector accepted wasm-ld from PATH")
+endif()
+if(NOT "${_missing_wasm_ld_output}${_missing_wasm_ld_error}" MATCHES "wasm-ld")
+   message(FATAL_ERROR "Developer toolchain selector failed for an unexpected reason")
 endif()

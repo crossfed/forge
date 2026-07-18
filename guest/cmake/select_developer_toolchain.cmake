@@ -37,6 +37,7 @@ function(forge_contract_select_developer_toolchain)
          NAMES wasm-ld
          HINTS "${_forge_contract_clang_bin}"
          REQUIRED
+         NO_DEFAULT_PATH
          NO_CACHE
       )
       set(FORGE_CONTRACT_WASM_LD "${_forge_contract_wasm_ld}")
