@@ -31,6 +31,11 @@ forge_add_contract(
 )
 
 forge_add_contract(
+   guestmacro
+   SOURCES guest_macro_contract.cpp
+)
+
+forge_add_contract(
    recordtest
    SOURCES record_contract.cpp
 )

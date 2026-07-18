@@ -276,6 +276,15 @@ def main():
     )
     check_features(features)
 
+    guest_macro = invoke(
+        args,
+        "guestmacro",
+        args.fixtures.parent / "consumer" / "guest_macro_contract.cpp",
+        args.output / "guest-macro",
+    )
+    if [action["name"] for action in guest_macro["actions"]] != ["run"]:
+        raise RuntimeError("abigen did not analyze the guest contract translation unit")
+
     multi_source_contract = args.fixtures / "multi_source_contract.cpp"
     multi_source_helper = args.fixtures / "multi_source_helper.cpp"
     invoke(

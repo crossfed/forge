@@ -1244,6 +1244,7 @@ artifacts generate(const request& options) {
        "-ffreestanding",
        "--sysroot=" + options.sysroot.string(),
        "-mcpu=mvp",
+       "-DFORGE_CONTRACT_GUEST=1",
        "-DFORGE_CONTRACT_DEFER_EOSIO_DISPATCH=1",
    };
    for (const auto& path : options.include_paths) {
