@@ -110,12 +110,20 @@ class [[forge::contract("dbhost")]] dbhost : public forge::contract::context {
       case 20:
          signedoverflow();
          return;
+      case 21:
+         emptyread();
+         return;
       default:
          forge::contract::check(false, "unknown database host scenario");
       }
    }
 
  private:
+   void emptyread() {
+      expect(read_action_data(nullptr, 0U) == sizeof(std::uint32_t),
+             "zero-length action read must return the full action size");
+   }
+
    void primary() {
       constexpr char first[] = "first";
       constexpr char second[] = "second";

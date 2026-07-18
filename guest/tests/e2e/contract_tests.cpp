@@ -114,6 +114,9 @@ struct invocation {
 
    std::uint32_t read_action_data(wasm::span<char> destination) const {
       const auto size = std::min(destination.size(), action_data.size());
+      if (size == 0U) {
+         return static_cast<std::uint32_t>(action_data.size());
+      }
       std::copy_n(action_data.begin(), size, destination.begin());
       return static_cast<std::uint32_t>(size);
    }
@@ -275,6 +278,16 @@ BOOST_AUTO_TEST_CASE(generated_dispatcher_executes_const_action_method) {
 
    BOOST_CHECK_NO_THROW(apply(code, host, "hello", "constanswer"));
    BOOST_TEST(host.return_value == forge::raw::pack(std::uint32_t{43}), boost::test_tools::per_element());
+}
+
+BOOST_AUTO_TEST_CASE(action_read_with_zero_length_returns_full_spring_payload_size) {
+   register_intrinsics();
+   const auto code = read_contract(FORGE_CONTRACT_TEST_WASM);
+   auto host = invocation{.action_data = forge::raw::pack(std::uint32_t{7})};
+
+   BOOST_CHECK_NO_THROW(apply(code, host, "hello", "readsize"));
+   BOOST_TEST(host.return_value == forge::raw::pack(std::uint32_t{sizeof(std::uint32_t)}),
+              boost::test_tools::per_element());
 }
 
 BOOST_AUTO_TEST_CASE(generated_dispatcher_serializes_user_defined_action_records) {
@@ -453,6 +466,13 @@ BOOST_AUTO_TEST_CASE(database_host_commits_primary_and_secondary_objectdb_state)
 
    BOOST_CHECK_NO_THROW(invoke_database(host, code, "dbhost", 18));
    BOOST_TEST(!host.find_table(account, database_scope, 20).has_value());
+}
+
+BOOST_AUTO_TEST_CASE(database_host_preserves_spring_zero_length_action_read_semantics) {
+   const auto code = read_contract(FORGE_CONTRACT_TEST_DB_HOST_WASM);
+   auto host = forge::contract::testing::host{};
+
+   BOOST_CHECK_NO_THROW(invoke_database(host, code, "dbhost", 21));
 }
 
 BOOST_AUTO_TEST_CASE(multi_index_and_singleton_execute_over_the_objectdb_host) {

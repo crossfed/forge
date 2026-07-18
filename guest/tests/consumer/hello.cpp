@@ -38,6 +38,11 @@ class [[forge::contract("hello")]] hello : public forge::contract::context {
       return 43U;
    }
 
+   [[forge::action]] std::uint32_t readsize(std::uint32_t value) const {
+      static_cast<void>(value);
+      return forge::contract::read_action_data(nullptr, 0U);
+   }
+
    [[forge::action]] void containers(std::map<std::string, std::string> values, std::set<std::uint32_t> ordered,
                                      std::deque<std::uint32_t> queued, std::list<std::uint32_t> linked) {
       const auto found = values.find("answer");

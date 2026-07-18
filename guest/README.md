@@ -265,6 +265,10 @@ env.set_action_return_value
 env.current_receiver
 ```
 
+`read_action_data` follows Spring's legacy contract: it normally returns the
+number of bytes copied, but when no bytes are copied it returns the full action
+payload size. `action_data_size` remains the direct size query.
+
 The same version also includes the 60 Spring/CDT database imports: the ten
 primary `db_*_i64` operations and ten operations for each of `idx64`, `idx128`,
 `idx256`, `idx_double` and `idx_long_double`. `<forge/contract/intrinsics.h>`
