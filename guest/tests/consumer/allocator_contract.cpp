@@ -68,6 +68,40 @@ class [[forge::contract("allocatortst")]] allocator_contract : public forge::con
       forge::contract::check(std::aligned_alloc(64U, 65U) == nullptr, "invalid aligned size was accepted");
    }
 
+   [[forge::action]] void normalprobe() {
+      constexpr auto original_size = std::size_t{32U};
+      auto* first = static_cast<std::uint8_t*>(std::malloc(original_size));
+      forge::contract::check(first != nullptr, "first normal allocation failed");
+      std::memset(first, 0x5a, original_size);
+
+      auto* resized = static_cast<std::uint8_t*>(std::realloc(first, original_size * 2U));
+      forge::contract::check(resized != nullptr, "first normal realloc failed");
+      for (auto index = std::size_t{0}; index < original_size; ++index) {
+         forge::contract::check(resized[index] == 0x5a, "first normal realloc lost data");
+      }
+      std::free(resized);
+
+      auto* reused = std::malloc(original_size);
+      forge::contract::check(reused != nullptr, "allocation after first normal free failed");
+      std::free(reused);
+
+      auto* aligned = static_cast<std::uint8_t*>(std::aligned_alloc(64U, 128U));
+      auto* ordinary = static_cast<std::uint8_t*>(std::malloc(original_size));
+      forge::contract::check(aligned != nullptr && ordinary != nullptr, "mixed allocation setup failed");
+      std::memset(aligned, 0xa5, 128U);
+      std::memset(ordinary, 0x3c, original_size);
+      ordinary = static_cast<std::uint8_t*>(std::realloc(ordinary, original_size * 2U));
+      forge::contract::check(ordinary != nullptr, "normal realloc with live aligned allocation failed");
+      for (auto index = std::size_t{0}; index < original_size; ++index) {
+         forge::contract::check(ordinary[index] == 0x3c, "normal realloc with live aligned allocation lost data");
+      }
+      for (auto index = std::size_t{0}; index < 128U; ++index) {
+         forge::contract::check(aligned[index] == 0xa5, "normal allocation operation corrupted aligned storage");
+      }
+      std::free(ordinary);
+      std::free(aligned);
+   }
+
    [[forge::action]] void reallocates() {
       constexpr auto original_size = std::size_t{1024U};
       auto* value = static_cast<std::uint8_t*>(std::malloc(original_size));

@@ -667,6 +667,10 @@ BOOST_AUTO_TEST_CASE(cdt_allocator_respects_alignment) {
    run_allocator_action("donoralign");
 }
 
+BOOST_AUTO_TEST_CASE(contract_allocator_handles_first_normal_allocation_without_aligned_probe) {
+   run_allocator_action("normalprobe");
+}
+
 BOOST_AUTO_TEST_CASE(contract_allocator_reallocates_and_zeroes_memory) {
    run_allocator_action("reallocates");
 }

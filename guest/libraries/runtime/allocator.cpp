@@ -550,30 +550,60 @@ struct aligned_allocation_header {
    std::uint32_t magic = magic_value;
    void* base = nullptr;
    size_t size = 0;
+   aligned_allocation_header* previous = nullptr;
+   aligned_allocation_header* next = nullptr;
 };
+
+static aligned_allocation_header* aligned_allocations = nullptr;
+
+static void register_aligned(aligned_allocation_header* header) {
+   header->previous = nullptr;
+   header->next = aligned_allocations;
+   if (aligned_allocations != nullptr) {
+      aligned_allocations->previous = header;
+   }
+   aligned_allocations = header;
+}
+
+static void unregister_aligned(aligned_allocation_header* header) {
+   if (header->previous != nullptr) {
+      header->previous->next = header->next;
+   } else {
+      aligned_allocations = header->next;
+   }
+   if (header->next != nullptr) {
+      header->next->previous = header->previous;
+   }
+   header->magic = 0U;
+   header->previous = nullptr;
+   header->next = nullptr;
+}
 
 aligned_allocation_header* aligned_header(void* ptr) {
    if (ptr == nullptr) {
       return nullptr;
    }
 
-   auto* header =
-       reinterpret_cast<aligned_allocation_header*>(static_cast<char*>(ptr) - sizeof(aligned_allocation_header));
-   if (header->magic != aligned_allocation_header::magic_value) {
-      return nullptr;
-   }
+   for (auto* header = aligned_allocations; header != nullptr; header = header->next) {
+      auto* const result = reinterpret_cast<char*>(header) + sizeof(aligned_allocation_header);
+      if (result != ptr || header->magic != aligned_allocation_header::magic_value) {
+         continue;
+      }
 
-   size_t allocation_size = 0;
-   if (!memory_heap.aligned_allocation_size(header->base, allocation_size))
-      return nullptr;
+      size_t allocation_size = 0;
+      if (!memory_heap.aligned_allocation_size(header->base, allocation_size)) {
+         return nullptr;
+      }
 
-   const auto base = reinterpret_cast<std::uintptr_t>(header->base);
-   const auto result = reinterpret_cast<std::uintptr_t>(ptr);
-   if (result < base || result - base < sizeof(aligned_allocation_header) || result - base > allocation_size ||
-       header->size > allocation_size - (result - base)) {
-      return nullptr;
+      const auto base = reinterpret_cast<std::uintptr_t>(header->base);
+      const auto address = reinterpret_cast<std::uintptr_t>(ptr);
+      if (address < base || address - base < sizeof(aligned_allocation_header) || address - base > allocation_size ||
+          header->size > allocation_size - (address - base)) {
+         return nullptr;
+      }
+      return header;
    }
-   return header;
+   return nullptr;
 }
 } // namespace forge::contract::runtime
 
@@ -609,6 +639,7 @@ void* aligned_alloc(size_t alignment, size_t size) {
       forge::contract::runtime::memory_heap.free(base);
       return nullptr;
    }
+   forge::contract::runtime::register_aligned(header);
    return result;
 }
 
@@ -627,8 +658,9 @@ void* calloc(size_t count, size_t size) {
 void* realloc(void* ptr, size_t size) {
    if (auto* header = forge::contract::runtime::aligned_header(ptr)) {
       if (size == 0U) {
-         header->magic = 0U;
-         forge::contract::runtime::memory_heap.free(header->base);
+         auto* base = header->base;
+         forge::contract::runtime::unregister_aligned(header);
+         forge::contract::runtime::memory_heap.free(base);
          return nullptr;
       }
 
@@ -638,7 +670,7 @@ void* realloc(void* ptr, size_t size) {
       }
       memcpy(result, ptr, std::min(size, header->size));
       auto* base = header->base;
-      header->magic = 0U;
+      forge::contract::runtime::unregister_aligned(header);
       forge::contract::runtime::memory_heap.free(base);
       return result;
    }
@@ -648,7 +680,7 @@ void* realloc(void* ptr, size_t size) {
 void free(void* ptr) {
    if (auto* header = forge::contract::runtime::aligned_header(ptr)) {
       auto* base = header->base;
-      header->magic = 0U;
+      forge::contract::runtime::unregister_aligned(header);
       forge::contract::runtime::memory_heap.free(base);
       return;
    }
