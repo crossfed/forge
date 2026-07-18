@@ -71,6 +71,7 @@ def invoke(
     ricardian_contracts=None,
     ricardian_clauses=None,
     bare_outputs=False,
+    error_contains=None,
 ):
     output.mkdir(parents=True, exist_ok=True)
     abi = output / f"{source.stem}.abi"
@@ -115,6 +116,11 @@ def invoke(
     if not succeeds and result.returncode == 0:
         raise RuntimeError(f"abigen unexpectedly accepted {source.name}")
     if not succeeds:
+        diagnostics = result.stdout + result.stderr
+        if error_contains is not None and error_contains not in diagnostics:
+            raise RuntimeError(
+                f"abigen rejected {source.name} without expected diagnostic {error_contains!r}:\n{diagnostics}"
+            )
         return None
     return json.loads(abi.read_text(encoding="utf-8"))
 
@@ -318,6 +324,14 @@ def main():
     invoke(args, "overloaded", args.fixtures / "overloaded_action.cpp", args.output / "overloaded-action", succeeds=False)
     invoke(args, "duplicate", args.fixtures / "duplicate_struct.cpp", args.output / "duplicate-struct", succeeds=False)
     invoke(args, "duplicate", args.fixtures / "duplicate_table.cpp", args.output / "duplicate-table", succeeds=False)
+    invoke(
+        args,
+        "duplicateindex",
+        args.fixtures / "duplicate_index_name.cpp",
+        args.output / "duplicate-index-name",
+        succeeds=False,
+        error_contains="invalid index name used in multi_index",
+    )
     invoke(
         args,
         "aliasclash",

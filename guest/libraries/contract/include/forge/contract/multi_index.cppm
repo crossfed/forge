@@ -89,7 +89,18 @@ concept secondary_index_spec =
     secondary_key<std::invoke_result_t<typename Index::secondary_extractor_type, const Row&>>;
 
 template <class... Index> consteval bool valid_index_names() {
-   return ((Index::index_name != 0U && Index::index_name != chain::protocol::encode_name("primary")) && ...);
+   constexpr auto names = std::array<std::uint64_t, sizeof...(Index)>{Index::index_name...};
+   for (std::size_t current = 0; current < names.size(); ++current) {
+      if (names[current] == 0U || names[current] == chain::protocol::encode_name("primary")) {
+         return false;
+      }
+      for (std::size_t previous = 0; previous < current; ++previous) {
+         if (names[current] == names[previous]) {
+            return false;
+         }
+      }
+   }
+   return true;
 }
 
 template <std::integral Key>
