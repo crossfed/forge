@@ -63,7 +63,9 @@ template <std::size_t Size, fixed_key_word Word, std::size_t WordCount>
 
    if (words_left != words_per_output) {
       if (words_left > 1U) {
-         packed <<= shift * static_cast<unsigned>(words_left - 1U);
+         // CDT and Spring count residual padding in bytes rather than Word-sized lanes. Preserve that observable
+         // layout because it defines raw fixed_key bytes and secondary-index keys for partial word sequences.
+         packed <<= static_cast<unsigned>(8U * (words_left - 1U));
       }
       output[output_index] = packed;
    }
