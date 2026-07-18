@@ -38,6 +38,16 @@ if(FORGE_BUILD_PROFILE STREQUAL "contract-sdk-host")
    set(FORGE_ENABLE_LIBP2P_INTEROP OFF CACHE BOOL "Run libp2p interoperability tests" FORCE)
 endif()
 
+if(FORGE_CONTRACT_SDK_HOST_PROFILE)
+   file(REAL_PATH "${CMAKE_CURRENT_SOURCE_DIR}" _forge_contract_host_source_root)
+   add_compile_options(
+      "-ffile-prefix-map=${_forge_contract_host_source_root}=."
+      "-fdebug-prefix-map=${_forge_contract_host_source_root}=."
+      "-ffile-prefix-map=${CMAKE_BINARY_DIR}=./build"
+      "-fdebug-prefix-map=${CMAKE_BINARY_DIR}=./build"
+   )
+endif()
+
 set(FORGE_LIBP2P_DONORS_ROOT "" CACHE PATH "Path to workspace donors directory containing go-libp2p, rust-libp2p and libp2p-specs")
 if(NOT FORGE_LIBP2P_DONORS_ROOT)
    set(_forge_default_donors_root "/Users/vladimirtarnakin/.openclaw/workspace/Projects/Storlane/donors")

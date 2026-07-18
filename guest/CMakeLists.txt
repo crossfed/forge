@@ -38,6 +38,16 @@ set(FORGE_CONTRACT_MANIFEST_LLVM_COMMIT "${FORGE_CONTRACT_LLVM_COMMIT}")
 set(FORGE_CONTRACT_SYSROOT_SCHEMA_VERSION 1)
 set(FORGE_CONTRACT_INTRINSIC_VERSION 1)
 
+file(REAL_PATH "${CMAKE_CURRENT_SOURCE_DIR}/.." _forge_contract_source_root)
+set(
+   _forge_contract_path_map_options
+   "-ffile-prefix-map=${_forge_contract_source_root}=."
+   "-fdebug-prefix-map=${_forge_contract_source_root}=."
+   "-ffile-prefix-map=${CMAKE_BINARY_DIR}=./build"
+   "-fdebug-prefix-map=${CMAKE_BINARY_DIR}=./build"
+)
+list(JOIN _forge_contract_path_map_options " " _forge_contract_path_map_flags)
+
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
 if(FORGE_CONTRACT_PROFILE STREQUAL "release")
@@ -77,6 +87,14 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
          GIT_SHALLOW FALSE
       )
    endif()
+   set(
+      _forge_contract_llvm_path_map_options
+      ${_forge_contract_path_map_options}
+      "-ffile-prefix-map=${_llvm_source}=./llvm-project"
+      "-fdebug-prefix-map=${_llvm_source}=./llvm-project"
+   )
+   list(JOIN _forge_contract_llvm_path_map_options " " _forge_contract_llvm_path_map_flags)
+   set(_forge_contract_wasm_path_map_flags "-mcpu=mvp ${_forge_contract_llvm_path_map_flags}")
    if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)$")
       set(_llvm_host_target AArch64)
    else()
@@ -92,6 +110,8 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
          -DCMAKE_INSTALL_PREFIX=${_llvm_install}
          -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
          -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+         -DCMAKE_C_FLAGS=${_forge_contract_llvm_path_map_flags}
+         -DCMAKE_CXX_FLAGS=${_forge_contract_llvm_path_map_flags}
          -DLLVM_ENABLE_PROJECTS=clang\;lld
          -DLLVM_TARGETS_TO_BUILD=WebAssembly\;${_llvm_host_target}
          -DLLVM_BUILD_LLVM_DYLIB=ON
@@ -137,9 +157,9 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
          -DCMAKE_RANLIB=${_llvm_install}/bin/llvm-ranlib
          -DCMAKE_ASM_COMPILER_AR=${_llvm_install}/bin/llvm-ar
          -DCMAKE_ASM_COMPILER_RANLIB=${_llvm_install}/bin/llvm-ranlib
-         -DCMAKE_C_FLAGS=-mcpu=mvp
-         -DCMAKE_CXX_FLAGS=-mcpu=mvp
-         -DCMAKE_ASM_FLAGS=-mcpu=mvp
+         -DCMAKE_C_FLAGS=${_forge_contract_wasm_path_map_flags}
+         -DCMAKE_CXX_FLAGS=${_forge_contract_wasm_path_map_flags}
+         -DCMAKE_ASM_FLAGS=${_forge_contract_wasm_path_map_flags}
          -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
          -DLLVM_ENABLE_RUNTIMES=libcxx\;libcxxabi\;compiler-rt
          -DLIBCXX_ENABLE_EXCEPTIONS=OFF
@@ -204,6 +224,8 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
          -DCMAKE_INSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}
          -DCMAKE_C_COMPILER=${_llvm_install}/bin/clang
          -DCMAKE_CXX_COMPILER=${_llvm_install}/bin/clang++
+         -DCMAKE_C_FLAGS=${_forge_contract_path_map_flags}
+         -DCMAKE_CXX_FLAGS=${_forge_contract_path_map_flags}
          -DCMAKE_PREFIX_PATH:PATH=${_forge_contract_prefix_path}
          -DClang_DIR=${_llvm_install}/lib/cmake/clang
          -DLLVM_DIR=${_llvm_install}/lib/cmake/llvm
@@ -359,6 +381,7 @@ ExternalProject_Add(
       -DCMAKE_SYSROOT=${FORGE_CONTRACT_SYSROOT}
       -DCMAKE_CXX_COMPILER=${FORGE_CONTRACT_CLANG}
       -DCMAKE_CXX_COMPILER_TARGET=wasm32
+      -DCMAKE_CXX_FLAGS=${_forge_contract_path_map_flags}
       -DCMAKE_AR=${FORGE_CONTRACT_LLVM_AR}
       -DCMAKE_RANLIB=${FORGE_CONTRACT_LLVM_RANLIB}
       -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY

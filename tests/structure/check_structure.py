@@ -292,6 +292,32 @@ def check_contract_sdk_components(root: Path, errors: list[str]) -> None:
       return
 
    source = path.read_text(errors="ignore")
+   for required in (
+      "-DCMAKE_C_FLAGS=${_forge_contract_llvm_path_map_flags}",
+      "-DCMAKE_CXX_FLAGS=${_forge_contract_llvm_path_map_flags}",
+      "-DCMAKE_C_FLAGS=${_forge_contract_wasm_path_map_flags}",
+      "-DCMAKE_CXX_FLAGS=${_forge_contract_wasm_path_map_flags}",
+      "-DCMAKE_ASM_FLAGS=${_forge_contract_wasm_path_map_flags}",
+      "-DCMAKE_C_FLAGS=${_forge_contract_path_map_flags}",
+      "-DCMAKE_CXX_FLAGS=${_forge_contract_path_map_flags}",
+   ):
+      if required not in source:
+         errors.append(
+            f"{path.relative_to(root)}: release SDK sub-builds must preserve path mapping: {required}"
+         )
+
+   root_cmake = (root / "CMakeLists.txt").read_text(errors="ignore")
+   for required in (
+      '"-ffile-prefix-map=${_forge_contract_host_source_root}=."',
+      '"-fdebug-prefix-map=${_forge_contract_host_source_root}=."',
+      '"-ffile-prefix-map=${CMAKE_BINARY_DIR}=./build"',
+      '"-fdebug-prefix-map=${CMAKE_BINARY_DIR}=./build"',
+   ):
+      if required not in root_cmake:
+         errors.append(
+            f"CMakeLists.txt: contract-sdk-host must map source and build paths: {required}"
+         )
+
    tools_project = re.search(
       r"ExternalProject_Add\(\s*forge_contract_tools(?P<body>.*?)\n\s*\)", source, re.DOTALL
    )
