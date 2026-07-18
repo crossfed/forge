@@ -285,6 +285,15 @@ def main():
     if [action["name"] for action in guest_macro["actions"]] != ["run"]:
         raise RuntimeError("abigen did not analyze the guest contract translation unit")
 
+    implicit_contract = invoke(
+        args,
+        "implicit_contract",
+        args.fixtures / "implicit_contract_table.cpp",
+        args.output / "implicit-contract-table",
+    )
+    if [table["name"] for table in implicit_contract["tables"]] != ["indextable"]:
+        raise RuntimeError("abigen did not infer a table owned by an implicitly named contract")
+
     multi_source_contract = args.fixtures / "multi_source_contract.cpp"
     multi_source_helper = args.fixtures / "multi_source_helper.cpp"
     invoke(

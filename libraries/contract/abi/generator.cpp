@@ -737,7 +737,7 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
 
    bool VisitClassTemplateSpecializationDecl(clang::ClassTemplateSpecializationDecl* declaration) {
       const auto* record = specialization_record(*declaration);
-      if (record == nullptr || annotation(*record, "forge.contract") != std::optional<std::string>{contract_name_}) {
+      if (record == nullptr || !belongs_to_selected_contract(*record)) {
          return true;
       }
       add_table(*declaration);
@@ -747,8 +747,7 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
    bool VisitTypedefNameDecl(clang::TypedefNameDecl* declaration) {
       const auto* specialization = specialization_type(declaration->getUnderlyingType());
       const auto* record = specialization == nullptr ? nullptr : specialization_record(*specialization);
-      const auto owned_record =
-          record != nullptr && annotation(*record, "forge.contract") == std::optional<std::string>{contract_name_};
+      const auto owned_record = record != nullptr && belongs_to_selected_contract(*record);
       if (specialization != nullptr && (belongs_to_selected_contract(*declaration) || owned_record)) {
          add_table(*specialization);
       }
