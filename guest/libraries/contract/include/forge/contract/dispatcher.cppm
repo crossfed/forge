@@ -16,9 +16,10 @@ export import forge.raw.codec;
 
 export namespace forge::contract {
 
-template <typename Contract, typename Result, typename... Arguments>
-void execute_action(chain::protocol::name self, chain::protocol::name first_receiver,
-                    Result (Contract::*method)(Arguments...)) {
+namespace detail {
+
+template <typename Contract, typename Result, typename... Arguments, typename Method>
+void execute_action_impl(chain::protocol::name self, chain::protocol::name first_receiver, Method method) {
    const auto size = action_data_size();
    auto bytes = std::vector<std::uint8_t>(size);
    if (size != 0U) {
@@ -46,6 +47,20 @@ void execute_action(chain::protocol::name self, chain::protocol::name first_rece
       check(packed.size() <= std::numeric_limits<std::uint32_t>::max(), "action return value is too large");
       set_action_return_value(packed.data(), static_cast<std::uint32_t>(packed.size()));
    }
+}
+
+} // namespace detail
+
+template <typename Contract, typename Result, typename... Arguments>
+void execute_action(chain::protocol::name self, chain::protocol::name first_receiver,
+                    Result (Contract::*method)(Arguments...)) {
+   detail::execute_action_impl<Contract, Result, Arguments...>(self, first_receiver, method);
+}
+
+template <typename Contract, typename Result, typename... Arguments>
+void execute_action(chain::protocol::name self, chain::protocol::name first_receiver,
+                    Result (Contract::*method)(Arguments...) const) {
+   detail::execute_action_impl<Contract, Result, Arguments...>(self, first_receiver, method);
 }
 
 struct dispatch_entry {

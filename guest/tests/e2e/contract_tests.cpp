@@ -268,6 +268,15 @@ BOOST_AUTO_TEST_CASE(generated_dispatcher_executes_zero_argument_action_with_emp
    BOOST_TEST(host.return_value == forge::raw::pack(std::uint32_t{42}), boost::test_tools::per_element());
 }
 
+BOOST_AUTO_TEST_CASE(generated_dispatcher_executes_const_action_method) {
+   register_intrinsics();
+   const auto code = read_contract(FORGE_CONTRACT_TEST_WASM);
+   auto host = invocation{};
+
+   BOOST_CHECK_NO_THROW(apply(code, host, "hello", "constanswer"));
+   BOOST_TEST(host.return_value == forge::raw::pack(std::uint32_t{43}), boost::test_tools::per_element());
+}
+
 BOOST_AUTO_TEST_CASE(generated_dispatcher_serializes_user_defined_action_records) {
    register_intrinsics();
    const auto code = read_contract(FORGE_CONTRACT_TEST_RECORD_WASM);

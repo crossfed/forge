@@ -1,5 +1,8 @@
 #include "multi_source.hpp"
 
-std::uint32_t increment(std::uint32_t value) {
-   return value + 1U;
+multi_source_types::value increment(multi_source_types::value value) {
+   auto packed = forge::raw::pack(value);
+   auto result = forge::raw::unpack_exact<multi_source_types::value>(packed);
+   ++result.number;
+   return result;
 }

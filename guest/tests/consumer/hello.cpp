@@ -34,6 +34,10 @@ class [[forge::contract("hello")]] hello : public forge::contract::context {
       return 42U;
    }
 
+   [[forge::action]] std::uint32_t constanswer() const {
+      return 43U;
+   }
+
    [[forge::action]] void containers(std::map<std::string, std::string> values, std::set<std::uint32_t> ordered,
                                      std::deque<std::uint32_t> queued, std::list<std::uint32_t> linked) {
       const auto found = values.find("answer");

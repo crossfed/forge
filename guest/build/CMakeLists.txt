@@ -28,6 +28,12 @@ set(_runtime_archive "${CMAKE_SYSROOT}/lib/libforge_guest_runtime.a")
 set(_generated "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(_abi "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_NAME}.abi")
 set(_dispatcher "${_generated}/${FORGE_CONTRACT_NAME}.dispatcher.cpp")
+set(_implementation_wrappers)
+set(_wrapper_index 1)
+foreach(_source IN LISTS _implementation_sources)
+   list(APPEND _implementation_wrappers "${_generated}/${FORGE_CONTRACT_NAME}.source-${_wrapper_index}.cpp")
+   math(EXPR _wrapper_index "${_wrapper_index} + 1")
+endforeach()
 set(_depfile "${_generated}/${FORGE_CONTRACT_NAME}.abi.d")
 set(_wasm "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_NAME}.wasm")
 set(_manifest "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_NAME}.contract.json")
@@ -129,6 +135,9 @@ set(_abigen_command
 foreach(_module IN LISTS _module_arguments)
    list(APPEND _abigen_command --module-file "${_module}")
 endforeach()
+foreach(_wrapper IN LISTS _implementation_wrappers)
+   list(APPEND _abigen_command --source-wrapper "${_wrapper}")
+endforeach()
 if(FORGE_CONTRACT_RICARDIAN_CONTRACTS)
    list(APPEND _abigen_command --ricardian-contracts "${FORGE_CONTRACT_RICARDIAN_CONTRACTS}")
 endif()
@@ -136,7 +145,13 @@ if(FORGE_CONTRACT_RICARDIAN_CLAUSES)
    list(APPEND _abigen_command --ricardian-clauses "${FORGE_CONTRACT_RICARDIAN_CLAUSES}")
 endif()
 list(APPEND _abigen_command ${FORGE_CONTRACT_SOURCES})
-set(_abigen_dependencies forge_guest_contract ${FORGE_CONTRACT_SOURCES})
+set(
+   _abigen_dependencies
+   forge_guest_contract
+   "${FORGE_CONTRACT_ABIGEN}"
+   "${FORGE_CONTRACT_ATTR_PLUGIN}"
+   ${FORGE_CONTRACT_SOURCES}
+)
 foreach(_ricardian_file FORGE_CONTRACT_RICARDIAN_CONTRACTS FORGE_CONTRACT_RICARDIAN_CLAUSES)
    if(NOT "${${_ricardian_file}}" STREQUAL "")
       list(APPEND _abigen_dependencies "${${_ricardian_file}}")
@@ -144,7 +159,7 @@ foreach(_ricardian_file FORGE_CONTRACT_RICARDIAN_CONTRACTS FORGE_CONTRACT_RICARD
 endforeach()
 
 add_custom_command(
-   OUTPUT "${_abi}" "${_dispatcher}"
+   OUTPUT "${_abi}" "${_dispatcher}" ${_implementation_wrappers}
    COMMAND ${CMAKE_COMMAND} -E make_directory "${_generated}"
    COMMAND ${_abigen_command}
    DEPENDS ${_abigen_dependencies}
@@ -156,7 +171,7 @@ add_custom_command(
 add_executable(
    ${FORGE_CONTRACT_NAME}
    "${_dispatcher}"
-   ${_implementation_sources}
+   ${_implementation_wrappers}
 )
 target_link_libraries(${FORGE_CONTRACT_NAME} PRIVATE forge_guest_contract forge_guest_eosio)
 target_include_directories(${FORGE_CONTRACT_NAME} PRIVATE "${_include}")

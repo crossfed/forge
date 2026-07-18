@@ -320,6 +320,18 @@ def main():
     if [action["name"] for action in multi_source["actions"]] != ["next"]:
         raise RuntimeError("shared multi-source action was not de-duplicated")
 
+    user_vector = invoke(
+        args,
+        "uservector",
+        args.fixtures / "user_vector_template.cpp",
+        args.output / "user-vector-template",
+    )
+    user_vector_structs = by_name(user_vector["structs"])
+    if user_vector_structs["store"]["fields"][0]["type"] != "vector_uint32":
+        raise RuntimeError("user-defined vector template was encoded as a standard ABI array")
+    if user_vector_structs["vector_uint32"]["fields"] != [{"name": "value", "type": "uint32"}]:
+        raise RuntimeError("user-defined vector template record shape changed")
+
     invoke(args, "duplicate", args.fixtures / "duplicate_action.cpp", args.output / "duplicate-action", succeeds=False)
     invoke(args, "overloaded", args.fixtures / "overloaded_action.cpp", args.output / "overloaded-action", succeeds=False)
     invoke(args, "duplicate", args.fixtures / "duplicate_struct.cpp", args.output / "duplicate-struct", succeeds=False)

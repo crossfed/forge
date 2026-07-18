@@ -42,6 +42,8 @@ request parse(int argc, const char* const* argv) {
          result.module_files.emplace_back(next());
       } else if (option == "--include") {
          result.include_paths.emplace_back(next());
+      } else if (option == "--source-wrapper") {
+         result.source_wrappers.emplace_back(next());
       } else if (option.starts_with("--")) {
          throw std::runtime_error{"unknown argument: " + std::string{option}};
       } else {
@@ -52,6 +54,9 @@ request parse(int argc, const char* const* argv) {
        result.sysroot.empty() || result.sources.empty()) {
       throw std::runtime_error{
           "--contract, --abi, --dispatch, --attribute-plugin, --sysroot and contract sources are required"};
+   }
+   if (!result.source_wrappers.empty() && result.source_wrappers.size() + 1U != result.sources.size()) {
+      throw std::runtime_error{"--source-wrapper must be specified once for every non-dispatch source"};
    }
    return result;
 }

@@ -20,11 +20,13 @@ struct request {
    std::vector<std::string> module_files;
    std::vector<std::filesystem::path> include_paths;
    std::vector<std::filesystem::path> sources;
+   std::vector<std::filesystem::path> source_wrappers;
 };
 
 struct artifacts {
    std::filesystem::path abi;
    std::filesystem::path dispatcher;
+   std::vector<std::filesystem::path> source_wrappers;
 };
 
 artifacts generate(const request& options);

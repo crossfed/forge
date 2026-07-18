@@ -107,6 +107,7 @@ struct schema {
    std::map<std::string, std::string> action_declarations;
    std::map<std::string, std::string> action_methods;
    std::map<std::string, std::string> call_declarations;
+   std::map<std::filesystem::path, std::set<std::string>> source_record_codecs;
    bool has_apply = false;
    bool has_eosio_dispatch = false;
    bool failed = false;
@@ -209,7 +210,8 @@ bool is_global_function(const clang::FunctionDecl& declaration) {
 
 class type_encoder {
  public:
-   type_encoder(clang::ASTContext& context, schema& output) : context_(context), output_(output) {}
+   type_encoder(clang::ASTContext& context, schema& output, std::set<std::string>& source_record_codecs)
+       : context_(context), output_(output), source_record_codecs_(source_record_codecs) {}
 
    std::string encode(clang::QualType input) {
       auto type = input.getNonReferenceType().getUnqualifiedType();
@@ -283,6 +285,23 @@ class type_encoder {
    }
 
  private:
+   static bool is_std_template(const clang::TemplateDecl& declaration, std::string_view name) {
+      if (declaration.getName() != llvm::StringRef{name.data(), name.size()}) {
+         return false;
+      }
+      auto* context = declaration.getDeclContext();
+      while (const auto* current = llvm::dyn_cast<clang::NamespaceDecl>(context)) {
+         if (current->isStdNamespace()) {
+            return true;
+         }
+         if (!current->isInline()) {
+            return false;
+         }
+         context = current->getParent();
+      }
+      return false;
+   }
+
    static clang::TypeLoc unwrap(clang::TypeLoc location) {
       while (true) {
          if (const auto qualified = location.getAs<clang::QualifiedTypeLoc>(); !qualified.isNull()) {
@@ -305,30 +324,31 @@ class type_encoder {
       if (declaration == nullptr) {
          return encode(location.getType());
       }
-      const auto name = declaration->getNameAsString();
       const auto type_argument = [&](std::size_t index) -> clang::TypeLoc {
          const auto& argument = specialization.getArgLoc(static_cast<unsigned>(index));
          const auto* source = argument.getTypeSourceInfo();
          return source == nullptr ? clang::TypeLoc{} : source->getTypeLoc();
       };
-      if ((name == "vector" || name == "set" || name == "deque" || name == "list") &&
+      if ((is_std_template(*declaration, "vector") || is_std_template(*declaration, "set") ||
+           is_std_template(*declaration, "deque") || is_std_template(*declaration, "list")) &&
           specialization.getNumArgs() >= 1U) {
          return encode_location(type_argument(0)) + "[]";
       }
-      if (name == "optional" && specialization.getNumArgs() >= 1U) {
+      if (is_std_template(*declaration, "optional") && specialization.getNumArgs() >= 1U) {
          return encode_location(type_argument(0)) + '?';
       }
-      if (name == "array" && specialization.getNumArgs() >= 2U) {
+      if (is_std_template(*declaration, "array") && specialization.getNumArgs() >= 2U) {
          return encode_location(type_argument(0)) + '[' +
                 std::to_string(integral_argument(specialization.getArgLoc(1))) + ']';
       }
-      if ((name == "pair" || name == "map") && specialization.getNumArgs() >= 2U) {
+      if ((is_std_template(*declaration, "pair") || is_std_template(*declaration, "map")) &&
+          specialization.getNumArgs() >= 2U) {
          const auto first = type_argument(0);
          const auto second = type_argument(1);
          const auto pair = add_pair(template_part_location(first), template_part_location(second));
-         return name == "map" ? pair + "[]" : pair;
+         return is_std_template(*declaration, "map") ? pair + "[]" : pair;
       }
-      if (name == "tuple") {
+      if (is_std_template(*declaration, "tuple")) {
          auto result = std::string{"tuple"};
          auto fields = std::vector<field_shape>{};
          for (auto index = std::size_t{0}; index < specialization.getNumArgs(); ++index) {
@@ -340,7 +360,7 @@ class type_encoder {
          add_synthetic_struct(result, std::move(fields));
          return result;
       }
-      if (name == "variant") {
+      if (is_std_template(*declaration, "variant")) {
          auto shape = variant_shape{.name = "variant"};
          for (auto index = std::size_t{0}; index < specialization.getNumArgs(); ++index) {
             const auto argument = type_argument(index);
@@ -363,8 +383,7 @@ class type_encoder {
          return encoded;
       }
       const auto* declaration = specialization.getTypePtr()->getTemplateName().getAsTemplateDecl();
-      if (declaration == nullptr ||
-          (declaration->getIdentifier() != nullptr && declaration->getIdentifier()->getName() == "basic_string")) {
+      if (declaration == nullptr || is_std_template(*declaration, "basic_string")) {
          return encoded;
       }
       auto result = std::string{"B_"} + declaration->getNameAsString();
@@ -448,7 +467,8 @@ class type_encoder {
          }
       }
       const auto qualified = record->getQualifiedNameAsString();
-      if (qualified == "std::basic_string<char>" || qualified.find("basic_string") != std::string::npos) {
+      const auto* specialization = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record);
+      if (specialization != nullptr && is_std_template(*specialization->getSpecializedTemplate(), "basic_string")) {
          return "string";
       }
 
@@ -465,8 +485,7 @@ class type_encoder {
          }
       }
 
-      if (const auto* specialization = llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record)) {
-         const auto template_name = specialization->getSpecializedTemplate()->getNameAsString();
+      if (specialization != nullptr) {
          const auto template_qualified = specialization->getSpecializedTemplate()->getQualifiedNameAsString();
          const auto arguments = flatten(specialization->getTemplateArgs());
          if (template_qualified == "forge::chain::protocol::fixed_key" && arguments.size() >= 1U &&
@@ -474,31 +493,33 @@ class type_encoder {
              arguments[0].getAsIntegral().getZExtValue() == 32U) {
             return "checksum256";
          }
-         if ((template_name == "vector" || template_name == "set" || template_name == "deque" ||
-              template_name == "list") &&
+         if ((is_std_template(*specialization->getSpecializedTemplate(), "vector") ||
+              is_std_template(*specialization->getSpecializedTemplate(), "set") ||
+              is_std_template(*specialization->getSpecializedTemplate(), "deque") ||
+              is_std_template(*specialization->getSpecializedTemplate(), "list")) &&
              arguments.size() >= 1U && arguments[0].getKind() == clang::TemplateArgument::Type) {
             return encode(arguments[0].getAsType()) + "[]";
          }
-         if (template_name == "optional" && arguments.size() >= 1U &&
+         if (is_std_template(*specialization->getSpecializedTemplate(), "optional") && arguments.size() >= 1U &&
              arguments[0].getKind() == clang::TemplateArgument::Type) {
             return encode(arguments[0].getAsType()) + '?';
          }
-         if (template_name == "array" && arguments.size() >= 2U &&
+         if (is_std_template(*specialization->getSpecializedTemplate(), "array") && arguments.size() >= 2U &&
              arguments[0].getKind() == clang::TemplateArgument::Type &&
              arguments[1].getKind() == clang::TemplateArgument::Integral) {
             return encode(arguments[0].getAsType()) + '[' +
                    std::to_string(arguments[1].getAsIntegral().getZExtValue()) + ']';
          }
-         if (template_name == "pair" && arguments.size() >= 2U) {
+         if (is_std_template(*specialization->getSpecializedTemplate(), "pair") && arguments.size() >= 2U) {
             return add_pair(arguments[0].getAsType(), arguments[1].getAsType());
          }
-         if (template_name == "map" && arguments.size() >= 2U) {
+         if (is_std_template(*specialization->getSpecializedTemplate(), "map") && arguments.size() >= 2U) {
             return add_pair(arguments[0].getAsType(), arguments[1].getAsType()) + "[]";
          }
-         if (template_name == "tuple") {
+         if (is_std_template(*specialization->getSpecializedTemplate(), "tuple")) {
             return add_tuple(arguments);
          }
-         if (template_name == "variant") {
+         if (is_std_template(*specialization->getSpecializedTemplate(), "variant")) {
             return add_variant(arguments);
          }
       }
@@ -552,16 +573,19 @@ class type_encoder {
       if (specialization == nullptr) {
          return encoded;
       }
-      const auto name = specialization->getSpecializedTemplate()->getNameAsString();
-      if (name == "basic_string") {
+      const auto* template_declaration = specialization->getSpecializedTemplate();
+      const auto name = template_declaration->getNameAsString();
+      if (is_std_template(*template_declaration, "basic_string")) {
          return encoded;
       }
 
       auto result = std::string{"B_"} + name;
       const auto arguments = flatten(specialization->getTemplateArgs());
-      const auto semantic_arguments = name == "map" || name == "pair" ? std::min<std::size_t>(2U, arguments.size())
-                                      : name == "array"               ? std::min<std::size_t>(2U, arguments.size())
-                                                                      : arguments.size();
+      const auto semantic_arguments =
+          is_std_template(*template_declaration, "map") || is_std_template(*template_declaration, "pair")
+              ? std::min<std::size_t>(2U, arguments.size())
+          : is_std_template(*template_declaration, "array") ? std::min<std::size_t>(2U, arguments.size())
+                                                            : arguments.size();
       for (auto index = std::size_t{0}; index < semantic_arguments; ++index) {
          const auto& argument = arguments[index];
          if (argument.getKind() == clang::TemplateArgument::Type) {
@@ -640,23 +664,25 @@ class type_encoder {
    }
 
    void add_struct(const clang::RecordDecl& declaration, const std::string& name) {
-      if (!claim_struct(output_, context_, name, declaration_identity(declaration), declaration.getLocation())) {
-         return;
-      }
-
-      auto shape = struct_shape{.name = name};
-      auto codec = record_codec_shape{};
       const auto* record = &declaration;
       if (const auto* cpp = llvm::dyn_cast<clang::CXXRecordDecl>(record); cpp != nullptr) {
          if (const auto* definition = cpp->getDefinition(); definition != nullptr) {
             record = definition;
          }
       }
+      const auto codec_name = "::" + record->getQualifiedNameAsString();
+      source_record_codecs_.insert(codec_name);
+      if (!claim_struct(output_, context_, name, declaration_identity(declaration), declaration.getLocation())) {
+         return;
+      }
+
+      auto shape = struct_shape{.name = name};
+      auto codec = record_codec_shape{};
       if (record->isUnion()) {
          fail("union record", declaration.getLocation());
          return;
       }
-      codec.name = "::" + record->getQualifiedNameAsString();
+      codec.name = codec_name;
       codec.forward_declaration = make_forward_declaration(*record);
       if (const auto* cpp = llvm::dyn_cast<clang::CXXRecordDecl>(record); cpp != nullptr && cpp->hasDefinition()) {
          if (cpp->getNumBases() > 1U) {
@@ -701,12 +727,15 @@ class type_encoder {
 
    clang::ASTContext& context_;
    schema& output_;
+   std::set<std::string>& source_record_codecs_;
 };
 
 class visitor final : public clang::RecursiveASTVisitor<visitor> {
  public:
-   visitor(clang::ASTContext& context, schema& output, std::string_view contract_name)
-       : context_(context), output_(output), encoder_(context, output), contract_name_(contract_name) {}
+   visitor(clang::ASTContext& context, schema& output, std::set<std::string>& source_record_codecs,
+           std::string_view contract_name)
+       : context_(context), output_(output), encoder_(context, output, source_record_codecs),
+         contract_name_(contract_name) {}
 
    bool VisitCXXRecordDecl(clang::CXXRecordDecl* declaration) {
       if (!declaration->isThisDeclarationADefinition() || declaration->isImplicit()) {
@@ -855,6 +884,15 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       std::string result;
    };
 
+   void register_method_types(const clang::CXXMethodDecl& method) {
+      if (!method.getReturnType()->isVoidType()) {
+         static_cast<void>(encoder_.encode(method.getReturnType()));
+      }
+      for (const auto* parameter : method.parameters()) {
+         static_cast<void>(encoder_.encode(*parameter));
+      }
+   }
+
    method_shape add_method(const clang::CXXMethodDecl& method, std::string_view annotated_name,
                            bool allow_unnamed_parameters) {
       if (method.isStatic()) {
@@ -886,6 +924,7 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
 
    void add_action(const clang::CXXRecordDecl& declaration, const clang::CXXMethodDecl& method,
                    std::string_view annotated_name) {
+      register_method_types(method);
       const auto identity = declaration_identity(method);
       const auto action_name = annotated_name.empty() ? method.getNameAsString() : std::string{annotated_name};
       const auto [existing, inserted] = output_.action_declarations.try_emplace(action_name, identity);
@@ -914,6 +953,7 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
    }
 
    void add_call(const clang::CXXMethodDecl& method, std::string_view annotated_name) {
+      register_method_types(method);
       const auto identity = declaration_identity(method);
       const auto call_name = annotated_name.empty() ? method.getNameAsString() : std::string{annotated_name};
       const auto [existing, inserted] = output_.call_declarations.try_emplace(call_name, identity);
@@ -953,10 +993,10 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
 
 class consumer final : public clang::ASTConsumer {
  public:
-   consumer(clang::ASTContext& context, schema& output, bool& found, bool& dispatch_source_found,
-            std::string_view contract_name, bool is_dispatch_source)
-       : visitor_(context, output, contract_name), found_(found), dispatch_source_found_(dispatch_source_found),
-         is_dispatch_source_(is_dispatch_source) {}
+   consumer(clang::ASTContext& context, schema& output, std::set<std::string>& source_record_codecs, bool& found,
+            bool& dispatch_source_found, std::string_view contract_name, bool is_dispatch_source)
+       : visitor_(context, output, source_record_codecs, contract_name), found_(found),
+         dispatch_source_found_(dispatch_source_found), is_dispatch_source_(is_dispatch_source) {}
 
    void HandleTranslationUnit(clang::ASTContext& context) override {
       visitor_.TraverseDecl(context.getTranslationUnitDecl());
@@ -982,8 +1022,8 @@ class action final : public clang::ASTFrontendAction {
    std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance& compiler,
                                                          llvm::StringRef input_file) override {
       const auto input = std::filesystem::weakly_canonical(std::filesystem::path{input_file.str()});
-      return std::make_unique<consumer>(compiler.getASTContext(), output_, found_, dispatch_source_found_,
-                                        contract_name_, input == dispatch_source_);
+      return std::make_unique<consumer>(compiler.getASTContext(), output_, output_.source_record_codecs[input], found_,
+                                        dispatch_source_found_, contract_name_, input == dispatch_source_);
    }
 
    void EndSourceFileAction() override {
@@ -1210,8 +1250,12 @@ void write_codec_declarations(std::ostream& output, const schema& input) {
    }
 }
 
-void write_codec_definitions(std::ostream& output, const schema& input) {
+void write_codec_definitions(std::ostream& output, const schema& input,
+                             const std::set<std::string>* selected = nullptr) {
    for (const auto& record : input.record_codecs) {
+      if (selected != nullptr && !selected->contains(record.name)) {
+         continue;
+      }
       const auto early_declaration = !record.forward_declaration.empty();
       const auto body_indent = early_declaration ? "   " : "      ";
       if (early_declaration) {
@@ -1246,6 +1290,13 @@ void write_codec_definitions(std::ostream& output, const schema& input) {
    }
 }
 
+const std::set<std::string>& source_record_codecs(const schema& input, const std::filesystem::path& source) {
+   static const auto empty = std::set<std::string>{};
+   const auto canonical = std::filesystem::weakly_canonical(source);
+   const auto found = input.source_record_codecs.find(canonical);
+   return found == input.source_record_codecs.end() ? empty : found->second;
+}
+
 std::string make_codec_prelude(const schema& input) {
    if (input.has_apply && !input.has_eosio_dispatch) {
       return {};
@@ -1262,8 +1313,10 @@ void write_dispatcher(const schema& input, const forge::contract::abi::request& 
    if (!input.has_apply || input.has_eosio_dispatch) {
       output << "#include <cstdint>\n";
       output << "import forge.contract.dispatcher;\n";
-      write_codec_declarations(output, input);
+   } else {
+      output << "import forge.raw.codec;\n";
    }
+   write_codec_declarations(output, input);
    if (input.has_eosio_dispatch) {
       output << "#define FORGE_CONTRACT_DEFER_EOSIO_DISPATCH 1\n";
    }
@@ -1273,11 +1326,13 @@ void write_dispatcher(const schema& input, const forge::contract::abi::request& 
       output << "#undef FORGE_CONTRACT_DEFER_EOSIO_DISPATCH\n";
    }
    if (input.has_apply && !input.has_eosio_dispatch) {
+      output << "#line 1 \"contract generated codecs\"\n";
+      write_codec_definitions(output, input, &source_record_codecs(input, options.sources.front()));
       write_text(options.dispatcher, output.str());
       return;
    }
    output << "#line 1 \"contract generated dispatcher\"\n";
-   write_codec_definitions(output, input);
+   write_codec_definitions(output, input, &source_record_codecs(input, options.sources.front()));
    if (input.has_eosio_dispatch) {
       output << "extern \"C\" [[gnu::visibility(\"default\")]] void apply("
                 "std::uint64_t receiver, std::uint64_t code, std::uint64_t action) {\n";
@@ -1302,6 +1357,25 @@ void write_dispatcher(const schema& input, const forge::contract::abi::request& 
    }
    output << "}\n";
    write_text(options.dispatcher, output.str());
+}
+
+void write_source_wrappers(const schema& input, const forge::contract::abi::request& options) {
+   if (options.source_wrappers.empty()) {
+      return;
+   }
+   if (options.source_wrappers.size() + 1U != options.sources.size()) {
+      throw std::runtime_error{"source wrapper count does not match non-dispatch contract sources"};
+   }
+   for (auto index = std::size_t{0}; index < options.source_wrappers.size(); ++index) {
+      const auto& source = options.sources[index + 1U];
+      auto output = std::ostringstream{};
+      output << "import forge.raw.codec;\n";
+      write_codec_declarations(output, input);
+      output << "#include " << std::quoted(std::filesystem::weakly_canonical(source).generic_string()) << "\n";
+      output << "#line 1 \"contract generated codecs\"\n";
+      write_codec_definitions(output, input, &source_record_codecs(input, source));
+      write_text(options.source_wrappers[index], output.str());
+   }
 }
 
 } // namespace
@@ -1389,8 +1463,9 @@ artifacts generate(const request& options) {
    canonicalize(output);
    write_abi(output, options);
    write_dispatcher(output, options);
+   write_source_wrappers(output, options);
    write_depfile(options, dependencies);
-   return {.abi = options.abi, .dispatcher = options.dispatcher};
+   return {.abi = options.abi, .dispatcher = options.dispatcher, .source_wrappers = options.source_wrappers};
 }
 
 } // namespace forge::contract::abi

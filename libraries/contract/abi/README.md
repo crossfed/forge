@@ -32,6 +32,14 @@ notifications require an explicit notification dispatcher. The library contains
 no CLI `main`, compiler patches or guest runtime. Its tests are the pinned CDT
 pass/fail fixtures plus local-include and wasm32-width regressions.
 
+For a multi-source build, `request::source_wrappers` contains one generated
+output path for each source after the dispatch source. Each wrapper includes
+its original translation unit and emits only the generated record codec
+definitions visible there. `forge_add_contract` configures these paths
+automatically and compiles the wrappers instead of compiling helper sources a
+second time. This preserves separate compilation and source-local type
+visibility while making generated codecs available in every contract source.
+
 For generated dispatchers, `abigen` also emits memberwise `forge.raw` codecs
 for user-defined ABI records, including records used by action parameters and
 results. Namespace-scope record codecs are declared before the contract source,
@@ -45,6 +53,11 @@ Legacy `EOSIO_DISPATCH` sources use the same generated codecs: their macro
 dispatch is deferred until after the codec specializations are declared.
 Hand-written `apply` functions remain fully author-owned and are included
 without generated dispatch code.
+
+Only actual standard-library templates receive CDT container encodings such as
+`T[]`. A product type named `vector`, `map`, `optional` or another standard
+container name remains a user ABI record. Generated dispatch supports both
+const and non-const action member functions.
 
 Modern `[[forge::action]]` and `[[forge::call]]` parameters must be named so
 their ABI fields are usable by clients. The EOSIO spelling preserves CDT's
