@@ -212,7 +212,7 @@ template <typename Derived, typename Host, bool IsJit> class execution_context_b
          uint32_t offset = data_seg.offset.value.i32; // force to unsigned
          auto addr = _linear_memory + offset;
          if (data_seg.data.size())
-            memcpy((char*)(addr), data_seg.data.data(), data_seg.data.size());
+            std::memcpy((char*)(addr), data_seg.data.data(), data_seg.data.size());
       }
 
       // Globals can be different from one WASM code to another.

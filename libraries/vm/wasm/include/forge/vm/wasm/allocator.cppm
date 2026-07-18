@@ -96,7 +96,7 @@ class contiguous_allocator {
          size_t new_size = align_to_page(aligned);
          char* new_base = (char*)mmap(NULL, new_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
          detail::check<exceptions::allocation>((new_base != MAP_FAILED), "mmap failed.");
-         memcpy(new_base, _base, _size);
+         std::memcpy(new_base, _base, _size);
          munmap(_base, _size);
          _size = new_size;
          _base = new_base;
@@ -493,7 +493,7 @@ class wasm_allocator {
       int err = mprotect(raw + (page_size * page), (page_size * size), PROT_READ | PROT_WRITE);
       detail::check<exceptions::allocation>((err == 0), "mprotect failed");
       T* ptr = (T*)(raw + (page_size * page));
-      memset(ptr, 0, page_size * size);
+      std::memset(ptr, 0, page_size * size);
       page += size;
    }
    template <typename T> void free(std::size_t size) {
@@ -524,7 +524,7 @@ class wasm_allocator {
    // \post all allocated pages are zero-filled.
    void reset(uint32_t new_pages) {
       if (page >= 0) {
-         memset(raw, '\0', page_size * page); // zero the memory
+         std::memset(raw, '\0', page_size * page); // zero the memory
       } else {
          std::size_t syspagesize = static_cast<std::size_t>(::sysconf(_SC_PAGESIZE));
          int err = mprotect(raw - syspagesize, syspagesize, PROT_READ);
@@ -542,7 +542,7 @@ class wasm_allocator {
    void reset() {
       if (page >= 0) {
          std::size_t syspagesize = static_cast<std::size_t>(::sysconf(_SC_PAGESIZE));
-         memset(raw, '\0', page_size * page); // zero the memory
+         std::memset(raw, '\0', page_size * page); // zero the memory
          int err = mprotect(raw - syspagesize, page_size * page + syspagesize, PROT_NONE);
          detail::check<exceptions::allocation>((err == 0), "mprotect failed");
       }

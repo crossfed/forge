@@ -2162,13 +2162,13 @@ template <typename Context, typename CpuFeatures = native_cpu_features> class ma
       auto relative = static_cast<uint32_t>(target_ - (branch_ + 4));
       if ((target_ - (branch_ + 4)) > 0x7FFFFFFFll || (target_ - (branch_ + 4)) < -0x80000000ll)
          unimplemented();
-      memcpy(branch, &relative, 4);
+      std::memcpy(branch, &relative, 4);
    }
 
    // A 64-bit absolute address is used for function calls whose
    // address is too far away for a 32-bit relative call.
    static void fix_branch64(void* branch, void* target) {
-      memcpy(branch, &target, 8);
+      std::memcpy(branch, &target, 8);
    }
 
    using fn_type = native_value (*)(void* context, void* memory);
@@ -2233,23 +2233,23 @@ template <typename Context, typename CpuFeatures = native_cpu_features> class ma
       emit_bytes(vals...);
    }
    void emit_operand32(uint32_t val) {
-      memcpy(code, &val, sizeof(val));
+      std::memcpy(code, &val, sizeof(val));
       code += sizeof(val);
    }
    void emit_operand64(uint64_t val) {
-      memcpy(code, &val, sizeof(val));
+      std::memcpy(code, &val, sizeof(val));
       code += sizeof(val);
    }
    void emit_operandf32(float val) {
-      memcpy(code, &val, sizeof(val));
+      std::memcpy(code, &val, sizeof(val));
       code += sizeof(val);
    }
    void emit_operandf64(double val) {
-      memcpy(code, &val, sizeof(val));
+      std::memcpy(code, &val, sizeof(val));
       code += sizeof(val);
    }
    template <class T> void emit_operand_ptr(T* val) {
-      memcpy(code, &val, sizeof(val));
+      std::memcpy(code, &val, sizeof(val));
       code += sizeof(val);
    }
 

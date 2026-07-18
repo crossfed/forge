@@ -23,6 +23,7 @@ CONDITIONAL_BRANCH = re.compile(r"^\s*#\s*(?:elif|else)\b")
 CONDITIONAL_END = re.compile(r"^\s*#\s*endif\b")
 PRIVATE_DECLARATION = re.compile(r"^(?:class|struct|enum(?:\s+class)?)\s+([A-Za-z_][A-Za-z0-9_:]*)")
 VM_WASM_EXPORT = re.compile(r"\bFORGE_VM_WASM_EXPORT\b")
+UNQUALIFIED_C_MEMORY = re.compile(r"(?<![:\w])(?:memcpy|memmove|memset|memcmp)\s*\(")
 
 
 def source_files(root: Path, roots: tuple[str, ...]) -> list[Path]:
@@ -190,6 +191,8 @@ def check_vm_wasm_boundaries(root: Path, errors: list[str]) -> None:
             errors.append(f"{relative}:{line_number}: VM components must use module imports")
          if VM_WASM_EXPORT.search(line):
             errors.append(f"{relative}:{line_number}: FORGE_VM_WASM_EXPORT is forbidden")
+         if UNQUALIFIED_C_MEMORY.search(line):
+            errors.append(f"{relative}:{line_number}: VM modules must qualify C memory functions through std")
 
 
 def check_plugin_impl_ownership(root: Path, errors: list[str]) -> None:

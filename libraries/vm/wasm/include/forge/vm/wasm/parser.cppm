@@ -325,7 +325,7 @@ class binary_parser {
       static_assert(std::is_arithmetic_v<T>, "Can only read builtin types");
       auto guard = code.scoped_shrink_bounds(sizeof(T));
       T result;
-      memcpy(&result, code.raw(), sizeof(T));
+      std::memcpy(&result, code.raw(), sizeof(T));
       code += sizeof(T);
       return result;
    }
