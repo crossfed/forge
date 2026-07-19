@@ -175,6 +175,18 @@ jobs:
           cmake --build build/contract-e2e -j 4
           ctest --test-dir build/contract-e2e --output-on-failure
 
+      - name: Verify unchanged Spring and EOSIO contracts
+        shell: bash
+        run: |
+          cmake -S guest/tests/corpus -B build/contract-corpus -G Ninja \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
+            -DForge_DIR="$GITHUB_WORKSPACE/build/forge-prefix/lib/cmake/Forge" \
+            -DForgeContract_DIR="$GITHUB_WORKSPACE/build/contract-sdk-prefix/lib/cmake/ForgeContract"
+          cmake --build build/contract-corpus -j 4
+          ctest --test-dir build/contract-corpus --output-on-failure
+
       - name: Verify source tree
         run: git diff --check
 
@@ -311,6 +323,18 @@ jobs:
             -DFORGE_CONTRACT_TEST_RECOVERY_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/recovery.wasm"
           cmake --build build/contract-release-e2e -j 4
           ctest --test-dir build/contract-release-e2e --output-on-failure
+
+      - name: Verify unchanged Spring and EOSIO contracts
+        shell: bash
+        run: |
+          cmake -S guest/tests/corpus -B build/contract-release-corpus -G Ninja \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
+            -DForge_DIR="$GITHUB_WORKSPACE/build/forge-prefix/lib/cmake/Forge" \
+            -DForgeContract_DIR="$GITHUB_WORKSPACE/build/contract-sdk-release-prefix/lib/cmake/ForgeContract"
+          cmake --build build/contract-release-corpus -j 4
+          ctest --test-dir build/contract-release-corpus --output-on-failure
 
       - name: Upload SDK archive and checksum
         uses: actions/upload-artifact@v4

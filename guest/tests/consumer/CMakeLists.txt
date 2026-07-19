@@ -41,6 +41,11 @@ forge_add_contract(
 )
 
 forge_add_contract(
+   equivalent
+   SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/equivalent_struct.cpp"
+)
+
+forge_add_contract(
    multisource
    SOURCES multi_source_helper.cpp multi_source.cpp
    DISPATCH_SOURCE multi_source.cpp

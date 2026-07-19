@@ -909,10 +909,15 @@ class type_encoder {
       const auto identity = record_layout_identity(*record);
       const auto [claimed, inserted] = output_.struct_declarations.try_emplace(name, identity);
       if (!inserted && claimed->second == identity) {
-         if (generate_codec) {
-            source_record_codecs_.insert(codec_name);
+         if (!generate_codec) {
+            return;
          }
-         return;
+         const auto source_inserted = source_record_codecs_.insert(codec_name).second;
+         const auto codec_exists =
+             std::ranges::any_of(output_.record_codecs, [&](const auto& codec) { return codec.name == codec_name; });
+         if (!source_inserted || codec_exists) {
+            return;
+         }
       }
       const auto duplicate = !inserted;
 
