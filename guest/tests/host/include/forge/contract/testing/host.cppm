@@ -4,12 +4,14 @@ module;
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <vector>
 
 export module forge.contract.testing.host;
 
 export import forge.contract.testing.exceptions;
 export import forge.contract.testing.schema;
+export import forge.contract.testing.state;
 
 export namespace forge::contract::testing {
 
@@ -30,6 +32,10 @@ class host final {
 
    invocation_result invoke(std::span<const std::uint8_t> code, std::uint64_t receiver, std::uint64_t first_receiver,
                             std::uint64_t action, std::vector<std::uint8_t> data = {});
+
+   void configure(oracle_state state);
+   [[nodiscard]] oracle_state state() const;
+   void register_contract(std::uint64_t account, std::vector<std::uint8_t> code);
 
    [[nodiscard]] std::optional<table> find_table(std::uint64_t code, std::uint64_t scope, std::uint64_t table_name);
    [[nodiscard]] std::optional<key_value> find_primary(std::uint64_t code, std::uint64_t scope,

@@ -67,6 +67,47 @@ forge_add_contract(
 )
 
 forge_add_contract(
+   oracle
+   SOURCES oracle_contract.cpp
+)
+
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/sdk_surface_manifest.json" _sdk_surface_json)
+set(_surface_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/surface")
+file(MAKE_DIRECTORY "${_surface_generated_dir}")
+set(_surface_sources)
+
+string(JSON _surface_header_count LENGTH "${_sdk_surface_json}" donor_cpp_headers)
+math(EXPR _surface_header_last "${_surface_header_count} - 1")
+foreach(_index RANGE 0 ${_surface_header_last})
+   string(JSON SURFACE_HEADER GET "${_sdk_surface_json}" donor_cpp_headers ${_index})
+   string(REGEX REPLACE "[^A-Za-z0-9_]" "_" _stem "${SURFACE_HEADER}")
+   set(_output "${_surface_generated_dir}/header_${_stem}.cpp")
+   configure_file(surface_header.cpp.in "${_output}" @ONLY)
+   list(APPEND _surface_sources "${_output}")
+endforeach()
+
+string(JSON _surface_module_count LENGTH "${_sdk_surface_json}" modern_modules)
+math(EXPR _surface_module_last "${_surface_module_count} - 1")
+foreach(_index RANGE 0 ${_surface_module_last})
+   string(JSON _leaf GET "${_sdk_surface_json}" modern_modules ${_index})
+   if(_leaf STREQUAL "contract")
+      set(SURFACE_MODULE "forge.contract")
+   else()
+      set(SURFACE_MODULE "forge.contract.${_leaf}")
+   endif()
+   string(REPLACE "." "_" _stem "${SURFACE_MODULE}")
+   set(_output "${_surface_generated_dir}/module_${_stem}.cpp")
+   configure_file(surface_module.cpp.in "${_output}" @ONLY)
+   list(APPEND _surface_sources "${_output}")
+endforeach()
+
+forge_add_contract(
+   surface
+   SOURCES surface_contract.cpp
+   COMPILE_CHECKS ${_surface_sources}
+)
+
+forge_add_contract(
    multiidx
    SOURCES multi_index_contract.cpp
 )
@@ -173,6 +214,20 @@ add_custom_target(
       --manifest "${CMAKE_CURRENT_BINARY_DIR}/hello.contract.json"
       --output "${CMAKE_CURRENT_BINARY_DIR}/checker"
    DEPENDS hello
+   VERBATIM
+)
+
+add_custom_target(
+   forge_contract_sdk_surface ALL
+   COMMAND
+      "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/check_sdk_surface.py"
+      --manifest "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/sdk_surface_manifest.json"
+      --registry "${ForgeContract_DATA_DIR}/registry/intrinsics.json"
+      --golden "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/spring_intrinsics.txt"
+      --data-dir "${ForgeContract_DATA_DIR}"
+      --source-root "${CMAKE_CURRENT_SOURCE_DIR}/../../.."
+   DEPENDS surface
    VERBATIM
 )
 

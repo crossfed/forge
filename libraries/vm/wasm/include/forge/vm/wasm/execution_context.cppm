@@ -176,7 +176,11 @@ template <typename Derived, typename Host, bool IsJit> class execution_context_b
       return _os;
    }
    inline auto get_interface() {
-      return execution_interface{_linear_memory, &_os};
+      auto memory_size = std::size_t{};
+      if (_linear_memory != nullptr && _wasm_alloc != nullptr && _wasm_alloc->get_current_page() >= 0) {
+         memory_size = static_cast<std::size_t>(_wasm_alloc->get_current_page()) * page_size;
+      }
+      return execution_interface{_linear_memory, memory_size, &_os};
    }
    void set_max_pages(std::uint32_t max_pages) {
       _max_pages = std::min(max_pages, static_cast<std::uint32_t>(::forge::vm::wasm::max_pages));

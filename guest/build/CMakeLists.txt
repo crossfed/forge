@@ -18,6 +18,7 @@ foreach(_required
 endforeach()
 
 string(REPLACE "|" ";" FORGE_CONTRACT_SOURCES "${FORGE_CONTRACT_SOURCES_ENCODED}")
+string(REPLACE "|" ";" FORGE_CONTRACT_COMPILE_CHECKS "${FORGE_CONTRACT_COMPILE_CHECKS_ENCODED}")
 set(_implementation_sources ${FORGE_CONTRACT_SOURCES})
 list(REMOVE_AT _implementation_sources 0)
 
@@ -293,6 +294,35 @@ target_compile_options(
       -ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=.
       -ffile-prefix-map=${CMAKE_CURRENT_BINARY_DIR}=.
 )
+
+if(FORGE_CONTRACT_COMPILE_CHECKS)
+   add_library(${FORGE_CONTRACT_NAME}_compile_checks OBJECT ${FORGE_CONTRACT_COMPILE_CHECKS})
+   target_link_libraries(
+      ${FORGE_CONTRACT_NAME}_compile_checks
+      PRIVATE
+         forge_guest_contract
+         forge_guest_eosio
+   )
+   target_include_directories(${FORGE_CONTRACT_NAME}_compile_checks PRIVATE "${_include}")
+   target_compile_definitions(${FORGE_CONTRACT_NAME}_compile_checks PRIVATE FORGE_CONTRACT_GUEST=1)
+   target_compile_options(
+      ${FORGE_CONTRACT_NAME}_compile_checks
+      PRIVATE
+         -fplugin=${FORGE_CONTRACT_ATTR_PLUGIN}
+         -fno-exceptions
+         -fno-rtti
+         -fno-threadsafe-statics
+         -ffreestanding
+         -fvisibility=hidden
+         -fno-ident
+         -mcpu=mvp
+         -Werror=return-type
+         -ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=.
+         -ffile-prefix-map=${CMAKE_CURRENT_BINARY_DIR}=.
+   )
+   add_dependencies(${FORGE_CONTRACT_NAME} ${FORGE_CONTRACT_NAME}_compile_checks)
+endif()
+
 set(_source_prefix_index 0)
 foreach(_source IN LISTS FORGE_CONTRACT_SOURCES)
    get_filename_component(_source_directory "${_source}" DIRECTORY)
@@ -302,6 +332,17 @@ foreach(_source IN LISTS FORGE_CONTRACT_SOURCES)
    )
    math(EXPR _source_prefix_index "${_source_prefix_index} + 1")
 endforeach()
+if(FORGE_CONTRACT_COMPILE_CHECKS)
+   set(_compile_check_prefix_index 0)
+   foreach(_source IN LISTS FORGE_CONTRACT_COMPILE_CHECKS)
+      get_filename_component(_source_directory "${_source}" DIRECTORY)
+      target_compile_options(
+         ${FORGE_CONTRACT_NAME}_compile_checks
+         PRIVATE "-ffile-prefix-map=${_source_directory}=./compile-check-${_compile_check_prefix_index}"
+      )
+      math(EXPR _compile_check_prefix_index "${_compile_check_prefix_index} + 1")
+   endforeach()
+endif()
 target_link_options(
    ${FORGE_CONTRACT_NAME}
    PRIVATE

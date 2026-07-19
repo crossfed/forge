@@ -1,7 +1,13 @@
 include(ExternalProject)
 
 function(forge_add_contract target)
-   cmake_parse_arguments(ARG "" "DISPATCH_SOURCE;RICARDIAN_CONTRACTS;RICARDIAN_CLAUSES" "SOURCES" ${ARGN})
+   cmake_parse_arguments(
+      ARG
+      ""
+      "DISPATCH_SOURCE;RICARDIAN_CONTRACTS;RICARDIAN_CLAUSES"
+      "SOURCES;COMPILE_CHECKS"
+      ${ARGN}
+   )
    if(NOT ARG_SOURCES)
       message(FATAL_ERROR "forge_add_contract(${target}) requires SOURCES")
    endif()
@@ -40,6 +46,16 @@ function(forge_add_contract target)
    list(REMOVE_ITEM _sources "${_dispatch_source}")
    list(INSERT _sources 0 "${_dispatch_source}")
    string(JOIN "|" _encoded_sources ${_sources})
+
+   set(_compile_checks)
+   foreach(_source IN LISTS ARG_COMPILE_CHECKS)
+      get_filename_component(_absolute "${_source}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+      if(NOT EXISTS "${_absolute}")
+         message(FATAL_ERROR "contract compile-check source does not exist: ${_absolute}")
+      endif()
+      list(APPEND _compile_checks "${_absolute}")
+   endforeach()
+   string(JOIN "|" _encoded_compile_checks ${_compile_checks})
 
    set(_ricardian_contracts "")
    if(ARG_RICARDIAN_CONTRACTS)
@@ -84,6 +100,7 @@ function(forge_add_contract target)
          -DFORGE_CONTRACT_SDK_PREFIX:PATH=${ForgeContract_PREFIX}
          -DFORGE_CONTRACT_NAME=${target}
          -DFORGE_CONTRACT_SOURCES_ENCODED=${_encoded_sources}
+         -DFORGE_CONTRACT_COMPILE_CHECKS_ENCODED=${_encoded_compile_checks}
          -DFORGE_CONTRACT_OUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}
          -DFORGE_CONTRACT_DATA_DIR=${ForgeContract_DATA_DIR}
          -DFORGE_CONTRACT_ABIGEN=${ForgeContract_ABIGEN}

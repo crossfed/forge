@@ -74,6 +74,7 @@ add_executable(
    crypto/test_blake2.cpp
    crypto/test_bls.cpp
    crypto/test_bls_legacy.cpp
+   crypto/test_contract_primitives.cpp
    crypto/test_cypher_suites.cpp
    crypto/test_hash_functions.cpp
    crypto/test_secp256k1_recover.cpp
@@ -241,6 +242,7 @@ add_executable(
    crypto/test_blake2.cpp
    crypto/test_bls.cpp
    crypto/test_bls_legacy.cpp
+   crypto/test_contract_primitives.cpp
    crypto/test_cypher_suites.cpp
    crypto/test_hash_functions.cpp
    crypto/test_secp256k1_recover.cpp

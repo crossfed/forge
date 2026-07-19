@@ -14,6 +14,7 @@ target_sources(
       FILES
          include/forge/contract/testing/exceptions.cppm
          include/forge/contract/testing/schema.cppm
+         include/forge/contract/testing/state.cppm
          include/forge/contract/testing/host.cppm
 )
 
@@ -31,6 +32,7 @@ target_link_libraries(
       Forge::forge_db_core
       Forge::forge_db_object
       Forge::forge_exceptions
+      Forge::forge_crypto
       Forge::forge_vm_wasm
       Forge::forge_chain_protocol
    PRIVATE

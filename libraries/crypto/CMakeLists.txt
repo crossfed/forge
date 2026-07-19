@@ -25,5 +25,6 @@ target_link_libraries(
       GMP::gmp
       OpenSSL::Crypto
       secp256k1
+      bn256
       bls12-381
 )

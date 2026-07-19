@@ -209,6 +209,13 @@ forge::contract::testing::invocation_result invoke_database(forge::contract::tes
                       forge::raw::pack(scenario));
 }
 
+std::uint64_t invoke_oracle(forge::contract::testing::host& host, const wasm::wasm_code& code, std::uint32_t scenario) {
+   const auto account = protocol::make_name("oracle").value;
+   const auto result = host.invoke({code.data(), code.size()}, account, account, protocol::make_name("run").value,
+                                   forge::raw::pack(scenario));
+   return forge::raw::unpack_exact<std::uint64_t>(result.return_value);
+}
+
 constexpr auto database_scope = std::uint64_t{1};
 
 } // namespace
@@ -694,6 +701,86 @@ BOOST_AUTO_TEST_CASE(database_host_rejects_foreign_iterators_and_resets_iterator
    BOOST_REQUIRE(row.has_value());
    const auto expected = std::vector<std::uint8_t>{'u', 'p', 'd', 'a', 't', 'e', 'd', 0};
    BOOST_TEST(row->value == expected, boost::test_tools::per_element());
+}
+
+BOOST_AUTO_TEST_CASE(contract_oracle_executes_all_non_database_intrinsic_families) {
+   const auto code = read_contract(FORGE_CONTRACT_TEST_ORACLE_WASM);
+   const auto oracle = protocol::make_name("oracle").value;
+   const auto alice = protocol::make_name("alice").value;
+   const auto callee = protocol::make_name("callee").value;
+   const auto active = protocol::make_name("active").value;
+
+   auto configured = forge::contract::testing::oracle_state{};
+   configured.accounts.insert(alice);
+   configured.authorized_accounts.insert(oracle);
+   configured.authorized_permissions.insert({alice, active});
+   configured.active_producers = {oracle, alice};
+   configured.publication_time = 111U;
+   configured.current_time = 222U;
+   configured.block_num = 333U;
+   configured.sender = alice;
+   configured.permission_last_used.insert({{alice, active}, 444});
+   configured.account_creation_time.insert({alice, 555});
+   configured.privileged_accounts.insert(oracle);
+   configured.transaction = {1, 2, 3, 4};
+   configured.tapos_block_num = 12;
+   configured.tapos_block_prefix = 34;
+   configured.expiration = 56U;
+   configured.context_free_data = {{5, 6, 7}};
+
+   auto host = forge::contract::testing::host{};
+   host.configure(configured);
+   host.register_contract(callee, {code.begin(), code.end()});
+
+   for (auto scenario = std::uint32_t{}; scenario <= 9U; ++scenario) {
+      BOOST_TEST_CONTEXT("oracle scenario " << scenario) {
+         BOOST_TEST(invoke_oracle(host, code, scenario) == static_cast<std::uint64_t>(scenario + 1U));
+      }
+   }
+
+   const auto state = host.state();
+   BOOST_TEST(state.recipients == std::vector<std::uint64_t>{alice}, boost::test_tools::per_element());
+   BOOST_TEST(state.console == "oracle:-7:42:oracledeadbe-170141183460469231731687303715884105728");
+   BOOST_TEST(state.inline_actions.size() == 1U);
+   BOOST_TEST(state.context_free_inline_actions.size() == 1U);
+   BOOST_TEST(state.deferred.empty());
+   BOOST_TEST(state.privileged_accounts.contains(alice));
+   BOOST_REQUIRE(state.limits.contains(alice));
+   BOOST_TEST(state.limits.at(alice).ram_bytes == 1024);
+   BOOST_TEST(state.limits.at(alice).net_weight == 20);
+   BOOST_TEST(state.limits.at(alice).cpu_weight == 30);
+   BOOST_TEST(!state.blockchain_parameters.empty());
+   BOOST_TEST(state.activated_features.size() == 1U);
+   BOOST_TEST(!state.finalizers.empty());
+}
+
+BOOST_AUTO_TEST_CASE(contract_oracle_rolls_back_all_observable_side_effects) {
+   const auto code = read_contract(FORGE_CONTRACT_TEST_ORACLE_WASM);
+   const auto oracle = protocol::make_name("oracle").value;
+   const auto alice = protocol::make_name("alice").value;
+
+   auto configured = forge::contract::testing::oracle_state{};
+   configured.accounts.insert(alice);
+   configured.privileged_accounts.insert(oracle);
+
+   auto host = forge::contract::testing::host{};
+   host.configure(configured);
+   const auto before_state = host.state();
+   const auto before_database = host.snapshot();
+
+   BOOST_CHECK_EXCEPTION(
+       invoke_oracle(host, code, 10U), forge::contract::testing::exceptions::assertion_failure, [](const auto& error) {
+          return std::string_view{error.what()}.find("oracle rollback requested") != std::string_view::npos;
+       });
+   BOOST_CHECK(host.state() == before_state);
+   BOOST_TEST(host.snapshot() == before_database, boost::test_tools::per_element());
+}
+
+BOOST_AUTO_TEST_CASE(contract_oracle_rejects_out_of_bounds_wasm_memory) {
+   const auto code = read_contract(FORGE_CONTRACT_TEST_ORACLE_WASM);
+   auto host = forge::contract::testing::host{};
+
+   BOOST_CHECK_THROW(invoke_oracle(host, code, 11U), std::exception);
 }
 
 #if defined(__x86_64__) || defined(_M_X64)

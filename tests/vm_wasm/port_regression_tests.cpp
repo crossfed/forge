@@ -13,6 +13,7 @@
 import forge.vm.wasm.allocator;
 import forge.vm.wasm.backend;
 import forge.vm.wasm.debug_info;
+import forge.vm.wasm.execution_interface;
 import forge.vm.wasm.types;
 import forge.vm.wasm.vector;
 import forge.vm.wasm.wasm_stack;
@@ -39,6 +40,7 @@ static_assert(!std::is_copy_constructible_v<wasm::contiguous_allocator>);
 static_assert(!std::is_copy_assignable_v<wasm::contiguous_allocator>);
 static_assert(std::is_nothrow_move_constructible_v<wasm::contiguous_allocator>);
 static_assert(std::is_nothrow_move_assignable_v<wasm::contiguous_allocator>);
+static_assert(std::is_constructible_v<wasm::execution_interface, char*, wasm::operand_stack*>);
 
 namespace {
 struct empty_span_host {
@@ -261,13 +263,33 @@ TEST_CASE("contiguous allocator transfers mapping ownership", "[allocator]") {
 }
 
 TEST_CASE("pointer validation rejects absent linear memory", "[execution_interface]") {
-   const auto interface = wasm::execution_interface{nullptr, nullptr};
+   const auto interface = wasm::execution_interface{nullptr, 0U, nullptr};
 
    BOOST_CHECK_THROW(interface.validate_pointer<char>(wasm::wasm_ptr_t{0}, wasm::wasm_size_t{1}),
                      wasm::exceptions::memory);
    BOOST_CHECK_THROW(interface.validate_pointer<char>(wasm::wasm_ptr_t{0}, wasm::wasm_size_t{0}),
                      wasm::exceptions::memory);
    BOOST_CHECK_THROW(interface.validate_null_terminated_pointer(wasm::wasm_ptr_t{0}), wasm::exceptions::memory);
+}
+
+TEST_CASE("pointer validation rejects ranges outside active linear memory", "[execution_interface]") {
+   auto memory = std::array<char, 8>{};
+   const auto interface = wasm::execution_interface{memory.data(), memory.size(), nullptr};
+
+   BOOST_CHECK_NO_THROW(interface.validate_pointer<char>(wasm::wasm_ptr_t{7}, wasm::wasm_size_t{1}));
+   BOOST_CHECK_NO_THROW(interface.validate_pointer<char>(wasm::wasm_ptr_t{8}, wasm::wasm_size_t{0}));
+   BOOST_CHECK_THROW(interface.validate_pointer<char>(wasm::wasm_ptr_t{8}, wasm::wasm_size_t{1}),
+                     wasm::exceptions::memory);
+   BOOST_CHECK_THROW(
+       interface.validate_pointer<char>(std::numeric_limits<wasm::wasm_ptr_t>::max(), wasm::wasm_size_t{2}),
+       wasm::exceptions::memory);
+   BOOST_CHECK_THROW(interface.validate_pointer<std::uint64_t>(wasm::wasm_ptr_t{1}, wasm::wasm_size_t{1}),
+                     wasm::exceptions::memory);
+
+   memory.fill('x');
+   BOOST_CHECK_THROW(interface.validate_null_terminated_pointer(wasm::wasm_ptr_t{0}), wasm::exceptions::memory);
+   memory.back() = '\0';
+   BOOST_CHECK_NO_THROW(interface.validate_null_terminated_pointer(wasm::wasm_ptr_t{0}));
 }
 
 TEST_CASE("empty profile maps translate to the unknown address", "[debug_info]") {

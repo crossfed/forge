@@ -1,6 +1,7 @@
 #pragma once
 
 import forge.contract.singleton;
+import forge.chain.protocol.values;
 
 namespace eosio {
 

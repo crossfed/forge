@@ -642,7 +642,7 @@ install(
 )
 
 install(
-   TARGETS secp256k1-internal secp256k1 bls12-381 softfloat
+   TARGETS secp256k1-internal secp256k1 bn256 bls12-381 softfloat
    EXPORT ForgeTargets
    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev EXCLUDE_FROM_ALL
    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev EXCLUDE_FROM_ALL
@@ -759,6 +759,13 @@ install(
 )
 install(
    DIRECTORY vendor/bls12-381/include/
+   DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+   COMPONENT dev
+   EXCLUDE_FROM_ALL
+)
+
+install(
+   DIRECTORY vendor/bn256/include/
    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
    COMPONENT dev
    EXCLUDE_FROM_ALL

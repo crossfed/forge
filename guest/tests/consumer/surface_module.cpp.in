@@ -1,0 +1,5 @@
+import @SURFACE_MODULE@;
+
+namespace {
+[[maybe_unused]] constexpr auto module_imports = true;
+}

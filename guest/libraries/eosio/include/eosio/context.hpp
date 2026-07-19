@@ -3,6 +3,7 @@
 #include <eosio/name.hpp>
 
 import forge.contract.action;
+import forge.contract.intrinsics;
 
 namespace eosio {
 

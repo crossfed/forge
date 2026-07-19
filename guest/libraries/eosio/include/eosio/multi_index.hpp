@@ -3,6 +3,7 @@
 #include <eosio/fixed_bytes.hpp>
 
 import forge.contract.multi_index;
+import forge.chain.protocol.values;
 
 namespace eosio {
 

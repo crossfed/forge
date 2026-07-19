@@ -19,6 +19,12 @@ struct host::impl {
    using uint128_output = output<unsigned __int128, 16>;
    using float128_input = input<float128, 16>;
    using float128_output = output<float128, 16>;
+   using checksum160_input = input<capi_checksum160>;
+   using checksum160_output = output<capi_checksum160>;
+   using checksum256_input = input<capi_checksum256>;
+   using checksum256_output = output<capi_checksum256>;
+   using checksum512_input = input<capi_checksum512>;
+   using checksum512_output = output<capi_checksum512>;
 
    impl();
    ~impl();
@@ -33,6 +39,99 @@ struct host::impl {
    std::optional<Row> find_secondary(std::uint64_t code, std::uint64_t scope, std::uint64_t table_name,
                                      std::uint64_t primary);
 
+   void configure(oracle_state state);
+   [[nodiscard]] oracle_state state() const;
+   void register_contract(std::uint64_t account, std::vector<std::uint8_t> code);
+
+   void require_recipient(std::uint64_t account);
+   void require_auth(std::uint64_t account) const;
+   [[nodiscard]] bool has_auth(std::uint64_t account) const;
+   void require_auth2(std::uint64_t account, std::uint64_t permission) const;
+   [[nodiscard]] bool is_account(std::uint64_t account) const;
+   void send_inline(std::span<const char> action);
+   void send_context_free_inline(std::span<const char> action);
+   [[nodiscard]] std::uint64_t publication_time() const;
+   std::uint32_t get_code_hash(std::uint64_t account, std::uint32_t version, output_span<char, 1> result) const;
+
+   std::int64_t call(std::uint64_t receiver, std::uint64_t flags, std::span<const char> data);
+   std::uint32_t get_call_return_value(std::span<char> destination) const;
+   std::uint32_t get_call_data(std::span<char> destination) const;
+   void set_call_return_value(std::span<const char> value);
+
+   std::uint32_t get_active_producers(output_span<std::uint64_t> producers) const;
+
+   void assert_sha256(std::span<const char> data, checksum256_input expected) const;
+   void assert_sha1(std::span<const char> data, checksum160_input expected) const;
+   void assert_sha512(std::span<const char> data, checksum512_input expected) const;
+   void assert_ripemd160(std::span<const char> data, checksum160_input expected) const;
+   void sha256(std::span<const char> data, checksum256_output result) const;
+   void sha1(std::span<const char> data, checksum160_output result) const;
+   void sha512(std::span<const char> data, checksum512_output result) const;
+   void ripemd160(std::span<const char> data, checksum160_output result) const;
+   std::int32_t recover_key(checksum256_input digest, std::span<const char> signature,
+                            std::span<char> public_key) const;
+   void assert_recover_key(checksum256_input digest, std::span<const char> signature,
+                           std::span<const char> public_key) const;
+
+   std::int32_t bls_g1_add(std::span<const char> left, std::span<const char> right, std::span<char> result) const;
+   std::int32_t bls_g2_add(std::span<const char> left, std::span<const char> right, std::span<char> result) const;
+   std::int32_t bls_g1_weighted_sum(std::span<const char> points, std::span<const char> scalars, std::uint32_t count,
+                                    std::span<char> result) const;
+   std::int32_t bls_g2_weighted_sum(std::span<const char> points, std::span<const char> scalars, std::uint32_t count,
+                                    std::span<char> result) const;
+   std::int32_t bls_pairing(std::span<const char> g1_points, std::span<const char> g2_points, std::uint32_t count,
+                            std::span<char> result) const;
+   std::int32_t bls_g1_map(std::span<const char> element, std::span<char> result) const;
+   std::int32_t bls_g2_map(std::span<const char> element, std::span<char> result) const;
+   std::int32_t bls_fp_mod(std::span<const char> scalar, std::span<char> result) const;
+   std::int32_t bls_fp_mul(std::span<const char> left, std::span<const char> right, std::span<char> result) const;
+   std::int32_t bls_fp_exp(std::span<const char> base, std::span<const char> exponent, std::span<char> result) const;
+   void sha3(std::span<const char> data, std::span<char> hash, std::int32_t keccak) const;
+   std::int32_t blake2_f(std::uint32_t rounds, std::span<const char> state, std::span<const char> message,
+                         std::span<const char> offset0, std::span<const char> offset1, std::int32_t final,
+                         std::span<char> result) const;
+   std::int32_t k1_recover(std::span<const char> signature, std::span<const char> digest,
+                           std::span<char> public_key) const;
+   std::int32_t alt_bn128_add(std::span<const char> left, std::span<const char> right, std::span<char> result) const;
+   std::int32_t alt_bn128_mul(std::span<const char> point, std::span<const char> scalar, std::span<char> result) const;
+   std::int32_t alt_bn128_pair(std::span<const char> pairs) const;
+   std::int32_t mod_exp(std::span<const char> base, std::span<const char> exponent, std::span<const char> modulus,
+                        std::span<char> result) const;
+
+   std::int32_t check_transaction_authorization(std::span<const char> transaction, std::span<const char> public_keys,
+                                                std::span<const char> permissions) const;
+   std::int32_t check_permission_authorization(std::uint64_t account, std::uint64_t permission,
+                                               std::span<const char> public_keys, std::span<const char> permissions,
+                                               std::uint64_t delay_us) const;
+   std::int64_t get_permission_last_used(std::uint64_t account, std::uint64_t permission) const;
+   std::int64_t get_account_creation_time(std::uint64_t account) const;
+
+   void prints(input<const char, 1> value);
+   void prints_l(std::span<const char> value);
+   void printi(std::int64_t value);
+   void printui(std::uint64_t value);
+   void printi128(input<__int128, 16> value);
+   void printui128(uint128_input value);
+   void printsf(float value);
+   void printdf(double value);
+   void printqf(float128_input value);
+   void printn(std::uint64_t value);
+   void printhex(std::span<const char> value);
+
+   void get_resource_limits(std::uint64_t account, output<std::int64_t> ram_bytes, output<std::int64_t> net_weight,
+                            output<std::int64_t> cpu_weight) const;
+   void set_resource_limits(std::uint64_t account, std::int64_t ram_bytes, std::int64_t net_weight,
+                            std::int64_t cpu_weight);
+   std::int64_t set_proposed_producers(std::span<const char> producer_data);
+   std::int64_t set_proposed_producers_ex(std::uint64_t format, std::span<const char> producer_data);
+   [[nodiscard]] bool is_privileged(std::uint64_t account) const;
+   void set_privileged(std::uint64_t account, bool value);
+   void set_blockchain_parameters_packed(std::span<const char> data);
+   std::uint32_t get_blockchain_parameters_packed(std::span<char> data) const;
+   void set_kv_parameters_packed(std::span<const char> data);
+   void preactivate_feature(checksum256_input digest);
+   void set_finalizers(std::uint64_t format, std::span<const char> data);
+
    void eosio_assert(std::uint32_t test, input<const char, 1> message);
    void eosio_assert_message(std::uint32_t test, forge::vm::wasm::span<const char> message);
    void eosio_assert_code(std::uint32_t test, std::uint64_t code);
@@ -41,6 +140,21 @@ struct host::impl {
    std::uint32_t read_action_data(forge::vm::wasm::span<char> destination) const;
    void set_action_return_value(forge::vm::wasm::span<const char> value);
    std::uint64_t current_receiver() const;
+   [[nodiscard]] std::uint64_t current_time() const;
+   [[nodiscard]] std::uint32_t get_block_num() const;
+   [[nodiscard]] bool is_feature_activated(checksum256_input digest) const;
+   [[nodiscard]] std::uint64_t get_sender() const;
+
+   void send_deferred(input<unsigned __int128, 16> sender_id, std::uint64_t payer, std::span<const char> transaction,
+                      std::uint32_t replace_existing);
+   std::int32_t cancel_deferred(input<unsigned __int128, 16> sender_id);
+   std::uint32_t read_transaction(std::span<char> destination) const;
+   [[nodiscard]] std::uint32_t transaction_size() const;
+   [[nodiscard]] std::int32_t tapos_block_num() const;
+   [[nodiscard]] std::int32_t tapos_block_prefix() const;
+   [[nodiscard]] std::uint32_t expiration() const;
+   std::int32_t get_action(std::uint32_t type, std::uint32_t index, std::span<char> destination) const;
+   std::int32_t get_context_free_data(std::uint32_t index, std::span<char> destination) const;
 
    std::int32_t db_store_i64(std::uint64_t scope, std::uint64_t table_name, std::uint64_t payer, std::uint64_t primary,
                              forge::vm::wasm::span<const char> value);
@@ -115,7 +229,7 @@ struct host::impl {
 
    template <typename T> T run(boost::asio::awaitable<T> operation);
    void run(boost::asio::awaitable<void> operation);
-   void begin_invocation(std::uint64_t receiver, std::vector<std::uint8_t> data);
+   void begin_invocation(std::uint64_t receiver, std::uint64_t first_receiver, std::vector<std::uint8_t> data);
    void commit_invocation();
    void rollback_invocation();
    void register_intrinsics();
@@ -152,8 +266,15 @@ struct host::impl {
    std::optional<forge::db::object::store> store_;
    std::optional<forge::db::object::transaction> transaction_;
    forge::vm::wasm::wasm_allocator allocator_;
+   oracle_state state_;
+   std::optional<oracle_state> state_before_invocation_;
+   std::map<std::uint64_t, std::vector<std::uint8_t>> contracts_;
    std::uint64_t receiver_ = 0;
+   std::uint64_t first_receiver_ = 0;
    std::vector<std::uint8_t> action_data_;
+   std::vector<std::uint8_t> call_data_;
+   std::vector<std::uint8_t> call_return_value_;
+   std::vector<std::uint8_t> last_call_return_value_;
    invocation_result result_;
    std::vector<iterator_entry> iterators_;
    std::map<std::tuple<row_kind, std::uint64_t>, std::int32_t> object_iterators_;

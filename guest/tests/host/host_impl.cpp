@@ -2,6 +2,7 @@ module;
 
 #include <boost/asio/awaitable.hpp>
 #include <forge/contract/intrinsics.hpp>
+#include <forge/contract/types.h>
 #include <forge/exceptions/macros.hpp>
 #include <algorithm>
 #include <array>
@@ -11,11 +12,13 @@ module;
 #include <cstdint>
 #include <cstring>
 #include <exception>
+#include <iomanip>
 #include <limits>
 #include <map>
 #include <memory>
 #include <optional>
 #include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <tuple>
@@ -32,6 +35,20 @@ import forge.db.object.index;
 import forge.db.object.store;
 import forge.db.object.transaction;
 import forge.ids.object_id;
+import forge.chain.protocol.values;
+import forge.crypto.asymmetric;
+import forge.crypto.blake2;
+import forge.crypto.bls.primitives;
+import forge.crypto.bn256;
+import forge.crypto.hex;
+import forge.crypto.modular_arithmetic;
+import forge.crypto.ripemd160;
+import forge.crypto.secp256k1;
+import forge.crypto.sha1;
+import forge.crypto.sha256;
+import forge.crypto.sha3;
+import forge.crypto.sha512;
+import forge.raw.raw;
 import forge.vm.wasm.backend;
 
 #include "details/memory_driver.hxx"
@@ -50,6 +67,37 @@ class exit_signal final {
 
    std::int32_t code = 0;
 };
+
+class wasm_allocator_guard final {
+ public:
+   explicit wasm_allocator_guard(forge::vm::wasm::wasm_allocator& allocator) : allocator_{allocator} {}
+
+   wasm_allocator_guard(const wasm_allocator_guard&) = delete;
+   wasm_allocator_guard& operator=(const wasm_allocator_guard&) = delete;
+
+   ~wasm_allocator_guard() {
+      allocator_.free();
+   }
+
+ private:
+   forge::vm::wasm::wasm_allocator& allocator_;
+};
+
+struct packed_code_hash_result {
+   forge::unsigned_int version;
+   std::uint64_t sequence = 0;
+   forge::crypto::sha256 digest;
+   std::uint8_t vm_type = 0;
+   std::uint8_t vm_version = 0;
+};
+
+template <typename Stream> void raw_pack(Stream& stream, const packed_code_hash_result& value) {
+   forge::raw::pack(stream, value.version);
+   forge::raw::pack(stream, value.sequence);
+   forge::raw::pack(stream, value.digest);
+   forge::raw::pack(stream, value.vm_type);
+   forge::raw::pack(stream, value.vm_version);
+}
 
 [[noreturn]] void fail_database(std::string_view message) {
    FORGE_THROW_EXCEPTION(exceptions::database_error, std::string{message});
@@ -86,6 +134,64 @@ void require_ordered(float128 value) {
 void require_ordered(std::uint64_t) {}
 void require_ordered(const uint128&) {}
 void require_ordered(const uint256&) {}
+
+template <typename Byte> [[nodiscard]] std::span<const std::uint8_t> as_bytes(std::span<Byte> value) {
+   return {reinterpret_cast<const std::uint8_t*>(value.data()), value.size_bytes()};
+}
+
+template <typename Byte> [[nodiscard]] std::span<std::uint8_t> as_writable_bytes(std::span<Byte> value) {
+   return {reinterpret_cast<std::uint8_t*>(value.data()), value.size_bytes()};
+}
+
+template <typename Source, typename Destination> void copy_digest(const Source& source, Destination& destination) {
+   if (source.data_size() != sizeof(destination.hash)) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "crypto digest size mismatch");
+   }
+   std::memcpy(destination.hash, source.data(), sizeof(destination.hash));
+}
+
+template <typename Digest, typename Source> [[nodiscard]] Digest read_digest(const Source& source) {
+   static_assert(sizeof(source.hash) == Digest::byte_size);
+   return Digest{reinterpret_cast<const char*>(source.hash), sizeof(source.hash)};
+}
+
+template <typename Byte>
+[[nodiscard]] std::uint32_t copy_sized(std::span<const Byte> source, std::span<Byte> destination) {
+   if (destination.empty()) {
+      return static_cast<std::uint32_t>(source.size());
+   }
+   const auto size = std::min(source.size(), destination.size());
+   std::copy_n(source.begin(), size, destination.begin());
+   return static_cast<std::uint32_t>(size);
+}
+
+[[nodiscard]] std::uint32_t copy_bytes(std::span<const std::uint8_t> source, std::span<char> destination) {
+   if (destination.empty()) {
+      return static_cast<std::uint32_t>(source.size());
+   }
+   const auto size = std::min(source.size(), destination.size());
+   std::memcpy(destination.data(), source.data(), size);
+   return static_cast<std::uint32_t>(size);
+}
+
+[[nodiscard]] std::string unsigned_128_to_string(unsigned __int128 value) {
+   if (value == 0U) {
+      return "0";
+   }
+   auto result = std::string{};
+   while (value != 0U) {
+      result.push_back(static_cast<char>('0' + value % 10U));
+      value /= 10U;
+   }
+   std::reverse(result.begin(), result.end());
+   return result;
+}
+
+void require_privileged(const oracle_state& state, std::uint64_t receiver) {
+   if (!state.privileged_accounts.contains(receiver)) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "contract is not privileged");
+   }
+}
 
 boost::asio::awaitable<std::optional<table>> lookup_table(forge::db::object::transaction& transaction,
                                                           std::uint64_t code, std::uint64_t scope,
@@ -170,11 +276,7 @@ void host::impl::register_intrinsics() {
    static const auto registered = [] {
 #define FORGE_CONTRACT_TEST_REGISTER(version, capability, header, feature, identifier, module_name, import_name,       \
                                      result, arguments)                                                                \
-   []<typename Host>() {                                                                                               \
-      if constexpr (requires { &Host::identifier; }) {                                                                 \
-         functions::template add<&Host::identifier>(#module_name, #import_name);                                       \
-      }                                                                                                                \
-   }.template operator()<impl>();
+   functions::template add<&impl::identifier>(#module_name, #import_name);
       FORGE_CONTRACT_INTRINSICS(FORGE_CONTRACT_TEST_REGISTER)
 #undef FORGE_CONTRACT_TEST_REGISTER
       return true;
@@ -182,14 +284,18 @@ void host::impl::register_intrinsics() {
    static_cast<void>(registered);
 }
 
-void host::impl::begin_invocation(std::uint64_t receiver, std::vector<std::uint8_t> data) {
+void host::impl::begin_invocation(std::uint64_t receiver, std::uint64_t first_receiver,
+                                  std::vector<std::uint8_t> data) {
    if (transaction_) {
       fail_database("contract database invocation is already active");
    }
    transaction_.emplace(run(store_->begin_transaction()));
+   state_before_invocation_ = state_;
    receiver_ = receiver;
+   first_receiver_ = first_receiver;
    action_data_ = std::move(data);
    result_ = {};
+   last_call_return_value_.clear();
    iterators_.clear();
    object_iterators_.clear();
    end_iterators_.clear();
@@ -199,17 +305,22 @@ void host::impl::begin_invocation(std::uint64_t receiver, std::vector<std::uint8
 void host::impl::commit_invocation() {
    run(transaction_->commit());
    transaction_.reset();
+   state_before_invocation_.reset();
 }
 
 void host::impl::rollback_invocation() {
    run(transaction_->rollback());
    transaction_.reset();
+   if (state_before_invocation_) {
+      state_ = std::move(*state_before_invocation_);
+      state_before_invocation_.reset();
+   }
 }
 
 invocation_result host::impl::invoke(std::span<const std::uint8_t> code, std::uint64_t receiver,
                                      std::uint64_t first_receiver, std::uint64_t action,
                                      std::vector<std::uint8_t> data) {
-   begin_invocation(receiver, std::move(data));
+   begin_invocation(receiver, first_receiver, std::move(data));
    auto bytes = forge::vm::wasm::wasm_code{code.begin(), code.end()};
    try {
       auto vm =
@@ -225,6 +336,24 @@ invocation_result host::impl::invoke(std::span<const std::uint8_t> code, std::ui
       std::rethrow_exception(failure);
    }
    return result_;
+}
+
+void host::impl::configure(oracle_state state) {
+   if (transaction_) {
+      fail_database("cannot configure contract test host during an invocation");
+   }
+   state_ = std::move(state);
+}
+
+oracle_state host::impl::state() const {
+   return state_;
+}
+
+void host::impl::register_contract(std::uint64_t account, std::vector<std::uint8_t> code) {
+   if (transaction_) {
+      fail_database("cannot register a contract during an invocation");
+   }
+   contracts_.insert_or_assign(account, std::move(code));
 }
 
 std::optional<table> host::impl::find_table(std::uint64_t code, std::uint64_t scope, std::uint64_t table_name) {
@@ -317,6 +446,497 @@ void host::impl::erase_iterator(std::int32_t iterator) {
    entry.erased = true;
 }
 
+void host::impl::require_recipient(std::uint64_t account) {
+   if (!is_account(account)) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "require_recipient account does not exist");
+   }
+   if (std::find(state_.recipients.begin(), state_.recipients.end(), account) == state_.recipients.end()) {
+      state_.recipients.push_back(account);
+   }
+}
+
+void host::impl::require_auth(std::uint64_t account) const {
+   if (!has_auth(account)) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "missing required authority");
+   }
+}
+
+bool host::impl::has_auth(std::uint64_t account) const {
+   return state_.authorized_accounts.contains(account);
+}
+
+void host::impl::require_auth2(std::uint64_t account, std::uint64_t permission) const {
+   if (!state_.authorized_permissions.contains({account, permission})) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "missing required authority");
+   }
+}
+
+bool host::impl::is_account(std::uint64_t account) const {
+   return account == receiver_ || state_.accounts.contains(account);
+}
+
+void host::impl::send_inline(std::span<const char> action) {
+   state_.inline_actions.emplace_back(as_bytes(action).begin(), as_bytes(action).end());
+}
+
+void host::impl::send_context_free_inline(std::span<const char> action) {
+   state_.context_free_inline_actions.emplace_back(as_bytes(action).begin(), as_bytes(action).end());
+}
+
+std::uint64_t host::impl::publication_time() const {
+   return state_.publication_time;
+}
+
+std::uint32_t host::impl::get_code_hash(std::uint64_t account, std::uint32_t version,
+                                        output_span<char, 1> result) const {
+   const auto found = state_.code_hashes.find(account);
+   const auto value = found == state_.code_hashes.end() ? code_hash{} : found->second;
+   const auto packed = forge::raw::pack(packed_code_hash_result{
+       .version = forge::unsigned_int{std::min(version, std::uint32_t{0})},
+       .sequence = value.sequence,
+       .digest = value.digest,
+       .vm_type = value.vm_type,
+       .vm_version = value.vm_version,
+   });
+   if (result.size() >= packed.size()) {
+      std::memcpy(result.data(), packed.data(), packed.size());
+   }
+   return static_cast<std::uint32_t>(packed.size());
+}
+
+std::int64_t host::impl::call(std::uint64_t receiver, std::uint64_t flags, std::span<const char> data) {
+   static_cast<void>(flags);
+   const auto target = contracts_.find(receiver);
+   if (target == contracts_.end()) {
+      return -1;
+   }
+
+   auto code = forge::vm::wasm::wasm_code{target->second.begin(), target->second.end()};
+   auto nested_allocator = forge::vm::wasm::wasm_allocator{};
+   auto allocator_guard = wasm_allocator_guard{nested_allocator};
+   auto vm = forge::vm::wasm::backend<functions, wasm, forge::vm::wasm::compatibility_options>{code, *this,
+                                                                                               &nested_allocator};
+   if (vm.get_module().get_exported_function("__forge_call") == std::numeric_limits<std::uint32_t>::max()) {
+      return -1;
+   }
+
+   const auto previous_receiver = receiver_;
+   const auto previous_call_data = std::move(call_data_);
+   const auto previous_call_return = std::move(call_return_value_);
+   receiver_ = receiver;
+   call_data_.assign(as_bytes(data).begin(), as_bytes(data).end());
+   call_return_value_.clear();
+   try {
+      vm(*this, "env", "__forge_call", previous_receiver, receiver);
+      const auto result = std::move(call_return_value_);
+      receiver_ = previous_receiver;
+      call_data_ = previous_call_data;
+      call_return_value_ = previous_call_return;
+      last_call_return_value_ = result;
+      return static_cast<std::int64_t>(result.size());
+   } catch (...) {
+      receiver_ = previous_receiver;
+      call_data_ = previous_call_data;
+      call_return_value_ = previous_call_return;
+      throw;
+   }
+}
+
+std::uint32_t host::impl::get_call_return_value(std::span<char> destination) const {
+   return copy_bytes(last_call_return_value_, destination);
+}
+
+std::uint32_t host::impl::get_call_data(std::span<char> destination) const {
+   return copy_bytes(call_data_, destination);
+}
+
+void host::impl::set_call_return_value(std::span<const char> value) {
+   call_return_value_.assign(as_bytes(value).begin(), as_bytes(value).end());
+}
+
+std::uint32_t host::impl::get_active_producers(output_span<std::uint64_t> producers) const {
+   const auto required = state_.active_producers.size() * sizeof(std::uint64_t);
+   if (!producers.empty()) {
+      const auto count = std::min(producers.size(), state_.active_producers.size());
+      std::copy_n(state_.active_producers.begin(), count, producers.begin());
+      return static_cast<std::uint32_t>(count * sizeof(std::uint64_t));
+   }
+   return static_cast<std::uint32_t>(required);
+}
+
+void host::impl::assert_sha256(std::span<const char> data, checksum256_input expected) const {
+   const auto actual = forge::crypto::sha256::hash(data.data(), static_cast<std::uint32_t>(data.size()));
+   if (std::memcmp(actual.data(), expected->hash, sizeof(expected->hash)) != 0) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "hash mismatch");
+   }
+}
+
+void host::impl::assert_sha1(std::span<const char> data, checksum160_input expected) const {
+   const auto actual = forge::crypto::sha1::hash(data.data(), static_cast<std::uint32_t>(data.size()));
+   if (std::memcmp(actual.data(), expected->hash, sizeof(expected->hash)) != 0) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "hash mismatch");
+   }
+}
+
+void host::impl::assert_sha512(std::span<const char> data, checksum512_input expected) const {
+   const auto actual = forge::crypto::sha512::hash(data.data(), static_cast<std::uint32_t>(data.size()));
+   if (std::memcmp(actual.data(), expected->hash, sizeof(expected->hash)) != 0) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "hash mismatch");
+   }
+}
+
+void host::impl::assert_ripemd160(std::span<const char> data, checksum160_input expected) const {
+   const auto actual = forge::crypto::ripemd160::hash(data.data(), static_cast<std::uint32_t>(data.size()));
+   if (std::memcmp(actual.data(), expected->hash, sizeof(expected->hash)) != 0) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "hash mismatch");
+   }
+}
+
+void host::impl::sha256(std::span<const char> data, checksum256_output result) const {
+   copy_digest(forge::crypto::sha256::hash(data.data(), static_cast<std::uint32_t>(data.size())), *result.get());
+}
+
+void host::impl::sha1(std::span<const char> data, checksum160_output result) const {
+   copy_digest(forge::crypto::sha1::hash(data.data(), static_cast<std::uint32_t>(data.size())), *result.get());
+}
+
+void host::impl::sha512(std::span<const char> data, checksum512_output result) const {
+   copy_digest(forge::crypto::sha512::hash(data.data(), static_cast<std::uint32_t>(data.size())), *result.get());
+}
+
+void host::impl::ripemd160(std::span<const char> data, checksum160_output result) const {
+   copy_digest(forge::crypto::ripemd160::hash(data.data(), static_cast<std::uint32_t>(data.size())), *result.get());
+}
+
+std::int32_t host::impl::recover_key(checksum256_input digest, std::span<const char> signature,
+                                     std::span<char> public_key) const {
+   const auto packed_signature = as_bytes(signature);
+   const auto value = forge::raw::unpack_exact<forge::crypto::asymmetric::signature>(packed_signature);
+   const auto recovered =
+       forge::crypto::asymmetric::public_key{value, read_digest<forge::crypto::sha256>(*digest.get()), false};
+   const auto packed = forge::raw::pack(recovered);
+   if (public_key.size() < packed.size()) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure,
+                            "destination buffer must at least be able to hold an ECC public key");
+   }
+   std::memcpy(public_key.data(), packed.data(), packed.size());
+   return static_cast<std::int32_t>(packed.size());
+}
+
+void host::impl::assert_recover_key(checksum256_input digest, std::span<const char> signature,
+                                    std::span<const char> public_key) const {
+   auto buffer = std::vector<char>(std::max(public_key.size(), std::size_t{33}));
+   const auto size = recover_key(std::move(digest), signature, buffer);
+   if (public_key.size() != static_cast<std::size_t>(size) ||
+       std::memcmp(public_key.data(), buffer.data(), public_key.size()) != 0) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "Error expected key different than recovered key");
+   }
+}
+
+std::int32_t host::impl::bls_g1_add(std::span<const char> left, std::span<const char> right,
+                                    std::span<char> result) const {
+   return forge::crypto::bls::primitives::g1_add(as_bytes(left), as_bytes(right), as_writable_bytes(result));
+}
+
+std::int32_t host::impl::bls_g2_add(std::span<const char> left, std::span<const char> right,
+                                    std::span<char> result) const {
+   return forge::crypto::bls::primitives::g2_add(as_bytes(left), as_bytes(right), as_writable_bytes(result));
+}
+
+std::int32_t host::impl::bls_g1_weighted_sum(std::span<const char> points, std::span<const char> scalars,
+                                             std::uint32_t count, std::span<char> result) const {
+   return forge::crypto::bls::primitives::g1_weighted_sum(as_bytes(points), as_bytes(scalars), count,
+                                                          as_writable_bytes(result));
+}
+
+std::int32_t host::impl::bls_g2_weighted_sum(std::span<const char> points, std::span<const char> scalars,
+                                             std::uint32_t count, std::span<char> result) const {
+   return forge::crypto::bls::primitives::g2_weighted_sum(as_bytes(points), as_bytes(scalars), count,
+                                                          as_writable_bytes(result));
+}
+
+std::int32_t host::impl::bls_pairing(std::span<const char> g1_points, std::span<const char> g2_points,
+                                     std::uint32_t count, std::span<char> result) const {
+   return forge::crypto::bls::primitives::pairing(as_bytes(g1_points), as_bytes(g2_points), count,
+                                                  as_writable_bytes(result));
+}
+
+std::int32_t host::impl::bls_g1_map(std::span<const char> element, std::span<char> result) const {
+   return forge::crypto::bls::primitives::g1_map(as_bytes(element), as_writable_bytes(result));
+}
+
+std::int32_t host::impl::bls_g2_map(std::span<const char> element, std::span<char> result) const {
+   return forge::crypto::bls::primitives::g2_map(as_bytes(element), as_writable_bytes(result));
+}
+
+std::int32_t host::impl::bls_fp_mod(std::span<const char> scalar, std::span<char> result) const {
+   return forge::crypto::bls::primitives::field_mod(as_bytes(scalar), as_writable_bytes(result));
+}
+
+std::int32_t host::impl::bls_fp_mul(std::span<const char> left, std::span<const char> right,
+                                    std::span<char> result) const {
+   return forge::crypto::bls::primitives::field_multiply(as_bytes(left), as_bytes(right), as_writable_bytes(result));
+}
+
+std::int32_t host::impl::bls_fp_exp(std::span<const char> base, std::span<const char> exponent,
+                                    std::span<char> result) const {
+   return forge::crypto::bls::primitives::field_exponentiate(as_bytes(base), as_bytes(exponent),
+                                                             as_writable_bytes(result));
+}
+
+void host::impl::sha3(std::span<const char> data, std::span<char> hash, std::int32_t keccak) const {
+   const auto value = forge::crypto::sha3::hash(data.data(), static_cast<std::uint32_t>(data.size()), keccak != 1);
+   const auto size = std::min(hash.size(), value.data_size());
+   std::memcpy(hash.data(), value.data(), size);
+}
+
+std::int32_t host::impl::blake2_f(std::uint32_t rounds, std::span<const char> state, std::span<const char> message,
+                                  std::span<const char> offset0, std::span<const char> offset1, std::int32_t final,
+                                  std::span<char> result) const {
+   try {
+      const auto bytes = [](std::span<const char> value) {
+         return forge::crypto::bytes{reinterpret_cast<const std::uint8_t*>(value.data()),
+                                     reinterpret_cast<const std::uint8_t*>(value.data() + value.size())};
+      };
+      const auto value = forge::crypto::blake2b(rounds, bytes(state), bytes(message), bytes(offset0), bytes(offset1),
+                                                final == 1, [] {});
+      if (result.size() < value.size()) {
+         return -1;
+      }
+      std::memcpy(result.data(), value.data(), value.size());
+      return 0;
+   } catch (const forge::crypto::blake2::exceptions::invalid_input&) {
+      return -1;
+   }
+}
+
+std::int32_t host::impl::k1_recover(std::span<const char> signature, std::span<const char> digest,
+                                    std::span<char> public_key) const {
+   try {
+      const auto to_bytes = [](std::span<const char> value) {
+         return forge::crypto::secp256k1::recover_bytes(value.begin(), value.end());
+      };
+      const auto value = forge::crypto::secp256k1::recover(to_bytes(signature), to_bytes(digest));
+      if (public_key.size() < value.size()) {
+         return -1;
+      }
+      std::memcpy(public_key.data(), value.data(), value.size());
+      return 0;
+   } catch (const std::exception&) {
+      return -1;
+   }
+}
+
+std::int32_t host::impl::alt_bn128_add(std::span<const char> left, std::span<const char> right,
+                                       std::span<char> result) const {
+   return forge::crypto::bn256::add(as_bytes(left), as_bytes(right), as_writable_bytes(result));
+}
+
+std::int32_t host::impl::alt_bn128_mul(std::span<const char> point, std::span<const char> scalar,
+                                       std::span<char> result) const {
+   return forge::crypto::bn256::multiply(as_bytes(point), as_bytes(scalar), as_writable_bytes(result));
+}
+
+std::int32_t host::impl::alt_bn128_pair(std::span<const char> pairs) const {
+   const auto value = forge::crypto::bn256::pairing_check(as_bytes(pairs));
+   return value < 0 ? -1 : (value != 0 ? 0 : 1);
+}
+
+std::int32_t host::impl::mod_exp(std::span<const char> base, std::span<const char> exponent,
+                                 std::span<const char> modulus, std::span<char> result) const {
+   try {
+      const auto to_bytes = [](std::span<const char> value) {
+         return forge::crypto::bytes{reinterpret_cast<const std::uint8_t*>(value.data()),
+                                     reinterpret_cast<const std::uint8_t*>(value.data() + value.size())};
+      };
+      const auto value = forge::crypto::modexp(to_bytes(base), to_bytes(exponent), to_bytes(modulus));
+      if (result.size() < value.size()) {
+         return -1;
+      }
+      std::memcpy(result.data(), value.data(), value.size());
+      return 0;
+   } catch (const forge::crypto::modular_arithmetic::exceptions::invalid_modulus&) {
+      return -1;
+   }
+}
+
+std::int32_t host::impl::check_transaction_authorization(std::span<const char> transaction,
+                                                         std::span<const char> public_keys,
+                                                         std::span<const char> permissions) const {
+   static_cast<void>(transaction);
+   static_cast<void>(public_keys);
+   static_cast<void>(permissions);
+   return state_.transaction_authorized ? 1 : 0;
+}
+
+std::int32_t host::impl::check_permission_authorization(std::uint64_t account, std::uint64_t permission,
+                                                        std::span<const char> public_keys,
+                                                        std::span<const char> permissions,
+                                                        std::uint64_t delay_us) const {
+   static_cast<void>(public_keys);
+   static_cast<void>(permissions);
+   static_cast<void>(delay_us);
+   return state_.permission_authorized || state_.authorized_permissions.contains({account, permission}) ? 1 : 0;
+}
+
+std::int64_t host::impl::get_permission_last_used(std::uint64_t account, std::uint64_t permission) const {
+   const auto found = state_.permission_last_used.find({account, permission});
+   if (found == state_.permission_last_used.end()) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "permission does not exist");
+   }
+   return found->second;
+}
+
+std::int64_t host::impl::get_account_creation_time(std::uint64_t account) const {
+   const auto found = state_.account_creation_time.find(account);
+   if (found == state_.account_creation_time.end()) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "account does not exist");
+   }
+   return found->second;
+}
+
+void host::impl::prints(input<const char, 1> value) {
+   state_.console.append(value.get());
+}
+
+void host::impl::prints_l(std::span<const char> value) {
+   state_.console.append(value.data(), value.size());
+}
+
+void host::impl::printi(std::int64_t value) {
+   state_.console.append(std::to_string(value));
+}
+
+void host::impl::printui(std::uint64_t value) {
+   state_.console.append(std::to_string(value));
+}
+
+void host::impl::printi128(input<__int128, 16> value) {
+   const auto number = *value.get();
+   if (number < 0) {
+      state_.console.push_back('-');
+      const auto magnitude = ~static_cast<unsigned __int128>(number) + 1U;
+      state_.console.append(unsigned_128_to_string(magnitude));
+   } else {
+      state_.console.append(unsigned_128_to_string(static_cast<unsigned __int128>(number)));
+   }
+}
+
+void host::impl::printui128(uint128_input value) {
+   state_.console.append(unsigned_128_to_string(*value.get()));
+}
+
+void host::impl::printsf(float value) {
+   auto stream = std::ostringstream{};
+   stream.setf(std::ios::scientific, std::ios::floatfield);
+   stream.precision(std::numeric_limits<float>::digits10);
+   stream << value;
+   state_.console.append(stream.str());
+}
+
+void host::impl::printdf(double value) {
+   auto stream = std::ostringstream{};
+   stream.setf(std::ios::scientific, std::ios::floatfield);
+   stream.precision(std::numeric_limits<double>::digits10);
+   stream << value;
+   state_.console.append(stream.str());
+}
+
+void host::impl::printqf(float128_input value) {
+   state_.console.append(format(*value.get()));
+}
+
+void host::impl::printn(std::uint64_t value) {
+   state_.console.append(forge::chain::protocol::name{value}.to_string());
+}
+
+void host::impl::printhex(std::span<const char> value) {
+   state_.console.append(forge::crypto::to_hex(reinterpret_cast<const std::uint8_t*>(value.data()),
+                                               static_cast<std::uint32_t>(value.size())));
+}
+
+void host::impl::get_resource_limits(std::uint64_t account, output<std::int64_t> ram_bytes,
+                                     output<std::int64_t> net_weight, output<std::int64_t> cpu_weight) const {
+   const auto found = state_.limits.find(account);
+   const auto value = found == state_.limits.end() ? resource_limits{} : found->second;
+   *ram_bytes.get() = value.ram_bytes;
+   *net_weight.get() = value.net_weight;
+   *cpu_weight.get() = value.cpu_weight;
+}
+
+void host::impl::set_resource_limits(std::uint64_t account, std::int64_t ram_bytes, std::int64_t net_weight,
+                                     std::int64_t cpu_weight) {
+   require_privileged(state_, receiver_);
+   if (ram_bytes < -1 || net_weight < -1 || cpu_weight < -1) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "invalid resource limit; expected [-1, INT64_MAX]");
+   }
+   state_.limits.insert_or_assign(account, resource_limits{ram_bytes, net_weight, cpu_weight});
+}
+
+std::int64_t host::impl::set_proposed_producers(std::span<const char> producer_data) {
+   return set_proposed_producers_ex(0U, producer_data);
+}
+
+std::int64_t host::impl::set_proposed_producers_ex(std::uint64_t format, std::span<const char> producer_data) {
+   require_privileged(state_, receiver_);
+   if (format > 1U) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "Producer schedule is in an unknown format!");
+   }
+   state_.proposed_producers.assign(as_bytes(producer_data).begin(), as_bytes(producer_data).end());
+   return static_cast<std::int64_t>(++state_.proposed_producer_version);
+}
+
+bool host::impl::is_privileged(std::uint64_t account) const {
+   return state_.privileged_accounts.contains(account);
+}
+
+void host::impl::set_privileged(std::uint64_t account, bool value) {
+   require_privileged(state_, receiver_);
+   if (value) {
+      state_.privileged_accounts.insert(account);
+   } else {
+      state_.privileged_accounts.erase(account);
+   }
+}
+
+void host::impl::set_blockchain_parameters_packed(std::span<const char> data) {
+   require_privileged(state_, receiver_);
+   state_.blockchain_parameters.assign(as_bytes(data).begin(), as_bytes(data).end());
+}
+
+std::uint32_t host::impl::get_blockchain_parameters_packed(std::span<char> data) const {
+   if (data.empty()) {
+      return static_cast<std::uint32_t>(state_.blockchain_parameters.size());
+   }
+   if (data.size() < state_.blockchain_parameters.size()) {
+      return 0U;
+   }
+   std::memcpy(data.data(), state_.blockchain_parameters.data(), state_.blockchain_parameters.size());
+   return static_cast<std::uint32_t>(state_.blockchain_parameters.size());
+}
+
+void host::impl::set_kv_parameters_packed(std::span<const char> data) {
+   require_privileged(state_, receiver_);
+   state_.kv_parameters.assign(as_bytes(data).begin(), as_bytes(data).end());
+}
+
+void host::impl::preactivate_feature(checksum256_input digest) {
+   require_privileged(state_, receiver_);
+   const auto value = read_digest<forge::crypto::sha256>(*digest.get());
+   if (!state_.available_features.empty() && !state_.available_features.contains(value)) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "protocol feature is not recognized");
+   }
+   state_.activated_features.insert(value);
+}
+
+void host::impl::set_finalizers(std::uint64_t format, std::span<const char> data) {
+   require_privileged(state_, receiver_);
+   if (format != 0U) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "Finalizer policy is in an unknown format!");
+   }
+   state_.finalizers.assign(as_bytes(data).begin(), as_bytes(data).end());
+}
+
 void host::impl::eosio_assert(std::uint32_t test, input<const char, 1> message) {
    if (test == 0U) {
       const auto size = strnlen(message.get(), max_assert_message_size);
@@ -364,6 +984,84 @@ void host::impl::set_action_return_value(forge::vm::wasm::span<const char> value
 
 std::uint64_t host::impl::current_receiver() const {
    return receiver_;
+}
+
+std::uint64_t host::impl::current_time() const {
+   return state_.current_time;
+}
+
+std::uint32_t host::impl::get_block_num() const {
+   return state_.block_num;
+}
+
+bool host::impl::is_feature_activated(checksum256_input digest) const {
+   return state_.activated_features.contains(read_digest<forge::crypto::sha256>(*digest.get()));
+}
+
+std::uint64_t host::impl::get_sender() const {
+   return state_.sender;
+}
+
+void host::impl::send_deferred(input<unsigned __int128, 16> sender_id, std::uint64_t payer,
+                               std::span<const char> transaction, std::uint32_t replace_existing) {
+   const auto key = *sender_id.get();
+   if (payer == 0U) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "deferred transaction payer must not be zero");
+   }
+   if (state_.deferred.contains(key) && replace_existing == 0U) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure,
+                            "deferred transaction with the same sender_id already exists");
+   }
+   state_.deferred.insert_or_assign(
+       key, deferred_transaction{.sender_id = key,
+                                 .payer = payer,
+                                 .packed = {as_bytes(transaction).begin(), as_bytes(transaction).end()}});
+}
+
+std::int32_t host::impl::cancel_deferred(input<unsigned __int128, 16> sender_id) {
+   return state_.deferred.erase(*sender_id.get()) != 0U ? 1 : 0;
+}
+
+std::uint32_t host::impl::read_transaction(std::span<char> destination) const {
+   return copy_bytes(state_.transaction, destination);
+}
+
+std::uint32_t host::impl::transaction_size() const {
+   return static_cast<std::uint32_t>(state_.transaction.size());
+}
+
+std::int32_t host::impl::tapos_block_num() const {
+   return state_.tapos_block_num;
+}
+
+std::int32_t host::impl::tapos_block_prefix() const {
+   return state_.tapos_block_prefix;
+}
+
+std::uint32_t host::impl::expiration() const {
+   return state_.expiration;
+}
+
+std::int32_t host::impl::get_action(std::uint32_t type, std::uint32_t index, std::span<char> destination) const {
+   if (type > 1U) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "action is not found");
+   }
+   const auto& actions = state_.actions[type];
+   if (index >= actions.size()) {
+      return -1;
+   }
+   const auto& action = actions[index];
+   if (destination.size() >= action.size()) {
+      std::memcpy(destination.data(), action.data(), action.size());
+   }
+   return static_cast<std::int32_t>(action.size());
+}
+
+std::int32_t host::impl::get_context_free_data(std::uint32_t index, std::span<char> destination) const {
+   if (index >= state_.context_free_data.size()) {
+      return -1;
+   }
+   return static_cast<std::int32_t>(copy_bytes(state_.context_free_data[index], destination));
 }
 
 std::vector<std::uint8_t> host::impl::snapshot() const {
