@@ -49,7 +49,7 @@ set(
 list(JOIN _forge_contract_path_map_options " " _forge_contract_path_map_flags)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
-find_package(Boost 1.90.0 EXACT REQUIRED CONFIG COMPONENTS headers)
+find_package(Boost 1.90.0 REQUIRED CONFIG COMPONENTS headers)
 
 set(_forge_contract_boost_include "")
 foreach(_candidate IN LISTS Boost_INCLUDE_DIRS)

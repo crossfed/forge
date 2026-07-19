@@ -27,6 +27,13 @@ add_test(
    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/guest/tests/tooling/test_runtime_bundle_policy.py
 )
 add_test(
+   NAME test_forge_contract_sdk_dependencies
+   COMMAND
+      ${CMAKE_COMMAND}
+      -DFORGE_CONTRACT_SDK_CMAKE=${CMAKE_SOURCE_DIR}/guest/CMakeLists.txt
+      -P ${CMAKE_SOURCE_DIR}/guest/tests/tooling/check_sdk_dependencies.cmake
+)
+add_test(
    NAME test_forge_contract_sdk_guest_runtime_archive
    COMMAND
       ${CMAKE_COMMAND}
