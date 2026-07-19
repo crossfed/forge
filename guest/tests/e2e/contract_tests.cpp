@@ -776,6 +776,24 @@ BOOST_AUTO_TEST_CASE(contract_oracle_executes_all_non_database_intrinsic_familie
    BOOST_TEST(!state.finalizers.empty());
 }
 
+BOOST_AUTO_TEST_CASE(contract_oracle_enforces_synchronous_call_access_mode) {
+   const auto code = read_contract(FORGE_CONTRACT_TEST_ORACLE_WASM);
+   const auto callee = protocol::make_name("callee").value;
+   const auto table = protocol::make_name("callrows").value;
+
+   auto host = forge::contract::testing::host{};
+   host.register_contract(callee, {code.begin(), code.end()});
+
+   BOOST_TEST(invoke_oracle(host, code, 12U) == 13U);
+   BOOST_CHECK_EXCEPTION(
+       invoke_oracle(host, code, 13U), forge::contract::testing::exceptions::database_error,
+       [](const auto& error) { return error.message() == "this API is not allowed in read only action/call"; });
+   BOOST_TEST(!host.find_table(callee, callee, table).has_value());
+
+   BOOST_TEST(invoke_oracle(host, code, 14U) == 15U);
+   BOOST_REQUIRE(host.find_primary(callee, callee, table, 1U).has_value());
+}
+
 BOOST_AUTO_TEST_CASE(contract_recovers_legacy_public_key) {
    const auto code = read_contract(FORGE_CONTRACT_TEST_RECOVERY_WASM);
    auto host = forge::contract::testing::host{};

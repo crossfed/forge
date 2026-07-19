@@ -233,6 +233,7 @@ struct host::impl {
    void commit_invocation();
    void rollback_invocation();
    void register_intrinsics();
+   void require_writable() const;
    std::int32_t cache(row_kind kind, forge::ids::object_id id, table::id_t table_id);
    std::int32_t end(row_kind kind, table::id_t table_id);
    iterator_entry& require_iterator(std::int32_t iterator, row_kind kind);
@@ -271,6 +272,7 @@ struct host::impl {
    std::map<std::uint64_t, std::vector<std::uint8_t>> contracts_;
    std::uint64_t receiver_ = 0;
    std::uint64_t first_receiver_ = 0;
+   bool read_only_ = false;
    std::vector<std::uint8_t> action_data_;
    std::vector<std::uint8_t> call_data_;
    std::vector<std::uint8_t> call_return_value_;

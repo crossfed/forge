@@ -293,6 +293,7 @@ void host::impl::begin_invocation(std::uint64_t receiver, std::uint64_t first_re
    state_before_invocation_ = state_;
    receiver_ = receiver;
    first_receiver_ = first_receiver;
+   read_only_ = false;
    action_data_ = std::move(data);
    result_ = {};
    last_call_return_value_.clear();
@@ -505,7 +506,6 @@ std::uint32_t host::impl::get_code_hash(std::uint64_t account, std::uint32_t ver
 }
 
 std::int64_t host::impl::call(std::uint64_t receiver, std::uint64_t flags, std::span<const char> data) {
-   static_cast<void>(flags);
    const auto target = contracts_.find(receiver);
    if (target == contracts_.end()) {
       return -1;
@@ -521,21 +521,25 @@ std::int64_t host::impl::call(std::uint64_t receiver, std::uint64_t flags, std::
    }
 
    const auto previous_receiver = receiver_;
+   const auto previous_read_only = read_only_;
    const auto previous_call_data = std::move(call_data_);
    const auto previous_call_return = std::move(call_return_value_);
-   receiver_ = receiver;
-   call_data_.assign(as_bytes(data).begin(), as_bytes(data).end());
-   call_return_value_.clear();
    try {
+      receiver_ = receiver;
+      read_only_ = previous_read_only || (flags & std::uint64_t{1}) != 0U;
+      call_data_.assign(as_bytes(data).begin(), as_bytes(data).end());
+      call_return_value_.clear();
       vm(*this, "env", "__forge_call", previous_receiver, receiver);
       const auto result = std::move(call_return_value_);
       receiver_ = previous_receiver;
+      read_only_ = previous_read_only;
       call_data_ = previous_call_data;
       call_return_value_ = previous_call_return;
       last_call_return_value_ = result;
       return static_cast<std::int64_t>(result.size());
    } catch (...) {
       receiver_ = previous_receiver;
+      read_only_ = previous_read_only;
       call_data_ = previous_call_data;
       call_return_value_ = previous_call_return;
       throw;
@@ -1077,8 +1081,15 @@ std::vector<std::uint8_t> host::impl::snapshot() const {
    return driver_->snapshot();
 }
 
+void host::impl::require_writable() const {
+   if (read_only_) {
+      fail_database("this API is not allowed in read only action/call");
+   }
+}
+
 std::int32_t host::impl::db_store_i64(std::uint64_t scope, std::uint64_t table_name, std::uint64_t payer,
                                       std::uint64_t primary, forge::vm::wasm::span<const char> value) {
+   require_writable();
    require_payer(payer);
    const auto owner = run(ensure_table(*transaction_, receiver_, scope, table_name, payer));
    if (run(transaction_->index<key_value_index, by_scope_primary>().find(owner.id, primary))) {
@@ -1096,6 +1107,7 @@ std::int32_t host::impl::db_store_i64(std::uint64_t scope, std::uint64_t table_n
 }
 
 void host::impl::db_update_i64(std::int32_t iterator, std::uint64_t payer, forge::vm::wasm::span<const char> value) {
+   require_writable();
    auto& entry = require_iterator(iterator, row_kind::primary);
    const auto owner = run(transaction_->get(entry.table_id));
    require_owner(owner, receiver_);
@@ -1109,6 +1121,7 @@ void host::impl::db_update_i64(std::int32_t iterator, std::uint64_t payer, forge
 }
 
 void host::impl::db_remove_i64(std::int32_t iterator) {
+   require_writable();
    auto& entry = require_iterator(iterator, row_kind::primary);
    const auto owner = run(transaction_->get(entry.table_id));
    require_owner(owner, receiver_);
@@ -1214,6 +1227,7 @@ std::int32_t host::impl::db_end_i64(std::uint64_t code, std::uint64_t scope, std
 template <typename Row, typename Index, host::impl::row_kind Kind, typename Secondary>
 std::int32_t host::impl::secondary_store(std::uint64_t scope, std::uint64_t table_name, std::uint64_t payer,
                                          std::uint64_t primary, Secondary secondary) {
+   require_writable();
    require_payer(payer);
    require_ordered(secondary);
    const auto owner = run(ensure_table(*transaction_, receiver_, scope, table_name, payer));
@@ -1232,6 +1246,7 @@ std::int32_t host::impl::secondary_store(std::uint64_t scope, std::uint64_t tabl
 
 template <typename Row, typename Index, host::impl::row_kind Kind, typename Secondary>
 void host::impl::secondary_update(std::int32_t iterator, std::uint64_t payer, Secondary secondary) {
+   require_writable();
    require_ordered(secondary);
    const auto& entry = require_iterator(iterator, Kind);
    const auto owner = run(transaction_->get(entry.table_id));
@@ -1246,6 +1261,7 @@ void host::impl::secondary_update(std::int32_t iterator, std::uint64_t payer, Se
 
 template <typename Row, typename Index, host::impl::row_kind Kind>
 void host::impl::secondary_remove(std::int32_t iterator) {
+   require_writable();
    const auto& entry = require_iterator(iterator, Kind);
    const auto owner = run(transaction_->get(entry.table_id));
    require_owner(owner, receiver_);

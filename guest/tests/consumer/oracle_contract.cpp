@@ -27,6 +27,9 @@ constexpr auto oracle_account = make_name("oracle");
 constexpr auto alice_account = make_name("alice");
 constexpr auto callee_account = make_name("callee");
 constexpr auto active_permission = make_name("active");
+constexpr auto call_table = make_name("callrows");
+constexpr auto call_primary = std::uint64_t{1};
+constexpr auto mutation_marker = std::uint32_t{0xffffffffU};
 
 } // namespace
 
@@ -60,6 +63,12 @@ class [[forge::contract("oracle")]] oracle : public forge::contract::context {
          return rollback_api();
       case 11:
          return malformed_memory();
+      case 12:
+         return read_only_call();
+      case 13:
+         return read_only_mutation();
+      case 14:
+         return read_write_mutation();
       default:
          forge::contract::check(false, "unknown oracle scenario");
       }
@@ -67,6 +76,10 @@ class [[forge::contract("oracle")]] oracle : public forge::contract::context {
    }
 
    [[forge::call]] std::uint32_t sum(std::uint32_t left, std::uint32_t right) const {
+      if (left == mutation_marker) {
+         constexpr auto value = std::array<char, 1>{42};
+         ::db_store_i64(get_self().value, call_table.value, get_self().value, call_primary, value.data(), value.size());
+      }
       return left + right;
    }
 
@@ -204,6 +217,26 @@ class [[forge::contract("oracle")]] oracle : public forge::contract::context {
       const auto call = forge::contract::call_wrapper<"sum"_i, &oracle::sum>{callee_account};
       forge::contract::check(call(20U, 22U) == 42U, "synchronous call returned wrong value");
       return 10U;
+   }
+
+   std::uint64_t read_only_call() const {
+      const auto call =
+          forge::contract::call_wrapper<"sum"_i, &oracle::sum, forge::contract::access_mode::read_only>{callee_account};
+      forge::contract::check(call(20U, 22U) == 42U, "read-only synchronous call returned wrong value");
+      return 13U;
+   }
+
+   std::uint64_t read_only_mutation() const {
+      const auto call =
+          forge::contract::call_wrapper<"sum"_i, &oracle::sum, forge::contract::access_mode::read_only>{callee_account};
+      static_cast<void>(call(mutation_marker, 0U));
+      return 14U;
+   }
+
+   std::uint64_t read_write_mutation() const {
+      const auto call = forge::contract::call_wrapper<"sum"_i, &oracle::sum>{callee_account};
+      static_cast<void>(call(mutation_marker, 0U));
+      return 15U;
    }
 
    std::uint64_t rollback_api() const {
