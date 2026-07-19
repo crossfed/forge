@@ -904,22 +904,26 @@ class type_encoder {
          output_.failed = true;
          return;
       }
+      const auto generate_codec = has_publicly_accessible_name(*record) && record->getOwningModule() == nullptr;
+      const auto codec_name = generate_codec ? "::" + record->getQualifiedNameAsString() : std::string{};
       const auto identity = record_layout_identity(*record);
       const auto [claimed, inserted] = output_.struct_declarations.try_emplace(name, identity);
       if (!inserted && claimed->second == identity) {
+         if (generate_codec) {
+            source_record_codecs_.insert(codec_name);
+         }
          return;
       }
       const auto duplicate = !inserted;
 
       auto shape = struct_shape{.name = name};
       auto codec = record_codec_shape{};
-      const auto generate_codec = has_publicly_accessible_name(*record) && record->getOwningModule() == nullptr;
       if (record->isUnion()) {
          fail("union record", declaration.getLocation());
          return;
       }
       if (generate_codec) {
-         codec.name = "::" + record->getQualifiedNameAsString();
+         codec.name = codec_name;
          codec.forward_declaration = make_forward_declaration(*record);
          source_record_codecs_.insert(codec.name);
       }

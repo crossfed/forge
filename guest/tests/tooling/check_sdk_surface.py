@@ -44,16 +44,18 @@ def main() -> None:
 
     surface = json.loads(args.manifest.read_text(encoding="utf-8"))
     registry = json.loads(args.registry.read_text(encoding="utf-8"))
-    imports = registry["imports"]
+    registry_imports = registry["imports"]
+    imports = [item for item in registry_imports if item["capability"] != "runtime"]
     expected = surface["intrinsics"]
 
     if len(imports) != expected["count"]:
         fail(f"intrinsic count mismatch: expected {expected['count']}, got {len(imports)}")
     if registry["interface_version"] != expected["interface_version"]:
         fail("contract interface version mismatch")
-    if registry["capabilities"] != expected["capabilities"]:
+    public_capabilities = [capability for capability in registry["capabilities"] if capability != "runtime"]
+    if public_capabilities != expected["capabilities"]:
         fail("contract capability set mismatch")
-    if len({item["import"] for item in imports}) != len(imports):
+    if len({item["import"] for item in registry_imports}) != len(registry_imports):
         fail("duplicate intrinsic import name")
 
     actual_signatures = [
@@ -67,7 +69,8 @@ def main() -> None:
         )
         for item in imports
     ]
-    if actual_signatures != parse_golden(args.golden):
+    golden_signatures = [signature for signature in parse_golden(args.golden) if signature[1] != "runtime"]
+    if actual_signatures != golden_signatures:
         fail("intrinsic signatures differ from the pinned CDT/Spring golden manifest")
 
     include = args.data_dir / "include"

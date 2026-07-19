@@ -177,6 +177,11 @@ def write_internal_header(
     for entry in visible_entries:
         result = c_type(entry["result"])
         parameters = c_type(entry["parameters"]) or "void"
+        if global_alias:
+            result = re.sub(r"\buint128_t\b", "unsigned __int128", result)
+            result = re.sub(r"\bint128_t\b", "__int128", result)
+            parameters = re.sub(r"\buint128_t\b", "unsigned __int128", parameters)
+            parameters = re.sub(r"\bint128_t\b", "__int128", parameters)
         parameters = re.sub(r"struct capi_checksum(160|256|512)", r"::capi_checksum\1", parameters)
         noreturn = " __attribute__((noreturn))" if entry["identifier"] == "eosio_exit" else ""
         lines.append(

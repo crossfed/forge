@@ -79,7 +79,11 @@ forge_add_contract(
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/sdk_surface_manifest.json" _sdk_surface_json)
 set(_surface_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/surface")
 file(MAKE_DIRECTORY "${_surface_generated_dir}")
-set(_surface_sources "${CMAKE_CURRENT_SOURCE_DIR}/asset_source_compat.cpp")
+set(
+   _surface_sources
+   "${CMAKE_CURRENT_SOURCE_DIR}/asset_source_compat.cpp"
+   "${CMAKE_CURRENT_SOURCE_DIR}/eosio_internal_db_header.cpp"
+)
 
 string(JSON _surface_header_count LENGTH "${_sdk_surface_json}" donor_cpp_headers)
 math(EXPR _surface_header_last "${_surface_header_count} - 1")

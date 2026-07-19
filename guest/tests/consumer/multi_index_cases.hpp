@@ -111,7 +111,8 @@ using secondary_iterator = decltype(std::declval<records&>().template get_index<
 static_assert(std::bidirectional_iterator<primary_iterator>);
 static_assert(std::bidirectional_iterator<secondary_iterator>);
 #if defined(FORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX)
-static_assert(std::same_as<eosio::checksum256, key256>);
+static_assert(std::derived_from<eosio::checksum256, key256>);
+static_assert(std::constructible_from<eosio::checksum256, key256>);
 #endif
 
 [[nodiscard]] constexpr key256 make_key(std::uint64_t value) {

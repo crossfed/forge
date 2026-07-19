@@ -1,5 +1,6 @@
 module;
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -8,7 +9,6 @@ module;
 #include <tuple>
 #include <type_traits>
 #include <utility>
-#include <vector>
 
 export module forge.contract.dispatcher;
 
@@ -20,33 +20,100 @@ export namespace forge::contract {
 
 namespace detail {
 
+inline constexpr auto local_buffer_size = std::size_t{512};
+
+class invocation_buffer {
+ public:
+   explicit invocation_buffer(std::size_t size) : size_(size) {
+      if (size_ > local_.size()) {
+         data_ = static_cast<std::uint8_t*>(std::malloc(size_));
+         check(data_ != nullptr, "contract invocation buffer allocation failed");
+      }
+   }
+
+   invocation_buffer(const invocation_buffer&) = delete;
+   invocation_buffer& operator=(const invocation_buffer&) = delete;
+
+   ~invocation_buffer() {
+      if (data_ != local_.data()) {
+         std::free(data_);
+      }
+   }
+
+   [[nodiscard]] std::uint8_t* data() noexcept {
+      return data_;
+   }
+
+   [[nodiscard]] const std::uint8_t* data() const noexcept {
+      return data_;
+   }
+
+   [[nodiscard]] std::size_t size() const noexcept {
+      return size_;
+   }
+
+ private:
+   std::array<std::uint8_t, local_buffer_size> local_{};
+   std::uint8_t* data_ = local_.data();
+   std::size_t size_ = 0;
+};
+
+template <typename Contract> void set_action_execution_type(Contract& instance) {
+   if constexpr (requires { typename Contract::exec_type_t; }) {
+      using exec_type = typename Contract::exec_type_t;
+      if constexpr (requires { instance.set_exec_type(exec_type::action); }) {
+         instance.set_exec_type(exec_type::action);
+      }
+   }
+}
+
+template <typename Contract> void set_call_execution_type(Contract& instance) {
+   if constexpr (requires { typename Contract::exec_type_t; }) {
+      using exec_type = typename Contract::exec_type_t;
+      if constexpr (requires { instance.set_exec_type(exec_type::call); }) {
+         instance.set_exec_type(exec_type::call);
+      }
+   }
+}
+
+template <typename Result, typename Setter>
+void set_packed_result(const Result& result, const char* size_error, Setter&& setter) {
+   const auto size = forge::raw::pack_size(result);
+   check(size <= std::numeric_limits<std::uint32_t>::max(), size_error);
+
+   auto bytes = invocation_buffer{size};
+   if (size != 0U) {
+      auto stream = forge::datastream<std::uint8_t*>{bytes.data(), bytes.size()};
+      forge::raw::pack(stream, result);
+   }
+   setter(bytes.data(), static_cast<std::uint32_t>(bytes.size()));
+}
+
 template <typename Contract, typename Result, typename... Arguments, typename Method>
 void execute_action_impl(chain::protocol::name self, chain::protocol::name first_receiver, Method method) {
    const auto size = action_data_size();
-   auto bytes = std::vector<std::uint8_t>(size);
+   auto bytes = invocation_buffer{size};
    if (size != 0U) {
       check(read_action_data(bytes.data(), size) == size, "failed to read complete action data");
    }
-   const auto empty = std::uint8_t{};
-   const auto* data = bytes.empty() ? &empty : bytes.data();
 
    auto arguments = std::tuple<std::decay_t<Arguments>...>{};
-   auto stream = forge::datastream<const std::uint8_t*>{data, bytes.size()};
+   auto stream = forge::datastream<const std::uint8_t*>{bytes.data(), bytes.size()};
    forge::raw::unpack(stream, arguments);
 
    auto contract_stream = typename Contract::stream_type{
-       reinterpret_cast<const char*>(data),
+       reinterpret_cast<const char*>(bytes.data()),
        bytes.size(),
    };
    auto instance = Contract{self, first_receiver, contract_stream};
+   set_action_execution_type(instance);
    if constexpr (std::is_void_v<Result>) {
       std::apply([&](auto&&... value) { (instance.*method)(std::forward<decltype(value)>(value)...); }, arguments);
    } else {
       auto result = std::apply(
           [&](auto&&... value) { return (instance.*method)(std::forward<decltype(value)>(value)...); }, arguments);
-      auto packed = forge::raw::pack(result);
-      check(packed.size() <= std::numeric_limits<std::uint32_t>::max(), "action return value is too large");
-      set_action_return_value(packed.data(), static_cast<std::uint32_t>(packed.size()));
+      set_packed_result(result, "action return value is too large",
+                        [](void* data, std::uint32_t size) { set_action_return_value(data, size); });
    }
 }
 
@@ -62,14 +129,13 @@ namespace detail {
 
 template <typename Contract, typename Result, typename... Arguments, typename Method>
 void execute_call_impl(chain::protocol::name sender, chain::protocol::name receiver, Method method) {
+   static_cast<void>(sender);
    const auto size = get_call_data(nullptr, 0U);
-   auto bytes = std::vector<std::uint8_t>(size);
+   auto bytes = invocation_buffer{size};
    if (size != 0U) {
       check(get_call_data(bytes.data(), size) == size, "failed to read complete sync call data");
    }
-   const auto empty = std::uint8_t{};
-   const auto* data = bytes.empty() ? &empty : bytes.data();
-   auto stream = forge::datastream<const std::uint8_t*>{data, bytes.size()};
+   auto stream = forge::datastream<const std::uint8_t*>{bytes.data(), bytes.size()};
    auto header = call_data_header{};
    forge::raw::unpack(stream, header);
    check(header.version == 0U, "unsupported sync call data version");
@@ -79,18 +145,18 @@ void execute_call_impl(chain::protocol::name sender, chain::protocol::name recei
    check(stream.remaining() == 0U, "sync call data contains trailing bytes");
 
    auto contract_stream = typename Contract::stream_type{
-       reinterpret_cast<const char*>(data),
+       reinterpret_cast<const char*>(bytes.data()),
        bytes.size(),
    };
-   auto instance = Contract{receiver, sender, contract_stream};
+   auto instance = Contract{receiver, receiver, contract_stream};
+   set_call_execution_type(instance);
    if constexpr (std::is_void_v<Result>) {
       std::apply([&](auto&&... value) { (instance.*method)(std::forward<decltype(value)>(value)...); }, arguments);
    } else {
       auto result = std::apply(
           [&](auto&&... value) { return (instance.*method)(std::forward<decltype(value)>(value)...); }, arguments);
-      auto packed = forge::raw::pack(result);
-      check(packed.size() <= std::numeric_limits<std::uint32_t>::max(), "sync call return value is too large");
-      set_call_return_value(packed.data(), static_cast<std::uint32_t>(packed.size()));
+      set_packed_result(result, "sync call return value is too large",
+                        [](void* data, std::uint32_t size) { set_call_return_value(data, size); });
    }
 }
 

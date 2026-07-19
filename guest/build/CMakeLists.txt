@@ -39,6 +39,7 @@ foreach(_source IN LISTS _implementation_sources)
 endforeach()
 set(_depfile "${_generated}/${FORGE_CONTRACT_TARGET}.abi.d")
 set(_manifest "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_TARGET}.contract.json")
+set(_contract_optimization "$<$<NOT:$<CONFIG:Debug>>:-O3>")
 
 add_library(forge_guest_raw STATIC "${_runtime}/stream.cpp" "${_runtime}/codec.cpp")
 target_sources(
@@ -164,6 +165,7 @@ foreach(_target forge_guest_raw forge_guest_crypto forge_guest_chain_protocol fo
       -fvisibility=hidden
       -fno-ident
       -mcpu=mvp
+      ${_contract_optimization}
    )
 endforeach()
 
@@ -321,6 +323,7 @@ target_compile_options(
       -fno-ident
       -mcpu=mvp
       -Werror=return-type
+      ${_contract_optimization}
       -ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=.
       -ffile-prefix-map=${CMAKE_CURRENT_BINARY_DIR}=.
 )
@@ -352,6 +355,7 @@ if(FORGE_CONTRACT_COMPILE_CHECKS)
          -fno-ident
          -mcpu=mvp
          -Werror=return-type
+         ${_contract_optimization}
          -ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=.
          -ffile-prefix-map=${CMAKE_CURRENT_BINARY_DIR}=.
    )
@@ -391,6 +395,7 @@ target_link_options(
       -Wl,--initial-memory=131072
       -Wl,--max-memory=16777216
       -Wl,--allow-undefined
+      -Wl,--gc-sections
       -Wl,--strip-all
       -Wl,--no-merge-data-segments
 )

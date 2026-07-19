@@ -153,6 +153,11 @@ tapos_block_prefix|core|transaction|||i32
 expiration|core|transaction|||i32
 get_action|core|transaction||i32,i32,i32,i32|i32
 get_context_free_data|core|transaction||i32,i32,i32|i32
+abort|runtime|runtime|||
+memcpy|runtime|runtime||i32,i32,i32|i32
+memmove|runtime|runtime||i32,i32,i32|i32
+memcmp|runtime|runtime||i32,i32,i32|i32
+memset|runtime|runtime||i32,i32,i32|i32
 __ashlti3|runtime|runtime||i32,i64,i64,i32|
 __ashrti3|runtime|runtime||i32,i64,i64,i32|
 __lshlti3|runtime|runtime||i32,i64,i64,i32|

@@ -77,7 +77,7 @@ def main() -> None:
     public_imports = [entry for entry in imports if entry["capability"] != "runtime"]
     runtime_imports = [entry for entry in imports if entry["capability"] == "runtime"]
     assert len(public_imports) == 152
-    assert len(runtime_imports) == 43
+    assert len(runtime_imports) == 48
 
     for name, entry in database.items():
         expected_parameters, expected_result = golden[name]

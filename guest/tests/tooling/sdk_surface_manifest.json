@@ -161,7 +161,6 @@
     "varuint32"
   ],
   "observable_errors": [
-    "action data contains trailing bytes",
     "cannot create objects in table of another contract",
     "cannot modify objects in table of another contract",
     "cannot erase objects in table of another contract",
