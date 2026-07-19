@@ -28,6 +28,10 @@ def run(*command: str) -> None:
     subprocess.run(command, check=True)
 
 
+def build_project(cmake: str, directory: Path) -> None:
+    run(cmake, "--build", str(directory), "--config", "Debug", "-j", "4")
+
+
 def contains_path(path: Path, needle: bytes) -> bool:
     if path.is_symlink() or not path.is_file():
         return False
@@ -146,8 +150,17 @@ def main() -> None:
     shutil.copytree(sdk / "share" / "forge-contract" / "examples" / "hello", source)
     build = output / "build"
     package = sdk / "lib" / "cmake" / "ForgeContract"
-    run(args.cmake, "-S", str(source), "-B", str(build), "-G", "Ninja", f"-DForgeContract_DIR={package}")
-    run(args.cmake, "--build", str(build), "-j", "4")
+    run(
+        args.cmake,
+        "-S",
+        str(source),
+        "-B",
+        str(build),
+        "-G",
+        "Ninja Multi-Config",
+        f"-DForgeContract_DIR={package}",
+    )
+    build_project(args.cmake, build)
 
     for suffix in ("wasm", "abi", "contract.json"):
         artifact = build / f"hello.{suffix}"
@@ -182,7 +195,7 @@ def main() -> None:
 
     types = source / "types.hpp"
     types.write_text(types.read_text(encoding="utf-8").replace("std::uint32_t", "std::uint64_t"), encoding="utf-8")
-    run(args.cmake, "--build", str(build), "-j", "4")
+    build_project(args.cmake, build)
     if type_target(read_abi(abi_path), "counter") != "uint64":
         raise RuntimeError("included header change did not regenerate the contract ABI")
 
@@ -193,7 +206,7 @@ def main() -> None:
         ),
         encoding="utf-8",
     )
-    run(args.cmake, "--build", str(build), "-j", "4")
+    build_project(args.cmake, build)
     if action_contract(read_abi(abi_path), "count") != "Record an updated positive counter value.":
         raise RuntimeError("Ricardian contracts change did not regenerate the contract ABI")
 
@@ -204,7 +217,7 @@ def main() -> None:
         ),
         encoding="utf-8",
     )
-    run(args.cmake, "--build", str(build), "-j", "4")
+    build_project(args.cmake, build)
     if clause_body(read_abi(abi_path), "positive-counter") != "The updated counter value must be greater than zero.":
         raise RuntimeError("Ricardian clauses change did not regenerate the contract ABI")
 
@@ -213,7 +226,7 @@ def main() -> None:
     time.sleep(0.01)
     with (source / "hello.cpp").open("a", encoding="utf-8") as stream:
         stream.write("\n")
-    run(args.cmake, "--build", str(build), "-j", "4")
+    build_project(args.cmake, build)
     if wasm.stat().st_mtime_ns <= first_mtime:
         raise RuntimeError("contract source change did not rebuild the WebAssembly artifact")
 

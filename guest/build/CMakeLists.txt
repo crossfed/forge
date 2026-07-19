@@ -36,7 +36,6 @@ foreach(_source IN LISTS _implementation_sources)
    math(EXPR _wrapper_index "${_wrapper_index} + 1")
 endforeach()
 set(_depfile "${_generated}/${FORGE_CONTRACT_NAME}.abi.d")
-set(_wasm "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_NAME}.wasm")
 set(_manifest "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_NAME}.contract.json")
 
 add_library(forge_guest_raw STATIC "${_runtime}/stream.cpp" "${_runtime}/codec.cpp")
@@ -166,64 +165,85 @@ foreach(_target forge_guest_raw forge_guest_crypto forge_guest_chain_protocol fo
    )
 endforeach()
 
+set(_module_configuration_directory "")
+if(CMAKE_CONFIGURATION_TYPES)
+   set(_module_configuration_directory "$<CONFIG>/")
+endif()
+set(
+   _raw_module_directory
+   "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_raw.dir/${_module_configuration_directory}"
+)
+set(
+   _crypto_module_directory
+   "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_crypto.dir/${_module_configuration_directory}"
+)
+set(
+   _protocol_module_directory
+   "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/${_module_configuration_directory}"
+)
+set(
+   _contract_module_directory
+   "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/${_module_configuration_directory}"
+)
+
 set(_module_arguments
-   "forge.raw.stream=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_raw.dir/forge.raw.stream.pcm"
-   "forge.raw.varint_value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_raw.dir/forge.raw.varint_value.pcm"
-   "forge.raw.codec=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_raw.dir/forge.raw.codec.pcm"
-   "forge.crypto.sha256:value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_crypto.dir/forge.crypto.sha256-value.pcm"
-   "forge.crypto.sha256=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_crypto.dir/forge.crypto.sha256.pcm"
-   "forge.crypto.sha512:value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_crypto.dir/forge.crypto.sha512-value.pcm"
-   "forge.crypto.sha512=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_crypto.dir/forge.crypto.sha512.pcm"
-   "forge.crypto.ripemd160:value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_crypto.dir/forge.crypto.ripemd160-value.pcm"
-   "forge.crypto.ripemd160=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_crypto.dir/forge.crypto.ripemd160.pcm"
-   "forge.crypto.asymmetric:value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_crypto.dir/forge.crypto.asymmetric-value.pcm"
-   "forge.crypto.asymmetric=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_crypto.dir/forge.crypto.asymmetric.pcm"
-   "forge.crypto.bls.values=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_crypto.dir/forge.crypto.bls.values.pcm"
-   "forge.chain.protocol.values=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.values.pcm"
-   "forge.chain.protocol.time=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.time.pcm"
-   "forge.chain.protocol.types:value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.types-value.pcm"
-   "forge.chain.protocol.types=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.types.pcm"
-   "forge.chain.protocol.fixed_key:value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.fixed_key-value.pcm"
-   "forge.chain.protocol.fixed_key=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.fixed_key.pcm"
-   "forge.chain.protocol.action:value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.action-value.pcm"
-   "forge.chain.protocol.action=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.action.pcm"
-   "forge.chain.protocol.transaction:value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.transaction-value.pcm"
-   "forge.chain.protocol.transaction=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.transaction.pcm"
-   "forge.chain.protocol.authority:value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.authority-value.pcm"
-   "forge.chain.protocol.authority=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.authority.pcm"
-   "forge.chain.protocol.producer_authority=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.producer_authority.pcm"
-   "forge.chain.protocol.system:value=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.system-value.pcm"
-   "forge.chain.protocol.system=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/forge.chain.protocol.system.pcm"
-   "forge.contract.intrinsics=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.intrinsics.pcm"
-   "forge.contract=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.pcm"
-   "forge.contract.datastream=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.datastream.pcm"
-   "forge.contract.varint=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.varint.pcm"
-   "forge.contract.fixed_bytes=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.fixed_bytes.pcm"
-   "forge.contract.binary_extension=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.binary_extension.pcm"
-   "forge.contract.ignore=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.ignore.pcm"
-   "forge.contract.hash_id=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.hash_id.pcm"
-   "forge.contract.action=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.action.pcm"
-   "forge.contract.base64=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.base64.pcm"
-   "forge.contract.transaction=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.transaction.pcm"
-   "forge.contract.system=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.system.pcm"
-   "forge.contract.deferred_transaction=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.deferred_transaction.pcm"
-   "forge.contract.authorization=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.authorization.pcm"
-   "forge.contract.bitset=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.bitset.pcm"
-   "forge.contract.call=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.call.pcm"
-   "forge.contract.crypto=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.crypto.pcm"
-   "forge.contract.crypto_bls_ext=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.crypto_bls_ext.pcm"
-   "forge.contract.crypto_ext=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.crypto_ext.pcm"
-   "forge.contract.instant_finality=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.instant_finality.pcm"
-   "forge.contract.key=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.key.pcm"
-   "forge.contract.powers=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.powers.pcm"
-   "forge.contract.print=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.print.pcm"
-   "forge.contract.privileged=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.privileged.pcm"
-   "forge.contract.producer_schedule=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.producer_schedule.pcm"
-   "forge.contract.rope=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.rope.pcm"
-   "forge.contract.string=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.string.pcm"
-   "forge.contract.dispatcher=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.dispatcher.pcm"
-   "forge.contract.multi_index=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.multi_index.pcm"
-   "forge.contract.singleton=${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/forge.contract.singleton.pcm"
+   "forge.raw.stream=${_raw_module_directory}forge.raw.stream.pcm"
+   "forge.raw.varint_value=${_raw_module_directory}forge.raw.varint_value.pcm"
+   "forge.raw.codec=${_raw_module_directory}forge.raw.codec.pcm"
+   "forge.crypto.sha256:value=${_crypto_module_directory}forge.crypto.sha256-value.pcm"
+   "forge.crypto.sha256=${_crypto_module_directory}forge.crypto.sha256.pcm"
+   "forge.crypto.sha512:value=${_crypto_module_directory}forge.crypto.sha512-value.pcm"
+   "forge.crypto.sha512=${_crypto_module_directory}forge.crypto.sha512.pcm"
+   "forge.crypto.ripemd160:value=${_crypto_module_directory}forge.crypto.ripemd160-value.pcm"
+   "forge.crypto.ripemd160=${_crypto_module_directory}forge.crypto.ripemd160.pcm"
+   "forge.crypto.asymmetric:value=${_crypto_module_directory}forge.crypto.asymmetric-value.pcm"
+   "forge.crypto.asymmetric=${_crypto_module_directory}forge.crypto.asymmetric.pcm"
+   "forge.crypto.bls.values=${_crypto_module_directory}forge.crypto.bls.values.pcm"
+   "forge.chain.protocol.values=${_protocol_module_directory}forge.chain.protocol.values.pcm"
+   "forge.chain.protocol.time=${_protocol_module_directory}forge.chain.protocol.time.pcm"
+   "forge.chain.protocol.types:value=${_protocol_module_directory}forge.chain.protocol.types-value.pcm"
+   "forge.chain.protocol.types=${_protocol_module_directory}forge.chain.protocol.types.pcm"
+   "forge.chain.protocol.fixed_key:value=${_protocol_module_directory}forge.chain.protocol.fixed_key-value.pcm"
+   "forge.chain.protocol.fixed_key=${_protocol_module_directory}forge.chain.protocol.fixed_key.pcm"
+   "forge.chain.protocol.action:value=${_protocol_module_directory}forge.chain.protocol.action-value.pcm"
+   "forge.chain.protocol.action=${_protocol_module_directory}forge.chain.protocol.action.pcm"
+   "forge.chain.protocol.transaction:value=${_protocol_module_directory}forge.chain.protocol.transaction-value.pcm"
+   "forge.chain.protocol.transaction=${_protocol_module_directory}forge.chain.protocol.transaction.pcm"
+   "forge.chain.protocol.authority:value=${_protocol_module_directory}forge.chain.protocol.authority-value.pcm"
+   "forge.chain.protocol.authority=${_protocol_module_directory}forge.chain.protocol.authority.pcm"
+   "forge.chain.protocol.producer_authority=${_protocol_module_directory}forge.chain.protocol.producer_authority.pcm"
+   "forge.chain.protocol.system:value=${_protocol_module_directory}forge.chain.protocol.system-value.pcm"
+   "forge.chain.protocol.system=${_protocol_module_directory}forge.chain.protocol.system.pcm"
+   "forge.contract.intrinsics=${_contract_module_directory}forge.contract.intrinsics.pcm"
+   "forge.contract=${_contract_module_directory}forge.contract.pcm"
+   "forge.contract.datastream=${_contract_module_directory}forge.contract.datastream.pcm"
+   "forge.contract.varint=${_contract_module_directory}forge.contract.varint.pcm"
+   "forge.contract.fixed_bytes=${_contract_module_directory}forge.contract.fixed_bytes.pcm"
+   "forge.contract.binary_extension=${_contract_module_directory}forge.contract.binary_extension.pcm"
+   "forge.contract.ignore=${_contract_module_directory}forge.contract.ignore.pcm"
+   "forge.contract.hash_id=${_contract_module_directory}forge.contract.hash_id.pcm"
+   "forge.contract.action=${_contract_module_directory}forge.contract.action.pcm"
+   "forge.contract.base64=${_contract_module_directory}forge.contract.base64.pcm"
+   "forge.contract.transaction=${_contract_module_directory}forge.contract.transaction.pcm"
+   "forge.contract.system=${_contract_module_directory}forge.contract.system.pcm"
+   "forge.contract.deferred_transaction=${_contract_module_directory}forge.contract.deferred_transaction.pcm"
+   "forge.contract.authorization=${_contract_module_directory}forge.contract.authorization.pcm"
+   "forge.contract.bitset=${_contract_module_directory}forge.contract.bitset.pcm"
+   "forge.contract.call=${_contract_module_directory}forge.contract.call.pcm"
+   "forge.contract.crypto=${_contract_module_directory}forge.contract.crypto.pcm"
+   "forge.contract.crypto_bls_ext=${_contract_module_directory}forge.contract.crypto_bls_ext.pcm"
+   "forge.contract.crypto_ext=${_contract_module_directory}forge.contract.crypto_ext.pcm"
+   "forge.contract.instant_finality=${_contract_module_directory}forge.contract.instant_finality.pcm"
+   "forge.contract.key=${_contract_module_directory}forge.contract.key.pcm"
+   "forge.contract.powers=${_contract_module_directory}forge.contract.powers.pcm"
+   "forge.contract.print=${_contract_module_directory}forge.contract.print.pcm"
+   "forge.contract.privileged=${_contract_module_directory}forge.contract.privileged.pcm"
+   "forge.contract.producer_schedule=${_contract_module_directory}forge.contract.producer_schedule.pcm"
+   "forge.contract.rope=${_contract_module_directory}forge.contract.rope.pcm"
+   "forge.contract.string=${_contract_module_directory}forge.contract.string.pcm"
+   "forge.contract.dispatcher=${_contract_module_directory}forge.contract.dispatcher.pcm"
+   "forge.contract.multi_index=${_contract_module_directory}forge.contract.multi_index.pcm"
+   "forge.contract.singleton=${_contract_module_directory}forge.contract.singleton.pcm"
 )
 set(_abigen_command
    "${FORGE_CONTRACT_ABIGEN}"
@@ -393,19 +413,26 @@ set_target_properties(
    SUFFIX ".wasm"
    RUNTIME_OUTPUT_DIRECTORY "${FORGE_CONTRACT_OUTPUT_DIR}"
 )
+foreach(_configuration IN LISTS CMAKE_CONFIGURATION_TYPES)
+   string(TOUPPER "${_configuration}" _configuration_upper)
+   set_target_properties(
+      ${FORGE_CONTRACT_NAME} PROPERTIES
+      "RUNTIME_OUTPUT_DIRECTORY_${_configuration_upper}" "${FORGE_CONTRACT_OUTPUT_DIR}"
+   )
+endforeach()
 
 add_custom_command(
    TARGET ${FORGE_CONTRACT_NAME}
    POST_BUILD
    COMMAND
       "${FORGE_CONTRACT_CHECK}"
-      --wasm "${_wasm}"
+      --wasm "$<TARGET_FILE:${FORGE_CONTRACT_NAME}>"
       --abi "${_abi}"
       --imports "${FORGE_CONTRACT_DATA_DIR}/registry/intrinsics.json"
       --required-export apply
    COMMAND
       "${FORGE_CONTRACT_MANIFEST}"
-      --wasm "${_wasm}"
+      --wasm "$<TARGET_FILE:${FORGE_CONTRACT_NAME}>"
       --abi "${_abi}"
       --imports "${FORGE_CONTRACT_DATA_DIR}/registry/intrinsics.json"
       --output "${_manifest}"
