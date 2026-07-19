@@ -586,6 +586,13 @@ BOOST_AUTO_TEST_CASE(multi_index_and_singleton_execute_over_the_objectdb_host) {
       const auto reindexed = host.find_index64(account, account, secondary_name(0), 1);
       BOOST_REQUIRE(reindexed.has_value());
       BOOST_TEST(reindexed->secondary == 5U);
+      const auto positive_zero_double = host.find_index_double(account, account, secondary_name(3), 3);
+      const auto positive_zero_long_double = host.find_index_long_double(account, account, secondary_name(4), 3);
+      BOOST_REQUIRE(positive_zero_double.has_value());
+      BOOST_REQUIRE(positive_zero_long_double.has_value());
+      BOOST_TEST(positive_zero_double->secondary.bits == std::bit_cast<std::uint64_t>(0.0));
+      constexpr auto positive_zero_words = std::array<std::uint64_t, 2>{};
+      BOOST_TEST(positive_zero_long_double->secondary.words == positive_zero_words);
 
       invoke_success(extended, 2);
       BOOST_TEST(host.find_table(account, account, protocol::make_name("settings").value).has_value());

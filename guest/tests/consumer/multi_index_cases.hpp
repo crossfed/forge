@@ -128,6 +128,22 @@ inline void set_record(record& row, std::uint64_t id, std::uint64_t secondary, c
    row.value = value;
 }
 
+struct record_update {
+   std::uint64_t id = 0;
+   std::uint64_t secondary = 0;
+   const char* value = nullptr;
+   bool floating_only = false;
+
+   void operator()(record& row) const {
+      if (floating_only) {
+         row.secondary_double = 0.0;
+         row.secondary_long_double = 0.0L;
+         return;
+      }
+      set_record(row, id, secondary, value);
+   }
+};
+
 inline void run(name self, std::uint32_t scenario) {
    auto table = records{self, self.value};
    switch (scenario) {
@@ -135,7 +151,11 @@ inline void run(name self, std::uint32_t scenario) {
    case 0: {
       table.emplace(self, [](record& row) { set_record(row, 1, 20, "first"); });
       table.emplace(self, [](record& row) { set_record(row, 2, 10, "second"); });
-      table.emplace(self, [](record& row) { set_record(row, 3, 20, "third"); });
+      table.emplace(self, [](record& row) {
+         set_record(row, 3, 20, "third");
+         row.secondary_double = -0.0;
+         row.secondary_long_double = -0.0L;
+      });
 
       contract_api::check(table.begin()->id == 1, "primary order mismatch");
       auto by64 = table.template get_index<"byone"_n>();
@@ -159,7 +179,8 @@ inline void run(name self, std::uint32_t scenario) {
    }
    case 1: {
       const auto iterator = table.require_find(1);
-      table.modify(iterator, contract_api::same_payer, [](record& row) { set_record(row, 1, 5, "updated"); });
+      table.modify(iterator, contract_api::same_payer, record_update{1, 5, "updated", false});
+      table.modify(table.require_find(3), contract_api::same_payer, record_update{0, 0, nullptr, true});
       contract_api::check(table.get(1).value == "updated", "modify failed");
       table.erase(table.require_find(2));
       contract_api::check(table.find(2) == table.end(), "erase failed");

@@ -3,6 +3,7 @@ module;
 #include <forge/contract/intrinsics.h>
 
 #include <array>
+#include <bit>
 #include <compare>
 #include <concepts>
 #include <cstddef>
@@ -238,7 +239,12 @@ template <secondary_key Key> constexpr Key lowest_secondary() noexcept {
 }
 
 template <secondary_key Key> bool secondary_equal(const Key& left, const Key& right) noexcept {
-   return left == right;
+   if constexpr (std::same_as<Key, double> || std::same_as<Key, long double>) {
+      using representation = std::array<std::byte, sizeof(Key)>;
+      return std::bit_cast<representation>(left) == std::bit_cast<representation>(right);
+   } else {
+      return left == right;
+   }
 }
 
 template <class Value, class Function> decltype(auto) with_packed(const Value& value, Function&& function) {
