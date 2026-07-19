@@ -319,25 +319,23 @@ endif()
 
 set(_forge_contract_input_sysroot "${FORGE_CONTRACT_SYSROOT}")
 set(FORGE_CONTRACT_SYSROOT "${CMAKE_BINARY_DIR}/sdk-sysroot")
-set(_forge_contract_sysroot_stage_stamp "${CMAKE_BINARY_DIR}/forge-contract-sysroot.stamp")
 set(_forge_contract_sysroot_stage_dependencies)
 if(TARGET forge_contract_sysroot)
    list(APPEND _forge_contract_sysroot_stage_dependencies forge_contract_sysroot)
 endif()
-add_custom_command(
-   OUTPUT "${_forge_contract_sysroot_stage_stamp}"
+# A developer sysroot is a mutable directory, so staging must run on every dependent build.
+add_custom_target(
+   forge_contract_stage_sysroot
    COMMAND
       ${CMAKE_COMMAND}
       -DSOURCE=${_forge_contract_input_sysroot}
       -DDESTINATION=${FORGE_CONTRACT_SYSROOT}
-      -DSTAMP=${_forge_contract_sysroot_stage_stamp}
       -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stage_sysroot.cmake"
    DEPENDS
       ${_forge_contract_sysroot_stage_dependencies}
       "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stage_sysroot.cmake"
    VERBATIM
 )
-add_custom_target(forge_contract_stage_sysroot DEPENDS "${_forge_contract_sysroot_stage_stamp}")
 
 set(_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(_sysroot_hash "${_generated_dir}/sysroot.sha256")

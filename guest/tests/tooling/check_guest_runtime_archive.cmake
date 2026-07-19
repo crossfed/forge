@@ -14,7 +14,6 @@ endforeach()
 set(_root "${CMAKE_CURRENT_BINARY_DIR}/contract-guest-runtime-policy")
 set(_source "${_root}/source")
 set(_destination "${_root}/destination")
-set(_stamp "${_root}/stage.stamp")
 file(REMOVE_RECURSE "${_root}")
 file(MAKE_DIRECTORY "${_source}/include" "${_source}/lib")
 file(WRITE "${_source}/include/source-marker.hpp" "source\n")
@@ -25,7 +24,6 @@ execute_process(
       "${CMAKE_COMMAND}"
       -DSOURCE=${_source}
       -DDESTINATION=${_destination}
-      -DSTAMP=${_stamp}
       -P "${FORGE_CONTRACT_STAGE_SYSROOT}"
    COMMAND_ERROR_IS_FATAL ANY
 )
@@ -39,6 +37,29 @@ endif()
 file(READ "${_source}/include/source-marker.hpp" _source_marker)
 if(NOT _source_marker STREQUAL "source\n")
    message(FATAL_ERROR "staging changed a developer sysroot file")
+endif()
+
+file(WRITE "${_source}/include/source-marker.hpp" "updated\n")
+file(WRITE "${_source}/include/added.hpp" "added\n")
+file(REMOVE "${_source}/lib/libc++.a")
+file(WRITE "${_source}/lib/libc++abi.a" "libcxxabi\n")
+execute_process(
+   COMMAND
+      "${CMAKE_COMMAND}"
+      -DSOURCE=${_source}
+      -DDESTINATION=${_destination}
+      -P "${FORGE_CONTRACT_STAGE_SYSROOT}"
+   COMMAND_ERROR_IS_FATAL ANY
+)
+file(READ "${_destination}/include/source-marker.hpp" _updated_marker)
+if(NOT _updated_marker STREQUAL "updated\n" OR NOT EXISTS "${_destination}/include/added.hpp")
+   message(FATAL_ERROR "restaging did not copy changed developer sysroot files")
+endif()
+if(EXISTS "${_destination}/include/staged-only.hpp" OR EXISTS "${_destination}/lib/libc++.a")
+   message(FATAL_ERROR "restaging retained files absent from the developer sysroot")
+endif()
+if(NOT EXISTS "${_destination}/lib/libc++abi.a")
+   message(FATAL_ERROR "restaging did not copy a new developer sysroot library")
 endif()
 
 function(_require_text file text)
@@ -59,6 +80,8 @@ endfunction()
 
 _require_text("${FORGE_CONTRACT_SDK_CMAKE}" "ExternalProject_Add(\n   forge_contract_guest_runtime")
 _require_text("${FORGE_CONTRACT_SDK_CMAKE}" "DEPENDS forge_contract_guest_runtime")
+_require_text("${FORGE_CONTRACT_SDK_CMAKE}" "add_custom_target(\n   forge_contract_stage_sysroot")
+_reject_text("${FORGE_CONTRACT_SDK_CMAKE}" "forge-contract-sysroot.stamp")
 _require_text("${FORGE_CONTRACT_RUNTIME_CMAKE}" "install(TARGETS forge_guest_runtime ARCHIVE")
 _require_text("${FORGE_CONTRACT_BUILD_CMAKE}" "add_library(forge_guest_runtime STATIC IMPORTED GLOBAL)")
 _require_text("${FORGE_CONTRACT_BUILD_CMAKE}" "set(_guest_libraries forge_guest_runtime")
