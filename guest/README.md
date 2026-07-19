@@ -347,8 +347,10 @@ cmake --build build/contract-sdk --target forge_contract_sdk_relocation -j 4
 Forge host package. The guest compiler, dependency scanner, archiver and
 ranlib are selected from that LLVM package rather than from an unrelated
 program found earlier in `PATH`. `FORGE_CONTRACT_CLANG` remains an explicit
-override for controlled developer environments. `wasm-ld` may be supplied by
-a separate lld package, as it is in Homebrew.
+override for controlled developer environments. The matching C driver is
+selected beside it, including versioned pairs such as `clang++-22` and
+`clang-22`; wrappers can set `FORGE_CONTRACT_CLANG_C` explicitly. `wasm-ld`
+may be supplied by a separate lld package, as it is in Homebrew.
 
 Developer mode copies `FORGE_CONTRACT_SYSROOT` into a build-owned staged
 sysroot before adding `libforge_guest_runtime.a`. The supplied directory is

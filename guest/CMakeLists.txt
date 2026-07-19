@@ -25,6 +25,7 @@ set_property(CACHE FORGE_CONTRACT_PROFILE PROPERTY STRINGS developer release)
 set(FORGE_CONTRACT_FORGE_DIR "" CACHE PATH "Directory containing ForgeConfig.cmake for host tools")
 set(FORGE_CONTRACT_SYSROOT "" CACHE PATH "Existing wasm32 sysroot used by developer mode")
 set(FORGE_CONTRACT_CLANG "" CACHE FILEPATH "Developer-mode clang++")
+set(FORGE_CONTRACT_CLANG_C "" CACHE FILEPATH "Developer-mode clang C driver")
 set(FORGE_CONTRACT_WASM_LD "" CACHE FILEPATH "Developer-mode wasm-ld")
 set(FORGE_CONTRACT_LLVM_AR "" CACHE FILEPATH "Developer-mode llvm-ar")
 set(FORGE_CONTRACT_LLVM_RANLIB "" CACHE FILEPATH "Developer-mode llvm-ranlib")
@@ -139,6 +140,7 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
    )
 
    set(FORGE_CONTRACT_CLANG "${_llvm_install}/bin/clang++")
+   set(FORGE_CONTRACT_CLANG_C "${_llvm_install}/bin/clang")
    set(FORGE_CONTRACT_CLANG_SCAN_DEPS "${_llvm_install}/bin/clang-scan-deps")
    set(FORGE_CONTRACT_WASM_LD "${_llvm_install}/bin/wasm-ld")
    set(FORGE_CONTRACT_LLVM_AR "${_llvm_install}/bin/llvm-ar")
@@ -267,6 +269,7 @@ else()
    foreach(
       _tool
       FORGE_CONTRACT_CLANG
+      FORGE_CONTRACT_CLANG_C
       FORGE_CONTRACT_CLANG_SCAN_DEPS
       FORGE_CONTRACT_WASM_LD
       FORGE_CONTRACT_LLVM_AR
@@ -331,11 +334,6 @@ endif()
 
 set(_forge_contract_input_sysroot "${FORGE_CONTRACT_SYSROOT}")
 set(FORGE_CONTRACT_SYSROOT "${CMAKE_BINARY_DIR}/sdk-sysroot")
-get_filename_component(_forge_contract_clang_directory "${FORGE_CONTRACT_CLANG}" DIRECTORY)
-set(_forge_contract_clang_c "${_forge_contract_clang_directory}/clang")
-if(NOT EXISTS "${_forge_contract_clang_c}")
-   message(FATAL_ERROR "the selected Contract SDK toolchain is missing clang: ${_forge_contract_clang_c}")
-endif()
 set(_forge_contract_sysroot_stage_dependencies)
 if(TARGET forge_contract_sysroot)
    list(APPEND _forge_contract_sysroot_stage_dependencies forge_contract_sysroot)
@@ -430,7 +428,7 @@ ExternalProject_Add(
       -DCMAKE_SYSTEM_PROCESSOR=wasm32
       -DCMAKE_SYSROOT=${FORGE_CONTRACT_SYSROOT}
       -DCMAKE_OSX_SYSROOT=
-      -DCMAKE_C_COMPILER=${_forge_contract_clang_c}
+      -DCMAKE_C_COMPILER=${FORGE_CONTRACT_CLANG_C}
       -DCMAKE_CXX_COMPILER=${FORGE_CONTRACT_CLANG}
       -DCMAKE_C_COMPILER_TARGET=wasm32
       -DCMAKE_CXX_COMPILER_TARGET=wasm32
