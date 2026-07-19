@@ -343,25 +343,39 @@ set(_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(_sysroot_hash "${_generated_dir}/sysroot.sha256")
 set(_intrinsic_registry "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/include/forge/contract/intrinsics.hpp")
 set(_intrinsic_manifest "${_generated_dir}/intrinsics.json")
-set(_forge_intrinsics "${_generated_dir}/include/forge/contract/intrinsics.h")
-set(_eosio_intrinsics "${_generated_dir}/include/eosio/action.h")
-set(_eosio_db_intrinsics "${_generated_dir}/include/eosio/db.h")
+set(
+   _intrinsic_headers
+   "${_generated_dir}/include/forge/contract/intrinsics.h"
+   "${_generated_dir}/include/forge/contract/types.h"
+   "${_generated_dir}/include/eosio/action.h"
+   "${_generated_dir}/include/eosio/call.h"
+   "${_generated_dir}/include/eosio/chain.h"
+   "${_generated_dir}/include/eosio/crypto.h"
+   "${_generated_dir}/include/eosio/crypto_bls_ext.h"
+   "${_generated_dir}/include/eosio/crypto_ext.h"
+   "${_generated_dir}/include/eosio/db.h"
+   "${_generated_dir}/include/eosio/instant_finality.h"
+   "${_generated_dir}/include/eosio/permission.h"
+   "${_generated_dir}/include/eosio/print.h"
+   "${_generated_dir}/include/eosio/privileged.h"
+   "${_generated_dir}/include/eosio/system.h"
+   "${_generated_dir}/include/eosio/transaction.h"
+   "${_generated_dir}/include/eosio/types.h"
+)
 add_custom_command(
-   OUTPUT "${_intrinsic_manifest}" "${_forge_intrinsics}" "${_eosio_intrinsics}" "${_eosio_db_intrinsics}"
+   OUTPUT "${_intrinsic_manifest}" ${_intrinsic_headers}
    COMMAND
       ${Python3_EXECUTABLE}
       "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate_intrinsic_manifest.py"
       --registry "${_intrinsic_registry}"
       --output "${_intrinsic_manifest}"
-      --forge-header "${_forge_intrinsics}"
-      --eosio-header "${_eosio_intrinsics}"
-      --eosio-db-header "${_eosio_db_intrinsics}"
+      --include-dir "${_generated_dir}/include"
    DEPENDS "${_intrinsic_registry}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate_intrinsic_manifest.py"
    VERBATIM
 )
 add_custom_target(
    forge_contract_intrinsic_manifest ALL
-   DEPENDS "${_intrinsic_manifest}" "${_forge_intrinsics}" "${_eosio_intrinsics}" "${_eosio_db_intrinsics}"
+   DEPENDS "${_intrinsic_manifest}" ${_intrinsic_headers}
 )
 
 ExternalProject_Add(

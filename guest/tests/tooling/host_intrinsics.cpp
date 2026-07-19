@@ -7,6 +7,16 @@
 using interface = forge::contract::host::interface;
 
 static_assert(forge::contract::host::interface_version == 1);
+static_assert(std::same_as<decltype(&interface::send_inline), void (interface::*)(char*, std::uint32_t)>);
+static_assert(
+    std::same_as<decltype(&interface::sha256), void (interface::*)(const char*, std::uint32_t, capi_checksum256*)>);
+static_assert(std::same_as<decltype(&interface::call),
+                           std::int64_t (interface::*)(std::uint64_t, std::uint64_t, const char*, std::uint32_t)>);
+static_assert(
+    std::same_as<decltype(&interface::bls_g1_add), std::int32_t (interface::*)(const char*, std::uint32_t, const char*,
+                                                                               std::uint32_t, char*, std::uint32_t)>);
+static_assert(
+    std::same_as<decltype(&interface::set_finalizers), void (interface::*)(std::uint64_t, const char*, std::uint32_t)>);
 static_assert(std::same_as<decltype(&interface::db_store_i64),
                            std::int32_t (interface::*)(std::uint64_t, std::uint64_t, std::uint64_t, std::uint64_t,
                                                        const void*, std::uint32_t)>);

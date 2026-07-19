@@ -112,6 +112,7 @@ add_custom_target(
       "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/run_intrinsic_fixtures.py"
       --manifest "${ForgeContract_DATA_DIR}/registry/intrinsics.json"
       --golden "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/spring_db_intrinsics.txt"
+      --full-golden "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/spring_intrinsics.txt"
       --eosio-db-header "${ForgeContract_DATA_DIR}/include/eosio/db.h"
       --cdt-fixture "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/cdt/capi/db.c"
    COMMAND

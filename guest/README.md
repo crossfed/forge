@@ -251,8 +251,22 @@ sockets, threads, clocks or random device.
 
 ## Intrinsics And Validation
 
-Interface version 1 contains 68 imports. Its eight lifecycle, action-data and
-context functions are:
+Interface version 1 contains the exact 148-function union of the pinned CDT and
+Spring contract interfaces. Every entry records its C header, WASM signature,
+capability set and, where applicable, the protocol feature that enables it.
+The seven capability sets are:
+
+```text
+core
+database
+privileged
+crypto_ext
+bls
+call
+instant_finality
+```
+
+The core set includes the lifecycle, action-data and context functions:
 
 ```text
 env.eosio_assert
@@ -269,11 +283,12 @@ env.current_receiver
 number of bytes copied, but when no bytes are copied it returns the full action
 payload size. `action_data_size` remains the direct size query.
 
-The same version also includes the 60 Spring/CDT database imports: the ten
+The same version includes the 60 Spring/CDT database imports: the ten
 primary `db_*_i64` operations and ten operations for each of `idx64`, `idx128`,
 `idx256`, `idx_double` and `idx_long_double`. `<forge/contract/intrinsics.h>`
-is canonical; `<eosio/db.h>` is a thin generated include over it. The shipped
-interface defines signatures only. Forge's non-installed test host executes all
+is canonical. The pinned CDT family headers under `<eosio/*.h>` are generated
+from that registry without a second declaration list. The shipped interface
+defines signatures only. Forge's non-installed test host executes all
 60 DB functions against `forge.db.object` to prove iterator, transaction, index
 and rollback semantics against Spring scenarios. It is a test oracle, not a
 product host binding. Authorization, RAM accounting and the blockchain-owned

@@ -36,7 +36,7 @@ inline std::uint32_t read_action_data(void* destination, std::uint32_t size) {
 }
 
 inline void set_action_return_value(const void* value, std::uint32_t size) {
-   ::set_action_return_value(value, size);
+   ::set_action_return_value(const_cast<void*>(value), size);
 }
 
 inline chain::protocol::name current_receiver() {

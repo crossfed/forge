@@ -168,8 +168,13 @@ host::impl::~impl() {
 
 void host::impl::register_intrinsics() {
    static const auto registered = [] {
-#define FORGE_CONTRACT_TEST_REGISTER(version, identifier, module_name, import_name, result, arguments)                 \
-   functions::add<&impl::identifier>(#module_name, #import_name);
+#define FORGE_CONTRACT_TEST_REGISTER(version, capability, header, feature, identifier, module_name, import_name,       \
+                                     result, arguments)                                                                \
+   []<typename Host>() {                                                                                               \
+      if constexpr (requires { &Host::identifier; }) {                                                                 \
+         functions::template add<&Host::identifier>(#module_name, #import_name);                                       \
+      }                                                                                                                \
+   }.template operator()<impl>();
       FORGE_CONTRACT_INTRINSICS(FORGE_CONTRACT_TEST_REGISTER)
 #undef FORGE_CONTRACT_TEST_REGISTER
       return true;

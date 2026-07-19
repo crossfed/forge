@@ -66,6 +66,12 @@ wasm::value_type parse_value_type(const forge::variant& value) {
    if (value.get_string() == "i64") {
       return wasm::i64;
    }
+   if (value.get_string() == "f32") {
+      return wasm::f32;
+   }
+   if (value.get_string() == "f64") {
+      return wasm::f64;
+   }
    throw std::runtime_error{"unsupported intrinsic WASM type: " + value.get_string()};
 }
 
