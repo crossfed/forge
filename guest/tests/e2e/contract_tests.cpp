@@ -386,6 +386,11 @@ BOOST_AUTO_TEST_CASE(legacy_contract_reports_action_and_synchronous_call_executi
    call_host.call_data = forge::raw::pack(std::uint32_t{0}, call_id("callmode"));
    BOOST_CHECK_NO_THROW(call(code, call_host, "alice", "legacynotify"));
    BOOST_TEST(forge::raw::unpack_exact<bool>(call_host.call_return_value));
+
+   call_host.call_data = forge::raw::pack(std::uint32_t{0}, call_id("callreceiver"));
+   BOOST_CHECK_NO_THROW(call(code, call_host, "alice", "legacynotify"));
+   BOOST_TEST(forge::raw::unpack_exact<std::uint64_t>(call_host.call_return_value) ==
+              protocol::make_name("legacynotify").value);
 }
 
 BOOST_AUTO_TEST_CASE(cdt_standard_containers_use_the_shared_guest_codec) {

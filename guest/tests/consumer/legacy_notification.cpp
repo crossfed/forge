@@ -21,4 +21,8 @@ class [[eosio::contract("legacynotify")]] legacynotify : public eosio::contract 
    [[eosio::call]] bool callmode() const {
       return is_sync_call();
    }
+
+   [[eosio::call]] std::uint64_t callreceiver() const {
+      return get_first_receiver().value;
+   }
 };
