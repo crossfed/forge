@@ -54,6 +54,10 @@ libraries/<lib>/                         # или <group>/<lib>/
   содержать module imports, targeted aliases и compatibility macros. Они не
   могут содержать самостоятельную реализацию, runtime state, serialization,
   allocator или dispatcher algorithms.
+- Generated Contract SDK C ABI `.h` являются build/install artifacts, а не
+  source headers библиотеки. Они могут объявлять только C-compatible ABI records
+  и intrinsic functions, генерируются из `guest/cmake/` и не размещаются в
+  `guest/libraries/*/include/forge`.
 
 **R2. Парный инвариант.**
 Каждый `X.cpp` в корне парен по базовому имени **ровно с одним** хедером:

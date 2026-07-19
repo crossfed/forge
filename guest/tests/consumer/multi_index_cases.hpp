@@ -175,6 +175,14 @@ inline void run(name self, std::uint32_t scenario) {
                           "idx_double lower bound mismatch");
       contract_api::check(table.template get_index<"bylongdbl"_n>().upper_bound(10.0L)->id == 1,
                           "idx_long_double upper bound mismatch");
+      auto by_double = table.template get_index<"bydouble"_n>();
+      const auto double_zero = by_double.find(0.0);
+      contract_api::check(double_zero != by_double.end() && double_zero->id == 3,
+                          "idx_double signed zero lookup mismatch");
+      auto by_long_double = table.template get_index<"bylongdbl"_n>();
+      const auto long_double_zero = by_long_double.find(0.0L);
+      contract_api::check(long_double_zero != by_long_double.end() && long_double_zero->id == 3,
+                          "idx_long_double signed zero lookup mismatch");
       return;
    }
    case 1: {

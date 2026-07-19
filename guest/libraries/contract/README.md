@@ -25,12 +25,17 @@ only signature registry and generates modern imports, EOSIO C declarations,
 the host binding skeleton and the approved-import manifest. Blockchain host
 implementations do not live here.
 
-Interface version 1 includes 68 functions: eight lifecycle/action-context
-functions and the complete 60-function Spring/CDT database C ABI. Contract C
-code may include either `<forge/contract/intrinsics.h>` or the thin
-compatibility header `<eosio/db.h>`. `forge.contract.multi_index` and
-`forge.contract.singleton` are the production C++23 API over those declarations;
-they do not link host Forge DB code into a contract.
+The installed C surface, including `<forge/contract/types.h>` and
+`<forge/contract/intrinsics.h>`, is generated during SDK assembly. C ABI records
+come from `guest/cmake/types.h.in`; generated `.h` files are not source headers
+of this module-first library and contain no C++ implementation.
+
+Interface version 1 includes the complete 148-function CDT/Spring union.
+Contract C code may include `<forge/contract/intrinsics.h>` or one of the thin
+EOSIO compatibility headers such as `<eosio/db.h>`.
+`forge.contract.multi_index` and `forge.contract.singleton` are the production
+C++23 API over those declarations; they do not link host Forge DB code into a
+contract.
 
 ```cpp
 #include <forge/contract/serialize.hpp>
@@ -78,4 +83,5 @@ all five secondary-key families, iterator boundaries, payer behavior,
 autoincrement, singleton operations and execution in `forge.vm.wasm` are tested
 end to end. The unchanged CDT database C fixture and an independent
 Spring-derived signature manifest prove all 60 database imports through the
-generated headers and VM parser.
+generated headers and VM parser. The full donor manifest separately verifies
+all 148 imports and capability sets.

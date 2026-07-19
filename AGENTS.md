@@ -74,7 +74,8 @@ The repository must stay neutral. Public APIs must not contain downstream produc
   narrow macro-only `FORGE_EXPORT_API(...)` exception.
 - Use C++17 nested namespace syntax (`namespace forge::raw { ... }`), not legacy nested braces (`namespace forge { namespace raw { ... } }`).
 - Indentation is 3 spaces per level. Hard tabs are forbidden.
-- Public `.hpp` / `.h` files under `include/forge` are forbidden except macro-only headers. Macro-only headers must not declare public types, functions, templates or old header-wrapper APIs.
+- Public `.hpp` / `.h` files under source `include/forge` are forbidden except macro-only headers. Macro-only headers must not declare public types, functions, templates or old header-wrapper APIs.
+- Generated Contract SDK C ABI headers are a narrow build/install artifact exception: they may declare only C-compatible ABI types and intrinsic functions, must be generated outside library source `include/forge`, and must not contain C++ templates or runtime implementation.
 - Do not create nested public include directories under `include/forge/<lib>`.
 - Do not use `import std;` until the supported toolchain and CI explicitly prove it is stable.
 - Local validation builds should use `cmake --build ... -j 4` or higher by
@@ -209,6 +210,9 @@ class service_node {
 - `guest/libraries/contract/intrinsics.hpp` is the only intrinsic signature
   registry. Generated guest C declarations, EOSIO headers, host skeletons and
   import manifests must derive from it.
+- Contract SDK C ABI support records are generated from templates under
+  `guest/cmake/`; generated `.h` files never live in a guest library's source
+  `include/forge` tree.
 
 ## Namespace And Target Naming
 

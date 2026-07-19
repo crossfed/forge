@@ -368,7 +368,10 @@ add_custom_command(
       --registry "${_intrinsic_registry}"
       --output "${_intrinsic_manifest}"
       --include-dir "${_generated_dir}/include"
-   DEPENDS "${_intrinsic_registry}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate_intrinsic_manifest.py"
+   DEPENDS
+      "${_intrinsic_registry}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate_intrinsic_manifest.py"
+      "${CMAKE_CURRENT_SOURCE_DIR}/cmake/types.h.in"
    VERBATIM
 )
 add_custom_target(
@@ -458,7 +461,6 @@ install(
    FILES
       libraries/contract/include/forge/contract/intrinsics.hpp
       libraries/contract/include/forge/contract/serialize.hpp
-      libraries/contract/include/forge/contract/types.h
    DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/include/forge/contract"
 )
 install(DIRECTORY libraries/eosio/include/ DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/include")

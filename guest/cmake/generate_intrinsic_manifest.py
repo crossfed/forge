@@ -208,7 +208,7 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    types_header = pathlib.Path(__file__).parent.parent / "libraries/contract/include/forge/contract/types.h"
+    types_header = pathlib.Path(__file__).parent / "types.h.in"
     write_types_header(types_header, args.include_dir / "forge/contract/types.h")
     eosio_types = args.include_dir / "eosio/types.h"
     eosio_types.parent.mkdir(parents=True, exist_ok=True)

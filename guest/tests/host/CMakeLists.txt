@@ -6,6 +6,13 @@ add_library(
    softfloat.cpp
 )
 
+set(_forge_contract_test_generated_include "${CMAKE_CURRENT_BINARY_DIR}/generated/include")
+configure_file(
+   "${CMAKE_CURRENT_SOURCE_DIR}/../../cmake/types.h.in"
+   "${_forge_contract_test_generated_include}/forge/contract/types.h"
+   COPYONLY
+)
+
 target_sources(
    forge_contract_test_host
    PUBLIC
@@ -23,6 +30,7 @@ target_include_directories(
    PRIVATE
       "${CMAKE_CURRENT_SOURCE_DIR}"
       "${CMAKE_CURRENT_SOURCE_DIR}/../../libraries/contract/include"
+      "${_forge_contract_test_generated_include}"
 )
 
 target_link_libraries(

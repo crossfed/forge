@@ -304,6 +304,18 @@ def check_contract_sdk_components(root: Path, errors: list[str]) -> None:
    if not path.exists():
       return
 
+   contract_include = root / "guest" / "libraries" / "contract" / "include" / "forge" / "contract"
+   source_c_headers = sorted(contract_include.glob("*.h"))
+   if source_c_headers:
+      rendered = ", ".join(str(header.relative_to(root)) for header in source_c_headers)
+      errors.append(
+         "generated Contract SDK C ABI headers must live outside library source include: " + rendered
+      )
+
+   types_template = root / "guest" / "cmake" / "types.h.in"
+   if not types_template.exists():
+      errors.append("guest/cmake/types.h.in: generated Contract SDK C ABI types template is missing")
+
    source = path.read_text(errors="ignore")
    for required in (
       "-DCMAKE_C_FLAGS=${_forge_contract_llvm_path_map_flags}",
