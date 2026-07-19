@@ -1,7 +1,9 @@
 module;
 
+#if !defined(FORGE_CONTRACT_GUEST)
 #include <boost/describe.hpp>
 #include <forge/raw/serialization.hpp>
+#endif
 
 #include <cstdint>
 #include <utility>
@@ -11,6 +13,7 @@ export module forge.chain.protocol.transaction;
 
 export import :value;
 
+#if !defined(FORGE_CONTRACT_GUEST)
 import forge.crypto.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
@@ -90,3 +93,4 @@ FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::transaction_header)
 FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::transaction)
 FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::signed_transaction)
 FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::packed_transaction)
+#endif

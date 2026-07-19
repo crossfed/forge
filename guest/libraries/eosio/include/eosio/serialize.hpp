@@ -2,7 +2,37 @@
 
 #include <eosio/dispatcher.hpp>
 
+#include <cstddef>
+#include <cstdint>
+#include <span>
+#include <vector>
+
 import forge.raw.codec;
+
+namespace eosio {
+
+template <typename T> [[nodiscard]] std::size_t pack_size(const T& value) {
+   return ::forge::raw::pack_size(value);
+}
+
+template <typename T> [[nodiscard]] std::vector<char> pack(const T& value) {
+   const auto bytes = ::forge::raw::pack(value);
+   return {reinterpret_cast<const char*>(bytes.data()), reinterpret_cast<const char*>(bytes.data() + bytes.size())};
+}
+
+template <typename T> [[nodiscard]] T unpack(const char* data, std::size_t size) {
+   return ::forge::raw::unpack_exact<T>(std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(data), size});
+}
+
+template <typename T> [[nodiscard]] T unpack(const std::vector<char>& data) {
+   return unpack<T>(data.data(), data.size());
+}
+
+template <typename T> void unpack(T& value, const char* data, std::size_t size) {
+   value = unpack<T>(data, size);
+}
+
+} // namespace eosio
 
 #define FORGE_EOSIO_DETAIL_PACK_MEMBER(type, member) ::forge::raw::pack(stream, value.member);
 #define FORGE_EOSIO_DETAIL_UNPACK_MEMBER(type, member) ::forge::raw::unpack(stream, value.member);

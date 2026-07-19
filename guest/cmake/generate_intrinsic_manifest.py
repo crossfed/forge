@@ -92,44 +92,9 @@ def c_type(value: str) -> str:
     return normalized
 
 
-def write_types_header(path: pathlib.Path) -> None:
+def write_types_header(source: pathlib.Path, path: pathlib.Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        """#pragma once
-
-#include <stdbool.h>
-#include <stdint.h>
-
-#define FORGE_CONTRACT_ALIGNED(type) __attribute__((aligned(16))) type
-
-typedef uint64_t capi_name;
-typedef unsigned __int128 uint128_t;
-typedef __int128 int128_t;
-
-struct capi_public_key {
-   char data[34];
-};
-
-struct capi_signature {
-   uint8_t data[66];
-};
-
-struct FORGE_CONTRACT_ALIGNED(capi_checksum256) {
-   uint8_t hash[32];
-};
-
-struct FORGE_CONTRACT_ALIGNED(capi_checksum160) {
-   uint8_t hash[20];
-};
-
-struct FORGE_CONTRACT_ALIGNED(capi_checksum512) {
-   uint8_t hash[64];
-};
-
-#undef FORGE_CONTRACT_ALIGNED
-""",
-        encoding="utf-8",
-    )
+    path.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
 
 
 def write_c_header(path: pathlib.Path, entries: list[dict]) -> None:
@@ -243,7 +208,8 @@ def main() -> None:
         encoding="utf-8",
     )
 
-    write_types_header(args.include_dir / "forge/contract/types.h")
+    types_header = pathlib.Path(__file__).parent.parent / "libraries/contract/include/forge/contract/types.h"
+    write_types_header(types_header, args.include_dir / "forge/contract/types.h")
     eosio_types = args.include_dir / "eosio/types.h"
     eosio_types.parent.mkdir(parents=True, exist_ok=True)
     eosio_types.write_text("#pragma once\n\n#include <forge/contract/types.h>\n", encoding="utf-8")

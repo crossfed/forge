@@ -165,9 +165,25 @@ template <std::size_t Size> class fixed_key {
       return detail::extract_fixed_key_bytes<Size>(words_);
    }
 
-   bool operator==(const fixed_key&) const = default;
-   [[nodiscard]] std::strong_ordering operator<=>(const fixed_key& other) const noexcept {
-      return words_ <=> other.words_;
+   [[nodiscard]] constexpr bool operator==(const fixed_key& other) const noexcept {
+      for (auto index = std::size_t{}; index < words_.size(); ++index) {
+         if (words_[index] != other.words_[index]) {
+            return false;
+         }
+      }
+      return true;
+   }
+
+   [[nodiscard]] constexpr std::strong_ordering operator<=>(const fixed_key& other) const noexcept {
+      for (auto index = std::size_t{}; index < words_.size(); ++index) {
+         if (words_[index] < other.words_[index]) {
+            return std::strong_ordering::less;
+         }
+         if (words_[index] > other.words_[index]) {
+            return std::strong_ordering::greater;
+         }
+      }
+      return std::strong_ordering::equal;
    }
 
  private:

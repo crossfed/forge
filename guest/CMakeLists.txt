@@ -460,6 +460,7 @@ install(
    FILES
       libraries/contract/include/forge/contract/intrinsics.hpp
       libraries/contract/include/forge/contract/serialize.hpp
+      libraries/contract/include/forge/contract/types.h
    DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/include/forge/contract"
 )
 install(DIRECTORY libraries/eosio/include/ DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/include")
@@ -521,6 +522,7 @@ install(
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/action_value.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/action.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/transaction_value.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/transaction.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/authority_value.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/authority.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/producer_authority.cppm"

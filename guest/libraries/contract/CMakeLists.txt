@@ -7,6 +7,31 @@ target_sources(
       FILES
          include/forge/contract/intrinsics.cppm
          include/forge/contract/contract.cppm
+         include/forge/contract/datastream.cppm
+         include/forge/contract/varint.cppm
+         include/forge/contract/fixed_bytes.cppm
+         include/forge/contract/binary_extension.cppm
+         include/forge/contract/ignore.cppm
+         include/forge/contract/hash_id.cppm
+         include/forge/contract/action.cppm
+         include/forge/contract/base64.cppm
+         include/forge/contract/transaction.cppm
+         include/forge/contract/deferred_transaction.cppm
+         include/forge/contract/authorization.cppm
+         include/forge/contract/bitset.cppm
+         include/forge/contract/call.cppm
+         include/forge/contract/crypto.cppm
+         include/forge/contract/crypto_bls_ext.cppm
+         include/forge/contract/crypto_ext.cppm
+         include/forge/contract/instant_finality.cppm
+         include/forge/contract/key.cppm
+         include/forge/contract/powers.cppm
+         include/forge/contract/system.cppm
+         include/forge/contract/print.cppm
+         include/forge/contract/privileged.cppm
+         include/forge/contract/producer_schedule.cppm
+         include/forge/contract/rope.cppm
+         include/forge/contract/string.cppm
          include/forge/contract/dispatcher.cppm
          include/forge/contract/multi_index.cppm
          include/forge/contract/singleton.cppm

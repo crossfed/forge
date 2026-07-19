@@ -11,6 +11,11 @@ import forge.chain.protocol.values;
 
 export namespace forge::contract {
 
+enum return_code : std::int32_t {
+   failure = -1,
+   success = 0,
+};
+
 [[noreturn]] inline void abort(std::string_view message) {
    ::eosio_assert_message(0U, message.data(), static_cast<std::uint32_t>(message.size()));
    __builtin_unreachable();
