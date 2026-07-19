@@ -257,6 +257,7 @@ struct block_timestamp {
    explicit block_timestamp(time_point value) noexcept;
    explicit block_timestamp(time_point_sec value) noexcept;
 
+   // CDT and Spring expose 0xffff as the contract-visible maximum even though slot is 32-bit.
    [[nodiscard]] static constexpr block_timestamp maximum() noexcept {
       return block_timestamp{0xffffU};
    }

@@ -471,6 +471,8 @@ BOOST_AUTO_TEST_CASE(time_and_extended_asset_match_cdt_wire_layout) {
    BOOST_TEST(parsed.time_since_epoch().count() == 946'684'800'000'000LL);
    BOOST_TEST(parsed.to_string() == "2000-01-01T00:00:00");
    BOOST_TEST(protocol::block_timestamp{parsed}.slot == 0U);
+   BOOST_TEST(protocol::block_timestamp::maximum().slot == 0xffffU);
+   BOOST_TEST(protocol::block_timestamp::maximum().next().slot == 0x10000U);
    BOOST_TEST(protocol::block_timestamp{parsed}.next().slot == 1U);
    BOOST_CHECK_EXCEPTION((void)protocol::block_timestamp{std::numeric_limits<std::uint32_t>::max()}.next(),
                          std::invalid_argument,
