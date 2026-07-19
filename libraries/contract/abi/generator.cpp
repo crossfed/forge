@@ -1517,7 +1517,7 @@ const std::set<std::string>& source_record_codecs(const schema& input, const std
 }
 
 std::string make_codec_prelude(const schema& input) {
-   if (input.has_apply && !input.has_eosio_dispatch) {
+   if (input.record_codecs.empty()) {
       return {};
    }
    auto output = std::ostringstream{};
