@@ -6,8 +6,8 @@ and is neither installed nor exported as a Forge component.
 
 ## Responsibilities
 
-- Register all 68 functions from the canonical intrinsic registry, including
-  `current_receiver`.
+- Register all 148 functions from the canonical intrinsic registry without a
+  second hand-written registration list.
 - Execute a contract invocation with one `forge::db::object::transaction`.
 - Commit successful `apply` and `eosio_exit`; roll back assertions, DB errors
   and VM traps.
@@ -15,6 +15,11 @@ and is neither installed nor exported as a Forge component.
   five secondary-index families.
 - Expose independent read helpers so tests inspect committed ObjectDB state
   without trusting the invocation-local iterator cache.
+- Provide deterministic invocation state for authorization, accounts,
+  transactions, producers, protocol features, resource limits and finality.
+- Execute hashing, key recovery, extended crypto, BLS, synchronous calls,
+  console output, inline actions and deferred transactions through real host
+  callbacks.
 
 The seven schema models are direct `forge::db::object::object` values. Ranked
 ObjectDB indexes own uniqueness, ordering, updates and rollback. The test-local
@@ -31,16 +36,19 @@ VM argument proxy so unaligned donor inputs are copied safely.
 
 ## Boundaries
 
-This library is not a blockchain runtime. It does not implement RAM billing,
-authorization management, controller policy, persistent schema migration or a
-public memory database. Product host bindings must provide their own state
-models and use production Forge DB drivers.
+This library is not a blockchain runtime. Its authorization and privileged
+state are deterministic fixtures, not a controller or consensus model. It does
+not implement RAM billing, fork choice, controller lifecycle, persistent schema
+migration or a public memory database. Product host bindings must provide their
+own policy, state models and production Forge DB drivers.
 
 ## Tests
 
 `guest/tests/e2e/contract_tests.cpp` runs real generated wasm32 contracts
-through `forge.vm.wasm`. The cases cover all 60 DB imports, C++23 `multi_index`
-and `singleton`, primary and secondary traversal, transaction commit/rollback,
-stale and wrong-kind iterators, payer and ownership checks, NaN, and unaligned
-`idx256` input. Test-only deterministic snapshots compare the complete modern
-and EOSIO ObjectDB result without exposing a public memory driver.
+through `forge.vm.wasm`. The database cases cover all 60 DB imports, C++23
+`multi_index` and `singleton`, traversal, transaction commit/rollback, iterator
+errors, payer and ownership checks, NaN, and unaligned `idx256` input. The full
+oracle contract executes every non-database capability family, verifies
+observable side effects and proves that assertion failures roll back ObjectDB
+and fixture state together. A malformed-pointer case verifies that guest ranges
+are rejected before a host callback touches memory.

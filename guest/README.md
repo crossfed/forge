@@ -288,11 +288,19 @@ primary `db_*_i64` operations and ten operations for each of `idx64`, `idx128`,
 `idx256`, `idx_double` and `idx_long_double`. `<forge/contract/intrinsics.h>`
 is canonical. The pinned CDT family headers under `<eosio/*.h>` are generated
 from that registry without a second declaration list. The shipped interface
-defines signatures only. Forge's non-installed test host executes all
-60 DB functions against `forge.db.object` to prove iterator, transaction, index
-and rollback semantics against Spring scenarios. It is a test oracle, not a
-product host binding. Authorization, RAM accounting and the blockchain-owned
-storage schema remain responsibilities of the future blockchain runtime.
+defines signatures only. Forge's non-installed test host registers all 148
+functions directly from the same registry. It executes the database family
+against `forge.db.object`, uses Forge crypto for contract-visible primitives,
+and supplies deterministic state for the remaining capability families. This
+is an executable SDK oracle, not a product host binding. Authorization policy,
+RAM accounting, consensus and the blockchain-owned storage schema remain
+responsibilities of the product runtime.
+
+The pinned CDT snapshot contains 14 public EOSIO C headers and 39 public EOSIO
+C++ headers. The SDK installs each compatibility header plus the canonical
+Forge C headers and 30 modern leaf modules. A committed surface manifest checks
+these exact inventories together with attributes, ABI vocabulary and stable
+contract-visible errors.
 
 The declarative registry generates guest declarations and the compatibility
 manifest consumed by `contract-check`. Validation rejects unknown or

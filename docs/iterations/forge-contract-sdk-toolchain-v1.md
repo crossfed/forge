@@ -1,7 +1,7 @@
 # Forge Contract SDK And Toolchain Design Baseline V1
 
-Status: accepted design baseline; the first build-foundation vertical is
-implemented on `contract-sdk-toolchain-v1`.
+Status: accepted design baseline; the complete SDK foundation is implemented on
+`contract-sdk-toolchain-v1` and awaits the unchanged-contract corpus gate.
 
 ## Implementation Snapshot
 
@@ -12,20 +12,20 @@ entry points live in `tools/`. It currently delivers:
 - release and developer toolchain profiles;
 - pinned upstream libc++, libc++abi and compiler-rt sysroot construction;
 - target-neutral raw codec and guest-safe chain value modules;
-- contract context, generated dispatcher and the initial versioned intrinsic set;
-- complete Spring/CDT database C ABI in intrinsic interface v1;
+- contract context and donor-compatible action, notification and synchronous-call dispatch;
+- the exact 148-function CDT/Spring union in intrinsic interface v1;
 - C++23 `multi_index`, `singleton` and targeted EOSIO database veneer;
-- executable ObjectDB test host for all contract DB intrinsics;
-- modern Forge and minimal EOSIO source vocabularies;
+- executable test host for every intrinsic family, with ObjectDB-backed tables;
+- guest-safe protocol, crypto and time values shared with host Forge;
+- 30 modern Forge modules and all 14 C plus 39 C++ headers from pinned CDT;
 - Clang attribute plugin, ABI generator, structural checker and build manifest;
 - CMake `find_package(ForgeContract)` and `forge_add_contract()`;
 - allocator/runtime tests and execution in `forge.vm.wasm`;
 - reproducibility, negative validation, archive and relocation gates.
 
-The remaining EOSIO C++ header corpus, production blockchain host bindings and
-the full legacy contract corpus remain later compatibility blocks. Statements
-below describing those surfaces are accepted target architecture unless the
-implementation snapshot above explicitly marks them complete.
+Production blockchain host bindings and the unchanged legacy contract corpus
+remain later compatibility blocks. The corpus is now an independent proof of a
+complete SDK rather than the mechanism for discovering missing fundamental API.
 
 This document defines only the guest SDK and contract toolchain track.
 `forge.vm.wasm` is already released and is the execution and validation oracle
@@ -443,10 +443,11 @@ Host and guest builds of `forge::raw` pass identical golden byte vectors.
 6. Add EOSIO veneer headers and the unchanged legacy contract corpus gate.
 7. Add the safety, clang-tidy and development UBSan profiles.
 
-The build foundation now completes steps 1-5 and the targeted EOSIO veneer from
-step 6. The executable test host proves the C ABI, C++23 `multi_index` and
-`singleton` over Forge ObjectDB. The next compatibility block expands the
-unchanged legacy contract corpus and adds the host surfaces it requires.
+The SDK foundation now completes steps 1-5, the full pinned CDT public veneer
+from step 6 and the local safety profiles from step 7. The executable oracle
+registers all 148 intrinsics, proves the C ABI and exercises the contract-visible
+families over Forge VM, ObjectDB and crypto. The next compatibility block builds
+the unchanged Spring contract corpus; it must not add missing fundamental API.
 
 Each stage must leave one executable acceptance proof. Compatibility is not
 deferred to the final stage.
