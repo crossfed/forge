@@ -8,6 +8,7 @@
 #include <vector>
 
 import forge.contract;
+import forge.contract.varint;
 
 using str = std::string;
 
@@ -65,6 +66,12 @@ class [[forge::contract("abifixture")]] abifixture : public forge::contract::con
       std::uint64_t id = 0;
    };
 
+   struct [[forge::table("varints")]] varint_record {
+      std::uint64_t id = 0;
+      forge::unsigned_int unsigned_value;
+      forge::signed_int signed_value;
+   };
+
    [[forge::action]] void alias(std::variant<std::uint64_t, str> arg0) {
       static_cast<void>(arg0);
    }
@@ -83,6 +90,11 @@ class [[forge::contract("abifixture")]] abifixture : public forge::contract::con
    }
    [[forge::action]] result_value result() {
       return {};
+   }
+   [[forge::action]] void varintargs(forge::contract::unsigned_int unsigned_value,
+                                     forge::contract::signed_int signed_value) {
+      static_cast<void>(unsigned_value);
+      static_cast<void>(signed_value);
    }
 
    [[forge::call]] std::uint32_t sum(std::uint32_t a, std::uint32_t b) {

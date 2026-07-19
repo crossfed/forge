@@ -189,7 +189,9 @@ def check_features(abi):
         "B_map_string_string_E": "pair_string_string[]",
         "B_vector_int32_E": "int32[]",
         "base_alias": "base_value",
+        "signed_int": "varint32",
         "str": "string",
+        "unsigned_int": "varuint32",
     }
 
     structs = by_name(abi["structs"])
@@ -204,12 +206,18 @@ def check_features(abi):
     variants = by_name(abi["variants"])
     assert variants["variant_uint64_str"]["types"] == ["uint64", "str"]
     tables = by_name(abi["tables"])
-    assert set(tables) == {"defaultrec", "indextable", "owned", "records", "singletn"}
+    assert set(tables) == {"defaultrec", "indextable", "owned", "records", "singletn", "varints"}
     assert tables["defaultrec"]["type"] == "defaultrec"
     assert tables["records"]["type"] == "record"
     assert tables["owned"]["type"] == "owned_record"
     assert tables["indextable"]["type"] == "indexed_record"
     assert tables["singletn"]["type"] == "indexed_record"
+    assert tables["varints"]["type"] == "varint_record"
+    assert by_name(structs["varint_record"]["fields"])["unsigned_value"]["type"] == "varuint32"
+    assert by_name(structs["varint_record"]["fields"])["signed_value"]["type"] == "varint32"
+    varint_fields = by_name(structs["varintargs"]["fields"])
+    assert varint_fields["unsigned_value"]["type"] == "unsigned_int"
+    assert varint_fields["signed_value"]["type"] == "signed_int"
     assert by_name(abi["action_results"])["result"]["result_type"] == "result_value"
     assert by_name(abi["calls"])["sum"] == {
         "name": "sum",
