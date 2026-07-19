@@ -41,6 +41,7 @@ target_include_directories(
    PUBLIC
       "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
 )
+target_link_libraries(forge_guest_contract PRIVATE Boost::headers)
 target_link_libraries(
    forge_guest_contract
    PUBLIC

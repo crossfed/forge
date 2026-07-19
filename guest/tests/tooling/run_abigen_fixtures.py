@@ -155,6 +155,11 @@ def invoke(
         command.extend(("--ricardian-contracts", str(ricardian_contracts)))
     if ricardian_clauses is not None:
         command.extend(("--ricardian-clauses", str(ricardian_clauses)))
+    source_wrappers = []
+    for index, _ in enumerate(additional_sources, start=1):
+        wrapper = output / f"{source.stem}.source-{index}.cpp"
+        source_wrappers.append(wrapper)
+        command.extend(("--source-wrapper", str(wrapper)))
     command.extend((str(source), *(str(item) for item in additional_sources)))
 
     result = subprocess.run(
@@ -218,6 +223,7 @@ def check_features(abi):
     varint_fields = by_name(structs["varintargs"]["fields"])
     assert varint_fields["unsigned_value"]["type"] == "unsigned_int"
     assert varint_fields["signed_value"]["type"] == "signed_int"
+    assert by_name(structs["extension"]["fields"])["value"]["type"] == "uint32$"
     assert by_name(abi["action_results"])["result"]["result_type"] == "result_value"
     assert by_name(abi["calls"])["sum"] == {
         "name": "sum",
@@ -379,8 +385,11 @@ def main():
         args.output / "multi-source-valid",
         additional_sources=(multi_source_helper,),
     )
-    if [action["name"] for action in multi_source["actions"]] != ["next"]:
+    if [action["name"] for action in multi_source["actions"]] != ["next", "previous"]:
         raise RuntimeError("shared multi-source action was not de-duplicated")
+    helper_wrapper = args.output / "multi-source-valid/multi_source_contract.source-1.cpp"
+    if "__forge_contract_action_" not in helper_wrapper.read_text(encoding="utf-8"):
+        raise RuntimeError("secondary translation-unit action did not receive a dispatch thunk")
 
     user_vector = invoke(
         args,
@@ -393,6 +402,69 @@ def main():
         raise RuntimeError("user-defined vector template was encoded as a standard ABI array")
     if user_vector_structs["vector_uint32"]["fields"] != [{"name": "value", "type": "uint32"}]:
         raise RuntimeError("user-defined vector template record shape changed")
+
+    eosio_transaction = invoke(
+        args,
+        "transactionabi",
+        args.fixtures / "eosio_transaction_abi.cpp",
+        args.output / "eosio-transaction-abi",
+    )
+    transaction_structs = [item for item in eosio_transaction["structs"] if item["name"] == "transaction"]
+    if len(transaction_structs) != 1:
+        raise RuntimeError("EOSIO transaction adapter did not reuse the canonical transaction ABI record")
+    transaction_records = by_name(eosio_transaction["structs"])
+    if transaction_records["permission_level"]["fields"] != [
+        {"name": "actor", "type": "name"},
+        {"name": "permission", "type": "name"},
+    ]:
+        raise RuntimeError("EOSIO transaction adapter changed the canonical permission_level ABI record")
+    if transaction_records["action"] != {
+        "name": "action",
+        "base": "",
+        "fields": [
+            {"name": "account", "type": "name"},
+            {"name": "name", "type": "name"},
+            {"name": "authorization", "type": "permission_level[]"},
+            {"name": "data", "type": "bytes"},
+        ],
+    }:
+        raise RuntimeError("EOSIO transaction adapter leaked its C++ inheritance into the ABI")
+    if transaction_records["extension"]["fields"] != [
+        {"name": "type", "type": "uint16"},
+        {"name": "data", "type": "bytes"},
+    ]:
+        raise RuntimeError("EOSIO transaction adapter changed the canonical extension ABI record")
+    if by_name(eosio_transaction["actions"])["sendtrx"]["type"] != "submit":
+        raise RuntimeError("annotated EOSIO action name replaced its donor method ABI type")
+    submit_fields = by_name(by_name(eosio_transaction["structs"])["submit"]["fields"])
+    if submit_fields["value"]["type"] != "transaction":
+        raise RuntimeError("EOSIO transaction action argument changed ABI type")
+
+    eosio_fixed_bytes = invoke(
+        args,
+        "fixedbytes",
+        args.fixtures / "eosio_fixed_bytes_abi.cpp",
+        args.output / "eosio-fixed-bytes-abi",
+    )
+    fixed_bytes_fields = by_name(by_name(eosio_fixed_bytes["structs"])["verify"]["fields"])
+    if {name: field["type"] for name, field in fixed_bytes_fields.items()} != {
+        "one": "checksum160",
+        "two": "checksum256",
+        "three": "checksum512",
+    }:
+        raise RuntimeError("EOSIO fixed_bytes adapters changed their canonical ABI names")
+    if any(item["name"].startswith("fixed_bytes") for item in eosio_fixed_bytes["structs"]):
+        raise RuntimeError("EOSIO fixed_bytes adapter leaked an implementation record into the ABI")
+
+    equivalent_struct = invoke(
+        args,
+        "equivalent",
+        args.fixtures / "equivalent_struct.cpp",
+        args.output / "equivalent-struct",
+    )
+    payload_structs = [item for item in equivalent_struct["structs"] if item["name"] == "payload"]
+    if len(payload_structs) != 1 or payload_structs[0]["fields"] != [{"name": "value", "type": "uint32"}]:
+        raise RuntimeError("equivalent ABI records were not de-duplicated")
 
     invoke(args, "duplicate", args.fixtures / "duplicate_action.cpp", args.output / "duplicate-action", succeeds=False)
     invoke(args, "overloaded", args.fixtures / "overloaded_action.cpp", args.output / "overloaded-action", succeeds=False)
@@ -470,6 +542,14 @@ def main():
         raise RuntimeError("exported custom apply received a duplicate generated dispatcher")
     if "codec_traits<::custom_record>" not in custom_dispatcher:
         raise RuntimeError("exported custom apply did not receive generated record codecs")
+    custom_apply_only = invoke(
+        args,
+        "custom_apply_only",
+        args.fixtures / "custom_apply_only.cpp",
+        args.output / "custom-apply-only",
+    )
+    if any(custom_apply_only[key] for key in ("types", "structs", "actions", "tables")):
+        raise RuntimeError("custom apply without ABI declarations generated spurious ABI entries")
     invoke(
         args,
         "invalid_exported_apply",

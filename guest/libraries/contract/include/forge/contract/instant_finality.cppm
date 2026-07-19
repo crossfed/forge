@@ -1,6 +1,6 @@
 module;
 
-#include <forge/contract/intrinsics.h>
+#include <forge/contract/internal/intrinsics.hpp>
 
 #include <cstdint>
 #include <string>
@@ -53,7 +53,7 @@ inline void set_finalizers(const finalizer_policy& policy) {
       check(authority.public_key.size() == sizeof(forge::crypto::bls::g1), "public key has a wrong size");
    }
    const auto bytes = ::forge::raw::pack(policy);
-   ::set_finalizers(0U, reinterpret_cast<const char*>(bytes.data()), bytes.size());
+   ::forge::contract::internal::set_finalizers(0U, reinterpret_cast<const char*>(bytes.data()), bytes.size());
 }
 
 } // namespace forge::contract

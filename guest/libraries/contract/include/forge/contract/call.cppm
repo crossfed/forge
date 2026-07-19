@@ -1,6 +1,6 @@
 module;
 
-#include <forge/contract/intrinsics.h>
+#include <forge/contract/internal/intrinsics.hpp>
 
 #include <concepts>
 #include <cstddef>
@@ -24,19 +24,19 @@ export namespace forge::contract {
 
 [[nodiscard]] inline std::int64_t call(chain::protocol::name receiver, std::uint64_t flags, const char* data,
                                        std::size_t size) {
-   return ::call(receiver.value, flags, data, size);
+   return ::forge::contract::internal::call(receiver.value, flags, data, size);
 }
 
 [[nodiscard]] inline std::uint32_t get_call_return_value(void* data, std::uint32_t size) {
-   return ::get_call_return_value(data, size);
+   return ::forge::contract::internal::get_call_return_value(data, size);
 }
 
 [[nodiscard]] inline std::uint32_t get_call_data(void* data, std::uint32_t size) {
-   return ::get_call_data(data, size);
+   return ::forge::contract::internal::get_call_data(data, size);
 }
 
 inline void set_call_return_value(void* data, std::uint32_t size) {
-   ::set_call_return_value(data, size);
+   ::forge::contract::internal::set_call_return_value(data, size);
 }
 
 enum class access_mode : std::uint8_t { read_write = 0, read_only = 1 };
@@ -93,7 +93,8 @@ class call_wrapper {
       const auto data = ::forge::raw::pack(
           std::tuple_cat(std::tuple{header}, std::tuple<std::decay_t<Args>...>{std::forward<Args>(args)...}));
       constexpr auto flags = Access == access_mode::read_only ? std::uint64_t{1} : std::uint64_t{0};
-      const auto result_size = ::call(receiver.value, flags, reinterpret_cast<const char*>(data.data()), data.size());
+      const auto result_size = ::forge::contract::internal::call(
+          receiver.value, flags, reinterpret_cast<const char*>(data.data()), data.size());
       if (result_size < 0) {
          if constexpr (Support == support_mode::abort_op) {
             check(false, "receiver does not support sync call but support_mode is set to abort_op");
@@ -111,7 +112,7 @@ class call_wrapper {
          check(static_cast<std::uint64_t>(result_size) <= std::numeric_limits<std::uint32_t>::max(),
                "sync call return value is too large");
          auto bytes = std::vector<std::uint8_t>(static_cast<std::size_t>(result_size));
-         check(::get_call_return_value(bytes.data(), bytes.size()) == bytes.size(),
+         check(::forge::contract::internal::get_call_return_value(bytes.data(), bytes.size()) == bytes.size(),
                "failed to read complete sync call return value");
          auto value = ::forge::raw::unpack_exact<original_result>(bytes);
          if constexpr (Support == support_mode::no_op) {

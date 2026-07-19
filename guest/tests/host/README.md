@@ -6,7 +6,7 @@ and is neither installed nor exported as a Forge component.
 
 ## Responsibilities
 
-- Register all 148 functions from the canonical intrinsic registry without a
+- Register all 152 functions from the canonical intrinsic registry without a
   second hand-written registration list.
 - Execute a contract invocation with one `forge::db::object::transaction`.
 - Commit successful `apply` and `eosio_exit`; roll back assertions, DB errors

@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.31)
 project(ForgeContractConsumer LANGUAGES CXX)
 
 foreach(_required
+   FORGE_CONTRACT_TARGET
    FORGE_CONTRACT_NAME
    FORGE_CONTRACT_SOURCES_ENCODED
    FORGE_CONTRACT_OUTPUT_DIR
@@ -19,6 +20,7 @@ endforeach()
 
 string(REPLACE "|" ";" FORGE_CONTRACT_SOURCES "${FORGE_CONTRACT_SOURCES_ENCODED}")
 string(REPLACE "|" ";" FORGE_CONTRACT_COMPILE_CHECKS "${FORGE_CONTRACT_COMPILE_CHECKS_ENCODED}")
+string(REPLACE "|" ";" FORGE_CONTRACT_INCLUDE_DIRECTORIES "${FORGE_CONTRACT_INCLUDE_DIRECTORIES_ENCODED}")
 set(_implementation_sources ${FORGE_CONTRACT_SOURCES})
 list(REMOVE_AT _implementation_sources 0)
 
@@ -27,16 +29,16 @@ set(_include "${FORGE_CONTRACT_DATA_DIR}/include")
 set(_runtime "${FORGE_CONTRACT_DATA_DIR}/runtime")
 set(_runtime_archive "${CMAKE_SYSROOT}/lib/libforge_guest_runtime.a")
 set(_generated "${CMAKE_CURRENT_BINARY_DIR}/generated")
-set(_abi "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_NAME}.abi")
-set(_dispatcher "${_generated}/${FORGE_CONTRACT_NAME}.dispatcher.cpp")
+set(_abi "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_TARGET}.abi")
+set(_dispatcher "${_generated}/${FORGE_CONTRACT_TARGET}.dispatcher.cpp")
 set(_implementation_wrappers)
 set(_wrapper_index 1)
 foreach(_source IN LISTS _implementation_sources)
-   list(APPEND _implementation_wrappers "${_generated}/${FORGE_CONTRACT_NAME}.source-${_wrapper_index}.cpp")
+   list(APPEND _implementation_wrappers "${_generated}/${FORGE_CONTRACT_TARGET}.source-${_wrapper_index}.cpp")
    math(EXPR _wrapper_index "${_wrapper_index} + 1")
 endforeach()
-set(_depfile "${_generated}/${FORGE_CONTRACT_NAME}.abi.d")
-set(_manifest "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_NAME}.contract.json")
+set(_depfile "${_generated}/${FORGE_CONTRACT_TARGET}.abi.d")
+set(_manifest "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_TARGET}.contract.json")
 
 add_library(forge_guest_raw STATIC "${_runtime}/stream.cpp" "${_runtime}/codec.cpp")
 target_sources(
@@ -255,6 +257,9 @@ set(_abigen_command
    --sysroot "${CMAKE_SYSROOT}"
    --include "${_include}"
 )
+foreach(_include_directory IN LISTS FORGE_CONTRACT_INCLUDE_DIRECTORIES)
+   list(APPEND _abigen_command --include "${_include_directory}")
+endforeach()
 foreach(_module IN LISTS _module_arguments)
    list(APPEND _abigen_command --module-file "${_module}")
 endforeach()
@@ -292,15 +297,20 @@ add_custom_command(
 )
 
 add_executable(
-   ${FORGE_CONTRACT_NAME}
+   ${FORGE_CONTRACT_TARGET}
    "${_dispatcher}"
    ${_implementation_wrappers}
 )
-target_link_libraries(${FORGE_CONTRACT_NAME} PRIVATE forge_guest_contract forge_guest_eosio)
-target_include_directories(${FORGE_CONTRACT_NAME} PRIVATE "${_include}")
-target_compile_definitions(${FORGE_CONTRACT_NAME} PRIVATE FORGE_CONTRACT_GUEST=1)
+target_link_libraries(${FORGE_CONTRACT_TARGET} PRIVATE forge_guest_contract forge_guest_eosio)
+target_include_directories(
+   ${FORGE_CONTRACT_TARGET}
+   PRIVATE
+      "${_include}"
+      ${FORGE_CONTRACT_INCLUDE_DIRECTORIES}
+)
+target_compile_definitions(${FORGE_CONTRACT_TARGET} PRIVATE FORGE_CONTRACT_GUEST=1)
 target_compile_options(
-   ${FORGE_CONTRACT_NAME}
+   ${FORGE_CONTRACT_TARGET}
    PRIVATE
       -fplugin=${FORGE_CONTRACT_ATTR_PLUGIN}
       -fno-exceptions
@@ -316,17 +326,22 @@ target_compile_options(
 )
 
 if(FORGE_CONTRACT_COMPILE_CHECKS)
-   add_library(${FORGE_CONTRACT_NAME}_compile_checks OBJECT ${FORGE_CONTRACT_COMPILE_CHECKS})
+   add_library(${FORGE_CONTRACT_TARGET}_compile_checks OBJECT ${FORGE_CONTRACT_COMPILE_CHECKS})
    target_link_libraries(
-      ${FORGE_CONTRACT_NAME}_compile_checks
+      ${FORGE_CONTRACT_TARGET}_compile_checks
       PRIVATE
          forge_guest_contract
          forge_guest_eosio
    )
-   target_include_directories(${FORGE_CONTRACT_NAME}_compile_checks PRIVATE "${_include}")
-   target_compile_definitions(${FORGE_CONTRACT_NAME}_compile_checks PRIVATE FORGE_CONTRACT_GUEST=1)
+   target_include_directories(
+      ${FORGE_CONTRACT_TARGET}_compile_checks
+      PRIVATE
+         "${_include}"
+         ${FORGE_CONTRACT_INCLUDE_DIRECTORIES}
+   )
+   target_compile_definitions(${FORGE_CONTRACT_TARGET}_compile_checks PRIVATE FORGE_CONTRACT_GUEST=1)
    target_compile_options(
-      ${FORGE_CONTRACT_NAME}_compile_checks
+      ${FORGE_CONTRACT_TARGET}_compile_checks
       PRIVATE
          -fplugin=${FORGE_CONTRACT_ATTR_PLUGIN}
          -fno-exceptions
@@ -340,14 +355,14 @@ if(FORGE_CONTRACT_COMPILE_CHECKS)
          -ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=.
          -ffile-prefix-map=${CMAKE_CURRENT_BINARY_DIR}=.
    )
-   add_dependencies(${FORGE_CONTRACT_NAME} ${FORGE_CONTRACT_NAME}_compile_checks)
+   add_dependencies(${FORGE_CONTRACT_TARGET} ${FORGE_CONTRACT_TARGET}_compile_checks)
 endif()
 
 set(_source_prefix_index 0)
 foreach(_source IN LISTS FORGE_CONTRACT_SOURCES)
    get_filename_component(_source_directory "${_source}" DIRECTORY)
    target_compile_options(
-      ${FORGE_CONTRACT_NAME}
+      ${FORGE_CONTRACT_TARGET}
       PRIVATE "-ffile-prefix-map=${_source_directory}=./source-${_source_prefix_index}"
    )
    math(EXPR _source_prefix_index "${_source_prefix_index} + 1")
@@ -357,14 +372,14 @@ if(FORGE_CONTRACT_COMPILE_CHECKS)
    foreach(_source IN LISTS FORGE_CONTRACT_COMPILE_CHECKS)
       get_filename_component(_source_directory "${_source}" DIRECTORY)
       target_compile_options(
-         ${FORGE_CONTRACT_NAME}_compile_checks
+         ${FORGE_CONTRACT_TARGET}_compile_checks
          PRIVATE "-ffile-prefix-map=${_source_directory}=./compile-check-${_compile_check_prefix_index}"
       )
       math(EXPR _compile_check_prefix_index "${_compile_check_prefix_index} + 1")
    endforeach()
 endif()
 target_link_options(
-   ${FORGE_CONTRACT_NAME}
+   ${FORGE_CONTRACT_TARGET}
    PRIVATE
       -nostdlib
       -Wl,--no-entry
@@ -377,11 +392,13 @@ target_link_options(
       -Wl,--max-memory=16777216
       -Wl,--allow-undefined
       -Wl,--strip-all
+      -Wl,--no-merge-data-segments
 )
 
 find_library(_libcxx NAMES c++ PATHS "${CMAKE_SYSROOT}/lib" "${CMAKE_SYSROOT}/lib/wasm32" NO_DEFAULT_PATH)
 find_library(_libcxxabi NAMES c++abi PATHS "${CMAKE_SYSROOT}/lib" "${CMAKE_SYSROOT}/lib/wasm32" NO_DEFAULT_PATH)
 find_library(_libc NAMES c PATHS "${CMAKE_SYSROOT}/lib" "${CMAKE_SYSROOT}/lib/wasm32" NO_DEFAULT_PATH)
+find_library(_libm NAMES m PATHS "${CMAKE_SYSROOT}/lib" "${CMAKE_SYSROOT}/lib/wasm32" NO_DEFAULT_PATH)
 find_library(
    _builtins
    NAMES clang_rt.builtins-wasm32
@@ -395,12 +412,12 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release" AND (NOT _libcxxabi OR NOT _builtin
    message(FATAL_ERROR "release Forge Contract sysroot requires libc++abi and compiler-rt builtins")
 endif()
 set(_guest_libraries forge_guest_runtime "${_libcxx}")
-foreach(_library _libcxxabi _libc _builtins)
+foreach(_library _libcxxabi _libc _libm _builtins)
    if(${_library})
       list(APPEND _guest_libraries "${${_library}}")
    endif()
 endforeach()
-target_link_libraries(${FORGE_CONTRACT_NAME} PRIVATE ${_guest_libraries})
+target_link_libraries(${FORGE_CONTRACT_TARGET} PRIVATE ${_guest_libraries})
 
 set(_manifest_llvm_commit_args)
 if(NOT FORGE_CONTRACT_LLVM_COMMIT STREQUAL "")
@@ -408,31 +425,31 @@ if(NOT FORGE_CONTRACT_LLVM_COMMIT STREQUAL "")
 endif()
 
 set_target_properties(
-   ${FORGE_CONTRACT_NAME} PROPERTIES
-   OUTPUT_NAME "${FORGE_CONTRACT_NAME}"
+   ${FORGE_CONTRACT_TARGET} PROPERTIES
+   OUTPUT_NAME "${FORGE_CONTRACT_TARGET}"
    SUFFIX ".wasm"
    RUNTIME_OUTPUT_DIRECTORY "${FORGE_CONTRACT_OUTPUT_DIR}"
 )
 foreach(_configuration IN LISTS CMAKE_CONFIGURATION_TYPES)
    string(TOUPPER "${_configuration}" _configuration_upper)
    set_target_properties(
-      ${FORGE_CONTRACT_NAME} PROPERTIES
+      ${FORGE_CONTRACT_TARGET} PROPERTIES
       "RUNTIME_OUTPUT_DIRECTORY_${_configuration_upper}" "${FORGE_CONTRACT_OUTPUT_DIR}"
    )
 endforeach()
 
 add_custom_command(
-   TARGET ${FORGE_CONTRACT_NAME}
+   TARGET ${FORGE_CONTRACT_TARGET}
    POST_BUILD
    COMMAND
       "${FORGE_CONTRACT_CHECK}"
-      --wasm "$<TARGET_FILE:${FORGE_CONTRACT_NAME}>"
+      --wasm "$<TARGET_FILE:${FORGE_CONTRACT_TARGET}>"
       --abi "${_abi}"
       --imports "${FORGE_CONTRACT_DATA_DIR}/registry/intrinsics.json"
       --required-export apply
    COMMAND
       "${FORGE_CONTRACT_MANIFEST}"
-      --wasm "$<TARGET_FILE:${FORGE_CONTRACT_NAME}>"
+      --wasm "$<TARGET_FILE:${FORGE_CONTRACT_TARGET}>"
       --abi "${_abi}"
       --imports "${FORGE_CONTRACT_DATA_DIR}/registry/intrinsics.json"
       --output "${_manifest}"

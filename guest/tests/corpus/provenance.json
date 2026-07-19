@@ -1,0 +1,398 @@
+{
+  "schema": 1,
+  "donors": {
+    "spring": {
+      "repository": "https://github.com/AntelopeIO/spring.git",
+      "commit": "e6a99f68b67abc4d89fe716755b2e1394a4991f7"
+    },
+    "cdt": {
+      "repository": "https://github.com/AntelopeIO/cdt.git",
+      "commit": "69599db279b7b93d0688502720c15c6962a1401b"
+    },
+    "eosio": {
+      "repository": "https://github.com/EOSIO/eos.git",
+      "commit": "11d35f0f934402321853119d36caeb7022813743",
+      "description": "v2.1.0-7-g11d35f0f9"
+    }
+  },
+  "files": [
+    {
+      "path": "eosio/contracts/eosio.bios/bin/eosio.bios.abi",
+      "donor": "eosio",
+      "source": "contracts/contracts/eosio.bios/bin/eosio.bios.abi",
+      "sha256": "7cc65b7359e32b7eeb31843edb01b62e17a6f7478b0eca4dea26e7fc2d0ab0f4"
+    },
+    {
+      "path": "eosio/contracts/eosio.bios/bin/eosio.bios.wasm",
+      "donor": "eosio",
+      "source": "contracts/contracts/eosio.bios/bin/eosio.bios.wasm",
+      "sha256": "f12613788d33551a623890545115e0f8ba19ceab0b4a3ff8dcf9d720891923db"
+    },
+    {
+      "path": "eosio/contracts/eosio.bios/include/eosio.bios/eosio.bios.hpp",
+      "donor": "eosio",
+      "source": "contracts/contracts/eosio.bios/include/eosio.bios/eosio.bios.hpp",
+      "sha256": "f1701565e134b94c92595bed2e02f1d98bcff84e5a3918cf42a4690c21fc39ed"
+    },
+    {
+      "path": "eosio/contracts/eosio.bios/ricardian/eosio.bios.contracts.md.in",
+      "donor": "eosio",
+      "source": "contracts/contracts/eosio.bios/ricardian/eosio.bios.contracts.md.in",
+      "sha256": "c0f4a6827602564cd2df013ba6f821a39dd223e48fece4fdda8a8a9faeb4f411"
+    },
+    {
+      "path": "eosio/contracts/eosio.bios/src/eosio.bios.cpp",
+      "donor": "eosio",
+      "source": "contracts/contracts/eosio.bios/src/eosio.bios.cpp",
+      "sha256": "806963d1499a8ecfda906de3ef339f1136cf07817d5fad5d6fe652b50818e2bf"
+    },
+    {
+      "path": "eosio/contracts/eosio.boot/bin/eosio.boot.abi",
+      "donor": "eosio",
+      "source": "contracts/contracts/eosio.boot/bin/eosio.boot.abi",
+      "sha256": "ef796a52ce59c0bca6ca46459281118a19a4337f7d002cb6dfd8d17931a9a48c"
+    },
+    {
+      "path": "eosio/contracts/eosio.boot/bin/eosio.boot.wasm",
+      "donor": "eosio",
+      "source": "contracts/contracts/eosio.boot/bin/eosio.boot.wasm",
+      "sha256": "f6720e5018d8d0b46e5ba6a117a8d397215c3ddb83f62dc0e9f3e14dff47d331"
+    },
+    {
+      "path": "eosio/contracts/eosio.boot/include/eosio.boot/eosio.boot.hpp",
+      "donor": "eosio",
+      "source": "contracts/contracts/eosio.boot/include/eosio.boot/eosio.boot.hpp",
+      "sha256": "56b234c4609170d38d59fdcbf0bb6d6cb9b9098ed111f1c28e0de2d2ed07f2eb"
+    },
+    {
+      "path": "eosio/contracts/eosio.boot/ricardian/eosio.boot.contracts.md.in",
+      "donor": "eosio",
+      "source": "contracts/contracts/eosio.boot/ricardian/eosio.boot.contracts.md.in",
+      "sha256": "5ebd74726f7de1c885d6e2006f8942516c55879e5a0f60ed098e08b9c57875fe"
+    },
+    {
+      "path": "eosio/contracts/eosio.boot/src/eosio.boot.cpp",
+      "donor": "eosio",
+      "source": "contracts/contracts/eosio.boot/src/eosio.boot.cpp",
+      "sha256": "91415b099dafb78760ecf35ec44ccf7038494ba41777b99c663545c7fff0e67a"
+    },
+    {
+      "path": "spring/contracts/eosio.boot/eosio.boot.abi",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.boot/eosio.boot.abi",
+      "sha256": "c85e37024905c7c8158005078d8adbeb749301e87b9a8e07c0ed3b7df083a445"
+    },
+    {
+      "path": "spring/contracts/eosio.boot/eosio.boot.cpp",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.boot/eosio.boot.cpp",
+      "sha256": "60e2fe7a4ec2d1b24d740eee98cc0a1da56ea976c85086a49429f19121d7de53"
+    },
+    {
+      "path": "spring/contracts/eosio.boot/eosio.boot.hpp",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.boot/eosio.boot.hpp",
+      "sha256": "56b234c4609170d38d59fdcbf0bb6d6cb9b9098ed111f1c28e0de2d2ed07f2eb"
+    },
+    {
+      "path": "spring/contracts/eosio.boot/eosio.boot.wasm",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.boot/eosio.boot.wasm",
+      "sha256": "b295aa0b211e671c215469bdea1f57707849bf0b9a44d0c0a64ddb90244518eb"
+    },
+    {
+      "path": "spring/contracts/eosio.msig/eosio.msig.abi",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.msig/eosio.msig.abi",
+      "sha256": "d17cb7143af3b9f7b08bd6132478918d1ea5721bfec2481b8aefb76e2c3420ea"
+    },
+    {
+      "path": "spring/contracts/eosio.msig/eosio.msig.cpp",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.msig/eosio.msig.cpp",
+      "sha256": "b2712686f00a88fc3107046c6d7f4db7ac8104cc679a2663fe32a377c72f3d79"
+    },
+    {
+      "path": "spring/contracts/eosio.msig/eosio.msig.hpp",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.msig/eosio.msig.hpp",
+      "sha256": "419a19c5d7c7a11fccb0314ee19e01b7e5a8b8ce853a33c199bb4fe41322caf9"
+    },
+    {
+      "path": "spring/contracts/eosio.msig/eosio.msig.wasm",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.msig/eosio.msig.wasm",
+      "sha256": "2ac7aed4b22f190af6b7b2ef3f90c74d5eb19eeb98220c9dfb6990dfd9aabbb6"
+    },
+    {
+      "path": "spring/contracts/eosio.system/delegate_bandwidth.cpp",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.system/delegate_bandwidth.cpp",
+      "sha256": "b97dbfd8539cfa2ab6917af1d73576cab2f48e470c11cec27d32eaa0b053194e"
+    },
+    {
+      "path": "spring/contracts/eosio.system/eosio.system.abi",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.system/eosio.system.abi",
+      "sha256": "9c1c2906cefdbb73ed980d99a2a8f3c337688c3d59229aba44d54787945dddd3"
+    },
+    {
+      "path": "spring/contracts/eosio.system/eosio.system.cpp",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.system/eosio.system.cpp",
+      "sha256": "27ac20e10e882b11e5c914b6ee41f0df05bbec16e514eca00c02c81c1858ae97"
+    },
+    {
+      "path": "spring/contracts/eosio.system/eosio.system.hpp",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.system/eosio.system.hpp",
+      "sha256": "7f31f257873a50243643496afcf05757d7d3a6083220c372869b93f54d0fe8f2"
+    },
+    {
+      "path": "spring/contracts/eosio.system/eosio.system.wasm",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.system/eosio.system.wasm",
+      "sha256": "fd587592ca2f8db5d14d15a4b50fc9b2d351ff83af11241ee7489ba9986f14cf"
+    },
+    {
+      "path": "spring/contracts/eosio.system/exchange_state.cpp",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.system/exchange_state.cpp",
+      "sha256": "de23fa9184a01ea6380ac58c3b800a9e861cf7eab4cdb59997b4b66a0b23fc9c"
+    },
+    {
+      "path": "spring/contracts/eosio.system/exchange_state.hpp",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.system/exchange_state.hpp",
+      "sha256": "14fbb80e589ce5fd8cd5ccc4818a519ed8fac51e6a0b377a6fbea56e378d8cf4"
+    },
+    {
+      "path": "spring/contracts/eosio.system/native.hpp",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.system/native.hpp",
+      "sha256": "8050477cda46964109bf88477e17663fa5bb93b14755f9b4e8fedc920d50c72b"
+    },
+    {
+      "path": "spring/contracts/eosio.system/peer_keys.cpp",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.system/peer_keys.cpp",
+      "sha256": "c4a3f3c666d4273868fc8fa49e1cbbd0d892c83d1444e17aafb82f49b9dab69d"
+    },
+    {
+      "path": "spring/contracts/eosio.system/peer_keys.hpp",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.system/peer_keys.hpp",
+      "sha256": "d9d7f4b3b1e520cf8948c23cde06c7daed3f3420cfe77b6bc6bdf052117ce78f"
+    },
+    {
+      "path": "spring/contracts/eosio.system/producer_pay.cpp",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.system/producer_pay.cpp",
+      "sha256": "78330559168d1878ee79b28901a1ff92a97b435f6fd9757ea1c13b0e6cc65e05"
+    },
+    {
+      "path": "spring/contracts/eosio.system/rex.cpp",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.system/rex.cpp",
+      "sha256": "f7e90a18591b9b191ed0b4a0e0369f48c3ee29746d4b49410f6bffecd7e841f9"
+    },
+    {
+      "path": "spring/contracts/eosio.system/voting.cpp",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.system/voting.cpp",
+      "sha256": "629bc17b5fd6108e4ecaca50c28d088699d914e5f5c54c6987fc485dd8431f00"
+    },
+    {
+      "path": "spring/contracts/eosio.token/eosio.token.abi",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.token/eosio.token.abi",
+      "sha256": "ad308ef35944af5b0850a76a3d8d5ec063fba2d8e6269132fccecf3ac3934126"
+    },
+    {
+      "path": "spring/contracts/eosio.token/eosio.token.bad.abi",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.token/eosio.token.bad.abi",
+      "sha256": "ab74fdefc23fd6b76b1ed88f6eb4e2075021f68e6e11b039adf86a856f827b1f"
+    },
+    {
+      "path": "spring/contracts/eosio.token/eosio.token.cpp",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.token/eosio.token.cpp",
+      "sha256": "d2ae436862dc6e997e14a38bae4776daf8b08f3df2711f44c8031c407bb05091"
+    },
+    {
+      "path": "spring/contracts/eosio.token/eosio.token.hpp",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.token/eosio.token.hpp",
+      "sha256": "0bd3f3b49baf7bbb20fb97b36d8bb73474cc01582fbd5c4e5d1911b3f27b226d"
+    },
+    {
+      "path": "spring/contracts/eosio.token/eosio.token.wasm",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.token/eosio.token.wasm",
+      "sha256": "4c76fdcd411cafbf3af1c0987bbb093bac2bfd2e8a669f12feae785ffd43a7c3"
+    },
+    {
+      "path": "spring/contracts/eosio.wrap/eosio.wrap.abi",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.wrap/eosio.wrap.abi",
+      "sha256": "a655afd2f7e7aab98bf7fee811faf53502bc340df14fa7935046a7a589c10731"
+    },
+    {
+      "path": "spring/contracts/eosio.wrap/eosio.wrap.cpp",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.wrap/eosio.wrap.cpp",
+      "sha256": "7e46af7a33eee28169325f6e650a8363f8851fec292e378b07894bbb17990bf8"
+    },
+    {
+      "path": "spring/contracts/eosio.wrap/eosio.wrap.hpp",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.wrap/eosio.wrap.hpp",
+      "sha256": "86020cf04ea740dcb5746c6736d71beb5ac63f925dc2f05b8ba2d2c8d980b924"
+    },
+    {
+      "path": "spring/contracts/eosio.wrap/eosio.wrap.wasm",
+      "donor": "spring",
+      "source": "unittests/contracts/eosio.wrap/eosio.wrap.wasm",
+      "sha256": "8f412c24ee10f312a4d14d02b8aefa74e96ff701d06a559c98375ff78a2ea109"
+    },
+    {
+      "path": "spring/test-contracts/capi/eosio/types.h",
+      "donor": "cdt",
+      "source": "libraries/eosiolib/capi/eosio/types.h",
+      "sha256": "5005dbbbcf3737b20a396a0d781fda88ae7c0cab526608371e015c73810ce9d7"
+    },
+    {
+      "path": "spring/test-contracts/test_api/test_action.cpp",
+      "donor": "spring",
+      "source": "unittests/test-contracts/test_api/test_action.cpp",
+      "sha256": "7b4bcfc0207e2464519aa91dcac5ae602d9a2ca4cea7ed9361687587b5a5003d"
+    },
+    {
+      "path": "spring/test-contracts/test_api/test_api.cpp",
+      "donor": "spring",
+      "source": "unittests/test-contracts/test_api/test_api.cpp",
+      "sha256": "3cb06330571248b94526333e2bd07707c3999f5eedf04a922b2e8813ccd79f36"
+    },
+    {
+      "path": "spring/test-contracts/test_api/test_api.hpp",
+      "donor": "spring",
+      "source": "unittests/test-contracts/test_api/test_api.hpp",
+      "sha256": "4c732ab76e16077cba9238f314117c6d697dd007e620ec3c18399df021cffc56"
+    },
+    {
+      "path": "spring/test-contracts/test_api/test_api.wasm",
+      "donor": "spring",
+      "source": "unittests/test-contracts/test_api/test_api.wasm",
+      "sha256": "86d76040ab5c3705fb3cfedb3a763c24ddf5c5b72bfab432c6beb377dc753e03"
+    },
+    {
+      "path": "spring/test-contracts/test_api/test_api_common.hpp",
+      "donor": "spring",
+      "source": "unittests/test-contracts/test_api/test_api_common.hpp",
+      "sha256": "7a349c5e626115f6173262f1b9bc97b0d263b55ca80e19fb8aeb5a4aed2aac3b"
+    },
+    {
+      "path": "spring/test-contracts/test_api/test_chain.cpp",
+      "donor": "spring",
+      "source": "unittests/test-contracts/test_api/test_chain.cpp",
+      "sha256": "4778f22ca1ac3d8191551a5a2dc2a512a6d22ec8e2da01eb025de04b90d1eabb"
+    },
+    {
+      "path": "spring/test-contracts/test_api/test_checktime.cpp",
+      "donor": "spring",
+      "source": "unittests/test-contracts/test_api/test_checktime.cpp",
+      "sha256": "2492b30d130b2f2e5da0d4ec8d1201be92d543fe46360edc6fa8c1974c7658d1"
+    },
+    {
+      "path": "spring/test-contracts/test_api/test_compiler_builtins.cpp",
+      "donor": "spring",
+      "source": "unittests/test-contracts/test_api/test_compiler_builtins.cpp",
+      "sha256": "c688c4ebb7ae2e63485f97f7ce1ee5c92cd729d95fc3169ecba194943d402daa"
+    },
+    {
+      "path": "spring/test-contracts/test_api/test_crypto.cpp",
+      "donor": "spring",
+      "source": "unittests/test-contracts/test_api/test_crypto.cpp",
+      "sha256": "b8b5bd62158c12b15f2685b6591a23f5f20f596ced57193cb8e647630e27f8e1"
+    },
+    {
+      "path": "spring/test-contracts/test_api/test_datastream.cpp",
+      "donor": "spring",
+      "source": "unittests/test-contracts/test_api/test_datastream.cpp",
+      "sha256": "a97f611812f0872749be3a4662869bdca7db2ec55e45d692fefc47955a7bdee6"
+    },
+    {
+      "path": "spring/test-contracts/test_api/test_permission.cpp",
+      "donor": "spring",
+      "source": "unittests/test-contracts/test_api/test_permission.cpp",
+      "sha256": "b9e91f4d3747c68ab48c39dd5f471c3ade93ae7dcf054cf5032d980d71dddedb"
+    },
+    {
+      "path": "spring/test-contracts/test_api/test_print.cpp",
+      "donor": "spring",
+      "source": "unittests/test-contracts/test_api/test_print.cpp",
+      "sha256": "8836398cdfe88feb68fbf0d8fc4b65bc55aaca52616bf8956d3fc6f0e71bb4c1"
+    },
+    {
+      "path": "spring/test-contracts/test_api/test_transaction.cpp",
+      "donor": "spring",
+      "source": "unittests/test-contracts/test_api/test_transaction.cpp",
+      "sha256": "78f26f07e0241d6726995027d5cea023bbb28b42364012bc0ba8b8a7ce9d6467"
+    },
+    {
+      "path": "spring/test-contracts/test_api/test_types.cpp",
+      "donor": "spring",
+      "source": "unittests/test-contracts/test_api/test_types.cpp",
+      "sha256": "2cb6b80bd4e76a827eed4fa76dfab947c4077d386e6ce484f20382da79b4eb02"
+    },
+    {
+      "path": "spring/test-contracts/test_api_db/test_api_db.abi",
+      "donor": "spring",
+      "source": "unittests/test-contracts/test_api_db/test_api_db.abi",
+      "sha256": "d63f80605213a900535fe61c918c0e9868232465c708e4e6b12d4c980695cb1f"
+    },
+    {
+      "path": "spring/test-contracts/test_api_db/test_api_db.cpp",
+      "donor": "spring",
+      "source": "unittests/test-contracts/test_api_db/test_api_db.cpp",
+      "sha256": "bed5348050fc00ac9a5e00ff8f8289e09e59adb77ce44ff567e104b4080b1c50"
+    },
+    {
+      "path": "spring/test-contracts/test_api_db/test_api_db.hpp",
+      "donor": "spring",
+      "source": "unittests/test-contracts/test_api_db/test_api_db.hpp",
+      "sha256": "c74c3ef2b9f714eca456d958aa89449ed1632c64bd658591787571063b65da70"
+    },
+    {
+      "path": "spring/test-contracts/test_api_db/test_api_db.wasm",
+      "donor": "spring",
+      "source": "unittests/test-contracts/test_api_db/test_api_db.wasm",
+      "sha256": "f873ca1fe41138bae79c14a0036c8203f3c3196046702b031998f927bdee62fa"
+    },
+    {
+      "path": "spring/test-contracts/test_api_multi_index/test_api_multi_index.abi",
+      "donor": "spring",
+      "source": "unittests/test-contracts/test_api_multi_index/test_api_multi_index.abi",
+      "sha256": "b11bbe0a152f150518dca01ce4c3a47c76d16583882409129525e4adf7bf2d11"
+    },
+    {
+      "path": "spring/test-contracts/test_api_multi_index/test_api_multi_index.cpp",
+      "donor": "spring",
+      "source": "unittests/test-contracts/test_api_multi_index/test_api_multi_index.cpp",
+      "sha256": "973a2eaef902feb0ad3a6ff2117c5a67dede20e05a0512a6ccfb99dc729b68b9"
+    },
+    {
+      "path": "spring/test-contracts/test_api_multi_index/test_api_multi_index.hpp",
+      "donor": "spring",
+      "source": "unittests/test-contracts/test_api_multi_index/test_api_multi_index.hpp",
+      "sha256": "ef59617397bc0127a765085dd7192fedbff393a54ae1a4aa51390a9f404097f8"
+    },
+    {
+      "path": "spring/test-contracts/test_api_multi_index/test_api_multi_index.wasm",
+      "donor": "spring",
+      "source": "unittests/test-contracts/test_api_multi_index/test_api_multi_index.wasm",
+      "sha256": "93148d63a7d1b0b864d986cf97fe125136cf2334ba277951d307ab4d16471fac"
+    }
+  ]
+}

@@ -58,7 +58,7 @@ def main() -> None:
 
     assert manifest["schema_version"] == 1
     assert manifest["interface_version"] == 1
-    assert len(imports) == 148
+    assert len(imports) == 200
     assert len(names) == len(set(names))
     assert len(database) == 60
     assert database.keys() == golden.keys()
@@ -71,7 +71,13 @@ def main() -> None:
         "database",
         "instant_finality",
         "privileged",
+        "runtime",
     }
+
+    public_imports = [entry for entry in imports if entry["capability"] != "runtime"]
+    runtime_imports = [entry for entry in imports if entry["capability"] == "runtime"]
+    assert len(public_imports) == 152
+    assert len(runtime_imports) == 43
 
     for name, entry in database.items():
         expected_parameters, expected_result = golden[name]

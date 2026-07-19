@@ -1,6 +1,6 @@
 module;
 
-#include <forge/contract/intrinsics.h>
+#include <forge/contract/internal/intrinsics.hpp>
 
 #include <algorithm>
 #include <array>
@@ -30,11 +30,13 @@ using bls_g2 = forge::crypto::bls::g2;
 using bls_gt = forge::crypto::bls::gt;
 
 [[nodiscard]] inline std::int32_t bls_g1_add(const bls_g1& first, const bls_g1& second, bls_g1& result) {
-   return ::bls_g1_add(first.data(), first.size(), second.data(), second.size(), result.data(), result.size());
+   return ::forge::contract::internal::bls_g1_add(first.data(), first.size(), second.data(), second.size(),
+                                                  result.data(), result.size());
 }
 
 [[nodiscard]] inline std::int32_t bls_g2_add(const bls_g2& first, const bls_g2& second, bls_g2& result) {
-   return ::bls_g2_add(first.data(), first.size(), second.data(), second.size(), result.data(), result.size());
+   return ::forge::contract::internal::bls_g2_add(first.data(), first.size(), second.data(), second.size(),
+                                                  result.data(), result.size());
 }
 
 [[nodiscard]] inline std::int32_t bls_g1_weighted_sum(const bls_g1 points[], const bls_scalar scalars[],
@@ -42,9 +44,9 @@ using bls_gt = forge::crypto::bls::gt;
    if (count == 0U) {
       return failure;
    }
-   return ::bls_g1_weighted_sum(reinterpret_cast<const char*>(points), count * sizeof(bls_g1),
-                                reinterpret_cast<const char*>(scalars), count * sizeof(bls_scalar), count,
-                                result.data(), result.size());
+   return ::forge::contract::internal::bls_g1_weighted_sum(
+       reinterpret_cast<const char*>(points), count * sizeof(bls_g1), reinterpret_cast<const char*>(scalars),
+       count * sizeof(bls_scalar), count, result.data(), result.size());
 }
 
 [[nodiscard]] inline std::int32_t bls_g2_weighted_sum(const bls_g2 points[], const bls_scalar scalars[],
@@ -52,9 +54,9 @@ using bls_gt = forge::crypto::bls::gt;
    if (count == 0U) {
       return failure;
    }
-   return ::bls_g2_weighted_sum(reinterpret_cast<const char*>(points), count * sizeof(bls_g2),
-                                reinterpret_cast<const char*>(scalars), count * sizeof(bls_scalar), count,
-                                result.data(), result.size());
+   return ::forge::contract::internal::bls_g2_weighted_sum(
+       reinterpret_cast<const char*>(points), count * sizeof(bls_g2), reinterpret_cast<const char*>(scalars),
+       count * sizeof(bls_scalar), count, result.data(), result.size());
 }
 
 [[nodiscard]] inline std::int32_t bls_pairing(const bls_g1 first[], const bls_g2 second[], std::uint32_t count,
@@ -62,29 +64,32 @@ using bls_gt = forge::crypto::bls::gt;
    if (count == 0U) {
       return failure;
    }
-   return ::bls_pairing(reinterpret_cast<const char*>(first), count * sizeof(bls_g1),
-                        reinterpret_cast<const char*>(second), count * sizeof(bls_g2), count, result.data(),
-                        result.size());
+   return ::forge::contract::internal::bls_pairing(reinterpret_cast<const char*>(first), count * sizeof(bls_g1),
+                                                   reinterpret_cast<const char*>(second), count * sizeof(bls_g2), count,
+                                                   result.data(), result.size());
 }
 
 [[nodiscard]] inline std::int32_t bls_g1_map(const bls_fp& value, bls_g1& result) {
-   return ::bls_g1_map(value.data(), value.size(), result.data(), result.size());
+   return ::forge::contract::internal::bls_g1_map(value.data(), value.size(), result.data(), result.size());
 }
 
 [[nodiscard]] inline std::int32_t bls_g2_map(const bls_fp2& value, bls_g2& result) {
-   return ::bls_g2_map(reinterpret_cast<const char*>(value.data()), sizeof(value), result.data(), result.size());
+   return ::forge::contract::internal::bls_g2_map(reinterpret_cast<const char*>(value.data()), sizeof(value),
+                                                  result.data(), result.size());
 }
 
 [[nodiscard]] inline std::int32_t bls_fp_mod(const bls_s& value, bls_fp& result) {
-   return ::bls_fp_mod(value.data(), value.size(), result.data(), result.size());
+   return ::forge::contract::internal::bls_fp_mod(value.data(), value.size(), result.data(), result.size());
 }
 
 [[nodiscard]] inline std::int32_t bls_fp_mul(const bls_fp& first, const bls_fp& second, bls_fp& result) {
-   return ::bls_fp_mul(first.data(), first.size(), second.data(), second.size(), result.data(), result.size());
+   return ::forge::contract::internal::bls_fp_mul(first.data(), first.size(), second.data(), second.size(),
+                                                  result.data(), result.size());
 }
 
 [[nodiscard]] inline std::int32_t bls_fp_exp(const bls_fp& base, const bls_s& exponent, bls_fp& result) {
-   return ::bls_fp_exp(base.data(), base.size(), exponent.data(), exponent.size(), result.data(), result.size());
+   return ::forge::contract::internal::bls_fp_exp(base.data(), base.size(), exponent.data(), exponent.size(),
+                                                  result.data(), result.size());
 }
 
 namespace detail {
@@ -142,8 +147,7 @@ inline void xmd_sha256(std::span<char> output, std::span<const char> input, std:
    constexpr auto hash_size = std::size_t{32};
    constexpr auto block_size = std::size_t{64};
    const auto blocks = (output.size() + hash_size - 1U) / hash_size;
-   check(blocks <= 255U && domain.size() <= 255U && output.size() <= 0xffffU,
-         "invalid BLS XMD expansion size");
+   check(blocks <= 255U && domain.size() <= 255U && output.size() <= 0xffffU, "invalid BLS XMD expansion size");
 
    auto initial = std::vector<char>(block_size, 0);
    initial.insert(initial.end(), input.begin(), input.end());

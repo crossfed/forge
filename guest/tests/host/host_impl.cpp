@@ -4,6 +4,7 @@ module;
 #include <forge/contract/intrinsics.hpp>
 #include <forge/contract/types.h>
 #include <forge/exceptions/macros.hpp>
+#include <forge/vm/wasm/host_function.hpp>
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -52,6 +53,7 @@ import forge.raw.raw;
 import forge.vm.wasm.backend;
 
 #include "details/memory_driver.hxx"
+#include "details/compiler_builtins.hxx"
 #include "details/host_impl.hxx"
 #include "details/softfloat.hxx"
 
@@ -184,6 +186,79 @@ template <typename Byte>
       value /= 10U;
    }
    std::reverse(result.begin(), result.end());
+   return result;
+}
+
+[[nodiscard]] std::uint32_t read_varuint(std::span<const std::uint8_t> data, std::size_t& offset) {
+   auto result = std::uint32_t{0};
+   for (auto shift = std::uint32_t{0}; shift < 35U; shift += 7U) {
+      if (offset == data.size()) {
+         FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "unexpected end of packed parameters");
+      }
+      const auto byte = data[offset++];
+      if (shift == 28U && (byte & 0xf0U) != 0U) {
+         FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "packed parameter varuint32 overflow");
+      }
+      result |= static_cast<std::uint32_t>(byte & 0x7fU) << shift;
+      if ((byte & 0x80U) == 0U) {
+         return result;
+      }
+   }
+   FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "packed parameter varuint32 overflow");
+}
+
+void write_varuint(std::vector<std::uint8_t>& output, std::uint32_t value) {
+   do {
+      auto byte = static_cast<std::uint8_t>(value & 0x7fU);
+      value >>= 7U;
+      if (value != 0U) {
+         byte |= 0x80U;
+      }
+      output.push_back(byte);
+   } while (value != 0U);
+}
+
+[[nodiscard]] std::size_t parameter_size(std::uint32_t id) {
+   if (id == 0U) {
+      return sizeof(std::uint64_t);
+   }
+   if ((id >= 1U && id <= 14U) || id == 17U) {
+      return sizeof(std::uint32_t);
+   }
+   if (id == 15U || id == 16U) {
+      return sizeof(std::uint16_t);
+   }
+   FORGE_THROW_EXCEPTION(exceptions::assertion_failure,
+                         "provided parameter id " + std::to_string(id) + " should be less than 18");
+}
+
+[[nodiscard]] std::vector<std::uint32_t> unpack_parameter_ids(std::span<const std::uint8_t> data, bool includes_values,
+                                                              std::array<std::vector<std::uint8_t>, 18>* values) {
+   auto offset = std::size_t{0};
+   const auto count = read_varuint(data, offset);
+   auto result = std::vector<std::uint32_t>{};
+   result.reserve(count);
+   auto visited = std::array<bool, 18>{};
+   for (auto index = std::uint32_t{0}; index < count; ++index) {
+      const auto id = read_varuint(data, offset);
+      const auto size = parameter_size(id);
+      if (visited[id]) {
+         FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "duplicate parameter id provided: " + std::to_string(id));
+      }
+      visited[id] = true;
+      result.push_back(id);
+      if (includes_values) {
+         if (data.size() - offset < size) {
+            FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "unexpected end of packed parameters");
+         }
+         (*values)[id].assign(data.begin() + static_cast<std::ptrdiff_t>(offset),
+                              data.begin() + static_cast<std::ptrdiff_t>(offset + size));
+         offset += size;
+      }
+   }
+   if (offset != data.size()) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "trailing bytes in packed parameters");
+   }
    return result;
 }
 
@@ -933,6 +1008,49 @@ void host::impl::set_kv_parameters_packed(std::span<const char> data) {
    state_.kv_parameters.assign(as_bytes(data).begin(), as_bytes(data).end());
 }
 
+std::uint32_t host::impl::get_wasm_parameters_packed(std::span<char> data, std::uint32_t) const {
+   const auto size = static_cast<std::uint32_t>(state_.wasm_parameters.size());
+   if (!state_.wasm_parameters.empty() && data.size() >= state_.wasm_parameters.size()) {
+      std::memcpy(data.data(), state_.wasm_parameters.data(), state_.wasm_parameters.size());
+   }
+   return size;
+}
+
+void host::impl::set_wasm_parameters_packed(std::span<const char> data) {
+   require_privileged(state_, receiver_);
+   state_.wasm_parameters.assign(as_bytes(data).begin(), as_bytes(data).end());
+}
+
+std::uint32_t host::impl::get_parameters_packed(std::span<const char> ids, std::span<char> data) const {
+   const auto selected = unpack_parameter_ids(as_bytes(ids), false, nullptr);
+   auto packed = std::vector<std::uint8_t>{};
+   write_varuint(packed, static_cast<std::uint32_t>(selected.size()));
+   for (const auto id : selected) {
+      write_varuint(packed, id);
+      if (state_.parameters[id].empty()) {
+         packed.resize(packed.size() + parameter_size(id), 0U);
+      } else {
+         packed.insert(packed.end(), state_.parameters[id].begin(), state_.parameters[id].end());
+      }
+   }
+   if (data.empty()) {
+      return static_cast<std::uint32_t>(packed.size());
+   }
+   if (data.size() < packed.size()) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure,
+                            "get_parameters_packed: buffer size is smaller than " + std::to_string(packed.size()));
+   }
+   std::memcpy(data.data(), packed.data(), packed.size());
+   return static_cast<std::uint32_t>(packed.size());
+}
+
+void host::impl::set_parameters_packed(std::span<const char> data) {
+   require_privileged(state_, receiver_);
+   auto updated = state_.parameters;
+   static_cast<void>(unpack_parameter_ids(as_bytes(data), true, &updated));
+   state_.parameters = std::move(updated);
+}
+
 void host::impl::preactivate_feature(checksum256_input digest) {
    require_privileged(state_, receiver_);
    const auto value = read_digest<forge::crypto::sha256>(*digest.get());
@@ -948,6 +1066,33 @@ void host::impl::set_finalizers(std::uint64_t format, std::span<const char> data
       FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "Finalizer policy is in an unknown format!");
    }
    state_.finalizers.assign(as_bytes(data).begin(), as_bytes(data).end());
+}
+
+[[noreturn]] void host::impl::abort() {
+   FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "abort() called");
+}
+
+void* host::impl::memcpy(copy_arguments arguments) {
+   const auto destination = reinterpret_cast<std::uintptr_t>(arguments.destination);
+   const auto source = reinterpret_cast<std::uintptr_t>(arguments.source);
+   const auto distance = destination < source ? source - destination : destination - source;
+   if (distance < arguments.size) {
+      FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "memcpy can only accept non-aliasing pointers");
+   }
+   return std::memcpy(arguments.destination, arguments.source, arguments.size);
+}
+
+void* host::impl::memmove(copy_arguments arguments) {
+   return std::memmove(arguments.destination, arguments.source, arguments.size);
+}
+
+std::int32_t host::impl::memcmp(compare_arguments arguments) const {
+   const auto result = std::memcmp(arguments.left, arguments.right, arguments.size);
+   return result < 0 ? -1 : result > 0 ? 1 : 0;
+}
+
+void* host::impl::memset(fill_arguments arguments) {
+   return std::memset(arguments.destination, arguments.value, arguments.size);
 }
 
 void host::impl::eosio_assert(std::uint32_t test, input<const char, 1> message) {

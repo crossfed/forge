@@ -30,7 +30,7 @@ The installed C surface, including `<forge/contract/types.h>` and
 come from `guest/cmake/types.h.in`; generated `.h` files are not source headers
 of this module-first library and contain no C++ implementation.
 
-Interface version 1 includes the complete 148-function CDT/Spring union.
+Interface version 1 includes the complete 152-function CDT/Spring union.
 Contract C code may include `<forge/contract/intrinsics.h>` or one of the thin
 EOSIO compatibility headers such as `<eosio/db.h>`.
 `forge.contract.multi_index` and `forge.contract.singleton` are the production
@@ -84,4 +84,4 @@ autoincrement, singleton operations and execution in `forge.vm.wasm` are tested
 end to end. The unchanged CDT database C fixture and an independent
 Spring-derived signature manifest prove all 60 database imports through the
 generated headers and VM parser. The full donor manifest separately verifies
-all 148 imports and capability sets.
+all 152 imports and capability sets.

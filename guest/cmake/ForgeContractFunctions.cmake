@@ -4,8 +4,8 @@ function(forge_add_contract target)
    cmake_parse_arguments(
       ARG
       ""
-      "DISPATCH_SOURCE;RICARDIAN_CONTRACTS;RICARDIAN_CLAUSES"
-      "SOURCES;COMPILE_CHECKS"
+      "CONTRACT;DISPATCH_SOURCE;RICARDIAN_CONTRACTS;RICARDIAN_CLAUSES"
+      "SOURCES;COMPILE_CHECKS;INCLUDE_DIRECTORIES"
       ${ARGN}
    )
    if(NOT ARG_SOURCES)
@@ -13,6 +13,9 @@ function(forge_add_contract target)
    endif()
    if(TARGET ${target})
       message(FATAL_ERROR "forge_add_contract target already exists: ${target}")
+   endif()
+   if(NOT ARG_CONTRACT)
+      set(ARG_CONTRACT "${target}")
    endif()
 
    set(_sources)
@@ -57,6 +60,21 @@ function(forge_add_contract target)
    endforeach()
    string(JOIN "|" _encoded_compile_checks ${_compile_checks})
 
+   set(_include_directories)
+   foreach(_include_directory IN LISTS ARG_INCLUDE_DIRECTORIES)
+      get_filename_component(
+         _absolute
+         "${_include_directory}"
+         REALPATH
+         BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+      )
+      if(NOT IS_DIRECTORY "${_absolute}")
+         message(FATAL_ERROR "contract include directory does not exist: ${_absolute}")
+      endif()
+      list(APPEND _include_directories "${_absolute}")
+   endforeach()
+   string(JOIN "|" _encoded_include_directories ${_include_directories})
+
    set(_ricardian_contracts "")
    if(ARG_RICARDIAN_CONTRACTS)
       get_filename_component(
@@ -98,9 +116,11 @@ function(forge_add_contract target)
          -DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}
          -DCMAKE_TOOLCHAIN_FILE=${ForgeContract_TOOLCHAIN}
          -DFORGE_CONTRACT_SDK_PREFIX:PATH=${ForgeContract_PREFIX}
-         -DFORGE_CONTRACT_NAME=${target}
+         -DFORGE_CONTRACT_TARGET=${target}
+         -DFORGE_CONTRACT_NAME=${ARG_CONTRACT}
          -DFORGE_CONTRACT_SOURCES_ENCODED=${_encoded_sources}
          -DFORGE_CONTRACT_COMPILE_CHECKS_ENCODED=${_encoded_compile_checks}
+         -DFORGE_CONTRACT_INCLUDE_DIRECTORIES_ENCODED=${_encoded_include_directories}
          -DFORGE_CONTRACT_OUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}
          -DFORGE_CONTRACT_DATA_DIR=${ForgeContract_DATA_DIR}
          -DFORGE_CONTRACT_ABIGEN=${ForgeContract_ABIGEN}

@@ -1,6 +1,6 @@
 module;
 
-#include <forge/contract/intrinsics.h>
+#include <forge/contract/internal/intrinsics.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -21,8 +21,7 @@ template <std::size_t Size = 32U> struct ec_point {
    std::vector<char> y;
 
    ec_point() : x(Size), y(Size) {}
-   ec_point(std::vector<char> x_value, std::vector<char> y_value)
-       : x(std::move(x_value)), y(std::move(y_value)) {
+   ec_point(std::vector<char> x_value, std::vector<char> y_value) : x(std::move(x_value)), y(std::move(y_value)) {
       check(x.size() == y.size(), "x's size must be equal to y's");
       check(x.size() == Size, "point size must match");
    }
@@ -51,14 +50,11 @@ template <std::size_t Size = 32U> struct ec_point_view {
       check(size == Size, "point size must match");
    }
 
-   explicit ec_point_view(const std::vector<char>& value)
-       : x(value.data()), y(value.data() + Size), size(Size) {
+   explicit ec_point_view(const std::vector<char>& value) : x(value.data()), y(value.data() + Size), size(Size) {
       check(value.size() == 2U * Size, "point size must match");
    }
 
-   explicit ec_point_view(const ec_point<Size>& value)
-       : x(value.x.data()), y(value.y.data()), size(Size) {
-   }
+   explicit ec_point_view(const ec_point<Size>& value) : x(value.x.data()), y(value.y.data()), size(Size) {}
 
    [[nodiscard]] std::vector<char> serialized() const {
       auto result = std::vector<char>(x, x + size);
@@ -77,16 +73,17 @@ using bigint = std::vector<char>;
 
 [[nodiscard]] inline std::int32_t alt_bn128_add(const char* first, std::uint32_t first_size, const char* second,
                                                 std::uint32_t second_size, char* result, std::uint32_t result_size) {
-   return ::alt_bn128_add(first, first_size, second, second_size, result, result_size);
+   return ::forge::contract::internal::alt_bn128_add(first, first_size, second, second_size, result, result_size);
 }
 
-template <typename First, typename Second> [[nodiscard]] g1_point alt_bn128_add(const First& first, const Second& second) {
+template <typename First, typename Second>
+[[nodiscard]] g1_point alt_bn128_add(const First& first, const Second& second) {
    const auto first_bytes = first.serialized();
    const auto second_bytes = second.serialized();
    auto result = g1_point{};
    auto output = result.serialized();
-   check(::alt_bn128_add(first_bytes.data(), first_bytes.size(), second_bytes.data(), second_bytes.size(), output.data(),
-                         output.size()) == 0,
+   check(::forge::contract::internal::alt_bn128_add(first_bytes.data(), first_bytes.size(), second_bytes.data(),
+                                                    second_bytes.size(), output.data(), output.size()) == 0,
          "internal_use_do_not_use::alt_bn128_add failed");
    result.x.assign(output.begin(), output.begin() + g1_coordinate_size);
    result.y.assign(output.begin() + g1_coordinate_size, output.end());
@@ -95,21 +92,21 @@ template <typename First, typename Second> [[nodiscard]] g1_point alt_bn128_add(
 
 [[nodiscard]] inline std::int32_t alt_bn128_mul(const char* point, std::uint32_t point_size, const char* scalar,
                                                 std::uint32_t scalar_size, char* result, std::uint32_t result_size) {
-   return ::alt_bn128_mul(point, point_size, scalar, scalar_size, result, result_size);
+   return ::forge::contract::internal::alt_bn128_mul(point, point_size, scalar, scalar_size, result, result_size);
 }
 
 template <typename Point> [[nodiscard]] g1_point alt_bn128_mul(const Point& point, const bigint& scalar) {
    const auto point_bytes = point.serialized();
    auto output = std::vector<char>(2U * g1_coordinate_size);
-   check(::alt_bn128_mul(point_bytes.data(), point_bytes.size(), scalar.data(), scalar.size(), output.data(),
-                         output.size()) == 0,
+   check(::forge::contract::internal::alt_bn128_mul(point_bytes.data(), point_bytes.size(), scalar.data(),
+                                                    scalar.size(), output.data(), output.size()) == 0,
          "internal_use_do_not_use::alt_bn128_mul failed");
    return g1_point{{output.begin(), output.begin() + g1_coordinate_size},
                    {output.begin() + g1_coordinate_size, output.end()}};
 }
 
 [[nodiscard]] inline std::int32_t alt_bn128_pair(const char* pairs, std::uint32_t size) {
-   return ::alt_bn128_pair(pairs, size);
+   return ::forge::contract::internal::alt_bn128_pair(pairs, size);
 }
 
 template <typename G1, typename G2>
@@ -122,20 +119,21 @@ template <typename G1, typename G2>
       bytes.insert(bytes.end(), first_bytes.begin(), first_bytes.end());
       bytes.insert(bytes.end(), second_bytes.begin(), second_bytes.end());
    }
-   return ::alt_bn128_pair(bytes.data(), bytes.size());
+   return ::forge::contract::internal::alt_bn128_pair(bytes.data(), bytes.size());
 }
 
 [[nodiscard]] inline std::int32_t mod_exp(const char* base, std::uint32_t base_size, const char* exponent,
                                           std::uint32_t exponent_size, const char* modulus, std::uint32_t modulus_size,
                                           char* result, std::uint32_t result_size) {
-   return ::mod_exp(base, base_size, exponent, exponent_size, modulus, modulus_size, result, result_size);
+   return ::forge::contract::internal::mod_exp(base, base_size, exponent, exponent_size, modulus, modulus_size, result,
+                                               result_size);
 }
 
 [[nodiscard]] inline std::int32_t mod_exp(const bigint& base, const bigint& exponent, const bigint& modulus,
                                           bigint& result) {
    check(result.size() >= modulus.size(), "mod_exp result parameter's size must be >= mod's size");
-   return ::mod_exp(base.data(), base.size(), exponent.data(), exponent.size(), modulus.data(), modulus.size(),
-                    result.data(), result.size());
+   return ::forge::contract::internal::mod_exp(base.data(), base.size(), exponent.data(), exponent.size(),
+                                               modulus.data(), modulus.size(), result.data(), result.size());
 }
 
 inline constexpr std::size_t blake2f_result_size = 64U;
@@ -144,21 +142,22 @@ inline constexpr std::size_t blake2f_result_size = 64U;
                                            const char* message, std::uint32_t message_size, const char* offset0,
                                            std::uint32_t offset0_size, const char* offset1, std::uint32_t offset1_size,
                                            std::int32_t final, char* result, std::uint32_t result_size) {
-   return ::blake2_f(rounds, state, state_size, message, message_size, offset0, offset0_size, offset1, offset1_size,
-                     final, result, result_size);
+   return ::forge::contract::internal::blake2_f(rounds, state, state_size, message, message_size, offset0, offset0_size,
+                                                offset1, offset1_size, final, result, result_size);
 }
 
 [[nodiscard]] inline std::int32_t blake2_f(std::uint32_t rounds, const std::vector<char>& state,
                                            const std::vector<char>& message, const std::vector<char>& offset0,
                                            const std::vector<char>& offset1, bool final, std::vector<char>& result) {
    check(result.size() >= blake2f_result_size, "blake2_f result parameter's size must be >= 64");
-   return ::blake2_f(rounds, state.data(), state.size(), message.data(), message.size(), offset0.data(), offset0.size(),
-                     offset1.data(), offset1.size(), final, result.data(), result.size());
+   return ::forge::contract::internal::blake2_f(rounds, state.data(), state.size(), message.data(), message.size(),
+                                                offset0.data(), offset0.size(), offset1.data(), offset1.size(), final,
+                                                result.data(), result.size());
 }
 
 [[nodiscard]] inline checksum256 sha3(const char* data, std::uint32_t size) {
    auto result = checksum256{};
-   ::sha3(data, size, result.data(), result.data_size(), 0);
+   ::forge::contract::internal::sha3(data, size, result.data(), result.data_size(), 0);
    return result;
 }
 
@@ -168,7 +167,7 @@ inline void assert_sha3(const char* data, std::uint32_t size, const checksum256&
 
 [[nodiscard]] inline checksum256 keccak(const char* data, std::uint32_t size) {
    auto result = checksum256{};
-   ::sha3(data, size, result.data(), result.data_size(), 1);
+   ::forge::contract::internal::sha3(data, size, result.data(), result.data_size(), 1);
    return result;
 }
 
@@ -179,7 +178,8 @@ inline void assert_keccak(const char* data, std::uint32_t size, const checksum25
 [[nodiscard]] inline std::int32_t k1_recover(const char* signature, std::uint32_t signature_size, const char* digest,
                                              std::uint32_t digest_size, char* public_key,
                                              std::uint32_t public_key_size) {
-   return ::k1_recover(signature, signature_size, digest, digest_size, public_key, public_key_size);
+   return ::forge::contract::internal::k1_recover(signature, signature_size, digest, digest_size, public_key,
+                                                  public_key_size);
 }
 
 } // namespace forge::contract

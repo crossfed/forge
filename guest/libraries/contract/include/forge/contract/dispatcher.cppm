@@ -23,49 +23,30 @@ namespace detail {
 template <typename Contract, typename Result, typename... Arguments, typename Method>
 void execute_action_impl(chain::protocol::name self, chain::protocol::name first_receiver, Method method) {
    const auto size = action_data_size();
-   if constexpr (sizeof...(Arguments) == 0U) {
-      check(size == 0U, "action data contains trailing bytes");
-      const auto empty = std::uint8_t{};
-      auto contract_stream = typename Contract::stream_type{
-          reinterpret_cast<const char*>(&empty),
-          0U,
-      };
-      auto instance = Contract{self, first_receiver, contract_stream};
-      if constexpr (std::is_void_v<Result>) {
-         (instance.*method)();
-      } else {
-         auto result = (instance.*method)();
-         auto packed = forge::raw::pack(result);
-         check(packed.size() <= std::numeric_limits<std::uint32_t>::max(), "action return value is too large");
-         set_action_return_value(packed.data(), static_cast<std::uint32_t>(packed.size()));
-      }
+   auto bytes = std::vector<std::uint8_t>(size);
+   if (size != 0U) {
+      check(read_action_data(bytes.data(), size) == size, "failed to read complete action data");
+   }
+   const auto empty = std::uint8_t{};
+   const auto* data = bytes.empty() ? &empty : bytes.data();
+
+   auto arguments = std::tuple<std::decay_t<Arguments>...>{};
+   auto stream = forge::datastream<const std::uint8_t*>{data, bytes.size()};
+   forge::raw::unpack(stream, arguments);
+
+   auto contract_stream = typename Contract::stream_type{
+       reinterpret_cast<const char*>(data),
+       bytes.size(),
+   };
+   auto instance = Contract{self, first_receiver, contract_stream};
+   if constexpr (std::is_void_v<Result>) {
+      std::apply([&](auto&&... value) { (instance.*method)(std::forward<decltype(value)>(value)...); }, arguments);
    } else {
-      auto bytes = std::vector<std::uint8_t>(size);
-      if (size != 0U) {
-         check(read_action_data(bytes.data(), size) == size, "failed to read complete action data");
-      }
-      const auto empty = std::uint8_t{};
-      const auto* data = bytes.empty() ? &empty : bytes.data();
-
-      auto arguments = std::tuple<std::decay_t<Arguments>...>{};
-      auto stream = forge::datastream<const std::uint8_t*>{data, bytes.size()};
-      forge::raw::unpack(stream, arguments);
-      check(stream.remaining() == 0U, "action data contains trailing bytes");
-
-      auto contract_stream = typename Contract::stream_type{
-          reinterpret_cast<const char*>(data),
-          bytes.size(),
-      };
-      auto instance = Contract{self, first_receiver, contract_stream};
-      if constexpr (std::is_void_v<Result>) {
-         std::apply([&](auto&&... value) { (instance.*method)(std::forward<decltype(value)>(value)...); }, arguments);
-      } else {
-         auto result = std::apply(
-             [&](auto&&... value) { return (instance.*method)(std::forward<decltype(value)>(value)...); }, arguments);
-         auto packed = forge::raw::pack(result);
-         check(packed.size() <= std::numeric_limits<std::uint32_t>::max(), "action return value is too large");
-         set_action_return_value(packed.data(), static_cast<std::uint32_t>(packed.size()));
-      }
+      auto result = std::apply(
+          [&](auto&&... value) { return (instance.*method)(std::forward<decltype(value)>(value)...); }, arguments);
+      auto packed = forge::raw::pack(result);
+      check(packed.size() <= std::numeric_limits<std::uint32_t>::max(), "action return value is too large");
+      set_action_return_value(packed.data(), static_cast<std::uint32_t>(packed.size()));
    }
 }
 

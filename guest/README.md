@@ -251,7 +251,7 @@ sockets, threads, clocks or random device.
 
 ## Intrinsics And Validation
 
-Interface version 1 contains the exact 148-function union of the pinned CDT and
+Interface version 1 contains the exact 152-function union of the pinned CDT and
 Spring contract interfaces. Every entry records its C header, WASM signature,
 capability set and, where applicable, the protocol feature that enables it.
 The seven capability sets are:
@@ -288,7 +288,7 @@ primary `db_*_i64` operations and ten operations for each of `idx64`, `idx128`,
 `idx256`, `idx_double` and `idx_long_double`. `<forge/contract/intrinsics.h>`
 is canonical. The pinned CDT family headers under `<eosio/*.h>` are generated
 from that registry without a second declaration list. The shipped interface
-defines signatures only. Forge's non-installed test host registers all 148
+defines signatures only. Forge's non-installed test host registers all 152
 functions directly from the same registry. It executes the database family
 against `forge.db.object`, uses Forge crypto for contract-visible primitives,
 and supplies deterministic state for the remaining capability families. This
@@ -376,3 +376,43 @@ Release mode builds the exact pinned LLVM and guest runtimes from source. Use
 
 See `docs/iterations/forge-contract-sdk-toolchain-v1.md` for the accepted
 design, donor pins and compatibility scope.
+
+<!-- contract-compatibility:start -->
+## Compatibility Matrix
+
+This section is generated from `tests/corpus/compatibility.json`. `Verified`
+means an automated acceptance gate exists and passes for the pinned donor.
+
+### SDK Surface
+
+| Area | Status | Evidence |
+|---|---|---|
+| Toolchain and sysroot | Verified | `forge_contract_sdk_relocation` |
+| 152 intrinsic functions | Verified | `check_sdk_surface.py` |
+| C and C++ compatibility headers | Verified | `check_sdk_surface.py` |
+| Modern contract modules | Verified | `surface contract` |
+| ABI and dispatcher | Verified | `run_abigen_fixtures.py` |
+| Raw, protocol, crypto and time | Verified | `contract SDK E2E` |
+| multi_index and singleton | Verified | `run_multi_index_fixtures.py` |
+| Executable VM oracle | Verified | `forge_contract_e2e_tests` |
+| Relocation and reproducibility | Verified | `forge_contract_sdk_relocation` |
+
+### Unchanged Contracts
+
+| Contract | Source | Build | ABI | WASM | VM | Behavior | Evidence |
+|---|---|---|---|---|---|---|---|
+| Spring eosio.boot | Verified | Verified | Verified | Verified | Verified | Verified | `forge_contract_corpus_integrity`<br>`forge_contract_corpus_abi`<br>`forge_contract_corpus_artifacts`<br>`forge_contract_corpus_e2e` |
+| Spring eosio.token | Verified | Verified | Verified | Verified | Verified | Verified | `forge_contract_corpus_integrity`<br>`forge_contract_corpus_abi`<br>`forge_contract_corpus_artifacts`<br>`forge_contract_corpus_e2e` |
+| Spring eosio.msig | Verified | Verified | Verified | Verified | Verified | Verified | `forge_contract_corpus_integrity`<br>`forge_contract_corpus_abi`<br>`forge_contract_corpus_artifacts`<br>`forge_contract_corpus_e2e` |
+| Spring eosio.wrap | Verified | Verified | Verified | Verified | Verified | Verified | `forge_contract_corpus_integrity`<br>`forge_contract_corpus_abi`<br>`forge_contract_corpus_artifacts`<br>`forge_contract_corpus_e2e` |
+| Spring eosio.system | Verified | Verified | Verified | Verified | Verified | Verified | `forge_contract_corpus_integrity`<br>`forge_contract_corpus_abi`<br>`forge_contract_corpus_artifacts`<br>`forge_contract_corpus_e2e` |
+| Spring test_api | Verified | Verified | Verified | Verified | Verified | Verified | `forge_contract_corpus_integrity`<br>`forge_contract_corpus_abi`<br>`forge_contract_corpus_artifacts`<br>`forge_contract_corpus_e2e` |
+| Spring test_api_db | Verified | Verified | Verified | Verified | Verified | Verified | `forge_contract_corpus_integrity`<br>`forge_contract_corpus_abi`<br>`forge_contract_corpus_artifacts`<br>`forge_contract_corpus_e2e` |
+| Spring test_api_multi_index | Verified | Verified | Verified | Verified | Verified | Verified | `forge_contract_corpus_integrity`<br>`forge_contract_corpus_abi`<br>`forge_contract_corpus_artifacts`<br>`forge_contract_corpus_e2e` |
+| EOSIO eosio.bios | Verified | Verified | Verified | Verified | Verified | Verified | `forge_contract_corpus_integrity`<br>`forge_contract_corpus_abi`<br>`forge_contract_corpus_artifacts`<br>`forge_contract_corpus_e2e` |
+| EOSIO eosio.boot | Verified | Verified | Verified | Verified | Verified | Verified | `forge_contract_corpus_integrity`<br>`forge_contract_corpus_abi`<br>`forge_contract_corpus_artifacts`<br>`forge_contract_corpus_e2e` |
+
+The compatibility denominator covers SDK-owned source, ABI, wire, import
+and contract-observable behavior. Controller, consensus, fork choice and
+production blockchain host policy are out of scope.
+<!-- contract-compatibility:end -->

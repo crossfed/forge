@@ -1,12 +1,62 @@
 #pragma once
 
+#include "compiler_builtins.hxx"
+
 namespace forge::contract::testing {
 
 class memory_driver;
 
-struct host::impl {
+struct host::impl : compiler_builtins {
    using wasm = forge::vm::wasm::interpreter;
-   using functions = forge::vm::wasm::registered_host_functions<impl>;
+
+   struct copy_arguments {
+      void* destination;
+      const void* source;
+      std::uint32_t size;
+   };
+
+   struct compare_arguments {
+      const void* left;
+      const void* right;
+      std::uint32_t size;
+   };
+
+   struct fill_arguments {
+      void* destination;
+      std::int32_t value;
+      std::uint32_t size;
+   };
+
+   struct type_converter : forge::vm::wasm::type_converter<impl> {
+      using base = forge::vm::wasm::type_converter<impl>;
+      using base::base;
+      using base::from_wasm;
+
+      FORGE_VM_WASM_FROM_WASM(copy_arguments, (forge::vm::wasm::wasm_ptr_t destination,
+                                               forge::vm::wasm::wasm_ptr_t source, forge::vm::wasm::wasm_size_t size)) {
+         auto* destination_ptr = this->template validate_pointer<char>(destination, size);
+         const auto* source_ptr = this->template validate_pointer<const char>(source, size);
+         this->template validate_pointer<char>(destination, 1);
+         return {destination_ptr, source_ptr, size};
+      }
+
+      FORGE_VM_WASM_FROM_WASM(compare_arguments, (forge::vm::wasm::wasm_ptr_t left, forge::vm::wasm::wasm_ptr_t right,
+                                                  forge::vm::wasm::wasm_size_t size)) {
+         const auto* left_ptr = this->template validate_pointer<const char>(left, size);
+         const auto* right_ptr = this->template validate_pointer<const char>(right, size);
+         return {left_ptr, right_ptr, size};
+      }
+
+      FORGE_VM_WASM_FROM_WASM(fill_arguments, (forge::vm::wasm::wasm_ptr_t destination, std::int32_t value,
+                                               forge::vm::wasm::wasm_size_t size)) {
+         auto* destination_ptr = this->template validate_pointer<char>(destination, size);
+         this->template validate_pointer<char>(destination, 1);
+         return {destination_ptr, value, size};
+      }
+   };
+
+   using functions =
+       forge::vm::wasm::registered_host_functions<impl, forge::vm::wasm::execution_interface, type_converter>;
    template <typename T, std::size_t Alignment = alignof(T)>
    using input = forge::vm::wasm::argument_proxy<const T*, Alignment>;
    template <typename T, std::size_t Alignment = alignof(T)>
@@ -129,8 +179,18 @@ struct host::impl {
    void set_blockchain_parameters_packed(std::span<const char> data);
    std::uint32_t get_blockchain_parameters_packed(std::span<char> data) const;
    void set_kv_parameters_packed(std::span<const char> data);
+   std::uint32_t get_wasm_parameters_packed(std::span<char> data, std::uint32_t max_version) const;
+   void set_wasm_parameters_packed(std::span<const char> data);
+   std::uint32_t get_parameters_packed(std::span<const char> ids, std::span<char> data) const;
+   void set_parameters_packed(std::span<const char> data);
    void preactivate_feature(checksum256_input digest);
    void set_finalizers(std::uint64_t format, std::span<const char> data);
+
+   [[noreturn]] void abort();
+   void* memcpy(copy_arguments arguments);
+   void* memmove(copy_arguments arguments);
+   std::int32_t memcmp(compare_arguments arguments) const;
+   void* memset(fill_arguments arguments);
 
    void eosio_assert(std::uint32_t test, input<const char, 1> message);
    void eosio_assert_message(std::uint32_t test, forge::vm::wasm::span<const char> message);

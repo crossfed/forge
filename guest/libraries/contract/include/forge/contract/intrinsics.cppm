@@ -1,6 +1,6 @@
 module;
 
-#include <forge/contract/intrinsics.h>
+#include <forge/contract/internal/intrinsics.hpp>
 
 #include <cstdint>
 #include <string_view>
@@ -17,7 +17,7 @@ enum return_code : std::int32_t {
 };
 
 [[noreturn]] inline void abort(std::string_view message) {
-   ::eosio_assert_message(0U, message.data(), static_cast<std::uint32_t>(message.size()));
+   ::forge::contract::internal::eosio_assert_message(0U, message.data(), static_cast<std::uint32_t>(message.size()));
    __builtin_unreachable();
 }
 
@@ -28,24 +28,24 @@ inline void check(bool condition, std::string_view message) {
 }
 
 [[noreturn]] inline void exit(std::int32_t code) {
-   ::eosio_exit(code);
+   ::forge::contract::internal::eosio_exit(code);
    __builtin_unreachable();
 }
 
 inline std::uint32_t action_data_size() {
-   return ::action_data_size();
+   return ::forge::contract::internal::action_data_size();
 }
 
 inline std::uint32_t read_action_data(void* destination, std::uint32_t size) {
-   return ::read_action_data(destination, size);
+   return ::forge::contract::internal::read_action_data(destination, size);
 }
 
 inline void set_action_return_value(const void* value, std::uint32_t size) {
-   ::set_action_return_value(const_cast<void*>(value), size);
+   ::forge::contract::internal::set_action_return_value(const_cast<void*>(value), size);
 }
 
 inline chain::protocol::name current_receiver() {
-   return chain::protocol::name{::current_receiver()};
+   return chain::protocol::name{::forge::contract::internal::current_receiver()};
 }
 
 } // namespace forge::contract

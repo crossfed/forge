@@ -310,6 +310,16 @@
                             get_blockchain_parameters_packed, std::uint32_t, (char* data, std::uint32_t datalen))      \
    FORGE_CONTRACT_INTRINSIC(1, privileged, privileged, none, set_kv_parameters_packed, env, set_kv_parameters_packed,  \
                             void, (const char* data, std::uint32_t datalen))                                           \
+   FORGE_CONTRACT_INTRINSIC(1, privileged, privileged, configurable_wasm_limits, get_wasm_parameters_packed, env,      \
+                            get_wasm_parameters_packed, std::uint32_t,                                                 \
+                            (char* data, std::uint32_t datalen, std::uint32_t max_version))                            \
+   FORGE_CONTRACT_INTRINSIC(1, privileged, privileged, configurable_wasm_limits, set_wasm_parameters_packed, env,      \
+                            set_wasm_parameters_packed, void, (const char* data, std::uint32_t datalen))               \
+   FORGE_CONTRACT_INTRINSIC(1, privileged, privileged, blockchain_parameters, get_parameters_packed, env,              \
+                            get_parameters_packed, std::uint32_t,                                                      \
+                            (const char* ids, std::uint32_t ids_size, char* data, std::uint32_t datalen))              \
+   FORGE_CONTRACT_INTRINSIC(1, privileged, privileged, blockchain_parameters, set_parameters_packed, env,              \
+                            set_parameters_packed, void, (const char* data, std::uint32_t datalen))                    \
    FORGE_CONTRACT_INTRINSIC(1, privileged, privileged, preactivate_feature, preactivate_feature, env,                  \
                             preactivate_feature, void, (const capi_checksum256* feature_digest))                       \
    FORGE_CONTRACT_INTRINSIC(1, core, system, none, eosio_assert, env, eosio_assert, void,                              \
@@ -340,4 +350,107 @@
    FORGE_CONTRACT_INTRINSIC(1, core, transaction, none, get_action, env, get_action, std::int32_t,                     \
                             (std::uint32_t type, std::uint32_t index, char* buff, forge_contract_size_t size))         \
    FORGE_CONTRACT_INTRINSIC(1, core, transaction, none, get_context_free_data, env, get_context_free_data,             \
-                            std::int32_t, (std::uint32_t index, char* buff, forge_contract_size_t size))
+                            std::int32_t, (std::uint32_t index, char* buff, forge_contract_size_t size))               \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, abort, env, abort, void, ())                                    \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, memcpy, env, memcpy, void*,                                     \
+                            (void* destination, const void* source, std::uint32_t size))                               \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, memmove, env, memmove, void*,                                   \
+                            (void* destination, const void* source, std::uint32_t size))                               \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, memcmp, env, memcmp, std::int32_t,                              \
+                            (const void* left, const void* right, std::uint32_t size))                                 \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, memset, env, memset, void*,                                     \
+                            (void* destination, std::int32_t value, std::uint32_t size))                               \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __ashlti3, env, __ashlti3, void,                                \
+                            (__int128* result, std::uint64_t low, std::uint64_t high, std::uint32_t shift))            \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __ashrti3, env, __ashrti3, void,                                \
+                            (__int128* result, std::uint64_t low, std::uint64_t high, std::uint32_t shift))            \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __lshlti3, env, __lshlti3, void,                                \
+                            (__int128* result, std::uint64_t low, std::uint64_t high, std::uint32_t shift))            \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __lshrti3, env, __lshrti3, void,                                \
+                            (__int128* result, std::uint64_t low, std::uint64_t high, std::uint32_t shift))            \
+   FORGE_CONTRACT_INTRINSIC(                                                                                           \
+       1, runtime, runtime, none, __divti3, env, __divti3, void,                                                       \
+       (__int128* result, std::uint64_t low_a, std::uint64_t high_a, std::uint64_t low_b, std::uint64_t high_b))       \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __udivti3, env, __udivti3, void,                                \
+                            (unsigned __int128* result, std::uint64_t low_a, std::uint64_t high_a,                     \
+                             std::uint64_t low_b, std::uint64_t high_b))                                               \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __multi3, env, __multi3, void,                                  \
+                            (unsigned __int128* result, std::uint64_t low_a, std::uint64_t high_a,                     \
+                             std::uint64_t low_b, std::uint64_t high_b))                                               \
+   FORGE_CONTRACT_INTRINSIC(                                                                                           \
+       1, runtime, runtime, none, __modti3, env, __modti3, void,                                                       \
+       (__int128* result, std::uint64_t low_a, std::uint64_t high_a, std::uint64_t low_b, std::uint64_t high_b))       \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __umodti3, env, __umodti3, void,                                \
+                            (unsigned __int128* result, std::uint64_t low_a, std::uint64_t high_a,                     \
+                             std::uint64_t low_b, std::uint64_t high_b))                                               \
+   FORGE_CONTRACT_INTRINSIC(                                                                                           \
+       1, runtime, runtime, none, __addtf3, env, __addtf3, void,                                                       \
+       (long double* result, std::uint64_t low_a, std::uint64_t high_a, std::uint64_t low_b, std::uint64_t high_b))    \
+   FORGE_CONTRACT_INTRINSIC(                                                                                           \
+       1, runtime, runtime, none, __subtf3, env, __subtf3, void,                                                       \
+       (long double* result, std::uint64_t low_a, std::uint64_t high_a, std::uint64_t low_b, std::uint64_t high_b))    \
+   FORGE_CONTRACT_INTRINSIC(                                                                                           \
+       1, runtime, runtime, none, __multf3, env, __multf3, void,                                                       \
+       (long double* result, std::uint64_t low_a, std::uint64_t high_a, std::uint64_t low_b, std::uint64_t high_b))    \
+   FORGE_CONTRACT_INTRINSIC(                                                                                           \
+       1, runtime, runtime, none, __divtf3, env, __divtf3, void,                                                       \
+       (long double* result, std::uint64_t low_a, std::uint64_t high_a, std::uint64_t low_b, std::uint64_t high_b))    \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __negtf2, env, __negtf2, void,                                  \
+                            (long double* result, std::uint64_t low, std::uint64_t high))                              \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __extendsftf2, env, __extendsftf2, void,                        \
+                            (long double* result, float value))                                                        \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __extenddftf2, env, __extenddftf2, void,                        \
+                            (long double* result, double value))                                                       \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __trunctfdf2, env, __trunctfdf2, double,                        \
+                            (std::uint64_t low, std::uint64_t high))                                                   \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __trunctfsf2, env, __trunctfsf2, float,                         \
+                            (std::uint64_t low, std::uint64_t high))                                                   \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __fixtfsi, env, __fixtfsi, std::int32_t,                        \
+                            (std::uint64_t low, std::uint64_t high))                                                   \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __fixtfdi, env, __fixtfdi, std::int64_t,                        \
+                            (std::uint64_t low, std::uint64_t high))                                                   \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __fixtfti, env, __fixtfti, void,                                \
+                            (__int128* result, std::uint64_t low, std::uint64_t high))                                 \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __fixunstfsi, env, __fixunstfsi, std::uint32_t,                 \
+                            (std::uint64_t low, std::uint64_t high))                                                   \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __fixunstfdi, env, __fixunstfdi, std::uint64_t,                 \
+                            (std::uint64_t low, std::uint64_t high))                                                   \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __fixunstfti, env, __fixunstfti, void,                          \
+                            (unsigned __int128* result, std::uint64_t low, std::uint64_t high))                        \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __fixsfti, env, __fixsfti, void,                                \
+                            (__int128* result, float value))                                                           \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __fixdfti, env, __fixdfti, void,                                \
+                            (__int128* result, double value))                                                          \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __fixunssfti, env, __fixunssfti, void,                          \
+                            (unsigned __int128* result, float value))                                                  \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __fixunsdfti, env, __fixunsdfti, void,                          \
+                            (unsigned __int128* result, double value))                                                 \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __floatsidf, env, __floatsidf, double, (std::int32_t value))    \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __floatsitf, env, __floatsitf, void,                            \
+                            (long double* result, std::int32_t value))                                                 \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __floatditf, env, __floatditf, void,                            \
+                            (long double* result, std::uint64_t value))                                                \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __floatunsitf, env, __floatunsitf, void,                        \
+                            (long double* result, std::uint32_t value))                                                \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __floatunditf, env, __floatunditf, void,                        \
+                            (long double* result, std::uint64_t value))                                                \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __floattidf, env, __floattidf, double,                          \
+                            (std::uint64_t low, std::uint64_t high))                                                   \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __floatuntidf, env, __floatuntidf, double,                      \
+                            (std::uint64_t low, std::uint64_t high))                                                   \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __cmptf2, env, __cmptf2, std::int32_t,                          \
+                            (std::uint64_t low_a, std::uint64_t high_a, std::uint64_t low_b, std::uint64_t high_b))    \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __eqtf2, env, __eqtf2, std::int32_t,                            \
+                            (std::uint64_t low_a, std::uint64_t high_a, std::uint64_t low_b, std::uint64_t high_b))    \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __netf2, env, __netf2, std::int32_t,                            \
+                            (std::uint64_t low_a, std::uint64_t high_a, std::uint64_t low_b, std::uint64_t high_b))    \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __getf2, env, __getf2, std::int32_t,                            \
+                            (std::uint64_t low_a, std::uint64_t high_a, std::uint64_t low_b, std::uint64_t high_b))    \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __gttf2, env, __gttf2, std::int32_t,                            \
+                            (std::uint64_t low_a, std::uint64_t high_a, std::uint64_t low_b, std::uint64_t high_b))    \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __letf2, env, __letf2, std::int32_t,                            \
+                            (std::uint64_t low_a, std::uint64_t high_a, std::uint64_t low_b, std::uint64_t high_b))    \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __lttf2, env, __lttf2, std::int32_t,                            \
+                            (std::uint64_t low_a, std::uint64_t high_a, std::uint64_t low_b, std::uint64_t high_b))    \
+   FORGE_CONTRACT_INTRINSIC(1, runtime, runtime, none, __unordtf2, env, __unordtf2, std::int32_t,                      \
+                            (std::uint64_t low_a, std::uint64_t high_a, std::uint64_t low_b, std::uint64_t high_b))

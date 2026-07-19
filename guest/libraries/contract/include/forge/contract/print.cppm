@@ -1,6 +1,6 @@
 module;
 
-#include <forge/contract/intrinsics.h>
+#include <forge/contract/internal/intrinsics.hpp>
 
 #include <concepts>
 #include <cstddef>
@@ -17,15 +17,15 @@ export import forge.chain.protocol.values;
 export namespace forge::contract {
 
 inline void printhex(const void* data, std::uint32_t size) {
-   ::printhex(data, size);
+   ::forge::contract::internal::printhex(data, size);
 }
 
 inline void printl(const char* data, std::size_t size) {
-   ::prints_l(data, static_cast<std::uint32_t>(size));
+   ::forge::contract::internal::prints_l(data, static_cast<std::uint32_t>(size));
 }
 
 inline void print(const char* value) {
-   ::prints(value);
+   ::forge::contract::internal::prints(value);
 }
 
 inline void print(std::string_view value) {
@@ -37,42 +37,42 @@ inline void print(const std::string& value) {
 }
 
 inline void print(chain::protocol::name value) {
-   ::printn(value.value);
+   ::forge::contract::internal::printn(value.value);
 }
 
 template <std::signed_integral T> inline void print(T value) {
    if constexpr (sizeof(T) == sizeof(__int128)) {
       const auto converted = static_cast<__int128>(value);
-      ::printi128(&converted);
+      ::forge::contract::internal::printi128(&converted);
    } else if constexpr (sizeof(T) == 1U && !std::same_as<T, bool>) {
       const auto character = static_cast<char>(value);
-      ::prints_l(&character, 1U);
+      ::forge::contract::internal::prints_l(&character, 1U);
    } else {
-      ::printi(static_cast<std::int64_t>(value));
+      ::forge::contract::internal::printi(static_cast<std::int64_t>(value));
    }
 }
 
 template <std::unsigned_integral T> inline void print(T value) {
    if constexpr (std::same_as<T, bool>) {
-      ::prints(value ? "true" : "false");
+      ::forge::contract::internal::prints(value ? "true" : "false");
    } else if constexpr (sizeof(T) == sizeof(unsigned __int128)) {
       const auto converted = static_cast<unsigned __int128>(value);
-      ::printui128(&converted);
+      ::forge::contract::internal::printui128(&converted);
    } else {
-      ::printui(static_cast<std::uint64_t>(value));
+      ::forge::contract::internal::printui(static_cast<std::uint64_t>(value));
    }
 }
 
 inline void print(float value) {
-   ::printsf(value);
+   ::forge::contract::internal::printsf(value);
 }
 
 inline void print(double value) {
-   ::printdf(value);
+   ::forge::contract::internal::printdf(value);
 }
 
 inline void print(long double value) {
-   ::printqf(&value);
+   ::forge::contract::internal::printqf(&value);
 }
 
 template <typename T>

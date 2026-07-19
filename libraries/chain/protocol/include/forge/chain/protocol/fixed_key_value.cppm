@@ -139,15 +139,20 @@ template <std::size_t Size> class fixed_key {
    }
 
    fixed_key() = default;
-   explicit constexpr fixed_key(const std::array<word_type, num_words()>& words) : words_{words} {}
-   explicit constexpr fixed_key(const std::array<std::uint8_t, Size>& bytes)
+   constexpr fixed_key(const std::array<word_type, num_words()>& words) : words_{words} {}
+   constexpr fixed_key(const std::array<std::uint8_t, Size>& bytes)
        : words_{detail::pack_fixed_key_words<Size>(bytes)} {}
 
    template <detail::fixed_key_word Word, std::size_t WordCount>
       requires(sizeof(Word) < sizeof(word_type) && sizeof(word_type) % sizeof(Word) == 0U &&
                WordCount * sizeof(Word) <= Size)
-   explicit constexpr fixed_key(const std::array<Word, WordCount>& words)
-       : words_{detail::pack_fixed_key_words<Size>(words)} {}
+   constexpr fixed_key(const std::array<Word, WordCount>& words) : words_{detail::pack_fixed_key_words<Size>(words)} {}
+
+   template <detail::fixed_key_word Word, std::size_t WordCount>
+      requires(sizeof(Word) < sizeof(word_type) && sizeof(word_type) % sizeof(Word) == 0U &&
+               WordCount * sizeof(Word) <= Size)
+   constexpr fixed_key(const Word (&words)[WordCount])
+       : words_{detail::pack_fixed_key_words<Size>(std::to_array(words))} {}
 
    template <detail::fixed_key_word First, std::same_as<First>... Rest>
       requires(sizeof(First) <= sizeof(word_type) && sizeof(word_type) % sizeof(First) == 0U &&
@@ -160,6 +165,15 @@ template <std::size_t Size> class fixed_key {
 
    [[nodiscard]] const std::array<word_type, num_words()>& get_array() const noexcept {
       return words_;
+   }
+   [[nodiscard]] constexpr word_type* data() noexcept {
+      return words_.data();
+   }
+   [[nodiscard]] constexpr const word_type* data() const noexcept {
+      return words_.data();
+   }
+   [[nodiscard]] static constexpr std::size_t size() noexcept {
+      return num_words();
    }
    [[nodiscard]] constexpr std::array<std::uint8_t, Size> extract_as_byte_array() const noexcept {
       return detail::extract_fixed_key_bytes<Size>(words_);

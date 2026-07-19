@@ -76,6 +76,8 @@ struct oracle_state {
    std::uint64_t proposed_producer_version = 0;
    std::vector<std::uint8_t> blockchain_parameters;
    std::vector<std::uint8_t> kv_parameters;
+   std::vector<std::uint8_t> wasm_parameters;
+   std::array<std::vector<std::uint8_t>, 18> parameters;
    std::vector<std::uint8_t> finalizers;
    std::string console;
 

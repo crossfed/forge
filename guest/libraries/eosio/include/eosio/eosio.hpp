@@ -37,6 +37,8 @@
 #include <eosio/transaction.hpp>
 #include <eosio/varint.hpp>
 
+#include <cstdlib>
+
 import forge.chain.protocol.values;
 import forge.contract.dispatcher;
 import forge.contract.intrinsics;
@@ -44,8 +46,6 @@ import forge.raw.codec;
 
 namespace eosio {
 
-using forge::chain::protocol::asset;
-using forge::chain::protocol::name;
 using forge::chain::protocol::permission_level;
 using forge::chain::protocol::symbol;
 using forge::chain::protocol::symbol_code;
@@ -54,5 +54,3 @@ using forge::contract::check;
 using forge::contract::current_receiver;
 
 } // namespace eosio
-
-using forge::chain::protocol::literals::operator""_n;

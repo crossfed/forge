@@ -1,6 +1,6 @@
 module;
 
-#include <forge/contract/intrinsics.h>
+#include <forge/contract/internal/intrinsics.hpp>
 
 #include <cstddef>
 #include <cstdint>
@@ -43,11 +43,12 @@ using chain::protocol::producer_schedule;
 }
 
 [[nodiscard]] inline std::vector<chain::protocol::name> get_active_producers() {
-   const auto bytes = ::get_active_producers(nullptr, 0U);
+   const auto bytes = ::forge::contract::internal::get_active_producers(nullptr, 0U);
    check(bytes % sizeof(std::uint64_t) == 0U, "active producer payload has invalid size");
    auto result = std::vector<chain::protocol::name>(bytes / sizeof(std::uint64_t));
    if (bytes != 0U) {
-      check(::get_active_producers(reinterpret_cast<std::uint64_t*>(result.data()), bytes) == bytes,
+      check(::forge::contract::internal::get_active_producers(reinterpret_cast<std::uint64_t*>(result.data()), bytes) ==
+                bytes,
             "failed to read active producers");
    }
    return result;

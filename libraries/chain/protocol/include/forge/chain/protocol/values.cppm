@@ -19,6 +19,8 @@ namespace detail {
 using int128_t = __int128;
 using uint128_t = unsigned __int128;
 
+constexpr std::uint64_t encode_symbol_code(std::string_view code);
+
 struct name {
    enum class raw : std::uint64_t {};
 
@@ -27,6 +29,19 @@ struct name {
    constexpr name(std::uint64_t raw_value = 0) : value(raw_value) {}
    constexpr explicit name(name::raw raw_value) : value(static_cast<std::uint64_t>(raw_value)) {}
    constexpr explicit name(std::string_view text);
+
+   [[nodiscard]] static constexpr std::uint8_t char_to_value(char value) {
+      if (value == '.') {
+         return 0U;
+      }
+      if (value >= '1' && value <= '5') {
+         return static_cast<std::uint8_t>(value - '1' + 1);
+      }
+      if (value >= 'a' && value <= 'z') {
+         return static_cast<std::uint8_t>(value - 'a' + 6);
+      }
+      detail::fail_value("character is not in allowed character set for names");
+   }
 
    constexpr operator raw() const noexcept {
       return raw{value};
@@ -54,6 +69,56 @@ struct name {
 
    [[nodiscard]] std::string to_string() const;
 
+   [[nodiscard]] constexpr name suffix() const noexcept {
+      auto remaining_bits_after_last_actual_dot = std::uint32_t{};
+      auto last_dot_bits = std::uint32_t{};
+      for (auto remaining_bits = std::int32_t{59}; remaining_bits >= 4; remaining_bits -= 5) {
+         const auto character = (value >> remaining_bits) & 0x1fULL;
+         if (character == 0U) {
+            last_dot_bits = static_cast<std::uint32_t>(remaining_bits);
+         } else {
+            remaining_bits_after_last_actual_dot = last_dot_bits;
+         }
+      }
+
+      const auto thirteenth_character = value & 0x0fULL;
+      if (thirteenth_character != 0U) {
+         remaining_bits_after_last_actual_dot = last_dot_bits;
+      }
+      if (remaining_bits_after_last_actual_dot == 0U) {
+         return *this;
+      }
+
+      const auto mask = (std::uint64_t{1} << remaining_bits_after_last_actual_dot) - 16U;
+      const auto shift = 64U - remaining_bits_after_last_actual_dot;
+      return name{((value & mask) << shift) + (thirteenth_character << (shift - 1U))};
+   }
+
+   [[nodiscard]] constexpr name prefix() const noexcept {
+      auto result = value;
+      auto saw_non_dot = false;
+      auto mask = std::uint64_t{0x0fULL};
+      for (auto offset = std::int32_t{}; offset <= 59;) {
+         const auto character = (value >> offset) & mask;
+         if (character == 0U) {
+            if (saw_non_dot) {
+               result = (value >> offset) << offset;
+               break;
+            }
+         } else {
+            saw_non_dot = true;
+         }
+
+         if (offset == 0) {
+            offset += 4;
+            mask = 0x1fULL;
+         } else {
+            offset += 5;
+         }
+      }
+      return name{result};
+   }
+
    constexpr bool operator==(const name&) const = default;
    constexpr auto operator<=>(const name&) const = default;
 };
@@ -75,6 +140,7 @@ struct symbol_code {
    std::uint64_t value = 0;
 
    constexpr explicit symbol_code(std::uint64_t raw_value = 0) : value(raw_value) {}
+   constexpr explicit symbol_code(std::string_view text) : value(encode_symbol_code(text)) {}
 
    constexpr std::uint64_t raw() const noexcept {
       return value;
@@ -117,6 +183,7 @@ struct symbol {
 
    constexpr symbol(std::uint64_t raw_value = 0) : value(raw_value) {}
    constexpr symbol(symbol_code code, std::uint8_t precision) : value((code.raw() << 8U) | precision) {}
+   constexpr symbol(std::string_view code, std::uint8_t precision) : symbol(symbol_code{code}, precision) {}
 
    constexpr std::uint64_t raw() const noexcept {
       return value;
@@ -142,7 +209,7 @@ struct asset {
    static constexpr std::int64_t max_amount = (std::int64_t{1} << 62U) - 1;
 
    std::int64_t amount = 0;
-   ::forge::chain::protocol::symbol sym{};
+   ::forge::chain::protocol::symbol symbol{};
 
    constexpr asset(std::int64_t raw_amount = 0) : amount(raw_amount) {}
    asset(std::int64_t raw_amount, ::forge::chain::protocol::symbol raw_symbol);
@@ -152,7 +219,7 @@ struct asset {
    }
 
    [[nodiscard]] constexpr bool is_valid() const noexcept {
-      return is_amount_within_range() && sym.is_valid();
+      return is_amount_within_range() && symbol.is_valid();
    }
 
    void set_amount(std::int64_t value);
@@ -217,7 +284,7 @@ struct extended_asset {
    constexpr extended_asset(asset value, account_name raw_contract) : quantity(value), contract(raw_contract) {}
 
    [[nodiscard]] constexpr extended_symbol get_extended_symbol() const noexcept {
-      return {quantity.sym, contract};
+      return {quantity.symbol, contract};
    }
 
    extended_asset operator-() const;
@@ -316,7 +383,7 @@ inline std::string name::to_string() const {
    return protocol::to_string(*this);
 }
 
-inline std::uint64_t encode_symbol_code(std::string_view code) {
+constexpr std::uint64_t encode_symbol_code(std::string_view code) {
    if (code.empty() || code.size() > 7U) {
       fail_invalid_argument("chain symbol code size is invalid");
    }
@@ -394,12 +461,12 @@ template <typename Stream> void raw_unpack(Stream& stream, symbol& value) {
 
 template <typename Stream> void raw_pack(Stream& stream, const asset& value) {
    forge::raw::pack(stream, value.amount);
-   forge::raw::pack(stream, value.sym);
+   forge::raw::pack(stream, value.symbol);
 }
 
 template <typename Stream> void raw_unpack(Stream& stream, asset& value) {
    forge::raw::unpack(stream, value.amount);
-   forge::raw::unpack(stream, value.sym);
+   forge::raw::unpack(stream, value.symbol);
 }
 
 template <typename Stream> void raw_pack(Stream& stream, const extended_symbol& value) {

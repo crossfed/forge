@@ -127,6 +127,19 @@ void* memcpy(void* destination, const void* source, std::size_t size) {
    return destination;
 }
 
+void* memccpy(void* destination, const void* source, int character, std::size_t size) {
+   auto* output = static_cast<std::uint8_t*>(destination);
+   const auto* input = static_cast<const std::uint8_t*>(source);
+   const auto expected = static_cast<std::uint8_t>(character);
+   for (auto index = std::size_t{0}; index < size; ++index) {
+      output[index] = input[index];
+      if (input[index] == expected) {
+         return output + index + 1U;
+      }
+   }
+   return nullptr;
+}
+
 void* memmove(void* destination, const void* source, std::size_t size) {
    auto* output = static_cast<std::uint8_t*>(destination);
    const auto* input = static_cast<const std::uint8_t*>(source);

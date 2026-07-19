@@ -1,6 +1,6 @@
 module;
 
-#include <forge/contract/intrinsics.h>
+#include <forge/contract/internal/intrinsics.hpp>
 
 #include <concepts>
 #include <cstdint>
@@ -82,7 +82,7 @@ template <typename T> [[nodiscard]] T unpack_action_data() {
 }
 
 inline void require_recipient(name account) {
-   ::require_recipient(account.value);
+   ::forge::contract::internal::require_recipient(account.value);
 }
 
 template <typename... Accounts> void require_recipient(name account, Accounts... remaining) {
@@ -91,23 +91,24 @@ template <typename... Accounts> void require_recipient(name account, Accounts...
 }
 
 inline void require_auth(name account) {
-   ::require_auth(account.value);
+   ::forge::contract::internal::require_auth(account.value);
 }
 
 inline void require_auth(const permission_level& permission) {
-   ::require_auth2(permission.actor.value, permission.permission.value);
+   ::forge::contract::internal::require_auth2(permission.actor.value, permission.permission.value);
 }
 
 [[nodiscard]] inline bool has_auth(name account) {
-   return ::has_auth(account.value);
+   return ::forge::contract::internal::has_auth(account.value);
 }
 
 [[nodiscard]] inline bool is_account(name account) {
-   return ::is_account(account.value);
+   return ::forge::contract::internal::is_account(account.value);
 }
 
 [[nodiscard]] inline chain::protocol::time_point publication_time() {
-   return chain::protocol::time_point{chain::protocol::microseconds{static_cast<std::int64_t>(::publication_time())}};
+   return chain::protocol::time_point{
+       chain::protocol::microseconds{static_cast<std::int64_t>(::forge::contract::internal::publication_time())}};
 }
 
 inline checksum256 get_code_hash(name account, code_hash_result* full_result = nullptr) {
@@ -115,10 +116,12 @@ inline checksum256 get_code_hash(name account, code_hash_result* full_result = n
    auto& result = full_result == nullptr ? local_result : *full_result;
    auto buffer = std::vector<std::uint8_t>(64U);
    constexpr auto version = std::uint32_t{0};
-   auto size = ::get_code_hash(account.value, version, reinterpret_cast<char*>(buffer.data()), buffer.size());
+   auto size = ::forge::contract::internal::get_code_hash(account.value, version,
+                                                          reinterpret_cast<char*>(buffer.data()), buffer.size());
    if (size > buffer.size()) {
       buffer.resize(size);
-      size = ::get_code_hash(account.value, version, reinterpret_cast<char*>(buffer.data()), buffer.size());
+      size = ::forge::contract::internal::get_code_hash(account.value, version, reinterpret_cast<char*>(buffer.data()),
+                                                        buffer.size());
    }
    check(size <= buffer.size(), "code hash result exceeds reported size");
    result = ::forge::raw::unpack_exact<code_hash_result>(
@@ -129,19 +132,7 @@ inline checksum256 get_code_hash(name account, code_hash_result* full_result = n
 
 struct action : chain::protocol::action {
    action() = default;
-
-   template <typename Data>
-   action(std::vector<permission_level> permissions, chain::protocol::name account,
-          chain::protocol::name action_name, Data&& value) {
-      this->account = account;
-      this->name = action_name;
-      authorization = std::move(permissions);
-      data = ::forge::raw::pack(std::forward<Data>(value));
-   }
-
-   template <typename Data>
-   action(permission_level permission, chain::protocol::name account, chain::protocol::name action_name, Data&& value)
-       : action(std::vector<permission_level>{permission}, account, action_name, std::forward<Data>(value)) {}
+   using chain::protocol::action::action;
 
    explicit action(chain::protocol::action value) : chain::protocol::action(std::move(value)) {}
 
@@ -152,14 +143,15 @@ struct action : chain::protocol::action {
    void send() const {
       auto serialized = ::forge::raw::pack(static_cast<const chain::protocol::action&>(*this));
       check(serialized.size() <= std::numeric_limits<std::uint32_t>::max(), "inline action is too large");
-      ::send_inline(reinterpret_cast<char*>(serialized.data()), serialized.size());
+      ::forge::contract::internal::send_inline(reinterpret_cast<char*>(serialized.data()), serialized.size());
    }
 
    void send_context_free() const {
       check(authorization.empty(), "context free actions cannot have authorizations");
       auto serialized = ::forge::raw::pack(static_cast<const chain::protocol::action&>(*this));
       check(serialized.size() <= std::numeric_limits<std::uint32_t>::max(), "context-free action is too large");
-      ::send_context_free_inline(reinterpret_cast<char*>(serialized.data()), serialized.size());
+      ::forge::contract::internal::send_context_free_inline(reinterpret_cast<char*>(serialized.data()),
+                                                            serialized.size());
    }
 };
 

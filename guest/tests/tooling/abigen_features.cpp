@@ -8,6 +8,7 @@
 #include <vector>
 
 import forge.contract;
+import forge.contract.binary_extension;
 import forge.contract.varint;
 
 using str = std::string;
@@ -95,6 +96,9 @@ class [[forge::contract("abifixture")]] abifixture : public forge::contract::con
                                      forge::contract::signed_int signed_value) {
       static_cast<void>(unsigned_value);
       static_cast<void>(signed_value);
+   }
+   [[forge::action]] void extension(forge::contract::binary_extension<std::uint32_t> value) {
+      static_cast<void>(value);
    }
 
    [[forge::call]] std::uint32_t sum(std::uint32_t a, std::uint32_t b) {

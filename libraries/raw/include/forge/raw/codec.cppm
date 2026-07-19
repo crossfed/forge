@@ -613,7 +613,7 @@ template <typename T> std::size_t pack_size(const T& value) {
 }
 
 template <typename T> bytes pack(const T& value) {
-   auto result = bytes(pack_size(value));
+   auto result = bytes(::forge::raw::pack_size(value));
    if (!result.empty()) {
       auto stream = datastream<std::uint8_t*>{result.data(), result.size()};
       pack(stream, value);

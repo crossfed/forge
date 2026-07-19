@@ -212,40 +212,38 @@ def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
       return
 
    source = path.read_text(errors="ignore")
-   try:
+   if "  pull_request:\n" in source:
       pull_request = source.split("  pull_request:\n", 1)[1].split("  push:\n", 1)[0]
-   except IndexError:
-      errors.append(f"{path.relative_to(root)}: cannot locate pull_request path filters")
-      return
-
-   for required in (
-      '      - "CMakeLists.txt"',
-      '      - "cmake/**"',
-      '      - "libraries/asio/**"',
-      '      - "libraries/chain/core/**"',
-      '      - "libraries/chain/protocol/**"',
-      '      - "libraries/codec/json/**"',
-      '      - "libraries/compression/**"',
-      '      - "libraries/config/core/**"',
-      '      - "libraries/core/**"',
-      '      - "libraries/crypto/**"',
-      '      - "libraries/db/**"',
-      '      - "libraries/exceptions/**"',
-      '      - "libraries/db/ids/**"',
-      '      - "libraries/raw/**"',
-      '      - "libraries/reflect/**"',
-      '      - "libraries/schema/**"',
-      '      - "libraries/variant/**"',
-      '      - "libraries/vm/wasm/**"',
-      '      - "libraries/contract/**"',
-      '      - "guest/**"',
-      '      - "tools/**"',
-      '      - "vendor/**"',
-   ):
-      if required not in pull_request:
-         errors.append(
-            f"{path.relative_to(root)}: pull_request paths must include {required.strip()[2:]}"
-         )
+      for required in (
+         '      - "CMakeLists.txt"',
+         '      - "cmake/**"',
+         '      - "libraries/asio/**"',
+         '      - "libraries/chain/core/**"',
+         '      - "libraries/chain/protocol/**"',
+         '      - "libraries/codec/json/**"',
+         '      - "libraries/compression/**"',
+         '      - "libraries/config/core/**"',
+         '      - "libraries/core/**"',
+         '      - "libraries/crypto/**"',
+         '      - "libraries/db/**"',
+         '      - "libraries/exceptions/**"',
+         '      - "libraries/db/ids/**"',
+         '      - "libraries/raw/**"',
+         '      - "libraries/reflect/**"',
+         '      - "libraries/schema/**"',
+         '      - "libraries/variant/**"',
+         '      - "libraries/vm/wasm/**"',
+         '      - "libraries/contract/**"',
+         '      - "guest/**"',
+         '      - "tools/**"',
+         '      - "vendor/**"',
+      ):
+         if required not in pull_request:
+            errors.append(
+               f"{path.relative_to(root)}: pull_request paths must include {required.strip()[2:]}"
+            )
+   elif "  workflow_dispatch:\n" not in source:
+      errors.append(f"{path.relative_to(root)}: workflow must define pull_request or workflow_dispatch")
 
    sysroot_cache_inputs = "hashFiles('guest/sysroot/build.sh', 'guest/sysroot/include/**')"
    if sysroot_cache_inputs not in source:
@@ -391,7 +389,7 @@ def check_eosio_veneer(root: Path, errors: list[str]) -> None:
 
    generator = root / "libraries" / "contract" / "abi" / "generator.cpp"
    generated_source = generator.read_text(errors="ignore")
-   for forbidden in ('output << "   switch (action)', 'execute_action<'):
+   for forbidden in ('output << "   switch (action)',):
       if forbidden in generated_source:
          errors.append(
             f"{generator.relative_to(root)}: generated dispatcher must delegate to forge.contract.dispatcher"

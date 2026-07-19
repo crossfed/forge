@@ -11,9 +11,7 @@ import forge.raw.codec;
 
 namespace eosio {
 
-template <typename T> [[nodiscard]] std::size_t pack_size(const T& value) {
-   return ::forge::raw::pack_size(value);
-}
+using ::forge::raw::pack_size;
 
 template <typename T> [[nodiscard]] std::vector<char> pack(const T& value) {
    const auto bytes = ::forge::raw::pack(value);
@@ -21,7 +19,8 @@ template <typename T> [[nodiscard]] std::vector<char> pack(const T& value) {
 }
 
 template <typename T> [[nodiscard]] T unpack(const char* data, std::size_t size) {
-   return ::forge::raw::unpack_exact<T>(std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(data), size});
+   return ::forge::raw::unpack_exact<T>(
+       std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(data), size});
 }
 
 template <typename T> [[nodiscard]] T unpack(const std::vector<char>& data) {
@@ -42,5 +41,15 @@ template <typename T> void unpack(T& value, const char* data, std::size_t size) 
       FORGE_EOSIO_DETAIL_FOREACH_SEQ(FORGE_EOSIO_DETAIL_PACK_MEMBER, type, members)                                    \
    }                                                                                                                   \
    template <typename Stream> friend void raw_unpack(Stream& stream, type& value) {                                    \
+      FORGE_EOSIO_DETAIL_FOREACH_SEQ(FORGE_EOSIO_DETAIL_UNPACK_MEMBER, type, members)                                  \
+   }
+
+#define EOSLIB_SERIALIZE_DERIVED(type, base, members)                                                                  \
+   template <typename Stream> friend void raw_pack(Stream& stream, const type& value) {                                \
+      ::forge::raw::pack(stream, static_cast<const base&>(value));                                                     \
+      FORGE_EOSIO_DETAIL_FOREACH_SEQ(FORGE_EOSIO_DETAIL_PACK_MEMBER, type, members)                                    \
+   }                                                                                                                   \
+   template <typename Stream> friend void raw_unpack(Stream& stream, type& value) {                                    \
+      ::forge::raw::unpack(stream, static_cast<base&>(value));                                                         \
       FORGE_EOSIO_DETAIL_FOREACH_SEQ(FORGE_EOSIO_DETAIL_UNPACK_MEMBER, type, members)                                  \
    }

@@ -39,7 +39,7 @@ The canonical registry generates `<forge/contract/intrinsics.h>`, the thin
 `spring_db_intrinsics.txt` fixture is an independent list of expected WASM
 signatures and is not generated from the Forge registry.
 
-The complete contract interface now contains the exact 148-function union of
+The complete contract interface now contains the exact 152-function union of
 the pinned CDT and Spring snapshots. The 60 functions in this note remain the
 `database` capability set. `current_receiver` and the other contract families
 are recorded by `forge-contract-sdk-surface-v1.md` and the committed SDK surface

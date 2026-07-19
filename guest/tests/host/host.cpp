@@ -2,6 +2,7 @@ module;
 
 #include <boost/asio/awaitable.hpp>
 #include <forge/contract/types.h>
+#include <forge/vm/wasm/host_function.hpp>
 
 #include <concepts>
 #include <cstddef>

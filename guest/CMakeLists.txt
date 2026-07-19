@@ -49,6 +49,18 @@ set(
 list(JOIN _forge_contract_path_map_options " " _forge_contract_path_map_flags)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+find_package(Boost 1.90.0 EXACT REQUIRED CONFIG COMPONENTS headers)
+
+set(_forge_contract_boost_include "")
+foreach(_candidate IN LISTS Boost_INCLUDE_DIRS)
+   if(EXISTS "${_candidate}/boost/pfr/core.hpp")
+      set(_forge_contract_boost_include "${_candidate}")
+      break()
+   endif()
+endforeach()
+if(NOT _forge_contract_boost_include)
+   message(FATAL_ERROR "Boost.PFR headers were not found in Boost ${Boost_VERSION}")
+endif()
 
 if(FORGE_CONTRACT_PROFILE STREQUAL "release")
    set(_llvm_install "${CMAKE_BINARY_DIR}/toolchain")
@@ -319,6 +331,11 @@ endif()
 
 set(_forge_contract_input_sysroot "${FORGE_CONTRACT_SYSROOT}")
 set(FORGE_CONTRACT_SYSROOT "${CMAKE_BINARY_DIR}/sdk-sysroot")
+get_filename_component(_forge_contract_clang_directory "${FORGE_CONTRACT_CLANG}" DIRECTORY)
+set(_forge_contract_clang_c "${_forge_contract_clang_directory}/clang")
+if(NOT EXISTS "${_forge_contract_clang_c}")
+   message(FATAL_ERROR "the selected Contract SDK toolchain is missing clang: ${_forge_contract_clang_c}")
+endif()
 set(_forge_contract_sysroot_stage_dependencies)
 if(TARGET forge_contract_sysroot)
    list(APPEND _forge_contract_sysroot_stage_dependencies forge_contract_sysroot)
@@ -331,6 +348,10 @@ add_custom_target(
       -DSOURCE=${_forge_contract_input_sysroot}
       -DDESTINATION=${FORGE_CONTRACT_SYSROOT}
       -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stage_sysroot.cmake"
+   COMMAND
+      ${CMAKE_COMMAND} -E copy_directory
+      "${CMAKE_CURRENT_SOURCE_DIR}/sysroot/include"
+      "${FORGE_CONTRACT_SYSROOT}/include"
    DEPENDS
       ${_forge_contract_sysroot_stage_dependencies}
       "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stage_sysroot.cmake"
@@ -344,6 +365,7 @@ set(_intrinsic_manifest "${_generated_dir}/intrinsics.json")
 set(
    _intrinsic_headers
    "${_generated_dir}/include/forge/contract/intrinsics.h"
+   "${_generated_dir}/include/forge/contract/internal/intrinsics.hpp"
    "${_generated_dir}/include/forge/contract/types.h"
    "${_generated_dir}/include/eosio/action.h"
    "${_generated_dir}/include/eosio/call.h"
@@ -359,6 +381,19 @@ set(
    "${_generated_dir}/include/eosio/system.h"
    "${_generated_dir}/include/eosio/transaction.h"
    "${_generated_dir}/include/eosio/types.h"
+   "${_generated_dir}/include/eosio/internal/action.hpp"
+   "${_generated_dir}/include/eosio/internal/call.hpp"
+   "${_generated_dir}/include/eosio/internal/chain.hpp"
+   "${_generated_dir}/include/eosio/internal/crypto.hpp"
+   "${_generated_dir}/include/eosio/internal/crypto_bls_ext.hpp"
+   "${_generated_dir}/include/eosio/internal/crypto_ext.hpp"
+   "${_generated_dir}/include/eosio/internal/db.hpp"
+   "${_generated_dir}/include/eosio/internal/instant_finality.hpp"
+   "${_generated_dir}/include/eosio/internal/permission.hpp"
+   "${_generated_dir}/include/eosio/internal/print.hpp"
+   "${_generated_dir}/include/eosio/internal/privileged.hpp"
+   "${_generated_dir}/include/eosio/internal/system.hpp"
+   "${_generated_dir}/include/eosio/internal/transaction.hpp"
 )
 add_custom_command(
    OUTPUT "${_intrinsic_manifest}" ${_intrinsic_headers}
@@ -394,13 +429,18 @@ ExternalProject_Add(
       -DCMAKE_SYSTEM_NAME=Generic
       -DCMAKE_SYSTEM_PROCESSOR=wasm32
       -DCMAKE_SYSROOT=${FORGE_CONTRACT_SYSROOT}
+      -DCMAKE_OSX_SYSROOT=
+      -DCMAKE_C_COMPILER=${_forge_contract_clang_c}
       -DCMAKE_CXX_COMPILER=${FORGE_CONTRACT_CLANG}
+      -DCMAKE_C_COMPILER_TARGET=wasm32
       -DCMAKE_CXX_COMPILER_TARGET=wasm32
+      -DCMAKE_C_FLAGS=${_forge_contract_path_map_flags}
       -DCMAKE_CXX_FLAGS=${_forge_contract_path_map_flags}
       -DCMAKE_AR=${FORGE_CONTRACT_LLVM_AR}
       -DCMAKE_RANLIB=${FORGE_CONTRACT_LLVM_RANLIB}
       -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
       -DFORGE_GUEST_INCLUDE_DIR=${_generated_dir}/include
+      -DFORGE_GUEST_LIBC_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../vendor/cdt-musl
    BUILD_ALWAYS TRUE
    BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> -j ${FORGE_CONTRACT_JOBS}
    INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
@@ -465,6 +505,10 @@ install(
 )
 install(DIRECTORY libraries/eosio/include/ DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/include")
 install(DIRECTORY "${_generated_dir}/include/" DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/include")
+install(
+   DIRECTORY "${_forge_contract_boost_include}/boost/pfr"
+   DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/include/boost"
+)
 install(
    FILES
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/raw/stream.cpp"

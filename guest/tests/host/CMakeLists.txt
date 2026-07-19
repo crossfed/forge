@@ -1,5 +1,6 @@
 add_library(
    forge_contract_test_host STATIC
+   compiler_builtins.cpp
    host.cpp
    host_impl.cpp
    memory_driver.cpp

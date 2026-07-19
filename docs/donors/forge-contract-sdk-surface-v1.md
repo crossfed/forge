@@ -18,7 +18,7 @@ dependencies.
 
 ## Accepted Surface
 
-Intrinsic interface version 1 contains 148 unique functions grouped into
+Intrinsic interface version 1 contains 152 unique functions grouped into
 `core`, `database`, `privileged`, `crypto_ext`, `bls`, `call` and
 `instant_finality`. Entries carry exact C and WASM signatures plus an optional
 Spring protocol-feature identifier. The canonical registry generates modern C
