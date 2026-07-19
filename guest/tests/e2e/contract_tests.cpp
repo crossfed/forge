@@ -332,6 +332,34 @@ BOOST_AUTO_TEST_CASE(generated_and_legacy_dispatchers_ignore_foreign_notificatio
    BOOST_TEST(modern_host.return_value.empty());
 }
 
+BOOST_AUTO_TEST_CASE(generated_dispatcher_routes_exact_and_wildcard_notifications) {
+   register_intrinsics();
+   const auto modern_code = read_contract(FORGE_CONTRACT_TEST_WASM);
+   const auto legacy_code = read_contract(FORGE_CONTRACT_TEST_LEGACY_NOTIFICATION_WASM);
+
+   for (const auto& code : {std::cref(modern_code), std::cref(legacy_code)}) {
+      auto exact = invocation{.action_data = forge::raw::pack(std::uint32_t{40})};
+      BOOST_CHECK_NO_THROW(apply(code.get(), exact, code.get().data() == modern_code.data() ? "hello" : "legacynotify",
+                                 "eosio.token", "transfer"));
+      BOOST_TEST(exact.return_value == forge::raw::pack(std::uint32_t{41}), boost::test_tools::per_element());
+
+      auto wildcard = invocation{.action_data = forge::raw::pack(std::uint32_t{40})};
+      BOOST_CHECK_NO_THROW(apply(code.get(), wildcard,
+                                 code.get().data() == modern_code.data() ? "hello" : "legacynotify", "other.token",
+                                 "fallback"));
+      BOOST_TEST(wildcard.return_value == forge::raw::pack(std::uint32_t{42}), boost::test_tools::per_element());
+   }
+}
+
+BOOST_AUTO_TEST_CASE(generated_dispatcher_selects_notification_before_decoding_action_data) {
+   register_intrinsics();
+   const auto code = read_contract(FORGE_CONTRACT_TEST_WASM);
+   auto host = invocation{.action_data = {0xff, 0xff, 0xff}};
+
+   BOOST_CHECK_NO_THROW(apply(code, host, "hello", "other.token", "transfer"));
+   BOOST_TEST(host.return_value.empty());
+}
+
 BOOST_AUTO_TEST_CASE(contract_check_failure_reaches_the_host) {
    register_intrinsics();
    const auto code = read_contract(FORGE_CONTRACT_TEST_WASM);

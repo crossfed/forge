@@ -15,6 +15,7 @@ module;
 #include <llvm/Support/DynamicLibrary.h>
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -65,6 +66,14 @@ struct action_shape {
    std::string result;
    std::string class_name;
    std::string method_name;
+   bool dispatchable = true;
+};
+
+struct notification_shape {
+   std::uint64_t code = 0;
+   std::uint64_t action = 0;
+   std::string class_name;
+   std::string method_name;
 };
 
 struct type_shape {
@@ -87,6 +96,8 @@ struct call_shape {
    std::string type;
    std::string result;
    std::uint64_t id = 0;
+   std::string class_name;
+   std::string method_name;
 };
 
 struct schema {
@@ -94,6 +105,7 @@ struct schema {
    std::vector<struct_shape> structs;
    std::vector<record_codec_shape> record_codecs;
    std::vector<action_shape> actions;
+   std::vector<notification_shape> notifications;
    std::vector<variant_shape> variants;
    std::vector<table_shape> tables;
    std::vector<protocol::clause_pair> clauses;
@@ -106,6 +118,7 @@ struct schema {
    std::set<std::string> explicit_table_declarations;
    std::map<std::string, std::string> action_declarations;
    std::map<std::string, std::string> action_methods;
+   std::map<std::string, std::string> notification_declarations;
    std::map<std::string, std::string> call_declarations;
    std::map<std::filesystem::path, std::set<std::string>> source_record_codecs;
    bool has_apply = false;
@@ -250,6 +263,9 @@ class type_encoder {
       auto type = input.getNonReferenceType().getUnqualifiedType();
       if (const auto* alias = llvm::dyn_cast_or_null<clang::TypedefType>(type.getTypePtrOrNull())) {
          const auto* declaration = alias->getDecl();
+         if (const auto known = known_alias(declaration->getQualifiedNameAsString()); known.has_value()) {
+            return *known;
+         }
          if (!context_.getSourceManager().isInSystemHeader(declaration->getLocation())) {
             const auto name = declaration->getNameAsString();
             const auto target = encode(declaration->getUnderlyingType());
@@ -318,6 +334,46 @@ class type_encoder {
    }
 
  private:
+   static std::optional<std::string> known_alias(std::string_view name) {
+      static constexpr auto aliases = std::array{
+          std::pair{"forge::chain::protocol::int128_t", "int128"},
+          std::pair{"forge::chain::protocol::uint128_t", "uint128"},
+          std::pair{"forge::chain::protocol::account_name", "name"},
+          std::pair{"forge::chain::protocol::action_name", "name"},
+          std::pair{"forge::chain::protocol::permission_name", "name"},
+          std::pair{"forge::chain::protocol::table_name", "name"},
+          std::pair{"forge::chain::protocol::bytes", "bytes"},
+          std::pair{"forge::chain::protocol::digest", "checksum256"},
+          std::pair{"forge::chain::protocol::chain_id", "checksum256"},
+          std::pair{"forge::chain::protocol::block_id", "checksum256"},
+          std::pair{"forge::chain::protocol::checksum", "checksum256"},
+          std::pair{"forge::chain::protocol::checksum256", "checksum256"},
+          std::pair{"forge::chain::protocol::checksum512", "checksum512"},
+          std::pair{"forge::chain::protocol::checksum160", "checksum160"},
+          std::pair{"forge::chain::protocol::transaction_id", "checksum256"},
+          std::pair{"forge::chain::protocol::public_key", "public_key"},
+          std::pair{"forge::chain::protocol::signature", "signature"},
+          std::pair{"forge::crypto::asymmetric::public_key", "public_key"},
+          std::pair{"forge::crypto::asymmetric::signature", "signature"},
+      };
+      for (const auto& [cpp_name, abi_name] : aliases) {
+         if (cpp_name == name) {
+            return std::string{abi_name};
+         }
+      }
+      return std::nullopt;
+   }
+
+   bool is_byte_type(clang::QualType input) const {
+      const auto type = input.getDesugaredType(context_).getUnqualifiedType();
+      const auto* builtin = type->getAs<clang::BuiltinType>();
+      if (builtin == nullptr) {
+         return false;
+      }
+      return builtin->getKind() == clang::BuiltinType::Char_S || builtin->getKind() == clang::BuiltinType::Char_U ||
+             builtin->getKind() == clang::BuiltinType::SChar || builtin->getKind() == clang::BuiltinType::UChar;
+   }
+
    static bool is_std_template(const clang::TemplateDecl& declaration, std::string_view name) {
       if (declaration.getName() != llvm::StringRef{name.data(), name.size()}) {
          return false;
@@ -365,6 +421,9 @@ class type_encoder {
       if ((is_std_template(*declaration, "vector") || is_std_template(*declaration, "set") ||
            is_std_template(*declaration, "deque") || is_std_template(*declaration, "list")) &&
           specialization.getNumArgs() >= 1U) {
+         if (is_std_template(*declaration, "vector") && is_byte_type(type_argument(0).getType())) {
+            return "bytes";
+         }
          return encode_location(type_argument(0)) + "[]";
       }
       if (is_std_template(*declaration, "optional") && specialization.getNumArgs() >= 1U) {
@@ -510,7 +569,17 @@ class type_encoder {
           {"forge::chain::protocol::symbol_code", "symbol_code"},
           {"forge::chain::protocol::symbol", "symbol"},
           {"forge::chain::protocol::asset", "asset"},
+          {"forge::chain::protocol::extended_symbol", "extended_symbol"},
+          {"forge::chain::protocol::extended_asset", "extended_asset"},
           {"forge::chain::protocol::permission_level", "permission_level"},
+          {"forge::chain::protocol::time_point", "time_point"},
+          {"forge::chain::protocol::time_point_sec", "time_point_sec"},
+          {"forge::chain::protocol::block_timestamp", "block_timestamp_type"},
+          {"forge::raw::unsigned_int", "varuint32"},
+          {"forge::raw::signed_int", "varint32"},
+          {"forge::crypto::sha256", "checksum256"},
+          {"forge::crypto::sha512", "checksum512"},
+          {"forge::crypto::ripemd160", "checksum160"},
       };
       for (const auto& [cpp_name, abi_name] : known) {
          if (qualified == cpp_name) {
@@ -521,16 +590,33 @@ class type_encoder {
       if (specialization != nullptr) {
          const auto template_qualified = specialization->getSpecializedTemplate()->getQualifiedNameAsString();
          const auto arguments = flatten(specialization->getTemplateArgs());
+         if ((template_qualified == "forge::contract::ignore" ||
+              template_qualified == "forge::contract::ignore_wrapper") &&
+             !arguments.empty() && arguments[0].getKind() == clang::TemplateArgument::Type) {
+            return encode(arguments[0].getAsType());
+         }
          if (template_qualified == "forge::chain::protocol::fixed_key" && arguments.size() >= 1U &&
-             arguments[0].getKind() == clang::TemplateArgument::Integral &&
-             arguments[0].getAsIntegral().getZExtValue() == 32U) {
-            return "checksum256";
+             arguments[0].getKind() == clang::TemplateArgument::Integral) {
+            switch (arguments[0].getAsIntegral().getZExtValue()) {
+            case 20U:
+               return "checksum160";
+            case 32U:
+               return "checksum256";
+            case 64U:
+               return "checksum512";
+            default:
+               break;
+            }
          }
          if ((is_std_template(*specialization->getSpecializedTemplate(), "vector") ||
               is_std_template(*specialization->getSpecializedTemplate(), "set") ||
               is_std_template(*specialization->getSpecializedTemplate(), "deque") ||
               is_std_template(*specialization->getSpecializedTemplate(), "list")) &&
              arguments.size() >= 1U && arguments[0].getKind() == clang::TemplateArgument::Type) {
+            if (is_std_template(*specialization->getSpecializedTemplate(), "vector") &&
+                is_byte_type(arguments[0].getAsType())) {
+               return "bytes";
+            }
             return encode(arguments[0].getAsType()) + "[]";
          }
          if (is_std_template(*specialization->getSpecializedTemplate(), "optional") && arguments.size() >= 1U &&
@@ -790,6 +876,10 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
          }
          return true;
       }
+      if (const auto action = annotation(*declaration, "forge.action"); action.has_value() &&
+          belongs_to_selected_contract(*declaration)) {
+         add_record_action(*declaration, *action);
+      }
       const auto contract = annotation(*declaration, "forge.contract");
       if (!contract.has_value()) {
          return true;
@@ -809,6 +899,27 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
          if (call.has_value()) {
             add_call(*method, *call);
          }
+         const auto notification = annotation(*method, "forge.on_notify");
+         if (notification.has_value()) {
+            add_notification(*declaration, *method, *notification);
+         }
+      }
+      return true;
+   }
+
+   bool VisitCXXMethodDecl(clang::CXXMethodDecl* declaration) {
+      if (!belongs_to_selected_contract(*declaration)) {
+         return true;
+      }
+      found_contract_ = true;
+      if (const auto action = annotation(*declaration, "forge.action"); action.has_value()) {
+         add_action(*declaration->getParent(), *declaration, *action);
+      }
+      if (const auto call = annotation(*declaration, "forge.call"); call.has_value()) {
+         add_call(*declaration, *call);
+      }
+      if (const auto notification = annotation(*declaration, "forge.on_notify"); notification.has_value()) {
+         add_notification(*declaration->getParent(), *declaration, *notification);
       }
       return true;
    }
@@ -993,6 +1104,26 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       });
    }
 
+   void add_record_action(const clang::CXXRecordDecl& declaration, std::string_view annotated_name) {
+      const auto identity = declaration_identity(declaration);
+      const auto action_name =
+          annotated_name.empty() ? declaration.getNameAsString() : std::string{annotated_name};
+      const auto [existing, inserted] = output_.action_declarations.try_emplace(action_name, identity);
+      if (!inserted && existing->second == identity) {
+         return;
+      }
+      if (!inserted) {
+         report(declaration.getLocation(), "duplicate contract action name");
+         return;
+      }
+      output_.actions.push_back(action_shape{
+          .name = action_name,
+          .type = encoder_.encode(context_.getTypeDeclType(clang::ElaboratedTypeKeyword::None, std::nullopt,
+                                                           &declaration)),
+          .dispatchable = false,
+      });
+   }
+
    void add_call(const clang::CXXMethodDecl& method, std::string_view annotated_name) {
       register_method_types(method);
       const auto identity = declaration_identity(method);
@@ -1016,6 +1147,49 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
           .type = method_info.type,
           .result = method_info.result,
           .id = identifier,
+          .class_name = method.getParent()->getQualifiedNameAsString(),
+          .method_name = method.getNameAsString(),
+      });
+   }
+
+   void add_notification(const clang::CXXRecordDecl& declaration, const clang::CXXMethodDecl& method,
+                         std::string_view filter) {
+      register_method_types(method);
+      const auto separator = filter.find("::");
+      if (separator == std::string_view::npos || separator == 0U || separator + 2U == filter.size() ||
+          filter.find("::", separator + 2U) != std::string_view::npos) {
+         report(method.getLocation(), "notification filter must be 'account::action' or '*::action'");
+         return;
+      }
+      const auto code_name = filter.substr(0U, separator);
+      const auto action_name = filter.substr(separator + 2U);
+      auto code = std::uint64_t{};
+      auto action = std::uint64_t{};
+      try {
+         if (code_name != "*") {
+            code = protocol::make_name(code_name).value;
+         }
+         action = protocol::make_name(action_name).value;
+      } catch (const std::exception&) {
+         report(method.getLocation(), "notification filter contains an invalid Antelope name");
+         return;
+      }
+
+      const auto identity = declaration_identity(method);
+      const auto key = std::to_string(code) + ':' + std::to_string(action);
+      const auto [existing, inserted] = output_.notification_declarations.try_emplace(key, identity);
+      if (!inserted && existing->second != identity) {
+         report(method.getLocation(), "duplicate contract notification route");
+         return;
+      }
+      if (!inserted) {
+         return;
+      }
+      output_.notifications.push_back(notification_shape{
+          .code = code,
+          .action = action,
+          .class_name = declaration.getQualifiedNameAsString(),
+          .method_name = method.getNameAsString(),
       });
    }
 
@@ -1209,6 +1383,10 @@ void canonicalize(schema& output) {
    std::ranges::sort(output.structs, by_name);
    std::ranges::sort(output.record_codecs, by_name);
    std::ranges::sort(output.actions, by_name);
+   std::ranges::sort(output.notifications, [](const auto& left, const auto& right) {
+      return std::tie(left.code, left.action, left.class_name, left.method_name) <
+             std::tie(right.code, right.action, right.class_name, right.method_name);
+   });
    std::ranges::sort(output.variants, by_name);
    std::ranges::sort(output.tables, by_name);
    std::ranges::sort(output.calls, by_name);
@@ -1349,9 +1527,27 @@ std::string make_codec_prelude(const schema& input) {
    return output.str();
 }
 
+void write_call_dispatcher(std::ostream& output, const schema& input) {
+   if (input.calls.empty()) {
+      return;
+   }
+   output << "extern \"C\" [[gnu::visibility(\"default\")]] void __forge_call("
+             "std::uint64_t sender, std::uint64_t receiver) {\n";
+   output << "   using forge::chain::protocol::name;\n";
+   output << "   static constexpr forge::contract::call_entry entries[] = {\n";
+   for (const auto& entry : input.calls) {
+      output << "      forge::contract::make_call_entry<" << entry.class_name << ", &" << entry.class_name << "::"
+             << entry.method_name << ">(" << entry.id << "ULL),\n";
+   }
+   output << "   };\n";
+   output << "   forge::contract::dispatch_call(name{sender}, name{receiver}, entries, " << input.calls.size()
+          << "U);\n";
+   output << "}\n";
+}
+
 void write_dispatcher(const schema& input, const forge::contract::abi::request& options) {
    auto output = std::ostringstream{};
-   if (!input.has_apply || input.has_eosio_dispatch) {
+   if (!input.has_apply || input.has_eosio_dispatch || !input.calls.empty()) {
       output << "#include <cstdint>\n";
       output << "import forge.contract.dispatcher;\n";
    } else {
@@ -1369,6 +1565,7 @@ void write_dispatcher(const schema& input, const forge::contract::abi::request& 
    if (input.has_apply && !input.has_eosio_dispatch) {
       output << "#line 1 \"contract generated codecs\"\n";
       write_codec_definitions(output, input, &source_record_codecs(input, options.sources.front()));
+      write_call_dispatcher(output, input);
       write_text(options.dispatcher, output.str());
       return;
    }
@@ -1379,24 +1576,43 @@ void write_dispatcher(const schema& input, const forge::contract::abi::request& 
                 "std::uint64_t receiver, std::uint64_t code, std::uint64_t action) {\n";
       output << "   forge::contract::detail::eosio_dispatch_definition<void>::invoke(receiver, code, action);\n";
       output << "}\n";
+      write_call_dispatcher(output, input);
       write_text(options.dispatcher, output.str());
       return;
    }
    output << "extern \"C\" [[gnu::visibility(\"default\")]] void apply("
              "std::uint64_t receiver, std::uint64_t code, std::uint64_t action) {\n";
    output << "   using forge::chain::protocol::name;\n";
-   if (!input.actions.empty()) {
+   const auto dispatchable_actions = std::ranges::count_if(input.actions, &action_shape::dispatchable);
+   if (dispatchable_actions != 0U) {
       output << "   static constexpr forge::contract::dispatch_entry entries[] = {\n";
       for (const auto& entry : input.actions) {
+         if (!entry.dispatchable) {
+            continue;
+         }
          output << "      forge::contract::make_dispatch_entry<" << entry.class_name << ", &" << entry.class_name
                 << "::" << entry.method_name << ">(" << protocol::make_name(entry.name).value << "ULL),\n";
       }
       output << "   };\n";
-      output << "   forge::contract::dispatch(name{receiver}, name{code}, action, entries);\n";
-   } else {
-      output << "   forge::contract::dispatch(name{receiver}, name{code}, action);\n";
    }
+   if (!input.notifications.empty()) {
+      output << "   static constexpr forge::contract::notification_entry notifications[] = {\n";
+      for (const auto& entry : input.notifications) {
+         output << "      forge::contract::make_notification_entry<" << entry.class_name << ", &" << entry.class_name
+                << "::" << entry.method_name << ">(" << entry.code << "ULL, " << entry.action << "ULL),\n";
+      }
+      output << "   };\n";
+   }
+   output << "   forge::contract::dispatch(name{receiver}, name{code}, action, ";
+   output << (dispatchable_actions == 0U ? "nullptr, 0U"
+                                        : "entries, " + std::to_string(dispatchable_actions) + "U");
+   output << ", ";
+   output << (input.notifications.empty()
+                  ? "nullptr, 0U"
+                  : "notifications, " + std::to_string(input.notifications.size()) + "U");
+   output << ");\n";
    output << "}\n";
+   write_call_dispatcher(output, input);
    write_text(options.dispatcher, output.str());
 }
 
@@ -1496,7 +1712,7 @@ artifacts generate(const request& options) {
       throw std::runtime_error{"first contract source must declare contract '" + options.contract +
                                "': " + dispatch_source.string()};
    }
-   if (output.actions.empty() && output.calls.empty() && output.tables.empty()) {
+   if (output.actions.empty() && output.calls.empty() && output.notifications.empty() && output.tables.empty()) {
       throw std::runtime_error{"contract '" + options.contract + "' has no ABI entries"};
    }
 

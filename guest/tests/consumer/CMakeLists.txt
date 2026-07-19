@@ -57,6 +57,11 @@ forge_add_contract(
 )
 
 forge_add_contract(
+   legacynotify
+   SOURCES legacy_notification.cpp
+)
+
+forge_add_contract(
    dbhost
    SOURCES db_host_contract.cpp
 )

@@ -189,6 +189,7 @@ jobs:
             -DFORGE_CONTRACT_TEST_RECORD_WASM="$GITHUB_WORKSPACE/build/contract-consumer/recordtest.wasm" \
             -DFORGE_CONTRACT_TEST_ALLOCATOR_WASM="$GITHUB_WORKSPACE/build/contract-consumer/allocatortst.wasm" \
             -DFORGE_CONTRACT_TEST_LEGACY_WASM="$GITHUB_WORKSPACE/build/contract-consumer/legacyhello.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_NOTIFICATION_WASM="$GITHUB_WORKSPACE/build/contract-consumer/legacynotify.wasm" \
             -DFORGE_CONTRACT_TEST_DB_WASM="$GITHUB_WORKSPACE/build/contract-consumer/dbintrinsics.wasm" \
             -DFORGE_CONTRACT_TEST_DB_HOST_WASM="$GITHUB_WORKSPACE/build/contract-consumer/dbhost.wasm" \
             -DFORGE_CONTRACT_TEST_MULTI_INDEX_WASM="$GITHUB_WORKSPACE/build/contract-consumer/multiidx.wasm" \
@@ -322,6 +323,7 @@ jobs:
             -DFORGE_CONTRACT_TEST_RECORD_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/recordtest.wasm" \
             -DFORGE_CONTRACT_TEST_ALLOCATOR_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/allocatortst.wasm" \
             -DFORGE_CONTRACT_TEST_LEGACY_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/legacyhello.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_NOTIFICATION_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/legacynotify.wasm" \
             -DFORGE_CONTRACT_TEST_DB_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/dbintrinsics.wasm" \
             -DFORGE_CONTRACT_TEST_DB_HOST_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/dbhost.wasm" \
             -DFORGE_CONTRACT_TEST_MULTI_INDEX_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/multiidx.wasm" \

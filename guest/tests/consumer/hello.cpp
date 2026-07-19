@@ -51,4 +51,12 @@ class [[forge::contract("hello")]] hello : public forge::contract::context {
       forge::contract::check(queued.size() == 2 && queued.front() == 3 && queued.back() == 4, "unexpected deque value");
       forge::contract::check(linked.size() == 2 && linked.front() == 5 && linked.back() == 6, "unexpected list value");
    }
+
+   [[forge::on_notify("eosio.token::transfer")]] std::uint32_t transfer(std::uint32_t value) {
+      return value + 1U;
+   }
+
+   [[forge::on_notify("*::fallback")]] std::uint32_t fallback(std::uint32_t value) {
+      return value + 2U;
+   }
 };

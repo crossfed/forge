@@ -31,6 +31,8 @@ endforeach()
 set(_executable_dependencies)
 set(_executable_unresolved)
 foreach(_executable IN LISTS _executables)
+   unset(_resolved)
+   unset(_unresolved)
    file(GET_RUNTIME_DEPENDENCIES
       RESOLVED_DEPENDENCIES_VAR _resolved
       UNRESOLVED_DEPENDENCIES_VAR _unresolved
@@ -41,6 +43,8 @@ foreach(_executable IN LISTS _executables)
    list(APPEND _executable_dependencies ${_resolved})
    list(APPEND _executable_unresolved ${_unresolved})
 endforeach()
+unset(_plugin_dependencies)
+unset(_plugin_unresolved)
 file(GET_RUNTIME_DEPENDENCIES
    RESOLVED_DEPENDENCIES_VAR _plugin_dependencies
    UNRESOLVED_DEPENDENCIES_VAR _plugin_unresolved

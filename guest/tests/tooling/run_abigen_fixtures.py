@@ -13,32 +13,86 @@ MODULES = (
     "forge.raw.stream",
     "forge.raw.varint_value",
     "forge.raw.codec",
+    "forge.crypto.sha256:value",
+    "forge.crypto.sha256",
+    "forge.crypto.sha512:value",
+    "forge.crypto.sha512",
+    "forge.crypto.ripemd160:value",
+    "forge.crypto.ripemd160",
+    "forge.crypto.asymmetric:value",
+    "forge.crypto.asymmetric",
+    "forge.crypto.bls.values",
     "forge.chain.protocol.values",
+    "forge.chain.protocol.time",
+    "forge.chain.protocol.types:value",
+    "forge.chain.protocol.types",
     "forge.chain.protocol.fixed_key:value",
     "forge.chain.protocol.fixed_key",
+    "forge.chain.protocol.action:value",
+    "forge.chain.protocol.action",
+    "forge.chain.protocol.transaction:value",
+    "forge.chain.protocol.transaction",
+    "forge.chain.protocol.authority:value",
+    "forge.chain.protocol.authority",
+    "forge.chain.protocol.producer_authority",
+    "forge.chain.protocol.system:value",
+    "forge.chain.protocol.system",
     "forge.contract.intrinsics",
     "forge.contract",
+    "forge.contract.datastream",
+    "forge.contract.varint",
+    "forge.contract.fixed_bytes",
+    "forge.contract.binary_extension",
+    "forge.contract.ignore",
+    "forge.contract.hash_id",
+    "forge.contract.action",
+    "forge.contract.base64",
+    "forge.contract.transaction",
+    "forge.contract.system",
+    "forge.contract.deferred_transaction",
+    "forge.contract.authorization",
+    "forge.contract.bitset",
+    "forge.contract.call",
+    "forge.contract.crypto",
+    "forge.contract.crypto_bls_ext",
+    "forge.contract.crypto_ext",
+    "forge.contract.instant_finality",
+    "forge.contract.key",
+    "forge.contract.powers",
+    "forge.contract.print",
+    "forge.contract.privileged",
+    "forge.contract.producer_schedule",
+    "forge.contract.rope",
+    "forge.contract.string",
     "forge.contract.dispatcher",
     "forge.contract.multi_index",
     "forge.contract.singleton",
 )
 
 MODULE_TARGETS = {
-    "forge.raw.stream": "forge_guest_raw",
-    "forge.raw.varint_value": "forge_guest_raw",
-    "forge.raw.codec": "forge_guest_raw",
-    "forge.chain.protocol.values": "forge_guest_chain_protocol",
-    "forge.chain.protocol.fixed_key:value": "forge_guest_chain_protocol",
-    "forge.chain.protocol.fixed_key": "forge_guest_chain_protocol",
-    "forge.contract.intrinsics": "forge_guest_contract",
-    "forge.contract": "forge_guest_contract",
-    "forge.contract.dispatcher": "forge_guest_contract",
-    "forge.contract.multi_index": "forge_guest_contract",
-    "forge.contract.singleton": "forge_guest_contract",
+    module: (
+        "forge_guest_raw"
+        if module.startswith("forge.raw.")
+        else "forge_guest_crypto"
+        if module.startswith("forge.crypto.")
+        else "forge_guest_chain_protocol"
+        if module.startswith("forge.chain.protocol.")
+        else "forge_guest_contract"
+    )
+    for module in MODULES
 }
 
 MODULE_FILES = {
+    "forge.crypto.sha256:value": "forge.crypto.sha256-value.pcm",
+    "forge.crypto.sha512:value": "forge.crypto.sha512-value.pcm",
+    "forge.crypto.ripemd160:value": "forge.crypto.ripemd160-value.pcm",
+    "forge.crypto.asymmetric:value": "forge.crypto.asymmetric-value.pcm",
+    "forge.chain.protocol.types:value": "forge.chain.protocol.types-value.pcm",
     "forge.chain.protocol.fixed_key:value": "forge.chain.protocol.fixed_key-value.pcm",
+    "forge.chain.protocol.action:value": "forge.chain.protocol.action-value.pcm",
+    "forge.chain.protocol.transaction:value": "forge.chain.protocol.transaction-value.pcm",
+    "forge.chain.protocol.authority:value": "forge.chain.protocol.authority-value.pcm",
+    "forge.chain.protocol.system:value": "forge.chain.protocol.system-value.pcm",
 }
 
 PASS_FIXTURES = {
