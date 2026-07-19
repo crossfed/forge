@@ -360,6 +360,10 @@ BOOST_AUTO_TEST_CASE(name_symbol_and_asset_match_spring_fixtures) {
 
    const auto token = protocol::asset{42, protocol::make_symbol("SYS", 4)};
    BOOST_TEST(pack_hex(token) == expected(spring::asset_raw));
+
+   constexpr auto source_compatible = protocol::asset{42};
+   static_assert(source_compatible.amount == 42);
+   static_assert(source_compatible.sym.raw() == 0U);
 }
 
 BOOST_AUTO_TEST_CASE(name_rejects_high_valued_thirteenth_character) {
@@ -390,17 +394,17 @@ BOOST_AUTO_TEST_CASE(symbol_and_asset_variant_parse_canonical_text) {
    protocol::from_variant(forge::variant{"0.0042 SYS"}, asset);
    const auto fractional_asset = protocol::asset{42, protocol::make_symbol("SYS", 4)};
    BOOST_TEST(asset.amount == fractional_asset.amount);
-   BOOST_TEST(asset.symbol.raw() == fractional_asset.symbol.raw());
+   BOOST_TEST(asset.sym.raw() == fractional_asset.sym.raw());
 
    protocol::from_variant(forge::variant{"42 SYS"}, asset);
    const auto whole_asset = protocol::asset{42, protocol::make_symbol("SYS", 0)};
    BOOST_TEST(asset.amount == whole_asset.amount);
-   BOOST_TEST(asset.symbol.raw() == whole_asset.symbol.raw());
+   BOOST_TEST(asset.sym.raw() == whole_asset.sym.raw());
 
    protocol::from_variant(forge::variant{"-0.0042 SYS"}, asset);
    const auto negative_asset = protocol::asset{-42, protocol::make_symbol("SYS", 4)};
    BOOST_TEST(asset.amount == negative_asset.amount);
-   BOOST_TEST(asset.symbol.raw() == negative_asset.symbol.raw());
+   BOOST_TEST(asset.sym.raw() == negative_asset.sym.raw());
 }
 
 BOOST_AUTO_TEST_CASE(asset_variant_parse_rejects_invalid_text) {

@@ -35,7 +35,7 @@ void require_amount(int128_t value, const char* underflow, const char* overflow)
 }
 
 void require_same_symbol(const asset& left, const asset& right, const char* message) {
-   require_value(left.symbol == right.symbol, message);
+   require_value(left.sym == right.sym, message);
 }
 
 void require_same_contract(const extended_asset& left, const extended_asset& right) {
@@ -45,9 +45,9 @@ void require_same_contract(const extended_asset& left, const extended_asset& rig
 } // namespace
 
 asset::asset(std::int64_t raw_amount, ::forge::chain::protocol::symbol raw_symbol)
-    : amount(raw_amount), symbol(raw_symbol) {
+    : amount(raw_amount), sym(raw_symbol) {
    require_value(is_amount_within_range(), "magnitude of asset amount must be less than 2^62");
-   require_value(symbol.is_valid(), "invalid symbol name");
+   require_value(sym.is_valid(), "invalid symbol name");
 }
 
 void asset::set_amount(std::int64_t value) {
@@ -57,7 +57,7 @@ void asset::set_amount(std::int64_t value) {
 
 asset asset::operator-() const {
    require_value(amount != std::numeric_limits<std::int64_t>::min(), "signed negation overflow");
-   return {-amount, symbol};
+   return {-amount, sym};
 }
 
 asset& asset::operator+=(const asset& value) {

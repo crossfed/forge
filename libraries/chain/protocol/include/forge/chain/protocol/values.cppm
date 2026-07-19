@@ -142,9 +142,9 @@ struct asset {
    static constexpr std::int64_t max_amount = (std::int64_t{1} << 62U) - 1;
 
    std::int64_t amount = 0;
-   ::forge::chain::protocol::symbol symbol{};
+   ::forge::chain::protocol::symbol sym{};
 
-   constexpr asset() = default;
+   constexpr asset(std::int64_t raw_amount = 0) : amount(raw_amount) {}
    asset(std::int64_t raw_amount, ::forge::chain::protocol::symbol raw_symbol);
 
    [[nodiscard]] constexpr bool is_amount_within_range() const noexcept {
@@ -152,7 +152,7 @@ struct asset {
    }
 
    [[nodiscard]] constexpr bool is_valid() const noexcept {
-      return is_amount_within_range() && symbol.is_valid();
+      return is_amount_within_range() && sym.is_valid();
    }
 
    void set_amount(std::int64_t value);
@@ -217,7 +217,7 @@ struct extended_asset {
    constexpr extended_asset(asset value, account_name raw_contract) : quantity(value), contract(raw_contract) {}
 
    [[nodiscard]] constexpr extended_symbol get_extended_symbol() const noexcept {
-      return {quantity.symbol, contract};
+      return {quantity.sym, contract};
    }
 
    extended_asset operator-() const;
@@ -394,12 +394,12 @@ template <typename Stream> void raw_unpack(Stream& stream, symbol& value) {
 
 template <typename Stream> void raw_pack(Stream& stream, const asset& value) {
    forge::raw::pack(stream, value.amount);
-   forge::raw::pack(stream, value.symbol);
+   forge::raw::pack(stream, value.sym);
 }
 
 template <typename Stream> void raw_unpack(Stream& stream, asset& value) {
    forge::raw::unpack(stream, value.amount);
-   forge::raw::unpack(stream, value.symbol);
+   forge::raw::unpack(stream, value.sym);
 }
 
 template <typename Stream> void raw_pack(Stream& stream, const extended_symbol& value) {
