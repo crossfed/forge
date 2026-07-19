@@ -259,6 +259,12 @@ def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
          f"{path.relative_to(root)}: macOS developer and release jobs must export the selected SDKROOT"
       )
 
+   recovery_contract = "-DFORGE_CONTRACT_TEST_RECOVERY_WASM="
+   if source.count(recovery_contract) != 2:
+      errors.append(
+         f"{path.relative_to(root)}: developer and release E2E jobs must execute the recovery contract"
+      )
+
    for incompatible_flag in ('CXXFLAGS=-stdlib=libc++', 'LDFLAGS=-stdlib=libc++'):
       if incompatible_flag in source:
          errors.append(
@@ -283,9 +289,13 @@ def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
       r"\s+-j 4",
       source,
    )
-   if release_build is None or "recordtest" not in release_build.group("targets").split():
+   required_release_contracts = {"recordtest", "legacynotify", "recovery"}
+   release_targets = set() if release_build is None else set(release_build.group("targets").split())
+   missing_release_contracts = sorted(required_release_contracts - release_targets)
+   if missing_release_contracts:
       errors.append(
-         f"{path.relative_to(root)}: release consumer must build recordtest before E2E configuration"
+         f"{path.relative_to(root)}: release consumer must build E2E contracts before configuration: "
+         f"{', '.join(missing_release_contracts)}"
       )
 
 
