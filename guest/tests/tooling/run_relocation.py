@@ -1,0 +1,235 @@
+#!/usr/bin/env python3
+
+import argparse
+import json
+import platform
+import shutil
+import subprocess
+import tarfile
+import time
+from pathlib import Path
+
+LINUX_SDK_RUNTIME_PREFIXES = (
+    "libstdc++.so",
+    "libc++.so",
+    "libc++abi.so",
+    "libunwind.so",
+    "libLLVM",
+    "libclang-cpp",
+    "liblld",
+)
+
+
+def is_linux_sdk_runtime(dependency: str) -> bool:
+    return Path(dependency).name.startswith(LINUX_SDK_RUNTIME_PREFIXES)
+
+
+def run(*command: str) -> None:
+    subprocess.run(command, check=True)
+
+
+def build_project(cmake: str, directory: Path) -> None:
+    run(cmake, "--build", str(directory), "--config", "Debug", "-j", "4")
+
+
+def contains_path(path: Path, needle: bytes) -> bool:
+    if path.is_symlink() or not path.is_file():
+        return False
+    with path.open("rb") as stream:
+        tail = b""
+        while chunk := stream.read(1024 * 1024):
+            data = tail + chunk
+            if needle in data:
+                return True
+            tail = data[-len(needle) :] if needle else b""
+    return False
+
+
+def read_abi(path: Path) -> dict:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def command_output(*command: str) -> str:
+    return subprocess.run(command, check=True, text=True, stdout=subprocess.PIPE).stdout
+
+
+def sdk_tools(sdk: Path) -> list[Path]:
+    return [
+        sdk / "bin" / "clang++",
+        sdk / "bin" / "clang-scan-deps",
+        sdk / "bin" / "llvm-ar",
+        sdk / "bin" / "llvm-ranlib",
+        sdk / "bin" / "wasm-ld",
+        sdk / "bin" / "abigen",
+        sdk / "bin" / "contract-check",
+        sdk / "bin" / "contract-manifest",
+        sdk / "lib" / "forge-contract" / "attr-plugin.so",
+    ]
+
+
+def verify_runtime_dependencies(sdk: Path) -> None:
+    dangling = [path for path in sdk.rglob("*") if path.is_symlink() and not path.exists()]
+    if dangling:
+        raise RuntimeError(f"SDK contains a dangling symlink: {dangling[0]}")
+
+    tools = [path for path in sdk_tools(sdk) if path.exists()]
+    if len(tools) != len(sdk_tools(sdk)):
+        raise RuntimeError("SDK runtime tool set is incomplete")
+
+    system = platform.system()
+    if system == "Darwin":
+        for tool in tools:
+            for line in command_output("otool", "-L", str(tool)).splitlines()[1:]:
+                dependency = line.strip().split(" ", 1)[0]
+                if dependency.startswith("@rpath/"):
+                    bundled = sdk / "lib" / Path(dependency).name
+                    if not bundled.is_file():
+                        raise RuntimeError(f"SDK does not bundle {dependency} required by {tool}")
+                elif dependency.startswith("/") and not dependency.startswith(("/System/Library/", "/usr/lib/")):
+                    raise RuntimeError(f"SDK tool retains an external runtime dependency: {tool}: {dependency}")
+    elif system == "Linux":
+        sdk_prefix = str(sdk.resolve()) + "/"
+        for tool in tools:
+            for line in command_output("ldd", str(tool)).splitlines():
+                if "not found" in line:
+                    raise RuntimeError(f"SDK tool has an unresolved runtime dependency: {tool}: {line.strip()}")
+                if "=>" not in line:
+                    continue
+                dependency = line.split("=>", 1)[1].strip().split(" ", 1)[0]
+                if dependency.startswith("/") and is_linux_sdk_runtime(dependency) and not dependency.startswith(sdk_prefix):
+                    raise RuntimeError(f"SDK tool uses an external LLVM runtime: {tool}: {dependency}")
+                if dependency.startswith("/") and not dependency.startswith(
+                    (sdk_prefix, "/lib/", "/lib64/", "/usr/lib/")
+                ):
+                    raise RuntimeError(f"SDK tool retains an external runtime dependency: {tool}: {dependency}")
+
+
+def type_target(abi: dict, name: str) -> str:
+    return next(entry["type"] for entry in abi["types"] if entry["new_type_name"] == name)
+
+
+def action_contract(abi: dict, name: str) -> str:
+    return next(entry["ricardian_contract"] for entry in abi["actions"] if entry["name"] == name)
+
+
+def clause_body(abi: dict, identifier: str) -> str:
+    return next(entry["body"] for entry in abi["ricardian_clauses"] if entry["id"] == identifier)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--archive", required=True, type=Path)
+    parser.add_argument("--cmake", required=True)
+    parser.add_argument("--source-root", required=True, type=Path)
+    parser.add_argument("--output", required=True, type=Path)
+    args = parser.parse_args()
+
+    output = args.output.resolve()
+    shutil.rmtree(output, ignore_errors=True)
+    unpacked = output / "sdk"
+    unpacked.mkdir(parents=True)
+    with tarfile.open(args.archive, "r:gz") as archive:
+        archive.extractall(unpacked, filter="data")
+
+    roots = [entry for entry in unpacked.iterdir() if entry.is_dir()]
+    if len(roots) != 1:
+        raise RuntimeError(f"expected one SDK root, found {len(roots)}")
+    sdk = roots[0]
+    verify_runtime_dependencies(sdk)
+
+    config = sdk / "lib" / "cmake" / "ForgeContract" / "ForgeContractConfig.cmake"
+    release = 'set(ForgeContract_PROFILE "release")' in config.read_text()
+    candidates = list(sdk.rglob("*"))
+    if not release:
+        candidates = [path for path in candidates if path.suffix in {".cmake", ".json", ".pc", ".txt"}]
+    leaked = [path for path in candidates if contains_path(path, str(args.source_root.resolve()).encode())]
+    if leaked:
+        raise RuntimeError(f"installed SDK contains source path: {leaked[0]}")
+
+    source = output / "consumer"
+    shutil.copytree(sdk / "share" / "forge-contract" / "examples" / "hello", source)
+    build = output / "build"
+    package = sdk / "lib" / "cmake" / "ForgeContract"
+    run(
+        args.cmake,
+        "-S",
+        str(source),
+        "-B",
+        str(build),
+        "-G",
+        "Ninja Multi-Config",
+        f"-DForgeContract_DIR={package}",
+    )
+    build_project(args.cmake, build)
+
+    for suffix in ("wasm", "abi", "contract.json"):
+        artifact = build / f"hello.{suffix}"
+        if not artifact.is_file() or artifact.stat().st_size == 0:
+            raise RuntimeError(f"missing relocated SDK artifact: {artifact}")
+
+    manifest = json.loads((build / "hello.contract.json").read_text(encoding="utf-8"))
+    if manifest["sdk"]["profile"] == "release":
+        expected_llvm = {
+            "version": "llvmorg-22.1.8",
+            "commit": "ca7933e47d3a3451d81e72ac174dcb5aa28b59d1",
+        }
+    else:
+        expected_llvm = {"version": command_output(str(sdk / "bin" / "clang++"), "--version").splitlines()[0]}
+    if manifest["llvm"] != expected_llvm:
+        raise RuntimeError(f"contract manifest has the wrong toolchain identity: {manifest['llvm']!r}")
+    if manifest["sysroot"]["schema_version"] != 1 or isinstance(manifest["sysroot"]["schema_version"], bool):
+        raise RuntimeError("contract manifest sysroot schema version is not the numeric version 1")
+    if manifest["intrinsics"]["interface_version"] != 1 or isinstance(
+        manifest["intrinsics"]["interface_version"], bool
+    ):
+        raise RuntimeError("contract manifest intrinsic interface version is not the numeric version 1")
+
+    abi_path = build / "hello.abi"
+    initial_abi = read_abi(abi_path)
+    if type_target(initial_abi, "counter") != "uint32":
+        raise RuntimeError("initial header ABI type was not generated")
+    if action_contract(initial_abi, "count") != "Record a positive counter value.":
+        raise RuntimeError("relative Ricardian contracts file was not loaded")
+    if clause_body(initial_abi, "positive-counter") != "The counter value must be greater than zero.":
+        raise RuntimeError("relative Ricardian clauses file was not loaded")
+
+    types = source / "types.hpp"
+    types.write_text(types.read_text(encoding="utf-8").replace("std::uint32_t", "std::uint64_t"), encoding="utf-8")
+    build_project(args.cmake, build)
+    if type_target(read_abi(abi_path), "counter") != "uint64":
+        raise RuntimeError("included header change did not regenerate the contract ABI")
+
+    contracts = source / "hello.contracts.md"
+    contracts.write_text(
+        contracts.read_text(encoding="utf-8").replace(
+            "Record a positive counter value.", "Record an updated positive counter value."
+        ),
+        encoding="utf-8",
+    )
+    build_project(args.cmake, build)
+    if action_contract(read_abi(abi_path), "count") != "Record an updated positive counter value.":
+        raise RuntimeError("Ricardian contracts change did not regenerate the contract ABI")
+
+    clauses = source / "hello.clauses.md"
+    clauses.write_text(
+        clauses.read_text(encoding="utf-8").replace(
+            "The counter value must be greater than zero.", "The updated counter value must be greater than zero."
+        ),
+        encoding="utf-8",
+    )
+    build_project(args.cmake, build)
+    if clause_body(read_abi(abi_path), "positive-counter") != "The updated counter value must be greater than zero.":
+        raise RuntimeError("Ricardian clauses change did not regenerate the contract ABI")
+
+    wasm = build / "hello.wasm"
+    first_mtime = wasm.stat().st_mtime_ns
+    time.sleep(0.01)
+    with (source / "hello.cpp").open("a", encoding="utf-8") as stream:
+        stream.write("\n")
+    build_project(args.cmake, build)
+    if wasm.stat().st_mtime_ns <= first_mtime:
+        raise RuntimeError("contract source change did not rebuild the WebAssembly artifact")
+
+
+if __name__ == "__main__":
+    main()

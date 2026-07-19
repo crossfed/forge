@@ -1,4 +1,5 @@
 module;
+#if !defined(FORGE_CONTRACT_GUEST)
 #include <forge/exceptions/macros.hpp>
 #include <boost/describe.hpp>
 #include <cstddef>
@@ -10,9 +11,13 @@ module;
 #include <string_view>
 #include <utility>
 #include <variant>
+#endif
 
 export module forge.crypto.asymmetric;
 
+#if defined(FORGE_CONTRACT_GUEST)
+export import :value;
+#else
 import forge.core.utility;
 import forge.crypto.ed25519;
 import forge.crypto.p256;
@@ -62,8 +67,8 @@ class public_key;
 
 class private_key {
  public:
-   using storage_type =
-      std::variant<secp256k1::private_key_shim, p256::private_key_shim, ed25519::private_key_shim, rsa::private_key_shim>;
+   using storage_type = std::variant<secp256k1::private_key_shim, p256::private_key_shim, ed25519::private_key_shim,
+                                     rsa::private_key_shim>;
 
    private_key() = default;
    private_key(private_key&&) = default;
@@ -112,7 +117,7 @@ class private_key {
 class public_key {
  public:
    using storage_type =
-      std::variant<secp256k1::public_key_shim, p256::public_key_shim, ed25519::public_key_shim, rsa::public_key_shim>;
+       std::variant<secp256k1::public_key_shim, p256::public_key_shim, ed25519::public_key_shim, rsa::public_key_shim>;
 
    public_key() = default;
    public_key(public_key&&) = default;
@@ -151,7 +156,7 @@ class public_key {
 class signature {
  public:
    using storage_type =
-      std::variant<secp256k1::signature_shim, p256::signature_shim, ed25519::signature_shim, rsa::signature_shim>;
+       std::variant<secp256k1::signature_shim, p256::signature_shim, ed25519::signature_shim, rsa::signature_shim>;
 
    signature() = default;
    signature(signature&&) = default;
@@ -238,7 +243,7 @@ namespace profiles {
 [[nodiscard]] const text_encoding_profile& bitcoin();
 [[nodiscard]] const text_encoding_profile& solana();
 [[nodiscard]] const text_encoding_profile& tezos();
-};
+}; // namespace profiles
 
 class encoding {
  public:
@@ -292,3 +297,4 @@ template <> struct hash<forge::crypto::asymmetric::signature> {
    }
 };
 } // namespace std
+#endif

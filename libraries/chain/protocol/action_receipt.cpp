@@ -2,6 +2,8 @@ module;
 
 #include <forge/raw/serialization.hpp>
 
+#include <new>
+
 module forge.chain.protocol.action_receipt;
 
 import forge.crypto.sha256;

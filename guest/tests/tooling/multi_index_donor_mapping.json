@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "donors": {
+    "cdt": "69599db279b7b93d0688502720c15c6962a1401b",
+    "spring": "e6a99f68b67abc4d89fe716755b2e1394a4991f7"
+  },
+  "cases": [
+    {"name": "idx64_store_only", "scenarios": [0]},
+    {"name": "idx64_check_without_storing", "scenarios": [0, 4]},
+    {"name": "idx64_general", "scenarios": [0, 1, 4]},
+    {"name": "idx128_store_only", "scenarios": [0]},
+    {"name": "idx128_check_without_storing", "scenarios": [1]},
+    {"name": "idx128_general", "scenarios": [0, 1]},
+    {"name": "idx64_require_find_fail", "scenarios": [11]},
+    {"name": "idx64_require_find_fail_with_msg", "scenarios": [12]},
+    {"name": "idx64_require_find_sk_fail", "scenarios": [13]},
+    {"name": "idx64_require_find_sk_fail_with_msg", "scenarios": [14]},
+    {"name": "idx128_autoincrement_test", "scenarios": [26, 27]},
+    {"name": "idx128_autoincrement_test_part1", "scenarios": [26]},
+    {"name": "idx128_autoincrement_test_part2", "scenarios": [27]},
+    {"name": "idx256_general", "scenarios": [0, 4]},
+    {"name": "idx_double_general", "scenarios": [25]},
+    {"name": "idx_long_double_general", "scenarios": [25]},
+    {"name": "idx64_pk_iterator_exceed_end", "scenarios": [5]},
+    {"name": "idx64_sk_iterator_exceed_end", "scenarios": [16]},
+    {"name": "idx64_pk_iterator_exceed_begin", "scenarios": [15]},
+    {"name": "idx64_sk_iterator_exceed_begin", "scenarios": [17]},
+    {"name": "idx64_pass_pk_ref_to_other_table", "scenarios": [7]},
+    {"name": "idx64_pass_sk_ref_to_other_table", "scenarios": [22]},
+    {"name": "idx64_pass_pk_end_itr_to_iterator_to", "scenarios": [30]},
+    {"name": "idx64_pass_pk_end_itr_to_modify", "scenarios": [18]},
+    {"name": "idx64_pass_pk_end_itr_to_erase", "scenarios": [19]},
+    {"name": "idx64_pass_sk_end_itr_to_iterator_to", "scenarios": [31]},
+    {"name": "idx64_pass_sk_end_itr_to_modify", "scenarios": [20]},
+    {"name": "idx64_pass_sk_end_itr_to_erase", "scenarios": [21]},
+    {"name": "idx64_modify_primary_key", "scenarios": [6]},
+    {"name": "idx64_run_out_of_avl_pk", "scenarios": [10]},
+    {"name": "idx64_sk_cache_pk_lookup", "scenarios": [4]},
+    {"name": "idx64_pk_cache_sk_lookup", "scenarios": [4]}
+  ]
+}

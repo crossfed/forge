@@ -1,399 +1,183 @@
 module;
-#include <forge/core/macros.hpp>
-#include <bit>
-#include <climits>
-#include <string.h>
-#include <stdint.h>
+
 #include <algorithm>
+#include <bit>
+#include <cstddef>
 #include <cstdint>
-#include <string>
+#include <cstring>
+#include <deque>
+#include <ios>
+#include <streambuf>
 #include <type_traits>
-#include <boost/multiprecision/cpp_int.hpp>
+#include <utility>
+#include <vector>
 
 export module forge.raw.datastream;
 
-import forge.core.utility;
-import forge.raw.exceptions;
+export import forge.raw.stream;
 
 export namespace forge {
 
-static_assert(CHAR_BIT == 8, "Forge datastream requires 8-bit bytes");
-
-namespace detail {
-NO_RETURN void raise_datastream_range(const char* file, size_t len, int64_t over);
-}
-
-template <typename Storage, typename Enable = void> class datastream;
-
-/**
- *  The purpose of this datastream is to provide a fast, efficient, means
- *  of calculating the amount of data "about to be written" and then
- *  writing it.  This means having two modes of operation, "test run" where
- *  you call the entire pack sequence calculating the size, and then
- *  actually packing it after doing a single allocation.
- */
-template <typename T>
-class datastream<T, std::enable_if_t<std::is_same_v<T, char*> || std::is_same_v<T, const char*> ||
-                                     std::is_same_v<T, unsigned char*> || std::is_same_v<T, const unsigned char*>>> {
+template <typename StreamBuffer>
+class datastream<StreamBuffer,
+                 std::enable_if_t<std::is_base_of_v<std::streambuf, std::remove_reference_t<StreamBuffer>>>> {
  public:
-   datastream(T start, size_t s) : _start(start), _pos(start), _end(start + s) {};
+   template <typename... Args> explicit datastream(Args&&... args) : buffer_(std::forward<Args>(args)...) {}
 
-   inline void skip(size_t s) {
-      _pos += s;
-   }
-   inline bool read(char* d, size_t s) {
-      if (size_t(_end - _pos) >= (size_t)s) {
-         memcpy(d, _pos, s);
-         _pos += s;
-         return true;
+   std::size_t read(char* data, std::size_t size) {
+      const auto read_size = buffer_.sgetn(data, static_cast<std::streamsize>(size));
+      if (read_size < 0 || static_cast<std::size_t>(read_size) != size) {
+         const auto consumed = read_size > 0 ? std::min(size, static_cast<std::size_t>(read_size)) : 0U;
+         raw::detail::raise_stream_range("read", consumed, static_cast<std::int64_t>(size - consumed));
       }
-      detail::raise_datastream_range("read", _end - _start, int64_t(-((_end - _pos) - 1)));
+      return size;
    }
 
-   inline bool write(const char* d, size_t s) {
-      if (size_t(_end - _pos) >= (size_t)s) {
-         memcpy(_pos, d, s);
-         _pos += s;
-         return true;
+   std::size_t write(const char* data, std::size_t size) {
+      const auto written_size = buffer_.sputn(data, static_cast<std::streamsize>(size));
+      if (written_size < 0 || static_cast<std::size_t>(written_size) != size) {
+         const auto consumed = written_size > 0 ? std::min(size, static_cast<std::size_t>(written_size)) : 0U;
+         raw::detail::raise_stream_range("write", consumed, static_cast<std::int64_t>(size - consumed));
       }
-      detail::raise_datastream_range("write", _end - _start, int64_t(-((_end - _pos) - 1)));
+      return size;
    }
 
-   inline bool put(char c) {
-      if (_pos < _end) {
-         *_pos = c;
-         ++_pos;
-         return true;
-      }
-      detail::raise_datastream_range("put", _end - _start, int64_t(-((_end - _pos) - 1)));
+   std::size_t tellp() {
+      return static_cast<std::size_t>(buffer_.pubseekoff(0, std::ios::cur));
    }
 
-   inline bool get(unsigned char& c) {
-      return get(*(char*)&c);
-   }
-   inline bool get(char& c) {
-      if (_pos < _end) {
-         c = *_pos;
-         ++_pos;
-         return true;
-      }
-      detail::raise_datastream_range("get", _end - _start, int64_t(-((_end - _pos) - 1)));
+   bool skip(std::size_t size) {
+      buffer_.pubseekoff(static_cast<std::streamoff>(size), std::ios::cur);
+      return true;
    }
 
-   T pos() const {
-      return _pos;
+   bool get(char& value) {
+      read(&value, 1U);
+      return true;
    }
-   inline bool valid() const {
-      return _pos <= _end && _pos >= _start;
+
+   bool seekp(std::size_t offset) {
+      buffer_.pubseekoff(static_cast<std::streamoff>(offset), std::ios::beg);
+      return true;
    }
-   inline bool seekp(size_t p) {
-      _pos = _start + p;
-      return _pos <= _end;
+
+   std::size_t remaining() {
+      return static_cast<std::size_t>(buffer_.in_avail());
    }
-   inline size_t tellp() const {
-      return _pos - _start;
+
+   StreamBuffer& storage() {
+      return buffer_;
    }
-   inline size_t remaining() const {
-      return _end - _pos;
+
+   const StreamBuffer& storage() const {
+      return buffer_;
    }
 
  private:
-   T _start;
-   T _pos;
-   T _end;
+   StreamBuffer buffer_;
 };
 
-template <> class datastream<size_t, void> {
+template <typename Byte, typename Allocator>
+class datastream<std::deque<Byte, Allocator>,
+                 std::enable_if_t<std::is_same_v<Byte, char> || std::is_same_v<Byte, std::uint8_t>>> {
  public:
-   datastream(size_t init_size = 0) : _size(init_size) {};
-   inline bool skip(size_t s) {
-      _size += s;
-      return true;
-   }
-   inline bool write(const char*, size_t s) {
-      _size += s;
-      return true;
-   }
-   inline bool put(char) {
-      ++_size;
-      return true;
-   }
-   inline bool valid() const {
-      return true;
-   }
-   inline bool seekp(size_t p) {
-      _size = p;
-      return true;
-   }
-   inline size_t tellp() const {
-      return _size;
-   }
-   inline size_t remaining() const {
-      return 0;
-   }
+   using storage_type = std::deque<Byte, Allocator>;
 
- private:
-   size_t _size;
-};
+   explicit datastream(storage_type storage = {}) : storage_(std::move(storage)) {}
 
-template <typename Streambuf>
-class datastream<Streambuf,
-                 typename std::enable_if_t<std::is_base_of_v<std::streambuf, std::remove_reference_t<Streambuf>>>> {
- private:
-   Streambuf buf;
-
-   using reference_type = std::add_lvalue_reference_t<Streambuf>;
-
- public:
-   template <typename... Args> datastream(Args&&... args) : buf(std::forward<Args>(args)...) {}
-
-   size_t read(char* data, size_t n) {
-      return buf.sgetn(data, n);
-   }
-   size_t write(const char* data, size_t n) {
-      return buf.sputn(data, n);
-   }
-   size_t tellp() {
-      return buf.pubseekoff(0, std::ios::cur);
-   }
-   bool skip(size_t p) {
-      buf.pubseekoff(p, std::ios::cur);
-      return true;
-   }
-   bool get(char& c) {
-      c = buf.sbumpc();
-      return true;
-   }
-   bool seekp(size_t off) {
-      buf.pubseekoff(off, std::ios::beg);
-      return true;
-   }
-   bool remaining() {
-      return buf.in_avail();
-   }
-
-   reference_type storage() {
-      return buf;
-   }
-   const reference_type storage() const {
-      return buf;
-   }
-};
-
-template <typename Container>
-class datastream<Container, typename std::enable_if_t<(std::is_same_v<std::vector<char>, Container> ||
-                                                       std::is_same_v<std::vector<std::uint8_t>, Container> ||
-                                                       std::is_same_v<std::deque<char>, Container> ||
-                                                       std::is_same_v<std::deque<std::uint8_t>, Container>)>> {
- private:
-   Container _container;
-   size_t cur;
-
- public:
-   template <typename... Args> datastream(Args&&... args) : _container(std::forward<Args>(args)...), cur(0) {}
-
-   size_t read(char* s, size_t n) {
-      if (cur + n > _container.size()) {
-         const auto over = (cur + n) - _container.size();
-         throw std::out_of_range("read byte datastream of length " + std::to_string(_container.size()) + " over by " +
-                                 std::to_string(over));
+   std::size_t read(char* destination, std::size_t size) {
+      if (size > remaining()) {
+         raw::detail::raise_stream_range("read", storage_.size(), static_cast<std::int64_t>(size - remaining()));
       }
-      std::copy_n(_container.begin() + cur, n, reinterpret_cast<std::uint8_t*>(s));
-      cur += n;
-      return n;
+      std::copy_n(storage_.begin() + static_cast<std::ptrdiff_t>(position_), size, destination);
+      position_ += size;
+      return size;
    }
 
-   size_t write(const char* s, size_t n) {
-      _container.resize(std::max(cur + n, _container.size()));
-      std::copy_n(reinterpret_cast<const std::uint8_t*>(s), n, _container.begin() + cur);
-      cur += n;
-      return n;
+   std::size_t write(const char* source, std::size_t size) {
+      storage_.resize(std::max(position_ + size, storage_.size()));
+      std::copy_n(source, size, storage_.begin() + static_cast<std::ptrdiff_t>(position_));
+      position_ += size;
+      return size;
    }
 
-   bool seekp(size_t off) {
-      cur = off;
+   bool seekp(std::size_t position) {
+      if (position > storage_.size()) {
+         return false;
+      }
+      position_ = position;
       return true;
    }
 
-   size_t tellp() const {
-      return cur;
+   std::size_t tellp() const {
+      return position_;
    }
-   bool skip(size_t p) {
-      cur += p;
+
+   bool skip(std::size_t size) {
+      return seekp(position_ + size);
+   }
+
+   bool get(char& value) {
+      read(&value, 1);
       return true;
    }
 
-   bool get(char& c) {
-      this->read(&c, 1);
-      return true;
+   std::size_t remaining() const {
+      return storage_.size() - position_;
    }
 
-   size_t remaining() const {
-      return _container.size() - cur;
+   storage_type& storage() {
+      return storage_;
    }
 
-   Container& storage() {
-      return _container;
+   const storage_type& storage() const {
+      return storage_;
    }
-   const Container& storage() const {
-      return _container;
-   }
+
+ private:
+   storage_type storage_;
+   std::size_t position_ = 0;
 };
 
-/**
- * Datastream wrapper that creates a copy of the datastream data read. After reading
- * the data is available via extract_mirror()
- * @tparam DataStream datastream to wrap
- */
-template <typename DataStream> class datastream_mirror {
+template <typename Stream> class datastream_mirror {
  public:
-   explicit datastream_mirror(DataStream& ds, size_t reserve = 0) : ds(ds) {
-      mirror.reserve(reserve);
+   explicit datastream_mirror(Stream& stream, std::size_t reserve = 0) : stream_(stream) {
+      mirror_.reserve(reserve);
    }
 
-   void skip(size_t s) {
-      ds.skip(s);
+   void skip(std::size_t size) {
+      stream_.skip(size);
    }
-   bool read(char* d, size_t s) {
-      if (ds.read(d, s)) {
-         auto size = mirror.size();
-         if (mirror.capacity() < size + s)
-            mirror.reserve(std::bit_ceil(size + s));
-         mirror.resize(size + s);
-         memcpy(mirror.data() + size, d, s);
-         return true;
+
+   bool read(char* destination, std::size_t size) {
+      if (!stream_.read(destination, size)) {
+         return false;
       }
-      return false;
+
+      const auto previous_size = mirror_.size();
+      if (mirror_.capacity() < previous_size + size) {
+         mirror_.reserve(std::bit_ceil(previous_size + size));
+      }
+      mirror_.resize(previous_size + size);
+      std::memcpy(mirror_.data() + previous_size, destination, size);
+      return true;
    }
 
-   bool get(unsigned char& c) {
-      return read(&c, 1);
+   bool get(unsigned char& value) {
+      return read(reinterpret_cast<char*>(&value), 1);
    }
-   bool get(char& c) {
-      return read(&c, 1);
+
+   bool get(char& value) {
+      return read(&value, 1);
    }
 
    std::vector<std::uint8_t> extract_mirror() {
-      return std::move(mirror);
+      return std::move(mirror_);
    }
 
  private:
-   DataStream& ds;
-   std::vector<std::uint8_t> mirror;
+   Stream& stream_;
+   std::vector<std::uint8_t> mirror_;
 };
-
-template <typename ST> inline datastream<ST>& operator<<(datastream<ST>& ds, const __int128& d) {
-   ds.write((const char*)&d, sizeof(d));
-   return ds;
-}
-
-template <typename ST, typename DATA> inline datastream<ST>& operator>>(datastream<ST>& ds, __int128& d) {
-   ds.read((char*)&d, sizeof(d));
-   return ds;
-}
-
-template <typename ST> inline datastream<ST>& operator<<(datastream<ST>& ds, const unsigned __int128& d) {
-   ds.write((const char*)&d, sizeof(d));
-   return ds;
-}
-
-template <typename ST, typename DATA> inline datastream<ST>& operator>>(datastream<ST>& ds, unsigned __int128& d) {
-   ds.read((char*)&d, sizeof(d));
-   return ds;
-}
-
-template <typename ST> inline datastream<ST>& operator<<(datastream<ST>& ds, const int64_t& d) {
-   ds.write((const char*)&d, sizeof(d));
-   return ds;
-}
-
-template <typename ST, typename DATA> inline datastream<ST>& operator>>(datastream<ST>& ds, int64_t& d) {
-   ds.read((char*)&d, sizeof(d));
-   return ds;
-}
-
-template <typename ST> inline datastream<ST>& operator<<(datastream<ST>& ds, const uint64_t& d) {
-   ds.write((const char*)&d, sizeof(d));
-   return ds;
-}
-
-template <typename ST, typename DATA> inline datastream<ST>& operator>>(datastream<ST>& ds, uint64_t& d) {
-   ds.read((char*)&d, sizeof(d));
-   return ds;
-}
-
-template <typename ST> inline datastream<ST>& operator<<(datastream<ST>& ds, const int32_t& d) {
-   ds.write((const char*)&d, sizeof(d));
-   return ds;
-}
-
-template <typename ST, typename DATA> inline datastream<ST>& operator>>(datastream<ST>& ds, int32_t& d) {
-   ds.read((char*)&d, sizeof(d));
-   return ds;
-}
-
-template <typename ST> inline datastream<ST>& operator<<(datastream<ST>& ds, const uint32_t& d) {
-   ds.write((const char*)&d, sizeof(d));
-   return ds;
-}
-
-template <typename ST, typename DATA> inline datastream<ST>& operator>>(datastream<ST>& ds, uint32_t& d) {
-   ds.read((char*)&d, sizeof(d));
-   return ds;
-}
-
-template <typename ST> inline datastream<ST>& operator<<(datastream<ST>& ds, const int16_t& d) {
-   ds.write((const char*)&d, sizeof(d));
-   return ds;
-}
-
-template <typename ST, typename DATA> inline datastream<ST>& operator>>(datastream<ST>& ds, int16_t& d) {
-   ds.read((char*)&d, sizeof(d));
-   return ds;
-}
-
-template <typename ST> inline datastream<ST>& operator<<(datastream<ST>& ds, const uint16_t& d) {
-   ds.write((const char*)&d, sizeof(d));
-   return ds;
-}
-
-template <typename ST, typename DATA> inline datastream<ST>& operator>>(datastream<ST>& ds, uint16_t& d) {
-   ds.read((char*)&d, sizeof(d));
-   return ds;
-}
-template <typename ST> inline datastream<ST>& operator<<(datastream<ST>& ds, const int8_t& d) {
-   ds.write((const char*)&d, sizeof(d));
-   return ds;
-}
-
-template <typename ST, typename DATA> inline datastream<ST>& operator>>(datastream<ST>& ds, int8_t& d) {
-   ds.read((char*)&d, sizeof(d));
-   return ds;
-}
-template <typename ST> inline datastream<ST>& operator<<(datastream<ST>& ds, const uint8_t& d) {
-   ds.write((const char*)&d, sizeof(d));
-   return ds;
-}
-
-template <typename ST, typename DATA> inline datastream<ST>& operator>>(datastream<ST>& ds, uint8_t& d) {
-   ds.read((char*)&d, sizeof(d));
-   return ds;
-}
-
-/*
-template<typename ST, typename T>
-inline datastream<ST>& operator<<(datastream<ST>& ds, const boost::multiprecision::number<T>& n) {
-   unsigned char data[(std::numeric_limits<decltype(n)>::digits+1)/8];
-   ds.read( (char*)data, sizeof(data) );
-   boost::multiprecision::import_bits( n, data, data + sizeof(data), 1 );
-}
-
-template<typename ST, typename T>
-inline datastream<ST>& operator>>(datastream<ST>& ds, boost::multiprecision::number<T>& n) {
-   unsigned char data[(std::numeric_limits<decltype(n)>::digits+1)/8];
-   boost::multiprecision::export_bits( n, data, 1 );
-   ds.write( (const char*)data, sizeof(data) );
-}
-*/
 
 } // namespace forge

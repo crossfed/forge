@@ -15,6 +15,46 @@ add_test(
    COMMAND ${Python3_EXECUTABLE} ${FORGE_STRUCTURE_CHECK} ${CMAKE_SOURCE_DIR}
    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
+add_test(
+   NAME test_forge_contract_sdk_cmake_runtime_policy
+   COMMAND
+      ${CMAKE_COMMAND}
+      -DFORGE_CONTRACT_RUNTIME_POLICY=${CMAKE_SOURCE_DIR}/guest/cmake/ContractSDKRuntimeDependencies.cmake
+      -P ${CMAKE_SOURCE_DIR}/guest/tests/tooling/check_runtime_bundle_policy.cmake
+)
+add_test(
+   NAME test_forge_contract_sdk_relocation_runtime_policy
+   COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/guest/tests/tooling/test_runtime_bundle_policy.py
+)
+add_test(
+   NAME test_forge_contract_sdk_guest_runtime_archive
+   COMMAND
+      ${CMAKE_COMMAND}
+      -DFORGE_CONTRACT_STAGE_SYSROOT=${CMAKE_SOURCE_DIR}/guest/cmake/stage_sysroot.cmake
+      -DFORGE_CONTRACT_SDK_CMAKE=${CMAKE_SOURCE_DIR}/guest/CMakeLists.txt
+      -DFORGE_CONTRACT_BUILD_CMAKE=${CMAKE_SOURCE_DIR}/guest/build/CMakeLists.txt
+      -DFORGE_CONTRACT_RUNTIME_CMAKE=${CMAKE_SOURCE_DIR}/guest/libraries/runtime/CMakeLists.txt
+      -DFORGE_CONTRACT_CONFIG_TEMPLATE=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractConfig.cmake.in
+      -P ${CMAKE_SOURCE_DIR}/guest/tests/tooling/check_guest_runtime_archive.cmake
+)
+add_test(
+   NAME test_forge_contract_sdk_package_prefix
+   COMMAND
+      ${CMAKE_COMMAND}
+      -DFORGE_CONTRACT_CONFIG_TEMPLATE=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractConfig.cmake.in
+      -DFORGE_CONTRACT_TOOLCHAIN_TEMPLATE=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractToolchain.cmake.in
+      -DFORGE_CONTRACT_FUNCTIONS=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractFunctions.cmake
+      -DFORGE_CONTRACT_TEST_ROOT=${CMAKE_BINARY_DIR}/tests/contract-package-prefix
+      -P ${CMAKE_SOURCE_DIR}/guest/tests/tooling/check_package_prefix.cmake
+)
+add_test(
+   NAME test_forge_contract_sdk_developer_toolchain
+   COMMAND
+      ${CMAKE_COMMAND}
+      -DFORGE_CONTRACT_TOOLCHAIN_SELECTOR=${CMAKE_SOURCE_DIR}/guest/cmake/select_developer_toolchain.cmake
+      -DFORGE_CONTRACT_TEST_ROOT=${CMAKE_BINARY_DIR}/tests/contract-developer-toolchain
+      -P ${CMAKE_SOURCE_DIR}/guest/tests/tooling/check_developer_toolchain.cmake
+)
 
 add_executable(
    test_forge
@@ -34,6 +74,7 @@ add_executable(
    crypto/test_blake2.cpp
    crypto/test_bls.cpp
    crypto/test_bls_legacy.cpp
+   crypto/test_contract_primitives.cpp
    crypto/test_cypher_suites.cpp
    crypto/test_hash_functions.cpp
    crypto/test_secp256k1_recover.cpp
@@ -112,6 +153,23 @@ add_executable(
 )
 target_link_libraries(test_forge_chain_protocol forge_chain_protocol forge Boost::included_unit_test_framework)
 add_test(NAME test_forge_chain_protocol COMMAND test_forge_chain_protocol WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+if(FORGE_ENABLE_CONTRACT_TOOLING)
+   add_executable(
+      test_forge_contract
+      unit/main.cpp
+      contract/contract_tests.cpp
+   )
+   target_link_libraries(
+      test_forge_contract
+      forge_contract_abi
+      forge_contract_attributes
+      forge_contract_validation
+      forge_contract_manifest
+      Boost::included_unit_test_framework
+   )
+   add_test(NAME test_forge_contract COMMAND test_forge_contract WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+endif()
 
 add_executable(
    test_forge_db_core
@@ -227,6 +285,7 @@ add_executable(
    crypto/test_blake2.cpp
    crypto/test_bls.cpp
    crypto/test_bls_legacy.cpp
+   crypto/test_contract_primitives.cpp
    crypto/test_cypher_suites.cpp
    crypto/test_hash_functions.cpp
    crypto/test_secp256k1_recover.cpp
@@ -1082,6 +1141,9 @@ add_custom_target(
       -DFORGE_PACKAGE_TEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
       -DFORGE_PACKAGE_TEST_C_COMPILER=${CMAKE_C_COMPILER}
       -DFORGE_PACKAGE_TEST_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}
+      -DFORGE_PACKAGE_TEST_CLANG_DIR=${Clang_DIR}
+      -DFORGE_PACKAGE_TEST_LLVM_DIR=${LLVM_DIR}
+      -DFORGE_PACKAGE_TEST_BUILT_WITH_TUI=${FORGE_HAS_TUI}
       -P ${CMAKE_CURRENT_SOURCE_DIR}/package_all_missing_dependency/expect_configure_failure.cmake
    DEPENDS test_forge_package_install
 )
@@ -1395,6 +1457,59 @@ add_test(
       --test-command forge_package_chain_protocol_component
 )
 set_tests_properties(test_forge_package_chain_protocol_component PROPERTIES DEPENDS test_forge_package_install)
+if(FORGE_ENABLE_CONTRACT_TOOLING)
+   add_test(
+      NAME test_forge_package_contract_abi_component
+      COMMAND ${CMAKE_CTEST_COMMAND}
+         --build-and-test
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_contract_abi_component
+         ${CMAKE_BINARY_DIR}/forge-package-contract-abi-component
+         --build-generator ${CMAKE_GENERATOR}
+         --build-options
+            ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+            -DClang_DIR=${Clang_DIR}
+            -DLLVM_DIR=${LLVM_DIR}
+         --test-command forge_package_contract_abi_component
+   )
+   set_tests_properties(test_forge_package_contract_abi_component PROPERTIES DEPENDS test_forge_package_install)
+   add_test(
+      NAME test_forge_package_contract_attributes_component
+      COMMAND ${CMAKE_CTEST_COMMAND}
+         --build-and-test
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_contract_attributes_component
+         ${CMAKE_BINARY_DIR}/forge-package-contract-attributes-component
+         --build-generator ${CMAKE_GENERATOR}
+         --build-options
+            ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+            -DClang_DIR=${Clang_DIR}
+            -DLLVM_DIR=${LLVM_DIR}
+            -DCMAKE_DISABLE_FIND_PACKAGE_Boost=TRUE
+         --test-command forge_package_contract_attributes_component
+   )
+   set_tests_properties(test_forge_package_contract_attributes_component PROPERTIES DEPENDS test_forge_package_install)
+   add_test(
+      NAME test_forge_package_contract_validation_component
+      COMMAND ${CMAKE_CTEST_COMMAND}
+         --build-and-test
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_contract_validation_component
+         ${CMAKE_BINARY_DIR}/forge-package-contract-validation-component
+         --build-generator ${CMAKE_GENERATOR}
+         --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         --test-command forge_package_contract_validation_component
+   )
+   set_tests_properties(test_forge_package_contract_validation_component PROPERTIES DEPENDS test_forge_package_install)
+   add_test(
+      NAME test_forge_package_contract_manifest_component
+      COMMAND ${CMAKE_CTEST_COMMAND}
+         --build-and-test
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_contract_manifest_component
+         ${CMAKE_BINARY_DIR}/forge-package-contract-manifest-component
+         --build-generator ${CMAKE_GENERATOR}
+         --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         --test-command forge_package_contract_manifest_component
+   )
+   set_tests_properties(test_forge_package_contract_manifest_component PROPERTIES DEPENDS test_forge_package_install)
+endif()
 add_test(
    NAME test_forge_package_vm_wasm_component
    COMMAND ${CMAKE_COMMAND}
@@ -1674,6 +1789,9 @@ add_test(
       -DFORGE_PACKAGE_TEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}
       -DFORGE_PACKAGE_TEST_C_COMPILER=${CMAKE_C_COMPILER}
       -DFORGE_PACKAGE_TEST_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}
+      -DFORGE_PACKAGE_TEST_CLANG_DIR=${Clang_DIR}
+      -DFORGE_PACKAGE_TEST_LLVM_DIR=${LLVM_DIR}
+      -DFORGE_PACKAGE_TEST_BUILT_WITH_TUI=${FORGE_HAS_TUI}
       -P ${CMAKE_CURRENT_SOURCE_DIR}/package_all_missing_dependency/expect_configure_failure.cmake
 )
 set_tests_properties(test_forge_package_all_missing_dependency PROPERTIES DEPENDS test_forge_package_install)

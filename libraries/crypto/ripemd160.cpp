@@ -29,9 +29,6 @@ import forge.variant.described;
 
 namespace forge::crypto {
 
-ripemd160::ripemd160() {
-   memset(_hash, 0, sizeof(_hash));
-}
 ripemd160::ripemd160(const std::string& hex_str) {
    auto bytes_written = forge::crypto::from_hex(hex_str, (char*)_hash, sizeof(_hash));
    if (bytes_written < sizeof(_hash))
@@ -43,10 +40,6 @@ std::string ripemd160::str() const {
 }
 ripemd160::operator std::string() const {
    return str();
-}
-
-char* ripemd160::data() const {
-   return (char*)&_hash[0];
 }
 
 struct ripemd160::encoder::impl {
@@ -99,22 +92,6 @@ ripemd160 operator^(const ripemd160& h1, const ripemd160& h2) {
    result._hash[4] = h1._hash[4] ^ h2._hash[4];
    return result;
 }
-bool operator>=(const ripemd160& h1, const ripemd160& h2) {
-   return memcmp(h1._hash, h2._hash, sizeof(h1._hash)) >= 0;
-}
-bool operator>(const ripemd160& h1, const ripemd160& h2) {
-   return memcmp(h1._hash, h2._hash, sizeof(h1._hash)) > 0;
-}
-bool operator<(const ripemd160& h1, const ripemd160& h2) {
-   return memcmp(h1._hash, h2._hash, sizeof(h1._hash)) < 0;
-}
-bool operator!=(const ripemd160& h1, const ripemd160& h2) {
-   return memcmp(h1._hash, h2._hash, sizeof(h1._hash)) != 0;
-}
-bool operator==(const ripemd160& h1, const ripemd160& h2) {
-   return memcmp(h1._hash, h2._hash, sizeof(h1._hash)) == 0;
-}
-
 void to_variant(const ripemd160& bi, variant& v) {
    v = std::vector<char>((const char*)&bi, ((const char*)&bi) + sizeof(bi));
 }

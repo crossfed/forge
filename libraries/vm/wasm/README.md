@@ -143,8 +143,10 @@ void register_host_functions() {
 ```
 
 `span<T>` arguments consume two WASM operands: an offset and an element count.
-The default converter validates that range against guarded guest memory before
-calling the host method. A mutable span writes directly into guest memory.
+The default converter validates offset, multiplication, addition and the final
+range against the currently active linear-memory byte count before calling the
+host method. C strings use a bounded terminator search within the same active
+range. A mutable span writes directly into guest memory.
 Never retain a guest pointer or span after the host callback returns.
 
 For potentially unaligned structured data, use

@@ -17,20 +17,6 @@ import forge.variant.multiprecision;
 import forge.variant.format;
 import forge.variant.described;
 
-namespace forge::chain::protocol {
-
-action_name newaccount::get_name() { return make_name("newaccount"); }
-action_name setcode::get_name() { return make_name("setcode"); }
-action_name setabi::get_name() { return make_name("setabi"); }
-action_name updateauth::get_name() { return make_name("updateauth"); }
-action_name deleteauth::get_name() { return make_name("deleteauth"); }
-action_name linkauth::get_name() { return make_name("linkauth"); }
-action_name unlinkauth::get_name() { return make_name("unlinkauth"); }
-action_name canceldelay::get_name() { return make_name("canceldelay"); }
-action_name onerror::get_name() { return make_name("onerror"); }
-
-} // namespace forge::chain::protocol
-
 FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::newaccount)
 FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::setcode)
 FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::setabi)

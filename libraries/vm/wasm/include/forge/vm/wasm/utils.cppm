@@ -1,13 +1,19 @@
 module;
 
 #include <cstdlib>
+#include <cstddef>
+#include <cstdint>
 #include <cxxabi.h>
 #include <fstream>
 #include <functional>
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
+#include <tuple>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 export module forge.vm.wasm.utils;

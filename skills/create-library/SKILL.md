@@ -12,6 +12,10 @@ description: Use when creating, extending, refactoring, or reviewing a library u
 **Когда применять:** создание новой библиотеки или добавление файла в существующую;
 ревью структуры либы; нормализация «поехавшего» стиля.
 
+Правила также обязательны для `guest/libraries/*`. Guest-код меняет target и
+dependency boundary, но не физическую семантику `.cppm/.hpp/.hxx/.cpp` и не
+парный инвариант.
+
 ## Каноническая структура
 ```
 libraries/<lib>/                         # или <group>/<lib>/
@@ -46,6 +50,14 @@ libraries/<lib>/                         # или <group>/<lib>/
   (макросы, экспортируемые шаблоны). По умолчанию — `.cppm`. `.hpp` — исключение.
 - Приватные хедеры — только в `details/` и только `.hxx`.
 - Реализация (`.cpp`) — только в корне либы. Не в `include/`, не в `details/`, не в `src/`.
+- Узкое исключение для EOSIO compatibility veneer: публичные `.hpp/.h` могут
+  содержать module imports, targeted aliases и compatibility macros. Они не
+  могут содержать самостоятельную реализацию, runtime state, serialization,
+  allocator или dispatcher algorithms.
+- Generated Contract SDK C ABI `.h` являются build/install artifacts, а не
+  source headers библиотеки. Они могут объявлять только C-compatible ABI records
+  и intrinsic functions, генерируются из `guest/cmake/` и не размещаются в
+  `guest/libraries/*/include/forge`.
 
 **R2. Парный инвариант.**
 Каждый `X.cpp` в корне парен по базовому имени **ровно с одним** хедером:
@@ -100,6 +112,10 @@ consumer. `details/` для таких `.cppm` не используется; о
 Convenience target, который только транзитивно собирает usage requirements других
 target-ов, объявляется `INTERFACE`. Добавлять фиктивный `.cpp`, пустой namespace,
 `aggregate_anchor`, `dummy_anchor` или другой placeholder symbol запрещено.
+
+Публичный `.cppm`, который состоит только из `import` / `export import`, запрещён.
+Основной модуль библиотеки владеет собственными declarations; удобное объединение
+нескольких leaf-модулей остаётся на уровне CMake/package component.
 
 ## Куда положить новый файл (решение)
 1. Публичный интерфейс? → `include/<ns_root>/<lib_path>/<entity>.cppm`

@@ -5,6 +5,7 @@ module;
 #include <functional>
 #include <mutex>
 #include <thread>
+#include <utility>
 
 export module forge.vm.wasm.watchdog;
 

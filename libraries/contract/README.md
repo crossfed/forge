@@ -1,0 +1,17 @@
+# Contract Host Libraries
+
+`libraries/contract` is an empty family for host-side contract build services.
+It deliberately has no `forge_contract` target and no `forge.contract` host
+module. Consumers select only the capability they need:
+
+| Library | Package component | Purpose |
+|---|---|---|
+| `abi` | `contract_abi` | Clang AST to chain ABI and dispatcher |
+| `attributes` | `contract_attributes` | Clang attribute registration |
+| `validation` | `contract_validation` | ABI and WebAssembly validation |
+| `manifest` | `contract_manifest` | Deterministic build manifests |
+
+Build these optional libraries with `FORGE_ENABLE_CONTRACT_TOOLING=ON`.
+Only `abi` and `attributes` require a compatible Clang/LLVM package. Contract
+guest code, the wasm32 sysroot and command-line programs live in `guest/` and
+`tools/` respectively.

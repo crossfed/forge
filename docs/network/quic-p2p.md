@@ -673,3 +673,15 @@ checkpoint, one `ctest` run caught a transient `test_forge_quic_p2p` segfault.
 The follow-up full binary run (`test_forge_quic_p2p`, 110 cases) and repeated
 `ctest` gate passed. Treat any recurrence in CI as a Block E/F hardening flake
 blocker and debug it from artifacts before broadening P2P scope.
+
+Known test race, 2026-07-16: a full unrelated Forge validation run completed
+89 of 90 tests and failed
+`p2p_gossipsub_forwards_between_subscribed_peers` after the subscriber callback
+had already delivered the expected payload. The callback fulfills its promise
+before returning `validation_result::accept`, while the delivered-message metric
+is updated after validation completes. The test can therefore observe a ready
+payload future and immediately sample `messages_delivered == 0`. This is a test
+synchronization defect, not evidence of a lost message. The test must wait on a
+deterministic post-validation/accounting condition; an arbitrary sleep is not an
+accepted fix. Track and fix this independently from Contract SDK work as
+Forge issue #84.

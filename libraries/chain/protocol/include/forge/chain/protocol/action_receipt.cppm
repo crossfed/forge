@@ -9,10 +9,10 @@ module;
 export module forge.chain.protocol.action_receipt;
 
 export import forge.chain.protocol.action;
+export import forge.raw.varint;
 import forge.crypto.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
-import forge.raw.varint;
 import forge.variant.value;
 import forge.variant.described;
 
@@ -35,7 +35,8 @@ core::digest calculate_savanna_action_digest(const action_receipt& receipt, cons
 
 export namespace forge::chain::protocol {
 BOOST_DESCRIBE_STRUCT(action_receipt, (),
-                      (receiver, act_digest, global_sequence, recv_sequence, auth_sequence, code_sequence, abi_sequence))
+                      (receiver, act_digest, global_sequence, recv_sequence, auth_sequence, code_sequence,
+                       abi_sequence))
 } // namespace forge::chain::protocol
 
 FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::action_receipt)

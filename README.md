@@ -149,6 +149,10 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [chain/core](libraries/chain/core/README.md) | `forge_chain_core` | Fundamental chain digest and Merkle primitives. | `forge_crypto`, `forge_exceptions`, `forge_raw`. |
 | [chain/protocol](libraries/chain/protocol/README.md) | `forge_chain_protocol` | Canonical protocol values, ordered keys, transactions, blocks, ABI and signing rules. | `forge_chain_core`, `forge_compression`, `forge_raw`, `forge_variant`, `forge_crypto`. |
 | [vm/wasm](libraries/vm/wasm/README.md) | `forge_vm_wasm` | Native WebAssembly parser, validator, interpreter, host-function runtime and x86_64 JIT. | `forge_exceptions`, threads, internal SoftFloat. |
+| [contract/abi](libraries/contract/abi/README.md) | `forge_contract_abi` | Optional Clang AST based contract ABI and dispatcher generation. | Clang/LLVM privately, `forge_chain_protocol`, `forge_codec_json`. |
+| [contract/attributes](libraries/contract/attributes/README.md) | `forge_contract_attributes` | Optional Forge/EOSIO Clang attribute registrations. | Clang/LLVM privately. |
+| [contract/validation](libraries/contract/validation/README.md) | `forge_contract_validation` | Optional contract ABI, WASM, import and export validation. | `forge_vm_wasm`, `forge_chain_protocol`, `forge_codec_json`. |
+| [contract/manifest](libraries/contract/manifest/README.md) | `forge_contract_manifest` | Optional deterministic contract build manifests. | `forge_vm_wasm`, `forge_crypto`, `forge_codec_json`. |
 | [json](libraries/codec/json/README.md) | `forge_codec_json` | JSON typed/value/document codec over Glaze. | Glaze privately, `forge_variant`, `forge_config_core`, `forge_schema`. |
 | [yaml](libraries/codec/yaml/README.md) | `forge_codec_yaml` | YAML typed/value/document codec with JSON-shaped API. | Glaze privately, `forge_config_core`, `forge_schema`. |
 | [xml](libraries/codec/xml/README.md) | `forge_codec_xml` | XML typed/tree codec over private pugixml. | `forge_core`, `forge_reflect`, `forge_schema`, pugixml privately. |
@@ -197,6 +201,13 @@ OpenSSL, ngtcp2, Glaze and Boost components belong to the leaf target that
 actually owns their API or implementation use. `Forge::forge` remains the all-in
 aggregate target, but consumers should request `COMPONENTS all` before linking
 it.
+
+Contract development is distributed separately from the ordinary host package.
+The standalone [guest SDK](guest/README.md) builds the pinned wasm32 sysroot,
+guest runtime, modern contract API, EOSIO compatibility veneer and thin tools.
+Host applications may request the four optional `contract_*` components above
+without installing the guest sysroot; only `contract_abi` and
+`contract_attributes` require a compatible Clang package.
 
 ## Архитектурные Документы
 

@@ -1,0 +1,350 @@
+name: Contract SDK
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/contract-sdk.yml"
+      - "CMakeLists.txt"
+      - "cmake/**"
+      - "libraries/asio/**"
+      - "libraries/chain/core/**"
+      - "libraries/chain/protocol/**"
+      - "libraries/codec/json/**"
+      - "libraries/compression/**"
+      - "libraries/config/core/**"
+      - "libraries/core/**"
+      - "libraries/crypto/**"
+      - "libraries/db/**"
+      - "libraries/exceptions/**"
+      - "libraries/db/ids/**"
+      - "libraries/raw/**"
+      - "libraries/reflect/**"
+      - "libraries/schema/**"
+      - "libraries/variant/**"
+      - "libraries/vm/wasm/**"
+      - "libraries/contract/**"
+      - "guest/**"
+      - "tools/**"
+      - "vendor/**"
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Build exact LLVM release archives
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contract-sdk-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  LLVM_COMMIT: ca7933e47d3a3451d81e72ac174dcb5aa28b59d1
+  CDT_COMMIT: 69599db279b7b93d0688502720c15c6962a1401b
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+
+jobs:
+  developer:
+    name: developer / ${{ matrix.os }}
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install host dependencies
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y ca-certificates gnupg software-properties-common wget
+            sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+            wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+              | sudo gpg --dearmor -o /usr/share/keyrings/apt.llvm.org.gpg
+            echo "deb [signed-by=/usr/share/keyrings/apt.llvm.org.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" \
+              | sudo tee /etc/apt/sources.list.d/llvm-22.list
+            sudo apt-get update
+            sudo apt-get install -y \
+              clang-22 clang-tools-22 lld-22 llvm-22-dev libclang-22-dev libclang-cpp22-dev \
+              g++-15 libc++-22-dev libc++abi-22-dev patchelf
+            echo "LLVM_ROOT=/usr/lib/llvm-22" >> "$GITHUB_ENV"
+            echo "CC=/usr/bin/clang-22" >> "$GITHUB_ENV"
+            echo "CXX=/usr/bin/clang++-22" >> "$GITHUB_ENV"
+            printf '#include <flat_map>\nint main() { std::flat_map<int, int> value; return value.size(); }\n' \
+              | /usr/bin/clang++-22 -std=c++23 -x c++ - -c -o /tmp/forge-flat-map.o
+            if ! command -v brew >/dev/null 2>&1; then
+              NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+              eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+              echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+            fi
+          else
+            brew install llvm lld
+            echo "LLVM_ROOT=$(brew --prefix llvm)" >> "$GITHUB_ENV"
+            echo "CC=$(brew --prefix llvm)/bin/clang" >> "$GITHUB_ENV"
+            echo "CXX=$(brew --prefix llvm)/bin/clang++" >> "$GITHUB_ENV"
+            echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+          fi
+          brew install boost cmake glaze gmp libngtcp2 ninja openssl@3
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+
+      - name: Check out pinned LLVM and CDT donors
+        shell: bash
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/llvm/llvm-project.git build/llvm-project
+          git -C build/llvm-project fetch --depth 1 origin "$LLVM_COMMIT"
+          git -C build/llvm-project checkout --detach "$LLVM_COMMIT"
+          git clone --filter=blob:none --no-checkout https://github.com/AntelopeIO/cdt.git build/cdt-donor
+          git -C build/cdt-donor fetch --depth 1 origin "$CDT_COMMIT"
+          git -C build/cdt-donor checkout --detach "$CDT_COMMIT"
+          echo "FORGE_CONTRACT_CDT_DONOR=$GITHUB_WORKSPACE/build/cdt-donor" >> "$GITHUB_ENV"
+
+      - uses: actions/cache@v4
+        id: sysroot
+        with:
+          path: build/contract-sysroot
+          key: contract-sysroot-${{ runner.os }}-${{ runner.arch }}-${{ env.LLVM_COMMIT }}-${{ hashFiles('guest/sysroot/build.sh', 'guest/sysroot/include/**') }}
+
+      - name: Build pinned wasm32 sysroot
+        if: steps.sysroot.outputs.cache-hit != 'true'
+        shell: bash
+        run: >-
+          guest/sysroot/build.sh
+          "$GITHUB_WORKSPACE/build/llvm-project"
+          "$GITHUB_WORKSPACE/build/contract-runtimes"
+          "$GITHUB_WORKSPACE/build/contract-sysroot"
+          "$LLVM_ROOT/bin"
+
+      - name: Build and install Forge host libraries
+        shell: bash
+        run: |
+          cmake -S . -B build/forge -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/build/forge-prefix" \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
+            -DFORGE_ENABLE_MODULES=ON \
+            -DFORGE_BUILD_PROFILE=contract-sdk-host \
+            -DClang_DIR="$LLVM_ROOT/lib/cmake/clang" \
+            -DLLVM_DIR="$LLVM_ROOT/lib/cmake/llvm" \
+            -DBUILD_TESTING=OFF
+          cmake --build build/forge -j 4
+          cmake --install build/forge --component dev
+
+      - name: Build developer SDK and relocatable archive
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            wasm_ld="$LLVM_ROOT/bin/wasm-ld"
+          else
+            wasm_ld="$(brew --prefix lld)/bin/wasm-ld"
+          fi
+          cmake -S guest -B build/contract-sdk -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
+            -DClang_DIR="$LLVM_ROOT/lib/cmake/clang" \
+            -DLLVM_DIR="$LLVM_ROOT/lib/cmake/llvm" \
+            -DFORGE_CONTRACT_PROFILE=developer \
+            -DFORGE_CONTRACT_FORGE_DIR="$GITHUB_WORKSPACE/build/forge-prefix/lib/cmake/Forge" \
+            -DFORGE_CONTRACT_SYSROOT="$GITHUB_WORKSPACE/build/contract-sysroot" \
+            -DFORGE_CONTRACT_CLANG="$LLVM_ROOT/bin/clang++" \
+            -DFORGE_CONTRACT_WASM_LD="$wasm_ld" \
+            -DFORGE_CONTRACT_LLVM_AR="$LLVM_ROOT/bin/llvm-ar" \
+            -DFORGE_CONTRACT_LLVM_RANLIB="$LLVM_ROOT/bin/llvm-ranlib" \
+            -DFORGE_CONTRACT_JOBS=4
+          cmake --build build/contract-sdk -j 4
+          cmake --install build/contract-sdk --prefix "$GITHUB_WORKSPACE/build/contract-sdk-prefix"
+          cmake --build build/contract-sdk --target forge_contract_sdk_relocation -j 4
+
+      - name: Build contracts and tooling fixtures
+        shell: bash
+        run: |
+          cmake -S guest/tests/consumer -B build/contract-consumer -G Ninja \
+            -DForgeContract_DIR="$GITHUB_WORKSPACE/build/contract-sdk-prefix/lib/cmake/ForgeContract"
+          cmake --build build/contract-consumer -j 4
+
+      - name: Execute generated contracts in Forge VM
+        shell: bash
+        run: |
+          cmake -S guest/tests/e2e -B build/contract-e2e -G Ninja \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
+            -DForge_DIR="$GITHUB_WORKSPACE/build/forge-prefix/lib/cmake/Forge" \
+            -DFORGE_CONTRACT_TEST_WASM="$GITHUB_WORKSPACE/build/contract-consumer/hello.wasm" \
+            -DFORGE_CONTRACT_TEST_RECORD_WASM="$GITHUB_WORKSPACE/build/contract-consumer/recordtest.wasm" \
+            -DFORGE_CONTRACT_TEST_ALLOCATOR_WASM="$GITHUB_WORKSPACE/build/contract-consumer/allocatortst.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_WASM="$GITHUB_WORKSPACE/build/contract-consumer/legacyhello.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_NOTIFICATION_WASM="$GITHUB_WORKSPACE/build/contract-consumer/legacynotify.wasm" \
+            -DFORGE_CONTRACT_TEST_DB_WASM="$GITHUB_WORKSPACE/build/contract-consumer/dbintrinsics.wasm" \
+            -DFORGE_CONTRACT_TEST_DB_HOST_WASM="$GITHUB_WORKSPACE/build/contract-consumer/dbhost.wasm" \
+            -DFORGE_CONTRACT_TEST_MULTI_INDEX_WASM="$GITHUB_WORKSPACE/build/contract-consumer/multiidx.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_WASM="$GITHUB_WORKSPACE/build/contract-consumer/legacymidx.wasm" \
+            -DFORGE_CONTRACT_TEST_MULTI_INDEX_ERRORS_WASM="$GITHUB_WORKSPACE/build/contract-consumer/midxerrors.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_ERRORS_WASM="$GITHUB_WORKSPACE/build/contract-consumer/legmidxerr.wasm" \
+            -DFORGE_CONTRACT_TEST_MULTI_INDEX_EXTENDED_WASM="$GITHUB_WORKSPACE/build/contract-consumer/midxextend.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_EXTENDED_WASM="$GITHUB_WORKSPACE/build/contract-consumer/legmidxext.wasm" \
+            -DFORGE_CONTRACT_TEST_ORACLE_WASM="$GITHUB_WORKSPACE/build/contract-consumer/oracle.wasm" \
+            -DFORGE_CONTRACT_TEST_RECOVERY_WASM="$GITHUB_WORKSPACE/build/contract-consumer/recovery.wasm"
+          cmake --build build/contract-e2e -j 4
+          ctest --test-dir build/contract-e2e --output-on-failure
+
+      - name: Verify source tree
+        run: git diff --check
+
+  release:
+    name: release / ${{ matrix.os }}
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.release)
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install release build dependencies
+        shell: bash
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y ca-certificates gnupg software-properties-common wget
+            sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+            wget -qO- https://apt.llvm.org/llvm-snapshot.gpg.key \
+              | sudo gpg --dearmor -o /usr/share/keyrings/apt.llvm.org.gpg
+            echo "deb [signed-by=/usr/share/keyrings/apt.llvm.org.gpg] http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" \
+              | sudo tee /etc/apt/sources.list.d/llvm-22.list
+            sudo apt-get update
+            sudo apt-get install -y \
+              clang-22 clang-tools-22 lld-22 llvm-22-dev libclang-22-dev libclang-cpp22-dev \
+              g++-15 libc++-22-dev libc++abi-22-dev patchelf
+            echo "LLVM_ROOT=/usr/lib/llvm-22" >> "$GITHUB_ENV"
+            echo "CC=/usr/bin/clang-22" >> "$GITHUB_ENV"
+            echo "CXX=/usr/bin/clang++-22" >> "$GITHUB_ENV"
+            printf '#include <flat_map>\nint main() { std::flat_map<int, int> value; return value.size(); }\n' \
+              | /usr/bin/clang++-22 -std=c++23 -x c++ - -c -o /tmp/forge-flat-map.o
+            if ! command -v brew >/dev/null 2>&1; then
+              NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+              eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+              echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+            fi
+          else
+            brew install llvm
+            echo "LLVM_ROOT=$(brew --prefix llvm)" >> "$GITHUB_ENV"
+            echo "CC=$(brew --prefix llvm)/bin/clang" >> "$GITHUB_ENV"
+            echo "CXX=$(brew --prefix llvm)/bin/clang++" >> "$GITHUB_ENV"
+            echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
+          fi
+          brew install boost cmake glaze gmp libngtcp2 ninja openssl@3
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+
+      - name: Check out pinned LLVM
+        shell: bash
+        run: |
+          git clone --filter=blob:none --no-checkout https://github.com/llvm/llvm-project.git build/llvm-project
+          git -C build/llvm-project fetch --depth 1 origin "$LLVM_COMMIT"
+          git -C build/llvm-project checkout --detach "$LLVM_COMMIT"
+
+      - name: Build exact LLVM toolchain
+        shell: bash
+        run: |
+          cmake -S guest -B build/contract-sdk-release -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
+            -DFORGE_CONTRACT_PROFILE=release \
+            -DFORGE_CONTRACT_FORGE_DIR="$GITHUB_WORKSPACE/build/forge-prefix/lib/cmake/Forge" \
+            -DFORGE_CONTRACT_LLVM_SOURCE_DIR="$GITHUB_WORKSPACE/build/llvm-project" \
+            -DFORGE_CONTRACT_JOBS=4
+          cmake --build build/contract-sdk-release --target forge_contract_llvm -j 4
+          llvm_root="$GITHUB_WORKSPACE/build/contract-sdk-release/toolchain"
+          test -x "$llvm_root/bin/clang++"
+          test -f "$llvm_root/lib/cmake/clang/ClangConfig.cmake"
+          echo "LLVM_ROOT=$llvm_root" >> "$GITHUB_ENV"
+          echo "CC=$llvm_root/bin/clang" >> "$GITHUB_ENV"
+          echo "CXX=$llvm_root/bin/clang++" >> "$GITHUB_ENV"
+
+      - name: Build and install Forge host libraries
+        shell: bash
+        run: |
+          cmake -S . -B build/forge -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX="$GITHUB_WORKSPACE/build/forge-prefix" \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
+            -DFORGE_ENABLE_MODULES=ON \
+            -DFORGE_BUILD_PROFILE=contract-sdk-host \
+            -DClang_DIR="$LLVM_ROOT/lib/cmake/clang" \
+            -DLLVM_DIR="$LLVM_ROOT/lib/cmake/llvm" \
+            -DBUILD_TESTING=OFF
+          cmake --build build/forge -j 4
+          cmake --install build/forge --component dev
+
+      - name: Build exact LLVM SDK archive and relocation gate
+        shell: bash
+        run: |
+          cmake --build build/contract-sdk-release --target forge_contract_sdk_relocation -j 4
+
+      - name: Execute exact-toolchain contracts in Forge VM
+        shell: bash
+        run: |
+          archive="$(find build/contract-sdk-release -maxdepth 1 -name 'forge-contract-sdk-*.tar.gz' -print -quit)"
+          mkdir -p build/contract-sdk-release-prefix
+          tar -xzf "$archive" -C build/contract-sdk-release-prefix --strip-components=1
+          cmake -S guest/tests/consumer -B build/contract-release-consumer -G Ninja \
+            -DForgeContract_DIR="$GITHUB_WORKSPACE/build/contract-sdk-release-prefix/lib/cmake/ForgeContract"
+          cmake --build build/contract-release-consumer \
+            --target hello recordtest allocatortst legacyhello legacynotify multisource dbhost \
+                     multiidx legacymidx midxerrors legmidxerr midxextend legmidxext \
+                     oracle recovery surface \
+                     forge_contract_database_intrinsic_fixtures forge_contract_multi_index_fixtures \
+            -j 4
+          cmake -S guest/tests/e2e -B build/contract-release-e2e -G Ninja \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
+            -DForge_DIR="$GITHUB_WORKSPACE/build/forge-prefix/lib/cmake/Forge" \
+            -DFORGE_CONTRACT_TEST_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/hello.wasm" \
+            -DFORGE_CONTRACT_TEST_RECORD_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/recordtest.wasm" \
+            -DFORGE_CONTRACT_TEST_ALLOCATOR_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/allocatortst.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/legacyhello.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_NOTIFICATION_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/legacynotify.wasm" \
+            -DFORGE_CONTRACT_TEST_DB_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/dbintrinsics.wasm" \
+            -DFORGE_CONTRACT_TEST_DB_HOST_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/dbhost.wasm" \
+            -DFORGE_CONTRACT_TEST_MULTI_INDEX_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/multiidx.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/legacymidx.wasm" \
+            -DFORGE_CONTRACT_TEST_MULTI_INDEX_ERRORS_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/midxerrors.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_ERRORS_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/legmidxerr.wasm" \
+            -DFORGE_CONTRACT_TEST_MULTI_INDEX_EXTENDED_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/midxextend.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_EXTENDED_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/legmidxext.wasm" \
+            -DFORGE_CONTRACT_TEST_ORACLE_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/oracle.wasm" \
+            -DFORGE_CONTRACT_TEST_RECOVERY_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/recovery.wasm"
+          cmake --build build/contract-release-e2e -j 4
+          ctest --test-dir build/contract-release-e2e --output-on-failure
+
+      - name: Upload SDK archive and checksum
+        uses: actions/upload-artifact@v4
+        with:
+          name: forge-contract-sdk-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            build/contract-sdk-release/forge-contract-sdk-*.tar.gz
+            build/contract-sdk-release/forge-contract-sdk-*.tar.gz.sha256
+          if-no-files-found: error

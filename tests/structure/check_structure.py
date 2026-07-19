@@ -9,8 +9,8 @@ from pathlib import Path
 
 
 SOURCE_SUFFIXES = {".cpp", ".cppm", ".hpp", ".hxx"}
-LAYOUT_ROOTS = ("libraries", "plugins")
-SCAN_ROOTS = ("libraries", "plugins", "tests")
+LAYOUT_ROOTS = ("libraries", "plugins", "guest/libraries", "guest/tests/host")
+SCAN_ROOTS = ("libraries", "plugins", "guest/libraries", "guest/tests/host", "tests")
 EXCLUDED_PARTS = {".git", "legacy", "vendor", "__pycache__"}
 MODULE_NAME = r"forge(?:\.[A-Za-z_][A-Za-z0-9_]*)+(?::[A-Za-z_][A-Za-z0-9_]*)?"
 MODULE_DECLARATION = re.compile(rf"^\s*export\s+module\s+({MODULE_NAME})\s*;")
@@ -23,6 +23,7 @@ CONDITIONAL_BRANCH = re.compile(r"^\s*#\s*(?:elif|else)\b")
 CONDITIONAL_END = re.compile(r"^\s*#\s*endif\b")
 PRIVATE_DECLARATION = re.compile(r"^(?:class|struct|enum(?:\s+class)?)\s+([A-Za-z_][A-Za-z0-9_:]*)")
 VM_WASM_EXPORT = re.compile(r"\bFORGE_VM_WASM_EXPORT\b")
+UNQUALIFIED_C_MEMORY = re.compile(r"(?<![:\w])(?:memcpy|memmove|memset|memcmp)\s*\(")
 
 
 def source_files(root: Path, roots: tuple[str, ...]) -> list[Path]:
@@ -69,6 +70,20 @@ def check_aggregates(root: Path, errors: list[str]) -> None:
       for line_number, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
          if anchor.search(line):
             errors.append(f"{path.relative_to(root)}:{line_number}: dummy anchor symbol is forbidden")
+
+   comments = re.compile(r"//[^\n]*|/\*.*?\*/", re.DOTALL)
+   module_line = re.compile(rf"^\s*(?:export\s+)?module(?:\s+{MODULE_NAME})?\s*;\s*$", re.MULTILINE)
+   import_line = re.compile(rf"^\s*(?:export\s+)?import\s+(?:{MODULE_NAME}|:[A-Za-z_]\w*)\s*;\s*$", re.MULTILINE)
+   include_line = re.compile(r"^\s*#\s*include\s*[<\"][^>\"]+[>\"]\s*$", re.MULTILINE)
+   for path in source_files(root, LAYOUT_ROOTS):
+      if path.suffix != ".cppm":
+         continue
+      source = comments.sub("", path.read_text(errors="ignore"))
+      if import_line.search(source) is None:
+         continue
+      remainder = include_line.sub("", import_line.sub("", module_line.sub("", source))).strip()
+      if not remainder:
+         errors.append(f"{path.relative_to(root)}: aggregate-only module is forbidden")
 
 
 def component_roots(root: Path) -> list[Path]:
@@ -176,6 +191,8 @@ def check_vm_wasm_boundaries(root: Path, errors: list[str]) -> None:
             errors.append(f"{relative}:{line_number}: VM components must use module imports")
          if VM_WASM_EXPORT.search(line):
             errors.append(f"{relative}:{line_number}: FORGE_VM_WASM_EXPORT is forbidden")
+         if UNQUALIFIED_C_MEMORY.search(line):
+            errors.append(f"{relative}:{line_number}: VM modules must qualify C memory functions through std")
 
 
 def check_plugin_impl_ownership(root: Path, errors: list[str]) -> None:
@@ -187,6 +204,202 @@ def check_plugin_impl_ownership(root: Path, errors: list[str]) -> None:
                f"{path.relative_to(root)}:{line_number}: plugin_impl.hxx may only own plugin::impl; "
                f"move {declaration.group(1)} to its exact private header"
             )
+
+
+def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
+   path = root / ".github" / "workflows" / "contract-sdk.yml"
+   if not path.exists():
+      return
+
+   source = path.read_text(errors="ignore")
+   try:
+      pull_request = source.split("  pull_request:\n", 1)[1].split("  push:\n", 1)[0]
+   except IndexError:
+      errors.append(f"{path.relative_to(root)}: cannot locate pull_request path filters")
+      return
+
+   for required in (
+      '      - "CMakeLists.txt"',
+      '      - "cmake/**"',
+      '      - "libraries/asio/**"',
+      '      - "libraries/chain/core/**"',
+      '      - "libraries/chain/protocol/**"',
+      '      - "libraries/codec/json/**"',
+      '      - "libraries/compression/**"',
+      '      - "libraries/config/core/**"',
+      '      - "libraries/core/**"',
+      '      - "libraries/crypto/**"',
+      '      - "libraries/db/**"',
+      '      - "libraries/exceptions/**"',
+      '      - "libraries/db/ids/**"',
+      '      - "libraries/raw/**"',
+      '      - "libraries/reflect/**"',
+      '      - "libraries/schema/**"',
+      '      - "libraries/variant/**"',
+      '      - "libraries/vm/wasm/**"',
+      '      - "libraries/contract/**"',
+      '      - "guest/**"',
+      '      - "tools/**"',
+      '      - "vendor/**"',
+   ):
+      if required not in pull_request:
+         errors.append(
+            f"{path.relative_to(root)}: pull_request paths must include {required.strip()[2:]}"
+         )
+
+   sysroot_cache_inputs = "hashFiles('guest/sysroot/build.sh', 'guest/sysroot/include/**')"
+   if sysroot_cache_inputs not in source:
+      errors.append(
+         f"{path.relative_to(root)}: contract sysroot cache key must hash its build script and headers"
+      )
+
+   macos_sdkroot = 'echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"'
+   if source.count(macos_sdkroot) < 2:
+      errors.append(
+         f"{path.relative_to(root)}: macOS developer and release jobs must export the selected SDKROOT"
+      )
+
+   recovery_contract = "-DFORGE_CONTRACT_TEST_RECOVERY_WASM="
+   if source.count(recovery_contract) != 2:
+      errors.append(
+         f"{path.relative_to(root)}: developer and release E2E jobs must execute the recovery contract"
+      )
+
+   for incompatible_flag in ('CXXFLAGS=-stdlib=libc++', 'LDFLAGS=-stdlib=libc++'):
+      if incompatible_flag in source:
+         errors.append(
+            f"{path.relative_to(root)}: Linux host tooling must not override its packaged C++ ABI; "
+            f"remove {incompatible_flag}"
+         )
+
+   for required in (
+      "ppa:ubuntu-toolchain-r/test",
+      "g++-15",
+      "FORGE_CONTRACT_LLVM_SOURCE_DIR",
+      "--target forge_contract_llvm -j 4",
+   ):
+      if required not in source:
+         errors.append(
+            f"{path.relative_to(root)}: Contract SDK workflow is missing {required}"
+         )
+
+   release_build = re.search(
+      r"cmake --build build/contract-release-consumer\s+\\\n"
+      r"\s+--target (?P<targets>(?:[^\n]|\\\n)+?)\s+\\\n"
+      r"\s+-j 4",
+      source,
+   )
+   required_release_contracts = {"recordtest", "legacynotify", "recovery"}
+   release_targets = set() if release_build is None else set(release_build.group("targets").split())
+   missing_release_contracts = sorted(required_release_contracts - release_targets)
+   if missing_release_contracts:
+      errors.append(
+         f"{path.relative_to(root)}: release consumer must build E2E contracts before configuration: "
+         f"{', '.join(missing_release_contracts)}"
+      )
+
+
+def check_contract_sdk_components(root: Path, errors: list[str]) -> None:
+   path = root / "guest" / "CMakeLists.txt"
+   if not path.exists():
+      return
+
+   contract_include = root / "guest" / "libraries" / "contract" / "include" / "forge" / "contract"
+   source_c_headers = sorted(contract_include.glob("*.h"))
+   if source_c_headers:
+      rendered = ", ".join(str(header.relative_to(root)) for header in source_c_headers)
+      errors.append(
+         "generated Contract SDK C ABI headers must live outside library source include: " + rendered
+      )
+
+   types_template = root / "guest" / "cmake" / "types.h.in"
+   if not types_template.exists():
+      errors.append("guest/cmake/types.h.in: generated Contract SDK C ABI types template is missing")
+
+   source = path.read_text(errors="ignore")
+   for required in (
+      "-DCMAKE_C_FLAGS=${_forge_contract_llvm_path_map_flags}",
+      "-DCMAKE_CXX_FLAGS=${_forge_contract_llvm_path_map_flags}",
+      "-DCMAKE_C_FLAGS=${_forge_contract_wasm_path_map_flags}",
+      "-DCMAKE_CXX_FLAGS=${_forge_contract_wasm_path_map_flags}",
+      "-DCMAKE_ASM_FLAGS=${_forge_contract_wasm_path_map_flags}",
+      "-DCMAKE_C_FLAGS=${_forge_contract_path_map_flags}",
+      "-DCMAKE_CXX_FLAGS=${_forge_contract_path_map_flags}",
+   ):
+      if required not in source:
+         errors.append(
+            f"{path.relative_to(root)}: release SDK sub-builds must preserve path mapping: {required}"
+         )
+
+   root_cmake = (root / "CMakeLists.txt").read_text(errors="ignore")
+   for required in (
+      '"-ffile-prefix-map=${_forge_contract_host_source_root}=."',
+      '"-fdebug-prefix-map=${_forge_contract_host_source_root}=."',
+      '"-ffile-prefix-map=${CMAKE_BINARY_DIR}=./build"',
+      '"-fdebug-prefix-map=${CMAKE_BINARY_DIR}=./build"',
+   ):
+      if required not in root_cmake:
+         errors.append(
+            f"CMakeLists.txt: contract-sdk-host must map source and build paths: {required}"
+         )
+
+   tools_project = re.search(
+      r"ExternalProject_Add\(\s*forge_contract_tools(?P<body>.*?)\n\s*\)", source, re.DOTALL
+   )
+   if (
+      tools_project is None
+      or "-DCMAKE_INSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}" not in tools_project.group("body")
+   ):
+      errors.append(
+         f"{path.relative_to(root)}: release tools must inherit the SDK install libdir"
+      )
+
+   try:
+      developer_profile = source.split(
+         'else()\n   find_package(Clang 22.1 CONFIG REQUIRED)', 1
+      )[1].split(
+         'endif()\n\nset(_forge_contract_input_sysroot', 1
+      )[0]
+   except IndexError:
+      errors.append(f"{path.relative_to(root)}: cannot locate developer Contract SDK profile")
+      return
+
+   for component in (
+      "contract_abi",
+      "contract_attributes",
+      "contract_validation",
+      "contract_manifest",
+   ):
+      if developer_profile.count(component) != 2:
+         errors.append(
+            f"{path.relative_to(root)}: developer Contract SDK must request {component} "
+            "with and without an explicit Forge_DIR"
+         )
+
+
+def check_eosio_veneer(root: Path, errors: list[str]) -> None:
+   path = root / "guest" / "libraries" / "eosio" / "include" / "eosio" / "dispatcher.hpp"
+   if not path.exists():
+      return
+
+   source = path.read_text(errors="ignore")
+   for forbidden in ("switch (action)", "execute_action<"):
+      if forbidden in source:
+         errors.append(f"{path.relative_to(root)}: EOSIO veneer must not own dispatcher algorithms")
+   if "::forge::contract::dispatch(" not in source:
+      errors.append(f"{path.relative_to(root)}: EOSIO dispatcher must delegate to forge.contract.dispatcher")
+
+   generator = root / "libraries" / "contract" / "abi" / "generator.cpp"
+   generated_source = generator.read_text(errors="ignore")
+   for forbidden in ('output << "   switch (action)', 'execute_action<'):
+      if forbidden in generated_source:
+         errors.append(
+            f"{generator.relative_to(root)}: generated dispatcher must delegate to forge.contract.dispatcher"
+         )
+   if 'forge::contract::dispatch(name{receiver}' not in generated_source:
+      errors.append(
+         f"{generator.relative_to(root)}: generated dispatcher does not delegate to forge.contract.dispatcher"
+      )
 
 
 def check_modules(root: Path, files: list[Path], errors: list[str]) -> None:
@@ -273,6 +486,9 @@ def main() -> int:
    check_pairing(root, errors)
    check_vm_wasm_boundaries(root, errors)
    check_plugin_impl_ownership(root, errors)
+   check_contract_sdk_workflow(root, errors)
+   check_contract_sdk_components(root, errors)
+   check_eosio_veneer(root, errors)
    check_modules(root, files, errors)
 
    if errors:

@@ -29,7 +29,10 @@ Hashes and encodings:
 Keys and signatures:
 
 - `forge.crypto.asymmetric`, `secp256k1`, `p256`, `ed25519`, `rsa`,
-  `x25519`, `webauthn`, `bls`.
+  `x25519`, `webauthn`, `bls`;
+- `forge.crypto.bn256` and `forge.crypto.bls.primitives` expose the
+  contract-visible BN254 and BLS operations used by Spring intrinsics without
+  exposing vendor types.
 
 Other primitives:
 

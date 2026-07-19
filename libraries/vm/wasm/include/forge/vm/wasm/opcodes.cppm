@@ -1,7 +1,9 @@
 module;
 
 #include <forge/vm/wasm/opcode_macros.hpp>
+#include <cstdint>
 #include <map>
+#include <string>
 
 export module forge.vm.wasm.opcodes;
 

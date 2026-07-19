@@ -8,6 +8,7 @@ module;
 
 export module forge.log.logger;
 
+import forge.core.utility;
 import forge.log.appender;
 import forge.log.log_message;
 import forge.log.record;

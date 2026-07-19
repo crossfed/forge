@@ -7,6 +7,7 @@
 #include <deque>
 #include <flat_map>
 #include <iomanip>
+#include <limits>
 #include <span>
 #include <sstream>
 #include <string>
@@ -42,6 +43,10 @@ namespace {
 
 std::string expected(std::string_view value) {
    return std::string{value};
+}
+
+bool has_message(const std::exception& error, std::string_view message) {
+   return error.what() == message;
 }
 
 std::string hex(std::span<const std::uint8_t> bytes) {
@@ -87,9 +92,15 @@ concept supports_single_word_factory = requires(Word word) {
    { Key::template make_from_word_sequence<Word>(word) } -> std::same_as<Key>;
 };
 
+template <typename Key, typename Word>
+concept supports_word_pair_factory = requires(Word first, Word second) {
+   { Key::template make_from_word_sequence<Word>(first, second) } -> std::same_as<Key>;
+};
+
 static_assert(std::constructible_from<protocol::key256, std::array<std::uint32_t, 5>>);
 static_assert(!std::constructible_from<protocol::key256, std::array<protocol::uint128_t, 1>>);
 static_assert(supports_single_word_factory<protocol::key256, protocol::uint128_t>);
+static_assert(supports_word_pair_factory<protocol::key256, protocol::uint128_t>);
 static_assert(!supports_single_word_factory<protocol::key256, std::int64_t>);
 static_assert(protocol::fixed_key<1>::num_words() == 1U && protocol::fixed_key<1>::padded_bytes() == 15U);
 static_assert(protocol::fixed_key<20>::num_words() == 2U && protocol::fixed_key<20>::padded_bytes() == 12U);
@@ -230,7 +241,7 @@ BOOST_AUTO_TEST_CASE(fixed_key_matches_donor_word_and_byte_order) {
    BOOST_TEST((variant.as<protocol::key256>() == value));
 }
 
-BOOST_AUTO_TEST_CASE(fixed_key_partial_word_sequences_match_cdt_fixed_bytes) {
+BOOST_AUTO_TEST_CASE(fixed_key_partial_word_sequences_preserve_cdt_layout) {
    const auto u8 = protocol::key256::make_from_word_sequence<std::uint8_t>(std::uint8_t{1U});
    const auto u16 = protocol::key256::make_from_word_sequence<std::uint16_t>(std::uint16_t{1U});
    const auto u32 = protocol::key256::make_from_word_sequence<std::uint32_t>(std::uint32_t{1U});
@@ -245,6 +256,8 @@ BOOST_AUTO_TEST_CASE(fixed_key_partial_word_sequences_match_cdt_fixed_bytes) {
    const auto u64_full = protocol::key256::make_from_word_sequence<std::uint64_t>(std::uint64_t{1U}, std::uint64_t{2U},
                                                                                   std::uint64_t{3U}, std::uint64_t{4U});
    const auto u128 = protocol::key256::make_from_word_sequence<protocol::uint128_t>(protocol::uint128_t{1U});
+   const auto u128_full =
+       protocol::key256::make_from_word_sequence<protocol::uint128_t>(protocol::uint128_t{1U}, protocol::uint128_t{2U});
 
    BOOST_TEST(backing_hex(u8) == "0100000000000000000000000000000000000000000000000000000000000000");
    BOOST_TEST(backing_hex(u16) == "0000000000000001000000000000000000000000000000000000000000000000");
@@ -256,8 +269,10 @@ BOOST_AUTO_TEST_CASE(fixed_key_partial_word_sequences_match_cdt_fixed_bytes) {
    BOOST_TEST(backing_hex(u64) == "0000000000000001000000000000000000000000000000000000000000000000");
    BOOST_TEST(backing_hex(u64_full) == "0000000000000001000000000000000200000000000000030000000000000004");
    BOOST_TEST(backing_hex(u128) == "0000000000000000000000000000000100000000000000000000000000000000");
+   BOOST_TEST(backing_hex(u128_full) == "0000000000000000000000000000000100000000000000000000000000000002");
 
    BOOST_TEST((u32_crossing == protocol::key256{std::array<std::uint32_t, 5>{1U, 2U, 3U, 4U, 5U}}));
+   BOOST_TEST(pack_hex(u32) == "0000000000000000000100000000000000000000000000000000000000000000");
    BOOST_TEST(hex(u64_full.extract_as_byte_array()) ==
               "0000000000000001000000000000000200000000000000030000000000000004");
 }
@@ -345,6 +360,10 @@ BOOST_AUTO_TEST_CASE(name_symbol_and_asset_match_spring_fixtures) {
 
    const auto token = protocol::asset{42, protocol::make_symbol("SYS", 4)};
    BOOST_TEST(pack_hex(token) == expected(spring::asset_raw));
+
+   constexpr auto source_compatible = protocol::asset{42};
+   static_assert(source_compatible.amount == 42);
+   static_assert(source_compatible.sym.raw() == 0U);
 }
 
 BOOST_AUTO_TEST_CASE(name_rejects_high_valued_thirteenth_character) {
@@ -398,6 +417,66 @@ BOOST_AUTO_TEST_CASE(asset_variant_parse_rejects_invalid_text) {
    BOOST_CHECK_THROW(protocol::from_variant(forge::variant{"0.0042 SYS extra"}, asset), std::invalid_argument);
    BOOST_CHECK_THROW(protocol::from_variant(forge::variant{"+1 SYS"}, asset), std::invalid_argument);
    BOOST_CHECK_THROW(protocol::from_variant(forge::variant{"9223372036854775808 SYS"}, asset), std::invalid_argument);
+}
+
+BOOST_AUTO_TEST_CASE(asset_arithmetic_preserves_cdt_checks_and_errors) {
+   const auto sys = protocol::make_symbol("SYS", 4);
+   const auto eos = protocol::make_symbol("EOS", 4);
+
+   auto value = protocol::asset{42, sys};
+   value += protocol::asset{8, sys};
+   BOOST_TEST(value.amount == 50);
+   value -= protocol::asset{20, sys};
+   BOOST_TEST(value.amount == 30);
+   value *= 3;
+   BOOST_TEST(value.amount == 90);
+   value /= 2;
+   BOOST_TEST(value.amount == 45);
+
+   BOOST_CHECK_EXCEPTION((void)(protocol::asset{protocol::asset::max_amount, sys} + protocol::asset{1, sys}),
+                         std::invalid_argument,
+                         [](const auto& error) { return has_message(error, "addition overflow"); });
+   BOOST_CHECK_EXCEPTION((void)(protocol::asset{-protocol::asset::max_amount, sys} - protocol::asset{1, sys}),
+                         std::invalid_argument,
+                         [](const auto& error) { return has_message(error, "subtraction underflow"); });
+   BOOST_CHECK_EXCEPTION(
+       (void)(protocol::asset{1, sys} + protocol::asset{1, eos}), std::invalid_argument,
+       [](const auto& error) { return has_message(error, "attempt to add asset with different symbol"); });
+   BOOST_CHECK_EXCEPTION((void)(protocol::asset{1, sys} / 0), std::invalid_argument,
+                         [](const auto& error) { return has_message(error, "divide by zero"); });
+   BOOST_CHECK_EXCEPTION((void)(protocol::asset{1, sys} == protocol::asset{1, eos}), std::invalid_argument,
+                         [](const auto& error) {
+                            return has_message(error, "comparison of assets with different symbols is not allowed");
+                         });
+
+   const auto first = protocol::extended_asset{protocol::asset{42, sys}, protocol::make_name("eosio.token")};
+   const auto second = protocol::extended_asset{protocol::asset{1, sys}, protocol::make_name("other.token")};
+   BOOST_CHECK_EXCEPTION(first + second, std::invalid_argument,
+                         [](const auto& error) { return has_message(error, "type mismatch"); });
+}
+
+BOOST_AUTO_TEST_CASE(time_and_extended_asset_match_cdt_wire_layout) {
+   const auto point = protocol::time_point{protocol::microseconds{0x0102030405060708LL}};
+   const auto point_sec = protocol::time_point_sec{0x01020304U};
+   const auto timestamp = protocol::block_timestamp{0x01020304U};
+   const auto extended =
+       protocol::extended_asset{protocol::asset{42, protocol::make_symbol("SYS", 4)}, protocol::make_name("eosio")};
+
+   BOOST_TEST(pack_hex(point) == "0807060504030201");
+   BOOST_TEST(pack_hex(point_sec) == "04030201");
+   BOOST_TEST(pack_hex(timestamp) == "04030201");
+   BOOST_TEST(pack_hex(extended) == "2a0000000000000004535953000000000000000000ea3055");
+
+   const auto parsed = protocol::time_point::from_iso_string("2000-01-01T00:00:00");
+   BOOST_TEST(parsed.time_since_epoch().count() == 946'684'800'000'000LL);
+   BOOST_TEST(parsed.to_string() == "2000-01-01T00:00:00");
+   BOOST_TEST(protocol::block_timestamp{parsed}.slot == 0U);
+   BOOST_TEST(protocol::block_timestamp::maximum().slot == 0xffffU);
+   BOOST_TEST(protocol::block_timestamp::maximum().next().slot == 0x10000U);
+   BOOST_TEST(protocol::block_timestamp{parsed}.next().slot == 1U);
+   BOOST_CHECK_EXCEPTION((void)protocol::block_timestamp{std::numeric_limits<std::uint32_t>::max()}.next(),
+                         std::invalid_argument,
+                         [](const auto& error) { return has_message(error, "block timestamp overflow"); });
 }
 
 BOOST_AUTO_TEST_CASE(action_transaction_and_signed_transaction_match_spring_fixtures) {
@@ -470,8 +549,8 @@ BOOST_AUTO_TEST_CASE(savanna_action_receipt_digests_use_core_merkle) {
    second.recv_sequence = 10U;
 
    const auto digests = std::array{
-      protocol::calculate_savanna_action_digest(first, action),
-      protocol::calculate_savanna_action_digest(second, action),
+       protocol::calculate_savanna_action_digest(first, action),
+       protocol::calculate_savanna_action_digest(second, action),
    };
 
    BOOST_TEST(digests[0].str() == expected(spring::savanna_action_digest));
@@ -511,7 +590,8 @@ BOOST_AUTO_TEST_CASE(transaction_signature_preimage_digest_and_spring_signature_
    BOOST_TEST(protocol::signature_digest(chain_id, trx, cfd).str() == expected(spring::transaction_signature_digest));
 
    const auto signature = parse_spring_signature(spring::transaction_signature);
-   const auto recovered = protocol::public_key{signature, core::digest{std::string{spring::transaction_signature_digest}}};
+   const auto recovered =
+       protocol::public_key{signature, core::digest{std::string{spring::transaction_signature_digest}}};
    BOOST_TEST(format_spring_public_key(recovered) == expected(spring::test_public_key));
 }
 
@@ -648,9 +728,9 @@ BOOST_AUTO_TEST_CASE(transaction_mroot_uses_core_merkle_over_receipt_digests) {
    receipts.push_back(make_receipt(2U));
    receipts.push_back(make_receipt(3U));
    const auto digests = std::array{
-      receipts[0].digest(),
-      receipts[1].digest(),
-      receipts[2].digest(),
+       receipts[0].digest(),
+       receipts[1].digest(),
+       receipts[2].digest(),
    };
    BOOST_TEST(protocol::calculate_transaction_mroot(receipts) == core::calculate_merkle_root(digests));
 }

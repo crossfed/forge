@@ -27,9 +27,6 @@ import forge.variant.described;
 #include "details/evp_digest_context.hxx"
 namespace forge::crypto {
 
-sha256::sha256() {
-   memset(_hash, 0, sizeof(_hash));
-}
 sha256::sha256(const char* data, size_t size) {
    if (size != sizeof(_hash))
       FORGE_THROW_EXCEPTION(digest::exceptions::invalid_size, "sha256 size mismatch");
@@ -51,13 +48,6 @@ std::string sha256::str() const {
 }
 sha256::operator std::string() const {
    return str();
-}
-
-const char* sha256::data() const {
-   return (const char*)&_hash[0];
-}
-char* sha256::data() {
-   return (char*)&_hash[0];
 }
 
 struct sha256::encoder::impl {
@@ -94,7 +84,7 @@ void sha256::encoder::write(const char* d, uint32_t dlen) {
 }
 void sha256::encoder::write(std::span<const std::uint8_t> data) {
    forge::detail::evp_digest_update(my->ctx.get(), reinterpret_cast<const char*>(data.data()),
-                                  static_cast<std::uint32_t>(data.size()));
+                                    static_cast<std::uint32_t>(data.size()));
 }
 sha256 sha256::encoder::result() {
    sha256 h;
@@ -123,16 +113,6 @@ sha256 operator^(const sha256& h1, const sha256& h2) {
    result._hash[3] = h1._hash[3] ^ h2._hash[3];
    return result;
 }
-std::strong_ordering operator<=>(const sha256& h1, const sha256& h2) {
-   return memcmp(h1._hash, h2._hash, sizeof(h1._hash)) <=> 0;
-}
-bool operator==(const sha256& h1, const sha256& h2) {
-   // idea to not use memcmp, from:
-   //   https://lemire.me/blog/2018/08/22/avoid-lexicographical-comparisons-when-testing-for-string-equality/
-   return h1._hash[0] == h2._hash[0] && h1._hash[1] == h2._hash[1] && h1._hash[2] == h2._hash[2] &&
-          h1._hash[3] == h2._hash[3];
-}
-
 uint32_t sha256::approx_log_32() const {
    uint16_t lzbits = clz();
    if (lzbits >= 0x100)

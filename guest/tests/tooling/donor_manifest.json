@@ -1,0 +1,68 @@
+{
+  "donor": {
+    "name": "AntelopeIO/cdt",
+    "commit": "69599db279b7b93d0688502720c15c6962a1401b"
+  },
+  "fixtures": [
+    {
+      "path": "tests/toolchain/abigen-pass/action_results_test.cpp",
+      "sha256": "81a839c39f9889a423a4849cb096525544e56df10b3aeab06221203e39a1fb70",
+      "forge_case": "cdt/abigen-pass/action_results_test.cpp"
+    },
+    {
+      "path": "tests/toolchain/abigen-pass/aliased_type_variant_template_arg.cpp",
+      "sha256": "1f14986d7479f27bd1616608646b1c069224cb6731362ecc38bdc2138459bcbb",
+      "forge_case": "cdt/abigen-pass/aliased_type_variant_template_arg.cpp"
+    },
+    {
+      "path": "tests/toolchain/abigen-pass/nested_container.cpp",
+      "sha256": "7f037b9eed3f3faa9020ad502b384846ce4b4ddc64dfdc86d5b81428f9f40c9b",
+      "forge_case": "cdt/abigen-pass/nested_container.cpp"
+    },
+    {
+      "path": "tests/toolchain/abigen-pass/ricardian_contract_test.cpp",
+      "sha256": "ea08a26e87dd0b18a00179545e0baa2137dd7f7051dba43d85204f9692517c41",
+      "forge_case": "cdt/abigen-pass/ricardian_contract_test.cpp"
+    },
+    {
+      "path": "tests/toolchain/abigen-pass/singleton_contract.cpp",
+      "sha256": "fb0c7b50af0bcb1bc9e768628dd2da1ddb9164b5aa73ce1ff1159641f0ea71ce",
+      "forge_case": "cdt/abigen-pass/singleton_contract.cpp"
+    },
+    {
+      "path": "tests/toolchain/abigen-pass/struct_base_typedefd.cpp",
+      "sha256": "26d026499f44c745a1592d2a7c0de5c7f5ddcc91a3f2b179225cb1daecfe9c43",
+      "forge_case": "cdt/abigen-pass/struct_base_typedefd.cpp"
+    },
+    {
+      "path": "tests/toolchain/abigen-pass/sync_call_test.cpp",
+      "sha256": "04d0ff2b05851550d9e5db6027f1629f0caa51dc2115ef4241e80c2a3aa87a79",
+      "forge_case": "cdt/abigen-pass/sync_call_test.cpp"
+    },
+    {
+      "path": "tests/toolchain/abigen-pass/tagged_number_test.cpp",
+      "sha256": "091c81a11d3aadb68e700109b4a981f77902dd9a314767f0fb32ab375bf3737d",
+      "forge_case": "cdt/abigen-pass/tagged_number_test.cpp"
+    },
+    {
+      "path": "tests/toolchain/abigen-pass/using_std_array.cpp",
+      "sha256": "b62f31e2f4ea5f0c98079c2df9c8dad791fb59f2322fb9ee4519cb843e25a9ba",
+      "forge_case": "cdt/abigen-pass/using_std_array.cpp"
+    },
+    {
+      "path": "tests/toolchain/abigen-fail/empty_contract.cpp",
+      "sha256": "205e75214e02b5756e9fdff035b83e24fc4a897658b710f11996fed2139816a4",
+      "forge_case": "cdt/abigen-fail/empty_contract.cpp"
+    },
+    {
+      "path": "tests/toolchain/abigen-fail/empty_contract_with_other_contract.cpp",
+      "sha256": "3e657d3c925c2d7001ae11dac1e8eff3d84f9e19d2356cd342bee1e3536f998c",
+      "forge_case": "cdt/abigen-fail/empty_contract_with_other_contract.cpp"
+    },
+    {
+      "path": "tests/toolchain/abigen-fail/wrong_contract_name.cpp",
+      "sha256": "a3be1c094b0c4e5f98fade56dc27abefaa3cb54d219b36422015f2e71bb27890",
+      "forge_case": "cdt/abigen-fail/wrong_contract_name.cpp"
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 module;
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <cstdlib>
 #include <exception>

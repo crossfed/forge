@@ -1,9 +1,11 @@
 module;
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <string_view>
 #include <vector>
 
@@ -388,7 +390,7 @@ struct module {
          const auto name_size = exports[i].field_str.size();
          if (exports[i].kind == external_kind::Function && name_size == str.size() &&
              (name_size == 0 ||
-              memcmp((const char*)str.data(), (const char*)exports[i].field_str.data(), name_size) == 0)) {
+              std::memcmp((const char*)str.data(), (const char*)exports[i].field_str.data(), name_size) == 0)) {
             index = exports[i].index;
             break;
          }

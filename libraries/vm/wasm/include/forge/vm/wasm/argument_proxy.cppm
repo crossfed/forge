@@ -2,6 +2,7 @@ module;
 
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <type_traits>
@@ -29,7 +30,7 @@ template <typename T, std::size_t LegacyAlign> struct argument_proxy<T*, LegacyA
    inline constexpr argument_proxy(void* ptr) : original_ptr(ptr) {
       if (!LegacyAlign || reinterpret_cast<std::uintptr_t>(original_ptr) % LegacyAlign != 0) {
          copy.emplace();
-         memcpy(std::addressof(*copy), original_ptr, sizeof(T));
+         std::memcpy(std::addressof(*copy), original_ptr, sizeof(T));
       }
    }
    inline constexpr argument_proxy(const argument_proxy&) = delete;
@@ -42,7 +43,7 @@ template <typename T, std::size_t LegacyAlign> struct argument_proxy<T*, LegacyA
 #pragma GCC diagnostic ignored "-Wnonnull"
       if constexpr (!std::is_const_v<T>)
          if (copy)
-            memcpy(original_ptr, std::addressof(*copy), sizeof(T));
+            std::memcpy(original_ptr, std::addressof(*copy), sizeof(T));
 #pragma GCC diagnostic pop
    }
    constexpr operator T*() {
@@ -91,7 +92,7 @@ template <typename T, std::size_t LegacyAlign> struct argument_proxy<span<T>, Le
        : original_ptr(ptr), copy(is_aligned(ptr) ? nullptr : new std::remove_cv_t<T>[size]) {
       *static_cast<span<T>*>(this) = span<T>(copy ? copy.get() : static_cast<T*>(ptr), size);
       if (copy)
-         memcpy(copy.get(), original_ptr, this->size_bytes());
+         std::memcpy(copy.get(), original_ptr, this->size_bytes());
    }
    inline constexpr argument_proxy(const argument_proxy&) = delete;
    inline constexpr argument_proxy(argument_proxy&&) = default;
@@ -100,7 +101,7 @@ template <typename T, std::size_t LegacyAlign> struct argument_proxy<span<T>, Le
 #pragma GCC diagnostic ignored "-Wnonnull"
       if constexpr (!std::is_const_v<T>)
          if (copy)
-            memcpy(original_ptr, copy.get(), this->size_bytes());
+            std::memcpy(original_ptr, copy.get(), this->size_bytes());
 #pragma GCC diagnostic pop
    }
    static constexpr bool is_legacy() {

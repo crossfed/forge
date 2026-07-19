@@ -6,6 +6,7 @@ module;
 #include <cstdint>
 #include <cstdlib>
 #include <cwchar>
+#include <filesystem>
 #include <fstream>
 #include <limits>
 #include <map>

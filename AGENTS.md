@@ -10,6 +10,9 @@ The repository must stay neutral. Public APIs must not contain downstream produc
 
 - Before creating, extending, moving, renaming or reviewing a library under
   `libraries/`, load and apply `create-library`.
+- Apply the same `create-library` rules to libraries under `guest/libraries/`.
+  Guest targeting changes dependencies and compiler flags, not file ownership
+  or pairing rules.
 - Before creating, renaming, moving, refactoring or reviewing an official plugin
   under `plugins/`, load and apply `create-plugin`; it extends
   `create-library`.
@@ -77,7 +80,8 @@ The repository must stay neutral. Public APIs must not contain downstream produc
   narrow macro-only `FORGE_EXPORT_API(...)` exception.
 - Use C++17 nested namespace syntax (`namespace forge::raw { ... }`), not legacy nested braces (`namespace forge { namespace raw { ... } }`).
 - Indentation is 3 spaces per level. Hard tabs are forbidden.
-- Public `.hpp` / `.h` files under `include/forge` are forbidden except macro-only headers. Macro-only headers must not declare public types, functions, templates or old header-wrapper APIs.
+- Public `.hpp` / `.h` files under source `include/forge` are forbidden except macro-only headers. Macro-only headers must not declare public types, functions, templates or old header-wrapper APIs.
+- Generated Contract SDK C ABI headers are a narrow build/install artifact exception: they may declare only C-compatible ABI types and intrinsic functions, must be generated outside library source `include/forge`, and must not contain C++ templates or runtime implementation.
 - Do not create nested public include directories under `include/forge/<lib>`.
 - Do not use `import std;` until the supported toolchain and CI explicitly prove it is stable.
 - Local validation builds should use `cmake --build ... -j 4` or higher by
@@ -193,6 +197,28 @@ class service_node {
 - Native ports must preserve donor behavior and licensing. Downstream
   compatibility aliases, donor namespaces and donor macro families are not
   public Forge API.
+
+## Contract Build Boundary
+
+- `libraries/contract` is an empty host-library family. It has no aggregate
+  target or module. ABI generation, attributes, validation and manifests are
+  independent optional package components.
+- Host contract libraries are enabled by `FORGE_ENABLE_CONTRACT_TOOLING`.
+  Only ABI and attribute components may depend on Clang/LLVM.
+- `guest/` owns wasm32 code, the sysroot, contract examples and guest tests.
+  Normal Forge configuration must not enter this project or build LLVM.
+- `tools/` owns thin host programs. Programs may parse no domain model and
+  must delegate to a matching `libraries/contract/*` command API.
+- `guest/libraries/eosio` is a compatibility veneer over
+  `guest/libraries/contract`. It may expose imports, targeted aliases and
+  compatibility macros, but owns no allocator, serialization, dispatcher or
+  protocol implementation.
+- `guest/libraries/contract/intrinsics.hpp` is the only intrinsic signature
+  registry. Generated guest C declarations, EOSIO headers, host skeletons and
+  import manifests must derive from it.
+- Contract SDK C ABI support records are generated from templates under
+  `guest/cmake/`; generated `.h` files never live in a guest library's source
+  `include/forge` tree.
 
 ## Namespace And Target Naming
 
