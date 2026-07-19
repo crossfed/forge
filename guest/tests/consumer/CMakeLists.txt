@@ -71,6 +71,11 @@ forge_add_contract(
    SOURCES oracle_contract.cpp
 )
 
+forge_add_contract(
+   recovery
+   SOURCES recovery_contract.cpp
+)
+
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/sdk_surface_manifest.json" _sdk_surface_json)
 set(_surface_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/surface")
 file(MAKE_DIRECTORY "${_surface_generated_dir}")

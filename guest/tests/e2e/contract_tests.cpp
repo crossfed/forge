@@ -23,6 +23,8 @@
 import forge.chain.protocol.fixed_key;
 import forge.chain.protocol.values;
 import forge.contract.testing.host;
+import forge.crypto.asymmetric;
+import forge.crypto.sha256;
 import forge.db.object.index;
 import forge.raw.codec;
 import forge.vm.wasm.backend;
@@ -214,6 +216,19 @@ std::uint64_t invoke_oracle(forge::contract::testing::host& host, const wasm::wa
    const auto result = host.invoke({code.data(), code.size()}, account, account, protocol::make_name("run").value,
                                    forge::raw::pack(scenario));
    return forge::raw::unpack_exact<std::uint64_t>(result.return_value);
+}
+
+void invoke_recovery(forge::contract::testing::host& host, const wasm::wasm_code& code) {
+   const auto payload = std::array<std::uint8_t, 4>{'T', 'e', 's', 't'};
+   const auto digest = forge::crypto::sha256::hash(std::span<const std::uint8_t>{payload});
+   const auto key = forge::crypto::asymmetric::private_key::generate();
+   const auto signature = key.sign_digest(digest);
+   const auto expected = key.get_public_key();
+   const auto account = protocol::make_name("recovery").value;
+   auto action_data = forge::raw::pack(std::tuple{digest, signature, expected});
+   const auto result = host.invoke({code.data(), code.size()}, account, account,
+                                   protocol::make_name("recoverkey").value, std::move(action_data));
+   BOOST_TEST(forge::raw::unpack_exact<bool>(result.return_value));
 }
 
 constexpr auto database_scope = std::uint64_t{1};
@@ -752,6 +767,12 @@ BOOST_AUTO_TEST_CASE(contract_oracle_executes_all_non_database_intrinsic_familie
    BOOST_TEST(!state.blockchain_parameters.empty());
    BOOST_TEST(state.activated_features.size() == 1U);
    BOOST_TEST(!state.finalizers.empty());
+}
+
+BOOST_AUTO_TEST_CASE(contract_recovers_legacy_public_key) {
+   const auto code = read_contract(FORGE_CONTRACT_TEST_RECOVERY_WASM);
+   auto host = forge::contract::testing::host{};
+   invoke_recovery(host, code);
 }
 
 BOOST_AUTO_TEST_CASE(contract_oracle_rolls_back_all_observable_side_effects) {

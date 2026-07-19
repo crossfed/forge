@@ -2,6 +2,7 @@ module;
 
 #include <forge/contract/intrinsics.h>
 
+#include <array>
 #include <cstdint>
 #include <limits>
 #include <span>
@@ -66,14 +67,20 @@ inline void assert_ripemd160(const char* data, std::uint32_t size, const checksu
 
 [[nodiscard]] inline public_key recover_key(const checksum256& digest, const signature& value) {
    const auto packed = ::forge::raw::pack(value);
-   const auto required = ::recover_key(
-       reinterpret_cast<const capi_checksum256*>(digest.data()), reinterpret_cast<const char*>(packed.data()),
-       packed.size(), nullptr, 0U);
+   auto optimistic = std::array<std::uint8_t, 256>{};
+   const auto required = ::recover_key(reinterpret_cast<const capi_checksum256*>(digest.data()),
+                                       reinterpret_cast<const char*>(packed.data()), packed.size(),
+                                       reinterpret_cast<char*>(optimistic.data()), optimistic.size());
    check(required > 0, "recover_key failed");
+   if (static_cast<std::size_t>(required) <= optimistic.size()) {
+      return ::forge::raw::unpack_exact<public_key>(
+          std::span<const std::uint8_t>{optimistic.data(), static_cast<std::size_t>(required)});
+   }
+
    auto bytes = std::vector<std::uint8_t>(static_cast<std::size_t>(required));
-   const auto written = ::recover_key(
-       reinterpret_cast<const capi_checksum256*>(digest.data()), reinterpret_cast<const char*>(packed.data()),
-       packed.size(), reinterpret_cast<char*>(bytes.data()), bytes.size());
+   const auto written = ::recover_key(reinterpret_cast<const capi_checksum256*>(digest.data()),
+                                      reinterpret_cast<const char*>(packed.data()), packed.size(),
+                                      reinterpret_cast<char*>(bytes.data()), bytes.size());
    check(written == required, "recover_key returned inconsistent public key size");
    return ::forge::raw::unpack_exact<public_key>(bytes);
 }
