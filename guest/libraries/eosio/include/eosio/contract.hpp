@@ -1,5 +1,6 @@
 #pragma once
 
+#include <eosio/datastream.hpp>
 #include <eosio/name.hpp>
 
 #include <cstdint>

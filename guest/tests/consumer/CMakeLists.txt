@@ -87,6 +87,7 @@ file(MAKE_DIRECTORY "${_surface_generated_dir}")
 set(
    _surface_sources
    "${CMAKE_CURRENT_SOURCE_DIR}/asset_source_compat.cpp"
+   "${CMAKE_CURRENT_SOURCE_DIR}/eosio_datastream_adl.cpp"
    "${CMAKE_CURRENT_SOURCE_DIR}/eosio_internal_db_header.cpp"
 )
 
