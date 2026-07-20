@@ -69,10 +69,13 @@ the host invocation transaction.
 ## Dependencies And Boundary
 
 The target depends only on `forge_guest_runtime`, the guest lanes of
-`forge.raw` and `forge.chain.protocol`, and the generated intrinsic C header.
-It owns no host binding implementation, filesystem, threads, deployment logic
-or blockchain state implementation. Database iterator behavior, payer rules,
-authorization, NaN validation and physical storage remain product host policy.
+`forge.raw`, `forge.codec.*` and `forge.chain.protocol`, and the generated
+intrinsic C header. Codec algorithms are prebuilt once into wasm32 archives;
+consumer builds compile their module interfaces and link those archives. The
+target owns no host binding implementation, filesystem, threads, deployment
+logic or blockchain state implementation. Database iterator behavior, payer
+rules, authorization, NaN validation and physical storage remain product host
+policy.
 
 ## Stability And Tests
 

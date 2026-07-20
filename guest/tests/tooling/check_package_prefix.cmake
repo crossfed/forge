@@ -55,7 +55,14 @@ foreach(_tool clang++ wasm-ld abigen contract-check contract-manifest)
    file(WRITE "${_prefix}/bin/${_tool}" "")
 endforeach()
 file(MAKE_DIRECTORY "${_prefix}/sysroot/lib")
-file(WRITE "${_prefix}/sysroot/lib/libforge_guest_runtime.a" "")
+foreach(_archive IN ITEMS
+   libforge_guest_runtime.a
+   libforge_guest_codec_base64.a
+   libforge_guest_codec_base58.a
+   libforge_guest_codec_hex.a
+)
+   file(WRITE "${_prefix}/sysroot/lib/${_archive}" "")
+endforeach()
 file(MAKE_DIRECTORY "${_prefix}/${CMAKE_INSTALL_DATADIR}/forge-contract")
 file(WRITE "${_prefix}/${CMAKE_INSTALL_DATADIR}/forge-contract/sysroot.sha256" "test\n")
 file(MAKE_DIRECTORY "${_prefix}/${CMAKE_INSTALL_LIBDIR}/forge-contract")
@@ -82,6 +89,18 @@ if(NOT "${CMAKE_CXX_COMPILER}" STREQUAL "${EXPECTED_PREFIX}/bin/clang++")
 endif()
 if(NOT "${ForgeContract_RUNTIME_ARCHIVE}" STREQUAL "${EXPECTED_PREFIX}/sysroot/lib/libforge_guest_runtime.a")
    message(FATAL_ERROR "ForgeContractConfig resolved the wrong runtime archive: ${ForgeContract_RUNTIME_ARCHIVE}")
+endif()
+if(NOT "${ForgeContract_CODEC_BASE64_ARCHIVE}" STREQUAL
+       "${EXPECTED_PREFIX}/sysroot/lib/libforge_guest_codec_base64.a")
+   message(FATAL_ERROR "ForgeContractConfig resolved the wrong Base64 archive: ${ForgeContract_CODEC_BASE64_ARCHIVE}")
+endif()
+if(NOT "${ForgeContract_CODEC_BASE58_ARCHIVE}" STREQUAL
+       "${EXPECTED_PREFIX}/sysroot/lib/libforge_guest_codec_base58.a")
+   message(FATAL_ERROR "ForgeContractConfig resolved the wrong Base58 archive: ${ForgeContract_CODEC_BASE58_ARCHIVE}")
+endif()
+if(NOT "${ForgeContract_CODEC_HEX_ARCHIVE}" STREQUAL
+       "${EXPECTED_PREFIX}/sysroot/lib/libforge_guest_codec_hex.a")
+   message(FATAL_ERROR "ForgeContractConfig resolved the wrong Hex archive: ${ForgeContract_CODEC_HEX_ARCHIVE}")
 endif()
 ]=]
 )

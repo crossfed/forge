@@ -108,8 +108,15 @@ def main() -> None:
     abi_source = args.source_root / "libraries/contract/abi/generator.cpp"
     require_tokens(abi_source, [f'"{name}"' for name in surface["abi_types"]], "ABI type vocabulary")
 
-    contract_root = args.source_root / "guest/libraries/contract/include/forge/contract"
-    contract_text = "\n".join(path.read_text(encoding="utf-8") for path in sorted(contract_root.glob("*.cppm")))
+    contract_module_root = args.source_root / "guest/libraries/contract/include/forge/contract"
+    contract_source_root = args.source_root / "guest/libraries/contract"
+    protocol_module_root = args.source_root / "libraries/chain/protocol/include/forge/chain/protocol"
+    contract_sources = [
+        *contract_module_root.glob("*.cppm"),
+        *contract_source_root.glob("*.cpp"),
+        *protocol_module_root.glob("*.cppm"),
+    ]
+    contract_text = "\n".join(path.read_text(encoding="utf-8") for path in sorted(contract_sources))
     missing_errors = [message for message in surface["observable_errors"] if message not in contract_text]
     if missing_errors:
         fail(f"missing contract-visible errors: {', '.join(missing_errors)}")

@@ -97,10 +97,9 @@ Ed25519, Secp256k1, ECDSA and RSA are all mandatory compatibility key families.
 RSA is required for IPFS/mainline DHT compatibility. Secp256k1 and ECDSA are
 required for blockchain-like networks built on top of FORGE and plugins.
 
-`forge.crypto.base58` must be cleaned up before multiformats code depends on it:
-new APIs use `std::span<const std::uint8_t>` and `std::vector<std::uint8_t>`,
-while old `char` / `std::vector<char>` overloads remain compatibility wrappers.
-Multiformats code should use byte-native APIs without scattered casts.
+Multiformats uses the byte-native `forge.codec.base58` API directly. Encoding
+does not belong to the crypto or network layers, and those layers must not add
+parallel Base58 implementations or scattered character/byte casts.
 
 ## Implementation Blocks
 

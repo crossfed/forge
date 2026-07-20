@@ -364,7 +364,7 @@ The Forge Contract SDK distribution is hermetic and contains:
 
 - pinned, unmodified Clang and lld binaries;
 - the wasm32 sysroot;
-- prebuilt `sysroot/lib/libforge_guest_runtime.a`;
+- prebuilt `sysroot/lib/libforge_guest_runtime.a` and dual-target codec archives;
 - guest module sources;
 - dual-target Forge library sources;
 - `abigen` and `attr-plugin`;
@@ -380,10 +380,10 @@ checkout. The release manifest identifies:
 This version triple is part of reproducible source-to-WASM verification.
 
 The input sysroot is copied to a build-owned staging directory before the guest
-runtime is compiled and installed. Contract consumer builds link that archive
-before libc++/libc++abi/compiler-rt and never compile runtime sources. The
-archive participates in the sysroot hash; runtime `.cpp` and private `.hxx`
-files are not distributed.
+runtime and codecs are compiled and installed. Contract consumer builds link
+those archives before libc++/libc++abi/compiler-rt and never compile runtime or
+codec implementation sources. The archives participate in the sysroot hash;
+runtime `.cpp`, codec `.cpp` and private `.hxx` files are not distributed.
 
 ## Repository Boundaries
 

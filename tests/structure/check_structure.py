@@ -425,6 +425,79 @@ def check_eosio_veneer(root: Path, errors: list[str]) -> None:
             )
 
 
+def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
+   forbidden_modules = (
+      "forge.core.encoding",
+      "forge.crypto.base64",
+      "forge.crypto.base58",
+      "forge.crypto.hex",
+      "forge.contract.base64",
+   )
+   for path in source_files(root, SCAN_ROOTS):
+      source = path.read_text(errors="ignore")
+      for module in forbidden_modules:
+         if module in source:
+            errors.append(f"{path.relative_to(root)}: removed codec module {module} is forbidden")
+
+   contract = root / "guest" / "libraries" / "contract"
+   include = contract / "include" / "forge" / "contract"
+   implementation_units = {
+      "action",
+      "authorization",
+      "bitset",
+      "call",
+      "compatibility_asset",
+      "crypto",
+      "crypto_bls_ext",
+      "crypto_ext",
+      "deferred_transaction",
+      "dispatcher",
+      "instant_finality",
+      "intrinsics",
+      "print",
+      "privileged",
+      "producer_schedule",
+      "rope",
+      "system",
+      "transaction",
+   }
+   for stem in sorted(implementation_units):
+      if not (include / f"{stem}.cppm").exists() or not (contract / f"{stem}.cpp").exists():
+         errors.append(f"guest contract implementation unit {stem} must have an exact .cppm/.cpp pair")
+
+   header_only = {
+      "binary_extension",
+      "compatibility_name",
+      "contract",
+      "datastream",
+      "fixed_bytes",
+      "ignore",
+      "key",
+      "multi_index",
+      "powers",
+      "singleton",
+      "string",
+      "varint",
+   }
+   for stem in sorted(header_only):
+      if (contract / f"{stem}.cpp").exists():
+         errors.append(f"guest contract header-only module {stem} must not own a .cpp")
+
+   moved_records = (
+      "code_hash_result",
+      "blockchain_parameters",
+      "kv_parameters",
+      "finalizer_authority",
+      "finalizer_policy",
+      "call_data_header",
+   )
+   for path in sorted(include.glob("*.cppm")):
+      source = path.read_text(errors="ignore")
+      for record in moved_records:
+         if re.search(rf"\bstruct\s+{record}\b", source):
+            errors.append(f"{path.relative_to(root)}: {record} belongs to forge.chain.protocol")
+
+
 def check_modules(root: Path, files: list[Path], errors: list[str]) -> None:
    declarations: dict[str, list[tuple[Path, int]]] = defaultdict(list)
    imports: list[tuple[str, Path, int]] = []
@@ -512,6 +585,7 @@ def main() -> int:
    check_contract_sdk_workflow(root, errors)
    check_contract_sdk_components(root, errors)
    check_eosio_veneer(root, errors)
+   check_contract_sdk_architecture(root, errors)
    check_modules(root, files, errors)
 
    if errors:

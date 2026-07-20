@@ -362,11 +362,9 @@ implementation-library namespaces. For plugin family/role decisions, follow
 - Do not shell out to an external `openssl` binary for key or certificate generation.
 - Specialized crypto libraries may remain optional targets when they have clear tests and isolated dependencies.
 - K1 compatibility must not be replaced with generic OpenSSL ECDSA behavior.
-- `forge.crypto.base58` must expose byte-friendly APIs using
-  `std::span<const std::uint8_t>` and `std::vector<std::uint8_t>` for new
-  multiformats/libp2p work. Existing `char` / `std::vector<char>` overloads may
-  remain as compatibility wrappers, but new network code must not scatter
-  casts between `char` and byte containers.
+- Base64, Base58 and hexadecimal encoding belong only to the dual-target
+  `forge.codec` leaf libraries. Crypto, contract, multiformats and network code
+  must consume those byte-native APIs instead of defining encoding algorithms.
 - `forge_crypto` stays synchronous and low-level. Do not import `forge_asio`,
   schedulers, threads or runtime policy into crypto primitives.
 - WebAuthn parsing must stay private to `forge_crypto` and must not reintroduce a

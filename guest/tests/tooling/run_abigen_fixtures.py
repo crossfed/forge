@@ -13,6 +13,12 @@ MODULES = (
     "forge.raw.stream",
     "forge.raw.varint_value",
     "forge.raw.codec",
+    "forge.codec.base64.exceptions",
+    "forge.codec.base64",
+    "forge.codec.base58.exceptions",
+    "forge.codec.base58",
+    "forge.codec.hex.exceptions",
+    "forge.codec.hex",
     "forge.crypto.sha256:value",
     "forge.crypto.sha256",
     "forge.crypto.sha512:value",
@@ -37,6 +43,14 @@ MODULES = (
     "forge.chain.protocol.producer_authority",
     "forge.chain.protocol.system:value",
     "forge.chain.protocol.system",
+    "forge.chain.protocol.code_hash_result",
+    "forge.chain.protocol.blockchain_parameters",
+    "forge.chain.protocol.kv_parameters",
+    "forge.chain.protocol.finalizer_authority",
+    "forge.chain.protocol.finalizer_policy",
+    "forge.chain.protocol.hash_id",
+    "forge.chain.protocol.call_access_mode",
+    "forge.chain.protocol.call_data_header",
     "forge.contract.intrinsics",
     "forge.contract",
     "forge.contract.datastream",
@@ -46,7 +60,6 @@ MODULES = (
     "forge.contract.ignore",
     "forge.contract.hash_id",
     "forge.contract.action",
-    "forge.contract.base64",
     "forge.contract.transaction",
     "forge.contract.system",
     "forge.contract.deferred_transaction",
@@ -75,6 +88,12 @@ MODULE_TARGETS = {
     module: (
         "forge_guest_raw"
         if module.startswith("forge.raw.")
+        else "forge_guest_codec_base64"
+        if module.startswith("forge.codec.base64")
+        else "forge_guest_codec_base58"
+        if module.startswith("forge.codec.base58")
+        else "forge_guest_codec_hex"
+        if module.startswith("forge.codec.hex")
         else "forge_guest_crypto"
         if module.startswith("forge.crypto.")
         else "forge_guest_chain_protocol"

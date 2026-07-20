@@ -353,9 +353,10 @@ selected beside it, including versioned pairs such as `clang++-22` and
 may be supplied by a separate lld package, as it is in Homebrew.
 
 Developer mode copies `FORGE_CONTRACT_SYSROOT` into a build-owned staged
-sysroot before adding `libforge_guest_runtime.a`. The supplied directory is
-never modified. The staged archive is included in `sysroot.sha256` and checked
-by `ForgeContractConfig.cmake` when a consumer loads the package.
+sysroot before adding the guest runtime and codec archives. The supplied
+directory is never modified. The staged archives are included in
+`sysroot.sha256` and checked by `ForgeContractConfig.cmake` when a consumer
+loads the package.
 
 Release mode builds the exact pinned LLVM and guest runtimes from source. Use
 `FORGE_CONTRACT_JOBS=4` to bound superbuild parallelism.
