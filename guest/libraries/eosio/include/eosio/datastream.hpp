@@ -77,6 +77,7 @@ namespace detail {
 
 template <typename Stream, typename T> Stream& write(Stream& stream, const T& value) {
    if constexpr (std::is_array_v<T>) {
+      // CDT fixed C arrays are length-prefixed; std::array is not.
       ::forge::raw::pack(stream, ::forge::unsigned_int{std::extent_v<T>});
       for (const auto& item : value) {
          stream << item;
@@ -97,6 +98,7 @@ template <typename Stream, typename T> Stream& write(Stream& stream, const T& va
 
 template <typename Stream, typename T> Stream& read(Stream& stream, T& value) {
    if constexpr (std::is_array_v<T>) {
+      // Keep the donor size check before reading the fixed storage.
       auto size = ::forge::unsigned_int{};
       ::forge::raw::unpack(stream, size);
       ::forge::raw::detail::require(size.value == std::extent_v<T>, "T[] size and unpacked size don't match");

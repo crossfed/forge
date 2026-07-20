@@ -363,6 +363,17 @@ BOOST_AUTO_TEST_CASE(legacy_dispatcher_serializes_user_defined_action_records) {
    BOOST_TEST(host.return_value == record, boost::test_tools::per_element());
 }
 
+BOOST_AUTO_TEST_CASE(legacy_fixed_c_arrays_preserve_cdt_length_framing) {
+   register_intrinsics();
+   const auto code = read_contract(FORGE_CONTRACT_TEST_LEGACY_WASM);
+   auto host = invocation{};
+
+   BOOST_CHECK_NO_THROW(apply(code, host, "legacyhello", "arraywire"));
+   const auto packed = forge::raw::unpack_exact<std::vector<char>>(host.return_value);
+   const auto expected = std::vector<char>{2, 7, 0, 0, 0, 9, 0, 0, 0};
+   BOOST_TEST(packed == expected, boost::test_tools::per_element());
+}
+
 BOOST_AUTO_TEST_CASE(legacy_dispatcher_preserves_cdt_trailing_action_data_semantics) {
    register_intrinsics();
    const auto code = read_contract(FORGE_CONTRACT_TEST_LEGACY_WASM);
