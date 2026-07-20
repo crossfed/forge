@@ -209,10 +209,11 @@ std::vector<std::uint8_t> signed_key_der(std::span<const std::uint8_t> public_ke
 std::vector<std::uint8_t> tls_identity_message(std::span<const std::uint8_t> certificate_public_key);
 
 test_identity make_secp256k1_identity() {
-   auto private_key = forge::crypto::asymmetric::private_key::generate<forge::crypto::secp256k1::private_key_shim>();
+   auto private_key = forge::crypto::asymmetric::private_key::generate<forge::crypto::secp256k1::private_key>();
    auto key = public_key{
        .type = public_key::type::secp256k1,
-       .data = bytes_from_range(private_key.get_public_key().as<forge::crypto::secp256k1::public_key_shim>().serialize()),
+       .data = bytes_from_range(
+          std::get<forge::crypto::asymmetric::k1_public_key>(private_key.get_public_key()).serialize()),
    };
    auto out = test_identity{.key = std::move(key), .private_key = private_key};
    out.peer = make_peer_id(out.key);
@@ -220,7 +221,7 @@ test_identity make_secp256k1_identity() {
 }
 
 test_identity make_p256_identity() {
-   auto private_key = forge::crypto::asymmetric::private_key::generate_p256<forge::crypto::p256::private_key_shim>();
+   auto private_key = forge::crypto::asymmetric::private_key::generate_p256<forge::crypto::p256::private_key>();
    auto key = public_key{
        .type = public_key::type::ecdsa,
        .data = forge::crypto::der::write_public_key(private_key.get_public_key()),
@@ -231,10 +232,10 @@ test_identity make_p256_identity() {
 }
 
 test_identity make_rsa_identity() {
-   auto private_key = forge::crypto::asymmetric::private_key::generate<forge::crypto::rsa::private_key_shim>();
+   auto private_key = forge::crypto::asymmetric::private_key::generate<forge::crypto::rsa::private_key>();
    auto key = public_key{
        .type = public_key::type::rsa,
-       .data = private_key.get_public_key().as<forge::crypto::rsa::public_key_shim>().serialize(),
+       .data = std::get<forge::crypto::asymmetric::rsa_public_key>(private_key.get_public_key()).serialize(),
    };
    auto out = test_identity{.key = std::move(key), .private_key = private_key};
    out.peer = make_peer_id(out.key);
@@ -325,9 +326,9 @@ test_certificate_identity make_test_certificate_identity(std::string_view common
        .data = forge::crypto::der::write_public_key(identity_private_key.get_public_key()),
    };
    const auto spki = certificate_public_key_der(certificate.get());
-   const auto signature = identity_private_key.sign(tls_identity_message(spki)).visit([](const auto& value) {
-      return bytes_from_range(value.serialize());
-   });
+   const auto signature = bytes_from_range(
+      std::get<forge::crypto::asymmetric::rsa_signature>(identity_private_key.sign(tls_identity_message(spki)))
+         .serialize());
    const auto extension_value = signed_key_der(encode_public_key(identity_key), signature);
    auto object = std::unique_ptr<ASN1_OBJECT, asn1_object_deleter>{OBJ_txt2obj("1.3.6.1.4.1.53594.1.1", 1)};
    auto octets = std::unique_ptr<ASN1_OCTET_STRING, asn1_octet_string_deleter>{ASN1_OCTET_STRING_new()};
@@ -563,12 +564,12 @@ std::vector<std::uint8_t> tls_identity_message(std::span<const std::uint8_t> cer
 std::vector<std::uint8_t> sign_test_identity(const test_identity& identity, std::span<const std::uint8_t> message) {
    return identity.private_key.visit([&](const auto& key) -> std::vector<std::uint8_t> {
       using key_type = std::decay_t<decltype(key)>;
-      if constexpr (std::is_same_v<key_type, forge::crypto::secp256k1::private_key_shim>) {
+      if constexpr (std::is_same_v<key_type, forge::crypto::secp256k1::private_key>) {
          return forge::crypto::secp256k1::sign_der(key, message);
-      } else if constexpr (std::is_same_v<key_type, forge::crypto::p256::private_key_shim>) {
+      } else if constexpr (std::is_same_v<key_type, forge::crypto::p256::private_key>) {
          return forge::crypto::p256::sign_der(key, message);
       } else {
-         return bytes_from_range(key.sign(message).serialize());
+         return bytes_from_range(key.sign(message));
       }
    });
 }

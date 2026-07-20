@@ -12,6 +12,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 import forge.crypto.asymmetric;
@@ -661,7 +662,7 @@ BOOST_AUTO_TEST_CASE(transaction_signature_preimage_digest_and_spring_signature_
 
    const auto signature = parse_spring_signature(spring::transaction_signature);
    const auto recovered =
-       protocol::public_key{signature, core::digest{std::string{spring::transaction_signature_digest}}};
+       forge::crypto::asymmetric::recover(signature, core::digest{std::string{spring::transaction_signature_digest}});
    BOOST_TEST(format_spring_public_key(recovered) == expected(spring::test_public_key));
 }
 
@@ -774,7 +775,7 @@ BOOST_AUTO_TEST_CASE(block_header_receipt_and_signed_block_match_spring_fixtures
    BOOST_TEST(protocol::calculate_block_num_from_id(protocol::calculate_block_id(header)) == spring::block_num_from_id);
 
    const auto signature = parse_spring_signature(spring::block_signature);
-   const auto recovered = protocol::public_key{signature, protocol::calculate_block_id(header)};
+   const auto recovered = forge::crypto::asymmetric::recover(signature, protocol::calculate_block_id(header));
    BOOST_TEST(format_spring_public_key(recovered) == expected(spring::test_public_key));
 
    const auto signed_header = make_reference_signed_block_header();
@@ -810,22 +811,23 @@ BOOST_AUTO_TEST_CASE(forge_secp256k1_is_the_crypto_surface_for_runtime_signature
    const auto digest = forge::crypto::sha256{std::string{spring::transaction_signature_digest}};
    const auto signature = private_key.sign_digest(digest);
    const auto public_key = private_key.get_public_key();
-   const auto recovered_key = forge::crypto::asymmetric::public_key{signature, digest};
-   const auto signature_text = signature.to_string();
-   const auto public_key_text = public_key.to_string();
+   const auto recovered_key = forge::crypto::asymmetric::recover(signature, digest);
+   const auto signature_text = forge::crypto::asymmetric::encoding::forge().format(signature);
+   const auto public_key_text = forge::crypto::asymmetric::encoding::forge().format(public_key);
    const auto signature_bytes = forge::raw::pack(signature);
    const auto public_key_bytes = forge::raw::pack(public_key);
-   const auto parsed_signature = forge::crypto::asymmetric::signature{signature_text};
-   const auto parsed_public_key = forge::crypto::asymmetric::public_key{public_key_text};
+   const auto parsed_signature = forge::crypto::asymmetric::encoding::forge().parse_signature(signature_text);
+   const auto parsed_public_key = forge::crypto::asymmetric::encoding::forge().parse_public(public_key_text);
    const auto unpacked_signature = forge::raw::unpack<forge::crypto::asymmetric::signature>(signature_bytes);
    const auto unpacked_public_key = forge::raw::unpack<forge::crypto::asymmetric::public_key>(public_key_bytes);
 
-   BOOST_TEST(static_cast<int>(signature.type()) == static_cast<int>(forge::crypto::asymmetric::algorithm::secp256k1));
+   BOOST_TEST(static_cast<int>(forge::crypto::asymmetric::type(signature)) ==
+              static_cast<int>(forge::crypto::asymmetric::algorithm::secp256k1));
    BOOST_TEST(recovered_key == public_key);
-   BOOST_TEST(parsed_signature.to_string() == signature_text);
-   BOOST_TEST(parsed_public_key.to_string() == public_key_text);
-   BOOST_TEST(unpacked_signature.to_string() == signature_text);
-   BOOST_TEST(unpacked_public_key.to_string() == public_key_text);
+   BOOST_TEST(forge::crypto::asymmetric::encoding::forge().format(parsed_signature) == signature_text);
+   BOOST_TEST(forge::crypto::asymmetric::encoding::forge().format(parsed_public_key) == public_key_text);
+   BOOST_TEST(forge::crypto::asymmetric::encoding::forge().format(unpacked_signature) == signature_text);
+   BOOST_TEST(forge::crypto::asymmetric::encoding::forge().format(unpacked_public_key) == public_key_text);
 
    const auto spring_public_key = parse_spring_public_key(spring::test_public_key);
    BOOST_TEST(format_spring_public_key(spring_public_key) == expected(spring::test_public_key));

@@ -102,7 +102,7 @@ auto expected_public_key = private_key.get_public_key();
 auto message = command.signing_bytes();
 auto signature = private_key.sign(message);
 
-auto verified = expected_public_key.verify(message, signature);
+auto verified = forge::crypto::asymmetric::verify(expected_public_key, message, signature);
 ```
 
 Store golden raw bytes for protocol DTOs in tests. That catches accidental

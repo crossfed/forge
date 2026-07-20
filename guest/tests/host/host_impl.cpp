@@ -692,9 +692,9 @@ std::int32_t host::impl::recover_key(checksum256_input digest, std::span<const c
    const auto packed_signature = as_bytes(signature);
    const auto value = forge::raw::unpack_exact<forge::crypto::asymmetric::signature>(packed_signature);
    const auto recovered =
-       forge::crypto::asymmetric::public_key{value, read_digest<forge::crypto::sha256>(*digest.get()), false};
+       forge::crypto::asymmetric::recover(value, read_digest<forge::crypto::sha256>(*digest.get()), false);
    const auto packed = forge::raw::pack(recovered);
-   if (value.which() >= 2U) {
+   if (forge::crypto::asymmetric::index(value) >= 2U) {
       if (public_key.size() < 33U) {
          FORGE_THROW_EXCEPTION(exceptions::assertion_failure,
                                "destination buffer must at least be able to hold an ECC public key");

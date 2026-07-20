@@ -206,12 +206,12 @@ auto action = signed_action{
 
 auto message = action.signing_bytes(chain_id);
 auto signature = private_key.sign(message);
-auto verified = public_key.verify(message, signature);
+auto verified = forge::crypto::asymmetric::verify(public_key, message, signature);
 ```
 
 `forge::crypto::asymmetric::algorithm` is a described enum, so schema and
-Variant boundaries use the stable names `secp256k1`, `p256`, `ed25519` and
-`rsa` rather than numeric values.
+Variant boundaries use the stable names `secp256k1`, `p256`, `webauthn`,
+`ed25519` and `rsa` rather than numeric values.
 
 ### Generate A P-256 Key Explicitly
 
@@ -235,7 +235,7 @@ auto action = signed_action{
 
 auto message = action.signing_bytes(chain_id);
 auto signature = private_key.sign(message);
-auto verified = public_key.verify(message, signature);
+auto verified = forge::crypto::asymmetric::verify(public_key, message, signature);
 ```
 
 Secp256k1 and P-256 have different compatibility expectations. Keep tests for
