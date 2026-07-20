@@ -358,6 +358,7 @@ add_custom_target(
 
 set(_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(_sysroot_hash "${_generated_dir}/sysroot.sha256")
+set(_foundation_manifest "${_generated_dir}/foundation.json")
 set(_intrinsic_registry "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/include/forge/contract/intrinsics.hpp")
 set(_intrinsic_manifest "${_generated_dir}/intrinsics.json")
 set(
@@ -413,9 +414,9 @@ add_custom_target(
 )
 
 ExternalProject_Add(
-   forge_contract_guest_runtime
+   forge_contract_guest_foundation
    DEPENDS forge_contract_stage_sysroot forge_contract_intrinsic_manifest
-   SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libraries/runtime"
+   SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/cmake/foundation-build"
    DOWNLOAD_COMMAND ""
    UPDATE_COMMAND ""
    PATCH_COMMAND ""
@@ -437,40 +438,30 @@ ExternalProject_Add(
       -DCMAKE_AR=${FORGE_CONTRACT_LLVM_AR}
       -DCMAKE_RANLIB=${FORGE_CONTRACT_LLVM_RANLIB}
       -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
+      -DFORGE_SOURCE_DIR=${_forge_contract_source_root}
       -DFORGE_GUEST_INCLUDE_DIR=${_generated_dir}/include
       -DFORGE_GUEST_LIBC_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../vendor/cdt-musl
+      -DFORGE_GUEST_BOOST_INCLUDE_DIR=${_forge_contract_boost_include}
    BUILD_ALWAYS TRUE
    BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> -j ${FORGE_CONTRACT_JOBS}
    INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
 )
 
-ExternalProject_Add(
-   forge_contract_guest_codecs
-   DEPENDS forge_contract_guest_runtime
-   SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec"
-   DOWNLOAD_COMMAND ""
-   UPDATE_COMMAND ""
-   PATCH_COMMAND ""
-   CMAKE_GENERATOR Ninja
-   CMAKE_ARGS
-      -DCMAKE_BUILD_TYPE=Release
-      -DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
-      -DCMAKE_INSTALL_PREFIX=${FORGE_CONTRACT_SYSROOT}
-      -DCMAKE_SYSTEM_NAME=Generic
-      -DCMAKE_SYSTEM_PROCESSOR=wasm32
-      -DCMAKE_SYSROOT=${FORGE_CONTRACT_SYSROOT}
-      -DCMAKE_OSX_SYSROOT=
-      -DCMAKE_CXX_COMPILER=${FORGE_CONTRACT_CLANG}
-      -DCMAKE_CXX_COMPILER_TARGET=wasm32
-      -DCMAKE_CXX_FLAGS=${_forge_contract_path_map_flags}
-      -DCMAKE_AR=${FORGE_CONTRACT_LLVM_AR}
-      -DCMAKE_RANLIB=${FORGE_CONTRACT_LLVM_RANLIB}
-      -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
-      -DFORGE_SOURCE_DIR=${_forge_contract_source_root}
-      -DFORGE_GUEST_INCLUDE_DIR=${_generated_dir}/include
-   BUILD_ALWAYS TRUE
-   BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> -j ${FORGE_CONTRACT_JOBS}
-   INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
+add_custom_command(
+   OUTPUT "${_foundation_manifest}"
+   COMMAND
+      ${Python3_EXECUTABLE}
+      "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate_foundation_manifest.py"
+      --lib-dir "${FORGE_CONTRACT_SYSROOT}/lib"
+      --output "${_foundation_manifest}"
+   DEPENDS
+      forge_contract_guest_foundation
+      "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate_foundation_manifest.py"
+   VERBATIM
+)
+add_custom_target(
+   forge_contract_foundation_manifest ALL
+   DEPENDS "${_foundation_manifest}"
 )
 
 add_custom_target(
@@ -480,7 +471,7 @@ add_custom_target(
       "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hash_tree.py"
       --root "${FORGE_CONTRACT_SYSROOT}"
       --output "${_sysroot_hash}"
-   DEPENDS forge_contract_guest_codecs "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hash_tree.py"
+   DEPENDS forge_contract_foundation_manifest "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hash_tree.py"
    BYPRODUCTS "${_sysroot_hash}"
    VERBATIM
 )
@@ -537,32 +528,6 @@ install(
    DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/include/boost"
 )
 install(
-   FILES
-      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/raw/stream.cpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/raw/codec.cpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/values.cpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/time.cpp"
-      libraries/contract/action.cpp
-      libraries/contract/authorization.cpp
-      libraries/contract/bitset.cpp
-      libraries/contract/call.cpp
-      libraries/contract/compatibility_asset.cpp
-      libraries/contract/crypto.cpp
-      libraries/contract/crypto_bls_ext.cpp
-      libraries/contract/crypto_ext.cpp
-      libraries/contract/deferred_transaction.cpp
-      libraries/contract/dispatcher.cpp
-      libraries/contract/instant_finality.cpp
-      libraries/contract/intrinsics.cpp
-      libraries/contract/print.cpp
-      libraries/contract/privileged.cpp
-      libraries/contract/producer_schedule.cpp
-      libraries/contract/rope.cpp
-      libraries/contract/system.cpp
-      libraries/contract/transaction.cpp
-   DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/runtime"
-)
-install(
    FILES "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/exceptions/include/forge/exceptions/policy.hpp"
    DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/include/forge/exceptions"
 )
@@ -577,7 +542,7 @@ install(
    DESTINATION .
 )
 install(FILES "${_intrinsic_manifest}" DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/registry")
-install(FILES "${_sysroot_hash}" DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract")
+install(FILES "${_sysroot_hash}" "${_foundation_manifest}" DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract")
 
 install(
    FILES

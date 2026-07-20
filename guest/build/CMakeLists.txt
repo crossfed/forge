@@ -26,11 +26,13 @@ list(REMOVE_AT _implementation_sources 0)
 
 set(_modules "${FORGE_CONTRACT_DATA_DIR}/modules")
 set(_include "${FORGE_CONTRACT_DATA_DIR}/include")
-set(_runtime "${FORGE_CONTRACT_DATA_DIR}/runtime")
 set(_runtime_archive "${CMAKE_SYSROOT}/lib/libforge_guest_runtime.a")
+set(_raw_archive "${CMAKE_SYSROOT}/lib/libforge_guest_raw.a")
 set(_codec_base64_archive "${CMAKE_SYSROOT}/lib/libforge_guest_codec_base64.a")
 set(_codec_base58_archive "${CMAKE_SYSROOT}/lib/libforge_guest_codec_base58.a")
 set(_codec_hex_archive "${CMAKE_SYSROOT}/lib/libforge_guest_codec_hex.a")
+set(_chain_protocol_archive "${CMAKE_SYSROOT}/lib/libforge_guest_chain_protocol.a")
+set(_contract_archive "${CMAKE_SYSROOT}/lib/libforge_guest_contract.a")
 set(_generated "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(_abi "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_TARGET}.abi")
 set(_dispatcher "${_generated}/${FORGE_CONTRACT_TARGET}.dispatcher.cpp")
@@ -44,7 +46,7 @@ set(_depfile "${_generated}/${FORGE_CONTRACT_TARGET}.abi.d")
 set(_manifest "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_TARGET}.contract.json")
 set(_contract_optimization "$<$<NOT:$<CONFIG:Debug>>:-O3>")
 
-add_library(forge_guest_raw STATIC "${_runtime}/stream.cpp" "${_runtime}/codec.cpp")
+add_library(forge_guest_raw STATIC)
 target_sources(
    forge_guest_raw
    PUBLIC
@@ -55,6 +57,9 @@ target_sources(
          "${_modules}/forge/raw/varint_value.cppm"
          "${_modules}/forge/raw/codec.cppm"
 )
+add_library(forge_guest_raw_implementation STATIC IMPORTED GLOBAL)
+set_target_properties(forge_guest_raw_implementation PROPERTIES IMPORTED_LOCATION "${_raw_archive}")
+target_link_libraries(forge_guest_raw PUBLIC forge_guest_raw_implementation)
 
 add_library(forge_guest_codec_base64 STATIC)
 target_sources(
@@ -117,7 +122,7 @@ target_sources(
 )
 target_link_libraries(forge_guest_crypto PUBLIC forge_guest_raw)
 
-add_library(forge_guest_chain_protocol STATIC "${_runtime}/values.cpp" "${_runtime}/time.cpp")
+add_library(forge_guest_chain_protocol STATIC)
 target_sources(
    forge_guest_chain_protocol
    PUBLIC
@@ -148,9 +153,30 @@ target_sources(
          "${_modules}/forge/chain/protocol/call_access_mode.cppm"
          "${_modules}/forge/chain/protocol/call_data_header.cppm"
 )
-target_link_libraries(forge_guest_chain_protocol PUBLIC forge_guest_raw forge_guest_crypto)
+add_library(forge_guest_chain_protocol_implementation STATIC IMPORTED GLOBAL)
+set_target_properties(
+   forge_guest_chain_protocol_implementation
+   PROPERTIES IMPORTED_LOCATION "${_chain_protocol_archive}"
+)
+target_link_libraries(
+   forge_guest_chain_protocol
+   PUBLIC
+      forge_guest_chain_protocol_implementation
+      forge_guest_raw
+      forge_guest_crypto
+)
 
-foreach(_archive IN ITEMS "${_runtime_archive}" "${_codec_base64_archive}" "${_codec_base58_archive}" "${_codec_hex_archive}")
+foreach(
+   _archive
+   IN ITEMS
+      "${_runtime_archive}"
+      "${_raw_archive}"
+      "${_codec_base64_archive}"
+      "${_codec_base58_archive}"
+      "${_codec_hex_archive}"
+      "${_chain_protocol_archive}"
+      "${_contract_archive}"
+)
    if(NOT EXISTS "${_archive}")
       message(FATAL_ERROR "Forge Contract sysroot is missing ${_archive}")
    endif()
@@ -158,27 +184,7 @@ endforeach()
 add_library(forge_guest_runtime STATIC IMPORTED GLOBAL)
 set_target_properties(forge_guest_runtime PROPERTIES IMPORTED_LOCATION "${_runtime_archive}")
 
-add_library(
-   forge_guest_contract STATIC
-   "${_runtime}/action.cpp"
-   "${_runtime}/authorization.cpp"
-   "${_runtime}/bitset.cpp"
-   "${_runtime}/call.cpp"
-   "${_runtime}/compatibility_asset.cpp"
-   "${_runtime}/crypto.cpp"
-   "${_runtime}/crypto_bls_ext.cpp"
-   "${_runtime}/crypto_ext.cpp"
-   "${_runtime}/deferred_transaction.cpp"
-   "${_runtime}/dispatcher.cpp"
-   "${_runtime}/instant_finality.cpp"
-   "${_runtime}/intrinsics.cpp"
-   "${_runtime}/print.cpp"
-   "${_runtime}/privileged.cpp"
-   "${_runtime}/producer_schedule.cpp"
-   "${_runtime}/rope.cpp"
-   "${_runtime}/system.cpp"
-   "${_runtime}/transaction.cpp"
-)
+add_library(forge_guest_contract STATIC)
 target_sources(
    forge_guest_contract
    PUBLIC
@@ -217,9 +223,12 @@ target_sources(
          "${_modules}/forge/contract/compatibility_name.cppm"
          "${_modules}/forge/contract/compatibility_asset.cppm"
 )
+add_library(forge_guest_contract_implementation STATIC IMPORTED GLOBAL)
+set_target_properties(forge_guest_contract_implementation PROPERTIES IMPORTED_LOCATION "${_contract_archive}")
 target_link_libraries(
    forge_guest_contract
    PUBLIC
+      forge_guest_contract_implementation
       forge_guest_raw
       forge_guest_chain_protocol
       forge_guest_codec_base64

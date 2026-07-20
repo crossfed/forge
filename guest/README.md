@@ -44,9 +44,9 @@ tar -xzf forge-contract-sdk-8.5.0-macos-arm64.tar.gz
 export ForgeContract_DIR="$PWD/forge-contract-sdk-8.5.0-macos-arm64/lib/cmake/ForgeContract"
 ```
 
-The archive includes pinned compiler tools, the wasm32 sysroot with the
-prebuilt `libforge_guest_runtime.a`, Forge contract modules, ABI tools,
-validation tools, and an example under
+The archive includes pinned compiler tools, the wasm32 sysroot with prebuilt
+runtime, raw, codec, chain protocol and contract implementation archives,
+Forge contract modules, ABI tools, validation tools, and an example under
 `share/forge-contract/examples/hello`.
 
 ## Build A Contract
@@ -220,8 +220,10 @@ iterators, algorithms, tuples, optional, variant, span, string views, concepts,
 numeric types and utilities.
 
 Dynamic allocation uses the CDT-derived linear-memory allocator behind normal
-C++ and C APIs. The allocator is compiled once into the SDK sysroot; each
-contract links the finished archive instead of rebuilding its sources:
+C++ and C APIs. All non-template Forge guest implementation is compiled once
+into the SDK sysroot. Each contract compiles module interfaces only to produce
+compiler-local BMI files and links the finished archives instead of rebuilding
+Forge sources:
 
 ```cpp
 #include <cstddef>
@@ -353,10 +355,11 @@ selected beside it, including versioned pairs such as `clang++-22` and
 may be supplied by a separate lld package, as it is in Homebrew.
 
 Developer mode copies `FORGE_CONTRACT_SYSROOT` into a build-owned staged
-sysroot before adding the guest runtime and codec archives. The supplied
-directory is never modified. The staged archives are included in
-`sysroot.sha256` and checked by `ForgeContractConfig.cmake` when a consumer
-loads the package.
+sysroot before adding the guest foundation archives. The supplied directory is
+never modified. `foundation.json` records the name and SHA-256 of every runtime,
+raw, codec, chain protocol, contract and math archive. The complete staged tree
+is also covered by `sysroot.sha256`; `ForgeContractConfig.cmake` verifies the
+foundation manifest without exposing internal archive paths as consumer API.
 
 Release mode builds the exact pinned LLVM and guest runtimes from source. Use
 `FORGE_CONTRACT_JOBS=4` to bound superbuild parallelism.
