@@ -1,4 +1,5 @@
 #include <concepts>
+#include <eosio/crypto.hpp>
 
 import forge.chain.protocol.blockchain_parameters;
 import forge.chain.protocol.call_access_mode;
@@ -8,8 +9,10 @@ import forge.chain.protocol.finalizer_policy;
 import forge.chain.protocol.hash_id;
 import forge.chain.protocol.kv_parameters;
 import forge.chain.protocol.system;
+import forge.chain.protocol.types;
 import forge.contract.action;
 import forge.contract.call;
+import forge.contract.crypto;
 import forge.contract.deferred_transaction;
 import forge.contract.hash_id;
 import forge.contract.instant_finality;
@@ -24,3 +27,7 @@ static_assert(std::same_as<forge::contract::hash_id, forge::chain::protocol::has
 static_assert(std::same_as<forge::contract::access_mode, forge::chain::protocol::call_access_mode>);
 static_assert(std::same_as<forge::contract::call_data_header, forge::chain::protocol::call_data_header>);
 static_assert(std::derived_from<forge::contract::onerror, forge::chain::protocol::onerror>);
+static_assert(std::same_as<forge::contract::public_key, forge::chain::protocol::public_key>);
+static_assert(std::same_as<forge::contract::signature, forge::chain::protocol::signature>);
+static_assert(std::same_as<eosio::public_key, forge::chain::protocol::public_key>);
+static_assert(std::same_as<eosio::signature, forge::chain::protocol::signature>);

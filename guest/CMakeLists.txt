@@ -447,8 +447,8 @@ ExternalProject_Add(
    INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
 )
 
-add_custom_command(
-   OUTPUT "${_foundation_manifest}"
+add_custom_target(
+   forge_contract_foundation_manifest ALL
    COMMAND
       ${Python3_EXECUTABLE}
       "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate_foundation_manifest.py"
@@ -457,11 +457,8 @@ add_custom_command(
    DEPENDS
       forge_contract_guest_foundation
       "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate_foundation_manifest.py"
+   BYPRODUCTS "${_foundation_manifest}"
    VERBATIM
-)
-add_custom_target(
-   forge_contract_foundation_manifest ALL
-   DEPENDS "${_foundation_manifest}"
 )
 
 add_custom_target(

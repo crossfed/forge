@@ -233,6 +233,9 @@ protocol::signed_block make_reference_signed_block() {
 
 BOOST_AUTO_TEST_SUITE(forge_chain_protocol_compatibility)
 
+static_assert(std::is_same_v<protocol::public_key, forge::crypto::asymmetric::public_key>);
+static_assert(std::is_same_v<protocol::signature, forge::crypto::asymmetric::signature>);
+
 BOOST_AUTO_TEST_CASE(fixed_key_matches_donor_word_and_byte_order) {
    const auto high = static_cast<protocol::uint128_t>(0x0102030405060708ULL) << 64U |
                      static_cast<protocol::uint128_t>(0x1112131415161718ULL);

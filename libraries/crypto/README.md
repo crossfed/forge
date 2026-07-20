@@ -31,7 +31,11 @@ Byte encodings are independent `forge.codec.base64`, `forge.codec.base58` and
 
 Keys and signatures:
 
-- `forge.crypto.asymmetric`, `secp256k1`, `p256`, `ed25519`, `rsa`,
+- `forge.crypto.asymmetric.value` owns the dual-target K1, R1, WebAuthn,
+  Ed25519 and RSA value variants;
+- `forge.crypto.asymmetric` owns host key generation, signing, validation,
+  verification, recovery and text encoding over those same values;
+- `forge.crypto.secp256k1`, `p256`, `ed25519`, `rsa`,
   `x25519`, `webauthn`, `bls`;
 - `forge.crypto.bn256` and `forge.crypto.bls.primitives` expose the
   contract-visible BN254 and BLS operations used by Spring intrinsics without
@@ -597,7 +601,7 @@ auto digest = webauthn_challenge_payload{
    .session = 42,
    .origin = "https://example.invalid",
 }.digest();
-auto recovered = webauthn_signature.recover(digest, true);
+auto recovered = forge::crypto::asymmetric::recover(signature, digest, true);
 ```
 
 WebAuthn client data parsing is private to `forge_crypto`; no JSON backend type is
@@ -606,7 +610,8 @@ recovery tests together when touching this code.
 
 ## Security Notes
 
-- `private_key::to_string()` is secret material. Do not print it in diagnostics.
+- `asymmetric::encoding::forge().format(private_key)` is secret material. Do
+  not print it in diagnostics.
 - Use explicit redaction in config/log/TUI layers before rendering crypto values.
 - OpenSSL 3.0+ is the only SSL/TLS-related crypto backend expected by FORGE
   consumers.

@@ -92,6 +92,14 @@ def main() -> None:
         fail("intrinsic signatures differ from the pinned CDT/Spring golden manifest")
 
     include = args.data_dir / "include"
+    installed_sources = sorted(
+        relative
+        for suffix in ("*.cpp", "*.hxx")
+        for path in args.data_dir.rglob(suffix)
+        if (relative := path.relative_to(args.data_dir)).parts[0] != "examples"
+    )
+    if installed_sources:
+        fail(f"SDK installs Forge implementation sources: {', '.join(map(str, installed_sources))}")
     require_boost_header_closure(include)
     require_files(include, surface["donor_c_headers"], "CDT C headers")
     require_files(include, surface["canonical_c_headers"], "canonical C headers")

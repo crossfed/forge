@@ -80,7 +80,12 @@ endfunction()
 
 _require_text("${FORGE_CONTRACT_SDK_CMAKE}" "ExternalProject_Add(\n   forge_contract_guest_foundation")
 _require_text("${FORGE_CONTRACT_SDK_CMAKE}" "SOURCE_DIR \"\${CMAKE_CURRENT_SOURCE_DIR}/cmake/foundation-build\"")
-_require_text("${FORGE_CONTRACT_SDK_CMAKE}" "forge_contract_foundation_manifest")
+_require_text(
+   "${FORGE_CONTRACT_SDK_CMAKE}"
+   "add_custom_target(\n   forge_contract_foundation_manifest ALL"
+)
+_require_text("${FORGE_CONTRACT_SDK_CMAKE}" "BYPRODUCTS \"\${_foundation_manifest}\"")
+_reject_text("${FORGE_CONTRACT_SDK_CMAKE}" "OUTPUT \"\${_foundation_manifest}\"")
 _require_text("${FORGE_CONTRACT_SDK_CMAKE}" "add_custom_target(\n   forge_contract_stage_sysroot")
 _reject_text("${FORGE_CONTRACT_SDK_CMAKE}" "forge-contract-sysroot.stamp")
 _reject_text("${FORGE_CONTRACT_SDK_CMAKE}" "forge_contract_guest_runtime")

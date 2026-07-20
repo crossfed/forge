@@ -426,6 +426,10 @@ def check_eosio_veneer(root: Path, errors: list[str]) -> None:
 
 
 def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
+   guest_codec = root / "guest" / "libraries" / "codec"
+   if guest_codec.exists():
+      errors.append("guest/libraries/codec: guest codec forwarding family is forbidden")
+
    forbidden_modules = (
       "forge.core.encoding",
       "forge.crypto.base64",
@@ -438,6 +442,28 @@ def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
       for module in forbidden_modules:
          if module in source:
             errors.append(f"{path.relative_to(root)}: removed codec module {module} is forbidden")
+      for shim in ("public_key_shim", "signature_shim", "private_key_shim"):
+         if shim in source:
+            errors.append(f"{path.relative_to(root)}: removed asymmetric shim {shim} is forbidden")
+
+   asymmetric_value = root / "libraries" / "crypto" / "include" / "forge" / "crypto" / "asymmetric_value.cppm"
+   asymmetric_source = asymmetric_value.read_text(errors="ignore")
+   if "FORGE_CONTRACT_GUEST" in asymmetric_source:
+      errors.append(f"{asymmetric_value.relative_to(root)}: asymmetric values must not have host/guest definitions")
+
+   duplicate_value_roots = (root / "libraries" / "chain" / "protocol", root / "guest" / "libraries")
+   duplicate_value = re.compile(r"\b(?:class|struct)\s+(?:public_key|signature)\b|\busing\s+(?:public_key|signature)\s*=\s*std::variant")
+   for value_root in duplicate_value_roots:
+      for path in source_files(root, (str(value_root.relative_to(root)),)):
+         if duplicate_value.search(path.read_text(errors="ignore")):
+            errors.append(f"{path.relative_to(root)}: asymmetric values belong to forge.crypto.asymmetric.value")
+
+   consumer_build = (root / "guest" / "build" / "CMakeLists.txt").read_text(errors="ignore")
+   implementation_source = re.compile(
+      r'"\$\{_(?:runtime|raw|codec|crypto|protocol|contract)[^}]*\}/[^"\n]+\.(?:cpp|hxx)"'
+   )
+   if implementation_source.search(consumer_build):
+      errors.append("guest/build/CMakeLists.txt: contract consumers must not compile Forge implementation sources")
 
    contract = root / "guest" / "libraries" / "contract"
    include = contract / "include" / "forge" / "contract"

@@ -34,6 +34,67 @@ BOOST_AUTO_TEST_CASE(asymmetric_algorithm_preserves_raw_int32_layout) {
    BOOST_CHECK(forge::raw::unpack<algorithm>(packed) == algorithm::rsa);
 }
 
+BOOST_AUTO_TEST_CASE(asymmetric_values_preserve_spring_wire_tags_and_bytes) {
+   const auto& antelope = encoding::antelope();
+
+   const auto k1_public = antelope.parse_public("EOS6MRyAjQq8ud7hVNYcfnVPJqcVpscN5So8BhtHuGYqET5GDW5CV");
+   BOOST_TEST(forge::codec::hex::encode(forge::raw::pack(k1_public)) ==
+              "0002c0ded2bc1f1305fb0faac5e6c03ee3a1924234985427b6167ca569d13df435cf");
+
+   const auto r1_public = antelope.parse_public("PUB_R1_6EPHFSKVYHBjQgxVGQPrwCxTg7BbZ69H9i4gztN9deKTEXYne4");
+   BOOST_TEST(forge::codec::hex::encode(forge::raw::pack(r1_public)) ==
+              "0102b0deed150ac513f4e0b62d2f7669cb3b36e79e3e7f0a9e021dd013a33eee9c66");
+
+   const auto webauthn_public =
+       antelope.parse_public("PUB_WA_WdCPfafVNxVMiW5ybdNs83oWjenQXvSt1F49fg9mv7qrCiRwHj5b38U3ponCFWxQTkDsMC");
+   const auto webauthn_public_raw = std::string{
+       "020220b9dab512e892392a44a9f41f9433c9fbd80db864e9df5889c2407db3acbb9f010d6b656f73642e696e76616c6964"};
+   BOOST_TEST(forge::codec::hex::encode(forge::raw::pack(webauthn_public)) == webauthn_public_raw);
+   BOOST_CHECK(forge::raw::unpack_exact<public_key>(forge::codec::hex::decode(webauthn_public_raw)) == webauthn_public);
+
+   const auto k1_signature = antelope.parse_signature(
+       "SIG_K1_K3LfbB7ZV2DNBu67iSn3yUMseTdiwoT49gAcwSZVT1QTvGXVHjkcvKqhentCW4FJngZJ1H9gBRSWgo9UPiWEXWHyKpXNCZ");
+   BOOST_TEST(forge::codec::hex::encode(forge::raw::pack(k1_signature)) ==
+              "001f3dcb0d39f609909713176bab7fbd5a11fc4d1597c1d67595173bf824199c6da129a1bf61f232c85b93c433d63715"
+              "ecfce385508ecac1dceb90e45c50969dde80");
+
+   auto r1_bytes = ecc_signature{};
+   for (auto index = std::size_t{}; index < r1_bytes.size(); ++index) {
+      r1_bytes[index] = static_cast<char>(index);
+   }
+   const auto r1_value = signature{r1_signature{r1_bytes}};
+   BOOST_TEST(forge::codec::hex::encode(forge::raw::pack(r1_value)) ==
+              "01000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f202122232425262728292a2b2c2d2e2f"
+              "303132333435363738393a3b3c3d3e3f40");
+
+   const auto webauthn_signature = antelope.parse_signature(
+       "SIG_WA_2AAAuLJS3pLPgkQQPqLsehL6VeRBaAZS7NYM91UYRUrSAEfUvzKN7DCSwhjsDqe74cZNWKUUGAHGG8ddSA7cvUxChbfKxL"
+       "SrDCpwe6MVUqz4PDdyCt5tXhEJmKekxG1o1ucY3LVj8Vi9rRbzAkKPCzWqC8cPcUtpLHNG8qUKkQrN4Xuwa9W8rsBiUKwZv1To"
+       "LyVhLrJe42pvHYBXicp4E8qec5E4m6SX11KuXERFcV48Mhiie2NyaxdtNtNzQ5XZ5hjBkxRujqejpF4SNHvdAGKRBbvhkiPLA25"
+       "FD3xoCbrN26z72");
+   const auto webauthn_signature_raw = std::string{
+       "0220d9132bbdb219e4e2d99af9c507e3597f86b615814f36672d501034861792bbcf21a46d1a2eb12bace4a29100b942f9"
+       "87494f3aefc8efb2d5af4d4d8de3e0871525aa14905af60ca17a1bb80e0cf9c3b46908a0f14f72567a2f140c3a3bd2ef0"
+       "74c010000006d737b226f726967696e223a2268747470733a2f2f6b656f73642e696e76616c6964222c2274797065223a22"
+       "776562617574686e2e676574222c226368616c6c656e6765223a226f69567235794848304a4336453962446675347142735a"
+       "6a527a70416c5131505a50436e5974766850556b3d227d"};
+   BOOST_TEST(forge::codec::hex::encode(forge::raw::pack(webauthn_signature)) == webauthn_signature_raw);
+   BOOST_CHECK(forge::raw::unpack_exact<signature>(forge::codec::hex::decode(webauthn_signature_raw)) ==
+               webauthn_signature);
+}
+
+BOOST_AUTO_TEST_CASE(forge_extension_key_tags_are_explicit) {
+   const auto ed25519_public = public_key{ed25519_public_key{}};
+   const auto rsa_public = public_key{rsa_public_key{{0xaaU, 0xbbU}}};
+   const auto ed25519_value = signature{ed25519_signature{}};
+   const auto rsa_value = signature{rsa_signature{{0xccU, 0xddU}}};
+
+   BOOST_TEST(forge::codec::hex::encode(forge::raw::pack(ed25519_public)).starts_with("03"));
+   BOOST_TEST(forge::codec::hex::encode(forge::raw::pack(rsa_public)) == "0402aabb");
+   BOOST_TEST(forge::codec::hex::encode(forge::raw::pack(ed25519_value)).starts_with("03"));
+   BOOST_TEST(forge::codec::hex::encode(forge::raw::pack(rsa_value)) == "0402ccdd");
+}
+
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
@@ -295,6 +356,21 @@ BOOST_AUTO_TEST_CASE(generic_sign_verify_all_supported_algorithms) try {
       BOOST_CHECK(!verify(pub, wrong_message, sig));
       BOOST_CHECK_EQUAL(encoding::forge().format(pub).substr(0, 4), "PUB_");
       BOOST_CHECK_EQUAL(encoding::forge().format(sig).substr(0, 4), "SIG_");
+   }
+}
+FORGE_LOG_AND_RETHROW();
+
+BOOST_AUTO_TEST_CASE(forge_encoding_roundtrips_all_host_private_keys) try {
+   const auto keys = std::vector<private_key>{
+       private_key::generate<secp256k1::private_key>(),
+       private_key::generate<p256::private_key>(),
+       private_key::generate<ed25519::private_key>(),
+       private_key::generate<rsa::private_key>(),
+   };
+
+   for (const auto& key : keys) {
+      const auto text = encoding::forge().format(key);
+      BOOST_CHECK(encoding::forge().parse_private(text) == key);
    }
 }
 FORGE_LOG_AND_RETHROW();
