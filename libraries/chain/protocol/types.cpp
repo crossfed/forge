@@ -149,7 +149,7 @@ void from_variant(const forge::variant& variant, symbol& value) {
 }
 
 void to_variant(const asset& value, forge::variant& variant) {
-   variant = format_amount(value.amount, value.symbol.precision()) + " " + to_string(value.symbol.code());
+   variant = format_amount(value.amount, value.sym.precision()) + " " + to_string(value.sym.code());
 }
 
 void from_variant(const forge::variant& variant, asset& value) {
