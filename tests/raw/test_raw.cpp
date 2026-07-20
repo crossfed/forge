@@ -18,7 +18,7 @@
 #include <vector>
 
 import forge.exceptions;
-import forge.crypto.hex;
+import forge.codec.hex;
 import forge.crypto.sha256;
 import forge.raw.datastream;
 import forge.raw.exceptions;
@@ -83,14 +83,14 @@ BOOST_AUTO_TEST_SUITE(raw_test_suite)
 
 BOOST_AUTO_TEST_CASE(raw_string_golden_bytes) {
    const auto packed = forge::raw::pack(std::string("abc"));
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(packed), "03616263");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(packed), "03616263");
 }
 
 BOOST_AUTO_TEST_CASE(boost_describe_struct_preserves_fc_reflect_member_order) {
    const A value{2, 2.25f, std::string("abc")};
    const auto packed = forge::raw::pack(value);
 
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(packed), "02000000000010400103616263");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(packed), "02000000000010400103616263");
 
    const auto unpacked = forge::raw::unpack<A>(packed);
    BOOST_CHECK(value == unpacked);
@@ -99,7 +99,7 @@ BOOST_AUTO_TEST_CASE(boost_describe_struct_preserves_fc_reflect_member_order) {
 BOOST_AUTO_TEST_CASE(boost_describe_enum_uses_old_reflected_enum_int64_layout) {
    const auto packed = forge::raw::pack(described_mode::write);
 
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(packed), "0900000000000000");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(packed), "0900000000000000");
 
    const auto unpacked = forge::raw::unpack<described_mode>(packed);
    BOOST_CHECK(unpacked == described_mode::write);
@@ -112,7 +112,7 @@ BOOST_AUTO_TEST_CASE(boost_describe_derived_types_pack_base_first_then_local_mem
 
    const auto packed = forge::raw::pack(value);
 
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(packed), "341256");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(packed), "341256");
 
    const auto unpacked = forge::raw::unpack<described_child>(packed);
    BOOST_CHECK(value == unpacked);
@@ -134,7 +134,7 @@ BOOST_AUTO_TEST_CASE(serialization_macros_instantiate_raw_variant_and_digest_pac
    std::uint8_t buffer[32]{};
    forge::datastream<std::uint8_t*> write_stream(buffer, sizeof(buffer));
    forge::raw::pack(write_stream, value);
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::crypto::bytes(buffer, buffer + write_stream.tellp())),
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(std::span<const std::uint8_t>{buffer, write_stream.tellp()}),
                      "3412046e6f6465");
 
    forge::datastream<const std::uint8_t*> read_stream(buffer, write_stream.tellp());
@@ -156,7 +156,7 @@ BOOST_AUTO_TEST_CASE(raw_pack_uses_canonical_uint8_byte_container) {
    auto bytes = std::vector<std::uint8_t>{};
    forge::raw::pack(bytes, value);
 
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(bytes), forge::crypto::to_hex(packed));
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(bytes), forge::codec::hex::encode(packed));
    BOOST_CHECK(forge::raw::unpack<macro_serialized_record>(bytes) == value);
 
    const auto view = std::span<const std::uint8_t>{bytes.data(), bytes.size()};
@@ -242,12 +242,12 @@ BOOST_AUTO_TEST_CASE(char_and_uint8_values_preserve_spring_wire_bits) {
    const auto chars = std::vector<char>{char{0x00}, char{0x7f}, static_cast<char>(0x80), static_cast<char>(0xff)};
    const auto octets = std::vector<std::uint8_t>{0x00, 0x7f, 0x80, 0xff};
    BOOST_CHECK(forge::raw::pack(chars) == forge::raw::pack(octets));
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::raw::pack(chars)), "04007f80ff");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(chars)), "04007f80ff");
 
    const auto char_wire = forge::raw::pack(static_cast<char>(0xff));
    const auto octet_wire = forge::raw::pack(std::uint8_t{0xff});
    BOOST_CHECK(char_wire == octet_wire);
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(char_wire), "ff");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(char_wire), "ff");
    BOOST_CHECK_EQUAL(static_cast<unsigned char>(forge::raw::unpack<char>(char_wire)), 0xffU);
    BOOST_CHECK_EQUAL(forge::raw::unpack<std::uint8_t>(octet_wire), 0xffU);
 }
@@ -257,12 +257,12 @@ BOOST_AUTO_TEST_CASE(int128_values_preserve_spring_wire_bits_for_all_streams) {
                                static_cast<unsigned __int128>(0x1112131415161718ULL);
    const auto unsigned_wire = forge::raw::pack(unsigned_value);
 
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(unsigned_wire), "18171615141312110807060504030201");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(unsigned_wire), "18171615141312110807060504030201");
    BOOST_CHECK(forge::raw::unpack<unsigned __int128>(unsigned_wire) == unsigned_value);
 
    const auto signed_value = static_cast<__int128>(-2);
    const auto signed_wire = forge::raw::pack(signed_value);
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(signed_wire), "feffffffffffffffffffffffffffffff");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(signed_wire), "feffffffffffffffffffffffffffffff");
    BOOST_CHECK(forge::raw::unpack<__int128>(signed_wire) == signed_value);
 
    auto digest_stream = forge::crypto::sha256::encoder{};
@@ -273,7 +273,7 @@ BOOST_AUTO_TEST_CASE(int128_values_preserve_spring_wire_bits_for_all_streams) {
 
 BOOST_AUTO_TEST_CASE(std_array_pointer_elements_use_element_codec) {
    const auto values = std::array<const char*, 2>{"a", "bc"};
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::raw::pack(values)), "0161026263");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(values)), "0161026263");
 }
 
 BOOST_AUTO_TEST_CASE(std_flat_map_preserves_spring_sorted_map_wire_layout) {
@@ -282,7 +282,7 @@ BOOST_AUTO_TEST_CASE(std_flat_map_preserves_spring_sorted_map_wire_layout) {
    value.emplace(1U, 11U);
 
    const auto packed = forge::raw::pack(value);
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(packed), "02010000000b000000020000000c000000");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(packed), "02010000000b000000020000000c000000");
    BOOST_CHECK((forge::raw::unpack<std::flat_map<std::uint32_t, std::uint32_t>>(packed) == value));
 }
 
@@ -294,10 +294,10 @@ BOOST_AUTO_TEST_CASE(target_neutral_containers_preserve_spring_wire_layout) {
    const auto expected_map = std::string{"02010000000b000000020000000c000000"};
    const auto expected_sequence = std::string{"020100000002000000"};
 
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::raw::pack(map)), expected_map);
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::raw::pack(set)), expected_sequence);
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::raw::pack(deque)), expected_sequence);
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::raw::pack(list)), expected_sequence);
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(map)), expected_map);
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(set)), expected_sequence);
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(deque)), expected_sequence);
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(list)), expected_sequence);
    BOOST_CHECK((forge::raw::unpack<decltype(map)>(forge::raw::pack(map)) == map));
    BOOST_CHECK((forge::raw::unpack<decltype(set)>(forge::raw::pack(set)) == set));
    BOOST_CHECK((forge::raw::unpack<decltype(deque)>(forge::raw::pack(deque)) == deque));
@@ -315,11 +315,12 @@ BOOST_AUTO_TEST_CASE(unknown_variant_wire_type_throws_codec_error) {
 BOOST_AUTO_TEST_CASE(std_chrono_preserves_old_fc_raw_layout) {
    using sys_time_us = std::chrono::sys_time<std::chrono::microseconds>;
 
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::raw::pack(sys_time_us{})), "0000000000000000");
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::raw::pack(sys_time_us{std::chrono::seconds{1}})), "40420f0000000000");
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::raw::pack(std::chrono::sys_seconds{std::chrono::seconds{1}})),
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(sys_time_us{})), "0000000000000000");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(sys_time_us{std::chrono::seconds{1}})),
+                     "40420f0000000000");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(std::chrono::sys_seconds{std::chrono::seconds{1}})),
                      "01000000");
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::raw::pack(std::chrono::microseconds{-1})), "ffffffffffffffff");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(std::chrono::microseconds{-1})), "ffffffffffffffff");
 
    BOOST_CHECK(forge::raw::unpack<sys_time_us>(forge::raw::pack(sys_time_us{std::chrono::seconds{1}})) ==
                sys_time_us{std::chrono::seconds{1}});

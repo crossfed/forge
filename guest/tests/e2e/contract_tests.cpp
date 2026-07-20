@@ -866,6 +866,15 @@ BOOST_AUTO_TEST_CASE(contract_oracle_enforces_synchronous_call_access_mode) {
    BOOST_REQUIRE(host.find_primary(callee, callee, table, 1U).has_value());
 }
 
+BOOST_AUTO_TEST_CASE(contract_oracle_uses_the_same_strict_codec_implementations) {
+   const auto code = read_contract(FORGE_CONTRACT_TEST_ORACLE_WASM);
+   auto host = forge::contract::testing::host{};
+
+   BOOST_TEST(invoke_oracle(host, code, 15U) == 16U);
+   BOOST_CHECK_EXCEPTION(invoke_oracle(host, code, 16U), forge::contract::testing::exceptions::assertion_failure,
+                         [](const auto& error) { return error.message() == "base64 trailing bits are non-canonical"; });
+}
+
 BOOST_AUTO_TEST_CASE(contract_recovers_legacy_public_key) {
    const auto code = read_contract(FORGE_CONTRACT_TEST_RECOVERY_WASM);
    auto host = forge::contract::testing::host{};

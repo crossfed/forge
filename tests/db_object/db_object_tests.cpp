@@ -44,7 +44,7 @@ import forge.asio.runtime;
 import forge.asio.blocking;
 import forge.asio.exceptions;
 import forge.chain.protocol.fixed_key;
-import forge.crypto.hex;
+import forge.codec.hex;
 import forge.crypto.sha256;
 import forge.db.core.exceptions;
 import forge.db.ids.object_id;
@@ -168,50 +168,42 @@ std::int64_t ranked_upload_score(const ranked_upload& value) noexcept {
    return value.score;
 }
 
-using payload_bytes_sum = forge::db::object::sum<
-   by_payload_bytes,
-   forge::db::object::member<&ranked_upload::payload, &payload_ref::size>>;
-using score_total_sum = forge::db::object::sum<
-   by_score_total, forge::db::object::global_fun<&ranked_upload_score>>;
+using payload_bytes_sum =
+    forge::db::object::sum<by_payload_bytes, forge::db::object::member<&ranked_upload::payload, &payload_ref::size>>;
+using score_total_sum = forge::db::object::sum<by_score_total, forge::db::object::global_fun<&ranked_upload_score>>;
 
 using ranked_upload_object = forge::db::object::object_index<
-   ranked_upload,
-   forge::db::object::indexed_by<
-      forge::db::object::ranked_primary_unique<
-         by_ranked_id, forge::db::object::ranked_schema<1>, payload_bytes_sum, score_total_sum>,
-      forge::db::object::ranked_unique<
-         by_ranked_token, forge::db::object::member<&ranked_upload::token>,
-         forge::db::object::ranked_schema<1>, payload_bytes_sum>,
-      forge::db::object::ranked_non_unique<
-         by_ranked_state, forge::db::object::member<&ranked_upload::state>,
-         forge::db::object::ranked_schema<1>, payload_bytes_sum>,
-      forge::db::object::ranked_non_unique<
-         by_ranked_tenant_score,
-         forge::db::object::composite_key<
-            forge::db::object::member<&ranked_upload::tenant>,
-            forge::db::object::descending<forge::db::object::member<&ranked_upload::score>>>,
-         forge::db::object::ranked_schema<1>, payload_bytes_sum>>>;
+    ranked_upload,
+    forge::db::object::indexed_by<
+        forge::db::object::ranked_primary_unique<by_ranked_id, forge::db::object::ranked_schema<1>, payload_bytes_sum,
+                                                 score_total_sum>,
+        forge::db::object::ranked_unique<by_ranked_token, forge::db::object::member<&ranked_upload::token>,
+                                         forge::db::object::ranked_schema<1>, payload_bytes_sum>,
+        forge::db::object::ranked_non_unique<by_ranked_state, forge::db::object::member<&ranked_upload::state>,
+                                             forge::db::object::ranked_schema<1>, payload_bytes_sum>,
+        forge::db::object::ranked_non_unique<
+            by_ranked_tenant_score,
+            forge::db::object::composite_key<
+                forge::db::object::member<&ranked_upload::tenant>,
+                forge::db::object::descending<forge::db::object::member<&ranked_upload::score>>>,
+            forge::db::object::ranked_schema<1>, payload_bytes_sum>>>;
 
 using ranked_upload_schema_v2_object = forge::db::object::object_index<
-   ranked_upload,
-   forge::db::object::indexed_by<
-      forge::db::object::ranked_primary_unique<
-         by_ranked_id, forge::db::object::ranked_schema<2>, payload_bytes_sum, score_total_sum>>>;
+    ranked_upload, forge::db::object::indexed_by<forge::db::object::ranked_primary_unique<
+                       by_ranked_id, forge::db::object::ranked_schema<2>, payload_bytes_sum, score_total_sum>>>;
 
 using ranked_upload_kind_mismatch_object = forge::db::object::object_index<
-   ranked_upload,
-   forge::db::object::indexed_by<
-      forge::db::object::ranked_primary_unique<
-         by_ranked_id, forge::db::object::ranked_schema<1>, payload_bytes_sum, score_total_sum>,
-      forge::db::object::ranked_non_unique<
-         by_ranked_token, forge::db::object::member<&ranked_upload::token>,
-         forge::db::object::ranked_schema<1>, payload_bytes_sum>>>;
+    ranked_upload,
+    forge::db::object::indexed_by<
+        forge::db::object::ranked_primary_unique<by_ranked_id, forge::db::object::ranked_schema<1>, payload_bytes_sum,
+                                                 score_total_sum>,
+        forge::db::object::ranked_non_unique<by_ranked_token, forge::db::object::member<&ranked_upload::token>,
+                                             forge::db::object::ranked_schema<1>, payload_bytes_sum>>>;
 
-using ranked_upload_sum_mismatch_object = forge::db::object::object_index<
-   ranked_upload,
-   forge::db::object::indexed_by<
-      forge::db::object::ranked_primary_unique<
-         by_ranked_id, forge::db::object::ranked_schema<1>, payload_bytes_sum>>>;
+using ranked_upload_sum_mismatch_object =
+    forge::db::object::object_index<ranked_upload,
+                                    forge::db::object::indexed_by<forge::db::object::ranked_primary_unique<
+                                        by_ranked_id, forge::db::object::ranked_schema<1>, payload_bytes_sum>>>;
 
 struct ranked_conversion : forge::db::object::object<ranked_conversion, 4, 12> {
    std::uint64_t unsigned_value = 0;
@@ -221,16 +213,16 @@ struct ranked_conversion : forge::db::object::object<ranked_conversion, 4, 12> {
 BOOST_DESCRIBE_STRUCT(ranked_conversion, (forge::db::object::object<ranked_conversion, 4, 12>),
                       (unsigned_value, signed_value))
 
-using signed_total_sum = forge::db::object::sum<
-   by_signed_total, forge::db::object::member<&ranked_conversion::unsigned_value>, std::int64_t>;
-using unsigned_total_sum = forge::db::object::sum<
-   by_unsigned_total, forge::db::object::member<&ranked_conversion::signed_value>, std::uint64_t>;
+using signed_total_sum =
+    forge::db::object::sum<by_signed_total, forge::db::object::member<&ranked_conversion::unsigned_value>,
+                           std::int64_t>;
+using unsigned_total_sum =
+    forge::db::object::sum<by_unsigned_total, forge::db::object::member<&ranked_conversion::signed_value>,
+                           std::uint64_t>;
 using ranked_conversion_object = forge::db::object::object_index<
-   ranked_conversion,
-   forge::db::object::indexed_by<
-      forge::db::object::ranked_primary_unique<
-         by_conversion_id, forge::db::object::ranked_schema<1>,
-         signed_total_sum, unsigned_total_sum>>>;
+    ranked_conversion,
+    forge::db::object::indexed_by<forge::db::object::ranked_primary_unique<
+        by_conversion_id, forge::db::object::ranked_schema<1>, signed_total_sum, unsigned_total_sum>>>;
 
 struct ranked_reference {
    std::uint64_t id = 0;
@@ -238,13 +230,11 @@ struct ranked_reference {
 };
 
 using ranked_reference_index = boost::multi_index_container<
-   ranked_reference,
-   boost::multi_index::indexed_by<
-      boost::multi_index::ranked_unique<
-         boost::multi_index::tag<reference_by_state_id>,
-         boost::multi_index::composite_key<
-            ranked_reference,
-            boost::multi_index::member<ranked_reference, std::uint32_t, &ranked_reference::state>,
+    ranked_reference,
+    boost::multi_index::indexed_by<boost::multi_index::ranked_unique<
+        boost::multi_index::tag<reference_by_state_id>,
+        boost::multi_index::composite_key<
+            ranked_reference, boost::multi_index::member<ranked_reference, std::uint32_t, &ranked_reference::state>,
             boost::multi_index::member<ranked_reference, std::uint64_t, &ranked_reference::id>>>>>;
 
 struct document : forge::db::object::object<document, 2, 9> {
@@ -341,10 +331,10 @@ class memory_session final : public forge::db::core::session {
 
    [[nodiscard]] forge::db::core::capabilities capabilities() const noexcept override {
       return forge::db::core::capabilities{
-         .snapshot_reads = false,
-         .writes = true,
-         .savepoints = true,
-         .record_locks = state_->support_record_locks,
+          .snapshot_reads = false,
+          .writes = true,
+          .savepoints = true,
+          .record_locks = state_->support_record_locks,
       };
    }
 
@@ -884,8 +874,7 @@ class memory_driver : public forge::db::core::driver {
       return out;
    }
 
-   [[nodiscard]] std::optional<forge::db::core::record_key>
-   first_key_with_kind(std::uint8_t kind) const {
+   [[nodiscard]] std::optional<forge::db::core::record_key> first_key_with_kind(std::uint8_t kind) const {
       auto guard = std::scoped_lock{state_->mutex};
       for (const auto& [key, _] : state_->records) {
          if (!key.empty() && std::to_integer<std::uint8_t>(key.bytes().front()) == kind) {
@@ -1065,9 +1054,8 @@ std::string hex(const std::vector<std::byte>& bytes) {
    return value;
 }
 
-[[nodiscard]] ranked_upload make_ranked_upload(std::uint64_t instance, std::uint32_t state,
-                                                std::uint32_t tenant, std::int64_t score,
-                                                std::uint64_t size) {
+[[nodiscard]] ranked_upload make_ranked_upload(std::uint64_t instance, std::uint32_t state, std::uint32_t tenant,
+                                               std::int64_t score, std::uint64_t size) {
    auto value = ranked_upload{};
    value.id = ranked_upload::id_t{instance};
    value.token = "upload-" + std::to_string(instance);
@@ -1104,8 +1092,8 @@ static_assert(!forge::db::object::object_model<bad_object>);
 static_assert(!forge::db::object::object_model<duplicate_tag_object>);
 static_assert(std::same_as<forge::db::object::id_t_of<account_object>, forge::db::ids::typed_id<1, 7>>);
 static_assert(std::same_as<forge::db::object::index_for_id_t<account::id_t>, account_object>);
-static_assert(std::same_as<forge::db::object::index_for_id_t<forge::db::object::header::id_t>,
-                           forge::db::object::header_index>);
+static_assert(
+    std::same_as<forge::db::object::index_for_id_t<forge::db::object::header::id_t>, forge::db::object::header_index>);
 static_assert(std::movable<forge::db::object::transaction>);
 static_assert(!std::copy_constructible<forge::db::object::transaction>);
 static_assert(std::same_as<forge::db::object::index_by_tag<account_object, by_name>,
@@ -1146,9 +1134,7 @@ template <typename Owner>
 concept can_replace_header = requires(Owner& owner, forge::db::object::header value) { owner.replace(value); };
 
 template <typename Owner>
-concept can_modify_header = requires(Owner& owner) {
-   owner.modify(forge::db::object::header_id, header_mutator{});
-};
+concept can_modify_header = requires(Owner& owner) { owner.modify(forge::db::object::header_id, header_mutator{}); };
 
 template <typename Owner>
 concept can_erase_header = requires(Owner& owner) { owner.erase(forge::db::object::header_id); };
@@ -1170,9 +1156,7 @@ static_assert(requires(forge::db::object::snapshot& snapshot) { snapshot.get(for
 static_assert(requires(const forge::db::object::snapshot& snapshot) {
    snapshot.index<forge::db::object::header_index, forge::db::object::header_by_id>();
 });
-static_assert(requires(forge::db::object::transaction& transaction) {
-   transaction.get(forge::db::object::header_id);
-});
+static_assert(requires(forge::db::object::transaction& transaction) { transaction.get(forge::db::object::header_id); });
 static_assert(requires(const forge::db::object::transaction& transaction) {
    transaction.index<forge::db::object::header_index, forge::db::object::header_by_id>();
 });
@@ -1191,7 +1175,7 @@ BOOST_AUTO_TEST_CASE(db_object_base_object_raw_serializes_id_before_fields) {
    const auto value = make_account(42, "alice", 100, 3);
    const auto bytes = forge::raw::pack(value);
 
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(bytes), "2a0000000000000005616c696365640000000000000003000000");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(bytes), "2a0000000000000005616c696365640000000000000003000000");
    BOOST_CHECK(forge::raw::unpack<account>(bytes) == value);
 }
 
@@ -1240,16 +1224,14 @@ BOOST_AUTO_TEST_CASE(db_object_ranked_indexes_maintain_counts_sums_and_positions
       BOOST_CHECK_EQUAL(co_await states.sum<by_payload_bytes>(), 60U);
       BOOST_CHECK_EQUAL(co_await states.equal_range(1U).count(), 2U);
       BOOST_CHECK_EQUAL(co_await states.equal_range(1U).sum<by_payload_bytes>(), 30U);
-      BOOST_CHECK((co_await states.equal_range_rank(1U)) ==
-                  (std::pair<std::uint64_t, std::uint64_t>{0U, 2U}));
+      BOOST_CHECK((co_await states.equal_range_rank(1U)) == (std::pair<std::uint64_t, std::uint64_t>{0U, 2U}));
       BOOST_CHECK_EQUAL(co_await states.find_rank(1U), 0U);
       const auto snapshots_before_missing_rank = driver->snapshot_calls();
       BOOST_CHECK_EQUAL(co_await states.find_rank(9U), 3U);
       BOOST_CHECK_EQUAL(driver->snapshot_calls(), snapshots_before_missing_rank + 1U);
       BOOST_CHECK_EQUAL(co_await states.lower_bound_rank(2U), 2U);
       BOOST_CHECK_EQUAL(co_await states.upper_bound_rank(1U), 2U);
-      BOOST_CHECK((co_await states.range_rank(1U, 2U)) ==
-                  (std::pair<std::uint64_t, std::uint64_t>{0U, 2U}));
+      BOOST_CHECK((co_await states.range_rank(1U, 2U)) == (std::pair<std::uint64_t, std::uint64_t>{0U, 2U}));
       BOOST_CHECK_EQUAL(co_await states.equal_range(9U).count(), 0U);
       BOOST_CHECK_EQUAL(co_await states.equal_range(9U).sum<by_payload_bytes>(), 0U);
 
@@ -1335,9 +1317,8 @@ BOOST_AUTO_TEST_CASE(db_object_guarded_non_ranked_index_preserves_missing_ranked
       auto store = co_await make_store(driver);
       auto guarded = store.index<account_object, by_name>().guarded([] {});
 
-      BOOST_CHECK_THROW(
-         co_await guarded.query_aggregate(forge::db::core::record_range{}),
-         forge::db::object::exceptions::invalid_descriptor);
+      BOOST_CHECK_THROW(co_await guarded.query_aggregate(forge::db::core::record_range{}),
+                        forge::db::object::exceptions::invalid_descriptor);
       co_return;
    }());
 }
@@ -1353,8 +1334,7 @@ BOOST_AUTO_TEST_CASE(db_object_ranked_indexes_fail_closed_for_missing_or_corrupt
       BOOST_REQUIRE(missing_root.has_value());
       missing_driver->erase_record(*missing_root);
       auto missing_index = missing_store.index<ranked_upload_object, by_ranked_id>();
-      BOOST_CHECK_THROW(co_await missing_index.count(),
-                        forge::db::object::exceptions::aggregate_rebuild_required);
+      BOOST_CHECK_THROW(co_await missing_index.count(), forge::db::object::exceptions::aggregate_rebuild_required);
 
       auto corrupt_driver = std::make_shared<memory_driver>();
       auto corrupt_store = co_await forge::db::object::store::open(corrupt_driver);
@@ -1364,8 +1344,7 @@ BOOST_AUTO_TEST_CASE(db_object_ranked_indexes_fail_closed_for_missing_or_corrupt
       BOOST_REQUIRE(corrupt_root.has_value());
       corrupt_driver->replace_record(*corrupt_root, {std::byte{0xffU}});
       auto corrupt_index = corrupt_store.index<ranked_upload_object, by_ranked_id>();
-      BOOST_CHECK_THROW(co_await corrupt_index.count(),
-                        forge::db::object::exceptions::aggregate_corruption);
+      BOOST_CHECK_THROW(co_await corrupt_index.count(), forge::db::object::exceptions::aggregate_corruption);
 
       auto schema_driver = std::make_shared<memory_driver>();
       auto schema_store = co_await forge::db::object::store::open(schema_driver);
@@ -1374,21 +1353,18 @@ BOOST_AUTO_TEST_CASE(db_object_ranked_indexes_fail_closed_for_missing_or_corrupt
 
       auto version_store = co_await forge::db::object::store::open(schema_driver);
       version_store.register_object<ranked_upload_schema_v2_object>();
-      BOOST_CHECK_THROW(
-         (co_await version_store.index<ranked_upload_schema_v2_object, by_ranked_id>().count()),
-         forge::db::object::exceptions::aggregate_corruption);
+      BOOST_CHECK_THROW((co_await version_store.index<ranked_upload_schema_v2_object, by_ranked_id>().count()),
+                        forge::db::object::exceptions::aggregate_corruption);
 
       auto kind_store = co_await forge::db::object::store::open(schema_driver);
       kind_store.register_object<ranked_upload_kind_mismatch_object>();
-      BOOST_CHECK_THROW(
-         (co_await kind_store.index<ranked_upload_kind_mismatch_object, by_ranked_token>().count()),
-         forge::db::object::exceptions::aggregate_corruption);
+      BOOST_CHECK_THROW((co_await kind_store.index<ranked_upload_kind_mismatch_object, by_ranked_token>().count()),
+                        forge::db::object::exceptions::aggregate_corruption);
 
       auto sum_store = co_await forge::db::object::store::open(schema_driver);
       sum_store.register_object<ranked_upload_sum_mismatch_object>();
-      BOOST_CHECK_THROW(
-         (co_await sum_store.index<ranked_upload_sum_mismatch_object, by_ranked_id>().count()),
-         forge::db::object::exceptions::aggregate_corruption);
+      BOOST_CHECK_THROW((co_await sum_store.index<ranked_upload_sum_mismatch_object, by_ranked_id>().count()),
+                        forge::db::object::exceptions::aggregate_corruption);
       co_return;
    }());
 }
@@ -1448,12 +1424,11 @@ BOOST_AUTO_TEST_CASE(db_object_ranked_backend_policy_requires_record_locks_befor
    auto driver = std::make_shared<memory_driver>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto store = co_await forge::db::object::store::open(
-         driver, forge::db::object::store::options{.writes = forge::db::object::write_policy::backend});
+          driver, forge::db::object::store::options{.writes = forge::db::object::write_policy::backend});
       store.register_object<ranked_upload_object>();
 
       const auto value = make_ranked_upload(1, 1, 1, 1, 10);
-      BOOST_CHECK_THROW(co_await store.insert(value),
-                        forge::db::object::exceptions::unsupported_operation);
+      BOOST_CHECK_THROW(co_await store.insert(value), forge::db::object::exceptions::unsupported_operation);
       BOOST_CHECK(!(co_await store.find(value.id)).has_value());
       co_return;
    }());
@@ -1465,7 +1440,7 @@ BOOST_AUTO_TEST_CASE(db_object_ranked_backend_policy_locks_family_coordinator_be
    driver->support_record_locks(true);
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto store = co_await forge::db::object::store::open(
-         driver, forge::db::object::store::options{.writes = forge::db::object::write_policy::backend});
+          driver, forge::db::object::store::options{.writes = forge::db::object::write_policy::backend});
       store.register_object<ranked_upload_object>();
       driver->clear_lock_requests();
 
@@ -1488,16 +1463,14 @@ BOOST_AUTO_TEST_CASE(db_object_backend_join_rejects_late_coordinator_claim) {
    driver->support_record_locks(true);
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto store = co_await forge::db::object::store::open(
-         driver, forge::db::object::store::options{.writes = forge::db::object::write_policy::backend});
+          driver, forge::db::object::store::options{.writes = forge::db::object::write_policy::backend});
       store.register_object<ranked_upload_object>();
 
       auto active = co_await driver->begin_transaction();
-      (void)co_await active.get_for_update(
-         forge::db::core::family{"preexisting"},
-         forge::db::core::record_key{std::vector<std::byte>{std::byte{0x01}}});
+      (void)co_await active.get_for_update(forge::db::core::family{"preexisting"},
+                                           forge::db::core::record_key{std::vector<std::byte>{std::byte{0x01}}});
 
-      BOOST_CHECK_THROW(co_await store.join(active),
-                        forge::db::core::exceptions::participant_conflict);
+      BOOST_CHECK_THROW(co_await store.join(active), forge::db::core::exceptions::participant_conflict);
       BOOST_CHECK(!active.claims_family(forge::db::core::family{"objectdb"}));
       co_await active.rollback();
    }());
@@ -1537,15 +1510,12 @@ BOOST_AUTO_TEST_CASE(db_object_ranked_indexes_follow_snapshot_savepoint_and_over
       auto overflow_driver = std::make_shared<memory_driver>();
       auto overflow_store = co_await forge::db::object::store::open(overflow_driver);
       overflow_store.register_object<ranked_upload_object>();
-      co_await overflow_store.insert(
-         make_ranked_upload(1, 1, 1, 1, std::numeric_limits<std::uint64_t>::max()));
-      BOOST_CHECK_THROW(
-         co_await overflow_store.insert(make_ranked_upload(2, 1, 1, 2, 1)),
-         forge::db::object::exceptions::aggregate_overflow);
+      co_await overflow_store.insert(make_ranked_upload(1, 1, 1, 1, std::numeric_limits<std::uint64_t>::max()));
+      BOOST_CHECK_THROW(co_await overflow_store.insert(make_ranked_upload(2, 1, 1, 2, 1)),
+                        forge::db::object::exceptions::aggregate_overflow);
       auto overflow_primary = overflow_store.index<ranked_upload_object, by_ranked_id>();
       BOOST_CHECK_EQUAL(co_await overflow_primary.count(), 1U);
-      BOOST_CHECK_EQUAL(co_await overflow_primary.sum<by_payload_bytes>(),
-                        std::numeric_limits<std::uint64_t>::max());
+      BOOST_CHECK_EQUAL(co_await overflow_primary.sum<by_payload_bytes>(), std::numeric_limits<std::uint64_t>::max());
 
       co_return;
    }());
@@ -1560,19 +1530,14 @@ BOOST_AUTO_TEST_CASE(db_object_ranked_projection_overflow_uses_public_exception)
 
       auto unsigned_overflow = ranked_conversion{};
       unsigned_overflow.id = ranked_conversion::id_t{1};
-      unsigned_overflow.unsigned_value =
-         static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) + 1U;
-      BOOST_CHECK_THROW(
-         co_await store.insert(unsigned_overflow),
-         forge::db::object::exceptions::aggregate_overflow);
+      unsigned_overflow.unsigned_value = static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) + 1U;
+      BOOST_CHECK_THROW(co_await store.insert(unsigned_overflow), forge::db::object::exceptions::aggregate_overflow);
       BOOST_CHECK(!(co_await store.find(unsigned_overflow.id)).has_value());
 
       auto negative_signed = ranked_conversion{};
       negative_signed.id = ranked_conversion::id_t{2};
       negative_signed.signed_value = -1;
-      BOOST_CHECK_THROW(
-         co_await store.insert(negative_signed),
-         forge::db::object::exceptions::aggregate_overflow);
+      BOOST_CHECK_THROW(co_await store.insert(negative_signed), forge::db::object::exceptions::aggregate_overflow);
       BOOST_CHECK(!(co_await store.find(negative_signed.id)).has_value());
 
       auto primary = store.index<ranked_conversion_object, by_conversion_id>();
@@ -1635,18 +1600,18 @@ BOOST_AUTO_TEST_CASE(db_object_store_concurrent_open_creates_single_header) {
 
       for (auto index = std::size_t{0}; index < 2U; ++index) {
          boost::asio::co_spawn(
-            executor,
-            [driver, completed, errors, versions, index]() -> boost::asio::awaitable<void> {
-               try {
-                  const auto store = co_await forge::db::object::store::open(driver);
-                  (*versions)[index] = store.header().version;
-               } catch (...) {
-                  (*errors)[index] = std::current_exception();
-               }
-               ++*completed;
-               co_return;
-            },
-            boost::asio::detached);
+             executor,
+             [driver, completed, errors, versions, index]() -> boost::asio::awaitable<void> {
+                try {
+                   const auto store = co_await forge::db::object::store::open(driver);
+                   (*versions)[index] = store.header().version;
+                } catch (...) {
+                   (*errors)[index] = std::current_exception();
+                }
+                ++*completed;
+                co_return;
+             },
+             boost::asio::detached);
       }
 
       auto timer = boost::asio::steady_timer{executor};
@@ -1672,8 +1637,7 @@ BOOST_AUTO_TEST_CASE(db_object_store_concurrent_open_creates_single_header) {
 BOOST_AUTO_TEST_CASE(db_object_store_rejects_non_empty_family_without_header) {
    auto runtime = forge::asio::runtime{};
    auto driver = std::make_shared<memory_driver>();
-   driver->seed_record(forge::db::core::record_key{std::vector<std::byte>{std::byte{0x10U}}},
-                       {std::byte{0x01U}});
+   driver->seed_record(forge::db::core::record_key{std::vector<std::byte>{std::byte{0x10U}}}, {std::byte{0x01U}});
 
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       BOOST_CHECK_THROW((void)(co_await forge::db::object::store::open(driver)),
@@ -1735,9 +1699,8 @@ BOOST_AUTO_TEST_CASE(db_object_store_materializes_object_record_key_from_base_id
 
    const auto keys = driver->keys();
    BOOST_REQUIRE(!keys.empty());
-   BOOST_CHECK(std::ranges::any_of(keys, [](const auto& key) {
-      return hex(key.bytes()) == "10010007000000000000002a";
-   }));
+   BOOST_CHECK(
+       std::ranges::any_of(keys, [](const auto& key) { return hex(key.bytes()) == "10010007000000000000002a"; }));
 }
 
 BOOST_AUTO_TEST_CASE(db_object_store_materializes_tuple_composite_index_key) {
@@ -1752,8 +1715,7 @@ BOOST_AUTO_TEST_CASE(db_object_store_materializes_tuple_composite_index_key) {
    const auto keys = driver->keys();
    BOOST_REQUIRE_EQUAL(keys.size(), 5U);
    BOOST_CHECK(std::ranges::any_of(keys, [](const auto& key) {
-      return hex(key.bytes()) ==
-             "210100070000000200ff00ff00ff03000000ff00ff00ff00ff00ff00ff00ff640000000000000000002a";
+      return hex(key.bytes()) == "210100070000000200ff00ff00ff03000000ff00ff00ff00ff00ff00ff00ff640000000000000000002a";
    }));
 }
 
@@ -2132,9 +2094,9 @@ BOOST_AUTO_TEST_CASE(db_object_shared_transaction_supports_distinct_store_famili
    auto driver = std::make_shared<memory_driver>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto first = co_await forge::db::object::store::open(
-         driver, forge::db::object::store::config{.family = forge::db::core::family{"objects.first"}});
+          driver, forge::db::object::store::config{.family = forge::db::core::family{"objects.first"}});
       auto second = co_await forge::db::object::store::open(
-         driver, forge::db::object::store::config{.family = forge::db::core::family{"objects.second"}});
+          driver, forge::db::object::store::config{.family = forge::db::core::family{"objects.second"}});
       first.register_object<account_object>();
       second.register_object<account_object>();
 
@@ -2172,15 +2134,14 @@ BOOST_AUTO_TEST_CASE(db_object_shared_transaction_rejects_duplicate_store_family
    auto driver = std::make_shared<memory_driver>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       const auto config = forge::db::object::store::config{
-         .family = forge::db::core::family{"objects.shared"},
+          .family = forge::db::core::family{"objects.shared"},
       };
       auto first = co_await forge::db::object::store::open(driver, config);
       auto duplicate = co_await forge::db::object::store::open(driver, config);
 
       auto shared = co_await driver->begin_transaction();
       auto first_tx = co_await first.join(shared);
-      BOOST_CHECK_THROW(co_await duplicate.join(shared),
-                        forge::db::core::exceptions::participant_conflict);
+      BOOST_CHECK_THROW(co_await duplicate.join(shared), forge::db::core::exceptions::participant_conflict);
       co_await shared.rollback();
       co_return;
    }());
@@ -2192,13 +2153,11 @@ BOOST_AUTO_TEST_CASE(db_object_join_attach_failure_releases_writer_gate) {
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto store = co_await make_store(driver);
       auto invalid = co_await driver->begin_transaction();
-      co_await invalid.put(
-         forge::db::core::family{"unrelated"},
-         forge::db::core::record_key{std::vector<std::byte>{std::byte{0x01}}},
-         std::vector<std::byte>{std::byte{0x02}});
+      co_await invalid.put(forge::db::core::family{"unrelated"},
+                           forge::db::core::record_key{std::vector<std::byte>{std::byte{0x01}}},
+                           std::vector<std::byte>{std::byte{0x02}});
 
-      BOOST_CHECK_THROW(co_await store.join(invalid),
-                        forge::db::core::exceptions::participant_conflict);
+      BOOST_CHECK_THROW(co_await store.join(invalid), forge::db::core::exceptions::participant_conflict);
       co_await invalid.rollback();
 
       auto valid = co_await driver->begin_transaction();
@@ -2221,21 +2180,20 @@ BOOST_AUTO_TEST_CASE(db_object_single_writer_serializes_joined_core_transactions
       auto second_error = std::make_shared<std::exception_ptr>();
       const auto executor = co_await boost::asio::this_coro::executor;
       boost::asio::co_spawn(
-         executor,
-         [driver, store, second_started, second_finished,
-          second_error]() mutable -> boost::asio::awaitable<void> {
-            try {
-               auto second_core = co_await driver->begin_transaction();
-               auto second = co_await store.join(second_core);
-               second_started->store(true, std::memory_order_release);
-               co_await second_core.rollback();
-            } catch (...) {
-               *second_error = std::current_exception();
-            }
-            second_finished->store(true, std::memory_order_release);
-            co_return;
-         },
-         boost::asio::detached);
+          executor,
+          [driver, store, second_started, second_finished, second_error]() mutable -> boost::asio::awaitable<void> {
+             try {
+                auto second_core = co_await driver->begin_transaction();
+                auto second = co_await store.join(second_core);
+                second_started->store(true, std::memory_order_release);
+                co_await second_core.rollback();
+             } catch (...) {
+                *second_error = std::current_exception();
+             }
+             second_finished->store(true, std::memory_order_release);
+             co_return;
+          },
+          boost::asio::detached);
 
       auto timer = boost::asio::steady_timer{executor};
       timer.expires_after(std::chrono::milliseconds{50});
@@ -2262,8 +2220,7 @@ BOOST_AUTO_TEST_CASE(db_object_backend_policy_does_not_serialize_joined_core_tra
    auto driver = std::make_shared<memory_driver>();
    forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
       auto store = co_await forge::db::object::store::open(
-         driver,
-         forge::db::object::store::options{.writes = forge::db::object::write_policy::backend});
+          driver, forge::db::object::store::options{.writes = forge::db::object::write_policy::backend});
       store.register_object<account_object>();
 
       auto first_core = co_await driver->begin_transaction();
@@ -2310,24 +2267,23 @@ BOOST_AUTO_TEST_CASE(db_object_cancelled_join_does_not_lose_writer_gate) {
       auto cancellation = std::make_shared<boost::asio::cancellation_signal>();
       const auto executor = co_await boost::asio::this_coro::executor;
       boost::asio::co_spawn(
-         executor,
-         [driver, store, waiting, cancelled, finished,
-          error]() mutable -> boost::asio::awaitable<void> {
-            try {
-               co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::enable_total_cancellation{});
-               auto second_core = co_await driver->begin_transaction();
-               waiting->store(true, std::memory_order_release);
-               auto second = co_await store.join(second_core);
-               co_await second_core.rollback();
-            } catch (const forge::asio::exceptions::canceled&) {
-               cancelled->store(true, std::memory_order_release);
-            } catch (...) {
-               *error = std::current_exception();
-            }
-            finished->store(true, std::memory_order_release);
-            co_return;
-         },
-         boost::asio::bind_cancellation_slot(cancellation->slot(), boost::asio::detached));
+          executor,
+          [driver, store, waiting, cancelled, finished, error]() mutable -> boost::asio::awaitable<void> {
+             try {
+                co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::enable_total_cancellation{});
+                auto second_core = co_await driver->begin_transaction();
+                waiting->store(true, std::memory_order_release);
+                auto second = co_await store.join(second_core);
+                co_await second_core.rollback();
+             } catch (const forge::asio::exceptions::canceled&) {
+                cancelled->store(true, std::memory_order_release);
+             } catch (...) {
+                *error = std::current_exception();
+             }
+             finished->store(true, std::memory_order_release);
+             co_return;
+          },
+          boost::asio::bind_cancellation_slot(cancellation->slot(), boost::asio::detached));
 
       auto timer = boost::asio::steady_timer{executor};
       while (!waiting->load(std::memory_order_acquire)) {
@@ -2948,17 +2904,14 @@ BOOST_AUTO_TEST_CASE(db_object_store_rejects_foreign_closed_and_originless_snaps
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       auto store = co_await make_store(driver);
       auto foreign = co_await foreign_driver->begin_read();
-      BOOST_CHECK_THROW(static_cast<void>(store.join(foreign)),
-                        forge::db::object::exceptions::invalid_descriptor);
+      BOOST_CHECK_THROW(static_cast<void>(store.join(foreign)), forge::db::object::exceptions::invalid_descriptor);
 
       auto closed = forge::db::core::snapshot{};
-      BOOST_CHECK_THROW(static_cast<void>(store.join(closed)),
-                        forge::db::object::exceptions::transaction_closed);
+      BOOST_CHECK_THROW(static_cast<void>(store.join(closed)), forge::db::object::exceptions::transaction_closed);
 
-      auto originless = forge::db::core::snapshot{
-         std::make_unique<memory_snapshot_session>(std::make_shared<memory_state>())};
-      BOOST_CHECK_THROW(static_cast<void>(store.join(originless)),
-                        forge::db::object::exceptions::invalid_descriptor);
+      auto originless =
+          forge::db::core::snapshot{std::make_unique<memory_snapshot_session>(std::make_shared<memory_state>())};
+      BOOST_CHECK_THROW(static_cast<void>(store.join(originless)), forge::db::object::exceptions::invalid_descriptor);
       co_return;
    }());
 }
@@ -3522,7 +3475,7 @@ BOOST_AUTO_TEST_CASE(db_object_db_rocksdb_driver_persists_objects_indexes_pages_
           .families = {"objectdb"},
       });
       auto store = co_await forge::db::object::store::open(
-         driver, forge::db::object::store::options{.writes = forge::db::object::write_policy::backend});
+          driver, forge::db::object::store::options{.writes = forge::db::object::write_policy::backend});
       store.register_object<account_object>();
       store.register_object<document_object>();
       store.register_object<ranked_upload_object>();
@@ -3553,7 +3506,7 @@ BOOST_AUTO_TEST_CASE(db_object_db_rocksdb_driver_persists_objects_indexes_pages_
           .families = {"objectdb"},
       });
       auto store = co_await forge::db::object::store::open(
-         driver, forge::db::object::store::options{.writes = forge::db::object::write_policy::backend});
+          driver, forge::db::object::store::options{.writes = forge::db::object::write_policy::backend});
       store.register_object<account_object>();
       store.register_object<document_object>();
       store.register_object<ranked_upload_object>();

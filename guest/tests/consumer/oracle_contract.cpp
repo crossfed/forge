@@ -18,6 +18,9 @@ import forge.contract.privileged;
 import forge.contract.producer_schedule;
 import forge.contract.system;
 import forge.contract.transaction;
+import forge.codec.base58;
+import forge.codec.base64;
+import forge.codec.hex;
 
 namespace {
 
@@ -69,6 +72,10 @@ class [[forge::contract("oracle")]] oracle : public forge::contract::context {
          return read_only_mutation();
       case 14:
          return read_write_mutation();
+      case 15:
+         return codec_api();
+      case 16:
+         return invalid_codec_input();
       default:
          forge::contract::check(false, "unknown oracle scenario");
       }
@@ -237,6 +244,25 @@ class [[forge::contract("oracle")]] oracle : public forge::contract::context {
       const auto call = forge::contract::call_wrapper<"sum"_i, &oracle::sum>{callee_account};
       static_cast<void>(call(mutation_marker, 0U));
       return 15U;
+   }
+
+   std::uint64_t codec_api() const {
+      forge::contract::check(forge::codec::base64::encode("forge") == "Zm9yZ2U=", "base64 encoding failed");
+      const auto bytes = std::array<std::uint8_t, 4>{0U, 0U, 0U, 1U};
+      forge::contract::check(forge::codec::base58::encode(bytes) == "1112", "base58 encoding failed");
+      forge::contract::check(forge::codec::base58::decode("1112") ==
+                                 std::vector<std::uint8_t>(bytes.begin(), bytes.end()),
+                             "base58 decoding failed");
+      forge::contract::check(forge::codec::hex::encode(bytes) == "00000001", "hex encoding failed");
+      forge::contract::check(forge::codec::hex::decode("00000001") ==
+                                 std::vector<std::uint8_t>(bytes.begin(), bytes.end()),
+                             "hex decoding failed");
+      return 16U;
+   }
+
+   std::uint64_t invalid_codec_input() const {
+      static_cast<void>(forge::codec::base64::decode("AB=="));
+      return 0U;
    }
 
    std::uint64_t rollback_api() const {

@@ -41,7 +41,7 @@ import forge.crypto.asymmetric;
 import forge.crypto.blake2;
 import forge.crypto.bls.primitives;
 import forge.crypto.bn256;
-import forge.crypto.hex;
+import forge.codec.hex;
 import forge.crypto.modular_arithmetic;
 import forge.crypto.ripemd160;
 import forge.crypto.secp256k1;
@@ -939,8 +939,8 @@ void host::impl::printn(std::uint64_t value) {
 }
 
 void host::impl::printhex(std::span<const char> value) {
-   state_.console.append(forge::crypto::to_hex(reinterpret_cast<const std::uint8_t*>(value.data()),
-                                               static_cast<std::uint32_t>(value.size())));
+   state_.console.append(forge::codec::hex::encode(
+       std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(value.data()), value.size()}));
 }
 
 void host::impl::get_resource_limits(std::uint64_t account, output<std::int64_t> ram_bytes,

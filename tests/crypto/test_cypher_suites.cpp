@@ -7,7 +7,7 @@
 #include <vector>
 
 import forge.crypto.asymmetric;
-import forge.crypto.hex;
+import forge.codec.hex;
 import forge.crypto.secp256k1;
 import forge.crypto.p256;
 import forge.crypto.ed25519;
@@ -29,7 +29,7 @@ BOOST_AUTO_TEST_CASE(asymmetric_algorithm_preserves_raw_int32_layout) {
    static_assert(std::is_same_v<std::underlying_type_t<algorithm>, std::int32_t>);
 
    const auto packed = forge::raw::pack(algorithm::rsa);
-   BOOST_TEST(forge::crypto::to_hex(packed) == "03000000");
+   BOOST_TEST(forge::codec::hex::encode(packed) == "03000000");
    BOOST_CHECK(forge::raw::unpack<algorithm>(packed) == algorithm::rsa);
 }
 
@@ -92,22 +92,22 @@ BOOST_AUTO_TEST_CASE(custom_encoding_profile_controls_text_prefixes) try {
    const auto signature = key.sign(std::vector<std::uint8_t>{'s', 'p', 'r', 'i', 'n', 'g'});
 
    auto profile = text_encoding_profile{
-      .id = "spring",
+       .id = "spring",
    };
    profile.private_keys.push_back(text_encoding_rule{
-      .type = algorithm::secp256k1,
-      .text_prefix = "PVT_K1_",
-      .checksum = {.scheme = checksum_scheme::ripemd160_with_text_suffix, .text_suffix = "K1"},
+       .type = algorithm::secp256k1,
+       .text_prefix = "PVT_K1_",
+       .checksum = {.scheme = checksum_scheme::ripemd160_with_text_suffix, .text_suffix = "K1"},
    });
    profile.public_keys.push_back(text_encoding_rule{
-      .type = algorithm::secp256k1,
-      .text_prefix = "SPRING",
-      .checksum = {.scheme = checksum_scheme::ripemd160},
+       .type = algorithm::secp256k1,
+       .text_prefix = "SPRING",
+       .checksum = {.scheme = checksum_scheme::ripemd160},
    });
    profile.signatures.push_back(text_encoding_rule{
-      .type = algorithm::secp256k1,
-      .text_prefix = "SIG_K1_",
-      .checksum = {.scheme = checksum_scheme::ripemd160_with_text_suffix, .text_suffix = "K1"},
+       .type = algorithm::secp256k1,
+       .text_prefix = "SIG_K1_",
+       .checksum = {.scheme = checksum_scheme::ripemd160_with_text_suffix, .text_suffix = "K1"},
    });
 
    const auto spring = encoding::custom(profile);
@@ -129,9 +129,9 @@ FORGE_LOG_AND_RETHROW();
 BOOST_AUTO_TEST_CASE(custom_encoding_rejects_unsupported_algorithm_for_profile) try {
    auto profile = text_encoding_profile{.id = "k1-only"};
    profile.public_keys.push_back(text_encoding_rule{
-      .type = algorithm::secp256k1,
-      .text_prefix = "PUB_K1_",
-      .checksum = {.scheme = checksum_scheme::ripemd160_with_text_suffix, .text_suffix = "K1"},
+       .type = algorithm::secp256k1,
+       .text_prefix = "PUB_K1_",
+       .checksum = {.scheme = checksum_scheme::ripemd160_with_text_suffix, .text_suffix = "K1"},
    });
 
    const auto k1_only = encoding::custom(profile);
@@ -283,10 +283,10 @@ BOOST_AUTO_TEST_CASE(generic_sign_verify_all_supported_algorithms) try {
    const auto message = std::vector<std::uint8_t>{'f', 'c', 'l', '-', 'c', 'r', 'y', 'p', 't', 'o'};
    const auto wrong_message = std::vector<std::uint8_t>{'w', 'r', 'o', 'n', 'g'};
    const auto keys = std::vector<private_key>{
-      private_key::generate<secp256k1::private_key_shim>(),
-      private_key::generate<p256::private_key_shim>(),
-      private_key::generate<ed25519::private_key_shim>(),
-      private_key::generate<rsa::private_key_shim>(),
+       private_key::generate<secp256k1::private_key_shim>(),
+       private_key::generate<p256::private_key_shim>(),
+       private_key::generate<ed25519::private_key_shim>(),
+       private_key::generate<rsa::private_key_shim>(),
    };
 
    for (const auto& key : keys) {
@@ -303,10 +303,10 @@ FORGE_LOG_AND_RETHROW();
 BOOST_AUTO_TEST_CASE(generic_sign_digest_all_supported_algorithms) try {
    const auto digest = forge::crypto::sha256::hash("forge-crypto-digest");
    const auto keys = std::vector<private_key>{
-      private_key::generate<secp256k1::private_key_shim>(),
-      private_key::generate<p256::private_key_shim>(),
-      private_key::generate<ed25519::private_key_shim>(),
-      private_key::generate<rsa::private_key_shim>(),
+       private_key::generate<secp256k1::private_key_shim>(),
+       private_key::generate<p256::private_key_shim>(),
+       private_key::generate<ed25519::private_key_shim>(),
+       private_key::generate<rsa::private_key_shim>(),
    };
 
    for (const auto& key : keys) {
@@ -314,12 +314,10 @@ BOOST_AUTO_TEST_CASE(generic_sign_digest_all_supported_algorithms) try {
       const auto pub = key.get_public_key();
       switch (key.type()) {
       case algorithm::secp256k1:
-      case algorithm::p256:
-         {
-            const auto recovered = public_key{sig, digest, true};
-            BOOST_TEST(recovered.to_string({}) == pub.to_string({}));
-         }
-         break;
+      case algorithm::p256: {
+         const auto recovered = public_key{sig, digest, true};
+         BOOST_TEST(recovered.to_string({}) == pub.to_string({}));
+      } break;
       case algorithm::ed25519:
       case algorithm::rsa:
          BOOST_TEST(pub.verify(digest.to_uint8_span(), sig));

@@ -12,7 +12,7 @@ module;
 
 module forge.net.quic.security;
 
-import forge.crypto.hex;
+import forge.codec.hex;
 import forge.crypto.sha256;
 import forge.crypto.x509;
 
@@ -45,7 +45,7 @@ std::string normalize_sha256_fingerprint(std::string_view value) {
 
 std::string sha256_fingerprint(std::span<const std::uint8_t> data) {
    const auto digest = forge::crypto::sha256::hash(data).to_uint8_span();
-   return forge::crypto::to_hex(digest.data(), static_cast<std::uint32_t>(digest.size()));
+   return forge::codec::hex::encode(digest);
 }
 
 std::string certificate_sha256_fingerprint_from_pem(std::string_view certificate_pem) {

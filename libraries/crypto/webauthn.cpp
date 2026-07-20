@@ -14,7 +14,7 @@ module;
 
 module forge.crypto.webauthn;
 
-import forge.crypto.base64;
+import forge.codec.base64;
 import forge.crypto.p256;
 import forge.crypto.sha256;
 import forge.exceptions;
@@ -337,7 +337,7 @@ class client_data_json_reader {
 
    [[noreturn]] void fail(const std::string& reason) const {
       FORGE_THROW_EXCEPTION(exceptions::invalid_client_data, "failed to parse client data JSON",
-                          forge::exceptions::ctx("reason", reason), forge::exceptions::ctx("offset", _pos));
+                            forge::exceptions::ctx("reason", reason), forge::exceptions::ctx("offset", _pos));
    }
 
    std::string_view _input;
@@ -349,7 +349,7 @@ client_data_fields parse_client_data_json(std::string_view input) {
       return client_data_json_reader{input}.parse();
    } catch (const std::invalid_argument& e) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_client_data, "failed to parse client data JSON",
-                          forge::exceptions::ctx("reason", e.what()));
+                            forge::exceptions::ctx("reason", e.what()));
    }
 }
 
@@ -360,14 +360,16 @@ credential_public_key::credential_public_key(const assertion& c, const forge::cr
 
    FORGE_ASSERT(client_data.type == "webauthn.get", "webauthn signature type not an assertion");
 
-   const auto challenge_bytes = forge::crypto::base64url_decode(client_data.challenge);
+   const auto challenge_bytes =
+       forge::codec::base64::decode(client_data.challenge, {.characters = forge::codec::base64::alphabet::url,
+                                                            .pad = forge::codec::base64::padding_policy::allow});
    FORGE_ASSERT(forge::crypto::sha256{std::span<const std::uint8_t>{challenge_bytes}} == digest,
                 "Wrong webauthn challenge");
 
    char required_origin_scheme[] = "https://";
    size_t https_len = strlen(required_origin_scheme);
    FORGE_ASSERT(client_data.origin.compare(0, https_len, required_origin_scheme) == 0,
-              "webauthn origin must begin with https://");
+                "webauthn origin must begin with https://");
    rpid = client_data.origin.substr(https_len, client_data.origin.rfind(':') - https_len);
 
    constexpr static size_t min_auth_data_size = 37;
@@ -381,7 +383,7 @@ credential_public_key::credential_public_key(const assertion& c, const forge::cr
                  "auth_data min size not enough to store a sha256");
    FORGE_ASSERT(memcmp(c.auth_data.data(), forge::crypto::sha256::hash(rpid).data(), sizeof(forge::crypto::sha256)) ==
                     0,
-              "webauthn rpid hash doesn't match origin");
+                "webauthn rpid hash doesn't match origin");
 
    // the signature (and thus public key we need to return) will be over
    //  sha256(auth_data || client_data_hash)

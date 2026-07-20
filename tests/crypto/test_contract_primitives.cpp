@@ -7,13 +7,13 @@
 
 import forge.crypto.bls.primitives;
 import forge.crypto.bn256;
-import forge.crypto.hex;
+import forge.codec.hex;
 
 namespace {
 
 std::vector<std::uint8_t> decode(std::string_view value) {
    auto result = std::vector<std::uint8_t>(value.size() / 2U);
-   forge::crypto::from_hex(std::string{value}, result.data(), result.size());
+   forge::codec::hex::decode(value, result);
    return result;
 }
 

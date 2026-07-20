@@ -1,0 +1,5 @@
+add_library(forge_codec_base58 STATIC base58.cpp)
+forge_target_modules_at(forge_codec_base58 codec/base58)
+
+target_include_directories(forge_codec_base58 PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
+target_link_libraries(forge_codec_base58 PUBLIC forge_exceptions)

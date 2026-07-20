@@ -43,7 +43,7 @@
 #include <unordered_map>
 
 import forge.crypto.random;
-import forge.crypto.hex;
+import forge.codec.hex;
 import forge.crypto.sha256;
 
 namespace forge::net::quic::detail {
@@ -90,9 +90,9 @@ using stateless_reset_secret = std::array<std::uint8_t, stateless_reset_secret_s
       return out;
    }
    out += "; client_version=0x";
-   out += forge::crypto::itoh(ngtcp2_conn_get_client_chosen_version(conn), 8);
+   out += forge::codec::hex::encode(ngtcp2_conn_get_client_chosen_version(conn), 8);
    out += "; negotiated_version=0x";
-   out += forge::crypto::itoh(ngtcp2_conn_get_negotiated_version(conn), 8);
+   out += forge::codec::hex::encode(ngtcp2_conn_get_negotiated_version(conn), 8);
    if (const auto tls_error = ngtcp2_conn_get_tls_error(conn); tls_error != 0) {
       out += "; tls_error=";
       out += std::to_string(tls_error);
@@ -433,7 +433,7 @@ std::string normalize_engine_sha256_fingerprint(std::string_view value) {
 
 std::string engine_sha256_fingerprint(std::span<const std::uint8_t> data) {
    const auto digest = forge::crypto::sha256::hash(data).to_uint8_span();
-   return forge::crypto::to_hex(digest.data(), static_cast<std::uint32_t>(digest.size()));
+   return forge::codec::hex::encode(digest);
 }
 
 struct engine_stream::impl {
@@ -2087,11 +2087,12 @@ engine_connector::async_connect(engine_endpoint remote, engine_client_options op
       connect_timer->cancel();
    } catch (const engine_failure& error) {
       if (active_connect->canceled()) {
-         connect_error = std::make_exception_ptr(engine_failure{engine_error_kind::canceled, "QUIC client connect canceled"});
-      } else if (active_connect->timed_out() ||
-          (error.kind() == engine_error_kind::handshake_timeout && handshake_limited_by_connect_deadline)) {
          connect_error =
-             std::make_exception_ptr(engine_failure{engine_error_kind::connect_timeout, "QUIC client connect timed out"});
+             std::make_exception_ptr(engine_failure{engine_error_kind::canceled, "QUIC client connect canceled"});
+      } else if (active_connect->timed_out() ||
+                 (error.kind() == engine_error_kind::handshake_timeout && handshake_limited_by_connect_deadline)) {
+         connect_error = std::make_exception_ptr(
+             engine_failure{engine_error_kind::connect_timeout, "QUIC client connect timed out"});
       } else {
          connect_error = std::current_exception();
       }
@@ -2232,7 +2233,7 @@ struct engine_listener::impl {
          const auto timed_out = connection->metrics.timeouts.load(std::memory_order_relaxed) > 0;
          pending_accept_error = timed_out ? engine_error_kind::handshake_timeout : engine_error_kind::connection_closed;
          pending_accept_failure_text = timed_out ? "QUIC server handshake timed out before accept"
-                                                  : "QUIC server connection closed before accept";
+                                                 : "QUIC server connection closed before accept";
          wake(accept_waiters);
       }
    }
@@ -2285,26 +2286,24 @@ struct engine_listener::impl {
             listener->cleanup_connection(closed_connection);
          });
       };
-      connection->local_connection_id_issued_hook = [listener_weak,
-                                                     connection_weak = std::weak_ptr<engine_connection::impl>{
-                                                         connection}](const ngtcp2_cid& cid) {
-         auto listener = listener_weak.lock();
-         auto connection = connection_weak.lock();
-         if (!listener || !connection) {
-            return;
-         }
-         listener->register_connection_cid(connection, cid_key(cid));
-      };
-      connection->local_connection_id_retired_hook = [listener_weak,
-                                                      connection_weak = std::weak_ptr<engine_connection::impl>{
-                                                          connection}](const ngtcp2_cid& cid) {
-         auto listener = listener_weak.lock();
-         auto connection = connection_weak.lock();
-         if (!listener || !connection) {
-            return;
-         }
-         listener->unregister_connection_cid(connection.get(), cid_key(cid));
-      };
+      connection->local_connection_id_issued_hook =
+          [listener_weak, connection_weak = std::weak_ptr<engine_connection::impl>{connection}](const ngtcp2_cid& cid) {
+             auto listener = listener_weak.lock();
+             auto connection = connection_weak.lock();
+             if (!listener || !connection) {
+                return;
+             }
+             listener->register_connection_cid(connection, cid_key(cid));
+          };
+      connection->local_connection_id_retired_hook =
+          [listener_weak, connection_weak = std::weak_ptr<engine_connection::impl>{connection}](const ngtcp2_cid& cid) {
+             auto listener = listener_weak.lock();
+             auto connection = connection_weak.lock();
+             if (!listener || !connection) {
+                return;
+             }
+             listener->unregister_connection_cid(connection.get(), cid_key(cid));
+          };
       auto connection_weak = std::weak_ptr<engine_connection::impl>{connection};
       connection->handshake_completed_hook = [listener_weak, connection_weak] {
          auto listener = listener_weak.lock();

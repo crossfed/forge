@@ -10,8 +10,9 @@
 #include <vector>
 
 import forge.exceptions;
-import forge.crypto.hex;
+import forge.codec.hex;
 import forge.crypto.modular_arithmetic;
+import forge.crypto.types;
 import forge.core.utility;
 
 using namespace forge;
@@ -92,20 +93,19 @@ BOOST_AUTO_TEST_CASE(modexp) try {
       auto modulus = to_bytes(parts[2]);
 
       auto res = forge::crypto::modexp(base, exponent, modulus);
-      BOOST_CHECK_EQUAL(forge::crypto::to_hex(res), forge::crypto::to_hex(expected_result));
+      BOOST_CHECK_EQUAL(forge::codec::hex::encode(res), forge::codec::hex::encode(expected_result));
    }
 }
 FORGE_LOG_AND_RETHROW();
 
 BOOST_AUTO_TEST_CASE(modexp_rejects_empty_modulus) try {
-   const auto call_with_empty_modulus = [] {
-      (void)forge::crypto::modexp(to_bytes("01"), to_bytes("02"), bytes{});
-   };
+   const auto call_with_empty_modulus = [] { (void)forge::crypto::modexp(to_bytes("01"), to_bytes("02"), bytes{}); };
 
    BOOST_CHECK_EXCEPTION(call_with_empty_modulus(), forge::crypto::modular_arithmetic::exceptions::invalid_modulus,
                          [](const forge::crypto::modular_arithmetic::exceptions::invalid_modulus& error) {
-      return error.code().category().name() == std::string_view{"forge.crypto.modular_arithmetic"};
-   });
+                            return error.code().category().name() ==
+                                   std::string_view{"forge.crypto.modular_arithmetic"};
+                         });
 }
 FORGE_LOG_AND_RETHROW();
 
@@ -1003,8 +1003,8 @@ BOOST_AUTO_TEST_CASE(modexp_vectors) try {
       // the host function's result is always length of modulus; pad expected result with enough 0x00s to match up
       expected_result.insert(expected_result.begin(), modulus.size() - expected_result.size(), 0x00);
 
-      BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::crypto::modexp(base, exponent, modulus)),
-                        forge::crypto::to_hex(expected_result));
+      BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::crypto::modexp(base, exponent, modulus)),
+                        forge::codec::hex::encode(expected_result));
    }
 }
 FORGE_LOG_AND_RETHROW();

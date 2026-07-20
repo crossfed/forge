@@ -10,7 +10,7 @@ module;
 module forge.crypto.sha224;
 
 import forge.core.utility;
-import forge.crypto.hex;
+import forge.codec.hex;
 import forge.crypto.hmac;
 import forge.exceptions;
 import forge.variant.exceptions;
@@ -31,13 +31,15 @@ sha224::sha224() {
    memset(_hash, 0, sizeof(_hash));
 }
 sha224::sha224(const std::string& hex_str) {
-   auto bytes_written = forge::crypto::from_hex(hex_str, (char*)_hash, sizeof(_hash));
+   auto bytes_written = forge::codec::hex::decode(
+       hex_str, std::span<std::uint8_t>{reinterpret_cast<std::uint8_t*>(_hash), sizeof(_hash)});
    if (bytes_written < sizeof(_hash))
       memset((char*)_hash + bytes_written, 0, (sizeof(_hash) - bytes_written));
 }
 
 std::string sha224::str() const {
-   return forge::crypto::to_hex((char*)_hash, sizeof(_hash));
+   return forge::codec::hex::encode(
+       std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(_hash), sizeof(_hash)});
 }
 sha224::operator std::string() const {
    return str();

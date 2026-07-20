@@ -81,7 +81,6 @@
   "modern_modules": [
     "action",
     "authorization",
-    "base64",
     "binary_extension",
     "bitset",
     "call",

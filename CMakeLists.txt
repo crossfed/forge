@@ -251,6 +251,9 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/object/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/blob/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/revision/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec/base64/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec/base58/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec/hex/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec/json/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/config/core/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec/yaml/include"
@@ -438,6 +441,9 @@ endif()
 
 add_subdirectory(libraries/core)
 add_subdirectory(libraries/exceptions)
+add_subdirectory(libraries/codec/base64)
+add_subdirectory(libraries/codec/base58)
+add_subdirectory(libraries/codec/hex)
 add_subdirectory(libraries/reflect)
 add_subdirectory(libraries/schema)
 add_subdirectory(libraries/variant)
@@ -469,6 +475,9 @@ set(
    forge_db_core
    forge_db_object
    forge_config_core
+   forge_codec_base64
+   forge_codec_base58
+   forge_codec_hex
    forge_codec_json
    forge_crypto
    forge_asio
@@ -585,6 +594,9 @@ set(
    db_core
    db_object
    config_core
+   codec_base64
+   codec_base58
+   codec_hex
    codec_json
    crypto
    asio
@@ -704,6 +716,9 @@ set(
    libraries/vm/wasm/include/forge
    libraries/db/core/include/forge
    libraries/db/object/include/forge
+   libraries/codec/base64/include/forge
+   libraries/codec/base58/include/forge
+   libraries/codec/hex/include/forge
    libraries/codec/json/include/forge
    libraries/config/core/include/forge
    libraries/crypto/include/forge

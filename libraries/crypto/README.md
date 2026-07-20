@@ -1,7 +1,7 @@
 # forge_crypto
 
 `forge_crypto` contains retained cryptographic primitives and wrappers: hashes,
-base encodings, AES/HMAC, AES-256-GCM, KDF helpers, secp256k1/P-256/WebAuthn keys
+AES/HMAC, AES-256-GCM, KDF helpers, secp256k1/P-256/WebAuthn keys
 and signatures, BLS/BN/GMP helpers, random bytes and OpenSSL 3.0+ integration.
 
 ## When To Use
@@ -21,10 +21,13 @@ and signatures, BLS/BN/GMP helpers, random bytes and OpenSSL 3.0+ integration.
 
 ## Public Modules
 
-Hashes and encodings:
+Hashes:
 
 - `forge.crypto.sha1`, `sha224`, `sha256`, `sha3`, `sha512`, `ripemd160`, `city`,
-  `blake2`, `hex`, `base58`, `base64`, `hmac`.
+  `blake2`, `hmac`.
+
+Byte encodings are independent `forge.codec.base64`, `forge.codec.base58` and
+`forge.codec.hex` components.
 
 Keys and signatures:
 
@@ -126,20 +129,23 @@ auto ripemd = forge::crypto::ripemd160::hash("abc").str();
 ```cpp
 #include <vector>
 
-import forge.crypto.base58;
-import forge.crypto.base64;
-import forge.crypto.hex;
+import forge.codec.base58;
+import forge.codec.base64;
+import forge.codec.hex;
 import forge.crypto.types;
 
 auto bytes = forge::crypto::bytes{'o', 'k'};
 
-auto hex = forge::crypto::to_hex(bytes);
-auto base58 = forge::crypto::base58_encode(bytes);
-auto base64 = forge::crypto::base64_encode(bytes);
-auto base64url = forge::crypto::base64url_encode("hello");
+auto hex = forge::codec::hex::encode(bytes);
+auto base58 = forge::codec::base58::encode(bytes);
+auto base64 = forge::codec::base64::encode(bytes);
+auto base64url = forge::codec::base64::encode(
+   "hello",
+   {.characters = forge::codec::base64::alphabet::url,
+    .pad = forge::codec::base64::padding::omit});
 
-auto decoded_base58 = forge::crypto::base58_decode(base58);
-auto decoded_base64 = forge::crypto::base64_decode(base64);
+auto decoded_base58 = forge::codec::base58::decode(base58);
+auto decoded_base64 = forge::codec::base64::decode(base64);
 ```
 
 ### Generate Random Bytes For A Seed Or Key
