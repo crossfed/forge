@@ -303,6 +303,13 @@ def check_contract_sdk_components(root: Path, errors: list[str]) -> None:
       return
 
    contract_include = root / "guest" / "libraries" / "contract" / "include" / "forge" / "contract"
+   nested_modules = sorted(
+      path for path in contract_include.rglob("*.cppm") if path.parent != contract_include
+   )
+   if nested_modules:
+      rendered = ", ".join(str(path.relative_to(root)) for path in nested_modules)
+      errors.append("guest contract modules must use a flat public include layout: " + rendered)
+
    source_c_headers = sorted(contract_include.glob("*.h"))
    if source_c_headers:
       rendered = ", ".join(str(header.relative_to(root)) for header in source_c_headers)

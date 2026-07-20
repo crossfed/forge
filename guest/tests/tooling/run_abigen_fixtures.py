@@ -67,7 +67,7 @@ MODULES = (
     "forge.contract.dispatcher",
     "forge.contract.multi_index",
     "forge.contract.singleton",
-    "forge.contract.compatibility.asset",
+    "forge.contract.compatibility_asset",
 )
 
 MODULE_TARGETS = {

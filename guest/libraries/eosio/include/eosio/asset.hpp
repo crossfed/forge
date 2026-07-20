@@ -3,7 +3,7 @@
 #include <eosio/name.hpp>
 #include <eosio/symbol.hpp>
 
-import forge.contract.compatibility.asset;
+import forge.contract.compatibility_asset;
 
 namespace eosio {
 

@@ -3,7 +3,7 @@ module;
 #include <compare>
 #include <cstdint>
 
-export module forge.contract.compatibility.asset;
+export module forge.contract.compatibility_asset;
 
 import forge.chain.protocol.values;
 import forge.raw.codec;
