@@ -315,7 +315,7 @@ set(_module_arguments
    "forge.crypto.sha512=${_crypto_module_directory}forge.crypto.sha512.pcm"
    "forge.crypto.ripemd160:value=${_crypto_module_directory}forge.crypto.ripemd160-value.pcm"
    "forge.crypto.ripemd160=${_crypto_module_directory}forge.crypto.ripemd160.pcm"
-   "forge.crypto.asymmetric:value=${_crypto_module_directory}forge.crypto.asymmetric-value.pcm"
+   "forge.crypto.asymmetric.value=${_crypto_module_directory}forge.crypto.asymmetric.value.pcm"
    "forge.crypto.asymmetric=${_crypto_module_directory}forge.crypto.asymmetric.pcm"
    "forge.crypto.bls.values=${_crypto_module_directory}forge.crypto.bls.values.pcm"
    "forge.chain.protocol.values=${_protocol_module_directory}forge.chain.protocol.values.pcm"

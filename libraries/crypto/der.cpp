@@ -15,6 +15,7 @@ module;
 #include <span>
 #include <string>
 #include <type_traits>
+#include <variant>
 
 module forge.crypto.der;
 
@@ -157,11 +158,11 @@ template <typename Range> [[nodiscard]] bytes bytes_from_range(const Range& valu
    const auto nid = ec_curve_nid(key);
    if (nid == NID_X9_62_prime256v1) {
       auto data = fixed_bytes<p256::public_key_point_data>(point, "P-256 public key");
-      return public_key{public_key::storage_type{p256::public_key_shim{p256::public_key{data}.serialize()}}};
+      return asymmetric::r1_public_key{p256::public_key{data}.serialize()};
    }
    if (nid == NID_secp256k1) {
       auto data = fixed_bytes<secp256k1::public_key_point_data>(point, "secp256k1 public key");
-      return public_key{public_key::storage_type{secp256k1::public_key_shim{secp256k1::public_key{data}.serialize()}}};
+      return asymmetric::k1_public_key{secp256k1::public_key{data}.serialize()};
    }
    invalid_key("unsupported EC public key curve");
 }
@@ -274,11 +275,11 @@ public_key read_public_key(std::span<const std::uint8_t> value) {
    auto key = parse_public(value);
    const auto type = EVP_PKEY_get_base_id(key.get());
    if (type == EVP_PKEY_RSA) {
-      return public_key{public_key::storage_type{rsa::public_key_shim{forge::crypto::bytes{value.begin(), value.end()}}}};
+      return asymmetric::rsa_public_key{forge::crypto::bytes{value.begin(), value.end()}};
    }
    if (type == EVP_PKEY_ED25519) {
-      return public_key{public_key::storage_type{
-          ed25519::public_key_shim{fixed_bytes<ed25519::public_key_data>(raw_public_key(key.get()), "Ed25519 public key")}}};
+      return asymmetric::ed25519_public_key{
+          fixed_bytes<ed25519::public_key_data>(raw_public_key(key.get()), "Ed25519 public key")};
    }
    if (type == EVP_PKEY_EC) {
       return read_ec_public(key.get());
@@ -290,20 +291,21 @@ private_key read_private_key(std::span<const std::uint8_t> value) {
    auto key = parse_private(value);
    const auto type = EVP_PKEY_get_base_id(key.get());
    if (type == EVP_PKEY_RSA) {
-      return private_key{private_key::storage_type{rsa::private_key_shim{forge::crypto::bytes{value.begin(), value.end()}}}};
+      return private_key{
+          private_key::storage_type{rsa::private_key::regenerate(forge::crypto::bytes{value.begin(), value.end()})}};
    }
    if (type == EVP_PKEY_ED25519) {
-      return private_key{private_key::storage_type{ed25519::private_key_shim{
-          fixed_bytes<ed25519::private_key_secret>(raw_private_key(key.get()), "Ed25519 private key")}}};
+      return private_key{private_key::storage_type{ed25519::private_key::regenerate(
+          fixed_bytes<ed25519::private_key_secret>(raw_private_key(key.get()), "Ed25519 private key"))}};
    }
    if (type == EVP_PKEY_EC) {
       const auto scalar = ec_private_scalar(key.get());
       const auto nid = ec_curve_nid(key.get());
       if (nid == NID_X9_62_prime256v1) {
-         return private_key{private_key::storage_type{p256::private_key_shim{scalar}}};
+         return private_key{private_key::storage_type{p256::private_key::regenerate(scalar)}};
       }
       if (nid == NID_secp256k1) {
-         return private_key{private_key::storage_type{secp256k1::private_key_shim{scalar}}};
+         return private_key{private_key::storage_type{secp256k1::private_key::regenerate(scalar)}};
       }
       invalid_key("unsupported EC private key curve");
    }
@@ -311,22 +313,24 @@ private_key read_private_key(std::span<const std::uint8_t> value) {
 }
 
 bytes write_public_key(const public_key& key) {
-   return key.visit([](const auto& value) -> bytes {
-      using value_type = std::decay_t<decltype(value)>;
-      if constexpr (std::is_same_v<value_type, rsa::public_key_shim>) {
-         return value.serialize();
-      } else if constexpr (std::is_same_v<value_type, ed25519::public_key_shim>) {
-         return write_spki(make_ed25519_public_key(value.serialize()).get());
-      } else if constexpr (std::is_same_v<value_type, p256::public_key_shim>) {
-         const auto data = bytes_from_range(value.serialize());
-         return write_spki(make_ec_public_key("prime256v1", data).get());
-      } else if constexpr (std::is_same_v<value_type, secp256k1::public_key_shim>) {
-         const auto data = bytes_from_range(value.serialize());
-         return write_spki(make_ec_public_key("secp256k1", data).get());
-      } else {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_options, "public key DER export is not implemented");
-      }
-   });
+   return std::visit(
+       [](const auto& value) -> bytes {
+          using value_type = std::decay_t<decltype(value)>;
+          if constexpr (std::is_same_v<value_type, asymmetric::rsa_public_key>) {
+             return value.serialize();
+          } else if constexpr (std::is_same_v<value_type, asymmetric::ed25519_public_key>) {
+             return write_spki(make_ed25519_public_key(value.serialize()).get());
+          } else if constexpr (std::is_same_v<value_type, asymmetric::r1_public_key>) {
+             const auto data = bytes_from_range(value.serialize());
+             return write_spki(make_ec_public_key("prime256v1", data).get());
+          } else if constexpr (std::is_same_v<value_type, asymmetric::k1_public_key>) {
+             const auto data = bytes_from_range(value.serialize());
+             return write_spki(make_ec_public_key("secp256k1", data).get());
+          } else {
+             FORGE_THROW_EXCEPTION(exceptions::invalid_options, "public key DER export is not implemented");
+          }
+       },
+       key);
 }
 
 } // namespace forge::crypto::der

@@ -1,240 +1,233 @@
 module;
 
 #include <forge/exceptions/macros.hpp>
+
 #include <algorithm>
-#include <compare>
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <ostream>
 #include <span>
+#include <tuple>
 #include <type_traits>
 #include <variant>
+#include <vector>
 
 module forge.crypto.asymmetric;
 
-import forge.core.utility;
+import forge.crypto.ed25519;
+import forge.crypto.p256;
+import forge.crypto.rsa;
+import forge.crypto.secp256k1;
+import forge.crypto.webauthn;
 import forge.exceptions;
-import forge.variant.static_variant;
+import forge.raw.raw;
 
 namespace forge::crypto::asymmetric {
 namespace {
 
-template <typename Storage> [[nodiscard]] algorithm algorithm_for(const Storage& storage) noexcept {
-   switch (storage.index()) {
-   case 0:
-      return algorithm::secp256k1;
-   case 1:
-      return algorithm::p256;
-   case 2:
-      return algorithm::ed25519;
-   default:
-      return algorithm::rsa;
-   }
+template <typename To, typename From> [[nodiscard]] To copy_array(const From& source) {
+   static_assert(std::tuple_size_v<To> == std::tuple_size_v<From>);
+   auto result = To{};
+   std::transform(source.begin(), source.end(), result.begin(),
+                  [](auto value) { return static_cast<typename To::value_type>(value); });
+   return result;
 }
 
-template <typename Storage> [[nodiscard]] bool storage_equal(const Storage& left, const Storage& right) {
-   if (left.index() != right.index()) {
-      return false;
-   }
+[[nodiscard]] secp256k1::compact_signature compact(const k1_signature& value) {
+   return copy_array<secp256k1::compact_signature>(value.data);
+}
+
+[[nodiscard]] p256::compact_signature compact(const r1_signature& value) {
+   return copy_array<p256::compact_signature>(value.data);
+}
+
+[[nodiscard]] k1_signature make_k1_signature(const secp256k1::compact_signature& value) {
+   return k1_signature{copy_array<ecc_signature>(value)};
+}
+
+[[nodiscard]] r1_signature make_r1_signature(const p256::compact_signature& value) {
+   return r1_signature{copy_array<ecc_signature>(value)};
+}
+
+template <typename Storage> [[nodiscard]] algorithm private_algorithm(const Storage& storage) noexcept {
    return std::visit(
-      [&](const auto& value) {
-         using value_type = std::decay_t<decltype(value)>;
-         const auto& left_data = value.serialize();
-         const auto& right_data = std::get<value_type>(right).serialize();
-         if constexpr (requires { left_data.size(); left_data.begin(); }) {
-            return left_data.size() == right_data.size() && std::equal(left_data.begin(), left_data.end(), right_data.begin());
-         } else {
-            return left_data == right_data;
-         }
-      },
-      left);
+       []<typename Value>(const Value&) {
+          if constexpr (std::same_as<Value, secp256k1::private_key>) {
+             return algorithm::secp256k1;
+          } else if constexpr (std::same_as<Value, p256::private_key>) {
+             return algorithm::p256;
+          } else if constexpr (std::same_as<Value, ed25519::private_key>) {
+             return algorithm::ed25519;
+          } else {
+             return algorithm::rsa;
+          }
+       },
+       storage);
 }
 
-template <typename Storage> [[nodiscard]] bool storage_less(const Storage& left, const Storage& right) {
-   if (left.index() != right.index()) {
-      return left.index() < right.index();
+template <typename Key> [[nodiscard]] std::vector<std::uint8_t> secret_bytes(const Key& value) {
+   const auto secret = value.get_secret();
+   if constexpr (std::same_as<std::decay_t<decltype(secret)>, sha256>) {
+      const auto bytes = secret.to_uint8_span();
+      return {bytes.begin(), bytes.end()};
+   } else {
+      return {secret.begin(), secret.end()};
    }
-   return std::visit(
-      [&](const auto& value) {
-         using value_type = std::decay_t<decltype(value)>;
-         const auto& left_data = value.serialize();
-         const auto& right_data = std::get<value_type>(right).serialize();
-         if constexpr (requires { left_data.begin(); left_data.end(); }) {
-            return std::lexicographical_compare(left_data.begin(), left_data.end(), right_data.begin(), right_data.end());
-         } else {
-            return (left_data <=> right_data) < 0;
-         }
-      },
-      left);
 }
-
-struct public_key_visitor : visitor<public_key::storage_type> {
-   template <typename KeyType> public_key::storage_type operator()(const KeyType& key) const {
-      return public_key::storage_type(key.get_public_key());
-   }
-};
-
-struct recovery_visitor : forge::visitor<public_key::storage_type> {
-   recovery_visitor(const sha256& digest, bool check_canonical) : _digest(digest), _check_canonical(check_canonical) {}
-
-   template <typename SignatureType> public_key::storage_type operator()(const SignatureType& s) const {
-      if constexpr (requires { s.recover(_digest, _check_canonical); }) {
-         return public_key::storage_type(s.recover(_digest, _check_canonical));
-      } else {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_options, "signature type does not support public key recovery");
-      }
-   }
-
-   const sha256& _digest;
-   bool _check_canonical;
-};
-
-struct sign_visitor : visitor<signature::storage_type> {
-   explicit sign_visitor(std::span<const std::uint8_t> message) : _message(message) {}
-
-   template <typename KeyType> signature::storage_type operator()(const KeyType& key) const {
-      return signature::storage_type(key.sign(_message));
-   }
-
-   std::span<const std::uint8_t> _message;
-};
-
-struct sign_digest_visitor : visitor<signature::storage_type> {
-   explicit sign_digest_visitor(const sha256& digest) : _digest(digest) {}
-
-   template <typename KeyType> signature::storage_type operator()(const KeyType& key) const {
-      if constexpr (requires { key.sign_digest(_digest); }) {
-         return signature::storage_type(key.sign_digest(_digest));
-      } else if constexpr (requires { key.sign(_digest); }) {
-         return signature::storage_type(key.sign(_digest));
-      } else {
-         return signature::storage_type(key.sign(_digest.to_uint8_span()));
-      }
-   }
-
-   const sha256& _digest;
-};
-
-struct is_valid_visitor : public forge::visitor<bool> {
-   template <typename KeyType> bool operator()(const KeyType& key) const {
-      return key.valid();
-   }
-};
-
-struct hash_visitor : public forge::visitor<std::size_t> {
-   template <typename SigType> std::size_t operator()(const SigType& sig) const {
-      auto seed = std::size_t{0};
-      const auto& data = sig.serialize();
-      for (auto byte : data) {
-         seed ^= static_cast<std::size_t>(byte) + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
-      }
-      return seed;
-   }
-};
 
 } // namespace
 
 public_key private_key::get_public_key() const {
-   return public_key(std::visit(public_key_visitor(), _storage));
+   return std::visit(
+       []<typename Value>(const Value& key) -> public_key {
+          if constexpr (std::same_as<Value, secp256k1::private_key>) {
+             return k1_public_key{key.get_public_key().serialize()};
+          } else if constexpr (std::same_as<Value, p256::private_key>) {
+             return r1_public_key{key.get_public_key().serialize()};
+          } else if constexpr (std::same_as<Value, ed25519::private_key>) {
+             return ed25519_public_key{key.get_public_key().serialize()};
+          } else {
+             return rsa_public_key{key.get_public_key().serialize()};
+          }
+       },
+       _storage);
 }
 
 algorithm private_key::type() const noexcept {
-   return algorithm_for(_storage);
+   return private_algorithm(_storage);
 }
 
 signature private_key::sign(std::span<const std::uint8_t> message) const {
-   return signature(std::visit(sign_visitor(message), _storage));
+   return std::visit(
+       [&](const auto& key) -> signature {
+          using key_type = std::decay_t<decltype(key)>;
+          if constexpr (std::same_as<key_type, secp256k1::private_key>) {
+             return make_k1_signature(key.sign_compact(sha256::hash(message), true));
+          } else if constexpr (std::same_as<key_type, p256::private_key>) {
+             return make_r1_signature(key.sign_compact(sha256::hash(message)));
+          } else if constexpr (std::same_as<key_type, ed25519::private_key>) {
+             return ed25519_signature{key.sign(message)};
+          } else {
+             return rsa_signature{key.sign(message)};
+          }
+       },
+       _storage);
 }
 
 signature private_key::sign_digest(const sha256& digest) const {
-   return signature(std::visit(sign_digest_visitor(digest), _storage));
+   return std::visit(
+       [&](const auto& key) -> signature {
+          using key_type = std::decay_t<decltype(key)>;
+          if constexpr (std::same_as<key_type, secp256k1::private_key>) {
+             return make_k1_signature(key.sign_compact(digest, true));
+          } else if constexpr (std::same_as<key_type, p256::private_key>) {
+             return make_r1_signature(key.sign_compact(digest));
+          } else if constexpr (std::same_as<key_type, ed25519::private_key>) {
+             return ed25519_signature{key.sign(digest.to_uint8_span())};
+          } else {
+             return rsa_signature{key.sign(digest.to_uint8_span())};
+          }
+       },
+       _storage);
 }
 
-bool operator==(const private_key& p1, const private_key& p2) {
-   return storage_equal(p1._storage, p2._storage);
+bool operator==(const private_key& left, const private_key& right) {
+   if (left._storage.index() != right._storage.index()) {
+      return false;
+   }
+   return std::visit(
+       [&](const auto& value) {
+          using value_type = std::decay_t<decltype(value)>;
+          return secret_bytes(value) == secret_bytes(std::get<value_type>(right._storage));
+       },
+       left._storage);
 }
 
-bool operator<(const private_key& p1, const private_key& p2) {
-   return storage_less(p1._storage, p2._storage);
+bool operator<(const private_key& left, const private_key& right) {
+   if (left._storage.index() != right._storage.index()) {
+      return left._storage.index() < right._storage.index();
+   }
+   return std::visit(
+       [&](const auto& value) {
+          using value_type = std::decay_t<decltype(value)>;
+          return secret_bytes(value) < secret_bytes(std::get<value_type>(right._storage));
+       },
+       left._storage);
 }
 
-public_key::public_key(const signature& c, const sha256& digest, bool check_canonical)
-    : _storage(std::visit(recovery_visitor(digest, check_canonical), c.storage())) {}
-
-algorithm public_key::type() const noexcept {
-   return algorithm_for(_storage);
+bool valid(const public_key& key) {
+   return std::visit(
+       [](const auto& value) {
+          using value_type = std::decay_t<decltype(value)>;
+          if constexpr (std::same_as<value_type, k1_public_key>) {
+             return secp256k1::public_key{value.data}.valid();
+          } else if constexpr (std::same_as<value_type, r1_public_key>) {
+             return p256::public_key{value.data}.valid();
+          } else if constexpr (std::same_as<value_type, webauthn_public_key>) {
+             return webauthn::valid(value);
+          } else if constexpr (std::same_as<value_type, ed25519_public_key>) {
+             return ed25519::public_key{value.data}.valid();
+          } else {
+             return rsa::public_key{value.data}.valid();
+          }
+       },
+       key);
 }
 
-std::size_t public_key::which() const {
-   return _storage.index();
-}
-
-bool public_key::valid() const {
-   return std::visit(is_valid_visitor(), _storage);
-}
-
-bool public_key::verify(std::span<const std::uint8_t> message, const signature& sig) const {
-   if (_storage.index() != sig.storage().index()) {
+bool verify(const public_key& key, std::span<const std::uint8_t> message, const signature& value) {
+   if (type(key) != type(value)) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_key, "signature algorithm does not match public key");
    }
 
    return std::visit(
-      [&](const auto& key) -> bool {
-         using key_type = std::decay_t<decltype(key)>;
-         const auto& typed_signature = std::get<typename key_type::signature_type>(sig.storage());
-         if constexpr (std::is_same_v<key_type, secp256k1::public_key_shim>) {
-            return secp256k1::verify_message(key, message, typed_signature);
-         } else if constexpr (std::is_same_v<key_type, p256::public_key_shim>) {
-            return p256::verify_message(key, message, typed_signature);
-         } else {
-            return key.verify(message, typed_signature.serialize());
-         }
-      },
-      _storage);
+       [&](const auto& typed_key) {
+          using key_type = std::decay_t<decltype(typed_key)>;
+          if constexpr (std::same_as<key_type, k1_public_key>) {
+             return secp256k1::verify_message(secp256k1::public_key{typed_key.data}, message,
+                                              compact(std::get<k1_signature>(value)));
+          } else if constexpr (std::same_as<key_type, r1_public_key>) {
+             return p256::verify_message(p256::public_key{typed_key.data}, message,
+                                         compact(std::get<r1_signature>(value)));
+          } else if constexpr (std::same_as<key_type, webauthn_public_key>) {
+             return webauthn::recover(std::get<webauthn_signature>(value), sha256::hash(message), true) == typed_key;
+          } else if constexpr (std::same_as<key_type, ed25519_public_key>) {
+             return ed25519::public_key{typed_key.data}.verify(message, std::get<ed25519_signature>(value).data);
+          } else {
+             return rsa::public_key{typed_key.data}.verify(message, std::get<rsa_signature>(value).data);
+          }
+       },
+       key);
 }
 
-std::ostream& operator<<(std::ostream& s, const public_key& k) {
-   s << "public_key(" << k.to_string({}) << ')';
-   return s;
+public_key recover(const signature& value, const sha256& digest, bool check_canonical) {
+   return std::visit(
+       [&](const auto& item) -> public_key {
+          using value_type = std::decay_t<decltype(item)>;
+          if constexpr (std::same_as<value_type, k1_signature>) {
+             return k1_public_key{secp256k1::public_key{compact(item), digest, check_canonical}.serialize()};
+          } else if constexpr (std::same_as<value_type, r1_signature>) {
+             return r1_public_key{p256::public_key{compact(item), digest, check_canonical}.serialize()};
+          } else if constexpr (std::same_as<value_type, webauthn_signature>) {
+             return webauthn::recover(item, digest, check_canonical);
+          } else {
+             FORGE_THROW_EXCEPTION(exceptions::invalid_options, "signature type does not support public key recovery");
+          }
+       },
+       value);
 }
 
-bool operator==(const public_key& p1, const public_key& p2) {
-   return storage_equal(p1._storage, p2._storage);
+std::size_t hash_value(const signature& value) {
+   auto seed = std::size_t{};
+   for (const auto byte : forge::raw::pack(value)) {
+      seed ^= static_cast<std::size_t>(byte) + 0x9e3779b97f4a7c15ULL + (seed << 6U) + (seed >> 2U);
+   }
+   return seed;
 }
 
-bool operator!=(const public_key& p1, const public_key& p2) {
-   return !(p1 == p2);
-}
-
-bool operator<(const public_key& p1, const public_key& p2) {
-   return storage_less(p1._storage, p2._storage);
-}
-
-algorithm signature::type() const noexcept {
-   return algorithm_for(_storage);
-}
-
-std::size_t signature::which() const {
-   return _storage.index();
-}
-
-std::size_t signature::variable_size() const {
-   return std::visit([](const auto& sig) { return sig.serialize().size(); }, _storage);
-}
-
-bool operator==(const signature& p1, const signature& p2) {
-   return storage_equal(p1._storage, p2._storage);
-}
-
-bool operator!=(const signature& p1, const signature& p2) {
-   return !storage_equal(p1._storage, p2._storage);
-}
-
-bool operator<(const signature& p1, const signature& p2) {
-   return storage_less(p1._storage, p2._storage);
-}
-
-std::size_t hash_value(const signature& b) {
-   return std::visit(hash_visitor(), b._storage);
+std::ostream& operator<<(std::ostream& stream, const public_key& key) {
+   stream << "public_key(" << encoding::forge().format(key) << ')';
+   return stream;
 }
 
 } // namespace forge::crypto::asymmetric

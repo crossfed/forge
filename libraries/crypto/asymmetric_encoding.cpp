@@ -4,8 +4,6 @@ module;
 #include <cstdint>
 #include <cstring>
 #include <exception>
-#include <map>
-#include <memory>
 #include <ranges>
 #include <span>
 #include <string>
@@ -16,7 +14,6 @@ module;
 
 module forge.crypto.asymmetric;
 
-import forge.core.utility;
 import forge.codec.base58;
 import forge.codec.hex;
 import forge.crypto.ed25519;
@@ -40,172 +37,14 @@ import forge.variant.described;
 namespace forge::crypto::asymmetric {
 namespace {
 
-constexpr const char* private_key_base_prefix = "PVT";
-constexpr const char* private_key_prefix[] = {"SECP256K1", "P256", "ED25519", "RSA"};
-constexpr const char* public_key_base_prefix = "PUB";
-constexpr const char* public_key_prefix[] = {"SECP256K1", "P256", "ED25519", "RSA"};
-constexpr const char* signature_base_prefix = "SIG";
-constexpr const char* signature_prefix[] = {"SECP256K1", "P256", "ED25519", "RSA"};
-
-template <typename DataType> struct checksummed_data {
-   std::uint32_t check = 0;
-   DataType data;
-
-   static auto calculate_checksum(const DataType& data, const char* prefix = nullptr) {
-      auto encoder = ripemd160::encoder();
-      raw::pack(encoder, data);
-
-      if (prefix != nullptr) {
-         encoder.write(prefix, const_strlen(prefix));
-      }
-      return encoder.result()._hash[0];
-   }
-
-   template <typename Stream> friend Stream& operator<<(Stream& s, const checksummed_data& value) {
-      forge::raw::pack(s, value.data);
-      forge::raw::pack(s, value.check);
-      return s;
-   }
-
-   template <typename Stream> friend Stream& operator>>(Stream& s, checksummed_data& value) {
-      forge::raw::unpack(s, value.data);
-      forge::raw::unpack(s, value.check);
-      return s;
-   }
-};
-
-template <typename, const char* const*, int, typename...> struct base58_str_parser_impl;
-
-template <typename Result, const char* const* Prefixes, int Position, typename KeyType, typename... Rem>
-struct base58_str_parser_impl<Result, Prefixes, Position, KeyType, Rem...> {
-   static Result apply(const std::string& prefix_str, const std::string& data_str) {
-      using data_type = typename KeyType::data_type;
-      using wrapper = checksummed_data<data_type>;
-      constexpr auto prefix = Prefixes[Position];
-
-      if (prefix == prefix_str) {
-         auto bin = forge::codec::base58::decode(data_str);
-         forge::datastream<const std::uint8_t*> unpacker(bin.data(), bin.size());
-         auto wrapped = wrapper{};
-         forge::raw::unpack(unpacker, wrapped);
-         FORGE_ASSERT(!unpacker.remaining(), "decoded base58 length too long");
-         FORGE_ASSERT(wrapper::calculate_checksum(wrapped.data, prefix) == wrapped.check);
-         return Result(KeyType(wrapped.data));
-      }
-
-      return base58_str_parser_impl<Result, Prefixes, Position + 1, Rem...>::apply(prefix_str, data_str);
-   }
-};
-
-template <typename Result, const char* const* Prefixes, int Position>
-struct base58_str_parser_impl<Result, Prefixes, Position> {
-   static Result apply(const std::string& prefix_str, const std::string& data_str) {
-      FORGE_ASSERT(false, "No matching suite type", forge::exceptions::ctx("prefix", prefix_str),
-                   forge::exceptions::ctx("data", data_str));
-   }
-};
-
-template <typename, const char* const* Prefixes> struct base58_str_parser;
-
-template <const char* const* Prefixes, typename... Ts> struct base58_str_parser<std::variant<Ts...>, Prefixes> {
-   static std::variant<Ts...> apply(const std::string& base58str) {
-      const auto pivot = base58str.find('_');
-      FORGE_ASSERT(pivot != std::string::npos, "No delimiter in data, cannot determine suite type: ${str}",
-                   forge::exceptions::ctx("str", base58str));
-
-      const auto prefix_str = base58str.substr(0, pivot);
-      auto data_str = base58str.substr(pivot + 1);
-      FORGE_ASSERT(!data_str.empty(), "Data only has suite type prefix: ${str}",
-                   forge::exceptions::ctx("str", base58str));
-
-      return base58_str_parser_impl<std::variant<Ts...>, Prefixes, 0, Ts...>::apply(prefix_str, data_str);
-   }
-};
-
-template <typename Storage, const char* const* Prefixes, int DefaultPosition = -1>
-struct base58str_visitor : public forge::visitor<std::string> {
-   explicit base58str_visitor(const forge::yield_function_t& yield) : _yield(yield) {};
-   template <typename KeyType> std::string operator()(const KeyType& key) const {
-      using data_type = typename KeyType::data_type;
-      constexpr int position = forge::get_index<Storage, KeyType>();
-      constexpr bool is_default = position == DefaultPosition;
-
-      auto wrapper = checksummed_data<data_type>{};
-      wrapper.data = key.serialize();
-      _yield();
-      wrapper.check =
-          checksummed_data<data_type>::calculate_checksum(wrapper.data, !is_default ? Prefixes[position] : nullptr);
-      _yield();
-      auto packed = raw::pack(wrapper);
-      _yield();
-      auto data_str = forge::codec::base58::encode(packed);
-      _yield();
-      if (!is_default) {
-         data_str = std::string(Prefixes[position]) + "_" + data_str;
-      }
-      _yield();
-
-      return data_str;
-   }
-   const forge::yield_function_t _yield;
-};
-
-template <typename Data> [[nodiscard]] Data parse_checked(std::string_view data, const char* checksum_prefix) {
-   using data_type = typename Data::data_type;
-   using wrapper = checksummed_data<data_type>;
-
-   const auto decoded = forge::codec::base58::decode(data);
-   auto unpacker = forge::datastream<const std::uint8_t*>(decoded.data(), decoded.size());
-   auto wrapped = wrapper{};
-   forge::raw::unpack(unpacker, wrapped);
-   FORGE_ASSERT(!unpacker.remaining(), "decoded key data length too long");
-   FORGE_ASSERT(wrapper::calculate_checksum(wrapped.data, checksum_prefix) == wrapped.check);
-   return Data{wrapped.data};
-}
-
-template <typename Data>
-[[nodiscard]] std::string format_checked(const Data& value, const char* checksum_prefix,
-                                         const forge::yield_function_t& yield = {}) {
-   using data_type = typename Data::data_type;
-   using wrapper = checksummed_data<data_type>;
-
-   auto wrapped = wrapper{};
-   wrapped.data = value.serialize();
-   wrapped.check = wrapper::calculate_checksum(wrapped.data, checksum_prefix);
-   const auto packed = raw::pack(wrapped);
-   yield();
-   return forge::codec::base58::encode(packed);
-}
-
-template <typename Data>
-[[nodiscard]] std::string to_wif(const Data& secret, const forge::yield_function_t& yield = {}) {
-   const auto payload_size = sizeof(typename Data::data_type) + 1U;
-   auto data = bytes(payload_size + 4U);
-   data[0] = std::uint8_t{0x80};
-   const auto serialized = secret.serialize();
-   std::memcpy(data.data() + 1, &serialized, sizeof(typename Data::data_type));
-   auto digest = sha256::hash(std::span<const std::uint8_t>{data.data(), payload_size});
-   digest = sha256::hash(digest);
-   std::memcpy(data.data() + payload_size, digest.data(), 4U);
-   yield();
-   return forge::codec::base58::encode(data);
-}
-
-template <typename Data> [[nodiscard]] Data from_wif(std::string_view wif_key) {
-   const auto decoded = forge::codec::base58::decode(wif_key);
-   FORGE_ASSERT(decoded.size() >= 5U, "invalid WIF private key");
-   auto key_bytes = bytes(decoded.begin() + 1, decoded.end() - 4);
-   auto check = sha256::hash(std::span<const std::uint8_t>{decoded.data(), decoded.size() - 4U});
-   auto check2 = sha256::hash(check);
-   FORGE_ASSERT(std::memcmp(check.data(), decoded.data() + decoded.size() - 4, 4) == 0 ||
-                std::memcmp(check2.data(), decoded.data() + decoded.size() - 4, 4) == 0);
-   auto value = typename Data::data_type{};
-   forge::raw::unpack(std::span<const std::uint8_t>{key_bytes.data(), key_bytes.size()}, value);
-   return Data{value};
-}
-
 template <typename Data> [[nodiscard]] std::vector<std::uint8_t> serialize_bytes(const Data& value) {
-   const auto serialized = value.serialize();
+   const auto serialized = [&]() {
+      if constexpr (requires { value.get_secret(); }) {
+         return value.get_secret();
+      } else {
+         return value.serialize();
+      }
+   }();
    return raw::pack(serialized);
 }
 
@@ -227,6 +66,19 @@ template <typename Data> [[nodiscard]] Data make_fixed_value_from_bytes(const st
       FORGE_THROW_EXCEPTION(exceptions::invalid_key, "decoded key data length is invalid");
    }
    return make_value_from_bytes<Data>(bytes);
+}
+
+template <typename Data> [[nodiscard]] Data make_fixed_data_from_bytes(const std::vector<std::uint8_t>& bytes) {
+   if (bytes.size() != sizeof(Data)) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_key, "decoded key data length is invalid");
+   }
+   auto unpacker = forge::datastream<const std::uint8_t*>(bytes.data(), bytes.size());
+   auto data = Data{};
+   forge::raw::unpack(unpacker, data);
+   if (unpacker.remaining()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_key, "decoded key data length is invalid");
+   }
+   return data;
 }
 
 [[nodiscard]] std::string encode_payload(const std::vector<std::uint8_t>& payload, text_codec codec) {
@@ -420,13 +272,18 @@ template <typename Data>
    const auto payload = decode_rule_payload(rule, text);
    switch (rule.type) {
    case algorithm::secp256k1:
-      return private_key{private_key::storage_type{make_fixed_value_from_bytes<secp256k1::private_key_shim>(payload)}};
+      return private_key{private_key::storage_type{
+          secp256k1::private_key::regenerate(make_fixed_data_from_bytes<secp256k1::private_key_secret>(payload))}};
    case algorithm::p256:
-      return private_key{private_key::storage_type{make_fixed_value_from_bytes<p256::private_key_shim>(payload)}};
+      return private_key{private_key::storage_type{
+          p256::private_key::regenerate(make_fixed_data_from_bytes<p256::private_key_secret>(payload))}};
+   case algorithm::webauthn:
+      FORGE_THROW_EXCEPTION(exceptions::invalid_key, "WebAuthn does not define a private key encoding");
    case algorithm::ed25519:
-      return private_key{private_key::storage_type{make_fixed_value_from_bytes<ed25519::private_key_shim>(payload)}};
+      return private_key{private_key::storage_type{
+          ed25519::private_key::regenerate(make_fixed_data_from_bytes<ed25519::private_key_secret>(payload))}};
    case algorithm::rsa:
-      return private_key{private_key::storage_type{make_value_from_bytes<rsa::private_key_shim>(payload)}};
+      return private_key{private_key::storage_type{make_value_from_bytes<rsa::private_key>(payload)}};
    }
    FORGE_THROW_EXCEPTION(exceptions::invalid_key, "encoded private key suite is not supported by this profile");
 }
@@ -435,13 +292,20 @@ template <typename Data>
    const auto payload = decode_rule_payload(rule, text);
    switch (rule.type) {
    case algorithm::secp256k1:
-      return public_key{public_key::storage_type{make_fixed_value_from_bytes<secp256k1::public_key_shim>(payload)}};
+      return public_key{make_fixed_value_from_bytes<k1_public_key>(payload)};
    case algorithm::p256:
-      return public_key{public_key::storage_type{make_fixed_value_from_bytes<p256::public_key_shim>(payload)}};
+      return public_key{make_fixed_value_from_bytes<r1_public_key>(payload)};
+   case algorithm::webauthn: {
+      auto value = make_value_from_bytes<webauthn_public_key>(payload);
+      if (value.rpid.empty()) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_key, "webauthn public key must have a non-empty rpid");
+      }
+      return public_key{std::move(value)};
+   }
    case algorithm::ed25519:
-      return public_key{public_key::storage_type{make_fixed_value_from_bytes<ed25519::public_key_shim>(payload)}};
+      return public_key{make_fixed_value_from_bytes<ed25519_public_key>(payload)};
    case algorithm::rsa:
-      return public_key{public_key::storage_type{make_value_from_bytes<rsa::public_key_shim>(payload)}};
+      return public_key{make_value_from_bytes<rsa_public_key>(payload)};
    }
    FORGE_THROW_EXCEPTION(exceptions::invalid_key, "encoded public key suite is not supported by this profile");
 }
@@ -450,21 +314,34 @@ template <typename Data>
    const auto payload = decode_rule_payload(rule, text);
    switch (rule.type) {
    case algorithm::secp256k1:
-      return signature{signature::storage_type{make_fixed_value_from_bytes<secp256k1::signature_shim>(payload)}};
+      return signature{make_fixed_value_from_bytes<k1_signature>(payload)};
    case algorithm::p256:
-      return signature{signature::storage_type{make_fixed_value_from_bytes<p256::signature_shim>(payload)}};
+      return signature{make_fixed_value_from_bytes<r1_signature>(payload)};
+   case algorithm::webauthn:
+      return signature{make_value_from_bytes<webauthn_signature>(payload)};
    case algorithm::ed25519:
-      return signature{signature::storage_type{make_fixed_value_from_bytes<ed25519::signature_shim>(payload)}};
+      return signature{make_fixed_value_from_bytes<ed25519_signature>(payload)};
    case algorithm::rsa:
-      return signature{signature::storage_type{make_value_from_bytes<rsa::signature_shim>(payload)}};
+      return signature{make_value_from_bytes<rsa_signature>(payload)};
    }
    FORGE_THROW_EXCEPTION(exceptions::invalid_key, "encoded signature suite is not supported by this profile");
 }
 
 template <typename Value>
 [[nodiscard]] std::string format_profile_value(const std::vector<text_encoding_rule>& rules, const Value& value) {
-   const auto& rule = require_format_rule(rules, value.type());
-   return value.visit([&](const auto& item) { return format_rule_payload(rule, item); });
+   const auto value_type = [&]() {
+      if constexpr (requires { value.type(); }) {
+         return value.type();
+      } else {
+         return type(value);
+      }
+   }();
+   const auto& rule = require_format_rule(rules, value_type);
+   if constexpr (requires { value.visit([](const auto&) {}); }) {
+      return value.visit([&](const auto& item) { return format_rule_payload(rule, item); });
+   } else {
+      return std::visit([&](const auto& item) { return format_rule_payload(rule, item); }, value);
+   }
 }
 
 template <typename Value, typename Parser>
@@ -482,45 +359,7 @@ template <typename Value, typename Parser>
                          forge::exceptions::ctx("matched_prefix", matched_prefix));
 }
 
-template <typename Storage, const char* const* Prefixes>
-[[nodiscard]] Storage parse_forge_text(const std::string& text, const char* base_prefix) {
-   const auto pivot = text.find('_');
-   FORGE_ASSERT(pivot != std::string::npos, "No delimiter in string, cannot determine key type",
-                forge::exceptions::ctx("str", text));
-   const auto prefix_str = text.substr(0, pivot);
-   FORGE_ASSERT(std::string_view(base_prefix) == prefix_str, "invalid key prefix", forge::exceptions::ctx("str", text),
-                forge::exceptions::ctx("prefix_str", prefix_str));
-   auto data_str = text.substr(pivot + 1);
-   FORGE_ASSERT(!data_str.empty(), "key has no data: ${str}", forge::exceptions::ctx("str", text));
-   return base58_str_parser<Storage, Prefixes>::apply(data_str);
-}
-
 } // namespace
-
-private_key::private_key(const std::string& text)
-    : _storage(parse_forge_text<private_key::storage_type, private_key_prefix>(text, private_key_base_prefix)) {}
-
-std::string private_key::to_string(const forge::yield_function_t& yield) const {
-   auto data_str = std::visit(base58str_visitor<storage_type, private_key_prefix>(yield), _storage);
-   return std::string(private_key_base_prefix) + "_" + data_str;
-}
-
-public_key::public_key(const std::string& text)
-    : _storage(parse_forge_text<public_key::storage_type, public_key_prefix>(text, public_key_base_prefix)) {}
-
-std::string public_key::to_string(const forge::yield_function_t& yield) const {
-   auto data_str = std::visit(base58str_visitor<storage_type, public_key_prefix>(yield), _storage);
-   return std::string(public_key_base_prefix) + "_" + data_str;
-}
-
-signature::signature(const std::string& text)
-    : _storage(parse_forge_text<signature::storage_type, signature_prefix>(text, signature_base_prefix)) {}
-
-std::string signature::to_string(const forge::yield_function_t& yield) const {
-   auto data_str = std::visit(base58str_visitor<storage_type, signature_prefix>(yield), _storage);
-   yield();
-   return std::string(signature_base_prefix) + "_" + data_str;
-}
 
 namespace profiles {
 namespace {
@@ -581,6 +420,7 @@ const text_encoding_profile& forge() {
            {
                prefixed_rule(algorithm::secp256k1, "PUB_SECP256K1_", "SECP256K1"),
                prefixed_rule(algorithm::p256, "PUB_P256_", "P256"),
+               prefixed_rule(algorithm::webauthn, "PUB_WEBAUTHN_", "WEBAUTHN"),
                prefixed_rule(algorithm::ed25519, "PUB_ED25519_", "ED25519"),
                prefixed_rule(algorithm::rsa, "PUB_RSA_", "RSA"),
            },
@@ -588,6 +428,7 @@ const text_encoding_profile& forge() {
            {
                prefixed_rule(algorithm::secp256k1, "SIG_SECP256K1_", "SECP256K1"),
                prefixed_rule(algorithm::p256, "SIG_P256_", "P256"),
+               prefixed_rule(algorithm::webauthn, "SIG_WEBAUTHN_", "WEBAUTHN"),
                prefixed_rule(algorithm::ed25519, "SIG_ED25519_", "ED25519"),
                prefixed_rule(algorithm::rsa, "SIG_RSA_", "RSA"),
            },
@@ -625,11 +466,13 @@ const text_encoding_profile& antelope() {
                },
                prefixed_rule(algorithm::secp256k1, "PUB_K1_", "K1", true, false),
                prefixed_rule(algorithm::p256, "PUB_R1_", "R1"),
+               prefixed_rule(algorithm::webauthn, "PUB_WA_", "WA"),
            },
        .signatures =
            {
                prefixed_rule(algorithm::secp256k1, "SIG_K1_", "K1"),
                prefixed_rule(algorithm::p256, "SIG_R1_", "R1"),
+               prefixed_rule(algorithm::webauthn, "SIG_WA_", "WA"),
            },
    };
    return value;
@@ -771,27 +614,30 @@ std::string encoding::format(const signature& sig) const {
 }
 
 void to_variant(const private_key& var, variant& vo, const forge::yield_function_t& yield) {
-   vo = var.to_string(yield);
+   yield();
+   vo = encoding::forge().format(var);
 }
 
 void from_variant(const variant& var, private_key& vo) {
-   vo = private_key(var.as_string());
+   vo = encoding::forge().parse_private(var.as_string());
 }
 
 void to_variant(const public_key& var, variant& vo, const forge::yield_function_t& yield) {
-   vo = var.to_string(yield);
+   yield();
+   vo = encoding::forge().format(var);
 }
 
 void from_variant(const variant& var, public_key& vo) {
-   vo = public_key(var.as_string());
+   vo = encoding::forge().parse_public(var.as_string());
 }
 
 void to_variant(const signature& var, variant& vo, const forge::yield_function_t& yield) {
-   vo = var.to_string(yield);
+   yield();
+   vo = encoding::forge().format(var);
 }
 
 void from_variant(const variant& var, signature& vo) {
-   vo = signature(var.as_string());
+   vo = encoding::forge().parse_signature(var.as_string());
 }
 
 } // namespace forge::crypto::asymmetric
