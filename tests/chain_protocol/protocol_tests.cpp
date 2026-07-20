@@ -28,7 +28,14 @@ import forge.chain.protocol.abi;
 import forge.chain.protocol.action;
 import forge.chain.protocol.action_receipt;
 import forge.chain.protocol.block;
+import forge.chain.protocol.blockchain_parameters;
+import forge.chain.protocol.call_access_mode;
+import forge.chain.protocol.call_data_header;
+import forge.chain.protocol.code_hash_result;
+import forge.chain.protocol.finalizer_policy;
 import forge.chain.protocol.fixed_key;
+import forge.chain.protocol.hash_id;
+import forge.chain.protocol.kv_parameters;
 import forge.chain.protocol.system;
 import forge.chain.protocol.transaction;
 import forge.chain.protocol.types;
@@ -239,6 +246,62 @@ BOOST_AUTO_TEST_CASE(fixed_key_matches_donor_word_and_byte_order) {
    const auto variant = forge::variant{value};
    BOOST_TEST(variant.get_string() == "0102030405060708111213141516171821222324252627283132333435363738");
    BOOST_TEST((variant.as<protocol::key256>() == value));
+}
+
+BOOST_AUTO_TEST_CASE(contract_wire_records_preserve_spring_raw_layout) {
+   auto code_hash = protocol::code_hash_result{};
+   code_hash.struct_version = forge::unsigned_int{1U};
+   code_hash.code_sequence = 0x0102030405060708ULL;
+   code_hash.code_hash = protocol::checksum256{std::array<std::uint8_t, 32>{
+       0x00U, 0x01U, 0x02U, 0x03U, 0x04U, 0x05U, 0x06U, 0x07U, 0x08U, 0x09U, 0x0aU, 0x0bU, 0x0cU, 0x0dU, 0x0eU, 0x0fU,
+       0x10U, 0x11U, 0x12U, 0x13U, 0x14U, 0x15U, 0x16U, 0x17U, 0x18U, 0x19U, 0x1aU, 0x1bU, 0x1cU, 0x1dU, 0x1eU, 0x1fU,
+   }};
+   code_hash.vm_type = 0xaaU;
+   code_hash.vm_version = 0xbbU;
+   BOOST_TEST(pack_hex(code_hash) ==
+              "010807060504030201000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1faabb");
+
+   const auto parameters = protocol::blockchain_parameters{
+       .max_block_net_usage = 1U,
+       .target_block_net_usage_pct = 2U,
+       .max_transaction_net_usage = 3U,
+       .base_per_transaction_net_usage = 4U,
+       .net_usage_leeway = 5U,
+       .context_free_discount_net_usage_num = 6U,
+       .context_free_discount_net_usage_den = 7U,
+       .max_block_cpu_usage = 8U,
+       .target_block_cpu_usage_pct = 9U,
+       .max_transaction_cpu_usage = 10U,
+       .min_transaction_cpu_usage = 11U,
+       .max_transaction_lifetime = 12U,
+       .deferred_trx_expiration_window = 13U,
+       .max_transaction_delay = 14U,
+       .max_inline_action_size = 15U,
+       .max_inline_action_depth = 16U,
+       .max_authority_depth = 17U,
+   };
+   BOOST_TEST(pack_hex(parameters) ==
+              "010000000000000002000000030000000400000005000000060000000700000008000000090000000a0000000b000000"
+              "0c0000000d0000000e0000000f00000010001100");
+
+   const auto kv = protocol::kv_parameters{.max_key_size = 1U, .max_value_size = 2U, .max_iterators = 3U};
+   BOOST_TEST(pack_hex(kv) == "010000000200000003000000");
+
+   const auto authority = protocol::finalizer_authority{
+       .description = "f",
+       .weight = 3U,
+       .public_key = {char{0x01}, char{0x02}},
+   };
+   BOOST_TEST(pack_hex(authority) == "01660300000000000000020102");
+   const auto policy = protocol::finalizer_policy{.threshold = 4U, .finalizers = {authority}};
+   BOOST_TEST(pack_hex(policy) == "04000000000000000101660300000000000000020102");
+
+   const auto call = protocol::call_data_header{.version = 0x01020304U, .func_name = 0x0102030405060708ULL};
+   BOOST_TEST(pack_hex(call) == "040302010807060504030201");
+   BOOST_TEST(static_cast<std::uint8_t>(protocol::call_access_mode::read_write) == 0U);
+   BOOST_TEST(static_cast<std::uint8_t>(protocol::call_access_mode::read_only) == 1U);
+   const auto apply_id = static_cast<protocol::hash_id::raw>(protocol::hash_id{"apply"});
+   BOOST_TEST(static_cast<std::uint64_t>(apply_id) == protocol::hash_id::hash("apply"));
 }
 
 BOOST_AUTO_TEST_CASE(fixed_key_partial_word_sequences_preserve_cdt_layout) {

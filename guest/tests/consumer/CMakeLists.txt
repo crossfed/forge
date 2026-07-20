@@ -89,6 +89,7 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/asset_source_compat.cpp"
    "${CMAKE_CURRENT_SOURCE_DIR}/eosio_datastream_adl.cpp"
    "${CMAKE_CURRENT_SOURCE_DIR}/eosio_internal_db_header.cpp"
+   "${CMAKE_CURRENT_SOURCE_DIR}/wire_aliases.cpp"
 )
 
 string(JSON _surface_header_count LENGTH "${_sdk_surface_json}" donor_cpp_headers)

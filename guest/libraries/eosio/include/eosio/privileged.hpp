@@ -45,3 +45,10 @@ inline void preactivate_feature(const checksum256& digest) {
 }
 
 } // namespace eosio
+
+// EOSIO declared these records in namespace eosio, so unqualified calls found
+// the helpers through argument-dependent lookup. The Forge veneer aliases the
+// records to their canonical protocol types; these using-declarations preserve
+// that source behavior without moving runtime operations into protocol.
+using eosio::set_blockchain_parameters;
+using eosio::set_kv_parameters;
