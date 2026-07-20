@@ -100,6 +100,7 @@ void execute_action_impl(chain::protocol::name self, chain::protocol::name first
    auto arguments = std::tuple<std::decay_t<Arguments>...>{};
    auto stream = forge::datastream<const std::uint8_t*>{bytes.data(), bytes.size()};
    forge::raw::unpack(stream, arguments);
+   // Pinned CDT intentionally accepts trailing action data after the declared argument tuple.
 
    auto contract_stream = typename Contract::stream_type{
        reinterpret_cast<const char*>(bytes.data()),
