@@ -4,6 +4,7 @@ module;
 
 #include <bit>
 #include <cstdint>
+#include <cstring>
 #include <limits>
 
 #include <softfloat.hpp>
