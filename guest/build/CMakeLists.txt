@@ -140,6 +140,7 @@ target_sources(
          "${_modules}/forge/contract/dispatcher.cppm"
          "${_modules}/forge/contract/multi_index.cppm"
          "${_modules}/forge/contract/singleton.cppm"
+         "${_modules}/forge/contract/compatibility_name.cppm"
          "${_modules}/forge/contract/compatibility_asset.cppm"
 )
 target_link_libraries(
@@ -249,6 +250,7 @@ set(_module_arguments
    "forge.contract.dispatcher=${_contract_module_directory}forge.contract.dispatcher.pcm"
    "forge.contract.multi_index=${_contract_module_directory}forge.contract.multi_index.pcm"
    "forge.contract.singleton=${_contract_module_directory}forge.contract.singleton.pcm"
+   "forge.contract.compatibility_name=${_contract_module_directory}forge.contract.compatibility_name.pcm"
    "forge.contract.compatibility_asset=${_contract_module_directory}forge.contract.compatibility_asset.pcm"
 )
 set(_abigen_command

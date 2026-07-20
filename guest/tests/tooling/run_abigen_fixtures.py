@@ -67,6 +67,7 @@ MODULES = (
     "forge.contract.dispatcher",
     "forge.contract.multi_index",
     "forge.contract.singleton",
+    "forge.contract.compatibility_name",
     "forge.contract.compatibility_asset",
 )
 

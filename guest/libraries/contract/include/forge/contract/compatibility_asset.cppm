@@ -6,6 +6,7 @@ module;
 export module forge.contract.compatibility_asset;
 
 import forge.chain.protocol.values;
+import forge.contract.compatibility_name;
 import forge.raw.codec;
 
 export namespace forge::contract::compatibility {
@@ -129,15 +130,14 @@ struct asset {
 
 struct extended_asset {
    asset quantity{};
-   chain::protocol::name contract{};
+   name contract{};
 
    constexpr extended_asset() = default;
 
    extended_asset(std::int64_t amount, chain::protocol::extended_symbol symbol)
        : extended_asset(chain::protocol::extended_asset{amount, symbol}) {}
 
-   constexpr extended_asset(asset value, chain::protocol::name raw_contract)
-       : quantity(value), contract(raw_contract) {}
+   constexpr extended_asset(asset value, name raw_contract) : quantity(value), contract(raw_contract) {}
 
    constexpr extended_asset(const chain::protocol::extended_asset& value)
        : quantity(value.quantity), contract(value.contract) {}
@@ -225,12 +225,12 @@ struct extended_asset {
 
  private:
    [[nodiscard]] constexpr chain::protocol::extended_asset protocol_value() const noexcept {
-      return {quantity.protocol_value(), contract};
+      return {quantity.protocol_value(), static_cast<const name::base&>(contract)};
    }
 
    constexpr void assign(const chain::protocol::extended_asset& value) noexcept {
       quantity = asset{value.quantity};
-      contract = value.contract;
+      contract = name{value.contract};
    }
 };
 

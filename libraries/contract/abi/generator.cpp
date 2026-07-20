@@ -665,6 +665,7 @@ class type_encoder {
 
       static const auto known = std::vector<std::pair<std::string_view, std::string_view>>{
           {"forge::chain::protocol::name", "name"},
+          {"forge::contract::compatibility::name", "name"},
           {"forge::chain::protocol::symbol_code", "symbol_code"},
           {"forge::chain::protocol::symbol", "symbol"},
           {"forge::chain::protocol::asset", "asset"},

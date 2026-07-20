@@ -35,6 +35,7 @@ target_sources(
          include/forge/contract/dispatcher.cppm
          include/forge/contract/multi_index.cppm
          include/forge/contract/singleton.cppm
+         include/forge/contract/compatibility_name.cppm
          include/forge/contract/compatibility_asset.cppm
 )
 target_include_directories(

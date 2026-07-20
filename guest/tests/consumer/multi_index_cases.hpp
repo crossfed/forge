@@ -23,9 +23,14 @@ namespace contract_api = forge::contract;
 namespace multi_index_cases {
 
 using forge::chain::protocol::key256;
-using forge::chain::protocol::name;
 using forge::chain::protocol::uint128_t;
+#if defined(FORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX)
+using eosio::name;
+using eosio::literals::operator""_n;
+#else
+using forge::chain::protocol::name;
 using forge::chain::protocol::literals::operator""_n;
+#endif
 
 #if defined(FORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX)
 struct [[eosio::table("records")]] record {

@@ -2,7 +2,11 @@
 
 import argparse
 import json
+import re
 from pathlib import Path
+
+
+BOOST_INCLUDE = re.compile(r'^\s*#\s*include\s*[<"](?P<path>boost/[^>"]+)[>"]', re.MULTILINE)
 
 
 def fail(message: str) -> None:
@@ -20,6 +24,20 @@ def require_tokens(path: Path, tokens: list[str], label: str) -> None:
     missing = [token for token in tokens if token not in text]
     if missing:
         fail(f"missing {label} in {path}: {', '.join(missing)}")
+
+
+def require_boost_header_closure(include: Path) -> None:
+    missing = set()
+    for header in sorted((include / "boost").rglob("*")):
+        if not header.is_file():
+            continue
+        source = header.read_text(encoding="utf-8", errors="ignore")
+        for match in BOOST_INCLUDE.finditer(source):
+            dependency = match.group("path")
+            if not (include / dependency).is_file():
+                missing.add(dependency)
+    if missing:
+        fail(f"missing Boost header closure: {', '.join(sorted(missing))}")
 
 
 def parse_golden(path: Path) -> list[tuple[str, str, str, str, tuple[str, ...], str]]:
@@ -74,6 +92,7 @@ def main() -> None:
         fail("intrinsic signatures differ from the pinned CDT/Spring golden manifest")
 
     include = args.data_dir / "include"
+    require_boost_header_closure(include)
     require_files(include, surface["donor_c_headers"], "CDT C headers")
     require_files(include, surface["canonical_c_headers"], "canonical C headers")
     require_files(include / "eosio", surface["donor_cpp_headers"], "CDT C++ headers")

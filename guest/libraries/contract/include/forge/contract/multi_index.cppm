@@ -64,7 +64,7 @@ template <name::raw IndexName, class Extractor> struct indexed_by {
 
 template <class Key>
 concept primary_key =
-    std::same_as<std::remove_cvref_t<Key>, std::uint64_t> || std::same_as<std::remove_cvref_t<Key>, name>;
+    std::same_as<std::remove_cvref_t<Key>, std::uint64_t> || std::derived_from<std::remove_cvref_t<Key>, name>;
 
 template <class Key>
 concept secondary_key =
@@ -81,7 +81,7 @@ namespace detail {
 template <class Key>
 concept primary_key_argument =
     (std::integral<std::remove_cvref_t<Key>> && !std::same_as<std::remove_cvref_t<Key>, bool>) ||
-    std::same_as<std::remove_cvref_t<Key>, name>;
+    std::derived_from<std::remove_cvref_t<Key>, name>;
 
 template <class Index, class Row>
 concept secondary_index_spec =
@@ -112,7 +112,9 @@ inline std::uint64_t to_raw_key(Key value) noexcept {
    return static_cast<std::uint64_t>(value);
 }
 
-inline std::uint64_t to_raw_key(name value) noexcept {
+template <class Key>
+   requires std::derived_from<std::remove_cvref_t<Key>, name>
+inline std::uint64_t to_raw_key(const Key& value) noexcept {
    return value.value;
 }
 

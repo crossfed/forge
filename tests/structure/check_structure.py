@@ -415,6 +415,15 @@ def check_eosio_veneer(root: Path, errors: list[str]) -> None:
                f"{asset.relative_to(root)}: EOSIO asset veneer must not own {forbidden.rstrip('(')}"
             )
 
+   name = root / "guest" / "libraries" / "eosio" / "include" / "eosio" / "name.hpp"
+   if name.exists():
+      name_source = name.read_text(errors="ignore")
+      for forbidden in ("raw_pack(", "raw_unpack("):
+         if forbidden in name_source:
+            errors.append(
+               f"{name.relative_to(root)}: EOSIO name veneer must not own {forbidden.rstrip('(')}"
+            )
+
 
 def check_modules(root: Path, files: list[Path], errors: list[str]) -> None:
    declarations: dict[str, list[tuple[Path, int]]] = defaultdict(list)
