@@ -303,6 +303,17 @@ class type_encoder {
 
    std::string encode(clang::QualType input) {
       auto type = input.getNonReferenceType().getUnqualifiedType();
+      if (const auto* alias = llvm::dyn_cast_or_null<clang::TypedefType>(type.getTypePtrOrNull())) {
+         const auto* declaration = alias->getDecl();
+         const auto qualified = declaration->getQualifiedNameAsString();
+         const auto canonical = qualified == "forge::chain::protocol::extensions" || known_alias(qualified).has_value();
+         if (!canonical && !context_.getSourceManager().isInSystemHeader(declaration->getLocation())) {
+            const auto name = declaration->getNameAsString();
+            const auto target = encode(declaration->getUnderlyingType());
+            add_alias(name, target, declaration->getLocation());
+            return name.empty() ? target : name;
+         }
+      }
       if (const auto known = known_type_alias(type); known.has_value()) {
          return *known;
       }
@@ -657,9 +668,11 @@ class type_encoder {
           {"forge::chain::protocol::symbol_code", "symbol_code"},
           {"forge::chain::protocol::symbol", "symbol"},
           {"forge::chain::protocol::asset", "asset"},
+          {"forge::contract::compatibility::asset", "asset"},
           {"eosio::asset", "asset"},
           {"forge::chain::protocol::extended_symbol", "extended_symbol"},
           {"forge::chain::protocol::extended_asset", "extended_asset"},
+          {"forge::contract::compatibility::extended_asset", "extended_asset"},
           {"eosio::extended_asset", "extended_asset"},
           {"forge::chain::protocol::time_point", "time_point"},
           {"forge::chain::protocol::time_point_sec", "time_point_sec"},

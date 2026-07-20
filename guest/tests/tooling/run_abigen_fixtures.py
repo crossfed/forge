@@ -67,6 +67,7 @@ MODULES = (
     "forge.contract.dispatcher",
     "forge.contract.multi_index",
     "forge.contract.singleton",
+    "forge.contract.compatibility.asset",
 )
 
 MODULE_TARGETS = {
@@ -194,6 +195,7 @@ def check_features(abi):
         "B_map_string_string_E": "pair_string_string[]",
         "B_vector_int32_E": "int32[]",
         "base_alias": "base_value",
+        "my_account": "name",
         "signed_int": "varint32",
         "str": "string",
         "unsigned_int": "varuint32",
@@ -224,6 +226,7 @@ def check_features(abi):
     assert varint_fields["unsigned_value"]["type"] == "unsigned_int"
     assert varint_fields["signed_value"]["type"] == "signed_int"
     assert by_name(structs["extension"]["fields"])["value"]["type"] == "uint32$"
+    assert by_name(structs["named"]["fields"])["owner"]["type"] == "my_account"
     assert by_name(abi["action_results"])["result"]["result_type"] == "result_value"
     assert by_name(abi["calls"])["sum"] == {
         "name": "sum",

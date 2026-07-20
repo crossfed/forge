@@ -399,6 +399,15 @@ def check_eosio_veneer(root: Path, errors: list[str]) -> None:
          f"{generator.relative_to(root)}: generated dispatcher does not delegate to forge.contract.dispatcher"
       )
 
+   asset = root / "guest" / "libraries" / "eosio" / "include" / "eosio" / "asset.hpp"
+   if asset.exists():
+      asset_source = asset.read_text(errors="ignore")
+      for forbidden in ("struct asset", "struct extended_asset", "raw_pack(", "raw_unpack("):
+         if forbidden in asset_source:
+            errors.append(
+               f"{asset.relative_to(root)}: EOSIO asset veneer must not own {forbidden.rstrip('(')}"
+            )
+
 
 def check_modules(root: Path, files: list[Path], errors: list[str]) -> None:
    declarations: dict[str, list[tuple[Path, int]]] = defaultdict(list)

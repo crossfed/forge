@@ -12,6 +12,7 @@ import forge.contract.binary_extension;
 import forge.contract.varint;
 
 using str = std::string;
+using my_account = forge::chain::protocol::account_name;
 
 struct result_value {
    std::int32_t count = 0;
@@ -75,6 +76,9 @@ class [[forge::contract("abifixture")]] abifixture : public forge::contract::con
 
    [[forge::action]] void alias(std::variant<std::uint64_t, str> arg0) {
       static_cast<void>(arg0);
+   }
+   [[forge::action]] void named(my_account owner) {
+      static_cast<void>(owner);
    }
    [[forge::action]] void nested(std::map<std::string, std::map<std::string, std::string>> arg0,
                                  const std::tuple<std::int32_t, double, std::string, std::vector<std::int32_t>>& arg1,
