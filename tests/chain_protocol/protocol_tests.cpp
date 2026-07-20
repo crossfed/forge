@@ -372,6 +372,13 @@ BOOST_AUTO_TEST_CASE(name_rejects_high_valued_thirteenth_character) {
    BOOST_CHECK_THROW(protocol::make_name("abcdefghijklz"), std::invalid_argument);
 }
 
+BOOST_AUTO_TEST_CASE(name_char_to_value_preserves_cdt_invalid_character_failure) {
+   BOOST_TEST(protocol::name::char_to_value('.') == 0U);
+   BOOST_TEST(protocol::name::char_to_value('1') == 1U);
+   BOOST_TEST(protocol::name::char_to_value('a') == 6U);
+   BOOST_CHECK_THROW((void)protocol::name::char_to_value('A'), std::invalid_argument);
+}
+
 BOOST_AUTO_TEST_CASE(asset_variant_text_preserves_precision) {
    auto variant = forge::variant{};
 

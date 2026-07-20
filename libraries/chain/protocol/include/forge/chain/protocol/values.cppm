@@ -40,6 +40,7 @@ struct name {
       if (value >= 'a' && value <= 'z') {
          return static_cast<std::uint8_t>(value - 'a' + 6);
       }
+      // Pinned CDT calls eosio::check(false) here; its following return is unreachable warning suppression.
       detail::fail_value("character is not in allowed character set for names");
    }
 
