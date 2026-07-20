@@ -366,7 +366,7 @@ std::int32_t compiler_builtins::__getf2(std::uint64_t low_a, std::uint64_t high_
 
 std::int32_t compiler_builtins::__gttf2(std::uint64_t low_a, std::uint64_t high_a, std::uint64_t low_b,
                                         std::uint64_t high_b) const {
-   return compare_f128(as_softfloat(low_a, high_a), as_softfloat(low_b, high_b), 0);
+   return __getf2(low_a, high_a, low_b, high_b);
 }
 
 std::int32_t compiler_builtins::__letf2(std::uint64_t low_a, std::uint64_t high_a, std::uint64_t low_b,
@@ -376,7 +376,7 @@ std::int32_t compiler_builtins::__letf2(std::uint64_t low_a, std::uint64_t high_
 
 std::int32_t compiler_builtins::__lttf2(std::uint64_t low_a, std::uint64_t high_a, std::uint64_t low_b,
                                         std::uint64_t high_b) const {
-   return compare_f128(as_softfloat(low_a, high_a), as_softfloat(low_b, high_b), 0);
+   return __letf2(low_a, high_a, low_b, high_b);
 }
 
 std::int32_t compiler_builtins::__unordtf2(std::uint64_t low_a, std::uint64_t high_a, std::uint64_t low_b,
