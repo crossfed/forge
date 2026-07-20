@@ -3,6 +3,7 @@
 import argparse
 import json
 import platform
+import re
 import shutil
 import subprocess
 import tarfile
@@ -18,6 +19,8 @@ LINUX_SDK_RUNTIME_PREFIXES = (
     "libclang-cpp",
     "liblld",
 )
+
+BOOST_INCLUDE = re.compile(rb'^\s*#\s*include\s*[<"](?P<path>boost/[^>"]+)[>"]', re.MULTILINE)
 
 
 def is_linux_sdk_runtime(dependency: str) -> bool:
@@ -104,6 +107,19 @@ def verify_runtime_dependencies(sdk: Path) -> None:
                     raise RuntimeError(f"SDK tool retains an external runtime dependency: {tool}: {dependency}")
 
 
+def verify_boost_header_closure(sdk: Path) -> None:
+    include = sdk / "share" / "forge-contract" / "include"
+    pfr = include / "boost" / "pfr"
+    if not pfr.is_dir():
+        raise RuntimeError("SDK does not contain its Boost.PFR dependency")
+
+    for header in pfr.rglob("*.hpp"):
+        for match in BOOST_INCLUDE.finditer(header.read_bytes()):
+            dependency = include / match.group("path").decode("utf-8")
+            if not dependency.is_file():
+                raise RuntimeError(f"SDK Boost.PFR dependency is not self-contained: {header}: {dependency}")
+
+
 def type_target(abi: dict, name: str) -> str:
     return next(entry["type"] for entry in abi["types"] if entry["new_type_name"] == name)
 
@@ -136,6 +152,7 @@ def main() -> None:
         raise RuntimeError(f"expected one SDK root, found {len(roots)}")
     sdk = roots[0]
     verify_runtime_dependencies(sdk)
+    verify_boost_header_closure(sdk)
 
     config = sdk / "lib" / "cmake" / "ForgeContract" / "ForgeContractConfig.cmake"
     release = 'set(ForgeContract_PROFILE "release")' in config.read_text()
