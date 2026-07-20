@@ -1,4 +1,24 @@
-add_library(forge_guest_contract STATIC dispatcher.cpp)
+add_library(
+   forge_guest_contract STATIC
+   action.cpp
+   authorization.cpp
+   bitset.cpp
+   call.cpp
+   compatibility_asset.cpp
+   crypto.cpp
+   crypto_bls_ext.cpp
+   crypto_ext.cpp
+   deferred_transaction.cpp
+   dispatcher.cpp
+   instant_finality.cpp
+   intrinsics.cpp
+   print.cpp
+   privileged.cpp
+   producer_schedule.cpp
+   rope.cpp
+   system.cpp
+   transaction.cpp
+)
 target_sources(
    forge_guest_contract
    PUBLIC
@@ -14,7 +34,6 @@ target_sources(
          include/forge/contract/ignore.cppm
          include/forge/contract/hash_id.cppm
          include/forge/contract/action.cppm
-         include/forge/contract/base64.cppm
          include/forge/contract/transaction.cppm
          include/forge/contract/deferred_transaction.cppm
          include/forge/contract/authorization.cppm
@@ -50,5 +69,8 @@ target_link_libraries(
       forge_guest_runtime
       forge_guest_raw
       forge_guest_chain_protocol
+      forge_guest_codec_base64
+      forge_guest_codec_base58
+      forge_guest_codec_hex
 )
 target_compile_features(forge_guest_contract PUBLIC cxx_std_23)

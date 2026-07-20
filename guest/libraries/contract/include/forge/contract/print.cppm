@@ -16,29 +16,12 @@ export import forge.chain.protocol.values;
 
 export namespace forge::contract {
 
-inline void printhex(const void* data, std::uint32_t size) {
-   ::forge::contract::internal::printhex(data, size);
-}
-
-inline void printl(const char* data, std::size_t size) {
-   ::forge::contract::internal::prints_l(data, static_cast<std::uint32_t>(size));
-}
-
-inline void print(const char* value) {
-   ::forge::contract::internal::prints(value);
-}
-
-inline void print(std::string_view value) {
-   printl(value.data(), value.size());
-}
-
-inline void print(const std::string& value) {
-   print(std::string_view{value});
-}
-
-inline void print(chain::protocol::name value) {
-   ::forge::contract::internal::printn(value.value);
-}
+void printhex(const void* data, std::uint32_t size);
+void printl(const char* data, std::size_t size);
+void print(const char* value);
+void print(std::string_view value);
+void print(const std::string& value);
+void print(chain::protocol::name value);
 
 template <std::signed_integral T> inline void print(T value) {
    if constexpr (sizeof(T) == sizeof(__int128)) {
@@ -63,17 +46,9 @@ template <std::unsigned_integral T> inline void print(T value) {
    }
 }
 
-inline void print(float value) {
-   ::forge::contract::internal::printsf(value);
-}
-
-inline void print(double value) {
-   ::forge::contract::internal::printdf(value);
-}
-
-inline void print(long double value) {
-   ::forge::contract::internal::printqf(&value);
-}
+void print(float value);
+void print(double value);
+void print(long double value);
 
 template <typename T>
 concept member_printable = requires(T&& value) { std::forward<T>(value).print(); };
@@ -87,9 +62,7 @@ template <typename First, typename... Rest> void print(First&& first, Rest&&... 
    (print(std::forward<Rest>(rest)), ...);
 }
 
-inline void print_f(const char* format) {
-   print(format);
-}
+void print_f(const char* format);
 
 template <typename Arg, typename... Args> void print_f(const char* format, Arg&& value, Args&&... rest) {
    while (*format != '\0') {

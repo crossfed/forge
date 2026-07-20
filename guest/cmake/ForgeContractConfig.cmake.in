@@ -13,6 +13,9 @@ set(ForgeContract_CLANG "${ForgeContract_PREFIX}/bin/clang++")
 set(ForgeContract_WASM_LD "${ForgeContract_PREFIX}/bin/wasm-ld")
 set(ForgeContract_SYSROOT "${ForgeContract_PREFIX}/sysroot")
 set(ForgeContract_RUNTIME_ARCHIVE "${ForgeContract_SYSROOT}/lib/libforge_guest_runtime.a")
+set(ForgeContract_CODEC_BASE64_ARCHIVE "${ForgeContract_SYSROOT}/lib/libforge_guest_codec_base64.a")
+set(ForgeContract_CODEC_BASE58_ARCHIVE "${ForgeContract_SYSROOT}/lib/libforge_guest_codec_base58.a")
+set(ForgeContract_CODEC_HEX_ARCHIVE "${ForgeContract_SYSROOT}/lib/libforge_guest_codec_hex.a")
 set(ForgeContract_DATA_DIR "${ForgeContract_PREFIX}/@CMAKE_INSTALL_DATADIR@/forge-contract")
 file(READ "${ForgeContract_DATA_DIR}/sysroot.sha256" ForgeContract_SYSROOT_HASH)
 string(STRIP "${ForgeContract_SYSROOT_HASH}" ForgeContract_SYSROOT_HASH)
@@ -29,6 +32,9 @@ foreach(_required
    ForgeContract_WASM_LD
    ForgeContract_SYSROOT
    ForgeContract_RUNTIME_ARCHIVE
+   ForgeContract_CODEC_BASE64_ARCHIVE
+   ForgeContract_CODEC_BASE58_ARCHIVE
+   ForgeContract_CODEC_HEX_ARCHIVE
    ForgeContract_DATA_DIR
    ForgeContract_ABIGEN
    ForgeContract_ATTR_PLUGIN

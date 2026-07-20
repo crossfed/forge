@@ -1,7 +1,5 @@
 module;
 
-#include <forge/contract/internal/intrinsics.hpp>
-
 #include <cstdint>
 #include <vector>
 
@@ -15,12 +13,9 @@ import forge.contract.intrinsics;
 
 export namespace forge::contract {
 
-[[nodiscard]] inline bool check_transaction_authorization(const char* transaction, std::uint32_t transaction_size,
-                                                          const char* public_keys, std::uint32_t public_keys_size,
-                                                          const char* permissions, std::uint32_t permissions_size) {
-   return ::forge::contract::internal::check_transaction_authorization(
-              transaction, transaction_size, public_keys, public_keys_size, permissions, permissions_size) > 0;
-}
+[[nodiscard]] bool check_transaction_authorization(const char* transaction, std::uint32_t transaction_size,
+                                                   const char* public_keys, std::uint32_t public_keys_size,
+                                                   const char* permissions, std::uint32_t permissions_size);
 
 template <typename PublicKeys, typename Permissions>
 [[nodiscard]] bool check_transaction_authorization(const std::vector<std::uint8_t>& transaction,
@@ -33,14 +28,10 @@ template <typename PublicKeys, typename Permissions>
                                           packed_permissions.size());
 }
 
-[[nodiscard]] inline bool
+[[nodiscard]] bool
 check_permission_authorization(chain::protocol::name account, chain::protocol::name permission, const char* public_keys,
                                std::uint32_t public_keys_size, const char* permissions, std::uint32_t permissions_size,
-                               chain::protocol::microseconds delay = chain::protocol::microseconds{}) {
-   return ::forge::contract::internal::check_permission_authorization(account.value, permission.value, public_keys,
-                                                                      public_keys_size, permissions, permissions_size,
-                                                                      static_cast<std::uint64_t>(delay.count())) > 0;
-}
+                               chain::protocol::microseconds delay = chain::protocol::microseconds{});
 
 template <typename PublicKeys, typename Permissions>
 [[nodiscard]] bool
@@ -54,15 +45,8 @@ check_permission_authorization(chain::protocol::name account, chain::protocol::n
                                          packed_permissions.size(), delay);
 }
 
-[[nodiscard]] inline chain::protocol::time_point get_permission_last_used(chain::protocol::name account,
-                                                                          chain::protocol::name permission) {
-   return chain::protocol::time_point{chain::protocol::microseconds{
-       ::forge::contract::internal::get_permission_last_used(account.value, permission.value)}};
-}
-
-[[nodiscard]] inline chain::protocol::time_point get_account_creation_time(chain::protocol::name account) {
-   return chain::protocol::time_point{
-       chain::protocol::microseconds{::forge::contract::internal::get_account_creation_time(account.value)}};
-}
+[[nodiscard]] chain::protocol::time_point get_permission_last_used(chain::protocol::name account,
+                                                                   chain::protocol::name permission);
+[[nodiscard]] chain::protocol::time_point get_account_creation_time(chain::protocol::name account);
 
 } // namespace forge::contract

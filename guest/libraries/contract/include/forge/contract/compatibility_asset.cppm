@@ -19,8 +19,7 @@ struct asset {
 
    constexpr asset(std::int64_t raw_amount = 0) : amount(raw_amount) {}
 
-   asset(std::int64_t raw_amount, chain::protocol::symbol raw_symbol)
-       : asset(chain::protocol::asset{raw_amount, raw_symbol}) {}
+   asset(std::int64_t raw_amount, chain::protocol::symbol raw_symbol);
 
    constexpr asset(const chain::protocol::asset& value) : amount(value.amount), symbol(value.sym) {}
 
@@ -32,75 +31,21 @@ struct asset {
       return is_amount_within_range() && symbol.is_valid();
    }
 
-   void set_amount(std::int64_t value) {
-      auto converted = protocol_value();
-      converted.set_amount(value);
-      assign(converted);
-   }
+   void set_amount(std::int64_t value);
+   asset operator-() const;
+   asset& operator+=(const asset& value);
+   asset& operator-=(const asset& value);
+   asset& operator*=(std::int64_t value);
+   asset& operator/=(std::int64_t value);
 
-   asset operator-() const {
-      return {-protocol_value()};
-   }
-
-   asset& operator+=(const asset& value) {
-      auto converted = protocol_value();
-      converted += value.protocol_value();
-      assign(converted);
-      return *this;
-   }
-
-   asset& operator-=(const asset& value) {
-      auto converted = protocol_value();
-      converted -= value.protocol_value();
-      assign(converted);
-      return *this;
-   }
-
-   asset& operator*=(std::int64_t value) {
-      auto converted = protocol_value();
-      converted *= value;
-      assign(converted);
-      return *this;
-   }
-
-   asset& operator/=(std::int64_t value) {
-      auto converted = protocol_value();
-      converted /= value;
-      assign(converted);
-      return *this;
-   }
-
-   friend asset operator+(asset left, const asset& right) {
-      return left += right;
-   }
-
-   friend asset operator-(asset left, const asset& right) {
-      return left -= right;
-   }
-
-   friend asset operator*(asset value, std::int64_t multiplier) {
-      return value *= multiplier;
-   }
-
-   friend asset operator*(std::int64_t multiplier, asset value) {
-      return value *= multiplier;
-   }
-
-   friend asset operator/(asset value, std::int64_t divisor) {
-      return value /= divisor;
-   }
-
-   friend std::int64_t operator/(const asset& left, const asset& right) {
-      return left.protocol_value() / right.protocol_value();
-   }
-
-   friend bool operator==(const asset& left, const asset& right) {
-      return left.protocol_value() == right.protocol_value();
-   }
-
-   friend std::strong_ordering operator<=>(const asset& left, const asset& right) {
-      return left.protocol_value() <=> right.protocol_value();
-   }
+   friend asset operator+(asset left, const asset& right);
+   friend asset operator-(asset left, const asset& right);
+   friend asset operator*(asset value, std::int64_t multiplier);
+   friend asset operator*(std::int64_t multiplier, asset value);
+   friend asset operator/(asset value, std::int64_t divisor);
+   friend std::int64_t operator/(const asset& left, const asset& right);
+   friend bool operator==(const asset& left, const asset& right);
+   friend std::strong_ordering operator<=>(const asset& left, const asset& right);
 
    template <typename Stream> friend void raw_pack(Stream& stream, const asset& value) {
       chain::protocol::raw_pack(stream, value.protocol_value());
@@ -134,8 +79,7 @@ struct extended_asset {
 
    constexpr extended_asset() = default;
 
-   extended_asset(std::int64_t amount, chain::protocol::extended_symbol symbol)
-       : extended_asset(chain::protocol::extended_asset{amount, symbol}) {}
+   extended_asset(std::int64_t amount, chain::protocol::extended_symbol symbol);
 
    constexpr extended_asset(asset value, name raw_contract) : quantity(value), contract(raw_contract) {}
 
@@ -146,72 +90,20 @@ struct extended_asset {
       return {quantity.symbol, contract};
    }
 
-   extended_asset operator-() const {
-      return {-protocol_value()};
-   }
+   extended_asset operator-() const;
+   extended_asset& operator+=(const extended_asset& value);
+   extended_asset& operator-=(const extended_asset& value);
+   extended_asset& operator*=(std::int64_t value);
+   extended_asset& operator/=(std::int64_t value);
 
-   extended_asset& operator+=(const extended_asset& value) {
-      auto converted = protocol_value();
-      converted += value.protocol_value();
-      assign(converted);
-      return *this;
-   }
-
-   extended_asset& operator-=(const extended_asset& value) {
-      auto converted = protocol_value();
-      converted -= value.protocol_value();
-      assign(converted);
-      return *this;
-   }
-
-   extended_asset& operator*=(std::int64_t value) {
-      auto converted = protocol_value();
-      converted *= value;
-      assign(converted);
-      return *this;
-   }
-
-   extended_asset& operator/=(std::int64_t value) {
-      auto converted = protocol_value();
-      converted /= value;
-      assign(converted);
-      return *this;
-   }
-
-   friend extended_asset operator+(extended_asset left, const extended_asset& right) {
-      return left += right;
-   }
-
-   friend extended_asset operator-(extended_asset left, const extended_asset& right) {
-      return left -= right;
-   }
-
-   friend extended_asset operator*(extended_asset value, std::int64_t multiplier) {
-      return value *= multiplier;
-   }
-
-   friend extended_asset operator*(std::int64_t multiplier, extended_asset value) {
-      return value *= multiplier;
-   }
-
-   friend extended_asset operator/(extended_asset value, std::int64_t divisor) {
-      return value /= divisor;
-   }
-
-   friend std::int64_t operator/(const extended_asset& left, const extended_asset& right) {
-      if (left.contract != right.contract) {
-         chain::protocol::detail::fail_value("type mismatch");
-      }
-      return left.quantity / right.quantity;
-   }
-
-   friend bool operator==(const extended_asset& left, const extended_asset& right) {
-      return left.protocol_value() == right.protocol_value();
-   }
-
-   friend std::strong_ordering operator<=>(const extended_asset& left, const extended_asset& right) {
-      return left.protocol_value() <=> right.protocol_value();
-   }
+   friend extended_asset operator+(extended_asset left, const extended_asset& right);
+   friend extended_asset operator-(extended_asset left, const extended_asset& right);
+   friend extended_asset operator*(extended_asset value, std::int64_t multiplier);
+   friend extended_asset operator*(std::int64_t multiplier, extended_asset value);
+   friend extended_asset operator/(extended_asset value, std::int64_t divisor);
+   friend std::int64_t operator/(const extended_asset& left, const extended_asset& right);
+   friend bool operator==(const extended_asset& left, const extended_asset& right);
+   friend std::strong_ordering operator<=>(const extended_asset& left, const extended_asset& right);
 
    template <typename Stream> friend void raw_pack(Stream& stream, const extended_asset& value) {
       chain::protocol::raw_pack(stream, value.protocol_value());

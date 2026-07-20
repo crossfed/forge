@@ -23,7 +23,7 @@
        1, core, action, get_code_hash, get_code_hash, env, get_code_hash, std::uint32_t,                               \
        (std::uint64_t account, std::uint32_t struct_version, char* result_buffer, forge_contract_size_t buffer_size))  \
    FORGE_CONTRACT_INTRINSIC(1, core, action, action_return_value, set_action_return_value, env,                        \
-                            set_action_return_value, void, (void* return_value, forge_contract_size_t size))           \
+                            set_action_return_value, void, (const char* return_value, forge_contract_size_t size))     \
    FORGE_CONTRACT_INTRINSIC(                                                                                           \
        1, call, call, none, call, env, call, std::int64_t,                                                             \
        (std::uint64_t receiver, std::uint64_t flags, const char* data, forge_contract_size_t data_size))               \
@@ -319,7 +319,7 @@
                             get_parameters_packed, std::uint32_t,                                                      \
                             (const char* ids, std::uint32_t ids_size, char* data, std::uint32_t datalen))              \
    FORGE_CONTRACT_INTRINSIC(1, privileged, privileged, blockchain_parameters, set_parameters_packed, env,              \
-                            set_parameters_packed, void, (const char* data, std::uint32_t datalen))                    \
+                            set_parameters_packed, void, (const char* data, forge_contract_size_t datalen))            \
    FORGE_CONTRACT_INTRINSIC(1, privileged, privileged, preactivate_feature, preactivate_feature, env,                  \
                             preactivate_feature, void, (const capi_checksum256* feature_digest))                       \
    FORGE_CONTRACT_INTRINSIC(1, core, system, none, eosio_assert, env, eosio_assert, void,                              \

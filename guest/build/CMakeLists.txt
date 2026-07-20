@@ -28,6 +28,9 @@ set(_modules "${FORGE_CONTRACT_DATA_DIR}/modules")
 set(_include "${FORGE_CONTRACT_DATA_DIR}/include")
 set(_runtime "${FORGE_CONTRACT_DATA_DIR}/runtime")
 set(_runtime_archive "${CMAKE_SYSROOT}/lib/libforge_guest_runtime.a")
+set(_codec_base64_archive "${CMAKE_SYSROOT}/lib/libforge_guest_codec_base64.a")
+set(_codec_base58_archive "${CMAKE_SYSROOT}/lib/libforge_guest_codec_base58.a")
+set(_codec_hex_archive "${CMAKE_SYSROOT}/lib/libforge_guest_codec_hex.a")
 set(_generated "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(_abi "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_TARGET}.abi")
 set(_dispatcher "${_generated}/${FORGE_CONTRACT_TARGET}.dispatcher.cpp")
@@ -52,6 +55,48 @@ target_sources(
          "${_modules}/forge/raw/varint_value.cppm"
          "${_modules}/forge/raw/codec.cppm"
 )
+
+add_library(forge_guest_codec_base64 STATIC)
+target_sources(
+   forge_guest_codec_base64
+   PUBLIC
+      FILE_SET forge_guest_codec_base64_modules TYPE CXX_MODULES
+      BASE_DIRS "${_modules}"
+      FILES
+         "${_modules}/forge/codec/base64/exceptions.cppm"
+         "${_modules}/forge/codec/base64/base64.cppm"
+)
+add_library(forge_guest_codec_base64_runtime STATIC IMPORTED GLOBAL)
+set_target_properties(forge_guest_codec_base64_runtime PROPERTIES IMPORTED_LOCATION "${_codec_base64_archive}")
+target_link_libraries(forge_guest_codec_base64 PUBLIC forge_guest_codec_base64_runtime)
+
+add_library(forge_guest_codec_base58 STATIC)
+target_sources(
+   forge_guest_codec_base58
+   PUBLIC
+      FILE_SET forge_guest_codec_base58_modules TYPE CXX_MODULES
+      BASE_DIRS "${_modules}"
+      FILES
+         "${_modules}/forge/codec/base58/exceptions.cppm"
+         "${_modules}/forge/codec/base58/base58.cppm"
+)
+add_library(forge_guest_codec_base58_runtime STATIC IMPORTED GLOBAL)
+set_target_properties(forge_guest_codec_base58_runtime PROPERTIES IMPORTED_LOCATION "${_codec_base58_archive}")
+target_link_libraries(forge_guest_codec_base58 PUBLIC forge_guest_codec_base58_runtime)
+
+add_library(forge_guest_codec_hex STATIC)
+target_sources(
+   forge_guest_codec_hex
+   PUBLIC
+      FILE_SET forge_guest_codec_hex_modules TYPE CXX_MODULES
+      BASE_DIRS "${_modules}"
+      FILES
+         "${_modules}/forge/codec/hex/exceptions.cppm"
+         "${_modules}/forge/codec/hex/hex.cppm"
+)
+add_library(forge_guest_codec_hex_runtime STATIC IMPORTED GLOBAL)
+set_target_properties(forge_guest_codec_hex_runtime PROPERTIES IMPORTED_LOCATION "${_codec_hex_archive}")
+target_link_libraries(forge_guest_codec_hex PUBLIC forge_guest_codec_hex_runtime)
 
 add_library(forge_guest_crypto STATIC)
 target_sources(
@@ -94,16 +139,46 @@ target_sources(
          "${_modules}/forge/chain/protocol/producer_authority.cppm"
          "${_modules}/forge/chain/protocol/system_value.cppm"
          "${_modules}/forge/chain/protocol/system.cppm"
+         "${_modules}/forge/chain/protocol/code_hash_result.cppm"
+         "${_modules}/forge/chain/protocol/blockchain_parameters.cppm"
+         "${_modules}/forge/chain/protocol/kv_parameters.cppm"
+         "${_modules}/forge/chain/protocol/finalizer_authority.cppm"
+         "${_modules}/forge/chain/protocol/finalizer_policy.cppm"
+         "${_modules}/forge/chain/protocol/hash_id.cppm"
+         "${_modules}/forge/chain/protocol/call_access_mode.cppm"
+         "${_modules}/forge/chain/protocol/call_data_header.cppm"
 )
 target_link_libraries(forge_guest_chain_protocol PUBLIC forge_guest_raw forge_guest_crypto)
 
-if(NOT EXISTS "${_runtime_archive}")
-   message(FATAL_ERROR "Forge Contract sysroot is missing ${_runtime_archive}")
-endif()
+foreach(_archive IN ITEMS "${_runtime_archive}" "${_codec_base64_archive}" "${_codec_base58_archive}" "${_codec_hex_archive}")
+   if(NOT EXISTS "${_archive}")
+      message(FATAL_ERROR "Forge Contract sysroot is missing ${_archive}")
+   endif()
+endforeach()
 add_library(forge_guest_runtime STATIC IMPORTED GLOBAL)
 set_target_properties(forge_guest_runtime PROPERTIES IMPORTED_LOCATION "${_runtime_archive}")
 
-add_library(forge_guest_contract STATIC "${_runtime}/dispatcher.cpp")
+add_library(
+   forge_guest_contract STATIC
+   "${_runtime}/action.cpp"
+   "${_runtime}/authorization.cpp"
+   "${_runtime}/bitset.cpp"
+   "${_runtime}/call.cpp"
+   "${_runtime}/compatibility_asset.cpp"
+   "${_runtime}/crypto.cpp"
+   "${_runtime}/crypto_bls_ext.cpp"
+   "${_runtime}/crypto_ext.cpp"
+   "${_runtime}/deferred_transaction.cpp"
+   "${_runtime}/dispatcher.cpp"
+   "${_runtime}/instant_finality.cpp"
+   "${_runtime}/intrinsics.cpp"
+   "${_runtime}/print.cpp"
+   "${_runtime}/privileged.cpp"
+   "${_runtime}/producer_schedule.cpp"
+   "${_runtime}/rope.cpp"
+   "${_runtime}/system.cpp"
+   "${_runtime}/transaction.cpp"
+)
 target_sources(
    forge_guest_contract
    PUBLIC
@@ -119,7 +194,6 @@ target_sources(
          "${_modules}/forge/contract/ignore.cppm"
          "${_modules}/forge/contract/hash_id.cppm"
          "${_modules}/forge/contract/action.cppm"
-         "${_modules}/forge/contract/base64.cppm"
          "${_modules}/forge/contract/transaction.cppm"
          "${_modules}/forge/contract/system.cppm"
          "${_modules}/forge/contract/deferred_transaction.cppm"
@@ -148,13 +222,25 @@ target_link_libraries(
    PUBLIC
       forge_guest_raw
       forge_guest_chain_protocol
+      forge_guest_codec_base64
+      forge_guest_codec_base58
+      forge_guest_codec_hex
 )
 
 add_library(forge_guest_eosio INTERFACE)
 target_include_directories(forge_guest_eosio INTERFACE "${_include}")
 target_link_libraries(forge_guest_eosio INTERFACE forge_guest_contract)
 
-foreach(_target forge_guest_raw forge_guest_crypto forge_guest_chain_protocol forge_guest_contract)
+foreach(
+   _target
+   forge_guest_raw
+   forge_guest_codec_base64
+   forge_guest_codec_base58
+   forge_guest_codec_hex
+   forge_guest_crypto
+   forge_guest_chain_protocol
+   forge_guest_contract
+)
    target_include_directories(${_target} PRIVATE "${_include}")
    target_compile_definitions(${_target} PRIVATE FORGE_CONTRACT_GUEST=1)
    target_compile_options(
@@ -180,6 +266,18 @@ set(
    "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_raw.dir/${_module_configuration_directory}"
 )
 set(
+   _codec_base64_module_directory
+   "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_codec_base64.dir/${_module_configuration_directory}"
+)
+set(
+   _codec_base58_module_directory
+   "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_codec_base58.dir/${_module_configuration_directory}"
+)
+set(
+   _codec_hex_module_directory
+   "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_codec_hex.dir/${_module_configuration_directory}"
+)
+set(
    _crypto_module_directory
    "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_crypto.dir/${_module_configuration_directory}"
 )
@@ -196,6 +294,12 @@ set(_module_arguments
    "forge.raw.stream=${_raw_module_directory}forge.raw.stream.pcm"
    "forge.raw.varint_value=${_raw_module_directory}forge.raw.varint_value.pcm"
    "forge.raw.codec=${_raw_module_directory}forge.raw.codec.pcm"
+   "forge.codec.base64.exceptions=${_codec_base64_module_directory}forge.codec.base64.exceptions.pcm"
+   "forge.codec.base64=${_codec_base64_module_directory}forge.codec.base64.pcm"
+   "forge.codec.base58.exceptions=${_codec_base58_module_directory}forge.codec.base58.exceptions.pcm"
+   "forge.codec.base58=${_codec_base58_module_directory}forge.codec.base58.pcm"
+   "forge.codec.hex.exceptions=${_codec_hex_module_directory}forge.codec.hex.exceptions.pcm"
+   "forge.codec.hex=${_codec_hex_module_directory}forge.codec.hex.pcm"
    "forge.crypto.sha256:value=${_crypto_module_directory}forge.crypto.sha256-value.pcm"
    "forge.crypto.sha256=${_crypto_module_directory}forge.crypto.sha256.pcm"
    "forge.crypto.sha512:value=${_crypto_module_directory}forge.crypto.sha512-value.pcm"
@@ -220,6 +324,14 @@ set(_module_arguments
    "forge.chain.protocol.producer_authority=${_protocol_module_directory}forge.chain.protocol.producer_authority.pcm"
    "forge.chain.protocol.system:value=${_protocol_module_directory}forge.chain.protocol.system-value.pcm"
    "forge.chain.protocol.system=${_protocol_module_directory}forge.chain.protocol.system.pcm"
+   "forge.chain.protocol.code_hash_result=${_protocol_module_directory}forge.chain.protocol.code_hash_result.pcm"
+   "forge.chain.protocol.blockchain_parameters=${_protocol_module_directory}forge.chain.protocol.blockchain_parameters.pcm"
+   "forge.chain.protocol.kv_parameters=${_protocol_module_directory}forge.chain.protocol.kv_parameters.pcm"
+   "forge.chain.protocol.finalizer_authority=${_protocol_module_directory}forge.chain.protocol.finalizer_authority.pcm"
+   "forge.chain.protocol.finalizer_policy=${_protocol_module_directory}forge.chain.protocol.finalizer_policy.pcm"
+   "forge.chain.protocol.hash_id=${_protocol_module_directory}forge.chain.protocol.hash_id.pcm"
+   "forge.chain.protocol.call_access_mode=${_protocol_module_directory}forge.chain.protocol.call_access_mode.pcm"
+   "forge.chain.protocol.call_data_header=${_protocol_module_directory}forge.chain.protocol.call_data_header.pcm"
    "forge.contract.intrinsics=${_contract_module_directory}forge.contract.intrinsics.pcm"
    "forge.contract=${_contract_module_directory}forge.contract.pcm"
    "forge.contract.datastream=${_contract_module_directory}forge.contract.datastream.pcm"
@@ -229,7 +341,6 @@ set(_module_arguments
    "forge.contract.ignore=${_contract_module_directory}forge.contract.ignore.pcm"
    "forge.contract.hash_id=${_contract_module_directory}forge.contract.hash_id.pcm"
    "forge.contract.action=${_contract_module_directory}forge.contract.action.pcm"
-   "forge.contract.base64=${_contract_module_directory}forge.contract.base64.pcm"
    "forge.contract.transaction=${_contract_module_directory}forge.contract.transaction.pcm"
    "forge.contract.system=${_contract_module_directory}forge.contract.system.pcm"
    "forge.contract.deferred_transaction=${_contract_module_directory}forge.contract.deferred_transaction.pcm"

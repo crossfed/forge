@@ -444,6 +444,35 @@ ExternalProject_Add(
    INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
 )
 
+ExternalProject_Add(
+   forge_contract_guest_codecs
+   DEPENDS forge_contract_guest_runtime
+   SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec"
+   DOWNLOAD_COMMAND ""
+   UPDATE_COMMAND ""
+   PATCH_COMMAND ""
+   CMAKE_GENERATOR Ninja
+   CMAKE_ARGS
+      -DCMAKE_BUILD_TYPE=Release
+      -DCMAKE_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
+      -DCMAKE_INSTALL_PREFIX=${FORGE_CONTRACT_SYSROOT}
+      -DCMAKE_SYSTEM_NAME=Generic
+      -DCMAKE_SYSTEM_PROCESSOR=wasm32
+      -DCMAKE_SYSROOT=${FORGE_CONTRACT_SYSROOT}
+      -DCMAKE_OSX_SYSROOT=
+      -DCMAKE_CXX_COMPILER=${FORGE_CONTRACT_CLANG}
+      -DCMAKE_CXX_COMPILER_TARGET=wasm32
+      -DCMAKE_CXX_FLAGS=${_forge_contract_path_map_flags}
+      -DCMAKE_AR=${FORGE_CONTRACT_LLVM_AR}
+      -DCMAKE_RANLIB=${FORGE_CONTRACT_LLVM_RANLIB}
+      -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
+      -DFORGE_SOURCE_DIR=${_forge_contract_source_root}
+      -DFORGE_GUEST_INCLUDE_DIR=${_generated_dir}/include
+   BUILD_ALWAYS TRUE
+   BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> -j ${FORGE_CONTRACT_JOBS}
+   INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
+)
+
 add_custom_target(
    forge_contract_sysroot_hash ALL
    COMMAND
@@ -451,7 +480,7 @@ add_custom_target(
       "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hash_tree.py"
       --root "${FORGE_CONTRACT_SYSROOT}"
       --output "${_sysroot_hash}"
-   DEPENDS forge_contract_guest_runtime "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hash_tree.py"
+   DEPENDS forge_contract_guest_codecs "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hash_tree.py"
    BYPRODUCTS "${_sysroot_hash}"
    VERBATIM
 )
@@ -513,7 +542,24 @@ install(
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/raw/codec.cpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/values.cpp"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/time.cpp"
+      libraries/contract/action.cpp
+      libraries/contract/authorization.cpp
+      libraries/contract/bitset.cpp
+      libraries/contract/call.cpp
+      libraries/contract/compatibility_asset.cpp
+      libraries/contract/crypto.cpp
+      libraries/contract/crypto_bls_ext.cpp
+      libraries/contract/crypto_ext.cpp
+      libraries/contract/deferred_transaction.cpp
       libraries/contract/dispatcher.cpp
+      libraries/contract/instant_finality.cpp
+      libraries/contract/intrinsics.cpp
+      libraries/contract/print.cpp
+      libraries/contract/privileged.cpp
+      libraries/contract/producer_schedule.cpp
+      libraries/contract/rope.cpp
+      libraries/contract/system.cpp
+      libraries/contract/transaction.cpp
    DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/runtime"
 )
 install(
@@ -533,6 +579,24 @@ install(
 install(FILES "${_intrinsic_manifest}" DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/registry")
 install(FILES "${_sysroot_hash}" DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract")
 
+install(
+   FILES
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/codec/base64/include/forge/codec/base64/base64.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/codec/base64/include/forge/codec/base64/exceptions.cppm"
+   DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/modules/forge/codec/base64"
+)
+install(
+   FILES
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/codec/base58/include/forge/codec/base58/base58.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/codec/base58/include/forge/codec/base58/exceptions.cppm"
+   DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/modules/forge/codec/base58"
+)
+install(
+   FILES
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/codec/hex/include/forge/codec/hex/hex.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/codec/hex/include/forge/codec/hex/exceptions.cppm"
+   DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/modules/forge/codec/hex"
+)
 install(
    FILES
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/raw/include/forge/raw/stream.cppm"
@@ -570,6 +634,14 @@ install(
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/producer_authority.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/system_value.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/system.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/code_hash_result.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/blockchain_parameters.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/kv_parameters.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/finalizer_authority.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/finalizer_policy.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/hash_id.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/call_access_mode.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/call_data_header.cppm"
    DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/modules/forge/chain/protocol"
 )
 

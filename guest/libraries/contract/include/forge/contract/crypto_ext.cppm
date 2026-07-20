@@ -71,10 +71,8 @@ using g1_point_view = ec_point_view<g1_coordinate_size>;
 using g2_point_view = ec_point_view<g2_coordinate_size>;
 using bigint = std::vector<char>;
 
-[[nodiscard]] inline std::int32_t alt_bn128_add(const char* first, std::uint32_t first_size, const char* second,
-                                                std::uint32_t second_size, char* result, std::uint32_t result_size) {
-   return ::forge::contract::internal::alt_bn128_add(first, first_size, second, second_size, result, result_size);
-}
+[[nodiscard]] std::int32_t alt_bn128_add(const char* first, std::uint32_t first_size, const char* second,
+                                         std::uint32_t second_size, char* result, std::uint32_t result_size);
 
 template <typename First, typename Second>
 [[nodiscard]] g1_point alt_bn128_add(const First& first, const Second& second) {
@@ -90,10 +88,8 @@ template <typename First, typename Second>
    return result;
 }
 
-[[nodiscard]] inline std::int32_t alt_bn128_mul(const char* point, std::uint32_t point_size, const char* scalar,
-                                                std::uint32_t scalar_size, char* result, std::uint32_t result_size) {
-   return ::forge::contract::internal::alt_bn128_mul(point, point_size, scalar, scalar_size, result, result_size);
-}
+[[nodiscard]] std::int32_t alt_bn128_mul(const char* point, std::uint32_t point_size, const char* scalar,
+                                         std::uint32_t scalar_size, char* result, std::uint32_t result_size);
 
 template <typename Point> [[nodiscard]] g1_point alt_bn128_mul(const Point& point, const bigint& scalar) {
    const auto point_bytes = point.serialized();
@@ -105,9 +101,7 @@ template <typename Point> [[nodiscard]] g1_point alt_bn128_mul(const Point& poin
                    {output.begin() + g1_coordinate_size, output.end()}};
 }
 
-[[nodiscard]] inline std::int32_t alt_bn128_pair(const char* pairs, std::uint32_t size) {
-   return ::forge::contract::internal::alt_bn128_pair(pairs, size);
-}
+[[nodiscard]] std::int32_t alt_bn128_pair(const char* pairs, std::uint32_t size);
 
 template <typename G1, typename G2>
 [[nodiscard]] std::int32_t alt_bn128_pair(const std::vector<std::pair<G1, G2>>& pairs) {
@@ -122,64 +116,25 @@ template <typename G1, typename G2>
    return ::forge::contract::internal::alt_bn128_pair(bytes.data(), bytes.size());
 }
 
-[[nodiscard]] inline std::int32_t mod_exp(const char* base, std::uint32_t base_size, const char* exponent,
-                                          std::uint32_t exponent_size, const char* modulus, std::uint32_t modulus_size,
-                                          char* result, std::uint32_t result_size) {
-   return ::forge::contract::internal::mod_exp(base, base_size, exponent, exponent_size, modulus, modulus_size, result,
-                                               result_size);
-}
-
-[[nodiscard]] inline std::int32_t mod_exp(const bigint& base, const bigint& exponent, const bigint& modulus,
-                                          bigint& result) {
-   check(result.size() >= modulus.size(), "mod_exp result parameter's size must be >= mod's size");
-   return ::forge::contract::internal::mod_exp(base.data(), base.size(), exponent.data(), exponent.size(),
-                                               modulus.data(), modulus.size(), result.data(), result.size());
-}
+[[nodiscard]] std::int32_t mod_exp(const char* base, std::uint32_t base_size, const char* exponent,
+                                   std::uint32_t exponent_size, const char* modulus, std::uint32_t modulus_size,
+                                   char* result, std::uint32_t result_size);
+[[nodiscard]] std::int32_t mod_exp(const bigint& base, const bigint& exponent, const bigint& modulus, bigint& result);
 
 inline constexpr std::size_t blake2f_result_size = 64U;
 
-[[nodiscard]] inline std::int32_t blake2_f(std::uint32_t rounds, const char* state, std::uint32_t state_size,
-                                           const char* message, std::uint32_t message_size, const char* offset0,
-                                           std::uint32_t offset0_size, const char* offset1, std::uint32_t offset1_size,
-                                           std::int32_t final, char* result, std::uint32_t result_size) {
-   return ::forge::contract::internal::blake2_f(rounds, state, state_size, message, message_size, offset0, offset0_size,
-                                                offset1, offset1_size, final, result, result_size);
-}
-
-[[nodiscard]] inline std::int32_t blake2_f(std::uint32_t rounds, const std::vector<char>& state,
-                                           const std::vector<char>& message, const std::vector<char>& offset0,
-                                           const std::vector<char>& offset1, bool final, std::vector<char>& result) {
-   check(result.size() >= blake2f_result_size, "blake2_f result parameter's size must be >= 64");
-   return ::forge::contract::internal::blake2_f(rounds, state.data(), state.size(), message.data(), message.size(),
-                                                offset0.data(), offset0.size(), offset1.data(), offset1.size(), final,
-                                                result.data(), result.size());
-}
-
-[[nodiscard]] inline checksum256 sha3(const char* data, std::uint32_t size) {
-   auto result = checksum256{};
-   ::forge::contract::internal::sha3(data, size, result.data(), result.data_size(), 0);
-   return result;
-}
-
-inline void assert_sha3(const char* data, std::uint32_t size, const checksum256& expected) {
-   check(sha3(data, size) == expected, "SHA3 hash of `data` does not match given `hash`");
-}
-
-[[nodiscard]] inline checksum256 keccak(const char* data, std::uint32_t size) {
-   auto result = checksum256{};
-   ::forge::contract::internal::sha3(data, size, result.data(), result.data_size(), 1);
-   return result;
-}
-
-inline void assert_keccak(const char* data, std::uint32_t size, const checksum256& expected) {
-   check(keccak(data, size) == expected, "Keccak hash of `data` does not match given `hash`");
-}
-
-[[nodiscard]] inline std::int32_t k1_recover(const char* signature, std::uint32_t signature_size, const char* digest,
-                                             std::uint32_t digest_size, char* public_key,
-                                             std::uint32_t public_key_size) {
-   return ::forge::contract::internal::k1_recover(signature, signature_size, digest, digest_size, public_key,
-                                                  public_key_size);
-}
+[[nodiscard]] std::int32_t blake2_f(std::uint32_t rounds, const char* state, std::uint32_t state_size,
+                                    const char* message, std::uint32_t message_size, const char* offset0,
+                                    std::uint32_t offset0_size, const char* offset1, std::uint32_t offset1_size,
+                                    std::int32_t final, char* result, std::uint32_t result_size);
+[[nodiscard]] std::int32_t blake2_f(std::uint32_t rounds, const std::vector<char>& state,
+                                    const std::vector<char>& message, const std::vector<char>& offset0,
+                                    const std::vector<char>& offset1, bool final, std::vector<char>& result);
+[[nodiscard]] checksum256 sha3(const char* data, std::uint32_t size);
+void assert_sha3(const char* data, std::uint32_t size, const checksum256& expected);
+[[nodiscard]] checksum256 keccak(const char* data, std::uint32_t size);
+void assert_keccak(const char* data, std::uint32_t size, const checksum256& expected);
+[[nodiscard]] std::int32_t k1_recover(const char* signature, std::uint32_t signature_size, const char* digest,
+                                      std::uint32_t digest_size, char* public_key, std::uint32_t public_key_size);
 
 } // namespace forge::contract
