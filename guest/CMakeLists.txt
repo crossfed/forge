@@ -161,6 +161,7 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
    set(FORGE_CONTRACT_LLVM_RANLIB "${_llvm_install}/bin/llvm-ranlib")
    set(FORGE_CONTRACT_CLANG_RESOURCE_DIR "${_llvm_install}/lib/clang/22")
    set(FORGE_CONTRACT_SYSROOT "${CMAKE_BINARY_DIR}/sysroot-base")
+   set(_llvm_runtimes "libcxx|libcxxabi|compiler-rt")
 
    ExternalProject_Add(
       forge_contract_sysroot
@@ -170,6 +171,7 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
       UPDATE_COMMAND ""
       PATCH_COMMAND ""
       CMAKE_GENERATOR Ninja
+      LIST_SEPARATOR "|"
       CMAKE_ARGS
          -DCMAKE_BUILD_TYPE=Release
          -DCMAKE_INSTALL_PREFIX=${FORGE_CONTRACT_SYSROOT}
@@ -189,7 +191,7 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
          -DCMAKE_CXX_FLAGS=${_forge_contract_wasm_path_map_flags}
          -DCMAKE_ASM_FLAGS=${_forge_contract_wasm_path_map_flags}
          -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
-         -DLLVM_ENABLE_RUNTIMES=libcxx\;libcxxabi\;compiler-rt
+         -DLLVM_ENABLE_RUNTIMES:STRING=${_llvm_runtimes}
          -DLIBCXX_ENABLE_EXCEPTIONS=OFF
          -DLIBCXX_ENABLE_RTTI=OFF
          -DLIBCXX_ENABLE_THREADS=OFF
@@ -250,8 +252,8 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
          -DCMAKE_BUILD_TYPE=Release
          -DCMAKE_INSTALL_PREFIX=${_host_tools_install}
          -DCMAKE_INSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}
-         -DCMAKE_C_COMPILER=${_llvm_install}/bin/clang
-         -DCMAKE_CXX_COMPILER=${_llvm_install}/bin/clang++
+         -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+         -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
          -DCMAKE_C_FLAGS=${_forge_contract_path_map_flags}
          -DCMAKE_CXX_FLAGS=${_forge_contract_path_map_flags}
          -DCMAKE_PREFIX_PATH:PATH=${_forge_contract_prefix_path}
