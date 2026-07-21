@@ -374,6 +374,15 @@ BOOST_AUTO_TEST_CASE(legacy_fixed_c_arrays_preserve_cdt_length_framing) {
    BOOST_TEST(packed == expected, boost::test_tools::per_element());
 }
 
+BOOST_AUTO_TEST_CASE(legacy_base64_decoders_preserve_crlf_compatibility) {
+   register_intrinsics();
+   const auto code = read_contract(FORGE_CONTRACT_TEST_LEGACY_WASM);
+   auto host = invocation{};
+
+   BOOST_CHECK_NO_THROW(apply(code, host, "legacyhello", "bafourlines"));
+   BOOST_TEST(forge::raw::unpack_exact<std::string>(host.return_value) == "abcdef");
+}
+
 BOOST_AUTO_TEST_CASE(legacy_dispatcher_preserves_cdt_trailing_action_data_semantics) {
    register_intrinsics();
    const auto code = read_contract(FORGE_CONTRACT_TEST_LEGACY_WASM);
