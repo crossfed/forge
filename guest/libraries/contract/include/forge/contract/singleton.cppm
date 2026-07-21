@@ -12,7 +12,7 @@ import forge.raw.codec;
 namespace forge::contract::detail {
 
 template <std::uint64_t Primary, class T> struct singleton_row {
-   T value{};
+   T value;
 
    [[nodiscard]] constexpr std::uint64_t primary_key() const noexcept {
       return Primary;

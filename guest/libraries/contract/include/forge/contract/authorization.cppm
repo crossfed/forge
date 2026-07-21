@@ -1,7 +1,5 @@
 module;
 
-#include <forge/contract/intrinsics.h>
-
 #include <cstdint>
 #include <vector>
 
@@ -15,52 +13,40 @@ import forge.contract.intrinsics;
 
 export namespace forge::contract {
 
-[[nodiscard]] inline bool check_transaction_authorization(
-    const char* transaction, std::uint32_t transaction_size, const char* public_keys, std::uint32_t public_keys_size,
-    const char* permissions, std::uint32_t permissions_size) {
-   return ::check_transaction_authorization(transaction, transaction_size, public_keys, public_keys_size, permissions,
-                                            permissions_size) > 0;
-}
+[[nodiscard]] bool check_transaction_authorization(const char* transaction, std::uint32_t transaction_size,
+                                                   const char* public_keys, std::uint32_t public_keys_size,
+                                                   const char* permissions, std::uint32_t permissions_size);
 
 template <typename PublicKeys, typename Permissions>
 [[nodiscard]] bool check_transaction_authorization(const std::vector<std::uint8_t>& transaction,
                                                    const PublicKeys& public_keys, const Permissions& permissions) {
    const auto packed_keys = ::forge::raw::pack(public_keys);
    const auto packed_permissions = ::forge::raw::pack(permissions);
-   return check_transaction_authorization(
-       reinterpret_cast<const char*>(transaction.data()), transaction.size(),
-       reinterpret_cast<const char*>(packed_keys.data()), packed_keys.size(),
-       reinterpret_cast<const char*>(packed_permissions.data()), packed_permissions.size());
+   return check_transaction_authorization(reinterpret_cast<const char*>(transaction.data()), transaction.size(),
+                                          reinterpret_cast<const char*>(packed_keys.data()), packed_keys.size(),
+                                          reinterpret_cast<const char*>(packed_permissions.data()),
+                                          packed_permissions.size());
 }
 
-[[nodiscard]] inline bool check_permission_authorization(
-    chain::protocol::name account, chain::protocol::name permission, const char* public_keys,
-    std::uint32_t public_keys_size, const char* permissions, std::uint32_t permissions_size,
-    chain::protocol::microseconds delay = chain::protocol::microseconds{}) {
-   return ::check_permission_authorization(account.value, permission.value, public_keys, public_keys_size, permissions,
-                                           permissions_size, static_cast<std::uint64_t>(delay.count())) > 0;
-}
+[[nodiscard]] bool
+check_permission_authorization(chain::protocol::name account, chain::protocol::name permission, const char* public_keys,
+                               std::uint32_t public_keys_size, const char* permissions, std::uint32_t permissions_size,
+                               chain::protocol::microseconds delay = chain::protocol::microseconds{});
 
 template <typename PublicKeys, typename Permissions>
-[[nodiscard]] bool check_permission_authorization(chain::protocol::name account, chain::protocol::name permission,
-                                                  const PublicKeys& public_keys, const Permissions& permissions,
-                                                  chain::protocol::microseconds delay =
-                                                      chain::protocol::microseconds{}) {
+[[nodiscard]] bool
+check_permission_authorization(chain::protocol::name account, chain::protocol::name permission,
+                               const PublicKeys& public_keys, const Permissions& permissions,
+                               chain::protocol::microseconds delay = chain::protocol::microseconds{}) {
    const auto packed_keys = ::forge::raw::pack(public_keys);
    const auto packed_permissions = ::forge::raw::pack(permissions);
-   return check_permission_authorization(
-       account, permission, reinterpret_cast<const char*>(packed_keys.data()), packed_keys.size(),
-       reinterpret_cast<const char*>(packed_permissions.data()), packed_permissions.size(), delay);
+   return check_permission_authorization(account, permission, reinterpret_cast<const char*>(packed_keys.data()),
+                                         packed_keys.size(), reinterpret_cast<const char*>(packed_permissions.data()),
+                                         packed_permissions.size(), delay);
 }
 
-[[nodiscard]] inline chain::protocol::time_point get_permission_last_used(chain::protocol::name account,
-                                                                          chain::protocol::name permission) {
-   return chain::protocol::time_point{
-       chain::protocol::microseconds{::get_permission_last_used(account.value, permission.value)}};
-}
-
-[[nodiscard]] inline chain::protocol::time_point get_account_creation_time(chain::protocol::name account) {
-   return chain::protocol::time_point{chain::protocol::microseconds{::get_account_creation_time(account.value)}};
-}
+[[nodiscard]] chain::protocol::time_point get_permission_last_used(chain::protocol::name account,
+                                                                   chain::protocol::name permission);
+[[nodiscard]] chain::protocol::time_point get_account_creation_time(chain::protocol::name account);
 
 } // namespace forge::contract

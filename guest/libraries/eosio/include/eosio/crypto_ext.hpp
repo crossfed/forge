@@ -1,7 +1,6 @@
 #pragma once
 
 #include <eosio/crypto.hpp>
-
 import forge.contract.crypto_ext;
 
 namespace eosio {

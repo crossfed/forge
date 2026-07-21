@@ -88,7 +88,8 @@ compact_signature private_key::sign_compact(const forge::crypto::sha256& digest,
    unsigned int counter = 0;
    do {
       FORGE_ASSERT(secp256k1_ecdsa_sign_recoverable(detail::_get_context(), &secp_sig, (unsigned char*)digest.data(),
-                                                  (unsigned char*)my->_key.data(), extended_nonce_function, &counter));
+                                                    (unsigned char*)my->_key.data(), extended_nonce_function,
+                                                    &counter));
       secp256k1_ecdsa_recoverable_signature_serialize_compact(detail::_get_context(), result.data() + 1, &recid,
                                                               &secp_sig);
    } while (require_canonical && !public_key::is_canonical(result));
@@ -97,9 +98,9 @@ compact_signature private_key::sign_compact(const forge::crypto::sha256& digest,
    return result;
 }
 
-der_signature sign_der(const private_key_shim& key, std::span<const std::uint8_t> message) {
+der_signature sign_der(const private_key& key, std::span<const std::uint8_t> message) {
    const auto digest = forge::crypto::sha256::hash(message);
-   const auto secret = key.serialize();
+   const auto secret = key.get_secret();
    if (!secp256k1_ec_seckey_verify(detail::_get_context(), reinterpret_cast<const unsigned char*>(secret.data()))) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_input, "invalid secp256k1 private key");
    }
@@ -121,7 +122,7 @@ der_signature sign_der(const private_key_shim& key, std::span<const std::uint8_t
    return out;
 }
 
-bool verify_der(const public_key_shim& key, std::span<const std::uint8_t> message,
+bool verify_der(const public_key& key, std::span<const std::uint8_t> message,
                 std::span<const std::uint8_t> signature_bytes) {
    secp256k1_pubkey public_key;
    const auto public_key_data = key.serialize();

@@ -45,12 +45,16 @@ namespace protocol = forge::chain::protocol;
 struct field_shape {
    std::string name;
    std::string type;
+
+   bool operator==(const field_shape&) const = default;
 };
 
 struct struct_shape {
    std::string name;
    std::string base;
    std::vector<field_shape> fields;
+
+   bool operator==(const struct_shape&) const = default;
 };
 
 struct record_codec_shape {
@@ -66,6 +70,7 @@ struct action_shape {
    std::string result;
    std::string class_name;
    std::string method_name;
+   std::filesystem::path source;
    bool dispatchable = true;
 };
 
@@ -74,6 +79,7 @@ struct notification_shape {
    std::uint64_t action = 0;
    std::string class_name;
    std::string method_name;
+   std::filesystem::path source;
 };
 
 struct type_shape {
@@ -98,6 +104,7 @@ struct call_shape {
    std::uint64_t id = 0;
    std::string class_name;
    std::string method_name;
+   std::filesystem::path source;
 };
 
 struct schema {
@@ -186,9 +193,24 @@ bool has_nameable_scope(const clang::RecordDecl& declaration) {
          context = current->getParent();
          continue;
       }
+      if (const auto* current = llvm::dyn_cast<clang::ExportDecl>(context)) {
+         context = current->getDeclContext();
+         continue;
+      }
       return false;
    }
    return false;
+}
+
+bool has_publicly_accessible_name(const clang::RecordDecl& declaration) {
+   const auto* current = &declaration;
+   while (current != nullptr) {
+      if (current->getAccess() == clang::AS_private || current->getAccess() == clang::AS_protected) {
+         return false;
+      }
+      current = llvm::dyn_cast<clang::RecordDecl>(current->getDeclContext());
+   }
+   return true;
 }
 
 std::string declaration_identity(const clang::NamedDecl& declaration) {
@@ -201,6 +223,26 @@ std::string declaration_identity(const clang::NamedDecl& declaration) {
       fallback += ':' + value->getType().getCanonicalType().getAsString();
    }
    return fallback;
+}
+
+std::string record_layout_identity(const clang::RecordDecl& declaration) {
+   const auto* record = &declaration;
+   if (const auto* cpp = llvm::dyn_cast<clang::CXXRecordDecl>(record); cpp != nullptr) {
+      if (const auto* definition = cpp->getDefinition(); definition != nullptr) {
+         record = definition;
+      }
+   }
+
+   auto result = std::string{record->isUnion() ? "union" : "record"};
+   if (const auto* cpp = llvm::dyn_cast<clang::CXXRecordDecl>(record); cpp != nullptr && cpp->hasDefinition()) {
+      for (const auto& base : cpp->bases()) {
+         result += "|base:" + base.getType().getCanonicalType().getAsString();
+      }
+   }
+   for (const auto* field : record->fields()) {
+      result += "|field:" + field->getNameAsString() + ':' + field->getType().getCanonicalType().getAsString();
+   }
+   return result;
 }
 
 bool claim_struct(schema& output, clang::ASTContext& context, const std::string& name, std::string identity,
@@ -263,9 +305,20 @@ class type_encoder {
       auto type = input.getNonReferenceType().getUnqualifiedType();
       if (const auto* alias = llvm::dyn_cast_or_null<clang::TypedefType>(type.getTypePtrOrNull())) {
          const auto* declaration = alias->getDecl();
-         if (const auto known = known_alias(declaration->getQualifiedNameAsString()); known.has_value()) {
-            return *known;
+         const auto qualified = declaration->getQualifiedNameAsString();
+         const auto canonical = qualified == "forge::chain::protocol::extensions" || known_alias(qualified).has_value();
+         if (!canonical && !context_.getSourceManager().isInSystemHeader(declaration->getLocation())) {
+            const auto name = declaration->getNameAsString();
+            const auto target = encode(declaration->getUnderlyingType());
+            add_alias(name, target, declaration->getLocation());
+            return name.empty() ? target : name;
          }
+      }
+      if (const auto known = known_type_alias(type); known.has_value()) {
+         return *known;
+      }
+      if (const auto* alias = llvm::dyn_cast_or_null<clang::TypedefType>(type.getTypePtrOrNull())) {
+         const auto* declaration = alias->getDecl();
          if (!context_.getSourceManager().isInSystemHeader(declaration->getLocation())) {
             const auto name = declaration->getNameAsString();
             const auto target = encode(declaration->getUnderlyingType());
@@ -355,11 +408,34 @@ class type_encoder {
           std::pair{"forge::chain::protocol::signature", "signature"},
           std::pair{"forge::crypto::asymmetric::public_key", "public_key"},
           std::pair{"forge::crypto::asymmetric::signature", "signature"},
+          std::pair{"forge::contract::public_key", "public_key"},
+          std::pair{"forge::contract::signature", "signature"},
       };
       for (const auto& [cpp_name, abi_name] : aliases) {
          if (cpp_name == name) {
             return std::string{abi_name};
          }
+      }
+      return std::nullopt;
+   }
+
+   std::optional<std::string> known_type_alias(clang::QualType input) {
+      auto type = input;
+      while (!type.isNull()) {
+         if (const auto* alias = llvm::dyn_cast_or_null<clang::TypedefType>(type.getTypePtrOrNull())) {
+            if (alias->getDecl()->getQualifiedNameAsString() == "forge::chain::protocol::extensions") {
+               add_extension();
+               return "extension[]";
+            }
+            if (const auto known = known_alias(alias->getDecl()->getQualifiedNameAsString()); known.has_value()) {
+               return known;
+            }
+         }
+         const auto desugared = type.getSingleStepDesugaredType(context_).getUnqualifiedType();
+         if (desugared == type) {
+            break;
+         }
+         type = desugared;
       }
       return std::nullopt;
    }
@@ -424,7 +500,7 @@ class type_encoder {
          if (is_std_template(*declaration, "vector") && is_byte_type(type_argument(0).getType())) {
             return "bytes";
          }
-         return encode_location(type_argument(0)) + "[]";
+         return template_part_location(type_argument(0)) + "[]";
       }
       if (is_std_template(*declaration, "optional") && specialization.getNumArgs() >= 1U) {
          return encode_location(type_argument(0)) + '?';
@@ -564,14 +640,41 @@ class type_encoder {
          return "string";
       }
 
+      if (qualified == "eosio::transaction") {
+         const auto* cpp = llvm::dyn_cast<clang::CXXRecordDecl>(record);
+         if (cpp == nullptr || cpp->getNumBases() != 1U || !cpp->field_empty() || cpp->bases_begin()->isVirtual()) {
+            fail(qualified, record->getLocation());
+            return {};
+         }
+         return encode(cpp->bases_begin()->getType());
+      }
+
+      if (qualified == "eosio::name") {
+         return "name";
+      }
+
+      if (qualified == "forge::chain::protocol::permission_level") {
+         add_permission_level();
+         return "permission_level";
+      }
+
+      if (qualified == "forge::chain::protocol::action") {
+         add_action();
+         return "action";
+      }
+
       static const auto known = std::vector<std::pair<std::string_view, std::string_view>>{
           {"forge::chain::protocol::name", "name"},
+          {"forge::contract::compatibility::name", "name"},
           {"forge::chain::protocol::symbol_code", "symbol_code"},
           {"forge::chain::protocol::symbol", "symbol"},
           {"forge::chain::protocol::asset", "asset"},
+          {"forge::contract::compatibility::asset", "asset"},
+          {"eosio::asset", "asset"},
           {"forge::chain::protocol::extended_symbol", "extended_symbol"},
           {"forge::chain::protocol::extended_asset", "extended_asset"},
-          {"forge::chain::protocol::permission_level", "permission_level"},
+          {"forge::contract::compatibility::extended_asset", "extended_asset"},
+          {"eosio::extended_asset", "extended_asset"},
           {"forge::chain::protocol::time_point", "time_point"},
           {"forge::chain::protocol::time_point_sec", "time_point_sec"},
           {"forge::chain::protocol::block_timestamp", "block_timestamp_type"},
@@ -595,8 +698,13 @@ class type_encoder {
              !arguments.empty() && arguments[0].getKind() == clang::TemplateArgument::Type) {
             return encode(arguments[0].getAsType());
          }
-         if (template_qualified == "forge::chain::protocol::fixed_key" && arguments.size() >= 1U &&
-             arguments[0].getKind() == clang::TemplateArgument::Integral) {
+         if (template_qualified == "forge::contract::binary_extension" && !arguments.empty() &&
+             arguments[0].getKind() == clang::TemplateArgument::Type) {
+            return encode(arguments[0].getAsType()) + '$';
+         }
+         if ((template_qualified == "forge::chain::protocol::fixed_key" ||
+              template_qualified == "eosio::fixed_bytes") &&
+             arguments.size() >= 1U && arguments[0].getKind() == clang::TemplateArgument::Integral) {
             switch (arguments[0].getAsIntegral().getZExtValue()) {
             case 20U:
                return "checksum160";
@@ -745,6 +853,21 @@ class type_encoder {
       return name;
    }
 
+   void add_permission_level() {
+      add_synthetic_struct("permission_level", {{"actor", "name"}, {"permission", "name"}});
+   }
+
+   void add_action() {
+      add_permission_level();
+      add_synthetic_struct(
+          "action",
+          {{"account", "name"}, {"name", "name"}, {"authorization", "permission_level[]"}, {"data", "bytes"}});
+   }
+
+   void add_extension() {
+      add_synthetic_struct("extension", {{"type", "uint16"}, {"data", "bytes"}});
+   }
+
    std::string add_tuple(const std::vector<clang::TemplateArgument>& arguments) {
       auto name = std::string{"tuple"};
       auto fields = std::vector<field_shape>{};
@@ -789,7 +912,7 @@ class type_encoder {
             record = definition;
          }
       }
-      if (!has_nameable_scope(*record)) {
+      if (record->getOwningModule() == nullptr && !has_nameable_scope(*record)) {
          auto& diagnostics = context_.getDiagnostics();
          const auto id = diagnostics.getCustomDiagID(
              clang::DiagnosticsEngine::Error, "contract ABI record '%0' is declared in an anonymous or local scope");
@@ -797,11 +920,22 @@ class type_encoder {
          output_.failed = true;
          return;
       }
-      const auto codec_name = "::" + record->getQualifiedNameAsString();
-      source_record_codecs_.insert(codec_name);
-      if (!claim_struct(output_, context_, name, declaration_identity(declaration), declaration.getLocation())) {
-         return;
+      const auto generate_codec = has_publicly_accessible_name(*record) && record->getOwningModule() == nullptr;
+      const auto codec_name = generate_codec ? "::" + record->getQualifiedNameAsString() : std::string{};
+      const auto identity = record_layout_identity(*record);
+      const auto [claimed, inserted] = output_.struct_declarations.try_emplace(name, identity);
+      if (!inserted && claimed->second == identity) {
+         if (!generate_codec) {
+            return;
+         }
+         const auto source_inserted = source_record_codecs_.insert(codec_name).second;
+         const auto codec_exists =
+             std::ranges::any_of(output_.record_codecs, [&](const auto& codec) { return codec.name == codec_name; });
+         if (!source_inserted || codec_exists) {
+            return;
+         }
       }
+      const auto duplicate = !inserted;
 
       auto shape = struct_shape{.name = name};
       auto codec = record_codec_shape{};
@@ -809,8 +943,11 @@ class type_encoder {
          fail("union record", declaration.getLocation());
          return;
       }
-      codec.name = codec_name;
-      codec.forward_declaration = make_forward_declaration(*record);
+      if (generate_codec) {
+         codec.name = codec_name;
+         codec.forward_declaration = make_forward_declaration(*record);
+         source_record_codecs_.insert(codec.name);
+      }
       if (const auto* cpp = llvm::dyn_cast<clang::CXXRecordDecl>(record); cpp != nullptr && cpp->hasDefinition()) {
          if (cpp->getNumBases() > 1U) {
             fail("multiple ABI base classes", declaration.getLocation());
@@ -827,7 +964,9 @@ class type_encoder {
                return;
             }
             shape.base = encode(base.getType());
-            codec.base = "::" + base_record->getQualifiedNameAsString();
+            if (generate_codec) {
+               codec.base = "::" + base_record->getQualifiedNameAsString();
+            }
          }
       }
       for (const auto* field : record->fields()) {
@@ -838,10 +977,25 @@ class type_encoder {
             return;
          }
          shape.fields.push_back(field_shape{field->getNameAsString(), encode(*field)});
-         codec.fields.push_back(field->getNameAsString());
+         if (generate_codec) {
+            codec.fields.push_back(field->getNameAsString());
+         }
       }
-      output_.structs.push_back(std::move(shape));
-      output_.record_codecs.push_back(std::move(codec));
+      if (duplicate) {
+         const auto existing = std::ranges::find(output_.structs, name, &struct_shape::name);
+         if (existing == output_.structs.end() || *existing != shape) {
+            const auto id = context_.getDiagnostics().getCustomDiagID(clang::DiagnosticsEngine::Error,
+                                                                      "duplicate contract ABI struct name '%0'");
+            context_.getDiagnostics().Report(declaration.getLocation(), id) << name;
+            output_.failed = true;
+            return;
+         }
+      } else {
+         output_.structs.push_back(std::move(shape));
+      }
+      if (generate_codec) {
+         output_.record_codecs.push_back(std::move(codec));
+      }
    }
 
    void fail(std::string_view type, clang::SourceLocation location) const {
@@ -860,9 +1014,9 @@ class type_encoder {
 class visitor final : public clang::RecursiveASTVisitor<visitor> {
  public:
    visitor(clang::ASTContext& context, schema& output, std::set<std::string>& source_record_codecs,
-           std::string_view contract_name)
+           std::string_view contract_name, std::filesystem::path source)
        : context_(context), output_(output), encoder_(context, output, source_record_codecs),
-         contract_name_(contract_name) {}
+         contract_name_(contract_name), source_(std::move(source)) {}
 
    bool VisitCXXRecordDecl(clang::CXXRecordDecl* declaration) {
       if (!declaration->isThisDeclarationADefinition() || declaration->isImplicit()) {
@@ -876,8 +1030,8 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
          }
          return true;
       }
-      if (const auto action = annotation(*declaration, "forge.action"); action.has_value() &&
-          belongs_to_selected_contract(*declaration)) {
+      if (const auto action = annotation(*declaration, "forge.action");
+          action.has_value() && belongs_to_selected_contract(*declaration)) {
          add_record_action(*declaration, *action);
       }
       const auto contract = annotation(*declaration, "forge.contract");
@@ -946,6 +1100,7 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
             return true;
          }
       }
+      found_contract_ = true;
       output_.has_apply = true;
       output_.has_eosio_dispatch = output_.has_eosio_dispatch || has_annotation(*declaration, "forge.eosio_dispatch");
       return true;
@@ -1052,7 +1207,7 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       }
       auto shape = method_shape{};
       shape.name = annotated_name.empty() ? method.getNameAsString() : std::string{annotated_name};
-      shape.type = shape.name;
+      shape.type = method.getNameAsString();
       if (!method.getReturnType()->isVoidType()) {
          shape.result = encoder_.encode(method.getReturnType());
       }
@@ -1101,13 +1256,13 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
           .result = method_info.result,
           .class_name = declaration.getQualifiedNameAsString(),
           .method_name = method.getNameAsString(),
+          .source = source_,
       });
    }
 
    void add_record_action(const clang::CXXRecordDecl& declaration, std::string_view annotated_name) {
       const auto identity = declaration_identity(declaration);
-      const auto action_name =
-          annotated_name.empty() ? declaration.getNameAsString() : std::string{annotated_name};
+      const auto action_name = annotated_name.empty() ? declaration.getNameAsString() : std::string{annotated_name};
       const auto [existing, inserted] = output_.action_declarations.try_emplace(action_name, identity);
       if (!inserted && existing->second == identity) {
          return;
@@ -1118,8 +1273,8 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       }
       output_.actions.push_back(action_shape{
           .name = action_name,
-          .type = encoder_.encode(context_.getTypeDeclType(clang::ElaboratedTypeKeyword::None, std::nullopt,
-                                                           &declaration)),
+          .type =
+              encoder_.encode(context_.getTypeDeclType(clang::ElaboratedTypeKeyword::None, std::nullopt, &declaration)),
           .dispatchable = false,
       });
    }
@@ -1149,6 +1304,7 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
           .id = identifier,
           .class_name = method.getParent()->getQualifiedNameAsString(),
           .method_name = method.getNameAsString(),
+          .source = source_,
       });
    }
 
@@ -1190,6 +1346,7 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
           .action = action,
           .class_name = declaration.getQualifiedNameAsString(),
           .method_name = method.getNameAsString(),
+          .source = source_,
       });
    }
 
@@ -1203,14 +1360,16 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
    schema& output_;
    type_encoder encoder_;
    std::string contract_name_;
+   std::filesystem::path source_;
    bool found_contract_ = false;
 };
 
 class consumer final : public clang::ASTConsumer {
  public:
    consumer(clang::ASTContext& context, schema& output, std::set<std::string>& source_record_codecs, bool& found,
-            bool& dispatch_source_found, std::string_view contract_name, bool is_dispatch_source)
-       : visitor_(context, output, source_record_codecs, contract_name), found_(found),
+            bool& dispatch_source_found, std::string_view contract_name, std::filesystem::path source,
+            bool is_dispatch_source)
+       : visitor_(context, output, source_record_codecs, contract_name, std::move(source)), found_(found),
          dispatch_source_found_(dispatch_source_found), is_dispatch_source_(is_dispatch_source) {}
 
    void HandleTranslationUnit(clang::ASTContext& context) override {
@@ -1238,7 +1397,7 @@ class action final : public clang::ASTFrontendAction {
                                                          llvm::StringRef input_file) override {
       const auto input = std::filesystem::weakly_canonical(std::filesystem::path{input_file.str()});
       return std::make_unique<consumer>(compiler.getASTContext(), output_, output_.source_record_codecs[input], found_,
-                                        dispatch_source_found_, contract_name_, input == dispatch_source_);
+                                        dispatch_source_found_, contract_name_, input, input == dispatch_source_);
    }
 
    void EndSourceFileAction() override {
@@ -1527,7 +1686,43 @@ std::string make_codec_prelude(const schema& input) {
    return output.str();
 }
 
-void write_call_dispatcher(std::ostream& output, const schema& input) {
+bool is_dispatch_source(const std::filesystem::path& source, const std::filesystem::path& dispatch_source) {
+   return source == dispatch_source;
+}
+
+std::string action_thunk(std::size_t index) {
+   return "__forge_contract_action_" + std::to_string(index);
+}
+
+std::string notification_thunk(std::size_t index) {
+   return "__forge_contract_notification_" + std::to_string(index);
+}
+
+std::string call_thunk(std::size_t index) {
+   return "__forge_contract_call_" + std::to_string(index);
+}
+
+void write_dispatch_thunk_declarations(std::ostream& output, const schema& input,
+                                       const std::filesystem::path& dispatch_source) {
+   for (auto index = std::size_t{0}; index < input.actions.size(); ++index) {
+      const auto& entry = input.actions[index];
+      if (entry.dispatchable && !is_dispatch_source(entry.source, dispatch_source)) {
+         output << "extern \"C\" void " << action_thunk(index) << "(std::uint64_t, std::uint64_t);\n";
+      }
+   }
+   for (auto index = std::size_t{0}; index < input.notifications.size(); ++index) {
+      if (!is_dispatch_source(input.notifications[index].source, dispatch_source)) {
+         output << "extern \"C\" void " << notification_thunk(index) << "(std::uint64_t, std::uint64_t);\n";
+      }
+   }
+   for (auto index = std::size_t{0}; index < input.calls.size(); ++index) {
+      if (!is_dispatch_source(input.calls[index].source, dispatch_source)) {
+         output << "extern \"C\" void " << call_thunk(index) << "(std::uint64_t, std::uint64_t);\n";
+      }
+   }
+}
+
+void write_call_dispatcher(std::ostream& output, const schema& input, const std::filesystem::path& dispatch_source) {
    if (input.calls.empty()) {
       return;
    }
@@ -1535,9 +1730,15 @@ void write_call_dispatcher(std::ostream& output, const schema& input) {
              "std::uint64_t sender, std::uint64_t receiver) {\n";
    output << "   using forge::chain::protocol::name;\n";
    output << "   static constexpr forge::contract::call_entry entries[] = {\n";
-   for (const auto& entry : input.calls) {
-      output << "      forge::contract::make_call_entry<" << entry.class_name << ", &" << entry.class_name << "::"
-             << entry.method_name << ">(" << entry.id << "ULL),\n";
+   for (auto index = std::size_t{0}; index < input.calls.size(); ++index) {
+      const auto& entry = input.calls[index];
+      if (is_dispatch_source(entry.source, dispatch_source)) {
+         output << "      forge::contract::make_call_entry<" << entry.class_name << ", &" << entry.class_name
+                << "::" << entry.method_name << ">(" << entry.id << "ULL),\n";
+      } else {
+         output << "      forge::contract::call_entry{" << entry.id << "ULL, [](name sender, name receiver) { "
+                << call_thunk(index) << "(sender.value, receiver.value); }},\n";
+      }
    }
    output << "   };\n";
    output << "   forge::contract::dispatch_call(name{sender}, name{receiver}, entries, " << input.calls.size()
@@ -1557,7 +1758,8 @@ void write_dispatcher(const schema& input, const forge::contract::abi::request& 
    if (input.has_eosio_dispatch) {
       output << "#define FORGE_CONTRACT_DEFER_EOSIO_DISPATCH 1\n";
    }
-   const auto source = std::filesystem::weakly_canonical(options.sources.front()).generic_string();
+   const auto dispatch_source = std::filesystem::weakly_canonical(options.sources.front());
+   const auto source = dispatch_source.generic_string();
    output << "#include " << std::quoted(source) << "\n";
    if (input.has_eosio_dispatch) {
       output << "#undef FORGE_CONTRACT_DEFER_EOSIO_DISPATCH\n";
@@ -1565,18 +1767,20 @@ void write_dispatcher(const schema& input, const forge::contract::abi::request& 
    if (input.has_apply && !input.has_eosio_dispatch) {
       output << "#line 1 \"contract generated codecs\"\n";
       write_codec_definitions(output, input, &source_record_codecs(input, options.sources.front()));
-      write_call_dispatcher(output, input);
+      write_dispatch_thunk_declarations(output, input, dispatch_source);
+      write_call_dispatcher(output, input, dispatch_source);
       write_text(options.dispatcher, output.str());
       return;
    }
    output << "#line 1 \"contract generated dispatcher\"\n";
    write_codec_definitions(output, input, &source_record_codecs(input, options.sources.front()));
+   write_dispatch_thunk_declarations(output, input, dispatch_source);
    if (input.has_eosio_dispatch) {
       output << "extern \"C\" [[gnu::visibility(\"default\")]] void apply("
                 "std::uint64_t receiver, std::uint64_t code, std::uint64_t action) {\n";
       output << "   forge::contract::detail::eosio_dispatch_definition<void>::invoke(receiver, code, action);\n";
       output << "}\n";
-      write_call_dispatcher(output, input);
+      write_call_dispatcher(output, input, dispatch_source);
       write_text(options.dispatcher, output.str());
       return;
    }
@@ -1586,33 +1790,45 @@ void write_dispatcher(const schema& input, const forge::contract::abi::request& 
    const auto dispatchable_actions = std::ranges::count_if(input.actions, &action_shape::dispatchable);
    if (dispatchable_actions != 0U) {
       output << "   static constexpr forge::contract::dispatch_entry entries[] = {\n";
-      for (const auto& entry : input.actions) {
+      for (auto index = std::size_t{0}; index < input.actions.size(); ++index) {
+         const auto& entry = input.actions[index];
          if (!entry.dispatchable) {
             continue;
          }
-         output << "      forge::contract::make_dispatch_entry<" << entry.class_name << ", &" << entry.class_name
-                << "::" << entry.method_name << ">(" << protocol::make_name(entry.name).value << "ULL),\n";
+         if (is_dispatch_source(entry.source, dispatch_source)) {
+            output << "      forge::contract::make_dispatch_entry<" << entry.class_name << ", &" << entry.class_name
+                   << "::" << entry.method_name << ">(" << protocol::make_name(entry.name).value << "ULL),\n";
+         } else {
+            output << "      forge::contract::dispatch_entry{" << protocol::make_name(entry.name).value
+                   << "ULL, [](name self, name first_receiver) { " << action_thunk(index)
+                   << "(self.value, first_receiver.value); }},\n";
+         }
       }
       output << "   };\n";
    }
    if (!input.notifications.empty()) {
       output << "   static constexpr forge::contract::notification_entry notifications[] = {\n";
-      for (const auto& entry : input.notifications) {
-         output << "      forge::contract::make_notification_entry<" << entry.class_name << ", &" << entry.class_name
-                << "::" << entry.method_name << ">(" << entry.code << "ULL, " << entry.action << "ULL),\n";
+      for (auto index = std::size_t{0}; index < input.notifications.size(); ++index) {
+         const auto& entry = input.notifications[index];
+         if (is_dispatch_source(entry.source, dispatch_source)) {
+            output << "      forge::contract::make_notification_entry<" << entry.class_name << ", &" << entry.class_name
+                   << "::" << entry.method_name << ">(" << entry.code << "ULL, " << entry.action << "ULL),\n";
+         } else {
+            output << "      forge::contract::notification_entry{" << entry.code << "ULL, " << entry.action
+                   << "ULL, [](name self, name first_receiver) { " << notification_thunk(index)
+                   << "(self.value, first_receiver.value); }},\n";
+         }
       }
       output << "   };\n";
    }
    output << "   forge::contract::dispatch(name{receiver}, name{code}, action, ";
-   output << (dispatchable_actions == 0U ? "nullptr, 0U"
-                                        : "entries, " + std::to_string(dispatchable_actions) + "U");
+   output << (dispatchable_actions == 0U ? "nullptr, 0U" : "entries, " + std::to_string(dispatchable_actions) + "U");
    output << ", ";
-   output << (input.notifications.empty()
-                  ? "nullptr, 0U"
-                  : "notifications, " + std::to_string(input.notifications.size()) + "U");
+   output << (input.notifications.empty() ? "nullptr, 0U"
+                                          : "notifications, " + std::to_string(input.notifications.size()) + "U");
    output << ");\n";
    output << "}\n";
-   write_call_dispatcher(output, input);
+   write_call_dispatcher(output, input, dispatch_source);
    write_text(options.dispatcher, output.str());
 }
 
@@ -1625,12 +1841,51 @@ void write_source_wrappers(const schema& input, const forge::contract::abi::requ
    }
    for (auto index = std::size_t{0}; index < options.source_wrappers.size(); ++index) {
       const auto& source = options.sources[index + 1U];
+      const auto canonical_source = std::filesystem::weakly_canonical(source);
       auto output = std::ostringstream{};
-      output << "import forge.raw.codec;\n";
+      output << "#include <cstdint>\n";
+      output << "import forge.contract.dispatcher;\n";
       write_codec_declarations(output, input);
-      output << "#include " << std::quoted(std::filesystem::weakly_canonical(source).generic_string()) << "\n";
+      output << "#include " << std::quoted(canonical_source.generic_string()) << "\n";
       output << "#line 1 \"contract generated codecs\"\n";
       write_codec_definitions(output, input, &source_record_codecs(input, source));
+      for (auto action_index = std::size_t{0}; action_index < input.actions.size(); ++action_index) {
+         const auto& entry = input.actions[action_index];
+         if (!entry.dispatchable || entry.source != canonical_source) {
+            continue;
+         }
+         output << "extern \"C\" [[gnu::visibility(\"hidden\")]] void " << action_thunk(action_index)
+                << "(std::uint64_t receiver, std::uint64_t code) {\n";
+         output << "   forge::contract::execute_action<" << entry.class_name
+                << ">(forge::chain::protocol::name{receiver}, forge::chain::protocol::name{code}, &" << entry.class_name
+                << "::" << entry.method_name << ");\n";
+         output << "}\n";
+      }
+      for (auto notification_index = std::size_t{0}; notification_index < input.notifications.size();
+           ++notification_index) {
+         const auto& entry = input.notifications[notification_index];
+         if (entry.source != canonical_source) {
+            continue;
+         }
+         output << "extern \"C\" [[gnu::visibility(\"hidden\")]] void " << notification_thunk(notification_index)
+                << "(std::uint64_t receiver, std::uint64_t code) {\n";
+         output << "   forge::contract::execute_action<" << entry.class_name
+                << ">(forge::chain::protocol::name{receiver}, forge::chain::protocol::name{code}, &" << entry.class_name
+                << "::" << entry.method_name << ");\n";
+         output << "}\n";
+      }
+      for (auto call_index = std::size_t{0}; call_index < input.calls.size(); ++call_index) {
+         const auto& entry = input.calls[call_index];
+         if (entry.source != canonical_source) {
+            continue;
+         }
+         output << "extern \"C\" [[gnu::visibility(\"hidden\")]] void " << call_thunk(call_index)
+                << "(std::uint64_t sender, std::uint64_t receiver) {\n";
+         output << "   forge::contract::execute_call<" << entry.class_name
+                << ">(forge::chain::protocol::name{sender}, forge::chain::protocol::name{receiver}, &"
+                << entry.class_name << "::" << entry.method_name << ");\n";
+         output << "}\n";
+      }
       write_text(options.source_wrappers[index], output.str());
    }
 }
@@ -1712,7 +1967,8 @@ artifacts generate(const request& options) {
       throw std::runtime_error{"first contract source must declare contract '" + options.contract +
                                "': " + dispatch_source.string()};
    }
-   if (output.actions.empty() && output.calls.empty() && output.notifications.empty() && output.tables.empty()) {
+   if (!output.has_apply && output.actions.empty() && output.calls.empty() && output.notifications.empty() &&
+       output.tables.empty()) {
       throw std::runtime_error{"contract '" + options.contract + "' has no ABI entries"};
    }
 

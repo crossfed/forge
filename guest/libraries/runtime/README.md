@@ -28,9 +28,11 @@ and the configured guest sysroot. It has no C++ module because its public ABI is
 the standard C/runtime surface consumed by libc++ and contract code.
 
 The SDK first copies the configured libc++/libc++abi/compiler-rt sysroot into a
-build-owned staging directory. The runtime archive is installed into that copy,
-and the final sysroot hash includes it. Developer mode therefore never writes
-to the caller's input sysroot.
+build-owned staging directory. One internal foundation build compiles the
+runtime together with the shared raw, codec, chain protocol and contract
+implementations. Their archives are installed into the staged sysroot and
+covered by both `foundation.json` and the final sysroot hash. Developer mode
+therefore never writes to the caller's input sysroot.
 
 ## Stability And Tests
 
@@ -42,5 +44,6 @@ through the real VM memory export. Error strings are stable symbolic errno names
 rather than host-localized messages.
 The E2E suite also links and executes `<cerrno>` reads and writes, proving that
 `errno` does not escape as an undeclared host import.
-Relocation tests verify that an installed consumer sees the archive but no
+Relocation tests verify that an installed consumer links the verified archive
+through `forge_add_contract` but receives no public archive-path variables,
 runtime `.cpp` or private `.hxx` files.

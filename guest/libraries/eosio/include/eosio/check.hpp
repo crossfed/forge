@@ -1,6 +1,6 @@
 #pragma once
 
-#include <forge/contract/intrinsics.h>
+#include <eosio/internal/system.hpp>
 
 #include <string_view>
 
@@ -15,14 +15,13 @@ using forge::contract::return_code;
    check(condition, message);
 }
 
-[[deprecated("use check")]] inline void eosio_assert_message(bool condition, const char* message,
-                                                              std::uint32_t size) {
+[[deprecated("use check")]] inline void eosio_assert_message(bool condition, const char* message, std::uint32_t size) {
    check(condition, std::string_view{message, size});
 }
 
 [[deprecated("use check")]] inline void eosio_assert_code(bool condition, std::uint64_t code) {
    if (!condition) {
-      ::eosio_assert_code(0U, code);
+      internal_use_do_not_use::eosio_assert_code(0U, code);
    }
 }
 

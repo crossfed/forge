@@ -12,7 +12,6 @@ set(ForgeContract_PREFIX "${PACKAGE_PREFIX_DIR}")
 set(ForgeContract_CLANG "${ForgeContract_PREFIX}/bin/clang++")
 set(ForgeContract_WASM_LD "${ForgeContract_PREFIX}/bin/wasm-ld")
 set(ForgeContract_SYSROOT "${ForgeContract_PREFIX}/sysroot")
-set(ForgeContract_RUNTIME_ARCHIVE "${ForgeContract_SYSROOT}/lib/libforge_guest_runtime.a")
 set(ForgeContract_DATA_DIR "${ForgeContract_PREFIX}/@CMAKE_INSTALL_DATADIR@/forge-contract")
 file(READ "${ForgeContract_DATA_DIR}/sysroot.sha256" ForgeContract_SYSROOT_HASH)
 string(STRIP "${ForgeContract_SYSROOT_HASH}" ForgeContract_SYSROOT_HASH)
@@ -28,7 +27,6 @@ foreach(_required
    ForgeContract_CLANG
    ForgeContract_WASM_LD
    ForgeContract_SYSROOT
-   ForgeContract_RUNTIME_ARCHIVE
    ForgeContract_DATA_DIR
    ForgeContract_ABIGEN
    ForgeContract_ATTR_PLUGIN
@@ -38,6 +36,44 @@ foreach(_required
    if(NOT EXISTS "${${_required}}")
       set(ForgeContract_FOUND FALSE)
       set(ForgeContract_NOT_FOUND_MESSAGE "Forge Contract SDK is incomplete: ${${_required}} does not exist")
+      return()
+   endif()
+endforeach()
+
+set(_forge_contract_foundation_manifest "${ForgeContract_DATA_DIR}/foundation.json")
+if(NOT EXISTS "${_forge_contract_foundation_manifest}")
+   set(ForgeContract_FOUND FALSE)
+   set(ForgeContract_NOT_FOUND_MESSAGE "Forge Contract SDK is missing its foundation manifest")
+   return()
+endif()
+file(READ "${_forge_contract_foundation_manifest}" _forge_contract_foundation_json)
+string(JSON _forge_contract_foundation_version GET "${_forge_contract_foundation_json}" version)
+if(NOT "${_forge_contract_foundation_version}" STREQUAL "1")
+   set(ForgeContract_FOUND FALSE)
+   set(ForgeContract_NOT_FOUND_MESSAGE "unsupported Forge Contract foundation manifest version")
+   return()
+endif()
+string(JSON _forge_contract_archive_count LENGTH "${_forge_contract_foundation_json}" archives)
+math(EXPR _forge_contract_archive_last "${_forge_contract_archive_count} - 1")
+foreach(_forge_contract_archive_index RANGE 0 ${_forge_contract_archive_last})
+   string(
+      JSON _forge_contract_archive_name
+      GET "${_forge_contract_foundation_json}" archives ${_forge_contract_archive_index} name
+   )
+   string(
+      JSON _forge_contract_archive_sha256
+      GET "${_forge_contract_foundation_json}" archives ${_forge_contract_archive_index} sha256
+   )
+   set(_forge_contract_archive "${ForgeContract_SYSROOT}/lib/${_forge_contract_archive_name}")
+   if(NOT EXISTS "${_forge_contract_archive}")
+      set(ForgeContract_FOUND FALSE)
+      set(ForgeContract_NOT_FOUND_MESSAGE "Forge Contract SDK is missing ${_forge_contract_archive_name}")
+      return()
+   endif()
+   file(SHA256 "${_forge_contract_archive}" _forge_contract_actual_sha256)
+   if(NOT "${_forge_contract_actual_sha256}" STREQUAL "${_forge_contract_archive_sha256}")
+      set(ForgeContract_FOUND FALSE)
+      set(ForgeContract_NOT_FOUND_MESSAGE "Forge Contract SDK archive checksum failed: ${_forge_contract_archive_name}")
       return()
    endif()
 endforeach()

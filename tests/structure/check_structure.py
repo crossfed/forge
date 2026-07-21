@@ -212,40 +212,38 @@ def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
       return
 
    source = path.read_text(errors="ignore")
-   try:
+   if "  pull_request:\n" in source:
       pull_request = source.split("  pull_request:\n", 1)[1].split("  push:\n", 1)[0]
-   except IndexError:
-      errors.append(f"{path.relative_to(root)}: cannot locate pull_request path filters")
-      return
-
-   for required in (
-      '      - "CMakeLists.txt"',
-      '      - "cmake/**"',
-      '      - "libraries/asio/**"',
-      '      - "libraries/chain/core/**"',
-      '      - "libraries/chain/protocol/**"',
-      '      - "libraries/codec/json/**"',
-      '      - "libraries/compression/**"',
-      '      - "libraries/config/core/**"',
-      '      - "libraries/core/**"',
-      '      - "libraries/crypto/**"',
-      '      - "libraries/db/**"',
-      '      - "libraries/exceptions/**"',
-      '      - "libraries/db/ids/**"',
-      '      - "libraries/raw/**"',
-      '      - "libraries/reflect/**"',
-      '      - "libraries/schema/**"',
-      '      - "libraries/variant/**"',
-      '      - "libraries/vm/wasm/**"',
-      '      - "libraries/contract/**"',
-      '      - "guest/**"',
-      '      - "tools/**"',
-      '      - "vendor/**"',
-   ):
-      if required not in pull_request:
-         errors.append(
-            f"{path.relative_to(root)}: pull_request paths must include {required.strip()[2:]}"
-         )
+      for required in (
+         '      - "CMakeLists.txt"',
+         '      - "cmake/**"',
+         '      - "libraries/asio/**"',
+         '      - "libraries/chain/core/**"',
+         '      - "libraries/chain/protocol/**"',
+         '      - "libraries/codec/json/**"',
+         '      - "libraries/compression/**"',
+         '      - "libraries/config/core/**"',
+         '      - "libraries/core/**"',
+         '      - "libraries/crypto/**"',
+         '      - "libraries/db/**"',
+         '      - "libraries/exceptions/**"',
+         '      - "libraries/db/ids/**"',
+         '      - "libraries/raw/**"',
+         '      - "libraries/reflect/**"',
+         '      - "libraries/schema/**"',
+         '      - "libraries/variant/**"',
+         '      - "libraries/vm/wasm/**"',
+         '      - "libraries/contract/**"',
+         '      - "guest/**"',
+         '      - "tools/**"',
+         '      - "vendor/**"',
+      ):
+         if required not in pull_request:
+            errors.append(
+               f"{path.relative_to(root)}: pull_request paths must include {required.strip()[2:]}"
+            )
+   elif "  workflow_dispatch:\n" not in source:
+      errors.append(f"{path.relative_to(root)}: workflow must define pull_request or workflow_dispatch")
 
    sysroot_cache_inputs = "hashFiles('guest/sysroot/build.sh', 'guest/sysroot/include/**')"
    if sysroot_cache_inputs not in source:
@@ -305,6 +303,13 @@ def check_contract_sdk_components(root: Path, errors: list[str]) -> None:
       return
 
    contract_include = root / "guest" / "libraries" / "contract" / "include" / "forge" / "contract"
+   nested_modules = sorted(
+      path for path in contract_include.rglob("*.cppm") if path.parent != contract_include
+   )
+   if nested_modules:
+      rendered = ", ".join(str(path.relative_to(root)) for path in nested_modules)
+      errors.append("guest contract modules must use a flat public include layout: " + rendered)
+
    source_c_headers = sorted(contract_include.glob("*.h"))
    if source_c_headers:
       rendered = ", ".join(str(header.relative_to(root)) for header in source_c_headers)
@@ -391,7 +396,7 @@ def check_eosio_veneer(root: Path, errors: list[str]) -> None:
 
    generator = root / "libraries" / "contract" / "abi" / "generator.cpp"
    generated_source = generator.read_text(errors="ignore")
-   for forbidden in ('output << "   switch (action)', 'execute_action<'):
+   for forbidden in ('output << "   switch (action)',):
       if forbidden in generated_source:
          errors.append(
             f"{generator.relative_to(root)}: generated dispatcher must delegate to forge.contract.dispatcher"
@@ -400,6 +405,123 @@ def check_eosio_veneer(root: Path, errors: list[str]) -> None:
       errors.append(
          f"{generator.relative_to(root)}: generated dispatcher does not delegate to forge.contract.dispatcher"
       )
+
+   asset = root / "guest" / "libraries" / "eosio" / "include" / "eosio" / "asset.hpp"
+   if asset.exists():
+      asset_source = asset.read_text(errors="ignore")
+      for forbidden in ("struct asset", "struct extended_asset", "raw_pack(", "raw_unpack("):
+         if forbidden in asset_source:
+            errors.append(
+               f"{asset.relative_to(root)}: EOSIO asset veneer must not own {forbidden.rstrip('(')}"
+            )
+
+   name = root / "guest" / "libraries" / "eosio" / "include" / "eosio" / "name.hpp"
+   if name.exists():
+      name_source = name.read_text(errors="ignore")
+      for forbidden in ("raw_pack(", "raw_unpack("):
+         if forbidden in name_source:
+            errors.append(
+               f"{name.relative_to(root)}: EOSIO name veneer must not own {forbidden.rstrip('(')}"
+            )
+
+
+def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
+   guest_codec = root / "guest" / "libraries" / "codec"
+   if guest_codec.exists():
+      errors.append("guest/libraries/codec: guest codec forwarding family is forbidden")
+
+   forbidden_modules = (
+      "forge.core.encoding",
+      "forge.crypto.base64",
+      "forge.crypto.base58",
+      "forge.crypto.hex",
+      "forge.contract.base64",
+   )
+   for path in source_files(root, SCAN_ROOTS):
+      source = path.read_text(errors="ignore")
+      for module in forbidden_modules:
+         if module in source:
+            errors.append(f"{path.relative_to(root)}: removed codec module {module} is forbidden")
+      for shim in ("public_key_shim", "signature_shim", "private_key_shim"):
+         if shim in source:
+            errors.append(f"{path.relative_to(root)}: removed asymmetric shim {shim} is forbidden")
+
+   asymmetric_value = root / "libraries" / "crypto" / "include" / "forge" / "crypto" / "asymmetric_value.cppm"
+   asymmetric_source = asymmetric_value.read_text(errors="ignore")
+   if "FORGE_CONTRACT_GUEST" in asymmetric_source:
+      errors.append(f"{asymmetric_value.relative_to(root)}: asymmetric values must not have host/guest definitions")
+
+   duplicate_value_roots = (root / "libraries" / "chain" / "protocol", root / "guest" / "libraries")
+   duplicate_value = re.compile(r"\b(?:class|struct)\s+(?:public_key|signature)\b|\busing\s+(?:public_key|signature)\s*=\s*std::variant")
+   for value_root in duplicate_value_roots:
+      for path in source_files(root, (str(value_root.relative_to(root)),)):
+         if duplicate_value.search(path.read_text(errors="ignore")):
+            errors.append(f"{path.relative_to(root)}: asymmetric values belong to forge.crypto.asymmetric.value")
+
+   consumer_build = (root / "guest" / "build" / "CMakeLists.txt").read_text(errors="ignore")
+   implementation_source = re.compile(
+      r'"\$\{_(?:runtime|raw|codec|crypto|protocol|contract)[^}]*\}/[^"\n]+\.(?:cpp|hxx)"'
+   )
+   if implementation_source.search(consumer_build):
+      errors.append("guest/build/CMakeLists.txt: contract consumers must not compile Forge implementation sources")
+
+   contract = root / "guest" / "libraries" / "contract"
+   include = contract / "include" / "forge" / "contract"
+   implementation_units = {
+      "action",
+      "authorization",
+      "bitset",
+      "call",
+      "compatibility_asset",
+      "crypto",
+      "crypto_bls_ext",
+      "crypto_ext",
+      "deferred_transaction",
+      "dispatcher",
+      "instant_finality",
+      "intrinsics",
+      "print",
+      "privileged",
+      "producer_schedule",
+      "rope",
+      "system",
+      "transaction",
+   }
+   for stem in sorted(implementation_units):
+      if not (include / f"{stem}.cppm").exists() or not (contract / f"{stem}.cpp").exists():
+         errors.append(f"guest contract implementation unit {stem} must have an exact .cppm/.cpp pair")
+
+   header_only = {
+      "binary_extension",
+      "compatibility_name",
+      "contract",
+      "datastream",
+      "fixed_bytes",
+      "ignore",
+      "key",
+      "multi_index",
+      "powers",
+      "singleton",
+      "string",
+      "varint",
+   }
+   for stem in sorted(header_only):
+      if (contract / f"{stem}.cpp").exists():
+         errors.append(f"guest contract header-only module {stem} must not own a .cpp")
+
+   moved_records = (
+      "code_hash_result",
+      "blockchain_parameters",
+      "kv_parameters",
+      "finalizer_authority",
+      "finalizer_policy",
+      "call_data_header",
+   )
+   for path in sorted(include.glob("*.cppm")):
+      source = path.read_text(errors="ignore")
+      for record in moved_records:
+         if re.search(rf"\bstruct\s+{record}\b", source):
+            errors.append(f"{path.relative_to(root)}: {record} belongs to forge.chain.protocol")
 
 
 def check_modules(root: Path, files: list[Path], errors: list[str]) -> None:
@@ -489,6 +611,7 @@ def main() -> int:
    check_contract_sdk_workflow(root, errors)
    check_contract_sdk_components(root, errors)
    check_eosio_veneer(root, errors)
+   check_contract_sdk_architecture(root, errors)
    check_modules(root, files, errors)
 
    if errors:

@@ -5,7 +5,7 @@
     "spring": "e6a99f68b67abc4d89fe716755b2e1394a4991f7"
   },
   "intrinsics": {
-    "count": 148,
+    "count": 152,
     "interface_version": 1,
     "capabilities": [
       "bls",
@@ -81,7 +81,6 @@
   "modern_modules": [
     "action",
     "authorization",
-    "base64",
     "binary_extension",
     "bitset",
     "call",
@@ -161,7 +160,6 @@
     "varuint32"
   ],
   "observable_errors": [
-    "action data contains trailing bytes",
     "cannot create objects in table of another contract",
     "cannot modify objects in table of another contract",
     "cannot erase objects in table of another contract",

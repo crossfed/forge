@@ -12,7 +12,7 @@ module;
 
 export module forge.crypto.bls;
 
-import forge.crypto.base64;
+import forge.codec.base64;
 import forge.crypto.ripemd160;
 import forge.exceptions;
 import forge.raw.datastream;
@@ -57,7 +57,8 @@ template <typename Container> Container deserialize_base64url(const std::string&
    using wrapper = checked_data<Container>;
    auto wrapped = wrapper{};
 
-   auto bin = forge::crypto::base64url_decode(data_str);
+   auto bin = forge::codec::base64::decode(data_str, {.characters = forge::codec::base64::alphabet::url,
+                                                      .pad = forge::codec::base64::padding_policy::allow});
    forge::datastream<const std::uint8_t*> unpacker(bin.data(), bin.size());
    forge::raw::unpack(unpacker, wrapped);
    FORGE_ASSERT(!unpacker.remaining(), "decoded base64url length too long");
@@ -73,7 +74,9 @@ template <typename Container> std::string serialize_base64url(const Container& d
    wrapped.data = data;
    wrapped.check = wrapper::calculate_checksum(wrapped.data);
    auto packed = raw::pack(wrapped);
-   return forge::crypto::base64url_encode(std::span<const std::uint8_t>{packed.data(), packed.size()});
+   return forge::codec::base64::encode(
+       std::span<const std::uint8_t>{packed.data(), packed.size()},
+       {.characters = forge::codec::base64::alphabet::url, .pad = forge::codec::base64::padding::omit});
 }
 
 } // namespace forge::crypto::bls::detail
@@ -258,7 +261,7 @@ class aggregate_signature {
 
    template <typename T> friend T& operator<<(T& ds, const aggregate_signature& sig) {
       std::array<std::uint8_t, 192> affine_non_montgomery_le =
-         sig._jacobian_montgomery_le.toAffineBytesLE(bls12_381::from_mont::yes);
+          sig._jacobian_montgomery_le.toAffineBytesLE(bls12_381::from_mont::yes);
       forge::raw::pack(ds, forge::unsigned_int(static_cast<std::uint32_t>(sizeof(affine_non_montgomery_le))));
       ds.write(reinterpret_cast<const char*>(affine_non_montgomery_le.data()), sizeof(affine_non_montgomery_le));
       return ds;

@@ -60,7 +60,8 @@ find_package(Boost REQUIRED)
 
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../host" "${CMAKE_CURRENT_BINARY_DIR}/host")
 
-add_executable(forge_contract_e2e_tests contract_tests.cpp)
+add_executable(forge_contract_e2e_tests compiler_builtins_tests.cpp contract_tests.cpp)
+target_include_directories(forge_contract_e2e_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../host")
 target_link_libraries(
    forge_contract_e2e_tests
    PRIVATE

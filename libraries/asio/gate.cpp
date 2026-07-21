@@ -8,7 +8,9 @@ module;
 #include <boost/system/error_code.hpp>
 
 #include <algorithm>
+#include <deque>
 #include <memory>
+#include <mutex>
 #include <ranges>
 #include <utility>
 

@@ -16,12 +16,28 @@ module;
 
 module forge.variant.value;
 
-import forge.core.encoding;
+import forge.codec.base64;
+import forge.codec.hex;
 import forge.core.string;
 import forge.core.utf8;
 import forge.variant.exceptions;
 
 namespace forge {
+namespace {
+
+std::vector<std::uint8_t> decode_blob_base64(std::string_view value) {
+   try {
+      return forge::codec::base64::decode(value);
+   } catch (const forge::codec::base64::exceptions::invalid_input&) {
+      if (!value.ends_with('='))
+         throw;
+
+      return forge::codec::base64::decode(value.substr(0, value.size() - 1U));
+   }
+}
+
+} // namespace
+
 /**
  *  The TypeID is stored in the 'last byte' of the variant.
  */
@@ -430,7 +446,7 @@ std::string variant::as_string() const {
       return *reinterpret_cast<const bool*>(this) ? "true" : "false";
    case blob_type:
       if (get_blob().data.size())
-         return forge::encoding::to_base64(std::span<const std::uint8_t>{
+         return forge::codec::base64::encode(std::span<const std::uint8_t>{
              reinterpret_cast<const std::uint8_t*>(get_blob().data.data()), get_blob().data.size()});
       return std::string();
    case null_type:
@@ -472,18 +488,9 @@ blob variant::as_blob() const {
          return blob();
       try {
          // pre-5.0 versions of variant added `=` to end of base64 encoded string in as_string() above.
-         // Keep legacy base64_decode behavior: extra trailing `=` is accepted.
-         // Other base64 decoders will not accept the extra `=`.
-         auto decoded = forge::encoding::from_base64(str);
+         auto decoded = decode_blob_base64(str);
          return {std::move(decoded)};
       } catch (const std::exception&) {
-         if (str.ends_with('=')) {
-            try {
-               auto decoded = forge::encoding::from_base64(std::string_view{str}.substr(0, str.size() - 1U));
-               return {std::move(decoded)};
-            } catch (const std::exception&) {
-            }
-         }
          // unable to decode, return the raw chars
       }
       return blob({std::vector<std::uint8_t>(str.begin(), str.end())});
@@ -693,8 +700,8 @@ void to_variant(const std::vector<char>& var, variant& vo) {
    if (var.size() > MAX_SIZE_OF_BYTE_ARRAYS)
       throw std::out_of_range("byte array too large");
    if (var.size())
-      vo = variant(forge::encoding::to_hex(
-         std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(var.data()), var.size()}));
+      vo = variant(forge::codec::hex::encode(
+          std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(var.data()), var.size()}));
    else
       vo = "";
 }
@@ -706,19 +713,19 @@ void from_variant(const variant& var, std::vector<char>& vo) {
       throw std::invalid_argument("the length of hex string should be even number");
    vo.resize(str.size() / 2);
    if (vo.size()) {
-      const auto r = forge::encoding::from_hex(
-         str, std::span<std::uint8_t>{reinterpret_cast<std::uint8_t*>(vo.data()), vo.size()});
+      const auto r = forge::codec::hex::decode(
+          str, std::span<std::uint8_t>{reinterpret_cast<std::uint8_t*>(vo.data()), vo.size()});
       if (r != vo.size())
          throw forge::variant_exceptions::decode_error{"hex decode length mismatch"};
    }
 }
 
 void to_variant(const blob& b, variant& v) {
-   v = variant(forge::encoding::to_base64(std::span<const std::uint8_t>{b.data.data(), b.data.size()}));
+   v = variant(forge::codec::base64::encode(std::span<const std::uint8_t>{b.data.data(), b.data.size()}));
 }
 
 void from_variant(const variant& v, blob& b) {
-   b.data = forge::encoding::from_base64(v.as_string());
+   b.data = decode_blob_base64(v.as_string());
 }
 
 void to_variant(const UInt<8>& n, variant& v) {

@@ -1,5 +1,7 @@
 #pragma once
 
+#include <eosio/internal/print.hpp>
+
 import forge.contract.print;
 
 namespace eosio {

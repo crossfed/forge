@@ -12,7 +12,7 @@ export import forge.chain.protocol.values;
 import forge.crypto.ripemd160;
 import forge.crypto.sha256;
 import forge.crypto.sha512;
-import forge.crypto.asymmetric;
+import forge.crypto.asymmetric.value;
 
 export namespace forge::chain::protocol {
 

@@ -15,7 +15,7 @@ module forge.crypto.x509;
 
 import forge.crypto.asymmetric;
 import forge.crypto.der;
-import forge.crypto.hex;
+import forge.codec.hex;
 import forge.crypto.sha256;
 
 namespace forge::crypto::x509 {
@@ -143,7 +143,7 @@ bytes certificate::fingerprint_sha256() const {
 }
 
 std::string certificate::fingerprint_sha256_text() const {
-   return forge::crypto::to_hex(fingerprint_sha256());
+   return forge::codec::hex::encode(fingerprint_sha256());
 }
 
 } // namespace forge::crypto::x509

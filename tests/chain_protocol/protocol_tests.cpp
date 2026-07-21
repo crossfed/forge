@@ -12,6 +12,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 import forge.crypto.asymmetric;
@@ -28,7 +29,14 @@ import forge.chain.protocol.abi;
 import forge.chain.protocol.action;
 import forge.chain.protocol.action_receipt;
 import forge.chain.protocol.block;
+import forge.chain.protocol.blockchain_parameters;
+import forge.chain.protocol.call_access_mode;
+import forge.chain.protocol.call_data_header;
+import forge.chain.protocol.code_hash_result;
+import forge.chain.protocol.finalizer_policy;
 import forge.chain.protocol.fixed_key;
+import forge.chain.protocol.hash_id;
+import forge.chain.protocol.kv_parameters;
 import forge.chain.protocol.system;
 import forge.chain.protocol.transaction;
 import forge.chain.protocol.types;
@@ -225,6 +233,9 @@ protocol::signed_block make_reference_signed_block() {
 
 BOOST_AUTO_TEST_SUITE(forge_chain_protocol_compatibility)
 
+static_assert(std::is_same_v<protocol::public_key, forge::crypto::asymmetric::public_key>);
+static_assert(std::is_same_v<protocol::signature, forge::crypto::asymmetric::signature>);
+
 BOOST_AUTO_TEST_CASE(fixed_key_matches_donor_word_and_byte_order) {
    const auto high = static_cast<protocol::uint128_t>(0x0102030405060708ULL) << 64U |
                      static_cast<protocol::uint128_t>(0x1112131415161718ULL);
@@ -239,6 +250,62 @@ BOOST_AUTO_TEST_CASE(fixed_key_matches_donor_word_and_byte_order) {
    const auto variant = forge::variant{value};
    BOOST_TEST(variant.get_string() == "0102030405060708111213141516171821222324252627283132333435363738");
    BOOST_TEST((variant.as<protocol::key256>() == value));
+}
+
+BOOST_AUTO_TEST_CASE(contract_wire_records_preserve_spring_raw_layout) {
+   auto code_hash = protocol::code_hash_result{};
+   code_hash.struct_version = forge::unsigned_int{1U};
+   code_hash.code_sequence = 0x0102030405060708ULL;
+   code_hash.code_hash = protocol::checksum256{std::array<std::uint8_t, 32>{
+       0x00U, 0x01U, 0x02U, 0x03U, 0x04U, 0x05U, 0x06U, 0x07U, 0x08U, 0x09U, 0x0aU, 0x0bU, 0x0cU, 0x0dU, 0x0eU, 0x0fU,
+       0x10U, 0x11U, 0x12U, 0x13U, 0x14U, 0x15U, 0x16U, 0x17U, 0x18U, 0x19U, 0x1aU, 0x1bU, 0x1cU, 0x1dU, 0x1eU, 0x1fU,
+   }};
+   code_hash.vm_type = 0xaaU;
+   code_hash.vm_version = 0xbbU;
+   BOOST_TEST(pack_hex(code_hash) ==
+              "010807060504030201000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1faabb");
+
+   const auto parameters = protocol::blockchain_parameters{
+       .max_block_net_usage = 1U,
+       .target_block_net_usage_pct = 2U,
+       .max_transaction_net_usage = 3U,
+       .base_per_transaction_net_usage = 4U,
+       .net_usage_leeway = 5U,
+       .context_free_discount_net_usage_num = 6U,
+       .context_free_discount_net_usage_den = 7U,
+       .max_block_cpu_usage = 8U,
+       .target_block_cpu_usage_pct = 9U,
+       .max_transaction_cpu_usage = 10U,
+       .min_transaction_cpu_usage = 11U,
+       .max_transaction_lifetime = 12U,
+       .deferred_trx_expiration_window = 13U,
+       .max_transaction_delay = 14U,
+       .max_inline_action_size = 15U,
+       .max_inline_action_depth = 16U,
+       .max_authority_depth = 17U,
+   };
+   BOOST_TEST(pack_hex(parameters) ==
+              "010000000000000002000000030000000400000005000000060000000700000008000000090000000a0000000b000000"
+              "0c0000000d0000000e0000000f00000010001100");
+
+   const auto kv = protocol::kv_parameters{.max_key_size = 1U, .max_value_size = 2U, .max_iterators = 3U};
+   BOOST_TEST(pack_hex(kv) == "010000000200000003000000");
+
+   const auto authority = protocol::finalizer_authority{
+       .description = "f",
+       .weight = 3U,
+       .public_key = {char{0x01}, char{0x02}},
+   };
+   BOOST_TEST(pack_hex(authority) == "01660300000000000000020102");
+   const auto policy = protocol::finalizer_policy{.threshold = 4U, .finalizers = {authority}};
+   BOOST_TEST(pack_hex(policy) == "04000000000000000101660300000000000000020102");
+
+   const auto call = protocol::call_data_header{.version = 0x01020304U, .func_name = 0x0102030405060708ULL};
+   BOOST_TEST(pack_hex(call) == "040302010807060504030201");
+   BOOST_TEST(static_cast<std::uint8_t>(protocol::call_access_mode::read_write) == 0U);
+   BOOST_TEST(static_cast<std::uint8_t>(protocol::call_access_mode::read_only) == 1U);
+   const auto apply_id = static_cast<protocol::hash_id::raw>(protocol::hash_id{"apply"});
+   BOOST_TEST(static_cast<std::uint64_t>(apply_id) == protocol::hash_id::hash("apply"));
 }
 
 BOOST_AUTO_TEST_CASE(fixed_key_partial_word_sequences_preserve_cdt_layout) {
@@ -370,6 +437,13 @@ BOOST_AUTO_TEST_CASE(name_rejects_high_valued_thirteenth_character) {
    BOOST_CHECK_NO_THROW((void)protocol::make_name("abcdefghijklj"));
    BOOST_CHECK_THROW(protocol::make_name("abcdefghijklk"), std::invalid_argument);
    BOOST_CHECK_THROW(protocol::make_name("abcdefghijklz"), std::invalid_argument);
+}
+
+BOOST_AUTO_TEST_CASE(name_char_to_value_preserves_cdt_invalid_character_failure) {
+   BOOST_TEST(protocol::name::char_to_value('.') == 0U);
+   BOOST_TEST(protocol::name::char_to_value('1') == 1U);
+   BOOST_TEST(protocol::name::char_to_value('a') == 6U);
+   BOOST_CHECK_THROW((void)protocol::name::char_to_value('A'), std::invalid_argument);
 }
 
 BOOST_AUTO_TEST_CASE(asset_variant_text_preserves_precision) {
@@ -591,7 +665,7 @@ BOOST_AUTO_TEST_CASE(transaction_signature_preimage_digest_and_spring_signature_
 
    const auto signature = parse_spring_signature(spring::transaction_signature);
    const auto recovered =
-       protocol::public_key{signature, core::digest{std::string{spring::transaction_signature_digest}}};
+       forge::crypto::asymmetric::recover(signature, core::digest{std::string{spring::transaction_signature_digest}});
    BOOST_TEST(format_spring_public_key(recovered) == expected(spring::test_public_key));
 }
 
@@ -704,7 +778,7 @@ BOOST_AUTO_TEST_CASE(block_header_receipt_and_signed_block_match_spring_fixtures
    BOOST_TEST(protocol::calculate_block_num_from_id(protocol::calculate_block_id(header)) == spring::block_num_from_id);
 
    const auto signature = parse_spring_signature(spring::block_signature);
-   const auto recovered = protocol::public_key{signature, protocol::calculate_block_id(header)};
+   const auto recovered = forge::crypto::asymmetric::recover(signature, protocol::calculate_block_id(header));
    BOOST_TEST(format_spring_public_key(recovered) == expected(spring::test_public_key));
 
    const auto signed_header = make_reference_signed_block_header();
@@ -740,22 +814,23 @@ BOOST_AUTO_TEST_CASE(forge_secp256k1_is_the_crypto_surface_for_runtime_signature
    const auto digest = forge::crypto::sha256{std::string{spring::transaction_signature_digest}};
    const auto signature = private_key.sign_digest(digest);
    const auto public_key = private_key.get_public_key();
-   const auto recovered_key = forge::crypto::asymmetric::public_key{signature, digest};
-   const auto signature_text = signature.to_string();
-   const auto public_key_text = public_key.to_string();
+   const auto recovered_key = forge::crypto::asymmetric::recover(signature, digest);
+   const auto signature_text = forge::crypto::asymmetric::encoding::forge().format(signature);
+   const auto public_key_text = forge::crypto::asymmetric::encoding::forge().format(public_key);
    const auto signature_bytes = forge::raw::pack(signature);
    const auto public_key_bytes = forge::raw::pack(public_key);
-   const auto parsed_signature = forge::crypto::asymmetric::signature{signature_text};
-   const auto parsed_public_key = forge::crypto::asymmetric::public_key{public_key_text};
+   const auto parsed_signature = forge::crypto::asymmetric::encoding::forge().parse_signature(signature_text);
+   const auto parsed_public_key = forge::crypto::asymmetric::encoding::forge().parse_public(public_key_text);
    const auto unpacked_signature = forge::raw::unpack<forge::crypto::asymmetric::signature>(signature_bytes);
    const auto unpacked_public_key = forge::raw::unpack<forge::crypto::asymmetric::public_key>(public_key_bytes);
 
-   BOOST_TEST(static_cast<int>(signature.type()) == static_cast<int>(forge::crypto::asymmetric::algorithm::secp256k1));
+   BOOST_TEST(static_cast<int>(forge::crypto::asymmetric::type(signature)) ==
+              static_cast<int>(forge::crypto::asymmetric::algorithm::secp256k1));
    BOOST_TEST(recovered_key == public_key);
-   BOOST_TEST(parsed_signature.to_string() == signature_text);
-   BOOST_TEST(parsed_public_key.to_string() == public_key_text);
-   BOOST_TEST(unpacked_signature.to_string() == signature_text);
-   BOOST_TEST(unpacked_public_key.to_string() == public_key_text);
+   BOOST_TEST(forge::crypto::asymmetric::encoding::forge().format(parsed_signature) == signature_text);
+   BOOST_TEST(forge::crypto::asymmetric::encoding::forge().format(parsed_public_key) == public_key_text);
+   BOOST_TEST(forge::crypto::asymmetric::encoding::forge().format(unpacked_signature) == signature_text);
+   BOOST_TEST(forge::crypto::asymmetric::encoding::forge().format(unpacked_public_key) == public_key_text);
 
    const auto spring_public_key = parse_spring_public_key(spring::test_public_key);
    BOOST_TEST(format_spring_public_key(spring_public_key) == expected(spring::test_public_key));

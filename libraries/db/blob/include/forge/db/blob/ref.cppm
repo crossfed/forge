@@ -18,7 +18,7 @@ module;
 export module forge.db.blob.ref;
 
 import forge.db.blob.types;
-import forge.crypto.hex;
+import forge.codec.hex;
 import forge.crypto.sha256;
 import forge.raw.exceptions;
 import forge.raw.raw;
@@ -26,8 +26,7 @@ import forge.variant.exceptions;
 import forge.variant.value;
 
 export namespace forge::db::blob {
-template <typename Digest>
-struct digest_traits;
+template <typename Digest> struct digest_traits;
 }
 
 namespace forge::db::blob::detail {
@@ -71,8 +70,7 @@ concept max_size_digest = requires {
    { digest_traits<Digest>::max_byte_size } -> std::convertible_to<std::size_t>;
 };
 
-template <typename Digest>
-[[nodiscard]] constexpr std::size_t max_digest_byte_size() {
+template <typename Digest> [[nodiscard]] constexpr std::size_t max_digest_byte_size() {
    if constexpr (fixed_size_digest<Digest>) {
       return digest_traits<Digest>::byte_size;
    } else if constexpr (max_size_digest<Digest>) {
@@ -82,15 +80,13 @@ template <typename Digest>
    }
 }
 
-template <typename Digest>
-void require_digest_byte_size(std::size_t size) {
+template <typename Digest> void require_digest_byte_size(std::size_t size) {
    if (size > max_digest_byte_size<Digest>()) {
       FORGE_THROW_EXCEPTION(forge::raw::exceptions::codec_error, "db blob ref digest raw size exceeds limit");
    }
 }
 
-template <typename Stream>
-void read_exact(Stream& stream, char* data, std::size_t size) {
+template <typename Stream> void read_exact(Stream& stream, char* data, std::size_t size) {
    if (size == 0U) {
       return;
    }
@@ -112,8 +108,7 @@ void read_exact(Stream& stream, char* data, std::size_t size) {
    }
 }
 
-template <typename Stream, typename Value>
-void read_scalar(Stream& stream, Value& value) {
+template <typename Stream, typename Value> void read_scalar(Stream& stream, Value& value) {
    static_assert(std::is_trivially_copyable_v<Value>);
    read_exact(stream, reinterpret_cast<char*>(&value), sizeof(value));
 }
@@ -122,19 +117,16 @@ void read_scalar(Stream& stream, Value& value) {
 
 export namespace forge::db::blob {
 
-template <typename Digest>
-struct hash;
+template <typename Digest> struct hash;
 
-template <>
-struct hash<forge::crypto::sha256> {
+template <> struct hash<forge::crypto::sha256> {
    [[nodiscard]] forge::crypto::sha256 operator()(std::span<const std::byte> value) const {
       return forge::crypto::sha256::hash(
-         std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(value.data()), value.size()});
+          std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(value.data()), value.size()});
    }
 };
 
-template <>
-struct digest_traits<forge::crypto::sha256> {
+template <> struct digest_traits<forge::crypto::sha256> {
    static constexpr auto algorithm = std::string_view{"sha256"};
    static constexpr auto byte_size = std::size_t{32U};
 
@@ -161,26 +153,23 @@ struct digest_traits<forge::crypto::sha256> {
 };
 
 template <typename Digest>
-concept digest_algorithm =
-   requires(Digest value, std::span<const std::byte> bytes, std::string_view text) {
-      { hash<Digest>{}(bytes) } -> std::same_as<Digest>;
-      { digest_traits<Digest>::algorithm } -> std::convertible_to<std::string_view>;
-      { digest_traits<Digest>::to_bytes(value) } -> std::same_as<std::vector<std::byte>>;
-      { digest_traits<Digest>::from_bytes(bytes) } -> std::same_as<Digest>;
-      { digest_traits<Digest>::text(value) } -> std::same_as<std::string>;
-      { digest_traits<Digest>::from_text(text) } -> std::same_as<Digest>;
-   };
+concept digest_algorithm = requires(Digest value, std::span<const std::byte> bytes, std::string_view text) {
+   { hash<Digest>{}(bytes) } -> std::same_as<Digest>;
+   { digest_traits<Digest>::algorithm } -> std::convertible_to<std::string_view>;
+   { digest_traits<Digest>::to_bytes(value) } -> std::same_as<std::vector<std::byte>>;
+   { digest_traits<Digest>::from_bytes(bytes) } -> std::same_as<Digest>;
+   { digest_traits<Digest>::text(value) } -> std::same_as<std::string>;
+   { digest_traits<Digest>::from_text(text) } -> std::same_as<Digest>;
+};
 
-template <typename Digest = digest>
-struct ref {
+template <typename Digest = digest> struct ref {
    Digest digest;
    std::uint64_t size = 0;
 
    bool operator==(const ref&) const = default;
    auto operator<=>(const ref&) const = default;
 
-   template <typename Stream>
-   friend Stream& operator<<(Stream& stream, const ref& value) {
+   template <typename Stream> friend Stream& operator<<(Stream& stream, const ref& value) {
       const auto digest_bytes = digest_traits<Digest>::to_bytes(value.digest);
       if constexpr (detail::fixed_size_digest<Digest>) {
          if (digest_bytes.size() != digest_traits<Digest>::byte_size) {
@@ -197,8 +186,7 @@ struct ref {
       return stream;
    }
 
-   template <typename Stream>
-   friend Stream& operator>>(Stream& stream, ref& value) {
+   template <typename Stream> friend Stream& operator>>(Stream& stream, ref& value) {
       auto digest_size = std::size_t{};
       if constexpr (detail::fixed_size_digest<Digest>) {
          digest_size = digest_traits<Digest>::byte_size;
@@ -222,17 +210,17 @@ struct ref {
 
 export namespace forge {
 
-template <typename Digest>
-void to_variant(const forge::db::blob::ref<Digest>& value, forge::variant& output) {
+template <typename Digest> void to_variant(const forge::db::blob::ref<Digest>& value, forge::variant& output) {
    output = forge::db::blob::digest_traits<Digest>::text(value.digest) + ":" + std::to_string(value.size);
 }
 
-template <typename Digest>
-void from_variant(const forge::variant& input, forge::db::blob::ref<Digest>& output) {
+template <typename Digest> void from_variant(const forge::variant& input, forge::db::blob::ref<Digest>& output) {
    const auto text = input.get_string();
    const auto split = text.find(':');
-   if (split == std::string::npos || split == 0U || split + 1U >= text.size() || text.find(':', split + 1U) != std::string::npos) {
-      FORGE_THROW_EXCEPTION(forge::variant_exceptions::decode_error, "db blob ref must be formatted as <digest>:<size>");
+   if (split == std::string::npos || split == 0U || split + 1U >= text.size() ||
+       text.find(':', split + 1U) != std::string::npos) {
+      FORGE_THROW_EXCEPTION(forge::variant_exceptions::decode_error,
+                            "db blob ref must be formatted as <digest>:<size>");
    }
    output.digest = forge::db::blob::digest_traits<Digest>::from_text(std::string_view{text}.substr(0U, split));
    output.size = forge::db::blob::detail::parse_size(std::string_view{text}.substr(split + 1U));

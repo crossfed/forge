@@ -27,13 +27,20 @@ add_test(
    COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/guest/tests/tooling/test_runtime_bundle_policy.py
 )
 add_test(
+   NAME test_forge_contract_sdk_dependencies
+   COMMAND
+      ${CMAKE_COMMAND}
+      -DFORGE_CONTRACT_SDK_CMAKE=${CMAKE_SOURCE_DIR}/guest/CMakeLists.txt
+      -P ${CMAKE_SOURCE_DIR}/guest/tests/tooling/check_sdk_dependencies.cmake
+)
+add_test(
    NAME test_forge_contract_sdk_guest_runtime_archive
    COMMAND
       ${CMAKE_COMMAND}
       -DFORGE_CONTRACT_STAGE_SYSROOT=${CMAKE_SOURCE_DIR}/guest/cmake/stage_sysroot.cmake
       -DFORGE_CONTRACT_SDK_CMAKE=${CMAKE_SOURCE_DIR}/guest/CMakeLists.txt
       -DFORGE_CONTRACT_BUILD_CMAKE=${CMAKE_SOURCE_DIR}/guest/build/CMakeLists.txt
-      -DFORGE_CONTRACT_RUNTIME_CMAKE=${CMAKE_SOURCE_DIR}/guest/libraries/runtime/CMakeLists.txt
+      -DFORGE_CONTRACT_FOUNDATION_CMAKE=${CMAKE_SOURCE_DIR}/guest/cmake/foundation-build/CMakeLists.txt
       -DFORGE_CONTRACT_CONFIG_TEMPLATE=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractConfig.cmake.in
       -P ${CMAKE_SOURCE_DIR}/guest/tests/tooling/check_guest_runtime_archive.cmake
 )
@@ -60,7 +67,6 @@ add_executable(
    test_forge
    unit/main.cpp
    core/test_chrono.cpp
-   core/test_encoding.cpp
    core/test_escape_str.cpp
    variant/test_static_variant.cpp
    variant/test_variant.cpp
@@ -69,8 +75,6 @@ add_executable(
    raw/test_raw.cpp
    json/test_json.cpp
    crypto/test_base32.cpp
-   crypto/test_base64.cpp
-   crypto/test_base58.cpp
    crypto/test_blake2.cpp
    crypto/test_bls.cpp
    crypto/test_bls_legacy.cpp
@@ -121,6 +125,16 @@ add_executable(
 )
 target_link_libraries(test_forge_codec_json forge Boost::included_unit_test_framework)
 add_test(NAME test_forge_codec_json COMMAND test_forge_codec_json WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+foreach(_codec IN ITEMS base64 base58 hex)
+   add_executable(test_forge_codec_${_codec} unit/main.cpp codec/${_codec}_tests.cpp)
+   target_link_libraries(test_forge_codec_${_codec} forge_codec_${_codec} Boost::included_unit_test_framework)
+   add_test(
+      NAME test_forge_codec_${_codec}
+      COMMAND test_forge_codec_${_codec}
+      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+   )
+endforeach()
 
 add_executable(
    test_forge_raw
@@ -280,8 +294,6 @@ add_executable(
    test_forge_crypto
    unit/main.cpp
    crypto/test_base32.cpp
-   crypto/test_base64.cpp
-   crypto/test_base58.cpp
    crypto/test_blake2.cpp
    crypto/test_bls.cpp
    crypto/test_bls_legacy.cpp
@@ -923,6 +935,39 @@ add_custom_target(
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
       --test-command forge_package_db_revision_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_codec_base64_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_codec_base64_component
+      ${CMAKE_BINARY_DIR}/forge-package-codec-base64-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_codec_base64_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_codec_base58_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_codec_base58_component
+      ${CMAKE_BINARY_DIR}/forge-package-codec-base58-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_codec_base58_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_codec_hex_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_codec_hex_component
+      ${CMAKE_BINARY_DIR}/forge-package-codec-hex-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_codec_hex_component
    DEPENDS test_forge_package_install
 )
 add_custom_target(
@@ -1570,6 +1615,39 @@ add_test(
       --test-command forge_package_db_revision_component
 )
 set_tests_properties(test_forge_package_db_revision_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_codec_base64_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_codec_base64_component
+      ${CMAKE_BINARY_DIR}/forge-package-codec-base64-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_codec_base64_component
+)
+set_tests_properties(test_forge_package_codec_base64_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_codec_base58_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_codec_base58_component
+      ${CMAKE_BINARY_DIR}/forge-package-codec-base58-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_codec_base58_component
+)
+set_tests_properties(test_forge_package_codec_base58_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_codec_hex_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_codec_hex_component
+      ${CMAKE_BINARY_DIR}/forge-package-codec-hex-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_codec_hex_component
+)
+set_tests_properties(test_forge_package_codec_hex_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_codec_json_component
    COMMAND ${CMAKE_CTEST_COMMAND}

@@ -10,7 +10,7 @@ import forge.variant.multiprecision;
 import forge.variant.format;
 import forge.variant.described;
 import forge.exceptions;
-import forge.crypto.base64;
+import forge.codec.base64;
 
 using namespace forge;
 using std::string;

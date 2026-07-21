@@ -1,7 +1,7 @@
 # forge_crypto
 
 `forge_crypto` contains retained cryptographic primitives and wrappers: hashes,
-base encodings, AES/HMAC, AES-256-GCM, KDF helpers, secp256k1/P-256/WebAuthn keys
+AES/HMAC, AES-256-GCM, KDF helpers, secp256k1/P-256/WebAuthn keys
 and signatures, BLS/BN/GMP helpers, random bytes and OpenSSL 3.0+ integration.
 
 ## When To Use
@@ -21,14 +21,21 @@ and signatures, BLS/BN/GMP helpers, random bytes and OpenSSL 3.0+ integration.
 
 ## Public Modules
 
-Hashes and encodings:
+Hashes:
 
 - `forge.crypto.sha1`, `sha224`, `sha256`, `sha3`, `sha512`, `ripemd160`, `city`,
-  `blake2`, `hex`, `base58`, `base64`, `hmac`.
+  `blake2`, `hmac`.
+
+Byte encodings are independent `forge.codec.base64`, `forge.codec.base58` and
+`forge.codec.hex` components.
 
 Keys and signatures:
 
-- `forge.crypto.asymmetric`, `secp256k1`, `p256`, `ed25519`, `rsa`,
+- `forge.crypto.asymmetric.value` owns the dual-target K1, R1, WebAuthn,
+  Ed25519 and RSA value variants;
+- `forge.crypto.asymmetric` owns host key generation, signing, validation,
+  verification, recovery and text encoding over those same values;
+- `forge.crypto.secp256k1`, `p256`, `ed25519`, `rsa`,
   `x25519`, `webauthn`, `bls`;
 - `forge.crypto.bn256` and `forge.crypto.bls.primitives` expose the
   contract-visible BN254 and BLS operations used by Spring intrinsics without
@@ -126,20 +133,23 @@ auto ripemd = forge::crypto::ripemd160::hash("abc").str();
 ```cpp
 #include <vector>
 
-import forge.crypto.base58;
-import forge.crypto.base64;
-import forge.crypto.hex;
+import forge.codec.base58;
+import forge.codec.base64;
+import forge.codec.hex;
 import forge.crypto.types;
 
 auto bytes = forge::crypto::bytes{'o', 'k'};
 
-auto hex = forge::crypto::to_hex(bytes);
-auto base58 = forge::crypto::base58_encode(bytes);
-auto base64 = forge::crypto::base64_encode(bytes);
-auto base64url = forge::crypto::base64url_encode("hello");
+auto hex = forge::codec::hex::encode(bytes);
+auto base58 = forge::codec::base58::encode(bytes);
+auto base64 = forge::codec::base64::encode(bytes);
+auto base64url = forge::codec::base64::encode(
+   "hello",
+   {.characters = forge::codec::base64::alphabet::url,
+    .pad = forge::codec::base64::padding::omit});
 
-auto decoded_base58 = forge::crypto::base58_decode(base58);
-auto decoded_base64 = forge::crypto::base64_decode(base64);
+auto decoded_base58 = forge::codec::base58::decode(base58);
+auto decoded_base64 = forge::codec::base64::decode(base64);
 ```
 
 ### Generate Random Bytes For A Seed Or Key
@@ -200,12 +210,12 @@ auto action = signed_action{
 
 auto message = action.signing_bytes(chain_id);
 auto signature = private_key.sign(message);
-auto verified = public_key.verify(message, signature);
+auto verified = forge::crypto::asymmetric::verify(public_key, message, signature);
 ```
 
 `forge::crypto::asymmetric::algorithm` is a described enum, so schema and
-Variant boundaries use the stable names `secp256k1`, `p256`, `ed25519` and
-`rsa` rather than numeric values.
+Variant boundaries use the stable names `secp256k1`, `p256`, `webauthn`,
+`ed25519` and `rsa` rather than numeric values.
 
 ### Generate A P-256 Key Explicitly
 
@@ -229,7 +239,7 @@ auto action = signed_action{
 
 auto message = action.signing_bytes(chain_id);
 auto signature = private_key.sign(message);
-auto verified = public_key.verify(message, signature);
+auto verified = forge::crypto::asymmetric::verify(public_key, message, signature);
 ```
 
 Secp256k1 and P-256 have different compatibility expectations. Keep tests for
@@ -591,7 +601,7 @@ auto digest = webauthn_challenge_payload{
    .session = 42,
    .origin = "https://example.invalid",
 }.digest();
-auto recovered = webauthn_signature.recover(digest, true);
+auto recovered = forge::crypto::asymmetric::recover(signature, digest, true);
 ```
 
 WebAuthn client data parsing is private to `forge_crypto`; no JSON backend type is
@@ -600,7 +610,8 @@ recovery tests together when touching this code.
 
 ## Security Notes
 
-- `private_key::to_string()` is secret material. Do not print it in diagnostics.
+- `asymmetric::encoding::forge().format(private_key)` is secret material. Do
+  not print it in diagnostics.
 - Use explicit redaction in config/log/TUI layers before rendering crypto values.
 - OpenSSL 3.0+ is the only SSL/TLS-related crypto backend expected by FORGE
   consumers.

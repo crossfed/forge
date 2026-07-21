@@ -103,6 +103,8 @@ class contract_abort : public std::runtime_error {
 struct invocation {
    std::vector<std::uint8_t> action_data;
    std::vector<std::uint8_t> return_value;
+   std::vector<std::uint8_t> call_data;
+   std::vector<std::uint8_t> call_return_value;
 
    void eosio_assert_message(std::uint32_t test, wasm::span<const char> message) {
       if (test == 0U) {
@@ -127,6 +129,17 @@ struct invocation {
       return_value.assign(reinterpret_cast<const std::uint8_t*>(value.data()),
                           reinterpret_cast<const std::uint8_t*>(value.data()) + value.size());
    }
+
+   std::uint32_t get_call_data(wasm::span<char> destination) const {
+      const auto size = std::min(destination.size(), call_data.size());
+      std::copy_n(call_data.begin(), size, destination.begin());
+      return static_cast<std::uint32_t>(size == 0U ? call_data.size() : size);
+   }
+
+   void set_call_return_value(wasm::span<const char> value) {
+      call_return_value.assign(reinterpret_cast<const std::uint8_t*>(value.data()),
+                               reinterpret_cast<const std::uint8_t*>(value.data()) + value.size());
+   }
 };
 
 using host_functions = wasm::registered_host_functions<invocation>;
@@ -137,6 +150,8 @@ void register_intrinsics() {
       host_functions::add<&invocation::action_data_size>("env", "action_data_size");
       host_functions::add<&invocation::read_action_data>("env", "read_action_data");
       host_functions::add<&invocation::set_action_return_value>("env", "set_action_return_value");
+      host_functions::add<&invocation::get_call_data>("env", "get_call_data");
+      host_functions::add<&invocation::set_call_return_value>("env", "set_call_return_value");
       return true;
    }();
    static_cast<void>(registered);
@@ -194,6 +209,22 @@ void apply(const wasm::wasm_code& code, invocation& host, std::string_view recei
 
 void apply(const wasm::wasm_code& code, invocation& host, std::string_view contract, std::string_view action) {
    apply_with<wasm::interpreter>(code, host, contract, action);
+}
+
+void call(const wasm::wasm_code& code, invocation& host, std::string_view sender, std::string_view receiver) {
+   static thread_local auto memory = allocator{};
+   auto mutable_code = code;
+   auto vm =
+       wasm::backend<host_functions, wasm::interpreter, wasm::compatibility_options>{mutable_code, host, &memory.value};
+   vm(host, "env", "__forge_call", protocol::make_name(sender).value, protocol::make_name(receiver).value);
+}
+
+constexpr std::uint64_t call_id(std::string_view value) {
+   auto result = std::uint64_t{5381U};
+   for (const auto character : value) {
+      result = ((result << 5U) + result) + static_cast<unsigned char>(character);
+   }
+   return result;
 }
 
 void run_allocator_action(std::string_view action) {
@@ -330,6 +361,56 @@ BOOST_AUTO_TEST_CASE(legacy_dispatcher_serializes_user_defined_action_records) {
 
    BOOST_CHECK_NO_THROW(apply(code, host, "legacyhello", "echo"));
    BOOST_TEST(host.return_value == record, boost::test_tools::per_element());
+}
+
+BOOST_AUTO_TEST_CASE(legacy_fixed_c_arrays_preserve_cdt_length_framing) {
+   register_intrinsics();
+   const auto code = read_contract(FORGE_CONTRACT_TEST_LEGACY_WASM);
+   auto host = invocation{};
+
+   BOOST_CHECK_NO_THROW(apply(code, host, "legacyhello", "arraywire"));
+   const auto packed = forge::raw::unpack_exact<std::vector<char>>(host.return_value);
+   const auto expected = std::vector<char>{2, 7, 0, 0, 0, 9, 0, 0, 0};
+   BOOST_TEST(packed == expected, boost::test_tools::per_element());
+}
+
+BOOST_AUTO_TEST_CASE(legacy_base64_decoders_preserve_crlf_compatibility) {
+   register_intrinsics();
+   const auto code = read_contract(FORGE_CONTRACT_TEST_LEGACY_WASM);
+   auto host = invocation{};
+
+   BOOST_CHECK_NO_THROW(apply(code, host, "legacyhello", "bafourlines"));
+   BOOST_TEST(forge::raw::unpack_exact<std::string>(host.return_value) == "abcdef");
+}
+
+BOOST_AUTO_TEST_CASE(legacy_dispatcher_preserves_cdt_trailing_action_data_semantics) {
+   register_intrinsics();
+   const auto code = read_contract(FORGE_CONTRACT_TEST_LEGACY_WASM);
+   const auto record = forge::raw::pack(std::string{"alice"}, std::vector<std::uint32_t>{7U, 11U, 42U});
+   auto host = invocation{.action_data = record};
+   host.action_data.push_back(0xffU);
+
+   BOOST_CHECK_NO_THROW(apply(code, host, "legacyhello", "echo"));
+   BOOST_TEST(host.return_value == record, boost::test_tools::per_element());
+}
+
+BOOST_AUTO_TEST_CASE(legacy_contract_reports_action_and_synchronous_call_execution_modes) {
+   register_intrinsics();
+   const auto code = read_contract(FORGE_CONTRACT_TEST_LEGACY_NOTIFICATION_WASM);
+   auto action_host = invocation{};
+
+   BOOST_CHECK_NO_THROW(apply(code, action_host, "legacynotify", "actionmode"));
+   BOOST_TEST(forge::raw::unpack_exact<bool>(action_host.return_value) == false);
+
+   auto call_host = invocation{};
+   call_host.call_data = forge::raw::pack(std::uint32_t{0}, call_id("callmode"));
+   BOOST_CHECK_NO_THROW(call(code, call_host, "alice", "legacynotify"));
+   BOOST_TEST(forge::raw::unpack_exact<bool>(call_host.call_return_value));
+
+   call_host.call_data = forge::raw::pack(std::uint32_t{0}, call_id("callreceiver"));
+   BOOST_CHECK_NO_THROW(call(code, call_host, "alice", "legacynotify"));
+   BOOST_TEST(forge::raw::unpack_exact<std::uint64_t>(call_host.call_return_value) ==
+              protocol::make_name("legacynotify").value);
 }
 
 BOOST_AUTO_TEST_CASE(cdt_standard_containers_use_the_shared_guest_codec) {
@@ -792,6 +873,15 @@ BOOST_AUTO_TEST_CASE(contract_oracle_enforces_synchronous_call_access_mode) {
 
    BOOST_TEST(invoke_oracle(host, code, 14U) == 15U);
    BOOST_REQUIRE(host.find_primary(callee, callee, table, 1U).has_value());
+}
+
+BOOST_AUTO_TEST_CASE(contract_oracle_uses_the_same_strict_codec_implementations) {
+   const auto code = read_contract(FORGE_CONTRACT_TEST_ORACLE_WASM);
+   auto host = forge::contract::testing::host{};
+
+   BOOST_TEST(invoke_oracle(host, code, 15U) == 16U);
+   BOOST_CHECK_EXCEPTION(invoke_oracle(host, code, 16U), forge::contract::testing::exceptions::assertion_failure,
+                         [](const auto& error) { return error.message() == "base64 trailing bits are non-canonical"; });
 }
 
 BOOST_AUTO_TEST_CASE(contract_recovers_legacy_public_key) {

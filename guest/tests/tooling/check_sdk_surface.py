@@ -2,7 +2,11 @@
 
 import argparse
 import json
+import re
 from pathlib import Path
+
+
+BOOST_INCLUDE = re.compile(r'^\s*#\s*include\s*[<"](?P<path>boost/[^>"]+)[>"]', re.MULTILINE)
 
 
 def fail(message: str) -> None:
@@ -20,6 +24,20 @@ def require_tokens(path: Path, tokens: list[str], label: str) -> None:
     missing = [token for token in tokens if token not in text]
     if missing:
         fail(f"missing {label} in {path}: {', '.join(missing)}")
+
+
+def require_boost_header_closure(include: Path) -> None:
+    missing = set()
+    for header in sorted((include / "boost").rglob("*")):
+        if not header.is_file():
+            continue
+        source = header.read_text(encoding="utf-8", errors="ignore")
+        for match in BOOST_INCLUDE.finditer(source):
+            dependency = match.group("path")
+            if not (include / dependency).is_file():
+                missing.add(dependency)
+    if missing:
+        fail(f"missing Boost header closure: {', '.join(sorted(missing))}")
 
 
 def parse_golden(path: Path) -> list[tuple[str, str, str, str, tuple[str, ...], str]]:
@@ -44,16 +62,18 @@ def main() -> None:
 
     surface = json.loads(args.manifest.read_text(encoding="utf-8"))
     registry = json.loads(args.registry.read_text(encoding="utf-8"))
-    imports = registry["imports"]
+    registry_imports = registry["imports"]
+    imports = [item for item in registry_imports if item["capability"] != "runtime"]
     expected = surface["intrinsics"]
 
     if len(imports) != expected["count"]:
         fail(f"intrinsic count mismatch: expected {expected['count']}, got {len(imports)}")
     if registry["interface_version"] != expected["interface_version"]:
         fail("contract interface version mismatch")
-    if registry["capabilities"] != expected["capabilities"]:
+    public_capabilities = [capability for capability in registry["capabilities"] if capability != "runtime"]
+    if public_capabilities != expected["capabilities"]:
         fail("contract capability set mismatch")
-    if len({item["import"] for item in imports}) != len(imports):
+    if len({item["import"] for item in registry_imports}) != len(registry_imports):
         fail("duplicate intrinsic import name")
 
     actual_signatures = [
@@ -67,10 +87,20 @@ def main() -> None:
         )
         for item in imports
     ]
-    if actual_signatures != parse_golden(args.golden):
+    golden_signatures = [signature for signature in parse_golden(args.golden) if signature[1] != "runtime"]
+    if actual_signatures != golden_signatures:
         fail("intrinsic signatures differ from the pinned CDT/Spring golden manifest")
 
     include = args.data_dir / "include"
+    installed_sources = sorted(
+        relative
+        for suffix in ("*.cpp", "*.hxx")
+        for path in args.data_dir.rglob(suffix)
+        if (relative := path.relative_to(args.data_dir)).parts[0] != "examples"
+    )
+    if installed_sources:
+        fail(f"SDK installs Forge implementation sources: {', '.join(map(str, installed_sources))}")
+    require_boost_header_closure(include)
     require_files(include, surface["donor_c_headers"], "CDT C headers")
     require_files(include, surface["canonical_c_headers"], "canonical C headers")
     require_files(include / "eosio", surface["donor_cpp_headers"], "CDT C++ headers")
@@ -86,8 +116,15 @@ def main() -> None:
     abi_source = args.source_root / "libraries/contract/abi/generator.cpp"
     require_tokens(abi_source, [f'"{name}"' for name in surface["abi_types"]], "ABI type vocabulary")
 
-    contract_root = args.source_root / "guest/libraries/contract/include/forge/contract"
-    contract_text = "\n".join(path.read_text(encoding="utf-8") for path in sorted(contract_root.glob("*.cppm")))
+    contract_module_root = args.source_root / "guest/libraries/contract/include/forge/contract"
+    contract_source_root = args.source_root / "guest/libraries/contract"
+    protocol_module_root = args.source_root / "libraries/chain/protocol/include/forge/chain/protocol"
+    contract_sources = [
+        *contract_module_root.glob("*.cppm"),
+        *contract_source_root.glob("*.cpp"),
+        *protocol_module_root.glob("*.cppm"),
+    ]
+    contract_text = "\n".join(path.read_text(encoding="utf-8") for path in sorted(contract_sources))
     missing_errors = [message for message in surface["observable_errors"] if message not in contract_text]
     if missing_errors:
         fail(f"missing contract-visible errors: {', '.join(missing_errors)}")

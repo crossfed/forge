@@ -13,7 +13,7 @@ entry points live in `tools/`. It currently delivers:
 - pinned upstream libc++, libc++abi and compiler-rt sysroot construction;
 - target-neutral raw codec and guest-safe chain value modules;
 - contract context and donor-compatible action, notification and synchronous-call dispatch;
-- the exact 148-function CDT/Spring union in intrinsic interface v1;
+- the exact 152-function CDT/Spring union in intrinsic interface v1;
 - C++23 `multi_index`, `singleton` and targeted EOSIO database veneer;
 - executable test host for every intrinsic family, with ObjectDB-backed tables;
 - guest-safe protocol, crypto and time values shared with host Forge;
@@ -364,7 +364,7 @@ The Forge Contract SDK distribution is hermetic and contains:
 
 - pinned, unmodified Clang and lld binaries;
 - the wasm32 sysroot;
-- prebuilt `sysroot/lib/libforge_guest_runtime.a`;
+- prebuilt runtime, raw, codec, chain protocol and contract implementation archives;
 - guest module sources;
 - dual-target Forge library sources;
 - `abigen` and `attr-plugin`;
@@ -379,10 +379,13 @@ checkout. The release manifest identifies:
 
 This version triple is part of reproducible source-to-WASM verification.
 
-The input sysroot is copied to a build-owned staging directory before the guest
-runtime is compiled and installed. Contract consumer builds link that archive
-before libc++/libc++abi/compiler-rt and never compile runtime sources. The
-archive participates in the sysroot hash; runtime `.cpp` and private `.hxx`
+The input sysroot is copied to a build-owned staging directory before one guest
+foundation build compiles and installs all non-template Forge implementation:
+runtime, raw, Base64/Base58/hex codecs, chain protocol, contract and math.
+Contract consumer builds compile only their sources, generated dispatcher and
+module interfaces required for local BMIs; implementation comes from the
+prebuilt archives. `foundation.json` records every archive hash and the complete
+tree participates in the sysroot hash. Production `.cpp` and private `.hxx`
 files are not distributed.
 
 ## Repository Boundaries
@@ -445,7 +448,7 @@ Host and guest builds of `forge::raw` pass identical golden byte vectors.
 
 The SDK foundation now completes steps 1-5, the full pinned CDT public veneer
 from step 6 and the local safety profiles from step 7. The executable oracle
-registers all 148 intrinsics, proves the C ABI and exercises the contract-visible
+registers all 152 intrinsics, proves the C ABI and exercises the contract-visible
 families over Forge VM, ObjectDB and crypto. The next compatibility block builds
 the unchanged Spring contract corpus; it must not add missing fundamental API.
 

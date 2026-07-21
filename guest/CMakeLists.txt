@@ -25,6 +25,7 @@ set_property(CACHE FORGE_CONTRACT_PROFILE PROPERTY STRINGS developer release)
 set(FORGE_CONTRACT_FORGE_DIR "" CACHE PATH "Directory containing ForgeConfig.cmake for host tools")
 set(FORGE_CONTRACT_SYSROOT "" CACHE PATH "Existing wasm32 sysroot used by developer mode")
 set(FORGE_CONTRACT_CLANG "" CACHE FILEPATH "Developer-mode clang++")
+set(FORGE_CONTRACT_CLANG_C "" CACHE FILEPATH "Developer-mode clang C driver")
 set(FORGE_CONTRACT_WASM_LD "" CACHE FILEPATH "Developer-mode wasm-ld")
 set(FORGE_CONTRACT_LLVM_AR "" CACHE FILEPATH "Developer-mode llvm-ar")
 set(FORGE_CONTRACT_LLVM_RANLIB "" CACHE FILEPATH "Developer-mode llvm-ranlib")
@@ -49,6 +50,18 @@ set(
 list(JOIN _forge_contract_path_map_options " " _forge_contract_path_map_flags)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
+find_package(Boost 1.90.0 REQUIRED CONFIG COMPONENTS headers)
+
+set(_forge_contract_boost_include "")
+foreach(_candidate IN LISTS Boost_INCLUDE_DIRS)
+   if(EXISTS "${_candidate}/boost/pfr/core.hpp")
+      set(_forge_contract_boost_include "${_candidate}")
+      break()
+   endif()
+endforeach()
+if(NOT _forge_contract_boost_include)
+   message(FATAL_ERROR "Boost.PFR headers were not found in Boost ${Boost_VERSION}")
+endif()
 
 if(FORGE_CONTRACT_PROFILE STREQUAL "release")
    set(_llvm_install "${CMAKE_BINARY_DIR}/toolchain")
@@ -100,11 +113,23 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
    else()
       set(_llvm_host_target X86)
    endif()
+   execute_process(
+      COMMAND "${CMAKE_C_COMPILER}" -dumpmachine
+      OUTPUT_VARIABLE _llvm_host_triple
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      COMMAND_ERROR_IS_FATAL ANY
+   )
+   if(_llvm_host_triple STREQUAL "")
+      message(FATAL_ERROR "release LLVM bootstrap compiler did not report a host target triple")
+   endif()
+   set(_llvm_projects "clang|lld")
+   set(_llvm_targets "WebAssembly|${_llvm_host_target}")
    ExternalProject_Add(
       forge_contract_llvm
       ${_llvm_source_arguments}
       SOURCE_SUBDIR llvm
       CMAKE_GENERATOR Ninja
+      LIST_SEPARATOR "|"
       CMAKE_ARGS
          -DCMAKE_BUILD_TYPE=Release
          -DCMAKE_INSTALL_PREFIX=${_llvm_install}
@@ -112,11 +137,14 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
          -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
          -DCMAKE_C_FLAGS=${_forge_contract_llvm_path_map_flags}
          -DCMAKE_CXX_FLAGS=${_forge_contract_llvm_path_map_flags}
-         -DLLVM_ENABLE_PROJECTS=clang\;lld
-         -DLLVM_TARGETS_TO_BUILD=WebAssembly\;${_llvm_host_target}
+         -DLLVM_ENABLE_PROJECTS:STRING=${_llvm_projects}
+         -DLLVM_TARGETS_TO_BUILD:STRING=${_llvm_targets}
+         -DLLVM_HOST_TRIPLE:STRING=${_llvm_host_triple}
+         -DLLVM_DEFAULT_TARGET_TRIPLE:STRING=${_llvm_host_triple}
          -DLLVM_BUILD_LLVM_DYLIB=ON
          -DLLVM_LINK_LLVM_DYLIB=ON
          -DCLANG_LINK_CLANG_DYLIB=ON
+         -DLLVM_ENABLE_RTTI=ON
          -DLLVM_ENABLE_TERMINFO=OFF
          -DLLVM_ENABLE_ZLIB=OFF
          -DLLVM_ENABLE_ZSTD=OFF
@@ -127,12 +155,14 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
    )
 
    set(FORGE_CONTRACT_CLANG "${_llvm_install}/bin/clang++")
+   set(FORGE_CONTRACT_CLANG_C "${_llvm_install}/bin/clang")
    set(FORGE_CONTRACT_CLANG_SCAN_DEPS "${_llvm_install}/bin/clang-scan-deps")
    set(FORGE_CONTRACT_WASM_LD "${_llvm_install}/bin/wasm-ld")
    set(FORGE_CONTRACT_LLVM_AR "${_llvm_install}/bin/llvm-ar")
    set(FORGE_CONTRACT_LLVM_RANLIB "${_llvm_install}/bin/llvm-ranlib")
    set(FORGE_CONTRACT_CLANG_RESOURCE_DIR "${_llvm_install}/lib/clang/22")
    set(FORGE_CONTRACT_SYSROOT "${CMAKE_BINARY_DIR}/sysroot-base")
+   set(_llvm_runtimes "libcxx|libcxxabi|compiler-rt")
 
    ExternalProject_Add(
       forge_contract_sysroot
@@ -142,6 +172,7 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
       UPDATE_COMMAND ""
       PATCH_COMMAND ""
       CMAKE_GENERATOR Ninja
+      LIST_SEPARATOR "|"
       CMAKE_ARGS
          -DCMAKE_BUILD_TYPE=Release
          -DCMAKE_INSTALL_PREFIX=${FORGE_CONTRACT_SYSROOT}
@@ -161,7 +192,9 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
          -DCMAKE_CXX_FLAGS=${_forge_contract_wasm_path_map_flags}
          -DCMAKE_ASM_FLAGS=${_forge_contract_wasm_path_map_flags}
          -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
-         -DLLVM_ENABLE_RUNTIMES=libcxx\;libcxxabi\;compiler-rt
+         -DLLVM_ENABLE_RUNTIMES:STRING=${_llvm_runtimes}
+         -DLLVM_INCLUDE_TESTS=OFF
+         -DLLVM_INCLUDE_DOCS=OFF
          -DLIBCXX_ENABLE_EXCEPTIONS=OFF
          -DLIBCXX_ENABLE_RTTI=OFF
          -DLIBCXX_ENABLE_THREADS=OFF
@@ -222,8 +255,8 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
          -DCMAKE_BUILD_TYPE=Release
          -DCMAKE_INSTALL_PREFIX=${_host_tools_install}
          -DCMAKE_INSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}
-         -DCMAKE_C_COMPILER=${_llvm_install}/bin/clang
-         -DCMAKE_CXX_COMPILER=${_llvm_install}/bin/clang++
+         -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+         -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
          -DCMAKE_C_FLAGS=${_forge_contract_path_map_flags}
          -DCMAKE_CXX_FLAGS=${_forge_contract_path_map_flags}
          -DCMAKE_PREFIX_PATH:PATH=${_forge_contract_prefix_path}
@@ -255,6 +288,7 @@ else()
    foreach(
       _tool
       FORGE_CONTRACT_CLANG
+      FORGE_CONTRACT_CLANG_C
       FORGE_CONTRACT_CLANG_SCAN_DEPS
       FORGE_CONTRACT_WASM_LD
       FORGE_CONTRACT_LLVM_AR
@@ -331,6 +365,10 @@ add_custom_target(
       -DSOURCE=${_forge_contract_input_sysroot}
       -DDESTINATION=${FORGE_CONTRACT_SYSROOT}
       -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stage_sysroot.cmake"
+   COMMAND
+      ${CMAKE_COMMAND} -E copy_directory
+      "${CMAKE_CURRENT_SOURCE_DIR}/sysroot/include"
+      "${FORGE_CONTRACT_SYSROOT}/include"
    DEPENDS
       ${_forge_contract_sysroot_stage_dependencies}
       "${CMAKE_CURRENT_SOURCE_DIR}/cmake/stage_sysroot.cmake"
@@ -339,11 +377,13 @@ add_custom_target(
 
 set(_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(_sysroot_hash "${_generated_dir}/sysroot.sha256")
+set(_foundation_manifest "${_generated_dir}/foundation.json")
 set(_intrinsic_registry "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/include/forge/contract/intrinsics.hpp")
 set(_intrinsic_manifest "${_generated_dir}/intrinsics.json")
 set(
    _intrinsic_headers
    "${_generated_dir}/include/forge/contract/intrinsics.h"
+   "${_generated_dir}/include/forge/contract/internal/intrinsics.hpp"
    "${_generated_dir}/include/forge/contract/types.h"
    "${_generated_dir}/include/eosio/action.h"
    "${_generated_dir}/include/eosio/call.h"
@@ -359,6 +399,19 @@ set(
    "${_generated_dir}/include/eosio/system.h"
    "${_generated_dir}/include/eosio/transaction.h"
    "${_generated_dir}/include/eosio/types.h"
+   "${_generated_dir}/include/eosio/internal/action.hpp"
+   "${_generated_dir}/include/eosio/internal/call.hpp"
+   "${_generated_dir}/include/eosio/internal/chain.hpp"
+   "${_generated_dir}/include/eosio/internal/crypto.hpp"
+   "${_generated_dir}/include/eosio/internal/crypto_bls_ext.hpp"
+   "${_generated_dir}/include/eosio/internal/crypto_ext.hpp"
+   "${_generated_dir}/include/eosio/internal/db.hpp"
+   "${_generated_dir}/include/eosio/internal/instant_finality.hpp"
+   "${_generated_dir}/include/eosio/internal/permission.hpp"
+   "${_generated_dir}/include/eosio/internal/print.hpp"
+   "${_generated_dir}/include/eosio/internal/privileged.hpp"
+   "${_generated_dir}/include/eosio/internal/system.hpp"
+   "${_generated_dir}/include/eosio/internal/transaction.hpp"
 )
 add_custom_command(
    OUTPUT "${_intrinsic_manifest}" ${_intrinsic_headers}
@@ -380,9 +433,9 @@ add_custom_target(
 )
 
 ExternalProject_Add(
-   forge_contract_guest_runtime
+   forge_contract_guest_foundation
    DEPENDS forge_contract_stage_sysroot forge_contract_intrinsic_manifest
-   SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/libraries/runtime"
+   SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/cmake/foundation-build"
    DOWNLOAD_COMMAND ""
    UPDATE_COMMAND ""
    PATCH_COMMAND ""
@@ -394,16 +447,37 @@ ExternalProject_Add(
       -DCMAKE_SYSTEM_NAME=Generic
       -DCMAKE_SYSTEM_PROCESSOR=wasm32
       -DCMAKE_SYSROOT=${FORGE_CONTRACT_SYSROOT}
+      -DCMAKE_OSX_SYSROOT=
+      -DCMAKE_C_COMPILER=${FORGE_CONTRACT_CLANG_C}
       -DCMAKE_CXX_COMPILER=${FORGE_CONTRACT_CLANG}
+      -DCMAKE_C_COMPILER_TARGET=wasm32
       -DCMAKE_CXX_COMPILER_TARGET=wasm32
+      -DCMAKE_C_FLAGS=${_forge_contract_path_map_flags}
       -DCMAKE_CXX_FLAGS=${_forge_contract_path_map_flags}
       -DCMAKE_AR=${FORGE_CONTRACT_LLVM_AR}
       -DCMAKE_RANLIB=${FORGE_CONTRACT_LLVM_RANLIB}
       -DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY
+      -DFORGE_SOURCE_DIR=${_forge_contract_source_root}
       -DFORGE_GUEST_INCLUDE_DIR=${_generated_dir}/include
+      -DFORGE_GUEST_LIBC_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/../vendor/cdt-musl
+      -DFORGE_GUEST_BOOST_INCLUDE_DIR=${_forge_contract_boost_include}
    BUILD_ALWAYS TRUE
    BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> -j ${FORGE_CONTRACT_JOBS}
    INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
+)
+
+add_custom_target(
+   forge_contract_foundation_manifest ALL
+   COMMAND
+      ${Python3_EXECUTABLE}
+      "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate_foundation_manifest.py"
+      --lib-dir "${FORGE_CONTRACT_SYSROOT}/lib"
+      --output "${_foundation_manifest}"
+   DEPENDS
+      forge_contract_guest_foundation
+      "${CMAKE_CURRENT_SOURCE_DIR}/cmake/generate_foundation_manifest.py"
+   BYPRODUCTS "${_foundation_manifest}"
+   VERBATIM
 )
 
 add_custom_target(
@@ -413,7 +487,7 @@ add_custom_target(
       "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hash_tree.py"
       --root "${FORGE_CONTRACT_SYSROOT}"
       --output "${_sysroot_hash}"
-   DEPENDS forge_contract_guest_runtime "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hash_tree.py"
+   DEPENDS forge_contract_foundation_manifest "${CMAKE_CURRENT_SOURCE_DIR}/cmake/hash_tree.py"
    BYPRODUCTS "${_sysroot_hash}"
    VERBATIM
 )
@@ -466,13 +540,8 @@ install(
 install(DIRECTORY libraries/eosio/include/ DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/include")
 install(DIRECTORY "${_generated_dir}/include/" DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/include")
 install(
-   FILES
-      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/raw/stream.cpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/raw/codec.cpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/values.cpp"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/time.cpp"
-      libraries/contract/dispatcher.cpp
-   DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/runtime"
+   DIRECTORY "${_forge_contract_boost_include}/boost/pfr"
+   DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/include/boost"
 )
 install(
    FILES "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/exceptions/include/forge/exceptions/policy.hpp"
@@ -489,8 +558,26 @@ install(
    DESTINATION .
 )
 install(FILES "${_intrinsic_manifest}" DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/registry")
-install(FILES "${_sysroot_hash}" DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract")
+install(FILES "${_sysroot_hash}" "${_foundation_manifest}" DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract")
 
+install(
+   FILES
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/codec/base64/include/forge/codec/base64/base64.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/codec/base64/include/forge/codec/base64/exceptions.cppm"
+   DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/modules/forge/codec/base64"
+)
+install(
+   FILES
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/codec/base58/include/forge/codec/base58/base58.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/codec/base58/include/forge/codec/base58/exceptions.cppm"
+   DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/modules/forge/codec/base58"
+)
+install(
+   FILES
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/codec/hex/include/forge/codec/hex/hex.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/codec/hex/include/forge/codec/hex/exceptions.cppm"
+   DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/modules/forge/codec/hex"
+)
 install(
    FILES
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/raw/include/forge/raw/stream.cppm"
@@ -528,6 +615,14 @@ install(
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/producer_authority.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/system_value.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/system.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/code_hash_result.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/blockchain_parameters.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/kv_parameters.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/finalizer_authority.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/finalizer_policy.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/hash_id.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/call_access_mode.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/call_data_header.cppm"
    DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/modules/forge/chain/protocol"
 )
 

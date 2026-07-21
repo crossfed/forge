@@ -2,6 +2,7 @@ module;
 #include <forge/exceptions/macros.hpp>
 
 #include <cctype>
+#include <algorithm>
 #include <cstring>
 #include <exception>
 #include <optional>
@@ -14,7 +15,8 @@ module;
 
 module forge.crypto.webauthn;
 
-import forge.crypto.base64;
+import forge.crypto.asymmetric.value;
+import forge.codec.base64;
 import forge.crypto.p256;
 import forge.crypto.sha256;
 import forge.exceptions;
@@ -337,7 +339,7 @@ class client_data_json_reader {
 
    [[noreturn]] void fail(const std::string& reason) const {
       FORGE_THROW_EXCEPTION(exceptions::invalid_client_data, "failed to parse client data JSON",
-                          forge::exceptions::ctx("reason", reason), forge::exceptions::ctx("offset", _pos));
+                            forge::exceptions::ctx("reason", reason), forge::exceptions::ctx("offset", _pos));
    }
 
    std::string_view _input;
@@ -349,56 +351,67 @@ client_data_fields parse_client_data_json(std::string_view input) {
       return client_data_json_reader{input}.parse();
    } catch (const std::invalid_argument& e) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_client_data, "failed to parse client data JSON",
-                          forge::exceptions::ctx("reason", e.what()));
+                            forge::exceptions::ctx("reason", e.what()));
    }
 }
 
 } // namespace detail
 
-credential_public_key::credential_public_key(const assertion& c, const forge::crypto::sha256& digest, bool) {
-   const auto client_data = detail::parse_client_data_json(c.client_json);
+bool valid(const asymmetric::webauthn_public_key& key) noexcept {
+   return !key.rpid.empty();
+}
+
+asymmetric::webauthn_public_key recover(const asymmetric::webauthn_signature& value,
+                                        const forge::crypto::sha256& digest, bool) {
+   const auto client_data = detail::parse_client_data_json(value.client_json);
 
    FORGE_ASSERT(client_data.type == "webauthn.get", "webauthn signature type not an assertion");
 
-   const auto challenge_bytes = forge::crypto::base64url_decode(client_data.challenge);
+   const auto challenge_bytes =
+       forge::codec::base64::decode(client_data.challenge, {.characters = forge::codec::base64::alphabet::url,
+                                                            .pad = forge::codec::base64::padding_policy::allow});
    FORGE_ASSERT(forge::crypto::sha256{std::span<const std::uint8_t>{challenge_bytes}} == digest,
                 "Wrong webauthn challenge");
 
    char required_origin_scheme[] = "https://";
    size_t https_len = strlen(required_origin_scheme);
    FORGE_ASSERT(client_data.origin.compare(0, https_len, required_origin_scheme) == 0,
-              "webauthn origin must begin with https://");
-   rpid = client_data.origin.substr(https_len, client_data.origin.rfind(':') - https_len);
+                "webauthn origin must begin with https://");
+   auto result = asymmetric::webauthn_public_key{};
+   result.rpid = client_data.origin.substr(https_len, client_data.origin.rfind(':') - https_len);
 
    constexpr static size_t min_auth_data_size = 37;
-   FORGE_ASSERT(c.auth_data.size() >= min_auth_data_size, "auth_data not as large as required");
-   if (c.auth_data[32] & 0x01)
-      user_verification_type = user_presence_t::USER_PRESENCE_PRESENT;
-   if (c.auth_data[32] & 0x04)
-      user_verification_type = user_presence_t::USER_PRESENCE_VERIFIED;
+   FORGE_ASSERT(value.auth_data.size() >= min_auth_data_size, "auth_data not as large as required");
+   if (value.auth_data[32] & 0x01) {
+      result.user_presence = asymmetric::webauthn_public_key::user_presence_t::USER_PRESENCE_PRESENT;
+   }
+   if (value.auth_data[32] & 0x04) {
+      result.user_presence = asymmetric::webauthn_public_key::user_presence_t::USER_PRESENCE_VERIFIED;
+   }
 
    static_assert(min_auth_data_size >= sizeof(forge::crypto::sha256),
                  "auth_data min size not enough to store a sha256");
-   FORGE_ASSERT(memcmp(c.auth_data.data(), forge::crypto::sha256::hash(rpid).data(), sizeof(forge::crypto::sha256)) ==
-                    0,
-              "webauthn rpid hash doesn't match origin");
+   FORGE_ASSERT(memcmp(value.auth_data.data(), forge::crypto::sha256::hash(result.rpid).data(),
+                       sizeof(forge::crypto::sha256)) == 0,
+                "webauthn rpid hash doesn't match origin");
 
    // the signature (and thus public key we need to return) will be over
    //  sha256(auth_data || client_data_hash)
-   forge::crypto::sha256 client_data_hash = forge::crypto::sha256::hash(c.client_json);
+   forge::crypto::sha256 client_data_hash = forge::crypto::sha256::hash(value.client_json);
    forge::crypto::sha256::encoder e;
-   e.write(std::span<const std::uint8_t>{c.auth_data.data(), c.auth_data.size()});
+   e.write(std::span<const std::uint8_t>{value.auth_data.data(), value.auth_data.size()});
    e.write(client_data_hash.data(), client_data_hash.data_size());
    forge::crypto::sha256 signed_digest = e.result();
 
-   int nV = c.compact_signature.data()[0];
-   if (nV < 31 || nV >= 35)
+   const auto recovery = static_cast<unsigned char>(value.compact_signature[0]);
+   if (recovery < 31 || recovery >= 35) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_signature, "unable to reconstruct public key from signature");
-   public_key_data = p256::recover_public_key_data(c.compact_signature, signed_digest, false);
-}
-
-void credential_public_key::post_init() {
-   FORGE_ASSERT(rpid.length(), "webauthn pubkey must have non empty rpid");
+   }
+   auto compact_signature = p256::compact_signature{};
+   std::transform(value.compact_signature.begin(), value.compact_signature.end(), compact_signature.begin(),
+                  [](char byte) { return static_cast<unsigned char>(byte); });
+   result.key = p256::recover_public_key_data(compact_signature, signed_digest, false);
+   return result;
 }
 
 } // namespace forge::crypto::webauthn

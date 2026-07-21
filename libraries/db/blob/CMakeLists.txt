@@ -26,6 +26,7 @@ install(
 target_link_libraries(
    forge_db_blob PUBLIC
       Boost::asio
+      forge_codec_hex
       forge_crypto
       forge_db_core
       forge_exceptions

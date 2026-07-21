@@ -3,7 +3,7 @@ foreach(
    FORGE_CONTRACT_STAGE_SYSROOT
    FORGE_CONTRACT_SDK_CMAKE
    FORGE_CONTRACT_BUILD_CMAKE
-   FORGE_CONTRACT_RUNTIME_CMAKE
+   FORGE_CONTRACT_FOUNDATION_CMAKE
    FORGE_CONTRACT_CONFIG_TEMPLATE
 )
    if(NOT DEFINED ${_required} OR NOT EXISTS "${${_required}}")
@@ -78,13 +78,47 @@ function(_reject_text file text)
    endif()
 endfunction()
 
-_require_text("${FORGE_CONTRACT_SDK_CMAKE}" "ExternalProject_Add(\n   forge_contract_guest_runtime")
-_require_text("${FORGE_CONTRACT_SDK_CMAKE}" "DEPENDS forge_contract_guest_runtime")
+_require_text("${FORGE_CONTRACT_SDK_CMAKE}" "ExternalProject_Add(\n   forge_contract_guest_foundation")
+_require_text("${FORGE_CONTRACT_SDK_CMAKE}" "SOURCE_DIR \"\${CMAKE_CURRENT_SOURCE_DIR}/cmake/foundation-build\"")
+_require_text(
+   "${FORGE_CONTRACT_SDK_CMAKE}"
+   "add_custom_target(\n   forge_contract_foundation_manifest ALL"
+)
+_require_text("${FORGE_CONTRACT_SDK_CMAKE}" "BYPRODUCTS \"\${_foundation_manifest}\"")
+_reject_text("${FORGE_CONTRACT_SDK_CMAKE}" "OUTPUT \"\${_foundation_manifest}\"")
 _require_text("${FORGE_CONTRACT_SDK_CMAKE}" "add_custom_target(\n   forge_contract_stage_sysroot")
 _reject_text("${FORGE_CONTRACT_SDK_CMAKE}" "forge-contract-sysroot.stamp")
-_require_text("${FORGE_CONTRACT_RUNTIME_CMAKE}" "install(TARGETS forge_guest_runtime ARCHIVE")
+_reject_text("${FORGE_CONTRACT_SDK_CMAKE}" "forge_contract_guest_runtime")
+_reject_text("${FORGE_CONTRACT_SDK_CMAKE}" "forge_contract_guest_codecs")
+foreach(_archive IN ITEMS
+   forge_guest_runtime
+   forge_guest_raw
+   forge_guest_codec_base64
+   forge_guest_codec_base58
+   forge_guest_codec_hex
+   forge_guest_chain_protocol
+   forge_guest_contract
+   forge_guest_math
+)
+   _require_text("${FORGE_CONTRACT_FOUNDATION_CMAKE}" "${_archive}")
+endforeach()
 _require_text("${FORGE_CONTRACT_BUILD_CMAKE}" "add_library(forge_guest_runtime STATIC IMPORTED GLOBAL)")
+_require_text("${FORGE_CONTRACT_BUILD_CMAKE}" "add_library(forge_guest_codec_base64_runtime STATIC IMPORTED GLOBAL)")
+_require_text("${FORGE_CONTRACT_BUILD_CMAKE}" "add_library(forge_guest_codec_base58_runtime STATIC IMPORTED GLOBAL)")
+_require_text("${FORGE_CONTRACT_BUILD_CMAKE}" "add_library(forge_guest_codec_hex_runtime STATIC IMPORTED GLOBAL)")
+_require_text("${FORGE_CONTRACT_BUILD_CMAKE}" "add_library(forge_guest_raw_implementation STATIC IMPORTED GLOBAL)")
+_require_text("${FORGE_CONTRACT_BUILD_CMAKE}" "add_library(forge_guest_chain_protocol_implementation STATIC IMPORTED GLOBAL)")
+_require_text("${FORGE_CONTRACT_BUILD_CMAKE}" "add_library(forge_guest_contract_implementation STATIC IMPORTED GLOBAL)")
 _require_text("${FORGE_CONTRACT_BUILD_CMAKE}" "set(_guest_libraries forge_guest_runtime")
-_require_text("${FORGE_CONTRACT_CONFIG_TEMPLATE}" "ForgeContract_RUNTIME_ARCHIVE")
+_require_text("${FORGE_CONTRACT_CONFIG_TEMPLATE}" "foundation.json")
+_require_text("${FORGE_CONTRACT_CONFIG_TEMPLATE}" "file(SHA256")
+_reject_text("${FORGE_CONTRACT_CONFIG_TEMPLATE}" "ForgeContract_RUNTIME_ARCHIVE")
+_reject_text("${FORGE_CONTRACT_CONFIG_TEMPLATE}" "ForgeContract_CODEC_BASE64_ARCHIVE")
+_reject_text("${FORGE_CONTRACT_CONFIG_TEMPLATE}" "ForgeContract_CODEC_BASE58_ARCHIVE")
+_reject_text("${FORGE_CONTRACT_CONFIG_TEMPLATE}" "ForgeContract_CODEC_HEX_ARCHIVE")
+_reject_text("${FORGE_CONTRACT_BUILD_CMAKE}" "\${_runtime}/")
 _reject_text("${FORGE_CONTRACT_BUILD_CMAKE}" "\${_runtime}/allocator.cpp")
 _reject_text("${FORGE_CONTRACT_BUILD_CMAKE}" "\${_runtime}/memory.cpp")
+_reject_text("${FORGE_CONTRACT_BUILD_CMAKE}" "\${_runtime}/base64.cpp")
+_reject_text("${FORGE_CONTRACT_BUILD_CMAKE}" "\${_runtime}/base58.cpp")
+_reject_text("${FORGE_CONTRACT_BUILD_CMAKE}" "\${_runtime}/hex.cpp")

@@ -21,7 +21,12 @@ CAPABILITIES = {
     "bls",
     "call",
     "instant_finality",
+    "runtime",
 }
+
+PUBLIC_INTRINSIC_COUNT = 152
+RUNTIME_INTRINSIC_COUNT = 48
+RUNTIME_HEADER = "runtime"
 
 EOSIO_HEADERS = (
     "action",
@@ -97,11 +102,12 @@ def write_types_header(source: pathlib.Path, path: pathlib.Path) -> None:
     path.write_text(source.read_text(encoding="utf-8"), encoding="utf-8")
 
 
-def write_c_header(path: pathlib.Path, entries: list[dict]) -> None:
+def write_c_header(path: pathlib.Path, entries: list[dict], *, eosio: bool = False) -> None:
+    types_header = "eosio/types.h" if eosio else "forge/contract/types.h"
     lines = [
         "#pragma once",
         "",
-        "#include <forge/contract/types.h>",
+        f"#include <{types_header}>",
         "",
         "#include <stddef.h>",
         "",
@@ -112,11 +118,8 @@ def write_c_header(path: pathlib.Path, entries: list[dict]) -> None:
         "#define FORGE_CONTRACT_IMPORT(module, name)",
         "#endif",
         "",
-        "#ifdef __cplusplus",
-        'extern "C" {',
-        "#endif",
-        "",
     ]
+    lines.extend(["#ifdef __cplusplus", 'extern "C" {', "#endif", ""])
     for entry in entries:
         result = c_type(entry["result"])
         parameters = c_type(entry["parameters"]) or "void"
@@ -136,6 +139,63 @@ def write_c_header(path: pathlib.Path, entries: list[dict]) -> None:
             "",
         ]
     )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def write_internal_header(
+    path: pathlib.Path,
+    entries: list[dict],
+    namespace: str,
+    excluded: set[str] | None = None,
+    global_alias: bool = False,
+) -> None:
+    excluded = excluded or set()
+    visible_entries = [entry for entry in entries if entry["identifier"] not in excluded]
+    lines = [
+        "#pragma once",
+        "",
+        "#include <stddef.h>",
+        "#include <stdint.h>",
+        "",
+        "struct capi_checksum160;",
+        "struct capi_checksum256;",
+        "struct capi_checksum512;",
+        "",
+    ]
+    if global_alias:
+        lines.extend(['extern "C" {', ""])
+    else:
+        lines.extend(
+            [
+                f"namespace {namespace} {{",
+                "using uint128_t = unsigned __int128;",
+                "using int128_t = __int128;",
+                "",
+            ]
+        )
+    for entry in visible_entries:
+        result = c_type(entry["result"])
+        parameters = c_type(entry["parameters"]) or "void"
+        if global_alias:
+            result = re.sub(r"\buint128_t\b", "unsigned __int128", result)
+            result = re.sub(r"\bint128_t\b", "__int128", result)
+            parameters = re.sub(r"\buint128_t\b", "unsigned __int128", parameters)
+            parameters = re.sub(r"\bint128_t\b", "__int128", parameters)
+        parameters = re.sub(r"struct capi_checksum(160|256|512)", r"::capi_checksum\1", parameters)
+        noreturn = " __attribute__((noreturn))" if entry["identifier"] == "eosio_exit" else ""
+        lines.append(
+            f'{result} {entry["identifier"]}({parameters}){noreturn} '
+            f'__attribute__((import_module("{entry["module"]}"), import_name("{entry["import"]}")));'
+        )
+    if global_alias:
+        lines.extend(["", "}"])
+    if global_alias:
+        lines.extend(["", f"namespace {namespace} {{"])
+        lines.extend(f"using ::{entry['identifier']};" for entry in visible_entries)
+        lines.extend([f"}} // namespace {namespace}", ""])
+    else:
+        lines.extend([f"}} // namespace {namespace}", ""])
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -173,14 +233,19 @@ def parse_registry(path: pathlib.Path) -> list[dict]:
             }
         )
 
-    if len(entries) != 148:
-        raise SystemExit(f"intrinsic registry must contain 148 declarations, found {len(entries)}")
+    expected_count = PUBLIC_INTRINSIC_COUNT + RUNTIME_INTRINSIC_COUNT
+    if len(entries) != expected_count:
+        raise SystemExit(f"intrinsic registry must contain {expected_count} declarations, found {len(entries)}")
     if len({entry["identifier"] for entry in entries}) != len(entries):
         raise SystemExit("intrinsic registry contains duplicate identifiers")
     if {entry["capability"] for entry in entries} - CAPABILITIES:
         raise SystemExit("intrinsic registry contains an unknown capability")
-    if {entry["header"] for entry in entries} - set(EOSIO_HEADERS):
+    if {entry["header"] for entry in entries} - (set(EOSIO_HEADERS) | {RUNTIME_HEADER}):
         raise SystemExit("intrinsic registry contains an unknown EOSIO header")
+    if sum(entry["header"] != RUNTIME_HEADER for entry in entries) != PUBLIC_INTRINSIC_COUNT:
+        raise SystemExit(f"intrinsic registry must contain {PUBLIC_INTRINSIC_COUNT} public declarations")
+    if sum(entry["header"] == RUNTIME_HEADER for entry in entries) != RUNTIME_INTRINSIC_COUNT:
+        raise SystemExit(f"intrinsic registry must contain {RUNTIME_INTRINSIC_COUNT} runtime declarations")
     return entries
 
 
@@ -213,11 +278,25 @@ def main() -> None:
     eosio_types = args.include_dir / "eosio/types.h"
     eosio_types.parent.mkdir(parents=True, exist_ok=True)
     eosio_types.write_text("#pragma once\n\n#include <forge/contract/types.h>\n", encoding="utf-8")
-    write_c_header(args.include_dir / "forge/contract/intrinsics.h", entries)
+    public_entries = [entry for entry in entries if entry["header"] != RUNTIME_HEADER]
+    write_c_header(args.include_dir / "forge/contract/intrinsics.h", public_entries)
     for header in EOSIO_HEADERS:
         write_c_header(
             args.include_dir / f"eosio/{header}.h",
             [entry for entry in entries if entry["header"] == header],
+            eosio=True,
+        )
+    write_internal_header(
+        args.include_dir / "forge/contract/internal/intrinsics.hpp", entries, "forge::contract::internal"
+    )
+    for header in EOSIO_HEADERS:
+        header_entries = [entry for entry in entries if entry["header"] == header]
+        write_internal_header(
+            args.include_dir / f"eosio/internal/{header}.hpp",
+            header_entries,
+            "eosio::internal_use_do_not_use",
+            {"set_action_return_value"},
+            header == "db",
         )
 
 

@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "sdk": [
+    {"area": "Toolchain and sysroot", "status": "Verified", "evidence": "forge_contract_sdk_relocation"},
+    {"area": "152 intrinsic functions", "status": "Verified", "evidence": "check_sdk_surface.py"},
+    {"area": "C and C++ compatibility headers", "status": "Verified", "evidence": "check_sdk_surface.py"},
+    {"area": "Modern contract modules", "status": "Verified", "evidence": "surface contract"},
+    {"area": "ABI and dispatcher", "status": "Verified", "evidence": "run_abigen_fixtures.py"},
+    {"area": "Raw, protocol, crypto and time", "status": "Verified", "evidence": "contract SDK E2E"},
+    {"area": "multi_index and singleton", "status": "Verified", "evidence": "run_multi_index_fixtures.py"},
+    {"area": "Executable VM oracle", "status": "Verified", "evidence": "forge_contract_e2e_tests"},
+    {"area": "Relocation and reproducibility", "status": "Verified", "evidence": "forge_contract_sdk_relocation"}
+  ],
+  "contracts": [
+    {"name": "Spring eosio.boot", "gates": {"source_integrity": "Verified", "unchanged_build": "Verified", "abi_parity": "Verified", "wasm_validation": "Verified", "vm_execution": "Verified", "behavior_parity": "Verified"}, "evidence": ["forge_contract_corpus_integrity", "forge_contract_corpus_abi", "forge_contract_corpus_artifacts", "forge_contract_corpus_e2e"]},
+    {"name": "Spring eosio.token", "gates": {"source_integrity": "Verified", "unchanged_build": "Verified", "abi_parity": "Verified", "wasm_validation": "Verified", "vm_execution": "Verified", "behavior_parity": "Verified"}, "evidence": ["forge_contract_corpus_integrity", "forge_contract_corpus_abi", "forge_contract_corpus_artifacts", "forge_contract_corpus_e2e"]},
+    {"name": "Spring eosio.msig", "gates": {"source_integrity": "Verified", "unchanged_build": "Verified", "abi_parity": "Verified", "wasm_validation": "Verified", "vm_execution": "Verified", "behavior_parity": "Verified"}, "evidence": ["forge_contract_corpus_integrity", "forge_contract_corpus_abi", "forge_contract_corpus_artifacts", "forge_contract_corpus_e2e"]},
+    {"name": "Spring eosio.wrap", "gates": {"source_integrity": "Verified", "unchanged_build": "Verified", "abi_parity": "Verified", "wasm_validation": "Verified", "vm_execution": "Verified", "behavior_parity": "Verified"}, "evidence": ["forge_contract_corpus_integrity", "forge_contract_corpus_abi", "forge_contract_corpus_artifacts", "forge_contract_corpus_e2e"]},
+    {"name": "Spring eosio.system", "gates": {"source_integrity": "Verified", "unchanged_build": "Verified", "abi_parity": "Verified", "wasm_validation": "Verified", "vm_execution": "Verified", "behavior_parity": "Verified"}, "evidence": ["forge_contract_corpus_integrity", "forge_contract_corpus_abi", "forge_contract_corpus_artifacts", "forge_contract_corpus_e2e"]},
+    {"name": "Spring test_api", "gates": {"source_integrity": "Verified", "unchanged_build": "Verified", "abi_parity": "Verified", "wasm_validation": "Verified", "vm_execution": "Verified", "behavior_parity": "Verified"}, "evidence": ["forge_contract_corpus_integrity", "forge_contract_corpus_abi", "forge_contract_corpus_artifacts", "forge_contract_corpus_e2e"]},
+    {"name": "Spring test_api_db", "gates": {"source_integrity": "Verified", "unchanged_build": "Verified", "abi_parity": "Verified", "wasm_validation": "Verified", "vm_execution": "Verified", "behavior_parity": "Verified"}, "evidence": ["forge_contract_corpus_integrity", "forge_contract_corpus_abi", "forge_contract_corpus_artifacts", "forge_contract_corpus_e2e"]},
+    {"name": "Spring test_api_multi_index", "gates": {"source_integrity": "Verified", "unchanged_build": "Verified", "abi_parity": "Verified", "wasm_validation": "Verified", "vm_execution": "Verified", "behavior_parity": "Verified"}, "evidence": ["forge_contract_corpus_integrity", "forge_contract_corpus_abi", "forge_contract_corpus_artifacts", "forge_contract_corpus_e2e"]},
+    {"name": "EOSIO eosio.bios", "gates": {"source_integrity": "Verified", "unchanged_build": "Verified", "abi_parity": "Verified", "wasm_validation": "Verified", "vm_execution": "Verified", "behavior_parity": "Verified"}, "evidence": ["forge_contract_corpus_integrity", "forge_contract_corpus_abi", "forge_contract_corpus_artifacts", "forge_contract_corpus_e2e"]},
+    {"name": "EOSIO eosio.boot", "gates": {"source_integrity": "Verified", "unchanged_build": "Verified", "abi_parity": "Verified", "wasm_validation": "Verified", "vm_execution": "Verified", "behavior_parity": "Verified"}, "evidence": ["forge_contract_corpus_integrity", "forge_contract_corpus_abi", "forge_contract_corpus_artifacts", "forge_contract_corpus_e2e"]}
+  ]
+}

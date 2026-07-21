@@ -1,0 +1,5 @@
+add_library(forge_codec_base64 STATIC base64.cpp)
+forge_target_modules_at(forge_codec_base64 codec/base64)
+
+target_include_directories(forge_codec_base64 PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
+target_link_libraries(forge_codec_base64 PUBLIC forge_exceptions)

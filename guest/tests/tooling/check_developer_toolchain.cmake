@@ -5,14 +5,15 @@ if(NOT DEFINED FORGE_CONTRACT_TEST_ROOT OR FORGE_CONTRACT_TEST_ROOT STREQUAL "")
    message(FATAL_ERROR "FORGE_CONTRACT_TEST_ROOT is required")
 endif()
 
-set(_root "${FORGE_CONTRACT_TEST_ROOT}")
+get_filename_component(_root "${FORGE_CONTRACT_TEST_ROOT}" ABSOLUTE)
 set(_selected "${_root}/selected/bin")
 set(_path_toolchain "${_root}/path/bin")
 set(_configured "${_root}/configured/bin")
+set(_versioned "${_root}/versioned/bin")
 file(REMOVE_RECURSE "${_root}")
-file(MAKE_DIRECTORY "${_selected}" "${_path_toolchain}" "${_configured}")
+file(MAKE_DIRECTORY "${_selected}" "${_path_toolchain}" "${_configured}" "${_versioned}")
 
-set(_selected_tools clang++ clang-scan-deps llvm-ar llvm-ranlib)
+set(_selected_tools clang clang++ clang-scan-deps llvm-ar llvm-ranlib)
 if(NOT FORGE_CONTRACT_TEST_MISSING_WASM_LD)
    list(APPEND _selected_tools wasm-ld)
 endif()
@@ -24,11 +25,19 @@ foreach(_tool IN LISTS _selected_tools)
       PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
    )
 endforeach()
-foreach(_tool clang++ clang-scan-deps wasm-ld llvm-ar llvm-ranlib)
+foreach(_tool clang clang++ clang-scan-deps wasm-ld llvm-ar llvm-ranlib)
    file(WRITE "${_path_toolchain}/${_tool}" "#!/bin/sh\nexit 0\n")
    file(
       CHMOD
       "${_path_toolchain}/${_tool}"
+      PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
+   )
+endforeach()
+foreach(_tool clang-22 clang++-22)
+   file(WRITE "${_versioned}/${_tool}" "#!/bin/sh\nexit 0\n")
+   file(
+      CHMOD
+      "${_versioned}/${_tool}"
       PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
    )
 endforeach()
@@ -42,6 +51,7 @@ file(
 set(ENV{PATH} "${_path_toolchain}:$ENV{PATH}")
 set(LLVM_TOOLS_BINARY_DIR "${_selected}")
 set(FORGE_CONTRACT_CLANG "")
+set(FORGE_CONTRACT_CLANG_C "")
 set(FORGE_CONTRACT_CLANG_SCAN_DEPS "${_configured}/clang-scan-deps")
 set(FORGE_CONTRACT_WASM_LD "")
 set(FORGE_CONTRACT_LLVM_AR "")
@@ -57,6 +67,7 @@ endif()
 foreach(
    _binding
    "FORGE_CONTRACT_CLANG;clang++"
+   "FORGE_CONTRACT_CLANG_C;clang"
    "FORGE_CONTRACT_WASM_LD;wasm-ld"
    "FORGE_CONTRACT_LLVM_AR;llvm-ar"
    "FORGE_CONTRACT_LLVM_RANLIB;llvm-ranlib"
@@ -70,6 +81,17 @@ endforeach()
 
 if(NOT FORGE_CONTRACT_CLANG_SCAN_DEPS STREQUAL "${_configured}/clang-scan-deps")
    message(FATAL_ERROR "FORGE_CONTRACT_CLANG_SCAN_DEPS did not preserve the configured path")
+endif()
+
+set(FORGE_CONTRACT_CLANG "${_versioned}/clang++-22")
+set(FORGE_CONTRACT_CLANG_C "")
+set(FORGE_CONTRACT_CLANG_SCAN_DEPS "${_selected}/clang-scan-deps")
+set(FORGE_CONTRACT_WASM_LD "${_selected}/wasm-ld")
+set(FORGE_CONTRACT_LLVM_AR "${_selected}/llvm-ar")
+set(FORGE_CONTRACT_LLVM_RANLIB "${_selected}/llvm-ranlib")
+forge_contract_select_developer_toolchain()
+if(NOT FORGE_CONTRACT_CLANG_C STREQUAL "${_versioned}/clang-22")
+   message(FATAL_ERROR "Versioned clang++ did not select its matching C driver: ${FORGE_CONTRACT_CLANG_C}")
 endif()
 
 execute_process(

@@ -2,8 +2,10 @@
 
 `forge_guest_eosio` is a header-only compatibility surface over
 `forge_guest_contract`. `eosio::contract` adapts `forge::contract::context`, value
-types alias `forge::chain::protocol`, and contract checks and action decoding
-reuse the Forge modules.
+types reuse `forge::chain::protocol`, and contract checks and action decoding
+reuse the Forge modules. The contract-owned asset compatibility type preserves
+the donor `.symbol` member spelling while delegating wire encoding and arithmetic
+to the canonical protocol type.
 
 ```cpp
 #include <eosio/eosio.hpp>

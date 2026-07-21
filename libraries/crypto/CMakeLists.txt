@@ -16,6 +16,9 @@ target_compile_definitions(
 
 target_link_libraries(
    forge_crypto PUBLIC
+      forge_codec_base64
+      forge_codec_base58
+      forge_codec_hex
       forge_core
       forge_exceptions
       forge_raw

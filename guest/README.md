@@ -44,9 +44,9 @@ tar -xzf forge-contract-sdk-8.5.0-macos-arm64.tar.gz
 export ForgeContract_DIR="$PWD/forge-contract-sdk-8.5.0-macos-arm64/lib/cmake/ForgeContract"
 ```
 
-The archive includes pinned compiler tools, the wasm32 sysroot with the
-prebuilt `libforge_guest_runtime.a`, Forge contract modules, ABI tools,
-validation tools, and an example under
+The archive includes pinned compiler tools, the wasm32 sysroot with prebuilt
+runtime, raw, codec, chain protocol and contract implementation archives,
+Forge contract modules, ABI tools, validation tools, and an example under
 `share/forge-contract/examples/hello`.
 
 ## Build A Contract
@@ -220,8 +220,10 @@ iterators, algorithms, tuples, optional, variant, span, string views, concepts,
 numeric types and utilities.
 
 Dynamic allocation uses the CDT-derived linear-memory allocator behind normal
-C++ and C APIs. The allocator is compiled once into the SDK sysroot; each
-contract links the finished archive instead of rebuilding its sources:
+C++ and C APIs. All non-template Forge guest implementation is compiled once
+into the SDK sysroot. Each contract compiles module interfaces only to produce
+compiler-local BMI files and links the finished archives instead of rebuilding
+Forge sources:
 
 ```cpp
 #include <cstddef>
@@ -251,7 +253,7 @@ sockets, threads, clocks or random device.
 
 ## Intrinsics And Validation
 
-Interface version 1 contains the exact 148-function union of the pinned CDT and
+Interface version 1 contains the exact 152-function union of the pinned CDT and
 Spring contract interfaces. Every entry records its C header, WASM signature,
 capability set and, where applicable, the protocol feature that enables it.
 The seven capability sets are:
@@ -288,7 +290,7 @@ primary `db_*_i64` operations and ten operations for each of `idx64`, `idx128`,
 `idx256`, `idx_double` and `idx_long_double`. `<forge/contract/intrinsics.h>`
 is canonical. The pinned CDT family headers under `<eosio/*.h>` are generated
 from that registry without a second declaration list. The shipped interface
-defines signatures only. Forge's non-installed test host registers all 148
+defines signatures only. Forge's non-installed test host registers all 152
 functions directly from the same registry. It executes the database family
 against `forge.db.object`, uses Forge crypto for contract-visible primitives,
 and supplies deterministic state for the remaining capability families. This
@@ -347,13 +349,17 @@ cmake --build build/contract-sdk --target forge_contract_sdk_relocation -j 4
 Forge host package. The guest compiler, dependency scanner, archiver and
 ranlib are selected from that LLVM package rather than from an unrelated
 program found earlier in `PATH`. `FORGE_CONTRACT_CLANG` remains an explicit
-override for controlled developer environments. `wasm-ld` may be supplied by
-a separate lld package, as it is in Homebrew.
+override for controlled developer environments. The matching C driver is
+selected beside it, including versioned pairs such as `clang++-22` and
+`clang-22`; wrappers can set `FORGE_CONTRACT_CLANG_C` explicitly. `wasm-ld`
+may be supplied by a separate lld package, as it is in Homebrew.
 
 Developer mode copies `FORGE_CONTRACT_SYSROOT` into a build-owned staged
-sysroot before adding `libforge_guest_runtime.a`. The supplied directory is
-never modified. The staged archive is included in `sysroot.sha256` and checked
-by `ForgeContractConfig.cmake` when a consumer loads the package.
+sysroot before adding the guest foundation archives. The supplied directory is
+never modified. `foundation.json` records the name and SHA-256 of every runtime,
+raw, codec, chain protocol, contract and math archive. The complete staged tree
+is also covered by `sysroot.sha256`; `ForgeContractConfig.cmake` verifies the
+foundation manifest without exposing internal archive paths as consumer API.
 
 Release mode builds the exact pinned LLVM and guest runtimes from source. Use
 `FORGE_CONTRACT_JOBS=4` to bound superbuild parallelism.
@@ -368,6 +374,10 @@ Release mode builds the exact pinned LLVM and guest runtimes from source. Use
   shared with host code; a second datastream or wire codec is forbidden.
   `FORGE_POLICY_THROW_EXCEPTION` selects typed host exceptions or the canonical
   guest check intrinsic without duplicating those implementations.
+- `forge.crypto.asymmetric.value` is the single host/guest key and signature
+  model. Contract operations use intrinsics, while host verification and
+  recovery remain in `forge.crypto.asymmetric`; neither side owns a copy of the
+  wire records.
 - Spring and CDT are pinned compatibility donors and test oracles, never build
   dependencies of a released SDK.
 - Blockchain controller bindings and deployment are outside this vertical
@@ -376,3 +386,43 @@ Release mode builds the exact pinned LLVM and guest runtimes from source. Use
 
 See `docs/iterations/forge-contract-sdk-toolchain-v1.md` for the accepted
 design, donor pins and compatibility scope.
+
+<!-- contract-compatibility:start -->
+## Compatibility Matrix
+
+This section is generated from `tests/corpus/compatibility.json`. `Verified`
+means an automated acceptance gate exists and passes for the pinned donor.
+
+### SDK Surface
+
+| Area | Status | Evidence |
+|---|---|---|
+| Toolchain and sysroot | Verified | `forge_contract_sdk_relocation` |
+| 152 intrinsic functions | Verified | `check_sdk_surface.py` |
+| C and C++ compatibility headers | Verified | `check_sdk_surface.py` |
+| Modern contract modules | Verified | `surface contract` |
+| ABI and dispatcher | Verified | `run_abigen_fixtures.py` |
+| Raw, protocol, crypto and time | Verified | `contract SDK E2E` |
+| multi_index and singleton | Verified | `run_multi_index_fixtures.py` |
+| Executable VM oracle | Verified | `forge_contract_e2e_tests` |
+| Relocation and reproducibility | Verified | `forge_contract_sdk_relocation` |
+
+### Unchanged Contracts
+
+| Contract | Source | Build | ABI | WASM | VM | Behavior | Evidence |
+|---|---|---|---|---|---|---|---|
+| Spring eosio.boot | Verified | Verified | Verified | Verified | Verified | Verified | `forge_contract_corpus_integrity`<br>`forge_contract_corpus_abi`<br>`forge_contract_corpus_artifacts`<br>`forge_contract_corpus_e2e` |
+| Spring eosio.token | Verified | Verified | Verified | Verified | Verified | Verified | `forge_contract_corpus_integrity`<br>`forge_contract_corpus_abi`<br>`forge_contract_corpus_artifacts`<br>`forge_contract_corpus_e2e` |
+| Spring eosio.msig | Verified | Verified | Verified | Verified | Verified | Verified | `forge_contract_corpus_integrity`<br>`forge_contract_corpus_abi`<br>`forge_contract_corpus_artifacts`<br>`forge_contract_corpus_e2e` |
+| Spring eosio.wrap | Verified | Verified | Verified | Verified | Verified | Verified | `forge_contract_corpus_integrity`<br>`forge_contract_corpus_abi`<br>`forge_contract_corpus_artifacts`<br>`forge_contract_corpus_e2e` |
+| Spring eosio.system | Verified | Verified | Verified | Verified | Verified | Verified | `forge_contract_corpus_integrity`<br>`forge_contract_corpus_abi`<br>`forge_contract_corpus_artifacts`<br>`forge_contract_corpus_e2e` |
+| Spring test_api | Verified | Verified | Verified | Verified | Verified | Verified | `forge_contract_corpus_integrity`<br>`forge_contract_corpus_abi`<br>`forge_contract_corpus_artifacts`<br>`forge_contract_corpus_e2e` |
+| Spring test_api_db | Verified | Verified | Verified | Verified | Verified | Verified | `forge_contract_corpus_integrity`<br>`forge_contract_corpus_abi`<br>`forge_contract_corpus_artifacts`<br>`forge_contract_corpus_e2e` |
+| Spring test_api_multi_index | Verified | Verified | Verified | Verified | Verified | Verified | `forge_contract_corpus_integrity`<br>`forge_contract_corpus_abi`<br>`forge_contract_corpus_artifacts`<br>`forge_contract_corpus_e2e` |
+| EOSIO eosio.bios | Verified | Verified | Verified | Verified | Verified | Verified | `forge_contract_corpus_integrity`<br>`forge_contract_corpus_abi`<br>`forge_contract_corpus_artifacts`<br>`forge_contract_corpus_e2e` |
+| EOSIO eosio.boot | Verified | Verified | Verified | Verified | Verified | Verified | `forge_contract_corpus_integrity`<br>`forge_contract_corpus_abi`<br>`forge_contract_corpus_artifacts`<br>`forge_contract_corpus_e2e` |
+
+The compatibility denominator covers SDK-owned source, ABI, wire, import
+and contract-observable behavior. Controller, consensus, fork choice and
+production blockchain host policy are out of scope.
+<!-- contract-compatibility:end -->

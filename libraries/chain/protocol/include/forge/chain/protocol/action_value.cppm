@@ -1,6 +1,7 @@
 module;
 
 #include <vector>
+#include <utility>
 
 export module forge.chain.protocol.action:value;
 
@@ -18,6 +19,20 @@ struct action_base {
 
 struct action : action_base {
    bytes data;
+
+   action() = default;
+
+   template <typename Data>
+   action(std::vector<permission_level> permissions, account_name raw_account, action_name raw_name, Data&& value) {
+      account = raw_account;
+      name = raw_name;
+      authorization = std::move(permissions);
+      data = forge::raw::pack(std::forward<Data>(value));
+   }
+
+   template <typename Data>
+   action(permission_level permission, account_name raw_account, action_name raw_name, Data&& value)
+       : action(std::vector<permission_level>{permission}, raw_account, raw_name, std::forward<Data>(value)) {}
 };
 
 template <typename Stream> void raw_pack(Stream& stream, const action_base& value) {

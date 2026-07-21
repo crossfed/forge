@@ -3,11 +3,11 @@
 #include <eosio/name.hpp>
 #include <eosio/symbol.hpp>
 
-import forge.chain.protocol.values;
+import forge.contract.compatibility_asset;
 
 namespace eosio {
 
-using forge::chain::protocol::asset;
-using forge::chain::protocol::extended_asset;
+using asset = forge::contract::compatibility::asset;
+using extended_asset = forge::contract::compatibility::extended_asset;
 
 } // namespace eosio

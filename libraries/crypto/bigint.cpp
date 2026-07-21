@@ -2,6 +2,7 @@ module;
 #include <forge/exceptions/macros.hpp>
 #include <bit>
 #include <openssl/bn.h>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -17,7 +18,7 @@ import forge.variant.chrono;
 import forge.variant.multiprecision;
 import forge.variant.format;
 import forge.variant.described;
-import forge.crypto.base64;
+import forge.codec.base64;
 
 import forge.exceptions;
 
@@ -206,7 +207,8 @@ bytes bigint::to_bytes() const {
 /** encodes the big int as base64 string, or a number */
 void to_variant(const bigint& bi, variant& v) {
    auto ve = bi.to_bytes();
-   v = forge::variant(base64_encode(reinterpret_cast<const unsigned char*>(ve.data()), ve.size(), false));
+   v = forge::variant(forge::codec::base64::encode(
+       std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(ve.data()), ve.size()}));
 }
 
 /** decodes the big int as base64 string, or a number */
@@ -215,7 +217,7 @@ void from_variant(const variant& v, bigint& bi) {
       bi = bigint(static_cast<unsigned long>(v.as_uint64()));
    else {
       std::string b64 = v.as_string();
-      auto decoded = base64_decode(b64);
+      auto decoded = forge::codec::base64::decode(b64);
       auto bin = bytes(decoded.begin(), decoded.end());
       bi = bigint(bin);
    }

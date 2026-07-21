@@ -1,6 +1,9 @@
 module;
 
-#include <forge/contract/intrinsics.h>
+#include <forge/contract/internal/intrinsics.hpp>
+
+#define BOOST_PFR_USE_CPP26 0
+#include <boost/pfr/core.hpp>
 
 #include <array>
 #include <bit>
@@ -61,25 +64,24 @@ template <name::raw IndexName, class Extractor> struct indexed_by {
 
 template <class Key>
 concept primary_key =
-    std::same_as<std::remove_cvref_t<Key>, std::uint64_t> || std::same_as<std::remove_cvref_t<Key>, name>;
+    std::same_as<std::remove_cvref_t<Key>, std::uint64_t> || std::derived_from<std::remove_cvref_t<Key>, name>;
 
 template <class Key>
 concept secondary_key =
     std::same_as<std::remove_cvref_t<Key>, std::uint64_t> ||
     std::same_as<std::remove_cvref_t<Key>, chain::protocol::uint128_t> ||
-    std::same_as<std::remove_cvref_t<Key>, chain::protocol::key256> || std::same_as<std::remove_cvref_t<Key>, double> ||
-    std::same_as<std::remove_cvref_t<Key>, long double>;
+    std::derived_from<std::remove_cvref_t<Key>, chain::protocol::key256> ||
+    std::same_as<std::remove_cvref_t<Key>, double> || std::same_as<std::remove_cvref_t<Key>, long double>;
 
 template <class Row>
-concept table_row = std::default_initializable<Row> &&
-                    requires(const Row& value) { requires primary_key<decltype(value.primary_key())>; };
+concept table_row = requires(const Row& value) { requires primary_key<decltype(value.primary_key())>; };
 
 namespace detail {
 
 template <class Key>
 concept primary_key_argument =
     (std::integral<std::remove_cvref_t<Key>> && !std::same_as<std::remove_cvref_t<Key>, bool>) ||
-    std::same_as<std::remove_cvref_t<Key>, name>;
+    std::derived_from<std::remove_cvref_t<Key>, name>;
 
 template <class Index, class Row>
 concept secondary_index_spec =
@@ -110,7 +112,9 @@ inline std::uint64_t to_raw_key(Key value) noexcept {
    return static_cast<std::uint64_t>(value);
 }
 
-inline std::uint64_t to_raw_key(name value) noexcept {
+template <class Key>
+   requires std::derived_from<std::remove_cvref_t<Key>, name>
+inline std::uint64_t to_raw_key(const Key& value) noexcept {
    return value.value;
 }
 
@@ -120,47 +124,47 @@ template <class Key> struct secondary_db;
    template <> struct secondary_db<key_type> {                                                                         \
       static std::int32_t store(std::uint64_t scope, std::uint64_t table, std::uint64_t payer, std::uint64_t primary,  \
                                 const key_type& secondary) {                                                           \
-         return ::prefix##_store(scope, table, payer, primary, &secondary);                                            \
+         return ::forge::contract::internal::prefix##_store(scope, table, payer, primary, &secondary);                 \
       }                                                                                                                \
                                                                                                                        \
       static void update(std::int32_t iterator, std::uint64_t payer, const key_type& secondary) {                      \
-         ::prefix##_update(iterator, payer, &secondary);                                                               \
+         ::forge::contract::internal::prefix##_update(iterator, payer, &secondary);                                    \
       }                                                                                                                \
                                                                                                                        \
       static void remove(std::int32_t iterator) {                                                                      \
-         ::prefix##_remove(iterator);                                                                                  \
+         ::forge::contract::internal::prefix##_remove(iterator);                                                       \
       }                                                                                                                \
                                                                                                                        \
       static std::int32_t next(std::int32_t iterator, std::uint64_t* primary) {                                        \
-         return ::prefix##_next(iterator, primary);                                                                    \
+         return ::forge::contract::internal::prefix##_next(iterator, primary);                                         \
       }                                                                                                                \
                                                                                                                        \
       static std::int32_t previous(std::int32_t iterator, std::uint64_t* primary) {                                    \
-         return ::prefix##_previous(iterator, primary);                                                                \
+         return ::forge::contract::internal::prefix##_previous(iterator, primary);                                     \
       }                                                                                                                \
                                                                                                                        \
       static std::int32_t find_primary(std::uint64_t code, std::uint64_t scope, std::uint64_t table,                   \
                                        std::uint64_t primary, key_type& secondary) {                                   \
-         return ::prefix##_find_primary(code, scope, table, &secondary, primary);                                      \
+         return ::forge::contract::internal::prefix##_find_primary(code, scope, table, &secondary, primary);           \
       }                                                                                                                \
                                                                                                                        \
       static std::int32_t find_secondary(std::uint64_t code, std::uint64_t scope, std::uint64_t table,                 \
                                          const key_type& secondary, std::uint64_t& primary) {                          \
-         return ::prefix##_find_secondary(code, scope, table, &secondary, &primary);                                   \
+         return ::forge::contract::internal::prefix##_find_secondary(code, scope, table, &secondary, &primary);        \
       }                                                                                                                \
                                                                                                                        \
       static std::int32_t lower_bound(std::uint64_t code, std::uint64_t scope, std::uint64_t table,                    \
                                       key_type& secondary, std::uint64_t& primary) {                                   \
-         return ::prefix##_lowerbound(code, scope, table, &secondary, &primary);                                       \
+         return ::forge::contract::internal::prefix##_lowerbound(code, scope, table, &secondary, &primary);            \
       }                                                                                                                \
                                                                                                                        \
       static std::int32_t upper_bound(std::uint64_t code, std::uint64_t scope, std::uint64_t table,                    \
                                       key_type& secondary, std::uint64_t& primary) {                                   \
-         return ::prefix##_upperbound(code, scope, table, &secondary, &primary);                                       \
+         return ::forge::contract::internal::prefix##_upperbound(code, scope, table, &secondary, &primary);            \
       }                                                                                                                \
                                                                                                                        \
       static std::int32_t end(std::uint64_t code, std::uint64_t scope, std::uint64_t table) {                          \
-         return ::prefix##_end(code, scope, table);                                                                    \
+         return ::forge::contract::internal::prefix##_end(code, scope, table);                                         \
       }                                                                                                                \
    }
 
@@ -176,43 +180,47 @@ template <> struct secondary_db<chain::protocol::key256> {
 
    static std::int32_t store(std::uint64_t scope, std::uint64_t table, std::uint64_t payer, std::uint64_t primary,
                              const key_type& secondary) {
-      return ::db_idx256_store(scope, table, payer, primary, secondary.get_array().data(), key_type::num_words());
+      return ::forge::contract::internal::db_idx256_store(scope, table, payer, primary, secondary.get_array().data(),
+                                                          key_type::num_words());
    }
 
    static void update(std::int32_t iterator, std::uint64_t payer, const key_type& secondary) {
-      ::db_idx256_update(iterator, payer, secondary.get_array().data(), key_type::num_words());
+      ::forge::contract::internal::db_idx256_update(iterator, payer, secondary.get_array().data(),
+                                                    key_type::num_words());
    }
 
    static void remove(std::int32_t iterator) {
-      ::db_idx256_remove(iterator);
+      ::forge::contract::internal::db_idx256_remove(iterator);
    }
 
    static std::int32_t next(std::int32_t iterator, std::uint64_t* primary) {
-      return ::db_idx256_next(iterator, primary);
+      return ::forge::contract::internal::db_idx256_next(iterator, primary);
    }
 
    static std::int32_t previous(std::int32_t iterator, std::uint64_t* primary) {
-      return ::db_idx256_previous(iterator, primary);
+      return ::forge::contract::internal::db_idx256_previous(iterator, primary);
    }
 
    static std::int32_t find_primary(std::uint64_t code, std::uint64_t scope, std::uint64_t table, std::uint64_t primary,
                                     key_type& secondary) {
       auto words = secondary.get_array();
-      const auto result = ::db_idx256_find_primary(code, scope, table, words.data(), words.size(), primary);
+      const auto result =
+          ::forge::contract::internal::db_idx256_find_primary(code, scope, table, words.data(), words.size(), primary);
       secondary = key_type{words};
       return result;
    }
 
    static std::int32_t find_secondary(std::uint64_t code, std::uint64_t scope, std::uint64_t table,
                                       const key_type& secondary, std::uint64_t& primary) {
-      return ::db_idx256_find_secondary(code, scope, table, secondary.get_array().data(), key_type::num_words(),
-                                        &primary);
+      return ::forge::contract::internal::db_idx256_find_secondary(code, scope, table, secondary.get_array().data(),
+                                                                   key_type::num_words(), &primary);
    }
 
    static std::int32_t lower_bound(std::uint64_t code, std::uint64_t scope, std::uint64_t table, key_type& secondary,
                                    std::uint64_t& primary) {
       auto words = secondary.get_array();
-      const auto result = ::db_idx256_lowerbound(code, scope, table, words.data(), words.size(), &primary);
+      const auto result =
+          ::forge::contract::internal::db_idx256_lowerbound(code, scope, table, words.data(), words.size(), &primary);
       secondary = key_type{words};
       return result;
    }
@@ -220,13 +228,74 @@ template <> struct secondary_db<chain::protocol::key256> {
    static std::int32_t upper_bound(std::uint64_t code, std::uint64_t scope, std::uint64_t table, key_type& secondary,
                                    std::uint64_t& primary) {
       auto words = secondary.get_array();
-      const auto result = ::db_idx256_upperbound(code, scope, table, words.data(), words.size(), &primary);
+      const auto result =
+          ::forge::contract::internal::db_idx256_upperbound(code, scope, table, words.data(), words.size(), &primary);
       secondary = key_type{words};
       return result;
    }
 
    static std::int32_t end(std::uint64_t code, std::uint64_t scope, std::uint64_t table) {
-      return ::db_idx256_end(code, scope, table);
+      return ::forge::contract::internal::db_idx256_end(code, scope, table);
+   }
+};
+
+template <class Key>
+   requires(!std::same_as<Key, chain::protocol::key256> && std::derived_from<Key, chain::protocol::key256>)
+struct secondary_db<Key> {
+   using base = chain::protocol::key256;
+
+   static std::int32_t store(std::uint64_t scope, std::uint64_t table, std::uint64_t payer, std::uint64_t primary,
+                             const Key& secondary) {
+      return secondary_db<base>::store(scope, table, payer, primary, static_cast<const base&>(secondary));
+   }
+
+   static void update(std::int32_t iterator, std::uint64_t payer, const Key& secondary) {
+      secondary_db<base>::update(iterator, payer, static_cast<const base&>(secondary));
+   }
+
+   static void remove(std::int32_t iterator) {
+      secondary_db<base>::remove(iterator);
+   }
+
+   static std::int32_t next(std::int32_t iterator, std::uint64_t* primary) {
+      return secondary_db<base>::next(iterator, primary);
+   }
+
+   static std::int32_t previous(std::int32_t iterator, std::uint64_t* primary) {
+      return secondary_db<base>::previous(iterator, primary);
+   }
+
+   static std::int32_t find_primary(std::uint64_t code, std::uint64_t scope, std::uint64_t table, std::uint64_t primary,
+                                    Key& secondary) {
+      auto value = static_cast<base&>(secondary);
+      const auto result = secondary_db<base>::find_primary(code, scope, table, primary, value);
+      static_cast<base&>(secondary) = value;
+      return result;
+   }
+
+   static std::int32_t find_secondary(std::uint64_t code, std::uint64_t scope, std::uint64_t table,
+                                      const Key& secondary, std::uint64_t& primary) {
+      return secondary_db<base>::find_secondary(code, scope, table, static_cast<const base&>(secondary), primary);
+   }
+
+   static std::int32_t lower_bound(std::uint64_t code, std::uint64_t scope, std::uint64_t table, Key& secondary,
+                                   std::uint64_t& primary) {
+      auto value = static_cast<base&>(secondary);
+      const auto result = secondary_db<base>::lower_bound(code, scope, table, value, primary);
+      static_cast<base&>(secondary) = value;
+      return result;
+   }
+
+   static std::int32_t upper_bound(std::uint64_t code, std::uint64_t scope, std::uint64_t table, Key& secondary,
+                                   std::uint64_t& primary) {
+      auto value = static_cast<base&>(secondary);
+      const auto result = secondary_db<base>::upper_bound(code, scope, table, value, primary);
+      static_cast<base&>(secondary) = value;
+      return result;
+   }
+
+   static std::int32_t end(std::uint64_t code, std::uint64_t scope, std::uint64_t table) {
+      return secondary_db<base>::end(code, scope, table);
    }
 };
 
@@ -247,14 +316,42 @@ template <secondary_key Key> bool secondary_equal(const Key& left, const Key& ri
    }
 }
 
+template <class Stream, class Value>
+concept explicitly_packable_row = requires(Stream& stream, const Value& value) { raw_pack(stream, value); };
+
+template <class Stream, class Value>
+concept explicitly_unpackable_row = requires(Stream& stream, Value& value) { raw_unpack(stream, value); };
+
+template <class Stream, class Value> void pack_row(Stream& stream, const Value& value) {
+   if constexpr (explicitly_packable_row<Stream, Value>) {
+      raw::pack(stream, value);
+   } else {
+      static_assert(std::is_aggregate_v<Value>,
+                    "multi_index rows require EOSLIB_SERIALIZE/FORGE_SERIALIZE or an aggregate row type");
+      boost::pfr::for_each_field(value, [&](const auto& field) { raw::pack(stream, field); });
+   }
+}
+
+template <class Stream, class Value> void unpack_row(Stream& stream, Value& value) {
+   if constexpr (explicitly_unpackable_row<Stream, Value>) {
+      raw::unpack(stream, value);
+   } else {
+      static_assert(std::is_aggregate_v<Value>,
+                    "multi_index rows require EOSLIB_SERIALIZE/FORGE_SERIALIZE or an aggregate row type");
+      boost::pfr::for_each_field(value, [&](auto& field) { raw::unpack(stream, field); });
+   }
+}
+
 template <class Value, class Function> decltype(auto) with_packed(const Value& value, Function&& function) {
    constexpr auto stack_capacity = std::size_t{512U};
-   const auto size = raw::pack_size(value);
+   auto sizing = forge::datastream<std::size_t>{};
+   pack_row(sizing, value);
+   const auto size = sizing.tellp();
    check(size <= std::numeric_limits<std::uint32_t>::max(), "serialized table row is too large");
 
    auto pack_into = [&](std::uint8_t* data) -> decltype(auto) {
       auto stream = forge::datastream<std::uint8_t*>{data, size};
-      raw::pack(stream, value);
+      pack_row(stream, value);
       return std::forward<Function>(function)(data, static_cast<std::uint32_t>(size));
    };
 
@@ -355,7 +452,7 @@ template <name::raw TableName, table_row T, class... Indices> class multi_index 
       const_iterator& operator++() {
          check(value_ != nullptr, "cannot increment end iterator");
          auto primary = std::uint64_t{};
-         const auto next = ::db_next_i64(value_->primary_iterator, &primary);
+         const auto next = ::forge::contract::internal::db_next_i64(value_->primary_iterator, &primary);
          value_ = next < 0 ? nullptr : std::addressof(owner_->load(next));
          return *this;
       }
@@ -370,12 +467,12 @@ template <name::raw TableName, table_row T, class... Indices> class multi_index 
          auto primary = std::uint64_t{};
          auto previous = std::int32_t{-1};
          if (value_ == nullptr) {
-            const auto end = ::db_end_i64(owner_->code_.value, owner_->scope_, table_name);
+            const auto end = ::forge::contract::internal::db_end_i64(owner_->code_.value, owner_->scope_, table_name);
             check(end != -1, "cannot decrement end iterator when the table is empty");
-            previous = ::db_previous_i64(end, &primary);
+            previous = ::forge::contract::internal::db_previous_i64(end, &primary);
             check(previous >= 0, "cannot decrement end iterator when the table is empty");
          } else {
-            previous = ::db_previous_i64(value_->primary_iterator, &primary);
+            previous = ::forge::contract::internal::db_previous_i64(value_->primary_iterator, &primary);
             check(previous >= 0, "cannot decrement iterator at beginning of table");
          }
          value_ = std::addressof(owner_->load(previous));
@@ -446,12 +543,14 @@ template <name::raw TableName, table_row T, class... Indices> class multi_index 
    }
 
    template <detail::primary_key_argument Key> const_iterator lower_bound(Key primary) const {
-      const auto iterator = ::db_lowerbound_i64(code_.value, scope_, table_name, detail::to_raw_key(primary));
+      const auto iterator =
+          ::forge::contract::internal::db_lowerbound_i64(code_.value, scope_, table_name, detail::to_raw_key(primary));
       return iterator < 0 ? end() : const_iterator{this, std::addressof(load(iterator))};
    }
 
    template <detail::primary_key_argument Key> const_iterator upper_bound(Key primary) const {
-      const auto iterator = ::db_upperbound_i64(code_.value, scope_, table_name, detail::to_raw_key(primary));
+      const auto iterator =
+          ::forge::contract::internal::db_upperbound_i64(code_.value, scope_, table_name, detail::to_raw_key(primary));
       return iterator < 0 ? end() : const_iterator{this, std::addressof(load(iterator))};
    }
 
@@ -461,7 +560,7 @@ template <name::raw TableName, table_row T, class... Indices> class multi_index 
          return const_iterator{this, cached};
       }
 
-      const auto iterator = ::db_find_i64(code_.value, scope_, table_name, raw_primary);
+      const auto iterator = ::forge::contract::internal::db_find_i64(code_.value, scope_, table_name, raw_primary);
       return iterator < 0 ? end() : const_iterator{this, std::addressof(load(iterator))};
    }
 
@@ -519,7 +618,7 @@ template <name::raw TableName, table_row T, class... Indices> class multi_index 
       const auto primary = detail::to_raw_key(value.primary_key());
 
       stored.primary_iterator = detail::with_packed(value, [&](const void* data, std::uint32_t size) {
-         return ::db_store_i64(scope_, table_name, payer.value, primary, data, size);
+         return ::forge::contract::internal::db_store_i64(scope_, table_name, payer.value, primary, data, size);
       });
       store_secondary(stored, payer.value, primary, std::make_index_sequence<index_count>{});
 
@@ -546,7 +645,7 @@ template <name::raw TableName, table_row T, class... Indices> class multi_index 
             "updater cannot change primary key when modifying an object");
 
       detail::with_packed(value, [&](const void* data, std::uint32_t size) {
-         ::db_update_i64(stored->primary_iterator, payer.value, data, size);
+         ::forge::contract::internal::db_update_i64(stored->primary_iterator, payer.value, data, size);
       });
       update_secondary(*stored, payer.value, primary, old_secondary, std::make_index_sequence<index_count>{});
 
@@ -570,7 +669,7 @@ template <name::raw TableName, table_row T, class... Indices> class multi_index 
 
       auto& stored = *position;
       const auto primary = detail::to_raw_key(stored.primary_key());
-      ::db_remove_i64(stored.primary_iterator);
+      ::forge::contract::internal::db_remove_i64(stored.primary_iterator);
       remove_secondary(stored, primary, std::make_index_sequence<index_count>{});
       items_.erase(position);
    }
@@ -829,15 +928,15 @@ template <name::raw TableName, table_row T, class... Indices> class multi_index 
          }
       }
 
-      const auto size = ::db_get_i64(iterator, nullptr, 0U);
+      const auto size = ::forge::contract::internal::db_get_i64(iterator, nullptr, 0U);
       check(size >= 0, "error reading iterator");
       auto& result = items_.emplace_back(this);
       result.primary_iterator = iterator;
       detail::with_buffer(static_cast<std::size_t>(size), [&](std::uint8_t* data) {
-         const auto read = ::db_get_i64(iterator, data, static_cast<std::uint32_t>(size));
+         const auto read = ::forge::contract::internal::db_get_i64(iterator, data, static_cast<std::uint32_t>(size));
          check(read == size, "error reading iterator");
          auto stream = forge::datastream<const std::uint8_t*>{data, static_cast<std::size_t>(size)};
-         raw::unpack(stream, static_cast<T&>(result));
+         detail::unpack_row(stream, static_cast<T&>(result));
          check(stream.remaining() == 0U, "table row contains trailing bytes");
       });
       return result;
@@ -847,7 +946,7 @@ template <name::raw TableName, table_row T, class... Indices> class multi_index 
       if (auto* cached = find_cached(primary); cached != nullptr) {
          return *cached;
       }
-      const auto iterator = ::db_find_i64(code_.value, scope_, table_name, primary);
+      const auto iterator = ::forge::contract::internal::db_find_i64(code_.value, scope_, table_name, primary);
       check(iterator >= 0, "unable to find key");
       return load(iterator);
    }
