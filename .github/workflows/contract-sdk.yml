@@ -1,6 +1,33 @@
 name: Contract SDK
 
 on:
+  pull_request:
+    paths:
+      - ".github/workflows/contract-sdk.yml"
+      - "CMakeLists.txt"
+      - "cmake/**"
+      - "libraries/asio/**"
+      - "libraries/chain/core/**"
+      - "libraries/chain/protocol/**"
+      - "libraries/codec/**"
+      - "libraries/compression/**"
+      - "libraries/config/core/**"
+      - "libraries/core/**"
+      - "libraries/crypto/**"
+      - "libraries/db/**"
+      - "libraries/exceptions/**"
+      - "libraries/raw/**"
+      - "libraries/reflect/**"
+      - "libraries/schema/**"
+      - "libraries/variant/**"
+      - "libraries/vm/wasm/**"
+      - "libraries/contract/**"
+      - "guest/**"
+      - "tools/**"
+      - "vendor/**"
+  push:
+    tags:
+      - "v*"
   workflow_dispatch:
     inputs:
       release:
