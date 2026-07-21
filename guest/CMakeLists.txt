@@ -113,11 +113,23 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
    else()
       set(_llvm_host_target X86)
    endif()
+   execute_process(
+      COMMAND "${CMAKE_C_COMPILER}" -dumpmachine
+      OUTPUT_VARIABLE _llvm_host_triple
+      OUTPUT_STRIP_TRAILING_WHITESPACE
+      COMMAND_ERROR_IS_FATAL ANY
+   )
+   if(_llvm_host_triple STREQUAL "")
+      message(FATAL_ERROR "release LLVM bootstrap compiler did not report a host target triple")
+   endif()
+   set(_llvm_projects "clang|lld")
+   set(_llvm_targets "WebAssembly|${_llvm_host_target}")
    ExternalProject_Add(
       forge_contract_llvm
       ${_llvm_source_arguments}
       SOURCE_SUBDIR llvm
       CMAKE_GENERATOR Ninja
+      LIST_SEPARATOR "|"
       CMAKE_ARGS
          -DCMAKE_BUILD_TYPE=Release
          -DCMAKE_INSTALL_PREFIX=${_llvm_install}
@@ -125,8 +137,10 @@ if(FORGE_CONTRACT_PROFILE STREQUAL "release")
          -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
          -DCMAKE_C_FLAGS=${_forge_contract_llvm_path_map_flags}
          -DCMAKE_CXX_FLAGS=${_forge_contract_llvm_path_map_flags}
-         -DLLVM_ENABLE_PROJECTS=clang\;lld
-         -DLLVM_TARGETS_TO_BUILD=WebAssembly\;${_llvm_host_target}
+         -DLLVM_ENABLE_PROJECTS:STRING=${_llvm_projects}
+         -DLLVM_TARGETS_TO_BUILD:STRING=${_llvm_targets}
+         -DLLVM_HOST_TRIPLE:STRING=${_llvm_host_triple}
+         -DLLVM_DEFAULT_TARGET_TRIPLE:STRING=${_llvm_host_triple}
          -DLLVM_BUILD_LLVM_DYLIB=ON
          -DLLVM_LINK_LLVM_DYLIB=ON
          -DCLANG_LINK_CLANG_DYLIB=ON
