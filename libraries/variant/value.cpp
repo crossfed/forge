@@ -23,6 +23,21 @@ import forge.core.utf8;
 import forge.variant.exceptions;
 
 namespace forge {
+namespace {
+
+std::vector<std::uint8_t> decode_blob_base64(std::string_view value) {
+   try {
+      return forge::codec::base64::decode(value);
+   } catch (const forge::codec::base64::exceptions::invalid_input&) {
+      if (!value.ends_with('='))
+         throw;
+
+      return forge::codec::base64::decode(value.substr(0, value.size() - 1U));
+   }
+}
+
+} // namespace
+
 /**
  *  The TypeID is stored in the 'last byte' of the variant.
  */
@@ -473,18 +488,9 @@ blob variant::as_blob() const {
          return blob();
       try {
          // pre-5.0 versions of variant added `=` to end of base64 encoded string in as_string() above.
-         // Keep legacy base64_decode behavior: extra trailing `=` is accepted.
-         // Other base64 decoders will not accept the extra `=`.
-         auto decoded = forge::codec::base64::decode(str);
+         auto decoded = decode_blob_base64(str);
          return {std::move(decoded)};
       } catch (const std::exception&) {
-         if (str.ends_with('=')) {
-            try {
-               auto decoded = forge::codec::base64::decode(std::string_view{str}.substr(0, str.size() - 1U));
-               return {std::move(decoded)};
-            } catch (const std::exception&) {
-            }
-         }
          // unable to decode, return the raw chars
       }
       return blob({std::vector<std::uint8_t>(str.begin(), str.end())});
@@ -719,7 +725,7 @@ void to_variant(const blob& b, variant& v) {
 }
 
 void from_variant(const variant& v, blob& b) {
-   b.data = forge::codec::base64::decode(v.as_string());
+   b.data = decode_blob_base64(v.as_string());
 }
 
 void to_variant(const UInt<8>& n, variant& v) {

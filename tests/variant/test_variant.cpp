@@ -262,6 +262,17 @@ BOOST_AUTO_TEST_CASE(variant_blob_backwards_compatibility) {
    }
 }
 
+BOOST_AUTO_TEST_CASE(variant_blob_from_variant_preserves_extra_padding_compatibility) {
+   const auto check_legacy_value = [](std::string_view encoded, std::string_view expected) {
+      auto decoded = blob{};
+      forge::from_variant(forge::variant{std::string{encoded}}, decoded);
+      BOOST_TEST(std::string(decoded.data.begin(), decoded.data.end()) == expected);
+   };
+
+   check_legacy_value("YWFhYWFhYWFhYWFhYWFhYWE==", "aaaaaaaaaaaaaaaaa");
+   check_legacy_value("YWJj=", "abc");
+}
+
 BOOST_AUTO_TEST_CASE(variant_blob_rejects_malformed_base64_trailing_garbage) {
    const auto malformed = std::string{"YQ==evil"};
    const auto value = forge::variant{malformed};
