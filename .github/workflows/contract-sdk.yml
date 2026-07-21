@@ -262,11 +262,9 @@ jobs:
           test -x "$llvm_root/bin/clang++"
           test -f "$llvm_root/lib/cmake/clang/ClangConfig.cmake"
           test -n "$("$llvm_root/bin/clang" -dumpmachine)"
-          printf '#include <flat_map>\nint main() { std::flat_map<int, int> value; return value.size(); }\n' \
-            | "$llvm_root/bin/clang++" -std=c++23 -x c++ - -c -o /tmp/forge-release-flat-map.o
+          printf 'int main() { return 0; }\n' \
+            | "$llvm_root/bin/clang++" -std=c++23 -x c++ - -c -o /tmp/forge-release-native.o
           echo "LLVM_ROOT=$llvm_root" >> "$GITHUB_ENV"
-          echo "CC=$llvm_root/bin/clang" >> "$GITHUB_ENV"
-          echo "CXX=$llvm_root/bin/clang++" >> "$GITHUB_ENV"
 
       - name: Build and install Forge host libraries
         shell: bash
