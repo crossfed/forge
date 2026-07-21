@@ -79,6 +79,9 @@ std::size_t decode(std::string_view input, std::span<std::uint8_t> output) {
 }
 
 std::vector<std::uint8_t> decode(std::string_view input) {
+   if (input.size() % 2U != 0U) {
+      fail_input("hex input length must be even");
+   }
    auto output = std::vector<std::uint8_t>(input.size() / 2U);
    decode(input, output);
    return output;

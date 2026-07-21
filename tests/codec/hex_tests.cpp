@@ -23,6 +23,7 @@ BOOST_AUTO_TEST_CASE(case_integer_width_and_strict_decode_are_supported) {
                      forge::codec::hex::exceptions::invalid_input);
    BOOST_CHECK_THROW(static_cast<void>(forge::codec::hex::decode("001122", output)),
                      forge::codec::hex::exceptions::insufficient_output);
+   BOOST_CHECK_THROW(static_cast<void>(forge::codec::hex::decode("abc")), forge::codec::hex::exceptions::invalid_input);
    BOOST_CHECK_THROW(
        static_cast<void>(forge::codec::hex::encode(std::uint8_t{1}, std::numeric_limits<std::size_t>::max())),
        forge::codec::hex::exceptions::invalid_input);
