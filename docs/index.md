@@ -13,6 +13,7 @@ Documents below explain cross-library architecture decisions.
 
 | Document | Purpose |
 | --- | --- |
+| [releases/8.11.0.md](releases/8.11.0.md) | Forge 8.11.0 canonical producer schedule module ownership. |
 | [releases/8.10.0.md](releases/8.10.0.md) | Forge 8.10.0 Contract SDK, EOSIO compatibility and migration guarantees. |
 | [releases/8.9.0.md](releases/8.9.0.md) | Forge 8.9.0 Crypto Signer binary API migration and compatibility guarantees. |
 | [releases/8.8.0.md](releases/8.8.0.md) | Forge 8.8.0 DB IDs family migration and compatibility guarantees. |
