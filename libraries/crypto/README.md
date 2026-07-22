@@ -21,6 +21,17 @@ Base32 is a general encoding and lives in
 [`forge_codec_base32`](../codec/base32/README.md). CityHash was removed because
 Forge had no first-party consumer or persisted contract for it.
 
+### CityHash Migration
+
+The removed `forge.crypto.city` module and `forge::crypto::city_hash*`
+functions have no drop-in Forge replacement. CityHash is a non-cryptographic
+hash, so consumers that own an existing CityHash-based wire or persisted
+contract must keep a CityHash implementation at that compatibility boundary.
+New Forge code should select a digest from `forge_crypto_digest` and treat the
+resulting bytes as a new format rather than silently replacing stored CityHash
+values. This removal must also appear in the Forge 8.11.0 source/package
+migration table before release.
+
 ## Consumption
 
 Request and link only the leaf that owns the required API:

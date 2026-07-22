@@ -547,7 +547,10 @@ implementation-library namespaces. For plugin family/role decisions, follow
 - Keep the repository name unchanged until repository migration is planned.
 - Boost.Describe migration must preserve the raw binary compatibility test baseline.
 - Do not move neutral libraries from downstream projects until the FORGE target structure exists.
-- Do not remove crypto primitives in the first pruning pass.
+- Do not remove cryptographic primitives incidentally during a structural
+  refactor. A maintainer-approved removal must be named in the task scope,
+  verify that no first-party consumer or persisted contract depends on it, and
+  document the downstream migration in the owning README and release notes.
 - `forge_core` is a low-level foundation only. It must not import `forge.crypto`, `forge.raw`, `forge.variant`, `forge.json` or `forge.log`.
 - `forge_core` may own neutral diagnostic helpers such as type names, but must not own Boost.Describe member traversal or variant conversion.
 - `forge_reflect` owns only Boost.Describe metadata helpers. It must not import or link `forge_variant`.
