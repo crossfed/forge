@@ -9,11 +9,12 @@ Package component: `chain_core`. Public namespace: `forge::chain::core`.
 
 ## Modules
 
-- `forge.chain.core.types` defines `digest` as `forge::crypto::sha256`.
+- `forge.chain.core.types` defines `digest` as `forge::crypto::digest::sha256`.
 - `forge.chain.core.merkle` exports `calculate_merkle_root()` and
   `incremental_merkle_tree` and re-exports `forge.chain.core.types`.
 
-The target publicly links `forge_crypto`, `forge_exceptions` and `forge_raw`.
+The target publicly links `forge_crypto_digest`, `forge_exceptions` and
+`forge_raw`.
 
 ## Merkle Roots
 

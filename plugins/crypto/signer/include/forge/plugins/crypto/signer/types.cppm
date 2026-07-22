@@ -9,7 +9,7 @@ module;
 export module forge.plugins.crypto.signer.types;
 
 import forge.crypto.asymmetric;
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.schema.diagnostic;
 import forge.schema.value_kind;
 import forge.schema.object;
@@ -35,7 +35,7 @@ struct config {
 struct request {
    std::string key_id;
    std::string purpose;
-   forge::crypto::sha256 digest;
+   forge::crypto::digest::sha256 digest;
    std::optional<forge::crypto::asymmetric::algorithm> required_algorithm;
 };
 

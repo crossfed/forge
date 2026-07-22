@@ -113,7 +113,7 @@ method name, use the typed method macro to select the wire method explicitly:
 ```cpp
 struct sign_request {
    std::string key_id;
-   forge::crypto::sha256 digest;
+   forge::crypto::digest::sha256 digest;
 };
 
 struct sign_response {
@@ -128,7 +128,7 @@ class signature_api : public forge::api::core::contract<signature_api> {
    sign(sign_request request) = 0;
 
    boost::asio::awaitable<sign_response>
-   sign(std::string key_id, forge::crypto::sha256 digest);
+   sign(std::string key_id, forge::crypto::digest::sha256 digest);
 };
 
 FORGE_API(signature_api,

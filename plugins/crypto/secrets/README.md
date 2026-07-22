@@ -8,7 +8,8 @@ files in product code.
 
 The plugin is not a wallet, remote KMS, product vault or authorization service.
 It enforces configured purposes, operation allow-lists, byte limits and local
-source loading policy, then delegates cryptographic primitives to `forge_crypto`.
+source loading policy, then delegates cryptographic primitives to
+`forge_crypto_core` and `forge_crypto_symmetric`.
 
 ## Target And Modules
 
@@ -45,7 +46,10 @@ Public modules:
 
 - `forge_app`
 - `forge_api_core`
-- `forge_crypto`
+- `forge_codec_base64`
+- `forge_codec_hex`
+- `forge_crypto_core`
+- `forge_crypto_symmetric`
 - `forge_config_core`
 - `forge_schema`
 

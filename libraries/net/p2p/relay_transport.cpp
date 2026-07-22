@@ -13,7 +13,7 @@ module;
 
 module forge.net.p2p.node;
 
-import forge.crypto.pem;
+import forge.crypto.pki.pem;
 import forge.crypto.asymmetric;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.identity;
@@ -32,7 +32,7 @@ void trace_relay(std::string_view message) {
 
 [[nodiscard]] forge::crypto::asymmetric::private_key private_key_from_pem(std::string_view pem) {
    try {
-      return forge::crypto::pem::read_private_key(pem);
+      return forge::crypto::pki::pem::read_private_key(pem);
    } catch (const forge::exceptions::base& error) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_identity, error.what());
    }

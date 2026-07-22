@@ -68,11 +68,11 @@ import forge.config.core.document;
 import forge.config.core.value;
 import forge.config.core.decode;
 import forge.crypto.asymmetric;
-import forge.crypto.ed25519;
-import forge.crypto.p256;
-import forge.crypto.rsa;
-import forge.crypto.secp256k1;
-import forge.crypto.sha256;
+import forge.crypto.asymmetric.ed25519;
+import forge.crypto.asymmetric.p256;
+import forge.crypto.asymmetric.rsa;
+import forge.crypto.asymmetric.secp256k1;
+import forge.crypto.digest.sha256;
 import forge.config.env;
 import forge.api.http.binding;
 import forge.net.http.base_url;
@@ -2080,7 +2080,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_config_is_redacted_and_local_only) {
    auto registry = forge::config::core::component_registry{};
    registry.add(*descriptor);
 
-   const auto key = forge::crypto::asymmetric::private_key::generate<forge::crypto::secp256k1::private_key>();
+   const auto key = forge::crypto::asymmetric::private_key::generate<forge::crypto::asymmetric::secp256k1::private_key>();
    auto document = signer_config(
       {key_entry("provider",
                  forge::crypto::asymmetric::encoding::forge().format(key),
@@ -2095,7 +2095,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_config_is_redacted_and_local_only) {
 }
 
 BOOST_AUTO_TEST_CASE(crypto_signer_config_decodes_through_public_schema) {
-   const auto key = forge::crypto::asymmetric::private_key::generate<forge::crypto::secp256k1::private_key>();
+   const auto key = forge::crypto::asymmetric::private_key::generate<forge::crypto::asymmetric::secp256k1::private_key>();
    const auto document = signer_config(
       {key_entry("provider",
                  forge::crypto::asymmetric::encoding::forge().format(key),
@@ -2112,7 +2112,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_config_decodes_through_public_schema) {
 }
 
 BOOST_AUTO_TEST_CASE(crypto_signer_rejects_removed_default_output_profile) {
-   const auto key = forge::crypto::asymmetric::private_key::generate<forge::crypto::secp256k1::private_key>();
+   const auto key = forge::crypto::asymmetric::private_key::generate<forge::crypto::asymmetric::secp256k1::private_key>();
    auto document = signer_config(
       {key_entry("provider", forge::crypto::asymmetric::encoding::forge().format(key), "forge", {"api.auth"})});
    document.set("plugins.crypto.signer.default-output-profile", "forge");
@@ -2175,7 +2175,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_structured_keys_are_not_cli_or_env_fields) {
    BOOST_TEST(!parsed.ok());
    BOOST_TEST(parsed.document.try_get("plugins.crypto.signer.keys") == nullptr);
 
-   const auto key = forge::crypto::asymmetric::private_key::generate<forge::crypto::secp256k1::private_key>();
+   const auto key = forge::crypto::asymmetric::private_key::generate<forge::crypto::asymmetric::secp256k1::private_key>();
    const auto document = signer_config(
       {key_entry("provider",
                  forge::crypto::asymmetric::encoding::forge().format(key),
@@ -2234,7 +2234,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_rejects_empty_private_key_through_schema) {
 }
 
 BOOST_AUTO_TEST_CASE(crypto_signer_requires_explicit_non_empty_purposes) {
-   const auto key = forge::crypto::asymmetric::private_key::generate<forge::crypto::secp256k1::private_key>();
+   const auto key = forge::crypto::asymmetric::private_key::generate<forge::crypto::asymmetric::secp256k1::private_key>();
    const auto private_key = forge::crypto::asymmetric::encoding::forge().format(key);
 
    auto runtime = forge::asio::runtime{};
@@ -2264,7 +2264,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_returns_typed_k1_result) {
    static_assert(std::same_as<decltype(std::declval<crypto_signer::response>().signature),
                               forge::crypto::asymmetric::signature>);
 
-   const auto key = forge::crypto::asymmetric::private_key::generate<forge::crypto::secp256k1::private_key>();
+   const auto key = forge::crypto::asymmetric::private_key::generate<forge::crypto::asymmetric::secp256k1::private_key>();
    auto plugin = crypto_signer::plugin{};
    auto document = signer_config(
       {key_entry("provider",
@@ -2280,7 +2280,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_returns_typed_k1_result) {
    forge::asio::blocking::run(runtime, plugin.provide(provider));
 
    auto api = apis.get<crypto_signer::api>(crypto_signer::api::ref());
-   const auto digest = forge::crypto::sha256::hash("receipt-payload");
+   const auto digest = forge::crypto::digest::sha256::hash(std::string{"receipt-payload"});
    const auto response = forge::asio::blocking::run(
       runtime,
       api->sign(crypto_signer::request{
@@ -2338,9 +2338,9 @@ BOOST_AUTO_TEST_CASE(crypto_signer_algorithm_roundtrips_through_described_dto_pa
 }
 
 BOOST_AUTO_TEST_CASE(crypto_signer_supports_p256_ed25519_and_rsa_binary_results) {
-   const auto p256_key = forge::crypto::asymmetric::private_key::generate<forge::crypto::p256::private_key>();
-   const auto ed25519_key = forge::crypto::asymmetric::private_key::generate<forge::crypto::ed25519::private_key>();
-   const auto rsa_key = forge::crypto::asymmetric::private_key::generate<forge::crypto::rsa::private_key>();
+   const auto p256_key = forge::crypto::asymmetric::private_key::generate<forge::crypto::asymmetric::p256::private_key>();
+   const auto ed25519_key = forge::crypto::asymmetric::private_key::generate<forge::crypto::asymmetric::ed25519::private_key>();
+   const auto rsa_key = forge::crypto::asymmetric::private_key::generate<forge::crypto::asymmetric::rsa::private_key>();
    auto plugin = crypto_signer::plugin{};
    auto document = signer_config(
       {key_entry("p256", forge::crypto::asymmetric::encoding::forge().format(p256_key), "forge", {"api.auth"}),
@@ -2355,7 +2355,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_supports_p256_ed25519_and_rsa_binary_results)
    forge::asio::blocking::run(runtime, plugin.provide(provider));
    auto api = apis.get<crypto_signer::api>(crypto_signer::api::ref());
 
-   const auto digest = forge::crypto::sha256::hash("auth-payload");
+   const auto digest = forge::crypto::digest::sha256::hash(std::string{"auth-payload"});
    const auto check_raw_roundtrip = [](const crypto_signer::response& expected) {
       const auto public_key = forge::raw::unpack<forge::crypto::asymmetric::public_key>(
          forge::raw::pack(expected.public_key));
@@ -2409,7 +2409,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_supports_p256_ed25519_and_rsa_binary_results)
 }
 
 BOOST_AUTO_TEST_CASE(crypto_signer_supports_custom_input_profile) {
-   const auto key = forge::crypto::asymmetric::private_key::generate<forge::crypto::secp256k1::private_key>();
+   const auto key = forge::crypto::asymmetric::private_key::generate<forge::crypto::asymmetric::secp256k1::private_key>();
    auto profile = forge::crypto::asymmetric::profiles::forge();
    profile.id = "custom-input";
    const auto encoding = forge::crypto::asymmetric::encoding::from_profile(profile);
@@ -2428,12 +2428,12 @@ BOOST_AUTO_TEST_CASE(crypto_signer_supports_custom_input_profile) {
    const auto result = forge::asio::blocking::run(
       runtime,
       apis.get<crypto_signer::api>(crypto_signer::api::ref())
-         ->sign("provider", "api.auth", forge::crypto::sha256::hash("payload")));
+         ->sign("provider", "api.auth", forge::crypto::digest::sha256::hash(std::string{"payload"})));
    BOOST_CHECK(result.public_key == key.get_public_key());
 }
 
 BOOST_AUTO_TEST_CASE(crypto_signer_enforces_allowed_purpose_and_algorithm) {
-   const auto key = forge::crypto::asymmetric::private_key::generate<forge::crypto::secp256k1::private_key>();
+   const auto key = forge::crypto::asymmetric::private_key::generate<forge::crypto::asymmetric::secp256k1::private_key>();
    auto plugin = crypto_signer::plugin{};
    auto document = signer_config(
       {key_entry("provider", forge::crypto::asymmetric::encoding::forge().format(key), "forge", {"storage.receipt"})});
@@ -2445,7 +2445,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_enforces_allowed_purpose_and_algorithm) {
    auto provider = forge::api::core::installer{apis};
    forge::asio::blocking::run(runtime, plugin.provide(provider));
    auto api = apis.get<crypto_signer::api>(crypto_signer::api::ref());
-   const auto digest = forge::crypto::sha256::hash("receipt-payload");
+   const auto digest = forge::crypto::digest::sha256::hash(std::string{"receipt-payload"});
 
    BOOST_CHECK_THROW(
       forge::asio::blocking::run(

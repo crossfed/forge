@@ -24,7 +24,7 @@ import forge.chain.protocol.fixed_key;
 import forge.chain.protocol.values;
 import forge.contract.testing.host;
 import forge.crypto.asymmetric;
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.db.object.index;
 import forge.raw.codec;
 import forge.vm.wasm.backend;
@@ -251,7 +251,7 @@ std::uint64_t invoke_oracle(forge::contract::testing::host& host, const wasm::wa
 
 void invoke_recovery(forge::contract::testing::host& host, const wasm::wasm_code& code) {
    const auto payload = std::array<std::uint8_t, 4>{'T', 'e', 's', 't'};
-   const auto digest = forge::crypto::sha256::hash(std::span<const std::uint8_t>{payload});
+   const auto digest = forge::crypto::digest::sha256::hash(std::span<const std::uint8_t>{payload});
    const auto key = forge::crypto::asymmetric::private_key::generate();
    const auto signature = key.sign_digest(digest);
    const auto expected = key.get_public_key();

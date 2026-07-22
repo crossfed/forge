@@ -33,7 +33,7 @@ parsing.
 
 - `forge_net_tcp`
 - `forge_net_transport`
-- `forge_crypto`
+- `forge_crypto_pki`
 - `forge_exceptions`
 - Boost.Asio SSL
 - OpenSSL
@@ -75,7 +75,7 @@ auto stream = std::move(tls).into_transport_stream();
 
 ## Boundaries
 
-- Depends on `forge_net_tcp`, `forge_net_transport`, `forge_crypto`, `forge_exceptions`,
+- Depends on `forge_net_tcp`, `forge_net_transport`, `forge_crypto_pki`, `forge_exceptions`,
   Boost.Asio SSL and OpenSSL.
 - Throws typed `forge::net::stcp::exceptions::*`.
 - Owns TLS mechanics: certificate/key loading, trust anchors, fingerprint

@@ -1,0 +1,5 @@
+add_library(forge_codec_base32 STATIC base32.cpp)
+forge_target_modules_at(forge_codec_base32 codec/base32)
+
+target_include_directories(forge_codec_base32 PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
+target_link_libraries(forge_codec_base32 PUBLIC forge_exceptions)

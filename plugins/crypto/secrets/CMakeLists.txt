@@ -22,7 +22,11 @@ target_link_libraries(
       forge_api_core
       forge_config_core
       forge_schema
-      forge_crypto
+      forge_crypto_core
       forge_exceptions
       Boost::asio
+   PRIVATE
+      forge_codec_base64
+      forge_codec_hex
+      forge_crypto_symmetric
 )

@@ -14,10 +14,10 @@ module;
 
 module forge.plugins.crypto.secrets.types;
 
-import forge.crypto.aes;
-import forge.crypto.kdf;
-import forge.crypto.random;
-import forge.crypto.types;
+import forge.crypto.symmetric.aes;
+import forge.crypto.symmetric.kdf;
+import forge.crypto.core.random;
+import forge.crypto.core.types;
 import forge.exceptions;
 import forge.plugins.crypto.secrets.exceptions;
 
@@ -28,13 +28,13 @@ constexpr auto magic = std::array<std::uint8_t, 8>{'F', 'C', 'L', 'S', 'E', 'C',
 
 [[noreturn]] void throw_invalid_encrypted_secret_file();
 
-void append_u64(forge::crypto::bytes& out, std::uint64_t value) {
+void append_u64(forge::crypto::core::bytes& out, std::uint64_t value) {
    for (auto i = 0U; i < 8U; ++i) {
       out.push_back(static_cast<std::uint8_t>((value >> (i * 8U)) & 0xffU));
    }
 }
 
-[[nodiscard]] std::uint64_t read_u64(const forge::crypto::bytes& input, std::size_t& offset) {
+[[nodiscard]] std::uint64_t read_u64(const forge::crypto::core::bytes& input, std::size_t& offset) {
    if (input.size() - offset < 8U) {
       throw_invalid_encrypted_secret_file();
    }
@@ -45,34 +45,34 @@ void append_u64(forge::crypto::bytes& out, std::uint64_t value) {
    return value;
 }
 
-void append_bytes(forge::crypto::bytes& out, std::span<const std::uint8_t> value) {
+void append_bytes(forge::crypto::core::bytes& out, std::span<const std::uint8_t> value) {
    out.insert(out.end(), value.begin(), value.end());
 }
 
-[[nodiscard]] forge::crypto::bytes read_bytes(const forge::crypto::bytes& input, std::size_t& offset, std::uint64_t size) {
+[[nodiscard]] forge::crypto::core::bytes read_bytes(const forge::crypto::core::bytes& input, std::size_t& offset, std::uint64_t size) {
    if (size > static_cast<std::uint64_t>((std::numeric_limits<std::size_t>::max)()) || input.size() - offset < size) {
       throw_invalid_encrypted_secret_file();
    }
-   auto output = forge::crypto::bytes{input.begin() + static_cast<std::ptrdiff_t>(offset),
+   auto output = forge::crypto::core::bytes{input.begin() + static_cast<std::ptrdiff_t>(offset),
                                     input.begin() + static_cast<std::ptrdiff_t>(offset + size)};
    offset += static_cast<std::size_t>(size);
    return output;
 }
 
-[[nodiscard]] forge::crypto::aes256_key derive_file_key(const std::string& passphrase,
-                                                       const forge::crypto::bytes& salt,
+[[nodiscard]] forge::crypto::symmetric::aes::aes256_key derive_file_key(const std::string& passphrase,
+                                                       const forge::crypto::core::bytes& salt,
                                                        std::uint64_t n,
                                                        std::uint64_t r,
                                                        std::uint64_t p,
                                                        std::uint64_t max_memory_bytes) {
-   return forge::crypto::make_aes256_key(forge::crypto::derive_scrypt({
+   return forge::crypto::symmetric::aes::make_aes256_key(forge::crypto::symmetric::kdf::derive_scrypt({
       .password = passphrase,
       .salt = salt,
       .n = n,
       .r = r,
       .p = p,
       .max_memory_bytes = max_memory_bytes,
-      .output_size = forge::crypto::aes256_key_size,
+      .output_size = forge::crypto::symmetric::aes::aes256_key_size,
    }));
 }
 
@@ -101,11 +101,11 @@ void validate_scrypt_limits(std::uint64_t n,
 }
 
 [[noreturn]] void throw_invalid_encrypted_secret_file_parameter(
-   const forge::exceptions::runtime_coded_exception<forge::crypto::aes::exceptions::code>& error) {
+   const forge::exceptions::runtime_coded_exception<forge::crypto::symmetric::aes::exceptions::code>& error) {
    switch (error.value()) {
-   case forge::crypto::aes::exceptions::code::invalid_nonce:
-   case forge::crypto::aes::exceptions::code::invalid_tag:
-   case forge::crypto::aes::exceptions::code::authentication_failed:
+   case forge::crypto::symmetric::aes::exceptions::code::invalid_nonce:
+   case forge::crypto::symmetric::aes::exceptions::code::invalid_tag:
+   case forge::crypto::symmetric::aes::exceptions::code::authentication_failed:
       throw_invalid_encrypted_secret_file();
    default:
       throw;
@@ -113,24 +113,24 @@ void validate_scrypt_limits(std::uint64_t n,
 }
 
 [[noreturn]] void throw_invalid_encrypted_secret_file_parameter(
-   const forge::exceptions::runtime_coded_exception<forge::crypto::kdf::exceptions::code>& error) {
+   const forge::exceptions::runtime_coded_exception<forge::crypto::symmetric::kdf::exceptions::code>& error) {
    switch (error.value()) {
-   case forge::crypto::kdf::exceptions::code::invalid_options:
-   case forge::crypto::kdf::exceptions::code::backend_error:
+   case forge::crypto::symmetric::kdf::exceptions::code::invalid_options:
+   case forge::crypto::symmetric::kdf::exceptions::code::backend_error:
       throw_invalid_encrypted_secret_file();
    default:
       throw;
    }
 }
 
-[[nodiscard]] forge::crypto::bytes make_header(std::uint64_t n,
+[[nodiscard]] forge::crypto::core::bytes make_header(std::uint64_t n,
                                              std::uint64_t r,
                                              std::uint64_t p,
                                              std::uint64_t max_memory_bytes,
-                                             const forge::crypto::bytes& salt,
-                                             const forge::crypto::bytes& nonce,
+                                             const forge::crypto::core::bytes& salt,
+                                             const forge::crypto::core::bytes& nonce,
                                              std::uint64_t ciphertext_size) {
-   auto header = forge::crypto::bytes{};
+   auto header = forge::crypto::core::bytes{};
    append_bytes(header, magic);
    append_u64(header, n);
    append_u64(header, r);
@@ -146,15 +146,15 @@ void validate_scrypt_limits(std::uint64_t n,
 
 } // namespace
 
-forge::crypto::bytes encrypt_secret_file(encrypted_file_encrypt_request request) {
+forge::crypto::core::bytes encrypt_secret_file(encrypted_file_encrypt_request request) {
    if (request.passphrase.empty() || request.plaintext.empty()) {
       FORGE_THROW("encrypted secret file requires passphrase and plaintext");
    }
    if (request.salt.empty()) {
-      request.salt = forge::crypto::random_bytes(16);
+      request.salt = forge::crypto::core::random_bytes(16);
    }
    if (request.nonce.empty()) {
-      request.nonce = forge::crypto::random_bytes(forge::crypto::aes_gcm_nonce_size);
+      request.nonce = forge::crypto::core::random_bytes(forge::crypto::symmetric::aes::aes_gcm_nonce_size);
    }
 
    const auto header = make_header(request.scrypt_n,
@@ -164,7 +164,7 @@ forge::crypto::bytes encrypt_secret_file(encrypted_file_encrypt_request request)
                                    request.salt,
                                    request.nonce,
                                    request.plaintext.size());
-   auto encrypted = forge::crypto::encrypt_aes256_gcm({
+   auto encrypted = forge::crypto::symmetric::aes::encrypt_aes256_gcm({
       .key = derive_file_key(request.passphrase,
                              request.salt,
                              request.scrypt_n,
@@ -182,7 +182,7 @@ forge::crypto::bytes encrypt_secret_file(encrypted_file_encrypt_request request)
    return output;
 }
 
-forge::crypto::bytes decrypt_secret_file(const forge::crypto::bytes& container,
+forge::crypto::core::bytes decrypt_secret_file(const forge::crypto::core::bytes& container,
                                        const std::string& passphrase,
                                        encrypted_file_decrypt_limits limits) {
    if (container.size() < magic.size() || !std::equal(magic.begin(), magic.end(), container.begin())) {
@@ -204,36 +204,36 @@ forge::crypto::bytes decrypt_secret_file(const forge::crypto::bytes& container,
    }
    auto salt = read_bytes(container, offset, salt_size);
    auto nonce = read_bytes(container, offset, nonce_size);
-   auto tag = read_bytes(container, offset, forge::crypto::aes_gcm_tag_size);
+   auto tag = read_bytes(container, offset, forge::crypto::symmetric::aes::aes_gcm_tag_size);
    auto ciphertext = read_bytes(container, offset, ciphertext_size);
    if (offset != container.size()) {
       throw_invalid_encrypted_secret_file();
    }
    auto header = make_header(n, r, p, max_memory_bytes, salt, nonce, ciphertext_size);
    try {
-      return forge::crypto::decrypt_aes256_gcm({
+      return forge::crypto::symmetric::aes::decrypt_aes256_gcm({
          .key = derive_file_key(passphrase, salt, n, r, p, max_memory_bytes),
          .encrypted =
-            forge::crypto::aes256_gcm_ciphertext{
+            forge::crypto::symmetric::aes::aes256_gcm_ciphertext{
                .nonce = std::move(nonce),
                .tag = std::move(tag),
                .ciphertext = std::move(ciphertext),
             },
          .aad = std::move(header),
       });
-   } catch (const forge::crypto::aes::exceptions::invalid_nonce&) {
+   } catch (const forge::crypto::symmetric::aes::exceptions::invalid_nonce&) {
       throw_invalid_encrypted_secret_file();
-   } catch (const forge::crypto::aes::exceptions::invalid_tag&) {
+   } catch (const forge::crypto::symmetric::aes::exceptions::invalid_tag&) {
       throw_invalid_encrypted_secret_file();
-   } catch (const forge::crypto::aes::exceptions::authentication_failed&) {
+   } catch (const forge::crypto::symmetric::aes::exceptions::authentication_failed&) {
       throw_invalid_encrypted_secret_file();
-   } catch (const forge::crypto::kdf::exceptions::invalid_options&) {
+   } catch (const forge::crypto::symmetric::kdf::exceptions::invalid_options&) {
       throw_invalid_encrypted_secret_file();
-   } catch (const forge::crypto::kdf::exceptions::backend_error&) {
+   } catch (const forge::crypto::symmetric::kdf::exceptions::backend_error&) {
       throw_invalid_encrypted_secret_file();
-   } catch (const forge::exceptions::runtime_coded_exception<forge::crypto::aes::exceptions::code>& error) {
+   } catch (const forge::exceptions::runtime_coded_exception<forge::crypto::symmetric::aes::exceptions::code>& error) {
       throw_invalid_encrypted_secret_file_parameter(error);
-   } catch (const forge::exceptions::runtime_coded_exception<forge::crypto::kdf::exceptions::code>& error) {
+   } catch (const forge::exceptions::runtime_coded_exception<forge::crypto::symmetric::kdf::exceptions::code>& error) {
       throw_invalid_encrypted_secret_file_parameter(error);
    }
 }

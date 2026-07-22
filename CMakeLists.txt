@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.31)
 
-project(forge VERSION 8.11.0 LANGUAGES C CXX ASM)
+project(forge VERSION 8.12.0 LANGUAGES C CXX ASM)
 
 include(GNUInstallDirs)
 include(CheckCXXSourceCompiles)
@@ -251,6 +251,7 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/object/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/blob/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/revision/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec/base32/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec/base64/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec/base58/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec/hex/include"
@@ -270,7 +271,14 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/log/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/otlp/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/rocksdb/include"
-   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/core/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/digest/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/symmetric/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/asymmetric/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/pki/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/math/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/bls/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/bn256/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/multiformats/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/asio/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/http/include"
@@ -441,6 +449,7 @@ endif()
 
 add_subdirectory(libraries/core)
 add_subdirectory(libraries/exceptions)
+add_subdirectory(libraries/codec/base32)
 add_subdirectory(libraries/codec/base64)
 add_subdirectory(libraries/codec/base58)
 add_subdirectory(libraries/codec/hex)
@@ -475,11 +484,20 @@ set(
    forge_db_core
    forge_db_object
    forge_config_core
+   forge_codec_base32
    forge_codec_base64
    forge_codec_base58
    forge_codec_hex
    forge_codec_json
-   forge_crypto
+   forge_crypto_core
+   forge_crypto_digest
+   forge_crypto_symmetric
+   forge_crypto_asymmetric_values
+   forge_crypto_asymmetric
+   forge_crypto_pki
+   forge_crypto_math
+   forge_crypto_bls
+   forge_crypto_bn256
    forge_asio
 )
 
@@ -594,11 +612,20 @@ set(
    db_core
    db_object
    config_core
+   codec_base32
    codec_base64
    codec_base58
    codec_hex
    codec_json
-   crypto
+   crypto_core
+   crypto_digest
+   crypto_symmetric
+   crypto_asymmetric_values
+   crypto_asymmetric
+   crypto_pki
+   crypto_math
+   crypto_bls
+   crypto_bn256
    asio
 )
 if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
@@ -716,12 +743,20 @@ set(
    libraries/vm/wasm/include/forge
    libraries/db/core/include/forge
    libraries/db/object/include/forge
+   libraries/codec/base32/include/forge
    libraries/codec/base64/include/forge
    libraries/codec/base58/include/forge
    libraries/codec/hex/include/forge
    libraries/codec/json/include/forge
    libraries/config/core/include/forge
-   libraries/crypto/include/forge
+   libraries/crypto/core/include/forge
+   libraries/crypto/digest/include/forge
+   libraries/crypto/symmetric/include/forge
+   libraries/crypto/asymmetric/include/forge
+   libraries/crypto/pki/include/forge
+   libraries/crypto/math/include/forge
+   libraries/crypto/bls/include/forge
+   libraries/crypto/bn256/include/forge
    libraries/asio/include/forge
 )
 if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)

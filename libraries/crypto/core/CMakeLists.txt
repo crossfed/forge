@@ -1,0 +1,18 @@
+add_library(
+   forge_crypto_core STATIC
+   random.cpp
+   secret_bytes.cpp
+)
+forge_target_modules_at(forge_crypto_core crypto/core)
+
+target_include_directories(forge_crypto_core PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
+target_compile_definitions(
+   forge_crypto_core
+   PUBLIC OPENSSL_API_COMPAT=0x30000000L
+          OPENSSL_NO_DEPRECATED
+)
+target_link_libraries(
+   forge_crypto_core
+   PUBLIC forge_exceptions
+   PRIVATE OpenSSL::Crypto
+)

@@ -1,3 +1,4 @@
+add_subdirectory(base32)
 add_subdirectory(base64)
 add_subdirectory(base58)
 add_subdirectory(hex)

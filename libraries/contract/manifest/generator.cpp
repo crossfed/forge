@@ -12,7 +12,7 @@ module;
 module forge.contract.manifest.generator;
 
 import forge.codec.json;
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.variant.value;
 import forge.vm.wasm.backend;
 
@@ -42,7 +42,7 @@ std::string text(const auto& bytes) {
 }
 
 std::string sha256(const std::vector<std::uint8_t>& bytes) {
-   return forge::crypto::sha256::hash(std::span<const std::uint8_t>{bytes}).str();
+   return forge::crypto::digest::sha256::hash(std::span<const std::uint8_t>{bytes}).str();
 }
 
 forge::variants imported_functions(const std::vector<std::uint8_t>& bytes) {

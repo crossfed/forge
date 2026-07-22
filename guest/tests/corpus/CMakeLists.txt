@@ -5,7 +5,11 @@ project(ForgeContractCompatibilityCorpus LANGUAGES CXX)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(ForgeContract CONFIG REQUIRED)
-find_package(Forge CONFIG REQUIRED COMPONENTS asio chain_protocol crypto db_core db_object exceptions raw vm_wasm)
+find_package(
+   Forge CONFIG REQUIRED
+   COMPONENTS asio chain_protocol crypto_asymmetric crypto_bls crypto_bn256 crypto_digest crypto_math db_core
+              db_object exceptions raw vm_wasm
+)
 find_package(Boost REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
@@ -92,7 +96,7 @@ target_link_libraries(
    forge_contract_corpus_tests
    PRIVATE
       Forge::forge_chain_protocol
-      Forge::forge_crypto
+      Forge::forge_crypto_digest
       Forge::forge_exceptions
       Forge::forge_raw
       Forge::forge_vm_wasm

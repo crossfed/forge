@@ -17,7 +17,7 @@
 import forge.chain.protocol.transaction;
 import forge.chain.protocol.values;
 import forge.contract.testing.host;
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.exceptions;
 import forge.raw.codec;
 import forge.vm.wasm.backend;
@@ -190,7 +190,7 @@ BOOST_AUTO_TEST_CASE(all_donor_and_forge_wasm_modules_validate_and_export_apply)
 }
 
 BOOST_AUTO_TEST_CASE(spring_boot_matches_donor_feature_activation) {
-   const auto digest = forge::crypto::sha256::hash("spring-boot", 11U);
+   const auto digest = forge::crypto::digest::sha256::hash("spring-boot", 11U);
    compare_action(fixture("spring_eosio_boot"), "eosio", protocol::make_name("activate").value,
                   forge::raw::pack(digest));
 }
@@ -240,6 +240,6 @@ BOOST_AUTO_TEST_CASE(legacy_eosio_bios_matches_donor_authorization) {
 }
 
 BOOST_AUTO_TEST_CASE(legacy_eosio_boot_matches_donor_feature_activation) {
-   const auto digest = forge::crypto::sha256::hash("eosio-boot", 10U);
+   const auto digest = forge::crypto::digest::sha256::hash("eosio-boot", 10U);
    compare_action(fixture("eosio_boot"), "eosio", protocol::make_name("activate").value, forge::raw::pack(digest));
 }

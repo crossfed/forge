@@ -34,7 +34,7 @@
 
 import forge.asio.blocking;
 import forge.asio.runtime;
-import forge.crypto.x509;
+import forge.crypto.pki.x509;
 import forge.net.stcp.connection;
 import forge.net.stcp.connector;
 import forge.net.stcp.exceptions;
@@ -297,7 +297,7 @@ boost::asio::awaitable<void> stcp_direct_roundtrip() {
    auto accept = spawn_result<forge::net::stcp::connection>(executor, listener.async_accept_connection());
    auto pinned_client = client_options(material);
    pinned_client.security.expected_sha256_fingerprint =
-       forge::crypto::x509::certificate::from_pem(material.server.certificate).fingerprint_sha256_text();
+       forge::crypto::pki::x509::certificate::from_pem(material.server.certificate).fingerprint_sha256_text();
    auto connector = forge::net::stcp::connector{executor, pinned_client};
    auto client = co_await connector.async_connect_connection(listener.local_endpoint());
    auto server = co_await take_result(accept);

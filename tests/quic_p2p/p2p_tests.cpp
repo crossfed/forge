@@ -42,12 +42,12 @@
 import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.crypto.asymmetric;
-import forge.crypto.der;
-import forge.crypto.p256;
-import forge.crypto.pem;
-import forge.crypto.rsa;
-import forge.crypto.secp256k1;
-import forge.crypto.x509;
+import forge.crypto.pki.der;
+import forge.crypto.asymmetric.p256;
+import forge.crypto.pki.pem;
+import forge.crypto.asymmetric.rsa;
+import forge.crypto.asymmetric.secp256k1;
+import forge.crypto.pki.x509;
 import forge.net.p2p.dht;
 import forge.net.p2p.discovery;
 import forge.net.p2p.endpoint;
@@ -187,7 +187,7 @@ test_identity make_test_identity() {
    const auto private_key_pem = bio_to_string(private_key_bio.get());
    auto out = test_identity{
        .key = public_key{.type = public_key::type::ed25519, .data = std::move(public_bytes)},
-       .private_key = forge::crypto::pem::read_private_key(private_key_pem),
+       .private_key = forge::crypto::pki::pem::read_private_key(private_key_pem),
        .private_key_pem = private_key_pem,
    };
    out.peer = make_peer_id(out.key);
@@ -209,7 +209,7 @@ std::vector<std::uint8_t> signed_key_der(std::span<const std::uint8_t> public_ke
 std::vector<std::uint8_t> tls_identity_message(std::span<const std::uint8_t> certificate_public_key);
 
 test_identity make_secp256k1_identity() {
-   auto private_key = forge::crypto::asymmetric::private_key::generate<forge::crypto::secp256k1::private_key>();
+   auto private_key = forge::crypto::asymmetric::private_key::generate<forge::crypto::asymmetric::secp256k1::private_key>();
    auto key = public_key{
        .type = public_key::type::secp256k1,
        .data = bytes_from_range(
@@ -221,10 +221,10 @@ test_identity make_secp256k1_identity() {
 }
 
 test_identity make_p256_identity() {
-   auto private_key = forge::crypto::asymmetric::private_key::generate_p256<forge::crypto::p256::private_key>();
+   auto private_key = forge::crypto::asymmetric::private_key::generate_p256<forge::crypto::asymmetric::p256::private_key>();
    auto key = public_key{
        .type = public_key::type::ecdsa,
-       .data = forge::crypto::der::write_public_key(private_key.get_public_key()),
+       .data = forge::crypto::pki::der::write_public_key(private_key.get_public_key()),
    };
    auto out = test_identity{.key = std::move(key), .private_key = private_key};
    out.peer = make_peer_id(out.key);
@@ -232,7 +232,7 @@ test_identity make_p256_identity() {
 }
 
 test_identity make_rsa_identity() {
-   auto private_key = forge::crypto::asymmetric::private_key::generate<forge::crypto::rsa::private_key>();
+   auto private_key = forge::crypto::asymmetric::private_key::generate<forge::crypto::asymmetric::rsa::private_key>();
    auto key = public_key{
        .type = public_key::type::rsa,
        .data = std::get<forge::crypto::asymmetric::rsa_public_key>(private_key.get_public_key()).serialize(),
@@ -254,17 +254,17 @@ std::vector<std::uint8_t> make_signed_rendezvous_peer_record(const test_identity
                   .endpoints = std::move(endpoints),
                   .sequence = sequence,
               },
-              identity.key, forge::crypto::pem::read_private_key(identity.private_key_pem))
+              identity.key, forge::crypto::pki::pem::read_private_key(identity.private_key_pem))
        .encode();
 }
 
 std::vector<std::uint8_t> make_signed_rendezvous_peer_record(const test_certificate_identity& identity,
                                                              std::vector<endpoint> endpoints = {},
                                                              std::uint64_t sequence = 1) {
-   const auto private_key = forge::crypto::pem::read_private_key(identity.private_key_pem);
+   const auto private_key = forge::crypto::pki::pem::read_private_key(identity.private_key_pem);
    const auto key = public_key{
        .type = public_key::type::rsa,
-       .data = forge::crypto::der::write_public_key(private_key.get_public_key()),
+       .data = forge::crypto::pki::der::write_public_key(private_key.get_public_key()),
    };
    if (endpoints.empty()) {
       endpoints.push_back(parse_endpoint("/ip4/127.0.0.1/udp/4401/quic-v1/p2p/" + identity.peer.to_string()));
@@ -320,10 +320,10 @@ test_certificate_identity make_test_certificate_identity(std::string_view common
       throw std::runtime_error{"failed to configure test certificate subject"};
    }
 
-   const auto identity_private_key = forge::crypto::pem::read_private_key(private_key_pem);
+   const auto identity_private_key = forge::crypto::pki::pem::read_private_key(private_key_pem);
    const auto identity_key = public_key{
        .type = public_key::type::rsa,
-       .data = forge::crypto::der::write_public_key(identity_private_key.get_public_key()),
+       .data = forge::crypto::pki::der::write_public_key(identity_private_key.get_public_key()),
    };
    const auto spki = certificate_public_key_der(certificate.get());
    const auto signature = bytes_from_range(
@@ -408,7 +408,7 @@ std::string_view test_private_key() {
 }
 
 peer_id legacy_cert_hash_peer_id(std::string_view certificate_pem) {
-   const auto certificate = forge::crypto::x509::certificate::from_pem(certificate_pem);
+   const auto certificate = forge::crypto::pki::x509::certificate::from_pem(certificate_pem);
    const auto der = certificate.der();
    return peer_id::from_bytes(forge::multiformats::multihash::sha2_256(der).encode());
 }
@@ -564,10 +564,10 @@ std::vector<std::uint8_t> tls_identity_message(std::span<const std::uint8_t> cer
 std::vector<std::uint8_t> sign_test_identity(const test_identity& identity, std::span<const std::uint8_t> message) {
    return identity.private_key.visit([&](const auto& key) -> std::vector<std::uint8_t> {
       using key_type = std::decay_t<decltype(key)>;
-      if constexpr (std::is_same_v<key_type, forge::crypto::secp256k1::private_key>) {
-         return forge::crypto::secp256k1::sign_der(key, message);
-      } else if constexpr (std::is_same_v<key_type, forge::crypto::p256::private_key>) {
-         return forge::crypto::p256::sign_der(key, message);
+      if constexpr (std::is_same_v<key_type, forge::crypto::asymmetric::secp256k1::private_key>) {
+         return forge::crypto::asymmetric::secp256k1::sign_der(key, message);
+      } else if constexpr (std::is_same_v<key_type, forge::crypto::asymmetric::p256::private_key>) {
+         return forge::crypto::asymmetric::p256::sign_der(key, message);
       } else {
          return bytes_from_range(key.sign(message));
       }
@@ -616,7 +616,7 @@ public_key test_rsa_public_key() {
    return public_key{
        .type = public_key::type::rsa,
        .data =
-           forge::crypto::der::write_public_key(forge::crypto::pem::read_private_key(test_private_key()).get_public_key()),
+           forge::crypto::pki::der::write_public_key(forge::crypto::pki::pem::read_private_key(test_private_key()).get_public_key()),
    };
 }
 
@@ -1023,7 +1023,7 @@ BOOST_AUTO_TEST_CASE(p2p_identity_uses_libp2p_multihash_shape) {
 
 BOOST_AUTO_TEST_CASE(p2p_certificate_without_libp2p_extension_is_rejected) {
    BOOST_CHECK_THROW((void)make_peer_id_from_certificate_pem(test_certificate()), exceptions::invalid_identity);
-   const auto certificate = forge::crypto::x509::certificate::from_pem(test_certificate());
+   const auto certificate = forge::crypto::pki::x509::certificate::from_pem(test_certificate());
    BOOST_CHECK_THROW((void)make_peer_id_from_certificate_der(certificate.der()), exceptions::invalid_identity);
 }
 
@@ -2053,7 +2053,7 @@ BOOST_AUTO_TEST_CASE(p2p_gossipsub_codec_roundtrips_v11_rpc_and_rejects_malforme
        .subject = pubsub::topic{.value = "forge.topic"},
        .key = encode_public_key(identity.key),
    };
-   pubsub::codec::sign_message(message, forge::crypto::pem::read_private_key(identity.private_key_pem));
+   pubsub::codec::sign_message(message, forge::crypto::pki::pem::read_private_key(identity.private_key_pem));
    BOOST_TEST(pubsub::codec::verify_message(message));
 
    const auto id = pubsub::codec::message_id(message);
@@ -2115,7 +2115,7 @@ BOOST_AUTO_TEST_CASE(p2p_gossipsub_signing_rejects_tampered_payload) {
        .subject = pubsub::topic{.value = "forge.signed"},
        .key = encode_public_key(identity.key),
    };
-   pubsub::codec::sign_message(message, forge::crypto::pem::read_private_key(identity.private_key_pem));
+   pubsub::codec::sign_message(message, forge::crypto::pki::pem::read_private_key(identity.private_key_pem));
    BOOST_TEST(pubsub::codec::verify_message(message));
 
    message.data.push_back('!');
@@ -2128,7 +2128,7 @@ BOOST_AUTO_TEST_CASE(p2p_signed_envelope_seals_and_verifies_domain_payload_and_s
    const auto payload = std::vector<std::uint8_t>{1, 2, 3, 4, 5};
 
    const auto envelope =
-       signed_envelope::seal(identity.key, forge::crypto::pem::read_private_key(identity.private_key_pem),
+       signed_envelope::seal(identity.key, forge::crypto::pki::pem::read_private_key(identity.private_key_pem),
                              "libp2p-relay-rsvp", payload_type, payload);
    const auto encoded = envelope.encode();
    const auto decoded = signed_envelope::decode(encoded);
@@ -2154,7 +2154,7 @@ BOOST_AUTO_TEST_CASE(p2p_relay_voucher_uses_signed_envelope_and_rejects_stale_or
    };
 
    const auto envelope = relay::codec::seal_reservation_voucher(
-       reservation, relay_identity.key, forge::crypto::pem::read_private_key(relay_identity.private_key_pem));
+       reservation, relay_identity.key, forge::crypto::pki::pem::read_private_key(relay_identity.private_key_pem));
    const auto decoded = relay::codec::open_reservation_voucher(envelope, relay_identity.peer, 4'102'444'799ULL);
 
    BOOST_TEST(decoded.relay_peer.to_string() == reservation.relay_peer.to_string());
@@ -2905,7 +2905,7 @@ BOOST_AUTO_TEST_CASE(p2p_libp2p_relay_wire_roundtrips_statuses_limits_and_vouche
            .peer = target_peer,
            .expires_at = 1'777'000'000,
        },
-       identity.key, forge::crypto::pem::read_private_key(identity.private_key_pem));
+       identity.key, forge::crypto::pki::pem::read_private_key(identity.private_key_pem));
 
    auto decoded_voucher = relay::codec::open_reservation_voucher(voucher, relay_peer, 1'776'999'999);
    BOOST_TEST(decoded_voucher.relay_peer.to_string() == relay_peer.to_string());

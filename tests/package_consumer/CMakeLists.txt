@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Forge CONFIG REQUIRED COMPONENTS log exceptions raw crypto app)
+find_package(Forge CONFIG REQUIRED COMPONENTS log exceptions raw crypto_digest app)
 
 add_executable(forge_package_consumer main.cpp)
 target_link_libraries(
@@ -14,6 +14,6 @@ target_link_libraries(
       Forge::forge_log
       Forge::forge_exceptions
       Forge::forge_raw
-      Forge::forge_crypto
+      Forge::forge_crypto_digest
       Forge::forge_app
 )

@@ -146,13 +146,14 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [variant](libraries/variant/README.md) | `forge_variant` | Dynamic value/object model and described conversions. | `forge_core`, `forge_reflect`, Boost.MultiIndex/multiprecision. |
 | [raw](libraries/raw/README.md) | `forge_raw` | Byte-compatible binary serialization. | `forge_core`, `forge_reflect`, `forge_variant`, `forge_exceptions`. |
 | [compression](libraries/compression/README.md) | `forge_compression` | Bounded zlib compression/decompression helpers. | Boost.Iostreams, ZLIB, `forge_exceptions`. |
-| [chain/core](libraries/chain/core/README.md) | `forge_chain_core` | Fundamental chain digest and Merkle primitives. | `forge_crypto`, `forge_exceptions`, `forge_raw`. |
-| [chain/protocol](libraries/chain/protocol/README.md) | `forge_chain_protocol` | Canonical protocol values, ordered keys, transactions, blocks, ABI and signing rules. | `forge_chain_core`, `forge_compression`, `forge_raw`, `forge_variant`, `forge_crypto`. |
+| [chain/core](libraries/chain/core/README.md) | `forge_chain_core` | Fundamental chain digest and Merkle primitives. | `forge_crypto_digest`, `forge_exceptions`, `forge_raw`. |
+| [chain/protocol](libraries/chain/protocol/README.md) | `forge_chain_protocol` | Canonical protocol values, ordered keys, transactions, blocks, ABI and signing rules. | `forge_chain_core`, `forge_compression`, `forge_raw`, `forge_variant`, `forge_crypto_asymmetric_values`, `forge_crypto_digest`. |
 | [vm/wasm](libraries/vm/wasm/README.md) | `forge_vm_wasm` | Native WebAssembly parser, validator, interpreter, host-function runtime and x86_64 JIT. | `forge_exceptions`, threads, internal SoftFloat. |
 | [contract/abi](libraries/contract/abi/README.md) | `forge_contract_abi` | Optional Clang AST based contract ABI and dispatcher generation. | Clang/LLVM privately, `forge_chain_protocol`, `forge_codec_json`. |
 | [contract/attributes](libraries/contract/attributes/README.md) | `forge_contract_attributes` | Optional Forge/EOSIO Clang attribute registrations. | Clang/LLVM privately. |
 | [contract/validation](libraries/contract/validation/README.md) | `forge_contract_validation` | Optional contract ABI, WASM, import and export validation. | `forge_vm_wasm`, `forge_chain_protocol`, `forge_codec_json`. |
-| [contract/manifest](libraries/contract/manifest/README.md) | `forge_contract_manifest` | Optional deterministic contract build manifests. | `forge_vm_wasm`, `forge_crypto`, `forge_codec_json`. |
+| [contract/manifest](libraries/contract/manifest/README.md) | `forge_contract_manifest` | Optional deterministic contract build manifests. | `forge_vm_wasm`, `forge_crypto_digest`, `forge_codec_json`. |
+| [codec/base32](libraries/codec/base32/README.md) | `forge_codec_base32` | Base32 byte/text encoding. | `forge_exceptions`. |
 | [json](libraries/codec/json/README.md) | `forge_codec_json` | JSON typed/value/document codec over Glaze. | Glaze privately, `forge_variant`, `forge_config_core`, `forge_schema`. |
 | [yaml](libraries/codec/yaml/README.md) | `forge_codec_yaml` | YAML typed/value/document codec with JSON-shaped API. | Glaze privately, `forge_config_core`, `forge_schema`. |
 | [xml](libraries/codec/xml/README.md) | `forge_codec_xml` | XML typed/tree codec over private pugixml. | `forge_core`, `forge_reflect`, `forge_schema`, pugixml privately. |
@@ -167,7 +168,14 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [api/quic](libraries/api/quic/README.md) | `forge_api_quic` | API frame binding over QUIC streams. | `forge_api_stream`, `forge_net_quic`. |
 | [api/websocket](libraries/api/websocket/README.md) | `forge_api_websocket` | API frame binding over WebSocket messages. | `forge_api_core`, `forge_net_websocket`, `forge_raw`. |
 | [api/p2p](libraries/api/p2p/README.md) | `forge_api_p2p` | API frame binding over negotiated P2P protocol streams. | `forge_api_stream`, `forge_net_p2p`. |
-| [crypto](libraries/crypto/README.md) | `forge_crypto` | Hashes, encodings, keys, signatures, OpenSSL 3.0+ crypto. | OpenSSL::Crypto, GMP, secp256k1, BLS. |
+| [crypto/core](libraries/crypto/core/README.md) | `forge_crypto_core` | Byte ownership, secret memory and secure random data. | `forge_exceptions`, OpenSSL::Crypto. |
+| [crypto/digest](libraries/crypto/digest/README.md) | `forge_crypto_digest` | Digests, HMAC and Raw pack hashing. | `forge_crypto_core`, `forge_raw`, `forge_variant`, OpenSSL::Crypto. |
+| [crypto/symmetric](libraries/crypto/symmetric/README.md) | `forge_crypto_symmetric` | AES, ChaCha20-Poly1305, HKDF and scrypt. | `forge_crypto_core`, `forge_exceptions`, OpenSSL::Crypto. |
+| [crypto/asymmetric](libraries/crypto/asymmetric/README.md) | `forge_crypto_asymmetric_values`, `forge_crypto_asymmetric` | Binary key/signature values and host signing algorithms. | `forge_raw`; host algorithms add OpenSSL and secp256k1. |
+| [crypto/pki](libraries/crypto/pki/README.md) | `forge_crypto_pki` | DER, PEM and X.509 boundaries. | `forge_crypto_asymmetric`, `forge_crypto_digest`, OpenSSL::Crypto. |
+| [crypto/math](libraries/crypto/math/README.md) | `forge_crypto_math` | Big integers and modular arithmetic. | `forge_crypto_core`, OpenSSL::Crypto, GMP. |
+| [crypto/bls](libraries/crypto/bls/README.md) | `forge_crypto_bls` | BLS values, signatures and contract primitives. | `forge_crypto_digest`, BLS12-381, OpenSSL::Crypto. |
+| [crypto/bn256](libraries/crypto/bn256/README.md) | `forge_crypto_bn256` | BN254 operations. | Internal BN256 backend. |
 | [log](libraries/log/README.md) | `forge_log` | Logging core, messages, console/appender boundary. | `forge_variant`, Boost.DLL privately. |
 | [otlp](libraries/otlp/README.md) | `forge_otlp` | OTLP/HTTP JSON log export and crash-spool resend. | `forge_log`, `forge_net_http`, `forge_asio`. |
 | [asio](libraries/asio/README.md) | `forge_asio` | Asio runtime, priority task scheduler and bounded CPU compute pool. | Boost.Asio, threads. |
@@ -176,15 +184,15 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [net/websocket](libraries/net/websocket/README.md) | `forge_net_websocket` | WebSocket connection/client primitives. | Boost.Beast/Asio, OpenSSL. |
 | [net/transport](libraries/net/transport/README.md) | `forge_net_transport` | Reusable stream/session concepts, chunk buffers and frame helpers. | Boost.Asio, `forge_exceptions`. |
 | [net/tcp](libraries/net/tcp/README.md) | `forge_net_tcp` | TCP transport adapter over `forge_net_transport`. | Boost.Asio, `forge_net_transport`. |
-| [net/stcp](libraries/net/stcp/README.md) | `forge_net_stcp` | Secure TCP transport profile. | `forge_net_tcp`, `forge_crypto`, `forge_net_transport`. |
+| [net/stcp](libraries/net/stcp/README.md) | `forge_net_stcp` | Secure TCP transport profile. | `forge_net_tcp`, `forge_crypto_pki`, `forge_net_transport`. |
 | [net/yamux](libraries/net/yamux/README.md) | `forge_net_yamux` | Yamux multiplexed sessions over a transport stream. | `forge_net_transport`, Boost.Asio. |
 | [net/quic](libraries/net/quic/README.md) | `forge_net_quic` | QUIC endpoint, listener, connector, framed streams. | ngtcp2, OpenSSL 3.0+, Boost.Asio. |
-| [multiformats](libraries/multiformats/README.md) | `forge_multiformats` | libp2p-compatible varint, multicodec, multihash, multibase and multiaddr. | `forge_crypto`, `forge_exceptions`. |
+| [multiformats](libraries/multiformats/README.md) | `forge_multiformats` | libp2p-compatible varint, multicodec, multihash, multibase and multiaddr. | `forge_codec_base32`, `forge_codec_base58`, `forge_crypto_digest`, `forge_exceptions`. |
 | [net/p2p](libraries/net/p2p/README.md) | `forge_net_p2p` | Peer identity, sessions, discovery, relay, DHT, rendezvous and GossipSub. | `forge_net_transport`, `forge_multiformats`, `forge_net_quic`, `forge_net_yamux`. |
 | [db/ids](libraries/db/ids/README.md) | `forge_db_ids` | Compact database object IDs and typed ID bindings. | `forge_raw`, `forge_variant`. |
 | [db/core](libraries/db/core/README.md) | `forge_db_core` | Shared record driver, transaction and snapshot contract. | Boost.Asio, `forge_exceptions`. |
 | [db/object](libraries/db/object/README.md) | `forge_db_object` | Typed object/index store over the shared DB driver. | Boost.Asio, `forge_db_core`, `forge_db_ids`, `forge_raw`, `forge_exceptions`. |
-| [db/blob](libraries/db/blob/README.md) | `forge_db_blob` | Content-addressed blob store with typed refs and explicit retention primitives. | Boost.Asio, `forge_db_core`, `forge_crypto`, `forge_raw`, `forge_variant`, `forge_exceptions`. |
+| [db/blob](libraries/db/blob/README.md) | `forge_db_blob` | Content-addressed blob store with typed refs and explicit retention primitives. | Boost.Asio, `forge_db_core`, `forge_crypto_digest`, `forge_raw`, `forge_variant`, `forge_exceptions`. |
 | [db/revision](libraries/db/revision/README.md) | `forge_db_revision` | Durable before-image revisions with strict-head revert and bounded whole-revision prune. | Boost.Asio, `forge_db_core`, `forge_db_object`, `forge_raw`, `forge_exceptions`. |
 | [db/mdbx](libraries/db/mdbx/README.md) | `forge_db_mdbx` | Vendored libmdbx implementation of the shared DB driver contract. | `forge_asio`, `forge_db_core`, `forge_exceptions`; libmdbx privately. |
 | [rocksdb](libraries/rocksdb/README.md) | `forge_rocksdb` | Optional RocksDB TransactionDB wrapper. | RocksDB privately, `forge_exceptions`, `forge_schema`. |
@@ -245,7 +253,7 @@ FORGE использует версию `MAJOR.MINOR.PATCH` вместе с яв
 описано в release notes вместе с migration path.
 
 Текущие изменения и переходы описаны в
-[Forge 8.11.0 release notes](docs/releases/8.11.0.md).
+[Forge 8.12.0 release notes](docs/releases/8.12.0.md).
 
 ## Совместимость
 
@@ -302,11 +310,11 @@ cmake --install build/forge-debug --prefix build/forge-install --component dev
 Consumer CMake:
 
 ```cmake
-find_package(Forge CONFIG REQUIRED COMPONENTS raw crypto app log api_http codec_xml)
+find_package(Forge CONFIG REQUIRED COMPONENTS raw crypto_digest app log api_http codec_xml)
 
 target_link_libraries(my_program PRIVATE
    Forge::forge_raw
-   Forge::forge_crypto
+   Forge::forge_crypto_digest
    Forge::forge_app
    Forge::forge_log
    Forge::forge_api_http

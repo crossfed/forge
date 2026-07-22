@@ -8,5 +8,7 @@ target_include_directories(forge_multiformats PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS
 target_link_libraries(
    forge_multiformats PUBLIC
       forge_exceptions
-      forge_crypto
+      forge_codec_base32
+      forge_codec_base58
+      forge_crypto_digest
 )

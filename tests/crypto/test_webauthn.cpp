@@ -13,31 +13,34 @@ import forge.raw.datastream;
 import forge.raw.raw;
 import forge.codec.base64;
 import forge.crypto.asymmetric;
-import forge.crypto.p256;
-import forge.crypto.webauthn;
-import forge.crypto.sha256;
+import forge.crypto.asymmetric.p256;
+import forge.crypto.asymmetric.webauthn;
+import forge.crypto.digest.sha256;
 import forge.core.utility;
 
 using namespace forge::crypto;
 using namespace forge;
 using namespace std::literals;
 
+namespace p256 = forge::crypto::asymmetric::p256;
+namespace webauthn = forge::crypto::asymmetric::webauthn;
+
 namespace {
 
-std::string base64url_encode(const forge::crypto::sha256& value) {
+std::string base64url_encode(const forge::crypto::digest::sha256& value) {
    return forge::codec::base64::encode(value.to_uint8_span(), {.characters = forge::codec::base64::alphabet::url,
                                                                .pad = forge::codec::base64::padding::omit});
 }
 
 } // namespace
 
-static forge::crypto::asymmetric::webauthn_signature make_webauthn_sig(const forge::crypto::p256::private_key& priv_key,
+static forge::crypto::asymmetric::webauthn_signature make_webauthn_sig(const forge::crypto::asymmetric::p256::private_key& priv_key,
                                                                        std::vector<uint8_t>& auth_data,
                                                                        const std::string& json) {
 
    // webauthn signature is sha256(auth_data || client_data_hash)
-   forge::crypto::sha256 client_data_hash = forge::crypto::sha256::hash(json);
-   forge::crypto::sha256::encoder e;
+   forge::crypto::digest::sha256 client_data_hash = forge::crypto::digest::sha256::hash(json);
+   forge::crypto::digest::sha256::encoder e;
    e.write((char*)auth_data.data(), auth_data.size());
    e.write(client_data_hash.data(), client_data_hash.data_size());
 
@@ -58,10 +61,10 @@ static forge::crypto::asymmetric::webauthn_signature make_webauthn_sig(const for
 
 struct high_s_webauthn_signature {
    forge::crypto::asymmetric::webauthn_signature webauthn_signature;
-   forge::crypto::p256::compact_signature compact_signature;
+   forge::crypto::asymmetric::p256::compact_signature compact_signature;
 };
 
-static high_s_webauthn_signature make_high_s_webauthn_sig(const forge::crypto::p256::private_key& priv_key,
+static high_s_webauthn_signature make_high_s_webauthn_sig(const forge::crypto::asymmetric::p256::private_key& priv_key,
                                                           std::vector<uint8_t>& auth_data, const std::string& json) {
    forge::crypto::asymmetric::webauthn_signature sig = make_webauthn_sig(priv_key, auth_data, json);
    char buff[8192];
@@ -93,7 +96,7 @@ static high_s_webauthn_signature make_high_s_webauthn_sig(const forge::crypto::p
 // Used by many tests. Keep these lazy so the test binary does not perform
 // crypto work before Boost.Test and module runtime initialization.
 static const p256::private_key& test_priv() {
-   static const p256::private_key value = forge::crypto::p256::private_key::generate();
+   static const p256::private_key value = forge::crypto::asymmetric::p256::private_key::generate();
    return value;
 }
 
@@ -102,13 +105,13 @@ static const p256::public_key& test_pub() {
    return value;
 }
 
-static const forge::crypto::sha256& challenge_digest() {
-   static const forge::crypto::sha256 value = forge::crypto::sha256::hash("monkeys"s);
+static const forge::crypto::digest::sha256& challenge_digest() {
+   static const forge::crypto::digest::sha256 value = forge::crypto::digest::sha256::hash("monkeys"s);
    return value;
 }
 
-static const forge::crypto::sha256& test_origin_hash() {
-   static const forge::crypto::sha256 value = forge::crypto::sha256::hash("fctesting.invalid"s);
+static const forge::crypto::digest::sha256& test_origin_hash() {
+   static const forge::crypto::digest::sha256 value = forge::crypto::digest::sha256::hash("fctesting.invalid"s);
    return value;
 }
 
@@ -183,7 +186,7 @@ BOOST_AUTO_TEST_CASE(good_high_s) try {
    auto high_s_sig = make_high_s_webauthn_sig(test_priv(), auth_data, json);
    BOOST_CHECK_EQUAL(wa_pub, webauthn::recover(high_s_sig.webauthn_signature, challenge_digest(), true));
    BOOST_CHECK_EXCEPTION(
-       p256::public_key(high_s_sig.compact_signature, forge::crypto::sha256::hash("not webauthn"s), true),
+       p256::public_key(high_s_sig.compact_signature, forge::crypto::digest::sha256::hash("not webauthn"s), true),
        forge::exceptions::context_error, [](const forge::exceptions::context_error& e) {
           return std::string(e.what()).find("invalid high s-value encountered in P-256 signature") != std::string::npos;
        });
@@ -215,7 +218,7 @@ BOOST_AUTO_TEST_CASE(mismatch_origin) try {
                       base64url_encode(challenge_digest()) + "\"}";
 
    std::vector<uint8_t> auth_data(37);
-   forge::crypto::sha256 mallory_origin_hash = forge::crypto::sha256::hash("mallory.invalid"s);
+   forge::crypto::digest::sha256 mallory_origin_hash = forge::crypto::digest::sha256::hash("mallory.invalid"s);
    memcpy(auth_data.data(), mallory_origin_hash.data(), sizeof(mallory_origin_hash));
 
    BOOST_CHECK_NE(wa_pub, webauthn::recover(make_webauthn_sig(test_priv(), auth_data, json), challenge_digest(), true));
@@ -448,7 +451,7 @@ BOOST_AUTO_TEST_CASE(challenge_wrong) try {
    asymmetric::webauthn_public_key wa_pub(test_pub().serialize(),
                                           asymmetric::webauthn_public_key::user_presence_t::USER_PRESENCE_NONE,
                                           "fctesting.invalid");
-   forge::crypto::sha256 other_digest = forge::crypto::sha256::hash("yo"s);
+   forge::crypto::digest::sha256 other_digest = forge::crypto::digest::sha256::hash("yo"s);
    std::string json = "{\"origin\":\"https://fctesting.invalid\",\"type\":\"webauthn.get\",\"challenge\":\"" +
                       base64url_encode(other_digest) + "\"}";
 
@@ -492,7 +495,7 @@ BOOST_AUTO_TEST_CASE(auth_data_rpid_hash_bad) try {
                       base64url_encode(challenge_digest()) + "\"}";
 
    std::vector<uint8_t> auth_data(37);
-   forge::crypto::sha256 origin_hash_corrupt = forge::crypto::sha256::hash("fctesting.invalid"s);
+   forge::crypto::digest::sha256 origin_hash_corrupt = forge::crypto::digest::sha256::hash("fctesting.invalid"s);
    memcpy(auth_data.data(), origin_hash_corrupt.data(), sizeof(origin_hash_corrupt));
    auth_data[4]++;
 
@@ -624,9 +627,9 @@ BOOST_AUTO_TEST_CASE(not_json_object) try {
 
    BOOST_CHECK_EXCEPTION(
        (void)webauthn::recover(make_webauthn_sig(test_priv(), auth_data, json), challenge_digest(), true),
-       forge::crypto::webauthn::exceptions::invalid_client_data,
-       [](const forge::crypto::webauthn::exceptions::invalid_client_data& e) {
-          return e.code().category().name() == std::string_view{"forge.crypto.webauthn"};
+       forge::crypto::asymmetric::webauthn::exceptions::invalid_client_data,
+       [](const forge::crypto::asymmetric::webauthn::exceptions::invalid_client_data& e) {
+          return e.code().category().name() == std::string_view{"forge.crypto.asymmetric.webauthn"};
        });
 }
 FORGE_LOG_AND_RETHROW();
@@ -707,7 +710,7 @@ FORGE_LOG_AND_RETHROW();
 
 // Good signature but with a different private key than was expecting
 BOOST_AUTO_TEST_CASE(different_priv_key) try {
-   p256::private_key other_priv = forge::crypto::p256::private_key::generate();
+   p256::private_key other_priv = forge::crypto::asymmetric::p256::private_key::generate();
 
    asymmetric::webauthn_public_key wa_pub(test_pub().serialize(),
                                           asymmetric::webauthn_public_key::user_presence_t::USER_PRESENCE_NONE,
@@ -734,9 +737,9 @@ BOOST_AUTO_TEST_CASE(empty_json) try {
 
    BOOST_CHECK_EXCEPTION(
        (void)webauthn::recover(make_webauthn_sig(test_priv(), auth_data, json), challenge_digest(), true),
-       forge::crypto::webauthn::exceptions::invalid_client_data,
-       [](const forge::crypto::webauthn::exceptions::invalid_client_data& e) {
-          return e.code().category().name() == std::string_view{"forge.crypto.webauthn"};
+       forge::crypto::asymmetric::webauthn::exceptions::invalid_client_data,
+       [](const forge::crypto::asymmetric::webauthn::exceptions::invalid_client_data& e) {
+          return e.code().category().name() == std::string_view{"forge.crypto.asymmetric.webauthn"};
        });
 }
 FORGE_LOG_AND_RETHROW();

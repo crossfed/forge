@@ -17,7 +17,7 @@ import forge.api.core.connection;
 import forge.api.core.registry;
 import forge.api.core.binding;
 import forge.api.core.dispatcher;
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.plugins.crypto.signer.types;
 
 export namespace forge::plugins::crypto::signer {
@@ -28,7 +28,7 @@ class api : public forge::api::core::contract<api, forge::api::core::surface::lo
 
    virtual boost::asio::awaitable<response> sign(request value) = 0;
 
-   boost::asio::awaitable<response> sign(std::string key_id, std::string purpose, forge::crypto::sha256 digest) {
+   boost::asio::awaitable<response> sign(std::string key_id, std::string purpose, forge::crypto::digest::sha256 digest) {
       co_return co_await sign(request{
          .key_id = std::move(key_id),
          .purpose = std::move(purpose),
@@ -36,7 +36,7 @@ class api : public forge::api::core::contract<api, forge::api::core::surface::lo
       });
    }
 
-   boost::asio::awaitable<response> sign(std::string key_id, forge::crypto::sha256 digest, options value) {
+   boost::asio::awaitable<response> sign(std::string key_id, forge::crypto::digest::sha256 digest, options value) {
       co_return co_await sign(request{
          .key_id = std::move(key_id),
          .purpose = std::move(value.purpose),

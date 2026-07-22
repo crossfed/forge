@@ -11,12 +11,13 @@
 
 import forge.exceptions;
 import forge.codec.hex;
-import forge.crypto.modular_arithmetic;
-import forge.crypto.types;
+import forge.crypto.math.modular_arithmetic;
+import forge.crypto.core.types;
 import forge.core.utility;
 
 using namespace forge;
 using namespace forge::crypto;
+using forge::crypto::core::bytes;
 #include "test_utils.hpp"
 
 BOOST_AUTO_TEST_SUITE(modular_arithmetic)
@@ -92,19 +93,19 @@ BOOST_AUTO_TEST_CASE(modexp) try {
       auto exponent = to_bytes(parts[1]);
       auto modulus = to_bytes(parts[2]);
 
-      auto res = forge::crypto::modexp(base, exponent, modulus);
+      auto res = forge::crypto::math::modexp(base, exponent, modulus);
       BOOST_CHECK_EQUAL(forge::codec::hex::encode(res), forge::codec::hex::encode(expected_result));
    }
 }
 FORGE_LOG_AND_RETHROW();
 
 BOOST_AUTO_TEST_CASE(modexp_rejects_empty_modulus) try {
-   const auto call_with_empty_modulus = [] { (void)forge::crypto::modexp(to_bytes("01"), to_bytes("02"), bytes{}); };
+   const auto call_with_empty_modulus = [] { (void)forge::crypto::math::modexp(to_bytes("01"), to_bytes("02"), bytes{}); };
 
-   BOOST_CHECK_EXCEPTION(call_with_empty_modulus(), forge::crypto::modular_arithmetic::exceptions::invalid_modulus,
-                         [](const forge::crypto::modular_arithmetic::exceptions::invalid_modulus& error) {
+   BOOST_CHECK_EXCEPTION(call_with_empty_modulus(), forge::crypto::math::modular_arithmetic::exceptions::invalid_modulus,
+                         [](const forge::crypto::math::modular_arithmetic::exceptions::invalid_modulus& error) {
                             return error.code().category().name() ==
-                                   std::string_view{"forge.crypto.modular_arithmetic"};
+                                   std::string_view{"forge.crypto.math.modular_arithmetic"};
                          });
 }
 FORGE_LOG_AND_RETHROW();
@@ -1003,7 +1004,7 @@ BOOST_AUTO_TEST_CASE(modexp_vectors) try {
       // the host function's result is always length of modulus; pad expected result with enough 0x00s to match up
       expected_result.insert(expected_result.begin(), modulus.size() - expected_result.size(), 0x00);
 
-      BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::crypto::modexp(base, exponent, modulus)),
+      BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::crypto::math::modexp(base, exponent, modulus)),
                         forge::codec::hex::encode(expected_result));
    }
 }
@@ -1081,7 +1082,7 @@ BOOST_AUTO_TEST_CASE(modexp_benchmarking) try {
 
             auto start_time = std::chrono::steady_clock::now();
 
-            auto res = forge::crypto::modexp(base, exponent, modulus);
+            auto res = forge::crypto::math::modexp(base, exponent, modulus);
 
             auto end_time = std::chrono::steady_clock::now();
 

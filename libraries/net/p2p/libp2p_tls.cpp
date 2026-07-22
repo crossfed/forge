@@ -22,8 +22,8 @@ module;
 module forge.net.p2p.node;
 
 import forge.crypto.asymmetric;
-import forge.crypto.pem;
-import forge.crypto.x509;
+import forge.crypto.pki.pem;
+import forge.crypto.pki.x509;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.identity;
 import forge.net.stcp.connection;
@@ -123,7 +123,7 @@ void require_openssl(bool ok, std::string_view message) {
       throw_identity("libp2p TLS requires identity private key material");
    }
    try {
-      return forge::crypto::pem::read_private_key(options.private_key_pem);
+      return forge::crypto::pki::pem::read_private_key(options.private_key_pem);
    } catch (const forge::exceptions::base& error) {
       throw_identity(error.what());
    }
@@ -210,7 +210,7 @@ void verify_certificate_basics(X509* certificate) {
    return message;
 }
 
-[[nodiscard]] peer_id verify_certificate_identity(const forge::crypto::x509::certificate& certificate,
+[[nodiscard]] peer_id verify_certificate_identity(const forge::crypto::pki::x509::certificate& certificate,
                                                   const std::optional<peer_id>& expected_peer) {
    const auto value = certificate.extension(extension_oid);
    if (value.empty()) {
@@ -327,7 +327,7 @@ peer_id verify_libp2p_tls_chain(const forge::net::stcp::certificate_chain& chain
    }
    auto certificate = parse_certificate(chain.certificates.front().der);
    verify_certificate_basics(certificate.get());
-   auto parsed = forge::crypto::x509::certificate::from_der(chain.certificates.front().der);
+   auto parsed = forge::crypto::pki::x509::certificate::from_der(chain.certificates.front().der);
    return verify_certificate_identity(parsed, expected_peer);
 }
 

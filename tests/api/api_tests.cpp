@@ -24,7 +24,7 @@ import forge.api.core.binding;
 import forge.api.core.dispatcher;
 import forge.asio.blocking;
 import forge.asio.runtime;
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
 import forge.reflect.reflect;

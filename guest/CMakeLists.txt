@@ -325,7 +325,6 @@ else()
          COMPONENTS
             chain_protocol
             codec_json
-            crypto
             vm_wasm
             contract_abi
             contract_attributes
@@ -340,7 +339,6 @@ else()
          COMPONENTS
             chain_protocol
             codec_json
-            crypto
             vm_wasm
             contract_abi
             contract_attributes
@@ -587,16 +585,24 @@ install(
 )
 install(
    FILES
-      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/include/forge/crypto/sha256.cppm"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/include/forge/crypto/sha256_value.cppm"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/include/forge/crypto/sha512.cppm"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/include/forge/crypto/sha512_value.cppm"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/include/forge/crypto/ripemd160.cppm"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/include/forge/crypto/ripemd160_value.cppm"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/include/forge/crypto/asymmetric.cppm"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/include/forge/crypto/asymmetric_value.cppm"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/include/forge/crypto/bls_values.cppm"
-   DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/modules/forge/crypto"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/digest/include/forge/crypto/digest/sha256.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/digest/include/forge/crypto/digest/sha256_value.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/digest/include/forge/crypto/digest/sha512.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/digest/include/forge/crypto/digest/sha512_value.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/digest/include/forge/crypto/digest/ripemd160.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/digest/include/forge/crypto/digest/ripemd160_value.cppm"
+   DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/modules/forge/crypto/digest"
+)
+install(
+   FILES
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/asymmetric/include/forge/crypto/asymmetric/asymmetric.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/asymmetric/include/forge/crypto/asymmetric/values.cppm"
+   DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/modules/forge/crypto/asymmetric"
+)
+install(
+   FILES
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/crypto/bls/include/forge/crypto/bls/bls_values.cppm"
+   DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/modules/forge/crypto/bls"
 )
 install(
    FILES
