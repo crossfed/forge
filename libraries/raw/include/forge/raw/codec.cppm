@@ -70,6 +70,7 @@ static_assert(CHAR_BIT == 8, "Forge raw serialization requires 8-bit bytes");
 namespace detail {
 
 [[noreturn]] void fail_codec(const char* message);
+datastream<std::vector<std::uint8_t>> make_input_stream(std::span<const std::uint8_t> input);
 
 inline void require(bool condition, const char* message) {
    if (!condition) {
@@ -736,19 +737,25 @@ template <typename T, typename... Rest> bytes pack(const T& value, const Rest&..
 
 template <typename T> T unpack(std::span<const std::uint8_t> input) {
    auto value = T{};
-   auto stream = datastream<const std::uint8_t*>{input.data(), input.size()};
+   auto stream = detail::make_input_stream(input);
    unpack(stream, value);
    return value;
 }
 
 template <typename T> void unpack(std::span<const std::uint8_t> input, T& value) {
-   auto stream = datastream<const std::uint8_t*>{input.data(), input.size()};
+   auto stream = detail::make_input_stream(input);
    unpack(stream, value);
+}
+
+template <typename T> void unpack_exact(std::span<const std::uint8_t> input, T& value) {
+   auto stream = detail::make_input_stream(input);
+   unpack(stream, value);
+   detail::require(stream.remaining() == 0U, "raw input contains trailing bytes");
 }
 
 template <typename T> T unpack_exact(std::span<const std::uint8_t> input) {
    auto value = T{};
-   auto stream = datastream<const std::uint8_t*>{input.data(), input.size()};
+   auto stream = detail::make_input_stream(input);
    unpack(stream, value);
    detail::require(stream.remaining() == 0U, "raw input contains trailing bytes");
    return value;

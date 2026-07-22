@@ -123,6 +123,15 @@ inline forge::datastream<std::uint8_t*>& operator<<(forge::datastream<std::uint8
    return stream;
 }
 
+inline forge::datastream<const std::uint8_t*>& operator>>(forge::datastream<const std::uint8_t*>& stream,
+                                                          pointer_stream_field& value) {
+   auto marker = std::uint8_t{};
+   stream.read(reinterpret_cast<char*>(&marker), sizeof(marker));
+   contract_api::check(marker == 0xa5, "pointer stream marker is invalid");
+   stream.read(reinterpret_cast<char*>(&value.value), sizeof(value.value));
+   return stream;
+}
+
 struct pointer_codec_record {
    std::uint64_t id = 0;
    pointer_stream_field payload{};
@@ -456,6 +465,8 @@ inline void run(name self, std::uint32_t scenario) {
          row.id = 1;
          row.payload.value = 7;
       });
+      auto reloaded = pointer_codec_records{self, self.value};
+      contract_api::check(reloaded.get(1).payload.value == 7, "canonical row reload mismatch");
       return;
    }
 #endif

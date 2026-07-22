@@ -906,9 +906,8 @@ template <name::raw TableName, table_row T, class... Indices> class multi_index 
       detail::with_buffer(static_cast<std::size_t>(size), [&](std::uint8_t* data) {
          const auto read = ::forge::contract::internal::db_get_i64(iterator, data, static_cast<std::uint32_t>(size));
          check(read == size, "error reading iterator");
-         auto stream = forge::datastream<const std::uint8_t*>{data, static_cast<std::size_t>(size)};
-         detail::unpack_row(stream, static_cast<T&>(result));
-         check(stream.remaining() == 0U, "table row contains trailing bytes");
+         forge::raw::unpack_exact(std::span<const std::uint8_t>{data, static_cast<std::size_t>(size)},
+                                  static_cast<T&>(result));
       });
       return result;
    }
