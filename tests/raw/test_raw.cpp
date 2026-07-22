@@ -154,11 +154,6 @@ forge::datastream<std::uint8_t*>& operator<<(forge::datastream<std::uint8_t*>& s
    return stream;
 }
 
-template <typename T>
-concept one_shot_raw_packable = requires(const T& value) { forge::raw::pack(value); };
-
-static_assert(!one_shot_raw_packable<pointer_datastream_aggregate>);
-
 BOOST_AUTO_TEST_SUITE(raw_test_suite)
 
 BOOST_AUTO_TEST_CASE(raw_string_golden_bytes) {
@@ -284,7 +279,20 @@ BOOST_AUTO_TEST_CASE(concrete_datastream_codec_precedes_aggregate_fallback) {
    stream << value;
 
    BOOST_CHECK_EQUAL(forge::codec::hex::encode(stream.storage()), "c378563412");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(value)), "c378563412");
+   BOOST_CHECK_EQUAL(forge::raw::pack_size(value), 5U);
+}
+
+BOOST_AUTO_TEST_CASE(one_shot_pack_uses_one_stream_for_nested_aggregates) {
+   const auto value = pointer_datastream_aggregate{.value = 0x12345678};
+   auto bytes = std::array<std::uint8_t, 5>{};
+   auto pointer_stream = forge::datastream<std::uint8_t*>{bytes.data(), bytes.size()};
+
+   pointer_stream << value;
+
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(bytes), "d478563412");
    BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(value)), "78563412");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(std::vector{value})), "0178563412");
 }
 
 BOOST_AUTO_TEST_CASE(uint8_vector_datastream_reads_varint_prefixed_values) {
