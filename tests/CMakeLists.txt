@@ -163,6 +163,7 @@ add_test(NAME test_forge_chain_core COMMAND test_forge_chain_core WORKING_DIRECT
 add_executable(
    test_forge_chain_protocol
    unit/main.cpp
+   chain_protocol/producer_schedule_tests.cpp
    chain_protocol/protocol_tests.cpp
 )
 target_link_libraries(test_forge_chain_protocol forge_chain_protocol forge Boost::included_unit_test_framework)

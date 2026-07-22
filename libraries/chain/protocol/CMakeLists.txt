@@ -10,6 +10,7 @@ add_library(
    abi.cpp
    authority.cpp
    system.cpp
+   producer_schedule.cpp
 )
 forge_target_modules_at(forge_chain_protocol chain/protocol)
 

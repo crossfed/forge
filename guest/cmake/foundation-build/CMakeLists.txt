@@ -128,6 +128,8 @@ forge_guest_add_implementation_archive(
       "${_protocol}/include/forge/chain/protocol/transaction.cppm"
       "${_protocol}/include/forge/chain/protocol/authority_value.cppm"
       "${_protocol}/include/forge/chain/protocol/authority.cppm"
+      "${_protocol}/include/forge/chain/protocol/producer_schedule_value.cppm"
+      "${_protocol}/include/forge/chain/protocol/producer_schedule.cppm"
       "${_protocol}/include/forge/chain/protocol/producer_authority.cppm"
       "${_protocol}/include/forge/chain/protocol/system_value.cppm"
       "${_protocol}/include/forge/chain/protocol/system.cppm"

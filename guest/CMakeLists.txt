@@ -618,6 +618,8 @@ install(
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/transaction.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/authority_value.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/authority.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/producer_schedule_value.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/producer_schedule.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/producer_authority.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/system_value.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/system.cppm"
