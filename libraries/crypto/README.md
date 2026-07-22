@@ -30,7 +30,7 @@ contract must keep a CityHash implementation at that compatibility boundary.
 New Forge code should select a digest from `forge_crypto_digest` and treat the
 resulting bytes as a new format rather than silently replacing stored CityHash
 values. The complete source/package migration is documented in the
-[Forge 8.11.0 release notes](../../docs/releases/8.11.0.md).
+[Forge 8.12.0 release notes](../../docs/releases/8.12.0.md).
 
 ## Consumption
 
