@@ -8,6 +8,7 @@ module;
 export module forge.contract.producer_schedule;
 
 export import forge.chain.protocol.producer_authority;
+export import forge.chain.protocol.producer_schedule;
 
 import forge.contract.intrinsics;
 import forge.raw.codec;

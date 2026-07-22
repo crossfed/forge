@@ -40,6 +40,8 @@ MODULES = (
     "forge.chain.protocol.transaction",
     "forge.chain.protocol.authority:value",
     "forge.chain.protocol.authority",
+    "forge.chain.protocol.producer_schedule:value",
+    "forge.chain.protocol.producer_schedule",
     "forge.chain.protocol.producer_authority",
     "forge.chain.protocol.system:value",
     "forge.chain.protocol.system",
@@ -113,6 +115,7 @@ MODULE_FILES = {
     "forge.chain.protocol.action:value": "forge.chain.protocol.action-value.pcm",
     "forge.chain.protocol.transaction:value": "forge.chain.protocol.transaction-value.pcm",
     "forge.chain.protocol.authority:value": "forge.chain.protocol.authority-value.pcm",
+    "forge.chain.protocol.producer_schedule:value": "forge.chain.protocol.producer_schedule-value.pcm",
     "forge.chain.protocol.system:value": "forge.chain.protocol.system-value.pcm",
 }
 
