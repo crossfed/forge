@@ -569,7 +569,7 @@ def check_crypto_family(root: Path, files: list[Path], errors: list[str]) -> Non
       "forge.crypto.aes",
       "forge.crypto.chacha20_poly1305",
       "forge.crypto.kdf",
-      "forge.crypto.asymmetric_value",
+      "forge.crypto.asymmetric.value",
       "forge.crypto.p256",
       "forge.crypto.secp256k1",
       "forge.crypto.ed25519",
@@ -612,8 +612,20 @@ def check_crypto_family(root: Path, files: list[Path], errors: list[str]) -> Non
       source = path.read_text(errors="ignore")
       if re.search(r"\bforge_crypto\b", source):
          errors.append(f"{path.relative_to(root)}: removed Crypto aggregate target is forbidden")
-      if re.search(r"\bCOMPONENTS\s+crypto\b", source):
-         errors.append(f"{path.relative_to(root)}: removed Crypto package component is forbidden")
+      for package in re.finditer(
+         r"\bfind_package\s*\(\s*Forge\b(?P<arguments>[^)]*)\)",
+         source,
+         flags=re.IGNORECASE | re.DOTALL,
+      ):
+         components = re.search(
+            r"\bCOMPONENTS\b(?P<values>.*?)(?:\bOPTIONAL_COMPONENTS\b|$)",
+            package.group("arguments"),
+            flags=re.IGNORECASE | re.DOTALL,
+         )
+         if components and re.search(
+            r"(?<![A-Za-z0-9_])crypto(?![A-Za-z0-9_])", components.group("values")
+         ):
+            errors.append(f"{path.relative_to(root)}: removed Crypto package component is forbidden")
 
    removed_paths = (
       root / "libraries" / "crypto" / "include",
