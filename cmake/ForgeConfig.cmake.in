@@ -92,6 +92,15 @@ set(
 set(_FORGE_REQUESTED_COMPONENTS ${Forge_FIND_COMPONENTS})
 set(_FORGE_ALL_REQUESTED FALSE)
 
+if("crypto" IN_LIST _FORGE_REQUESTED_COMPONENTS)
+   message(
+      FATAL_ERROR
+      "Forge crypto component was removed; request the required crypto_core, "
+      "crypto_digest, crypto_symmetric, crypto_asymmetric_values, "
+      "crypto_asymmetric, crypto_pki, crypto_math, crypto_bls or crypto_bn256 components"
+   )
+endif()
+
 macro(_forge_add_component component)
    if(NOT "${component}" IN_LIST _FORGE_COMPONENTS)
       list(APPEND _FORGE_COMPONENTS "${component}")

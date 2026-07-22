@@ -1030,6 +1030,15 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
+   test_forge_package_crypto_removed_component
+   COMMAND ${CMAKE_COMMAND}
+      -DFORGE_PACKAGE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/forge-package-crypto-removed-component
+      -DFORGE_PACKAGE_TEST_PREFIX=${FORGE_PACKAGE_INSTALL_PREFIX}
+      -DFORGE_PACKAGE_TEST_GENERATOR=${CMAKE_GENERATOR}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_removed_component/expect_configure_failure.cmake
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
    test_forge_package_compression_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
@@ -1770,6 +1779,15 @@ add_test(
       --test-command forge_package_crypto_bn256_component
 )
 set_tests_properties(test_forge_package_crypto_bn256_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_crypto_removed_component
+   COMMAND ${CMAKE_COMMAND}
+      -DFORGE_PACKAGE_TEST_BINARY_DIR=${CMAKE_BINARY_DIR}/forge-package-crypto-removed-component
+      -DFORGE_PACKAGE_TEST_PREFIX=${FORGE_PACKAGE_INSTALL_PREFIX}
+      -DFORGE_PACKAGE_TEST_GENERATOR=${CMAKE_GENERATOR}
+      -P ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_removed_component/expect_configure_failure.cmake
+)
+set_tests_properties(test_forge_package_crypto_removed_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_compression_component
    COMMAND ${CMAKE_CTEST_COMMAND}
