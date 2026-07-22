@@ -71,6 +71,7 @@ string concatenation, JSON or hand-written field loops.
 #include <string>
 
 import forge.crypto.asymmetric;
+import forge.crypto.core.types;
 import forge.crypto.digest.sha256;
 import forge.raw.raw;
 

@@ -13,23 +13,7 @@ import forge.crypto.digest.sha256;
 import forge.exceptions;
 #include "details/private_key_impl.hxx"
 
-/* used by mixed + secp256k1 */
-
 namespace forge::crypto::asymmetric::secp256k1 {
-namespace detail {
-
-private_key_impl::private_key_impl() noexcept {}
-
-private_key_impl::private_key_impl(const private_key_impl& cpy) noexcept {
-   this->_key = cpy._key;
-}
-
-private_key_impl& private_key_impl::operator=(const private_key_impl& pk) noexcept {
-   _key = pk._key;
-   return *this;
-}
-} // namespace detail
-
 static const private_key_secret empty_priv{};
 
 private_key::private_key() : my(std::make_unique<detail::private_key_impl>()) {}

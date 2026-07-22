@@ -16,6 +16,7 @@ add_library(
    asymmetric_encoding.cpp
    ed25519.cpp
    p256.cpp
+   private_key_impl.cpp
    rsa.cpp
    secp256k1.cpp
    secp256k1_backend.cpp
