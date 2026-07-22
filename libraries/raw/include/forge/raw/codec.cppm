@@ -25,6 +25,30 @@ export module forge.raw.codec;
 export import forge.raw.stream;
 export import forge.raw.varint_value;
 
+export namespace forge::raw::detail {
+
+struct stream_probe_tag {};
+
+} // namespace forge::raw::detail
+
+export namespace forge {
+
+template <> class datastream<std::vector<std::uint8_t>, raw::detail::stream_probe_tag> {
+ public:
+   bool read(char*, std::size_t);
+   bool write(const char*, std::size_t);
+   bool put(char);
+   bool get(char&);
+   bool get(std::uint8_t&);
+   bool skip(std::size_t);
+   bool seekp(std::size_t);
+   std::size_t tellp() const;
+   std::size_t remaining() const;
+   bool valid() const;
+};
+
+} // namespace forge
+
 export namespace forge::raw {
 
 using bytes = std::vector<std::uint8_t>;
@@ -106,8 +130,7 @@ template <> struct built_in_codec<unsigned __int128> : std::true_type {};
 
 template <typename T> inline constexpr auto built_in_codec_v = built_in_codec<std::remove_cv_t<T>>::value;
 
-// Probe ADL without forge::datastream so the generic fallback cannot detect itself.
-struct stream_probe {};
+using stream_probe = forge::datastream<std::vector<std::uint8_t>, stream_probe_tag>;
 
 template <typename T>
 concept custom_stream_packable = requires(stream_probe& stream, const T& value) { stream << value; };
@@ -762,7 +785,7 @@ inline constexpr bool stream_codec_readable_v =
 } // namespace raw::detail
 
 template <typename Storage, typename Enable, typename T>
-   requires(!raw::detail::custom_stream_packable<T> &&
+   requires(!std::same_as<Enable, raw::detail::stream_probe_tag> && !raw::detail::custom_stream_packable<T> &&
             raw::detail::stream_codec_writable_v<datastream<Storage, Enable>, T>)
 datastream<Storage, Enable>& operator<<(datastream<Storage, Enable>& stream, const T& value) {
    if constexpr (raw::detail::adl_packable<datastream<Storage, Enable>, T>) {
@@ -776,7 +799,7 @@ datastream<Storage, Enable>& operator<<(datastream<Storage, Enable>& stream, con
 }
 
 template <typename Storage, typename Enable, typename T>
-   requires(!raw::detail::custom_stream_unpackable<T> &&
+   requires(!std::same_as<Enable, raw::detail::stream_probe_tag> && !raw::detail::custom_stream_unpackable<T> &&
             raw::detail::stream_codec_readable_v<datastream<Storage, Enable>, T>)
 datastream<Storage, Enable>& operator>>(datastream<Storage, Enable>& stream, T& value) {
    if constexpr (raw::detail::adl_unpackable<datastream<Storage, Enable>, T>) {
