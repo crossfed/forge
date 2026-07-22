@@ -175,6 +175,24 @@ template <typename Stream, typename T>
 concept traits_unpackable =
     requires(Stream& stream, T& value) { codec_traits<std::remove_cv_t<T>>::unpack(stream, value); };
 
+enum class stream_codec_kind : std::uint8_t { fallback, traits, stream, adl };
+
+template <typename Stream, typename T> consteval stream_codec_kind selected_stream_codec() {
+   if constexpr (adl_packable<Stream, T>) {
+      return stream_codec_kind::adl;
+   } else if constexpr (stream_packable<Stream, T>) {
+      return stream_codec_kind::stream;
+   } else if constexpr (traits_packable<Stream, T>) {
+      return stream_codec_kind::traits;
+   } else {
+      return stream_codec_kind::fallback;
+   }
+}
+
+template <typename T>
+concept one_shot_packable = selected_stream_codec<forge::datastream<std::size_t>, T>() ==
+                            selected_stream_codec<forge::datastream<std::uint8_t*>, T>();
+
 template <std::size_t Index = 0, typename... T> void select_variant(std::variant<T...>& value, std::size_t selected) {
    if constexpr (Index < sizeof...(T)) {
       if (Index == selected) {
@@ -717,7 +735,9 @@ template <typename T> std::size_t pack_size(const T& value) {
    return stream.tellp();
 }
 
-template <typename T> bytes pack(const T& value) {
+template <typename T>
+   requires detail::one_shot_packable<T>
+bytes pack(const T& value) {
    auto result = bytes(::forge::raw::pack_size(value));
    if (!result.empty()) {
       auto stream = datastream<std::uint8_t*>{result.data(), result.size()};
@@ -726,11 +746,15 @@ template <typename T> bytes pack(const T& value) {
    return result;
 }
 
-template <typename T> void pack(std::vector<std::uint8_t>& output, const T& value) {
+template <typename T>
+   requires detail::one_shot_packable<T>
+void pack(std::vector<std::uint8_t>& output, const T& value) {
    output = pack(value);
 }
 
-template <typename T, typename... Rest> bytes pack(const T& value, const Rest&... rest) {
+template <typename T, typename... Rest>
+   requires(detail::one_shot_packable<T> && (detail::one_shot_packable<Rest> && ...))
+bytes pack(const T& value, const Rest&... rest) {
    auto sizing = datastream<std::size_t>{};
    pack(sizing, value, rest...);
    auto result = bytes(sizing.tellp());

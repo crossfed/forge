@@ -143,6 +143,22 @@ forge::datastream<std::vector<std::uint8_t>>& operator<<(forge::datastream<std::
 
 static_assert(std::is_aggregate_v<concrete_datastream_aggregate>);
 
+struct pointer_datastream_aggregate {
+   std::uint32_t value = 0;
+};
+
+forge::datastream<std::uint8_t*>& operator<<(forge::datastream<std::uint8_t*>& stream,
+                                             const pointer_datastream_aggregate& item) {
+   forge::raw::pack(stream, std::uint8_t{0xd4});
+   forge::raw::pack(stream, item.value);
+   return stream;
+}
+
+template <typename T>
+concept one_shot_raw_packable = requires(const T& value) { forge::raw::pack(value); };
+
+static_assert(!one_shot_raw_packable<pointer_datastream_aggregate>);
+
 BOOST_AUTO_TEST_SUITE(raw_test_suite)
 
 BOOST_AUTO_TEST_CASE(raw_string_golden_bytes) {
