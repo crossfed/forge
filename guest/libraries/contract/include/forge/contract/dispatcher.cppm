@@ -78,14 +78,8 @@ template <typename Contract> void set_call_execution_type(Contract& instance) {
 
 template <typename Result, typename Setter>
 void set_packed_result(const Result& result, const char* size_error, Setter&& setter) {
-   const auto size = forge::raw::pack_size(result);
-   check(size <= std::numeric_limits<std::uint32_t>::max(), size_error);
-
-   auto bytes = invocation_buffer{size};
-   if (size != 0U) {
-      auto stream = forge::datastream<std::uint8_t*>{bytes.data(), bytes.size()};
-      forge::raw::pack(stream, result);
-   }
+   auto bytes = forge::raw::pack(result);
+   check(bytes.size() <= std::numeric_limits<std::uint32_t>::max(), size_error);
    setter(bytes.data(), static_cast<std::uint32_t>(bytes.size()));
 }
 

@@ -39,12 +39,7 @@ template <typename T> [[nodiscard]] T unpack_body(const bytes& body) {
 }
 
 template <typename T> [[nodiscard]] bytes pack_body(const T& value) {
-   auto out = bytes(forge::raw::pack_size(value));
-   if (!out.empty()) {
-      forge::datastream<std::uint8_t*> stream{out.data(), out.size()};
-      forge::raw::pack(stream, value);
-   }
-   return out;
+   return forge::raw::pack(value);
 }
 
 template <typename T> struct method_signature;
@@ -161,7 +156,7 @@ struct method_descriptor {
    std::function<boost::asio::awaitable<std::vector<bytes>>(std::shared_ptr<void>, bytes)> raw_stream_invoker;
    std::function<boost::asio::awaitable<bytes>(std::shared_ptr<void>, std::vector<bytes>)> raw_client_stream_invoker;
    std::function<boost::asio::awaitable<std::vector<bytes>>(std::shared_ptr<void>, std::vector<bytes>)>
-      raw_bidirectional_stream_invoker;
+       raw_bidirectional_stream_invoker;
 };
 
 struct descriptor {
@@ -219,15 +214,15 @@ template <typename Interface, bool EnableRaw> class contract_builder {
       if constexpr (EnableRaw) {
          value.raw_stream_invoker = [](std::shared_ptr<void> implementation,
                                        bytes payload) -> boost::asio::awaitable<std::vector<bytes>> {
-             auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
-             auto request = unpack_body<Request>(payload);
-             auto responses = co_await std::invoke(Method, *typed, std::move(request));
-             auto packed = std::vector<bytes>{};
-             packed.reserve(responses.size());
-             for (const auto& response : responses) {
-                packed.push_back(pack_body(response));
-             }
-             co_return packed;
+            auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
+            auto request = unpack_body<Request>(payload);
+            auto responses = co_await std::invoke(Method, *typed, std::move(request));
+            auto packed = std::vector<bytes>{};
+            packed.reserve(responses.size());
+            for (const auto& response : responses) {
+               packed.push_back(pack_body(response));
+            }
+            co_return packed;
          };
       }
       descriptor_.methods.push_back(std::move(value));
@@ -250,14 +245,14 @@ template <typename Interface, bool EnableRaw> class contract_builder {
       if constexpr (EnableRaw) {
          value.raw_client_stream_invoker = [](std::shared_ptr<void> implementation,
                                               std::vector<bytes> payloads) -> boost::asio::awaitable<bytes> {
-             auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
-             auto requests = std::vector<Request>{};
-             requests.reserve(payloads.size());
-             for (auto& payload : payloads) {
-                requests.push_back(unpack_body<Request>(payload));
-             }
-             auto response = co_await std::invoke(Method, *typed, std::move(requests));
-             co_return pack_body(response);
+            auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
+            auto requests = std::vector<Request>{};
+            requests.reserve(payloads.size());
+            for (auto& payload : payloads) {
+               requests.push_back(unpack_body<Request>(payload));
+            }
+            auto response = co_await std::invoke(Method, *typed, std::move(requests));
+            co_return pack_body(response);
          };
       }
       descriptor_.methods.push_back(std::move(value));
@@ -279,21 +274,21 @@ template <typename Interface, bool EnableRaw> class contract_builder {
       };
       if constexpr (EnableRaw) {
          value.raw_bidirectional_stream_invoker =
-              [](std::shared_ptr<void> implementation,
-                 std::vector<bytes> payloads) -> boost::asio::awaitable<std::vector<bytes>> {
-             auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
-             auto requests = std::vector<Request>{};
-             requests.reserve(payloads.size());
-             for (auto& payload : payloads) {
-                requests.push_back(unpack_body<Request>(payload));
-             }
-             auto responses = co_await std::invoke(Method, *typed, std::move(requests));
-             auto packed = std::vector<bytes>{};
-             packed.reserve(responses.size());
-             for (const auto& response : responses) {
-                packed.push_back(pack_body(response));
-             }
-             co_return packed;
+             [](std::shared_ptr<void> implementation,
+                std::vector<bytes> payloads) -> boost::asio::awaitable<std::vector<bytes>> {
+            auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
+            auto requests = std::vector<Request>{};
+            requests.reserve(payloads.size());
+            for (auto& payload : payloads) {
+               requests.push_back(unpack_body<Request>(payload));
+            }
+            auto responses = co_await std::invoke(Method, *typed, std::move(requests));
+            auto packed = std::vector<bytes>{};
+            packed.reserve(responses.size());
+            for (const auto& response : responses) {
+               packed.push_back(pack_body(response));
+            }
+            co_return packed;
          };
       }
       descriptor_.methods.push_back(std::move(value));
@@ -327,19 +322,19 @@ template <typename Interface, bool EnableRaw> class contract_builder {
       };
       if constexpr (EnableRaw) {
          value.raw_invoker = [](std::shared_ptr<void> implementation, bytes payload) -> boost::asio::awaitable<bytes> {
-             auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
-             if constexpr (argument_count == 1U) {
-                auto request = unpack_body<Request>(payload);
-                auto response = co_await std::invoke(Method, *typed, std::move(request));
-                co_return pack_body(response);
-             } else {
-                auto request = unpack_body<method_argument_tuple_t<Method>>(payload);
-                auto invoke = [&](auto&&... args) -> boost::asio::awaitable<Response> {
-                   co_return co_await std::invoke(Method, *typed, std::forward<decltype(args)>(args)...);
-                };
-                auto response = co_await std::apply(invoke, std::move(request));
-                co_return pack_body(response);
-             }
+            auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
+            if constexpr (argument_count == 1U) {
+               auto request = unpack_body<Request>(payload);
+               auto response = co_await std::invoke(Method, *typed, std::move(request));
+               co_return pack_body(response);
+            } else {
+               auto request = unpack_body<method_argument_tuple_t<Method>>(payload);
+               auto invoke = [&](auto&&... args) -> boost::asio::awaitable<Response> {
+                  co_return co_await std::invoke(Method, *typed, std::forward<decltype(args)>(args)...);
+               };
+               auto response = co_await std::apply(invoke, std::move(request));
+               co_return pack_body(response);
+            }
          };
       }
       descriptor_.methods.push_back(std::move(value));
@@ -361,10 +356,10 @@ template <typename Interface, bool EnableRaw> class contract_builder {
       };
       if constexpr (EnableRaw) {
          value.raw_invoker = [](std::shared_ptr<void> implementation, bytes payload) -> boost::asio::awaitable<bytes> {
-             auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
-             auto request = unpack_body<Request>(payload);
-             auto response = co_await std::invoke(Method, *typed, std::move(request));
-             co_return pack_body(response);
+            auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
+            auto request = unpack_body<Request>(payload);
+            auto response = co_await std::invoke(Method, *typed, std::move(request));
+            co_return pack_body(response);
          };
       }
       descriptor_.methods.push_back(std::move(value));
@@ -408,8 +403,8 @@ template <typename Interface, bool EnableRaw> class method_builder {
           .details_type = typeid(Details),
           .thrower = [](const error_payload& payload) -> void {
              throw Exception{payload.message, forge::exceptions::make_fields(
-                                 forge::exceptions::ctx("remote.category", payload.identity.category),
-                                 forge::exceptions::ctx("remote.code", payload.identity.code))};
+                                                  forge::exceptions::ctx("remote.category", payload.identity.category),
+                                                  forge::exceptions::ctx("remote.code", payload.identity.code))};
           },
       });
       return *this;
