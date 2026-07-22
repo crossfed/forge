@@ -608,6 +608,9 @@ def check_crypto_family(root: Path, files: list[Path], errors: list[str]) -> Non
    cmake_files.extend(root.glob("libraries/**/CMakeLists.txt"))
    cmake_files.extend(root.glob("plugins/**/CMakeLists.txt"))
    cmake_files.extend(root.glob("tests/**/CMakeLists.txt"))
+   cmake_files.extend(root.glob("guest/**/CMakeLists.txt"))
+   cmake_files.extend(root.glob("guest/cmake/**/*.cmake"))
+   cmake_files.extend(root.glob("guest/cmake/**/*.cmake.in"))
    for path in sorted(set(cmake_files)):
       source = path.read_text(errors="ignore")
       if re.search(r"\bforge_crypto\b", source):
