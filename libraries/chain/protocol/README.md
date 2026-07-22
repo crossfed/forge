@@ -15,6 +15,10 @@ Package component: `chain_protocol`. Public namespace:
 - `forge.chain.protocol.fixed_key`: `fixed_key<Size>` and `key256`, with
   ordered word construction, canonical raw bytes and fixed-width hex variants.
 - `forge.chain.protocol.authority`: permission weights and authority thresholds.
+- `forge.chain.protocol.producer_schedule`: legacy producer keys and schedules
+  used by block headers and contract APIs.
+- `forge.chain.protocol.producer_authority`: weighted block-signing authorities
+  and producer authority schedules.
 - `forge.chain.protocol.action`: actions and the Savanna action digest that
   commits to the return value.
 - `forge.chain.protocol.action_receipt`: canonical action receipts, witness
