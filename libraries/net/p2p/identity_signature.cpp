@@ -8,6 +8,7 @@ module;
 #include <string>
 #include <type_traits>
 #include <utility>
+#include <variant>
 #include <vector>
 
 module forge.net.p2p.identity;
@@ -65,20 +66,23 @@ extern "C++" {
 namespace forge::net::p2p {
 
 public_key public_key_from_crypto(const forge::crypto::asymmetric::public_key& key) {
-   return key.visit([](const auto& value) -> public_key {
-      using value_type = std::decay_t<decltype(value)>;
-      if constexpr (std::is_same_v<value_type, forge::crypto::ed25519::public_key_shim>) {
-         return public_key{.type = public_key::type::ed25519, .data = bytes_from_range(value.serialize())};
-      } else if constexpr (std::is_same_v<value_type, forge::crypto::rsa::public_key_shim>) {
-         return public_key{.type = public_key::type::rsa, .data = value.serialize()};
-      } else if constexpr (std::is_same_v<value_type, forge::crypto::secp256k1::public_key_shim>) {
-         return public_key{.type = public_key::type::secp256k1, .data = bytes_from_range(value.serialize())};
-      } else if constexpr (std::is_same_v<value_type, forge::crypto::p256::public_key_shim>) {
-         const auto spki = forge::crypto::der::write_public_key(forge::crypto::asymmetric::public_key{
-             forge::crypto::asymmetric::public_key::storage_type{value}});
-         return public_key{.type = public_key::type::ecdsa, .data = spki};
-      }
-   });
+   return std::visit(
+       [](const auto& value) -> public_key {
+          using value_type = std::decay_t<decltype(value)>;
+          if constexpr (std::is_same_v<value_type, forge::crypto::asymmetric::ed25519_public_key>) {
+             return public_key{.type = public_key::type::ed25519, .data = bytes_from_range(value.serialize())};
+          } else if constexpr (std::is_same_v<value_type, forge::crypto::asymmetric::rsa_public_key>) {
+             return public_key{.type = public_key::type::rsa, .data = value.serialize()};
+          } else if constexpr (std::is_same_v<value_type, forge::crypto::asymmetric::k1_public_key>) {
+             return public_key{.type = public_key::type::secp256k1, .data = bytes_from_range(value.serialize())};
+          } else if constexpr (std::is_same_v<value_type, forge::crypto::asymmetric::r1_public_key>) {
+             const auto spki = forge::crypto::der::write_public_key(forge::crypto::asymmetric::public_key{value});
+             return public_key{.type = public_key::type::ecdsa, .data = spki};
+          } else {
+             FORGE_THROW_EXCEPTION(exceptions::invalid_identity, "WebAuthn keys cannot identify a libp2p peer");
+          }
+       },
+       key);
 }
 
 forge::crypto::asymmetric::public_key crypto_public_key(const public_key& key) {
@@ -88,20 +92,15 @@ forge::crypto::asymmetric::public_key crypto_public_key(const public_key& key) {
 
    switch (key.type) {
    case public_key::type::ed25519:
-      return forge::crypto::asymmetric::public_key{
-          forge::crypto::asymmetric::public_key::storage_type{
-              forge::crypto::ed25519::public_key_shim{ed25519_public_key_data(key)}}};
+      return forge::crypto::asymmetric::ed25519_public_key{ed25519_public_key_data(key)};
    case public_key::type::rsa:
-      return forge::crypto::asymmetric::public_key{
-          forge::crypto::asymmetric::public_key::storage_type{forge::crypto::rsa::public_key_shim{key.data}}};
+      return forge::crypto::asymmetric::rsa_public_key{key.data};
    case public_key::type::secp256k1:
-      return forge::crypto::asymmetric::public_key{
-          forge::crypto::asymmetric::public_key::storage_type{
-              forge::crypto::secp256k1::public_key_shim{secp256k1_public_key_data(key)}}};
+      return forge::crypto::asymmetric::k1_public_key{secp256k1_public_key_data(key)};
    case public_key::type::ecdsa: {
       try {
          auto parsed = forge::crypto::der::read_public_key(key.data);
-         if (parsed.type() != forge::crypto::asymmetric::algorithm::p256) {
+         if (forge::crypto::asymmetric::type(parsed) != forge::crypto::asymmetric::algorithm::p256) {
             FORGE_THROW_EXCEPTION(exceptions::invalid_identity, "libp2p ECDSA public key must be P-256");
          }
          return parsed;
@@ -118,12 +117,12 @@ std::vector<std::uint8_t> sign_identity(const forge::crypto::asymmetric::private
    try {
       return key.visit([&](const auto& value) -> std::vector<std::uint8_t> {
          using value_type = std::decay_t<decltype(value)>;
-         if constexpr (std::is_same_v<value_type, forge::crypto::secp256k1::private_key_shim>) {
+         if constexpr (std::is_same_v<value_type, forge::crypto::secp256k1::private_key>) {
             return forge::crypto::secp256k1::sign_der(value, message);
-         } else if constexpr (std::is_same_v<value_type, forge::crypto::p256::private_key_shim>) {
+         } else if constexpr (std::is_same_v<value_type, forge::crypto::p256::private_key>) {
             return forge::crypto::p256::sign_der(value, message);
          } else {
-            return bytes_from_range(value.sign(message).serialize());
+            return bytes_from_range(value.sign(message));
          }
       });
    } catch (const forge::exceptions::base& error) {
@@ -147,10 +146,11 @@ bool verify_identity_signature(const public_key& key, std::span<const std::uint8
          return forge::crypto::rsa::public_key{key.data}.verify(message, {signature.begin(), signature.end()});
       case public_key::type::secp256k1:
          return forge::crypto::secp256k1::verify_der(
-             forge::crypto::secp256k1::public_key_shim{secp256k1_public_key_data(key)}, message, signature);
-      case public_key::type::ecdsa:
-         return forge::crypto::p256::verify_der(
-             crypto_public_key(key).as<forge::crypto::p256::public_key_shim>(), message, signature);
+             forge::crypto::secp256k1::public_key{secp256k1_public_key_data(key)}, message, signature);
+      case public_key::type::ecdsa: {
+         const auto parsed = std::get<forge::crypto::asymmetric::r1_public_key>(crypto_public_key(key));
+         return forge::crypto::p256::verify_der(forge::crypto::p256::public_key{parsed.data}, message, signature);
+      }
       }
    } catch (const forge::exceptions::base& error) {
       throw_identity(error.what());

@@ -8,7 +8,6 @@ configure_file(
 add_library(
    forge_core STATIC
    chrono.cpp
-   encoding.cpp
    string.cpp
    uint128.cpp
    utf8.cpp

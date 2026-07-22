@@ -1,19 +1,24 @@
 #include <boost/describe.hpp>
 #include <boost/test/unit_test.hpp>
 #include <forge/raw/serialization.hpp>
+#include <array>
 #include <chrono>
 #include <concepts>
 #include <cstdint>
+#include <deque>
 #include <flat_map>
+#include <list>
+#include <map>
 #include <optional>
 #include <set>
 #include <span>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
 
 import forge.exceptions;
-import forge.crypto.hex;
+import forge.codec.hex;
 import forge.crypto.sha256;
 import forge.raw.datastream;
 import forge.raw.exceptions;
@@ -38,6 +43,13 @@ struct A {
    bool operator==(const A&) const = default;
 };
 BOOST_DESCRIBE_STRUCT(A, (), (x, y, z))
+
+class short_write_streambuf final : public std::streambuf {
+ protected:
+   std::streamsize xsputn(const char*, std::streamsize size) override {
+      return size > 0 ? size - 1 : 0;
+   }
+};
 
 enum class described_mode : int64_t { read = 7, write = 9 };
 BOOST_DESCRIBE_ENUM(described_mode, read, write)
@@ -67,18 +79,111 @@ BOOST_DESCRIBE_STRUCT(macro_serialized_record, (), (id, name))
 FORGE_DECLARE_SERIALIZATION(macro_serialized_record)
 FORGE_IMPLEMENT_SERIALIZATION(macro_serialized_record)
 
+struct stream_serialized_aggregate {
+   std::uint32_t value = 0;
+
+   bool operator==(const stream_serialized_aggregate&) const = default;
+
+   template <typename Stream>
+      requires requires(Stream& target, const char* data) { target.write(data, std::size_t{}); }
+   friend Stream& operator<<(Stream& stream, const stream_serialized_aggregate& item) {
+      forge::raw::pack(stream, std::uint8_t{0xa5});
+      forge::raw::pack(stream, item.value);
+      return stream;
+   }
+
+   template <typename Stream>
+      requires requires(Stream& target, char* data) { target.read(data, std::size_t{}); }
+   friend Stream& operator>>(Stream& stream, stream_serialized_aggregate& item) {
+      auto marker = std::uint8_t{};
+      forge::raw::unpack(stream, marker);
+      forge::raw::detail::require(marker == 0xa5, "custom aggregate marker is invalid");
+      forge::raw::unpack(stream, item.value);
+      return stream;
+   }
+};
+
+static_assert(std::is_aggregate_v<stream_serialized_aggregate>);
+
+struct datastream_serialized_aggregate {
+   std::uint32_t value = 0;
+
+   bool operator==(const datastream_serialized_aggregate&) const = default;
+};
+
+template <typename Storage>
+forge::datastream<Storage>& operator<<(forge::datastream<Storage>& stream,
+                                       const datastream_serialized_aggregate& item) {
+   forge::raw::pack(stream, std::uint8_t{0x5a});
+   forge::raw::pack(stream, item.value);
+   return stream;
+}
+
+template <typename Storage>
+forge::datastream<Storage>& operator>>(forge::datastream<Storage>& stream, datastream_serialized_aggregate& item) {
+   auto marker = std::uint8_t{};
+   forge::raw::unpack(stream, marker);
+   forge::raw::detail::require(marker == 0x5a, "datastream aggregate marker is invalid");
+   forge::raw::unpack(stream, item.value);
+   return stream;
+}
+
+static_assert(std::is_aggregate_v<datastream_serialized_aggregate>);
+
+struct concrete_datastream_aggregate {
+   std::uint32_t value = 0;
+};
+
+forge::datastream<std::vector<std::uint8_t>>& operator<<(forge::datastream<std::vector<std::uint8_t>>& stream,
+                                                         const concrete_datastream_aggregate& item) {
+   forge::raw::pack(stream, std::uint8_t{0xc3});
+   forge::raw::pack(stream, item.value);
+   return stream;
+}
+
+forge::datastream<std::vector<std::uint8_t>>& operator>>(forge::datastream<std::vector<std::uint8_t>>& stream,
+                                                         concrete_datastream_aggregate& item) {
+   auto marker = std::uint8_t{};
+   forge::raw::unpack(stream, marker);
+   forge::raw::detail::require(marker == 0xc3, "concrete datastream aggregate marker is invalid");
+   forge::raw::unpack(stream, item.value);
+   return stream;
+}
+
+static_assert(std::is_aggregate_v<concrete_datastream_aggregate>);
+
+struct pointer_datastream_aggregate {
+   std::uint32_t value = 0;
+};
+
+forge::datastream<std::uint8_t*>& operator<<(forge::datastream<std::uint8_t*>& stream,
+                                             const pointer_datastream_aggregate& item) {
+   forge::raw::pack(stream, std::uint8_t{0xd4});
+   forge::raw::pack(stream, item.value);
+   return stream;
+}
+
+forge::datastream<const std::uint8_t*>& operator>>(forge::datastream<const std::uint8_t*>& stream,
+                                                   pointer_datastream_aggregate& item) {
+   auto marker = std::uint8_t{};
+   forge::raw::unpack(stream, marker);
+   forge::raw::detail::require(marker == 0xd4, "pointer datastream aggregate marker is invalid");
+   forge::raw::unpack(stream, item.value);
+   return stream;
+}
+
 BOOST_AUTO_TEST_SUITE(raw_test_suite)
 
 BOOST_AUTO_TEST_CASE(raw_string_golden_bytes) {
    const auto packed = forge::raw::pack(std::string("abc"));
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(packed), "03616263");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(packed), "03616263");
 }
 
 BOOST_AUTO_TEST_CASE(boost_describe_struct_preserves_fc_reflect_member_order) {
    const A value{2, 2.25f, std::string("abc")};
    const auto packed = forge::raw::pack(value);
 
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(packed), "02000000000010400103616263");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(packed), "02000000000010400103616263");
 
    const auto unpacked = forge::raw::unpack<A>(packed);
    BOOST_CHECK(value == unpacked);
@@ -87,7 +192,7 @@ BOOST_AUTO_TEST_CASE(boost_describe_struct_preserves_fc_reflect_member_order) {
 BOOST_AUTO_TEST_CASE(boost_describe_enum_uses_old_reflected_enum_int64_layout) {
    const auto packed = forge::raw::pack(described_mode::write);
 
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(packed), "0900000000000000");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(packed), "0900000000000000");
 
    const auto unpacked = forge::raw::unpack<described_mode>(packed);
    BOOST_CHECK(unpacked == described_mode::write);
@@ -100,7 +205,7 @@ BOOST_AUTO_TEST_CASE(boost_describe_derived_types_pack_base_first_then_local_mem
 
    const auto packed = forge::raw::pack(value);
 
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(packed), "341256");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(packed), "341256");
 
    const auto unpacked = forge::raw::unpack<described_child>(packed);
    BOOST_CHECK(value == unpacked);
@@ -122,7 +227,7 @@ BOOST_AUTO_TEST_CASE(serialization_macros_instantiate_raw_variant_and_digest_pac
    std::uint8_t buffer[32]{};
    forge::datastream<std::uint8_t*> write_stream(buffer, sizeof(buffer));
    forge::raw::pack(write_stream, value);
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::crypto::bytes(buffer, buffer + write_stream.tellp())),
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(std::span<const std::uint8_t>{buffer, write_stream.tellp()}),
                      "3412046e6f6465");
 
    forge::datastream<const std::uint8_t*> read_stream(buffer, write_stream.tellp());
@@ -144,25 +249,188 @@ BOOST_AUTO_TEST_CASE(raw_pack_uses_canonical_uint8_byte_container) {
    auto bytes = std::vector<std::uint8_t>{};
    forge::raw::pack(bytes, value);
 
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(bytes), forge::crypto::to_hex(packed));
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(bytes), forge::codec::hex::encode(packed));
    BOOST_CHECK(forge::raw::unpack<macro_serialized_record>(bytes) == value);
 
    const auto view = std::span<const std::uint8_t>{bytes.data(), bytes.size()};
    BOOST_CHECK(forge::raw::unpack<macro_serialized_record>(view) == value);
 }
 
+BOOST_AUTO_TEST_CASE(custom_stream_codec_precedes_aggregate_fallback) {
+   const auto value = stream_serialized_aggregate{.value = 0x12345678};
+   const auto packed = forge::raw::pack(value);
+
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(packed), "a578563412");
+   BOOST_CHECK(forge::raw::unpack<stream_serialized_aggregate>(packed) == value);
+
+   auto stream = forge::datastream<std::vector<std::uint8_t>>{};
+   stream << value;
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(stream.storage()), "a578563412");
+
+   stream.seekp(0);
+   auto decoded = stream_serialized_aggregate{};
+   stream >> decoded;
+   BOOST_CHECK(decoded == value);
+}
+
+BOOST_AUTO_TEST_CASE(datastream_specific_codec_precedes_aggregate_fallback) {
+   const auto value = datastream_serialized_aggregate{.value = 0x12345678};
+   const auto packed = forge::raw::pack(value);
+
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(packed), "5a78563412");
+   BOOST_CHECK(forge::raw::unpack<datastream_serialized_aggregate>(packed) == value);
+
+   auto stream = forge::datastream<std::vector<std::uint8_t>>{};
+   stream << value;
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(stream.storage()), "5a78563412");
+
+   stream.seekp(0);
+   auto decoded = datastream_serialized_aggregate{};
+   stream >> decoded;
+   BOOST_CHECK(decoded == value);
+}
+
+BOOST_AUTO_TEST_CASE(concrete_datastream_codec_precedes_aggregate_fallback) {
+   const auto value = concrete_datastream_aggregate{.value = 0x12345678};
+   auto stream = forge::datastream<std::vector<std::uint8_t>>{};
+
+   stream << value;
+
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(stream.storage()), "c378563412");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(value)), "c378563412");
+   BOOST_CHECK_EQUAL(forge::raw::pack_size(value), 5U);
+   BOOST_CHECK_EQUAL(forge::raw::unpack<concrete_datastream_aggregate>(forge::raw::pack(value)).value, value.value);
+}
+
+BOOST_AUTO_TEST_CASE(one_shot_pack_uses_one_stream_for_nested_aggregates) {
+   const auto value = pointer_datastream_aggregate{.value = 0x12345678};
+   auto bytes = std::array<std::uint8_t, 5>{};
+   auto pointer_stream = forge::datastream<std::uint8_t*>{bytes.data(), bytes.size()};
+
+   pointer_stream << value;
+
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(bytes), "d478563412");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(value)), "78563412");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(std::vector{value})), "0178563412");
+   BOOST_CHECK_EQUAL(forge::raw::unpack<pointer_datastream_aggregate>(forge::raw::pack(value)).value, value.value);
+
+   auto pointer_reader = forge::datastream<const std::uint8_t*>{bytes.data(), bytes.size()};
+   auto pointer_decoded = pointer_datastream_aggregate{};
+   pointer_reader >> pointer_decoded;
+   BOOST_CHECK_EQUAL(pointer_decoded.value, value.value);
+}
+
+BOOST_AUTO_TEST_CASE(uint8_vector_datastream_reads_varint_prefixed_values) {
+   auto stream = forge::datastream<std::vector<std::uint8_t>>{std::vector<std::uint8_t>{
+       0x03, static_cast<std::uint8_t>('r'), static_cast<std::uint8_t>('a'), static_cast<std::uint8_t>('w')}};
+   auto value = std::string{};
+
+   forge::raw::unpack(stream, value);
+
+   BOOST_CHECK_EQUAL(value, "raw");
+   BOOST_CHECK_EQUAL(stream.remaining(), 0U);
+}
+
+BOOST_AUTO_TEST_CASE(deque_and_streambuf_datastreams_read_varint_prefixed_values) {
+   auto uint8_stream = forge::datastream<std::deque<std::uint8_t>>{std::deque<std::uint8_t>{
+       0x03, static_cast<std::uint8_t>('r'), static_cast<std::uint8_t>('a'), static_cast<std::uint8_t>('w')}};
+   auto uint8_value = std::string{};
+   forge::raw::unpack(uint8_stream, uint8_value);
+   BOOST_CHECK_EQUAL(uint8_value, "raw");
+   BOOST_CHECK_EQUAL(uint8_stream.remaining(), 0U);
+
+   auto char_stream =
+       forge::datastream<std::deque<char>>{std::deque<char>{char{0x03}, char{'r'}, char{'a'}, char{'w'}}};
+   auto char_value = std::string{};
+   forge::raw::unpack(char_stream, char_value);
+   BOOST_CHECK_EQUAL(char_value, "raw");
+   BOOST_CHECK_EQUAL(char_stream.remaining(), 0U);
+
+   auto streambuf = forge::datastream<std::stringbuf>{std::string{"\x03raw", 4}, std::ios_base::in};
+   auto streambuf_value = std::string{};
+   forge::raw::unpack(streambuf, streambuf_value);
+   BOOST_CHECK_EQUAL(streambuf_value, "raw");
+   BOOST_CHECK_EQUAL(streambuf.remaining(), 0U);
+}
+
+BOOST_AUTO_TEST_CASE(deque_and_streambuf_datastreams_read_signed_varints) {
+   auto uint8_stream = forge::datastream<std::deque<std::uint8_t>>{std::deque<std::uint8_t>{0x81, 0x01}};
+   auto uint8_value = forge::signed_int{};
+   forge::raw::unpack(uint8_stream, uint8_value);
+   BOOST_CHECK_EQUAL(uint8_value.value, -65);
+   BOOST_CHECK_EQUAL(uint8_stream.remaining(), 0U);
+
+   auto char_stream = forge::datastream<std::deque<char>>{std::deque<char>{static_cast<char>(0x81), char{0x01}}};
+   auto char_value = forge::signed_int{};
+   forge::raw::unpack(char_stream, char_value);
+   BOOST_CHECK_EQUAL(char_value.value, -65);
+   BOOST_CHECK_EQUAL(char_stream.remaining(), 0U);
+
+   auto streambuf = forge::datastream<std::stringbuf>{std::string{"\x81\x01", 2}, std::ios_base::in};
+   auto streambuf_value = forge::signed_int{};
+   forge::raw::unpack(streambuf, streambuf_value);
+   BOOST_CHECK_EQUAL(streambuf_value.value, -65);
+   BOOST_CHECK_EQUAL(streambuf.remaining(), 0U);
+}
+
+BOOST_AUTO_TEST_CASE(signed_varint_rejects_uint32_overflow) {
+   auto stream = forge::datastream<std::stringbuf>{std::string{"\xff\xff\xff\xff\x10", 5}, std::ios_base::in};
+   auto value = forge::signed_int{};
+   BOOST_CHECK_EXCEPTION(forge::raw::unpack(stream, value), forge::raw::exceptions::codec_error,
+                         [](const forge::raw::exceptions::codec_error& error) {
+                            return error.message() == "raw signed varint overflows int32";
+                         });
+}
+
+BOOST_AUTO_TEST_CASE(streambuf_datastream_rejects_truncated_reads) {
+   auto truncated_value = forge::datastream<std::stringbuf>{std::string{"\x03ra", 3}, std::ios_base::in};
+   auto value = std::string{};
+   BOOST_CHECK_THROW(forge::raw::unpack(truncated_value, value), forge::raw::exceptions::range_error);
+
+   auto truncated_varint = forge::datastream<std::stringbuf>{std::string{"\x80", 1}, std::ios_base::in};
+   auto varint = forge::unsigned_int{};
+   BOOST_CHECK_THROW(forge::raw::unpack(truncated_varint, varint), forge::raw::exceptions::range_error);
+
+   auto truncated_write = forge::datastream<short_write_streambuf>{};
+   BOOST_CHECK_THROW(truncated_write.write("raw", 3U), forge::raw::exceptions::range_error);
+}
+
 BOOST_AUTO_TEST_CASE(char_and_uint8_values_preserve_spring_wire_bits) {
    const auto chars = std::vector<char>{char{0x00}, char{0x7f}, static_cast<char>(0x80), static_cast<char>(0xff)};
    const auto octets = std::vector<std::uint8_t>{0x00, 0x7f, 0x80, 0xff};
    BOOST_CHECK(forge::raw::pack(chars) == forge::raw::pack(octets));
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::raw::pack(chars)), "04007f80ff");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(chars)), "04007f80ff");
 
    const auto char_wire = forge::raw::pack(static_cast<char>(0xff));
    const auto octet_wire = forge::raw::pack(std::uint8_t{0xff});
    BOOST_CHECK(char_wire == octet_wire);
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(char_wire), "ff");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(char_wire), "ff");
    BOOST_CHECK_EQUAL(static_cast<unsigned char>(forge::raw::unpack<char>(char_wire)), 0xffU);
    BOOST_CHECK_EQUAL(forge::raw::unpack<std::uint8_t>(octet_wire), 0xffU);
+}
+
+BOOST_AUTO_TEST_CASE(int128_values_preserve_spring_wire_bits_for_all_streams) {
+   const auto unsigned_value = (static_cast<unsigned __int128>(0x0102030405060708ULL) << 64U) |
+                               static_cast<unsigned __int128>(0x1112131415161718ULL);
+   const auto unsigned_wire = forge::raw::pack(unsigned_value);
+
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(unsigned_wire), "18171615141312110807060504030201");
+   BOOST_CHECK(forge::raw::unpack<unsigned __int128>(unsigned_wire) == unsigned_value);
+
+   const auto signed_value = static_cast<__int128>(-2);
+   const auto signed_wire = forge::raw::pack(signed_value);
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(signed_wire), "feffffffffffffffffffffffffffffff");
+   BOOST_CHECK(forge::raw::unpack<__int128>(signed_wire) == signed_value);
+
+   auto digest_stream = forge::crypto::sha256::encoder{};
+   forge::raw::pack(digest_stream, unsigned_value);
+   BOOST_CHECK_EQUAL(digest_stream.result().str(),
+                     forge::crypto::sha256::hash(std::span<const std::uint8_t>{unsigned_wire}).str());
+}
+
+BOOST_AUTO_TEST_CASE(std_array_pointer_elements_use_element_codec) {
+   const auto values = std::array<const char*, 2>{"a", "bc"};
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(values)), "0161026263");
 }
 
 BOOST_AUTO_TEST_CASE(std_flat_map_preserves_spring_sorted_map_wire_layout) {
@@ -171,26 +439,45 @@ BOOST_AUTO_TEST_CASE(std_flat_map_preserves_spring_sorted_map_wire_layout) {
    value.emplace(1U, 11U);
 
    const auto packed = forge::raw::pack(value);
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(packed), "02010000000b000000020000000c000000");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(packed), "02010000000b000000020000000c000000");
    BOOST_CHECK((forge::raw::unpack<std::flat_map<std::uint32_t, std::uint32_t>>(packed) == value));
+}
+
+BOOST_AUTO_TEST_CASE(target_neutral_containers_preserve_spring_wire_layout) {
+   const auto map = std::map<std::uint32_t, std::uint32_t>{{2U, 12U}, {1U, 11U}};
+   const auto set = std::set<std::uint32_t>{1U, 2U};
+   const auto deque = std::deque<std::uint32_t>{1U, 2U};
+   const auto list = std::list<std::uint32_t>{1U, 2U};
+   const auto expected_map = std::string{"02010000000b000000020000000c000000"};
+   const auto expected_sequence = std::string{"020100000002000000"};
+
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(map)), expected_map);
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(set)), expected_sequence);
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(deque)), expected_sequence);
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(list)), expected_sequence);
+   BOOST_CHECK((forge::raw::unpack<decltype(map)>(forge::raw::pack(map)) == map));
+   BOOST_CHECK((forge::raw::unpack<decltype(set)>(forge::raw::pack(set)) == set));
+   BOOST_CHECK((forge::raw::unpack<decltype(deque)>(forge::raw::pack(deque)) == deque));
+   BOOST_CHECK((forge::raw::unpack<decltype(list)>(forge::raw::pack(list)) == list));
 }
 
 BOOST_AUTO_TEST_CASE(unknown_variant_wire_type_throws_codec_error) {
    const std::vector<std::uint8_t> invalid_variant{0xff};
    BOOST_CHECK_EXCEPTION((void)forge::raw::unpack<forge::variant>(invalid_variant), forge::raw::exceptions::codec_error,
                          [](const forge::raw::exceptions::codec_error& error) {
-      return error.code().category().name() == std::string_view{"forge.raw"};
-   });
+                            return error.code().category().name() == std::string_view{"forge.raw"};
+                         });
 }
 
 BOOST_AUTO_TEST_CASE(std_chrono_preserves_old_fc_raw_layout) {
    using sys_time_us = std::chrono::sys_time<std::chrono::microseconds>;
 
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::raw::pack(sys_time_us{})), "0000000000000000");
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::raw::pack(sys_time_us{std::chrono::seconds{1}})), "40420f0000000000");
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::raw::pack(std::chrono::sys_seconds{std::chrono::seconds{1}})),
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(sys_time_us{})), "0000000000000000");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(sys_time_us{std::chrono::seconds{1}})),
+                     "40420f0000000000");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(std::chrono::sys_seconds{std::chrono::seconds{1}})),
                      "01000000");
-   BOOST_CHECK_EQUAL(forge::crypto::to_hex(forge::raw::pack(std::chrono::microseconds{-1})), "ffffffffffffffff");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(std::chrono::microseconds{-1})), "ffffffffffffffff");
 
    BOOST_CHECK(forge::raw::unpack<sys_time_us>(forge::raw::pack(sys_time_us{std::chrono::seconds{1}})) ==
                sys_time_us{std::chrono::seconds{1}});

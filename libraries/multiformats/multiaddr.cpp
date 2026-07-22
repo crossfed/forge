@@ -5,6 +5,7 @@ module;
 #include <arpa/inet.h>
 #include <charconv>
 #include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <limits>
 #include <optional>
@@ -18,7 +19,7 @@ module forge.multiformats.multiaddr;
 
 import forge.multiformats.exceptions;
 
-import forge.crypto.base58;
+import forge.codec.base58;
 import forge.multiformats.varint;
 
 namespace forge::multiformats {
@@ -118,34 +119,34 @@ void append_big_endian_port(bytes& out, std::uint16_t port) {
 
 [[nodiscard]] protocol_code from_multicodec(multicodec_code code) {
    switch (code) {
-      case multicodec_code::ip4:
-         return protocol_code::ip4;
-      case multicodec_code::tcp:
-         return protocol_code::tcp;
-      case multicodec_code::ip6:
-         return protocol_code::ip6;
-      case multicodec_code::dns:
-         return protocol_code::dns;
-      case multicodec_code::dns4:
-         return protocol_code::dns4;
-      case multicodec_code::dns6:
-         return protocol_code::dns6;
-      case multicodec_code::udp:
-         return protocol_code::udp;
-      case multicodec_code::p2p_circuit:
-         return protocol_code::p2p_circuit;
-      case multicodec_code::p2p:
-         return protocol_code::p2p;
-      case multicodec_code::quic:
-         return protocol_code::quic;
-      case multicodec_code::quic_v1:
-         return protocol_code::quic_v1;
-      case multicodec_code::ws:
-         return protocol_code::ws;
-      case multicodec_code::wss:
-         return protocol_code::wss;
-      default:
-         throw exceptions::invalid_format{"unsupported multiaddr protocol"};
+   case multicodec_code::ip4:
+      return protocol_code::ip4;
+   case multicodec_code::tcp:
+      return protocol_code::tcp;
+   case multicodec_code::ip6:
+      return protocol_code::ip6;
+   case multicodec_code::dns:
+      return protocol_code::dns;
+   case multicodec_code::dns4:
+      return protocol_code::dns4;
+   case multicodec_code::dns6:
+      return protocol_code::dns6;
+   case multicodec_code::udp:
+      return protocol_code::udp;
+   case multicodec_code::p2p_circuit:
+      return protocol_code::p2p_circuit;
+   case multicodec_code::p2p:
+      return protocol_code::p2p;
+   case multicodec_code::quic:
+      return protocol_code::quic;
+   case multicodec_code::quic_v1:
+      return protocol_code::quic_v1;
+   case multicodec_code::ws:
+      return protocol_code::ws;
+   case multicodec_code::wss:
+      return protocol_code::wss;
+   default:
+      throw exceptions::invalid_format{"unsupported multiaddr protocol"};
    }
 }
 
@@ -159,56 +160,56 @@ void append_big_endian_port(bytes& out, std::uint16_t port) {
 
 void validate_component(const multiaddr_component& component) {
    switch (component.code) {
-      case protocol_code::ip4:
-         if (component.value.empty()) {
-            throw exceptions::invalid_format{"multiaddr protocol is missing a value"};
-         }
-         (void)parse_ip(component.value, AF_INET, 4);
-         break;
-      case protocol_code::ip6:
-         if (component.value.empty()) {
-            throw exceptions::invalid_format{"multiaddr protocol is missing a value"};
-         }
-         (void)parse_ip(component.value, AF_INET6, 16);
-         break;
-      case protocol_code::tcp:
-      case protocol_code::udp:
-         if (component.value.empty()) {
-            throw exceptions::invalid_format{"multiaddr protocol is missing a value"};
-         }
-         (void)parse_port(component.value);
-         break;
-      case protocol_code::dns:
-      case protocol_code::dns4:
-      case protocol_code::dns6:
-         if (component.value.empty()) {
-            throw exceptions::invalid_format{"multiaddr protocol is missing a value"};
-         }
-         break;
-      case protocol_code::p2p:
-         if (component.value.empty()) {
-            throw exceptions::invalid_format{"multiaddr protocol is missing a value"};
-         }
-         try {
-            const auto bytes = forge::crypto::base58_decode(component.value);
-            if (bytes.empty()) {
-               throw exceptions::invalid_format{"multiaddr p2p component is invalid"};
-            }
-         } catch (const forge::exceptions::base&) {
+   case protocol_code::ip4:
+      if (component.value.empty()) {
+         throw exceptions::invalid_format{"multiaddr protocol is missing a value"};
+      }
+      (void)parse_ip(component.value, AF_INET, 4);
+      break;
+   case protocol_code::ip6:
+      if (component.value.empty()) {
+         throw exceptions::invalid_format{"multiaddr protocol is missing a value"};
+      }
+      (void)parse_ip(component.value, AF_INET6, 16);
+      break;
+   case protocol_code::tcp:
+   case protocol_code::udp:
+      if (component.value.empty()) {
+         throw exceptions::invalid_format{"multiaddr protocol is missing a value"};
+      }
+      (void)parse_port(component.value);
+      break;
+   case protocol_code::dns:
+   case protocol_code::dns4:
+   case protocol_code::dns6:
+      if (component.value.empty()) {
+         throw exceptions::invalid_format{"multiaddr protocol is missing a value"};
+      }
+      break;
+   case protocol_code::p2p:
+      if (component.value.empty()) {
+         throw exceptions::invalid_format{"multiaddr protocol is missing a value"};
+      }
+      try {
+         const auto bytes = forge::codec::base58::decode(component.value);
+         if (bytes.empty()) {
             throw exceptions::invalid_format{"multiaddr p2p component is invalid"};
          }
-         break;
-      case protocol_code::p2p_circuit:
-      case protocol_code::quic:
-      case protocol_code::quic_v1:
-      case protocol_code::ws:
-      case protocol_code::wss:
-         if (!component.value.empty()) {
-            throw exceptions::invalid_format{"multiaddr protocol must not have a value"};
-         }
-         break;
-      default:
-         throw exceptions::invalid_format{"unsupported multiaddr protocol"};
+      } catch (const forge::exceptions::base&) {
+         throw exceptions::invalid_format{"multiaddr p2p component is invalid"};
+      }
+      break;
+   case protocol_code::p2p_circuit:
+   case protocol_code::quic:
+   case protocol_code::quic_v1:
+   case protocol_code::ws:
+   case protocol_code::wss:
+      if (!component.value.empty()) {
+         throw exceptions::invalid_format{"multiaddr protocol must not have a value"};
+      }
+      break;
+   default:
+      throw exceptions::invalid_format{"unsupported multiaddr protocol"};
    }
 }
 
@@ -221,28 +222,28 @@ multiaddr multiaddr::parse(std::string_view value) {
    for (std::size_t i = 0; i < parts.size(); ++i) {
       auto code = parse_multiaddr_protocol(parts[i]);
       switch (code) {
-         case protocol_code::ip4:
-         case protocol_code::ip6:
-         case protocol_code::dns:
-         case protocol_code::dns4:
-         case protocol_code::dns6:
-         case protocol_code::tcp:
-         case protocol_code::udp:
-         case protocol_code::p2p:
-            if (++i >= parts.size()) {
-               throw exceptions::invalid_format{"multiaddr protocol is missing a value"};
-            }
-            result.push({.code = code, .value = std::string{parts[i]}});
-            break;
-         case protocol_code::p2p_circuit:
-         case protocol_code::quic:
-         case protocol_code::quic_v1:
-         case protocol_code::ws:
-         case protocol_code::wss:
-            result.push({.code = code, .value = {}});
-            break;
-         default:
-            throw exceptions::invalid_format{"unsupported address protocol"};
+      case protocol_code::ip4:
+      case protocol_code::ip6:
+      case protocol_code::dns:
+      case protocol_code::dns4:
+      case protocol_code::dns6:
+      case protocol_code::tcp:
+      case protocol_code::udp:
+      case protocol_code::p2p:
+         if (++i >= parts.size()) {
+            throw exceptions::invalid_format{"multiaddr protocol is missing a value"};
+         }
+         result.push({.code = code, .value = std::string{parts[i]}});
+         break;
+      case protocol_code::p2p_circuit:
+      case protocol_code::quic:
+      case protocol_code::quic_v1:
+      case protocol_code::ws:
+      case protocol_code::wss:
+         result.push({.code = code, .value = {}});
+         break;
+      default:
+         throw exceptions::invalid_format{"unsupported address protocol"};
       }
    }
 
@@ -258,52 +259,52 @@ multiaddr multiaddr::from_bytes(std::span<const std::uint8_t> data) {
       offset += consumed;
 
       switch (code) {
-         case protocol_code::ip4: {
-            if (data.size() - offset < 4) {
-               throw exceptions::invalid_format{"multiaddr ip4 component is truncated"};
-            }
-            result.push({.code = code, .value = format_ip(data.subspan(offset, 4), AF_INET)});
-            offset += 4;
-            break;
+      case protocol_code::ip4: {
+         if (data.size() - offset < 4) {
+            throw exceptions::invalid_format{"multiaddr ip4 component is truncated"};
          }
-         case protocol_code::ip6: {
-            if (data.size() - offset < 16) {
-               throw exceptions::invalid_format{"multiaddr ip6 component is truncated"};
-            }
-            result.push({.code = code, .value = format_ip(data.subspan(offset, 16), AF_INET6)});
-            offset += 16;
-            break;
+         result.push({.code = code, .value = format_ip(data.subspan(offset, 4), AF_INET)});
+         offset += 4;
+         break;
+      }
+      case protocol_code::ip6: {
+         if (data.size() - offset < 16) {
+            throw exceptions::invalid_format{"multiaddr ip6 component is truncated"};
          }
-         case protocol_code::tcp:
-         case protocol_code::udp:
-            result.push({.code = code, .value = std::to_string(read_big_endian_port(data, offset))});
-            break;
-         case protocol_code::dns:
-         case protocol_code::dns4:
-         case protocol_code::dns6:
-            result.push({.code = code, .value = read_prefixed_string(data, offset)});
-            break;
-         case protocol_code::p2p: {
-            const auto length = varint_decode(data.subspan(offset));
-            offset += length.size;
-            if (length.value > data.size() - offset) {
-               throw exceptions::invalid_format{"multiaddr p2p component length exceeds available bytes"};
-            }
-            auto peer_bytes = bytes{data.begin() + static_cast<std::ptrdiff_t>(offset),
-                                    data.begin() + static_cast<std::ptrdiff_t>(offset + length.value)};
-            result.push({.code = code, .value = forge::crypto::base58_encode(peer_bytes)});
-            offset += static_cast<std::size_t>(length.value);
-            break;
+         result.push({.code = code, .value = format_ip(data.subspan(offset, 16), AF_INET6)});
+         offset += 16;
+         break;
+      }
+      case protocol_code::tcp:
+      case protocol_code::udp:
+         result.push({.code = code, .value = std::to_string(read_big_endian_port(data, offset))});
+         break;
+      case protocol_code::dns:
+      case protocol_code::dns4:
+      case protocol_code::dns6:
+         result.push({.code = code, .value = read_prefixed_string(data, offset)});
+         break;
+      case protocol_code::p2p: {
+         const auto length = varint_decode(data.subspan(offset));
+         offset += length.size;
+         if (length.value > data.size() - offset) {
+            throw exceptions::invalid_format{"multiaddr p2p component length exceeds available bytes"};
          }
-         case protocol_code::p2p_circuit:
-         case protocol_code::quic:
-         case protocol_code::quic_v1:
-         case protocol_code::ws:
-         case protocol_code::wss:
-            result.push({.code = code, .value = {}});
-            break;
-         default:
-            throw exceptions::invalid_format{"unsupported address protocol"};
+         auto peer_bytes = bytes{data.begin() + static_cast<std::ptrdiff_t>(offset),
+                                 data.begin() + static_cast<std::ptrdiff_t>(offset + length.value)};
+         result.push({.code = code, .value = forge::codec::base58::encode(peer_bytes)});
+         offset += static_cast<std::size_t>(length.value);
+         break;
+      }
+      case protocol_code::p2p_circuit:
+      case protocol_code::quic:
+      case protocol_code::quic_v1:
+      case protocol_code::ws:
+      case protocol_code::wss:
+         result.push({.code = code, .value = {}});
+         break;
+      default:
+         throw exceptions::invalid_format{"unsupported address protocol"};
       }
    }
 
@@ -328,40 +329,40 @@ bytes multiaddr::to_bytes() const {
    for (const auto& component : components_) {
       append_var(out, code_value(component.code));
       switch (component.code) {
-         case protocol_code::ip4: {
-            auto parsed = parse_ip(component.value, AF_INET, 4);
-            out.insert(out.end(), parsed.begin(), parsed.end());
-            break;
-         }
-         case protocol_code::ip6: {
-            auto parsed = parse_ip(component.value, AF_INET6, 16);
-            out.insert(out.end(), parsed.begin(), parsed.end());
-            break;
-         }
-         case protocol_code::tcp:
-         case protocol_code::udp:
-            append_big_endian_port(out, parse_port(component.value));
-            break;
-         case protocol_code::dns:
-         case protocol_code::dns4:
-         case protocol_code::dns6: {
-            auto payload = bytes{component.value.begin(), component.value.end()};
-            append_prefixed(out, payload);
-            break;
-         }
-         case protocol_code::p2p: {
-            auto payload = forge::crypto::base58_decode(component.value);
-            append_prefixed(out, payload);
-            break;
-         }
-         case protocol_code::p2p_circuit:
-         case protocol_code::quic:
-         case protocol_code::quic_v1:
-         case protocol_code::ws:
-         case protocol_code::wss:
-            break;
-         default:
-            throw exceptions::invalid_format{"unsupported address protocol"};
+      case protocol_code::ip4: {
+         auto parsed = parse_ip(component.value, AF_INET, 4);
+         out.insert(out.end(), parsed.begin(), parsed.end());
+         break;
+      }
+      case protocol_code::ip6: {
+         auto parsed = parse_ip(component.value, AF_INET6, 16);
+         out.insert(out.end(), parsed.begin(), parsed.end());
+         break;
+      }
+      case protocol_code::tcp:
+      case protocol_code::udp:
+         append_big_endian_port(out, parse_port(component.value));
+         break;
+      case protocol_code::dns:
+      case protocol_code::dns4:
+      case protocol_code::dns6: {
+         auto payload = bytes{component.value.begin(), component.value.end()};
+         append_prefixed(out, payload);
+         break;
+      }
+      case protocol_code::p2p: {
+         auto payload = forge::codec::base58::decode(component.value);
+         append_prefixed(out, payload);
+         break;
+      }
+      case protocol_code::p2p_circuit:
+      case protocol_code::quic:
+      case protocol_code::quic_v1:
+      case protocol_code::ws:
+      case protocol_code::wss:
+         break;
+      default:
+         throw exceptions::invalid_format{"unsupported address protocol"};
       }
    }
    return out;
@@ -385,7 +386,8 @@ multiaddr multiaddr::decapsulate(const multiaddr& value) const {
    auto found = std::optional<std::size_t>{};
    const auto needle_size = value.components_.size();
    for (std::size_t offset = 0; offset + needle_size <= components_.size(); ++offset) {
-      if (std::equal(value.components_.begin(), value.components_.end(), components_.begin() + static_cast<std::ptrdiff_t>(offset))) {
+      if (std::equal(value.components_.begin(), value.components_.end(),
+                     components_.begin() + static_cast<std::ptrdiff_t>(offset))) {
          found = offset;
       }
    }

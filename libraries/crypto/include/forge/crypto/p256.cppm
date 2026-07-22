@@ -2,6 +2,7 @@ module;
 #include <forge/exceptions/macros.hpp>
 #include <array>
 #include <boost/describe.hpp>
+#include <cstdint>
 #include <memory>
 #include <span>
 #include <utility>
@@ -95,6 +96,8 @@ class public_key {
  */
 class private_key {
  public:
+   using data_type = private_key_secret;
+
    private_key();
    private_key(private_key&& pk);
    private_key(const private_key& pk);
@@ -111,7 +114,8 @@ class private_key {
     *  an initial seed.   A public_key created from the seed can be multiplied by the offset to calculate
     *  the new public key without having to know the private key.
     */
-   static private_key generate_from_seed(const forge::crypto::sha256& seed, const forge::crypto::sha256& offset = forge::crypto::sha256());
+   static private_key generate_from_seed(const forge::crypto::sha256& seed,
+                                         const forge::crypto::sha256& offset = forge::crypto::sha256());
 
    private_key_secret get_secret() const; // get the private key secret
 
@@ -148,130 +152,17 @@ class private_key {
    std::unique_ptr<detail::private_key_impl> my;
 };
 
-/**
- * Shims
- */
-struct signature_shim;
-
-struct public_key_shim {
-   using data_type = public_key_data;
-   using signature_type = signature_shim;
-
-   public_key_shim() = default;
-   explicit public_key_shim(const data_type& data) : _data(data) {}
-   explicit public_key_shim(data_type&& data) : _data(std::move(data)) {}
-
-   [[nodiscard]] const data_type& serialize() const {
-      return _data;
-   }
-
-   template <typename Stream> friend Stream& operator<<(Stream& s, const public_key_shim& value) {
-      forge::raw::pack(s, value._data);
-      return s;
-   }
-
-   template <typename Stream> friend Stream& operator>>(Stream& s, public_key_shim& value) {
-      forge::raw::unpack(s, value._data);
-      return s;
-   }
-
-   bool valid() const {
-      return public_key(_data).valid();
-   }
-
-   data_type _data{};
-};
-
-struct signature_shim {
-   using data_type = compact_signature;
-   using public_key_type = public_key_shim;
-
-   signature_shim() = default;
-   explicit signature_shim(const data_type& data) : _data(data) {}
-   explicit signature_shim(data_type&& data) : _data(std::move(data)) {}
-
-   [[nodiscard]] const data_type& serialize() const {
-      return _data;
-   }
-
-   template <typename Stream> friend Stream& operator<<(Stream& s, const signature_shim& value) {
-      forge::raw::pack(s, value._data);
-      return s;
-   }
-
-   template <typename Stream> friend Stream& operator>>(Stream& s, signature_shim& value) {
-      forge::raw::unpack(s, value._data);
-      return s;
-   }
-
-   public_key_type recover(const sha256& digest, bool check_canonical) const {
-      return public_key_type(public_key(_data, digest, check_canonical).serialize());
-   }
-
-   data_type _data{};
-};
-
-struct private_key_shim {
-   using data_type = private_key_secret;
-   using signature_type = signature_shim;
-   using public_key_type = public_key_shim;
-
-   private_key_shim() = default;
-   explicit private_key_shim(const data_type& data) : _data(data) {}
-   explicit private_key_shim(data_type&& data) : _data(std::move(data)) {}
-
-   [[nodiscard]] const data_type& serialize() const {
-      return _data;
-   }
-
-   template <typename Stream> friend Stream& operator<<(Stream& s, const private_key_shim& value) {
-      forge::raw::pack(s, value._data);
-      return s;
-   }
-
-   template <typename Stream> friend Stream& operator>>(Stream& s, private_key_shim& value) {
-      forge::raw::unpack(s, value._data);
-      return s;
-   }
-
-   signature_type sign(const sha256& digest, bool require_canonical = true) const {
-      return signature_type(private_key::regenerate(_data).sign_compact(digest));
-   }
-
-   signature_type sign(std::span<const std::uint8_t> message) const {
-      return sign(sha256::hash(message), true);
-   }
-
-   public_key_type get_public_key() const {
-      return public_key_type(private_key::regenerate(_data).get_public_key().serialize());
-   }
-
-   sha512 get_shared_secret(const public_key_type& pub_key) const {
-      return private_key::regenerate(_data).get_shared_secret(public_key(pub_key.serialize()));
-   }
-
-   static private_key_shim generate() {
-      return private_key_shim(private_key::generate().get_secret());
-   }
-
-   data_type _data{};
-};
-
-inline bool verify_digest(const public_key_shim& key, const sha256& digest, const signature_shim& signature,
+inline bool verify_digest(const public_key& key, const sha256& digest, const compact_signature& signature,
                           bool check_canonical = true) {
-   return public_key(signature.serialize(), digest, check_canonical).serialize() == key.serialize();
+   return public_key(signature, digest, check_canonical).serialize() == key.serialize();
 }
 
-inline bool verify_message(const public_key_shim& key, std::span<const std::uint8_t> message,
-                           const signature_shim& signature) {
+inline bool verify_message(const public_key& key, std::span<const std::uint8_t> message,
+                           const compact_signature& signature) {
    return verify_digest(key, sha256::hash(message), signature, true);
 }
 
-[[nodiscard]] der_signature sign_der(const private_key_shim& key, std::span<const std::uint8_t> message);
-[[nodiscard]] bool verify_der(const public_key_shim& key, std::span<const std::uint8_t> message,
+[[nodiscard]] der_signature sign_der(const private_key& key, std::span<const std::uint8_t> message);
+[[nodiscard]] bool verify_der(const public_key& key, std::span<const std::uint8_t> message,
                               std::span<const std::uint8_t> signature);
-
-BOOST_DESCRIBE_STRUCT(public_key_shim, (), (_data))
-BOOST_DESCRIBE_STRUCT(signature_shim, (), (_data))
-BOOST_DESCRIBE_STRUCT(private_key_shim, (), (_data))
 } // namespace forge::crypto::p256

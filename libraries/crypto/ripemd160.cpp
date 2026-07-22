@@ -11,7 +11,7 @@ module;
 module forge.crypto.ripemd160;
 
 import forge.core.utility;
-import forge.crypto.hex;
+import forge.codec.hex;
 import forge.crypto.sha256;
 import forge.crypto.sha512;
 import forge.exceptions;
@@ -29,24 +29,19 @@ import forge.variant.described;
 
 namespace forge::crypto {
 
-ripemd160::ripemd160() {
-   memset(_hash, 0, sizeof(_hash));
-}
 ripemd160::ripemd160(const std::string& hex_str) {
-   auto bytes_written = forge::crypto::from_hex(hex_str, (char*)_hash, sizeof(_hash));
+   auto bytes_written = forge::codec::hex::decode(
+       hex_str, std::span<std::uint8_t>{reinterpret_cast<std::uint8_t*>(_hash), sizeof(_hash)});
    if (bytes_written < sizeof(_hash))
       memset((char*)_hash + bytes_written, 0, (sizeof(_hash) - bytes_written));
 }
 
 std::string ripemd160::str() const {
-   return forge::crypto::to_hex((char*)_hash, sizeof(_hash));
+   return forge::codec::hex::encode(
+       std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(_hash), sizeof(_hash)});
 }
 ripemd160::operator std::string() const {
    return str();
-}
-
-char* ripemd160::data() const {
-   return (char*)&_hash[0];
 }
 
 struct ripemd160::encoder::impl {
@@ -99,22 +94,6 @@ ripemd160 operator^(const ripemd160& h1, const ripemd160& h2) {
    result._hash[4] = h1._hash[4] ^ h2._hash[4];
    return result;
 }
-bool operator>=(const ripemd160& h1, const ripemd160& h2) {
-   return memcmp(h1._hash, h2._hash, sizeof(h1._hash)) >= 0;
-}
-bool operator>(const ripemd160& h1, const ripemd160& h2) {
-   return memcmp(h1._hash, h2._hash, sizeof(h1._hash)) > 0;
-}
-bool operator<(const ripemd160& h1, const ripemd160& h2) {
-   return memcmp(h1._hash, h2._hash, sizeof(h1._hash)) < 0;
-}
-bool operator!=(const ripemd160& h1, const ripemd160& h2) {
-   return memcmp(h1._hash, h2._hash, sizeof(h1._hash)) != 0;
-}
-bool operator==(const ripemd160& h1, const ripemd160& h2) {
-   return memcmp(h1._hash, h2._hash, sizeof(h1._hash)) == 0;
-}
-
 void to_variant(const ripemd160& bi, variant& v) {
    v = std::vector<char>((const char*)&bi, ((const char*)&bi) + sizeof(bi));
 }

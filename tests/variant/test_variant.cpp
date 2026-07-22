@@ -15,7 +15,7 @@ import forge.variant.format;
 import forge.variant.described;
 import forge.core.chrono;
 import forge.exceptions;
-import forge.crypto.base64;
+import forge.codec.base64;
 using namespace forge;
 using std::string;
 
@@ -176,10 +176,10 @@ BOOST_AUTO_TEST_CASE(variant_format_string_limited) {
       mu("blob", a_blob);
       mu("var", a_variant);
       const string result = forge::format_string(format_str, mu, true);
-      const string target_result =
-          format_prefix + a_short_list + " " + "{" + "\"b\":\"" + b_short_list + "\",\"c\":\"" + c_short_list + "\"}" +
-          " " + "[\"" + d_short_list + "\",\"" + e_short_list + "\"]" + " " +
-          forge::crypto::base64_encode(a_blob.data.data(), a_blob.data.size()) + " " + g_short_list;
+      const string target_result = format_prefix + a_short_list + " " + "{" + "\"b\":\"" + b_short_list +
+                                   "\",\"c\":\"" + c_short_list + "\"}" + " " + "[\"" + d_short_list + "\",\"" +
+                                   e_short_list + "\"]" + " " + forge::codec::base64::encode(a_blob.data) + " " +
+                                   g_short_list;
 
       BOOST_CHECK_EQUAL(result, target_result);
       BOOST_CHECK_LT(result.size(), 1024 + 3 * mu.size());
@@ -262,6 +262,17 @@ BOOST_AUTO_TEST_CASE(variant_blob_backwards_compatibility) {
    }
 }
 
+BOOST_AUTO_TEST_CASE(variant_blob_from_variant_preserves_extra_padding_compatibility) {
+   const auto check_legacy_value = [](std::string_view encoded, std::string_view expected) {
+      auto decoded = blob{};
+      forge::from_variant(forge::variant{std::string{encoded}}, decoded);
+      BOOST_TEST(std::string(decoded.data.begin(), decoded.data.end()) == expected);
+   };
+
+   check_legacy_value("YWFhYWFhYWFhYWFhYWFhYWE==", "aaaaaaaaaaaaaaaaa");
+   check_legacy_value("YWJj=", "abc");
+}
+
 BOOST_AUTO_TEST_CASE(variant_blob_rejects_malformed_base64_trailing_garbage) {
    const auto malformed = std::string{"YQ==evil"};
    const auto value = forge::variant{malformed};
@@ -270,7 +281,7 @@ BOOST_AUTO_TEST_CASE(variant_blob_rejects_malformed_base64_trailing_garbage) {
    BOOST_TEST(std::string(blob_value.begin(), blob_value.end()) == malformed);
 
    auto decoded = forge::blob{};
-   BOOST_CHECK_THROW(forge::from_variant(value, decoded), std::invalid_argument);
+   BOOST_CHECK_THROW(forge::from_variant(value, decoded), forge::codec::base64::exceptions::invalid_input);
 }
 
 BOOST_AUTO_TEST_CASE(array) {

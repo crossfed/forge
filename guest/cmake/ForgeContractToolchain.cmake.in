@@ -1,0 +1,30 @@
+set(CMAKE_SYSTEM_NAME Generic)
+set(CMAKE_SYSTEM_PROCESSOR wasm32)
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+
+if(DEFINED FORGE_CONTRACT_SDK_PREFIX AND NOT "${FORGE_CONTRACT_SDK_PREFIX}" STREQUAL "")
+   get_filename_component(_forge_contract_prefix "${FORGE_CONTRACT_SDK_PREFIX}" ABSOLUTE)
+else()
+   get_filename_component(
+      _forge_contract_prefix
+      "${CMAKE_CURRENT_LIST_DIR}/@FORGE_CONTRACT_PREFIX_FROM_CONFIG_DIR@"
+      ABSOLUTE
+   )
+endif()
+set(CMAKE_C_COMPILER "${_forge_contract_prefix}/bin/clang++")
+set(CMAKE_CXX_COMPILER "${_forge_contract_prefix}/bin/clang++")
+set(CMAKE_CXX_COMPILER_CLANG_SCAN_DEPS "${_forge_contract_prefix}/bin/clang-scan-deps")
+set(CMAKE_LINKER "${_forge_contract_prefix}/bin/wasm-ld")
+set(CMAKE_AR "${_forge_contract_prefix}/bin/llvm-ar")
+set(CMAKE_RANLIB "${_forge_contract_prefix}/bin/llvm-ranlib")
+set(CMAKE_SYSROOT "${_forge_contract_prefix}/sysroot")
+set(CMAKE_EXE_LINKER_FLAGS_INIT "-fuse-ld=${CMAKE_LINKER}")
+
+set(CMAKE_C_COMPILER_TARGET wasm32)
+set(CMAKE_CXX_COMPILER_TARGET wasm32)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_CXX_SCAN_FOR_MODULES ON)
+
+set(CMAKE_EXECUTABLE_SUFFIX ".wasm")

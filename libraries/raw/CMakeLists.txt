@@ -1,7 +1,7 @@
 add_library(
    forge_raw STATIC
-   datastream.cpp
-   raw.cpp
+   codec.cpp
+   stream.cpp
    varint.cpp
 )
 forge_target_modules(forge_raw raw)

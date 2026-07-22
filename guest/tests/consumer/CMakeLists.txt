@@ -1,0 +1,261 @@
+cmake_minimum_required(VERSION 3.31)
+
+project(ForgeContractConsumerTest LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+find_package(ForgeContract CONFIG REQUIRED)
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+
+add_library(
+   forge_contract_host_intrinsic_fixture
+   OBJECT
+      "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/host_intrinsics.cpp"
+)
+target_include_directories(
+   forge_contract_host_intrinsic_fixture
+   PRIVATE
+      "${ForgeContract_DATA_DIR}/include"
+)
+
+forge_add_contract(
+   hello
+   SOURCES hello.cpp
+)
+
+forge_add_contract(
+   minimal
+   SOURCES minimal.cpp
+)
+
+forge_add_contract(
+   guestmacro
+   SOURCES guest_macro_contract.cpp
+)
+
+forge_add_contract(
+   recordtest
+   SOURCES record_contract.cpp
+)
+
+forge_add_contract(
+   equivalent
+   SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/equivalent_struct.cpp"
+)
+
+forge_add_contract(
+   multisource
+   SOURCES multi_source_helper.cpp multi_source.cpp
+   DISPATCH_SOURCE multi_source.cpp
+)
+
+forge_add_contract(
+   allocatortst
+   SOURCES allocator_contract.cpp
+)
+
+forge_add_contract(
+   legacyhello
+   SOURCES legacy_hello.cpp
+)
+
+forge_add_contract(
+   legacynotify
+   SOURCES legacy_notification.cpp
+)
+
+forge_add_contract(
+   dbhost
+   SOURCES db_host_contract.cpp
+)
+
+forge_add_contract(
+   oracle
+   SOURCES oracle_contract.cpp
+)
+
+forge_add_contract(
+   recovery
+   SOURCES recovery_contract.cpp
+)
+
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/sdk_surface_manifest.json" _sdk_surface_json)
+set(_surface_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/surface")
+file(MAKE_DIRECTORY "${_surface_generated_dir}")
+set(
+   _surface_sources
+   "${CMAKE_CURRENT_SOURCE_DIR}/asset_source_compat.cpp"
+   "${CMAKE_CURRENT_SOURCE_DIR}/eosio_datastream_adl.cpp"
+   "${CMAKE_CURRENT_SOURCE_DIR}/eosio_internal_db_header.cpp"
+   "${CMAKE_CURRENT_SOURCE_DIR}/wire_aliases.cpp"
+)
+
+string(JSON _surface_header_count LENGTH "${_sdk_surface_json}" donor_cpp_headers)
+math(EXPR _surface_header_last "${_surface_header_count} - 1")
+foreach(_index RANGE 0 ${_surface_header_last})
+   string(JSON SURFACE_HEADER GET "${_sdk_surface_json}" donor_cpp_headers ${_index})
+   string(REGEX REPLACE "[^A-Za-z0-9_]" "_" _stem "${SURFACE_HEADER}")
+   set(_output "${_surface_generated_dir}/header_${_stem}.cpp")
+   configure_file(surface_header.cpp.in "${_output}" @ONLY)
+   list(APPEND _surface_sources "${_output}")
+endforeach()
+
+string(JSON _surface_module_count LENGTH "${_sdk_surface_json}" modern_modules)
+math(EXPR _surface_module_last "${_surface_module_count} - 1")
+foreach(_index RANGE 0 ${_surface_module_last})
+   string(JSON _leaf GET "${_sdk_surface_json}" modern_modules ${_index})
+   if(_leaf STREQUAL "contract")
+      set(SURFACE_MODULE "forge.contract")
+   else()
+      set(SURFACE_MODULE "forge.contract.${_leaf}")
+   endif()
+   string(REPLACE "." "_" _stem "${SURFACE_MODULE}")
+   set(_output "${_surface_generated_dir}/module_${_stem}.cpp")
+   configure_file(surface_module.cpp.in "${_output}" @ONLY)
+   list(APPEND _surface_sources "${_output}")
+endforeach()
+
+forge_add_contract(
+   surface
+   SOURCES surface_contract.cpp
+   COMPILE_CHECKS ${_surface_sources}
+)
+
+forge_add_contract(
+   multiidx
+   SOURCES multi_index_contract.cpp
+)
+
+forge_add_contract(
+   legacymidx
+   SOURCES legacy_multi_index_contract.cpp
+)
+
+forge_add_contract(
+   midxerrors
+   SOURCES multi_index_errors_contract.cpp
+)
+
+forge_add_contract(
+   legmidxerr
+   SOURCES legacy_multi_index_errors_contract.cpp
+)
+
+forge_add_contract(
+   midxextend
+   SOURCES multi_index_extended_contract.cpp
+)
+
+forge_add_contract(
+   legmidxext
+   SOURCES legacy_multi_index_extended_contract.cpp
+)
+
+add_custom_target(
+   forge_contract_multi_index_fixtures ALL
+   COMMAND
+      "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/run_multi_index_fixtures.py"
+      --mapping "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/multi_index_donor_mapping.json"
+      --abi-pair "${CMAKE_CURRENT_BINARY_DIR}/multiidx.abi" "${CMAKE_CURRENT_BINARY_DIR}/legacymidx.abi"
+      --abi-pair "${CMAKE_CURRENT_BINARY_DIR}/midxerrors.abi" "${CMAKE_CURRENT_BINARY_DIR}/legmidxerr.abi"
+      --abi-pair "${CMAKE_CURRENT_BINARY_DIR}/midxextend.abi" "${CMAKE_CURRENT_BINARY_DIR}/legmidxext.abi"
+   DEPENDS multiidx legacymidx midxerrors legmidxerr midxextend legmidxext
+   VERBATIM
+)
+
+set(_db_intrinsics_wasm "${CMAKE_CURRENT_BINARY_DIR}/dbintrinsics.wasm")
+add_custom_target(
+   forge_contract_database_intrinsic_fixtures ALL
+   COMMAND
+      "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/run_intrinsic_fixtures.py"
+      --manifest "${ForgeContract_DATA_DIR}/registry/intrinsics.json"
+      --golden "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/spring_db_intrinsics.txt"
+      --full-golden "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/spring_intrinsics.txt"
+      --eosio-db-header "${ForgeContract_DATA_DIR}/include/eosio/db.h"
+      --cdt-fixture "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/cdt/capi/db.c"
+   COMMAND
+      "${ForgeContract_CLANG}"
+      --target=wasm32
+      --sysroot=${ForgeContract_SYSROOT}
+      -x c
+      -ffreestanding
+      -nostdlib
+      -fno-ident
+      -mcpu=mvp
+      -I${ForgeContract_DATA_DIR}/include
+      -Wl,--no-entry
+      -Wl,--export=test_db
+      -Wl,--allow-undefined
+      -Wl,--strip-all
+      "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/cdt/capi/db.c"
+      -o "${_db_intrinsics_wasm}"
+   BYPRODUCTS "${_db_intrinsics_wasm}"
+   DEPENDS forge_contract_host_intrinsic_fixture
+   VERBATIM
+)
+
+set(_tooling_output "${CMAKE_CURRENT_BINARY_DIR}/tooling")
+set(_tooling_build_dir "${CMAKE_CURRENT_BINARY_DIR}/hello.contract")
+add_custom_target(
+   forge_contract_tooling_fixtures ALL
+   COMMAND
+      "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/run_abigen_fixtures.py"
+      --abigen "${ForgeContract_ABIGEN}"
+      --plugin "${ForgeContract_ATTR_PLUGIN}"
+      --sysroot "${ForgeContract_SYSROOT}"
+      --include "${ForgeContract_DATA_DIR}/include"
+      --build-dir "${_tooling_build_dir}"
+      --fixtures "${CMAKE_CURRENT_SOURCE_DIR}/../tooling"
+      --output "${_tooling_output}"
+   DEPENDS hello
+   VERBATIM
+)
+
+add_custom_target(
+   forge_contract_checker_fixtures ALL
+   COMMAND
+      "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/run_checker_fixtures.py"
+      --checker "${ForgeContract_CHECK}"
+      --manifest-tool "${ForgeContract_MANIFEST}"
+      --clang "${ForgeContract_CLANG}"
+      --wasm "${CMAKE_CURRENT_BINARY_DIR}/hello.wasm"
+      --abi "${CMAKE_CURRENT_BINARY_DIR}/hello.abi"
+      --imports "${ForgeContract_DATA_DIR}/registry/intrinsics.json"
+      --manifest "${CMAKE_CURRENT_BINARY_DIR}/hello.contract.json"
+      --output "${CMAKE_CURRENT_BINARY_DIR}/checker"
+   DEPENDS hello
+   VERBATIM
+)
+
+add_custom_target(
+   forge_contract_sdk_surface ALL
+   COMMAND
+      "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/check_sdk_surface.py"
+      --manifest "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/sdk_surface_manifest.json"
+      --registry "${ForgeContract_DATA_DIR}/registry/intrinsics.json"
+      --golden "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/spring_intrinsics.txt"
+      --data-dir "${ForgeContract_DATA_DIR}"
+      --source-root "${CMAKE_CURRENT_SOURCE_DIR}/../../.."
+   DEPENDS surface
+   VERBATIM
+)
+
+add_custom_target(
+   forge_contract_reproducibility ALL
+   COMMAND
+      "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/run_reproducibility.py"
+      --cmake "${CMAKE_COMMAND}"
+      --package "${ForgeContract_DIR}"
+      --source "${CMAKE_CURRENT_SOURCE_DIR}/hello.cpp"
+      --output "${CMAKE_CURRENT_BINARY_DIR}/reproducibility"
+   DEPENDS hello
+   VERBATIM
+)

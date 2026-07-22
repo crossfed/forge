@@ -51,6 +51,8 @@ class public_key {
 
 class private_key {
  public:
+   using data_type = private_key_secret;
+
    private_key() = default;
    explicit private_key(private_key_secret value);
 
@@ -67,92 +69,4 @@ class private_key {
    private_key_secret data_;
 };
 
-struct signature_shim;
-
-struct public_key_shim {
-   using data_type = public_key_data;
-   using signature_type = signature_shim;
-
-   public_key_shim() = default;
-   explicit public_key_shim(const data_type& data) : _data(data) {}
-   explicit public_key_shim(data_type&& data) : _data(std::move(data)) {}
-
-   [[nodiscard]] const data_type& serialize() const {
-      return _data;
-   }
-
-   template <typename Stream> friend Stream& operator<<(Stream& s, const public_key_shim& value) {
-      forge::raw::pack(s, value._data);
-      return s;
-   }
-
-   template <typename Stream> friend Stream& operator>>(Stream& s, public_key_shim& value) {
-      forge::raw::unpack(s, value._data);
-      return s;
-   }
-
-   [[nodiscard]] bool valid() const noexcept;
-   [[nodiscard]] bool verify(std::span<const std::uint8_t> message, const signature_data& signature) const;
-
-   data_type _data{};
-};
-
-struct signature_shim {
-   using data_type = signature_data;
-   using public_key_type = public_key_shim;
-
-   signature_shim() = default;
-   explicit signature_shim(const data_type& data) : _data(data) {}
-   explicit signature_shim(data_type&& data) : _data(std::move(data)) {}
-
-   [[nodiscard]] const data_type& serialize() const {
-      return _data;
-   }
-
-   template <typename Stream> friend Stream& operator<<(Stream& s, const signature_shim& value) {
-      forge::raw::pack(s, value._data);
-      return s;
-   }
-
-   template <typename Stream> friend Stream& operator>>(Stream& s, signature_shim& value) {
-      forge::raw::unpack(s, value._data);
-      return s;
-   }
-
-   data_type _data{};
-};
-
-struct private_key_shim {
-   using data_type = private_key_secret;
-   using signature_type = signature_shim;
-   using public_key_type = public_key_shim;
-
-   private_key_shim() = default;
-   explicit private_key_shim(const data_type& data) : _data(data) {}
-   explicit private_key_shim(data_type&& data) : _data(std::move(data)) {}
-
-   [[nodiscard]] const data_type& serialize() const {
-      return _data;
-   }
-
-   template <typename Stream> friend Stream& operator<<(Stream& s, const private_key_shim& value) {
-      forge::raw::pack(s, value._data);
-      return s;
-   }
-
-   template <typename Stream> friend Stream& operator>>(Stream& s, private_key_shim& value) {
-      forge::raw::unpack(s, value._data);
-      return s;
-   }
-
-   [[nodiscard]] signature_type sign(std::span<const std::uint8_t> message) const;
-   [[nodiscard]] public_key_type get_public_key() const;
-   [[nodiscard]] static private_key_shim generate();
-
-   data_type _data{};
-};
-
-BOOST_DESCRIBE_STRUCT(public_key_shim, (), (_data))
-BOOST_DESCRIBE_STRUCT(signature_shim, (), (_data))
-BOOST_DESCRIBE_STRUCT(private_key_shim, (), (_data))
 } // namespace forge::crypto::rsa

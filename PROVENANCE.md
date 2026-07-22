@@ -5,6 +5,40 @@ license by itself; see `LICENSE`, `NOTICE`, and `THIRD_PARTY_LICENSES`.
 
 Audit date: 2026-07-16.
 
+## Forge Contract SDK
+
+`guest` is Forge's native C++23 smart-contract toolchain assembly. Release
+archives build unmodified LLVM `llvmorg-22.1.8` from commit
+`ca7933e47d3a3451d81e72ac174dcb5aa28b59d1`, including Clang, lld, libc++,
+libc++abi and compiler-rt for the freestanding `wasm32` target. LLVM remains an
+upstream toolchain; Forge carries no compiler patches.
+
+`guest/libraries/runtime/details/allocator.hxx` is source-derived from
+AntelopeIO/cdt commit `69599db279b7b93d0688502720c15c6962a1401b`, file
+`libraries/eosiolib/malloc.cpp`. Forge preserves the donor allocation, reuse,
+coalescing, reallocation and WebAssembly memory-growth algorithms while
+adapting the error policy, naming and integration to the versioned Forge
+intrinsic surface. The derived file remains under the donor MIT license.
+
+The macro-only EOSIO dispatcher veneer derives its parenthesized action-sequence
+expansion from the same CDT commit, files
+`libraries/eosiolib/contracts/eosio/dispatcher.hpp` and
+`libraries/meta_refl/include/bluegrass/meta/preprocessor.hpp`. Action decoding
+and invocation are implemented only by `forge::contract::execute_action`.
+
+The attribute plugin, ABI generator, contract checker, manifest generator,
+CMake package and guest runtime integration are Forge implementations.
+AntelopeIO CDT at the commit above and Spring commit
+`e6a99f68b67abc4d89fe716755b2e1394a4991f7` are pinned compatibility oracles
+for attributes, ABI schema, dispatch and observable contract behavior. They are
+not build dependencies and their patched compiler code is not incorporated.
+The active CDT ABI pass/fail fixtures are hash-pinned, mapped one-for-one to
+test-local Forge inputs and compared against the donor ABI goldens in CI.
+
+Target-neutral `forge.raw` codec modules and guest-safe
+`forge.chain.protocol` value modules are compiled from the same source units
+for host and guest targets. They are not duplicated inside the SDK.
+
 ## Confirmed Derived Or Adapted Source
 
 ### Native EOS VM Port

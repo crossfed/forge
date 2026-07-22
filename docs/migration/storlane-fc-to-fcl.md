@@ -194,7 +194,7 @@ auto payload = signed_payload{
 auto message = payload.signing_bytes(chain_id);
 auto signature = private_key.sign(message);
 
-auto verified = expected_public_key.verify(message, signature);
+auto verified = fcl::crypto::asymmetric::verify(expected_public_key, message, signature);
 ```
 
 OpenSSL 3.0+ is the backend baseline. FCL does not shell out to `openssl`. AES-GCM

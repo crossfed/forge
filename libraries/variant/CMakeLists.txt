@@ -10,6 +10,8 @@ forge_target_modules(forge_variant variant)
 target_include_directories(forge_variant PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
 target_link_libraries(
    forge_variant PUBLIC
+      forge_codec_base64
+      forge_codec_hex
       forge_core
       forge_exceptions
       forge_reflect

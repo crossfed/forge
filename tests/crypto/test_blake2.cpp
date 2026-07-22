@@ -7,7 +7,7 @@
 #include <vector>
 
 import forge.exceptions;
-import forge.crypto.hex;
+import forge.codec.hex;
 import forge.crypto.blake2;
 import forge.core.utility;
 
@@ -104,7 +104,7 @@ BOOST_AUTO_TEST_CASE(compress) try {
 
       auto res = blake2b(_rounds, _h, _m, _t0_offset, _t1_offset, _f, yield);
 
-      BOOST_CHECK_EQUAL(forge::crypto::to_hex(res), forge::crypto::to_hex(expected_result));
+      BOOST_CHECK_EQUAL(forge::codec::hex::encode(res), forge::codec::hex::encode(expected_result));
    }
 }
 FORGE_LOG_AND_RETHROW();
@@ -116,8 +116,8 @@ BOOST_AUTO_TEST_CASE(compress_rejects_invalid_input_lengths) try {
 
    BOOST_CHECK_EXCEPTION(call_with_bad_state(), forge::crypto::blake2::exceptions::invalid_input,
                          [](const forge::crypto::blake2::exceptions::invalid_input& error) {
-      return error.code().category().name() == std::string_view{"forge.crypto.blake2"};
-   });
+                            return error.code().category().name() == std::string_view{"forge.crypto.blake2"};
+                         });
 }
 FORGE_LOG_AND_RETHROW();
 

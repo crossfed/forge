@@ -154,24 +154,4 @@ signature_data private_key::sign(std::span<const std::uint8_t> message) const {
    return out;
 }
 
-bool public_key_shim::valid() const noexcept {
-   return !_data.empty();
-}
-
-bool public_key_shim::verify(std::span<const std::uint8_t> message, const signature_data& signature) const {
-   return public_key{_data}.verify(message, signature);
-}
-
-private_key_shim::signature_type private_key_shim::sign(std::span<const std::uint8_t> message) const {
-   return signature_type{private_key::regenerate(_data).sign(message)};
-}
-
-private_key_shim::public_key_type private_key_shim::get_public_key() const {
-   return public_key_type{private_key::regenerate(_data).get_public_key().serialize()};
-}
-
-private_key_shim private_key_shim::generate() {
-   return private_key_shim{private_key::generate().get_secret()};
-}
-
 } // namespace forge::crypto::rsa

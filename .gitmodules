@@ -16,3 +16,6 @@
 [submodule "vendor/eos-vm-test-wasms"]
 	path = vendor/eos-vm-test-wasms
 	url = https://github.com/EOSIO/eos-vm-test-wasms.git
+[submodule "vendor/cdt-musl"]
+	path = vendor/cdt-musl
+	url = https://github.com/AntelopeIO/cdt-musl.git

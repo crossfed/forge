@@ -24,7 +24,7 @@ import forge.db.blob.snapshot;
 import forge.db.blob.store;
 import forge.db.blob.transaction;
 import forge.db.blob.types;
-import forge.crypto.hex;
+import forge.codec.hex;
 import forge.crypto.sha256;
 import forge.db.core.exceptions;
 import forge.db.core.driver;
@@ -45,23 +45,20 @@ using record_map = std::map<forge::db::core::record_key, std::vector<std::byte>>
 using family_map = std::map<std::string, record_map>;
 
 std::vector<std::byte> bytes(std::string text) {
-   return std::vector<std::byte>{
-      reinterpret_cast<const std::byte*>(text.data()),
-      reinterpret_cast<const std::byte*>(text.data() + text.size())};
+   return std::vector<std::byte>{reinterpret_cast<const std::byte*>(text.data()),
+                                 reinterpret_cast<const std::byte*>(text.data() + text.size())};
 }
 
 std::string text(const std::vector<std::byte>& bytes_value) {
-   return std::string{
-      reinterpret_cast<const char*>(bytes_value.data()),
-      reinterpret_cast<const char*>(bytes_value.data() + bytes_value.size())};
+   return std::string{reinterpret_cast<const char*>(bytes_value.data()),
+                      reinterpret_cast<const char*>(bytes_value.data() + bytes_value.size())};
 }
 
 bool starts_with(const forge::db::core::record_key& value, const forge::db::core::record_key& prefix) {
    const auto& bytes_value = value.bytes();
    const auto& prefix_value = prefix.bytes();
-   return prefix_value.empty() ||
-          (bytes_value.size() >= prefix_value.size() &&
-           std::equal(prefix_value.begin(), prefix_value.end(), bytes_value.begin()));
+   return prefix_value.empty() || (bytes_value.size() >= prefix_value.size() &&
+                                   std::equal(prefix_value.begin(), prefix_value.end(), bytes_value.begin()));
 }
 
 struct memory_state {
@@ -77,9 +74,9 @@ class memory_session final : public forge::db::core::session {
 
    [[nodiscard]] forge::db::core::capabilities capabilities() const noexcept override {
       return forge::db::core::capabilities{
-         .snapshot_reads = snapshot_,
-         .writes = writable_,
-         .savepoints = writable_,
+          .snapshot_reads = snapshot_,
+          .writes = writable_,
+          .savepoints = writable_,
       };
    }
 
@@ -96,8 +93,7 @@ class memory_session final : public forge::db::core::session {
       co_return found->second;
    }
 
-   boost::asio::awaitable<void> put(forge::db::core::family family,
-                                    forge::db::core::record_key key,
+   boost::asio::awaitable<void> put(forge::db::core::family family, forge::db::core::record_key key,
                                     std::vector<std::byte> value) override {
       working_[family.name][std::move(key)] = std::move(value);
       co_return;
@@ -131,8 +127,8 @@ class memory_session final : public forge::db::core::session {
    }
 
    boost::asio::awaitable<forge::db::core::record_page> scan_page(forge::db::core::family family,
-                                                            forge::db::core::record_range range,
-                                                            forge::db::core::page_request request) override {
+                                                                  forge::db::core::record_range range,
+                                                                  forge::db::core::page_request request) override {
       forge::db::core::validate_page_request(request);
       auto result = forge::db::core::record_page{};
       const auto family_found = working_.find(family.name);
@@ -253,7 +249,7 @@ struct document : forge::db::object::object<document, 3, 9> {
 BOOST_DESCRIBE_STRUCT(document, (forge::db::object::object<document, 3, 9>), (blob, title))
 
 using document_object =
-   forge::db::object::object_index<document, forge::db::object::indexed_by<forge::db::object::primary_unique<by_id>>>;
+    forge::db::object::object_index<document, forge::db::object::indexed_by<forge::db::object::primary_unique<by_id>>>;
 
 document make_document(std::uint64_t instance, forge::db::blob::ref<forge::db::blob::digest> ref) {
    auto value = document{};
@@ -267,15 +263,13 @@ document make_document(std::uint64_t instance, forge::db::blob::ref<forge::db::b
 
 namespace forge::db::blob {
 
-template <>
-struct hash<toy_digest> {
+template <> struct hash<toy_digest> {
    [[nodiscard]] toy_digest operator()(std::span<const std::byte> payload) const {
       return toy_digest{std::vector<std::byte>{payload.begin(), payload.end()}};
    }
 };
 
-template <>
-struct digest_traits<toy_digest> {
+template <> struct digest_traits<toy_digest> {
    static constexpr auto algorithm = std::string_view{"toy"};
 
    [[nodiscard]] static std::vector<std::byte> to_bytes(const toy_digest& value) {
@@ -287,14 +281,13 @@ struct digest_traits<toy_digest> {
    }
 
    [[nodiscard]] static std::string text(const toy_digest& value) {
-      return forge::crypto::to_hex(
-         reinterpret_cast<const std::uint8_t*>(value.bytes.data()),
-         static_cast<std::uint32_t>(value.bytes.size()));
+      return forge::codec::hex::encode(
+          std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(value.bytes.data()), value.bytes.size()});
    }
 
    [[nodiscard]] static toy_digest from_text(std::string_view value) {
       auto decoded = std::vector<std::uint8_t>(value.size() / 2U);
-      forge::crypto::from_hex(std::string{value}, decoded.data(), decoded.size());
+      forge::codec::hex::decode(value, decoded);
       auto bytes = std::vector<std::byte>{};
       bytes.reserve(decoded.size());
       for (const auto byte : decoded) {
@@ -304,15 +297,13 @@ struct digest_traits<toy_digest> {
    }
 };
 
-template <>
-struct hash<mirror_digest> {
+template <> struct hash<mirror_digest> {
    [[nodiscard]] mirror_digest operator()(std::span<const std::byte> payload) const {
       return mirror_digest{std::vector<std::byte>{payload.begin(), payload.end()}};
    }
 };
 
-template <>
-struct digest_traits<mirror_digest> {
+template <> struct digest_traits<mirror_digest> {
    static constexpr auto algorithm = std::string_view{"mirror"};
 
    [[nodiscard]] static std::vector<std::byte> to_bytes(const mirror_digest& value) {
@@ -324,14 +315,13 @@ struct digest_traits<mirror_digest> {
    }
 
    [[nodiscard]] static std::string text(const mirror_digest& value) {
-      return forge::crypto::to_hex(
-         reinterpret_cast<const std::uint8_t*>(value.bytes.data()),
-         static_cast<std::uint32_t>(value.bytes.size()));
+      return forge::codec::hex::encode(
+          std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(value.bytes.data()), value.bytes.size()});
    }
 
    [[nodiscard]] static mirror_digest from_text(std::string_view value) {
       auto decoded = std::vector<std::uint8_t>(value.size() / 2U);
-      forge::crypto::from_hex(std::string{value}, decoded.data(), decoded.size());
+      forge::codec::hex::decode(value, decoded);
       auto bytes = std::vector<std::byte>{};
       bytes.reserve(decoded.size());
       for (const auto byte : decoded) {
@@ -341,15 +331,13 @@ struct digest_traits<mirror_digest> {
    }
 };
 
-template <>
-struct hash<strict_digest> {
+template <> struct hash<strict_digest> {
    [[nodiscard]] strict_digest operator()(std::span<const std::byte> payload) const {
       return strict_digest{std::vector<std::byte>{payload.begin(), payload.end()}};
    }
 };
 
-template <>
-struct digest_traits<strict_digest> {
+template <> struct digest_traits<strict_digest> {
    static constexpr auto algorithm = std::string_view{"strict"};
 
    [[nodiscard]] static std::vector<std::byte> to_bytes(const strict_digest& value) {
@@ -361,14 +349,13 @@ struct digest_traits<strict_digest> {
    }
 
    [[nodiscard]] static std::string text(const strict_digest& value) {
-      return forge::crypto::to_hex(
-         reinterpret_cast<const std::uint8_t*>(value.bytes.data()),
-         static_cast<std::uint32_t>(value.bytes.size()));
+      return forge::codec::hex::encode(
+          std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(value.bytes.data()), value.bytes.size()});
    }
 
    [[nodiscard]] static strict_digest from_text(std::string_view value) {
       auto decoded = std::vector<std::uint8_t>(value.size() / 2U);
-      forge::crypto::from_hex(std::string{value}, decoded.data(), decoded.size());
+      forge::codec::hex::decode(value, decoded);
       auto bytes = std::vector<std::byte>{};
       bytes.reserve(decoded.size());
       for (const auto byte : decoded) {
@@ -378,8 +365,7 @@ struct digest_traits<strict_digest> {
    }
 };
 
-template <>
-struct digest_traits<capped_digest> {
+template <> struct digest_traits<capped_digest> {
    static constexpr auto max_byte_size = std::size_t{2U};
 
    [[nodiscard]] static std::vector<std::byte> to_bytes(const capped_digest& value) {
@@ -396,9 +382,7 @@ struct digest_traits<capped_digest> {
 FORGE_DB_OBJECT(document_object)
 
 template <typename View>
-concept mutable_blob_snapshot = requires(View& view,
-                                         forge::db::blob::ref<> value,
-                                         forge::db::blob::owner_ref owner) {
+concept mutable_blob_snapshot = requires(View& view, forge::db::blob::ref<> value, forge::db::blob::owner_ref owner) {
    view.erase(value);
    view.retain(value, owner);
    view.release(value, owner);
@@ -413,9 +397,8 @@ BOOST_AUTO_TEST_CASE(db_blob_owner_ref_uses_binary_object_id_identity) {
    const auto object = forge::db::ids::object_id{.space = 201, .type = 7, .instance = 42};
    const auto typed = forge::db::ids::typed_id<201, 7>{42};
    const auto packed = forge::raw::pack(object);
-   const auto expected = std::vector<std::byte>{
-      reinterpret_cast<const std::byte*>(packed.data()),
-      reinterpret_cast<const std::byte*>(packed.data() + packed.size())};
+   const auto expected = std::vector<std::byte>{reinterpret_cast<const std::byte*>(packed.data()),
+                                                reinterpret_cast<const std::byte*>(packed.data() + packed.size())};
 
    const auto object_owner = forge::db::blob::owner_ref{object};
    const auto typed_owner = forge::db::blob::owner_ref{typed};
@@ -423,12 +406,12 @@ BOOST_AUTO_TEST_CASE(db_blob_owner_ref_uses_binary_object_id_identity) {
    BOOST_CHECK(typed_owner == object_owner);
    BOOST_CHECK(!forge::db::blob::owner_ref{forge::db::ids::object_id{}}.empty());
 
-   const auto other_space = forge::db::blob::owner_ref{
-      forge::db::ids::object_id{.space = 200, .type = 7, .instance = 42}};
-   const auto other_type = forge::db::blob::owner_ref{
-      forge::db::ids::object_id{.space = 201, .type = 8, .instance = 42}};
-   const auto other_instance = forge::db::blob::owner_ref{
-      forge::db::ids::object_id{.space = 201, .type = 7, .instance = 43}};
+   const auto other_space =
+       forge::db::blob::owner_ref{forge::db::ids::object_id{.space = 200, .type = 7, .instance = 42}};
+   const auto other_type =
+       forge::db::blob::owner_ref{forge::db::ids::object_id{.space = 201, .type = 8, .instance = 42}};
+   const auto other_instance =
+       forge::db::blob::owner_ref{forge::db::ids::object_id{.space = 201, .type = 7, .instance = 43}};
    BOOST_CHECK(other_space != object_owner);
    BOOST_CHECK(other_type != object_owner);
    BOOST_CHECK(other_instance != object_owner);
@@ -442,9 +425,9 @@ BOOST_AUTO_TEST_CASE(db_blob_object_id_owner_interoperates_with_legacy_binary_ow
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       const auto id = forge::db::ids::typed_id<201, 7>{42};
       const auto packed = forge::raw::pack(id.as_object_id());
-      const auto legacy_bytes = std::vector<std::byte>{
-         reinterpret_cast<const std::byte*>(packed.data()),
-         reinterpret_cast<const std::byte*>(packed.data() + packed.size())};
+      const auto legacy_bytes =
+          std::vector<std::byte>{reinterpret_cast<const std::byte*>(packed.data()),
+                                 reinterpret_cast<const std::byte*>(packed.data() + packed.size())};
       const auto legacy = forge::db::blob::owner_ref{legacy_bytes};
       const auto object_owner = forge::db::blob::owner_ref{id};
       const auto content = co_await blobs.put(bytes("object-owned payload"));
@@ -466,8 +449,8 @@ BOOST_AUTO_TEST_CASE(db_blob_ref_defaults_to_sha256_and_variant_uses_text_form) 
    using ref_type = forge::db::blob::ref<>;
 
    auto value = ref_type{
-      .digest = forge::db::blob::hash<forge::db::blob::digest>{}(bytes("db-blob-ref")),
-      .size = 12345,
+       .digest = forge::db::blob::hash<forge::db::blob::digest>{}(bytes("db-blob-ref")),
+       .size = 12345,
    };
 
    auto encoded = forge::variant{};
@@ -490,7 +473,8 @@ BOOST_AUTO_TEST_CASE(db_blob_ref_defaults_to_sha256_and_variant_uses_text_form) 
 BOOST_AUTO_TEST_CASE(db_blob_ref_variant_rejects_invalid_text_form) {
    auto decoded = forge::db::blob::ref<>{};
 
-   BOOST_CHECK_THROW(forge::from_variant(forge::variant{"missing-colon"}, decoded), forge::variant_exceptions::decode_error);
+   BOOST_CHECK_THROW(forge::from_variant(forge::variant{"missing-colon"}, decoded),
+                     forge::variant_exceptions::decode_error);
    BOOST_CHECK_THROW(forge::from_variant(forge::variant{":1"}, decoded), forge::variant_exceptions::decode_error);
    BOOST_CHECK_THROW(forge::from_variant(forge::variant{std::string(64, '0') + ":"}, decoded),
                      forge::variant_exceptions::decode_error);
@@ -504,8 +488,8 @@ BOOST_AUTO_TEST_CASE(db_blob_ref_variant_rejects_invalid_text_form) {
 
 BOOST_AUTO_TEST_CASE(db_blob_ref_raw_roundtrip_is_compact_binary) {
    auto value = forge::db::blob::ref<>{
-      .digest = forge::db::blob::hash<forge::db::blob::digest>{}(bytes("db-blob-raw-ref")),
-      .size = 777,
+       .digest = forge::db::blob::hash<forge::db::blob::digest>{}(bytes("db-blob-raw-ref")),
+       .size = 777,
    };
 
    const auto packed = forge::raw::pack(value);
@@ -518,8 +502,8 @@ BOOST_AUTO_TEST_CASE(db_blob_ref_raw_roundtrip_is_compact_binary) {
 
 BOOST_AUTO_TEST_CASE(db_blob_ref_raw_uses_digest_traits_for_custom_digest) {
    auto value = forge::db::blob::ref<toy_digest>{
-      .digest = toy_digest{bytes("\xde\xad")},
-      .size = 777,
+       .digest = toy_digest{bytes("\xde\xad")},
+       .size = 777,
    };
 
    const auto packed = forge::raw::pack(value);
@@ -532,8 +516,8 @@ BOOST_AUTO_TEST_CASE(db_blob_ref_raw_uses_digest_traits_for_custom_digest) {
 
 BOOST_AUTO_TEST_CASE(db_blob_ref_raw_roundtrip_supports_streambuf_datastream) {
    auto value = forge::db::blob::ref<>{
-      .digest = forge::db::blob::hash<forge::db::blob::digest>{}(bytes("db-blob-streambuf-ref")),
-      .size = 888,
+       .digest = forge::db::blob::hash<forge::db::blob::digest>{}(bytes("db-blob-streambuf-ref")),
+       .size = 888,
    };
    const auto packed = forge::raw::pack(value);
    const auto packed_text = std::string{reinterpret_cast<const char*>(packed.data()), packed.size()};
@@ -548,8 +532,8 @@ BOOST_AUTO_TEST_CASE(db_blob_ref_raw_roundtrip_supports_streambuf_datastream) {
 
 BOOST_AUTO_TEST_CASE(db_blob_ref_raw_rejects_truncated_streambuf_payload) {
    auto value = forge::db::blob::ref<>{
-      .digest = forge::db::blob::hash<forge::db::blob::digest>{}(bytes("db-blob-truncated-ref")),
-      .size = 999,
+       .digest = forge::db::blob::hash<forge::db::blob::digest>{}(bytes("db-blob-truncated-ref")),
+       .size = 999,
    };
    auto packed = forge::raw::pack(value);
    packed.pop_back();
@@ -562,8 +546,8 @@ BOOST_AUTO_TEST_CASE(db_blob_ref_raw_rejects_truncated_streambuf_payload) {
 
 BOOST_AUTO_TEST_CASE(db_blob_ref_raw_rejects_truncated_in_memory_payload_as_codec_error) {
    auto value = forge::db::blob::ref<>{
-      .digest = forge::db::blob::hash<forge::db::blob::digest>{}(bytes("db-blob-truncated-memory-ref")),
-      .size = 1001,
+       .digest = forge::db::blob::hash<forge::db::blob::digest>{}(bytes("db-blob-truncated-memory-ref")),
+       .size = 1001,
    };
    auto packed = forge::raw::pack(value);
    packed.pop_back();
@@ -582,8 +566,8 @@ BOOST_AUTO_TEST_CASE(db_blob_ref_raw_rejects_excessive_variable_digest_size) {
 
 BOOST_AUTO_TEST_CASE(db_blob_ref_raw_rejects_oversized_variable_digest_on_pack) {
    auto value = forge::db::blob::ref<capped_digest>{
-      .digest = capped_digest{bytes("\x01\x02\x03")},
-      .size = 3,
+       .digest = capped_digest{bytes("\x01\x02\x03")},
+       .size = 3,
    };
 
    BOOST_CHECK_THROW(forge::raw::pack(value), forge::raw::exceptions::codec_error);
@@ -591,8 +575,8 @@ BOOST_AUTO_TEST_CASE(db_blob_ref_raw_rejects_oversized_variable_digest_on_pack) 
 
 BOOST_AUTO_TEST_CASE(db_blob_ref_supports_custom_digest_text_roundtrip) {
    auto value = forge::db::blob::ref<toy_digest>{
-      .digest = toy_digest{bytes("\xde\xad")},
-      .size = 7,
+       .digest = toy_digest{bytes("\xde\xad")},
+       .size = 7,
    };
 
    auto encoded = forge::variant{};
@@ -630,8 +614,7 @@ BOOST_AUTO_TEST_CASE(db_blob_put_returns_default_ref_and_default_operations_use_
 
       auto wrong = ref;
       wrong.digest = forge::db::blob::hash<forge::db::blob::digest>{}(bytes("wrong"));
-      BOOST_CHECK_THROW(co_await blobs.put(wrong, bytes("alpha")),
-                        forge::db::blob::exceptions::digest_mismatch);
+      BOOST_CHECK_THROW(co_await blobs.put(wrong, bytes("alpha")), forge::db::blob::exceptions::digest_mismatch);
       co_return;
    }());
 }
@@ -652,12 +635,9 @@ BOOST_AUTO_TEST_CASE(db_blob_snapshot_preserves_payload_and_refs_across_collecti
       auto wrong_size = value;
       ++wrong_size.size;
       BOOST_CHECK(!(co_await view.has(wrong_size)));
-      BOOST_CHECK_THROW((void)(co_await view.get(wrong_size)),
-                        forge::db::blob::exceptions::digest_mismatch);
-      BOOST_CHECK_THROW((void)(co_await view.stat_blob(wrong_size)),
-                        forge::db::blob::exceptions::digest_mismatch);
-      BOOST_CHECK_THROW(co_await view.verify(wrong_size),
-                        forge::db::blob::exceptions::digest_mismatch);
+      BOOST_CHECK_THROW((void)(co_await view.get(wrong_size)), forge::db::blob::exceptions::digest_mismatch);
+      BOOST_CHECK_THROW((void)(co_await view.stat_blob(wrong_size)), forge::db::blob::exceptions::digest_mismatch);
+      BOOST_CHECK_THROW(co_await view.verify(wrong_size), forge::db::blob::exceptions::digest_mismatch);
 
       co_await blobs.release(value, owner);
       const auto collected = co_await blobs.collect_unreferenced({.limit = 10});
@@ -685,17 +665,13 @@ BOOST_AUTO_TEST_CASE(db_blob_store_rejects_foreign_closed_and_originless_snapsho
 
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       auto foreign = co_await foreign_driver->begin_read();
-      BOOST_CHECK_THROW(static_cast<void>(blobs.join(foreign)),
-                        forge::db::blob::exceptions::invalid_descriptor);
+      BOOST_CHECK_THROW(static_cast<void>(blobs.join(foreign)), forge::db::blob::exceptions::invalid_descriptor);
 
       auto closed = forge::db::core::snapshot{};
-      BOOST_CHECK_THROW(static_cast<void>(blobs.join(closed)),
-                        forge::db::blob::exceptions::transaction_closed);
+      BOOST_CHECK_THROW(static_cast<void>(blobs.join(closed)), forge::db::blob::exceptions::transaction_closed);
 
-      auto originless = forge::db::core::snapshot{
-         std::make_unique<memory_session>(state, true, false)};
-      BOOST_CHECK_THROW(static_cast<void>(blobs.join(originless)),
-                        forge::db::blob::exceptions::invalid_descriptor);
+      auto originless = forge::db::core::snapshot{std::make_unique<memory_session>(state, true, false)};
+      BOOST_CHECK_THROW(static_cast<void>(blobs.join(originless)), forge::db::blob::exceptions::invalid_descriptor);
       co_return;
    }());
 }
@@ -818,8 +794,8 @@ BOOST_AUTO_TEST_CASE(db_blob_retain_rejects_missing_blob_without_creating_owner)
 
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       const auto missing = forge::db::blob::ref<>{
-         .digest = forge::db::blob::hash<forge::db::blob::digest>{}(bytes("missing")),
-         .size = 7U,
+          .digest = forge::db::blob::hash<forge::db::blob::digest>{}(bytes("missing")),
+          .size = 7U,
       };
 
       BOOST_CHECK_THROW(co_await blobs.retain(missing, forge::db::blob::owner_ref{"doc:missing"}),
@@ -837,8 +813,10 @@ BOOST_AUTO_TEST_CASE(db_blob_ref_keys_do_not_alias_variable_length_digests) {
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       const auto short_payload = std::vector<std::byte>{std::byte{0x01}};
       const auto long_payload = std::vector<std::byte>{std::byte{0x01}, std::byte{0x00}, std::byte{0x02}};
-      const auto short_ref = forge::db::blob::ref<toy_digest>{.digest = toy_digest{short_payload}, .size = short_payload.size()};
-      const auto long_ref = forge::db::blob::ref<toy_digest>{.digest = toy_digest{long_payload}, .size = long_payload.size()};
+      const auto short_ref =
+          forge::db::blob::ref<toy_digest>{.digest = toy_digest{short_payload}, .size = short_payload.size()};
+      const auto long_ref =
+          forge::db::blob::ref<toy_digest>{.digest = toy_digest{long_payload}, .size = long_payload.size()};
 
       co_await blobs.put(short_ref, short_payload);
       co_await blobs.put(long_ref, long_payload);
@@ -960,18 +938,14 @@ BOOST_AUTO_TEST_CASE(db_blob_savepoint_rollback_restores_payload_refs_and_collec
 BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_supports_distinct_store_families) {
    auto runtime = forge::asio::runtime{};
    auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
-   auto first = forge::db::blob::store{
-      driver,
-      forge::db::blob::store::config{
-         .data_family = forge::db::core::family{"blobs.first.data"},
-         .refs_family = forge::db::core::family{"blobs.first.refs"},
-      }};
-   auto second = forge::db::blob::store{
-      driver,
-      forge::db::blob::store::config{
-         .data_family = forge::db::core::family{"blobs.second.data"},
-         .refs_family = forge::db::core::family{"blobs.second.refs"},
-      }};
+   auto first = forge::db::blob::store{driver, forge::db::blob::store::config{
+                                                   .data_family = forge::db::core::family{"blobs.first.data"},
+                                                   .refs_family = forge::db::core::family{"blobs.first.refs"},
+                                               }};
+   auto second = forge::db::blob::store{driver, forge::db::blob::store::config{
+                                                    .data_family = forge::db::core::family{"blobs.second.data"},
+                                                    .refs_family = forge::db::core::family{"blobs.second.refs"},
+                                                }};
 
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       auto shared = co_await driver->begin_transaction();
@@ -1010,10 +984,8 @@ BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_reuses_existing_store_transactio
       co_await shared.rollback_to_savepoint(point);
       const auto also_kept = co_await second.put(bytes("also-kept"));
 
-      BOOST_CHECK_THROW(co_await second.commit(),
-                        forge::db::blob::exceptions::unsupported_operation);
-      BOOST_CHECK_THROW(co_await second.rollback(),
-                        forge::db::blob::exceptions::unsupported_operation);
+      BOOST_CHECK_THROW(co_await second.commit(), forge::db::blob::exceptions::unsupported_operation);
+      BOOST_CHECK_THROW(co_await second.rollback(), forge::db::blob::exceptions::unsupported_operation);
 
       co_await shared.commit();
       BOOST_CHECK(co_await blobs.has(kept));
@@ -1027,8 +999,8 @@ BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_rejects_foreign_store_rejoin) {
    auto runtime = forge::asio::runtime{};
    auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
    const auto config = forge::db::blob::store::config{
-      .data_family = forge::db::core::family{"blobs.shared.data"},
-      .refs_family = forge::db::core::family{"blobs.shared.refs"},
+       .data_family = forge::db::core::family{"blobs.shared.data"},
+       .refs_family = forge::db::core::family{"blobs.shared.refs"},
    };
    auto first = forge::db::blob::store{driver, config};
    auto foreign = forge::db::blob::store{driver, config};
@@ -1036,8 +1008,7 @@ BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_rejects_foreign_store_rejoin) {
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       auto shared = co_await driver->begin_transaction();
       auto first_tx = first.join(shared);
-      BOOST_CHECK_THROW(static_cast<void>(foreign.join(first_tx)),
-                        forge::db::blob::exceptions::invalid_descriptor);
+      BOOST_CHECK_THROW(static_cast<void>(foreign.join(first_tx)), forge::db::blob::exceptions::invalid_descriptor);
       co_await shared.rollback();
       co_return;
    }());
@@ -1047,8 +1018,8 @@ BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_rejects_duplicate_store_families
    auto runtime = forge::asio::runtime{};
    auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
    const auto config = forge::db::blob::store::config{
-      .data_family = forge::db::core::family{"blobs.shared.data"},
-      .refs_family = forge::db::core::family{"blobs.shared.refs"},
+       .data_family = forge::db::core::family{"blobs.shared.data"},
+       .refs_family = forge::db::core::family{"blobs.shared.refs"},
    };
    auto first = forge::db::blob::store{driver, config};
    auto duplicate = forge::db::blob::store{driver, config};
@@ -1056,8 +1027,7 @@ BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_rejects_duplicate_store_families
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       auto shared = co_await driver->begin_transaction();
       auto first_tx = first.join(shared);
-      BOOST_CHECK_THROW(static_cast<void>(duplicate.join(shared)),
-                        forge::db::core::exceptions::participant_conflict);
+      BOOST_CHECK_THROW(static_cast<void>(duplicate.join(shared)), forge::db::core::exceptions::participant_conflict);
       co_await shared.rollback();
       co_return;
    }());
@@ -1069,32 +1039,27 @@ BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_rejects_overlapping_store_famili
 
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       const auto expect_conflict = [&](forge::db::blob::store::config first_config,
-                                       forge::db::blob::store::config second_config)
-         -> boost::asio::awaitable<void> {
+                                       forge::db::blob::store::config second_config) -> boost::asio::awaitable<void> {
          auto first = forge::db::blob::store{driver, std::move(first_config)};
          auto second = forge::db::blob::store{driver, std::move(second_config)};
          auto shared = co_await driver->begin_transaction();
          auto first_tx = first.join(shared);
-         BOOST_CHECK_THROW(static_cast<void>(second.join(shared)),
-                           forge::db::core::exceptions::participant_conflict);
+         BOOST_CHECK_THROW(static_cast<void>(second.join(shared)), forge::db::core::exceptions::participant_conflict);
          co_await shared.rollback();
       };
 
       co_await expect_conflict(
-         {.data_family = forge::db::core::family{"shared.data"},
-          .refs_family = forge::db::core::family{"first.refs"}},
-         {.data_family = forge::db::core::family{"shared.data"},
-          .refs_family = forge::db::core::family{"second.refs"}});
+          {.data_family = forge::db::core::family{"shared.data"}, .refs_family = forge::db::core::family{"first.refs"}},
+          {.data_family = forge::db::core::family{"shared.data"},
+           .refs_family = forge::db::core::family{"second.refs"}});
       co_await expect_conflict(
-         {.data_family = forge::db::core::family{"first.data"},
-          .refs_family = forge::db::core::family{"shared.refs"}},
-         {.data_family = forge::db::core::family{"second.data"},
-          .refs_family = forge::db::core::family{"shared.refs"}});
+          {.data_family = forge::db::core::family{"first.data"}, .refs_family = forge::db::core::family{"shared.refs"}},
+          {.data_family = forge::db::core::family{"second.data"},
+           .refs_family = forge::db::core::family{"shared.refs"}});
       co_await expect_conflict(
-         {.data_family = forge::db::core::family{"first.data"},
-          .refs_family = forge::db::core::family{"cross-role"}},
-         {.data_family = forge::db::core::family{"cross-role"},
-          .refs_family = forge::db::core::family{"second.refs"}});
+          {.data_family = forge::db::core::family{"first.data"}, .refs_family = forge::db::core::family{"cross-role"}},
+          {.data_family = forge::db::core::family{"cross-role"},
+           .refs_family = forge::db::core::family{"second.refs"}});
       co_return;
    }());
 }
@@ -1102,23 +1067,19 @@ BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_rejects_overlapping_store_famili
 BOOST_AUTO_TEST_CASE(db_blob_shared_transaction_rejects_object_family_overlap) {
    auto runtime = forge::asio::runtime{};
    auto driver = std::make_shared<memory_driver>(std::make_shared<memory_state>());
-   auto blobs = forge::db::blob::store{
-      driver,
-      forge::db::blob::store::config{
-         .data_family = forge::db::core::family{"shared.records"},
-         .refs_family = forge::db::core::family{"blob.refs"},
-      }};
+   auto blobs = forge::db::blob::store{driver, forge::db::blob::store::config{
+                                                   .data_family = forge::db::core::family{"shared.records"},
+                                                   .refs_family = forge::db::core::family{"blob.refs"},
+                                               }};
 
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       auto objects = co_await forge::db::object::store::open(
-         driver,
-         forge::db::object::store::config{.family = forge::db::core::family{"shared.records"}});
+          driver, forge::db::object::store::config{.family = forge::db::core::family{"shared.records"}});
       objects.register_object<document_object>();
 
       auto shared = co_await driver->begin_transaction();
       auto object_tx = co_await objects.join(shared);
-      BOOST_CHECK_THROW(static_cast<void>(blobs.join(shared)),
-                        forge::db::core::exceptions::participant_conflict);
+      BOOST_CHECK_THROW(static_cast<void>(blobs.join(shared)), forge::db::core::exceptions::participant_conflict);
       co_await shared.rollback();
       co_return;
    }());

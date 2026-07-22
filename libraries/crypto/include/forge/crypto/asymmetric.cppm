@@ -1,18 +1,24 @@
 module;
+
+#if !defined(FORGE_CONTRACT_GUEST)
 #include <forge/exceptions/macros.hpp>
 #include <boost/describe.hpp>
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <ostream>
 #include <span>
 #include <string>
 #include <string_view>
 #include <utility>
 #include <variant>
+#include <vector>
+#endif
 
 export module forge.crypto.asymmetric;
 
+export import forge.crypto.asymmetric.value;
+
+#if !defined(FORGE_CONTRACT_GUEST)
 import forge.core.utility;
 import forge.crypto.ed25519;
 import forge.crypto.p256;
@@ -20,17 +26,16 @@ import forge.crypto.rsa;
 import forge.crypto.secp256k1;
 import forge.crypto.sha256;
 export import forge.exceptions;
-import forge.reflect.reflect;
 import forge.raw.raw;
-import forge.variant.exceptions;
-import forge.variant.value;
-import forge.variant.conversion;
-import forge.variant.containers;
 import forge.variant.chrono;
-import forge.variant.multiprecision;
-import forge.variant.format;
+import forge.variant.containers;
+import forge.variant.conversion;
 import forge.variant.described;
+import forge.variant.exceptions;
+import forge.variant.format;
+import forge.variant.multiprecision;
 import forge.variant.static_variant;
+import forge.variant.value;
 
 export namespace forge::crypto::asymmetric {
 
@@ -48,128 +53,28 @@ using invalid_options = forge::exceptions::coded_exception<code, code::invalid_o
 
 } // namespace exceptions
 
-enum class algorithm : std::int32_t {
-   secp256k1,
-   p256,
-   ed25519,
-   rsa,
-};
-
-BOOST_DESCRIBE_ENUM(algorithm, secp256k1, p256, ed25519, rsa)
-
-class signature;
-class public_key;
+BOOST_DESCRIBE_ENUM(algorithm, secp256k1, p256, webauthn, ed25519, rsa)
 
 class private_key {
  public:
-   using storage_type =
-      std::variant<secp256k1::private_key_shim, p256::private_key_shim, ed25519::private_key_shim, rsa::private_key_shim>;
+   using storage_type = std::variant<secp256k1::private_key, p256::private_key, ed25519::private_key, rsa::private_key>;
 
    private_key() = default;
    private_key(private_key&&) = default;
    private_key(const private_key&) = default;
+   private_key& operator=(private_key&&) = default;
    private_key& operator=(const private_key&) = default;
+
+   explicit private_key(storage_type value) : _storage(std::move(value)) {}
 
    [[nodiscard]] algorithm type() const noexcept;
    [[nodiscard]] public_key get_public_key() const;
    [[nodiscard]] signature sign(std::span<const std::uint8_t> message) const;
    [[nodiscard]] signature sign_digest(const sha256& digest) const;
-
-   template <typename T> [[nodiscard]] const T& as() const {
-      return std::get<T>(_storage);
-   }
-
-   template <typename Visitor> decltype(auto) visit(Visitor&& visitor) const {
-      return std::visit(std::forward<Visitor>(visitor), _storage);
-   }
-
-   template <typename KeyType = secp256k1::private_key_shim> [[nodiscard]] static private_key generate() {
-      return private_key(storage_type(KeyType::generate()));
-   }
-
-   template <typename KeyType = p256::private_key_shim> [[nodiscard]] static private_key generate_p256() {
-      return private_key(storage_type(KeyType::generate()));
-   }
-
-   template <typename KeyType = secp256k1::private_key_shim>
-   [[nodiscard]] static private_key regenerate(const typename KeyType::data_type& data) {
-      return private_key(storage_type(KeyType(data)));
-   }
-
-   explicit private_key(const std::string& text);
-   [[nodiscard]] std::string to_string(const forge::yield_function_t& yield = forge::yield_function_t()) const;
-
-   explicit private_key(storage_type&& other_storage) : _storage(std::move(other_storage)) {}
-
- private:
-   storage_type _storage;
-   BOOST_DESCRIBE_CLASS(private_key, (), (), (), (_storage))
-
-   friend bool operator==(const private_key& p1, const private_key& p2);
-   friend bool operator<(const private_key& p1, const private_key& p2);
-};
-
-class public_key {
- public:
-   using storage_type =
-      std::variant<secp256k1::public_key_shim, p256::public_key_shim, ed25519::public_key_shim, rsa::public_key_shim>;
-
-   public_key() = default;
-   public_key(public_key&&) = default;
-   public_key(const public_key&) = default;
-   public_key& operator=(const public_key&) = default;
-
-   public_key(const signature& c, const sha256& digest, bool check_canonical = true);
-   explicit public_key(storage_type&& other_storage) : _storage(std::move(other_storage)) {}
-
-   [[nodiscard]] algorithm type() const noexcept;
-   [[nodiscard]] bool valid() const;
-   [[nodiscard]] bool verify(std::span<const std::uint8_t> message, const signature& sig) const;
-   [[nodiscard]] std::size_t which() const;
-
-   template <typename T> [[nodiscard]] const T& as() const {
-      return std::get<T>(_storage);
-   }
-
-   template <typename Visitor> decltype(auto) visit(Visitor&& visitor) const {
-      return std::visit(std::forward<Visitor>(visitor), _storage);
-   }
-
-   explicit public_key(const std::string& text);
-   [[nodiscard]] std::string to_string(const forge::yield_function_t& yield = forge::yield_function_t()) const;
-
-   storage_type _storage;
-   BOOST_DESCRIBE_CLASS(public_key, (), (), (), (_storage))
-
- private:
-   friend std::ostream& operator<<(std::ostream& s, const public_key& k);
-   friend bool operator==(const public_key& p1, const public_key& p2);
-   friend bool operator!=(const public_key& p1, const public_key& p2);
-   friend bool operator<(const public_key& p1, const public_key& p2);
-};
-
-class signature {
- public:
-   using storage_type =
-      std::variant<secp256k1::signature_shim, p256::signature_shim, ed25519::signature_shim, rsa::signature_shim>;
-
-   signature() = default;
-   signature(signature&&) = default;
-   signature(const signature&) = default;
-   signature& operator=(const signature&) = default;
-
-   explicit signature(const std::string& text);
-   [[nodiscard]] std::string to_string(const forge::yield_function_t& yield = forge::yield_function_t()) const;
-
-   [[nodiscard]] algorithm type() const noexcept;
-   [[nodiscard]] std::size_t which() const;
-   [[nodiscard]] std::size_t variable_size() const;
-   [[nodiscard]] const storage_type& storage() const {
+   [[nodiscard]] const storage_type& storage() const noexcept {
       return _storage;
    }
 
-   explicit signature(storage_type&& other_storage) : _storage(std::move(other_storage)) {}
-
    template <typename T> [[nodiscard]] const T& as() const {
       return std::get<T>(_storage);
    }
@@ -178,17 +83,32 @@ class signature {
       return std::visit(std::forward<Visitor>(visitor), _storage);
    }
 
+   template <typename KeyType = secp256k1::private_key> [[nodiscard]] static private_key generate() {
+      return private_key{storage_type{KeyType::generate()}};
+   }
+
+   template <typename KeyType = p256::private_key> [[nodiscard]] static private_key generate_p256() {
+      return private_key{storage_type{KeyType::generate()}};
+   }
+
+   template <typename KeyType = secp256k1::private_key>
+   [[nodiscard]] static private_key regenerate(typename KeyType::data_type value) {
+      return private_key{storage_type{KeyType::regenerate(std::move(value))}};
+   }
+
  private:
    storage_type _storage;
-   BOOST_DESCRIBE_CLASS(signature, (), (), (), (_storage))
 
-   friend bool operator==(const signature& p1, const signature& p2);
-   friend bool operator!=(const signature& p1, const signature& p2);
-   friend bool operator<(const signature& p1, const signature& p2);
-   friend std::size_t hash_value(const signature& b);
+   friend bool operator==(const private_key&, const private_key&);
+   friend bool operator<(const private_key&, const private_key&);
 };
 
-[[nodiscard]] std::size_t hash_value(const signature& b);
+[[nodiscard]] bool valid(const public_key& key);
+[[nodiscard]] bool verify(const public_key& key, std::span<const std::uint8_t> message, const signature& value);
+[[nodiscard]] public_key recover(const signature& value, const sha256& digest, bool check_canonical = true);
+[[nodiscard]] std::size_t hash_value(const signature& value);
+
+std::ostream& operator<<(std::ostream& stream, const public_key& key);
 
 enum class checksum_scheme {
    none,
@@ -238,7 +158,7 @@ namespace profiles {
 [[nodiscard]] const text_encoding_profile& bitcoin();
 [[nodiscard]] const text_encoding_profile& solana();
 [[nodiscard]] const text_encoding_profile& tezos();
-};
+} // namespace profiles
 
 class encoding {
  public:
@@ -257,7 +177,7 @@ class encoding {
 
    [[nodiscard]] std::string format(const public_key& key) const;
    [[nodiscard]] std::string format(const private_key& key) const;
-   [[nodiscard]] std::string format(const signature& sig) const;
+   [[nodiscard]] std::string format(const signature& value) const;
 
  private:
    explicit encoding(text_encoding_profile profile);
@@ -265,17 +185,17 @@ class encoding {
    text_encoding_profile profile_;
 };
 
-void to_variant(const private_key& var, forge::variant& vo,
+void to_variant(const private_key& value, forge::variant& output,
                 const forge::yield_function_t& yield = forge::yield_function_t());
-void from_variant(const forge::variant& var, private_key& vo);
+void from_variant(const forge::variant& value, private_key& output);
 
-void to_variant(const public_key& var, forge::variant& vo,
+void to_variant(const public_key& value, forge::variant& output,
                 const forge::yield_function_t& yield = forge::yield_function_t());
-void from_variant(const forge::variant& var, public_key& vo);
+void from_variant(const forge::variant& value, public_key& output);
 
-void to_variant(const signature& var, forge::variant& vo,
+void to_variant(const signature& value, forge::variant& output,
                 const forge::yield_function_t& yield = forge::yield_function_t());
-void from_variant(const forge::variant& var, signature& vo);
+void from_variant(const forge::variant& value, signature& output);
 
 } // namespace forge::crypto::asymmetric
 
@@ -284,11 +204,4 @@ template <> struct enum_wire_type<forge::crypto::asymmetric::algorithm> {
    using type = std::int32_t;
 };
 } // namespace forge::raw
-
-export namespace std {
-template <> struct hash<forge::crypto::asymmetric::signature> {
-   std::size_t operator()(const forge::crypto::asymmetric::signature& k) const {
-      return forge::crypto::asymmetric::hash_value(k);
-   }
-};
-} // namespace std
+#endif

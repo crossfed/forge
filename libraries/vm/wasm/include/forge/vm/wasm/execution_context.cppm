@@ -16,8 +16,10 @@ module;
 #include <signal.h>
 #include <string_view>
 #include <system_error>
+#include <type_traits>
 #include <ucontext.h>
 #include <utility>
+#include <vector>
 
 export module forge.vm.wasm.backend:execution_context;
 
@@ -174,7 +176,11 @@ template <typename Derived, typename Host, bool IsJit> class execution_context_b
       return _os;
    }
    inline auto get_interface() {
-      return execution_interface{_linear_memory, &_os};
+      auto memory_size = std::size_t{};
+      if (_linear_memory != nullptr && _wasm_alloc != nullptr && _wasm_alloc->get_current_page() >= 0) {
+         memory_size = static_cast<std::size_t>(_wasm_alloc->get_current_page()) * page_size;
+      }
+      return execution_interface{_linear_memory, memory_size, &_os};
    }
    void set_max_pages(std::uint32_t max_pages) {
       _max_pages = std::min(max_pages, static_cast<std::uint32_t>(::forge::vm::wasm::max_pages));
@@ -210,7 +216,7 @@ template <typename Derived, typename Host, bool IsJit> class execution_context_b
          uint32_t offset = data_seg.offset.value.i32; // force to unsigned
          auto addr = _linear_memory + offset;
          if (data_seg.data.size())
-            memcpy((char*)(addr), data_seg.data.data(), data_seg.data.size());
+            std::memcpy((char*)(addr), data_seg.data.data(), data_seg.data.size());
       }
 
       // Globals can be different from one WASM code to another.

@@ -12,8 +12,12 @@ module;
 
 #include <algorithm>
 #include <chrono>
+#include <condition_variable>
+#include <deque>
 #include <exception>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <ranges>
 #include <utility>
 #include <vector>

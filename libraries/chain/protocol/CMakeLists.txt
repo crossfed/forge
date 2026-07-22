@@ -1,5 +1,7 @@
 add_library(
    forge_chain_protocol STATIC
+   values.cpp
+   time.cpp
    types.cpp
    action.cpp
    action_receipt.cpp
@@ -16,6 +18,7 @@ target_include_directories(forge_chain_protocol PUBLIC ${FORGE_PUBLIC_INCLUDE_DI
 target_link_libraries(
    forge_chain_protocol PUBLIC
       forge_chain_core
+      forge_codec_hex
       forge_compression
       forge_raw
       forge_variant

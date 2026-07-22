@@ -19,8 +19,8 @@ module forge.plugins.crypto.secrets.plugin;
 
 import forge.config.core.component;
 import forge.config.core.decode;
-import forge.crypto.base64;
-import forge.crypto.hex;
+import forge.codec.base64;
+import forge.codec.hex;
 import forge.crypto.secret_bytes;
 import forge.crypto.types;
 import forge.exceptions;
@@ -45,8 +45,7 @@ namespace {
    return forge::crypto::bytes{value.begin(), value.end()};
 }
 
-[[nodiscard]] forge::crypto::bytes decode_material(
-   std::string value, encoding encoding_value, const std::string& id) {
+[[nodiscard]] forge::crypto::bytes decode_material(std::string value, encoding encoding_value, const std::string& id) {
    try {
       switch (encoding_value) {
       case encoding::raw:
@@ -58,14 +57,13 @@ namespace {
                                   forge::exceptions::ctx("secret_id", id));
          }
          auto output = forge::crypto::bytes(value.size() / 2U);
-         const auto written = forge::crypto::from_hex(value, output.data(), output.size());
+         const auto written = forge::codec::hex::decode(value, output);
          output.resize(written);
          return output;
       }
       case encoding::base64: {
          value = trim_ascii(std::move(value));
-         auto decoded = forge::crypto::base64_decode<std::vector<char>>(value);
-         return forge::crypto::bytes{decoded.begin(), decoded.end()};
+         return forge::codec::base64::decode(value);
       }
       }
    } catch (const exceptions::invalid_secret&) {
@@ -78,8 +76,7 @@ namespace {
                          forge::exceptions::ctx("secret_id", id));
 }
 
-[[nodiscard]] forge::crypto::bytes read_file(
-   const std::string& path, std::uint64_t max_bytes, const std::string& id) {
+[[nodiscard]] forge::crypto::bytes read_file(const std::string& path, std::uint64_t max_bytes, const std::string& id) {
    if (path.empty()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_source, "secret file path is empty",
                             forge::exceptions::ctx("secret_id", id));
@@ -87,8 +84,7 @@ namespace {
    auto input = std::ifstream{std::filesystem::path{path}, std::ios::binary};
    if (!input) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_source, "secret file cannot be opened",
-                            forge::exceptions::ctx("secret_id", id),
-                            forge::exceptions::ctx("path", path));
+                            forge::exceptions::ctx("secret_id", id), forge::exceptions::ctx("path", path));
    }
    input.seekg(0, std::ios::end);
    const auto size = input.tellg();
@@ -117,11 +113,10 @@ namespace {
                          forge::exceptions::ctx("secret_id", id));
 }
 
-[[nodiscard]] forge::crypto::secret_bytes load_secret_material(
-   const secret_entry& entry,
-   std::uint64_t max_plaintext_bytes,
-   std::uint64_t max_ciphertext_bytes,
-   encrypted_file_decrypt_limits decrypt_limits) {
+[[nodiscard]] forge::crypto::secret_bytes load_secret_material(const secret_entry& entry,
+                                                               std::uint64_t max_plaintext_bytes,
+                                                               std::uint64_t max_ciphertext_bytes,
+                                                               encrypted_file_decrypt_limits decrypt_limits) {
    auto material = forge::crypto::bytes{};
    switch (entry.source.type) {
    case source_type::value:
@@ -139,13 +134,11 @@ namespace {
          decrypt_limits.max_plaintext_bytes = max_plaintext_bytes;
          material = decrypt_secret_file(container, passphrase, decrypt_limits);
       } catch (const exceptions::size_limit_exceeded&) {
-         forge::exceptions::capture_and_rethrow(
-            "encrypted secret file source", std::source_location::current(),
-            forge::exceptions::ctx("secret_id", entry.id));
+         forge::exceptions::capture_and_rethrow("encrypted secret file source", std::source_location::current(),
+                                                forge::exceptions::ctx("secret_id", entry.id));
       } catch (const exceptions::invalid_secret&) {
-         forge::exceptions::capture_and_rethrow(
-            "encrypted secret file source", std::source_location::current(),
-            forge::exceptions::ctx("secret_id", entry.id));
+         forge::exceptions::capture_and_rethrow("encrypted secret file source", std::source_location::current(),
+                                                forge::exceptions::ctx("secret_id", entry.id));
       } catch (const std::exception&) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_secret, "encrypted secret file cannot be decrypted",
                                forge::exceptions::ctx("secret_id", entry.id));
@@ -154,8 +147,7 @@ namespace {
    }
    }
    if (material.size() > max_plaintext_bytes) {
-      FORGE_THROW_EXCEPTION(exceptions::size_limit_exceeded,
-                            "secret material exceeds configured plaintext limit",
+      FORGE_THROW_EXCEPTION(exceptions::size_limit_exceeded, "secret material exceeds configured plaintext limit",
                             forge::exceptions::ctx("secret_id", entry.id));
    }
    if (material.empty()) {
@@ -180,9 +172,8 @@ void require_aes_update_limit(std::uint64_t value, const char* label) {
 config decode_config(const forge::config::core::component_view& view) {
    auto decoded = forge::config::core::decode<config>(view.source(), view.section());
    if (!decoded.ok()) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_config,
-                          forge::config::core::format_decode_diagnostics("invalid crypto secrets config",
-                                                                 decoded.diagnostics));
+      FORGE_THROW_EXCEPTION(exceptions::invalid_config, forge::config::core::format_decode_diagnostics(
+                                                            "invalid crypto secrets config", decoded.diagnostics));
    }
    return std::move(decoded.value);
 }
@@ -195,11 +186,11 @@ void apply_config(plugin::impl& state, forge::config::core::component_view view)
 
    auto loaded = std::map<std::string, plugin::impl::loaded_secret>{};
    const auto decrypt_limits = encrypted_file_decrypt_limits{
-      .max_plaintext_bytes = decoded.default_max_plaintext_bytes,
-      .max_scrypt_n = decoded.encrypted_file_max_scrypt_n,
-      .max_scrypt_r = decoded.encrypted_file_max_scrypt_r,
-      .max_scrypt_p = decoded.encrypted_file_max_scrypt_p,
-      .max_scrypt_memory_bytes = decoded.encrypted_file_max_scrypt_memory_bytes,
+       .max_plaintext_bytes = decoded.default_max_plaintext_bytes,
+       .max_scrypt_n = decoded.encrypted_file_max_scrypt_n,
+       .max_scrypt_r = decoded.encrypted_file_max_scrypt_r,
+       .max_scrypt_p = decoded.encrypted_file_max_scrypt_p,
+       .max_scrypt_memory_bytes = decoded.encrypted_file_max_scrypt_memory_bytes,
    };
    for (auto& entry : decoded.secrets) {
       auto max_plaintext = resolved_limit(entry.max_plaintext_bytes, decoded.default_max_plaintext_bytes);
@@ -209,18 +200,17 @@ void apply_config(plugin::impl& state, forge::config::core::component_view view)
       require_aes_update_limit(max_ciphertext, "max-ciphertext-bytes");
       require_aes_update_limit(max_aad, "max-aad-bytes");
       auto material = load_secret_material(entry, max_plaintext, max_ciphertext, decrypt_limits);
-      loaded.emplace(entry.id,
-                     plugin::impl::loaded_secret{
-                        .id = entry.id,
-                        .kind = entry.kind,
-                        .material = std::move(material),
-                        .purposes = std::move(entry.purposes),
-                        .operations = std::move(entry.operations),
-                        .allow_raw_export = entry.allow_raw_export,
-                        .max_plaintext_bytes = max_plaintext,
-                        .max_ciphertext_bytes = max_ciphertext,
-                        .max_aad_bytes = max_aad,
-                     });
+      loaded.emplace(entry.id, plugin::impl::loaded_secret{
+                                   .id = entry.id,
+                                   .kind = entry.kind,
+                                   .material = std::move(material),
+                                   .purposes = std::move(entry.purposes),
+                                   .operations = std::move(entry.operations),
+                                   .allow_raw_export = entry.allow_raw_export,
+                                   .max_plaintext_bytes = max_plaintext,
+                                   .max_ciphertext_bytes = max_ciphertext,
+                                   .max_aad_bytes = max_aad,
+                               });
    }
    state.secrets = std::move(loaded);
    state.stopping = false;

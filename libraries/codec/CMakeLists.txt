@@ -1,3 +1,6 @@
+add_subdirectory(base64)
+add_subdirectory(base58)
+add_subdirectory(hex)
 add_subdirectory(json)
 add_subdirectory(yaml)
 add_subdirectory(xml)

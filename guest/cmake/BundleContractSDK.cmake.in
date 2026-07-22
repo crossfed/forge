@@ -1,0 +1,135 @@
+set(_prefix "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}")
+set(_library_dir "${_prefix}/@CMAKE_INSTALL_LIBDIR@")
+include("${CMAKE_CURRENT_LIST_DIR}/ContractSDKRuntimeDependencies.cmake")
+forge_contract_sdk_runtime_dependency_filters(_runtime_dependency_filters)
+set(_runtime_prefixes "@CMAKE_PREFIX_PATH@")
+set(_configured_runtime_directories "@CMAKE_LIBRARY_PATH@")
+forge_contract_sdk_runtime_search_directories(
+   _runtime_dependency_directories
+   INSTALL_LIBRARY_DIR "${_library_dir}"
+   PREFIXES ${_runtime_prefixes}
+   DIRECTORIES ${_configured_runtime_directories}
+)
+set(_executables
+   "${_prefix}/bin/clang++"
+   "${_prefix}/bin/clang-scan-deps"
+   "${_prefix}/bin/llvm-ar"
+   "${_prefix}/bin/llvm-ranlib"
+   "${_prefix}/bin/wasm-ld"
+   "${_prefix}/bin/abigen"
+   "${_prefix}/bin/contract-check"
+   "${_prefix}/bin/contract-manifest"
+)
+set(_plugin "${_library_dir}/forge-contract/attr-plugin@CMAKE_SHARED_MODULE_SUFFIX@")
+
+foreach(_path IN LISTS _executables _plugin)
+   if(NOT EXISTS "${_path}")
+      message(FATAL_ERROR "Forge Contract SDK runtime bundling cannot find ${_path}")
+   endif()
+endforeach()
+
+set(_executable_dependencies)
+set(_executable_unresolved)
+foreach(_executable IN LISTS _executables)
+   unset(_resolved)
+   unset(_unresolved)
+   file(GET_RUNTIME_DEPENDENCIES
+      RESOLVED_DEPENDENCIES_VAR _resolved
+      UNRESOLVED_DEPENDENCIES_VAR _unresolved
+      EXECUTABLES "${_executable}"
+      DIRECTORIES ${_runtime_dependency_directories}
+      ${_runtime_dependency_filters}
+   )
+   list(APPEND _executable_dependencies ${_resolved})
+   list(APPEND _executable_unresolved ${_unresolved})
+endforeach()
+unset(_plugin_dependencies)
+unset(_plugin_unresolved)
+file(GET_RUNTIME_DEPENDENCIES
+   RESOLVED_DEPENDENCIES_VAR _plugin_dependencies
+   UNRESOLVED_DEPENDENCIES_VAR _plugin_unresolved
+   MODULES "${_plugin}"
+   DIRECTORIES ${_runtime_dependency_directories}
+   ${_runtime_dependency_filters}
+)
+set(_dependencies ${_executable_dependencies} ${_plugin_dependencies})
+set(_unresolved ${_executable_unresolved} ${_plugin_unresolved})
+list(REMOVE_DUPLICATES _dependencies)
+list(REMOVE_DUPLICATES _unresolved)
+if(_unresolved)
+   message(FATAL_ERROR "unresolved Forge Contract SDK runtime dependencies: ${_unresolved}")
+endif()
+
+file(MAKE_DIRECTORY "${_library_dir}")
+set(_bundled)
+foreach(_dependency IN LISTS _dependencies)
+   get_filename_component(_name "${_dependency}" NAME)
+   set(_destination "${_library_dir}/${_name}")
+   # COPY_FILE follows symlinks, so every dependency is self-contained even
+   # when the selected LLVM installation exposes an unversioned link.
+   file(COPY_FILE "${_dependency}" "${_destination}" ONLY_IF_DIFFERENT)
+   forge_contract_sdk_prepare_runtime_dependency("${_destination}")
+   list(APPEND _bundled "${_destination}")
+endforeach()
+
+if(APPLE)
+   find_program(_install_name_tool install_name_tool REQUIRED)
+   find_program(_otool otool REQUIRED)
+   find_program(_codesign codesign REQUIRED)
+   set(_binaries ${_executables} "${_plugin}" ${_bundled})
+   foreach(_binary IN LISTS _binaries)
+      execute_process(COMMAND "${_otool}" -L "${_binary}" OUTPUT_VARIABLE _linked COMMAND_ERROR_IS_FATAL ANY)
+      foreach(_dependency IN LISTS _dependencies)
+         string(FIND "${_linked}" "${_dependency}" _found)
+         if(NOT _found EQUAL -1)
+            get_filename_component(_name "${_dependency}" NAME)
+            execute_process(
+               COMMAND "${_install_name_tool}" -change "${_dependency}" "@rpath/${_name}" "${_binary}"
+               COMMAND_ERROR_IS_FATAL ANY
+            )
+         endif()
+      endforeach()
+   endforeach()
+   foreach(_library IN LISTS _bundled)
+      get_filename_component(_name "${_library}" NAME)
+      execute_process(
+         COMMAND "${_install_name_tool}" -id "@rpath/${_name}" "${_library}"
+         COMMAND_ERROR_IS_FATAL ANY
+      )
+   endforeach()
+   foreach(_binary IN LISTS _binaries)
+      execute_process(
+         COMMAND "${_codesign}" --force --sign - "${_binary}"
+         COMMAND_ERROR_IS_FATAL ANY
+      )
+   endforeach()
+elseif(UNIX)
+   find_program(_patchelf patchelf REQUIRED)
+   foreach(_executable IN LISTS _executables)
+      execute_process(
+         COMMAND "${_patchelf}" --set-rpath "$ORIGIN/../lib" "${_executable}"
+         COMMAND_ERROR_IS_FATAL ANY
+      )
+   endforeach()
+   execute_process(
+      COMMAND "${_patchelf}" --set-rpath "$ORIGIN/.." "${_plugin}"
+      COMMAND_ERROR_IS_FATAL ANY
+   )
+   foreach(_library IN LISTS _bundled)
+      execute_process(
+         COMMAND "${_patchelf}" --set-rpath "$ORIGIN" "${_library}"
+         COMMAND_ERROR_IS_FATAL ANY
+      )
+   endforeach()
+   set(_libstdcxx_license "/usr/share/doc/libstdc++6/copyright")
+   if(NOT EXISTS "${_libstdcxx_license}")
+      message(FATAL_ERROR "cannot find the libstdc++ redistribution notice: ${_libstdcxx_license}")
+   endif()
+   file(MAKE_DIRECTORY "${_prefix}/share/licenses/forge-contract")
+   file(
+      COPY_FILE
+      "${_libstdcxx_license}"
+      "${_prefix}/share/licenses/forge-contract/libstdc++-copyright"
+      ONLY_IF_DIFFERENT
+   )
+endif()

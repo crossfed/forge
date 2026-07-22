@@ -1,5 +1,5 @@
 module;
-#include <stdint.h>
+#include <cstdint>
 #include <openssl/types.h>
 #include <span>
 #include <string>

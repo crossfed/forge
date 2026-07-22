@@ -7,10 +7,12 @@
 #include <deque>
 #include <flat_map>
 #include <iomanip>
+#include <limits>
 #include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 import forge.crypto.asymmetric;
@@ -27,7 +29,14 @@ import forge.chain.protocol.abi;
 import forge.chain.protocol.action;
 import forge.chain.protocol.action_receipt;
 import forge.chain.protocol.block;
+import forge.chain.protocol.blockchain_parameters;
+import forge.chain.protocol.call_access_mode;
+import forge.chain.protocol.call_data_header;
+import forge.chain.protocol.code_hash_result;
+import forge.chain.protocol.finalizer_policy;
 import forge.chain.protocol.fixed_key;
+import forge.chain.protocol.hash_id;
+import forge.chain.protocol.kv_parameters;
 import forge.chain.protocol.system;
 import forge.chain.protocol.transaction;
 import forge.chain.protocol.types;
@@ -42,6 +51,10 @@ namespace {
 
 std::string expected(std::string_view value) {
    return std::string{value};
+}
+
+bool has_message(const std::exception& error, std::string_view message) {
+   return error.what() == message;
 }
 
 std::string hex(std::span<const std::uint8_t> bytes) {
@@ -87,9 +100,15 @@ concept supports_single_word_factory = requires(Word word) {
    { Key::template make_from_word_sequence<Word>(word) } -> std::same_as<Key>;
 };
 
+template <typename Key, typename Word>
+concept supports_word_pair_factory = requires(Word first, Word second) {
+   { Key::template make_from_word_sequence<Word>(first, second) } -> std::same_as<Key>;
+};
+
 static_assert(std::constructible_from<protocol::key256, std::array<std::uint32_t, 5>>);
 static_assert(!std::constructible_from<protocol::key256, std::array<protocol::uint128_t, 1>>);
 static_assert(supports_single_word_factory<protocol::key256, protocol::uint128_t>);
+static_assert(supports_word_pair_factory<protocol::key256, protocol::uint128_t>);
 static_assert(!supports_single_word_factory<protocol::key256, std::int64_t>);
 static_assert(protocol::fixed_key<1>::num_words() == 1U && protocol::fixed_key<1>::padded_bytes() == 15U);
 static_assert(protocol::fixed_key<20>::num_words() == 2U && protocol::fixed_key<20>::padded_bytes() == 12U);
@@ -214,6 +233,9 @@ protocol::signed_block make_reference_signed_block() {
 
 BOOST_AUTO_TEST_SUITE(forge_chain_protocol_compatibility)
 
+static_assert(std::is_same_v<protocol::public_key, forge::crypto::asymmetric::public_key>);
+static_assert(std::is_same_v<protocol::signature, forge::crypto::asymmetric::signature>);
+
 BOOST_AUTO_TEST_CASE(fixed_key_matches_donor_word_and_byte_order) {
    const auto high = static_cast<protocol::uint128_t>(0x0102030405060708ULL) << 64U |
                      static_cast<protocol::uint128_t>(0x1112131415161718ULL);
@@ -230,7 +252,63 @@ BOOST_AUTO_TEST_CASE(fixed_key_matches_donor_word_and_byte_order) {
    BOOST_TEST((variant.as<protocol::key256>() == value));
 }
 
-BOOST_AUTO_TEST_CASE(fixed_key_partial_word_sequences_match_cdt_fixed_bytes) {
+BOOST_AUTO_TEST_CASE(contract_wire_records_preserve_spring_raw_layout) {
+   auto code_hash = protocol::code_hash_result{};
+   code_hash.struct_version = forge::unsigned_int{1U};
+   code_hash.code_sequence = 0x0102030405060708ULL;
+   code_hash.code_hash = protocol::checksum256{std::array<std::uint8_t, 32>{
+       0x00U, 0x01U, 0x02U, 0x03U, 0x04U, 0x05U, 0x06U, 0x07U, 0x08U, 0x09U, 0x0aU, 0x0bU, 0x0cU, 0x0dU, 0x0eU, 0x0fU,
+       0x10U, 0x11U, 0x12U, 0x13U, 0x14U, 0x15U, 0x16U, 0x17U, 0x18U, 0x19U, 0x1aU, 0x1bU, 0x1cU, 0x1dU, 0x1eU, 0x1fU,
+   }};
+   code_hash.vm_type = 0xaaU;
+   code_hash.vm_version = 0xbbU;
+   BOOST_TEST(pack_hex(code_hash) ==
+              "010807060504030201000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1faabb");
+
+   const auto parameters = protocol::blockchain_parameters{
+       .max_block_net_usage = 1U,
+       .target_block_net_usage_pct = 2U,
+       .max_transaction_net_usage = 3U,
+       .base_per_transaction_net_usage = 4U,
+       .net_usage_leeway = 5U,
+       .context_free_discount_net_usage_num = 6U,
+       .context_free_discount_net_usage_den = 7U,
+       .max_block_cpu_usage = 8U,
+       .target_block_cpu_usage_pct = 9U,
+       .max_transaction_cpu_usage = 10U,
+       .min_transaction_cpu_usage = 11U,
+       .max_transaction_lifetime = 12U,
+       .deferred_trx_expiration_window = 13U,
+       .max_transaction_delay = 14U,
+       .max_inline_action_size = 15U,
+       .max_inline_action_depth = 16U,
+       .max_authority_depth = 17U,
+   };
+   BOOST_TEST(pack_hex(parameters) ==
+              "010000000000000002000000030000000400000005000000060000000700000008000000090000000a0000000b000000"
+              "0c0000000d0000000e0000000f00000010001100");
+
+   const auto kv = protocol::kv_parameters{.max_key_size = 1U, .max_value_size = 2U, .max_iterators = 3U};
+   BOOST_TEST(pack_hex(kv) == "010000000200000003000000");
+
+   const auto authority = protocol::finalizer_authority{
+       .description = "f",
+       .weight = 3U,
+       .public_key = {char{0x01}, char{0x02}},
+   };
+   BOOST_TEST(pack_hex(authority) == "01660300000000000000020102");
+   const auto policy = protocol::finalizer_policy{.threshold = 4U, .finalizers = {authority}};
+   BOOST_TEST(pack_hex(policy) == "04000000000000000101660300000000000000020102");
+
+   const auto call = protocol::call_data_header{.version = 0x01020304U, .func_name = 0x0102030405060708ULL};
+   BOOST_TEST(pack_hex(call) == "040302010807060504030201");
+   BOOST_TEST(static_cast<std::uint8_t>(protocol::call_access_mode::read_write) == 0U);
+   BOOST_TEST(static_cast<std::uint8_t>(protocol::call_access_mode::read_only) == 1U);
+   const auto apply_id = static_cast<protocol::hash_id::raw>(protocol::hash_id{"apply"});
+   BOOST_TEST(static_cast<std::uint64_t>(apply_id) == protocol::hash_id::hash("apply"));
+}
+
+BOOST_AUTO_TEST_CASE(fixed_key_partial_word_sequences_preserve_cdt_layout) {
    const auto u8 = protocol::key256::make_from_word_sequence<std::uint8_t>(std::uint8_t{1U});
    const auto u16 = protocol::key256::make_from_word_sequence<std::uint16_t>(std::uint16_t{1U});
    const auto u32 = protocol::key256::make_from_word_sequence<std::uint32_t>(std::uint32_t{1U});
@@ -245,6 +323,8 @@ BOOST_AUTO_TEST_CASE(fixed_key_partial_word_sequences_match_cdt_fixed_bytes) {
    const auto u64_full = protocol::key256::make_from_word_sequence<std::uint64_t>(std::uint64_t{1U}, std::uint64_t{2U},
                                                                                   std::uint64_t{3U}, std::uint64_t{4U});
    const auto u128 = protocol::key256::make_from_word_sequence<protocol::uint128_t>(protocol::uint128_t{1U});
+   const auto u128_full =
+       protocol::key256::make_from_word_sequence<protocol::uint128_t>(protocol::uint128_t{1U}, protocol::uint128_t{2U});
 
    BOOST_TEST(backing_hex(u8) == "0100000000000000000000000000000000000000000000000000000000000000");
    BOOST_TEST(backing_hex(u16) == "0000000000000001000000000000000000000000000000000000000000000000");
@@ -256,8 +336,10 @@ BOOST_AUTO_TEST_CASE(fixed_key_partial_word_sequences_match_cdt_fixed_bytes) {
    BOOST_TEST(backing_hex(u64) == "0000000000000001000000000000000000000000000000000000000000000000");
    BOOST_TEST(backing_hex(u64_full) == "0000000000000001000000000000000200000000000000030000000000000004");
    BOOST_TEST(backing_hex(u128) == "0000000000000000000000000000000100000000000000000000000000000000");
+   BOOST_TEST(backing_hex(u128_full) == "0000000000000000000000000000000100000000000000000000000000000002");
 
    BOOST_TEST((u32_crossing == protocol::key256{std::array<std::uint32_t, 5>{1U, 2U, 3U, 4U, 5U}}));
+   BOOST_TEST(pack_hex(u32) == "0000000000000000000100000000000000000000000000000000000000000000");
    BOOST_TEST(hex(u64_full.extract_as_byte_array()) ==
               "0000000000000001000000000000000200000000000000030000000000000004");
 }
@@ -345,12 +427,23 @@ BOOST_AUTO_TEST_CASE(name_symbol_and_asset_match_spring_fixtures) {
 
    const auto token = protocol::asset{42, protocol::make_symbol("SYS", 4)};
    BOOST_TEST(pack_hex(token) == expected(spring::asset_raw));
+
+   constexpr auto source_compatible = protocol::asset{42};
+   static_assert(source_compatible.amount == 42);
+   static_assert(source_compatible.sym.raw() == 0U);
 }
 
 BOOST_AUTO_TEST_CASE(name_rejects_high_valued_thirteenth_character) {
    BOOST_CHECK_NO_THROW((void)protocol::make_name("abcdefghijklj"));
    BOOST_CHECK_THROW(protocol::make_name("abcdefghijklk"), std::invalid_argument);
    BOOST_CHECK_THROW(protocol::make_name("abcdefghijklz"), std::invalid_argument);
+}
+
+BOOST_AUTO_TEST_CASE(name_char_to_value_preserves_cdt_invalid_character_failure) {
+   BOOST_TEST(protocol::name::char_to_value('.') == 0U);
+   BOOST_TEST(protocol::name::char_to_value('1') == 1U);
+   BOOST_TEST(protocol::name::char_to_value('a') == 6U);
+   BOOST_CHECK_THROW((void)protocol::name::char_to_value('A'), std::invalid_argument);
 }
 
 BOOST_AUTO_TEST_CASE(asset_variant_text_preserves_precision) {
@@ -398,6 +491,66 @@ BOOST_AUTO_TEST_CASE(asset_variant_parse_rejects_invalid_text) {
    BOOST_CHECK_THROW(protocol::from_variant(forge::variant{"0.0042 SYS extra"}, asset), std::invalid_argument);
    BOOST_CHECK_THROW(protocol::from_variant(forge::variant{"+1 SYS"}, asset), std::invalid_argument);
    BOOST_CHECK_THROW(protocol::from_variant(forge::variant{"9223372036854775808 SYS"}, asset), std::invalid_argument);
+}
+
+BOOST_AUTO_TEST_CASE(asset_arithmetic_preserves_cdt_checks_and_errors) {
+   const auto sys = protocol::make_symbol("SYS", 4);
+   const auto eos = protocol::make_symbol("EOS", 4);
+
+   auto value = protocol::asset{42, sys};
+   value += protocol::asset{8, sys};
+   BOOST_TEST(value.amount == 50);
+   value -= protocol::asset{20, sys};
+   BOOST_TEST(value.amount == 30);
+   value *= 3;
+   BOOST_TEST(value.amount == 90);
+   value /= 2;
+   BOOST_TEST(value.amount == 45);
+
+   BOOST_CHECK_EXCEPTION((void)(protocol::asset{protocol::asset::max_amount, sys} + protocol::asset{1, sys}),
+                         std::invalid_argument,
+                         [](const auto& error) { return has_message(error, "addition overflow"); });
+   BOOST_CHECK_EXCEPTION((void)(protocol::asset{-protocol::asset::max_amount, sys} - protocol::asset{1, sys}),
+                         std::invalid_argument,
+                         [](const auto& error) { return has_message(error, "subtraction underflow"); });
+   BOOST_CHECK_EXCEPTION(
+       (void)(protocol::asset{1, sys} + protocol::asset{1, eos}), std::invalid_argument,
+       [](const auto& error) { return has_message(error, "attempt to add asset with different symbol"); });
+   BOOST_CHECK_EXCEPTION((void)(protocol::asset{1, sys} / 0), std::invalid_argument,
+                         [](const auto& error) { return has_message(error, "divide by zero"); });
+   BOOST_CHECK_EXCEPTION((void)(protocol::asset{1, sys} == protocol::asset{1, eos}), std::invalid_argument,
+                         [](const auto& error) {
+                            return has_message(error, "comparison of assets with different symbols is not allowed");
+                         });
+
+   const auto first = protocol::extended_asset{protocol::asset{42, sys}, protocol::make_name("eosio.token")};
+   const auto second = protocol::extended_asset{protocol::asset{1, sys}, protocol::make_name("other.token")};
+   BOOST_CHECK_EXCEPTION(first + second, std::invalid_argument,
+                         [](const auto& error) { return has_message(error, "type mismatch"); });
+}
+
+BOOST_AUTO_TEST_CASE(time_and_extended_asset_match_cdt_wire_layout) {
+   const auto point = protocol::time_point{protocol::microseconds{0x0102030405060708LL}};
+   const auto point_sec = protocol::time_point_sec{0x01020304U};
+   const auto timestamp = protocol::block_timestamp{0x01020304U};
+   const auto extended =
+       protocol::extended_asset{protocol::asset{42, protocol::make_symbol("SYS", 4)}, protocol::make_name("eosio")};
+
+   BOOST_TEST(pack_hex(point) == "0807060504030201");
+   BOOST_TEST(pack_hex(point_sec) == "04030201");
+   BOOST_TEST(pack_hex(timestamp) == "04030201");
+   BOOST_TEST(pack_hex(extended) == "2a0000000000000004535953000000000000000000ea3055");
+
+   const auto parsed = protocol::time_point::from_iso_string("2000-01-01T00:00:00");
+   BOOST_TEST(parsed.time_since_epoch().count() == 946'684'800'000'000LL);
+   BOOST_TEST(parsed.to_string() == "2000-01-01T00:00:00");
+   BOOST_TEST(protocol::block_timestamp{parsed}.slot == 0U);
+   BOOST_TEST(protocol::block_timestamp::maximum().slot == 0xffffU);
+   BOOST_TEST(protocol::block_timestamp::maximum().next().slot == 0x10000U);
+   BOOST_TEST(protocol::block_timestamp{parsed}.next().slot == 1U);
+   BOOST_CHECK_EXCEPTION((void)protocol::block_timestamp{std::numeric_limits<std::uint32_t>::max()}.next(),
+                         std::invalid_argument,
+                         [](const auto& error) { return has_message(error, "block timestamp overflow"); });
 }
 
 BOOST_AUTO_TEST_CASE(action_transaction_and_signed_transaction_match_spring_fixtures) {
@@ -470,8 +623,8 @@ BOOST_AUTO_TEST_CASE(savanna_action_receipt_digests_use_core_merkle) {
    second.recv_sequence = 10U;
 
    const auto digests = std::array{
-      protocol::calculate_savanna_action_digest(first, action),
-      protocol::calculate_savanna_action_digest(second, action),
+       protocol::calculate_savanna_action_digest(first, action),
+       protocol::calculate_savanna_action_digest(second, action),
    };
 
    BOOST_TEST(digests[0].str() == expected(spring::savanna_action_digest));
@@ -511,7 +664,8 @@ BOOST_AUTO_TEST_CASE(transaction_signature_preimage_digest_and_spring_signature_
    BOOST_TEST(protocol::signature_digest(chain_id, trx, cfd).str() == expected(spring::transaction_signature_digest));
 
    const auto signature = parse_spring_signature(spring::transaction_signature);
-   const auto recovered = protocol::public_key{signature, core::digest{std::string{spring::transaction_signature_digest}}};
+   const auto recovered =
+       forge::crypto::asymmetric::recover(signature, core::digest{std::string{spring::transaction_signature_digest}});
    BOOST_TEST(format_spring_public_key(recovered) == expected(spring::test_public_key));
 }
 
@@ -624,7 +778,7 @@ BOOST_AUTO_TEST_CASE(block_header_receipt_and_signed_block_match_spring_fixtures
    BOOST_TEST(protocol::calculate_block_num_from_id(protocol::calculate_block_id(header)) == spring::block_num_from_id);
 
    const auto signature = parse_spring_signature(spring::block_signature);
-   const auto recovered = protocol::public_key{signature, protocol::calculate_block_id(header)};
+   const auto recovered = forge::crypto::asymmetric::recover(signature, protocol::calculate_block_id(header));
    BOOST_TEST(format_spring_public_key(recovered) == expected(spring::test_public_key));
 
    const auto signed_header = make_reference_signed_block_header();
@@ -648,9 +802,9 @@ BOOST_AUTO_TEST_CASE(transaction_mroot_uses_core_merkle_over_receipt_digests) {
    receipts.push_back(make_receipt(2U));
    receipts.push_back(make_receipt(3U));
    const auto digests = std::array{
-      receipts[0].digest(),
-      receipts[1].digest(),
-      receipts[2].digest(),
+       receipts[0].digest(),
+       receipts[1].digest(),
+       receipts[2].digest(),
    };
    BOOST_TEST(protocol::calculate_transaction_mroot(receipts) == core::calculate_merkle_root(digests));
 }
@@ -660,22 +814,23 @@ BOOST_AUTO_TEST_CASE(forge_secp256k1_is_the_crypto_surface_for_runtime_signature
    const auto digest = forge::crypto::sha256{std::string{spring::transaction_signature_digest}};
    const auto signature = private_key.sign_digest(digest);
    const auto public_key = private_key.get_public_key();
-   const auto recovered_key = forge::crypto::asymmetric::public_key{signature, digest};
-   const auto signature_text = signature.to_string();
-   const auto public_key_text = public_key.to_string();
+   const auto recovered_key = forge::crypto::asymmetric::recover(signature, digest);
+   const auto signature_text = forge::crypto::asymmetric::encoding::forge().format(signature);
+   const auto public_key_text = forge::crypto::asymmetric::encoding::forge().format(public_key);
    const auto signature_bytes = forge::raw::pack(signature);
    const auto public_key_bytes = forge::raw::pack(public_key);
-   const auto parsed_signature = forge::crypto::asymmetric::signature{signature_text};
-   const auto parsed_public_key = forge::crypto::asymmetric::public_key{public_key_text};
+   const auto parsed_signature = forge::crypto::asymmetric::encoding::forge().parse_signature(signature_text);
+   const auto parsed_public_key = forge::crypto::asymmetric::encoding::forge().parse_public(public_key_text);
    const auto unpacked_signature = forge::raw::unpack<forge::crypto::asymmetric::signature>(signature_bytes);
    const auto unpacked_public_key = forge::raw::unpack<forge::crypto::asymmetric::public_key>(public_key_bytes);
 
-   BOOST_TEST(static_cast<int>(signature.type()) == static_cast<int>(forge::crypto::asymmetric::algorithm::secp256k1));
+   BOOST_TEST(static_cast<int>(forge::crypto::asymmetric::type(signature)) ==
+              static_cast<int>(forge::crypto::asymmetric::algorithm::secp256k1));
    BOOST_TEST(recovered_key == public_key);
-   BOOST_TEST(parsed_signature.to_string() == signature_text);
-   BOOST_TEST(parsed_public_key.to_string() == public_key_text);
-   BOOST_TEST(unpacked_signature.to_string() == signature_text);
-   BOOST_TEST(unpacked_public_key.to_string() == public_key_text);
+   BOOST_TEST(forge::crypto::asymmetric::encoding::forge().format(parsed_signature) == signature_text);
+   BOOST_TEST(forge::crypto::asymmetric::encoding::forge().format(parsed_public_key) == public_key_text);
+   BOOST_TEST(forge::crypto::asymmetric::encoding::forge().format(unpacked_signature) == signature_text);
+   BOOST_TEST(forge::crypto::asymmetric::encoding::forge().format(unpacked_public_key) == public_key_text);
 
    const auto spring_public_key = parse_spring_public_key(spring::test_public_key);
    BOOST_TEST(format_spring_public_key(spring_public_key) == expected(spring::test_public_key));

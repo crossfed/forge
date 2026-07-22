@@ -11,7 +11,7 @@ module;
 
 module forge.net.p2p.identity;
 
-import forge.crypto.base58;
+import forge.codec.base58;
 import forge.crypto.asymmetric;
 import forge.crypto.x509;
 import forge.multiformats.exceptions;
@@ -116,7 +116,7 @@ void verify_libp2p_certificate_extension(const forge::crypto::x509::certificate&
    const auto value = certificate.extension("1.3.6.1.4.1.53594.1.1");
    if (value.empty()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_identity,
-                          "libp2p peer certificate is missing signed identity extension");
+                            "libp2p peer certificate is missing signed identity extension");
    }
    const auto extension = decode_signed_key_extension(value);
    verify_libp2p_certificate_extension(certificate, extension);
@@ -138,7 +138,7 @@ std::string peer_id::to_cid_string() const {
 }
 
 forge::multiformats::bytes peer_id::to_bytes() const {
-   return forge::crypto::base58_decode(value);
+   return forge::codec::base58::decode(value);
 }
 
 peer_id peer_id::from_string(std::string_view value) {
@@ -167,7 +167,7 @@ peer_id peer_id::from_string(std::string_view value) {
 
 peer_id peer_id::from_bytes(std::span<const std::uint8_t> value) {
    (void)forge::multiformats::multihash::decode(value);
-   return peer_id{.value = forge::crypto::base58_encode(value)};
+   return peer_id{.value = forge::codec::base58::encode(value)};
 }
 
 forge::multiformats::bytes encode_public_key(const public_key& key) {

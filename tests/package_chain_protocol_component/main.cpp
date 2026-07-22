@@ -19,7 +19,8 @@ int main() {
    receipt.act_digest = forge::chain::protocol::generate_action_digest(action, forge::chain::protocol::bytes{});
    const auto savanna_digest = forge::chain::protocol::calculate_savanna_action_digest(receipt, action);
    auto block = forge::chain::protocol::signed_block{};
-   auto key = forge::chain::protocol::key256{};
+   auto key = forge::chain::protocol::key256::make_from_word_sequence<forge::chain::protocol::uint128_t>(
+       forge::chain::protocol::uint128_t{1U}, forge::chain::protocol::uint128_t{2U});
    block.transaction_mroot = digest;
    (void)transaction;
    (void)savanna_digest;

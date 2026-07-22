@@ -5,6 +5,7 @@ module;
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/this_coro.hpp>
 
+#include <deque>
 #include <exception>
 #include <functional>
 #include <map>

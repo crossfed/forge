@@ -88,7 +88,7 @@ const ec_group& get_curve() {
 
 void raise_openssl_failure(const char* message) {
    FORGE_THROW_EXCEPTION(exceptions::backend_error, "OpenSSL error", forge::exceptions::ctx("message", message),
-                       forge::exceptions::ctx("code", static_cast<uint32_t>(ERR_get_error())));
+                         forge::exceptions::ctx("code", static_cast<uint32_t>(ERR_get_error())));
 }
 
 bool is_empty(const public_key_data& key) {
@@ -123,8 +123,8 @@ public_key_data point_to_public_key_data(const EC_POINT* point) {
    public_key_data result;
    const auto written = EC_POINT_point2oct(group, point, POINT_CONVERSION_COMPRESSED,
                                            reinterpret_cast<unsigned char*>(result.data()), result.size(), ctx);
-   FORGE_ASSERT(written == result.size(), "unexpected P-256 public key size", forge::exceptions::ctx("written", written),
-              forge::exceptions::ctx("expected", result.size()));
+   FORGE_ASSERT(written == result.size(), "unexpected P-256 public key size",
+                forge::exceptions::ctx("written", written), forge::exceptions::ctx("expected", result.size()));
    return result;
 }
 
@@ -132,12 +132,13 @@ public_key_point_data point_to_uncompressed_data(const public_key_data& data) {
    const ec_group& group = get_curve();
    bn_ctx ctx(BN_CTX_new());
    ec_point point(EC_POINT_new(group));
-   FORGE_ASSERT(EC_POINT_oct2point(group, point, reinterpret_cast<const unsigned char*>(data.data()), data.size(), ctx));
+   FORGE_ASSERT(
+       EC_POINT_oct2point(group, point, reinterpret_cast<const unsigned char*>(data.data()), data.size(), ctx));
    public_key_point_data result;
    const auto written = EC_POINT_point2oct(group, point, POINT_CONVERSION_UNCOMPRESSED,
                                            reinterpret_cast<unsigned char*>(result.data()), result.size(), ctx);
    FORGE_ASSERT(written == result.size(), "unexpected uncompressed P-256 public key size",
-              forge::exceptions::ctx("written", written), forge::exceptions::ctx("expected", result.size()));
+                forge::exceptions::ctx("written", written), forge::exceptions::ctx("expected", result.size()));
    return result;
 }
 
@@ -185,7 +186,7 @@ evp_pkey_ptr make_private_pkey(const private_key_secret& secret) {
    FORGE_ASSERT(1 == OSSL_PARAM_BLD_push_utf8_string(builder.get(), OSSL_PKEY_PARAM_GROUP_NAME, r1_group_name, 0));
    FORGE_ASSERT(1 == OSSL_PARAM_BLD_push_BN(builder.get(), OSSL_PKEY_PARAM_PRIV_KEY, priv));
    FORGE_ASSERT(1 == OSSL_PARAM_BLD_push_octet_string(builder.get(), OSSL_PKEY_PARAM_PUB_KEY, pub_uncompressed.data(),
-                                                    pub_uncompressed.size()));
+                                                      pub_uncompressed.size()));
    ossl_param_ptr params(OSSL_PARAM_BLD_to_param(builder.get()));
    FORGE_ASSERT(params != nullptr, "error building EVP private key params");
    evp_pkey_ctx_ptr ctx(EVP_PKEY_CTX_new_from_name(nullptr, "EC", nullptr));
@@ -246,8 +247,8 @@ void require_der_signature(std::span<const std::uint8_t> der) {
    }
 }
 
-std::optional<public_key_data> recover_public_key_from_sig(ECDSA_SIG* sig, const forge::crypto::sha256& digest, int recid,
-                                                           bool check) {
+std::optional<public_key_data> recover_public_key_from_sig(ECDSA_SIG* sig, const forge::crypto::sha256& digest,
+                                                           int recid, bool check) {
    const BIGNUM *r = nullptr, *s = nullptr;
    ECDSA_SIG_get0(sig, &r, &s);
    FORGE_ASSERT(r != nullptr && s != nullptr, "invalid P-256 signature");
@@ -326,7 +327,8 @@ std::optional<public_key_data> recover_public_key_from_sig(ECDSA_SIG* sig, const
 }
 } // namespace
 
-public_key_data recover_public_key_data(const compact_signature& c, const forge::crypto::sha256& digest, bool check_canonical) {
+public_key_data recover_public_key_data(const compact_signature& c, const forge::crypto::sha256& digest,
+                                        bool check_canonical) {
    int nV = c.data()[0];
    if (nV < 27 || nV >= 35)
       FORGE_THROW_EXCEPTION(exceptions::invalid_signature, "unable to reconstruct public key from signature");
@@ -399,7 +401,7 @@ public_key public_key::mult(const forge::crypto::sha256& digest) {
    bn_ctx ctx(BN_CTX_new());
    ec_point master(EC_POINT_new(group));
    FORGE_ASSERT(EC_POINT_oct2point(group, master, reinterpret_cast<const unsigned char*>(my->_key.data()),
-                                 my->_key.size(), ctx));
+                                   my->_key.size(), ctx));
    ssl_bignum z = bignum_from_bytes(digest.data(), digest.data_size());
    ec_point result(EC_POINT_new(group));
    FORGE_ASSERT(EC_POINT_mul(group, result, nullptr, master, z, ctx));
@@ -422,11 +424,11 @@ public_key public_key::add(const forge::crypto::sha256& digest) const {
 
       ec_point master(EC_POINT_new(group));
       FORGE_ASSERT(EC_POINT_oct2point(group, master, reinterpret_cast<const unsigned char*>(my->_key.data()),
-                                    my->_key.size(), ctx));
+                                      my->_key.size(), ctx));
       auto digest_key = private_key::regenerate(digest).get_public_key().serialize();
       ec_point digest_point(EC_POINT_new(group));
       FORGE_ASSERT(EC_POINT_oct2point(group, digest_point, reinterpret_cast<const unsigned char*>(digest_key.data()),
-                                    digest_key.size(), ctx));
+                                      digest_key.size(), ctx));
       ec_point result(EC_POINT_new(group));
       FORGE_ASSERT(EC_POINT_add(group, result, digest_point, master, ctx));
       if (EC_POINT_is_at_infinity(group, result))
@@ -468,8 +470,8 @@ forge::crypto::sha256 private_key::get_secret() const {
 private_key private_key::generate() {
    private_key self;
    do {
-      forge::crypto::fill_random(std::span<std::uint8_t>{
-         reinterpret_cast<std::uint8_t*>(self.my->_key.data()), self.my->_key.data_size()});
+      forge::crypto::fill_random(
+          std::span<std::uint8_t>{reinterpret_cast<std::uint8_t*>(self.my->_key.data()), self.my->_key.data_size()});
    } while (!valid_secret(self.my->_key));
    return self;
 }
@@ -478,8 +480,8 @@ signature private_key::sign(const forge::crypto::sha256& digest) const {
    const auto der = sign_der(my->_key, digest);
    signature sig;
    std::memset(sig.data(), 0, sig.size());
-   FORGE_ASSERT(der.size() <= sig.size(), "P-256 DER signature is too large", forge::exceptions::ctx("der_size", der.size()),
-              forge::exceptions::ctx("signature_size", sig.size()));
+   FORGE_ASSERT(der.size() <= sig.size(), "P-256 DER signature is too large",
+                forge::exceptions::ctx("der_size", der.size()), forge::exceptions::ctx("signature_size", sig.size()));
    std::memcpy(sig.data(), der.data(), der.size());
    return sig;
 }
@@ -519,12 +521,12 @@ bool private_key::verify(const forge::crypto::sha256& digest, const forge::crypt
    return get_public_key().verify(digest, sig);
 }
 
-der_signature sign_der(const private_key_shim& key, std::span<const std::uint8_t> message) {
-   const auto der = sign_der(key.serialize(), forge::crypto::sha256::hash(message));
+der_signature sign_der(const private_key& key, std::span<const std::uint8_t> message) {
+   const auto der = sign_der(key.get_secret(), forge::crypto::sha256::hash(message));
    return der_signature{der.begin(), der.end()};
 }
 
-bool verify_der(const public_key_shim& key, std::span<const std::uint8_t> message,
+bool verify_der(const public_key& key, std::span<const std::uint8_t> message,
                 std::span<const std::uint8_t> signature_bytes) {
    if (signature_bytes.empty() || signature_bytes.size() > signature{}.size()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_signature, "invalid P-256 DER signature size");
@@ -547,7 +549,7 @@ forge::crypto::sha512 private_key::get_shared_secret(const public_key& other) co
    ssl_bignum priv = bignum_from_bytes(my->_key.data(), my->_key.data_size());
    ec_point peer(EC_POINT_new(group));
    FORGE_ASSERT(EC_POINT_oct2point(group, peer, reinterpret_cast<const unsigned char*>(other.my->_key.data()),
-                                 other.my->_key.size(), ctx));
+                                   other.my->_key.size(), ctx));
    ec_point shared(EC_POINT_new(group));
    FORGE_ASSERT(EC_POINT_mul(group, shared, nullptr, peer, priv, ctx));
    ssl_bignum x;
