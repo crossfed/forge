@@ -382,6 +382,8 @@ macro(_forge_add_component component)
       elseif("${component}" STREQUAL "plugins_crypto_secrets")
          _forge_add_component(app)
          _forge_add_component(api_core)
+         _forge_add_component(codec_base64)
+         _forge_add_component(codec_hex)
          _forge_add_component(config_core)
          _forge_add_component(schema)
          _forge_add_component(crypto_core)
@@ -494,6 +496,7 @@ foreach(_forge_component IN LISTS _FORGE_COMPONENTS)
    if(
       NOT "${_forge_component}" STREQUAL "tui"
       AND NOT "${_forge_component}" STREQUAL "contract_attributes"
+      AND NOT "${_forge_component}" STREQUAL "crypto_bn256"
    )
       set(_FORGE_NEEDS_BOOST TRUE)
    endif()

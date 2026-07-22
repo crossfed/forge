@@ -26,5 +26,7 @@ target_link_libraries(
       forge_exceptions
       Boost::asio
    PRIVATE
+      forge_codec_base64
+      forge_codec_hex
       forge_crypto_symmetric
 )

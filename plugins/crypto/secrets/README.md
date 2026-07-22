@@ -46,6 +46,8 @@ Public modules:
 
 - `forge_app`
 - `forge_api_core`
+- `forge_codec_base64`
+- `forge_codec_hex`
 - `forge_crypto_core`
 - `forge_crypto_symmetric`
 - `forge_config_core`

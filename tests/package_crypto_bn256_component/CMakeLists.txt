@@ -5,6 +5,7 @@ project(forge-package-crypto-bn256-component LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_DISABLE_FIND_PACKAGE_Boost ON)
 
 find_package(Forge CONFIG REQUIRED COMPONENTS crypto_bn256)
 
