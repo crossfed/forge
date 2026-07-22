@@ -22,5 +22,6 @@ target_link_libraries(
       forge_compression
       forge_raw
       forge_variant
-      forge_crypto
+      forge_crypto_asymmetric_values
+      forge_crypto_digest
 )

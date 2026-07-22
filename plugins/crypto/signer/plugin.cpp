@@ -36,7 +36,7 @@ import forge.config.core.decode;
 import forge.config.core.document;
 import forge.config.core.value;
 import forge.crypto.asymmetric;
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.exceptions;
 import forge.plugins.crypto.signer.api;
 import forge.plugins.crypto.signer.exceptions;

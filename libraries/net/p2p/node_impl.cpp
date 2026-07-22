@@ -35,11 +35,11 @@ module;
 
 module forge.net.p2p.node;
 
-import forge.crypto.chacha20_poly1305;
-import forge.crypto.der;
-import forge.crypto.ed25519;
-import forge.crypto.hmac;
-import forge.crypto.pem;
+import forge.crypto.symmetric.chacha20_poly1305;
+import forge.crypto.pki.der;
+import forge.crypto.asymmetric.ed25519;
+import forge.crypto.digest.hmac;
+import forge.crypto.pki.pem;
 import forge.crypto.asymmetric;
 import forge.net.p2p.dht;
 import forge.net.p2p.discovery;
@@ -56,10 +56,10 @@ import forge.net.p2p.rendezvous;
 import forge.net.p2p.resource_manager;
 import forge.net.p2p.scoring;
 import forge.net.p2p.stream;
-import forge.crypto.random;
-import forge.crypto.rsa;
-import forge.crypto.sha256;
-import forge.crypto.x25519;
+import forge.crypto.core.random;
+import forge.crypto.asymmetric.rsa;
+import forge.crypto.digest.sha256;
+import forge.crypto.asymmetric.x25519;
 import forge.multiformats.types;
 import forge.multiformats.varint;
 import forge.multiformats.exceptions;
@@ -122,7 +122,7 @@ namespace asio = boost::asio;
 }
 
 [[nodiscard]] std::uint64_t random_nonce() {
-   const auto bytes = forge::crypto::random_bytes(8);
+   const auto bytes = forge::crypto::core::random_bytes(8);
    auto out = std::uint64_t{};
    for (auto byte : bytes) {
       out = (out << 8U) | byte;

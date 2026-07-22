@@ -88,23 +88,25 @@ foreach(_codec IN ITEMS base64 base58 hex)
    )
 endforeach()
 
-set(_crypto "${FORGE_SOURCE_DIR}/libraries/crypto/include")
+set(_crypto_digest "${FORGE_SOURCE_DIR}/libraries/crypto/digest/include")
+set(_crypto_asymmetric "${FORGE_SOURCE_DIR}/libraries/crypto/asymmetric/include")
+set(_crypto_bls "${FORGE_SOURCE_DIR}/libraries/crypto/bls/include")
 add_library(forge_guest_crypto_modules OBJECT)
 target_sources(
    forge_guest_crypto_modules
    PUBLIC
       FILE_SET CXX_MODULES
-      BASE_DIRS "${_crypto}"
+      BASE_DIRS "${_crypto_digest}" "${_crypto_asymmetric}" "${_crypto_bls}"
       FILES
-         "${_crypto}/forge/crypto/sha256_value.cppm"
-         "${_crypto}/forge/crypto/sha256.cppm"
-         "${_crypto}/forge/crypto/sha512_value.cppm"
-         "${_crypto}/forge/crypto/sha512.cppm"
-         "${_crypto}/forge/crypto/ripemd160_value.cppm"
-         "${_crypto}/forge/crypto/ripemd160.cppm"
-         "${_crypto}/forge/crypto/asymmetric_value.cppm"
-         "${_crypto}/forge/crypto/asymmetric.cppm"
-         "${_crypto}/forge/crypto/bls_values.cppm"
+         "${_crypto_digest}/forge/crypto/digest/sha256_value.cppm"
+         "${_crypto_digest}/forge/crypto/digest/sha256.cppm"
+         "${_crypto_digest}/forge/crypto/digest/sha512_value.cppm"
+         "${_crypto_digest}/forge/crypto/digest/sha512.cppm"
+         "${_crypto_digest}/forge/crypto/digest/ripemd160_value.cppm"
+         "${_crypto_digest}/forge/crypto/digest/ripemd160.cppm"
+         "${_crypto_asymmetric}/forge/crypto/asymmetric/values.cppm"
+         "${_crypto_asymmetric}/forge/crypto/asymmetric/asymmetric.cppm"
+         "${_crypto_bls}/forge/crypto/bls/bls_values.cppm"
 )
 forge_guest_configure_target(forge_guest_crypto_modules)
 target_link_libraries(forge_guest_crypto_modules PRIVATE forge_guest_raw_modules)

@@ -11,11 +11,11 @@ module;
 
 module forge.plugins.crypto.secrets.plugin;
 
-import forge.crypto.aes;
-import forge.crypto.kdf;
-import forge.crypto.random;
-import forge.crypto.secret_bytes;
-import forge.crypto.types;
+import forge.crypto.symmetric.aes;
+import forge.crypto.symmetric.kdf;
+import forge.crypto.core.random;
+import forge.crypto.core.secret_bytes;
+import forge.crypto.core.types;
 import forge.exceptions;
 import forge.plugins.crypto.secrets.exceptions;
 import forge.plugins.crypto.secrets.types;
@@ -62,14 +62,14 @@ void require_size(std::uint64_t actual, std::uint64_t limit, const char* label) 
    }
 }
 
-[[nodiscard]] forge::crypto::bytes copy_for_explicit_raw_export(const forge::crypto::secret_bytes& material) {
+[[nodiscard]] forge::crypto::core::bytes copy_for_explicit_raw_export(const forge::crypto::core::secret_bytes& material) {
    return material.copy();
 }
 
 template <typename Secret>
-[[nodiscard]] forge::crypto::aes256_key aes_key_from_secret(const Secret& secret) {
+[[nodiscard]] forge::crypto::symmetric::aes::aes256_key aes_key_from_secret(const Secret& secret) {
    try {
-      return forge::crypto::make_aes256_key(secret.material.span());
+      return forge::crypto::symmetric::aes::make_aes256_key(secret.material.span());
    } catch (const std::exception&) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_secret, "secret is not a valid AES-256 key",
                           forge::exceptions::ctx("secret_id", secret.id));
@@ -92,12 +92,12 @@ template <typename Secret>
 }
 
 [[noreturn]] void throw_malformed_aes_gcm_parameter(
-   const forge::exceptions::runtime_coded_exception<forge::crypto::aes::exceptions::code>& error,
+   const forge::exceptions::runtime_coded_exception<forge::crypto::symmetric::aes::exceptions::code>& error,
    const std::string& secret_id) {
    switch (error.value()) {
-   case forge::crypto::aes::exceptions::code::invalid_nonce:
+   case forge::crypto::symmetric::aes::exceptions::code::invalid_nonce:
       throw_malformed_aes_gcm_nonce(secret_id);
-   case forge::crypto::aes::exceptions::code::invalid_tag:
+   case forge::crypto::symmetric::aes::exceptions::code::invalid_tag:
       throw_malformed_aes_gcm_tag(secret_id);
    default:
       throw;
@@ -105,10 +105,10 @@ template <typename Secret>
 }
 
 [[noreturn]] void throw_malformed_hkdf_parameter(
-   const forge::exceptions::runtime_coded_exception<forge::crypto::kdf::exceptions::code>& error,
+   const forge::exceptions::runtime_coded_exception<forge::crypto::symmetric::kdf::exceptions::code>& error,
    const std::string& secret_id) {
    switch (error.value()) {
-   case forge::crypto::kdf::exceptions::code::invalid_options:
+   case forge::crypto::symmetric::kdf::exceptions::code::invalid_options:
       throw_malformed_hkdf_request(secret_id);
    default:
       throw;
@@ -153,16 +153,17 @@ derive_result plugin::impl::derive_hkdf_sha256(derive_request value) const {
    const auto& secret = find_secret(secrets, value.secret_id);
    require_allowed(secret, value.purpose, operation::derive_hkdf_sha256);
    try {
-      auto output = forge::crypto::derive_hkdf_sha256(forge::crypto::hkdf_sha256_span_request{
+      auto output = forge::crypto::symmetric::kdf::derive_hkdf_sha256(
+         forge::crypto::symmetric::kdf::hkdf_sha256_span_request{
          .secret = secret.material.span(),
          .salt = value.salt,
          .info = value.info,
          .output_size = static_cast<std::size_t>(value.output_size),
       });
       return derive_result{.secret_id = secret.id, .bytes = std::move(output)};
-   } catch (const forge::crypto::kdf::exceptions::invalid_options&) {
+   } catch (const forge::crypto::symmetric::kdf::exceptions::invalid_options&) {
       throw_malformed_hkdf_request(secret.id);
-   } catch (const forge::exceptions::runtime_coded_exception<forge::crypto::kdf::exceptions::code>& error) {
+   } catch (const forge::exceptions::runtime_coded_exception<forge::crypto::symmetric::kdf::exceptions::code>& error) {
       throw_malformed_hkdf_parameter(error, secret.id);
    }
 }
@@ -175,10 +176,10 @@ aead_encrypt_result plugin::impl::encrypt_aes_gcm(aead_encrypt_request value) co
 
    auto nonce = std::move(value.nonce);
    if (nonce.empty()) {
-      nonce = forge::crypto::random_bytes(forge::crypto::aes_gcm_nonce_size);
+      nonce = forge::crypto::core::random_bytes(forge::crypto::symmetric::aes::aes_gcm_nonce_size);
    }
    try {
-      auto encrypted = forge::crypto::encrypt_aes256_gcm(forge::crypto::aes256_gcm_encrypt_request{
+      auto encrypted = forge::crypto::symmetric::aes::encrypt_aes256_gcm(forge::crypto::symmetric::aes::aes256_gcm_encrypt_request{
          .key = aes_key_from_secret(secret),
          .nonce = std::move(nonce),
          .plaintext = std::move(value.plaintext),
@@ -190,9 +191,9 @@ aead_encrypt_result plugin::impl::encrypt_aes_gcm(aead_encrypt_request value) co
          .tag = std::move(encrypted.tag),
          .ciphertext = std::move(encrypted.ciphertext),
       };
-   } catch (const forge::crypto::aes::exceptions::invalid_nonce&) {
+   } catch (const forge::crypto::symmetric::aes::exceptions::invalid_nonce&) {
       throw_malformed_aes_gcm_nonce(secret.id);
-   } catch (const forge::exceptions::runtime_coded_exception<forge::crypto::aes::exceptions::code>& error) {
+   } catch (const forge::exceptions::runtime_coded_exception<forge::crypto::symmetric::aes::exceptions::code>& error) {
       throw_malformed_aes_gcm_parameter(error, secret.id);
    }
 }
@@ -205,10 +206,10 @@ aead_decrypt_result plugin::impl::decrypt_aes_gcm(aead_decrypt_request value) co
    require_size(value.aad.size(), secret.max_aad_bytes, "AAD");
 
    try {
-      auto plaintext = forge::crypto::decrypt_aes256_gcm(forge::crypto::aes256_gcm_decrypt_request{
+      auto plaintext = forge::crypto::symmetric::aes::decrypt_aes256_gcm(forge::crypto::symmetric::aes::aes256_gcm_decrypt_request{
          .key = aes_key_from_secret(secret),
          .encrypted =
-            forge::crypto::aes256_gcm_ciphertext{
+            forge::crypto::symmetric::aes::aes256_gcm_ciphertext{
                .nonce = std::move(value.nonce),
                .tag = std::move(value.tag),
                .ciphertext = std::move(value.ciphertext),
@@ -217,13 +218,13 @@ aead_decrypt_result plugin::impl::decrypt_aes_gcm(aead_decrypt_request value) co
       });
       require_size(plaintext.size(), secret.max_plaintext_bytes, "plaintext");
       return aead_decrypt_result{.secret_id = secret.id, .plaintext = std::move(plaintext)};
-   } catch (const forge::crypto::aes::exceptions::invalid_nonce&) {
+   } catch (const forge::crypto::symmetric::aes::exceptions::invalid_nonce&) {
       throw_malformed_aes_gcm_nonce(secret.id);
-   } catch (const forge::crypto::aes::exceptions::invalid_tag&) {
+   } catch (const forge::crypto::symmetric::aes::exceptions::invalid_tag&) {
       throw_malformed_aes_gcm_tag(secret.id);
-   } catch (const forge::exceptions::runtime_coded_exception<forge::crypto::aes::exceptions::code>& error) {
+   } catch (const forge::exceptions::runtime_coded_exception<forge::crypto::symmetric::aes::exceptions::code>& error) {
       throw_malformed_aes_gcm_parameter(error, secret.id);
-   } catch (const forge::crypto::aes::exceptions::authentication_failed&) {
+   } catch (const forge::crypto::symmetric::aes::exceptions::authentication_failed&) {
       FORGE_THROW_EXCEPTION(exceptions::crypto_failed, "AES-GCM authentication failed",
                           forge::exceptions::ctx("secret_id", secret.id));
    }

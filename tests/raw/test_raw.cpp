@@ -19,7 +19,7 @@
 
 import forge.exceptions;
 import forge.codec.hex;
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.raw.datastream;
 import forge.raw.exceptions;
 import forge.raw.raw;
@@ -235,10 +235,10 @@ BOOST_AUTO_TEST_CASE(serialization_macros_instantiate_raw_variant_and_digest_pac
    forge::raw::unpack(read_stream, unpacked);
    BOOST_CHECK(value == unpacked);
 
-   forge::crypto::sha256::encoder digest_stream;
+   forge::crypto::digest::sha256::encoder digest_stream;
    forge::raw::pack(digest_stream, value);
    BOOST_CHECK_EQUAL(digest_stream.result().str(),
-                     forge::crypto::sha256::hash(std::span<const std::uint8_t>{buffer, write_stream.tellp()}).str());
+                     forge::crypto::digest::sha256::hash(std::span<const std::uint8_t>{buffer, write_stream.tellp()}).str());
 }
 
 BOOST_AUTO_TEST_CASE(raw_pack_uses_canonical_uint8_byte_container) {
@@ -422,10 +422,10 @@ BOOST_AUTO_TEST_CASE(int128_values_preserve_spring_wire_bits_for_all_streams) {
    BOOST_CHECK_EQUAL(forge::codec::hex::encode(signed_wire), "feffffffffffffffffffffffffffffff");
    BOOST_CHECK(forge::raw::unpack<__int128>(signed_wire) == signed_value);
 
-   auto digest_stream = forge::crypto::sha256::encoder{};
+   auto digest_stream = forge::crypto::digest::sha256::encoder{};
    forge::raw::pack(digest_stream, unsigned_value);
    BOOST_CHECK_EQUAL(digest_stream.result().str(),
-                     forge::crypto::sha256::hash(std::span<const std::uint8_t>{unsigned_wire}).str());
+                     forge::crypto::digest::sha256::hash(std::span<const std::uint8_t>{unsigned_wire}).str());
 }
 
 BOOST_AUTO_TEST_CASE(std_array_pointer_elements_use_element_codec) {

@@ -21,7 +21,8 @@ target_link_libraries(
       forge_api_core
       forge_config_core
       forge_schema
-      forge_crypto
+      forge_crypto_asymmetric
+      forge_crypto_digest
       forge_exceptions
       Boost::asio
 )

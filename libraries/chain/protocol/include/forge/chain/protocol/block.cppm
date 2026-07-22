@@ -16,7 +16,7 @@ export module forge.chain.protocol.block;
 export import forge.raw.varint;
 
 export import forge.chain.protocol.transaction;
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
 import forge.variant.value;

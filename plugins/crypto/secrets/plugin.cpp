@@ -16,7 +16,7 @@ import forge.app.plugin_context;
 import forge.app.plugin_registry;
 import forge.config.core.component;
 import forge.config.core.decode;
-import forge.crypto.secret_bytes;
+import forge.crypto.core.secret_bytes;
 import forge.plugins.crypto.secrets.api;
 import forge.plugins.crypto.secrets.types;
 

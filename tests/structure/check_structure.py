@@ -454,7 +454,17 @@ def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
          if shim in source:
             errors.append(f"{path.relative_to(root)}: removed asymmetric shim {shim} is forbidden")
 
-   asymmetric_value = root / "libraries" / "crypto" / "include" / "forge" / "crypto" / "asymmetric_value.cppm"
+   asymmetric_value = (
+      root
+      / "libraries"
+      / "crypto"
+      / "asymmetric"
+      / "include"
+      / "forge"
+      / "crypto"
+      / "asymmetric"
+      / "values.cppm"
+   )
    asymmetric_source = asymmetric_value.read_text(errors="ignore")
    if "FORGE_CONTRACT_GUEST" in asymmetric_source:
       errors.append(f"{asymmetric_value.relative_to(root)}: asymmetric values must not have host/guest definitions")
@@ -464,7 +474,7 @@ def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
    for value_root in duplicate_value_roots:
       for path in source_files(root, (str(value_root.relative_to(root)),)):
          if duplicate_value.search(path.read_text(errors="ignore")):
-            errors.append(f"{path.relative_to(root)}: asymmetric values belong to forge.crypto.asymmetric.value")
+            errors.append(f"{path.relative_to(root)}: asymmetric values belong to forge.crypto.asymmetric.values")
 
    consumer_build = (root / "guest" / "build" / "CMakeLists.txt").read_text(errors="ignore")
    implementation_source = re.compile(
@@ -530,6 +540,90 @@ def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
       for record in moved_records:
          if re.search(rf"\bstruct\s+{record}\b", source):
             errors.append(f"{path.relative_to(root)}: {record} belongs to forge.chain.protocol")
+
+
+def check_crypto_family(root: Path, files: list[Path], errors: list[str]) -> None:
+   leaf_namespaces = {
+      "asymmetric",
+      "bls",
+      "bn256",
+      "core",
+      "digest",
+      "math",
+      "pki",
+      "symmetric",
+   }
+   forbidden_modules = (
+      "forge.crypto.types",
+      "forge.crypto.secret_bytes",
+      "forge.crypto.random",
+      "forge.crypto.sha1",
+      "forge.crypto.sha224",
+      "forge.crypto.sha256",
+      "forge.crypto.sha3",
+      "forge.crypto.sha512",
+      "forge.crypto.ripemd160",
+      "forge.crypto.blake2",
+      "forge.crypto.hmac",
+      "forge.crypto.packhash",
+      "forge.crypto.aes",
+      "forge.crypto.chacha20_poly1305",
+      "forge.crypto.kdf",
+      "forge.crypto.asymmetric_value",
+      "forge.crypto.p256",
+      "forge.crypto.secp256k1",
+      "forge.crypto.ed25519",
+      "forge.crypto.rsa",
+      "forge.crypto.webauthn",
+      "forge.crypto.x25519",
+      "forge.crypto.der",
+      "forge.crypto.pem",
+      "forge.crypto.x509",
+      "forge.crypto.bigint",
+      "forge.crypto.modular_arithmetic",
+      "forge.crypto.base32",
+      "forge.crypto.city",
+   )
+   root_namespace = re.compile(r"^(?:export\s+)?namespace\s+forge::crypto\s*\{")
+
+   for path in files:
+      relative = path.relative_to(root)
+      for line_number, line in enumerate(path.read_text(errors="ignore").splitlines(), 1):
+         if root_namespace.match(line.strip()):
+            errors.append(
+               f"{relative}:{line_number}: forge::crypto is a grouping namespace; "
+               "public symbols must belong to a Crypto leaf"
+            )
+         for match in re.finditer(r"\bforge::crypto::([A-Za-z_][A-Za-z0-9_]*)", line):
+            owner = match.group(1)
+            if owner not in leaf_namespaces:
+               errors.append(
+                  f"{relative}:{line_number}: forge::crypto::{owner} bypasses the Crypto leaf namespace"
+               )
+         for module in forbidden_modules:
+            if re.search(rf"\b{re.escape(module)}\b", line):
+               errors.append(f"{relative}:{line_number}: removed Crypto module {module} is forbidden")
+
+   cmake_files = [root / "CMakeLists.txt", root / "cmake" / "ForgeConfig.cmake.in"]
+   cmake_files.extend(root.glob("libraries/**/CMakeLists.txt"))
+   cmake_files.extend(root.glob("plugins/**/CMakeLists.txt"))
+   cmake_files.extend(root.glob("tests/**/CMakeLists.txt"))
+   for path in sorted(set(cmake_files)):
+      source = path.read_text(errors="ignore")
+      if re.search(r"\bforge_crypto\b", source):
+         errors.append(f"{path.relative_to(root)}: removed Crypto aggregate target is forbidden")
+      if re.search(r"\bCOMPONENTS\s+crypto\b", source):
+         errors.append(f"{path.relative_to(root)}: removed Crypto package component is forbidden")
+
+   removed_paths = (
+      root / "libraries" / "crypto" / "include",
+      root / "libraries" / "crypto" / "base32.cpp",
+      root / "libraries" / "crypto" / "city.cpp",
+      root / "libraries" / "crypto" / "city_crc.cpp",
+   )
+   for path in removed_paths:
+      if path.exists():
+         errors.append(f"{path.relative_to(root)}: removed monolithic Crypto path is forbidden")
 
 
 def check_modules(root: Path, files: list[Path], errors: list[str]) -> None:
@@ -620,6 +714,7 @@ def main() -> int:
    check_contract_sdk_components(root, errors)
    check_eosio_veneer(root, errors)
    check_contract_sdk_architecture(root, errors)
+   check_crypto_family(root, files, errors)
    check_modules(root, files, errors)
 
    if errors:

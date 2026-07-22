@@ -13,7 +13,7 @@ module;
 module forge.chain.protocol.block;
 
 import forge.chain.core.merkle;
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
 import forge.variant.value;
@@ -48,7 +48,7 @@ bytes signature_preimage(const block_header& value) {
 
 core::digest block_digest(const block_header& value) {
    const auto preimage = signature_preimage(value);
-   return forge::crypto::sha256::hash(std::span<const std::uint8_t>{preimage.data(), preimage.size()});
+   return forge::crypto::digest::sha256::hash(std::span<const std::uint8_t>{preimage.data(), preimage.size()});
 }
 
 std::uint32_t calculate_block_num_from_id(const block_id& id) {

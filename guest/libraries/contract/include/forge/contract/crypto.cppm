@@ -10,7 +10,7 @@ export module forge.contract.crypto;
 
 export import forge.contract.fixed_bytes;
 
-import forge.crypto.asymmetric.value;
+import forge.crypto.asymmetric.values;
 import forge.contract.datastream;
 import forge.contract.intrinsics;
 

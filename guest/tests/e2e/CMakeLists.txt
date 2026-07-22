@@ -55,7 +55,11 @@ if(NOT FORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_EXTENDED_WASM OR
    message(FATAL_ERROR "FORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_EXTENDED_WASM must name the legacy extended contract")
 endif()
 
-find_package(Forge CONFIG REQUIRED COMPONENTS asio chain_protocol crypto db_core db_object exceptions raw vm_wasm)
+find_package(
+   Forge CONFIG REQUIRED
+   COMPONENTS asio chain_protocol crypto_asymmetric crypto_bls crypto_bn256 crypto_digest crypto_math db_core
+              db_object exceptions raw vm_wasm
+)
 find_package(Boost REQUIRED)
 
 add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../host" "${CMAKE_CURRENT_BINARY_DIR}/host")
@@ -66,7 +70,8 @@ target_link_libraries(
    forge_contract_e2e_tests
    PRIVATE
       Forge::forge_chain_protocol
-      Forge::forge_crypto
+      Forge::forge_crypto_asymmetric
+      Forge::forge_crypto_digest
       Forge::forge_raw
       Forge::forge_vm_wasm
       forge_contract_test_host

@@ -11,13 +11,13 @@ module;
 
 export module forge.db.blob.types;
 
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.db.core.record;
 import forge.db.ids.object_id;
 
 export namespace forge::db::blob {
 
-using digest = forge::crypto::sha256;
+using digest = forge::crypto::digest::sha256;
 
 class owner_ref final {
  public:

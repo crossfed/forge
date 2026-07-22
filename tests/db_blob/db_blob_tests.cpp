@@ -25,7 +25,7 @@ import forge.db.blob.store;
 import forge.db.blob.transaction;
 import forge.db.blob.types;
 import forge.codec.hex;
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.db.core.exceptions;
 import forge.db.core.driver;
 import forge.db.core.record;

@@ -27,7 +27,7 @@
 
 import forge.asio.blocking;
 import forge.asio.runtime;
-import forge.crypto.pem;
+import forge.crypto.pki.pem;
 import forge.net.p2p.dht;
 import forge.multiformats.exceptions;
 import forge.multiformats.multihash;
@@ -426,7 +426,7 @@ std::vector<std::uint8_t> signed_rendezvous_record(const libp2p_identity& identi
                   .sequence = static_cast<std::uint64_t>(
                       std::chrono::system_clock::now().time_since_epoch().count()),
               },
-              key, forge::crypto::pem::read_private_key(identity.private_key_pem))
+              key, forge::crypto::pki::pem::read_private_key(identity.private_key_pem))
        .encode();
 }
 

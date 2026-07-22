@@ -680,9 +680,9 @@ class type_encoder {
           {"forge::chain::protocol::block_timestamp", "block_timestamp_type"},
           {"forge::unsigned_int", "varuint32"},
           {"forge::signed_int", "varint32"},
-          {"forge::crypto::sha256", "checksum256"},
-          {"forge::crypto::sha512", "checksum512"},
-          {"forge::crypto::ripemd160", "checksum160"},
+          {"forge::crypto::digest::sha256", "checksum256"},
+          {"forge::crypto::digest::sha512", "checksum512"},
+          {"forge::crypto::digest::ripemd160", "checksum160"},
       };
       for (const auto& [cpp_name, abi_name] : known) {
          if (qualified == cpp_name) {

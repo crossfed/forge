@@ -17,7 +17,7 @@ module;
 module forge.chain.protocol.transaction;
 
 import forge.compression.zlib;
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
 import forge.raw.varint;
@@ -101,7 +101,7 @@ core::digest transaction::sig_digest(const chain_id& chain_id, const std::vector
 
 transaction_id calculate_transaction_id(const transaction& value) {
    const auto bytes = pack_transaction(value);
-   return forge::crypto::sha256::hash(std::span<const std::uint8_t>{bytes.data(), bytes.size()});
+   return forge::crypto::digest::sha256::hash(std::span<const std::uint8_t>{bytes.data(), bytes.size()});
 }
 
 bytes signature_preimage(const chain_id& chain_id, const transaction& value, const std::vector<bytes>& cfd) {
@@ -118,7 +118,7 @@ bytes signature_preimage(const chain_id& chain_id, const transaction& value, con
 
 core::digest signature_digest(const chain_id& chain_id, const transaction& value, const std::vector<bytes>& cfd) {
    const auto preimage = signature_preimage(chain_id, value, cfd);
-   return forge::crypto::sha256::hash(std::span<const std::uint8_t>{preimage.data(), preimage.size()});
+   return forge::crypto::digest::sha256::hash(std::span<const std::uint8_t>{preimage.data(), preimage.size()});
 }
 
 packed_transaction::packed_transaction(const signed_transaction& value, packed_compression selected_compression)

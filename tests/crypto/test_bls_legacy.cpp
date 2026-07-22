@@ -10,7 +10,7 @@ import forge.exceptions;
 import forge.crypto.bls;
 
 import forge.raw.raw;
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.codec.json;
 import forge.variant.exceptions;
 import forge.variant.value;
@@ -43,7 +43,7 @@ std::vector<uint8_t> message_1 = {51,  23, 56, 93,  212, 129, 128, 27,
 std::vector<uint8_t> message_2 = {16, 38, 54,  125, 71, 214, 217, 78,
                                   73, 23, 127, 235, 8,  94,  41,  53}; // Message is passed in as a byte vector
 
-forge::crypto::sha256 message_3 = forge::crypto::sha256("1097cf48a15ba1c618237d3d79f3c684c031a9844c27e6b95c6d27d8a5f401a1");
+forge::crypto::digest::sha256 message_3 = forge::crypto::digest::sha256("1097cf48a15ba1c618237d3d79f3c684c031a9844c27e6b95c6d27d8a5f401a1");
 
 // test a single key signature + verification
 BOOST_AUTO_TEST_CASE(bls_sig_verif) try {
@@ -89,8 +89,8 @@ BOOST_AUTO_TEST_CASE(bls_sig_verif_finality_types) try {
    std::string s_view_number = std::to_string(view_number);
    std::string c_s = cmt + s_view_number;
 
-   forge::crypto::sha256 h1 = forge::crypto::sha256::hash(c_s);
-   forge::crypto::sha256 h2 = forge::crypto::sha256::hash(std::make_pair(h1, message_3));
+   forge::crypto::digest::sha256 h1 = forge::crypto::digest::sha256::hash(c_s);
+   forge::crypto::digest::sha256 h2 = forge::crypto::digest::sha256::hash(std::make_pair(h1, message_3));
 
    std::vector<unsigned char> v = std::vector<unsigned char>(h2.data(), h2.data() + 32);
 

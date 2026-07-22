@@ -7,7 +7,7 @@ module;
 
 module forge.chain.protocol.action;
 
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
 import forge.variant.value;

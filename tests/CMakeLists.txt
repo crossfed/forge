@@ -290,23 +290,92 @@ if(FORGE_HAS_ROCKSDB)
    add_test(NAME test_forge_db_rocksdb COMMAND test_forge_db_rocksdb WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 endif()
 
+add_executable(test_forge_codec_base32 unit/main.cpp crypto/test_base32.cpp)
+target_link_libraries(test_forge_codec_base32 forge_codec_base32 Boost::included_unit_test_framework)
+add_test(NAME test_forge_codec_base32 COMMAND test_forge_codec_base32 WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(test_forge_crypto_core unit/main.cpp crypto/test_core.cpp)
+target_link_libraries(test_forge_crypto_core forge_crypto_core Boost::included_unit_test_framework)
+add_test(NAME test_forge_crypto_core COMMAND test_forge_crypto_core WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
 add_executable(
-   test_forge_crypto
+   test_forge_crypto_digest
    unit/main.cpp
-   crypto/test_base32.cpp
    crypto/test_blake2.cpp
+   crypto/test_hash_functions.cpp
+)
+target_link_libraries(test_forge_crypto_digest forge_crypto_digest Boost::included_unit_test_framework)
+add_test(NAME test_forge_crypto_digest COMMAND test_forge_crypto_digest WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(test_forge_crypto_symmetric unit/main.cpp crypto/test_symmetric.cpp)
+target_link_libraries(
+   test_forge_crypto_symmetric
+   forge_crypto_symmetric
+   forge_raw
+   Boost::included_unit_test_framework
+)
+add_test(NAME test_forge_crypto_symmetric COMMAND test_forge_crypto_symmetric WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(test_forge_crypto_asymmetric_values unit/main.cpp crypto/test_asymmetric_values.cpp)
+target_link_libraries(
+   test_forge_crypto_asymmetric_values
+   forge_crypto_asymmetric_values
+   forge_raw
+   Boost::included_unit_test_framework
+)
+add_test(
+   NAME test_forge_crypto_asymmetric_values
+   COMMAND test_forge_crypto_asymmetric_values
+   WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+add_executable(
+   test_forge_crypto_asymmetric
+   unit/main.cpp
+   crypto/test_cypher_suites.cpp
+   crypto/test_secp256k1_recover.cpp
+   crypto/test_webauthn.cpp
+)
+target_link_libraries(
+   test_forge_crypto_asymmetric
+   forge_crypto_asymmetric
+   forge_crypto_symmetric
+   Boost::included_unit_test_framework
+)
+add_test(NAME test_forge_crypto_asymmetric COMMAND test_forge_crypto_asymmetric WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(test_forge_crypto_pki unit/main.cpp crypto/test_pki.cpp)
+target_link_libraries(test_forge_crypto_pki forge_crypto_pki Boost::included_unit_test_framework)
+add_test(NAME test_forge_crypto_pki COMMAND test_forge_crypto_pki WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(test_forge_crypto_math unit/main.cpp crypto/test_modular_arithmetic.cpp)
+target_link_libraries(test_forge_crypto_math forge_crypto_math Boost::included_unit_test_framework)
+add_test(NAME test_forge_crypto_math COMMAND test_forge_crypto_math WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(
+   test_forge_crypto_bls
+   unit/main.cpp
    crypto/test_bls.cpp
    crypto/test_bls_legacy.cpp
    crypto/test_contract_primitives.cpp
-   crypto/test_cypher_suites.cpp
-   crypto/test_hash_functions.cpp
-   crypto/test_secp256k1_recover.cpp
-   crypto/test_modular_arithmetic.cpp
-   crypto/test_symmetric.cpp
-   crypto/test_webauthn.cpp
 )
-target_link_libraries(test_forge_crypto forge Boost::included_unit_test_framework)
-add_test(NAME test_forge_crypto COMMAND test_forge_crypto WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+target_link_libraries(
+   test_forge_crypto_bls
+   forge_codec_hex
+   forge_codec_json
+   forge_crypto_bls
+   Boost::included_unit_test_framework
+)
+add_test(NAME test_forge_crypto_bls COMMAND test_forge_crypto_bls WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(test_forge_crypto_bn256 unit/main.cpp crypto/test_bn256.cpp)
+target_link_libraries(
+   test_forge_crypto_bn256
+   forge_codec_hex
+   forge_crypto_bn256
+   Boost::included_unit_test_framework
+)
+add_test(NAME test_forge_crypto_bn256 COMMAND test_forge_crypto_bn256 WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
    test_forge_multiformats
@@ -842,6 +911,122 @@ add_custom_target(
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
       --test-command forge_package_db_ids_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_codec_base32_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_codec_base32_component
+      ${CMAKE_BINARY_DIR}/forge-package-codec-base32-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options
+         ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON
+      --test-command forge_package_codec_base32_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_crypto_core_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_core_component
+      ${CMAKE_BINARY_DIR}/forge-package-crypto-core-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_crypto_core_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_crypto_digest_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_digest_component
+      ${CMAKE_BINARY_DIR}/forge-package-crypto-digest-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_crypto_digest_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_crypto_symmetric_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_symmetric_component
+      ${CMAKE_BINARY_DIR}/forge-package-crypto-symmetric-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_crypto_symmetric_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_crypto_asymmetric_values_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_asymmetric_values_component
+      ${CMAKE_BINARY_DIR}/forge-package-crypto-asymmetric-values-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options
+         ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON
+      --test-command forge_package_crypto_asymmetric_values_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_crypto_asymmetric_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_asymmetric_component
+      ${CMAKE_BINARY_DIR}/forge-package-crypto-asymmetric-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_crypto_asymmetric_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_crypto_pki_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_pki_component
+      ${CMAKE_BINARY_DIR}/forge-package-crypto-pki-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_crypto_pki_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_crypto_math_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_math_component
+      ${CMAKE_BINARY_DIR}/forge-package-crypto-math-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_crypto_math_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_crypto_bls_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_bls_component
+      ${CMAKE_BINARY_DIR}/forge-package-crypto-bls-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_crypto_bls_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_crypto_bn256_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_bn256_component
+      ${CMAKE_BINARY_DIR}/forge-package-crypto-bn256-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options
+         ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON
+      --test-command forge_package_crypto_bn256_component
    DEPENDS test_forge_package_install
 )
 add_custom_target(
@@ -1469,6 +1654,122 @@ add_test(
       --test-command forge_package_db_ids_component
 )
 set_tests_properties(test_forge_package_db_ids_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_codec_base32_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_codec_base32_component
+      ${CMAKE_BINARY_DIR}/forge-package-codec-base32-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options
+         ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON
+      --test-command forge_package_codec_base32_component
+)
+set_tests_properties(test_forge_package_codec_base32_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_crypto_core_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_core_component
+      ${CMAKE_BINARY_DIR}/forge-package-crypto-core-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_crypto_core_component
+)
+set_tests_properties(test_forge_package_crypto_core_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_crypto_digest_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_digest_component
+      ${CMAKE_BINARY_DIR}/forge-package-crypto-digest-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_crypto_digest_component
+)
+set_tests_properties(test_forge_package_crypto_digest_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_crypto_symmetric_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_symmetric_component
+      ${CMAKE_BINARY_DIR}/forge-package-crypto-symmetric-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_crypto_symmetric_component
+)
+set_tests_properties(test_forge_package_crypto_symmetric_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_crypto_asymmetric_values_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_asymmetric_values_component
+      ${CMAKE_BINARY_DIR}/forge-package-crypto-asymmetric-values-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options
+         ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON
+      --test-command forge_package_crypto_asymmetric_values_component
+)
+set_tests_properties(test_forge_package_crypto_asymmetric_values_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_crypto_asymmetric_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_asymmetric_component
+      ${CMAKE_BINARY_DIR}/forge-package-crypto-asymmetric-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_crypto_asymmetric_component
+)
+set_tests_properties(test_forge_package_crypto_asymmetric_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_crypto_pki_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_pki_component
+      ${CMAKE_BINARY_DIR}/forge-package-crypto-pki-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_crypto_pki_component
+)
+set_tests_properties(test_forge_package_crypto_pki_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_crypto_math_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_math_component
+      ${CMAKE_BINARY_DIR}/forge-package-crypto-math-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_crypto_math_component
+)
+set_tests_properties(test_forge_package_crypto_math_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_crypto_bls_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_bls_component
+      ${CMAKE_BINARY_DIR}/forge-package-crypto-bls-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_crypto_bls_component
+)
+set_tests_properties(test_forge_package_crypto_bls_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_crypto_bn256_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_bn256_component
+      ${CMAKE_BINARY_DIR}/forge-package-crypto-bn256-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options
+         ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON
+      --test-command forge_package_crypto_bn256_component
+)
+set_tests_properties(test_forge_package_crypto_bn256_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_compression_component
    COMMAND ${CMAKE_CTEST_COMMAND}

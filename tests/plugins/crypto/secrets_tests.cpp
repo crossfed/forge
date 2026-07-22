@@ -19,11 +19,11 @@ import forge.config.core.component;
 import forge.config.core.decode;
 import forge.config.core.document;
 import forge.config.core.value;
-import forge.crypto.aes;
+import forge.crypto.symmetric.aes;
 import forge.codec.base64;
-import forge.crypto.kdf;
-import forge.crypto.secret_bytes;
-import forge.crypto.types;
+import forge.crypto.symmetric.kdf;
+import forge.crypto.core.secret_bytes;
+import forge.crypto.core.types;
 import forge.config.env;
 import forge.plugins.crypto.secrets.api;
 import forge.plugins.crypto.secrets.exceptions;
@@ -116,12 +116,12 @@ source_encrypted_file_with_passphrase_file(const std::filesystem::path& path, co
    return document;
 }
 
-void write_secret_file(const std::filesystem::path& path, const forge::crypto::bytes& value) {
+void write_secret_file(const std::filesystem::path& path, const forge::crypto::core::bytes& value) {
    auto out = std::ofstream{path, std::ios::binary | std::ios::trunc};
    out.write(reinterpret_cast<const char*>(value.data()), static_cast<std::streamsize>(value.size()));
 }
 
-void overwrite_u64_le(forge::crypto::bytes& value, std::size_t offset, std::uint64_t replacement) {
+void overwrite_u64_le(forge::crypto::core::bytes& value, std::size_t offset, std::uint64_t replacement) {
    for (auto i = 0U; i < 8U; ++i) {
       value[offset + i] = static_cast<std::uint8_t>((replacement >> (i * 8U)) & 0xffU);
    }
@@ -138,8 +138,8 @@ configured_api(forge::asio::runtime& runtime, crypto_secrets::plugin& plugin,
    return registry.get<crypto_secrets::api>(crypto_secrets::api::ref());
 }
 
-[[nodiscard]] forge::crypto::bytes bytes(std::string_view value) {
-   return forge::crypto::bytes{value.begin(), value.end()};
+[[nodiscard]] forge::crypto::core::bytes bytes(std::string_view value) {
+   return forge::crypto::core::bytes{value.begin(), value.end()};
 }
 
 [[nodiscard]] crypto_secrets::encrypted_file_decrypt_limits
@@ -324,7 +324,7 @@ FORGE_LOG_AND_RETHROW();
 
 BOOST_AUTO_TEST_CASE(crypto_secrets_file_source_rejects_short_read) try {
    auto input = std::istringstream{"abc"};
-   auto output = forge::crypto::bytes(5U);
+   auto output = forge::crypto::core::bytes(5U);
    input.read(reinterpret_cast<char*>(output.data()), static_cast<std::streamsize>(output.size()));
 
    BOOST_CHECK_THROW(crypto_secrets::require_complete_file_read(input, output.size(), "/tmp/short-secret", "short"),
@@ -349,9 +349,9 @@ BOOST_AUTO_TEST_CASE(crypto_secrets_hkdf_and_aes_gcm_are_purpose_gated) try {
                                                             }));
    BOOST_TEST(derived.bytes.size() == 32U);
 
-   auto aes_key = forge::crypto::make_aes256_key(
+   auto aes_key = forge::crypto::symmetric::aes::make_aes256_key(
        std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(key.data()), key.size()});
-   const auto encrypted = forge::crypto::encrypt_aes256_gcm({
+   const auto encrypted = forge::crypto::symmetric::aes::encrypt_aes256_gcm({
        .key = aes_key,
        .nonce = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
        .plaintext = bytes("payload"),
@@ -453,9 +453,9 @@ BOOST_AUTO_TEST_CASE(crypto_secrets_decrypt_aes_gcm_maps_malformed_parameters) t
        runtime, plugin,
        secrets_config({secret_entry("data-key", source_value(key), {"payload.decrypt"}, {"decrypt_aes_gcm"})}));
 
-   auto aes_key = forge::crypto::make_aes256_key(
+   auto aes_key = forge::crypto::symmetric::aes::make_aes256_key(
        std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(key.data()), key.size()});
-   const auto encrypted = forge::crypto::encrypt_aes256_gcm({
+   const auto encrypted = forge::crypto::symmetric::aes::encrypt_aes256_gcm({
        .key = aes_key,
        .nonce = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
        .plaintext = bytes("payload"),
@@ -499,7 +499,8 @@ BOOST_AUTO_TEST_CASE(crypto_secrets_decrypt_aes_gcm_rejects_oversized_aad_before
                                                .secret_id = "data-key",
                                                .purpose = "payload.decrypt",
                                                .nonce = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
-                                               .tag = std::vector<std::uint8_t>(forge::crypto::aes_gcm_tag_size, 0),
+                                               .tag = std::vector<std::uint8_t>(
+                                                  forge::crypto::symmetric::aes::aes_gcm_tag_size, 0),
                                                .ciphertext = bytes("ciphertext"),
                                                .aad = bytes("oversized-aad"),
                                            })),
@@ -522,8 +523,9 @@ BOOST_AUTO_TEST_CASE(crypto_secrets_decrypt_aes_gcm_rejects_oversized_plaintext_
                                                .secret_id = "data-key",
                                                .purpose = "payload.decrypt",
                                                .nonce = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
-                                               .tag = std::vector<std::uint8_t>(forge::crypto::aes_gcm_tag_size, 0),
-                                               .ciphertext = forge::crypto::bytes(33U, std::uint8_t{0}),
+                                               .tag = std::vector<std::uint8_t>(
+                                                  forge::crypto::symmetric::aes::aes_gcm_tag_size, 0),
+                                               .ciphertext = forge::crypto::core::bytes(33U, std::uint8_t{0}),
                                            })),
        crypto_secrets::exceptions::size_limit_exceeded);
 }
@@ -537,9 +539,9 @@ BOOST_AUTO_TEST_CASE(crypto_secrets_decrypt_aes_gcm_keeps_authentication_failure
        runtime, plugin,
        secrets_config({secret_entry("data-key", source_value(key), {"payload.decrypt"}, {"decrypt_aes_gcm"})}));
 
-   auto aes_key = forge::crypto::make_aes256_key(
+   auto aes_key = forge::crypto::symmetric::aes::make_aes256_key(
        std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(key.data()), key.size()});
-   auto encrypted = forge::crypto::encrypt_aes256_gcm({
+   auto encrypted = forge::crypto::symmetric::aes::encrypt_aes256_gcm({
        .key = aes_key,
        .nonce = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
        .plaintext = bytes("payload"),
@@ -709,7 +711,7 @@ FORGE_LOG_AND_RETHROW();
 BOOST_AUTO_TEST_CASE(crypto_secrets_encrypted_file_default_ciphertext_limit_allows_max_plaintext) try {
    const auto path = std::filesystem::temp_directory_path() / "forge-crypto-secrets-encrypted-source-default-limit.bin";
    const auto passphrase = std::string{"correct horse battery staple"};
-   const auto plaintext = forge::crypto::bytes(crypto_secrets::default_max_plaintext_bytes, std::uint8_t{'x'});
+   const auto plaintext = forge::crypto::core::bytes(crypto_secrets::default_max_plaintext_bytes, std::uint8_t{'x'});
    const auto container = crypto_secrets::encrypt_secret_file(crypto_secrets::encrypted_file_encrypt_request{
        .plaintext = plaintext,
        .passphrase = passphrase,

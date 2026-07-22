@@ -16,8 +16,8 @@
 #include <vector>
 
 import forge.crypto.asymmetric;
-import forge.crypto.secp256k1;
-import forge.crypto.sha256;
+import forge.crypto.asymmetric.secp256k1;
+import forge.crypto.digest.sha256;
 import forge.compression.exceptions;
 import forge.raw.raw;
 import forge.raw.exceptions;
@@ -305,7 +305,7 @@ BOOST_AUTO_TEST_CASE(contract_wire_records_preserve_spring_raw_layout) {
    BOOST_TEST(static_cast<std::uint8_t>(protocol::call_access_mode::read_write) == 0U);
    BOOST_TEST(static_cast<std::uint8_t>(protocol::call_access_mode::read_only) == 1U);
    const auto apply_id = static_cast<protocol::hash_id::raw>(protocol::hash_id{"apply"});
-   BOOST_TEST(static_cast<std::uint64_t>(apply_id) == protocol::hash_id::hash("apply"));
+   BOOST_TEST(static_cast<std::uint64_t>(apply_id) == protocol::hash_id::hash(std::string{"apply"}));
 }
 
 BOOST_AUTO_TEST_CASE(fixed_key_partial_word_sequences_preserve_cdt_layout) {
@@ -811,7 +811,7 @@ BOOST_AUTO_TEST_CASE(transaction_mroot_uses_core_merkle_over_receipt_digests) {
 
 BOOST_AUTO_TEST_CASE(forge_secp256k1_is_the_crypto_surface_for_runtime_signatures) {
    const auto private_key = forge::crypto::asymmetric::private_key::generate();
-   const auto digest = forge::crypto::sha256{std::string{spring::transaction_signature_digest}};
+   const auto digest = forge::crypto::digest::sha256{std::string{spring::transaction_signature_digest}};
    const auto signature = private_key.sign_digest(digest);
    const auto public_key = private_key.get_public_key();
    const auto recovered_key = forge::crypto::asymmetric::recover(signature, digest);

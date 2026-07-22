@@ -41,7 +41,11 @@ target_link_libraries(
       Forge::forge_db_core
       Forge::forge_db_object
       Forge::forge_exceptions
-      Forge::forge_crypto
+      Forge::forge_crypto_asymmetric
+      Forge::forge_crypto_bls
+      Forge::forge_crypto_bn256
+      Forge::forge_crypto_digest
+      Forge::forge_crypto_math
       Forge::forge_vm_wasm
       Forge::forge_chain_protocol
    PRIVATE

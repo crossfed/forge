@@ -14,11 +14,11 @@ module;
 module forge.net.p2p.identity;
 
 import forge.crypto.asymmetric;
-import forge.crypto.der;
-import forge.crypto.ed25519;
-import forge.crypto.p256;
-import forge.crypto.rsa;
-import forge.crypto.secp256k1;
+import forge.crypto.pki.der;
+import forge.crypto.asymmetric.ed25519;
+import forge.crypto.asymmetric.p256;
+import forge.crypto.asymmetric.rsa;
+import forge.crypto.asymmetric.secp256k1;
 import forge.exceptions;
 import forge.net.p2p.exceptions;
 
@@ -40,20 +40,20 @@ template <typename Range> [[nodiscard]] std::vector<std::uint8_t> bytes_from_ran
    FORGE_THROW_EXCEPTION(exceptions::invalid_identity, std::move(message));
 }
 
-[[nodiscard]] forge::crypto::ed25519::public_key_data ed25519_public_key_data(const public_key& key) {
-   if (key.data.size() != forge::crypto::ed25519::public_key_data{}.size()) {
+[[nodiscard]] forge::crypto::asymmetric::ed25519::public_key_data ed25519_public_key_data(const public_key& key) {
+   if (key.data.size() != forge::crypto::asymmetric::ed25519::public_key_data{}.size()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_identity, "invalid Ed25519 public key size");
    }
-   auto out = forge::crypto::ed25519::public_key_data{};
+   auto out = forge::crypto::asymmetric::ed25519::public_key_data{};
    std::copy(key.data.begin(), key.data.end(), out.begin());
    return out;
 }
 
-[[nodiscard]] forge::crypto::secp256k1::public_key_data secp256k1_public_key_data(const public_key& key) {
-   if (key.data.size() != forge::crypto::secp256k1::public_key_data{}.size()) {
+[[nodiscard]] forge::crypto::asymmetric::secp256k1::public_key_data secp256k1_public_key_data(const public_key& key) {
+   if (key.data.size() != forge::crypto::asymmetric::secp256k1::public_key_data{}.size()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_identity, "invalid secp256k1 public key size");
    }
-   auto out = forge::crypto::secp256k1::public_key_data{};
+   auto out = forge::crypto::asymmetric::secp256k1::public_key_data{};
    std::copy(key.data.begin(), key.data.end(), out.begin());
    return out;
 }
@@ -76,7 +76,7 @@ public_key public_key_from_crypto(const forge::crypto::asymmetric::public_key& k
           } else if constexpr (std::is_same_v<value_type, forge::crypto::asymmetric::k1_public_key>) {
              return public_key{.type = public_key::type::secp256k1, .data = bytes_from_range(value.serialize())};
           } else if constexpr (std::is_same_v<value_type, forge::crypto::asymmetric::r1_public_key>) {
-             const auto spki = forge::crypto::der::write_public_key(forge::crypto::asymmetric::public_key{value});
+             const auto spki = forge::crypto::pki::der::write_public_key(forge::crypto::asymmetric::public_key{value});
              return public_key{.type = public_key::type::ecdsa, .data = spki};
           } else {
              FORGE_THROW_EXCEPTION(exceptions::invalid_identity, "WebAuthn keys cannot identify a libp2p peer");
@@ -99,7 +99,7 @@ forge::crypto::asymmetric::public_key crypto_public_key(const public_key& key) {
       return forge::crypto::asymmetric::k1_public_key{secp256k1_public_key_data(key)};
    case public_key::type::ecdsa: {
       try {
-         auto parsed = forge::crypto::der::read_public_key(key.data);
+         auto parsed = forge::crypto::pki::der::read_public_key(key.data);
          if (forge::crypto::asymmetric::type(parsed) != forge::crypto::asymmetric::algorithm::p256) {
             FORGE_THROW_EXCEPTION(exceptions::invalid_identity, "libp2p ECDSA public key must be P-256");
          }
@@ -117,10 +117,10 @@ std::vector<std::uint8_t> sign_identity(const forge::crypto::asymmetric::private
    try {
       return key.visit([&](const auto& value) -> std::vector<std::uint8_t> {
          using value_type = std::decay_t<decltype(value)>;
-         if constexpr (std::is_same_v<value_type, forge::crypto::secp256k1::private_key>) {
-            return forge::crypto::secp256k1::sign_der(value, message);
-         } else if constexpr (std::is_same_v<value_type, forge::crypto::p256::private_key>) {
-            return forge::crypto::p256::sign_der(value, message);
+         if constexpr (std::is_same_v<value_type, forge::crypto::asymmetric::secp256k1::private_key>) {
+            return forge::crypto::asymmetric::secp256k1::sign_der(value, message);
+         } else if constexpr (std::is_same_v<value_type, forge::crypto::asymmetric::p256::private_key>) {
+            return forge::crypto::asymmetric::p256::sign_der(value, message);
          } else {
             return bytes_from_range(value.sign(message));
          }
@@ -135,21 +135,21 @@ bool verify_identity_signature(const public_key& key, std::span<const std::uint8
    try {
       switch (key.type) {
       case public_key::type::ed25519: {
-         if (signature.size() != forge::crypto::ed25519::signature_data{}.size()) {
+         if (signature.size() != forge::crypto::asymmetric::ed25519::signature_data{}.size()) {
             FORGE_THROW_EXCEPTION(exceptions::invalid_identity, "invalid Ed25519 signature size");
          }
-         auto value = forge::crypto::ed25519::signature_data{};
+         auto value = forge::crypto::asymmetric::ed25519::signature_data{};
          std::copy(signature.begin(), signature.end(), value.begin());
-         return forge::crypto::ed25519::public_key{ed25519_public_key_data(key)}.verify(message, value);
+         return forge::crypto::asymmetric::ed25519::public_key{ed25519_public_key_data(key)}.verify(message, value);
       }
       case public_key::type::rsa:
-         return forge::crypto::rsa::public_key{key.data}.verify(message, {signature.begin(), signature.end()});
+         return forge::crypto::asymmetric::rsa::public_key{key.data}.verify(message, {signature.begin(), signature.end()});
       case public_key::type::secp256k1:
-         return forge::crypto::secp256k1::verify_der(
-             forge::crypto::secp256k1::public_key{secp256k1_public_key_data(key)}, message, signature);
+         return forge::crypto::asymmetric::secp256k1::verify_der(
+             forge::crypto::asymmetric::secp256k1::public_key{secp256k1_public_key_data(key)}, message, signature);
       case public_key::type::ecdsa: {
          const auto parsed = std::get<forge::crypto::asymmetric::r1_public_key>(crypto_public_key(key));
-         return forge::crypto::p256::verify_der(forge::crypto::p256::public_key{parsed.data}, message, signature);
+         return forge::crypto::asymmetric::p256::verify_der(forge::crypto::asymmetric::p256::public_key{parsed.data}, message, signature);
       }
       }
    } catch (const forge::exceptions::base& error) {

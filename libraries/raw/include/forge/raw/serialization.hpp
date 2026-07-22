@@ -10,7 +10,7 @@
 //   import forge.variant;
 //   import forge.raw.datastream;
 //   import forge.raw.raw;
-//   import forge.crypto.sha256; // required by FORGE_*_SERIALIZATION_PACK
+//   import forge.crypto.digest.sha256; // required by FORGE_*_SERIALIZATION_PACK
 //
 // The macros intentionally do not declare new public types or functions.
 
@@ -24,7 +24,7 @@
    namespace forge::raw {                                                                                                \
    ext template void pack<forge::datastream<std::size_t>, type>(forge::datastream<std::size_t> & stream,                   \
                                                               const type& value);                                      \
-   ext template void pack<forge::crypto::sha256::encoder, type>(forge::crypto::sha256::encoder & stream,               \
+   ext template void pack<forge::crypto::digest::sha256::encoder, type>(forge::crypto::digest::sha256::encoder & stream,               \
                                                                 const type& value);                                    \
    ext template void pack<forge::datastream<std::uint8_t*>, type>(forge::datastream<std::uint8_t*> & stream,           \
                                                                   const type& value);                                  \

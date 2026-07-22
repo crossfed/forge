@@ -7,7 +7,7 @@ import forge.db.blob.ref;
 import forge.db.blob.snapshot;
 import forge.db.blob.store;
 import forge.db.blob.types;
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.db.core.record;
 import forge.db.ids.object_id;
 import forge.variant.value;

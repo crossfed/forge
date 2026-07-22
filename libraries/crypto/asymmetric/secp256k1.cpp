@@ -1,0 +1,163 @@
+module;
+#include <forge/exceptions/macros.hpp>
+#include "details/openssl_backend.hxx"
+#include <array>
+#include <exception>
+#include <memory>
+#include <secp256k1.h>
+#include <secp256k1_recovery.h>
+#include <span>
+#include <utility>
+#if _WIN32
+#include <malloc.h>
+#elif defined(__FreeBSD__)
+#include <stdlib.h>
+#else
+#include <alloca.h>
+#endif
+
+module forge.crypto.asymmetric.secp256k1;
+
+import forge.crypto.digest.hmac;
+import forge.crypto.core.random;
+import forge.crypto.digest.sha256;
+import forge.crypto.digest.sha512;
+import forge.exceptions;
+
+#include "details/private_key_impl.hxx"
+
+namespace forge::crypto::asymmetric::secp256k1 {
+namespace detail {
+using forge::crypto::asymmetric::detail::ec_group;
+
+struct context_creator {
+   context_creator() {
+      ctx = secp256k1_context_create(SECP256K1_CONTEXT_NONE);
+      char seed[32];
+      forge::crypto::core::fill_random(std::span<std::uint8_t>{reinterpret_cast<std::uint8_t*>(seed), sizeof(seed)});
+      FORGE_ASSERT(secp256k1_context_randomize(ctx, (const unsigned char*)seed));
+   }
+   secp256k1_context* ctx = nullptr;
+};
+const secp256k1_context* _get_context() {
+   static context_creator cc;
+   return cc.ctx;
+}
+
+class public_key_impl {
+ public:
+   public_key_impl() noexcept {}
+
+   public_key_impl(const public_key_impl& cpy) noexcept : _key(cpy._key) {}
+
+   public_key_data _key;
+};
+
+typedef std::array<char, 37> chr37;
+chr37 _derive_message(const public_key_data& key, int i);
+forge::crypto::digest::sha256 _left(const forge::crypto::digest::sha512& v);
+forge::crypto::digest::sha256 _right(const forge::crypto::digest::sha512& v);
+const ec_group& get_curve();
+const private_key_secret& get_curve_order();
+const private_key_secret& get_half_curve_order();
+} // namespace detail
+
+static const public_key_data empty_pub{};
+
+forge::crypto::digest::sha512 private_key::get_shared_secret(const public_key& other) const {
+   static const private_key_secret empty_priv{};
+   FORGE_ASSERT(my->_key != empty_priv);
+   FORGE_ASSERT(other.my->_key != empty_pub);
+   secp256k1_pubkey secp_pubkey;
+   const auto other_serialized = other.serialize();
+   FORGE_ASSERT(secp256k1_ec_pubkey_parse(detail::_get_context(), &secp_pubkey,
+                                        (const unsigned char*)other_serialized.data(), other_serialized.size()));
+   FORGE_ASSERT(secp256k1_ec_pubkey_tweak_mul(detail::_get_context(), &secp_pubkey, (unsigned char*)my->_key.data()));
+   public_key_data serialized_result;
+   size_t serialized_result_sz = sizeof(serialized_result);
+   secp256k1_ec_pubkey_serialize(detail::_get_context(), reinterpret_cast<unsigned char*>(serialized_result.data()),
+                                 &serialized_result_sz, &secp_pubkey, SECP256K1_EC_COMPRESSED);
+   FORGE_ASSERT(serialized_result_sz == sizeof(serialized_result));
+   return forge::crypto::digest::sha512::hash(serialized_result.begin() + 1, serialized_result.size() - 1);
+}
+
+private_key private_key::generate() {
+   private_key ret;
+   do {
+      forge::crypto::core::fill_random(std::span<std::uint8_t>{
+         reinterpret_cast<std::uint8_t*>(ret.my->_key.data()), ret.my->_key.data_size()});
+   } while (!secp256k1_ec_seckey_verify(detail::_get_context(), (const uint8_t*)ret.my->_key.data()));
+   return ret;
+}
+
+public_key::public_key() : my(std::make_unique<detail::public_key_impl>()) {}
+
+public_key::public_key(const public_key& pk)
+    : my(pk.my ? std::make_unique<detail::public_key_impl>(*pk.my) : nullptr) {}
+
+public_key::public_key(public_key&& pk) : my(std::move(pk.my)) {}
+
+public_key::~public_key() {}
+
+public_key& public_key::operator=(const public_key& pk) {
+   my = pk.my ? std::make_unique<detail::public_key_impl>(*pk.my) : nullptr;
+   return *this;
+}
+
+public_key& public_key::operator=(public_key&& pk) {
+   my = std::move(pk.my);
+   return *this;
+}
+
+bool public_key::valid() const {
+   return my->_key != empty_pub;
+}
+
+public_key_data public_key::serialize() const {
+   FORGE_ASSERT(my->_key != empty_pub);
+   return my->_key;
+}
+
+public_key::public_key(const public_key_point_data& dat) : my(std::make_unique<detail::public_key_impl>()) {
+   const char* front = &dat.data()[0];
+   if (*front == 0) {
+   } else {
+      secp256k1_pubkey pub;
+      FORGE_ASSERT(secp256k1_ec_pubkey_parse(detail::_get_context(), &pub, reinterpret_cast<const unsigned char*>(front),
+                                           sizeof(dat)));
+      size_t serialized_size = my->_key.size();
+      FORGE_ASSERT(secp256k1_ec_pubkey_serialize(detail::_get_context(),
+                                               reinterpret_cast<unsigned char*>(my->_key.data()), &serialized_size,
+                                               &pub, SECP256K1_EC_COMPRESSED));
+      FORGE_ASSERT(serialized_size == my->_key.size());
+   }
+}
+
+public_key::public_key(const public_key_data& dat) : my(std::make_unique<detail::public_key_impl>()) {
+   my->_key = dat;
+}
+
+public_key::public_key(const compact_signature& c, const forge::crypto::digest::sha256& digest, bool check_canonical)
+    : my(std::make_unique<detail::public_key_impl>()) {
+   int nV = c.data()[0];
+   if (nV < 27 || nV >= 35)
+      FORGE_THROW_EXCEPTION(exceptions::invalid_signature, "unable to reconstruct public key from signature");
+
+   if (check_canonical) {
+      FORGE_ASSERT(is_canonical(c), "signature is not canonical");
+   }
+
+   secp256k1_pubkey secp_pub;
+   secp256k1_ecdsa_recoverable_signature secp_sig;
+
+   FORGE_ASSERT(secp256k1_ecdsa_recoverable_signature_parse_compact(
+       detail::_get_context(), &secp_sig, (unsigned char*)c.begin() + 1, (*c.begin() - 27) & 3));
+   FORGE_ASSERT(secp256k1_ecdsa_recover(detail::_get_context(), &secp_pub, &secp_sig, (unsigned char*)digest.data()));
+
+   size_t serialized_result_sz = my->_key.size();
+   secp256k1_ec_pubkey_serialize(detail::_get_context(), reinterpret_cast<unsigned char*>(my->_key.data()),
+                                 &serialized_result_sz, &secp_pub, SECP256K1_EC_COMPRESSED);
+   FORGE_ASSERT(serialized_result_sz == my->_key.size());
+}
+
+} // namespace forge::crypto::asymmetric::secp256k1

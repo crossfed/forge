@@ -10,7 +10,7 @@
 #include <vector>
 
 import forge.chain.core.merkle;
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.raw.exceptions;
 import forge.raw.raw;
 
@@ -124,7 +124,7 @@ BOOST_AUTO_TEST_CASE(incremental_merkle_append_overflow_preserves_state) {
        encode_state(std::numeric_limits<std::uint64_t>::max(), trees));
    const auto root = tree.root();
 
-   BOOST_CHECK_THROW(tree.append(core::digest::hash("overflow")), std::overflow_error);
+   BOOST_CHECK_THROW(tree.append(core::digest::hash(std::string{"overflow"})), std::overflow_error);
    BOOST_TEST(tree.size() == std::numeric_limits<std::uint64_t>::max());
    BOOST_TEST(tree.root() == root);
 }
