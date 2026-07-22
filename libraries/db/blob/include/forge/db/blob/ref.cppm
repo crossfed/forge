@@ -19,7 +19,7 @@ export module forge.db.blob.ref;
 
 import forge.db.blob.types;
 import forge.codec.hex;
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.raw.exceptions;
 import forge.raw.raw;
 import forge.variant.exceptions;
@@ -119,36 +119,36 @@ export namespace forge::db::blob {
 
 template <typename Digest> struct hash;
 
-template <> struct hash<forge::crypto::sha256> {
-   [[nodiscard]] forge::crypto::sha256 operator()(std::span<const std::byte> value) const {
-      return forge::crypto::sha256::hash(
+template <> struct hash<forge::crypto::digest::sha256> {
+   [[nodiscard]] forge::crypto::digest::sha256 operator()(std::span<const std::byte> value) const {
+      return forge::crypto::digest::sha256::hash(
           std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(value.data()), value.size()});
    }
 };
 
-template <> struct digest_traits<forge::crypto::sha256> {
+template <> struct digest_traits<forge::crypto::digest::sha256> {
    static constexpr auto algorithm = std::string_view{"sha256"};
    static constexpr auto byte_size = std::size_t{32U};
 
-   [[nodiscard]] static std::vector<std::byte> to_bytes(const forge::crypto::sha256& value) {
+   [[nodiscard]] static std::vector<std::byte> to_bytes(const forge::crypto::digest::sha256& value) {
       const auto* begin = reinterpret_cast<const std::byte*>(value.data());
       return std::vector<std::byte>{begin, begin + value.data_size()};
    }
 
-   [[nodiscard]] static forge::crypto::sha256 from_bytes(std::span<const std::byte> value) {
-      if (value.size() != forge::crypto::sha256{}.data_size()) {
+   [[nodiscard]] static forge::crypto::digest::sha256 from_bytes(std::span<const std::byte> value) {
+      if (value.size() != forge::crypto::digest::sha256{}.data_size()) {
          FORGE_THROW_EXCEPTION(forge::variant_exceptions::decode_error, "sha256 db blob ref digest has invalid size");
       }
-      return forge::crypto::sha256{reinterpret_cast<const char*>(value.data()), value.size()};
+      return forge::crypto::digest::sha256{reinterpret_cast<const char*>(value.data()), value.size()};
    }
 
-   [[nodiscard]] static std::string text(const forge::crypto::sha256& value) {
+   [[nodiscard]] static std::string text(const forge::crypto::digest::sha256& value) {
       return value.str();
    }
 
-   [[nodiscard]] static forge::crypto::sha256 from_text(std::string_view value) {
-      detail::require_hex_text(value, forge::crypto::sha256{}.data_size() * 2U);
-      return forge::crypto::sha256{std::string{value}};
+   [[nodiscard]] static forge::crypto::digest::sha256 from_text(std::string_view value) {
+      detail::require_hex_text(value, forge::crypto::digest::sha256{}.data_size() * 2U);
+      return forge::crypto::digest::sha256{std::string{value}};
    }
 };
 

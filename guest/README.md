@@ -374,7 +374,7 @@ Release mode builds the exact pinned LLVM and guest runtimes from source. Use
   shared with host code; a second datastream or wire codec is forbidden.
   `FORGE_POLICY_THROW_EXCEPTION` selects typed host exceptions or the canonical
   guest check intrinsic without duplicating those implementations.
-- `forge.crypto.asymmetric.value` is the single host/guest key and signature
+- `forge.crypto.asymmetric.values` is the single host/guest key and signature
   model. Contract operations use intrinsics, while host verification and
   recovery remain in `forge.crypto.asymmetric`; neither side owns a copy of the
   wire records.

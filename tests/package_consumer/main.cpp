@@ -5,7 +5,7 @@
 #include <string>
 
 import forge.app.application;
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.exceptions;
 import forge.log.log_message;
 import forge.log.logger;
@@ -28,7 +28,7 @@ int main() {
    logger.add_sink(sink);
    logger.info("package works", {forge::log_ctx("component", "smoke")});
 
-   const auto digest = forge::crypto::sha256::hash(std::string{"package works"});
+   const auto digest = forge::crypto::digest::sha256::hash(std::string{"package works"});
    const auto bytes = forge::raw::pack(std::string{digest});
    FORGE_ASSERT(!bytes.empty(), "raw pack should produce bytes", forge::exceptions::ctx("size", bytes.size()));
 

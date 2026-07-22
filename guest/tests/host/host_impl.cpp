@@ -38,17 +38,17 @@ import forge.db.object.transaction;
 import forge.db.ids.object_id;
 import forge.chain.protocol.values;
 import forge.crypto.asymmetric;
-import forge.crypto.blake2;
+import forge.crypto.digest.blake2;
 import forge.crypto.bls.primitives;
 import forge.crypto.bn256;
 import forge.codec.hex;
-import forge.crypto.modular_arithmetic;
-import forge.crypto.ripemd160;
-import forge.crypto.secp256k1;
-import forge.crypto.sha1;
-import forge.crypto.sha256;
-import forge.crypto.sha3;
-import forge.crypto.sha512;
+import forge.crypto.math.modular_arithmetic;
+import forge.crypto.digest.ripemd160;
+import forge.crypto.asymmetric.secp256k1;
+import forge.crypto.digest.sha1;
+import forge.crypto.digest.sha256;
+import forge.crypto.digest.sha3;
+import forge.crypto.digest.sha512;
 import forge.raw.raw;
 import forge.vm.wasm.backend;
 
@@ -88,7 +88,7 @@ class wasm_allocator_guard final {
 struct packed_code_hash_result {
    forge::unsigned_int version;
    std::uint64_t sequence = 0;
-   forge::crypto::sha256 digest;
+   forge::crypto::digest::sha256 digest;
    std::uint8_t vm_type = 0;
    std::uint8_t vm_version = 0;
 };
@@ -644,47 +644,47 @@ std::uint32_t host::impl::get_active_producers(output_span<std::uint64_t> produc
 }
 
 void host::impl::assert_sha256(std::span<const char> data, checksum256_input expected) const {
-   const auto actual = forge::crypto::sha256::hash(data.data(), static_cast<std::uint32_t>(data.size()));
+   const auto actual = forge::crypto::digest::sha256::hash(data.data(), static_cast<std::uint32_t>(data.size()));
    if (std::memcmp(actual.data(), expected->hash, sizeof(expected->hash)) != 0) {
       FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "hash mismatch");
    }
 }
 
 void host::impl::assert_sha1(std::span<const char> data, checksum160_input expected) const {
-   const auto actual = forge::crypto::sha1::hash(data.data(), static_cast<std::uint32_t>(data.size()));
+   const auto actual = forge::crypto::digest::sha1::hash(data.data(), static_cast<std::uint32_t>(data.size()));
    if (std::memcmp(actual.data(), expected->hash, sizeof(expected->hash)) != 0) {
       FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "hash mismatch");
    }
 }
 
 void host::impl::assert_sha512(std::span<const char> data, checksum512_input expected) const {
-   const auto actual = forge::crypto::sha512::hash(data.data(), static_cast<std::uint32_t>(data.size()));
+   const auto actual = forge::crypto::digest::sha512::hash(data.data(), static_cast<std::uint32_t>(data.size()));
    if (std::memcmp(actual.data(), expected->hash, sizeof(expected->hash)) != 0) {
       FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "hash mismatch");
    }
 }
 
 void host::impl::assert_ripemd160(std::span<const char> data, checksum160_input expected) const {
-   const auto actual = forge::crypto::ripemd160::hash(data.data(), static_cast<std::uint32_t>(data.size()));
+   const auto actual = forge::crypto::digest::ripemd160::hash(data.data(), static_cast<std::uint32_t>(data.size()));
    if (std::memcmp(actual.data(), expected->hash, sizeof(expected->hash)) != 0) {
       FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "hash mismatch");
    }
 }
 
 void host::impl::sha256(std::span<const char> data, checksum256_output result) const {
-   copy_digest(forge::crypto::sha256::hash(data.data(), static_cast<std::uint32_t>(data.size())), *result.get());
+   copy_digest(forge::crypto::digest::sha256::hash(data.data(), static_cast<std::uint32_t>(data.size())), *result.get());
 }
 
 void host::impl::sha1(std::span<const char> data, checksum160_output result) const {
-   copy_digest(forge::crypto::sha1::hash(data.data(), static_cast<std::uint32_t>(data.size())), *result.get());
+   copy_digest(forge::crypto::digest::sha1::hash(data.data(), static_cast<std::uint32_t>(data.size())), *result.get());
 }
 
 void host::impl::sha512(std::span<const char> data, checksum512_output result) const {
-   copy_digest(forge::crypto::sha512::hash(data.data(), static_cast<std::uint32_t>(data.size())), *result.get());
+   copy_digest(forge::crypto::digest::sha512::hash(data.data(), static_cast<std::uint32_t>(data.size())), *result.get());
 }
 
 void host::impl::ripemd160(std::span<const char> data, checksum160_output result) const {
-   copy_digest(forge::crypto::ripemd160::hash(data.data(), static_cast<std::uint32_t>(data.size())), *result.get());
+   copy_digest(forge::crypto::digest::ripemd160::hash(data.data(), static_cast<std::uint32_t>(data.size())), *result.get());
 }
 
 std::int32_t host::impl::recover_key(checksum256_input digest, std::span<const char> signature,
@@ -692,7 +692,7 @@ std::int32_t host::impl::recover_key(checksum256_input digest, std::span<const c
    const auto packed_signature = as_bytes(signature);
    const auto value = forge::raw::unpack_exact<forge::crypto::asymmetric::signature>(packed_signature);
    const auto recovered =
-       forge::crypto::asymmetric::recover(value, read_digest<forge::crypto::sha256>(*digest.get()), false);
+       forge::crypto::asymmetric::recover(value, read_digest<forge::crypto::digest::sha256>(*digest.get()), false);
    const auto packed = forge::raw::pack(recovered);
    if (forge::crypto::asymmetric::index(value) >= 2U) {
       if (public_key.size() < 33U) {
@@ -773,7 +773,7 @@ std::int32_t host::impl::bls_fp_exp(std::span<const char> base, std::span<const 
 }
 
 void host::impl::sha3(std::span<const char> data, std::span<char> hash, std::int32_t keccak) const {
-   const auto value = forge::crypto::sha3::hash(data.data(), static_cast<std::uint32_t>(data.size()), keccak != 1);
+   const auto value = forge::crypto::digest::sha3::hash(data.data(), static_cast<std::uint32_t>(data.size()), keccak != 1);
    const auto size = std::min(hash.size(), value.data_size());
    std::memcpy(hash.data(), value.data(), size);
 }
@@ -783,17 +783,17 @@ std::int32_t host::impl::blake2_f(std::uint32_t rounds, std::span<const char> st
                                   std::span<char> result) const {
    try {
       const auto bytes = [](std::span<const char> value) {
-         return forge::crypto::bytes{reinterpret_cast<const std::uint8_t*>(value.data()),
+         return forge::crypto::core::bytes{reinterpret_cast<const std::uint8_t*>(value.data()),
                                      reinterpret_cast<const std::uint8_t*>(value.data() + value.size())};
       };
-      const auto value = forge::crypto::blake2b(rounds, bytes(state), bytes(message), bytes(offset0), bytes(offset1),
+      const auto value = forge::crypto::digest::blake2b(rounds, bytes(state), bytes(message), bytes(offset0), bytes(offset1),
                                                 final == 1, [] {});
       if (result.size() < value.size()) {
          return -1;
       }
       std::memcpy(result.data(), value.data(), value.size());
       return 0;
-   } catch (const forge::crypto::blake2::exceptions::invalid_input&) {
+   } catch (const forge::crypto::digest::blake2::exceptions::invalid_input&) {
       return -1;
    }
 }
@@ -802,9 +802,9 @@ std::int32_t host::impl::k1_recover(std::span<const char> signature, std::span<c
                                     std::span<char> public_key) const {
    try {
       const auto to_bytes = [](std::span<const char> value) {
-         return forge::crypto::secp256k1::recover_bytes(value.begin(), value.end());
+         return forge::crypto::asymmetric::secp256k1::recover_bytes(value.begin(), value.end());
       };
-      const auto value = forge::crypto::secp256k1::recover(to_bytes(signature), to_bytes(digest));
+      const auto value = forge::crypto::asymmetric::secp256k1::recover(to_bytes(signature), to_bytes(digest));
       if (public_key.size() < value.size()) {
          return -1;
       }
@@ -834,16 +834,16 @@ std::int32_t host::impl::mod_exp(std::span<const char> base, std::span<const cha
                                  std::span<const char> modulus, std::span<char> result) const {
    try {
       const auto to_bytes = [](std::span<const char> value) {
-         return forge::crypto::bytes{reinterpret_cast<const std::uint8_t*>(value.data()),
-                                     reinterpret_cast<const std::uint8_t*>(value.data() + value.size())};
+         return forge::crypto::core::bytes{reinterpret_cast<const std::uint8_t*>(value.data()),
+                                           reinterpret_cast<const std::uint8_t*>(value.data() + value.size())};
       };
-      const auto value = forge::crypto::modexp(to_bytes(base), to_bytes(exponent), to_bytes(modulus));
+      const auto value = forge::crypto::math::modexp(to_bytes(base), to_bytes(exponent), to_bytes(modulus));
       if (result.size() < value.size()) {
          return -1;
       }
       std::memcpy(result.data(), value.data(), value.size());
       return 0;
-   } catch (const forge::crypto::modular_arithmetic::exceptions::invalid_modulus&) {
+   } catch (const forge::crypto::math::modular_arithmetic::exceptions::invalid_modulus&) {
       return -1;
    }
 }
@@ -1053,7 +1053,7 @@ void host::impl::set_parameters_packed(std::span<const char> data) {
 
 void host::impl::preactivate_feature(checksum256_input digest) {
    require_privileged(state_, receiver_);
-   const auto value = read_digest<forge::crypto::sha256>(*digest.get());
+   const auto value = read_digest<forge::crypto::digest::sha256>(*digest.get());
    if (!state_.available_features.empty() && !state_.available_features.contains(value)) {
       FORGE_THROW_EXCEPTION(exceptions::assertion_failure, "protocol feature is not recognized");
    }
@@ -1153,7 +1153,7 @@ std::uint32_t host::impl::get_block_num() const {
 }
 
 bool host::impl::is_feature_activated(checksum256_input digest) const {
-   return state_.activated_features.contains(read_digest<forge::crypto::sha256>(*digest.get()));
+   return state_.activated_features.contains(read_digest<forge::crypto::digest::sha256>(*digest.get()));
 }
 
 std::uint64_t host::impl::get_sender() const {

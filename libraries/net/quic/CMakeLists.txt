@@ -20,7 +20,9 @@ target_include_directories(forge_net_quic PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
 target_link_libraries(
    forge_net_quic PUBLIC
       forge_exceptions
-      forge_crypto
+      forge_crypto_core
+      forge_crypto_digest
+      forge_crypto_pki
       forge_asio
       forge_net_transport
       Boost::asio

@@ -110,13 +110,14 @@ continuity:
 - `libraries/core`: selected utility code including `uint128`, string helpers,
   UTF-8 helpers, type names, time/version helpers where the file history traces
   to the initial FC import.
+- `libraries/codec`: selected Base58 and Base64 implementations retain source
+  continuity to the initial import.
 - `libraries/crypto`: mixed provenance, not a whole-library FC-derived claim.
-  Retained or adapted source includes selected legacy encodings and numeric
-  helpers (`base58`, `base64`, `bigint`, `modular_arithmetic`), embedded
-  CityHash, selected BLS wrappers, selected secp256k1/recovery wrappers, and
-  digest value/bitwise/HMAC/hex compatibility code where current files retain
-  source continuity to the initial import. OpenSSL3 EVP backends and newer
-  high-level crypto APIs are FORGE-original rewrites or additions.
+  Retained or adapted source includes numeric helpers (`bigint`,
+  `modular_arithmetic`), selected BLS wrappers, selected secp256k1/recovery
+  wrappers, and digest value/bitwise/HMAC/hex compatibility code where current
+  files retain source continuity to the initial import. OpenSSL3 EVP backends
+  and newer high-level crypto APIs are FORGE-original rewrites or additions.
 - `libraries/log`: selected legacy logger, log message, log context, appender,
   and config code tracing to FC logging. Newer structured record/sink support,
   `std::source_location` APIs, and other hardened additions are FORGE-original.
@@ -189,12 +190,10 @@ items include:
 - `vendor/bn256`: EOS Network Foundation bn256, MIT.
 - `vendor/bls12-381`: Matthias Schonebeck BLS12-381, MIT.
 - `vendor/utf8cpp`: Nemanja Trifunovic UTF8-CPP, permissive license.
-- `libraries/crypto/city.cpp` and `libraries/crypto/include/forge/crypto/city.cppm`:
-  Google CityHash, MIT.
-- `libraries/crypto/base58.cpp`: Satoshi Nakamoto and The Bitcoin Developers,
-  MIT/X11.
-- `libraries/crypto/include/forge/crypto/base64.cppm`: Rene Nyffenegger base64
-  implementation with Kevin Heifner modification notice.
+- `libraries/codec/base58/base58.cpp`: Satoshi Nakamoto and The Bitcoin
+  Developers, MIT/X11.
+- `libraries/codec/base64/base64.cpp`: Rene Nyffenegger base64 implementation
+  with Kevin Heifner modification notice.
 - `libraries/core/uint128.cpp`: portions adapted from Evan Teran.
 - `vendor/pugixml`: Arseny Kapoulkine pugixml, MIT. FORGE compiles
   `vendor/pugixml/src/pugixml.cpp` directly into `forge_codec_xml` as a private XML

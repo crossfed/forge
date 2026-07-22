@@ -9,7 +9,7 @@ module;
 
 export module forge.plugins.crypto.secrets.types;
 
-import forge.crypto.types;
+import forge.crypto.core.types;
 import forge.schema.diagnostic;
 import forge.schema.value_kind;
 import forge.schema.object;
@@ -120,56 +120,56 @@ struct get_request {
 
 struct get_result {
    std::string secret_id;
-   forge::crypto::bytes bytes;
+   forge::crypto::core::bytes bytes;
 };
 
 struct derive_request {
    std::string secret_id;
    std::string purpose;
-   forge::crypto::bytes salt;
-   forge::crypto::bytes info;
+   forge::crypto::core::bytes salt;
+   forge::crypto::core::bytes info;
    std::uint64_t output_size = 32;
 };
 
 struct derive_result {
    std::string secret_id;
-   forge::crypto::bytes bytes;
+   forge::crypto::core::bytes bytes;
 };
 
 struct aead_encrypt_request {
    std::string secret_id;
    std::string purpose;
-   forge::crypto::bytes nonce;
-   forge::crypto::bytes plaintext;
-   forge::crypto::bytes aad;
+   forge::crypto::core::bytes nonce;
+   forge::crypto::core::bytes plaintext;
+   forge::crypto::core::bytes aad;
 };
 
 struct aead_encrypt_result {
    std::string secret_id;
-   forge::crypto::bytes nonce;
-   forge::crypto::bytes tag;
-   forge::crypto::bytes ciphertext;
+   forge::crypto::core::bytes nonce;
+   forge::crypto::core::bytes tag;
+   forge::crypto::core::bytes ciphertext;
 };
 
 struct aead_decrypt_request {
    std::string secret_id;
    std::string purpose;
-   forge::crypto::bytes nonce;
-   forge::crypto::bytes tag;
-   forge::crypto::bytes ciphertext;
-   forge::crypto::bytes aad;
+   forge::crypto::core::bytes nonce;
+   forge::crypto::core::bytes tag;
+   forge::crypto::core::bytes ciphertext;
+   forge::crypto::core::bytes aad;
 };
 
 struct aead_decrypt_result {
    std::string secret_id;
-   forge::crypto::bytes plaintext;
+   forge::crypto::core::bytes plaintext;
 };
 
 struct encrypted_file_encrypt_request {
-   forge::crypto::bytes plaintext;
+   forge::crypto::core::bytes plaintext;
    std::string passphrase;
-   forge::crypto::bytes salt;
-   forge::crypto::bytes nonce;
+   forge::crypto::core::bytes salt;
+   forge::crypto::core::bytes nonce;
    std::uint64_t scrypt_n = default_scrypt_n;
    std::uint64_t scrypt_r = default_scrypt_r;
    std::uint64_t scrypt_p = default_scrypt_p;
@@ -184,8 +184,8 @@ struct encrypted_file_decrypt_limits {
    std::uint64_t max_scrypt_memory_bytes = default_encrypted_file_max_scrypt_memory_bytes;
 };
 
-[[nodiscard]] forge::crypto::bytes encrypt_secret_file(encrypted_file_encrypt_request request);
-[[nodiscard]] forge::crypto::bytes decrypt_secret_file(const forge::crypto::bytes& container,
+[[nodiscard]] forge::crypto::core::bytes encrypt_secret_file(encrypted_file_encrypt_request request);
+[[nodiscard]] forge::crypto::core::bytes decrypt_secret_file(const forge::crypto::core::bytes& container,
                                                      const std::string& passphrase,
                                                      encrypted_file_decrypt_limits limits);
 

@@ -3,9 +3,9 @@ inline uint32_t to_uint32(const std::string& s) {
    return (uint32_t)std::stoul(s.c_str(), &l, 16);
 }
 
-inline bytes to_bytes(const std::string& source) {
+inline forge::crypto::core::bytes to_bytes(const std::string& source) {
    BOOST_REQUIRE(!(source.length() % 2));
-   bytes output(source.length() / 2);
+   forge::crypto::core::bytes output(source.length() / 2);
    forge::codec::hex::decode(source, output);
    return output;
 }

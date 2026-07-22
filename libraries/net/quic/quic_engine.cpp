@@ -42,9 +42,9 @@
 #include <string_view>
 #include <unordered_map>
 
-import forge.crypto.random;
+import forge.crypto.core.random;
 import forge.codec.hex;
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 
 namespace forge::net::quic::detail {
 namespace {
@@ -142,7 +142,7 @@ int accept_any_certificate_cb(int, X509_STORE_CTX*) {
 
 [[nodiscard]] bool fill_random(std::span<std::uint8_t> bytes) {
    try {
-      forge::crypto::fill_random(bytes);
+      forge::crypto::core::fill_random(bytes);
       return true;
    } catch (...) {
       return false;
@@ -432,7 +432,7 @@ std::string normalize_engine_sha256_fingerprint(std::string_view value) {
 }
 
 std::string engine_sha256_fingerprint(std::span<const std::uint8_t> data) {
-   const auto digest = forge::crypto::sha256::hash(data).to_uint8_span();
+   const auto digest = forge::crypto::digest::sha256::hash(data).to_uint8_span();
    return forge::codec::hex::encode(digest);
 }
 

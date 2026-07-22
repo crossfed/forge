@@ -35,11 +35,11 @@ module;
 
 module forge.net.p2p.node;
 
-import forge.crypto.chacha20_poly1305;
-import forge.crypto.der;
-import forge.crypto.ed25519;
-import forge.crypto.hmac;
-import forge.crypto.pem;
+import forge.crypto.symmetric.chacha20_poly1305;
+import forge.crypto.pki.der;
+import forge.crypto.asymmetric.ed25519;
+import forge.crypto.digest.hmac;
+import forge.crypto.pki.pem;
 import forge.crypto.asymmetric;
 import forge.net.p2p.dht;
 import forge.net.p2p.diagnostics;
@@ -57,10 +57,10 @@ import forge.net.p2p.rendezvous;
 import forge.net.p2p.resource_manager;
 import forge.net.p2p.scoring;
 import forge.net.p2p.stream;
-import forge.crypto.random;
-import forge.crypto.rsa;
-import forge.crypto.sha256;
-import forge.crypto.x25519;
+import forge.crypto.core.random;
+import forge.crypto.asymmetric.rsa;
+import forge.crypto.digest.sha256;
+import forge.crypto.asymmetric.x25519;
 import forge.multiformats.types;
 import forge.multiformats.varint;
 import forge.multiformats.exceptions;
@@ -1088,7 +1088,7 @@ boost::asio::awaitable<pubsub::message> node::async_publish(pubsub::topic subjec
        .subject = std::move(subject),
    };
    if (publish_options.sign) {
-      const auto key = forge::crypto::pem::read_private_key(self->options.private_key_pem);
+      const auto key = forge::crypto::pki::pem::read_private_key(self->options.private_key_pem);
       pubsub::codec::sign_message(value, key);
       if (!value.from || *value.from != self->local) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_identity, "GossipSub signing key does not match local Peer ID");
@@ -1139,7 +1139,7 @@ boost::asio::awaitable<std::chrono::milliseconds> node::async_ping(peer_id peer)
 boost::asio::awaitable<std::chrono::milliseconds> node::async_ping(peer_id peer, open_options options) {
    auto started = std::chrono::steady_clock::now();
    auto stream = co_await async_open_protocol_stream(std::move(peer), builtins::ping, std::move(options));
-   const auto payload = forge::crypto::random_bytes(32);
+   const auto payload = forge::crypto::core::random_bytes(32);
    co_await stream.async_write(payload);
    const auto reply = co_await stream.async_read();
    if (reply != payload) {

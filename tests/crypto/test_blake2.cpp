@@ -8,11 +8,13 @@
 
 import forge.exceptions;
 import forge.codec.hex;
-import forge.crypto.blake2;
+import forge.crypto.digest.blake2;
 import forge.core.utility;
 
 using namespace forge;
 using namespace forge::crypto;
+using forge::crypto::core::bytes;
+using forge::crypto::digest::blake2b;
 
 #include "test_utils.hpp"
 
@@ -114,9 +116,9 @@ BOOST_AUTO_TEST_CASE(compress_rejects_invalid_input_lengths) try {
       (void)blake2b(0, to_bytes("00"), bytes(128, 0), bytes(8, 0), bytes(8, 0), true, [] {});
    };
 
-   BOOST_CHECK_EXCEPTION(call_with_bad_state(), forge::crypto::blake2::exceptions::invalid_input,
-                         [](const forge::crypto::blake2::exceptions::invalid_input& error) {
-                            return error.code().category().name() == std::string_view{"forge.crypto.blake2"};
+   BOOST_CHECK_EXCEPTION(call_with_bad_state(), forge::crypto::digest::blake2::exceptions::invalid_input,
+                         [](const forge::crypto::digest::blake2::exceptions::invalid_input& error) {
+                            return error.code().category().name() == std::string_view{"forge.crypto.digest.blake2"};
                          });
 }
 FORGE_LOG_AND_RETHROW();

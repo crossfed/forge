@@ -10,7 +10,7 @@ export module forge.chain.protocol.system;
 export import :value;
 
 #if !defined(FORGE_CONTRACT_GUEST)
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
 

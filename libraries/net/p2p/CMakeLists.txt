@@ -58,7 +58,11 @@ target_link_libraries(
       forge_exceptions
       forge_api_core
       forge_raw
-      forge_crypto
+      forge_crypto_asymmetric
+      forge_crypto_core
+      forge_crypto_digest
+      forge_crypto_pki
+      forge_crypto_symmetric
       forge_multiformats
       forge_asio
       forge_net_transport

@@ -36,6 +36,7 @@ set(
    db_revision
    db_mdbx
    db_rocksdb
+   codec_base32
    codec_base64
    codec_base58
    codec_hex
@@ -54,7 +55,15 @@ set(
    log
    otlp
    rocksdb
-   crypto
+   crypto_core
+   crypto_digest
+   crypto_symmetric
+   crypto_asymmetric_values
+   crypto_asymmetric
+   crypto_pki
+   crypto_math
+   crypto_bls
+   crypto_bn256
    multiformats
    asio
    net_transport
@@ -83,6 +92,15 @@ set(
 set(_FORGE_REQUESTED_COMPONENTS ${Forge_FIND_COMPONENTS})
 set(_FORGE_ALL_REQUESTED FALSE)
 
+if("crypto" IN_LIST _FORGE_REQUESTED_COMPONENTS)
+   message(
+      FATAL_ERROR
+      "Forge crypto component was removed; request the required crypto_core, "
+      "crypto_digest, crypto_symmetric, crypto_asymmetric_values, "
+      "crypto_asymmetric, crypto_pki, crypto_math, crypto_bls or crypto_bn256 components"
+   )
+endif()
+
 macro(_forge_add_component component)
    if(NOT "${component}" IN_LIST _FORGE_COMPONENTS)
       list(APPEND _FORGE_COMPONENTS "${component}")
@@ -109,13 +127,14 @@ macro(_forge_add_component component)
       elseif("${component}" STREQUAL "chain_core")
          _forge_add_component(exceptions)
          _forge_add_component(raw)
-         _forge_add_component(crypto)
+         _forge_add_component(crypto_digest)
       elseif("${component}" STREQUAL "chain_protocol")
          _forge_add_component(chain_core)
          _forge_add_component(compression)
          _forge_add_component(raw)
          _forge_add_component(variant)
-         _forge_add_component(crypto)
+         _forge_add_component(crypto_asymmetric_values)
+         _forge_add_component(crypto_digest)
       elseif("${component}" STREQUAL "vm_wasm")
          _forge_add_component(exceptions)
       elseif("${component}" STREQUAL "contract_abi")
@@ -146,7 +165,7 @@ macro(_forge_add_component component)
             set(Forge_NOT_FOUND_MESSAGE "Forge contract_manifest component requires Forge built with contract tooling")
          else()
             _forge_add_component(codec_json)
-            _forge_add_component(crypto)
+            _forge_add_component(crypto_digest)
             _forge_add_component(vm_wasm)
          endif()
       elseif("${component}" STREQUAL "db_core")
@@ -160,7 +179,7 @@ macro(_forge_add_component component)
          _forge_add_component(codec_hex)
          _forge_add_component(db_core)
          _forge_add_component(exceptions)
-         _forge_add_component(crypto)
+         _forge_add_component(crypto_digest)
          _forge_add_component(db_ids)
          _forge_add_component(raw)
          _forge_add_component(variant)
@@ -258,17 +277,58 @@ macro(_forge_add_component component)
             _forge_add_component(exceptions)
             _forge_add_component(schema)
          endif()
-      elseif("${component}" STREQUAL "crypto")
+      elseif("${component}" STREQUAL "codec_base32")
+         _forge_add_component(exceptions)
+      elseif("${component}" STREQUAL "crypto_core")
+         _forge_add_component(exceptions)
+      elseif("${component}" STREQUAL "crypto_digest")
+         _forge_add_component(codec_hex)
+         _forge_add_component(core)
+         _forge_add_component(crypto_core)
+         _forge_add_component(exceptions)
+         _forge_add_component(raw)
+         _forge_add_component(variant)
+      elseif("${component}" STREQUAL "crypto_symmetric")
+         _forge_add_component(crypto_core)
+         _forge_add_component(exceptions)
+      elseif("${component}" STREQUAL "crypto_asymmetric_values")
+         _forge_add_component(raw)
+      elseif("${component}" STREQUAL "crypto_asymmetric")
          _forge_add_component(codec_base64)
          _forge_add_component(codec_base58)
          _forge_add_component(codec_hex)
          _forge_add_component(core)
+         _forge_add_component(crypto_asymmetric_values)
+         _forge_add_component(crypto_core)
+         _forge_add_component(crypto_digest)
+         _forge_add_component(exceptions)
+         _forge_add_component(raw)
+         _forge_add_component(variant)
+      elseif("${component}" STREQUAL "crypto_pki")
+         _forge_add_component(codec_hex)
+         _forge_add_component(crypto_asymmetric)
+         _forge_add_component(crypto_core)
+         _forge_add_component(crypto_digest)
+         _forge_add_component(exceptions)
+      elseif("${component}" STREQUAL "crypto_math")
+         _forge_add_component(codec_base64)
+         _forge_add_component(core)
+         _forge_add_component(crypto_core)
+         _forge_add_component(exceptions)
+         _forge_add_component(variant)
+      elseif("${component}" STREQUAL "crypto_bls")
+         _forge_add_component(codec_base64)
+         _forge_add_component(core)
+         _forge_add_component(crypto_core)
+         _forge_add_component(crypto_digest)
          _forge_add_component(exceptions)
          _forge_add_component(raw)
          _forge_add_component(reflect)
          _forge_add_component(variant)
+      elseif("${component}" STREQUAL "crypto_bn256")
       elseif("${component}" STREQUAL "multiformats")
-         _forge_add_component(crypto)
+         _forge_add_component(codec_base32)
+         _forge_add_component(crypto_digest)
       elseif("${component}" STREQUAL "asio")
          _forge_add_component(exceptions)
       elseif("${component}" STREQUAL "net_transport")
@@ -277,7 +337,7 @@ macro(_forge_add_component component)
          _forge_add_component(net_transport)
       elseif("${component}" STREQUAL "net_stcp")
          _forge_add_component(net_tcp)
-         _forge_add_component(crypto)
+         _forge_add_component(crypto_pki)
       elseif("${component}" STREQUAL "net_yamux")
          _forge_add_component(net_transport)
       elseif("${component}" STREQUAL "app")
@@ -306,7 +366,9 @@ macro(_forge_add_component component)
          _forge_add_component(asio)
       elseif("${component}" STREQUAL "net_quic")
          _forge_add_component(asio)
-         _forge_add_component(crypto)
+         _forge_add_component(crypto_core)
+         _forge_add_component(crypto_digest)
+         _forge_add_component(crypto_pki)
          _forge_add_component(net_transport)
       elseif("${component}" STREQUAL "net_p2p")
          _forge_add_component(api_core)
@@ -324,13 +386,17 @@ macro(_forge_add_component component)
          _forge_add_component(api_core)
          _forge_add_component(config_core)
          _forge_add_component(schema)
-         _forge_add_component(crypto)
+         _forge_add_component(crypto_asymmetric)
+         _forge_add_component(crypto_digest)
       elseif("${component}" STREQUAL "plugins_crypto_secrets")
          _forge_add_component(app)
          _forge_add_component(api_core)
+         _forge_add_component(codec_base64)
+         _forge_add_component(codec_hex)
          _forge_add_component(config_core)
          _forge_add_component(schema)
-         _forge_add_component(crypto)
+         _forge_add_component(crypto_core)
+         _forge_add_component(crypto_symmetric)
       elseif("${component}" STREQUAL "plugins_p2p_node")
          _forge_add_component(app)
          _forge_add_component(api_core)
@@ -439,6 +505,7 @@ foreach(_forge_component IN LISTS _FORGE_COMPONENTS)
    if(
       NOT "${_forge_component}" STREQUAL "tui"
       AND NOT "${_forge_component}" STREQUAL "contract_attributes"
+      AND NOT "${_forge_component}" STREQUAL "crypto_bn256"
    )
       set(_FORGE_NEEDS_BOOST TRUE)
    endif()
@@ -480,7 +547,15 @@ if("asio" IN_LIST _FORGE_COMPONENTS OR "net_transport" IN_LIST _FORGE_COMPONENTS
 endif()
 
 set(_FORGE_OPENSSL_COMPONENTS)
-if("crypto" IN_LIST _FORGE_COMPONENTS)
+if(
+   "crypto_core" IN_LIST _FORGE_COMPONENTS
+   OR "crypto_digest" IN_LIST _FORGE_COMPONENTS
+   OR "crypto_symmetric" IN_LIST _FORGE_COMPONENTS
+   OR "crypto_asymmetric" IN_LIST _FORGE_COMPONENTS
+   OR "crypto_pki" IN_LIST _FORGE_COMPONENTS
+   OR "crypto_math" IN_LIST _FORGE_COMPONENTS
+   OR "crypto_bls" IN_LIST _FORGE_COMPONENTS
+)
    list(APPEND _FORGE_OPENSSL_COMPONENTS Crypto)
 endif()
 if("net_http" IN_LIST _FORGE_COMPONENTS OR "net_websocket" IN_LIST _FORGE_COMPONENTS OR "net_stcp" IN_LIST _FORGE_COMPONENTS)
@@ -519,12 +594,12 @@ if("codec_json" IN_LIST _FORGE_COMPONENTS OR "codec_yaml" IN_LIST _FORGE_COMPONE
    _forge_require_package(glaze 7.5 CONFIG)
 endif()
 
-if("crypto" IN_LIST _FORGE_COMPONENTS)
+if("crypto_math" IN_LIST _FORGE_COMPONENTS)
    find_path(GMP_INCLUDE_DIR gmp.h)
    find_library(GMP_LIBRARY NAMES gmp)
    if(NOT GMP_INCLUDE_DIR OR NOT GMP_LIBRARY)
-      set(Forge_crypto_FOUND FALSE)
-      set(Forge_NOT_FOUND_MESSAGE "Forge crypto component requires GMP")
+      set(Forge_crypto_math_FOUND FALSE)
+      set(Forge_NOT_FOUND_MESSAGE "Forge crypto_math component requires GMP")
    elseif(NOT TARGET GMP::gmp)
       add_library(GMP::gmp UNKNOWN IMPORTED)
       set_target_properties(GMP::gmp PROPERTIES IMPORTED_LOCATION "${GMP_LIBRARY}" INTERFACE_INCLUDE_DIRECTORIES "${GMP_INCLUDE_DIR}")

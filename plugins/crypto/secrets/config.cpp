@@ -21,8 +21,8 @@ import forge.config.core.component;
 import forge.config.core.decode;
 import forge.codec.base64;
 import forge.codec.hex;
-import forge.crypto.secret_bytes;
-import forge.crypto.types;
+import forge.crypto.core.secret_bytes;
+import forge.crypto.core.types;
 import forge.exceptions;
 import forge.plugins.crypto.secrets.exceptions;
 import forge.plugins.crypto.secrets.types;
@@ -41,11 +41,11 @@ namespace {
    return value;
 }
 
-[[nodiscard]] forge::crypto::bytes bytes_from_string(std::string_view value) {
-   return forge::crypto::bytes{value.begin(), value.end()};
+[[nodiscard]] forge::crypto::core::bytes bytes_from_string(std::string_view value) {
+   return forge::crypto::core::bytes{value.begin(), value.end()};
 }
 
-[[nodiscard]] forge::crypto::bytes decode_material(std::string value, encoding encoding_value, const std::string& id) {
+[[nodiscard]] forge::crypto::core::bytes decode_material(std::string value, encoding encoding_value, const std::string& id) {
    try {
       switch (encoding_value) {
       case encoding::raw:
@@ -56,7 +56,7 @@ namespace {
             FORGE_THROW_EXCEPTION(exceptions::invalid_secret, "hex secret has odd length",
                                   forge::exceptions::ctx("secret_id", id));
          }
-         auto output = forge::crypto::bytes(value.size() / 2U);
+         auto output = forge::crypto::core::bytes(value.size() / 2U);
          const auto written = forge::codec::hex::decode(value, output);
          output.resize(written);
          return output;
@@ -76,7 +76,7 @@ namespace {
                          forge::exceptions::ctx("secret_id", id));
 }
 
-[[nodiscard]] forge::crypto::bytes read_file(const std::string& path, std::uint64_t max_bytes, const std::string& id) {
+[[nodiscard]] forge::crypto::core::bytes read_file(const std::string& path, std::uint64_t max_bytes, const std::string& id) {
    if (path.empty()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_source, "secret file path is empty",
                             forge::exceptions::ctx("secret_id", id));
@@ -93,7 +93,7 @@ namespace {
                             forge::exceptions::ctx("secret_id", id));
    }
    input.seekg(0, std::ios::beg);
-   auto output = forge::crypto::bytes(static_cast<std::size_t>(size));
+   auto output = forge::crypto::core::bytes(static_cast<std::size_t>(size));
    if (!output.empty()) {
       input.read(reinterpret_cast<char*>(output.data()), static_cast<std::streamsize>(output.size()));
       require_complete_file_read(input, output.size(), path, id);
@@ -113,11 +113,11 @@ namespace {
                          forge::exceptions::ctx("secret_id", id));
 }
 
-[[nodiscard]] forge::crypto::secret_bytes load_secret_material(const secret_entry& entry,
+[[nodiscard]] forge::crypto::core::secret_bytes load_secret_material(const secret_entry& entry,
                                                                std::uint64_t max_plaintext_bytes,
                                                                std::uint64_t max_ciphertext_bytes,
                                                                encrypted_file_decrypt_limits decrypt_limits) {
-   auto material = forge::crypto::bytes{};
+   auto material = forge::crypto::core::bytes{};
    switch (entry.source.type) {
    case source_type::value:
       material = decode_material(entry.source.value, entry.source.encoding, entry.id);
@@ -154,7 +154,7 @@ namespace {
       FORGE_THROW_EXCEPTION(exceptions::invalid_secret, "secret material is empty",
                             forge::exceptions::ctx("secret_id", entry.id));
    }
-   return forge::crypto::secret_bytes{std::move(material)};
+   return forge::crypto::core::secret_bytes{std::move(material)};
 }
 
 [[nodiscard]] std::uint64_t resolved_limit(std::uint64_t value, std::uint64_t fallback) {

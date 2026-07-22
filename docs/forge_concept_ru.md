@@ -114,7 +114,9 @@ FORGE не должен быть одним большим target. Каждый 
 - `forge_raw`;
 - `forge_codec_yaml`;
 - `forge_codec_json`;
-- `forge_crypto`;
+- `forge_crypto_digest`;
+- `forge_crypto_asymmetric_values`;
+- `forge_crypto_asymmetric`;
 - `forge_runtime`;
 - `forge_log`;
 - `forge_app`;
@@ -136,7 +138,7 @@ FORGE не должен быть одним большим target. Каждый 
 - `forge::net::http::server`;
 - `forge::app::runtime`;
 - `forge::tui::screen`;
-- `forge::crypto::vault`;
+- `forge::crypto::asymmetric::private_key`;
 - `forge::log::logger`.
 
 Цель: скрыть детали реализации, уменьшить rebuild surface и не протаскивать OpenSSL/ngtcp2/Boost internals в публичные interfaces.
@@ -501,11 +503,14 @@ forge::ctx("token", value, forge::sensitive)
 Но новый namespace должен быть FORGE:
 
 ```cpp
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.crypto.asymmetric;
 ```
 
-Crypto namespace lives under `forge::crypto`; старый FC source namespace больше не является целью после structural split.
+`forge::crypto` является только grouping namespace. Публичные symbols принадлежат
+leaf namespaces `core`, `digest`, `symmetric`, `asymmetric`, `pki`, `math`,
+`bls` и `bn256`; старый FC source namespace больше не является целью после
+structural split.
 
 ### 8.2 Перенести generic crypto из Storlane
 
@@ -829,13 +834,17 @@ libraries/{lib}/CMakeLists.txt
 
 ```text
 libraries/crypto/
-  include/forge/crypto/types.cppm
-  include/forge/crypto/random.cppm
-  include/forge/crypto/aes.cppm
-  crypto.cpp
-  random.cpp
-  aes.cpp
   CMakeLists.txt
+  core/
+    include/forge/crypto/core/random.cppm
+    random.cpp
+  digest/
+    include/forge/crypto/digest/sha256.cppm
+    sha256.cpp
+  asymmetric/
+    include/forge/crypto/asymmetric/values.cppm
+    include/forge/crypto/asymmetric/asymmetric.cppm
+    asymmetric.cpp
 ```
 
 ### 14.1 Почему `.cppm` в `include`
@@ -846,7 +855,7 @@ libraries/crypto/
 
 ### 14.2 Владение module BMI
 
-`BMI` — Binary Module Interface, служебный файл компилятора для C++ modules. Целевое состояние: каждый доменный target (`forge_core`, `forge_raw`, `forge_codec_json`, `forge_crypto` и т. д.) сам владеет своими `.cppm` через `FILE_SET CXX_MODULES`.
+`BMI` — Binary Module Interface, служебный файл компилятора для C++ modules. Целевое состояние: каждый доменный target (`forge_core`, `forge_raw`, `forge_codec_json`, `forge_crypto_digest` и т. д.) сам владеет своими `.cppm` через `FILE_SET CXX_MODULES`.
 
 Общий `forge_modules` bridge удалён. Он был допустим только как временная миграционная подпорка для старого монолитного графа, но не является архитектурным слоем FORGE.
 
@@ -864,7 +873,15 @@ forge_reflect
 forge_raw
 forge_codec_yaml
 forge_codec_json
-forge_crypto
+forge_crypto_core
+forge_crypto_digest
+forge_crypto_symmetric
+forge_crypto_asymmetric_values
+forge_crypto_asymmetric
+forge_crypto_pki
+forge_crypto_math
+forge_crypto_bls
+forge_crypto_bn256
 forge_runtime
 forge_log
 forge_config_core

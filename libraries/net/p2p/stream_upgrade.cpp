@@ -22,12 +22,12 @@ module;
 
 module forge.net.p2p.node;
 
-import forge.crypto.chacha20_poly1305;
-import forge.crypto.hmac;
-import forge.crypto.pem;
+import forge.crypto.symmetric.chacha20_poly1305;
+import forge.crypto.digest.hmac;
+import forge.crypto.pki.pem;
 import forge.crypto.asymmetric;
-import forge.crypto.sha256;
-import forge.crypto.x25519;
+import forge.crypto.digest.sha256;
+import forge.crypto.asymmetric.x25519;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.identity;
 import forge.net.p2p.message;
@@ -54,13 +54,13 @@ namespace {
 }
 
 [[nodiscard]] std::vector<std::uint8_t> sha256(std::span<const std::uint8_t> value) {
-   const auto digest = forge::crypto::sha256::hash(value).to_uint8_span();
+   const auto digest = forge::crypto::digest::sha256::hash(value).to_uint8_span();
    return {digest.begin(), digest.end()};
 }
 
 [[nodiscard]] std::vector<std::uint8_t> hmac_sha256(std::span<const std::uint8_t> key,
                                                     std::span<const std::uint8_t> value) {
-   const auto digest = forge::crypto::hmac_sha256{}.digest(key, value).to_uint8_span();
+   const auto digest = forge::crypto::digest::hmac_sha256{}.digest(key, value).to_uint8_span();
    return {digest.begin(), digest.end()};
 }
 
@@ -85,27 +85,27 @@ namespace {
 
 [[nodiscard]] forge::crypto::asymmetric::private_key private_key_from_pem_for_noise(std::string_view pem) {
    try {
-      return forge::crypto::pem::read_private_key(pem);
+      return forge::crypto::pki::pem::read_private_key(pem);
    } catch (const forge::exceptions::base& error) {
       throw_crypto_failure(error.what());
    }
 }
 
 struct x25519_key {
-   forge::crypto::x25519::private_key key;
+   forge::crypto::asymmetric::x25519::private_key key;
    std::array<std::uint8_t, 32> public_key{};
 };
 
 [[nodiscard]] x25519_key make_x25519_key() {
-   auto key = forge::crypto::x25519::private_key::generate();
+   auto key = forge::crypto::asymmetric::x25519::private_key::generate();
    return x25519_key{.key = key, .public_key = key.get_public_key().serialize()};
 }
 
-[[nodiscard]] std::vector<std::uint8_t> x25519_dh(const forge::crypto::x25519::private_key& private_key,
+[[nodiscard]] std::vector<std::uint8_t> x25519_dh(const forge::crypto::asymmetric::x25519::private_key& private_key,
                                                   std::span<const std::uint8_t, 32> remote_public) {
-   auto public_key = forge::crypto::x25519::public_key_data{};
+   auto public_key = forge::crypto::asymmetric::x25519::public_key_data{};
    std::copy(remote_public.begin(), remote_public.end(), public_key.begin());
-   const auto secret = private_key.get_shared_secret(forge::crypto::x25519::public_key{public_key});
+   const auto secret = private_key.get_shared_secret(forge::crypto::asymmetric::x25519::public_key{public_key});
    return {secret.begin(), secret.end()};
 }
 
@@ -130,13 +130,13 @@ struct x25519_key {
                                                                   std::uint64_t nonce_value,
                                                                   std::span<const std::uint8_t> ad,
                                                                   std::span<const std::uint8_t> plaintext) {
-   if (key.size() != forge::crypto::chacha20_poly1305::key{}.size()) {
+   if (key.size() != forge::crypto::symmetric::chacha20_poly1305::key{}.size()) {
       FORGE_THROW_EXCEPTION(exceptions::protocol_error, "Noise cipher key must be 32 bytes");
    }
-   auto cipher_key = forge::crypto::chacha20_poly1305::key{};
+   auto cipher_key = forge::crypto::symmetric::chacha20_poly1305::key{};
    std::copy(key.begin(), key.end(), cipher_key.begin());
    const auto nonce = noise_nonce(nonce_value);
-   return forge::crypto::chacha20_poly1305::encrypt(cipher_key, nonce, ad, plaintext);
+   return forge::crypto::symmetric::chacha20_poly1305::encrypt(cipher_key, nonce, ad, plaintext);
 }
 
 [[nodiscard]] std::vector<std::uint8_t> chacha20_poly1305_decrypt(std::span<const std::uint8_t> key,
@@ -146,14 +146,14 @@ struct x25519_key {
    if (ciphertext.size() < 16) {
       FORGE_THROW_EXCEPTION(exceptions::protocol_error, "Noise ciphertext is missing authentication tag");
    }
-   if (key.size() != forge::crypto::chacha20_poly1305::key{}.size()) {
+   if (key.size() != forge::crypto::symmetric::chacha20_poly1305::key{}.size()) {
       FORGE_THROW_EXCEPTION(exceptions::protocol_error, "Noise cipher key must be 32 bytes");
    }
-   auto cipher_key = forge::crypto::chacha20_poly1305::key{};
+   auto cipher_key = forge::crypto::symmetric::chacha20_poly1305::key{};
    std::copy(key.begin(), key.end(), cipher_key.begin());
    const auto nonce = noise_nonce(nonce_value);
    try {
-      return forge::crypto::chacha20_poly1305::decrypt(cipher_key, nonce, ad, ciphertext);
+      return forge::crypto::symmetric::chacha20_poly1305::decrypt(cipher_key, nonce, ad, ciphertext);
    } catch (const forge::exceptions::base&) {
       FORGE_THROW_EXCEPTION(exceptions::peer_verification_failed, "Noise authentication failed");
    }

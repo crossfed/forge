@@ -17,7 +17,7 @@ module;
 
 module forge.net.p2p.dht;
 
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.multiformats.multiaddr;
 import forge.multiformats.exceptions;
 import forge.multiformats.types;
@@ -363,8 +363,8 @@ dht::key make_dht_key(const peer_id& peer) {
 }
 
 dht::distance distance_between(std::span<const std::uint8_t> left, std::span<const std::uint8_t> right) {
-   const auto left_hash = forge::crypto::sha256::hash(left).to_uint8_span();
-   const auto right_hash = forge::crypto::sha256::hash(right).to_uint8_span();
+   const auto left_hash = forge::crypto::digest::sha256::hash(left).to_uint8_span();
+   const auto right_hash = forge::crypto::digest::sha256::hash(right).to_uint8_span();
    auto out = dht::distance{};
    for (auto i = std::size_t{}; i < out.bytes.size(); ++i) {
       out.bytes[i] = static_cast<std::uint8_t>(left_hash[i] ^ right_hash[i]);

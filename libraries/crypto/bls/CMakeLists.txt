@@ -1,0 +1,30 @@
+add_library(
+   forge_crypto_bls STATIC
+   bls.cpp
+   bls_primitives.cpp
+   bls_private_key.cpp
+   bls_public_key.cpp
+   bls_signature.cpp
+)
+forge_target_modules_at(forge_crypto_bls crypto/bls)
+
+target_include_directories(forge_crypto_bls PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
+target_compile_definitions(
+   forge_crypto_bls
+   PUBLIC OPENSSL_API_COMPAT=0x30000000L
+          OPENSSL_NO_DEPRECATED
+)
+target_link_libraries(
+   forge_crypto_bls
+   PUBLIC
+      forge_codec_base64
+      forge_core
+      forge_crypto_core
+      forge_crypto_digest
+      forge_exceptions
+      forge_raw
+      forge_reflect
+      forge_variant
+      bls12-381
+      OpenSSL::Crypto
+)

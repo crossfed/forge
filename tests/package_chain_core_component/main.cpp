@@ -1,9 +1,11 @@
 #include <span>
 
+#include <string>
+
 import forge.chain.core.merkle;
 
 int main() {
-   const auto leaf = forge::chain::core::digest::hash("package-chain-core-merkle");
+   const auto leaf = forge::chain::core::digest::hash(std::string{"package-chain-core-merkle"});
    const auto root = forge::chain::core::calculate_merkle_root(std::span{&leaf, 1U});
    auto tree = forge::chain::core::incremental_merkle_tree{};
    tree.append(leaf);

@@ -11,7 +11,7 @@ module;
 
 export module forge.contract.testing.state;
 
-export import forge.crypto.sha256;
+export import forge.crypto.digest.sha256;
 
 export namespace forge::contract::testing {
 
@@ -25,7 +25,7 @@ struct resource_limits {
 
 struct code_hash {
    std::uint64_t sequence = 0;
-   forge::crypto::sha256 digest;
+   forge::crypto::digest::sha256 digest;
    std::uint8_t vm_type = 0;
    std::uint8_t vm_version = 0;
 
@@ -58,8 +58,8 @@ struct oracle_state {
    std::map<std::uint64_t, std::int64_t> account_creation_time;
    std::map<std::uint64_t, resource_limits> limits;
    std::set<std::uint64_t> privileged_accounts;
-   std::set<forge::crypto::sha256> available_features;
-   std::set<forge::crypto::sha256> activated_features;
+   std::set<forge::crypto::digest::sha256> available_features;
+   std::set<forge::crypto::digest::sha256> activated_features;
 
    std::vector<std::uint8_t> transaction;
    std::int32_t tapos_block_num = 0;

@@ -10,7 +10,7 @@ export module forge.chain.protocol.action_receipt;
 
 export import forge.chain.protocol.action;
 export import forge.raw.varint;
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
 import forge.variant.value;

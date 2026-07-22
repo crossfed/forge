@@ -9,13 +9,13 @@
 
 import forge.crypto.asymmetric;
 import forge.codec.hex;
-import forge.crypto.secp256k1;
-import forge.crypto.p256;
-import forge.crypto.ed25519;
-import forge.crypto.rsa;
-import forge.crypto.x25519;
-import forge.crypto.chacha20_poly1305;
-import forge.crypto.sha256;
+import forge.crypto.asymmetric.secp256k1;
+import forge.crypto.asymmetric.p256;
+import forge.crypto.asymmetric.ed25519;
+import forge.crypto.asymmetric.rsa;
+import forge.crypto.asymmetric.x25519;
+import forge.crypto.symmetric.chacha20_poly1305;
+import forge.crypto.digest.sha256;
 import forge.core.utility;
 import forge.exceptions;
 import forge.raw.raw;
@@ -23,6 +23,8 @@ import forge.raw.raw;
 using namespace forge::crypto;
 using namespace forge::crypto::asymmetric;
 using namespace forge;
+using forge::crypto::digest::sha256;
+namespace chacha20_poly1305 = forge::crypto::symmetric::chacha20_poly1305;
 
 BOOST_AUTO_TEST_SUITE(cypher_suites)
 
@@ -376,7 +378,7 @@ BOOST_AUTO_TEST_CASE(forge_encoding_roundtrips_all_host_private_keys) try {
 FORGE_LOG_AND_RETHROW();
 
 BOOST_AUTO_TEST_CASE(generic_sign_digest_all_supported_algorithms) try {
-   const auto digest = forge::crypto::sha256::hash("forge-crypto-digest");
+   const auto digest = forge::crypto::digest::sha256::hash(std::string{"forge-crypto-digest"});
    const auto keys = std::vector<private_key>{
        private_key::generate<secp256k1::private_key>(),
        private_key::generate<p256::private_key>(),

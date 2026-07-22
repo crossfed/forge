@@ -1,6 +1,7 @@
 #include <concepts>
 #include <cstdint>
 #include <flat_map>
+#include <string>
 #include <vector>
 
 import forge.chain.protocol.action;
@@ -11,8 +12,7 @@ import forge.chain.protocol.transaction;
 
 int main() {
    static_assert(std::same_as<forge::chain::protocol::bytes, std::vector<std::uint8_t>>);
-   const auto digest =
-       forge::chain::protocol::digest::hash("package-chain-protocol", sizeof("package-chain-protocol") - 1U);
+   const auto digest = forge::chain::protocol::digest::hash(std::string{"package-chain-protocol"});
    auto transaction = forge::chain::protocol::transaction{};
    auto action = forge::chain::protocol::action{};
    auto receipt = forge::chain::protocol::action_receipt{};

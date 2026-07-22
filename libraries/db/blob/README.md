@@ -21,7 +21,7 @@ forge::db::blob::store blobs{
    }};
 ```
 
-The default `put(bytes)` path uses `forge::crypto::sha256` and returns
+The default `put(bytes)` path uses `forge::crypto::digest::sha256` and returns
 `forge::db::blob::ref<forge::db::blob::digest>`:
 
 ```cpp
@@ -52,7 +52,7 @@ forge::db::blob::ref<forge::db::blob::digest> value{
 ```
 
 `forge::db::blob::digest` is the default digest type and aliases
-`forge::crypto::sha256`. Other digest types can participate by specializing `forge::db::blob::hash<Digest>` and
+`forge::crypto::digest::sha256`. Other digest types can participate by specializing `forge::db::blob::hash<Digest>` and
 `forge::db::blob::digest_traits<Digest>` with hashing, byte conversion, text
 conversion and a stable algorithm id.
 

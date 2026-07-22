@@ -13,7 +13,7 @@ module forge.net.p2p.identity;
 
 import forge.codec.base58;
 import forge.crypto.asymmetric;
-import forge.crypto.x509;
+import forge.crypto.pki.x509;
 import forge.multiformats.exceptions;
 import forge.multiformats.types;
 import forge.multiformats.varint;
@@ -98,7 +98,7 @@ struct signed_key_extension {
    return out;
 }
 
-void verify_libp2p_certificate_extension(const forge::crypto::x509::certificate& certificate,
+void verify_libp2p_certificate_extension(const forge::crypto::pki::x509::certificate& certificate,
                                          const signed_key_extension& extension) {
    const auto public_key = decode_public_key(extension.public_key);
    const auto spki = certificate.public_key_der();
@@ -112,7 +112,7 @@ void verify_libp2p_certificate_extension(const forge::crypto::x509::certificate&
    }
 }
 
-[[nodiscard]] peer_id peer_id_from_libp2p_certificate_extension(const forge::crypto::x509::certificate& certificate) {
+[[nodiscard]] peer_id peer_id_from_libp2p_certificate_extension(const forge::crypto::pki::x509::certificate& certificate) {
    const auto value = certificate.extension("1.3.6.1.4.1.53594.1.1");
    if (value.empty()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_identity,
@@ -240,12 +240,12 @@ peer_id make_peer_id(const public_key& key) {
 }
 
 peer_id make_peer_id_from_certificate_pem(std::string_view certificate_pem) {
-   auto certificate = forge::crypto::x509::certificate::from_pem(certificate_pem);
+   auto certificate = forge::crypto::pki::x509::certificate::from_pem(certificate_pem);
    return peer_id_from_libp2p_certificate_extension(certificate);
 }
 
 peer_id make_peer_id_from_certificate_der(std::span<const std::uint8_t> der) {
-   auto parsed = forge::crypto::x509::certificate::from_der(der);
+   auto parsed = forge::crypto::pki::x509::certificate::from_der(der);
    return peer_id_from_libp2p_certificate_extension(parsed);
 }
 

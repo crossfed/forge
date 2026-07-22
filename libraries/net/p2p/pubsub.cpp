@@ -13,7 +13,7 @@ module;
 module forge.net.p2p.pubsub;
 
 import forge.crypto.asymmetric;
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.multiformats.multicodec;
 import forge.multiformats.exceptions;
 import forge.multiformats.multihash;
@@ -54,7 +54,7 @@ void validate_topic(const topic& value, const options& opts) {
    }
 }
 
-[[nodiscard]] std::vector<std::uint8_t> digest_bytes(const forge::crypto::sha256& digest) {
+[[nodiscard]] std::vector<std::uint8_t> digest_bytes(const forge::crypto::digest::sha256& digest) {
    const auto span = digest.to_uint8_span();
    return {span.begin(), span.end()};
 }
@@ -580,7 +580,7 @@ std::vector<std::uint8_t> codec::message_id(const message& value) {
       return out;
    }
    const auto encoded = encode_message_payload(value, options{}, true);
-   return digest_bytes(forge::crypto::sha256::hash(std::span<const std::uint8_t>{encoded}));
+   return digest_bytes(forge::crypto::digest::sha256::hash(std::span<const std::uint8_t>{encoded}));
 }
 
 void codec::sign_message(message& value, const forge::crypto::asymmetric::private_key& key) {

@@ -11,7 +11,7 @@ module;
 
 module forge.plugins.crypto.secrets.plugin;
 
-import forge.crypto.secret_bytes;
+import forge.crypto.core.secret_bytes;
 import forge.plugins.crypto.secrets.api;
 import forge.plugins.crypto.secrets.types;
 

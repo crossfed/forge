@@ -32,7 +32,7 @@ module;
 
 module forge.net.stcp.connection;
 
-import forge.crypto.x509;
+import forge.crypto.pki.x509;
 import forge.net.transport.stream;
 
 namespace forge::net::stcp {
@@ -256,13 +256,13 @@ void load_trust(asio::ssl::context& context, const security_options& security) {
       return std::nullopt;
    }
    auto der = certificate_der(certificate.get());
-   auto parsed = crypto::x509::certificate::from_der(der);
+   auto parsed = crypto::pki::x509::certificate::from_der(der);
    return peer_certificate{.der = std::move(der), .sha256_fingerprint = parsed.fingerprint_sha256_text()};
 }
 
 [[nodiscard]] peer_certificate peer_certificate_from_x509(X509* certificate) {
    auto der = certificate_der(certificate);
-   auto parsed = crypto::x509::certificate::from_der(der);
+   auto parsed = crypto::pki::x509::certificate::from_der(der);
    return peer_certificate{.der = std::move(der), .sha256_fingerprint = parsed.fingerprint_sha256_text()};
 }
 

@@ -11,7 +11,7 @@ module;
 export module forge.chain.protocol.abi;
 
 export import forge.chain.protocol.types;
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
 import forge.variant.value;
