@@ -79,6 +79,28 @@ BOOST_DESCRIBE_STRUCT(macro_serialized_record, (), (id, name))
 FORGE_DECLARE_SERIALIZATION(macro_serialized_record)
 FORGE_IMPLEMENT_SERIALIZATION(macro_serialized_record)
 
+struct stream_serialized_aggregate {
+   std::uint32_t value = 0;
+
+   bool operator==(const stream_serialized_aggregate&) const = default;
+
+   template <typename Stream> friend Stream& operator<<(Stream& stream, const stream_serialized_aggregate& item) {
+      forge::raw::pack(stream, std::uint8_t{0xa5});
+      forge::raw::pack(stream, item.value);
+      return stream;
+   }
+
+   template <typename Stream> friend Stream& operator>>(Stream& stream, stream_serialized_aggregate& item) {
+      auto marker = std::uint8_t{};
+      forge::raw::unpack(stream, marker);
+      forge::raw::detail::require(marker == 0xa5, "custom aggregate marker is invalid");
+      forge::raw::unpack(stream, item.value);
+      return stream;
+   }
+};
+
+static_assert(std::is_aggregate_v<stream_serialized_aggregate>);
+
 BOOST_AUTO_TEST_SUITE(raw_test_suite)
 
 BOOST_AUTO_TEST_CASE(raw_string_golden_bytes) {
@@ -161,6 +183,23 @@ BOOST_AUTO_TEST_CASE(raw_pack_uses_canonical_uint8_byte_container) {
 
    const auto view = std::span<const std::uint8_t>{bytes.data(), bytes.size()};
    BOOST_CHECK(forge::raw::unpack<macro_serialized_record>(view) == value);
+}
+
+BOOST_AUTO_TEST_CASE(custom_stream_codec_precedes_aggregate_fallback) {
+   const auto value = stream_serialized_aggregate{.value = 0x12345678};
+   const auto packed = forge::raw::pack(value);
+
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(packed), "a578563412");
+   BOOST_CHECK(forge::raw::unpack<stream_serialized_aggregate>(packed) == value);
+
+   auto stream = forge::datastream<std::vector<std::uint8_t>>{};
+   stream << value;
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(stream.storage()), "a578563412");
+
+   stream.seekp(0);
+   auto decoded = stream_serialized_aggregate{};
+   stream >> decoded;
+   BOOST_CHECK(decoded == value);
 }
 
 BOOST_AUTO_TEST_CASE(uint8_vector_datastream_reads_varint_prefixed_values) {
