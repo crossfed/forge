@@ -617,14 +617,12 @@ def check_crypto_family(root: Path, files: list[Path], errors: list[str]) -> Non
          source,
          flags=re.IGNORECASE | re.DOTALL,
       ):
-         components = re.search(
-            r"\bCOMPONENTS\b(?P<values>.*?)(?:\bOPTIONAL_COMPONENTS\b|$)",
-            package.group("arguments"),
-            flags=re.IGNORECASE | re.DOTALL,
-         )
-         if components and re.search(
-            r"(?<![A-Za-z0-9_])crypto(?![A-Za-z0-9_])", components.group("values")
-         ):
+         arguments = {
+            value.casefold()
+            for token in re.findall(r'"[^"]*"|\S+', package.group("arguments"))
+            for value in token.strip('"').split(";")
+         }
+         if "crypto" in arguments:
             errors.append(f"{path.relative_to(root)}: removed Crypto package component is forbidden")
 
    removed_paths = (
