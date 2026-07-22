@@ -32,7 +32,8 @@ not an application addressing policy layer.
 
 Target: `forge_multiformats`.
 
-Dependencies: `forge_exceptions`, `forge_crypto`.
+Dependencies: `forge_exceptions`, `forge_codec_base32`, `forge_codec_base58`
+and `forge_crypto_digest`.
 
 ## Examples
 

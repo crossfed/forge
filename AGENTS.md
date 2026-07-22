@@ -152,7 +152,7 @@ class service_node {
   - `forge_api_core`
   - `forge_api_http`
   - `forge_api_transport`
-  - `forge_crypto`
+  - `forge_crypto_digest`
   - `forge_runtime`
   - `forge_log`
   - `forge_app`
@@ -356,6 +356,11 @@ implementation-library namespaces. For plugin family/role decisions, follow
 
 ## Crypto
 
+- `forge::crypto` is an empty family root. Public symbols and dependencies live
+  in focused `core`, `digest`, `symmetric`, `asymmetric`, `pki`, `math`, `bls`
+  and `bn256` leaf libraries.
+- There is no Crypto aggregate target or package component. Consumers must link
+  the smallest owning leaf target.
 - OpenSSL 3+ is the crypto backend baseline.
 - There must be one OpenSSL implementation selected in the build graph.
 - Do not add BoringSSL.
@@ -365,10 +370,10 @@ implementation-library namespaces. For plugin family/role decisions, follow
 - Base64, Base58 and hexadecimal encoding belong only to the dual-target
   `forge.codec` leaf libraries. Crypto, contract, multiformats and network code
   must consume those byte-native APIs instead of defining encoding algorithms.
-- `forge_crypto` stays synchronous and low-level. Do not import `forge_asio`,
-  schedulers, threads or runtime policy into crypto primitives.
-- WebAuthn parsing must stay private to `forge_crypto` and must not reintroduce a
-  public or vendored JSON parser dependency.
+- Crypto leaf libraries stay synchronous and low-level. Do not import
+  `forge_asio`, schedulers, threads or runtime policy into crypto primitives.
+- WebAuthn parsing must stay private to `forge_crypto_asymmetric` and must not
+  reintroduce a public or vendored JSON parser dependency.
 
 ## Runtime And Networking
 
@@ -549,8 +554,8 @@ implementation-library namespaces. For plugin family/role decisions, follow
 - `forge_variant` owns described-type conversion to and from `forge::variant`; described variant mapping must not live in `forge_reflect`.
 - The umbrella `forge` target must not collect external dependencies "just in case"; put each dependency on the target that owns the include/link usage.
 - Installed consumers should link leaf targets such as `Forge::forge_raw`,
-  `Forge::forge_crypto` or `Forge::forge_app` when they need a small dependency
-  footprint. `Forge::forge` is intentionally the whole feature set.
+  `Forge::forge_crypto_digest` or `Forge::forge_app` when they need a small
+  dependency footprint. `Forge::forge` is intentionally the whole feature set.
 - Raw serialization belongs only to `libraries/raw`; do not define `namespace forge::raw` or raw overloads in `core`.
 - Filesystem/config/path-layout helpers are not part of the FORGE core foundation. Use `std::filesystem` directly or keep app-specific helpers in consuming projects.
 - Removed FC-like source APIs must not return as public FORGE APIs: `forge::array`, `forge::fwd`, `forge::safe`, `forge::filesystem`, flat/interprocess containers, mock time and compatibility mutexes.

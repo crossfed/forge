@@ -71,7 +71,7 @@ string concatenation, JSON or hand-written field loops.
 #include <string>
 
 import forge.crypto.asymmetric;
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.raw.raw;
 
 struct signed_command {
@@ -79,13 +79,13 @@ struct signed_command {
    std::uint64_t sequence = 0;
    std::string command;
 
-   [[nodiscard]] forge::crypto::bytes signing_bytes() const;
+   [[nodiscard]] forge::crypto::core::bytes signing_bytes() const;
 };
 
 BOOST_DESCRIBE_STRUCT(signed_command, (), (account, sequence, command))
 
-inline forge::crypto::bytes signed_command::signing_bytes() const {
-   auto bytes = forge::crypto::bytes{};
+inline forge::crypto::core::bytes signed_command::signing_bytes() const {
+   auto bytes = forge::crypto::core::bytes{};
    forge::raw::pack(bytes, *this);
    return bytes;
 }
@@ -151,7 +151,7 @@ instantiations for a frequently used DTO, while other translation units only see
 #include <cstdint>
 #include <string>
 
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
 import forge.variant.exceptions;
@@ -179,7 +179,7 @@ or `.cpp` file:
 ```cpp
 #include <forge/raw/serialization.hpp>
 
-import forge.crypto.sha256;
+import forge.crypto.digest.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
 import forge.variant.exceptions;

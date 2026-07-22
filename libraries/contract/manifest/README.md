@@ -27,9 +27,9 @@ This library does not require Clang and does not validate policy; use
 
 ## Dependencies
 
-`forge_codec_json`, `forge_crypto` and `forge_vm_wasm` provide deterministic
-JSON, SHA-256 and WASM feature/import inspection. No Clang dependency is
-transitive through package component `contract_manifest`.
+`forge_codec_json`, `forge_crypto_digest` and `forge_vm_wasm` provide
+deterministic JSON, SHA-256 and WASM feature/import inspection. No Clang
+dependency is transitive through package component `contract_manifest`.
 
 ## Stability And Tests
 

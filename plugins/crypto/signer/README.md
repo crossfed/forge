@@ -32,9 +32,9 @@ types; text encoding belongs to the consuming boundary.
 
 ## What It Provides
 
-- Loads configured local private keys through `forge_crypto`.
+- Loads configured local private keys through `forge_crypto_asymmetric`.
 - Enforces key ids, allowed purposes and optional required algorithms.
-- Signs `forge::crypto::sha256` digests through a local-only `forge_api_core` contract.
+- Signs `forge::crypto::digest::sha256` digests through a local-only `forge_api_core` contract.
 - Returns `forge::crypto::asymmetric::public_key` and
   `forge::crypto::asymmetric::signature` directly.
 - Keeps key material config secret/redacted through schema/config metadata.
@@ -47,7 +47,8 @@ configured keys.
 
 - `forge_app`
 - `forge_api_core`
-- `forge_crypto`
+- `forge_crypto_asymmetric`
+- `forge_crypto_digest`
 - `forge_config_core`
 - `forge_schema`
 

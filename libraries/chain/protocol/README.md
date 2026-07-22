@@ -27,7 +27,7 @@ Package component: `chain_protocol`. Public namespace:
 - `forge.chain.protocol.system`: canonical system action payloads.
 
 The target publicly links `forge_chain_core`, `forge_compression`, `forge_raw`,
-`forge_variant` and `forge_crypto`.
+`forge_variant`, `forge_crypto_asymmetric_values` and `forge_crypto_digest`.
 
 `forge::chain::protocol::digest` aliases `forge::chain::core::digest`. Protocol
 names such as `chain_id`, `block_id`, `transaction_id` and `checksum256` remain
