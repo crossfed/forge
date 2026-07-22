@@ -106,8 +106,6 @@ core::digest signed_block_digest(const signed_block& value) {
 
 } // namespace forge::chain::protocol
 
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::producer_key)
-FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::producer_schedule)
 FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::block_header)
 FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::signed_block_header)
 FORGE_IMPLEMENT_SERIALIZATION_PACK(forge::chain::protocol::transaction_receipt_header)

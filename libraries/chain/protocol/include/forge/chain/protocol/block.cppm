@@ -9,12 +9,12 @@ module;
 #include <new>
 #include <optional>
 #include <variant>
-#include <vector>
 
 export module forge.chain.protocol.block;
 
 export import forge.raw.varint;
 
+export import forge.chain.protocol.producer_schedule;
 export import forge.chain.protocol.transaction;
 import forge.crypto.sha256;
 import forge.raw.datastream;
@@ -23,16 +23,6 @@ import forge.variant.value;
 import forge.variant.described;
 
 export namespace forge::chain::protocol {
-
-struct producer_key {
-   account_name producer_name;
-   public_key block_signing_key;
-};
-
-struct producer_schedule {
-   std::uint32_t version = 0;
-   std::vector<producer_key> producers;
-};
 
 struct block_header {
    block_timestamp timestamp;
@@ -101,8 +91,6 @@ core::digest signed_block_digest(const signed_block& value);
 } // namespace forge::chain::protocol
 
 export namespace forge::chain::protocol {
-BOOST_DESCRIBE_STRUCT(producer_key, (), (producer_name, block_signing_key))
-BOOST_DESCRIBE_STRUCT(producer_schedule, (), (version, producers))
 BOOST_DESCRIBE_STRUCT(block_header, (),
                       (timestamp, producer, confirmed, previous, transaction_mroot, action_mroot, schedule_version,
                        new_producers, header_extensions))
@@ -165,8 +153,6 @@ inline forge::chain::protocol::bytes pack(const forge::chain::protocol::signed_b
 
 } // namespace forge::raw
 
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::producer_key)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::producer_schedule)
 FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::block_header)
 FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::signed_block_header)
 FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::transaction_receipt_header)
