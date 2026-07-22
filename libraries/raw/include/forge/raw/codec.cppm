@@ -25,15 +25,15 @@ export module forge.raw.codec;
 export import forge.raw.stream;
 export import forge.raw.varint_value;
 
-export namespace forge::raw::detail {
+namespace forge::raw::detail {
 
-struct stream_probe_tag {};
+struct stream_probe_storage {};
 
 } // namespace forge::raw::detail
 
-export namespace forge {
+namespace forge {
 
-template <> class datastream<std::vector<std::uint8_t>, raw::detail::stream_probe_tag> {
+template <> class datastream<raw::detail::stream_probe_storage, void> {
  public:
    bool read(char*, std::size_t);
    bool write(const char*, std::size_t);
@@ -45,6 +45,13 @@ template <> class datastream<std::vector<std::uint8_t>, raw::detail::stream_prob
    std::size_t tellp() const;
    std::size_t remaining() const;
    bool valid() const;
+};
+
+class raw_stream_probe : public datastream<raw::detail::stream_probe_storage> {};
+
+template <typename Storage> class raw_concrete_stream_probe {
+ public:
+   operator datastream<Storage>&() const;
 };
 
 } // namespace forge
@@ -130,13 +137,29 @@ template <> struct built_in_codec<unsigned __int128> : std::true_type {};
 
 template <typename T> inline constexpr auto built_in_codec_v = built_in_codec<std::remove_cv_t<T>>::value;
 
-using stream_probe = forge::datastream<std::vector<std::uint8_t>, stream_probe_tag>;
+template <typename T>
+concept templated_stream_packable = requires(forge::raw_stream_probe& stream, const T& value) { stream << value; };
 
 template <typename T>
-concept custom_stream_packable = requires(stream_probe& stream, const T& value) { stream << value; };
+concept templated_stream_unpackable = requires(forge::raw_stream_probe& stream, T& value) { stream >> value; };
+
+template <typename Storage, typename T>
+concept concrete_stream_packable =
+    requires(forge::raw_concrete_stream_probe<Storage>& stream, const T& value) { stream << value; };
+
+template <typename Storage, typename T>
+concept concrete_stream_unpackable =
+    requires(forge::raw_concrete_stream_probe<Storage>& stream, T& value) { stream >> value; };
 
 template <typename T>
-concept custom_stream_unpackable = requires(stream_probe& stream, T& value) { stream >> value; };
+concept custom_stream_packable = templated_stream_packable<T> || concrete_stream_packable<std::size_t, T> ||
+                                 concrete_stream_packable<std::uint8_t*, T> || concrete_stream_packable<char*, T> ||
+                                 concrete_stream_packable<std::vector<std::uint8_t>, T>;
+
+template <typename T>
+concept custom_stream_unpackable =
+    templated_stream_unpackable<T> || concrete_stream_unpackable<const std::uint8_t*, T> ||
+    concrete_stream_unpackable<const char*, T> || concrete_stream_unpackable<std::vector<std::uint8_t>, T>;
 
 template <typename Stream, typename T>
 concept stream_packable = !std::is_arithmetic_v<T> && !std::is_enum_v<T> && !built_in_codec_v<T> &&
@@ -785,7 +808,7 @@ inline constexpr bool stream_codec_readable_v =
 } // namespace raw::detail
 
 template <typename Storage, typename Enable, typename T>
-   requires(!std::same_as<Enable, raw::detail::stream_probe_tag> && !raw::detail::custom_stream_packable<T> &&
+   requires(!std::same_as<Storage, raw::detail::stream_probe_storage> && !raw::detail::custom_stream_packable<T> &&
             raw::detail::stream_codec_writable_v<datastream<Storage, Enable>, T>)
 datastream<Storage, Enable>& operator<<(datastream<Storage, Enable>& stream, const T& value) {
    if constexpr (raw::detail::adl_packable<datastream<Storage, Enable>, T>) {
@@ -799,7 +822,7 @@ datastream<Storage, Enable>& operator<<(datastream<Storage, Enable>& stream, con
 }
 
 template <typename Storage, typename Enable, typename T>
-   requires(!std::same_as<Enable, raw::detail::stream_probe_tag> && !raw::detail::custom_stream_unpackable<T> &&
+   requires(!std::same_as<Storage, raw::detail::stream_probe_storage> && !raw::detail::custom_stream_unpackable<T> &&
             raw::detail::stream_codec_readable_v<datastream<Storage, Enable>, T>)
 datastream<Storage, Enable>& operator>>(datastream<Storage, Enable>& stream, T& value) {
    if constexpr (raw::detail::adl_unpackable<datastream<Storage, Enable>, T>) {

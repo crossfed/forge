@@ -111,17 +111,16 @@ struct datastream_serialized_aggregate {
    bool operator==(const datastream_serialized_aggregate&) const = default;
 };
 
-template <typename Storage, typename Enable>
-forge::datastream<Storage, Enable>& operator<<(forge::datastream<Storage, Enable>& stream,
-                                               const datastream_serialized_aggregate& item) {
+template <typename Storage>
+forge::datastream<Storage>& operator<<(forge::datastream<Storage>& stream,
+                                       const datastream_serialized_aggregate& item) {
    forge::raw::pack(stream, std::uint8_t{0x5a});
    forge::raw::pack(stream, item.value);
    return stream;
 }
 
-template <typename Storage, typename Enable>
-forge::datastream<Storage, Enable>& operator>>(forge::datastream<Storage, Enable>& stream,
-                                               datastream_serialized_aggregate& item) {
+template <typename Storage>
+forge::datastream<Storage>& operator>>(forge::datastream<Storage>& stream, datastream_serialized_aggregate& item) {
    auto marker = std::uint8_t{};
    forge::raw::unpack(stream, marker);
    forge::raw::detail::require(marker == 0x5a, "datastream aggregate marker is invalid");
@@ -130,6 +129,19 @@ forge::datastream<Storage, Enable>& operator>>(forge::datastream<Storage, Enable
 }
 
 static_assert(std::is_aggregate_v<datastream_serialized_aggregate>);
+
+struct concrete_datastream_aggregate {
+   std::uint32_t value = 0;
+};
+
+forge::datastream<std::vector<std::uint8_t>>& operator<<(forge::datastream<std::vector<std::uint8_t>>& stream,
+                                                         const concrete_datastream_aggregate& item) {
+   forge::raw::pack(stream, std::uint8_t{0xc3});
+   forge::raw::pack(stream, item.value);
+   return stream;
+}
+
+static_assert(std::is_aggregate_v<concrete_datastream_aggregate>);
 
 BOOST_AUTO_TEST_SUITE(raw_test_suite)
 
@@ -247,6 +259,15 @@ BOOST_AUTO_TEST_CASE(datastream_specific_codec_precedes_aggregate_fallback) {
    auto decoded = datastream_serialized_aggregate{};
    stream >> decoded;
    BOOST_CHECK(decoded == value);
+}
+
+BOOST_AUTO_TEST_CASE(concrete_datastream_codec_precedes_aggregate_fallback) {
+   const auto value = concrete_datastream_aggregate{.value = 0x12345678};
+   auto stream = forge::datastream<std::vector<std::uint8_t>>{};
+
+   stream << value;
+
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(stream.storage()), "c378563412");
 }
 
 BOOST_AUTO_TEST_CASE(uint8_vector_datastream_reads_varint_prefixed_values) {
