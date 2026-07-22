@@ -111,6 +111,29 @@ struct named_record {
 
 using named_records = contract_api::multi_index<"named"_n, named_record>;
 
+struct pointer_stream_field {
+   std::uint8_t value = 0;
+};
+
+inline forge::datastream<std::uint8_t*>& operator<<(forge::datastream<std::uint8_t*>& stream,
+                                                    const pointer_stream_field& value) {
+   constexpr auto marker = std::uint8_t{0xa5};
+   stream.write(reinterpret_cast<const char*>(&marker), sizeof(marker));
+   stream.write(reinterpret_cast<const char*>(&value.value), sizeof(value.value));
+   return stream;
+}
+
+struct pointer_codec_record {
+   std::uint64_t id = 0;
+   pointer_stream_field payload{};
+
+   [[nodiscard]] std::uint64_t primary_key() const {
+      return id;
+   }
+};
+
+using pointer_codec_records = contract_api::multi_index<"codecrows"_n, pointer_codec_record>;
+
 using primary_iterator = records::const_iterator;
 using secondary_iterator = decltype(std::declval<records&>().template get_index<"byone"_n>())::const_iterator;
 static_assert(std::bidirectional_iterator<primary_iterator>);
@@ -425,6 +448,14 @@ inline void run(name self, std::uint32_t scenario) {
       contract_api::check(named.find("bob"_n)->value == "second", "name primary find mismatch");
       contract_api::check(named.lower_bound("bob"_n)->id == "bob"_n, "name primary lower bound mismatch");
       contract_api::check(named.upper_bound("alice"_n)->id == "bob"_n, "name primary upper bound mismatch");
+      return;
+   }
+   case 34: {
+      auto rows = pointer_codec_records{self, self.value};
+      rows.emplace(self, [](pointer_codec_record& row) {
+         row.id = 1;
+         row.payload.value = 7;
+      });
       return;
    }
 #endif

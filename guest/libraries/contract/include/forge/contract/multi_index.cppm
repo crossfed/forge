@@ -317,20 +317,7 @@ template <secondary_key Key> bool secondary_equal(const Key& left, const Key& ri
 }
 
 template <class Stream, class Value>
-concept explicitly_packable_row = requires(Stream& stream, const Value& value) { raw_pack(stream, value); };
-
-template <class Stream, class Value>
 concept explicitly_unpackable_row = requires(Stream& stream, Value& value) { raw_unpack(stream, value); };
-
-template <class Stream, class Value> void pack_row(Stream& stream, const Value& value) {
-   if constexpr (explicitly_packable_row<Stream, Value>) {
-      raw::pack(stream, value);
-   } else {
-      static_assert(std::is_aggregate_v<Value>,
-                    "multi_index rows require EOSLIB_SERIALIZE/FORGE_SERIALIZE or an aggregate row type");
-      boost::pfr::for_each_field(value, [&](const auto& field) { raw::pack(stream, field); });
-   }
-}
 
 template <class Stream, class Value> void unpack_row(Stream& stream, Value& value) {
    if constexpr (explicitly_unpackable_row<Stream, Value>) {
@@ -343,25 +330,9 @@ template <class Stream, class Value> void unpack_row(Stream& stream, Value& valu
 }
 
 template <class Value, class Function> decltype(auto) with_packed(const Value& value, Function&& function) {
-   constexpr auto stack_capacity = std::size_t{512U};
-   auto sizing = forge::datastream<std::size_t>{};
-   pack_row(sizing, value);
-   const auto size = sizing.tellp();
-   check(size <= std::numeric_limits<std::uint32_t>::max(), "serialized table row is too large");
-
-   auto pack_into = [&](std::uint8_t* data) -> decltype(auto) {
-      auto stream = forge::datastream<std::uint8_t*>{data, size};
-      pack_row(stream, value);
-      return std::forward<Function>(function)(data, static_cast<std::uint32_t>(size));
-   };
-
-   if (size <= stack_capacity) {
-      auto storage = std::array<std::uint8_t, stack_capacity>{};
-      return pack_into(storage.data());
-   }
-
-   auto storage = std::vector<std::uint8_t>(size);
-   return pack_into(storage.data());
+   auto bytes = forge::raw::pack(value);
+   check(bytes.size() <= std::numeric_limits<std::uint32_t>::max(), "serialized table row is too large");
+   return std::forward<Function>(function)(bytes.data(), static_cast<std::uint32_t>(bytes.size()));
 }
 
 template <class Function> decltype(auto) with_buffer(std::size_t size, Function&& function) {

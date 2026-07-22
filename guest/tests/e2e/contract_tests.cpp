@@ -733,6 +733,12 @@ BOOST_AUTO_TEST_CASE(multi_index_and_singleton_execute_over_the_objectdb_host) {
       const auto named_table = protocol::make_name("named").value;
       BOOST_REQUIRE(host.find_primary(account, account, named_table, protocol::make_name("alice").value).has_value());
       BOOST_REQUIRE(host.find_primary(account, account, named_table, protocol::make_name("bob").value).has_value());
+      invoke_success(extended, 34);
+      const auto codec_table = protocol::make_name("codecrows").value;
+      const auto codec_row = host.find_primary(account, account, codec_table, 1);
+      BOOST_REQUIRE(codec_row.has_value());
+      constexpr auto canonical_row = std::array<std::uint8_t, 9>{1, 0, 0, 0, 0, 0, 0, 0, 7};
+      BOOST_TEST(codec_row->value == canonical_row, boost::test_tools::per_element());
       return host.snapshot();
    };
 
