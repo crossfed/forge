@@ -29,8 +29,8 @@ hash, so consumers that own an existing CityHash-based wire or persisted
 contract must keep a CityHash implementation at that compatibility boundary.
 New Forge code should select a digest from `forge_crypto_digest` and treat the
 resulting bytes as a new format rather than silently replacing stored CityHash
-values. This removal must also appear in the Forge 8.11.0 source/package
-migration table before release.
+values. The complete source/package migration is documented in the
+[Forge 8.11.0 release notes](../../docs/releases/8.11.0.md).
 
 ## Consumption
 
