@@ -8,6 +8,7 @@ extern "C" {
 
 void* memchr(const void* value, int byte, size_t size);
 int memcmp(const void* left, const void* right, size_t size);
+void* memccpy(void* destination, const void* source, int character, size_t size);
 void* memcpy(void* destination, const void* source, size_t size);
 void* memmove(void* destination, const void* source, size_t size);
 void* memset(void* destination, int value, size_t size);

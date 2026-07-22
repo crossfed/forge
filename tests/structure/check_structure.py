@@ -317,6 +317,14 @@ def check_contract_sdk_components(root: Path, errors: list[str]) -> None:
          "generated Contract SDK C ABI headers must live outside library source include: " + rendered
       )
 
+   eosio_include = root / "guest" / "libraries" / "eosio" / "include" / "eosio"
+   for header in sorted(eosio_include.glob("*.hpp")):
+      source = header.read_text(errors="ignore")
+      if "boost/pfr" in source or "boost::pfr" in source:
+         errors.append(
+            f"{header.relative_to(root)}: EOSIO veneer must delegate aggregate serialization to forge.raw"
+         )
+
    types_template = root / "guest" / "cmake" / "types.h.in"
    if not types_template.exists():
       errors.append("guest/cmake/types.h.in: generated Contract SDK C ABI types template is missing")

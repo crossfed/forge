@@ -1,5 +1,6 @@
 #include <eosio/datastream.hpp>
 
+#include <concepts>
 #include <cstdint>
 
 struct eosio_datastream_record {
@@ -18,6 +19,7 @@ class eosio_datastream_unsupported {
 template <typename T>
 concept eosio_stream_writable = requires(eosio::datastream<char*>& stream, const T& value) { stream << value; };
 
+static_assert(std::same_as<eosio::datastream<char*>, forge::datastream<char*>>);
 static_assert(eosio_stream_writable<eosio_datastream_record>);
 static_assert(eosio_stream_writable<eosio_datastream_array_record>);
 static_assert(!eosio_stream_writable<eosio_datastream_unsupported>);

@@ -25,6 +25,10 @@ only signature registry and generates modern imports, EOSIO C declarations,
 the host binding skeleton and the approved-import manifest. Blockchain host
 implementations do not live here.
 
+`forge.contract.datastream` exposes the canonical `forge.raw` stream and codec.
+The raw codec owns CDT-compatible aggregate and fixed C-array traversal; the
+EOSIO compatibility header only aliases the same `forge::datastream`.
+
 The installed C surface, including `<forge/contract/types.h>` and
 `<forge/contract/intrinsics.h>`, is generated during SDK assembly. C ABI records
 come from `guest/cmake/types.h.in`; generated `.h` files are not source headers

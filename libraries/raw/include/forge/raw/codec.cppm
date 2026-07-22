@@ -1,5 +1,7 @@
 module;
 
+#include <boost/pfr/core.hpp>
+
 #include <array>
 #include <climits>
 #include <cstddef>
@@ -106,10 +108,12 @@ template <typename T> inline constexpr auto built_in_codec_v = built_in_codec<st
 
 template <typename Stream, typename T>
 concept stream_packable = !std::is_arithmetic_v<T> && !std::is_enum_v<T> && !built_in_codec_v<T> &&
+                          !(std::is_class_v<T> && std::is_aggregate_v<T>) && !std::is_array_v<T> &&
                           requires(Stream& stream, const T& value) { stream << value; };
 
 template <typename Stream, typename T>
 concept stream_unpackable = !std::is_arithmetic_v<T> && !std::is_enum_v<T> && !built_in_codec_v<T> &&
+                            !(std::is_class_v<T> && std::is_aggregate_v<T>) && !std::is_array_v<T> &&
                             requires(Stream& stream, T& value) { stream >> value; };
 
 template <typename Stream, typename T>
@@ -249,6 +253,20 @@ template <typename Stream, typename T>
 void unpack(Stream& stream, T& value) {
    codec_traits<std::remove_cv_t<T>>::unpack(stream, value);
 }
+
+template <typename Stream, typename T, std::size_t Size> void pack(Stream& stream, const T (&value)[Size]);
+
+template <typename Stream, typename T, std::size_t Size> void unpack(Stream& stream, T (&value)[Size]);
+
+template <typename Stream, typename T>
+   requires(std::is_class_v<T> && std::is_aggregate_v<T> && !detail::adl_packable<Stream, T> &&
+            !detail::traits_packable<Stream, T> && !detail::built_in_codec_v<T>)
+void pack(Stream& stream, const T& value);
+
+template <typename Stream, typename T>
+   requires(std::is_class_v<T> && std::is_aggregate_v<T> && !detail::adl_unpackable<Stream, T> &&
+            !detail::traits_unpackable<Stream, T> && !detail::built_in_codec_v<T>)
+void unpack(Stream& stream, T& value);
 
 template <typename Stream> void pack(Stream& stream, const std::string& value);
 
@@ -592,6 +610,38 @@ template <typename Stream, typename... T> void unpack(Stream& stream, std::varia
    std::visit([&](auto& item) { unpack(stream, item); }, value);
 }
 
+template <typename Stream, typename T, std::size_t Size> void pack(Stream& stream, const T (&value)[Size]) {
+   static_assert(Size <= max_array_elements, "raw C array exceeds the element limit");
+   pack(stream, unsigned_int{Size});
+   for (const auto& item : value) {
+      pack(stream, item);
+   }
+}
+
+template <typename Stream, typename T, std::size_t Size> void unpack(Stream& stream, T (&value)[Size]) {
+   static_assert(Size <= max_array_elements, "raw C array exceeds the element limit");
+   auto size = unsigned_int{};
+   unpack(stream, size);
+   detail::require(size.value == Size, "T[] size and unpacked size don't match");
+   for (auto& item : value) {
+      unpack(stream, item);
+   }
+}
+
+template <typename Stream, typename T>
+   requires(std::is_class_v<T> && std::is_aggregate_v<T> && !detail::adl_packable<Stream, T> &&
+            !detail::traits_packable<Stream, T> && !detail::built_in_codec_v<T>)
+void pack(Stream& stream, const T& value) {
+   boost::pfr::for_each_field(value, [&](const auto& field) { pack(stream, field); });
+}
+
+template <typename Stream, typename T>
+   requires(std::is_class_v<T> && std::is_aggregate_v<T> && !detail::adl_unpackable<Stream, T> &&
+            !detail::traits_unpackable<Stream, T> && !detail::built_in_codec_v<T>)
+void unpack(Stream& stream, T& value) {
+   boost::pfr::for_each_field(value, [&](auto& field) { unpack(stream, field); });
+}
+
 template <typename Stream, typename First, typename Second, typename... Rest>
 void pack(Stream& stream, const First& first, const Second& second, const Rest&... rest) {
    pack(stream, first);
@@ -678,3 +728,54 @@ template <typename T> void unpack(const std::uint8_t* data, std::uint32_t size, 
 }
 
 } // namespace forge::raw
+
+export namespace forge {
+
+namespace raw::detail {
+
+template <typename T>
+inline constexpr bool character_pointer_v =
+    std::is_pointer_v<std::remove_cv_t<T>> &&
+    std::same_as<std::remove_cv_t<std::remove_pointer_t<std::remove_cv_t<T>>>, char>;
+
+template <typename Stream, typename T>
+inline constexpr bool stream_codec_writable_v =
+    std::is_arithmetic_v<T> || std::is_enum_v<T> || std::same_as<std::remove_cv_t<T>, std::byte> ||
+    character_pointer_v<T> || std::is_array_v<T> || built_in_codec_v<T> || adl_packable<Stream, T> ||
+    traits_packable<Stream, T> || (std::is_class_v<T> && std::is_aggregate_v<T>);
+
+template <typename Stream, typename T>
+inline constexpr bool stream_codec_readable_v =
+    std::is_arithmetic_v<T> || std::is_enum_v<T> || std::same_as<std::remove_cv_t<T>, std::byte> ||
+    std::is_array_v<T> || built_in_codec_v<T> || adl_unpackable<Stream, T> || traits_unpackable<Stream, T> ||
+    (std::is_class_v<T> && std::is_aggregate_v<T>);
+
+} // namespace raw::detail
+
+template <typename Storage, typename Enable, typename T>
+   requires(raw::detail::stream_codec_writable_v<datastream<Storage, Enable>, T>)
+datastream<Storage, Enable>& operator<<(datastream<Storage, Enable>& stream, const T& value) {
+   if constexpr (raw::detail::adl_packable<datastream<Storage, Enable>, T>) {
+      raw_pack(stream, value);
+   } else if constexpr (raw::detail::traits_packable<datastream<Storage, Enable>, T>) {
+      raw::codec_traits<std::remove_cv_t<T>>::pack(stream, value);
+   } else {
+      raw::pack(stream, value);
+   }
+   return stream;
+}
+
+template <typename Storage, typename Enable, typename T>
+   requires(raw::detail::stream_codec_readable_v<datastream<Storage, Enable>, T>)
+datastream<Storage, Enable>& operator>>(datastream<Storage, Enable>& stream, T& value) {
+   if constexpr (raw::detail::adl_unpackable<datastream<Storage, Enable>, T>) {
+      raw_unpack(stream, value);
+   } else if constexpr (raw::detail::traits_unpackable<datastream<Storage, Enable>, T>) {
+      raw::codec_traits<std::remove_cv_t<T>>::unpack(stream, value);
+   } else {
+      raw::unpack(stream, value);
+   }
+   return stream;
+}
+
+} // namespace forge
