@@ -49,9 +49,9 @@ template <> class datastream<raw::detail::stream_probe_storage, void> {
 
 class raw_stream_probe : public datastream<raw::detail::stream_probe_storage> {};
 
-template <typename Storage> class raw_concrete_stream_probe {
+template <typename Stream> class raw_concrete_stream_probe {
  public:
-   operator datastream<Storage>&() const;
+   operator Stream&() const;
 };
 
 } // namespace forge
@@ -143,31 +143,29 @@ concept templated_stream_packable = requires(forge::raw_stream_probe& stream, co
 template <typename T>
 concept templated_stream_unpackable = requires(forge::raw_stream_probe& stream, T& value) { stream >> value; };
 
-template <typename Storage, typename T>
+template <typename Stream, typename T>
 concept concrete_stream_packable =
-    requires(forge::raw_concrete_stream_probe<Storage>& stream, const T& value) { stream << value; };
+    requires(forge::raw_concrete_stream_probe<Stream>& stream, const T& value) { stream << value; };
 
-template <typename Storage, typename T>
+template <typename Stream, typename T>
 concept concrete_stream_unpackable =
-    requires(forge::raw_concrete_stream_probe<Storage>& stream, T& value) { stream >> value; };
-
-template <typename T>
-concept custom_stream_packable = templated_stream_packable<T> || concrete_stream_packable<std::size_t, T> ||
-                                 concrete_stream_packable<std::uint8_t*, T> || concrete_stream_packable<char*, T> ||
-                                 concrete_stream_packable<std::vector<std::uint8_t>, T>;
-
-template <typename T>
-concept custom_stream_unpackable =
-    templated_stream_unpackable<T> || concrete_stream_unpackable<const std::uint8_t*, T> ||
-    concrete_stream_unpackable<const char*, T> || concrete_stream_unpackable<std::vector<std::uint8_t>, T>;
+    requires(forge::raw_concrete_stream_probe<Stream>& stream, T& value) { stream >> value; };
 
 template <typename Stream, typename T>
-concept stream_packable = !std::is_arithmetic_v<T> && !std::is_enum_v<T> && !built_in_codec_v<T> &&
-                          custom_stream_packable<T> && requires(Stream& stream, const T& value) { stream << value; };
+concept custom_stream_packable = templated_stream_packable<T> || concrete_stream_packable<Stream, T>;
 
 template <typename Stream, typename T>
-concept stream_unpackable = !std::is_arithmetic_v<T> && !std::is_enum_v<T> && !built_in_codec_v<T> &&
-                            custom_stream_unpackable<T> && requires(Stream& stream, T& value) { stream >> value; };
+concept custom_stream_unpackable = templated_stream_unpackable<T> || concrete_stream_unpackable<Stream, T>;
+
+template <typename Stream, typename T>
+concept stream_packable =
+    !std::is_arithmetic_v<T> && !std::is_enum_v<T> && !built_in_codec_v<T> && custom_stream_packable<Stream, T> &&
+    requires(Stream& stream, const T& value) { stream << value; };
+
+template <typename Stream, typename T>
+concept stream_unpackable =
+    !std::is_arithmetic_v<T> && !std::is_enum_v<T> && !built_in_codec_v<T> && custom_stream_unpackable<Stream, T> &&
+    requires(Stream& stream, T& value) { stream >> value; };
 
 template <typename Stream, typename T>
 concept traits_packable =
@@ -313,12 +311,13 @@ template <typename Stream, typename T, std::size_t Size> void unpack(Stream& str
 
 template <typename Stream, typename T>
    requires(std::is_class_v<T> && std::is_aggregate_v<T> && !detail::adl_packable<Stream, T> &&
-            !detail::traits_packable<Stream, T> && !detail::custom_stream_packable<T> && !detail::built_in_codec_v<T>)
+            !detail::traits_packable<Stream, T> && !detail::custom_stream_packable<Stream, T> &&
+            !detail::built_in_codec_v<T>)
 void pack(Stream& stream, const T& value);
 
 template <typename Stream, typename T>
    requires(std::is_class_v<T> && std::is_aggregate_v<T> && !detail::adl_unpackable<Stream, T> &&
-            !detail::traits_unpackable<Stream, T> && !detail::custom_stream_unpackable<T> &&
+            !detail::traits_unpackable<Stream, T> && !detail::custom_stream_unpackable<Stream, T> &&
             !detail::built_in_codec_v<T>)
 void unpack(Stream& stream, T& value);
 
@@ -684,14 +683,15 @@ template <typename Stream, typename T, std::size_t Size> void unpack(Stream& str
 
 template <typename Stream, typename T>
    requires(std::is_class_v<T> && std::is_aggregate_v<T> && !detail::adl_packable<Stream, T> &&
-            !detail::traits_packable<Stream, T> && !detail::custom_stream_packable<T> && !detail::built_in_codec_v<T>)
+            !detail::traits_packable<Stream, T> && !detail::custom_stream_packable<Stream, T> &&
+            !detail::built_in_codec_v<T>)
 void pack(Stream& stream, const T& value) {
    boost::pfr::for_each_field(value, [&](const auto& field) { pack(stream, field); });
 }
 
 template <typename Stream, typename T>
    requires(std::is_class_v<T> && std::is_aggregate_v<T> && !detail::adl_unpackable<Stream, T> &&
-            !detail::traits_unpackable<Stream, T> && !detail::custom_stream_unpackable<T> &&
+            !detail::traits_unpackable<Stream, T> && !detail::custom_stream_unpackable<Stream, T> &&
             !detail::built_in_codec_v<T>)
 void unpack(Stream& stream, T& value) {
    boost::pfr::for_each_field(value, [&](auto& field) { unpack(stream, field); });
@@ -808,7 +808,8 @@ inline constexpr bool stream_codec_readable_v =
 } // namespace raw::detail
 
 template <typename Storage, typename Enable, typename T>
-   requires(!std::same_as<Storage, raw::detail::stream_probe_storage> && !raw::detail::custom_stream_packable<T> &&
+   requires(!std::same_as<Storage, raw::detail::stream_probe_storage> &&
+            !raw::detail::custom_stream_packable<datastream<Storage, Enable>, T> &&
             raw::detail::stream_codec_writable_v<datastream<Storage, Enable>, T>)
 datastream<Storage, Enable>& operator<<(datastream<Storage, Enable>& stream, const T& value) {
    if constexpr (raw::detail::adl_packable<datastream<Storage, Enable>, T>) {
@@ -822,7 +823,8 @@ datastream<Storage, Enable>& operator<<(datastream<Storage, Enable>& stream, con
 }
 
 template <typename Storage, typename Enable, typename T>
-   requires(!std::same_as<Storage, raw::detail::stream_probe_storage> && !raw::detail::custom_stream_unpackable<T> &&
+   requires(!std::same_as<Storage, raw::detail::stream_probe_storage> &&
+            !raw::detail::custom_stream_unpackable<datastream<Storage, Enable>, T> &&
             raw::detail::stream_codec_readable_v<datastream<Storage, Enable>, T>)
 datastream<Storage, Enable>& operator>>(datastream<Storage, Enable>& stream, T& value) {
    if constexpr (raw::detail::adl_unpackable<datastream<Storage, Enable>, T>) {

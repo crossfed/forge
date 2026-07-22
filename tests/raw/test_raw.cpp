@@ -268,6 +268,7 @@ BOOST_AUTO_TEST_CASE(concrete_datastream_codec_precedes_aggregate_fallback) {
    stream << value;
 
    BOOST_CHECK_EQUAL(forge::codec::hex::encode(stream.storage()), "c378563412");
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(forge::raw::pack(value)), "78563412");
 }
 
 BOOST_AUTO_TEST_CASE(uint8_vector_datastream_reads_varint_prefixed_values) {
