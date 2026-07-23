@@ -17,7 +17,7 @@ struct request {
    std::filesystem::path sysroot;
    std::filesystem::path ricardian_contracts;
    std::filesystem::path ricardian_clauses;
-   std::vector<std::string> module_files;
+   std::vector<std::filesystem::path> module_paths;
    std::vector<std::filesystem::path> include_paths;
    std::vector<std::filesystem::path> sources;
    std::vector<std::filesystem::path> source_wrappers;

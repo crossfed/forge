@@ -38,8 +38,8 @@ request parse(int argc, const char* const* argv) {
          result.ricardian_contracts = next();
       } else if (option == "--ricardian-clauses") {
          result.ricardian_clauses = next();
-      } else if (option == "--module-file") {
-         result.module_files.emplace_back(next());
+      } else if (option == "--module-path") {
+         result.module_paths.emplace_back(next());
       } else if (option == "--include") {
          result.include_paths.emplace_back(next());
       } else if (option == "--source-wrapper") {

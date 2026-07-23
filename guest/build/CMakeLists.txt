@@ -6,6 +6,8 @@ foreach(_required
    FORGE_CONTRACT_TARGET
    FORGE_CONTRACT_NAME
    FORGE_CONTRACT_SOURCES_ENCODED
+   FORGE_CONTRACT_GRAPH_FILE
+   FORGE_CONTRACT_GRAPH_HASH
    FORGE_CONTRACT_OUTPUT_DIR
    FORGE_CONTRACT_DATA_DIR
    FORGE_CONTRACT_ABIGEN
@@ -18,11 +20,103 @@ foreach(_required
    endif()
 endforeach()
 
+if(NOT EXISTS "${FORGE_CONTRACT_GRAPH_FILE}")
+   message(FATAL_ERROR "Forge Contract library graph does not exist: ${FORGE_CONTRACT_GRAPH_FILE}")
+endif()
+file(SHA256 "${FORGE_CONTRACT_GRAPH_FILE}" _contract_graph_hash)
+if(NOT _contract_graph_hash STREQUAL FORGE_CONTRACT_GRAPH_HASH)
+   message(FATAL_ERROR "Forge Contract library graph hash mismatch")
+endif()
+include("${FORGE_CONTRACT_GRAPH_FILE}")
+if(NOT FORGE_CONTRACT_GRAPH_VERSION EQUAL 1)
+   message(FATAL_ERROR "unsupported Forge Contract library graph version")
+endif()
+
 string(REPLACE "|" ";" FORGE_CONTRACT_SOURCES "${FORGE_CONTRACT_SOURCES_ENCODED}")
 string(REPLACE "|" ";" FORGE_CONTRACT_COMPILE_CHECKS "${FORGE_CONTRACT_COMPILE_CHECKS_ENCODED}")
 string(REPLACE "|" ";" FORGE_CONTRACT_INCLUDE_DIRECTORIES "${FORGE_CONTRACT_INCLUDE_DIRECTORIES_ENCODED}")
 set(_implementation_sources ${FORGE_CONTRACT_SOURCES})
 list(REMOVE_AT _implementation_sources 0)
+
+function(_forge_contract_append_source_graph_file path owner role logical physical)
+   foreach(_value IN ITEMS "${owner}" "${role}" "${logical}" "${physical}")
+      string(FIND "${_value}" "|" _pipe_index)
+      string(FIND "${_value}" "\r" _carriage_return_index)
+      string(FIND "${_value}" "\n" _newline_index)
+      if(NOT _pipe_index EQUAL -1 OR NOT _carriage_return_index EQUAL -1 OR NOT _newline_index EQUAL -1)
+         message(FATAL_ERROR "contract source graph value contains a reserved separator: ${_value}")
+      endif()
+   endforeach()
+   file(APPEND "${path}" "F|${owner}|${role}|${logical}|${physical}\n")
+endfunction()
+
+function(_forge_contract_append_source_graph_edge path owner dependency)
+   foreach(_value IN ITEMS "${owner}" "${dependency}")
+      string(FIND "${_value}" "|" _pipe_index)
+      string(FIND "${_value}" "\r" _carriage_return_index)
+      string(FIND "${_value}" "\n" _newline_index)
+      if(NOT _pipe_index EQUAL -1 OR NOT _carriage_return_index EQUAL -1 OR NOT _newline_index EQUAL -1)
+         message(FATAL_ERROR "contract source graph edge contains a reserved separator: ${_value}")
+      endif()
+   endforeach()
+   file(APPEND "${path}" "E|${owner}|${dependency}\n")
+endfunction()
+
+set(_source_graph "${CMAKE_CURRENT_BINARY_DIR}/contract-source-graph.txt")
+set(_source_graph_inputs ${FORGE_CONTRACT_SOURCES} ${FORGE_CONTRACT_COMPILE_CHECKS})
+set(_contract_graph_owner "contract:${FORGE_CONTRACT_NAME}")
+file(WRITE "${_source_graph}" "FORGE_CONTRACT_SOURCE_GRAPH_V2\n")
+set(_source_index 0)
+foreach(_source IN LISTS FORGE_CONTRACT_SOURCES)
+   get_filename_component(_name "${_source}" NAME)
+   _forge_contract_append_source_graph_file(
+      "${_source_graph}"
+      "${_contract_graph_owner}"
+      contract_source
+      "contract/source-${_source_index}/${_name}"
+      "${_source}"
+   )
+   math(EXPR _source_index "${_source_index} + 1")
+endforeach()
+set(_compile_check_index 0)
+foreach(_source IN LISTS FORGE_CONTRACT_COMPILE_CHECKS)
+   get_filename_component(_name "${_source}" NAME)
+   _forge_contract_append_source_graph_file(
+      "${_source_graph}"
+      "${_contract_graph_owner}"
+      compile_check
+      "contract/compile-check-${_compile_check_index}/${_name}"
+      "${_source}"
+   )
+   math(EXPR _compile_check_index "${_compile_check_index} + 1")
+endforeach()
+if(FORGE_CONTRACT_RICARDIAN_CONTRACTS)
+   list(APPEND _source_graph_inputs "${FORGE_CONTRACT_RICARDIAN_CONTRACTS}")
+   get_filename_component(_name "${FORGE_CONTRACT_RICARDIAN_CONTRACTS}" NAME)
+   _forge_contract_append_source_graph_file(
+      "${_source_graph}"
+      "${_contract_graph_owner}"
+      ricardian_contracts
+      "contract/ricardian/contracts/${_name}"
+      "${FORGE_CONTRACT_RICARDIAN_CONTRACTS}"
+   )
+endif()
+if(FORGE_CONTRACT_RICARDIAN_CLAUSES)
+   list(APPEND _source_graph_inputs "${FORGE_CONTRACT_RICARDIAN_CLAUSES}")
+   get_filename_component(_name "${FORGE_CONTRACT_RICARDIAN_CLAUSES}" NAME)
+   _forge_contract_append_source_graph_file(
+      "${_source_graph}"
+      "${_contract_graph_owner}"
+      ricardian_clauses
+      "contract/ricardian/clauses/${_name}"
+      "${FORGE_CONTRACT_RICARDIAN_CLAUSES}"
+   )
+endif()
+foreach(_dependency_id IN LISTS FORGE_CONTRACT_GRAPH_ROOT_LIBRARY_IDS)
+   _forge_contract_append_source_graph_edge(
+      "${_source_graph}" "${_contract_graph_owner}" "${_dependency_id}"
+   )
+endforeach()
 
 set(_modules "${FORGE_CONTRACT_DATA_DIR}/modules")
 set(_include "${FORGE_CONTRACT_DATA_DIR}/include")
@@ -268,115 +362,127 @@ foreach(
    )
 endforeach()
 
+function(_forge_contract_configure_downstream_target target)
+   target_compile_definitions(${target} PRIVATE FORGE_CONTRACT_GUEST=1)
+   target_compile_options(
+      ${target}
+      PRIVATE
+         -fno-exceptions
+         -fno-rtti
+         -fno-threadsafe-statics
+         -ffreestanding
+         -fvisibility=hidden
+         -fno-ident
+         -mcpu=mvp
+         ${_contract_optimization}
+   )
+endfunction()
+
+set(_contract_library_targets)
+if(FORGE_CONTRACT_GRAPH_LIBRARY_COUNT GREATER 0)
+   math(EXPR _contract_library_last "${FORGE_CONTRACT_GRAPH_LIBRARY_COUNT} - 1")
+   foreach(_index RANGE 0 ${_contract_library_last})
+      set(_prefix "FORGE_CONTRACT_GRAPH_LIBRARY_${_index}")
+      set(_id "${${_prefix}_ID}")
+      string(SHA256 _id_hash "${_id}")
+      string(SUBSTRING "${_id_hash}" 0 16 _id_hash)
+      set(_target "forge_contract_library_${_id_hash}")
+      set("_forge_contract_library_target_${_id_hash}" "${_target}")
+
+      set(_dependencies ${${_prefix}_GUEST_DEPENDENCIES})
+      foreach(_dependency_id IN LISTS ${_prefix}_DEPENDENCY_IDS)
+         string(SHA256 _dependency_hash "${_dependency_id}")
+         string(SUBSTRING "${_dependency_hash}" 0 16 _dependency_hash)
+         if(NOT DEFINED _forge_contract_library_target_${_dependency_hash})
+            message(FATAL_ERROR "contract library dependency is missing from graph: ${_dependency_id}")
+         endif()
+         list(APPEND _dependencies "${_forge_contract_library_target_${_dependency_hash}}")
+      endforeach()
+
+      add_library(${_target} STATIC)
+      target_sources(
+         ${_target}
+         PUBLIC
+            FILE_SET forge_contract_modules TYPE CXX_MODULES
+            BASE_DIRS ${${_prefix}_MODULE_BASES}
+            FILES ${${_prefix}_MODULE_PATHS}
+      )
+      if(${_prefix}_SOURCE_PATHS)
+         target_sources(${_target} PRIVATE ${${_prefix}_SOURCE_PATHS})
+      endif()
+      if(${_prefix}_PUBLIC_HEADER_PATHS OR ${_prefix}_PRIVATE_HEADER_PATHS)
+         target_sources(
+            ${_target}
+            PRIVATE
+               ${${_prefix}_PUBLIC_HEADER_PATHS}
+               ${${_prefix}_PRIVATE_HEADER_PATHS}
+         )
+      endif()
+      target_include_directories(${_target} PUBLIC ${${_prefix}_MODULE_BASES})
+      if(_dependencies)
+         target_link_libraries(${_target} PUBLIC ${_dependencies})
+      endif()
+      _forge_contract_configure_downstream_target(${_target})
+      list(APPEND _contract_library_targets "${_target}")
+
+      foreach(_role module implementation public_header private_header)
+         if(_role STREQUAL "module")
+            set(_logical_values ${${_prefix}_MODULE_LOGICAL})
+            set(_physical_values ${${_prefix}_MODULE_PATHS})
+         elseif(_role STREQUAL "implementation")
+            set(_logical_values ${${_prefix}_SOURCE_LOGICAL})
+            set(_physical_values ${${_prefix}_SOURCE_PATHS})
+         elseif(_role STREQUAL "public_header")
+            set(_logical_values ${${_prefix}_PUBLIC_HEADER_LOGICAL})
+            set(_physical_values ${${_prefix}_PUBLIC_HEADER_PATHS})
+         else()
+            set(_logical_values ${${_prefix}_PRIVATE_HEADER_LOGICAL})
+            set(_physical_values ${${_prefix}_PRIVATE_HEADER_PATHS})
+         endif()
+         list(LENGTH _logical_values _value_count)
+         if(_value_count GREATER 0)
+            math(EXPR _value_last "${_value_count} - 1")
+            foreach(_value_index RANGE 0 ${_value_last})
+               list(GET _logical_values ${_value_index} _logical)
+               list(GET _physical_values ${_value_index} _physical)
+               list(APPEND _source_graph_inputs "${_physical}")
+               _forge_contract_append_source_graph_file(
+                  "${_source_graph}" "${_id}" "${_role}" "${_logical}" "${_physical}"
+               )
+            endforeach()
+         endif()
+      endforeach()
+      foreach(_dependency_id IN LISTS ${_prefix}_DEPENDENCY_IDS)
+         _forge_contract_append_source_graph_edge(
+            "${_source_graph}" "${_id}" "${_dependency_id}"
+         )
+      endforeach()
+   endforeach()
+endif()
+
 set(_module_configuration_directory "")
 if(CMAKE_CONFIGURATION_TYPES)
    set(_module_configuration_directory "$<CONFIG>/")
 endif()
 set(
-   _raw_module_directory
-   "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_raw.dir/${_module_configuration_directory}"
+   _module_targets
+   forge_guest_raw
+   forge_guest_codec_base64
+   forge_guest_codec_base58
+   forge_guest_codec_hex
+   forge_guest_crypto
+   forge_guest_chain_protocol
+   forge_guest_contract
+   ${_contract_library_targets}
 )
-set(
-   _codec_base64_module_directory
-   "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_codec_base64.dir/${_module_configuration_directory}"
-)
-set(
-   _codec_base58_module_directory
-   "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_codec_base58.dir/${_module_configuration_directory}"
-)
-set(
-   _codec_hex_module_directory
-   "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_codec_hex.dir/${_module_configuration_directory}"
-)
-set(
-   _crypto_module_directory
-   "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_crypto.dir/${_module_configuration_directory}"
-)
-set(
-   _protocol_module_directory
-   "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/${_module_configuration_directory}"
-)
-set(
-   _contract_module_directory
-   "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/${_module_configuration_directory}"
-)
+set(_module_search_paths)
+foreach(_module_target IN LISTS _module_targets)
+   list(
+      APPEND _module_search_paths
+      "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${_module_target}.dir/${_module_configuration_directory}"
+   )
+endforeach()
 
-set(_module_arguments
-   "forge.raw.stream=${_raw_module_directory}forge.raw.stream.pcm"
-   "forge.raw.varint_value=${_raw_module_directory}forge.raw.varint_value.pcm"
-   "forge.raw.codec=${_raw_module_directory}forge.raw.codec.pcm"
-   "forge.codec.base64.exceptions=${_codec_base64_module_directory}forge.codec.base64.exceptions.pcm"
-   "forge.codec.base64=${_codec_base64_module_directory}forge.codec.base64.pcm"
-   "forge.codec.base58.exceptions=${_codec_base58_module_directory}forge.codec.base58.exceptions.pcm"
-   "forge.codec.base58=${_codec_base58_module_directory}forge.codec.base58.pcm"
-   "forge.codec.hex.exceptions=${_codec_hex_module_directory}forge.codec.hex.exceptions.pcm"
-   "forge.codec.hex=${_codec_hex_module_directory}forge.codec.hex.pcm"
-   "forge.crypto.digest.sha256:value=${_crypto_module_directory}forge.crypto.digest.sha256-value.pcm"
-   "forge.crypto.digest.sha256=${_crypto_module_directory}forge.crypto.digest.sha256.pcm"
-   "forge.crypto.digest.sha512:value=${_crypto_module_directory}forge.crypto.digest.sha512-value.pcm"
-   "forge.crypto.digest.sha512=${_crypto_module_directory}forge.crypto.digest.sha512.pcm"
-   "forge.crypto.digest.ripemd160:value=${_crypto_module_directory}forge.crypto.digest.ripemd160-value.pcm"
-   "forge.crypto.digest.ripemd160=${_crypto_module_directory}forge.crypto.digest.ripemd160.pcm"
-   "forge.crypto.asymmetric.values=${_crypto_module_directory}forge.crypto.asymmetric.values.pcm"
-   "forge.crypto.asymmetric=${_crypto_module_directory}forge.crypto.asymmetric.pcm"
-   "forge.crypto.bls.values=${_crypto_module_directory}forge.crypto.bls.values.pcm"
-   "forge.chain.protocol.values=${_protocol_module_directory}forge.chain.protocol.values.pcm"
-   "forge.chain.protocol.time=${_protocol_module_directory}forge.chain.protocol.time.pcm"
-   "forge.chain.protocol.types:value=${_protocol_module_directory}forge.chain.protocol.types-value.pcm"
-   "forge.chain.protocol.types=${_protocol_module_directory}forge.chain.protocol.types.pcm"
-   "forge.chain.protocol.fixed_key:value=${_protocol_module_directory}forge.chain.protocol.fixed_key-value.pcm"
-   "forge.chain.protocol.fixed_key=${_protocol_module_directory}forge.chain.protocol.fixed_key.pcm"
-   "forge.chain.protocol.action:value=${_protocol_module_directory}forge.chain.protocol.action-value.pcm"
-   "forge.chain.protocol.action=${_protocol_module_directory}forge.chain.protocol.action.pcm"
-   "forge.chain.protocol.transaction:value=${_protocol_module_directory}forge.chain.protocol.transaction-value.pcm"
-   "forge.chain.protocol.transaction=${_protocol_module_directory}forge.chain.protocol.transaction.pcm"
-   "forge.chain.protocol.authority:value=${_protocol_module_directory}forge.chain.protocol.authority-value.pcm"
-   "forge.chain.protocol.authority=${_protocol_module_directory}forge.chain.protocol.authority.pcm"
-   "forge.chain.protocol.producer_schedule:value=${_protocol_module_directory}forge.chain.protocol.producer_schedule-value.pcm"
-   "forge.chain.protocol.producer_schedule=${_protocol_module_directory}forge.chain.protocol.producer_schedule.pcm"
-   "forge.chain.protocol.producer_authority=${_protocol_module_directory}forge.chain.protocol.producer_authority.pcm"
-   "forge.chain.protocol.system:value=${_protocol_module_directory}forge.chain.protocol.system-value.pcm"
-   "forge.chain.protocol.system=${_protocol_module_directory}forge.chain.protocol.system.pcm"
-   "forge.chain.protocol.code_hash_result=${_protocol_module_directory}forge.chain.protocol.code_hash_result.pcm"
-   "forge.chain.protocol.blockchain_parameters=${_protocol_module_directory}forge.chain.protocol.blockchain_parameters.pcm"
-   "forge.chain.protocol.kv_parameters=${_protocol_module_directory}forge.chain.protocol.kv_parameters.pcm"
-   "forge.chain.protocol.finalizer_authority=${_protocol_module_directory}forge.chain.protocol.finalizer_authority.pcm"
-   "forge.chain.protocol.finalizer_policy=${_protocol_module_directory}forge.chain.protocol.finalizer_policy.pcm"
-   "forge.chain.protocol.hash_id=${_protocol_module_directory}forge.chain.protocol.hash_id.pcm"
-   "forge.chain.protocol.call_access_mode=${_protocol_module_directory}forge.chain.protocol.call_access_mode.pcm"
-   "forge.chain.protocol.call_data_header=${_protocol_module_directory}forge.chain.protocol.call_data_header.pcm"
-   "forge.contract.intrinsics=${_contract_module_directory}forge.contract.intrinsics.pcm"
-   "forge.contract=${_contract_module_directory}forge.contract.pcm"
-   "forge.contract.datastream=${_contract_module_directory}forge.contract.datastream.pcm"
-   "forge.contract.varint=${_contract_module_directory}forge.contract.varint.pcm"
-   "forge.contract.fixed_bytes=${_contract_module_directory}forge.contract.fixed_bytes.pcm"
-   "forge.contract.binary_extension=${_contract_module_directory}forge.contract.binary_extension.pcm"
-   "forge.contract.ignore=${_contract_module_directory}forge.contract.ignore.pcm"
-   "forge.contract.hash_id=${_contract_module_directory}forge.contract.hash_id.pcm"
-   "forge.contract.action=${_contract_module_directory}forge.contract.action.pcm"
-   "forge.contract.transaction=${_contract_module_directory}forge.contract.transaction.pcm"
-   "forge.contract.system=${_contract_module_directory}forge.contract.system.pcm"
-   "forge.contract.deferred_transaction=${_contract_module_directory}forge.contract.deferred_transaction.pcm"
-   "forge.contract.authorization=${_contract_module_directory}forge.contract.authorization.pcm"
-   "forge.contract.bitset=${_contract_module_directory}forge.contract.bitset.pcm"
-   "forge.contract.call=${_contract_module_directory}forge.contract.call.pcm"
-   "forge.contract.crypto=${_contract_module_directory}forge.contract.crypto.pcm"
-   "forge.contract.crypto_bls_ext=${_contract_module_directory}forge.contract.crypto_bls_ext.pcm"
-   "forge.contract.crypto_ext=${_contract_module_directory}forge.contract.crypto_ext.pcm"
-   "forge.contract.instant_finality=${_contract_module_directory}forge.contract.instant_finality.pcm"
-   "forge.contract.key=${_contract_module_directory}forge.contract.key.pcm"
-   "forge.contract.powers=${_contract_module_directory}forge.contract.powers.pcm"
-   "forge.contract.print=${_contract_module_directory}forge.contract.print.pcm"
-   "forge.contract.privileged=${_contract_module_directory}forge.contract.privileged.pcm"
-   "forge.contract.producer_schedule=${_contract_module_directory}forge.contract.producer_schedule.pcm"
-   "forge.contract.rope=${_contract_module_directory}forge.contract.rope.pcm"
-   "forge.contract.string=${_contract_module_directory}forge.contract.string.pcm"
-   "forge.contract.dispatcher=${_contract_module_directory}forge.contract.dispatcher.pcm"
-   "forge.contract.multi_index=${_contract_module_directory}forge.contract.multi_index.pcm"
-   "forge.contract.singleton=${_contract_module_directory}forge.contract.singleton.pcm"
-   "forge.contract.compatibility_name=${_contract_module_directory}forge.contract.compatibility_name.pcm"
-   "forge.contract.compatibility_asset=${_contract_module_directory}forge.contract.compatibility_asset.pcm"
-)
 set(_abigen_command
    "${FORGE_CONTRACT_ABIGEN}"
    --contract "${FORGE_CONTRACT_NAME}"
@@ -390,8 +496,8 @@ set(_abigen_command
 foreach(_include_directory IN LISTS FORGE_CONTRACT_INCLUDE_DIRECTORIES)
    list(APPEND _abigen_command --include "${_include_directory}")
 endforeach()
-foreach(_module IN LISTS _module_arguments)
-   list(APPEND _abigen_command --module-file "${_module}")
+foreach(_module_path IN LISTS _module_search_paths)
+   list(APPEND _abigen_command --module-path "${_module_path}")
 endforeach()
 foreach(_wrapper IN LISTS _implementation_wrappers)
    list(APPEND _abigen_command --source-wrapper "${_wrapper}")
@@ -406,6 +512,7 @@ list(APPEND _abigen_command ${FORGE_CONTRACT_SOURCES})
 set(
    _abigen_dependencies
    forge_guest_contract
+   ${_contract_library_targets}
    "${FORGE_CONTRACT_ABIGEN}"
    "${FORGE_CONTRACT_ATTR_PLUGIN}"
    ${FORGE_CONTRACT_SOURCES}
@@ -431,7 +538,19 @@ add_executable(
    "${_dispatcher}"
    ${_implementation_wrappers}
 )
-target_link_libraries(${FORGE_CONTRACT_TARGET} PRIVATE forge_guest_contract forge_guest_eosio)
+set_property(
+   TARGET ${FORGE_CONTRACT_TARGET}
+   APPEND
+   PROPERTY LINK_DEPENDS "${_source_graph};${_source_graph_inputs}"
+)
+target_link_libraries(
+   ${FORGE_CONTRACT_TARGET}
+   PRIVATE
+      forge_guest_contract
+      forge_guest_eosio
+      ${FORGE_CONTRACT_GRAPH_ROOT_GUEST_DEPENDENCIES}
+      ${_contract_library_targets}
+)
 target_include_directories(
    ${FORGE_CONTRACT_TARGET}
    PRIVATE
@@ -463,6 +582,8 @@ if(FORGE_CONTRACT_COMPILE_CHECKS)
       PRIVATE
          forge_guest_contract
          forge_guest_eosio
+         ${FORGE_CONTRACT_GRAPH_ROOT_GUEST_DEPENDENCIES}
+         ${_contract_library_targets}
    )
    target_include_directories(
       ${FORGE_CONTRACT_TARGET}_compile_checks
@@ -585,6 +706,7 @@ add_custom_command(
       --wasm "$<TARGET_FILE:${FORGE_CONTRACT_TARGET}>"
       --abi "${_abi}"
       --imports "${FORGE_CONTRACT_DATA_DIR}/registry/intrinsics.json"
+      --source-graph "${_source_graph}"
       --output "${_manifest}"
       --sdk-version "${FORGE_CONTRACT_SDK_VERSION}"
       --llvm-version "${FORGE_CONTRACT_LLVM_VERSION}"

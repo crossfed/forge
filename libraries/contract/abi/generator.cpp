@@ -1191,6 +1191,51 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       std::string result;
    };
 
+   std::optional<std::uint64_t> named_action_value(const clang::ParmVarDecl& parameter) {
+      const auto* record = parameter.getType().getNonReferenceType()->getAsCXXRecordDecl();
+      record = record == nullptr ? nullptr : record->getDefinition();
+      if (record == nullptr) {
+         return std::nullopt;
+      }
+
+      const clang::CXXMethodDecl* named_method = nullptr;
+      for (const auto* method : record->methods()) {
+         if (method->getNameAsString() != "get_name") {
+            continue;
+         }
+         if (named_method != nullptr) {
+            report(parameter.getLocation(), "typed action payload has an ambiguous get_name()");
+            return std::nullopt;
+         }
+         named_method = method;
+      }
+      if (named_method == nullptr) {
+         return std::nullopt;
+      }
+      if (!named_method->isStatic() || !named_method->isConstexpr() || named_method->getNumParams() != 0U) {
+         report(named_method->getLocation(), "typed action get_name() must be static constexpr and take no arguments");
+         return std::nullopt;
+      }
+      const auto* result_record = named_method->getReturnType()->getAsCXXRecordDecl();
+      if (result_record == nullptr ||
+          result_record->getCanonicalDecl()->getQualifiedNameAsString() != "forge::chain::protocol::name") {
+         report(named_method->getLocation(), "typed action get_name() must return forge::chain::protocol::action_name");
+         return std::nullopt;
+      }
+
+      const auto* body = llvm::dyn_cast_or_null<clang::CompoundStmt>(named_method->getBody());
+      const auto* return_statement =
+          body != nullptr && body->size() == 1U ? llvm::dyn_cast<clang::ReturnStmt>(*body->body_begin()) : nullptr;
+      const auto* expression = return_statement == nullptr ? nullptr : return_statement->getRetValue();
+      auto result = clang::Expr::EvalResult{};
+      if (expression == nullptr || !expression->EvaluateAsRValue(result, context_) || !result.Val.isStruct() ||
+          result.Val.getStructNumFields() != 1U || !result.Val.getStructField(0).isInt()) {
+         report(named_method->getLocation(), "typed action get_name() must have a constant action name");
+         return std::nullopt;
+      }
+      return result.Val.getStructField(0).getInt().getZExtValue();
+   }
+
    void register_method_types(const clang::CXXMethodDecl& method) {
       if (!method.getReturnType()->isVoidType()) {
          static_cast<void>(encoder_.encode(method.getReturnType()));
@@ -1233,7 +1278,20 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
                    std::string_view annotated_name) {
       register_method_types(method);
       const auto identity = declaration_identity(method);
-      const auto action_name = annotated_name.empty() ? method.getNameAsString() : std::string{annotated_name};
+      auto action_name = annotated_name.empty() ? method.getNameAsString() : std::string{annotated_name};
+      auto action_type = method.getNameAsString();
+      const auto* named_parameter = method.getNumParams() == 1U ? method.getParamDecl(0) : nullptr;
+      const auto named_value =
+          named_parameter == nullptr ? std::optional<std::uint64_t>{} : named_action_value(*named_parameter);
+      if (named_value.has_value()) {
+         const auto canonical_name = protocol::to_string(protocol::action_name{*named_value});
+         if (!annotated_name.empty() && annotated_name != canonical_name) {
+            report(method.getLocation(), "action attribute name does not match payload get_name()");
+            return;
+         }
+         action_name = canonical_name;
+         action_type = encoder_.encode(*named_parameter);
+      }
       const auto [existing, inserted] = output_.action_declarations.try_emplace(action_name, identity);
       if (!inserted && existing->second == identity) {
          return;
@@ -1248,8 +1306,16 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
          report(method.getLocation(), "overloaded contract action methods are not supported");
          return;
       }
-      const auto method_info =
-          add_method(method, annotated_name, has_annotation(method, "forge.attribute_scope:action:eosio"));
+      const auto method_info = named_value.has_value()
+                                   ? method_shape{
+                                         .name = action_name,
+                                         .type = action_type,
+                                         .result = method.getReturnType()->isVoidType()
+                                                       ? std::string{}
+                                                       : encoder_.encode(method.getReturnType()),
+                                      }
+                                   : add_method(method, annotated_name,
+                                                has_annotation(method, "forge.attribute_scope:action:eosio"));
       output_.actions.push_back(action_shape{
           .name = method_info.name,
           .type = method_info.type,
@@ -1915,8 +1981,8 @@ artifacts generate(const request& options) {
    for (const auto& path : options.include_paths) {
       arguments.push_back("-I" + path.string());
    }
-   for (const auto& module : options.module_files) {
-      arguments.push_back("-fmodule-file=" + module);
+   for (const auto& path : options.module_paths) {
+      arguments.push_back("-fprebuilt-module-path=" + path.string());
    }
 
    auto source_paths = std::vector<std::string>{};
