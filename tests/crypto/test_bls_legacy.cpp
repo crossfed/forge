@@ -164,6 +164,49 @@ BOOST_AUTO_TEST_CASE(bls_agg_tree_verif) try {
 }
 FORGE_LOG_AND_RETHROW();
 
+BOOST_AUTO_TEST_CASE(bls_grouped_aggregate_verification) try {
+   const auto sk1 = private_key{seed_1};
+   const auto sk2 = private_key{seed_2};
+   const auto pk1 = sk1.get_public_key();
+   const auto pk2 = sk2.get_public_key();
+   const auto strong_keys = std::array{pk1, pk2};
+   const auto weak_keys = std::array{pk1};
+
+   auto aggregate = aggregate_signature{};
+   aggregate.aggregate(sk1.sign(message_1));
+   aggregate.aggregate(sk2.sign(message_1));
+   aggregate.aggregate(sk1.sign(message_2));
+
+   const auto groups = std::array{
+       aggregate_verification_group{.public_keys = strong_keys, .message = message_1},
+       aggregate_verification_group{.public_keys = weak_keys, .message = message_2},
+   };
+   BOOST_TEST(verify_grouped(groups, aggregate));
+
+   auto tampered = message_2;
+   tampered.front() ^= 0x01U;
+   const auto invalid_groups = std::array{
+       aggregate_verification_group{.public_keys = strong_keys, .message = message_1},
+       aggregate_verification_group{.public_keys = weak_keys, .message = tampered},
+   };
+   BOOST_TEST(!verify_grouped(invalid_groups, aggregate));
+   BOOST_TEST(!verify_grouped({}, aggregate));
+   BOOST_TEST(
+       !verify_grouped(std::array{aggregate_verification_group{.public_keys = {}, .message = message_1}}, aggregate));
+
+   auto duplicate_message_aggregate = aggregate_signature{};
+   duplicate_message_aggregate.aggregate(sk1.sign(message_1));
+   duplicate_message_aggregate.aggregate(sk2.sign(message_1));
+   duplicate_message_aggregate.aggregate(sk1.sign(message_1));
+   BOOST_TEST(!verify_grouped(
+       std::array{
+           aggregate_verification_group{.public_keys = strong_keys, .message = message_1},
+           aggregate_verification_group{.public_keys = weak_keys, .message = message_1},
+       },
+       duplicate_message_aggregate));
+}
+FORGE_LOG_AND_RETHROW();
+
 // test random key generation, signature + verification
 BOOST_AUTO_TEST_CASE(bls_key_gen) try {
 

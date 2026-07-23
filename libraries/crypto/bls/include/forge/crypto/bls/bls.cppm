@@ -281,7 +281,14 @@ class aggregate_signature {
    bls12_381::g2 _jacobian_montgomery_le;
 };
 
+struct aggregate_verification_group {
+   std::span<const public_key> public_keys;
+   std::span<const std::uint8_t> message;
+};
+
 [[nodiscard]] bool verify(const public_key& pubkey, std::span<const std::uint8_t> message, const signature& sig);
+[[nodiscard]] bool verify_grouped(std::span<const aggregate_verification_group> groups,
+                                  const aggregate_signature& signature);
 
 void to_variant(const public_key& var, variant& vo);
 void from_variant(const variant& var, public_key& vo);

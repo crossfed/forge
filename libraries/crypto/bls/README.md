@@ -16,6 +16,12 @@ import forge.crypto.bls.values;
 const auto signature = forge::crypto::bls::signature_value{};
 ```
 
+`forge.crypto.bls` also owns grouped aggregate verification. Each group combines
+multiple public keys over one message, while one aggregate signature covers all
+groups. Group messages must be distinct; signers of the same message belong in
+one group. Consensus libraries pass typed keys and message bytes to this API
+and never access the private BLS12-381 backend directly.
+
 The target depends on Crypto Core and Digest, Codec Base64, Raw, Reflect,
 Variant, Exceptions, OpenSSL Crypto and the private BLS12-381 backend. It does
 not own consensus or finality policy. `test_forge_crypto_bls` preserves legacy
