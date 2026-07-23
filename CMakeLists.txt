@@ -481,6 +481,7 @@ set(
    forge_chain_protocol
    forge_chain_quorum
    forge_chain_fork
+   forge_chain_savanna
    forge_vm_wasm
    forge_db_ids
    forge_db_core
@@ -612,6 +613,7 @@ set(
    chain_protocol
    chain_quorum
    chain_fork
+   chain_savanna
    vm_wasm
    db_core
    db_object

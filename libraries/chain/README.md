@@ -15,6 +15,9 @@ owns no public symbols.
   evaluation. Package component: `chain_quorum`.
 - [`forge_chain_fork`](fork/README.md) owns a generic thread-safe fork graph and
   deterministic best-rank selection. Package component: `chain_fork`.
+- [`forge_chain_savanna`](savanna/README.md) owns a neutral operational
+  finality kernel, finalizer policy validation and typed QC verification.
+  Package component: `chain_savanna`.
 
 The dependency direction is `forge_chain_protocol -> forge_chain_core`. Core
 never imports protocol.
