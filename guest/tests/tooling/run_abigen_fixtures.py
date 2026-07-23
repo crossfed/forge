@@ -291,6 +291,28 @@ def main():
         raise RuntimeError("named action ABI payload fields changed")
     if "submit" in named_action_structs:
         raise RuntimeError("named action generated a legacy method wrapper")
+
+    named_helpers = invoke(
+        args,
+        "namedhelpers",
+        args.fixtures / "named_action_unrelated_get_name.cpp",
+        args.output / "named-action-unrelated-get-name",
+    )
+    named_helper_actions = by_name(named_helpers["actions"])
+    named_helper_structs = by_name(named_helpers["structs"])
+    if named_helper_actions["submit"]["type"] != "submit":
+        raise RuntimeError("unrelated get_name method changed the legacy action ABI")
+    if named_helper_structs["submit"]["fields"] != [{"name": "request", "type": "legacy_request"}]:
+        raise RuntimeError("legacy action wrapper fields changed")
+    if named_helper_actions["publishrev"]["type"] != "overloaded_named_request":
+        raise RuntimeError("valid named action hook was hidden by an unrelated overload")
+    if "publish" in named_helper_structs:
+        raise RuntimeError("overloaded named action generated a legacy method wrapper")
+    if named_helper_actions["archive"]["type"] != "archive":
+        raise RuntimeError("inaccessible get_name method changed the legacy action ABI")
+    if named_helper_actions["erase"]["type"] != "erase":
+        raise RuntimeError("deleted get_name method changed the legacy action ABI")
+
     invoke(
         args,
         "namedmismatch",

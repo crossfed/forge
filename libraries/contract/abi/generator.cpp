@@ -1204,6 +1204,12 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
          if (method->getNameAsString() != "get_name") {
             continue;
          }
+         const auto* result_record = method->getReturnType()->getAsCXXRecordDecl();
+         if (!method->isStatic() || !method->isConstexpr() || method->getNumParams() != 0U ||
+             method->getAccess() != clang::AS_public || method->isDeleted() || result_record == nullptr ||
+             result_record->getCanonicalDecl()->getQualifiedNameAsString() != "forge::chain::protocol::name") {
+            continue;
+         }
          if (named_method != nullptr) {
             report(parameter.getLocation(), "typed action payload has an ambiguous get_name()");
             return std::nullopt;
@@ -1211,16 +1217,6 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
          named_method = method;
       }
       if (named_method == nullptr) {
-         return std::nullopt;
-      }
-      if (!named_method->isStatic() || !named_method->isConstexpr() || named_method->getNumParams() != 0U) {
-         report(named_method->getLocation(), "typed action get_name() must be static constexpr and take no arguments");
-         return std::nullopt;
-      }
-      const auto* result_record = named_method->getReturnType()->getAsCXXRecordDecl();
-      if (result_record == nullptr ||
-          result_record->getCanonicalDecl()->getQualifiedNameAsString() != "forge::chain::protocol::name") {
-         report(named_method->getLocation(), "typed action get_name() must return forge::chain::protocol::action_name");
          return std::nullopt;
       }
 
