@@ -8,17 +8,24 @@ export module forge.contract.abi.generator;
 
 export namespace forge::contract::abi {
 
+struct source_root {
+   std::string logical_path;
+   std::filesystem::path physical_path;
+};
+
 struct request {
    std::string contract;
    std::filesystem::path abi;
    std::filesystem::path dispatcher;
    std::filesystem::path depfile;
+   std::filesystem::path source_dependencies;
    std::filesystem::path attribute_plugin;
    std::filesystem::path sysroot;
    std::filesystem::path ricardian_contracts;
    std::filesystem::path ricardian_clauses;
    std::vector<std::filesystem::path> module_paths;
    std::vector<std::filesystem::path> include_paths;
+   std::vector<source_root> source_roots;
    std::vector<std::filesystem::path> sources;
    std::vector<std::filesystem::path> source_wrappers;
 };

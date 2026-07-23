@@ -63,7 +63,9 @@ def compile_wasm(args, source, output, *flags):
     )
 
 
-def manifest_command(args, source_graph, output):
+def manifest_command(args, source_graph, output, source_dependencies=None):
+    if source_dependencies is None:
+        source_dependencies = args.source_dependencies
     return [
         str(args.manifest_tool),
         "--wasm",
@@ -74,6 +76,8 @@ def manifest_command(args, source_graph, output):
         str(args.imports),
         "--source-graph",
         str(source_graph),
+        "--source-dependencies",
+        str(source_dependencies),
         "--output",
         str(output),
         "--sdk-version",
@@ -149,6 +153,19 @@ def check_source_graph(args):
         contains="dependency target has no files",
     )
 
+    unsupported_dependencies = directory / "unsupported-dependencies.txt"
+    unsupported_dependencies.write_text("FORGE_CONTRACT_SOURCE_DEPENDENCIES_V2\n", encoding="utf-8")
+    run(
+        manifest_command(
+            args,
+            first_graph,
+            directory / "unsupported-dependencies.json",
+            unsupported_dependencies,
+        ),
+        succeeds=False,
+        contains="source dependencies have an unsupported schema",
+    )
+
 
 def main():
     parser = argparse.ArgumentParser()
@@ -159,6 +176,7 @@ def main():
     parser.add_argument("--abi", required=True, type=pathlib.Path)
     parser.add_argument("--imports", required=True, type=pathlib.Path)
     parser.add_argument("--source-graph", required=True, type=pathlib.Path)
+    parser.add_argument("--source-dependencies", required=True, type=pathlib.Path)
     parser.add_argument("--manifest", required=True, type=pathlib.Path)
     parser.add_argument("--output", required=True, type=pathlib.Path)
     args = parser.parse_args()
@@ -186,6 +204,12 @@ def main():
     assert manifest["source_graph"]["sha256"]
     if any(pathlib.Path(entry["logical_path"]).is_absolute() for entry in manifest["source_graph"]["files"]):
         raise RuntimeError("contract manifest source graph contains an absolute logical path")
+    if not any(
+        entry["role"] == "contract_include"
+        and entry["logical_path"].endswith("/local_value.hpp")
+        for entry in manifest["source_graph"]["files"]
+    ):
+        raise RuntimeError("contract manifest omits a compiler-discovered local include")
 
     bare_output = args.output / "bare-manifest"
     bare_output.mkdir(parents=True, exist_ok=True)

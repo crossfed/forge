@@ -71,7 +71,10 @@ The graph SHA-256 is calculated over an explicit domain string, record counts
 and length-prefixed fields. Physical paths are used only to read source bytes;
 they are never serialized. Contract sources, compile checks, Ricardian inputs,
 contract-library modules, implementations and public/private headers are all
-attested. Manifest v1 artifacts are rebuilt rather than accepted as a
+attested. `abigen` also contributes every compiler-discovered include under the
+contract's declared source and include roots. The manifest skips physical files
+already owned by the declarative library graph, so each source has one
+attestation owner. Manifest v1 artifacts are rebuilt rather than accepted as a
 compatibility format.
 
 ## Executable Proof
@@ -86,6 +89,7 @@ The independent `guest/tests/dual_target` fixture verifies:
 - package install, relocation and downstream `find_package`;
 - guest compilation from an installed `Product::protocol` target;
 - source graph roles, edges and deterministic content hashing;
+- compiler-discovered local includes and digest changes after header edits;
 - configure failures for invalid source and dependency graphs.
 
 Existing VM E2E and Spring/EOSIO compatibility corpus remain mandatory. The

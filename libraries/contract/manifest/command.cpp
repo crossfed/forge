@@ -77,6 +77,7 @@ int run(int argc, const char* const* argv) {
           .abi = require(values, "abi"),
           .imports = require(values, "imports"),
           .source_graph = require(values, "source-graph"),
+          .source_dependencies = require(values, "source-dependencies"),
           .output = require(values, "output"),
           .sdk_version = require(values, "sdk-version"),
           .profile = require(values, "profile"),

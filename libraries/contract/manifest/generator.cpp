@@ -109,7 +109,54 @@ void write_field(forge::crypto::digest::sha256::encoder& encoder, std::string_vi
    }
 }
 
-source_graph read_source_graph(const std::filesystem::path& path) {
+void append_source_file(source_graph& graph, std::set<std::pair<std::string, std::string>>& file_keys,
+                        std::set<std::filesystem::path>& physical_paths, const std::vector<std::string>& fields,
+                        bool skip_attested_physical_path) {
+   if (fields.size() != 5U || fields[0] != "F" || fields[1].empty() || fields[2].empty() || fields[3].empty() ||
+       fields[4].empty()) {
+      throw std::runtime_error{"contract source graph contains an incomplete file record"};
+   }
+   const auto physical = std::filesystem::weakly_canonical(fields[4]);
+   if (skip_attested_physical_path && physical_paths.contains(physical)) {
+      return;
+   }
+   if (!file_keys.emplace(fields[1], fields[3]).second) {
+      throw std::runtime_error{"contract source graph contains a duplicate logical path"};
+   }
+   const auto bytes = read_bytes(physical);
+   physical_paths.insert(physical);
+   graph.files.push_back(source_file{
+       .owner = fields[1],
+       .role = fields[2],
+       .logical_path = fields[3],
+       .sha256 = sha256(bytes),
+   });
+}
+
+void read_source_dependencies(const std::filesystem::path& path, source_graph& graph,
+                              std::set<std::pair<std::string, std::string>>& file_keys,
+                              std::set<std::filesystem::path>& physical_paths) {
+   auto input = std::ifstream{path, std::ios::binary};
+   if (!input) {
+      throw std::runtime_error{"cannot open contract source dependencies: " + path.string()};
+   }
+
+   auto header = std::string{};
+   if (!std::getline(input, header) || header != "FORGE_CONTRACT_SOURCE_DEPENDENCIES_V1") {
+      throw std::runtime_error{"contract source dependencies have an unsupported schema"};
+   }
+   auto line = std::string{};
+   while (std::getline(input, line)) {
+      if (!line.empty()) {
+         append_source_file(graph, file_keys, physical_paths, split(line, '|'), true);
+      }
+   }
+   if (!input.eof()) {
+      throw std::runtime_error{"cannot read complete contract source dependencies"};
+   }
+}
+
+source_graph read_source_graph(const std::filesystem::path& path, const std::filesystem::path& dependencies_path) {
    auto input = std::ifstream{path, std::ios::binary};
    if (!input) {
       throw std::runtime_error{"cannot open contract source graph: " + path.string()};
@@ -122,6 +169,7 @@ source_graph read_source_graph(const std::filesystem::path& path) {
 
    auto result = source_graph{};
    auto file_keys = std::set<std::pair<std::string, std::string>>{};
+   auto physical_paths = std::set<std::filesystem::path>{};
    auto edge_keys = std::set<std::pair<std::string, std::string>>{};
    auto line = std::string{};
    while (std::getline(input, line)) {
@@ -130,19 +178,7 @@ source_graph read_source_graph(const std::filesystem::path& path) {
       }
       const auto fields = split(line, '|');
       if (fields.size() == 5U && fields[0] == "F") {
-         if (fields[1].empty() || fields[2].empty() || fields[3].empty() || fields[4].empty()) {
-            throw std::runtime_error{"contract source graph contains an incomplete file record"};
-         }
-         if (!file_keys.emplace(fields[1], fields[3]).second) {
-            throw std::runtime_error{"contract source graph contains a duplicate logical path"};
-         }
-         const auto bytes = read_bytes(fields[4]);
-         result.files.push_back(source_file{
-             .owner = fields[1],
-             .role = fields[2],
-             .logical_path = fields[3],
-             .sha256 = sha256(bytes),
-         });
+         append_source_file(result, file_keys, physical_paths, fields, false);
       } else if (fields.size() == 3U && fields[0] == "E") {
          if (fields[1].empty() || fields[2].empty()) {
             throw std::runtime_error{"contract source graph contains an incomplete dependency edge"};
@@ -158,6 +194,7 @@ source_graph read_source_graph(const std::filesystem::path& path) {
    if (!input.eof()) {
       throw std::runtime_error{"cannot read complete contract source graph"};
    }
+   read_source_dependencies(dependencies_path, result, file_keys, physical_paths);
    if (result.files.empty()) {
       throw std::runtime_error{"contract source graph contains no files"};
    }
@@ -235,7 +272,7 @@ void generate(const request& options) {
    const auto wasm_bytes = read_bytes(options.wasm);
    const auto abi_bytes = read_bytes(options.abi);
    const auto registry_bytes = read_bytes(options.imports);
-   const auto graph = read_source_graph(options.source_graph);
+   const auto graph = read_source_graph(options.source_graph, options.source_dependencies);
 
    auto root = forge::mutable_variant_object{};
    root("schema_version", std::uint64_t{2});

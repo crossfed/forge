@@ -137,6 +137,7 @@ foreach(_source IN LISTS _implementation_sources)
    math(EXPR _wrapper_index "${_wrapper_index} + 1")
 endforeach()
 set(_depfile "${_generated}/${FORGE_CONTRACT_TARGET}.abi.d")
+set(_source_dependencies "${_generated}/${FORGE_CONTRACT_TARGET}.source-dependencies.txt")
 set(_manifest "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_TARGET}.contract.json")
 set(_contract_optimization "$<$<NOT:$<CONFIG:Debug>>:-O3>")
 
@@ -489,12 +490,36 @@ set(_abigen_command
    --abi "${_abi}"
    --dispatch "${_dispatcher}"
    --depfile "${_depfile}"
+   --source-dependencies "${_source_dependencies}"
    --attribute-plugin "${FORGE_CONTRACT_ATTR_PLUGIN}"
    --sysroot "${CMAKE_SYSROOT}"
    --include "${_include}"
 )
+set(_source_root_paths)
+set(_source_root_index 0)
+foreach(_source IN LISTS FORGE_CONTRACT_SOURCES)
+   get_filename_component(_source_root "${_source}" DIRECTORY)
+   get_filename_component(_source_root "${_source_root}" REALPATH)
+   if(NOT _source_root IN_LIST _source_root_paths)
+      list(APPEND _source_root_paths "${_source_root}")
+      list(
+         APPEND _abigen_command
+         --source-root "contract/source-root-${_source_root_index}" "${_source_root}"
+      )
+      math(EXPR _source_root_index "${_source_root_index} + 1")
+   endif()
+endforeach()
+set(_include_root_index 0)
 foreach(_include_directory IN LISTS FORGE_CONTRACT_INCLUDE_DIRECTORIES)
    list(APPEND _abigen_command --include "${_include_directory}")
+   if(NOT _include_directory IN_LIST _source_root_paths)
+      list(APPEND _source_root_paths "${_include_directory}")
+      list(
+         APPEND _abigen_command
+         --source-root "contract/include-root-${_include_root_index}" "${_include_directory}"
+      )
+      math(EXPR _include_root_index "${_include_root_index} + 1")
+   endif()
 endforeach()
 foreach(_module_path IN LISTS _module_search_paths)
    list(APPEND _abigen_command --module-path "${_module_path}")
@@ -524,7 +549,7 @@ foreach(_ricardian_file FORGE_CONTRACT_RICARDIAN_CONTRACTS FORGE_CONTRACT_RICARD
 endforeach()
 
 add_custom_command(
-   OUTPUT "${_abi}" "${_dispatcher}" ${_implementation_wrappers}
+   OUTPUT "${_abi}" "${_dispatcher}" "${_source_dependencies}" ${_implementation_wrappers}
    COMMAND ${CMAKE_COMMAND} -E make_directory "${_generated}"
    COMMAND ${_abigen_command}
    DEPENDS ${_abigen_dependencies}
@@ -707,6 +732,7 @@ add_custom_command(
       --abi "${_abi}"
       --imports "${FORGE_CONTRACT_DATA_DIR}/registry/intrinsics.json"
       --source-graph "${_source_graph}"
+      --source-dependencies "${_source_dependencies}"
       --output "${_manifest}"
       --sdk-version "${FORGE_CONTRACT_SDK_VERSION}"
       --llvm-version "${FORGE_CONTRACT_LLVM_VERSION}"

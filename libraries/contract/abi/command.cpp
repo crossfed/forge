@@ -30,6 +30,8 @@ request parse(int argc, const char* const* argv) {
          result.dispatcher = next();
       } else if (option == "--depfile") {
          result.depfile = next();
+      } else if (option == "--source-dependencies") {
+         result.source_dependencies = next();
       } else if (option == "--attribute-plugin") {
          result.attribute_plugin = next();
       } else if (option == "--sysroot") {
@@ -42,6 +44,11 @@ request parse(int argc, const char* const* argv) {
          result.module_paths.emplace_back(next());
       } else if (option == "--include") {
          result.include_paths.emplace_back(next());
+      } else if (option == "--source-root") {
+         result.source_roots.push_back(source_root{
+             .logical_path = std::string{next()},
+             .physical_path = next(),
+         });
       } else if (option == "--source-wrapper") {
          result.source_wrappers.emplace_back(next());
       } else if (option.starts_with("--")) {

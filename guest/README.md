@@ -296,8 +296,10 @@ Invalid or ambiguous annotations fail the build. ABI is parsed again by
 
 `hello.contract.json` uses manifest schema v2. Its `source_graph` contains
 sorted library identities, file roles, logical paths, content SHA-256 values
-and dependency edges. The graph digest uses length-prefixed records and never
-contains physical source or build paths.
+and dependency edges. `abigen` adds compiler-discovered contract includes from
+the declared contract source and include roots, while files already owned by a
+contract library keep that library identity. The graph digest uses
+length-prefixed records and never contains physical source or build paths.
 
 The tooling suite executes every active ABI pass/fail fixture from pinned CDT
 commit `69599db279b7b93d0688502720c15c6962a1401b` as a separate Forge case. When

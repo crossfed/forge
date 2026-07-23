@@ -1557,6 +1557,110 @@ void write_depfile(const forge::contract::abi::request& options, const std::set<
    write_text(options.depfile, output.str());
 }
 
+bool is_portable_logical_path(const std::filesystem::path& path) {
+   if (path.empty() || path.is_absolute()) {
+      return false;
+   }
+   return std::ranges::none_of(path, [](const auto& component) {
+      const auto value = component.generic_string();
+      return value.empty() || value == "." || value == "..";
+   });
+}
+
+bool contains_reserved_separator(std::string_view value) {
+   return value.find_first_of("|\r\n") != std::string_view::npos;
+}
+
+std::optional<std::filesystem::path> relative_to(const std::filesystem::path& path, const std::filesystem::path& root) {
+   const auto relative = path.lexically_relative(root);
+   if (relative.empty() || relative.is_absolute() ||
+       std::ranges::any_of(relative, [](const auto& component) { return component == ".."; })) {
+      return std::nullopt;
+   }
+   return relative;
+}
+
+void write_source_dependencies(const forge::contract::abi::request& options,
+                               const std::set<std::filesystem::path>& dependencies) {
+   if (options.source_dependencies.empty()) {
+      return;
+   }
+   if (options.source_roots.empty()) {
+      throw std::runtime_error{"source dependency output requires at least one source root"};
+   }
+
+   struct normalized_root {
+      std::filesystem::path logical;
+      std::filesystem::path physical;
+   };
+
+   auto roots = std::vector<normalized_root>{};
+   auto logical_roots = std::set<std::filesystem::path>{};
+   auto physical_roots = std::set<std::filesystem::path>{};
+   roots.reserve(options.source_roots.size());
+   for (const auto& root : options.source_roots) {
+      const auto logical = std::filesystem::path{root.logical_path}.lexically_normal();
+      if (!is_portable_logical_path(logical) || contains_reserved_separator(logical.generic_string())) {
+         throw std::runtime_error{"source root has an invalid logical path: " + root.logical_path};
+      }
+      if (!std::filesystem::is_directory(root.physical_path)) {
+         throw std::runtime_error{"source root is not a directory: " + root.physical_path.string()};
+      }
+      const auto physical = std::filesystem::weakly_canonical(root.physical_path);
+      if (contains_reserved_separator(physical.generic_string())) {
+         throw std::runtime_error{"source root path contains a reserved separator: " + physical.string()};
+      }
+      if (!logical_roots.insert(logical).second) {
+         throw std::runtime_error{"duplicate source root logical path: " + logical.generic_string()};
+      }
+      if (!physical_roots.insert(physical).second) {
+         throw std::runtime_error{"source root has multiple logical paths: " + physical.string()};
+      }
+      roots.push_back(normalized_root{.logical = logical, .physical = physical});
+   }
+   std::ranges::sort(roots, [](const auto& left, const auto& right) {
+      const auto left_size = std::ranges::distance(left.physical);
+      const auto right_size = std::ranges::distance(right.physical);
+      return left_size != right_size ? left_size > right_size : left.logical < right.logical;
+   });
+
+   auto source_paths = std::set<std::filesystem::path>{};
+   for (const auto& source : options.sources) {
+      source_paths.insert(std::filesystem::weakly_canonical(source));
+   }
+
+   auto discovered = std::map<std::filesystem::path, std::filesystem::path>{};
+   for (const auto& dependency : dependencies) {
+      if (source_paths.contains(dependency)) {
+         continue;
+      }
+      for (const auto& root : roots) {
+         const auto relative = relative_to(dependency, root.physical);
+         if (!relative.has_value()) {
+            continue;
+         }
+         const auto logical = (root.logical / *relative).lexically_normal();
+         if (!is_portable_logical_path(logical) || contains_reserved_separator(logical.generic_string()) ||
+             contains_reserved_separator(dependency.generic_string())) {
+            throw std::runtime_error{"contract dependency has an invalid path: " + dependency.string()};
+         }
+         const auto [existing, inserted] = discovered.emplace(logical, dependency);
+         if (!inserted && existing->second != dependency) {
+            throw std::runtime_error{"contract dependencies map to the same logical path: " + logical.generic_string()};
+         }
+         break;
+      }
+   }
+
+   auto output = std::ostringstream{};
+   output << "FORGE_CONTRACT_SOURCE_DEPENDENCIES_V1\n";
+   for (const auto& [logical, physical] : discovered) {
+      output << "F|contract:" << options.contract << "|contract_include|" << logical.generic_string() << '|'
+             << physical.generic_string() << '\n';
+   }
+   write_text(options.source_dependencies, output.str());
+}
+
 std::string trim_lines(std::string value) {
    while (!value.empty() && (value.front() == '\n' || value.front() == '\r')) {
       value.erase(value.begin());
@@ -2044,6 +2148,7 @@ artifacts generate(const request& options) {
    write_dispatcher(output, options);
    write_source_wrappers(output, options);
    write_depfile(options, dependencies);
+   write_source_dependencies(options, dependencies);
    return {.abi = options.abi, .dispatcher = options.dispatcher, .source_wrappers = options.source_wrappers};
 }
 

@@ -196,6 +196,13 @@ def main() -> None:
         for entry in manifest["source_graph"]["files"]
     ):
         raise RuntimeError("contract source graph contains an absolute logical path")
+    if not any(
+        entry["role"] == "contract_include"
+        and entry["logical_path"].endswith("/types.hpp")
+        for entry in manifest["source_graph"]["files"]
+    ):
+        raise RuntimeError("contract source graph omits a compiler-discovered local include")
+    initial_source_graph_digest = manifest["source_graph"]["sha256"]
     if manifest["sdk"]["profile"] == "release":
         expected_llvm = {
             "version": "llvmorg-22.1.8",
@@ -226,6 +233,9 @@ def main() -> None:
     build_project(args.cmake, build)
     if type_target(read_abi(abi_path), "counter") != "uint64":
         raise RuntimeError("included header change did not regenerate the contract ABI")
+    changed_manifest = json.loads((build / "hello.contract.json").read_text(encoding="utf-8"))
+    if changed_manifest["source_graph"]["sha256"] == initial_source_graph_digest:
+        raise RuntimeError("included header change did not update the contract source graph digest")
 
     contracts = source / "hello.contracts.md"
     contracts.write_text(
