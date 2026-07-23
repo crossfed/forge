@@ -509,6 +509,20 @@ foreach(_source IN LISTS FORGE_CONTRACT_SOURCES)
       math(EXPR _source_root_index "${_source_root_index} + 1")
    endif()
 endforeach()
+set(_compile_check_root_index 0)
+foreach(_source IN LISTS FORGE_CONTRACT_COMPILE_CHECKS)
+   get_filename_component(_source_root "${_source}" DIRECTORY)
+   get_filename_component(_source_root "${_source_root}" REALPATH)
+   list(APPEND _abigen_command --dependency-source "${_source}")
+   if(NOT _source_root IN_LIST _source_root_paths)
+      list(APPEND _source_root_paths "${_source_root}")
+      list(
+         APPEND _abigen_command
+         --source-root "contract/compile-check-root-${_compile_check_root_index}" "${_source_root}"
+      )
+      math(EXPR _compile_check_root_index "${_compile_check_root_index} + 1")
+   endif()
+endforeach()
 set(_include_root_index 0)
 foreach(_include_directory IN LISTS FORGE_CONTRACT_INCLUDE_DIRECTORIES)
    list(APPEND _abigen_command --include "${_include_directory}")
@@ -541,6 +555,7 @@ set(
    "${FORGE_CONTRACT_ABIGEN}"
    "${FORGE_CONTRACT_ATTR_PLUGIN}"
    ${FORGE_CONTRACT_SOURCES}
+   ${FORGE_CONTRACT_COMPILE_CHECKS}
 )
 foreach(_ricardian_file FORGE_CONTRACT_RICARDIAN_CONTRACTS FORGE_CONTRACT_RICARDIAN_CLAUSES)
    if(NOT "${${_ricardian_file}}" STREQUAL "")

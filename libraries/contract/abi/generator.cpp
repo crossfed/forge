@@ -7,6 +7,7 @@ module;
 #include <clang/Basic/Diagnostic.h>
 #include <clang/Frontend/CompilerInstance.h>
 #include <clang/Frontend/FrontendAction.h>
+#include <clang/Frontend/FrontendActions.h>
 #include <clang/Index/USRGeneration.h>
 #include <clang/Tooling/CompilationDatabase.h>
 #include <clang/Tooling/Tooling.h>
@@ -1452,6 +1453,16 @@ class consumer final : public clang::ASTConsumer {
    bool is_dispatch_source_ = false;
 };
 
+void collect_source_dependencies(clang::CompilerInstance& compiler, std::set<std::filesystem::path>& dependencies) {
+   const auto& source_manager = compiler.getSourceManager();
+   for (auto iterator = source_manager.fileinfo_begin(); iterator != source_manager.fileinfo_end(); ++iterator) {
+      const auto path = std::filesystem::path{iterator->first.getName().str()};
+      if (!path.empty() && std::filesystem::exists(path)) {
+         dependencies.insert(std::filesystem::weakly_canonical(path));
+      }
+   }
+}
+
 class action final : public clang::ASTFrontendAction {
  public:
    action(schema& output, bool& found, bool& dispatch_source_found, std::string_view contract_name,
@@ -1467,13 +1478,7 @@ class action final : public clang::ASTFrontendAction {
    }
 
    void EndSourceFileAction() override {
-      const auto& source_manager = getCompilerInstance().getSourceManager();
-      for (auto iterator = source_manager.fileinfo_begin(); iterator != source_manager.fileinfo_end(); ++iterator) {
-         const auto path = std::filesystem::path{iterator->first.getName().str()};
-         if (!path.empty() && std::filesystem::exists(path)) {
-            dependencies_.insert(std::filesystem::weakly_canonical(path));
-         }
-      }
+      collect_source_dependencies(getCompilerInstance(), dependencies_);
    }
 
  private:
@@ -1503,6 +1508,30 @@ class action_factory final : public clang::tooling::FrontendActionFactory {
    bool& dispatch_source_found_;
    std::string contract_name_;
    std::filesystem::path dispatch_source_;
+   std::set<std::filesystem::path>& dependencies_;
+};
+
+class dependency_action final : public clang::SyntaxOnlyAction {
+ public:
+   explicit dependency_action(std::set<std::filesystem::path>& dependencies) : dependencies_(dependencies) {}
+
+   void EndSourceFileAction() override {
+      collect_source_dependencies(getCompilerInstance(), dependencies_);
+   }
+
+ private:
+   std::set<std::filesystem::path>& dependencies_;
+};
+
+class dependency_action_factory final : public clang::tooling::FrontendActionFactory {
+ public:
+   explicit dependency_action_factory(std::set<std::filesystem::path>& dependencies) : dependencies_(dependencies) {}
+
+   std::unique_ptr<clang::FrontendAction> create() override {
+      return std::make_unique<dependency_action>(dependencies_);
+   }
+
+ private:
    std::set<std::filesystem::path>& dependencies_;
 };
 
@@ -1626,6 +1655,9 @@ void write_source_dependencies(const forge::contract::abi::request& options,
 
    auto source_paths = std::set<std::filesystem::path>{};
    for (const auto& source : options.sources) {
+      source_paths.insert(std::filesystem::weakly_canonical(source));
+   }
+   for (const auto& source : options.dependency_sources) {
       source_paths.insert(std::filesystem::weakly_canonical(source));
    }
 
@@ -2088,6 +2120,7 @@ artifacts generate(const request& options) {
    for (const auto& path : options.module_paths) {
       arguments.push_back("-fprebuilt-module-path=" + path.string());
    }
+   const auto dependency_arguments = arguments;
 
    auto source_paths = std::vector<std::string>{};
    source_paths.reserve(options.sources.size());
@@ -2140,6 +2173,19 @@ artifacts generate(const request& options) {
    if (!output.has_apply && output.actions.empty() && output.calls.empty() && output.notifications.empty() &&
        output.tables.empty()) {
       throw std::runtime_error{"contract '" + options.contract + "' has no ABI entries"};
+   }
+   if (!options.dependency_sources.empty()) {
+      auto dependency_source_paths = std::vector<std::string>{};
+      dependency_source_paths.reserve(options.dependency_sources.size());
+      for (const auto& source : options.dependency_sources) {
+         dependency_source_paths.push_back(source.string());
+      }
+      auto dependency_compilation = clang::tooling::FixedCompilationDatabase{".", dependency_arguments};
+      auto dependency_tool = clang::tooling::ClangTool{dependency_compilation, dependency_source_paths};
+      auto dependency_factory = dependency_action_factory{dependencies};
+      if (dependency_tool.run(&dependency_factory) != 0) {
+         throw std::runtime_error{"contract dependency source analysis failed"};
+      }
    }
 
    load_ricardian(output, options);

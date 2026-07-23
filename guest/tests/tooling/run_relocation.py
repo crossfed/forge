@@ -202,6 +202,12 @@ def main() -> None:
         for entry in manifest["source_graph"]["files"]
     ):
         raise RuntimeError("contract source graph omits a compiler-discovered local include")
+    if not any(
+        entry["role"] == "contract_include"
+        and entry["logical_path"].endswith("/compile_check.hpp")
+        for entry in manifest["source_graph"]["files"]
+    ):
+        raise RuntimeError("contract source graph omits a compile-check include")
     initial_source_graph_digest = manifest["source_graph"]["sha256"]
     if manifest["sdk"]["profile"] == "release":
         expected_llvm = {
@@ -236,6 +242,17 @@ def main() -> None:
     changed_manifest = json.loads((build / "hello.contract.json").read_text(encoding="utf-8"))
     if changed_manifest["source_graph"]["sha256"] == initial_source_graph_digest:
         raise RuntimeError("included header change did not update the contract source graph digest")
+    compile_check_digest = changed_manifest["source_graph"]["sha256"]
+
+    compile_check = source / "compile_check.hpp"
+    compile_check.write_text(
+        compile_check.read_text(encoding="utf-8").replace("compile_check_value = 42", "compile_check_value = 43"),
+        encoding="utf-8",
+    )
+    build_project(args.cmake, build)
+    changed_manifest = json.loads((build / "hello.contract.json").read_text(encoding="utf-8"))
+    if changed_manifest["source_graph"]["sha256"] == compile_check_digest:
+        raise RuntimeError("compile-check header change did not update the contract source graph digest")
 
     contracts = source / "hello.contracts.md"
     contracts.write_text(

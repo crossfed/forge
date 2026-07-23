@@ -49,6 +49,8 @@ request parse(int argc, const char* const* argv) {
              .logical_path = std::string{next()},
              .physical_path = next(),
          });
+      } else if (option == "--dependency-source") {
+         result.dependency_sources.emplace_back(next());
       } else if (option == "--source-wrapper") {
          result.source_wrappers.emplace_back(next());
       } else if (option.starts_with("--")) {
