@@ -702,6 +702,8 @@ target_link_libraries(
       ${FORGE_LEAF_TARGETS}
 )
 
+set_target_properties(forge ${FORGE_LEAF_TARGETS} PROPERTIES EXPORT_NO_SYSTEM TRUE)
+
 if(DEFINED BUILD_TESTING AND BUILD_TESTING AND NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
    add_subdirectory(tests)
 endif()
