@@ -231,6 +231,31 @@ forge_add_contract(expression LIBRARIES protocol SOURCES contract.cpp)
         contains="generator expressions are not supported",
     )
 
+    directory_scope = write_negative_project(
+        output / "directory-scope",
+        """forge_add_contract_library(
+   dependency ID negative.directory.dependency SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+forge_add_contract_library(
+   protocol ID negative.directory.protocol SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+set_property(
+   TARGET protocol
+   PROPERTY INTERFACE_LINK_LIBRARIES "::@(fixture);dependency"
+)
+forge_add_contract(directoryscope LIBRARIES protocol SOURCES contract.cpp)
+""",
+    )
+    configure(
+        args,
+        directory_scope,
+        output / "directory-scope-build",
+        succeeds=False,
+        contains="unterminated CMake directory-scope wrapper",
+    )
+
     cycle = write_negative_project(
         output / "cycle",
         """forge_add_contract_library(
@@ -261,6 +286,7 @@ def check_dependency_normalization(args, output: Path) -> None:
     source = output / "source"
     source.mkdir(parents=True)
     (source / "include").mkdir()
+    (source / "libraries").mkdir()
     (source / "src").mkdir()
     (source / "include" / "dependency.cppm").write_text(
         """export module self_contained.dependency;
@@ -317,19 +343,28 @@ class [[forge::contract("selfcontained")]] self_contained_contract
 project(SelfContainedContractLibrary LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 find_package(ForgeContract CONFIG REQUIRED)
-forge_add_contract_library(
-   dependency ID self_contained.dependency SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+add_subdirectory(libraries)
+target_link_libraries(protocol PRIVATE dependency)
+get_target_property(protocol_dependencies protocol INTERFACE_LINK_LIBRARIES)
+if(NOT protocol_dependencies MATCHES "::@\\\\(")
+   message(FATAL_ERROR "fixture did not produce a CMake directory-scope wrapper")
+endif()
+forge_add_contract(
+   selfcontained LIBRARIES protocol protocol SOURCES contract.cpp
+)
+""",
+        encoding="utf-8",
+    )
+    (source / "libraries" / "CMakeLists.txt").write_text(
+        """forge_add_contract_library(
+   dependency ID self_contained.dependency SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.."
    MODULE_BASE_DIRS include MODULE_SOURCES include/dependency.cppm
    SOURCES src/dependency.cpp
 )
 forge_add_contract_library(
-   protocol ID self_contained.protocol SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   protocol ID self_contained.protocol SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.."
    MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
    SOURCES src/protocol.cpp
-)
-target_link_libraries(protocol PRIVATE dependency)
-forge_add_contract(
-   selfcontained LIBRARIES protocol protocol SOURCES contract.cpp
 )
 """,
         encoding="utf-8",
