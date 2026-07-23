@@ -49,9 +49,17 @@ core = core.next(
 ```
 
 Finalizer policies require a non-empty unique BLS key set without the identity
-key, checked total weight and a reachable strict-majority threshold. Policy
-generations advance exactly one step. Ordered diffs use ascending removal and
-insertion indexes.
+key, checked total weight and a reachable strict-majority threshold. Admission
+also supplies one BLS proof of possession per finalizer. `validate()` returns a
+non-serializable `verified_finalizer_policy`, and QC verification accepts only
+that verified capability. The raw policy remains the donor-compatible
+operational record and is available through `get()`.
+
+Policy generations advance exactly one step. Ordered diffs use ascending
+removal and insertion indexes. `apply()` reuses verification for retained keys
+and requires proofs aligned with newly inserted finalizers. A downstream
+adapter must retain or recover registration proofs when reconstructing an
+operational verified policy after restart.
 
 ## Compatibility Invariants
 
@@ -62,9 +70,10 @@ digest fixtures are covered by donor-backed tests.
 
 QC verification delegates weighted threshold evaluation to
 `forge_chain_quorum` and grouped aggregate signature verification to
-`forge_crypto_bls`. A finalizer present in both active and pending policies must
-cast the same strong/weak vote in both signatures. Chain code does not include
-or call the BLS vendor.
+`forge_crypto_bls`. Same-message key aggregation is available only after
+proof-of-possession validation, preventing rogue-key attacks. A finalizer
+present in both active and pending policies must cast the same strong/weak vote
+in both signatures. Chain code does not include or call the BLS vendor.
 
 ## Boundaries
 

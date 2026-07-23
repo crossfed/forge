@@ -27,10 +27,10 @@ std::vector<std::uint8_t> weak_digest(digest value) {
    return result;
 }
 
-std::vector<std::uint64_t> weights(const finalizer_policy& policy) {
+std::vector<std::uint64_t> weights(const verified_finalizer_policy& policy) {
    auto result = std::vector<std::uint64_t>{};
-   result.reserve(policy.finalizers.size());
-   for (const auto& finalizer : policy.finalizers) {
+   result.reserve(policy.get().finalizers.size());
+   for (const auto& finalizer : policy.get().finalizers) {
       result.push_back(finalizer.weight);
    }
    return result;
@@ -48,11 +48,12 @@ std::vector<std::uint32_t> signers(const vote_bitset& bits) {
    return result;
 }
 
-std::vector<forge::crypto::bls::public_key> selected_keys(const vote_bitset& votes, const finalizer_policy& policy) {
-   auto result = std::vector<forge::crypto::bls::public_key>{};
+std::vector<forge::crypto::bls::proof_verified_public_key> selected_keys(const vote_bitset& votes,
+                                                                         const verified_finalizer_policy& policy) {
+   auto result = std::vector<forge::crypto::bls::proof_verified_public_key>{};
    result.reserve(votes.count());
    for (auto index = votes.find_first(); index != vote_bitset::npos; index = votes.find_next(index)) {
-      result.push_back(policy.finalizers[index].public_key);
+      result.push_back(policy.verified_keys()[index]);
    }
    return result;
 }
@@ -61,11 +62,14 @@ bool voted(const std::optional<vote_bitset>& votes, std::size_t index) {
    return votes && (*votes)[index];
 }
 
-void verify_dual_finalizer_votes(const qc_signature& active_signature, const finalizer_policy& active_policy,
-                                 const qc_signature& pending_signature, const finalizer_policy& pending_policy) {
-   for (auto active_index = std::size_t{}; active_index < active_policy.finalizers.size(); ++active_index) {
-      for (auto pending_index = std::size_t{}; pending_index < pending_policy.finalizers.size(); ++pending_index) {
-         if (active_policy.finalizers[active_index].public_key != pending_policy.finalizers[pending_index].public_key) {
+void verify_dual_finalizer_votes(const qc_signature& active_signature, const verified_finalizer_policy& active_policy,
+                                 const qc_signature& pending_signature,
+                                 const verified_finalizer_policy& pending_policy) {
+   const auto& active = active_policy.get();
+   const auto& pending = pending_policy.get();
+   for (auto active_index = std::size_t{}; active_index < active.finalizers.size(); ++active_index) {
+      for (auto pending_index = std::size_t{}; pending_index < pending.finalizers.size(); ++pending_index) {
+         if (active.finalizers[active_index].public_key != pending.finalizers[pending_index].public_key) {
             continue;
          }
          if (voted(active_signature.strong_votes, active_index) !=
@@ -96,13 +100,12 @@ qc_claim quorum_certificate::claim() const noexcept {
    return {.block = block, .strong = strong()};
 }
 
-void verify_basic(const qc_signature& value, const finalizer_policy& policy) {
-   validate(policy);
+void verify_basic(const qc_signature& value, const verified_finalizer_policy& policy) {
    if (!value.strong_votes && !value.weak_votes) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_qc, "Savanna QC contains neither strong nor weak votes");
    }
 
-   const auto count = policy.finalizers.size();
+   const auto count = policy.get().finalizers.size();
    if ((value.strong_votes && value.strong_votes->size() != count) ||
        (value.weak_votes && value.weak_votes->size() != count)) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_qc, "Savanna QC vote bitset size does not match finalizer policy");
@@ -117,12 +120,12 @@ void verify_basic(const qc_signature& value, const finalizer_policy& policy) {
    }
 }
 
-void verify_weights(const qc_signature& value, const finalizer_policy& policy) {
+void verify_weights(const qc_signature& value, const verified_finalizer_policy& policy) {
    verify_basic(value, policy);
    const auto policy_weights = weights(policy);
    const auto strong_signers = value.strong_votes ? signers(*value.strong_votes) : std::vector<std::uint32_t>{};
    const auto weak_signers = value.weak_votes ? signers(*value.weak_votes) : std::vector<std::uint32_t>{};
-   const auto strong = forge::chain::quorum::evaluate(policy.threshold, policy_weights, strong_signers);
+   const auto strong = forge::chain::quorum::evaluate(policy.get().threshold, policy_weights, strong_signers);
    if (value.strong()) {
       if (!strong.reached()) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_qc, "Savanna strong quorum threshold is not met");
@@ -132,17 +135,17 @@ void verify_weights(const qc_signature& value, const finalizer_policy& policy) {
 
    auto combined = strong_signers;
    combined.insert(combined.end(), weak_signers.begin(), weak_signers.end());
-   const auto weak = forge::chain::quorum::evaluate(policy.threshold, policy_weights, combined);
+   const auto weak = forge::chain::quorum::evaluate(policy.get().threshold, policy_weights, combined);
    if (!weak.reached()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_qc, "Savanna weak quorum threshold is not met");
    }
 }
 
-void verify_signature(const qc_signature& value, const finalizer_policy& policy, digest strong_digest) {
+void verify_signature(const qc_signature& value, const verified_finalizer_policy& policy, digest strong_digest) {
    verify_weights(value, policy);
 
-   auto strong_keys = std::vector<forge::crypto::bls::public_key>{};
-   auto weak_keys = std::vector<forge::crypto::bls::public_key>{};
+   auto strong_keys = std::vector<forge::crypto::bls::proof_verified_public_key>{};
+   auto weak_keys = std::vector<forge::crypto::bls::proof_verified_public_key>{};
    auto weak_message = std::vector<std::uint8_t>{};
    auto groups = std::vector<forge::crypto::bls::aggregate_verification_group>{};
    groups.reserve(2U);
@@ -168,8 +171,8 @@ void verify_signature(const qc_signature& value, const finalizer_policy& policy,
    }
 }
 
-void verify(const quorum_certificate& value, const finalizer_policy& active,
-            const std::optional<finalizer_policy>& pending, digest finality_digest) {
+void verify(const quorum_certificate& value, const verified_finalizer_policy& active,
+            const std::optional<verified_finalizer_policy>& pending, digest finality_digest) {
    if (value.pending.has_value() != pending.has_value()) {
       if (value.pending) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_qc, "Savanna QC contains a pending-policy signature unexpectedly");

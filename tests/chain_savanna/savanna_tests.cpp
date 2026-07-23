@@ -67,30 +67,37 @@ BOOST_AUTO_TEST_CASE(chain_savanna_policy_validates_strict_majority_and_keys) {
                make_finalizer(second, 2U, "second"),
            },
    };
-   savanna::validate(policy);
+   const auto proofs = std::array{first.proof_of_possession(), second.proof_of_possession()};
+   const auto verified = savanna::validate(policy, proofs);
+   BOOST_TEST(verified.get().generation == policy.generation);
 
    auto empty = policy;
    empty.finalizers.clear();
-   BOOST_CHECK_THROW(savanna::validate(empty), savanna::exceptions::invalid_policy);
+   BOOST_CHECK_THROW(static_cast<void>(savanna::validate(empty, {})), savanna::exceptions::invalid_policy);
 
    auto half = policy;
    half.finalizers[0].weight = 2U;
    half.threshold = 2U;
-   BOOST_CHECK_THROW(savanna::validate(half), savanna::exceptions::invalid_policy);
+   BOOST_CHECK_THROW(static_cast<void>(savanna::validate(half, proofs)), savanna::exceptions::invalid_policy);
 
    auto duplicate = policy;
    duplicate.finalizers[1].public_key = duplicate.finalizers[0].public_key;
-   BOOST_CHECK_THROW(savanna::validate(duplicate), savanna::exceptions::duplicate_finalizer);
+   BOOST_CHECK_THROW(static_cast<void>(savanna::validate(duplicate, proofs)), savanna::exceptions::duplicate_finalizer);
 
    auto identity = policy;
    identity.finalizers[0].public_key = {};
-   BOOST_CHECK_THROW(savanna::validate(identity), savanna::exceptions::invalid_policy);
+   BOOST_CHECK_THROW(static_cast<void>(savanna::validate(identity, proofs)), savanna::exceptions::invalid_policy);
 
    auto overflow = policy;
    overflow.finalizers[0].weight = std::numeric_limits<std::uint64_t>::max();
    overflow.finalizers[1].weight = 1U;
    overflow.threshold = std::numeric_limits<std::uint64_t>::max();
-   BOOST_CHECK_THROW(savanna::validate(overflow), savanna::exceptions::policy_weight_overflow);
+   BOOST_CHECK_THROW(static_cast<void>(savanna::validate(overflow, proofs)),
+                     savanna::exceptions::policy_weight_overflow);
+
+   const auto wrong_proofs = std::array{second.proof_of_possession(), first.proof_of_possession()};
+   BOOST_CHECK_THROW(static_cast<void>(savanna::validate(policy, wrong_proofs)),
+                     savanna::exceptions::invalid_proof_of_possession);
 }
 
 BOOST_AUTO_TEST_CASE(chain_savanna_policy_diff_is_ordered_and_sequential) {
@@ -108,35 +115,57 @@ BOOST_AUTO_TEST_CASE(chain_savanna_policy_diff_is_ordered_and_sequential) {
                make_finalizer(third, 1U, "third"),
            },
    };
+   const auto source_proofs = std::array{
+       first.proof_of_possession(),
+       second.proof_of_possession(),
+       third.proof_of_possession(),
+   };
+   const auto verified_source = savanna::validate(source, source_proofs);
 
    const auto updated =
-       savanna::apply(source, {
-                                  .generation = 5U,
-                                  .threshold = 2U,
-                                  .finalizers =
-                                      {
-                                          .remove_indexes = {1U},
-                                          .insert_indexes = {{1U, make_finalizer(replacement, 1U, "replacement")}},
-                                      },
-                              });
-   BOOST_TEST(updated.generation == 5U);
-   BOOST_REQUIRE_EQUAL(updated.finalizers.size(), 3U);
-   BOOST_TEST(updated.finalizers[0].description == "first");
-   BOOST_TEST(updated.finalizers[1].description == "replacement");
-   BOOST_TEST(updated.finalizers[2].description == "third");
+       savanna::apply(verified_source,
+                      {
+                          .generation = 5U,
+                          .threshold = 2U,
+                          .finalizers =
+                              {
+                                  .remove_indexes = {1U},
+                                  .insert_indexes = {{1U, make_finalizer(replacement, 1U, "replacement")}},
+                              },
+                      },
+                      std::array{replacement.proof_of_possession()});
+   const auto& updated_policy = updated.get();
+   BOOST_TEST(updated_policy.generation == 5U);
+   BOOST_REQUIRE_EQUAL(updated_policy.finalizers.size(), 3U);
+   BOOST_TEST(updated_policy.finalizers[0].description == "first");
+   BOOST_TEST(updated_policy.finalizers[1].description == "replacement");
+   BOOST_TEST(updated_policy.finalizers[2].description == "third");
 
    auto skipped = savanna::finalizer_policy_diff{
        .generation = 6U,
        .threshold = 2U,
    };
-   BOOST_CHECK_THROW(static_cast<void>(savanna::apply(source, skipped)), savanna::exceptions::invalid_policy);
+   BOOST_CHECK_THROW(static_cast<void>(savanna::apply(verified_source, skipped, {})),
+                     savanna::exceptions::invalid_policy);
 
    auto unordered = savanna::finalizer_policy_diff{
        .generation = 5U,
        .threshold = 2U,
        .finalizers = {.remove_indexes = {1U, 1U}},
    };
-   BOOST_CHECK_THROW(static_cast<void>(savanna::apply(source, unordered)), savanna::exceptions::invalid_policy);
+   BOOST_CHECK_THROW(static_cast<void>(savanna::apply(verified_source, unordered, {})),
+                     savanna::exceptions::invalid_policy);
+
+   const auto wrong_replacement_proof = std::array{first.proof_of_possession()};
+   BOOST_CHECK_THROW(static_cast<void>(savanna::apply(
+                         verified_source,
+                         {
+                             .generation = 5U,
+                             .threshold = 2U,
+                             .finalizers = {.insert_indexes = {{1U, make_finalizer(replacement, 1U, "replacement")}}},
+                         },
+                         wrong_replacement_proof)),
+                     savanna::exceptions::invalid_proof_of_possession);
 }
 
 BOOST_AUTO_TEST_CASE(chain_savanna_qc_claim_raw_layout_matches_spring) {
@@ -253,6 +282,11 @@ BOOST_AUTO_TEST_CASE(chain_savanna_verifies_strong_weak_and_pending_qcs) {
                make_finalizer(third, 1U, "third"),
            },
    };
+   const auto verified_policy = savanna::validate(policy, std::array{
+                                                              first.proof_of_possession(),
+                                                              second.proof_of_possession(),
+                                                              third.proof_of_possession(),
+                                                          });
    const auto digest = make_digest(42U);
 
    auto strong_votes = savanna::vote_bitset{3U};
@@ -265,7 +299,7 @@ BOOST_AUTO_TEST_CASE(chain_savanna_verifies_strong_weak_and_pending_qcs) {
        .strong_votes = strong_votes,
        .signature = strong_signature,
    };
-   savanna::verify_signature(strong, policy, digest);
+   savanna::verify_signature(strong, verified_policy, digest);
    const auto packed_certificate = forge::raw::pack(savanna::quorum_certificate{.block = 9U, .active = strong});
    BOOST_REQUIRE_EQUAL(packed_certificate.size(), 203U);
    BOOST_TEST(packed_certificate[0] == 0x09U);
@@ -292,14 +326,14 @@ BOOST_AUTO_TEST_CASE(chain_savanna_verifies_strong_weak_and_pending_qcs) {
        .weak_votes = weak_votes,
        .signature = weak_signature,
    };
-   savanna::verify_signature(weak, policy, digest);
+   savanna::verify_signature(weak, verified_policy, digest);
 
    const auto certificate = savanna::quorum_certificate{
        .block = 9U,
        .active = strong,
        .pending = strong,
    };
-   savanna::verify(certificate, policy, policy, digest);
+   savanna::verify(certificate, verified_policy, verified_policy, digest);
    BOOST_TEST(certificate.strong());
    const auto expected_claim = savanna::qc_claim{
        .block = 9U,
@@ -309,18 +343,19 @@ BOOST_AUTO_TEST_CASE(chain_savanna_verifies_strong_weak_and_pending_qcs) {
 
    auto inconsistent_dual_vote = certificate;
    inconsistent_dual_vote.pending = weak;
-   BOOST_CHECK_THROW(savanna::verify(inconsistent_dual_vote, policy, policy, digest), savanna::exceptions::invalid_qc);
+   BOOST_CHECK_THROW(savanna::verify(inconsistent_dual_vote, verified_policy, verified_policy, digest),
+                     savanna::exceptions::invalid_qc);
 
-   BOOST_CHECK_THROW(savanna::verify_signature(strong, policy, make_digest(43U)),
+   BOOST_CHECK_THROW(savanna::verify_signature(strong, verified_policy, make_digest(43U)),
                      savanna::exceptions::invalid_qc_signature);
 
    auto malformed = strong;
    malformed.strong_votes = savanna::vote_bitset{2U};
-   BOOST_CHECK_THROW(savanna::verify_basic(malformed, policy), savanna::exceptions::invalid_qc);
+   BOOST_CHECK_THROW(savanna::verify_basic(malformed, verified_policy), savanna::exceptions::invalid_qc);
 
    auto overlap = weak;
    overlap.weak_votes->set(0U);
-   BOOST_CHECK_THROW(savanna::verify_basic(overlap, policy), savanna::exceptions::invalid_qc);
+   BOOST_CHECK_THROW(savanna::verify_basic(overlap, verified_policy), savanna::exceptions::invalid_qc);
 }
 
 BOOST_AUTO_TEST_CASE(chain_savanna_validation_and_rank_are_deterministic) {

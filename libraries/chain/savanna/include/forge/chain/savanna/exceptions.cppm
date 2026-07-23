@@ -17,6 +17,7 @@ enum class code : std::uint16_t {
    invalid_qc = 5,
    invalid_qc_signature = 6,
    invalid_validation_state = 7,
+   invalid_proof_of_possession = 8,
 };
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(code, "forge.chain.savanna")
@@ -28,5 +29,6 @@ using invalid_finality_state = forge::exceptions::coded_exception<code, code::in
 using invalid_qc = forge::exceptions::coded_exception<code, code::invalid_qc>;
 using invalid_qc_signature = forge::exceptions::coded_exception<code, code::invalid_qc_signature>;
 using invalid_validation_state = forge::exceptions::coded_exception<code, code::invalid_validation_state>;
+using invalid_proof_of_possession = forge::exceptions::coded_exception<code, code::invalid_proof_of_possession>;
 
 } // namespace forge::chain::savanna::exceptions

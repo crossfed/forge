@@ -12,6 +12,16 @@ bool verify(const public_key& pubkey, std::span<const uint8_t> message, const si
    return bls12_381::verify(pubkey.jacobian_montgomery_le(), message, signature.jacobian_montgomery_le());
 };
 
+std::optional<proof_verified_public_key> verify_proof_of_possession(const public_key& key, const signature& proof) {
+   if (key == public_key{}) {
+      return std::nullopt;
+   }
+   if (!bls12_381::pop_verify(key.jacobian_montgomery_le(), proof.jacobian_montgomery_le())) {
+      return std::nullopt;
+   }
+   return proof_verified_public_key{key};
+}
+
 bool verify_grouped(std::span<const aggregate_verification_group> groups, const aggregate_signature& signature) {
    if (groups.empty()) {
       return false;
@@ -30,7 +40,7 @@ bool verify_grouped(std::span<const aggregate_verification_group> groups, const 
       auto group_keys = std::vector<bls12_381::g1>{};
       group_keys.reserve(group.public_keys.size());
       for (const auto& key : group.public_keys) {
-         group_keys.push_back(key.jacobian_montgomery_le());
+         group_keys.push_back(key.get().jacobian_montgomery_le());
       }
       public_keys.push_back(bls12_381::aggregate_public_keys(group_keys));
       messages.emplace_back(group.message.begin(), group.message.end());

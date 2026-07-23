@@ -21,6 +21,8 @@ while the public C++ API remains Preview.
   - `libraries/chain/include/eosio/chain/finalizer_policy.hpp`
   - `libraries/chain/include/eosio/chain/qc.hpp`
   - `libraries/chain/qc.cpp`
+  - `libraries/testing/contracts/eosio.bios/eosio.bios.hpp`
+  - `libraries/testing/contracts/eosio.bios/eosio.bios.cpp`
   - `unittests/finality_core_tests.cpp`
   - `unittests/savanna_finalizer_policy_tests.cpp`
 
@@ -34,6 +36,7 @@ Accepted:
 - identical vote semantics for finalizers shared by active and pending policies;
 - strong digest plus `WEAK` postfix for weak votes;
 - finality digest packing that omits finalizer-policy generations.
+- proof-of-possession validation when finalizer keys enter policy state.
 
 The Spring finality preimage is preserved exactly in structure:
 
@@ -77,6 +80,8 @@ Corrected during transfer:
 - validation uses neutral `commitment`, not an action-receipt field;
 - rank consumes `finality_core + block_ref`, not header state;
 - grouped BLS verification moves into `forge_crypto_bls`;
+- grouped verification accepts only proof-verified public-key capabilities,
+  while Raw finalizer policies keep the donor layout without embedded proofs;
 - QC weight evaluation uses `forge_chain_quorum`;
 - producer and protocol records remain downstream.
 

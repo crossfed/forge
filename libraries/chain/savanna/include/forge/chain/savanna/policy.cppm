@@ -3,6 +3,7 @@ module;
 #include <boost/describe.hpp>
 
 #include <cstdint>
+#include <span>
 #include <utility>
 #include <vector>
 
@@ -26,8 +27,37 @@ struct finalizer_policy_diff {
    ordered_diff<finalizer> finalizers;
 };
 
-void validate(const finalizer_policy& policy);
-[[nodiscard]] finalizer_policy apply(const finalizer_policy& source, const finalizer_policy_diff& difference);
+class verified_finalizer_policy {
+ public:
+   verified_finalizer_policy(const verified_finalizer_policy&) = default;
+   verified_finalizer_policy(verified_finalizer_policy&&) = default;
+   verified_finalizer_policy& operator=(const verified_finalizer_policy&) = default;
+   verified_finalizer_policy& operator=(verified_finalizer_policy&&) = default;
+
+   [[nodiscard]] const finalizer_policy& get() const noexcept {
+      return policy_;
+   }
+   [[nodiscard]] std::span<const forge::crypto::bls::proof_verified_public_key> verified_keys() const noexcept {
+      return keys_;
+   }
+
+ private:
+   verified_finalizer_policy(finalizer_policy policy, std::vector<forge::crypto::bls::proof_verified_public_key> keys)
+       : policy_(std::move(policy)), keys_(std::move(keys)) {}
+
+   finalizer_policy policy_;
+   std::vector<forge::crypto::bls::proof_verified_public_key> keys_;
+
+   friend verified_finalizer_policy validate(finalizer_policy, std::span<const forge::crypto::bls::signature>);
+   friend verified_finalizer_policy apply(const verified_finalizer_policy&, const finalizer_policy_diff&,
+                                          std::span<const forge::crypto::bls::signature>);
+};
+
+[[nodiscard]] verified_finalizer_policy validate(finalizer_policy policy,
+                                                 std::span<const forge::crypto::bls::signature> proofs);
+[[nodiscard]] verified_finalizer_policy apply(const verified_finalizer_policy& source,
+                                              const finalizer_policy_diff& difference,
+                                              std::span<const forge::crypto::bls::signature> inserted_proofs);
 
 BOOST_DESCRIBE_STRUCT(finalizer_policy_diff, (), (generation, threshold, finalizers))
 

@@ -3,6 +3,7 @@
 #include <array>
 #include <bls12-381/bls12-381.hpp>
 #include <iostream>
+#include <type_traits>
 #include <vector>
 
 import forge.exceptions;
@@ -164,13 +165,21 @@ BOOST_AUTO_TEST_CASE(bls_agg_tree_verif) try {
 }
 FORGE_LOG_AND_RETHROW();
 
+static_assert(!std::is_constructible_v<proof_verified_public_key, public_key>);
+
 BOOST_AUTO_TEST_CASE(bls_grouped_aggregate_verification) try {
    const auto sk1 = private_key{seed_1};
    const auto sk2 = private_key{seed_2};
    const auto pk1 = sk1.get_public_key();
    const auto pk2 = sk2.get_public_key();
-   const auto strong_keys = std::array{pk1, pk2};
-   const auto weak_keys = std::array{pk1};
+   const auto verified_pk1 = verify_proof_of_possession(pk1, sk1.proof_of_possession());
+   const auto verified_pk2 = verify_proof_of_possession(pk2, sk2.proof_of_possession());
+   BOOST_REQUIRE(verified_pk1);
+   BOOST_REQUIRE(verified_pk2);
+   BOOST_TEST(!verify_proof_of_possession(pk2, sk1.proof_of_possession()));
+   BOOST_TEST(!verify_proof_of_possession(public_key{}, signature{}));
+   const auto strong_keys = std::array{*verified_pk1, *verified_pk2};
+   const auto weak_keys = std::array{*verified_pk1};
 
    auto aggregate = aggregate_signature{};
    aggregate.aggregate(sk1.sign(message_1));

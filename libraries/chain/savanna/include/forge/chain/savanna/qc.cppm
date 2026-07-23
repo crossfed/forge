@@ -29,11 +29,11 @@ struct quorum_certificate {
    [[nodiscard]] qc_claim claim() const noexcept;
 };
 
-void verify_basic(const qc_signature& value, const finalizer_policy& policy);
-void verify_weights(const qc_signature& value, const finalizer_policy& policy);
-void verify_signature(const qc_signature& value, const finalizer_policy& policy, digest strong_digest);
-void verify(const quorum_certificate& value, const finalizer_policy& active,
-            const std::optional<finalizer_policy>& pending, digest finality_digest);
+void verify_basic(const qc_signature& value, const verified_finalizer_policy& policy);
+void verify_weights(const qc_signature& value, const verified_finalizer_policy& policy);
+void verify_signature(const qc_signature& value, const verified_finalizer_policy& policy, digest strong_digest);
+void verify(const quorum_certificate& value, const verified_finalizer_policy& active,
+            const std::optional<verified_finalizer_policy>& pending, digest finality_digest);
 
 BOOST_DESCRIBE_STRUCT(qc_signature, (), (strong_votes, weak_votes, signature))
 BOOST_DESCRIBE_STRUCT(quorum_certificate, (), (block, active, pending))

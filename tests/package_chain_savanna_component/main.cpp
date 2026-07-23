@@ -25,7 +25,7 @@ int main() {
                },
            },
    };
-   savanna::validate(policy);
+   const auto verified = savanna::validate(policy, std::array{key.proof_of_possession()});
 
    const auto finality = savanna::finality_core::genesis(1U, 1U);
    const auto block = savanna::block_ref{
@@ -34,5 +34,5 @@ int main() {
        .slot = 1U,
    };
    const auto rank = savanna::make_rank(finality, block);
-   return policy.threshold == 1U && rank.block == 1U ? 0 : 1;
+   return verified.get().threshold == 1U && rank.block == 1U ? 0 : 1;
 }
