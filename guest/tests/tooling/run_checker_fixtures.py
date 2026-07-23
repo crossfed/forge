@@ -63,6 +63,93 @@ def compile_wasm(args, source, output, *flags):
     )
 
 
+def manifest_command(args, source_graph, output):
+    return [
+        str(args.manifest_tool),
+        "--wasm",
+        str(args.wasm),
+        "--abi",
+        str(args.abi),
+        "--imports",
+        str(args.imports),
+        "--source-graph",
+        str(source_graph),
+        "--output",
+        str(output),
+        "--sdk-version",
+        "test",
+        "--profile",
+        "developer",
+        "--reproducible",
+        "false",
+        "--llvm-version",
+        "test",
+        "--sysroot-version",
+        "1",
+        "--sysroot-hash",
+        "test",
+        "--intrinsic-version",
+        "1",
+    ]
+
+
+def source_graph_digest(path):
+    return json.loads(path.read_text(encoding="utf-8"))["source_graph"]["sha256"]
+
+
+def check_source_graph(args):
+    directory = args.output / "source-graph"
+    directory.mkdir(parents=True, exist_ok=True)
+    module = directory / "protocol.cppm"
+    implementation = directory / "protocol.cpp"
+    module.write_text("export module fixture.protocol;\n", encoding="utf-8")
+    implementation.write_text("module fixture.protocol;\n", encoding="utf-8")
+
+    header = "FORGE_CONTRACT_SOURCE_GRAPH_V2\n"
+    records = [
+        f"F|fixture.protocol|module|include/fixture/protocol.cppm|{module}\n",
+        f"F|fixture.protocol|implementation|src/protocol.cpp|{implementation}\n",
+        f"F|contract:fixture|contract_source|contract/fixture.cpp|{implementation}\n",
+        "E|contract:fixture|fixture.protocol\n",
+    ]
+    first_graph = directory / "first.txt"
+    reordered_graph = directory / "reordered.txt"
+    first_graph.write_text(header + "".join(records), encoding="utf-8")
+    reordered_graph.write_text(header + "".join(reversed(records)), encoding="utf-8")
+
+    first_manifest = directory / "first.json"
+    reordered_manifest = directory / "reordered.json"
+    run(manifest_command(args, first_graph, first_manifest), succeeds=True)
+    run(manifest_command(args, reordered_graph, reordered_manifest), succeeds=True)
+    if source_graph_digest(first_manifest) != source_graph_digest(reordered_manifest):
+        raise RuntimeError("source graph digest depends on descriptor record order")
+
+    implementation.write_text("module fixture.protocol;\n// changed\n", encoding="utf-8")
+    changed_manifest = directory / "changed.json"
+    run(manifest_command(args, first_graph, changed_manifest), succeeds=True)
+    if source_graph_digest(first_manifest) == source_graph_digest(changed_manifest):
+        raise RuntimeError("source graph digest did not change with a source file")
+
+    duplicate_graph = directory / "duplicate.txt"
+    duplicate_graph.write_text(header + records[0] + records[0], encoding="utf-8")
+    run(
+        manifest_command(args, duplicate_graph, directory / "duplicate.json"),
+        succeeds=False,
+        contains="duplicate logical path",
+    )
+
+    dangling_graph = directory / "dangling.txt"
+    dangling_graph.write_text(
+        header + records[0] + records[2] + "E|contract:fixture|missing.protocol\n",
+        encoding="utf-8",
+    )
+    run(
+        manifest_command(args, dangling_graph, directory / "dangling.json"),
+        succeeds=False,
+        contains="dependency target has no files",
+    )
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--checker", required=True, type=pathlib.Path)
@@ -71,13 +158,14 @@ def main():
     parser.add_argument("--wasm", required=True, type=pathlib.Path)
     parser.add_argument("--abi", required=True, type=pathlib.Path)
     parser.add_argument("--imports", required=True, type=pathlib.Path)
+    parser.add_argument("--source-graph", required=True, type=pathlib.Path)
     parser.add_argument("--manifest", required=True, type=pathlib.Path)
     parser.add_argument("--output", required=True, type=pathlib.Path)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
 
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == 1
+    assert manifest["schema_version"] == 2
     assert manifest["sdk"]["profile"] in {"developer", "release"}
     assert manifest["sdk"]["reproducible"] == (manifest["sdk"]["profile"] == "release")
     if manifest["sdk"]["profile"] == "release":
@@ -94,40 +182,17 @@ def main():
     assert manifest["abi"]["sha256"] == hashlib.sha256(args.abi.read_bytes()).hexdigest()
     assert manifest["wasm"]["features"] == ["mvp"]
     assert {entry["module"] for entry in manifest["wasm"]["imports"]} == {"env"}
+    assert manifest["source_graph"]["files"]
+    assert manifest["source_graph"]["sha256"]
+    if any(pathlib.Path(entry["logical_path"]).is_absolute() for entry in manifest["source_graph"]["files"]):
+        raise RuntimeError("contract manifest source graph contains an absolute logical path")
 
     bare_output = args.output / "bare-manifest"
     bare_output.mkdir(parents=True, exist_ok=True)
-    run(
-        [
-            str(args.manifest_tool),
-            "--wasm",
-            str(args.wasm),
-            "--abi",
-            str(args.abi),
-            "--imports",
-            str(args.imports),
-            "--output",
-            "bare.contract.json",
-            "--sdk-version",
-            "test",
-            "--profile",
-            "developer",
-            "--reproducible",
-            "false",
-            "--llvm-version",
-            "test",
-            "--sysroot-version",
-            "1",
-            "--sysroot-hash",
-            "test",
-            "--intrinsic-version",
-            "1",
-        ],
-        cwd=bare_output,
-        succeeds=True,
-    )
+    run(manifest_command(args, args.source_graph, "bare.contract.json"), cwd=bare_output, succeeds=True)
     if not (bare_output / "bare.contract.json").is_file():
         raise RuntimeError("contract-manifest did not write a bare output path")
+    check_source_graph(args)
 
     check(args, args.wasm, args.abi, args.imports, succeeds=True)
     check(args, args.wasm, args.abi, args.imports, succeeds=False, contains="required contract export is missing",
