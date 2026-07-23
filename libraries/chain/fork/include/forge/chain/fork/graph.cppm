@@ -175,15 +175,43 @@ class graph {
       }
       const auto parent = require_node_unlocked(id).data.parent;
       const auto subtree = collect_subtree_unlocked(id);
+      const auto parent_node = nodes_.find(parent);
+      if (parent_node == nodes_.end()) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_node, "fork graph parent node is missing");
+      }
+      const auto parent_link = parent_node->second.children.find(id);
+      if (parent_link == parent_node->second.children.end()) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_node, "fork graph parent link is missing");
+      }
 
       auto removed = std::vector<entry>{};
       removed.reserve(subtree.size());
+      auto ranked = std::vector<typename rank_set::iterator>{};
+      ranked.reserve(subtree.size());
+      auto node_entries = std::vector<typename node_map::iterator>{};
+      node_entries.reserve(subtree.size());
       for (const auto& child : subtree) {
-         removed.push_back(require_node_unlocked(child).data);
+         const auto node_entry = nodes_.find(child);
+         if (node_entry == nodes_.end()) {
+            FORGE_THROW_EXCEPTION(exceptions::invalid_node, "fork graph subtree node is missing");
+         }
+         const auto& current = node_entry->second.data;
+         removed.push_back(current);
+         const auto found = ranking_.find(rank_key{current.rank, current.id});
+         if (found == ranking_.end()) {
+            FORGE_THROW_EXCEPTION(exceptions::invalid_node, "fork graph rank entry is missing");
+         }
+         ranked.push_back(found);
+         node_entries.push_back(node_entry);
       }
 
-      nodes_.at(parent).children.erase(id);
-      erase_nodes_unlocked(subtree);
+      parent_node->second.children.erase(parent_link);
+      for (const auto iterator : ranked) {
+         ranking_.erase(iterator);
+      }
+      for (const auto iterator : node_entries) {
+         nodes_.erase(iterator);
+      }
       return removed;
    }
 
@@ -287,14 +315,6 @@ class graph {
          result.insert(result.end(), children.begin(), children.end());
       }
       return result;
-   }
-
-   void erase_nodes_unlocked(const std::vector<Id>& ids) {
-      for (const auto& id : ids) {
-         const auto found = nodes_.find(id);
-         ranking_.erase(rank_key{found->second.data.rank, found->first});
-         nodes_.erase(found);
-      }
    }
 
    mutable std::shared_mutex mutex_;

@@ -131,6 +131,23 @@ BOOST_AUTO_TEST_CASE(chain_fork_insert_has_strong_exception_safety) {
    BOOST_TEST(graph.best().id == 2U);
 }
 
+BOOST_AUTO_TEST_CASE(chain_fork_remove_prepares_rank_lookups_before_mutation) {
+   const auto rejected_rank = std::make_shared<std::uint64_t>(0U);
+   auto graph = fork::graph<std::uint64_t, std::uint64_t, std::uint64_t, throwing_better>{
+       throwing_better{.rejected_rank = rejected_rank}};
+   graph.reset({.id = 1U, .parent = 0U, .rank = 1U, .value = 10U});
+   BOOST_REQUIRE(fork::inserted(
+       graph.insert({.id = 2U, .parent = 1U, .rank = 2U, .value = 20U})));
+
+   *rejected_rank = 2U;
+   BOOST_CHECK_THROW(static_cast<void>(graph.remove_subtree(2U)), std::runtime_error);
+   *rejected_rank = 0U;
+
+   BOOST_TEST(graph.size() == 2U);
+   BOOST_TEST(graph.contains(2U));
+   BOOST_TEST(graph.best().id == 2U);
+}
+
 struct throwing_value {
    std::shared_ptr<bool> reject_copy;
    std::uint64_t value = 0;
