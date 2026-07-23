@@ -90,6 +90,95 @@ hello.abi
 hello.contract.json
 ```
 
+## Dual-Target Protocol Libraries
+
+Protocol values can be compiled once as a normal host static library and again
+inside an isolated contract build from the same declared source graph:
+
+```cmake
+find_package(Forge CONFIG REQUIRED COMPONENTS raw chain_protocol)
+find_package(ForgeContract CONFIG REQUIRED)
+
+forge_add_contract_library(
+   product_protocol
+   ID product.chain.protocol
+   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
+   MODULE_SOURCES include/product/chain/protocol.cppm
+   SOURCES src/protocol.cpp
+   PUBLIC_HEADERS include/product/chain/version.hpp
+   PRIVATE_HEADERS src/limits.hpp
+   LIBRARIES
+      Forge::forge_raw
+      Forge::forge_chain_protocol
+)
+
+forge_add_contract(
+   product
+   LIBRARIES product_protocol
+   SOURCES contract.cpp
+)
+```
+
+`ID` is the stable package identity. A contract library may depend only on
+guest-compatible Forge targets or other contract libraries. The configure step
+rejects dependency cycles, unknown host-only targets, duplicate logical paths
+and sources outside `SOURCE_ROOT`.
+
+The SDK passes the declared graph to the guest build. It does not infer C++
+module names, transport compiler BMI/PCM files, or reuse host compiler state.
+Clang and CMake compile the installed module sources for the selected guest
+toolchain and discover them through prebuilt-module search paths local to that
+build.
+
+A protocol package installs its source graph and host archive separately:
+
+```cmake
+set_target_properties(product_protocol PROPERTIES EXPORT_NAME protocol)
+
+forge_install_contract_library(
+   TARGET product_protocol
+   EXPORT ProductProtocolTargets
+   MODULE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/modules"
+   SOURCE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/sources"
+)
+```
+
+Export `ProductProtocolTargets` with the normal CMake `install(EXPORT ...)`
+command. Its package config must call `find_dependency(Forge)` and
+`find_dependency(ForgeContract)`. The resulting imported target, such as
+`Product::protocol`, can be passed directly to `forge_add_contract`. Installed
+metadata is prefix-relative; compiled module files are never installed.
+
+## Named Action Payloads
+
+A shared action DTO owns its canonical action name:
+
+```cpp
+struct begin_revision {
+   workspace_id workspace;
+   inode_id inode;
+
+   static constexpr forge::chain::protocol::action_name get_name() {
+      return forge::chain::protocol::make_name("beginrev");
+   }
+};
+```
+
+For a handler with exactly one such parameter, ABI generation exposes the DTO
+fields directly and dispatch unpacks the same DTO. An explicit action attribute
+is allowed only when its value matches `get_name()`. Legacy handlers without
+`get_name()` retain the method-parameter wrapper ABI.
+
+Host code constructs a transaction action without repeating the name:
+
+```cpp
+auto value = forge::chain::protocol::action{permission, account, begin_revision{...}};
+```
+
+The constructor and guest dispatcher both use `forge::raw`, so the host action
+bytes and guest payload layout have one source of truth.
+
 ## Modern Contract
 
 ```cpp
@@ -204,6 +293,11 @@ so an incremental build cannot retain stale ABI metadata.
 
 Invalid or ambiguous annotations fail the build. ABI is parsed again by
 `contract-check`; it is not accepted merely because JSON syntax is valid.
+
+`hello.contract.json` uses manifest schema v2. Its `source_graph` contains
+sorted library identities, file roles, logical paths, content SHA-256 values
+and dependency edges. The graph digest uses length-prefixed records and never
+contains physical source or build paths.
 
 The tooling suite executes every active ABI pass/fail fixture from pinned CDT
 commit `69599db279b7b93d0688502720c15c6962a1401b` as a separate Forge case. When

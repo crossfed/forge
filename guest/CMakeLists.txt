@@ -758,6 +758,9 @@ add_custom_target(
       "${CMAKE_CURRENT_SOURCE_DIR}/tests/tooling/run_relocation.py"
       --archive "${_forge_contract_archive}"
       --cmake "${CMAKE_COMMAND}"
+      --cxx-compiler "${CMAKE_CXX_COMPILER}"
+      --forge-package "${Forge_DIR}"
+      --dual-target-source "${CMAKE_CURRENT_SOURCE_DIR}/tests/dual_target"
       --source-root "${CMAKE_CURRENT_SOURCE_DIR}/.."
       --output "${CMAKE_CURRENT_BINARY_DIR}/relocation"
    DEPENDS forge_contract_sdk_archive

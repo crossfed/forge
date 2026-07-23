@@ -227,6 +227,7 @@ add_custom_target(
       --wasm "${CMAKE_CURRENT_BINARY_DIR}/hello.wasm"
       --abi "${CMAKE_CURRENT_BINARY_DIR}/hello.abi"
       --imports "${ForgeContract_DATA_DIR}/registry/intrinsics.json"
+      --source-graph "${_tooling_build_dir}/contract-source-graph.txt"
       --manifest "${CMAKE_CURRENT_BINARY_DIR}/hello.contract.json"
       --output "${CMAKE_CURRENT_BINARY_DIR}/checker"
    DEPENDS hello

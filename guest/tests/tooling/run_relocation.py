@@ -6,6 +6,7 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
 import tarfile
 import time
 from pathlib import Path
@@ -136,6 +137,9 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--archive", required=True, type=Path)
     parser.add_argument("--cmake", required=True)
+    parser.add_argument("--cxx-compiler", required=True, type=Path)
+    parser.add_argument("--forge-package", required=True, type=Path)
+    parser.add_argument("--dual-target-source", required=True, type=Path)
     parser.add_argument("--source-root", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
@@ -185,6 +189,13 @@ def main() -> None:
             raise RuntimeError(f"missing relocated SDK artifact: {artifact}")
 
     manifest = json.loads((build / "hello.contract.json").read_text(encoding="utf-8"))
+    if manifest["schema_version"] != 2:
+        raise RuntimeError("contract manifest does not use source graph schema v2")
+    if any(
+        Path(entry["logical_path"]).is_absolute()
+        for entry in manifest["source_graph"]["files"]
+    ):
+        raise RuntimeError("contract source graph contains an absolute logical path")
     if manifest["sdk"]["profile"] == "release":
         expected_llvm = {
             "version": "llvmorg-22.1.8",
@@ -246,6 +257,23 @@ def main() -> None:
     build_project(args.cmake, build)
     if wasm.stat().st_mtime_ns <= first_mtime:
         raise RuntimeError("contract source change did not rebuild the WebAssembly artifact")
+
+    run(
+        sys.executable,
+        str(args.source_root / "guest" / "tests" / "tooling" / "run_dual_target_fixtures.py"),
+        "--cmake",
+        args.cmake,
+        "--cxx-compiler",
+        str(args.cxx_compiler),
+        "--forge-package",
+        str(args.forge_package),
+        "--contract-package",
+        str(package),
+        "--source",
+        str(args.dual_target_source),
+        "--output",
+        str(output / "dual-target"),
+    )
 
 
 if __name__ == "__main__":
