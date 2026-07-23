@@ -82,6 +82,9 @@ Corrected during transfer:
 - grouped BLS verification moves into `forge_crypto_bls`;
 - grouped verification accepts only proof-verified public-key capabilities,
   while Raw finalizer policies keep the donor layout without embedded proofs;
+- weak QC encoding rejects a present-but-empty weak-vote bitset;
+- retained validation roots are replay-verified from stored leaf digests rather
+  than trusted as an unauthenticated historical cache;
 - QC weight evaluation uses `forge_chain_quorum`;
 - producer and protocol records remain downstream.
 

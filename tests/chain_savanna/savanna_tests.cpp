@@ -356,6 +356,10 @@ BOOST_AUTO_TEST_CASE(chain_savanna_verifies_strong_weak_and_pending_qcs) {
    auto overlap = weak;
    overlap.weak_votes->set(0U);
    BOOST_CHECK_THROW(savanna::verify_basic(overlap, verified_policy), savanna::exceptions::invalid_qc);
+
+   auto empty_weak = strong;
+   empty_weak.weak_votes = savanna::vote_bitset{3U};
+   BOOST_CHECK_THROW(savanna::verify_basic(empty_weak, verified_policy), savanna::exceptions::invalid_qc);
 }
 
 BOOST_AUTO_TEST_CASE(chain_savanna_validation_and_rank_are_deterministic) {
@@ -380,6 +384,22 @@ BOOST_AUTO_TEST_CASE(chain_savanna_validation_and_rank_are_deterministic) {
    BOOST_TEST(savanna::root_at(validation, 6U) == validation.tree.root());
    BOOST_TEST(validation.tree.root() ==
               savanna::digest{"86c45f2da153d610b48601b783c016799698c1e2a43da4b1a58a7bf77609ec8e"});
+
+   auto forged_history = validation;
+   forged_history.roots.front() = make_digest(99U);
+   BOOST_CHECK_THROW(savanna::validate(forged_history), savanna::exceptions::invalid_validation_state);
+   BOOST_CHECK_THROW(static_cast<void>(savanna::append(forged_history, {.num = 7U})),
+                     savanna::exceptions::invalid_validation_state);
+
+   auto forged_leaf = validation;
+   forged_leaf.leaves.front() = make_digest(98U);
+   BOOST_CHECK_THROW(savanna::validate(forged_leaf), savanna::exceptions::invalid_validation_state);
+
+   const auto roundtrip = forge::raw::unpack<savanna::validation_state>(forge::raw::pack(validation));
+   savanna::validate(roundtrip);
+   BOOST_TEST(savanna::root_at(roundtrip, 5U) ==
+              savanna::digest{"05e8db53e2d7fb3796ac15410da91f71debba651be277d8a9593e4b1b4986e8d"});
+
    BOOST_CHECK_THROW(static_cast<void>(savanna::append(validation, {.num = 8U})),
                      savanna::exceptions::invalid_validation_state);
 

@@ -24,6 +24,7 @@ struct validation_state {
    forge::chain::core::incremental_merkle_tree tree;
    block_num_t first = 0;
    std::vector<digest> roots;
+   std::vector<digest> leaves;
 };
 
 [[nodiscard]] validation_state make_validation(const validation_leaf& genesis);
@@ -32,6 +33,6 @@ struct validation_state {
 void validate(const validation_state& state);
 
 BOOST_DESCRIBE_STRUCT(validation_leaf, (), (num, slot, parent_slot, finality_digest, commitment))
-BOOST_DESCRIBE_STRUCT(validation_state, (), (tree, first, roots))
+BOOST_DESCRIBE_STRUCT(validation_state, (), (tree, first, roots, leaves))
 
 } // namespace forge::chain::savanna

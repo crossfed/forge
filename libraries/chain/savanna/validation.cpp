@@ -4,6 +4,7 @@ module;
 
 #include <cstddef>
 #include <limits>
+#include <vector>
 
 module forge.chain.savanna.validation;
 
@@ -21,18 +22,23 @@ digest leaf_digest(const validation_leaf& leaf) {
 
 validation_state make_validation(const validation_leaf& genesis) {
    auto result = validation_state{.first = genesis.num};
-   result.tree.append(leaf_digest(genesis));
+   const auto leaf = leaf_digest(genesis);
+   result.tree.append(leaf);
    result.roots.push_back(result.tree.root());
+   result.leaves.push_back(leaf);
    return result;
 }
 
 validation_state append(validation_state state, const validation_leaf& leaf) {
+   validate(state);
    if (state.roots.size() > std::numeric_limits<block_num_t>::max() - state.first ||
        leaf.num != state.first + static_cast<block_num_t>(state.roots.size())) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_validation_state, "Savanna validation leaf is not contiguous");
    }
-   state.tree.append(leaf_digest(leaf));
+   const auto digest = leaf_digest(leaf);
+   state.tree.append(digest);
    state.roots.push_back(state.tree.root());
+   state.leaves.push_back(digest);
    return state;
 }
 
@@ -45,12 +51,25 @@ digest root_at(const validation_state& state, block_num_t num) {
 }
 
 void validate(const validation_state& state) {
-   if (state.tree.empty() || state.roots.empty() || state.tree.size() != state.roots.size() ||
-       state.roots.back() != state.tree.root()) {
+   if (state.tree.empty() || state.roots.empty() || state.roots.size() != state.leaves.size() ||
+       state.tree.size() != state.roots.size()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_validation_state, "Savanna validation Merkle state is inconsistent");
    }
    if (state.roots.size() - 1U > std::numeric_limits<block_num_t>::max() - state.first) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_validation_state, "Savanna validation block range overflows");
+   }
+
+   auto replay = forge::chain::core::incremental_merkle_tree{};
+   for (auto index = std::size_t{}; index < state.leaves.size(); ++index) {
+      replay.append(state.leaves[index]);
+      if (replay.root() != state.roots[index]) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_validation_state, "Savanna retained validation root is inconsistent",
+                               forge::exceptions::ctx("root_index", index));
+      }
+   }
+   if (forge::raw::pack(replay) != forge::raw::pack(state.tree)) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_validation_state,
+                            "Savanna incremental validation tree is inconsistent");
    }
 }
 

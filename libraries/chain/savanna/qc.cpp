@@ -110,6 +110,9 @@ void verify_basic(const qc_signature& value, const verified_finalizer_policy& po
        (value.weak_votes && value.weak_votes->size() != count)) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_qc, "Savanna QC vote bitset size does not match finalizer policy");
    }
+   if (value.weak_votes && value.weak_votes->none()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_qc, "Savanna weak QC contains no weak votes");
+   }
 
    if (value.strong_votes && value.weak_votes) {
       auto overlap = *value.strong_votes;
