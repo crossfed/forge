@@ -25,6 +25,8 @@ set(
    compression
    chain_core
    chain_protocol
+   chain_quorum
+   chain_fork
    vm_wasm
    contract_abi
    contract_attributes
@@ -135,6 +137,10 @@ macro(_forge_add_component component)
          _forge_add_component(variant)
          _forge_add_component(crypto_asymmetric_values)
          _forge_add_component(crypto_digest)
+      elseif("${component}" STREQUAL "chain_quorum")
+         _forge_add_component(exceptions)
+      elseif("${component}" STREQUAL "chain_fork")
+         _forge_add_component(exceptions)
       elseif("${component}" STREQUAL "vm_wasm")
          _forge_add_component(exceptions)
       elseif("${component}" STREQUAL "contract_abi")

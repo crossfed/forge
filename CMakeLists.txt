@@ -479,6 +479,8 @@ set(
    forge_compression
    forge_chain_core
    forge_chain_protocol
+   forge_chain_quorum
+   forge_chain_fork
    forge_vm_wasm
    forge_db_ids
    forge_db_core
@@ -608,6 +610,8 @@ set(
    compression
    chain_core
    chain_protocol
+   chain_quorum
+   chain_fork
    vm_wasm
    db_core
    db_object

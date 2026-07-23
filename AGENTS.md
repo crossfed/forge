@@ -178,9 +178,10 @@ class service_node {
   fixtures.
 - Dependency direction is `forge_chain_protocol -> forge_chain_core`; core must
   never import protocol.
-- Chain libraries must not contain controller-owned mutable state, state
-  persistence, execution, consensus, P2P sync, node lifecycle, plugin
-  implementations, runtime config, key custody or product policy.
+- Focused Chain leaves may own deterministic, product-neutral quorum, fork and
+  finality algorithms. They must not own controller state, state persistence,
+  execution, P2P sync, node lifecycle, plugin implementations, runtime config,
+  key custody or product policy.
 - A focused Chain leaf may own neutral remote-state query contracts, explicit
   chain consistency/finality vocabulary and typed client views over
   `forge_api_core`. It must not implement a DB Core driver, import a concrete
