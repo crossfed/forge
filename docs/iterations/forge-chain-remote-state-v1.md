@@ -136,7 +136,7 @@ encoding/decoding using the downstream shared schema.
 Conceptually:
 
 ```cpp
-auto remote = mount.get_remote_api<forge::chain::state::api>();
+auto remote = co_await mount.get_remote_api<forge::chain::state::api>();
 auto state = forge::chain::state::client{std::move(remote)};
 
 auto read = co_await state.begin_read({
