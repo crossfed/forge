@@ -401,7 +401,19 @@ function(_forge_contract_target_dependencies target output)
    if(NOT _dependencies)
       set(_dependencies)
    endif()
-   set(${output} "${_dependencies}" PARENT_SCOPE)
+   set(_normalized)
+   foreach(_dependency IN LISTS _dependencies)
+      if(_dependency MATCHES "^\\$<LINK_ONLY:([^<>]+)>$")
+         set(_dependency "${CMAKE_MATCH_1}")
+      elseif(_dependency MATCHES "\\$<")
+         message(
+            FATAL_ERROR
+            "generator expressions are not supported in contract library dependencies: ${_dependency}"
+         )
+      endif()
+      list(APPEND _normalized "${_dependency}")
+   endforeach()
+   set(${output} "${_normalized}" PARENT_SCOPE)
 endfunction()
 
 function(_forge_contract_collect_library graph target)
@@ -428,9 +440,6 @@ function(_forge_contract_collect_library graph target)
 
    _forge_contract_target_dependencies("${_target}" _dependencies)
    foreach(_dependency IN LISTS _dependencies)
-      if(_dependency MATCHES "\\$<")
-         message(FATAL_ERROR "generator expressions are not supported in contract library dependencies: ${_dependency}")
-      endif()
       _forge_contract_collect_library("${graph}" "${_dependency}")
    endforeach()
 

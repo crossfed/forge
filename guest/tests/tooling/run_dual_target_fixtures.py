@@ -212,6 +212,25 @@ forge_add_contract_library(
         contains="not guest-compatible",
     )
 
+    generator_expression = write_negative_project(
+        output / "generator-expression",
+        """add_library(host_only INTERFACE)
+forge_add_contract_library(
+   protocol ID negative.generator.expression SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+target_link_libraries(protocol PUBLIC "$<BUILD_INTERFACE:host_only>")
+forge_add_contract(expression LIBRARIES protocol SOURCES contract.cpp)
+""",
+    )
+    configure(
+        args,
+        generator_expression,
+        output / "generator-expression-build",
+        succeeds=False,
+        contains="generator expressions are not supported",
+    )
+
     cycle = write_negative_project(
         output / "cycle",
         """forge_add_contract_library(
@@ -242,19 +261,53 @@ def check_dependency_normalization(args, output: Path) -> None:
     source = output / "source"
     source.mkdir(parents=True)
     (source / "include").mkdir()
+    (source / "src").mkdir()
+    (source / "include" / "dependency.cppm").write_text(
+        """export module self_contained.dependency;
+
+export int dependency_value();
+""",
+        encoding="utf-8",
+    )
+    (source / "src" / "dependency.cpp").write_text(
+        """module self_contained.dependency;
+
+int dependency_value() {
+   return 42;
+}
+""",
+        encoding="utf-8",
+    )
     (source / "include" / "protocol.cppm").write_text(
-        "export module self_contained.protocol;\n",
+        """export module self_contained.protocol;
+
+export int protocol_value();
+""",
+        encoding="utf-8",
+    )
+    (source / "src" / "protocol.cpp").write_text(
+        """module self_contained.protocol;
+
+import self_contained.dependency;
+
+int protocol_value() {
+   return dependency_value();
+}
+""",
         encoding="utf-8",
     )
     (source / "contract.cpp").write_text(
         """import forge.contract;
+import self_contained.protocol;
 
 class [[forge::contract("selfcontained")]] self_contained_contract
     : public forge::contract::context {
  public:
    using context::context;
 
-   [[forge::action]] void ping() {}
+   [[forge::action]] void ping() {
+      forge::contract::check(protocol_value() == 42, "private dependency was not linked");
+   }
 };
 """,
         encoding="utf-8",
@@ -265,9 +318,16 @@ project(SelfContainedContractLibrary LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 find_package(ForgeContract CONFIG REQUIRED)
 forge_add_contract_library(
+   dependency ID self_contained.dependency SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/dependency.cppm
+   SOURCES src/dependency.cpp
+)
+forge_add_contract_library(
    protocol ID self_contained.protocol SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
    MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+   SOURCES src/protocol.cpp
 )
+target_link_libraries(protocol PRIVATE dependency)
 forge_add_contract(
    selfcontained LIBRARIES protocol protocol SOURCES contract.cpp
 )
@@ -290,6 +350,12 @@ forge_add_contract(
     ]
     if len(edges) != 1:
         raise RuntimeError(f"root contract library dependency was not normalized: {edges}")
+    private_edge = {
+        "owner": "self_contained.protocol",
+        "dependency": "self_contained.dependency",
+    }
+    if private_edge not in manifest["source_graph"]["dependencies"]:
+        raise RuntimeError("LINK_ONLY private contract dependency was not attested")
 
 
 def main() -> None:
