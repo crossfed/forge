@@ -328,6 +328,9 @@ def main() -> None:
     relocated = output / "product-protocol-relocated"
     shutil.copytree(producer_install, relocated)
     product_package = relocated / "lib" / "cmake" / "ProductProtocol"
+    module_metadata = product_package / "cxx-modules"
+    if not module_metadata.is_dir() or not any(module_metadata.glob("*.cmake")):
+        raise RuntimeError("installed protocol package omits CMake C++ module metadata")
     consumer_build = output / "consumer-build"
     configure(
         args,

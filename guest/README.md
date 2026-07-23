@@ -142,10 +142,19 @@ forge_install_contract_library(
    MODULE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/modules"
    SOURCE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/sources"
 )
+
+install(
+   EXPORT ProductProtocolTargets
+   FILE ProductProtocolTargets.cmake
+   NAMESPACE Product::
+   CXX_MODULES_DIRECTORY cxx-modules
+   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ProductProtocol"
+)
 ```
 
 Export `ProductProtocolTargets` with the normal CMake `install(EXPORT ...)`
-command. Its package config must call `find_dependency(Forge)` and
+command and a `CXX_MODULES_DIRECTORY`, so consumers receive CMake's module
+metadata. Its package config must call `find_dependency(Forge)` and
 `find_dependency(ForgeContract)`. The resulting imported target, such as
 `Product::protocol`, can be passed directly to `forge_add_contract`. Installed
 metadata is prefix-relative; compiled module files are never installed.

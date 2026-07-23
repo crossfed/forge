@@ -56,6 +56,7 @@ install(
    EXPORT ProductProtocolTargets
    FILE ProductProtocolTargets.cmake
    NAMESPACE Product::
+   CXX_MODULES_DIRECTORY cxx-modules
    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ProductProtocol"
 )
 
