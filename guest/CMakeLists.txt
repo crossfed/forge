@@ -349,6 +349,14 @@ else()
    add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../tools" "${CMAKE_CURRENT_BINARY_DIR}/tools")
 endif()
 
+if(FORGE_CONTRACT_FORGE_DIR)
+   set(_forge_contract_host_package_dir "${FORGE_CONTRACT_FORGE_DIR}")
+elseif(Forge_DIR)
+   set(_forge_contract_host_package_dir "${Forge_DIR}")
+else()
+   message(FATAL_ERROR "Contract SDK could not resolve the Forge host package directory")
+endif()
+
 set(_forge_contract_input_sysroot "${FORGE_CONTRACT_SYSROOT}")
 set(FORGE_CONTRACT_SYSROOT "${CMAKE_BINARY_DIR}/sdk-sysroot")
 set(_forge_contract_sysroot_stage_dependencies)
@@ -759,7 +767,7 @@ add_custom_target(
       --archive "${_forge_contract_archive}"
       --cmake "${CMAKE_COMMAND}"
       --cxx-compiler "${CMAKE_CXX_COMPILER}"
-      --forge-package "${Forge_DIR}"
+      --forge-package "${_forge_contract_host_package_dir}"
       --dual-target-source "${CMAKE_CURRENT_SOURCE_DIR}/tests/dual_target"
       --source-root "${CMAKE_CURRENT_SOURCE_DIR}/.."
       --output "${CMAKE_CURRENT_BINARY_DIR}/relocation"
