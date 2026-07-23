@@ -360,6 +360,12 @@ BOOST_AUTO_TEST_CASE(chain_savanna_verifies_strong_weak_and_pending_qcs) {
    auto empty_weak = strong;
    empty_weak.weak_votes = savanna::vote_bitset{3U};
    BOOST_CHECK_THROW(savanna::verify_basic(empty_weak, verified_policy), savanna::exceptions::invalid_qc);
+
+   auto downgraded = strong;
+   downgraded.weak_votes = savanna::vote_bitset{3U};
+   downgraded.weak_votes->set(2U);
+   downgraded.signature.aggregate(third.sign(weak_bytes));
+   BOOST_CHECK_THROW(savanna::verify_signature(downgraded, verified_policy, digest), savanna::exceptions::invalid_qc);
 }
 
 BOOST_AUTO_TEST_CASE(chain_savanna_validation_and_rank_are_deterministic) {
@@ -392,8 +398,14 @@ BOOST_AUTO_TEST_CASE(chain_savanna_validation_and_rank_are_deterministic) {
                      savanna::exceptions::invalid_validation_state);
 
    auto forged_leaf = validation;
-   forged_leaf.leaves.front() = make_digest(98U);
+   forged_leaf.leaves.front().commitment = make_digest(98U);
    BOOST_CHECK_THROW(savanna::validate(forged_leaf), savanna::exceptions::invalid_validation_state);
+
+   auto forged_origin = validation;
+   ++forged_origin.first;
+   BOOST_CHECK_THROW(savanna::validate(forged_origin), savanna::exceptions::invalid_validation_state);
+   BOOST_CHECK_THROW(static_cast<void>(savanna::append(forged_origin, {.num = 8U})),
+                     savanna::exceptions::invalid_validation_state);
 
    const auto roundtrip = forge::raw::unpack<savanna::validation_state>(forge::raw::pack(validation));
    savanna::validate(roundtrip);

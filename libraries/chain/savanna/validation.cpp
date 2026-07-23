@@ -22,10 +22,9 @@ digest leaf_digest(const validation_leaf& leaf) {
 
 validation_state make_validation(const validation_leaf& genesis) {
    auto result = validation_state{.first = genesis.num};
-   const auto leaf = leaf_digest(genesis);
-   result.tree.append(leaf);
+   result.tree.append(leaf_digest(genesis));
    result.roots.push_back(result.tree.root());
-   result.leaves.push_back(leaf);
+   result.leaves.push_back(genesis);
    return result;
 }
 
@@ -35,10 +34,9 @@ validation_state append(validation_state state, const validation_leaf& leaf) {
        leaf.num != state.first + static_cast<block_num_t>(state.roots.size())) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_validation_state, "Savanna validation leaf is not contiguous");
    }
-   const auto digest = leaf_digest(leaf);
-   state.tree.append(digest);
+   state.tree.append(leaf_digest(leaf));
    state.roots.push_back(state.tree.root());
-   state.leaves.push_back(digest);
+   state.leaves.push_back(leaf);
    return state;
 }
 
@@ -61,7 +59,12 @@ void validate(const validation_state& state) {
 
    auto replay = forge::chain::core::incremental_merkle_tree{};
    for (auto index = std::size_t{}; index < state.leaves.size(); ++index) {
-      replay.append(state.leaves[index]);
+      if (state.leaves[index].num != state.first + static_cast<block_num_t>(index)) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_validation_state,
+                               "Savanna retained validation leaf is not contiguous",
+                               forge::exceptions::ctx("leaf_index", index));
+      }
+      replay.append(leaf_digest(state.leaves[index]));
       if (replay.root() != state.roots[index]) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_validation_state, "Savanna retained validation root is inconsistent",
                                forge::exceptions::ctx("root_index", index));

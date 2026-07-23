@@ -24,7 +24,7 @@ struct validation_state {
    forge::chain::core::incremental_merkle_tree tree;
    block_num_t first = 0;
    std::vector<digest> roots;
-   std::vector<digest> leaves;
+   std::vector<validation_leaf> leaves;
 };
 
 [[nodiscard]] validation_state make_validation(const validation_leaf& genesis);

@@ -135,6 +135,9 @@ void verify_weights(const qc_signature& value, const verified_finalizer_policy& 
       }
       return;
    }
+   if (strong.reached()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_qc, "Savanna weak QC already contains a strong quorum");
+   }
 
    auto combined = strong_signers;
    combined.insert(combined.end(), weak_signers.begin(), weak_signers.end());

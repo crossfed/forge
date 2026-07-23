@@ -83,8 +83,10 @@ Corrected during transfer:
 - grouped verification accepts only proof-verified public-key capabilities,
   while Raw finalizer policies keep the donor layout without embedded proofs;
 - weak QC encoding rejects a present-but-empty weak-vote bitset;
-- retained validation roots are replay-verified from stored leaf digests rather
-  than trusted as an unauthenticated historical cache;
+- weak QC encoding is rejected when its strong votes already reach quorum;
+- retained validation roots and their starting block are replay-verified from
+  stored neutral leaf preimages rather than trusted as an unauthenticated
+  historical cache;
 - QC weight evaluation uses `forge_chain_quorum`;
 - producer and protocol records remain downstream.
 

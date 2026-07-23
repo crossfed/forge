@@ -73,13 +73,15 @@ QC verification delegates weighted threshold evaluation to
 `forge_crypto_bls`. Same-message key aggregation is available only after
 proof-of-possession validation, preventing rogue-key attacks. A finalizer
 present in both active and pending policies must cast the same strong/weak vote
-in both signatures. A present weak-vote bitset must contain at least one vote,
-so a strong QC cannot be represented non-canonically as weak.
+in both signatures. A weak QC must contain at least one weak vote, and its
+strong-vote subset must remain below threshold, so a strong quorum cannot be
+represented non-canonically as weak.
 
-`validation_state` retains derived leaf digests alongside historical roots.
-Validation replays every leaf, verifies every retained root and compares the
-complete incremental Merkle state. This makes deserialized state safe to query
-through `root_at()` after validation without a full protocol block history.
+`validation_state` retains neutral leaf preimages alongside historical roots.
+Validation checks their explicit contiguous block numbers from `first`, hashes
+and replays every leaf, verifies every retained root and compares the complete
+incremental Merkle state. This makes deserialized state safe to query through
+`root_at()` after validation without a full protocol block history.
 Chain code does not include or call the BLS vendor.
 
 ## Boundaries
