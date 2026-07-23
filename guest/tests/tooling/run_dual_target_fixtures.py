@@ -238,6 +238,60 @@ forge_add_contract(cycle LIBRARIES first SOURCES contract.cpp)
     )
 
 
+def check_dependency_normalization(args, output: Path) -> None:
+    source = output / "source"
+    source.mkdir(parents=True)
+    (source / "include").mkdir()
+    (source / "include" / "protocol.cppm").write_text(
+        "export module self_contained.protocol;\n",
+        encoding="utf-8",
+    )
+    (source / "contract.cpp").write_text(
+        """import forge.contract;
+
+class [[forge::contract("selfcontained")]] self_contained_contract
+    : public forge::contract::context {
+ public:
+   using context::context;
+
+   [[forge::action]] void ping() {}
+};
+""",
+        encoding="utf-8",
+    )
+    (source / "CMakeLists.txt").write_text(
+        """cmake_minimum_required(VERSION 3.31)
+project(SelfContainedContractLibrary LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 23)
+find_package(ForgeContract CONFIG REQUIRED)
+forge_add_contract_library(
+   protocol ID self_contained.protocol SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+forge_add_contract(
+   selfcontained LIBRARIES protocol protocol SOURCES contract.cpp
+)
+""",
+        encoding="utf-8",
+    )
+
+    build_directory = output / "build"
+    configure(args, source, build_directory)
+    build(args, build_directory)
+    _, manifest = verify_artifacts(build_directory, "selfcontained")
+    edges = [
+        edge
+        for edge in manifest["source_graph"]["dependencies"]
+        if edge
+        == {
+            "owner": "contract:selfcontained",
+            "dependency": "self_contained.protocol",
+        }
+    ]
+    if len(edges) != 1:
+        raise RuntimeError(f"root contract library dependency was not normalized: {edges}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--cmake", required=True)
@@ -301,6 +355,7 @@ def main() -> None:
     run(str(vm_build / "product_protocol_vm_tests"))
 
     check_negative_projects(args, output / "negative")
+    check_dependency_normalization(args, output / "dependency-normalization")
 
 
 if __name__ == "__main__":
