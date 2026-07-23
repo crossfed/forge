@@ -10,4 +10,5 @@ target_link_libraries(
    forge_chain_fork PUBLIC
       Boost::headers
       forge_exceptions
+      Threads::Threads
 )

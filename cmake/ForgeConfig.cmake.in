@@ -548,7 +548,12 @@ if("log" IN_LIST _FORGE_COMPONENTS)
    find_package(boost_stacktrace_basic CONFIG QUIET)
 endif()
 
-if("asio" IN_LIST _FORGE_COMPONENTS OR "net_transport" IN_LIST _FORGE_COMPONENTS OR "vm_wasm" IN_LIST _FORGE_COMPONENTS)
+if(
+   "asio" IN_LIST _FORGE_COMPONENTS
+   OR "chain_fork" IN_LIST _FORGE_COMPONENTS
+   OR "net_transport" IN_LIST _FORGE_COMPONENTS
+   OR "vm_wasm" IN_LIST _FORGE_COMPONENTS
+)
    _forge_require_package(Threads)
 endif()
 
