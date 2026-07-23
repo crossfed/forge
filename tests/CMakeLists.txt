@@ -169,6 +169,22 @@ add_executable(
 target_link_libraries(test_forge_chain_protocol forge_chain_protocol forge Boost::included_unit_test_framework)
 add_test(NAME test_forge_chain_protocol COMMAND test_forge_chain_protocol WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
+add_executable(
+   test_forge_chain_quorum
+   unit/main.cpp
+   chain_quorum/quorum_tests.cpp
+)
+target_link_libraries(test_forge_chain_quorum forge_chain_quorum forge Boost::included_unit_test_framework)
+add_test(NAME test_forge_chain_quorum COMMAND test_forge_chain_quorum WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(
+   test_forge_chain_fork
+   unit/main.cpp
+   chain_fork/fork_tests.cpp
+)
+target_link_libraries(test_forge_chain_fork forge_chain_fork forge Boost::included_unit_test_framework)
+add_test(NAME test_forge_chain_fork COMMAND test_forge_chain_fork WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
 if(FORGE_ENABLE_CONTRACT_TOOLING)
    add_executable(
       test_forge_contract
@@ -1073,6 +1089,28 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
+   test_forge_package_chain_quorum_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_chain_quorum_component
+      ${CMAKE_BINARY_DIR}/forge-package-chain-quorum-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_chain_quorum_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_chain_fork_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_chain_fork_component
+      ${CMAKE_BINARY_DIR}/forge-package-chain-fork-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_chain_fork_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
    test_forge_package_vm_wasm_component
    COMMAND ${CMAKE_COMMAND}
       -DFORGE_PACKAGE_TEST_INSTALL_PREFIX=${FORGE_PACKAGE_INSTALL_PREFIX}
@@ -1822,6 +1860,28 @@ add_test(
       --test-command forge_package_chain_protocol_component
 )
 set_tests_properties(test_forge_package_chain_protocol_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_chain_quorum_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_chain_quorum_component
+      ${CMAKE_BINARY_DIR}/forge-package-chain-quorum-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_chain_quorum_component
+)
+set_tests_properties(test_forge_package_chain_quorum_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_chain_fork_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_chain_fork_component
+      ${CMAKE_BINARY_DIR}/forge-package-chain-fork-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_chain_fork_component
+)
+set_tests_properties(test_forge_package_chain_fork_component PROPERTIES DEPENDS test_forge_package_install)
 if(FORGE_ENABLE_CONTRACT_TOOLING)
    add_test(
       NAME test_forge_package_contract_abi_component
