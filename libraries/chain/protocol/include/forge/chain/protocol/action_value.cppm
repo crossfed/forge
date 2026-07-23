@@ -1,5 +1,7 @@
 module;
 
+#include <concepts>
+#include <type_traits>
 #include <vector>
 #include <utility>
 
@@ -33,6 +35,21 @@ struct action : action_base {
    template <typename Data>
    action(permission_level permission, account_name raw_account, action_name raw_name, Data&& value)
        : action(std::vector<permission_level>{permission}, raw_account, raw_name, std::forward<Data>(value)) {}
+
+   template <typename Data>
+      requires requires {
+         { std::remove_cvref_t<Data>::get_name() } -> std::same_as<action_name>;
+      }
+   action(std::vector<permission_level> permissions, account_name raw_account, Data&& value)
+       : action(std::move(permissions), raw_account, std::remove_cvref_t<Data>::get_name(), std::forward<Data>(value)) {
+   }
+
+   template <typename Data>
+      requires requires {
+         { std::remove_cvref_t<Data>::get_name() } -> std::same_as<action_name>;
+      }
+   action(permission_level permission, account_name raw_account, Data&& value)
+       : action(std::vector<permission_level>{permission}, raw_account, std::forward<Data>(value)) {}
 };
 
 template <typename Stream> void raw_pack(Stream& stream, const action_base& value) {
