@@ -182,6 +182,9 @@ class service_node {
   finality algorithms. They must not own controller state, state persistence,
   execution, P2P sync, node lifecycle, plugin implementations, runtime config,
   key custody or product policy.
+- Finality leaves use explicit operational block numbers and slots. They must
+  not derive semantics from a concrete protocol block ID or import
+  `forge.chain.protocol.*`; protocol adapters remain downstream.
 - A focused Chain leaf may own neutral remote-state query contracts, explicit
   chain consistency/finality vocabulary and typed client views over
   `forge_api_core`. It must not implement a DB Core driver, import a concrete

@@ -1,0 +1,363 @@
+#include <boost/test/unit_test.hpp>
+
+#include <array>
+#include <cstdint>
+#include <limits>
+#include <string>
+#include <vector>
+
+import forge.chain.savanna.finality_core;
+import forge.chain.savanna.policy;
+import forge.chain.savanna.qc;
+import forge.chain.savanna.rank;
+import forge.chain.savanna.validation;
+import forge.crypto.digest.sha256;
+import forge.raw.raw;
+
+namespace {
+
+namespace savanna = forge::chain::savanna;
+namespace bls = forge::crypto::bls;
+
+savanna::digest make_digest(std::uint64_t value) {
+   auto result = savanna::digest{};
+   result._hash[0] = value;
+   return result;
+}
+
+bls::private_key make_private_key(std::uint8_t base) {
+   auto seed = std::array<std::uint8_t, 32>{};
+   for (auto index = std::size_t{}; index < seed.size(); ++index) {
+      seed[index] = static_cast<std::uint8_t>(base + index);
+   }
+   return bls::private_key{std::span<const std::uint8_t>{seed}};
+}
+
+savanna::finalizer make_finalizer(const bls::private_key& key, std::uint64_t weight, std::string description) {
+   return {
+       .description = std::move(description),
+       .weight = weight,
+       .public_key = key.get_public_key(),
+   };
+}
+
+std::vector<std::uint8_t> weak_message(savanna::digest value) {
+   auto result = std::vector<std::uint8_t>{};
+   const auto bytes = value.to_uint8_span();
+   result.insert(result.end(), bytes.begin(), bytes.end());
+   result.insert(result.end(), {'W', 'E', 'A', 'K'});
+   return result;
+}
+
+savanna::digest packed_finality_digest(const savanna::finality_core& core) {
+   auto encoder = forge::crypto::digest::sha256::encoder{};
+   core.pack_for_digest(encoder);
+   return encoder.result();
+}
+
+BOOST_AUTO_TEST_CASE(chain_savanna_policy_validates_strict_majority_and_keys) {
+   const auto first = make_private_key(1U);
+   const auto second = make_private_key(33U);
+   const auto policy = savanna::finalizer_policy{
+       .generation = 1U,
+       .threshold = 2U,
+       .finalizers =
+           {
+               make_finalizer(first, 1U, "first"),
+               make_finalizer(second, 2U, "second"),
+           },
+   };
+   savanna::validate(policy);
+
+   auto empty = policy;
+   empty.finalizers.clear();
+   BOOST_CHECK_THROW(savanna::validate(empty), savanna::exceptions::invalid_policy);
+
+   auto half = policy;
+   half.finalizers[0].weight = 2U;
+   half.threshold = 2U;
+   BOOST_CHECK_THROW(savanna::validate(half), savanna::exceptions::invalid_policy);
+
+   auto duplicate = policy;
+   duplicate.finalizers[1].public_key = duplicate.finalizers[0].public_key;
+   BOOST_CHECK_THROW(savanna::validate(duplicate), savanna::exceptions::duplicate_finalizer);
+
+   auto identity = policy;
+   identity.finalizers[0].public_key = {};
+   BOOST_CHECK_THROW(savanna::validate(identity), savanna::exceptions::invalid_policy);
+
+   auto overflow = policy;
+   overflow.finalizers[0].weight = std::numeric_limits<std::uint64_t>::max();
+   overflow.finalizers[1].weight = 1U;
+   overflow.threshold = std::numeric_limits<std::uint64_t>::max();
+   BOOST_CHECK_THROW(savanna::validate(overflow), savanna::exceptions::policy_weight_overflow);
+}
+
+BOOST_AUTO_TEST_CASE(chain_savanna_policy_diff_is_ordered_and_sequential) {
+   const auto first = make_private_key(1U);
+   const auto second = make_private_key(33U);
+   const auto third = make_private_key(65U);
+   const auto replacement = make_private_key(97U);
+   const auto source = savanna::finalizer_policy{
+       .generation = 4U,
+       .threshold = 2U,
+       .finalizers =
+           {
+               make_finalizer(first, 1U, "first"),
+               make_finalizer(second, 1U, "second"),
+               make_finalizer(third, 1U, "third"),
+           },
+   };
+
+   const auto updated =
+       savanna::apply(source, {
+                                  .generation = 5U,
+                                  .threshold = 2U,
+                                  .finalizers =
+                                      {
+                                          .remove_indexes = {1U},
+                                          .insert_indexes = {{1U, make_finalizer(replacement, 1U, "replacement")}},
+                                      },
+                              });
+   BOOST_TEST(updated.generation == 5U);
+   BOOST_REQUIRE_EQUAL(updated.finalizers.size(), 3U);
+   BOOST_TEST(updated.finalizers[0].description == "first");
+   BOOST_TEST(updated.finalizers[1].description == "replacement");
+   BOOST_TEST(updated.finalizers[2].description == "third");
+
+   auto skipped = savanna::finalizer_policy_diff{
+       .generation = 6U,
+       .threshold = 2U,
+   };
+   BOOST_CHECK_THROW(static_cast<void>(savanna::apply(source, skipped)), savanna::exceptions::invalid_policy);
+
+   auto unordered = savanna::finalizer_policy_diff{
+       .generation = 5U,
+       .threshold = 2U,
+       .finalizers = {.remove_indexes = {1U, 1U}},
+   };
+   BOOST_CHECK_THROW(static_cast<void>(savanna::apply(source, unordered)), savanna::exceptions::invalid_policy);
+}
+
+BOOST_AUTO_TEST_CASE(chain_savanna_qc_claim_raw_layout_matches_spring) {
+   const auto bytes = forge::raw::pack(savanna::qc_claim{.block = 0x01020304U, .strong = true});
+   const auto expected = std::vector<std::uint8_t>{0x04U, 0x03U, 0x02U, 0x01U, 0x01U};
+   BOOST_TEST(bytes == expected, boost::test_tools::per_element());
+}
+
+BOOST_AUTO_TEST_CASE(chain_savanna_finality_matches_strong_and_weak_sequences) {
+   const auto genesis_id = make_digest(1U);
+   auto core = savanna::finality_core::genesis(0U, 10U);
+   auto slot = savanna::block_slot_t{10U};
+
+   auto next = [&](savanna::qc_claim claim) {
+      const auto current = core.current_block_num();
+      const auto current_id = current == 0U ? genesis_id : make_digest(current + 1U);
+      core = core.next(
+          {
+              .num = current,
+              .id = current_id,
+              .slot = slot,
+              .finality_digest = make_digest(current + 100U),
+              .active_policy_generation = 1U,
+          },
+          claim);
+      ++slot;
+      BOOST_TEST(core.current_block_num() == current + 1U);
+      BOOST_CHECK(core.latest_qc_claim() == claim);
+   };
+
+   next({.block = 0U, .strong = true});
+   next({.block = 1U, .strong = true});
+   next({.block = 2U, .strong = true});
+   BOOST_TEST(core.last_final_block_num() == 1U);
+
+   next({.block = 2U, .strong = true});
+   next({.block = 3U, .strong = false});
+   next({.block = 3U, .strong = false});
+   BOOST_TEST(core.last_final_block_num() == 1U);
+   next({.block = 3U, .strong = true});
+   BOOST_TEST(core.last_final_block_num() == 2U);
+   next({.block = 4U, .strong = true});
+   next({.block = 6U, .strong = true});
+   BOOST_TEST(core.last_final_block_num() == 3U);
+}
+
+BOOST_AUTO_TEST_CASE(chain_savanna_finality_digest_preserves_spring_preimage) {
+   auto core = savanna::finality_core{
+       .links =
+           {
+               {.source = 5U, .target = 5U, .strong = false},
+               {.source = 6U, .target = 5U, .strong = true},
+           },
+       .refs = {{
+           .num = 5U,
+           .id = make_digest(1U),
+           .slot = 11U,
+           .finality_digest = make_digest(2U),
+           .active_policy_generation = 3U,
+           .pending_policy_generation = 4U,
+       }},
+       .genesis_slot = 9U,
+   };
+   const auto expected = savanna::digest{"8f6d62c3e4284755526e1f782e93c645bbd57d6c9eb98e3c73f574b2834c4d6b"};
+   BOOST_TEST(core.digest_for_finality() == expected);
+
+   auto compatibility_only = core;
+   compatibility_only.refs[0].num = 99U;
+   compatibility_only.refs[0].active_policy_generation = 30U;
+   compatibility_only.refs[0].pending_policy_generation = 40U;
+   BOOST_TEST(packed_finality_digest(compatibility_only) == expected);
+
+   compatibility_only.refs[0].slot = 12U;
+   BOOST_TEST(packed_finality_digest(compatibility_only) != expected);
+
+   auto malformed = core;
+   malformed.refs.clear();
+   BOOST_CHECK_THROW(static_cast<void>(malformed.digest_for_finality()), savanna::exceptions::invalid_finality_state);
+}
+
+BOOST_AUTO_TEST_CASE(chain_savanna_reversible_root_matches_donor_layout) {
+   const auto core = savanna::finality_core{
+       .links =
+           {
+               {.source = 5U, .target = 5U, .strong = true},
+               {.source = 6U, .target = 5U, .strong = true},
+               {.source = 7U, .target = 5U, .strong = true},
+               {.source = 8U, .target = 5U, .strong = true},
+           },
+       .refs =
+           {
+               {.num = 5U, .id = make_digest(5U), .slot = 10U, .finality_digest = make_digest(10U)},
+               {.num = 6U, .id = make_digest(6U), .slot = 11U, .finality_digest = make_digest(11U)},
+               {.num = 7U, .id = make_digest(7U), .slot = 12U, .finality_digest = make_digest(12U)},
+           },
+       .genesis_slot = 1U,
+   };
+   savanna::validate(core);
+   BOOST_TEST(core.reversible_blocks_root() ==
+              savanna::digest{"0a207008b0e24951416c8eabe657e2fafb4141506adda5d3ad5c10d727592888"});
+}
+
+BOOST_AUTO_TEST_CASE(chain_savanna_verifies_strong_weak_and_pending_qcs) {
+   const auto first = make_private_key(1U);
+   const auto second = make_private_key(33U);
+   const auto third = make_private_key(65U);
+   const auto policy = savanna::finalizer_policy{
+       .generation = 1U,
+       .threshold = 3U,
+       .finalizers =
+           {
+               make_finalizer(first, 2U, "first"),
+               make_finalizer(second, 1U, "second"),
+               make_finalizer(third, 1U, "third"),
+           },
+   };
+   const auto digest = make_digest(42U);
+
+   auto strong_votes = savanna::vote_bitset{3U};
+   strong_votes.set(0U);
+   strong_votes.set(1U);
+   auto strong_signature = bls::aggregate_signature{};
+   strong_signature.aggregate(first.sign(digest.to_uint8_span()));
+   strong_signature.aggregate(second.sign(digest.to_uint8_span()));
+   const auto strong = savanna::qc_signature{
+       .strong_votes = strong_votes,
+       .signature = strong_signature,
+   };
+   savanna::verify_signature(strong, policy, digest);
+   const auto packed_certificate = forge::raw::pack(savanna::quorum_certificate{.block = 9U, .active = strong});
+   BOOST_REQUIRE_EQUAL(packed_certificate.size(), 203U);
+   BOOST_TEST(packed_certificate[0] == 0x09U);
+   BOOST_TEST(packed_certificate[4] == 0x01U);
+   BOOST_TEST(packed_certificate[5] == 0x03U);
+   BOOST_TEST(packed_certificate[6] == 0x03U);
+   BOOST_TEST(packed_certificate[7] == 0x00U);
+   BOOST_TEST(packed_certificate[8] == 0xc0U);
+   BOOST_TEST(packed_certificate[9] == 0x01U);
+   BOOST_TEST(packed_certificate.back() == 0x00U);
+   BOOST_TEST(forge::crypto::digest::sha256::hash(packed_certificate).str() ==
+              "5fecab0ef7d336ce3c3f6ba6b52fb91f7e0864d7f379e0be3992eea62ed95098");
+
+   auto weak_strong_votes = savanna::vote_bitset{3U};
+   weak_strong_votes.set(0U);
+   auto weak_votes = savanna::vote_bitset{3U};
+   weak_votes.set(1U);
+   auto weak_signature = bls::aggregate_signature{};
+   weak_signature.aggregate(first.sign(digest.to_uint8_span()));
+   const auto weak_bytes = weak_message(digest);
+   weak_signature.aggregate(second.sign(weak_bytes));
+   const auto weak = savanna::qc_signature{
+       .strong_votes = weak_strong_votes,
+       .weak_votes = weak_votes,
+       .signature = weak_signature,
+   };
+   savanna::verify_signature(weak, policy, digest);
+
+   const auto certificate = savanna::quorum_certificate{
+       .block = 9U,
+       .active = strong,
+       .pending = strong,
+   };
+   savanna::verify(certificate, policy, policy, digest);
+   BOOST_TEST(certificate.strong());
+   const auto expected_claim = savanna::qc_claim{
+       .block = 9U,
+       .strong = true,
+   };
+   BOOST_CHECK(certificate.claim() == expected_claim);
+
+   auto inconsistent_dual_vote = certificate;
+   inconsistent_dual_vote.pending = weak;
+   BOOST_CHECK_THROW(savanna::verify(inconsistent_dual_vote, policy, policy, digest), savanna::exceptions::invalid_qc);
+
+   BOOST_CHECK_THROW(savanna::verify_signature(strong, policy, make_digest(43U)),
+                     savanna::exceptions::invalid_qc_signature);
+
+   auto malformed = strong;
+   malformed.strong_votes = savanna::vote_bitset{2U};
+   BOOST_CHECK_THROW(savanna::verify_basic(malformed, policy), savanna::exceptions::invalid_qc);
+
+   auto overlap = weak;
+   overlap.weak_votes->set(0U);
+   BOOST_CHECK_THROW(savanna::verify_basic(overlap, policy), savanna::exceptions::invalid_qc);
+}
+
+BOOST_AUTO_TEST_CASE(chain_savanna_validation_and_rank_are_deterministic) {
+   const auto first = savanna::validation_leaf{
+       .num = 5U,
+       .slot = 10U,
+       .parent_slot = 9U,
+       .finality_digest = make_digest(1U),
+       .commitment = make_digest(2U),
+   };
+   auto validation = savanna::make_validation(first);
+   BOOST_TEST(savanna::root_at(validation, 5U) ==
+              savanna::digest{"05e8db53e2d7fb3796ac15410da91f71debba651be277d8a9593e4b1b4986e8d"});
+   validation = savanna::append(std::move(validation), {
+                                                           .num = 6U,
+                                                           .slot = 11U,
+                                                           .parent_slot = 10U,
+                                                           .finality_digest = make_digest(3U),
+                                                           .commitment = make_digest(4U),
+                                                       });
+   savanna::validate(validation);
+   BOOST_TEST(savanna::root_at(validation, 6U) == validation.tree.root());
+   BOOST_TEST(validation.tree.root() ==
+              savanna::digest{"86c45f2da153d610b48601b783c016799698c1e2a43da4b1a58a7bf77609ec8e"});
+   BOOST_CHECK_THROW(static_cast<void>(savanna::append(validation, {.num = 8U})),
+                     savanna::exceptions::invalid_validation_state);
+
+   auto core = savanna::finality_core::genesis(5U, 10U);
+   const auto block = savanna::block_ref{
+       .num = 5U,
+       .id = make_digest(6U),
+       .slot = 11U,
+   };
+   const auto first_rank = savanna::make_rank(core, block);
+   auto later = first_rank;
+   later.block = 12U;
+   BOOST_TEST(savanna::better(later, first_rank));
+}
+
+} // namespace

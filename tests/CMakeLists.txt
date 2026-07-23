@@ -185,6 +185,19 @@ add_executable(
 target_link_libraries(test_forge_chain_fork forge_chain_fork forge Boost::included_unit_test_framework)
 add_test(NAME test_forge_chain_fork COMMAND test_forge_chain_fork WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
+add_executable(
+   test_forge_chain_savanna
+   unit/main.cpp
+   chain_savanna/savanna_tests.cpp
+)
+target_link_libraries(
+   test_forge_chain_savanna
+   forge_chain_savanna
+   forge_raw
+   Boost::included_unit_test_framework
+)
+add_test(NAME test_forge_chain_savanna COMMAND test_forge_chain_savanna WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
 if(FORGE_ENABLE_CONTRACT_TOOLING)
    add_executable(
       test_forge_contract
@@ -1111,6 +1124,17 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
+   test_forge_package_chain_savanna_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_chain_savanna_component
+      ${CMAKE_BINARY_DIR}/forge-package-chain-savanna-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_chain_savanna_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
    test_forge_package_vm_wasm_component
    COMMAND ${CMAKE_COMMAND}
       -DFORGE_PACKAGE_TEST_INSTALL_PREFIX=${FORGE_PACKAGE_INSTALL_PREFIX}
@@ -1882,6 +1906,17 @@ add_test(
       --test-command forge_package_chain_fork_component
 )
 set_tests_properties(test_forge_package_chain_fork_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_chain_savanna_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_chain_savanna_component
+      ${CMAKE_BINARY_DIR}/forge-package-chain-savanna-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_chain_savanna_component
+)
+set_tests_properties(test_forge_package_chain_savanna_component PROPERTIES DEPENDS test_forge_package_install)
 if(FORGE_ENABLE_CONTRACT_TOOLING)
    add_test(
       NAME test_forge_package_contract_abi_component
