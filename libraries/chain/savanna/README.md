@@ -156,7 +156,8 @@ state mutex and duplicate/conflict state is checked again before mutation.
 `observe()` validates an external QC before accepting it; `best()` chooses
 between locally aggregated and received candidates with strong-over-weak
 ordering. Active and pending policy signatures remain paired as one complete
-certificate throughout storage and selection.
+certificate throughout storage and selection. Optional vote sets use the
+canonical donor encoding: an all-weak QC omits its empty strong-vote bitset.
 
 The accumulator is deliberately not serializable. Losing pending votes on
 restart affects progress only; it cannot authorize an invalid QC. Networking,

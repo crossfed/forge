@@ -261,6 +261,27 @@ BOOST_AUTO_TEST_CASE(chain_savanna_vote_accumulator_tracks_donor_states) {
    BOOST_CHECK(accumulator.status().active.state ==
                savanna::accumulator_state::weak_final);
 
+   auto all_weak = savanna::vote_accumulator{candidate, verified};
+   static_cast<void>(
+       all_weak.add(make_vote(candidate, first, savanna::vote_kind::weak)));
+   static_cast<void>(
+       all_weak.add(make_vote(candidate, second, savanna::vote_kind::weak)));
+   const auto all_weak_qc = all_weak.best();
+   BOOST_REQUIRE(all_weak_qc.has_value());
+   BOOST_CHECK(!all_weak_qc->active.strong_votes.has_value());
+   const auto all_weak_keys = std::array{first, second};
+   const auto all_weak_indices = std::array<std::size_t, 2>{0U, 1U};
+   const auto all_weak_kinds =
+       std::array{savanna::vote_kind::weak, savanna::vote_kind::weak};
+   const auto canonical_all_weak = savanna::quorum_certificate{
+       .block = candidate.num,
+       .active = make_qc_signature(
+           candidate, policy.finalizers.size(), all_weak_keys,
+           all_weak_indices, all_weak_kinds),
+   };
+   BOOST_TEST(forge::raw::pack(*all_weak_qc) ==
+              forge::raw::pack(canonical_all_weak));
+
    auto restricted = savanna::vote_accumulator{candidate, verified};
    static_cast<void>(restricted.add(
        make_vote(candidate, second, savanna::vote_kind::weak)));

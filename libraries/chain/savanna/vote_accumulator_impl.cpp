@@ -122,7 +122,9 @@ vote_accumulator::impl::policy_votes::local() const {
    auto signature = strong_signature;
    signature.aggregate(weak_signature);
    return qc_signature{
-       .strong_votes = strong_votes,
+       .strong_votes = strong_votes.any()
+                           ? std::optional<vote_bitset>{strong_votes}
+                           : std::nullopt,
        .weak_votes = weak_votes,
        .signature = std::move(signature),
    };

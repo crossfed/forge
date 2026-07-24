@@ -114,6 +114,7 @@ Corrected during transfer:
   match the candidate before accepting votes or certificates;
 - active and pending policy halves remain paired during received/local
   best-certificate selection;
+- all-weak locally constructed QCs omit their empty optional strong-vote set;
 - shared active/pending finalizers are mutated atomically after signature
   verification outside the accumulator mutex;
 - finalizer safety is a versioned neutral value while durable persistence
