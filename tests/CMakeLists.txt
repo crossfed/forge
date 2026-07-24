@@ -189,6 +189,7 @@ add_executable(
    test_forge_chain_savanna
    unit/main.cpp
    chain_savanna/savanna_tests.cpp
+   chain_savanna/hardening_tests.cpp
 )
 target_link_libraries(
    test_forge_chain_savanna
