@@ -18,8 +18,16 @@ struct library_translation_unit {
    std::filesystem::path physical_path;
 };
 
+enum class library_source_role {
+   module,
+   implementation,
+   public_header,
+   private_header,
+};
+
 struct library_source {
    std::string owner;
+   library_source_role role;
    std::filesystem::path physical_path;
 };
 

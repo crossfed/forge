@@ -55,8 +55,26 @@ request parse(int argc, const char* const* argv) {
       } else if (option == "--attested-source") {
          result.attested_sources.emplace_back(next());
       } else if (option == "--library-source") {
+         auto owner = std::string{next()};
+         const auto role = next();
+         const auto parsed_role = [&] {
+            if (role == "module") {
+               return library_source_role::module;
+            }
+            if (role == "implementation") {
+               return library_source_role::implementation;
+            }
+            if (role == "public_header") {
+               return library_source_role::public_header;
+            }
+            if (role == "private_header") {
+               return library_source_role::private_header;
+            }
+            throw std::runtime_error{"contract library source has an invalid role: " + std::string{role}};
+         }();
          result.library_sources.push_back(library_source{
-             .owner = std::string{next()},
+             .owner = std::move(owner),
+             .role = parsed_role,
              .physical_path = next(),
          });
       } else if (option == "--library-translation-unit") {

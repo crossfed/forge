@@ -15,6 +15,7 @@ module;
 #include <clang/Tooling/CompilationDatabase.h>
 #include <clang/Tooling/Tooling.h>
 #include <llvm/ADT/SmallString.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/Support/DynamicLibrary.h>
 
@@ -1446,10 +1447,21 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
 using source_dependencies = std::map<std::filesystem::path, bool>;
 using module_dependencies = std::set<std::string>;
 
-void collect_module_dependencies(clang::ASTContext& context, module_dependencies& dependencies) {
+void collect_module_dependencies(clang::ASTContext& context, module_dependencies& dependencies,
+                                 module_dependencies* exported_dependencies = nullptr) {
    for (const auto* declaration : context.local_imports()) {
       if (const auto* imported = declaration->getImportedModule(); imported != nullptr) {
          dependencies.insert(imported->getFullModuleName());
+      }
+   }
+   if (exported_dependencies == nullptr) {
+      return;
+   }
+   if (const auto* current = context.getCurrentNamedModule(); current != nullptr) {
+      auto exported = llvm::SmallVector<clang::Module*, 4>{};
+      current->getExportedModules(exported);
+      for (const auto* module : exported) {
+         exported_dependencies->insert(module->getFullModuleName());
       }
    }
 }
@@ -1558,11 +1570,13 @@ class action_factory final : public clang::tooling::FrontendActionFactory {
 
 class dependency_consumer final : public clang::ASTConsumer {
  public:
-   dependency_consumer(module_dependencies& imported_modules, module_dependencies& provided_modules)
-       : imported_modules_(imported_modules), provided_modules_(provided_modules) {}
+   dependency_consumer(module_dependencies& imported_modules, module_dependencies& exported_modules,
+                       module_dependencies& provided_modules)
+       : imported_modules_(imported_modules), exported_modules_(exported_modules), provided_modules_(provided_modules) {
+   }
 
    void HandleTranslationUnit(clang::ASTContext& context) override {
-      collect_module_dependencies(context, imported_modules_);
+      collect_module_dependencies(context, imported_modules_, &exported_modules_);
       if (const auto* module = context.getCurrentNamedModule(); module != nullptr) {
          provided_modules_.insert(module->getFullModuleName());
       }
@@ -1570,17 +1584,19 @@ class dependency_consumer final : public clang::ASTConsumer {
 
  private:
    module_dependencies& imported_modules_;
+   module_dependencies& exported_modules_;
    module_dependencies& provided_modules_;
 };
 
 class dependency_action final : public clang::SyntaxOnlyAction {
  public:
    dependency_action(source_dependencies& dependencies, module_dependencies& imported_modules,
-                     module_dependencies& provided_modules)
-       : dependencies_(dependencies), imported_modules_(imported_modules), provided_modules_(provided_modules) {}
+                     module_dependencies& exported_modules, module_dependencies& provided_modules)
+       : dependencies_(dependencies), imported_modules_(imported_modules), exported_modules_(exported_modules),
+         provided_modules_(provided_modules) {}
 
    std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance&, llvm::StringRef) override {
-      return std::make_unique<dependency_consumer>(imported_modules_, provided_modules_);
+      return std::make_unique<dependency_consumer>(imported_modules_, exported_modules_, provided_modules_);
    }
 
    void EndSourceFileAction() override {
@@ -1590,22 +1606,26 @@ class dependency_action final : public clang::SyntaxOnlyAction {
  private:
    source_dependencies& dependencies_;
    module_dependencies& imported_modules_;
+   module_dependencies& exported_modules_;
    module_dependencies& provided_modules_;
 };
 
 class dependency_action_factory final : public clang::tooling::FrontendActionFactory {
  public:
    dependency_action_factory(source_dependencies& dependencies, module_dependencies& imported_modules,
-                             module_dependencies& provided_modules)
-       : dependencies_(dependencies), imported_modules_(imported_modules), provided_modules_(provided_modules) {}
+                             module_dependencies& exported_modules, module_dependencies& provided_modules)
+       : dependencies_(dependencies), imported_modules_(imported_modules), exported_modules_(exported_modules),
+         provided_modules_(provided_modules) {}
 
    std::unique_ptr<clang::FrontendAction> create() override {
-      return std::make_unique<dependency_action>(dependencies_, imported_modules_, provided_modules_);
+      return std::make_unique<dependency_action>(dependencies_, imported_modules_, exported_modules_,
+                                                 provided_modules_);
    }
 
  private:
    source_dependencies& dependencies_;
    module_dependencies& imported_modules_;
+   module_dependencies& exported_modules_;
    module_dependencies& provided_modules_;
 };
 
@@ -1794,6 +1814,7 @@ void write_source_dependencies(const forge::contract::abi::request& options, con
 void validate_library_dependencies(const forge::contract::abi::request& options,
                                    const std::map<std::string, source_dependencies>& dependencies_by_owner,
                                    const std::map<std::string, module_dependencies>& modules_by_owner,
+                                   const std::map<std::string, module_dependencies>& exported_modules_by_owner,
                                    const std::map<std::string, module_dependencies>& provided_modules_by_owner,
                                    const source_dependencies& contract_dependencies,
                                    const module_dependencies& contract_modules) {
@@ -1806,7 +1827,7 @@ void validate_library_dependencies(const forge::contract::abi::request& options,
    }
 
    auto sources_by_owner = std::map<std::string, std::set<std::filesystem::path>>{};
-   auto owners_by_source = std::map<std::filesystem::path, std::string>{};
+   auto sources = std::map<std::filesystem::path, forge::contract::abi::library_source>{};
    for (const auto& source : options.library_sources) {
       if (source.owner.empty() || contains_reserved_separator(source.owner)) {
          throw std::runtime_error{"contract library source has an invalid owner"};
@@ -1818,13 +1839,18 @@ void validate_library_dependencies(const forge::contract::abi::request& options,
       if (!attested_sources.contains(physical_path)) {
          throw std::runtime_error{"contract library source is not attested: " + physical_path.string()};
       }
-      const auto [existing, inserted] = owners_by_source.emplace(physical_path, source.owner);
-      if (!inserted && existing->second != source.owner) {
+      const auto canonical_source = forge::contract::abi::library_source{
+          .owner = source.owner,
+          .role = source.role,
+          .physical_path = physical_path,
+      };
+      const auto [existing, inserted] = sources.emplace(physical_path, canonical_source);
+      if (!inserted && (existing->second.owner != source.owner || existing->second.role != source.role)) {
          throw std::runtime_error{"contract library source has multiple owners: " + physical_path.string()};
       }
-      sources_by_owner[source.owner].insert(std::move(physical_path));
+      sources_by_owner[source.owner].insert(physical_path);
    }
-   if (owners_by_source.size() != attested_sources.size()) {
+   if (sources.size() != attested_sources.size()) {
       throw std::runtime_error{"an attested contract library source has no owner"};
    }
    for (const auto& source : options.library_translation_units) {
@@ -1911,6 +1937,11 @@ void validate_library_dependencies(const forge::contract::abi::request& options,
       return visible;
    };
 
+   const auto is_public_source = [](forge::contract::abi::library_source_role role) {
+      return role == forge::contract::abi::library_source_role::module ||
+             role == forge::contract::abi::library_source_role::public_header;
+   };
+
    auto external_roots = std::vector<std::filesystem::path>{};
    external_roots.reserve(options.external_source_roots.size());
    for (const auto& root : options.external_source_roots) {
@@ -1926,15 +1957,15 @@ void validate_library_dependencies(const forge::contract::abi::request& options,
       }
       const auto visible_owners = visible_dependencies(owner, true);
 
-      auto allowed_sources = std::set<std::filesystem::path>{};
-      for (const auto& visible_owner : visible_owners) {
-         const auto& sources = sources_by_owner.at(visible_owner);
-         allowed_sources.insert(sources.begin(), sources.end());
-      }
       for (const auto& [dependency, is_system] : dependencies) {
-         if (allowed_sources.contains(dependency) || is_system ||
-             std::ranges::any_of(external_roots,
-                                 [&](const auto& root) { return relative_to(dependency, root).has_value(); })) {
+         const auto source = sources.find(dependency);
+         const auto source_is_allowed =
+             source != sources.end() &&
+             (source->second.owner == owner ||
+              (visible_owners.contains(source->second.owner) && is_public_source(source->second.role)));
+         if (source_is_allowed || is_system || std::ranges::any_of(external_roots, [&](const auto& root) {
+                return relative_to(dependency, root).has_value();
+             })) {
             continue;
          }
          throw std::runtime_error{"contract library " + owner + " dependency is not declared: " + dependency.string()};
@@ -1947,6 +1978,16 @@ void validate_library_dependencies(const forge::contract::abi::request& options,
             }
          }
       }
+      if (const auto exported = exported_modules_by_owner.find(owner); exported != exported_modules_by_owner.end()) {
+         const auto public_owners = visible_dependencies(owner, false);
+         for (const auto& module : exported->second) {
+            const auto dependency_owner = owners_by_module.find(module);
+            if (dependency_owner != owners_by_module.end() && !public_owners.contains(dependency_owner->second)) {
+               throw std::runtime_error{"contract library " + owner +
+                                        " exports a module through a private dependency: " + module};
+            }
+         }
+      }
    }
 
    const auto visible_owners = visible_dependencies(contract_owner, false);
@@ -1956,8 +1997,9 @@ void validate_library_dependencies(const forge::contract::abi::request& options,
           })) {
          continue;
       }
-      const auto owner = owners_by_source.find(dependency);
-      if (owner != owners_by_source.end() && !visible_owners.contains(owner->second)) {
+      const auto source = sources.find(dependency);
+      if (source != sources.end() &&
+          (!visible_owners.contains(source->second.owner) || !is_public_source(source->second.role))) {
          throw std::runtime_error{"contract " + options.contract +
                                   " dependency is not declared: " + dependency.string()};
       }
@@ -2463,8 +2505,10 @@ artifacts generate(const request& options) {
       }
       auto dependency_compilation = clang::tooling::FixedCompilationDatabase{".", dependency_arguments};
       auto dependency_tool = clang::tooling::ClangTool{dependency_compilation, dependency_source_paths};
+      auto exported_modules = module_dependencies{};
       auto provided_modules = module_dependencies{};
-      auto dependency_factory = dependency_action_factory{dependencies, imported_modules, provided_modules};
+      auto dependency_factory =
+          dependency_action_factory{dependencies, imported_modules, exported_modules, provided_modules};
       if (dependency_tool.run(&dependency_factory) != 0) {
          throw std::runtime_error{"contract dependency source analysis failed"};
       }
@@ -2481,18 +2525,20 @@ artifacts generate(const request& options) {
 
       auto dependencies_by_owner = std::map<std::string, source_dependencies>{};
       auto modules_by_owner = std::map<std::string, module_dependencies>{};
+      auto exported_modules_by_owner = std::map<std::string, module_dependencies>{};
       auto provided_modules_by_owner = std::map<std::string, module_dependencies>{};
       for (const auto& [owner, library_sources] : sources_by_owner) {
          auto dependency_compilation = clang::tooling::FixedCompilationDatabase{".", dependency_arguments};
          auto dependency_tool = clang::tooling::ClangTool{dependency_compilation, library_sources};
-         auto dependency_factory = dependency_action_factory{dependencies_by_owner[owner], modules_by_owner[owner],
-                                                             provided_modules_by_owner[owner]};
+         auto dependency_factory =
+             dependency_action_factory{dependencies_by_owner[owner], modules_by_owner[owner],
+                                       exported_modules_by_owner[owner], provided_modules_by_owner[owner]};
          if (dependency_tool.run(&dependency_factory) != 0) {
             throw std::runtime_error{"contract library dependency source analysis failed: " + owner};
          }
       }
-      validate_library_dependencies(options, dependencies_by_owner, modules_by_owner, provided_modules_by_owner,
-                                    dependencies, imported_modules);
+      validate_library_dependencies(options, dependencies_by_owner, modules_by_owner, exported_modules_by_owner,
+                                    provided_modules_by_owner, dependencies, imported_modules);
    }
 
    load_ricardian(output, options);

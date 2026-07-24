@@ -821,6 +821,13 @@ export int protocol_value();
 """,
         encoding="utf-8",
     )
+    (source / "include" / "protocol" / "protocol_private.hpp").write_text(
+        """#pragma once
+
+inline constexpr int protocol_private_value = 42;
+""",
+        encoding="utf-8",
+    )
     (source / "src" / "protocol.cpp").write_text(
         """module self_contained.protocol;
 
@@ -883,6 +890,7 @@ forge_add_contract_library(
    protocol ID self_contained.protocol SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.."
    MODULE_BASE_DIRS include/protocol MODULE_SOURCES include/protocol/protocol.cppm
    SOURCES src/protocol.cpp
+   PRIVATE_HEADERS include/protocol/protocol_private.hpp
 )
 """,
         encoding="utf-8",
@@ -979,6 +987,63 @@ class [[forge::contract("selfcontained")]] self_contained_contract
         private_module_build,
         succeeds=False,
         contains="contract selfcontained dependency is not declared",
+    )
+
+    private_file_source = output / "private-file-source"
+    shutil.copytree(source, private_file_source)
+    (private_file_source / "contract.cpp").write_text(
+        """import forge.contract;
+import self_contained.protocol;
+
+#include "protocol_private.hpp"
+
+class [[forge::contract("selfcontained")]] self_contained_contract
+    : public forge::contract::context {
+ public:
+   using context::context;
+
+   [[forge::action]] void ping() {
+      forge::contract::check(
+         protocol_value() == protocol_private_value,
+         "private protocol file escaped its owner"
+      );
+   }
+};
+""",
+        encoding="utf-8",
+    )
+    private_file_build = output / "private-file-build"
+    configure(args, private_file_source, private_file_build)
+    build(
+        args,
+        private_file_build,
+        succeeds=False,
+        contains="protocol_private.hpp",
+    )
+
+    private_reexport_source = output / "private-reexport-source"
+    shutil.copytree(source, private_reexport_source)
+    (
+        private_reexport_source
+        / "include"
+        / "protocol"
+        / "protocol.cppm"
+    ).write_text(
+        """export module self_contained.protocol;
+
+export import self_contained.dependency;
+
+export int protocol_value();
+""",
+        encoding="utf-8",
+    )
+    private_reexport_build = output / "private-reexport-build"
+    configure(args, private_reexport_source, private_reexport_build)
+    build(
+        args,
+        private_reexport_build,
+        succeeds=False,
+        contains="exports a module through a private dependency",
     )
 
 
