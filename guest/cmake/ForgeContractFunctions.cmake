@@ -503,6 +503,27 @@ function(_forge_contract_validate_usage_requirements target module_bases)
    endforeach()
 endfunction()
 
+function(_forge_contract_validate_source_usage_requirements target sources)
+   foreach(_source IN LISTS sources)
+      foreach(_property COMPILE_DEFINITIONS COMPILE_OPTIONS INCLUDE_DIRECTORIES)
+         get_property(
+            _values
+            SOURCE "${_source}"
+            TARGET_DIRECTORY "${target}"
+            PROPERTY "${_property}"
+         )
+         if(_values)
+            message(
+               FATAL_ERROR
+               "contract library ${target} source ${_source} has unsupported source-scoped "
+               "${_property}; dual-target protocol inputs must be declared by "
+               "forge_add_contract_library"
+            )
+         endif()
+      endforeach()
+   endforeach()
+endfunction()
+
 function(_forge_contract_collect_library graph target)
    _forge_contract_canonical_target("${target}" _target)
    _forge_contract_guest_dependency("${_target}" _guest_dependency)
@@ -630,6 +651,10 @@ function(_forge_contract_write_graph target libraries output)
       foreach(_logical IN LISTS _private_headers)
          list(APPEND _private_header_paths "${_source_root}/${_logical}")
       endforeach()
+      if(NOT _imported)
+         set(_compiled_paths ${_module_paths} ${_source_paths})
+         _forge_contract_validate_source_usage_requirements("${_node}" "${_compiled_paths}")
+      endif()
 
       set(_dependency_ids)
       set(_guest_dependencies)

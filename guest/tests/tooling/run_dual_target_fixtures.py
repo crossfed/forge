@@ -140,7 +140,9 @@ def verify_relocatable_package(prefix: Path, forbidden: list[Path]) -> None:
 def write_negative_project(root: Path, body: str) -> Path:
     root.mkdir(parents=True)
     (root / "include").mkdir()
+    (root / "src").mkdir()
     (root / "include" / "protocol.cppm").write_text("export module negative.protocol;\n", encoding="utf-8")
+    (root / "src" / "protocol.cpp").write_text("int negative_protocol_value = 0;\n", encoding="utf-8")
     (root / "contract.cpp").write_text("import forge.contract;\n", encoding="utf-8")
     (root / "CMakeLists.txt").write_text(
         """cmake_minimum_required(VERSION 3.31)
@@ -283,6 +285,69 @@ forge_add_contract(includedirectory LIBRARIES protocol SOURCES contract.cpp)
         output / "include-directory-build",
         succeeds=False,
         contains="INCLUDE_DIRECTORIES:",
+    )
+
+    source_compile_definition = write_negative_project(
+        output / "source-compile-definition",
+        """forge_add_contract_library(
+   protocol ID negative.source.compile.definition SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+set_source_files_properties(
+   "${CMAKE_CURRENT_SOURCE_DIR}/include/protocol.cppm"
+   PROPERTIES COMPILE_DEFINITIONS PROTOCOL_LAYOUT_VERSION=2
+)
+forge_add_contract(sourcedefinition LIBRARIES protocol SOURCES contract.cpp)
+""",
+    )
+    configure(
+        args,
+        source_compile_definition,
+        output / "source-compile-definition-build",
+        succeeds=False,
+        contains="unsupported source-scoped COMPILE_DEFINITIONS",
+    )
+
+    source_compile_option = write_negative_project(
+        output / "source-compile-option",
+        """forge_add_contract_library(
+   protocol ID negative.source.compile.option SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm SOURCES src/protocol.cpp
+)
+set_source_files_properties(
+   "${CMAKE_CURRENT_SOURCE_DIR}/src/protocol.cpp"
+   PROPERTIES COMPILE_OPTIONS -fpack-struct=1
+)
+forge_add_contract(sourceoption LIBRARIES protocol SOURCES contract.cpp)
+""",
+    )
+    configure(
+        args,
+        source_compile_option,
+        output / "source-compile-option-build",
+        succeeds=False,
+        contains="unsupported source-scoped COMPILE_OPTIONS",
+    )
+
+    source_include_directory = write_negative_project(
+        output / "source-include-directory",
+        """forge_add_contract_library(
+   protocol ID negative.source.include.directory SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+set_source_files_properties(
+   "${CMAKE_CURRENT_SOURCE_DIR}/include/protocol.cppm"
+   PROPERTIES INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+forge_add_contract(sourceincludedirectory LIBRARIES protocol SOURCES contract.cpp)
+""",
+    )
+    configure(
+        args,
+        source_include_directory,
+        output / "source-include-directory-build",
+        succeeds=False,
+        contains="unsupported source-scoped INCLUDE_DIRECTORIES",
     )
 
     directory_scope = write_negative_project(
