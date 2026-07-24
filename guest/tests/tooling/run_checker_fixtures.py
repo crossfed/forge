@@ -114,7 +114,7 @@ def check_source_graph(args):
         f"F|fixture.protocol|module|include/fixture/protocol.cppm|{module}\n",
         f"F|fixture.protocol|implementation|src/protocol.cpp|{implementation}\n",
         f"F|contract:fixture|contract_source|contract/fixture.cpp|{implementation}\n",
-        "E|contract:fixture|fixture.protocol\n",
+        "E|contract:fixture|fixture.protocol|PUBLIC\n",
     ]
     first_graph = directory / "first.txt"
     reordered_graph = directory / "reordered.txt"
@@ -127,6 +127,16 @@ def check_source_graph(args):
     run(manifest_command(args, reordered_graph, reordered_manifest), succeeds=True)
     if source_graph_digest(first_manifest) != source_graph_digest(reordered_manifest):
         raise RuntimeError("source graph digest depends on descriptor record order")
+
+    private_scope_graph = directory / "private-scope.txt"
+    private_scope_graph.write_text(
+        header + "".join(records[:-1]) + "E|contract:fixture|fixture.protocol|PRIVATE\n",
+        encoding="utf-8",
+    )
+    private_scope_manifest = directory / "private-scope.json"
+    run(manifest_command(args, private_scope_graph, private_scope_manifest), succeeds=True)
+    if source_graph_digest(first_manifest) == source_graph_digest(private_scope_manifest):
+        raise RuntimeError("source graph digest does not attest dependency scope")
 
     implementation.write_text("module fixture.protocol;\n// changed\n", encoding="utf-8")
     changed_manifest = directory / "changed.json"
@@ -144,13 +154,24 @@ def check_source_graph(args):
 
     dangling_graph = directory / "dangling.txt"
     dangling_graph.write_text(
-        header + records[0] + records[2] + "E|contract:fixture|missing.protocol\n",
+        header + records[0] + records[2] + "E|contract:fixture|missing.protocol|PUBLIC\n",
         encoding="utf-8",
     )
     run(
         manifest_command(args, dangling_graph, directory / "dangling.json"),
         succeeds=False,
         contains="dependency target has no files",
+    )
+
+    invalid_scope_graph = directory / "invalid-scope.txt"
+    invalid_scope_graph.write_text(
+        header + records[0] + records[2] + "E|contract:fixture|fixture.protocol|INTERFACE\n",
+        encoding="utf-8",
+    )
+    run(
+        manifest_command(args, invalid_scope_graph, directory / "invalid-scope.json"),
+        succeeds=False,
+        contains="invalid dependency scope",
     )
 
     unsupported_dependencies = directory / "unsupported-dependencies.txt"

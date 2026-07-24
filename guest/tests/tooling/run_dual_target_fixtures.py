@@ -113,7 +113,11 @@ def verify_source_graph(manifest: dict) -> None:
     roles = {entry["role"] for entry in graph["files"] if entry["owner"] == "product.chain.protocol"}
     if roles != {"module", "implementation", "public_header", "private_header"}:
         raise RuntimeError(f"dual-target source graph has incomplete roles: {sorted(roles)}")
-    expected_edge = {"owner": "contract:product", "dependency": "product.chain.protocol"}
+    expected_edge = {
+        "owner": "contract:product",
+        "dependency": "product.chain.protocol",
+        "scope": "PUBLIC",
+    }
     if expected_edge not in graph["dependencies"]:
         raise RuntimeError("dual-target source graph omits the contract-to-library dependency")
     expected_include = {
@@ -710,6 +714,33 @@ forge_add_contract(directoryscope LIBRARIES protocol SOURCES contract.cpp)
         contains="unterminated CMake directory-scope wrapper",
     )
 
+    interface_dependency = write_negative_project(
+        output / "interface-dependency",
+        """forge_add_contract_library(
+   dependency ID negative.interface.dependency SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/protocol")
+file(
+   WRITE "${CMAKE_CURRENT_BINARY_DIR}/protocol/protocol.cppm"
+   "export module negative.interface.protocol;\\n"
+)
+forge_add_contract_library(
+   protocol ID negative.interface.protocol SOURCE_ROOT "${CMAKE_CURRENT_BINARY_DIR}/protocol"
+   MODULE_BASE_DIRS . MODULE_SOURCES protocol.cppm
+)
+target_link_libraries(protocol INTERFACE dependency)
+forge_add_contract(interfaceonly LIBRARIES protocol SOURCES contract.cpp)
+""",
+    )
+    configure(
+        args,
+        interface_dependency,
+        output / "interface-dependency-build",
+        succeeds=False,
+        contains="INTERFACE-only contract library dependencies are not supported",
+    )
+
     cycle = write_negative_project(
         output / "cycle",
         """forge_add_contract_library(
@@ -739,13 +770,22 @@ forge_add_contract(cycle LIBRARIES first SOURCES contract.cpp)
 def check_dependency_normalization(args, output: Path) -> None:
     source = output / "source"
     source.mkdir(parents=True)
-    (source / "include").mkdir()
+    (source / "include" / "dependency").mkdir(parents=True)
+    (source / "include" / "second_dependency").mkdir()
+    (source / "include" / "protocol").mkdir()
     (source / "libraries").mkdir()
     (source / "src").mkdir()
-    (source / "include" / "dependency.cppm").write_text(
+    (source / "include" / "dependency" / "dependency.cppm").write_text(
         """export module self_contained.dependency;
 
 export int dependency_value();
+""",
+        encoding="utf-8",
+    )
+    (source / "include" / "dependency" / "private_dependency.hpp").write_text(
+        """#pragma once
+
+inline constexpr int private_dependency_header_value = 20;
 """,
         encoding="utf-8",
     )
@@ -758,7 +798,7 @@ int dependency_value() {
 """,
         encoding="utf-8",
     )
-    (source / "include" / "second_dependency.cppm").write_text(
+    (source / "include" / "second_dependency" / "second_dependency.cppm").write_text(
         """export module self_contained.second_dependency;
 
 export int second_dependency_value();
@@ -774,7 +814,7 @@ int second_dependency_value() {
 """,
         encoding="utf-8",
     )
-    (source / "include" / "protocol.cppm").write_text(
+    (source / "include" / "protocol" / "protocol.cppm").write_text(
         """export module self_contained.protocol;
 
 export int protocol_value();
@@ -829,17 +869,19 @@ forge_add_contract(
     (source / "libraries" / "CMakeLists.txt").write_text(
         """forge_add_contract_library(
    dependency ID self_contained.dependency SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.."
-   MODULE_BASE_DIRS include MODULE_SOURCES include/dependency.cppm
+   MODULE_BASE_DIRS include/dependency MODULE_SOURCES include/dependency/dependency.cppm
    SOURCES src/dependency.cpp
+   PUBLIC_HEADERS include/dependency/private_dependency.hpp
 )
 forge_add_contract_library(
    second_dependency ID self_contained.second_dependency SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.."
-   MODULE_BASE_DIRS include MODULE_SOURCES include/second_dependency.cppm
+   MODULE_BASE_DIRS include/second_dependency
+   MODULE_SOURCES include/second_dependency/second_dependency.cppm
    SOURCES src/second_dependency.cpp
 )
 forge_add_contract_library(
    protocol ID self_contained.protocol SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.."
-   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+   MODULE_BASE_DIRS include/protocol MODULE_SOURCES include/protocol/protocol.cppm
    SOURCES src/protocol.cpp
 )
 """,
@@ -857,23 +899,87 @@ forge_add_contract_library(
         == {
             "owner": "contract:selfcontained",
             "dependency": "self_contained.protocol",
+            "scope": "PUBLIC",
         }
     ]
     if len(edges) != 1:
         raise RuntimeError(f"root contract library dependency was not normalized: {edges}")
     private_edges = sorted(
-        (edge["owner"], edge["dependency"])
+        (edge["owner"], edge["dependency"], edge["scope"])
         for edge in manifest["source_graph"]["dependencies"]
         if edge["owner"] == "self_contained.protocol"
     )
     expected_private_edges = [
-        ("self_contained.protocol", "self_contained.dependency"),
-        ("self_contained.protocol", "self_contained.second_dependency"),
+        ("self_contained.protocol", "self_contained.dependency", "PRIVATE"),
+        ("self_contained.protocol", "self_contained.second_dependency", "PRIVATE"),
     ]
     if private_edges != expected_private_edges:
         raise RuntimeError(
             f"multi-entry LINK_ONLY contract dependencies were not attested: {private_edges}"
         )
+
+    private_leak_source = output / "private-leak-source"
+    shutil.copytree(source, private_leak_source)
+    (private_leak_source / "contract.cpp").write_text(
+        """import forge.contract;
+import self_contained.protocol;
+
+#include "private_dependency.hpp"
+
+class [[forge::contract("selfcontained")]] self_contained_contract
+    : public forge::contract::context {
+ public:
+   using context::context;
+
+   [[forge::action]] void ping() {
+      forge::contract::check(
+         protocol_value() == 42 && private_dependency_header_value == 20,
+         "private dependency escaped its owner"
+      );
+   }
+};
+""",
+        encoding="utf-8",
+    )
+    private_leak_build = output / "private-leak-build"
+    configure(args, private_leak_source, private_leak_build)
+    build(
+        args,
+        private_leak_build,
+        succeeds=False,
+        contains="private_dependency.hpp",
+    )
+
+    private_module_source = output / "private-module-source"
+    shutil.copytree(source, private_module_source)
+    (private_module_source / "contract.cpp").write_text(
+        """import forge.contract;
+import self_contained.protocol;
+import self_contained.dependency;
+
+class [[forge::contract("selfcontained")]] self_contained_contract
+    : public forge::contract::context {
+ public:
+   using context::context;
+
+   [[forge::action]] void ping() {
+      forge::contract::check(
+         protocol_value() == 42 && dependency_value() == 20,
+         "private dependency escaped its owner"
+      );
+   }
+};
+""",
+        encoding="utf-8",
+    )
+    private_module_build = output / "private-module-build"
+    configure(args, private_module_source, private_module_build)
+    build(
+        args,
+        private_module_build,
+        succeeds=False,
+        contains="contract selfcontained dependency is not declared",
+    )
 
 
 def main() -> None:

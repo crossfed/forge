@@ -23,9 +23,15 @@ struct library_source {
    std::filesystem::path physical_path;
 };
 
+enum class library_dependency_scope {
+   public_,
+   private_,
+};
+
 struct library_dependency {
    std::string owner;
    std::string dependency;
+   library_dependency_scope scope;
 };
 
 struct request {

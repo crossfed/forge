@@ -73,6 +73,7 @@ struct source_file {
 struct dependency_edge {
    std::string owner;
    std::string dependency;
+   std::string scope;
 };
 
 struct source_graph {
@@ -179,14 +180,18 @@ source_graph read_source_graph(const std::filesystem::path& path, const std::fil
       const auto fields = split(line, '|');
       if (fields.size() == 5U && fields[0] == "F") {
          append_source_file(result, file_keys, physical_paths, fields, false);
-      } else if (fields.size() == 3U && fields[0] == "E") {
+      } else if (fields.size() == 4U && fields[0] == "E") {
          if (fields[1].empty() || fields[2].empty()) {
             throw std::runtime_error{"contract source graph contains an incomplete dependency edge"};
+         }
+         if (fields[3] != "PUBLIC" && fields[3] != "PRIVATE") {
+            throw std::runtime_error{"contract source graph contains an invalid dependency scope"};
          }
          if (!edge_keys.emplace(fields[1], fields[2]).second) {
             throw std::runtime_error{"contract source graph contains a duplicate dependency edge"};
          }
-         result.dependencies.push_back(dependency_edge{.owner = fields[1], .dependency = fields[2]});
+         result.dependencies.push_back(
+             dependency_edge{.owner = fields[1], .dependency = fields[2], .scope = fields[3]});
       } else {
          throw std::runtime_error{"contract source graph contains an invalid record"};
       }
@@ -216,7 +221,7 @@ source_graph read_source_graph(const std::filesystem::path& path, const std::fil
       return std::tie(value.owner, value.role, value.logical_path, value.sha256);
    });
    std::ranges::sort(result.dependencies, {},
-                     [](const auto& value) { return std::tie(value.owner, value.dependency); });
+                     [](const auto& value) { return std::tie(value.owner, value.dependency, value.scope); });
 
    auto encoder = forge::crypto::digest::sha256::encoder{};
    write_field(encoder, "forge.contract.source-graph.v2");
@@ -233,6 +238,7 @@ source_graph read_source_graph(const std::filesystem::path& path, const std::fil
       write_field(encoder, "dependency");
       write_field(encoder, edge.owner);
       write_field(encoder, edge.dependency);
+      write_field(encoder, edge.scope);
    }
    result.sha256 = encoder.result().str();
    return result;
@@ -248,7 +254,8 @@ forge::variant source_graph_value(const source_graph& graph) {
    auto dependencies = forge::variants{};
    dependencies.reserve(graph.dependencies.size());
    for (const auto& edge : graph.dependencies) {
-      dependencies.emplace_back(forge::mutable_variant_object{}("owner", edge.owner)("dependency", edge.dependency));
+      dependencies.emplace_back(
+          forge::mutable_variant_object{}("owner", edge.owner)("dependency", edge.dependency)("scope", edge.scope));
    }
    return forge::mutable_variant_object{}("files", std::move(files))("dependencies",
                                                                      std::move(dependencies))("sha256", graph.sha256);

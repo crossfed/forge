@@ -29,7 +29,7 @@ if(NOT _contract_graph_hash STREQUAL FORGE_CONTRACT_GRAPH_HASH)
    message(FATAL_ERROR "Forge Contract library graph hash mismatch")
 endif()
 include("${FORGE_CONTRACT_GRAPH_FILE}")
-if(NOT FORGE_CONTRACT_GRAPH_VERSION EQUAL 1)
+if(NOT FORGE_CONTRACT_GRAPH_VERSION EQUAL 2)
    message(FATAL_ERROR "unsupported Forge Contract library graph version")
 endif()
 
@@ -64,8 +64,8 @@ function(_forge_contract_append_source_graph_file path owner role logical physic
    file(APPEND "${path}" "F|${owner}|${role}|${logical}|${physical}\n")
 endfunction()
 
-function(_forge_contract_append_source_graph_edge path owner dependency)
-   foreach(_value IN ITEMS "${owner}" "${dependency}")
+function(_forge_contract_append_source_graph_edge path owner dependency scope)
+   foreach(_value IN ITEMS "${owner}" "${dependency}" "${scope}")
       string(FIND "${_value}" "|" _pipe_index)
       string(FIND "${_value}" "\r" _carriage_return_index)
       string(FIND "${_value}" "\n" _newline_index)
@@ -73,7 +73,10 @@ function(_forge_contract_append_source_graph_edge path owner dependency)
          message(FATAL_ERROR "contract source graph edge contains a reserved separator: ${_value}")
       endif()
    endforeach()
-   file(APPEND "${path}" "E|${owner}|${dependency}\n")
+   if(NOT scope STREQUAL "PUBLIC" AND NOT scope STREQUAL "PRIVATE")
+      message(FATAL_ERROR "contract source graph edge has invalid scope: ${scope}")
+   endif()
+   file(APPEND "${path}" "E|${owner}|${dependency}|${scope}\n")
 endfunction()
 
 set(_source_graph "${CMAKE_CURRENT_BINARY_DIR}/contract-source-graph.txt")
@@ -132,7 +135,7 @@ if(FORGE_CONTRACT_RICARDIAN_CLAUSES)
 endif()
 foreach(_dependency_id IN LISTS FORGE_CONTRACT_GRAPH_ROOT_LIBRARY_IDS)
    _forge_contract_append_source_graph_edge(
-      "${_source_graph}" "${_contract_graph_owner}" "${_dependency_id}"
+      "${_source_graph}" "${_contract_graph_owner}" "${_dependency_id}" PUBLIC
    )
 endforeach()
 
@@ -406,6 +409,9 @@ set(_contract_library_source_paths)
 set(_contract_library_owned_sources)
 set(_contract_library_translation_units)
 set(_contract_library_dependencies)
+foreach(_root_id IN LISTS FORGE_CONTRACT_GRAPH_ROOT_LIBRARY_IDS)
+   list(APPEND _contract_library_dependencies "${_contract_graph_owner}" "${_root_id}" PUBLIC)
+endforeach()
 if(FORGE_CONTRACT_GRAPH_LIBRARY_COUNT GREATER 0)
    math(EXPR _contract_library_last "${FORGE_CONTRACT_GRAPH_LIBRARY_COUNT} - 1")
    foreach(_index RANGE 0 ${_contract_library_last})
@@ -416,14 +422,23 @@ if(FORGE_CONTRACT_GRAPH_LIBRARY_COUNT GREATER 0)
       set(_target "forge_contract_library_${_id_hash}")
       set("_forge_contract_library_target_${_id_hash}" "${_target}")
 
-      set(_dependencies ${${_prefix}_GUEST_DEPENDENCIES})
-      foreach(_dependency_id IN LISTS ${_prefix}_DEPENDENCY_IDS)
+      set(_public_dependencies ${${_prefix}_PUBLIC_GUEST_DEPENDENCIES})
+      foreach(_dependency_id IN LISTS ${_prefix}_PUBLIC_DEPENDENCY_IDS)
          string(SHA256 _dependency_hash "${_dependency_id}")
          string(SUBSTRING "${_dependency_hash}" 0 16 _dependency_hash)
          if(NOT DEFINED _forge_contract_library_target_${_dependency_hash})
             message(FATAL_ERROR "contract library dependency is missing from graph: ${_dependency_id}")
          endif()
-         list(APPEND _dependencies "${_forge_contract_library_target_${_dependency_hash}}")
+         list(APPEND _public_dependencies "${_forge_contract_library_target_${_dependency_hash}}")
+      endforeach()
+      set(_private_dependencies ${${_prefix}_PRIVATE_GUEST_DEPENDENCIES})
+      foreach(_dependency_id IN LISTS ${_prefix}_PRIVATE_DEPENDENCY_IDS)
+         string(SHA256 _dependency_hash "${_dependency_id}")
+         string(SUBSTRING "${_dependency_hash}" 0 16 _dependency_hash)
+         if(NOT DEFINED _forge_contract_library_target_${_dependency_hash})
+            message(FATAL_ERROR "contract library dependency is missing from graph: ${_dependency_id}")
+         endif()
+         list(APPEND _private_dependencies "${_forge_contract_library_target_${_dependency_hash}}")
       endforeach()
 
       add_library(${_target} STATIC)
@@ -447,8 +462,11 @@ if(FORGE_CONTRACT_GRAPH_LIBRARY_COUNT GREATER 0)
       endif()
       target_include_directories(${_target} PUBLIC ${${_prefix}_MODULE_BASES})
       list(APPEND _contract_library_include_directories ${${_prefix}_MODULE_BASES})
-      if(_dependencies)
-         target_link_libraries(${_target} PUBLIC ${_dependencies})
+      if(_public_dependencies)
+         target_link_libraries(${_target} PUBLIC ${_public_dependencies})
+      endif()
+      if(_private_dependencies)
+         target_link_libraries(${_target} PRIVATE ${_private_dependencies})
       endif()
       list(APPEND _contract_library_targets "${_target}")
       foreach(_source IN LISTS ${_prefix}_MODULE_PATHS ${_prefix}_SOURCE_PATHS)
@@ -489,10 +507,16 @@ if(FORGE_CONTRACT_GRAPH_LIBRARY_COUNT GREATER 0)
             endforeach()
          endif()
       endforeach()
-      foreach(_dependency_id IN LISTS ${_prefix}_DEPENDENCY_IDS)
-         list(APPEND _contract_library_dependencies "${_id}" "${_dependency_id}")
+      foreach(_dependency_id IN LISTS ${_prefix}_PUBLIC_DEPENDENCY_IDS)
+         list(APPEND _contract_library_dependencies "${_id}" "${_dependency_id}" PUBLIC)
          _forge_contract_append_source_graph_edge(
-            "${_source_graph}" "${_id}" "${_dependency_id}"
+            "${_source_graph}" "${_id}" "${_dependency_id}" PUBLIC
+         )
+      endforeach()
+      foreach(_dependency_id IN LISTS ${_prefix}_PRIVATE_DEPENDENCY_IDS)
+         list(APPEND _contract_library_dependencies "${_id}" "${_dependency_id}" PRIVATE)
+         _forge_contract_append_source_graph_edge(
+            "${_source_graph}" "${_id}" "${_dependency_id}" PRIVATE
          )
       endforeach()
       _forge_contract_configure_downstream_target(
@@ -501,6 +525,17 @@ if(FORGE_CONTRACT_GRAPH_LIBRARY_COUNT GREATER 0)
       )
    endforeach()
 endif()
+
+set(_root_contract_library_targets)
+foreach(_root_id IN LISTS FORGE_CONTRACT_GRAPH_ROOT_LIBRARY_IDS)
+   string(SHA256 _root_hash "${_root_id}")
+   string(SUBSTRING "${_root_hash}" 0 16 _root_hash)
+   if(NOT DEFINED _forge_contract_library_target_${_root_hash})
+      message(FATAL_ERROR "root contract library is missing from graph: ${_root_id}")
+   endif()
+   list(APPEND _root_contract_library_targets "${_forge_contract_library_target_${_root_hash}}")
+endforeach()
+list(REMOVE_DUPLICATES _root_contract_library_targets)
 list(REMOVE_DUPLICATES _contract_library_include_directories)
 list(REMOVE_DUPLICATES _contract_library_source_paths)
 
@@ -610,11 +645,13 @@ endif()
 list(LENGTH _contract_library_dependencies _contract_library_dependency_count)
 if(_contract_library_dependency_count GREATER 0)
    math(EXPR _contract_library_dependency_last "${_contract_library_dependency_count} - 1")
-   foreach(_index RANGE 0 ${_contract_library_dependency_last} 2)
+   foreach(_index RANGE 0 ${_contract_library_dependency_last} 3)
       math(EXPR _dependency_index "${_index} + 1")
+      math(EXPR _scope_index "${_index} + 2")
       list(GET _contract_library_dependencies ${_index} _owner)
       list(GET _contract_library_dependencies ${_dependency_index} _dependency)
-      list(APPEND _abigen_command --library-dependency "${_owner}" "${_dependency}")
+      list(GET _contract_library_dependencies ${_scope_index} _scope)
+      list(APPEND _abigen_command --library-dependency "${_owner}" "${_dependency}" "${_scope}")
    endforeach()
 endif()
 foreach(_module_path IN LISTS _module_search_paths)
@@ -672,7 +709,7 @@ target_link_libraries(
       forge_guest_contract
       forge_guest_eosio
       ${FORGE_CONTRACT_GRAPH_ROOT_GUEST_DEPENDENCIES}
-      ${_contract_library_targets}
+      ${_root_contract_library_targets}
 )
 target_include_directories(
    ${FORGE_CONTRACT_TARGET}
@@ -708,7 +745,7 @@ if(FORGE_CONTRACT_COMPILE_CHECKS)
          forge_guest_contract
          forge_guest_eosio
          ${FORGE_CONTRACT_GRAPH_ROOT_GUEST_DEPENDENCIES}
-         ${_contract_library_targets}
+         ${_root_contract_library_targets}
    )
    target_include_directories(
       ${FORGE_CONTRACT_TARGET}_compile_checks

@@ -4,6 +4,7 @@ module;
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 module forge.contract.abi.command;
 
@@ -64,9 +65,22 @@ request parse(int argc, const char* const* argv) {
              .physical_path = next(),
          });
       } else if (option == "--library-dependency") {
+         auto owner = std::string{next()};
+         auto dependency = std::string{next()};
+         const auto scope = next();
+         const auto parsed_scope = [&] {
+            if (scope == "PUBLIC") {
+               return library_dependency_scope::public_;
+            }
+            if (scope == "PRIVATE") {
+               return library_dependency_scope::private_;
+            }
+            throw std::runtime_error{"contract library dependency has an invalid scope: " + std::string{scope}};
+         }();
          result.library_dependencies.push_back(library_dependency{
-             .owner = std::string{next()},
-             .dependency = std::string{next()},
+             .owner = std::move(owner),
+             .dependency = std::move(dependency),
+             .scope = parsed_scope,
          });
       } else if (option == "--dependency-source") {
          result.dependency_sources.emplace_back(next());
