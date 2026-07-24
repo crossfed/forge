@@ -15,4 +15,8 @@ std::optional<std::uint64_t> checked_add(std::uint64_t left, std::uint64_t right
    return left + right;
 }
 
+const char* implementation_file() {
+   return __FILE__;
+}
+
 } // namespace product::chain

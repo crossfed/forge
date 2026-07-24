@@ -75,8 +75,17 @@ attested. `forge_add_contract` uses its call-site directory as the default
 contract `SOURCE_ROOT`; `abigen` contributes every compiler-discovered include
 under that root. Exact files owned by linked contract libraries remain under
 their declarative owners; other local dependencies outside the contract root
-fail closed. Each source therefore has one attestation owner. Manifest v1
-artifacts are rebuilt rather than accepted as a compatibility format.
+fail closed. Module and implementation translation units are scanned
+independently for each library owner, so an included local header must also be
+declared in that library's graph. Each source therefore has one attestation
+owner. Manifest v1 artifacts are rebuilt rather than accepted as a
+compatibility format.
+
+Guest compilation maps every declared library file to
+`contract-library/<ID>/<logical-path>`. This keeps `__FILE__` and
+`std::source_location` stable across build-tree, installed and relocated
+package consumers; absolute producer, SDK and build paths are excluded from
+the resulting WASM.
 
 ## Executable Proof
 
@@ -91,6 +100,7 @@ The independent `guest/tests/dual_target` fixture verifies:
 - guest compilation from an installed `Product::protocol` target;
 - source graph roles, edges and deterministic content hashing;
 - compiler-discovered local includes and digest changes after header edits;
+- stable library source paths in build-tree and relocated WASM artifacts;
 - configure failures for invalid source and dependency graphs.
 
 Existing VM E2E and Spring/EOSIO compatibility corpus remain mandatory. The

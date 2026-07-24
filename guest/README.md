@@ -130,13 +130,17 @@ or absolute includes fail the build.
 `ID` is the stable package identity. A contract library may depend only on
 guest-compatible Forge targets or other contract libraries. The configure step
 rejects dependency cycles, unknown host-only targets, duplicate logical paths
-and sources outside `SOURCE_ROOT`.
+and sources outside `SOURCE_ROOT`. The guest build also scans every declared
+module and implementation file; a compiled local header omitted from
+`PUBLIC_HEADERS` or `PRIVATE_HEADERS` fails attestation.
 
 The SDK passes the declared graph to the guest build. It does not infer C++
 module names, transport compiler BMI/PCM files, or reuse host compiler state.
 Clang and CMake compile the installed module sources for the selected guest
 toolchain and discover them through prebuilt-module search paths local to that
-build.
+build. Guest diagnostics and `__FILE__` values identify declared library files
+as `contract-library/<ID>/<logical-path>`, without producer, install-prefix or
+build-directory paths.
 
 A protocol package installs its source graph and host archive separately:
 

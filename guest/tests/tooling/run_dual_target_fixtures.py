@@ -150,6 +150,17 @@ def verify_relocatable_package(prefix: Path, forbidden: list[Path]) -> None:
                 raise RuntimeError(f"contract protocol package retains an absolute path: {metadata}: {needle}")
 
 
+def verify_reproducible_wasm(path: Path, forbidden: list[Path]) -> None:
+    payload = path.read_bytes()
+    expected = b"contract-library/product.chain.protocol/src/protocol.cpp"
+    if expected not in payload:
+        raise RuntimeError(f"contract library source path is not stable in {path}")
+    for source in forbidden:
+        needle = str(source.resolve()).encode()
+        if needle in payload:
+            raise RuntimeError(f"contract library leaks an absolute path in {path}: {source}")
+
+
 def write_negative_project(root: Path, body: str) -> Path:
     root.mkdir(parents=True)
     (root / "include").mkdir()
@@ -784,6 +795,10 @@ def main() -> None:
     verify_direct_action(producer_abi)
     verify_source_graph(producer_manifest)
     verify_relocatable_package(producer_install, [args.source, producer_build])
+    verify_reproducible_wasm(
+        producer_build / "product.wasm",
+        [args.source / "producer", producer_build, args.contract_package.parent.parent.parent],
+    )
 
     relocated = output / "product-protocol-relocated"
     shutil.copytree(producer_install, relocated)
@@ -801,6 +816,10 @@ def main() -> None:
     build(args, consumer_build)
     run(str(consumer_build / "product_protocol_consumer"))
     verify_artifacts(consumer_build, "consumer")
+    verify_reproducible_wasm(
+        consumer_build / "consumer.wasm",
+        [relocated, consumer_build, args.contract_package.parent.parent.parent],
+    )
 
     vm_build = output / "vm-build"
     configure(

@@ -394,6 +394,9 @@ function(_forge_contract_configure_downstream_target target)
          -fno-ident
          -mcpu=mvp
          ${_contract_optimization}
+         -ffile-prefix-map=${CMAKE_CURRENT_BINARY_DIR}=./build
+         -ffile-prefix-map=${FORGE_CONTRACT_SDK_PREFIX}=./sdk
+         ${ARGN}
    )
 endfunction()
 
@@ -445,12 +448,12 @@ if(FORGE_CONTRACT_GRAPH_LIBRARY_COUNT GREATER 0)
       if(_dependencies)
          target_link_libraries(${_target} PUBLIC ${_dependencies})
       endif()
-      _forge_contract_configure_downstream_target(${_target})
       list(APPEND _contract_library_targets "${_target}")
       foreach(_source IN LISTS ${_prefix}_MODULE_PATHS ${_prefix}_SOURCE_PATHS)
          list(APPEND _contract_library_dependency_sources "${_id}" "${_source}")
       endforeach()
 
+      set(_contract_library_prefix_maps)
       foreach(_role module implementation public_header private_header)
          if(_role STREQUAL "module")
             set(_logical_values ${${_prefix}_MODULE_LOGICAL})
@@ -471,6 +474,10 @@ if(FORGE_CONTRACT_GRAPH_LIBRARY_COUNT GREATER 0)
             foreach(_value_index RANGE 0 ${_value_last})
                list(GET _logical_values ${_value_index} _logical)
                list(GET _physical_values ${_value_index} _physical)
+               list(
+                  APPEND _contract_library_prefix_maps
+                  "-ffile-prefix-map=${_physical}=contract-library/${_id}/${_logical}"
+               )
                list(APPEND _source_graph_inputs "${_physical}")
                list(APPEND _contract_library_source_paths "${_physical}")
                _forge_contract_append_source_graph_file(
@@ -484,6 +491,10 @@ if(FORGE_CONTRACT_GRAPH_LIBRARY_COUNT GREATER 0)
             "${_source_graph}" "${_id}" "${_dependency_id}"
          )
       endforeach()
+      _forge_contract_configure_downstream_target(
+         ${_target}
+         ${_contract_library_prefix_maps}
+      )
    endforeach()
 endif()
 list(REMOVE_DUPLICATES _contract_library_include_directories)
@@ -662,6 +673,7 @@ target_compile_options(
       -ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=.
       -ffile-prefix-map=${CMAKE_CURRENT_BINARY_DIR}=.
       -ffile-prefix-map=${FORGE_CONTRACT_SOURCE_ROOT}=./source
+      -ffile-prefix-map=${FORGE_CONTRACT_SDK_PREFIX}=./sdk
 )
 
 if(FORGE_CONTRACT_COMPILE_CHECKS)
@@ -696,6 +708,7 @@ if(FORGE_CONTRACT_COMPILE_CHECKS)
          ${_contract_optimization}
          -ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=.
          -ffile-prefix-map=${CMAKE_CURRENT_BINARY_DIR}=.
+         -ffile-prefix-map=${FORGE_CONTRACT_SDK_PREFIX}=./sdk
    )
    add_dependencies(${FORGE_CONTRACT_TARGET} ${FORGE_CONTRACT_TARGET}_compile_checks)
 endif()

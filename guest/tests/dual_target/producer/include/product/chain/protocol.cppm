@@ -57,5 +57,6 @@ struct revision {
 };
 
 [[nodiscard]] std::optional<std::uint64_t> checked_add(std::uint64_t left, std::uint64_t right);
+[[nodiscard]] const char* implementation_file();
 
 } // namespace product::chain

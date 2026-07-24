@@ -23,6 +23,9 @@ class [[forge::contract("product")]] product_contract : public forge::contract::
    [[forge::action]] void beginrev(product::chain::begin_revision request) {
       const auto size = product::chain::checked_add(request.size, 0);
       forge::contract::check(size.has_value(), "revision size overflow");
+      forge::contract::check(
+          product::chain::implementation_file() != nullptr,
+          "contract library source path is unavailable");
 
       revisions rows{get_self(), request.workspace.value};
       rows.emplace(get_self(), [&](auto& row) {
