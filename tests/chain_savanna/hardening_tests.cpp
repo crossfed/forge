@@ -211,6 +211,25 @@ BOOST_AUTO_TEST_CASE(chain_savanna_validation_state_is_bounded_and_versioned) {
        static_cast<void>(forge::raw::unpack<savanna::validation_state>(
            stream.storage())),
        forge::raw::exceptions::codec_error);
+
+   auto phantom_prefix = forge::chain::core::incremental_merkle_tree{};
+   phantom_prefix.append(hardening_digest(998U));
+   auto phantom_current = phantom_prefix;
+   phantom_current.append(
+       forge::crypto::digest::sha256::hash(retained_leaf));
+   auto phantom_stream = forge::datastream<std::vector<std::uint8_t>>{};
+   forge::raw::pack(phantom_stream, std::uint32_t{1U});
+   forge::raw::pack(phantom_stream, phantom_prefix);
+   forge::raw::pack(phantom_stream, phantom_current);
+   forge::raw::pack(phantom_stream, savanna::block_num_t{0U});
+   forge::raw::pack(
+       phantom_stream, std::vector<savanna::digest>{phantom_current.root()});
+   forge::raw::pack(
+       phantom_stream, std::vector<savanna::validation_leaf>{retained_leaf});
+   BOOST_CHECK_THROW(
+       static_cast<void>(forge::raw::unpack<savanna::validation_state>(
+           phantom_stream.storage())),
+       forge::raw::exceptions::codec_error);
 }
 
 BOOST_AUTO_TEST_CASE(chain_savanna_vote_accumulator_tracks_donor_states) {

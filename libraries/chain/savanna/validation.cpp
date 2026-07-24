@@ -117,6 +117,14 @@ void validate(const validation_state& state) {
       return;
    }
 
+   if (state.prefix_.size() > static_cast<std::uint64_t>(state.first_)) {
+      FORGE_THROW_EXCEPTION(
+          exceptions::invalid_validation_state,
+          "Savanna validation prefix exceeds the available block history",
+          forge::exceptions::ctx("prefix_size", state.prefix_.size()),
+          forge::exceptions::ctx("first_block", state.first_));
+   }
+
    if (state.current_.empty() || state.roots_.size() != state.leaves_.size() ||
        state.roots_.size() >
            std::numeric_limits<std::uint64_t>::max() - state.prefix_.size() ||
