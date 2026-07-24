@@ -18,6 +18,7 @@ target_include_directories(forge_chain_savanna PUBLIC ${FORGE_PUBLIC_INCLUDE_DIR
 target_link_libraries(
    forge_chain_savanna PUBLIC
       Boost::headers
+      Threads::Threads
       forge_chain_core
       forge_chain_quorum
       forge_crypto_bls
