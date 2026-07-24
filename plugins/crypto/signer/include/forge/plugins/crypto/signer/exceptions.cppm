@@ -20,6 +20,7 @@ class exceptions {
       unsupported_profile = 5,
       invalid_key = 6,
       signing_failed = 7,
+      unavailable = 8,
    };
 
    using invalid_config = forge::exceptions::coded_exception<code, code::invalid_config>;
@@ -29,6 +30,7 @@ class exceptions {
    using unsupported_profile = forge::exceptions::coded_exception<code, code::unsupported_profile>;
    using invalid_key = forge::exceptions::coded_exception<code, code::invalid_key>;
    using signing_failed = forge::exceptions::coded_exception<code, code::signing_failed>;
+   using unavailable = forge::exceptions::coded_exception<code, code::unavailable>;
 };
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(exceptions::code, "forge.plugins.crypto.signer")

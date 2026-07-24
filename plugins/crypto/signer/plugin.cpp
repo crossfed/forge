@@ -5,6 +5,7 @@ module;
 #include <boost/asio/awaitable.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <coroutine>
 #include <exception>
 #include <map>
@@ -36,9 +37,11 @@ import forge.config.core.decode;
 import forge.config.core.document;
 import forge.config.core.value;
 import forge.crypto.asymmetric;
+import forge.crypto.bls;
 import forge.crypto.digest.sha256;
 import forge.exceptions;
 import forge.plugins.crypto.signer.api;
+import forge.plugins.crypto.signer.bls_api;
 import forge.plugins.crypto.signer.exceptions;
 import forge.plugins.crypto.signer.types;
 import forge.schema.diagnostic;
@@ -49,6 +52,7 @@ import forge.schema.enums;
 #include "details/config.hxx"
 #include "details/plugin_impl.hxx"
 #include "details/api_impl.hxx"
+#include "details/bls_api_impl.hxx"
 
 namespace forge::plugins::crypto::signer {
 
@@ -58,8 +62,8 @@ plugin::~plugin() = default;
 
 forge::app::plugin_descriptor descriptor(plugin_options value) {
    return forge::app::plugin_descriptor{
-      .id = {.value = "forge.plugins.crypto.signer"},
-      .factory = [value = std::move(value)] { return std::make_unique<plugin>(value); },
+       .id = {.value = "forge.plugins.crypto.signer"},
+       .factory = [value = std::move(value)] { return std::make_unique<plugin>(value); },
    };
 }
 
@@ -68,18 +72,18 @@ forge::app::plugin_id plugin::id() const {
 }
 
 std::string plugin::version() const {
-   return "2.0.0";
+   return "2.1.0";
 }
 
 std::optional<forge::config::core::component_descriptor> plugin::describe_config() const {
    auto descriptor = forge::config::core::describe_component<config>("plugins.crypto.signer");
    descriptor.fields.push_back(forge::config::core::field_descriptor{
-      .name = "default-output-profile",
-      .kind = forge::schema::value_kind::string,
-      .deprecated = true,
-      .deprecated_message = "removed in Forge 8.9; format typed signer results at the consumer boundary",
-      .description = "Removed migration tombstone; supplied values are rejected",
-      .ingestion_only = true,
+       .name = "default-output-profile",
+       .kind = forge::schema::value_kind::string,
+       .deprecated = true,
+       .deprecated_message = "removed in Forge 8.9; format typed signer results at the consumer boundary",
+       .description = "Removed migration tombstone; supplied values are rejected",
+       .ingestion_only = true,
    });
    return descriptor;
 }
@@ -91,11 +95,12 @@ boost::asio::awaitable<void> plugin::configure(forge::config::core::component_vi
 
 boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provider) {
    provider.install<api>(std::make_shared<api_impl>(impl_));
+   provider.install<bls_api>(std::make_shared<bls_api_impl>(impl_));
    co_return;
 }
 
 boost::asio::awaitable<void> plugin::initialize(forge::app::plugin_context&) {
-   impl_->stopping = false;
+   impl_->stopping.store(false, std::memory_order_release);
    co_return;
 }
 
@@ -104,11 +109,11 @@ boost::asio::awaitable<void> plugin::startup() {
 }
 
 void plugin::request_stop() noexcept {
-   impl_->stopping = true;
+   impl_->stopping.store(true, std::memory_order_release);
 }
 
 boost::asio::awaitable<void> plugin::shutdown() {
-   impl_->stopping = true;
+   impl_->stopping.store(true, std::memory_order_release);
    co_return;
 }
 
