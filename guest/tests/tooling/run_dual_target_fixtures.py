@@ -1196,6 +1196,46 @@ export int protocol_value();
         contains="exports a module through a private dependency: forge.raw.codec",
     )
 
+    crypto_leaf_leak_source = output / "crypto-leaf-leak-source"
+    shutil.copytree(source, crypto_leaf_leak_source)
+    (
+        crypto_leaf_leak_source
+        / "include"
+        / "protocol"
+        / "protocol.cppm"
+    ).write_text(
+        """export module self_contained.protocol;
+
+#if defined(FORGE_CONTRACT_GUEST)
+export import forge.crypto.digest.sha256;
+#endif
+
+export int protocol_value();
+""",
+        encoding="utf-8",
+    )
+    cmake = (crypto_leaf_leak_source / "CMakeLists.txt").read_text(encoding="utf-8")
+    cmake = cmake.replace(
+        "find_package(Forge CONFIG REQUIRED COMPONENTS raw)",
+        "find_package(Forge CONFIG REQUIRED COMPONENTS raw crypto_asymmetric_values)",
+    )
+    cmake = cmake.replace(
+        "target_link_libraries(protocol PRIVATE dependency dependency second_dependency)",
+        "target_link_libraries(\n"
+        "   protocol PUBLIC Forge::forge_crypto_asymmetric_values\n"
+        "   PRIVATE dependency dependency second_dependency\n"
+        ")",
+    )
+    (crypto_leaf_leak_source / "CMakeLists.txt").write_text(cmake, encoding="utf-8")
+    crypto_leaf_leak_build = output / "crypto-leaf-leak-build"
+    configure(args, crypto_leaf_leak_source, crypto_leaf_leak_build)
+    build(
+        args,
+        crypto_leaf_leak_build,
+        succeeds=False,
+        contains="forge.crypto.digest.sha256",
+    )
+
     external_private_source = (
         contract_sdk_prefix(args.contract_package)
         / "share"

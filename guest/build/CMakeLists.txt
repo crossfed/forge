@@ -219,11 +219,11 @@ add_library(forge_guest_codec_hex_runtime STATIC IMPORTED GLOBAL)
 set_target_properties(forge_guest_codec_hex_runtime PROPERTIES IMPORTED_LOCATION "${_codec_hex_archive}")
 target_link_libraries(forge_guest_codec_hex PUBLIC forge_guest_codec_hex_runtime)
 
-add_library(forge_guest_crypto STATIC)
+add_library(forge_guest_crypto_digest STATIC)
 target_sources(
-   forge_guest_crypto
+   forge_guest_crypto_digest
    PUBLIC
-      FILE_SET forge_guest_crypto_modules TYPE CXX_MODULES
+      FILE_SET forge_guest_crypto_digest_modules TYPE CXX_MODULES
       BASE_DIRS "${_modules}"
       FILES
          "${_modules}/forge/crypto/digest/sha256_value.cppm"
@@ -232,11 +232,46 @@ target_sources(
          "${_modules}/forge/crypto/digest/sha512.cppm"
          "${_modules}/forge/crypto/digest/ripemd160_value.cppm"
          "${_modules}/forge/crypto/digest/ripemd160.cppm"
-         "${_modules}/forge/crypto/asymmetric/values.cppm"
-         "${_modules}/forge/crypto/asymmetric/asymmetric.cppm"
-         "${_modules}/forge/crypto/bls/bls_values.cppm"
 )
-target_link_libraries(forge_guest_crypto PUBLIC forge_guest_raw)
+target_link_libraries(forge_guest_crypto_digest PUBLIC forge_guest_raw)
+
+add_library(forge_guest_crypto_asymmetric_values STATIC)
+target_sources(
+   forge_guest_crypto_asymmetric_values
+   PUBLIC
+      FILE_SET forge_guest_crypto_asymmetric_values_modules TYPE CXX_MODULES
+      BASE_DIRS "${_modules}"
+      FILES "${_modules}/forge/crypto/asymmetric/values.cppm"
+)
+target_link_libraries(forge_guest_crypto_asymmetric_values PUBLIC forge_guest_raw)
+
+add_library(forge_guest_crypto_asymmetric STATIC)
+target_sources(
+   forge_guest_crypto_asymmetric
+   PUBLIC
+      FILE_SET forge_guest_crypto_asymmetric_modules TYPE CXX_MODULES
+      BASE_DIRS "${_modules}"
+      FILES "${_modules}/forge/crypto/asymmetric/asymmetric.cppm"
+)
+target_link_libraries(forge_guest_crypto_asymmetric PUBLIC forge_guest_crypto_asymmetric_values)
+
+add_library(forge_guest_crypto_bls_values STATIC)
+target_sources(
+   forge_guest_crypto_bls_values
+   PUBLIC
+      FILE_SET forge_guest_crypto_bls_values_modules TYPE CXX_MODULES
+      BASE_DIRS "${_modules}"
+      FILES "${_modules}/forge/crypto/bls/bls_values.cppm"
+)
+
+add_library(forge_guest_crypto INTERFACE)
+target_link_libraries(
+   forge_guest_crypto
+   INTERFACE
+      forge_guest_crypto_digest
+      forge_guest_crypto_asymmetric
+      forge_guest_crypto_bls_values
+)
 
 add_library(forge_guest_chain_protocol STATIC)
 target_sources(
@@ -364,7 +399,10 @@ foreach(
    forge_guest_codec_base64
    forge_guest_codec_base58
    forge_guest_codec_hex
-   forge_guest_crypto
+   forge_guest_crypto_digest
+   forge_guest_crypto_asymmetric_values
+   forge_guest_crypto_asymmetric
+   forge_guest_crypto_bls_values
    forge_guest_chain_protocol
    forge_guest_contract
 )
@@ -633,7 +671,10 @@ set(
    forge_guest_codec_base64
    forge_guest_codec_base58
    forge_guest_codec_hex
-   forge_guest_crypto
+   forge_guest_crypto_digest
+   forge_guest_crypto_asymmetric_values
+   forge_guest_crypto_asymmetric
+   forge_guest_crypto_bls_values
    forge_guest_chain_protocol
    forge_guest_contract
    ${_contract_library_targets}

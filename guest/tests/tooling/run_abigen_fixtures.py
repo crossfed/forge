@@ -14,7 +14,10 @@ MODULE_TARGETS = (
     "forge_guest_codec_base64",
     "forge_guest_codec_base58",
     "forge_guest_codec_hex",
-    "forge_guest_crypto",
+    "forge_guest_crypto_digest",
+    "forge_guest_crypto_asymmetric_values",
+    "forge_guest_crypto_asymmetric",
+    "forge_guest_crypto_bls_values",
     "forge_guest_chain_protocol",
     "forge_guest_contract",
 )

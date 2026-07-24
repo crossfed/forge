@@ -104,12 +104,12 @@ function(_forge_contract_guest_dependency input output)
       set(_guest forge_guest_codec_base58)
    elseif(_name STREQUAL "forge_codec_hex")
       set(_guest forge_guest_codec_hex)
-   elseif(
-      _name STREQUAL "forge_crypto_digest"
-      OR _name STREQUAL "forge_crypto_asymmetric_values"
-      OR _name STREQUAL "forge_crypto_bls_values"
-   )
-      set(_guest forge_guest_crypto)
+   elseif(_name STREQUAL "forge_crypto_digest")
+      set(_guest forge_guest_crypto_digest)
+   elseif(_name STREQUAL "forge_crypto_asymmetric_values")
+      set(_guest forge_guest_crypto_asymmetric_values)
+   elseif(_name STREQUAL "forge_crypto_bls_values")
+      set(_guest forge_guest_crypto_bls_values)
    elseif(_name STREQUAL "forge_chain_protocol")
       set(_guest forge_guest_chain_protocol)
    else()
