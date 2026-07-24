@@ -23,7 +23,14 @@ add_executable(abigen abigen/main.cpp)
 target_link_libraries(abigen PRIVATE Forge::forge_contract_abi)
 
 add_library(attr_plugin MODULE attr-plugin/plugin.cpp)
-target_link_libraries(attr_plugin PRIVATE Forge::forge_contract_attributes clang-cpp LLVM)
+target_link_libraries(
+   attr_plugin
+   PRIVATE
+      Forge::forge_contract_abi
+      Forge::forge_contract_attributes
+      clang-cpp
+      LLVM
+)
 target_include_directories(attr_plugin SYSTEM PRIVATE ${CLANG_INCLUDE_DIRS} ${LLVM_INCLUDE_DIRS})
 target_compile_definitions(attr_plugin PRIVATE ${LLVM_DEFINITIONS})
 set_target_properties(attr_plugin PROPERTIES PREFIX "" OUTPUT_NAME "attr-plugin")

@@ -413,6 +413,16 @@ def check_contract_sdk_components(root: Path, errors: list[str]) -> None:
          )
 
 
+def check_contract_tool_ownership(root: Path, errors: list[str]) -> None:
+   for path in source_files(root, ("tools",)):
+      source = path.read_text(errors="ignore")
+      if "HandleTranslationUnit" in source:
+         errors.append(
+            f"{path.relative_to(root)}: contract tools must delegate AST processing "
+            "to libraries/contract"
+         )
+
+
 def check_eosio_veneer(root: Path, errors: list[str]) -> None:
    path = root / "guest" / "libraries" / "eosio" / "include" / "eosio" / "dispatcher.hpp"
    if not path.exists():
@@ -749,6 +759,7 @@ def main() -> int:
    check_chain_savanna_boundaries(root, errors)
    check_contract_sdk_workflow(root, errors)
    check_contract_sdk_components(root, errors)
+   check_contract_tool_ownership(root, errors)
    check_eosio_veneer(root, errors)
    check_contract_sdk_architecture(root, errors)
    check_crypto_family(root, files, errors)
