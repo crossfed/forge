@@ -75,32 +75,12 @@ bool vote_accumulator::observe(const quorum_certificate& certificate) {
                             impl_->candidate.finality_digest));
 
    auto lock = std::lock_guard{impl_->mutex};
-   auto changed = impl_->active.observe(certificate.active);
-   if (impl_->pending) {
-      changed = impl_->pending->observe(*certificate.pending) || changed;
-   }
-   return changed;
+   return impl_->observe(certificate);
 }
 
 std::optional<quorum_certificate> vote_accumulator::best() const {
    auto lock = std::lock_guard{impl_->mutex};
-   auto active = impl_->active.best();
-   if (!active) {
-      return std::nullopt;
-   }
-
-   auto pending = std::optional<qc_signature>{};
-   if (impl_->pending) {
-      pending = impl_->pending->best();
-      if (!pending) {
-         return std::nullopt;
-      }
-   }
-   return quorum_certificate{
-       .block = impl_->candidate.num,
-       .active = std::move(*active),
-       .pending = std::move(pending),
-   };
+   return impl_->best();
 }
 
 accumulator_status vote_accumulator::status() const {

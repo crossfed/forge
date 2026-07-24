@@ -118,6 +118,7 @@ finalizer_safety_state advance_from_qc(
    state.require_valid();
    require_candidate(candidate_core, candidate);
    if (certificate.get().block != candidate.num ||
+       certificate.finality_digest() != candidate.finality_digest ||
        !certificate.get().strong() ||
        !certificate.has_strong_vote(finalizer)) {
       FORGE_THROW_EXCEPTION(

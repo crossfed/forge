@@ -109,13 +109,18 @@ qc_claim quorum_certificate::claim() const noexcept {
 }
 
 verified_quorum_certificate::verified_quorum_certificate(
-    quorum_certificate certificate,
+    quorum_certificate certificate, digest finality_digest,
     std::vector<forge::crypto::bls::public_key> strong_voters)
     : certificate_{std::move(certificate)},
+      finality_digest_{std::move(finality_digest)},
       strong_voters_{std::move(strong_voters)} {}
 
 const quorum_certificate& verified_quorum_certificate::get() const noexcept {
    return certificate_;
+}
+
+const digest& verified_quorum_certificate::finality_digest() const noexcept {
+   return finality_digest_;
 }
 
 bool verified_quorum_certificate::has_strong_vote(
@@ -228,7 +233,8 @@ verify(quorum_certificate value, const verified_finalizer_policy& active,
    if (value.pending) {
       append_strong_voters(strong_voters, *value.pending, *pending);
    }
-   return verified_quorum_certificate{std::move(value), std::move(strong_voters)};
+   return verified_quorum_certificate{
+       std::move(value), std::move(finality_digest), std::move(strong_voters)};
 }
 
 } // namespace forge::chain::savanna

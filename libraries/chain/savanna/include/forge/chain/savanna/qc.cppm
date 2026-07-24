@@ -40,15 +40,17 @@ class verified_quorum_certificate {
    operator=(verified_quorum_certificate&&) = default;
 
    [[nodiscard]] const quorum_certificate& get() const noexcept;
+   [[nodiscard]] const digest& finality_digest() const noexcept;
    [[nodiscard]] bool
    has_strong_vote(const forge::crypto::bls::public_key& finalizer) const noexcept;
 
  private:
    verified_quorum_certificate(
-       quorum_certificate certificate,
+       quorum_certificate certificate, digest finality_digest,
        std::vector<forge::crypto::bls::public_key> strong_voters);
 
    quorum_certificate certificate_;
+   digest finality_digest_;
    std::vector<forge::crypto::bls::public_key> strong_voters_;
 
    friend verified_quorum_certificate

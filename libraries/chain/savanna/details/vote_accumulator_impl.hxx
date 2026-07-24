@@ -12,8 +12,6 @@ struct vote_accumulator::impl {
       void add(std::size_t index, vote_kind kind,
                const forge::crypto::bls::signature& signature);
       [[nodiscard]] std::optional<qc_signature> local() const;
-      [[nodiscard]] std::optional<qc_signature> best() const;
-      bool observe(const qc_signature& signature);
       [[nodiscard]] policy_accumulator_status status() const noexcept;
 
       verified_finalizer_policy policy;
@@ -26,7 +24,6 @@ struct vote_accumulator::impl {
       vote_bitset weak_votes;
       forge::crypto::bls::aggregate_signature strong_signature;
       forge::crypto::bls::aggregate_signature weak_signature;
-      std::optional<qc_signature> received;
    };
 
    impl(block_ref candidate_value, verified_finalizer_policy active_value,
@@ -36,10 +33,14 @@ struct vote_accumulator::impl {
        const forge::crypto::bls::public_key& finalizer, vote_kind kind) const;
    [[nodiscard]] bool known(const forge::crypto::bls::public_key& finalizer) const;
    void add_verified(const finalizer_vote& vote);
+   [[nodiscard]] std::optional<quorum_certificate> local() const;
+   bool observe(quorum_certificate certificate);
+   [[nodiscard]] std::optional<quorum_certificate> best() const;
 
    block_ref candidate;
    policy_votes active;
    std::optional<policy_votes> pending;
+   std::optional<quorum_certificate> received;
    mutable std::mutex mutex;
 };
 

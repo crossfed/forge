@@ -128,30 +128,6 @@ vote_accumulator::impl::policy_votes::local() const {
    };
 }
 
-std::optional<qc_signature>
-vote_accumulator::impl::policy_votes::best() const {
-   auto aggregated = local();
-   if (!aggregated) {
-      return received;
-   }
-   if (!received) {
-      return aggregated;
-   }
-   if (received->strong() || aggregated->weak()) {
-      return received;
-   }
-   return aggregated;
-}
-
-bool vote_accumulator::impl::policy_votes::observe(
-    const qc_signature& signature) {
-   if (!received || (received->weak() && signature.strong())) {
-      received = signature;
-      return true;
-   }
-   return false;
-}
-
 policy_accumulator_status
 vote_accumulator::impl::policy_votes::status() const noexcept {
    return {
@@ -208,6 +184,48 @@ void vote_accumulator::impl::add_verified(const finalizer_vote& vote) {
          pending->add(*index, vote.kind, vote.signature);
       }
    }
+}
+
+std::optional<quorum_certificate> vote_accumulator::impl::local() const {
+   auto active_signature = active.local();
+   if (!active_signature) {
+      return std::nullopt;
+   }
+
+   auto pending_signature = std::optional<qc_signature>{};
+   if (pending) {
+      pending_signature = pending->local();
+      if (!pending_signature) {
+         return std::nullopt;
+      }
+   }
+   return quorum_certificate{
+       .block = candidate.num,
+       .active = std::move(*active_signature),
+       .pending = std::move(pending_signature),
+   };
+}
+
+bool vote_accumulator::impl::observe(quorum_certificate certificate) {
+   if (!received || (!received->strong() && certificate.strong())) {
+      received = std::move(certificate);
+      return true;
+   }
+   return false;
+}
+
+std::optional<quorum_certificate> vote_accumulator::impl::best() const {
+   auto local_certificate = local();
+   if (!local_certificate) {
+      return received;
+   }
+   if (!received) {
+      return local_certificate;
+   }
+   if (received->strong() || !local_certificate->strong()) {
+      return received;
+   }
+   return local_certificate;
 }
 
 } // namespace forge::chain::savanna

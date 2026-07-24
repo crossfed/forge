@@ -108,7 +108,10 @@ Corrected during transfer:
 - validation roots and preimages are bounded by explicit finality advancement;
 - append no longer replays retained history;
 - QC weight evaluation uses `forge_chain_quorum`;
-- QC verification returns a non-serializable strong-voter capability;
+- QC verification returns a non-serializable capability bound to the checked
+  finality digest and strong voters;
+- active and pending policy halves remain paired during received/local
+  best-certificate selection;
 - shared active/pending finalizers are mutated atomically after signature
   verification outside the accumulator mutex;
 - finalizer safety is a versioned neutral value while durable persistence

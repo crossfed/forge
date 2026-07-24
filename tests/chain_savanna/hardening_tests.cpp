@@ -451,6 +451,68 @@ BOOST_AUTO_TEST_CASE(chain_savanna_received_qc_beats_local_weak_qc) {
    BOOST_TEST(accumulator.best()->strong());
 }
 
+BOOST_AUTO_TEST_CASE(chain_savanna_dual_policy_best_keeps_qc_halves_paired) {
+   const auto shared = hardening_key(1U);
+   const auto pending_only = hardening_key(33U);
+   const auto active_policy = savanna::finalizer_policy{
+       .generation = 1U,
+       .threshold = 2U,
+       .finalizers = {hardening_finalizer(shared, 2U, "shared")},
+   };
+   const auto pending_policy = savanna::finalizer_policy{
+       .generation = 2U,
+       .threshold = 2U,
+       .finalizers =
+           {
+               hardening_finalizer(shared, 1U, "shared"),
+               hardening_finalizer(pending_only, 1U, "pending"),
+           },
+   };
+   const auto active = savanna::validate(
+       active_policy, std::array{shared.proof_of_possession()});
+   const auto pending = savanna::validate(
+       pending_policy,
+       std::array{shared.proof_of_possession(),
+                  pending_only.proof_of_possession()});
+   const auto candidate = hardening_ref(12U, 32U, 120U);
+   auto accumulator = savanna::vote_accumulator{candidate, active, pending};
+
+   static_cast<void>(
+       accumulator.add(make_vote(candidate, shared, savanna::vote_kind::strong)));
+   BOOST_CHECK(accumulator.status().active.state ==
+               savanna::accumulator_state::strong);
+   BOOST_REQUIRE(accumulator.status().pending.has_value());
+   BOOST_CHECK(accumulator.status().pending->state ==
+               savanna::accumulator_state::unrestricted);
+
+   const auto weak_kind = std::array{savanna::vote_kind::weak};
+   const auto active_keys = std::array{shared};
+   const auto active_indices = std::array<std::size_t, 1>{0U};
+   const auto pending_kinds =
+       std::array{savanna::vote_kind::weak, savanna::vote_kind::weak};
+   const auto pending_keys = std::array{shared, pending_only};
+   const auto pending_indices = std::array<std::size_t, 2>{0U, 1U};
+   const auto received = savanna::quorum_certificate{
+       .block = candidate.num,
+       .active = make_qc_signature(
+           candidate, active_policy.finalizers.size(), active_keys,
+           active_indices, weak_kind),
+       .pending = make_qc_signature(
+           candidate, pending_policy.finalizers.size(), pending_keys,
+           pending_indices, pending_kinds),
+   };
+   BOOST_TEST(accumulator.observe(received));
+
+   const auto best = accumulator.best();
+   BOOST_REQUIRE(best.has_value());
+   BOOST_TEST(best->active.weak());
+   BOOST_REQUIRE(best->pending.has_value());
+   BOOST_TEST(best->pending->weak());
+   BOOST_CHECK_NO_THROW(static_cast<void>(savanna::verify(
+       *best, active, std::optional<savanna::verified_finalizer_policy>{pending},
+       candidate.finality_digest)));
+}
+
 BOOST_AUTO_TEST_CASE(chain_savanna_finalizer_safety_matches_spring_rules) {
    const auto ref0 = hardening_ref(0U, 10U, 1U);
    const auto ref1 = hardening_ref(1U, 11U, 2U);
@@ -541,6 +603,7 @@ BOOST_AUTO_TEST_CASE(chain_savanna_verified_qc_advances_finalizer_safety) {
    const auto verified_qc = savanna::verify(
        certificate, verified_policy, std::nullopt,
        candidate.finality_digest);
+   BOOST_TEST(verified_qc.finality_digest() == candidate.finality_digest);
    BOOST_TEST(verified_qc.has_strong_vote(key.get_public_key()));
 
    const auto advanced = savanna::advance_from_qc(
@@ -555,6 +618,14 @@ BOOST_AUTO_TEST_CASE(chain_savanna_verified_qc_advances_finalizer_safety) {
        key.get_public_key());
    BOOST_TEST(recovered.lock().id == ref1.id);
    BOOST_TEST(recovered.last_vote().id == candidate.id);
+
+   auto mismatched_candidate = candidate;
+   mismatched_candidate.finality_digest = hardening_digest(999U);
+   BOOST_CHECK_THROW(
+       static_cast<void>(savanna::advance_from_qc(
+           savanna::make_finalizer_safety(ref1), core, mismatched_candidate,
+           verified_qc, key.get_public_key())),
+       savanna::exceptions::invalid_qc);
 
    const auto competing = hardening_ref(candidate.num, candidate.slot, 99U);
    const auto competing_plan = savanna::plan_vote(recovered, core, competing);

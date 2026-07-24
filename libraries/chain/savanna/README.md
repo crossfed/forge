@@ -83,8 +83,9 @@ represented non-canonically as weak.
 
 `verify()` returns a non-serializable `verified_quorum_certificate`. In
 addition to the checked certificate, this capability records which public keys
-are proven strong voters. Finalizer safety updates accept the capability rather
-than an unchecked QC record.
+are proven strong voters and the finality digest against which their signatures
+were verified. Finalizer safety updates accept the capability rather than an
+unchecked QC record and require its digest to match the candidate.
 
 ## Bounded Validation
 
@@ -149,7 +150,8 @@ pending policies is updated atomically. BLS verification is done outside the
 state mutex and duplicate/conflict state is checked again before mutation.
 `observe()` validates an external QC before accepting it; `best()` chooses
 between locally aggregated and received candidates with strong-over-weak
-ordering.
+ordering. Active and pending policy signatures remain paired as one complete
+certificate throughout storage and selection.
 
 The accumulator is deliberately not serializable. Losing pending votes on
 restart affects progress only; it cannot authorize an invalid QC. Networking,
