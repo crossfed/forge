@@ -123,7 +123,9 @@ forge_add_contract(
 `forge_add_contract` treats its call-site source directory as `SOURCE_ROOT`.
 Contract sources must remain under that root, and compiler-discovered headers
 there are recorded with stable `contract/source/...` paths. A contract stored
-elsewhere can declare `SOURCE_ROOT` explicitly.
+elsewhere can declare `SOURCE_ROOT` explicitly. Local dependencies outside that
+root must be exact files declared by a linked contract library; unowned relative
+or absolute includes fail the build.
 
 `ID` is the stable package identity. A contract library may depend only on
 guest-compatible Forge targets or other contract libraries. The configure step

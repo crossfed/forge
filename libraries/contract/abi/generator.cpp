@@ -9,6 +9,7 @@ module;
 #include <clang/Frontend/FrontendAction.h>
 #include <clang/Frontend/FrontendActions.h>
 #include <clang/Index/USRGeneration.h>
+#include <clang/Lex/HeaderSearch.h>
 #include <clang/Sema/Lookup.h>
 #include <clang/Tooling/CompilationDatabase.h>
 #include <clang/Tooling/Tooling.h>
@@ -25,6 +26,7 @@ module;
 #include <memory>
 #include <map>
 #include <optional>
+#include <ranges>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -1469,12 +1471,20 @@ class consumer final : public clang::ASTConsumer {
    bool is_dispatch_source_ = false;
 };
 
-void collect_source_dependencies(clang::CompilerInstance& compiler, std::set<std::filesystem::path>& dependencies) {
+using source_dependencies = std::map<std::filesystem::path, bool>;
+
+void collect_source_dependencies(clang::CompilerInstance& compiler, source_dependencies& dependencies) {
    const auto& source_manager = compiler.getSourceManager();
+   auto& header_search = compiler.getPreprocessor().getHeaderSearchInfo();
    for (auto iterator = source_manager.fileinfo_begin(); iterator != source_manager.fileinfo_end(); ++iterator) {
       const auto path = std::filesystem::path{iterator->first.getName().str()};
       if (!path.empty() && std::filesystem::exists(path)) {
-         dependencies.insert(std::filesystem::weakly_canonical(path));
+         const auto is_system = clang::SrcMgr::isSystem(header_search.getFileDirFlavor(iterator->first));
+         const auto canonical = std::filesystem::weakly_canonical(path);
+         const auto [entry, inserted] = dependencies.emplace(canonical, is_system);
+         if (!inserted) {
+            entry->second = entry->second && is_system;
+         }
       }
    }
 }
@@ -1482,7 +1492,7 @@ void collect_source_dependencies(clang::CompilerInstance& compiler, std::set<std
 class action final : public clang::ASTFrontendAction {
  public:
    action(schema& output, bool& found, bool& dispatch_source_found, std::string_view contract_name,
-          std::filesystem::path dispatch_source, std::set<std::filesystem::path>& dependencies)
+          std::filesystem::path dispatch_source, source_dependencies& dependencies)
        : output_(output), found_(found), dispatch_source_found_(dispatch_source_found), contract_name_(contract_name),
          dispatch_source_(std::move(dispatch_source)), dependencies_(dependencies) {}
 
@@ -1503,13 +1513,13 @@ class action final : public clang::ASTFrontendAction {
    bool& dispatch_source_found_;
    std::string contract_name_;
    std::filesystem::path dispatch_source_;
-   std::set<std::filesystem::path>& dependencies_;
+   source_dependencies& dependencies_;
 };
 
 class action_factory final : public clang::tooling::FrontendActionFactory {
  public:
    action_factory(schema& output, bool& found, bool& dispatch_source_found, std::string_view contract_name,
-                  std::filesystem::path dispatch_source, std::set<std::filesystem::path>& dependencies)
+                  std::filesystem::path dispatch_source, source_dependencies& dependencies)
        : output_(output), found_(found), dispatch_source_found_(dispatch_source_found), contract_name_(contract_name),
          dispatch_source_(std::move(dispatch_source)), dependencies_(dependencies) {}
 
@@ -1524,31 +1534,31 @@ class action_factory final : public clang::tooling::FrontendActionFactory {
    bool& dispatch_source_found_;
    std::string contract_name_;
    std::filesystem::path dispatch_source_;
-   std::set<std::filesystem::path>& dependencies_;
+   source_dependencies& dependencies_;
 };
 
 class dependency_action final : public clang::SyntaxOnlyAction {
  public:
-   explicit dependency_action(std::set<std::filesystem::path>& dependencies) : dependencies_(dependencies) {}
+   explicit dependency_action(source_dependencies& dependencies) : dependencies_(dependencies) {}
 
    void EndSourceFileAction() override {
       collect_source_dependencies(getCompilerInstance(), dependencies_);
    }
 
  private:
-   std::set<std::filesystem::path>& dependencies_;
+   source_dependencies& dependencies_;
 };
 
 class dependency_action_factory final : public clang::tooling::FrontendActionFactory {
  public:
-   explicit dependency_action_factory(std::set<std::filesystem::path>& dependencies) : dependencies_(dependencies) {}
+   explicit dependency_action_factory(source_dependencies& dependencies) : dependencies_(dependencies) {}
 
    std::unique_ptr<clang::FrontendAction> create() override {
       return std::make_unique<dependency_action>(dependencies_);
    }
 
  private:
-   std::set<std::filesystem::path>& dependencies_;
+   source_dependencies& dependencies_;
 };
 
 std::string read_text(const std::filesystem::path& path) {
@@ -1589,13 +1599,13 @@ std::string depfile_path(const std::filesystem::path& path) {
    return result;
 }
 
-void write_depfile(const forge::contract::abi::request& options, const std::set<std::filesystem::path>& dependencies) {
+void write_depfile(const forge::contract::abi::request& options, const source_dependencies& dependencies) {
    if (options.depfile.empty()) {
       return;
    }
    auto output = std::ostringstream{};
    output << depfile_path(options.abi) << ':';
-   for (const auto& dependency : dependencies) {
+   for (const auto& dependency : dependencies | std::views::keys) {
       output << " \\\n  " << depfile_path(dependency);
    }
    output << '\n';
@@ -1626,7 +1636,7 @@ std::optional<std::filesystem::path> relative_to(const std::filesystem::path& pa
 }
 
 void write_source_dependencies(const forge::contract::abi::request& options,
-                               const std::set<std::filesystem::path>& dependencies) {
+                               const source_dependencies& dependencies) {
    if (options.source_dependencies.empty()) {
       return;
    }
@@ -1669,6 +1679,17 @@ void write_source_dependencies(const forge::contract::abi::request& options,
       return left_size != right_size ? left_size > right_size : left.logical < right.logical;
    });
 
+   auto external_roots = std::vector<std::filesystem::path>{};
+   external_roots.reserve(options.external_source_roots.size());
+   for (const auto& root : options.external_source_roots) {
+      if (!std::filesystem::is_directory(root)) {
+         throw std::runtime_error{"external source root is not a directory: " + root.string()};
+      }
+      external_roots.push_back(std::filesystem::weakly_canonical(root));
+   }
+   std::ranges::sort(external_roots);
+   external_roots.erase(std::unique(external_roots.begin(), external_roots.end()), external_roots.end());
+
    auto source_paths = std::set<std::filesystem::path>{};
    for (const auto& source : options.sources) {
       source_paths.insert(std::filesystem::weakly_canonical(source));
@@ -1676,12 +1697,19 @@ void write_source_dependencies(const forge::contract::abi::request& options,
    for (const auto& source : options.dependency_sources) {
       source_paths.insert(std::filesystem::weakly_canonical(source));
    }
+   for (const auto& source : options.attested_sources) {
+      if (!std::filesystem::is_regular_file(source)) {
+         throw std::runtime_error{"attested source is not a file: " + source.string()};
+      }
+      source_paths.insert(std::filesystem::weakly_canonical(source));
+   }
 
    auto discovered = std::map<std::filesystem::path, std::filesystem::path>{};
-   for (const auto& dependency : dependencies) {
+   for (const auto& [dependency, is_system] : dependencies) {
       if (source_paths.contains(dependency)) {
          continue;
       }
+      auto matched = false;
       for (const auto& root : roots) {
          const auto relative = relative_to(dependency, root.physical);
          if (!relative.has_value()) {
@@ -1696,8 +1724,15 @@ void write_source_dependencies(const forge::contract::abi::request& options,
          if (!inserted && existing->second != dependency) {
             throw std::runtime_error{"contract dependencies map to the same logical path: " + logical.generic_string()};
          }
+         matched = true;
          break;
       }
+      if (matched || is_system ||
+          std::ranges::any_of(external_roots,
+                              [&](const auto& root) { return relative_to(dependency, root).has_value(); })) {
+         continue;
+      }
+      throw std::runtime_error{"contract dependency is outside declared source roots: " + dependency.string()};
    }
 
    auto output = std::ostringstream{};
@@ -2150,7 +2185,7 @@ artifacts generate(const request& options) {
    auto discovery = schema{};
    auto discovery_found = false;
    auto discovery_dispatch_source_found = false;
-   auto discovery_dependencies = std::set<std::filesystem::path>{};
+   auto discovery_dependencies = source_dependencies{};
    const auto dispatch_source = std::filesystem::weakly_canonical(options.sources.front());
    auto discovery_factory = action_factory{discovery,        discovery_found, discovery_dispatch_source_found,
                                            options.contract, dispatch_source, discovery_dependencies};
@@ -2173,7 +2208,7 @@ artifacts generate(const request& options) {
    auto output = schema{};
    auto found = false;
    auto dispatch_source_found = false;
-   auto dependencies = std::set<std::filesystem::path>{};
+   auto dependencies = source_dependencies{};
    auto factory = action_factory{output, found, dispatch_source_found, options.contract, dispatch_source, dependencies};
    const auto result = tool.run(&factory);
    if (result != 0 || output.failed) {

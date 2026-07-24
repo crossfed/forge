@@ -71,11 +71,17 @@ def configure(
     run(*command, succeeds=succeeds, contains=contains)
 
 
-def build(args, directory: Path, *targets: str) -> None:
+def build(
+    args,
+    directory: Path,
+    *targets: str,
+    succeeds: bool = True,
+    contains: Optional[str] = None,
+) -> None:
     command = [args.cmake, "--build", str(directory), "-j", "4"]
     if targets:
         command.extend(["--target", *targets])
-    run(*command)
+    run(*command, succeeds=succeeds, contains=contains)
 
 
 def verify_artifacts(directory: Path, contract: str) -> tuple[dict, dict]:
@@ -197,6 +203,121 @@ def check_negative_projects(args, output: Path) -> None:
         output / "contract-source-escape-build",
         succeeds=False,
         contains="outside SOURCE_ROOT",
+    )
+
+    outside_header = output / "outside.hpp"
+    outside_header.write_text("#pragma once\ninline constexpr auto outside_value = 42;\n", encoding="utf-8")
+    relative_include_escape = write_negative_project(
+        output / "relative-include-escape",
+        """forge_add_contract(relativeescape SOURCES contract.cpp)
+""",
+    )
+    (relative_include_escape / "contract.cpp").write_text(
+        """#include "../outside.hpp"
+import forge.contract;
+
+class [[forge::contract("relativeescape")]] relative_escape : public forge::contract::context {
+ public:
+   using context::context;
+   [[forge::action]] void verify() {
+      forge::contract::check(outside_value == 42, "outside value mismatch");
+   }
+};
+""",
+        encoding="utf-8",
+    )
+    relative_include_build = output / "relative-include-escape-build"
+    configure(args, relative_include_escape, relative_include_build)
+    build(
+        args,
+        relative_include_build,
+        succeeds=False,
+        contains="contract dependency is outside declared source roots",
+    )
+
+    absolute_include_escape = write_negative_project(
+        output / "absolute-include-escape",
+        """forge_add_contract(absoluteescape SOURCES contract.cpp)
+""",
+    )
+    (absolute_include_escape / "contract.cpp").write_text(
+        f"""#include "{outside_header.as_posix()}"
+import forge.contract;
+
+class [[forge::contract("absoluteescape")]] absolute_escape : public forge::contract::context {{
+ public:
+   using context::context;
+   [[forge::action]] void verify() {{
+      forge::contract::check(outside_value == 42, "outside value mismatch");
+   }}
+}};
+""",
+        encoding="utf-8",
+    )
+    absolute_include_build = output / "absolute-include-escape-build"
+    configure(args, absolute_include_escape, absolute_include_build)
+    build(
+        args,
+        absolute_include_build,
+        succeeds=False,
+        contains="contract dependency is outside declared source roots",
+    )
+
+    undeclared_library_header = output / "undeclared-library-header"
+    (undeclared_library_header / "protocol" / "include").mkdir(parents=True)
+    (undeclared_library_header / "contract").mkdir(parents=True)
+    (undeclared_library_header / "protocol" / "include" / "undeclared.hpp").write_text(
+        "#pragma once\ninline constexpr auto undeclared_value = 42;\n",
+        encoding="utf-8",
+    )
+    (undeclared_library_header / "protocol" / "include" / "protocol.cppm").write_text(
+        "export module negative.undeclared.protocol;\n",
+        encoding="utf-8",
+    )
+    (undeclared_library_header / "contract" / "contract.cpp").write_text(
+        """#include <undeclared.hpp>
+import forge.contract;
+import negative.undeclared.protocol;
+
+class [[forge::contract("undeclared")]] undeclared_contract : public forge::contract::context {
+ public:
+   using context::context;
+   [[forge::action]] void verify() {
+      forge::contract::check(undeclared_value == 42, "protocol value mismatch");
+   }
+};
+""",
+        encoding="utf-8",
+    )
+    (undeclared_library_header / "CMakeLists.txt").write_text(
+        """cmake_minimum_required(VERSION 3.31)
+project(UndeclaredContractLibraryHeader LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 23)
+find_package(Forge CONFIG REQUIRED COMPONENTS raw)
+find_package(ForgeContract CONFIG REQUIRED)
+forge_add_contract_library(
+   protocol ID negative.undeclared.header
+   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/protocol"
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+   LIBRARIES Forge::forge_raw
+)
+forge_add_contract(
+   undeclared
+   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/contract"
+   SOURCES contract.cpp
+   LIBRARIES protocol
+)
+""",
+        encoding="utf-8",
+    )
+    undeclared_library_header_build = output / "undeclared-library-header-build"
+    configure(args, undeclared_library_header, undeclared_library_header_build)
+    build(
+        args,
+        undeclared_library_header_build,
+        succeeds=False,
+        contains="contract dependency is outside declared source roots",
     )
 
     duplicate = write_negative_project(

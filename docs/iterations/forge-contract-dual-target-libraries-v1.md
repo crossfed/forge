@@ -73,10 +73,10 @@ they are never serialized. Contract sources, compile checks, Ricardian inputs,
 contract-library modules, implementations and public/private headers are all
 attested. `forge_add_contract` uses its call-site directory as the default
 contract `SOURCE_ROOT`; `abigen` contributes every compiler-discovered include
-under that root and explicitly declared include roots. The manifest skips
-physical files already owned by the declarative library graph, so each source
-has one attestation owner. Manifest v1 artifacts are rebuilt rather than
-accepted as a compatibility format.
+under that root. Exact files owned by linked contract libraries remain under
+their declarative owners; other local dependencies outside the contract root
+fail closed. Each source therefore has one attestation owner. Manifest v1
+artifacts are rebuilt rather than accepted as a compatibility format.
 
 ## Executable Proof
 

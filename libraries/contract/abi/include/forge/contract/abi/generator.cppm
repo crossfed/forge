@@ -26,6 +26,8 @@ struct request {
    std::vector<std::filesystem::path> module_paths;
    std::vector<std::filesystem::path> include_paths;
    std::vector<source_root> source_roots;
+   std::vector<std::filesystem::path> external_source_roots;
+   std::vector<std::filesystem::path> attested_sources;
    std::vector<std::filesystem::path> sources;
    std::vector<std::filesystem::path> dependency_sources;
    std::vector<std::filesystem::path> source_wrappers;
