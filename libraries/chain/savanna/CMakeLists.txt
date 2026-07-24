@@ -4,6 +4,10 @@ add_library(
    policy.cpp
    finality_core.cpp
    qc.cpp
+   vote.cpp
+   vote_accumulator.cpp
+   vote_accumulator_impl.cpp
+   finalizer_safety.cpp
    validation.cpp
    rank.cpp
 )
@@ -14,6 +18,7 @@ target_include_directories(forge_chain_savanna PUBLIC ${FORGE_PUBLIC_INCLUDE_DIR
 target_link_libraries(
    forge_chain_savanna PUBLIC
       Boost::headers
+      Threads::Threads
       forge_chain_core
       forge_chain_quorum
       forge_crypto_bls

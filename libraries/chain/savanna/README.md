@@ -2,8 +2,9 @@
 
 `forge_chain_savanna` is the Preview operational kernel for Savanna-style
 instant finality. It owns policy validation, strong/weak finality transitions,
-quorum-certificate verification, validation commitments and deterministic fork
-ranking without owning a blockchain controller.
+quorum-certificate verification and construction, bounded validation
+commitments, finalizer safety decisions and deterministic fork ranking without
+owning a blockchain controller.
 
 ## Package
 
@@ -21,7 +22,10 @@ Crypto Digest, Raw and Variant dependencies.
 - `forge.chain.savanna.policy`
 - `forge.chain.savanna.finality_core`
 - `forge.chain.savanna.qc`
+- `forge.chain.savanna.vote`
+- `forge.chain.savanna.vote_accumulator`
 - `forge.chain.savanna.validation`
+- `forge.chain.savanna.finalizer_safety`
 - `forge.chain.savanna.rank`
 - `forge.chain.savanna.exceptions`
 
@@ -77,17 +81,124 @@ in both signatures. A weak QC must contain at least one weak vote, and its
 strong-vote subset must remain below threshold, so a strong quorum cannot be
 represented non-canonically as weak.
 
-`validation_state` retains neutral leaf preimages alongside historical roots.
-Validation checks their explicit contiguous block numbers from `first`, hashes
-and replays every leaf, verifies every retained root and compares the complete
-incremental Merkle state. This makes deserialized state safe to query through
-`root_at()` after validation without a full protocol block history.
+`verify()` returns a non-serializable `verified_quorum_certificate`. In
+addition to the checked certificate, this capability records which public keys
+are proven strong voters and the finality digest against which their signatures
+were verified. Finalizer safety updates accept the capability rather than an
+unchecked QC record and require its digest to match the candidate.
+
+## Bounded Validation
+
+`validation_state` is an encapsulated, versioned value. It stores a compact
+Merkle frontier before the retained range, the current frontier, retained roots
+and the corresponding neutral leaf preimages:
+
+```cpp
+auto state = savanna::make_validation(genesis_leaf);
+state = savanna::append(std::move(state), next_leaf);
+
+const auto finalized_root = savanna::root_at(state, finalized);
+state = savanna::advance_finalized(std::move(state), finalized);
+```
+
+`advance_finalized()` retains the finalized block itself and removes older
+roots and preimages. The prefix frontier keeps the complete Merkle history in
+`O(log N)` space. A caller chooses and enforces its reversible window by
+advancing the state whenever finality moves. Looking up a pruned root throws
+`validation_root_unavailable`.
+
+`append()` is `O(log N)` and does not replay the retained range. Full replay is
+performed by explicit `validate()` and by Raw decoding. The Raw v1 layout is:
+
+1. version;
+2. prefix incremental-Merkle frontier;
+3. current incremental-Merkle frontier;
+4. first retained block number;
+5. retained roots;
+6. retained leaf preimages.
+
+The old Forge 8.13.0 Preview layout is intentionally not decoded. Unknown
+versions and inconsistent frontiers fail with
+`forge::raw::exceptions::codec_error`.
+
+## Vote Accumulation
+
+`vote_accumulator` is a move-only, thread-safe, ephemeral collector for one
+candidate:
+
+```cpp
+savanna::vote_accumulator votes{
+    candidate,
+    active_verified_policy,
+    pending_verified_policy};
+
+const auto result = votes.add({
+    .block = candidate.id,
+    .finalizer = finalizer_key,
+    .kind = savanna::vote_kind::strong,
+    .signature = signature,
+});
+
+if (auto qc = votes.best()) {
+   publish(*qc);
+}
+```
+
+Construction verifies that the supplied active and optional pending policy
+generations exactly match the candidate. A candidate that names a pending
+generation requires that policy, while a candidate without one rejects an
+extra pending policy.
+
+It implements the donor states `unrestricted`, `restricted`,
+`weak_achieved`, `weak_final` and `strong`. A finalizer shared by active and
+pending policies is updated atomically. BLS verification is done outside the
+state mutex and duplicate/conflict state is checked again before mutation.
+`observe()` validates an external QC before accepting it; `best()` chooses
+between locally aggregated and received candidates with strong-over-weak
+ordering. Active and pending policy signatures remain paired as one complete
+certificate throughout storage and selection. Optional vote sets use the
+canonical donor encoding: an all-weak QC omits its empty strong-vote bitset.
+
+The accumulator is deliberately not serializable. Losing pending votes on
+restart affects progress only; it cannot authorize an invalid QC. Networking,
+unknown-block queues and connection policy belong to the node runtime.
+
+## Finalizer Safety
+
+`finalizer_safety_state` carries the donor `last_vote`, `lock` and
+`other_branch_latest_time` mechanics using explicit block slots:
+
+```cpp
+auto safety = savanna::make_finalizer_safety(initial_lock);
+const auto plan = savanna::plan_vote(safety, candidate_core, candidate);
+
+if (plan.decision != savanna::vote_decision::abstain) {
+   co_await persist_safety(plan.next);
+   const auto signature = sign(
+       savanna::message_for_vote(candidate.finality_digest,
+                                 plan.decision == savanna::vote_decision::strong
+                                     ? savanna::vote_kind::strong
+                                     : savanna::vote_kind::weak));
+   publish(signature);
+}
+```
+
+`plan_vote()` checks slot monotonicity, higher-QC liveness and ancestry safety,
+then returns the next versioned Raw state. The downstream controller **must
+durably persist `vote_plan.next` before signing or publishing the vote**.
+Forge intentionally owns neither the DB/file implementation nor key custody.
+
+`advance_from_qc()` updates safety state only from a verified strong QC that
+proves the local finalizer cast a strong vote. After restart, the product
+restores the serialized safety state and reconstructs verified policies from
+the required BLS proofs of possession.
+
 Chain code does not include or call the BLS vendor.
 
 ## Boundaries
 
 This library does not own protocol blocks, producer schedules, genesis
 configuration, header extensions, signed-block admission, controller state,
-execution, persistence, P2P synchronization, node lifecycle, key custody or
-product policy. Those layers adapt their own protocol records into the
-operational types here.
+execution, persistence implementation, P2P synchronization, node lifecycle,
+key custody or product policy. Those layers adapt their own protocol records
+into the operational types here.

@@ -13,6 +13,7 @@ Documents below explain cross-library architecture decisions.
 
 | Document | Purpose |
 | --- | --- |
+| [releases/8.14.0.md](releases/8.14.0.md) | Forge 8.14.0 bounded Savanna validation, vote accumulation and finalizer safety. |
 | [releases/8.13.0.md](releases/8.13.0.md) | Forge 8.13.0 neutral Chain quorum, fork and Savanna primitives. |
 | [releases/8.11.0.md](releases/8.11.0.md) | Forge 8.11.0 canonical producer schedule module ownership. |
 | [releases/8.12.0.md](releases/8.12.0.md) | Forge 8.12.0 Crypto leaf-family migration. |

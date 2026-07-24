@@ -12,6 +12,7 @@ import forge.chain.savanna.qc;
 import forge.chain.savanna.rank;
 import forge.chain.savanna.validation;
 import forge.crypto.digest.sha256;
+import forge.raw.exceptions;
 import forge.raw.raw;
 
 namespace {
@@ -333,7 +334,8 @@ BOOST_AUTO_TEST_CASE(chain_savanna_verifies_strong_weak_and_pending_qcs) {
        .active = strong,
        .pending = strong,
    };
-   savanna::verify(certificate, verified_policy, verified_policy, digest);
+   static_cast<void>(
+       savanna::verify(certificate, verified_policy, verified_policy, digest));
    BOOST_TEST(certificate.strong());
    const auto expected_claim = savanna::qc_claim{
        .block = 9U,
@@ -343,8 +345,10 @@ BOOST_AUTO_TEST_CASE(chain_savanna_verifies_strong_weak_and_pending_qcs) {
 
    auto inconsistent_dual_vote = certificate;
    inconsistent_dual_vote.pending = weak;
-   BOOST_CHECK_THROW(savanna::verify(inconsistent_dual_vote, verified_policy, verified_policy, digest),
-                     savanna::exceptions::invalid_qc);
+   BOOST_CHECK_THROW(
+       static_cast<void>(savanna::verify(
+           inconsistent_dual_vote, verified_policy, verified_policy, digest)),
+       savanna::exceptions::invalid_qc);
 
    BOOST_CHECK_THROW(savanna::verify_signature(strong, verified_policy, make_digest(43U)),
                      savanna::exceptions::invalid_qc_signature);
@@ -387,25 +391,9 @@ BOOST_AUTO_TEST_CASE(chain_savanna_validation_and_rank_are_deterministic) {
                                                            .commitment = make_digest(4U),
                                                        });
    savanna::validate(validation);
-   BOOST_TEST(savanna::root_at(validation, 6U) == validation.tree.root());
-   BOOST_TEST(validation.tree.root() ==
+   BOOST_TEST(savanna::root_at(validation, 6U) == validation.root());
+   BOOST_TEST(validation.root() ==
               savanna::digest{"86c45f2da153d610b48601b783c016799698c1e2a43da4b1a58a7bf77609ec8e"});
-
-   auto forged_history = validation;
-   forged_history.roots.front() = make_digest(99U);
-   BOOST_CHECK_THROW(savanna::validate(forged_history), savanna::exceptions::invalid_validation_state);
-   BOOST_CHECK_THROW(static_cast<void>(savanna::append(forged_history, {.num = 7U})),
-                     savanna::exceptions::invalid_validation_state);
-
-   auto forged_leaf = validation;
-   forged_leaf.leaves.front().commitment = make_digest(98U);
-   BOOST_CHECK_THROW(savanna::validate(forged_leaf), savanna::exceptions::invalid_validation_state);
-
-   auto forged_origin = validation;
-   ++forged_origin.first;
-   BOOST_CHECK_THROW(savanna::validate(forged_origin), savanna::exceptions::invalid_validation_state);
-   BOOST_CHECK_THROW(static_cast<void>(savanna::append(forged_origin, {.num = 8U})),
-                     savanna::exceptions::invalid_validation_state);
 
    const auto roundtrip = forge::raw::unpack<savanna::validation_state>(forge::raw::pack(validation));
    savanna::validate(roundtrip);
@@ -414,6 +402,13 @@ BOOST_AUTO_TEST_CASE(chain_savanna_validation_and_rank_are_deterministic) {
 
    BOOST_CHECK_THROW(static_cast<void>(savanna::append(validation, {.num = 8U})),
                      savanna::exceptions::invalid_validation_state);
+
+   auto corrupted = forge::raw::pack(validation);
+   corrupted.back() ^= 0x01U;
+   BOOST_CHECK_THROW(
+       static_cast<void>(
+           forge::raw::unpack<savanna::validation_state>(corrupted)),
+       forge::raw::exceptions::codec_error);
 
    auto core = savanna::finality_core::genesis(5U, 10U);
    const auto block = savanna::block_ref{
