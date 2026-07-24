@@ -71,11 +71,12 @@ The graph SHA-256 is calculated over an explicit domain string, record counts
 and length-prefixed fields. Physical paths are used only to read source bytes;
 they are never serialized. Contract sources, compile checks, Ricardian inputs,
 contract-library modules, implementations and public/private headers are all
-attested. `abigen` also contributes every compiler-discovered include under the
-contract's declared source and include roots. The manifest skips physical files
-already owned by the declarative library graph, so each source has one
-attestation owner. Manifest v1 artifacts are rebuilt rather than accepted as a
-compatibility format.
+attested. `forge_add_contract` uses its call-site directory as the default
+contract `SOURCE_ROOT`; `abigen` contributes every compiler-discovered include
+under that root and explicitly declared include roots. The manifest skips
+physical files already owned by the declarative library graph, so each source
+has one attestation owner. Manifest v1 artifacts are rebuilt rather than
+accepted as a compatibility format.
 
 ## Executable Proof
 

@@ -43,7 +43,7 @@ target_link_libraries(
 forge_add_contract(
    product
    LIBRARIES product_protocol
-   SOURCES contract.cpp
+   SOURCES contract/product.cpp
 )
 
 forge_install_contract_library(

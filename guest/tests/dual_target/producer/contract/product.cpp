@@ -1,3 +1,4 @@
+#include "../contract_support/local_value.hpp"
 #include <cstdint>
 #include <product/chain/version.hpp>
 
@@ -8,6 +9,7 @@ import product.chain.protocol;
 using forge::chain::protocol::literals::operator""_n;
 
 static_assert(product::chain::protocol_version == 1);
+static_assert(product_contract_local_value == 42);
 
 class [[forge::contract("product")]] product_contract : public forge::contract::context {
  public:

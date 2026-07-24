@@ -120,6 +120,11 @@ forge_add_contract(
 )
 ```
 
+`forge_add_contract` treats its call-site source directory as `SOURCE_ROOT`.
+Contract sources must remain under that root, and compiler-discovered headers
+there are recorded with stable `contract/source/...` paths. A contract stored
+elsewhere can declare `SOURCE_ROOT` explicitly.
+
 `ID` is the stable package identity. A contract library may depend only on
 guest-compatible Forge targets or other contract libraries. The configure step
 rejects dependency cycles, unknown host-only targets, duplicate logical paths

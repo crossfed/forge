@@ -110,6 +110,13 @@ def verify_source_graph(manifest: dict) -> None:
     expected_edge = {"owner": "contract:product", "dependency": "product.chain.protocol"}
     if expected_edge not in graph["dependencies"]:
         raise RuntimeError("dual-target source graph omits the contract-to-library dependency")
+    expected_include = {
+        "owner": "contract:product",
+        "role": "contract_include",
+        "logical_path": "contract/source/contract_support/local_value.hpp",
+    }
+    if not any(all(entry.get(key) == value for key, value in expected_include.items()) for entry in graph["files"]):
+        raise RuntimeError("dual-target source graph omits a sibling compiler-discovered header")
     if any(Path(entry["logical_path"]).is_absolute() for entry in graph["files"]):
         raise RuntimeError("dual-target source graph contains an absolute logical path")
 
@@ -161,6 +168,7 @@ def check_negative_projects(args, output: Path) -> None:
     output.mkdir(parents=True)
     outside = output / "outside.cppm"
     outside.write_text("export module negative.outside;\n", encoding="utf-8")
+    (output / "outside.cpp").write_text("import forge.contract;\n", encoding="utf-8")
 
     source_escape = write_negative_project(
         output / "source-escape",
@@ -174,6 +182,19 @@ def check_negative_projects(args, output: Path) -> None:
         args,
         source_escape,
         output / "source-escape-build",
+        succeeds=False,
+        contains="outside SOURCE_ROOT",
+    )
+
+    contract_source_escape = write_negative_project(
+        output / "contract-source-escape",
+        """forge_add_contract(escape SOURCES ../outside.cpp)
+""",
+    )
+    configure(
+        args,
+        contract_source_escape,
+        output / "contract-source-escape-build",
         succeeds=False,
         contains="outside SOURCE_ROOT",
     )
@@ -265,6 +286,24 @@ forge_add_contract(option LIBRARIES protocol SOURCES contract.cpp)
         args,
         compile_option,
         output / "compile-option-build",
+        succeeds=False,
+        contains="COMPILE_OPTIONS;",
+    )
+
+    inherited_compile_option = write_negative_project(
+        output / "inherited-compile-option",
+        """add_compile_options(-fpack-struct=1)
+forge_add_contract_library(
+   protocol ID negative.inherited.compile.option SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+forge_add_contract(inheritedoption LIBRARIES protocol SOURCES contract.cpp)
+""",
+    )
+    configure(
+        args,
+        inherited_compile_option,
+        output / "inherited-compile-option-build",
         succeeds=False,
         contains="COMPILE_OPTIONS;",
     )

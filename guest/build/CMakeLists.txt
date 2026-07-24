@@ -5,6 +5,7 @@ project(ForgeContractConsumer LANGUAGES CXX)
 foreach(_required
    FORGE_CONTRACT_TARGET
    FORGE_CONTRACT_NAME
+   FORGE_CONTRACT_SOURCE_ROOT
    FORGE_CONTRACT_SOURCES_ENCODED
    FORGE_CONTRACT_GRAPH_FILE
    FORGE_CONTRACT_GRAPH_HASH
@@ -38,6 +39,19 @@ string(REPLACE "|" ";" FORGE_CONTRACT_INCLUDE_DIRECTORIES "${FORGE_CONTRACT_INCL
 set(_implementation_sources ${FORGE_CONTRACT_SOURCES})
 list(REMOVE_AT _implementation_sources 0)
 
+get_filename_component(FORGE_CONTRACT_SOURCE_ROOT "${FORGE_CONTRACT_SOURCE_ROOT}" REALPATH)
+if(NOT IS_DIRECTORY "${FORGE_CONTRACT_SOURCE_ROOT}")
+   message(FATAL_ERROR "Forge Contract SOURCE_ROOT is not a directory: ${FORGE_CONTRACT_SOURCE_ROOT}")
+endif()
+
+function(_forge_contract_relative_to_source_root path output)
+   file(RELATIVE_PATH _relative "${FORGE_CONTRACT_SOURCE_ROOT}" "${path}")
+   if(IS_ABSOLUTE "${_relative}" OR _relative MATCHES "^\\.\\.(/|$)")
+      message(FATAL_ERROR "contract source is outside SOURCE_ROOT: ${path}")
+   endif()
+   set(${output} "${_relative}" PARENT_SCOPE)
+endfunction()
+
 function(_forge_contract_append_source_graph_file path owner role logical physical)
    foreach(_value IN ITEMS "${owner}" "${role}" "${logical}" "${physical}")
       string(FIND "${_value}" "|" _pipe_index)
@@ -66,26 +80,30 @@ set(_source_graph "${CMAKE_CURRENT_BINARY_DIR}/contract-source-graph.txt")
 set(_source_graph_inputs ${FORGE_CONTRACT_SOURCES} ${FORGE_CONTRACT_COMPILE_CHECKS})
 set(_contract_graph_owner "contract:${FORGE_CONTRACT_NAME}")
 file(WRITE "${_source_graph}" "FORGE_CONTRACT_SOURCE_GRAPH_V2\n")
-set(_source_index 0)
 foreach(_source IN LISTS FORGE_CONTRACT_SOURCES)
-   get_filename_component(_name "${_source}" NAME)
+   _forge_contract_relative_to_source_root("${_source}" _relative)
    _forge_contract_append_source_graph_file(
       "${_source_graph}"
       "${_contract_graph_owner}"
       contract_source
-      "contract/source-${_source_index}/${_name}"
+      "contract/source/${_relative}"
       "${_source}"
    )
-   math(EXPR _source_index "${_source_index} + 1")
 endforeach()
 set(_compile_check_index 0)
 foreach(_source IN LISTS FORGE_CONTRACT_COMPILE_CHECKS)
-   get_filename_component(_name "${_source}" NAME)
+   file(RELATIVE_PATH _relative "${FORGE_CONTRACT_SOURCE_ROOT}" "${_source}")
+   if(IS_ABSOLUTE "${_relative}" OR _relative MATCHES "^\\.\\.(/|$)")
+      get_filename_component(_name "${_source}" NAME)
+      set(_logical "contract/compile-check-${_compile_check_index}/${_name}")
+   else()
+      set(_logical "contract/compile-check/${_relative}")
+   endif()
    _forge_contract_append_source_graph_file(
       "${_source_graph}"
       "${_contract_graph_owner}"
       compile_check
-      "contract/compile-check-${_compile_check_index}/${_name}"
+      "${_logical}"
       "${_source}"
    )
    math(EXPR _compile_check_index "${_compile_check_index} + 1")
@@ -498,26 +516,27 @@ set(_abigen_command
    --sysroot "${CMAKE_SYSROOT}"
    --include "${_include}"
 )
-set(_source_root_paths)
-set(_source_root_index 0)
-foreach(_source IN LISTS FORGE_CONTRACT_SOURCES)
-   get_filename_component(_source_root "${_source}" DIRECTORY)
-   get_filename_component(_source_root "${_source_root}" REALPATH)
-   if(NOT _source_root IN_LIST _source_root_paths)
-      list(APPEND _source_root_paths "${_source_root}")
-      list(
-         APPEND _abigen_command
-         --source-root "contract/source-root-${_source_root_index}" "${_source_root}"
-      )
-      math(EXPR _source_root_index "${_source_root_index} + 1")
-   endif()
-endforeach()
+set(_source_root_paths "${FORGE_CONTRACT_SOURCE_ROOT}")
+list(APPEND _abigen_command --source-root "contract/source" "${FORGE_CONTRACT_SOURCE_ROOT}")
+
+function(_forge_contract_source_root_covers path output)
+   foreach(_root IN LISTS _source_root_paths)
+      file(RELATIVE_PATH _relative "${_root}" "${path}")
+      if(NOT IS_ABSOLUTE "${_relative}" AND NOT _relative MATCHES "^\\.\\.(/|$)")
+         set(${output} TRUE PARENT_SCOPE)
+         return()
+      endif()
+   endforeach()
+   set(${output} FALSE PARENT_SCOPE)
+endfunction()
+
 set(_compile_check_root_index 0)
 foreach(_source IN LISTS FORGE_CONTRACT_COMPILE_CHECKS)
    get_filename_component(_source_root "${_source}" DIRECTORY)
    get_filename_component(_source_root "${_source_root}" REALPATH)
    list(APPEND _abigen_command --dependency-source "${_source}")
-   if(NOT _source_root IN_LIST _source_root_paths)
+   _forge_contract_source_root_covers("${_source_root}" _source_root_covered)
+   if(NOT _source_root_covered)
       list(APPEND _source_root_paths "${_source_root}")
       list(
          APPEND _abigen_command
@@ -529,7 +548,8 @@ endforeach()
 set(_include_root_index 0)
 foreach(_include_directory IN LISTS FORGE_CONTRACT_INCLUDE_DIRECTORIES)
    list(APPEND _abigen_command --include "${_include_directory}")
-   if(NOT _include_directory IN_LIST _source_root_paths)
+   _forge_contract_source_root_covers("${_include_directory}" _source_root_covered)
+   if(NOT _source_root_covered)
       list(APPEND _source_root_paths "${_include_directory}")
       list(
          APPEND _abigen_command
@@ -619,6 +639,7 @@ target_compile_options(
       ${_contract_optimization}
       -ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=.
       -ffile-prefix-map=${CMAKE_CURRENT_BINARY_DIR}=.
+      -ffile-prefix-map=${FORGE_CONTRACT_SOURCE_ROOT}=./source
 )
 
 if(FORGE_CONTRACT_COMPILE_CHECKS)
@@ -657,24 +678,18 @@ if(FORGE_CONTRACT_COMPILE_CHECKS)
    add_dependencies(${FORGE_CONTRACT_TARGET} ${FORGE_CONTRACT_TARGET}_compile_checks)
 endif()
 
-set(_source_prefix_index 0)
-foreach(_source IN LISTS FORGE_CONTRACT_SOURCES)
-   get_filename_component(_source_directory "${_source}" DIRECTORY)
-   target_compile_options(
-      ${FORGE_CONTRACT_TARGET}
-      PRIVATE "-ffile-prefix-map=${_source_directory}=./source-${_source_prefix_index}"
-   )
-   math(EXPR _source_prefix_index "${_source_prefix_index} + 1")
-endforeach()
 if(FORGE_CONTRACT_COMPILE_CHECKS)
    set(_compile_check_prefix_index 0)
    foreach(_source IN LISTS FORGE_CONTRACT_COMPILE_CHECKS)
       get_filename_component(_source_directory "${_source}" DIRECTORY)
-      target_compile_options(
-         ${FORGE_CONTRACT_TARGET}_compile_checks
-         PRIVATE "-ffile-prefix-map=${_source_directory}=./compile-check-${_compile_check_prefix_index}"
-      )
-      math(EXPR _compile_check_prefix_index "${_compile_check_prefix_index} + 1")
+      _forge_contract_source_root_covers("${_source_directory}" _source_root_covered)
+      if(NOT _source_root_covered)
+         target_compile_options(
+            ${FORGE_CONTRACT_TARGET}_compile_checks
+            PRIVATE "-ffile-prefix-map=${_source_directory}=./compile-check-${_compile_check_prefix_index}"
+         )
+         math(EXPR _compile_check_prefix_index "${_compile_check_prefix_index} + 1")
+      endif()
    endforeach()
 endif()
 target_link_options(
