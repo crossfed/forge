@@ -312,6 +312,16 @@ def main():
         raise RuntimeError("inaccessible get_name method changed the legacy action ABI")
     if named_helper_actions["erase"]["type"] != "erase":
         raise RuntimeError("deleted get_name method changed the legacy action ABI")
+    if named_helper_actions["inherited"]["type"] != "inherited_named_request":
+        raise RuntimeError("public inherited named action hook did not produce direct DTO ABI")
+    if "restore" in named_helper_structs:
+        raise RuntimeError("inherited named action generated a legacy method wrapper")
+    if named_helper_actions["runtime"]["type"] != "runtime":
+        raise RuntimeError("non-constexpr get_name method changed the legacy action ABI")
+    if named_helper_actions["defaulted"]["type"] != "defaulted":
+        raise RuntimeError("get_name method with parameters changed the legacy action ABI")
+    if named_helper_actions["hidden"]["type"] != "hidden":
+        raise RuntimeError("derived get_name overload did not hide the inherited named action hook")
 
     invoke(
         args,

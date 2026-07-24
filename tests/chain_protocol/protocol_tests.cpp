@@ -49,6 +49,43 @@ static_assert(std::same_as<protocol::digest, core::digest>);
 
 namespace {
 
+struct constexpr_named_payload {
+   static constexpr protocol::action_name get_name() {
+      return protocol::make_name("constexpr");
+   }
+};
+
+struct runtime_named_payload {
+   static protocol::action_name get_name() {
+      return protocol::make_name("runtime");
+   }
+};
+
+struct defaulted_named_payload {
+   static constexpr protocol::action_name get_name(std::uint64_t = 0) {
+      return protocol::make_name("defaulted");
+   }
+};
+
+struct inherited_named_payload : constexpr_named_payload {};
+
+struct hidden_inherited_named_payload : constexpr_named_payload {
+   std::uint64_t get_name(std::uint64_t) const {
+      return 0;
+   }
+};
+
+static_assert(std::constructible_from<protocol::action, protocol::permission_level, protocol::account_name,
+                                      constexpr_named_payload>);
+static_assert(std::constructible_from<protocol::action, protocol::permission_level, protocol::account_name,
+                                      inherited_named_payload>);
+static_assert(!std::constructible_from<protocol::action, protocol::permission_level, protocol::account_name,
+                                       runtime_named_payload>);
+static_assert(!std::constructible_from<protocol::action, protocol::permission_level, protocol::account_name,
+                                       defaulted_named_payload>);
+static_assert(!std::constructible_from<protocol::action, protocol::permission_level, protocol::account_name,
+                                       hidden_inherited_named_payload>);
+
 std::string expected(std::string_view value) {
    return std::string{value};
 }

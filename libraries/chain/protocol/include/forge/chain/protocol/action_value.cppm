@@ -1,15 +1,25 @@
 module;
 
-#include <concepts>
+#include <cstdint>
 #include <type_traits>
-#include <vector>
 #include <utility>
+#include <vector>
 
 export module forge.chain.protocol.action:value;
 
 export import forge.chain.protocol.types;
 
 import forge.raw.codec;
+
+namespace forge::chain::protocol::details {
+
+template <typename Data>
+concept named_action_payload = requires {
+   static_cast<action_name (*)()>(&std::remove_cvref_t<Data>::get_name);
+   typename std::integral_constant<std::uint64_t, std::remove_cvref_t<Data>::get_name().value>;
+};
+
+} // namespace forge::chain::protocol::details
 
 export namespace forge::chain::protocol {
 
@@ -37,17 +47,13 @@ struct action : action_base {
        : action(std::vector<permission_level>{permission}, raw_account, raw_name, std::forward<Data>(value)) {}
 
    template <typename Data>
-      requires requires {
-         { std::remove_cvref_t<Data>::get_name() } -> std::same_as<action_name>;
-      }
+      requires details::named_action_payload<Data>
    action(std::vector<permission_level> permissions, account_name raw_account, Data&& value)
        : action(std::move(permissions), raw_account, std::remove_cvref_t<Data>::get_name(), std::forward<Data>(value)) {
    }
 
    template <typename Data>
-      requires requires {
-         { std::remove_cvref_t<Data>::get_name() } -> std::same_as<action_name>;
-      }
+      requires details::named_action_payload<Data>
    action(permission_level permission, account_name raw_account, Data&& value)
        : action(std::vector<permission_level>{permission}, raw_account, std::forward<Data>(value)) {}
 };
