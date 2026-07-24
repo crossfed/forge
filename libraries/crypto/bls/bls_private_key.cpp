@@ -1,6 +1,5 @@
 module;
 #include <forge/exceptions/macros.hpp>
-#include <algorithm>
 #include <array>
 #include <bls12-381/bls12-381.hpp>
 #include <cstdint>
@@ -39,15 +38,12 @@ private_key private_key::generate() {
 }
 
 static std::array<uint64_t, 4> priv_parse_base64url(const std::string& base64urlstr) {
-   auto res = std::mismatch(config::private_key_prefix.begin(), config::private_key_prefix.end(),
-                            base64urlstr.begin());
-   FORGE_ASSERT(res.first == config::private_key_prefix.end(), "BLS Private Key has invalid format : ${str}",
-              forge::exceptions::ctx("str", base64urlstr));
+   FORGE_ASSERT(base64urlstr.starts_with(config::private_key_prefix), "BLS Private Key has invalid format : ${str}",
+                forge::exceptions::ctx("str", base64urlstr));
 
    auto data_str = base64urlstr.substr(config::private_key_prefix.size());
 
-   std::array<uint64_t, 4> bytes =
-      forge::crypto::bls::detail::deserialize_base64url<std::array<uint64_t, 4>>(data_str);
+   std::array<uint64_t, 4> bytes = forge::crypto::bls::detail::deserialize_base64url<std::array<uint64_t, 4>>(data_str);
 
    return bytes;
 }
