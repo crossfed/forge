@@ -253,7 +253,7 @@ FORGE использует версию `MAJOR.MINOR.PATCH` вместе с яв
 описано в release notes вместе с migration path.
 
 Текущие изменения и переходы описаны в
-[Forge 8.14.0 release notes](docs/releases/8.14.0.md).
+[Forge 8.15.0 release notes](docs/releases/8.15.0.md).
 
 ## Совместимость
 
