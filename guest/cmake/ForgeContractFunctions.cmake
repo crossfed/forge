@@ -587,6 +587,7 @@ function(_forge_contract_write_graph target libraries output)
             list(APPEND _dependency_ids "${_dependency_id}")
          endif()
       endforeach()
+      list(REMOVE_DUPLICATES _dependency_ids)
       list(REMOVE_DUPLICATES _guest_dependencies)
 
       set(_prefix "FORGE_CONTRACT_GRAPH_LIBRARY_${_index}")

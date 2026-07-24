@@ -361,7 +361,7 @@ project(SelfContainedContractLibrary LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 find_package(ForgeContract CONFIG REQUIRED)
 add_subdirectory(libraries)
-target_link_libraries(protocol PRIVATE dependency second_dependency)
+target_link_libraries(protocol PRIVATE dependency dependency second_dependency)
 get_target_property(protocol_dependencies protocol INTERFACE_LINK_LIBRARIES)
 if(NOT protocol_dependencies MATCHES "::@\\\\(")
    message(FATAL_ERROR "fixture did not produce a CMake directory-scope wrapper")
@@ -407,15 +407,15 @@ forge_add_contract_library(
     ]
     if len(edges) != 1:
         raise RuntimeError(f"root contract library dependency was not normalized: {edges}")
-    private_edges = {
+    private_edges = sorted(
         (edge["owner"], edge["dependency"])
         for edge in manifest["source_graph"]["dependencies"]
         if edge["owner"] == "self_contained.protocol"
-    }
-    expected_private_edges = {
+    )
+    expected_private_edges = [
         ("self_contained.protocol", "self_contained.dependency"),
         ("self_contained.protocol", "self_contained.second_dependency"),
-    }
+    ]
     if private_edges != expected_private_edges:
         raise RuntimeError(
             f"multi-entry LINK_ONLY contract dependencies were not attested: {private_edges}"
