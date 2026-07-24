@@ -299,7 +299,23 @@ export int dependency_value();
         """module self_contained.dependency;
 
 int dependency_value() {
-   return 42;
+   return 20;
+}
+""",
+        encoding="utf-8",
+    )
+    (source / "include" / "second_dependency.cppm").write_text(
+        """export module self_contained.second_dependency;
+
+export int second_dependency_value();
+""",
+        encoding="utf-8",
+    )
+    (source / "src" / "second_dependency.cpp").write_text(
+        """module self_contained.second_dependency;
+
+int second_dependency_value() {
+   return 22;
 }
 """,
         encoding="utf-8",
@@ -315,9 +331,10 @@ export int protocol_value();
         """module self_contained.protocol;
 
 import self_contained.dependency;
+import self_contained.second_dependency;
 
 int protocol_value() {
-   return dependency_value();
+   return dependency_value() + second_dependency_value();
 }
 """,
         encoding="utf-8",
@@ -344,7 +361,7 @@ project(SelfContainedContractLibrary LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 find_package(ForgeContract CONFIG REQUIRED)
 add_subdirectory(libraries)
-target_link_libraries(protocol PRIVATE dependency)
+target_link_libraries(protocol PRIVATE dependency second_dependency)
 get_target_property(protocol_dependencies protocol INTERFACE_LINK_LIBRARIES)
 if(NOT protocol_dependencies MATCHES "::@\\\\(")
    message(FATAL_ERROR "fixture did not produce a CMake directory-scope wrapper")
@@ -360,6 +377,11 @@ forge_add_contract(
    dependency ID self_contained.dependency SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.."
    MODULE_BASE_DIRS include MODULE_SOURCES include/dependency.cppm
    SOURCES src/dependency.cpp
+)
+forge_add_contract_library(
+   second_dependency ID self_contained.second_dependency SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.."
+   MODULE_BASE_DIRS include MODULE_SOURCES include/second_dependency.cppm
+   SOURCES src/second_dependency.cpp
 )
 forge_add_contract_library(
    protocol ID self_contained.protocol SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.."
@@ -385,12 +407,19 @@ forge_add_contract_library(
     ]
     if len(edges) != 1:
         raise RuntimeError(f"root contract library dependency was not normalized: {edges}")
-    private_edge = {
-        "owner": "self_contained.protocol",
-        "dependency": "self_contained.dependency",
+    private_edges = {
+        (edge["owner"], edge["dependency"])
+        for edge in manifest["source_graph"]["dependencies"]
+        if edge["owner"] == "self_contained.protocol"
     }
-    if private_edge not in manifest["source_graph"]["dependencies"]:
-        raise RuntimeError("LINK_ONLY private contract dependency was not attested")
+    expected_private_edges = {
+        ("self_contained.protocol", "self_contained.dependency"),
+        ("self_contained.protocol", "self_contained.second_dependency"),
+    }
+    if private_edges != expected_private_edges:
+        raise RuntimeError(
+            f"multi-entry LINK_ONLY contract dependencies were not attested: {private_edges}"
+        )
 
 
 def main() -> None:
