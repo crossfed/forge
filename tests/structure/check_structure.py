@@ -206,6 +206,29 @@ def check_plugin_impl_ownership(root: Path, errors: list[str]) -> None:
             )
 
 
+def check_chain_savanna_boundaries(root: Path, errors: list[str]) -> None:
+   component = root / "libraries" / "chain" / "savanna"
+   if not component.exists():
+      return
+
+   forbidden = {
+      "forge.chain.protocol": "protocol modules",
+      "forge::chain::protocol": "protocol namespace",
+      "bls12-381": "private BLS backend",
+      "bls12_381": "private BLS backend",
+      "blockchain::": "product namespace",
+      "storlane::": "product namespace",
+      "eosio::": "donor namespace",
+      "spring::": "donor namespace",
+   }
+   for path in source_files(root, ("libraries/chain/savanna",)):
+      relative = path.relative_to(root)
+      source = path.read_text(errors="ignore")
+      for token, owner in forbidden.items():
+         if token in source:
+            errors.append(f"{relative}: Savanna kernel must not depend on {owner} ({token})")
+
+
 def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
    path = root / ".github" / "workflows" / "contract-sdk.yml"
    if not path.exists():
@@ -723,6 +746,7 @@ def main() -> int:
    check_pairing(root, errors)
    check_vm_wasm_boundaries(root, errors)
    check_plugin_impl_ownership(root, errors)
+   check_chain_savanna_boundaries(root, errors)
    check_contract_sdk_workflow(root, errors)
    check_contract_sdk_components(root, errors)
    check_eosio_veneer(root, errors)

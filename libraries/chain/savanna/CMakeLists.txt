@@ -1,0 +1,24 @@
+add_library(
+   forge_chain_savanna STATIC
+   types.cpp
+   policy.cpp
+   finality_core.cpp
+   qc.cpp
+   validation.cpp
+   rank.cpp
+)
+forge_target_modules_at(forge_chain_savanna chain/savanna)
+
+target_include_directories(forge_chain_savanna PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
+
+target_link_libraries(
+   forge_chain_savanna PUBLIC
+      Boost::headers
+      forge_chain_core
+      forge_chain_quorum
+      forge_crypto_bls
+      forge_crypto_digest
+      forge_exceptions
+      forge_raw
+      forge_variant
+)
