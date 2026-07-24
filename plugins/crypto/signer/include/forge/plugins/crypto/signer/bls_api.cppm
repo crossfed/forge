@@ -3,6 +3,7 @@ module;
 #include <boost/asio/awaitable.hpp>
 #include <forge/api/core/macros.hpp>
 
+#include <cstdint>
 #include <string>
 #include <utility>
 #include <vector>
