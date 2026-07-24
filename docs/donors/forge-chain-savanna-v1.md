@@ -21,10 +21,17 @@ while the public C++ API remains Preview.
   - `libraries/chain/include/eosio/chain/finalizer_policy.hpp`
   - `libraries/chain/include/eosio/chain/qc.hpp`
   - `libraries/chain/qc.cpp`
+  - `libraries/chain/include/eosio/chain/block_state.hpp`
+  - `libraries/chain/block_state.cpp`
+  - `libraries/chain/include/eosio/chain/finalizer.hpp`
+  - `libraries/chain/finalizer.cpp`
   - `libraries/testing/contracts/eosio.bios/eosio.bios.hpp`
   - `libraries/testing/contracts/eosio.bios/eosio.bios.cpp`
   - `unittests/finality_core_tests.cpp`
   - `unittests/savanna_finalizer_policy_tests.cpp`
+  - `unittests/finalizer_vote_tests.cpp`
+  - `unittests/finalizer_tests.cpp`
+  - `unittests/block_state_tests.cpp`
 
 Accepted:
 
@@ -37,6 +44,15 @@ Accepted:
 - strong digest plus `WEAK` postfix for weak votes;
 - finality digest packing that omits finalizer-policy generations.
 - proof-of-possession validation when finalizer keys enter policy state.
+- front-trimming validation roots at the last-final boundary while retaining
+  the complete incremental Merkle frontier;
+- thread-safe strong/weak vote accumulation with the donor states
+  `unrestricted`, `restricted`, `weak_achieved`, `weak_final` and `strong`;
+- best-QC selection between locally aggregated and externally received
+  certificates;
+- cross-candidate finalizer safety through `last_vote`, `lock` and
+  `other_branch_latest_time`;
+- durable-before-signing ownership for finalizer safety state.
 
 The Spring finality preimage is preserved exactly in structure:
 
@@ -52,7 +68,9 @@ Rejected:
 - deriving block number from a protocol-specific block ID;
 - controller, fork database and header-state ownership;
 - producer schedules, genesis policy and extension IDs;
-- vote networking, aggregation runtime and key custody;
+- vote networking, connection/runtime queues and key custody;
+- Spring's controller-owned safety file, CRC and filesystem lifecycle;
+- serialization of ephemeral vote accumulators;
 - direct vendor cryptography in Chain.
 
 ### Blockchain Reference
@@ -85,9 +103,22 @@ Corrected during transfer:
 - weak QC encoding rejects a present-but-empty weak-vote bitset;
 - weak QC encoding is rejected when its strong votes already reach quorum;
 - retained validation roots and their starting block are replay-verified from
-  stored neutral leaf preimages rather than trusted as an unauthenticated
-  historical cache;
+  stored neutral leaf preimages and a compact prefix frontier rather than
+  trusted as an unauthenticated historical cache;
+- validation roots and preimages are bounded by explicit finality advancement;
+- append no longer replays retained history;
 - QC weight evaluation uses `forge_chain_quorum`;
+- QC verification returns a non-serializable capability bound to the checked
+  finality digest and strong voters;
+- vote accumulation requires its active and pending policy generations to
+  match the candidate before accepting votes or certificates;
+- active and pending policy halves remain paired during received/local
+  best-certificate selection;
+- all-weak locally constructed QCs omit their empty optional strong-vote set;
+- shared active/pending finalizers are mutated atomically after signature
+  verification outside the accumulator mutex;
+- finalizer safety is a versioned neutral value while durable persistence
+  remains downstream;
 - producer and protocol records remain downstream.
 
 ## Target Components
@@ -100,7 +131,9 @@ Corrected during transfer:
   - policy validation and diffs;
   - finality transitions and digest;
   - QC validation;
-  - validation commitment tree;
+  - local and received QC aggregation;
+  - bounded validation commitment tree;
+  - finalizer vote safety planning;
   - deterministic rank.
 
 ## Verification
@@ -115,7 +148,12 @@ The focused tests cover:
 - duplicate BLS keys and weight overflow;
 - grouped active/pending QC verification and tampering;
 - malformed vote bitsets;
-- validation commitment roots;
+- validation commitment roots, compaction and 100,000-block bounded-state
+  behavior;
+- all donor accumulator states, duplicate/conflicting votes, active/pending
+  policies, concurrent submissions and best-QC selection;
+- monotonicity, liveness, ancestry safety, branch changes, restart roundtrip
+  and verified strong-QC safety advancement;
 - rank ordering;
 - static absence of protocol, product and direct BLS-vendor dependencies in
   the Chain leaf.

@@ -3,8 +3,12 @@
 #include <span>
 
 import forge.chain.savanna.finality_core;
+import forge.chain.savanna.finalizer_safety;
 import forge.chain.savanna.policy;
 import forge.chain.savanna.rank;
+import forge.chain.savanna.validation;
+import forge.chain.savanna.vote;
+import forge.chain.savanna.vote_accumulator;
 
 int main() {
    using namespace forge::chain;
@@ -32,7 +36,23 @@ int main() {
        .num = 1U,
        .id = id,
        .slot = 1U,
+       .active_policy_generation = 1U,
    };
    const auto rank = savanna::make_rank(finality, block);
-   return verified.get().threshold == 1U && rank.block == 1U ? 0 : 1;
+   auto validation = savanna::make_validation({
+       .num = 1U,
+       .slot = 1U,
+       .finality_digest = id,
+       .commitment = id,
+   });
+   auto votes = savanna::vote_accumulator{block, verified};
+   const auto safety = savanna::make_finalizer_safety(block);
+   const auto message =
+       savanna::message_for_vote(id, savanna::vote_kind::strong);
+   return verified.get().threshold == 1U && rank.block == 1U &&
+                  validation.retained_size() == 1U &&
+                  !votes.status().quorum_reached() &&
+                  safety.lock().id == id && message.size() == 32U
+              ? 0
+              : 1;
 }
