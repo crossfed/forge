@@ -96,7 +96,7 @@ void vote_accumulator::impl::policy_votes::add(
       }
       break;
    case accumulator_state::weak_achieved:
-      if (weak_weight >= weak_limit) {
+      if (weak_weight > weak_limit) {
          state = accumulator_state::weak_final;
       }
       break;

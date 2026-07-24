@@ -302,6 +302,49 @@ BOOST_AUTO_TEST_CASE(chain_savanna_vote_accumulator_tracks_donor_states) {
    BOOST_TEST(weak_message[35] == static_cast<std::uint8_t>('K'));
 }
 
+BOOST_AUTO_TEST_CASE(
+    chain_savanna_zero_weight_vote_does_not_finalize_weak_quorum) {
+   const auto first = hardening_key(1U);
+   const auto second = hardening_key(33U);
+   const auto zero = hardening_key(65U);
+   const auto fourth = hardening_key(97U);
+   const auto policy = savanna::finalizer_policy{
+       .generation = 1U,
+       .threshold = 2U,
+       .finalizers =
+           {
+               hardening_finalizer(first, 1U, "first"),
+               hardening_finalizer(second, 1U, "second"),
+               hardening_finalizer(zero, 0U, "zero"),
+               hardening_finalizer(fourth, 1U, "fourth"),
+           },
+   };
+   const auto verified = savanna::validate(
+       policy, std::array{first.proof_of_possession(),
+                          second.proof_of_possession(),
+                          zero.proof_of_possession(),
+                          fourth.proof_of_possession()});
+   const auto candidate = hardening_ref(9U, 20U, 90U);
+   auto accumulator = savanna::vote_accumulator{candidate, verified};
+
+   static_cast<void>(
+       accumulator.add(make_vote(candidate, first, savanna::vote_kind::strong)));
+   static_cast<void>(
+       accumulator.add(make_vote(candidate, second, savanna::vote_kind::weak)));
+   BOOST_CHECK(accumulator.status().active.state ==
+               savanna::accumulator_state::weak_achieved);
+
+   static_cast<void>(
+       accumulator.add(make_vote(candidate, zero, savanna::vote_kind::weak)));
+   BOOST_CHECK(accumulator.status().active.state ==
+               savanna::accumulator_state::weak_achieved);
+
+   static_cast<void>(
+       accumulator.add(make_vote(candidate, fourth, savanna::vote_kind::strong)));
+   BOOST_CHECK(accumulator.status().active.state ==
+               savanna::accumulator_state::strong);
+}
+
 BOOST_AUTO_TEST_CASE(chain_savanna_vote_accumulator_is_atomic_and_thread_safe) {
    const auto first = hardening_key(1U);
    const auto second = hardening_key(33U);
@@ -506,6 +549,17 @@ BOOST_AUTO_TEST_CASE(chain_savanna_verified_qc_advances_finalizer_safety) {
    BOOST_TEST(advanced.lock().id == ref1.id);
    BOOST_TEST(advanced.last_vote().id == candidate.id);
    BOOST_TEST(advanced.other_branch_latest_slot() == 0U);
+
+   const auto recovered = savanna::advance_from_qc(
+       savanna::make_finalizer_safety(ref1), core, candidate, verified_qc,
+       key.get_public_key());
+   BOOST_TEST(recovered.lock().id == ref1.id);
+   BOOST_TEST(recovered.last_vote().id == candidate.id);
+
+   const auto competing = hardening_ref(candidate.num, candidate.slot, 99U);
+   const auto competing_plan = savanna::plan_vote(recovered, core, competing);
+   BOOST_TEST(!competing_plan.monotonic);
+   BOOST_CHECK(competing_plan.decision == savanna::vote_decision::abstain);
 
    BOOST_CHECK_THROW(
        static_cast<void>(savanna::advance_from_qc(

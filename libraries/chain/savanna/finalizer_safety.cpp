@@ -126,14 +126,15 @@ finalizer_safety_state advance_from_qc(
    }
 
    const auto latest_qc_slot = candidate_core.latest_qc_block_slot();
-   if (latest_qc_slot <= state.lock_.slot ||
-       (!state.last_vote_.empty() &&
-        candidate.slot <= state.last_vote_.slot)) {
+   if (!state.last_vote_.empty() &&
+       candidate.slot <= state.last_vote_.slot) {
       return state;
    }
 
-   state.lock_ = candidate_core.get_block_reference(
-       candidate_core.latest_qc_claim().block);
+   if (latest_qc_slot > state.lock_.slot) {
+      state.lock_ = candidate_core.get_block_reference(
+          candidate_core.latest_qc_claim().block);
+   }
    state.last_vote_ = candidate;
    state.other_branch_latest_slot_ = 0U;
    state.require_valid();
