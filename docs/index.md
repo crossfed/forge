@@ -13,6 +13,7 @@ Documents below explain cross-library architecture decisions.
 
 | Document | Purpose |
 | --- | --- |
+| [releases/8.13.0.md](releases/8.13.0.md) | Forge 8.13.0 neutral Chain quorum, fork and Savanna primitives. |
 | [releases/8.11.0.md](releases/8.11.0.md) | Forge 8.11.0 canonical producer schedule module ownership. |
 | [releases/8.12.0.md](releases/8.12.0.md) | Forge 8.12.0 Crypto leaf-family migration. |
 | [releases/8.10.0.md](releases/8.10.0.md) | Forge 8.10.0 Contract SDK, EOSIO compatibility and migration guarantees. |
