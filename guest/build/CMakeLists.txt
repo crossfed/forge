@@ -373,6 +373,7 @@ foreach(
    target_compile_options(
       ${_target}
       PRIVATE
+      -fplugin=${FORGE_CONTRACT_ATTR_PLUGIN}
       -fno-exceptions
       -fno-rtti
       -fno-threadsafe-statics
@@ -389,6 +390,7 @@ function(_forge_contract_configure_downstream_target target)
    target_compile_options(
       ${target}
       PRIVATE
+         -fplugin=${FORGE_CONTRACT_ATTR_PLUGIN}
          -fno-exceptions
          -fno-rtti
          -fno-threadsafe-statics
@@ -403,10 +405,10 @@ function(_forge_contract_configure_downstream_target target)
    )
 endfunction()
 
-function(_forge_contract_collect_guest_module_sources output)
+function(_forge_contract_collect_guest_module_targets output)
    set(_pending ${ARGN})
    set(_visited)
-   set(_sources)
+   set(_targets)
    while(_pending)
       list(POP_FRONT _pending _target)
       if(_target IN_LIST _visited)
@@ -421,16 +423,9 @@ function(_forge_contract_collect_guest_module_sources output)
       if(_module_sets STREQUAL "_module_sets-NOTFOUND")
          set(_module_sets)
       endif()
-      foreach(_module_set IN LISTS _module_sets)
-         get_target_property(_module_sources ${_target} "CXX_MODULE_SET_${_module_set}")
-         if(_module_sources STREQUAL "_module_sources-NOTFOUND")
-            message(FATAL_ERROR "guest dependency has an unreadable C++ module file set: ${_target}")
-         endif()
-         foreach(_source IN LISTS _module_sources)
-            get_filename_component(_source "${_source}" REALPATH)
-            list(APPEND _sources "${_source}")
-         endforeach()
-      endforeach()
+      if(_module_sets)
+         list(APPEND _targets "${_target}")
+      endif()
 
       get_target_property(_dependencies ${_target} INTERFACE_LINK_LIBRARIES)
       if(_dependencies STREQUAL "_dependencies-NOTFOUND")
@@ -445,18 +440,32 @@ function(_forge_contract_collect_guest_module_sources output)
          endif()
       endforeach()
    endwhile()
-   list(REMOVE_DUPLICATES _sources)
-   set(${output} "${_sources}" PARENT_SCOPE)
+   list(REMOVE_DUPLICATES _targets)
+   set(${output} "${_targets}" PARENT_SCOPE)
+endfunction()
+
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/contract-compilations")
+function(_forge_contract_generate_object_list target identity output)
+   set(
+      _path
+      "${CMAKE_CURRENT_BINARY_DIR}/contract-compilations/${identity}-$<CONFIG>.objects"
+   )
+   file(
+      GENERATE
+      OUTPUT "${_path}"
+      CONTENT "$<JOIN:$<TARGET_OBJECTS:${target}>,\n>\n"
+   )
+   set(${output} "${_path}" PARENT_SCOPE)
 endfunction()
 
 set(_contract_library_targets)
 set(_contract_library_include_directories)
 set(_contract_library_source_paths)
 set(_contract_library_owned_sources)
-set(_contract_library_translation_units)
+set(_contract_library_compilations)
 set(_contract_library_dependencies)
-set(_contract_library_external_module_sources)
-set(_contract_library_external_module_paths)
+set(_contract_library_external_compilations)
+set(_contract_compilation_object_lists)
 foreach(_root_id IN LISTS FORGE_CONTRACT_GRAPH_ROOT_LIBRARY_IDS)
    list(APPEND _contract_library_dependencies "${_contract_graph_owner}" "${_root_id}" PUBLIC)
 endforeach()
@@ -488,22 +497,32 @@ if(FORGE_CONTRACT_GRAPH_LIBRARY_COUNT GREATER 0)
          endif()
          list(APPEND _private_dependencies "${_forge_contract_library_target_${_dependency_hash}}")
       endforeach()
-      _forge_contract_collect_guest_module_sources(
-         _public_guest_module_sources
+      _forge_contract_collect_guest_module_targets(
+         _public_guest_module_targets
          ${${_prefix}_PUBLIC_GUEST_DEPENDENCIES}
       )
-      _forge_contract_collect_guest_module_sources(
-         _private_guest_module_sources
+      _forge_contract_collect_guest_module_targets(
+         _private_guest_module_targets
          ${${_prefix}_PRIVATE_GUEST_DEPENDENCIES}
       )
-      foreach(_source IN LISTS _public_guest_module_sources)
-         list(REMOVE_ITEM _private_guest_module_sources "${_source}")
-         list(APPEND _contract_library_external_module_sources "${_id}" PUBLIC "${_source}")
-         list(APPEND _contract_library_external_module_paths "${_source}")
+      foreach(_module_target IN LISTS _public_guest_module_targets)
+         list(REMOVE_ITEM _private_guest_module_targets "${_module_target}")
+         string(SHA256 _metadata_hash "${_id}|PUBLIC|${_module_target}")
+         string(SUBSTRING "${_metadata_hash}" 0 16 _metadata_hash)
+         _forge_contract_generate_object_list(
+            "${_module_target}" "external-${_metadata_hash}" _object_list
+         )
+         list(APPEND _contract_library_external_compilations "${_id}" PUBLIC "${_object_list}")
+         list(APPEND _contract_compilation_object_lists "${_object_list}")
       endforeach()
-      foreach(_source IN LISTS _private_guest_module_sources)
-         list(APPEND _contract_library_external_module_sources "${_id}" PRIVATE "${_source}")
-         list(APPEND _contract_library_external_module_paths "${_source}")
+      foreach(_module_target IN LISTS _private_guest_module_targets)
+         string(SHA256 _metadata_hash "${_id}|PRIVATE|${_module_target}")
+         string(SUBSTRING "${_metadata_hash}" 0 16 _metadata_hash)
+         _forge_contract_generate_object_list(
+            "${_module_target}" "external-${_metadata_hash}" _object_list
+         )
+         list(APPEND _contract_library_external_compilations "${_id}" PRIVATE "${_object_list}")
+         list(APPEND _contract_compilation_object_lists "${_object_list}")
       endforeach()
 
       add_library(${_target} STATIC)
@@ -534,9 +553,6 @@ if(FORGE_CONTRACT_GRAPH_LIBRARY_COUNT GREATER 0)
          target_link_libraries(${_target} PRIVATE ${_private_dependencies})
       endif()
       list(APPEND _contract_library_targets "${_target}")
-      foreach(_source IN LISTS ${_prefix}_MODULE_PATHS ${_prefix}_SOURCE_PATHS)
-         list(APPEND _contract_library_translation_units "${_id}" "${_source}")
-      endforeach()
 
       set(_contract_library_prefix_maps)
       foreach(_role module implementation public_header private_header)
@@ -588,6 +604,9 @@ if(FORGE_CONTRACT_GRAPH_LIBRARY_COUNT GREATER 0)
          ${_target}
          ${_contract_library_prefix_maps}
       )
+      _forge_contract_generate_object_list("${_target}" "library-${_id_hash}" _object_list)
+      list(APPEND _contract_library_compilations "${_id}" "${_object_list}")
+      list(APPEND _contract_compilation_object_lists "${_object_list}")
    endforeach()
 endif()
 
@@ -699,14 +718,14 @@ if(_contract_library_owned_source_count GREATER 0)
       list(APPEND _abigen_command --library-source "${_owner}" "${_role}" "${_source}")
    endforeach()
 endif()
-list(LENGTH _contract_library_translation_units _contract_library_translation_unit_count)
-if(_contract_library_translation_unit_count GREATER 0)
-   math(EXPR _contract_library_translation_unit_last "${_contract_library_translation_unit_count} - 1")
-   foreach(_index RANGE 0 ${_contract_library_translation_unit_last} 2)
-      math(EXPR _source_index "${_index} + 1")
-      list(GET _contract_library_translation_units ${_index} _owner)
-      list(GET _contract_library_translation_units ${_source_index} _source)
-      list(APPEND _abigen_command --library-translation-unit "${_owner}" "${_source}")
+list(LENGTH _contract_library_compilations _contract_library_compilation_count)
+if(_contract_library_compilation_count GREATER 0)
+   math(EXPR _contract_library_compilation_last "${_contract_library_compilation_count} - 1")
+   foreach(_index RANGE 0 ${_contract_library_compilation_last} 2)
+      math(EXPR _object_list_index "${_index} + 1")
+      list(GET _contract_library_compilations ${_index} _owner)
+      list(GET _contract_library_compilations ${_object_list_index} _object_list)
+      list(APPEND _abigen_command --library-compilation "${_owner}" "${_object_list}")
    endforeach()
 endif()
 list(LENGTH _contract_library_dependencies _contract_library_dependency_count)
@@ -721,22 +740,22 @@ if(_contract_library_dependency_count GREATER 0)
       list(APPEND _abigen_command --library-dependency "${_owner}" "${_dependency}" "${_scope}")
    endforeach()
 endif()
-list(LENGTH _contract_library_external_module_sources _contract_library_external_module_source_count)
-if(_contract_library_external_module_source_count GREATER 0)
+list(LENGTH _contract_library_external_compilations _contract_library_external_compilation_count)
+if(_contract_library_external_compilation_count GREATER 0)
    math(
       EXPR
-      _contract_library_external_module_source_last
-      "${_contract_library_external_module_source_count} - 1"
+      _contract_library_external_compilation_last
+      "${_contract_library_external_compilation_count} - 1"
    )
-   foreach(_index RANGE 0 ${_contract_library_external_module_source_last} 3)
+   foreach(_index RANGE 0 ${_contract_library_external_compilation_last} 3)
       math(EXPR _scope_index "${_index} + 1")
-      math(EXPR _source_index "${_index} + 2")
-      list(GET _contract_library_external_module_sources ${_index} _owner)
-      list(GET _contract_library_external_module_sources ${_scope_index} _scope)
-      list(GET _contract_library_external_module_sources ${_source_index} _source)
+      math(EXPR _object_list_index "${_index} + 2")
+      list(GET _contract_library_external_compilations ${_index} _owner)
+      list(GET _contract_library_external_compilations ${_scope_index} _scope)
+      list(GET _contract_library_external_compilations ${_object_list_index} _object_list)
       list(
          APPEND _abigen_command
-         --library-external-module-source "${_owner}" "${_scope}" "${_source}"
+         --library-external-compilation "${_owner}" "${_scope}" "${_object_list}"
       )
    endforeach()
 endif()
@@ -762,7 +781,7 @@ set(
    ${FORGE_CONTRACT_SOURCES}
    ${FORGE_CONTRACT_COMPILE_CHECKS}
    ${_contract_library_source_paths}
-   ${_contract_library_external_module_paths}
+   ${_contract_compilation_object_lists}
 )
 foreach(_ricardian_file FORGE_CONTRACT_RICARDIAN_CONTRACTS FORGE_CONTRACT_RICARDIAN_CLAUSES)
    if(NOT "${${_ricardian_file}}" STREQUAL "")

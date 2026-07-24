@@ -13,9 +13,9 @@ struct source_root {
    std::filesystem::path physical_path;
 };
 
-struct library_translation_unit {
+struct library_compilation {
    std::string owner;
-   std::filesystem::path physical_path;
+   std::filesystem::path object_list;
 };
 
 enum class library_source_role {
@@ -42,10 +42,10 @@ struct library_dependency {
    library_dependency_scope scope;
 };
 
-struct library_external_module_source {
+struct library_external_compilation {
    std::string owner;
    library_dependency_scope scope;
-   std::filesystem::path physical_path;
+   std::filesystem::path object_list;
 };
 
 struct request {
@@ -64,9 +64,9 @@ struct request {
    std::vector<std::filesystem::path> external_source_roots;
    std::vector<std::filesystem::path> attested_sources;
    std::vector<library_source> library_sources;
-   std::vector<library_translation_unit> library_translation_units;
+   std::vector<library_compilation> library_compilations;
    std::vector<library_dependency> library_dependencies;
-   std::vector<library_external_module_source> library_external_module_sources;
+   std::vector<library_external_compilation> library_external_compilations;
    std::vector<std::filesystem::path> sources;
    std::vector<std::filesystem::path> dependency_sources;
    std::vector<std::filesystem::path> source_wrappers;

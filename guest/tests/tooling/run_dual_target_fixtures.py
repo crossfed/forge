@@ -138,6 +138,51 @@ def verify_source_graph(manifest: dict) -> None:
         raise RuntimeError("dual-target source graph contains an absolute logical path")
 
 
+def verify_compilation_metadata(build: Path, source: Path) -> None:
+    object_lists = sorted((build / "product.contract" / "contract-compilations").glob("library-*.objects"))
+    if len(object_lists) != 1:
+        raise RuntimeError(f"expected one product protocol compilation, found {len(object_lists)}")
+
+    expected_sources = {
+        (source / "include" / "product" / "chain" / "protocol.cppm").resolve(),
+        (source / "src" / "protocol.cpp").resolve(),
+    }
+    observed: dict[Path, dict] = {}
+    for object_name in object_lists[0].read_text(encoding="utf-8").splitlines():
+        if not object_name:
+            continue
+        metadata_path = Path(object_name + ".forge-contract-metadata.json")
+        if not metadata_path.is_file():
+            raise RuntimeError(f"contract compilation metadata is missing: {metadata_path}")
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        if not isinstance(metadata, dict) or metadata.get("version") != 1:
+            raise RuntimeError(f"contract compilation metadata has an invalid schema: {metadata_path}")
+        for field in ("dependencies", "imports", "exports", "provides"):
+            values = metadata.get(field)
+            if not isinstance(values, list) or len(values) != len(set(map(str, values))):
+                raise RuntimeError(f"contract compilation metadata has invalid {field}: {metadata_path}")
+        for dependency in metadata["dependencies"]:
+            if (
+                not isinstance(dependency, dict)
+                or not isinstance(dependency.get("path"), str)
+                or not isinstance(dependency.get("system"), bool)
+            ):
+                raise RuntimeError(f"contract compilation metadata has an invalid dependency: {metadata_path}")
+        observed[Path(metadata["source"]).resolve()] = metadata
+
+    if set(observed) != expected_sources:
+        raise RuntimeError("contract compilation metadata does not match the protocol translation units")
+
+    module_source = (source / "include" / "product" / "chain" / "protocol.cppm").resolve()
+    implementation_source = (source / "src" / "protocol.cpp").resolve()
+    if "product.chain.protocol" not in observed[module_source]["provides"]:
+        raise RuntimeError("protocol module metadata does not identify its provided module")
+    if "forge.chain.protocol.values" not in observed[module_source]["exports"]:
+        raise RuntimeError("protocol module metadata does not identify its exported dependency")
+    if "product.chain.protocol" not in observed[implementation_source]["imports"]:
+        raise RuntimeError("protocol implementation metadata does not identify its module import")
+
+
 def package_metadata(prefix: Path) -> list[Path]:
     return [
         path
@@ -1198,6 +1243,7 @@ def main() -> None:
     producer_abi, producer_manifest = verify_artifacts(producer_build, "product")
     verify_direct_action(producer_abi)
     verify_source_graph(producer_manifest)
+    verify_compilation_metadata(producer_build, args.source / "producer")
     verify_relocatable_package(producer_install, [args.source, producer_build])
     verify_reproducible_wasm(
         producer_build / "product.wasm",

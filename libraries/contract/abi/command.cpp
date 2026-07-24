@@ -87,10 +87,10 @@ request parse(int argc, const char* const* argv) {
              .role = parsed_role,
              .physical_path = next(),
          });
-      } else if (option == "--library-translation-unit") {
-         result.library_translation_units.push_back(library_translation_unit{
+      } else if (option == "--library-compilation") {
+         result.library_compilations.push_back(library_compilation{
              .owner = std::string{next()},
-             .physical_path = next(),
+             .object_list = next(),
          });
       } else if (option == "--library-dependency") {
          auto owner = std::string{next()};
@@ -101,13 +101,13 @@ request parse(int argc, const char* const* argv) {
              .dependency = std::move(dependency),
              .scope = scope,
          });
-      } else if (option == "--library-external-module-source") {
+      } else if (option == "--library-external-compilation") {
          auto owner = std::string{next()};
          const auto scope = parse_library_dependency_scope(next());
-         result.library_external_module_sources.push_back(library_external_module_source{
+         result.library_external_compilations.push_back(library_external_compilation{
              .owner = std::move(owner),
              .scope = scope,
-             .physical_path = next(),
+             .object_list = next(),
          });
       } else if (option == "--dependency-source") {
          result.dependency_sources.emplace_back(next());
