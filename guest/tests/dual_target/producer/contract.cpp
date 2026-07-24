@@ -1,10 +1,13 @@
 #include <cstdint>
+#include <product/chain/version.hpp>
 
 import forge.contract;
 import forge.contract.multi_index;
 import product.chain.protocol;
 
 using forge::chain::protocol::literals::operator""_n;
+
+static_assert(product::chain::protocol_version == 1);
 
 class [[forge::contract("product")]] product_contract : public forge::contract::context {
  public:
