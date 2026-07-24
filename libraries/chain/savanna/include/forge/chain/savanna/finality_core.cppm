@@ -2,6 +2,7 @@ module;
 
 #include <boost/describe.hpp>
 
+#include <cstdint>
 #include <vector>
 
 export module forge.chain.savanna.finality_core;

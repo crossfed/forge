@@ -1,6 +1,5 @@
 module;
 #include <forge/exceptions/macros.hpp>
-#include <algorithm>
 #include <array>
 #include <bls12-381/bls12-381.hpp>
 #include <cstdint>
@@ -16,10 +15,8 @@ import forge.exceptions;
 namespace forge::crypto::bls {
 
 inline std::array<uint8_t, 96> deserialize_base64url(const std::string& base64urlstr) {
-   auto res =
-       std::mismatch(config::public_key_prefix.begin(), config::public_key_prefix.end(), base64urlstr.begin());
-   FORGE_ASSERT(res.first == config::public_key_prefix.end(), "BLS Public Key has invalid format : ${str}",
-              forge::exceptions::ctx("str", base64urlstr));
+   FORGE_ASSERT(base64urlstr.starts_with(config::public_key_prefix), "BLS Public Key has invalid format : ${str}",
+                forge::exceptions::ctx("str", base64urlstr));
    auto data_str = base64urlstr.substr(config::public_key_prefix.size());
    return forge::crypto::bls::detail::deserialize_base64url<std::array<uint8_t, 96>>(data_str);
 }
@@ -47,7 +44,7 @@ public_key::public_key(const std::string& base64urlstr)
 
 std::string public_key::to_string() const {
    std::string data_str =
-      forge::crypto::bls::detail::serialize_base64url<std::array<uint8_t, 96>>(_affine_non_montgomery_le);
+       forge::crypto::bls::detail::serialize_base64url<std::array<uint8_t, 96>>(_affine_non_montgomery_le);
    return config::public_key_prefix + data_str;
 }
 

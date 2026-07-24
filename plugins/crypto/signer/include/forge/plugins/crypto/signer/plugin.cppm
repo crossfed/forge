@@ -46,6 +46,7 @@ class plugin final : public forge::app::plugin {
  private:
    struct impl;
    class api_impl;
+   class bls_api_impl;
 
    friend void apply_config(impl&, forge::config::core::component_view);
 
