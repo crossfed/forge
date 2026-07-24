@@ -301,6 +301,16 @@ BOOST_AUTO_TEST_CASE(chain_savanna_vote_accumulator_tracks_donor_states) {
    BOOST_TEST(forge::raw::pack(*all_weak_qc) ==
               forge::raw::pack(canonical_all_weak));
 
+   auto noncanonical_all_weak = canonical_all_weak;
+   noncanonical_all_weak.active.strong_votes =
+       savanna::vote_bitset{policy.finalizers.size()};
+   auto observed_all_weak =
+       savanna::vote_accumulator{candidate, verified};
+   BOOST_CHECK_THROW(
+       static_cast<void>(observed_all_weak.observe(noncanonical_all_weak)),
+       savanna::exceptions::invalid_qc);
+   BOOST_CHECK(!observed_all_weak.best().has_value());
+
    auto restricted = savanna::vote_accumulator{candidate, verified};
    static_cast<void>(restricted.add(
        make_vote(candidate, second, savanna::vote_kind::weak)));
