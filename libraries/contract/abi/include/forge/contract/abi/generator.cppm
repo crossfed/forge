@@ -13,6 +13,11 @@ struct source_root {
    std::filesystem::path physical_path;
 };
 
+struct library_dependency_source {
+   std::string owner;
+   std::filesystem::path physical_path;
+};
+
 struct request {
    std::string contract;
    std::filesystem::path abi;
@@ -28,6 +33,7 @@ struct request {
    std::vector<source_root> source_roots;
    std::vector<std::filesystem::path> external_source_roots;
    std::vector<std::filesystem::path> attested_sources;
+   std::vector<library_dependency_source> library_dependency_sources;
    std::vector<std::filesystem::path> sources;
    std::vector<std::filesystem::path> dependency_sources;
    std::vector<std::filesystem::path> source_wrappers;

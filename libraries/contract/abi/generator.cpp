@@ -1744,6 +1744,39 @@ void write_source_dependencies(const forge::contract::abi::request& options,
    write_text(options.source_dependencies, output.str());
 }
 
+void validate_library_dependencies(
+    const forge::contract::abi::request& options,
+    const std::map<std::string, source_dependencies>& dependencies_by_owner) {
+   auto allowed_sources = std::set<std::filesystem::path>{};
+   for (const auto& source : options.attested_sources) {
+      if (!std::filesystem::is_regular_file(source)) {
+         throw std::runtime_error{"attested source is not a file: " + source.string()};
+      }
+      allowed_sources.insert(std::filesystem::weakly_canonical(source));
+   }
+
+   auto external_roots = std::vector<std::filesystem::path>{};
+   external_roots.reserve(options.external_source_roots.size());
+   for (const auto& root : options.external_source_roots) {
+      if (!std::filesystem::is_directory(root)) {
+         throw std::runtime_error{"external source root is not a directory: " + root.string()};
+      }
+      external_roots.push_back(std::filesystem::weakly_canonical(root));
+   }
+
+   for (const auto& [owner, dependencies] : dependencies_by_owner) {
+      for (const auto& [dependency, is_system] : dependencies) {
+         if (allowed_sources.contains(dependency) || is_system ||
+             std::ranges::any_of(external_roots,
+                                 [&](const auto& root) { return relative_to(dependency, root).has_value(); })) {
+            continue;
+         }
+         throw std::runtime_error{"contract library " + owner +
+                                  " dependency is not declared: " + dependency.string()};
+      }
+   }
+}
+
 std::string trim_lines(std::string value) {
    while (!value.empty() && (value.front() == '\n' || value.front() == '\r')) {
       value.erase(value.begin());
@@ -2237,6 +2270,26 @@ artifacts generate(const request& options) {
       if (dependency_tool.run(&dependency_factory) != 0) {
          throw std::runtime_error{"contract dependency source analysis failed"};
       }
+   }
+   if (!options.library_dependency_sources.empty()) {
+      auto sources_by_owner = std::map<std::string, std::vector<std::string>>{};
+      for (const auto& source : options.library_dependency_sources) {
+         if (source.owner.empty() || contains_reserved_separator(source.owner)) {
+            throw std::runtime_error{"contract library dependency source has an invalid owner"};
+         }
+         sources_by_owner[source.owner].push_back(source.physical_path.string());
+      }
+
+      auto dependencies_by_owner = std::map<std::string, source_dependencies>{};
+      for (const auto& [owner, library_sources] : sources_by_owner) {
+         auto dependency_compilation = clang::tooling::FixedCompilationDatabase{".", dependency_arguments};
+         auto dependency_tool = clang::tooling::ClangTool{dependency_compilation, library_sources};
+         auto dependency_factory = dependency_action_factory{dependencies_by_owner[owner]};
+         if (dependency_tool.run(&dependency_factory) != 0) {
+            throw std::runtime_error{"contract library dependency source analysis failed: " + owner};
+         }
+      }
+      validate_library_dependencies(options, dependencies_by_owner);
    }
 
    load_ricardian(output, options);

@@ -53,6 +53,11 @@ request parse(int argc, const char* const* argv) {
          result.external_source_roots.emplace_back(next());
       } else if (option == "--attested-source") {
          result.attested_sources.emplace_back(next());
+      } else if (option == "--library-dependency-source") {
+         result.library_dependency_sources.push_back(library_dependency_source{
+             .owner = std::string{next()},
+             .physical_path = next(),
+         });
       } else if (option == "--dependency-source") {
          result.dependency_sources.emplace_back(next());
       } else if (option == "--source-wrapper") {

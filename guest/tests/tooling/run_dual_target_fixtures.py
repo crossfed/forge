@@ -320,6 +320,57 @@ forge_add_contract(
         contains="contract dependency is outside declared source roots",
     )
 
+    undeclared_compiled_header = write_negative_project(
+        output / "undeclared-compiled-header",
+        """forge_add_contract_library(
+   protocol ID negative.undeclared.compiled.header
+   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+   SOURCES src/protocol.cpp
+)
+forge_add_contract(undeclaredcompiled LIBRARIES protocol SOURCES contract.cpp)
+""",
+    )
+    (undeclared_compiled_header / "src" / "undeclared.hpp").write_text(
+        "#pragma once\ninline constexpr auto undeclared_compiled_value = 42;\n",
+        encoding="utf-8",
+    )
+    (undeclared_compiled_header / "src" / "protocol.cpp").write_text(
+        """module;
+
+#include "undeclared.hpp"
+
+module negative.protocol;
+
+int negative_protocol_value = undeclared_compiled_value;
+""",
+        encoding="utf-8",
+    )
+    (undeclared_compiled_header / "contract.cpp").write_text(
+        """import forge.contract;
+import negative.protocol;
+
+class [[forge::contract("undeclaredcompiled")]] undeclared_compiled_contract
+    : public forge::contract::context {
+ public:
+   using context::context;
+   [[forge::action]] void verify() {}
+};
+""",
+        encoding="utf-8",
+    )
+    undeclared_compiled_header_build = output / "undeclared-compiled-header-build"
+    configure(args, undeclared_compiled_header, undeclared_compiled_header_build)
+    build(
+        args,
+        undeclared_compiled_header_build,
+        succeeds=False,
+        contains=(
+            "contract library negative.undeclared.compiled.header "
+            "dependency is not declared"
+        ),
+    )
+
     duplicate = write_negative_project(
         output / "duplicate",
         """forge_add_contract_library(
