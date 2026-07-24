@@ -454,6 +454,8 @@ function(_forge_contract_validate_usage_requirements target module_bases)
       INTERFACE_COMPILE_DEFINITIONS
       COMPILE_OPTIONS
       INTERFACE_COMPILE_OPTIONS
+      LINK_OPTIONS
+      INTERFACE_LINK_OPTIONS
    )
       get_target_property(_values "${target}" "${_property}")
       if(_values STREQUAL "_values-NOTFOUND")

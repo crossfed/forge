@@ -550,6 +550,42 @@ forge_add_contract(option LIBRARIES protocol SOURCES contract.cpp)
         contains="COMPILE_OPTIONS;",
     )
 
+    link_option = write_negative_project(
+        output / "link-option",
+        """forge_add_contract_library(
+   protocol ID negative.link.option SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+target_link_options(protocol PRIVATE "LINKER:--export=private_helper")
+forge_add_contract(linkoption LIBRARIES protocol SOURCES contract.cpp)
+""",
+    )
+    configure(
+        args,
+        link_option,
+        output / "link-option-build",
+        succeeds=False,
+        contains="LINK_OPTIONS;",
+    )
+
+    interface_link_option = write_negative_project(
+        output / "interface-link-option",
+        """forge_add_contract_library(
+   protocol ID negative.interface.link.option SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+target_link_options(protocol INTERFACE "LINKER:--export=public_helper")
+forge_add_contract(interfacelinkoption LIBRARIES protocol SOURCES contract.cpp)
+""",
+    )
+    configure(
+        args,
+        interface_link_option,
+        output / "interface-link-option-build",
+        succeeds=False,
+        contains="INTERFACE_LINK_OPTIONS;",
+    )
+
     inherited_compile_option = write_negative_project(
         output / "inherited-compile-option",
         """add_compile_options(-fpack-struct=1)
