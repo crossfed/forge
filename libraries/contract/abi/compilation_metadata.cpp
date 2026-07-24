@@ -4,15 +4,15 @@ module;
 #include <clang/AST/ASTContext.h>
 #include <clang/Basic/Diagnostic.h>
 #include <clang/Basic/Module.h>
+#include <clang/Basic/SourceManager.h>
 #include <clang/Frontend/CompilerInstance.h>
-#include <clang/Lex/HeaderSearch.h>
-#include <clang/Lex/Preprocessor.h>
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/Support/JSON.h>
 #include <llvm/Support/raw_ostream.h>
 
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <memory>
 #include <set>
@@ -20,6 +20,7 @@ module;
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 module forge.contract.abi.compilation_metadata;
 
@@ -31,14 +32,21 @@ using module_dependencies = std::set<std::string>;
 
 source_dependencies collect_source_dependencies(clang::CompilerInstance& compiler) {
    const auto& source_manager = compiler.getSourceManager();
-   auto& header_search = compiler.getPreprocessor().getHeaderSearchInfo();
-   auto result = source_dependencies{};
+   auto files = std::vector<clang::FileEntryRef>{};
+   files.reserve(std::distance(source_manager.fileinfo_begin(), source_manager.fileinfo_end()));
    for (auto iterator = source_manager.fileinfo_begin(); iterator != source_manager.fileinfo_end(); ++iterator) {
-      const auto path = std::filesystem::path{iterator->first.getName().str()};
+      files.push_back(iterator->first);
+   }
+
+   auto result = source_dependencies{};
+   for (const auto& file : files) {
+      const auto path = std::filesystem::path{file.getName().str()};
       if (path.empty() || !std::filesystem::exists(path)) {
          continue;
       }
-      const auto is_system = clang::SrcMgr::isSystem(header_search.getFileDirFlavor(iterator->first));
+      const auto file_id = source_manager.translateFile(file);
+      const auto is_system =
+          file_id.isValid() && source_manager.isInSystemHeader(source_manager.getLocForStartOfFile(file_id));
       const auto canonical = std::filesystem::weakly_canonical(path);
       const auto [entry, inserted] = result.emplace(canonical, is_system);
       if (!inserted) {

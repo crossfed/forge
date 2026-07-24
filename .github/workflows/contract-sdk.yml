@@ -144,6 +144,14 @@ jobs:
           cmake --build build/forge -j 4
           cmake --install build/forge --component dev
 
+      - name: Release completed developer build inputs
+        shell: bash
+        run: |
+          cmake -E remove_directory "$GITHUB_WORKSPACE/build/forge"
+          cmake -E remove_directory "$GITHUB_WORKSPACE/build/contract-runtimes"
+          cmake -E remove_directory "$GITHUB_WORKSPACE/build/llvm-project"
+          df -h "$GITHUB_WORKSPACE"
+
       - name: Build developer SDK and relocatable archive
         shell: bash
         run: |

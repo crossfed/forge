@@ -6,11 +6,11 @@ module;
 #include <clang/AST/TypeLoc.h>
 #include <clang/Basic/Diagnostic.h>
 #include <clang/Basic/Module.h>
+#include <clang/Basic/SourceManager.h>
 #include <clang/Frontend/CompilerInstance.h>
 #include <clang/Frontend/FrontendAction.h>
 #include <clang/Frontend/FrontendActions.h>
 #include <clang/Index/USRGeneration.h>
-#include <clang/Lex/HeaderSearch.h>
 #include <clang/Sema/Lookup.h>
 #include <clang/Tooling/CompilationDatabase.h>
 #include <clang/Tooling/Tooling.h>
@@ -27,6 +27,7 @@ module;
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <memory>
 #include <map>
 #include <optional>
@@ -1501,11 +1502,18 @@ class consumer final : public clang::ASTConsumer {
 
 void collect_source_dependencies(clang::CompilerInstance& compiler, source_dependencies& dependencies) {
    const auto& source_manager = compiler.getSourceManager();
-   auto& header_search = compiler.getPreprocessor().getHeaderSearchInfo();
+   auto files = std::vector<clang::FileEntryRef>{};
+   files.reserve(std::distance(source_manager.fileinfo_begin(), source_manager.fileinfo_end()));
    for (auto iterator = source_manager.fileinfo_begin(); iterator != source_manager.fileinfo_end(); ++iterator) {
-      const auto path = std::filesystem::path{iterator->first.getName().str()};
+      files.push_back(iterator->first);
+   }
+
+   for (const auto& file : files) {
+      const auto path = std::filesystem::path{file.getName().str()};
       if (!path.empty() && std::filesystem::exists(path)) {
-         const auto is_system = clang::SrcMgr::isSystem(header_search.getFileDirFlavor(iterator->first));
+         const auto file_id = source_manager.translateFile(file);
+         const auto is_system =
+             file_id.isValid() && source_manager.isInSystemHeader(source_manager.getLocForStartOfFile(file_id));
          const auto canonical = std::filesystem::weakly_canonical(path);
          const auto [entry, inserted] = dependencies.emplace(canonical, is_system);
          if (!inserted) {

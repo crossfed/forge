@@ -304,6 +304,20 @@ def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
             f"{path.relative_to(root)}: Contract SDK workflow is missing {required}"
          )
 
+   for disposable in ("build/forge", "build/contract-runtimes", "build/llvm-project"):
+      cleanup = f'cmake -E remove_directory "$GITHUB_WORKSPACE/{disposable}"'
+      if source.count(cleanup) != 1:
+         errors.append(
+            f"{path.relative_to(root)}: developer SDK workflow must release {disposable} "
+            "after its installed output is complete"
+         )
+   for retained in ("build/forge-prefix", "build/contract-sysroot", "build/cdt-donor"):
+      cleanup = f'cmake -E remove_directory "$GITHUB_WORKSPACE/{retained}"'
+      if cleanup in source:
+         errors.append(
+            f"{path.relative_to(root)}: developer SDK workflow must retain {retained}"
+         )
+
    release_build = re.search(
       r"cmake --build build/contract-release-consumer\s+\\\n"
       r"\s+--target (?P<targets>(?:[^\n]|\\\n)+?)\s+\\\n"
@@ -420,6 +434,12 @@ def check_contract_tool_ownership(root: Path, errors: list[str]) -> None:
          errors.append(
             f"{path.relative_to(root)}: contract tools must delegate AST processing "
             "to libraries/contract"
+         )
+
+   for path in source_files(root, ("libraries/contract",)):
+      if "getFileDirFlavor" in path.read_text(errors="ignore"):
+         errors.append(
+            f"{path.relative_to(root)}: contract dependency classification must use SourceManager locations"
          )
 
 

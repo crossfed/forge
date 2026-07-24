@@ -1277,8 +1277,12 @@ def main() -> None:
         [args.source / "producer", producer_build, args.contract_package.parent.parent.parent],
     )
 
+    producer_wasm = output / "product.wasm"
+    shutil.copy2(producer_build / "product.wasm", producer_wasm)
     relocated = output / "product-protocol-relocated"
     shutil.copytree(producer_install, relocated)
+    shutil.rmtree(producer_build)
+    shutil.rmtree(producer_install)
     product_package = relocated / "lib" / "cmake" / "ProductProtocol"
     module_metadata = product_package / "cxx-modules"
     if not module_metadata.is_dir() or not any(module_metadata.glob("*.cmake")):
@@ -1297,6 +1301,7 @@ def main() -> None:
         consumer_build / "consumer.wasm",
         [relocated, consumer_build, args.contract_package.parent.parent.parent],
     )
+    shutil.rmtree(consumer_build)
 
     vm_build = output / "vm-build"
     configure(
@@ -1306,15 +1311,22 @@ def main() -> None:
         product_package=product_package,
         build_type="Debug",
         definitions=(
-            f"-DPRODUCT_PROTOCOL_WASM={producer_build / 'product.wasm'}",
+            f"-DPRODUCT_PROTOCOL_WASM={producer_wasm}",
             f"-DFORGE_CONTRACT_TEST_HOST_SOURCE={args.source.parent / 'host'}",
         ),
     )
     build(args, vm_build)
     run(str(vm_build / "product_protocol_vm_tests"))
+    shutil.rmtree(vm_build)
+    shutil.rmtree(relocated)
 
-    check_negative_projects(args, output / "negative")
-    check_dependency_normalization(args, output / "dependency-normalization")
+    negative = output / "negative"
+    check_negative_projects(args, negative)
+    shutil.rmtree(negative)
+
+    dependency_normalization = output / "dependency-normalization"
+    check_dependency_normalization(args, dependency_normalization)
+    shutil.rmtree(dependency_normalization)
 
 
 if __name__ == "__main__":
