@@ -2,6 +2,7 @@ module;
 
 #include <cstdint>
 #include <optional>
+#include <type_traits>
 
 export module product.chain.protocol;
 
@@ -32,7 +33,10 @@ struct begin_revision {
    std::uint64_t size = 0;
 
    static constexpr forge::chain::protocol::action_name get_name() {
-      return forge::chain::protocol::make_name("beginrev");
+      if (std::is_constant_evaluated()) {
+         return forge::chain::protocol::make_name("beginrev");
+      }
+      return forge::chain::protocol::make_name("runtime");
    }
 };
 

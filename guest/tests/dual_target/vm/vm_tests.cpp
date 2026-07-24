@@ -42,7 +42,8 @@ int main() {
    };
    const auto account = protocol::make_name("product").value;
    auto host = forge::contract::testing::host{};
-   host.invoke(code, account, account, product::chain::begin_revision::get_name().value, forge::raw::pack(request));
+   constexpr auto begin_revision_name = product::chain::begin_revision::get_name();
+   host.invoke(code, account, account, begin_revision_name.value, forge::raw::pack(request));
 
    const auto row = host.find_primary(account, request.workspace.value, protocol::make_name("revisions").value, 0);
    assert(row.has_value());

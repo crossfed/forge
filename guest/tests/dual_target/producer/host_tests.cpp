@@ -8,6 +8,14 @@ import forge.raw.codec;
 import forge.chain.protocol.action;
 import product.chain.protocol;
 
+namespace {
+
+forge::chain::protocol::action_name runtime_action_name() {
+   return product::chain::begin_revision::get_name();
+}
+
+} // namespace
+
 int main() {
    const auto payload = product::chain::begin_revision{
        .workspace = product::chain::workspace_id{7},
@@ -26,7 +34,9 @@ int main() {
        forge::chain::protocol::account_name{},
        payload,
    };
-   assert(transaction_action.name == product::chain::begin_revision::get_name());
+   constexpr auto abi_action_name = product::chain::begin_revision::get_name();
+   assert(runtime_action_name() != abi_action_name);
+   assert(transaction_action.name == abi_action_name);
    assert(transaction_action.data.size() == encoded.size());
    assert(std::equal(transaction_action.data.begin(), transaction_action.data.end(), encoded.begin(), encoded.end()));
 

@@ -14,9 +14,13 @@ import forge.raw.codec;
 namespace forge::chain::protocol::details {
 
 template <typename Data>
+using named_action_name =
+    std::integral_constant<std::uint64_t, std::remove_cvref_t<Data>::get_name().value>;
+
+template <typename Data>
 concept named_action_payload = requires {
    static_cast<action_name (*)()>(&std::remove_cvref_t<Data>::get_name);
-   typename std::integral_constant<std::uint64_t, std::remove_cvref_t<Data>::get_name().value>;
+   typename named_action_name<Data>;
 };
 
 } // namespace forge::chain::protocol::details
@@ -49,7 +53,10 @@ struct action : action_base {
    template <typename Data>
       requires details::named_action_payload<Data>
    action(std::vector<permission_level> permissions, account_name raw_account, Data&& value)
-       : action(std::move(permissions), raw_account, std::remove_cvref_t<Data>::get_name(), std::forward<Data>(value)) {
+       : action(std::move(permissions),
+                raw_account,
+                action_name{details::named_action_name<Data>::value},
+                std::forward<Data>(value)) {
    }
 
    template <typename Data>

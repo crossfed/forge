@@ -1237,7 +1237,7 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
                                             clang::VK_LValue, location);
       auto call = sema_.BuildCallExpr(nullptr, callee, location, {}, location);
       auto result = clang::Expr::EvalResult{};
-      if (call.isInvalid() || !call.get()->EvaluateAsRValue(result, context_) || !result.Val.isStruct() ||
+      if (call.isInvalid() || !call.get()->EvaluateAsConstantExpr(result, context_) || !result.Val.isStruct() ||
           result.Val.getStructNumFields() != 1U || !result.Val.getStructField(0).isInt()) {
          report(location, "typed action get_name() must have a constant action name");
          return std::nullopt;
