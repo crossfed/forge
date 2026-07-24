@@ -838,6 +838,9 @@ inline constexpr int protocol_private_value = 42;
     (source / "src" / "protocol.cpp").write_text(
         """module self_contained.protocol;
 
+#if defined(FORGE_CONTRACT_GUEST)
+import forge.raw.codec;
+#endif
 import self_contained.dependency;
 import self_contained.second_dependency;
 
@@ -868,6 +871,7 @@ class [[forge::contract("selfcontained")]] self_contained_contract
 project(SelfContainedContractLibrary LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_EXTENSIONS OFF)
+find_package(Forge CONFIG REQUIRED COMPONENTS raw)
 find_package(ForgeContract CONFIG REQUIRED)
 add_subdirectory(libraries)
 target_link_libraries(protocol PRIVATE dependency dependency second_dependency)
@@ -888,6 +892,7 @@ forge_add_contract(
    SOURCES src/dependency.cpp
    PUBLIC_HEADERS include/dependency/private_dependency.hpp
 )
+target_link_libraries(dependency PUBLIC Forge::forge_raw)
 forge_add_contract_library(
    second_dependency ID self_contained.second_dependency SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.."
    MODULE_BASE_DIRS include/second_dependency
@@ -1054,6 +1059,38 @@ export int protocol_value();
         contains="exports a module through a private dependency",
     )
 
+    public_sdk_reexport_source = output / "public-sdk-reexport-source"
+    shutil.copytree(source, public_sdk_reexport_source)
+    (
+        public_sdk_reexport_source
+        / "include"
+        / "protocol"
+        / "protocol.cppm"
+    ).write_text(
+        """export module self_contained.protocol;
+
+#if defined(FORGE_CONTRACT_GUEST)
+export import forge.raw.codec;
+#endif
+
+export int protocol_value();
+""",
+        encoding="utf-8",
+    )
+    cmake = (public_sdk_reexport_source / "CMakeLists.txt").read_text(
+        encoding="utf-8"
+    )
+    cmake = cmake.replace(
+        "target_link_libraries(protocol PRIVATE dependency dependency second_dependency)",
+        "target_link_libraries(protocol PUBLIC dependency PRIVATE second_dependency)",
+    )
+    (public_sdk_reexport_source / "CMakeLists.txt").write_text(
+        cmake, encoding="utf-8"
+    )
+    public_sdk_reexport_build = output / "public-sdk-reexport-build"
+    configure(args, public_sdk_reexport_source, public_sdk_reexport_build)
+    build(args, public_sdk_reexport_build)
+
     private_sdk_reexport_source = output / "private-sdk-reexport-source"
     shutil.copytree(source, private_sdk_reexport_source)
     (
@@ -1071,11 +1108,6 @@ export int protocol_value();
         encoding="utf-8",
     )
     cmake = (private_sdk_reexport_source / "CMakeLists.txt").read_text(encoding="utf-8")
-    cmake = cmake.replace(
-        "find_package(ForgeContract CONFIG REQUIRED)",
-        "find_package(Forge CONFIG REQUIRED COMPONENTS raw)\n"
-        "find_package(ForgeContract CONFIG REQUIRED)",
-    )
     cmake = cmake.replace(
         "target_link_libraries(protocol PRIVATE dependency dependency second_dependency)",
         "target_link_libraries(\n"

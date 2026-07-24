@@ -2003,6 +2003,22 @@ void validate_library_dependencies(const forge::contract::abi::request& options,
          visibility.private_modules.erase(module);
       }
    }
+   const auto external_module_is_visible = [&](const std::set<std::string>& visible_owners,
+                                               const std::string& importing_owner, const std::string& module,
+                                               bool include_importing_owner_private) {
+      for (const auto& visible_owner : visible_owners) {
+         const auto external = external_modules_by_owner.find(visible_owner);
+         if (external == external_modules_by_owner.end()) {
+            continue;
+         }
+         if (external->second.public_modules.contains(module) ||
+             (include_importing_owner_private && visible_owner == importing_owner &&
+              external->second.private_modules.contains(module))) {
+            return true;
+         }
+      }
+      return false;
+   };
 
    for (const auto& [owner, dependencies] : dependencies_by_owner) {
       if (!sources_by_owner.contains(owner)) {
@@ -2038,9 +2054,7 @@ void validate_library_dependencies(const forge::contract::abi::request& options,
                }
                throw std::runtime_error{"contract library " + owner + " dependency is not declared: " + module};
             }
-            const auto external = external_modules_by_owner.find(owner);
-            if (external != external_modules_by_owner.end() && (external->second.public_modules.contains(module) ||
-                                                                external->second.private_modules.contains(module))) {
+            if (external_module_is_visible(visible_owners, owner, module, true)) {
                continue;
             }
             throw std::runtime_error{"contract library " + owner + " dependency is not declared: " + module};
@@ -2057,8 +2071,7 @@ void validate_library_dependencies(const forge::contract::abi::request& options,
                throw std::runtime_error{"contract library " + owner +
                                         " exports a module through a private dependency: " + module};
             }
-            const auto external = external_modules_by_owner.find(owner);
-            if (external != external_modules_by_owner.end() && external->second.public_modules.contains(module)) {
+            if (external_module_is_visible(public_owners, owner, module, false)) {
                continue;
             }
             throw std::runtime_error{"contract library " + owner +
