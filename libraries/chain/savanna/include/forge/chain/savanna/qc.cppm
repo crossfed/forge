@@ -3,6 +3,7 @@ module;
 #include <boost/describe.hpp>
 
 #include <optional>
+#include <vector>
 
 export module forge.chain.savanna.qc;
 
@@ -29,11 +30,39 @@ struct quorum_certificate {
    [[nodiscard]] qc_claim claim() const noexcept;
 };
 
+class verified_quorum_certificate {
+ public:
+   verified_quorum_certificate(const verified_quorum_certificate&) = default;
+   verified_quorum_certificate(verified_quorum_certificate&&) = default;
+   verified_quorum_certificate&
+   operator=(const verified_quorum_certificate&) = default;
+   verified_quorum_certificate&
+   operator=(verified_quorum_certificate&&) = default;
+
+   [[nodiscard]] const quorum_certificate& get() const noexcept;
+   [[nodiscard]] bool
+   has_strong_vote(const forge::crypto::bls::public_key& finalizer) const noexcept;
+
+ private:
+   verified_quorum_certificate(
+       quorum_certificate certificate,
+       std::vector<forge::crypto::bls::public_key> strong_voters);
+
+   quorum_certificate certificate_;
+   std::vector<forge::crypto::bls::public_key> strong_voters_;
+
+   friend verified_quorum_certificate
+   verify(quorum_certificate, const verified_finalizer_policy&,
+          const std::optional<verified_finalizer_policy>&, digest);
+};
+
 void verify_basic(const qc_signature& value, const verified_finalizer_policy& policy);
 void verify_weights(const qc_signature& value, const verified_finalizer_policy& policy);
 void verify_signature(const qc_signature& value, const verified_finalizer_policy& policy, digest strong_digest);
-void verify(const quorum_certificate& value, const verified_finalizer_policy& active,
-            const std::optional<verified_finalizer_policy>& pending, digest finality_digest);
+[[nodiscard]] verified_quorum_certificate
+verify(quorum_certificate value, const verified_finalizer_policy& active,
+       const std::optional<verified_finalizer_policy>& pending,
+       digest finality_digest);
 
 BOOST_DESCRIBE_STRUCT(qc_signature, (), (strong_votes, weak_votes, signature))
 BOOST_DESCRIBE_STRUCT(quorum_certificate, (), (block, active, pending))

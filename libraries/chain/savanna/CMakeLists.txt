@@ -4,6 +4,9 @@ add_library(
    policy.cpp
    finality_core.cpp
    qc.cpp
+   vote.cpp
+   vote_accumulator.cpp
+   vote_accumulator_impl.cpp
    validation.cpp
    rank.cpp
 )
