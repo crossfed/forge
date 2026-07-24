@@ -139,6 +139,10 @@ void verify_basic(const qc_signature& value, const verified_finalizer_policy& po
        (value.weak_votes && value.weak_votes->size() != count)) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_qc, "Savanna QC vote bitset size does not match finalizer policy");
    }
+   if (value.strong_votes && value.strong_votes->none()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_qc,
+                            "Savanna QC contains an empty strong-vote set");
+   }
    if (value.weak_votes && value.weak_votes->none()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_qc, "Savanna weak QC contains no weak votes");
    }
