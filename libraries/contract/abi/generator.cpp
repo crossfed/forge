@@ -1899,7 +1899,7 @@ std::vector<compilation_metadata> read_compilation_object_list(const std::filesy
 
 void validate_library_dependencies(
     const forge::contract::abi::request& options,
-    const std::map<std::string, source_dependencies>& dependencies_by_owner,
+    const std::map<std::filesystem::path, source_dependencies>& dependencies_by_source,
     const std::map<std::string, module_dependencies>& modules_by_owner,
     const std::map<std::string, module_dependencies>& exported_modules_by_owner,
     const std::map<std::string, module_dependencies>& provided_modules_by_owner,
@@ -2086,20 +2086,31 @@ void validate_library_dependencies(
       return false;
    };
 
-   for (const auto& [owner, dependencies] : dependencies_by_owner) {
-      if (!sources_by_owner.contains(owner)) {
-         throw std::runtime_error{"contract library dependency source owner is unknown: " + owner};
+   for (const auto& [translation_unit, dependencies] : dependencies_by_source) {
+      const auto importing_source = sources.find(translation_unit);
+      if (importing_source == sources.end()) {
+         throw std::runtime_error{"contract library dependency source is unknown: " + translation_unit.string()};
       }
+      const auto& owner = importing_source->second.owner;
       const auto visible_owners = visible_dependencies(owner, true);
 
       for (const auto& [dependency, is_system] : dependencies) {
          const auto source = sources.find(dependency);
          if (source != sources.end()) {
+            const auto same_owner = source->second.owner == owner;
+            const auto own_source_is_visible =
+                same_owner && (importing_source->second.role != forge::contract::abi::library_source_role::module ||
+                               is_public_source(source->second.role));
             const auto source_is_allowed =
-                source->second.owner == owner ||
-                (visible_owners.contains(source->second.owner) && is_public_source(source->second.role));
+                own_source_is_visible ||
+                (!same_owner && visible_owners.contains(source->second.owner) && is_public_source(source->second.role));
             if (source_is_allowed) {
                continue;
+            }
+            if (same_owner && importing_source->second.role == forge::contract::abi::library_source_role::module &&
+                !is_public_source(source->second.role)) {
+               throw std::runtime_error{"contract library " + owner +
+                                        " public module source includes a private source: " + dependency.string()};
             }
             throw std::runtime_error{"contract library " + owner +
                                      " dependency is not declared: " + dependency.string()};
@@ -2111,6 +2122,11 @@ void validate_library_dependencies(
          }
          throw std::runtime_error{"contract library " + owner + " dependency is not declared: " + dependency.string()};
       }
+   }
+
+   for (const auto& [owner, declared_sources] : sources_by_owner) {
+      static_cast<void>(declared_sources);
+      const auto visible_owners = visible_dependencies(owner, true);
       if (const auto imported = modules_by_owner.find(owner); imported != modules_by_owner.end()) {
          for (const auto& module : imported->second) {
             const auto dependency_owner = owners_by_module.find(module);
@@ -2670,7 +2686,7 @@ artifacts generate(const request& options) {
    }
    if (!options.library_sources.empty() || !options.library_compilations.empty() ||
        !options.library_dependencies.empty() || !options.library_external_compilations.empty()) {
-      auto dependencies_by_owner = std::map<std::string, source_dependencies>{};
+      auto dependencies_by_source = std::map<std::filesystem::path, source_dependencies>{};
       auto modules_by_owner = std::map<std::string, module_dependencies>{};
       auto exported_modules_by_owner = std::map<std::string, module_dependencies>{};
       auto provided_modules_by_owner = std::map<std::string, module_dependencies>{};
@@ -2684,13 +2700,7 @@ artifacts generate(const request& options) {
                throw std::runtime_error{"contract library compilation metadata has a duplicate source: " +
                                         metadata.source.string()};
             }
-            auto& dependencies = dependencies_by_owner[compilation.owner];
-            for (const auto& [path, system] : metadata.dependencies) {
-               const auto [entry, inserted] = dependencies.emplace(path, system);
-               if (!inserted) {
-                  entry->second = entry->second && system;
-               }
-            }
+            dependencies_by_source.emplace(metadata.source, metadata.dependencies);
             modules_by_owner[compilation.owner].insert(metadata.imported_modules.begin(),
                                                        metadata.imported_modules.end());
             exported_modules_by_owner[compilation.owner].insert(metadata.exported_modules.begin(),
@@ -2732,7 +2742,7 @@ artifacts generate(const request& options) {
          }
       }
 
-      validate_library_dependencies(options, dependencies_by_owner, modules_by_owner, exported_modules_by_owner,
+      validate_library_dependencies(options, dependencies_by_source, modules_by_owner, exported_modules_by_owner,
                                     provided_modules_by_owner, compiled_sources_by_owner, external_modules_by_owner,
                                     external_module_sources, dependencies, imported_modules);
    }

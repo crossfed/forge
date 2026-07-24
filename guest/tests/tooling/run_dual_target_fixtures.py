@@ -1079,6 +1079,33 @@ class [[forge::contract("selfcontained")]] self_contained_contract
         contains="protocol_private.hpp",
     )
 
+    private_module_header_source = output / "private-module-header-source"
+    shutil.copytree(source, private_module_header_source)
+    (
+        private_module_header_source
+        / "include"
+        / "protocol"
+        / "protocol.cppm"
+    ).write_text(
+        """module;
+
+#include "protocol_private.hpp"
+
+export module self_contained.protocol;
+
+export int protocol_value();
+""",
+        encoding="utf-8",
+    )
+    private_module_header_build = output / "private-module-header-build"
+    configure(args, private_module_header_source, private_module_header_build)
+    build(
+        args,
+        private_module_header_build,
+        succeeds=False,
+        contains="public module source includes a private source",
+    )
+
     private_reexport_source = output / "private-reexport-source"
     shutil.copytree(source, private_reexport_source)
     (
