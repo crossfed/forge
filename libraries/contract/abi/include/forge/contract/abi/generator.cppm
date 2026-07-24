@@ -42,6 +42,12 @@ struct library_dependency {
    library_dependency_scope scope;
 };
 
+struct library_external_module_source {
+   std::string owner;
+   library_dependency_scope scope;
+   std::filesystem::path physical_path;
+};
+
 struct request {
    std::string contract;
    std::filesystem::path abi;
@@ -60,6 +66,7 @@ struct request {
    std::vector<library_source> library_sources;
    std::vector<library_translation_unit> library_translation_units;
    std::vector<library_dependency> library_dependencies;
+   std::vector<library_external_module_source> library_external_module_sources;
    std::vector<std::filesystem::path> sources;
    std::vector<std::filesystem::path> dependency_sources;
    std::vector<std::filesystem::path> source_wrappers;

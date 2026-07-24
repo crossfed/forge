@@ -403,12 +403,60 @@ function(_forge_contract_configure_downstream_target target)
    )
 endfunction()
 
+function(_forge_contract_collect_guest_module_sources output)
+   set(_pending ${ARGN})
+   set(_visited)
+   set(_sources)
+   while(_pending)
+      list(POP_FRONT _pending _target)
+      if(_target IN_LIST _visited)
+         continue()
+      endif()
+      if(NOT TARGET ${_target})
+         message(FATAL_ERROR "contract graph references an unknown guest dependency target: ${_target}")
+      endif()
+      list(APPEND _visited "${_target}")
+
+      get_target_property(_module_sets ${_target} CXX_MODULE_SETS)
+      if(_module_sets STREQUAL "_module_sets-NOTFOUND")
+         set(_module_sets)
+      endif()
+      foreach(_module_set IN LISTS _module_sets)
+         get_target_property(_module_sources ${_target} "CXX_MODULE_SET_${_module_set}")
+         if(_module_sources STREQUAL "_module_sources-NOTFOUND")
+            message(FATAL_ERROR "guest dependency has an unreadable C++ module file set: ${_target}")
+         endif()
+         foreach(_source IN LISTS _module_sources)
+            get_filename_component(_source "${_source}" REALPATH)
+            list(APPEND _sources "${_source}")
+         endforeach()
+      endforeach()
+
+      get_target_property(_dependencies ${_target} INTERFACE_LINK_LIBRARIES)
+      if(_dependencies STREQUAL "_dependencies-NOTFOUND")
+         set(_dependencies)
+      endif()
+      foreach(_dependency IN LISTS _dependencies)
+         if(_dependency MATCHES "\\$<")
+            message(FATAL_ERROR "guest dependency has an unsupported transitive target: ${_dependency}")
+         endif()
+         if(TARGET ${_dependency})
+            list(APPEND _pending "${_dependency}")
+         endif()
+      endforeach()
+   endwhile()
+   list(REMOVE_DUPLICATES _sources)
+   set(${output} "${_sources}" PARENT_SCOPE)
+endfunction()
+
 set(_contract_library_targets)
 set(_contract_library_include_directories)
 set(_contract_library_source_paths)
 set(_contract_library_owned_sources)
 set(_contract_library_translation_units)
 set(_contract_library_dependencies)
+set(_contract_library_external_module_sources)
+set(_contract_library_external_module_paths)
 foreach(_root_id IN LISTS FORGE_CONTRACT_GRAPH_ROOT_LIBRARY_IDS)
    list(APPEND _contract_library_dependencies "${_contract_graph_owner}" "${_root_id}" PUBLIC)
 endforeach()
@@ -439,6 +487,23 @@ if(FORGE_CONTRACT_GRAPH_LIBRARY_COUNT GREATER 0)
             message(FATAL_ERROR "contract library dependency is missing from graph: ${_dependency_id}")
          endif()
          list(APPEND _private_dependencies "${_forge_contract_library_target_${_dependency_hash}}")
+      endforeach()
+      _forge_contract_collect_guest_module_sources(
+         _public_guest_module_sources
+         ${${_prefix}_PUBLIC_GUEST_DEPENDENCIES}
+      )
+      _forge_contract_collect_guest_module_sources(
+         _private_guest_module_sources
+         ${${_prefix}_PRIVATE_GUEST_DEPENDENCIES}
+      )
+      foreach(_source IN LISTS _public_guest_module_sources)
+         list(REMOVE_ITEM _private_guest_module_sources "${_source}")
+         list(APPEND _contract_library_external_module_sources "${_id}" PUBLIC "${_source}")
+         list(APPEND _contract_library_external_module_paths "${_source}")
+      endforeach()
+      foreach(_source IN LISTS _private_guest_module_sources)
+         list(APPEND _contract_library_external_module_sources "${_id}" PRIVATE "${_source}")
+         list(APPEND _contract_library_external_module_paths "${_source}")
       endforeach()
 
       add_library(${_target} STATIC)
@@ -656,6 +721,25 @@ if(_contract_library_dependency_count GREATER 0)
       list(APPEND _abigen_command --library-dependency "${_owner}" "${_dependency}" "${_scope}")
    endforeach()
 endif()
+list(LENGTH _contract_library_external_module_sources _contract_library_external_module_source_count)
+if(_contract_library_external_module_source_count GREATER 0)
+   math(
+      EXPR
+      _contract_library_external_module_source_last
+      "${_contract_library_external_module_source_count} - 1"
+   )
+   foreach(_index RANGE 0 ${_contract_library_external_module_source_last} 3)
+      math(EXPR _scope_index "${_index} + 1")
+      math(EXPR _source_index "${_index} + 2")
+      list(GET _contract_library_external_module_sources ${_index} _owner)
+      list(GET _contract_library_external_module_sources ${_scope_index} _scope)
+      list(GET _contract_library_external_module_sources ${_source_index} _source)
+      list(
+         APPEND _abigen_command
+         --library-external-module-source "${_owner}" "${_scope}" "${_source}"
+      )
+   endforeach()
+endif()
 foreach(_module_path IN LISTS _module_search_paths)
    list(APPEND _abigen_command --module-path "${_module_path}")
 endforeach()
@@ -678,6 +762,7 @@ set(
    ${FORGE_CONTRACT_SOURCES}
    ${FORGE_CONTRACT_COMPILE_CHECKS}
    ${_contract_library_source_paths}
+   ${_contract_library_external_module_paths}
 )
 foreach(_ricardian_file FORGE_CONTRACT_RICARDIAN_CONTRACTS FORGE_CONTRACT_RICARDIAN_CLAUSES)
    if(NOT "${${_ricardian_file}}" STREQUAL "")

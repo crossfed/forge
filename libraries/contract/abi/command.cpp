@@ -13,6 +13,16 @@ import forge.contract.abi.generator;
 namespace forge::contract::abi::command {
 namespace {
 
+library_dependency_scope parse_library_dependency_scope(std::string_view scope) {
+   if (scope == "PUBLIC") {
+      return library_dependency_scope::public_;
+   }
+   if (scope == "PRIVATE") {
+      return library_dependency_scope::private_;
+   }
+   throw std::runtime_error{"contract library dependency has an invalid scope: " + std::string{scope}};
+}
+
 request parse(int argc, const char* const* argv) {
    auto result = request{};
    for (auto index = 1; index < argc; ++index) {
@@ -85,20 +95,19 @@ request parse(int argc, const char* const* argv) {
       } else if (option == "--library-dependency") {
          auto owner = std::string{next()};
          auto dependency = std::string{next()};
-         const auto scope = next();
-         const auto parsed_scope = [&] {
-            if (scope == "PUBLIC") {
-               return library_dependency_scope::public_;
-            }
-            if (scope == "PRIVATE") {
-               return library_dependency_scope::private_;
-            }
-            throw std::runtime_error{"contract library dependency has an invalid scope: " + std::string{scope}};
-         }();
+         const auto scope = parse_library_dependency_scope(next());
          result.library_dependencies.push_back(library_dependency{
              .owner = std::move(owner),
              .dependency = std::move(dependency),
-             .scope = parsed_scope,
+             .scope = scope,
+         });
+      } else if (option == "--library-external-module-source") {
+         auto owner = std::string{next()};
+         const auto scope = parse_library_dependency_scope(next());
+         result.library_external_module_sources.push_back(library_external_module_source{
+             .owner = std::move(owner),
+             .scope = scope,
+             .physical_path = next(),
          });
       } else if (option == "--dependency-source") {
          result.dependency_sources.emplace_back(next());

@@ -38,6 +38,13 @@ def macos_sysroot() -> Optional[Path]:
     return Path(result.stdout.strip()).resolve()
 
 
+def contract_sdk_prefix(contract_package: Path) -> Path:
+    for candidate in (contract_package, *contract_package.parents):
+        if (candidate / "share" / "forge-contract" / "modules").is_dir():
+            return candidate
+    raise RuntimeError(f"cannot locate Contract SDK prefix from {contract_package}")
+
+
 def configure(
     args,
     source: Path,
@@ -860,6 +867,7 @@ class [[forge::contract("selfcontained")]] self_contained_contract
         """cmake_minimum_required(VERSION 3.31)
 project(SelfContainedContractLibrary LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(ForgeContract CONFIG REQUIRED)
 add_subdirectory(libraries)
 target_link_libraries(protocol PRIVATE dependency dependency second_dependency)
@@ -1045,6 +1053,85 @@ export int protocol_value();
         succeeds=False,
         contains="exports a module through a private dependency",
     )
+
+    private_sdk_reexport_source = output / "private-sdk-reexport-source"
+    shutil.copytree(source, private_sdk_reexport_source)
+    (
+        private_sdk_reexport_source
+        / "include"
+        / "protocol"
+        / "protocol.cppm"
+    ).write_text(
+        """export module self_contained.protocol;
+
+export import forge.raw.codec;
+
+export int protocol_value();
+""",
+        encoding="utf-8",
+    )
+    cmake = (private_sdk_reexport_source / "CMakeLists.txt").read_text(encoding="utf-8")
+    cmake = cmake.replace(
+        "find_package(ForgeContract CONFIG REQUIRED)",
+        "find_package(Forge CONFIG REQUIRED COMPONENTS raw)\n"
+        "find_package(ForgeContract CONFIG REQUIRED)",
+    )
+    cmake = cmake.replace(
+        "target_link_libraries(protocol PRIVATE dependency dependency second_dependency)",
+        "target_link_libraries(\n"
+        "   protocol PRIVATE dependency dependency second_dependency Forge::forge_raw\n"
+        ")",
+    )
+    (private_sdk_reexport_source / "CMakeLists.txt").write_text(cmake, encoding="utf-8")
+    private_sdk_reexport_build = output / "private-sdk-reexport-build"
+    configure(args, private_sdk_reexport_source, private_sdk_reexport_build)
+    build(
+        args,
+        private_sdk_reexport_build,
+        succeeds=False,
+        contains="exports a module through a private dependency: forge.raw.codec",
+    )
+
+    external_private_source = (
+        contract_sdk_prefix(args.contract_package)
+        / "share"
+        / "forge-contract"
+        / "private-surface-fixture"
+    )
+    shutil.rmtree(external_private_source, ignore_errors=True)
+    shutil.copytree(source, external_private_source)
+    (external_private_source / "contract.cpp").write_text(
+        """import forge.contract;
+import self_contained.protocol;
+
+#include "protocol_private.hpp"
+
+class [[forge::contract("selfcontained")]] self_contained_contract
+    : public forge::contract::context {
+ public:
+   using context::context;
+
+   [[forge::action]] void ping() {
+      forge::contract::check(
+         protocol_value() == protocol_private_value,
+         "SDK-root private protocol file escaped its owner"
+      );
+   }
+};
+""",
+        encoding="utf-8",
+    )
+    try:
+        external_private_build = output / "external-private-file-build"
+        configure(args, external_private_source, external_private_build)
+        build(
+            args,
+            external_private_build,
+            succeeds=False,
+            contains="protocol_private.hpp",
+        )
+    finally:
+        shutil.rmtree(external_private_source, ignore_errors=True)
 
 
 def main() -> None:
