@@ -7,6 +7,7 @@ add_library(
    vote.cpp
    vote_accumulator.cpp
    vote_accumulator_impl.cpp
+   finalizer_safety.cpp
    validation.cpp
    rank.cpp
 )
