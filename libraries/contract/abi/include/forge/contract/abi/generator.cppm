@@ -13,9 +13,19 @@ struct source_root {
    std::filesystem::path physical_path;
 };
 
-struct library_dependency_source {
+struct library_translation_unit {
    std::string owner;
    std::filesystem::path physical_path;
+};
+
+struct library_source {
+   std::string owner;
+   std::filesystem::path physical_path;
+};
+
+struct library_dependency {
+   std::string owner;
+   std::string dependency;
 };
 
 struct request {
@@ -33,7 +43,9 @@ struct request {
    std::vector<source_root> source_roots;
    std::vector<std::filesystem::path> external_source_roots;
    std::vector<std::filesystem::path> attested_sources;
-   std::vector<library_dependency_source> library_dependency_sources;
+   std::vector<library_source> library_sources;
+   std::vector<library_translation_unit> library_translation_units;
+   std::vector<library_dependency> library_dependencies;
    std::vector<std::filesystem::path> sources;
    std::vector<std::filesystem::path> dependency_sources;
    std::vector<std::filesystem::path> source_wrappers;

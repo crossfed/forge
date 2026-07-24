@@ -53,10 +53,20 @@ request parse(int argc, const char* const* argv) {
          result.external_source_roots.emplace_back(next());
       } else if (option == "--attested-source") {
          result.attested_sources.emplace_back(next());
-      } else if (option == "--library-dependency-source") {
-         result.library_dependency_sources.push_back(library_dependency_source{
+      } else if (option == "--library-source") {
+         result.library_sources.push_back(library_source{
              .owner = std::string{next()},
              .physical_path = next(),
+         });
+      } else if (option == "--library-translation-unit") {
+         result.library_translation_units.push_back(library_translation_unit{
+             .owner = std::string{next()},
+             .physical_path = next(),
+         });
+      } else if (option == "--library-dependency") {
+         result.library_dependencies.push_back(library_dependency{
+             .owner = std::string{next()},
+             .dependency = std::string{next()},
          });
       } else if (option == "--dependency-source") {
          result.dependency_sources.emplace_back(next());

@@ -382,6 +382,83 @@ class [[forge::contract("undeclaredcompiled")]] undeclared_compiled_contract
         ),
     )
 
+    undeclared_cross_library = output / "undeclared-cross-library"
+    for directory in (
+        undeclared_cross_library / "a" / "include",
+        undeclared_cross_library / "a" / "src",
+        undeclared_cross_library / "b" / "include",
+        undeclared_cross_library / "contract",
+    ):
+        directory.mkdir(parents=True)
+    (undeclared_cross_library / "a" / "include" / "a.cppm").write_text(
+        "export module negative.cross.a;\nexport int cross_value();\n",
+        encoding="utf-8",
+    )
+    hidden_header = undeclared_cross_library / "b" / "include" / "hidden.hpp"
+    hidden_header.write_text(
+        "#pragma once\ninline constexpr auto hidden_cross_value = 42;\n",
+        encoding="utf-8",
+    )
+    (undeclared_cross_library / "b" / "include" / "b.cppm").write_text(
+        "export module negative.cross.b;\nexport inline constexpr auto b_value = 7;\n",
+        encoding="utf-8",
+    )
+    (undeclared_cross_library / "a" / "src" / "a.cpp").write_text(
+        f"""module;
+
+#include "{hidden_header.as_posix()}"
+
+module negative.cross.a;
+
+int cross_value() {{
+   return hidden_cross_value;
+}}
+""",
+        encoding="utf-8",
+    )
+    (undeclared_cross_library / "contract" / "contract.cpp").write_text(
+        """import forge.contract;
+import negative.cross.a;
+
+class [[forge::contract("crossowner")]] cross_owner_contract : public forge::contract::context {
+ public:
+   using context::context;
+   [[forge::action]] void verify() {
+      forge::contract::check(cross_value() == 42, "cross-library value mismatch");
+   }
+};
+""",
+        encoding="utf-8",
+    )
+    (undeclared_cross_library / "CMakeLists.txt").write_text(
+        """cmake_minimum_required(VERSION 3.31)
+project(UndeclaredCrossLibraryDependency LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 23)
+find_package(ForgeContract CONFIG REQUIRED)
+forge_add_contract_library(
+   a ID negative.cross.a SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/a"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/a.cppm SOURCES src/a.cpp
+)
+forge_add_contract_library(
+   b ID negative.cross.b SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/b"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/b.cppm PUBLIC_HEADERS include/hidden.hpp
+)
+forge_add_contract(
+   crossowner SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/contract"
+   LIBRARIES a b SOURCES contract.cpp
+)
+""",
+        encoding="utf-8",
+    )
+    undeclared_cross_library_build = output / "undeclared-cross-library-build"
+    configure(args, undeclared_cross_library, undeclared_cross_library_build)
+    build(
+        args,
+        undeclared_cross_library_build,
+        succeeds=False,
+        contains="contract library negative.cross.a dependency is not declared",
+    )
+
     duplicate = write_negative_project(
         output / "duplicate",
         """forge_add_contract_library(

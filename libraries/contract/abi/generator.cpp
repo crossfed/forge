@@ -1747,12 +1747,58 @@ void write_source_dependencies(const forge::contract::abi::request& options,
 void validate_library_dependencies(
     const forge::contract::abi::request& options,
     const std::map<std::string, source_dependencies>& dependencies_by_owner) {
-   auto allowed_sources = std::set<std::filesystem::path>{};
+   auto attested_sources = std::set<std::filesystem::path>{};
    for (const auto& source : options.attested_sources) {
       if (!std::filesystem::is_regular_file(source)) {
          throw std::runtime_error{"attested source is not a file: " + source.string()};
       }
-      allowed_sources.insert(std::filesystem::weakly_canonical(source));
+      attested_sources.insert(std::filesystem::weakly_canonical(source));
+   }
+
+   auto sources_by_owner = std::map<std::string, std::set<std::filesystem::path>>{};
+   auto owners_by_source = std::map<std::filesystem::path, std::string>{};
+   for (const auto& source : options.library_sources) {
+      if (source.owner.empty() || contains_reserved_separator(source.owner)) {
+         throw std::runtime_error{"contract library source has an invalid owner"};
+      }
+      if (!std::filesystem::is_regular_file(source.physical_path)) {
+         throw std::runtime_error{"contract library source is not a file: " + source.physical_path.string()};
+      }
+      const auto physical_path = std::filesystem::weakly_canonical(source.physical_path);
+      if (!attested_sources.contains(physical_path)) {
+         throw std::runtime_error{"contract library source is not attested: " + physical_path.string()};
+      }
+      const auto [existing, inserted] = owners_by_source.emplace(physical_path, source.owner);
+      if (!inserted && existing->second != source.owner) {
+         throw std::runtime_error{"contract library source has multiple owners: " + physical_path.string()};
+      }
+      sources_by_owner[source.owner].insert(std::move(physical_path));
+   }
+   if (owners_by_source.size() != attested_sources.size()) {
+      throw std::runtime_error{"an attested contract library source has no owner"};
+   }
+   for (const auto& source : options.library_translation_units) {
+      const auto owner = sources_by_owner.find(source.owner);
+      const auto physical_path = std::filesystem::weakly_canonical(source.physical_path);
+      if (owner == sources_by_owner.end() || !owner->second.contains(physical_path)) {
+         throw std::runtime_error{"contract library translation unit does not belong to its owner: " +
+                                  physical_path.string()};
+      }
+   }
+
+   auto direct_dependencies = std::map<std::string, std::set<std::string>>{};
+   for (const auto& edge : options.library_dependencies) {
+      if (edge.owner.empty() || edge.dependency.empty() || contains_reserved_separator(edge.owner) ||
+          contains_reserved_separator(edge.dependency)) {
+         throw std::runtime_error{"contract library dependency has an invalid owner"};
+      }
+      if (!sources_by_owner.contains(edge.owner)) {
+         throw std::runtime_error{"contract library dependency owner is unknown: " + edge.owner};
+      }
+      if (!sources_by_owner.contains(edge.dependency)) {
+         throw std::runtime_error{"contract library dependency target is unknown: " + edge.dependency};
+      }
+      direct_dependencies[edge.owner].insert(edge.dependency);
    }
 
    auto external_roots = std::vector<std::filesystem::path>{};
@@ -1765,6 +1811,30 @@ void validate_library_dependencies(
    }
 
    for (const auto& [owner, dependencies] : dependencies_by_owner) {
+      if (!sources_by_owner.contains(owner)) {
+         throw std::runtime_error{"contract library dependency source owner is unknown: " + owner};
+      }
+      auto visible_owners = std::set<std::string>{owner};
+      auto pending = std::vector<std::string>{owner};
+      while (!pending.empty()) {
+         auto current = std::move(pending.back());
+         pending.pop_back();
+         const auto edge = direct_dependencies.find(current);
+         if (edge == direct_dependencies.end()) {
+            continue;
+         }
+         for (const auto& dependency : edge->second) {
+            if (visible_owners.insert(dependency).second) {
+               pending.push_back(dependency);
+            }
+         }
+      }
+
+      auto allowed_sources = std::set<std::filesystem::path>{};
+      for (const auto& visible_owner : visible_owners) {
+         const auto& sources = sources_by_owner.at(visible_owner);
+         allowed_sources.insert(sources.begin(), sources.end());
+      }
       for (const auto& [dependency, is_system] : dependencies) {
          if (allowed_sources.contains(dependency) || is_system ||
              std::ranges::any_of(external_roots,
@@ -2271,11 +2341,12 @@ artifacts generate(const request& options) {
          throw std::runtime_error{"contract dependency source analysis failed"};
       }
    }
-   if (!options.library_dependency_sources.empty()) {
+   if (!options.library_sources.empty() || !options.library_translation_units.empty() ||
+       !options.library_dependencies.empty()) {
       auto sources_by_owner = std::map<std::string, std::vector<std::string>>{};
-      for (const auto& source : options.library_dependency_sources) {
+      for (const auto& source : options.library_translation_units) {
          if (source.owner.empty() || contains_reserved_separator(source.owner)) {
-            throw std::runtime_error{"contract library dependency source has an invalid owner"};
+            throw std::runtime_error{"contract library translation unit has an invalid owner"};
          }
          sources_by_owner[source.owner].push_back(source.physical_path.string());
       }
