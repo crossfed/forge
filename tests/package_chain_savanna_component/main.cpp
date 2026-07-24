@@ -36,6 +36,7 @@ int main() {
        .num = 1U,
        .id = id,
        .slot = 1U,
+       .active_policy_generation = 1U,
    };
    const auto rank = savanna::make_rank(finality, block);
    auto validation = savanna::make_validation({

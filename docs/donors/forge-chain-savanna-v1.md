@@ -110,6 +110,8 @@ Corrected during transfer:
 - QC weight evaluation uses `forge_chain_quorum`;
 - QC verification returns a non-serializable capability bound to the checked
   finality digest and strong voters;
+- vote accumulation requires its active and pending policy generations to
+  match the candidate before accepting votes or certificates;
 - active and pending policy halves remain paired during received/local
   best-certificate selection;
 - shared active/pending finalizers are mutated atomically after signature

@@ -345,6 +345,50 @@ BOOST_AUTO_TEST_CASE(
                savanna::accumulator_state::strong);
 }
 
+BOOST_AUTO_TEST_CASE(
+    chain_savanna_vote_accumulator_requires_candidate_policy_generations) {
+   const auto key = hardening_key(1U);
+   const auto policy = savanna::finalizer_policy{
+       .generation = 1U,
+       .threshold = 1U,
+       .finalizers = {hardening_finalizer(key, 1U, "active")},
+   };
+   const auto active =
+       savanna::validate(policy, std::array{key.proof_of_possession()});
+   auto pending_policy = policy;
+   pending_policy.generation = 2U;
+   const auto pending = savanna::validate(
+       pending_policy, std::array{key.proof_of_possession()});
+
+   auto candidate = hardening_ref(10U, 30U, 100U);
+   candidate.active_policy_generation = 2U;
+   BOOST_CHECK_THROW(
+       static_cast<void>(savanna::vote_accumulator{candidate, active}),
+       savanna::exceptions::invalid_policy);
+
+   candidate.active_policy_generation = 1U;
+   candidate.pending_policy_generation = 2U;
+   BOOST_CHECK_THROW(
+       static_cast<void>(savanna::vote_accumulator{candidate, active}),
+       savanna::exceptions::invalid_policy);
+
+   candidate.pending_policy_generation = 0U;
+   BOOST_CHECK_THROW(
+       static_cast<void>(
+           savanna::vote_accumulator{candidate, active, pending}),
+       savanna::exceptions::invalid_policy);
+
+   candidate.pending_policy_generation = 3U;
+   BOOST_CHECK_THROW(
+       static_cast<void>(
+           savanna::vote_accumulator{candidate, active, pending}),
+       savanna::exceptions::invalid_policy);
+
+   candidate.pending_policy_generation = 2U;
+   BOOST_CHECK_NO_THROW(static_cast<void>(
+       savanna::vote_accumulator{candidate, active, pending}));
+}
+
 BOOST_AUTO_TEST_CASE(chain_savanna_vote_accumulator_is_atomic_and_thread_safe) {
    const auto first = hardening_key(1U);
    const auto second = hardening_key(33U);
@@ -371,7 +415,8 @@ BOOST_AUTO_TEST_CASE(chain_savanna_vote_accumulator_is_atomic_and_thread_safe) {
    auto pending_policy = policy;
    pending_policy.generation = 2U;
    const auto pending = savanna::validate(pending_policy, proofs);
-   const auto candidate = hardening_ref(10U, 30U, 100U);
+   auto candidate = hardening_ref(10U, 30U, 100U);
+   candidate.pending_policy_generation = pending_policy.generation;
    auto accumulator =
        savanna::vote_accumulator{candidate, active, pending};
 
@@ -474,7 +519,8 @@ BOOST_AUTO_TEST_CASE(chain_savanna_dual_policy_best_keeps_qc_halves_paired) {
        pending_policy,
        std::array{shared.proof_of_possession(),
                   pending_only.proof_of_possession()});
-   const auto candidate = hardening_ref(12U, 32U, 120U);
+   auto candidate = hardening_ref(12U, 32U, 120U);
+   candidate.pending_policy_generation = pending_policy.generation;
    auto accumulator = savanna::vote_accumulator{candidate, active, pending};
 
    static_cast<void>(

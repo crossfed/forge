@@ -1,5 +1,7 @@
 module;
 
+#include <forge/exceptions/macros.hpp>
+
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -13,6 +15,42 @@ module forge.chain.savanna.vote_accumulator;
 #include "details/vote_accumulator_impl.hxx"
 
 namespace forge::chain::savanna {
+namespace {
+
+void require_candidate_policies(
+    const block_ref& candidate, const verified_finalizer_policy& active,
+    const std::optional<verified_finalizer_policy>& pending) {
+   if (active.get().generation != candidate.active_policy_generation) {
+      FORGE_THROW_EXCEPTION(
+          exceptions::invalid_policy,
+          "Savanna accumulator active policy does not match the candidate",
+          forge::exceptions::ctx("candidate_generation",
+                                 candidate.active_policy_generation),
+          forge::exceptions::ctx("policy_generation",
+                                 active.get().generation));
+   }
+
+   const auto expects_pending = candidate.pending_policy_generation != 0U;
+   if (expects_pending != pending.has_value()) {
+      FORGE_THROW_EXCEPTION(
+          exceptions::invalid_policy,
+          "Savanna accumulator pending policy presence does not match the candidate",
+          forge::exceptions::ctx("candidate_generation",
+                                 candidate.pending_policy_generation));
+   }
+   if (pending &&
+       pending->get().generation != candidate.pending_policy_generation) {
+      FORGE_THROW_EXCEPTION(
+          exceptions::invalid_policy,
+          "Savanna accumulator pending policy does not match the candidate",
+          forge::exceptions::ctx("candidate_generation",
+                                 candidate.pending_policy_generation),
+          forge::exceptions::ctx("policy_generation",
+                                 pending->get().generation));
+   }
+}
+
+} // namespace
 
 bool policy_accumulator_status::quorum_reached() const noexcept {
    return state == accumulator_state::weak_achieved ||
@@ -27,8 +65,11 @@ bool accumulator_status::quorum_reached() const noexcept {
 vote_accumulator::vote_accumulator(
     block_ref candidate, verified_finalizer_policy active,
     std::optional<verified_finalizer_policy> pending)
-    : impl_{std::make_unique<impl>(std::move(candidate), std::move(active),
-                                  std::move(pending))} {}
+    : impl_{} {
+   require_candidate_policies(candidate, active, pending);
+   impl_ = std::make_unique<impl>(
+       std::move(candidate), std::move(active), std::move(pending));
+}
 
 vote_accumulator::~vote_accumulator() = default;
 vote_accumulator::vote_accumulator(vote_accumulator&&) noexcept = default;

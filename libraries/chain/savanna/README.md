@@ -144,6 +144,11 @@ if (auto qc = votes.best()) {
 }
 ```
 
+Construction verifies that the supplied active and optional pending policy
+generations exactly match the candidate. A candidate that names a pending
+generation requires that policy, while a candidate without one rejects an
+extra pending policy.
+
 It implements the donor states `unrestricted`, `restricted`,
 `weak_achieved`, `weak_final` and `strong`. A finalizer shared by active and
 pending policies is updated atomically. BLS verification is done outside the
