@@ -76,6 +76,11 @@ plugins, telemetry and compatibility layers должны быть пригодн
 - [DB State Services v1](iterations/forge-db-state-services-v1.md): implemented
   runtime DB Store revision integration, shared read-view tradeoffs, future
   physical checkpoints and deferred generic migrations.
+- [Chain Remote State v1](iterations/forge-chain-remote-state-v1.md):
+  accepted direction for DB-shaped typed contract-state reads and chain-native
+  transaction submission over transport-neutral Forge API contracts. It is not
+  a remote DB Core backend; consistency, block anchors, cursors, ABI identity
+  and finality remain explicit chain semantics.
 - [Config](config/schema-config-program-options.md): schema rules, neutral
   config documents, env/CLI adapters and redaction.
 - [Secret Provider](iterations/fcl-secret-provider-v1.md): neutral

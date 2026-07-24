@@ -178,9 +178,18 @@ class service_node {
   fixtures.
 - Dependency direction is `forge_chain_protocol -> forge_chain_core`; core must
   never import protocol.
-- Chain libraries must not contain controller, state, execution, consensus,
-  P2P sync, node lifecycle, plugin APIs, runtime config, key custody or product
-  policy.
+- Focused Chain leaves may own deterministic, product-neutral quorum, fork and
+  finality algorithms. They must not own controller state, state persistence,
+  execution, P2P sync, node lifecycle, plugin implementations, runtime config,
+  key custody or product policy.
+- Finality leaves use explicit operational block numbers and slots. They must
+  not derive semantics from a concrete protocol block ID or import
+  `forge.chain.protocol.*`; protocol adapters remain downstream.
+- A focused Chain leaf may own neutral remote-state query contracts, explicit
+  chain consistency/finality vocabulary and typed client views over
+  `forge_api_core`. It must not implement a DB Core driver, import a concrete
+  API transport or expose controller/backend types. Concrete node service
+  implementations belong to plugins or products.
 - Product blockchains may build runtime layers on top of the Chain family, but
   downstream product names and assumptions must not enter its public API.
 
@@ -253,6 +262,10 @@ Group by what the artifact is, not by an implementation detail:
   live in `forge::api::core`; channel-specific variants live in leaves such as
   `forge::api::http`, `forge::api::transport`, `forge::api::quic`,
   `forge::api::websocket` and `forge::api::p2p`.
+- A domain service contract may remain in its owning domain while deriving from
+  `forge::api::core::contract`. The `forge::api` family owns contract/proxy
+  mechanics and channel bindings; it does not take ownership of every domain
+  vocabulary exposed through those mechanics.
 - Network substrates remain separate under `forge::net`, for example
   `forge::net::http`, `forge::net::transport` and `forge::net::quic`. API
   bindings may depend on these substrates; network substrates must not depend

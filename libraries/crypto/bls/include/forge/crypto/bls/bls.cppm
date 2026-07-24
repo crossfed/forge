@@ -6,9 +6,11 @@ module;
 #include <cstdint>
 #include <iomanip>
 #include <ios>
+#include <optional>
 #include <ostream>
 #include <span>
 #include <string>
+#include <utility>
 
 export module forge.crypto.bls;
 
@@ -233,6 +235,26 @@ class signature {
    bls12_381::g2 _jacobian_montgomery_le;
 };
 
+class proof_verified_public_key {
+ public:
+   proof_verified_public_key(const proof_verified_public_key&) = default;
+   proof_verified_public_key(proof_verified_public_key&&) = default;
+   proof_verified_public_key& operator=(const proof_verified_public_key&) = default;
+   proof_verified_public_key& operator=(proof_verified_public_key&&) = default;
+
+   [[nodiscard]] const public_key& get() const noexcept {
+      return key_;
+   }
+
+ private:
+   explicit proof_verified_public_key(public_key key) : key_(std::move(key)) {}
+
+   public_key key_;
+
+   friend std::optional<proof_verified_public_key> verify_proof_of_possession(const public_key& key,
+                                                                              const signature& proof);
+};
+
 class aggregate_signature {
  public:
    aggregate_signature() = default;
@@ -281,7 +303,16 @@ class aggregate_signature {
    bls12_381::g2 _jacobian_montgomery_le;
 };
 
+struct aggregate_verification_group {
+   std::span<const proof_verified_public_key> public_keys;
+   std::span<const std::uint8_t> message;
+};
+
 [[nodiscard]] bool verify(const public_key& pubkey, std::span<const std::uint8_t> message, const signature& sig);
+[[nodiscard]] std::optional<proof_verified_public_key> verify_proof_of_possession(const public_key& key,
+                                                                                  const signature& proof);
+[[nodiscard]] bool verify_grouped(std::span<const aggregate_verification_group> groups,
+                                  const aggregate_signature& signature);
 
 void to_variant(const public_key& var, variant& vo);
 void from_variant(const variant& var, public_key& vo);

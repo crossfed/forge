@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.31)
 
-project(forge VERSION 8.12.0 LANGUAGES C CXX ASM)
+project(forge VERSION 8.13.0 LANGUAGES C CXX ASM)
 
 include(GNUInstallDirs)
 include(CheckCXXSourceCompiles)
@@ -479,6 +479,9 @@ set(
    forge_compression
    forge_chain_core
    forge_chain_protocol
+   forge_chain_quorum
+   forge_chain_fork
+   forge_chain_savanna
    forge_vm_wasm
    forge_db_ids
    forge_db_core
@@ -608,6 +611,9 @@ set(
    compression
    chain_core
    chain_protocol
+   chain_quorum
+   chain_fork
+   chain_savanna
    vm_wasm
    db_core
    db_object
