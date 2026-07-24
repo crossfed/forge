@@ -1,6 +1,5 @@
 module;
 #include <forge/exceptions/macros.hpp>
-#include <algorithm>
 #include <array>
 #include <bls12-381/bls12-381.hpp>
 #include <cstdint>
@@ -33,10 +32,8 @@ signature::signature(std::span<const uint8_t, 192> affine_non_montgomery_le)
 
 static std::array<uint8_t, 192> sig_parse_base64url(const std::string& base64urlstr) {
    try {
-      auto res =
-          std::mismatch(config::signature_prefix.begin(), config::signature_prefix.end(), base64urlstr.begin());
-      FORGE_ASSERT(res.first == config::signature_prefix.end(), "BLS Signature has invalid format : ${str}",
-                 forge::exceptions::ctx("str", base64urlstr));
+      FORGE_ASSERT(base64urlstr.starts_with(config::signature_prefix), "BLS Signature has invalid format : ${str}",
+                   forge::exceptions::ctx("str", base64urlstr));
       auto data_str = base64urlstr.substr(config::signature_prefix.size());
       return forge::crypto::bls::detail::deserialize_base64url<std::array<uint8_t, 192>>(data_str);
    }
@@ -49,7 +46,7 @@ signature::signature(const std::string& base64urlstr)
 
 std::string signature::to_string() const {
    std::string data_str =
-      forge::crypto::bls::detail::serialize_base64url<std::array<uint8_t, 192>>(_affine_non_montgomery_le);
+       forge::crypto::bls::detail::serialize_base64url<std::array<uint8_t, 192>>(_affine_non_montgomery_le);
    return config::signature_prefix + data_str;
 }
 
@@ -60,7 +57,7 @@ std::string aggregate_signature::to_string() const {
    std::array<uint8_t, 192> affine_non_montgomery_le =
        _jacobian_montgomery_le.toAffineBytesLE(bls12_381::from_mont::yes);
    std::string data_str =
-      forge::crypto::bls::detail::serialize_base64url<std::array<uint8_t, 192>>(affine_non_montgomery_le);
+       forge::crypto::bls::detail::serialize_base64url<std::array<uint8_t, 192>>(affine_non_montgomery_le);
    return config::signature_prefix + data_str;
 }
 

@@ -349,6 +349,11 @@ FORGE_LOG_AND_RETHROW();
 
 BOOST_AUTO_TEST_CASE(bls_prefix_encoding_check) try {
 
+   // Short inputs must fail before prefix comparison reads beyond their bounds.
+   BOOST_CHECK_THROW(private_key("x"), forge::exceptions::context_error);
+   BOOST_CHECK_THROW(public_key("x"), forge::exceptions::context_error);
+   BOOST_CHECK_THROW(signature("x"), forge::exceptions::context_error);
+
    // test no_throw for correctly encoded keys
    BOOST_CHECK_NO_THROW(private_key("PVT_BLS_vh0bYgBLOLxs_h9zvYNtj20yj8UJxWeFFAtDUW2_pG44e5yc"));
    BOOST_CHECK_NO_THROW(public_key("PUB_BLS_82P3oM1u0IEv64u9i4vSzvg1-"

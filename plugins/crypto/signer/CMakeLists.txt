@@ -2,6 +2,7 @@ add_library(
    forge_plugins_crypto_signer STATIC
       plugin.cpp
       api_impl.cpp
+      bls_api_impl.cpp
       config.cpp
       plugin_impl.cpp
 )
@@ -22,6 +23,7 @@ target_link_libraries(
       forge_config_core
       forge_schema
       forge_crypto_asymmetric
+      forge_crypto_bls
       forge_crypto_digest
       forge_exceptions
       Boost::asio
