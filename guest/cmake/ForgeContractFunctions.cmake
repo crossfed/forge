@@ -447,6 +447,62 @@ function(_forge_contract_target_dependencies target output)
    set(${output} "${_normalized}" PARENT_SCOPE)
 endfunction()
 
+function(_forge_contract_validate_usage_requirements target module_bases)
+   foreach(
+      _property
+      COMPILE_DEFINITIONS
+      INTERFACE_COMPILE_DEFINITIONS
+      COMPILE_OPTIONS
+      INTERFACE_COMPILE_OPTIONS
+   )
+      get_target_property(_values "${target}" "${_property}")
+      if(_values STREQUAL "_values-NOTFOUND")
+         set(_values)
+      endif()
+      if(_values)
+         message(
+            FATAL_ERROR
+            "contract library ${target} has unsupported target-scoped ${_property}; "
+            "dual-target protocol inputs must be declared by forge_add_contract_library"
+         )
+      endif()
+   endforeach()
+
+   set(_allowed_include_directories)
+   foreach(_module_base IN LISTS module_bases)
+      get_filename_component(_module_base "${_module_base}" REALPATH)
+      list(APPEND _allowed_include_directories "${_module_base}")
+   endforeach()
+
+   foreach(_property INCLUDE_DIRECTORIES INTERFACE_INCLUDE_DIRECTORIES)
+      get_target_property(_values "${target}" "${_property}")
+      if(_values STREQUAL "_values-NOTFOUND")
+         set(_values)
+      endif()
+      foreach(_value IN LISTS _values)
+         if(_value MATCHES "^\\$<BUILD_INTERFACE:([^<>]+)>$")
+            set(_include_directory "${CMAKE_MATCH_1}")
+         elseif(_value MATCHES "\\$<")
+            message(
+               FATAL_ERROR
+               "contract library ${target} has unsupported target-scoped ${_property}: ${_value}"
+            )
+         else()
+            set(_include_directory "${_value}")
+         endif()
+
+         get_filename_component(_include_directory "${_include_directory}" REALPATH)
+         if(NOT _include_directory IN_LIST _allowed_include_directories)
+            message(
+               FATAL_ERROR
+               "contract library ${target} has undeclared target-scoped ${_property}: ${_value}; "
+               "public include roots must be declared by MODULE_BASE_DIRS"
+            )
+         endif()
+      endforeach()
+   endforeach()
+endfunction()
+
 function(_forge_contract_collect_library graph target)
    _forge_contract_canonical_target("${target}" _target)
    _forge_contract_guest_dependency("${_target}" _guest_dependency)
@@ -564,6 +620,7 @@ function(_forge_contract_write_graph target libraries output)
             list(APPEND _public_header_paths "${_source_root}/${_logical}")
          endforeach()
       endif()
+      _forge_contract_validate_usage_requirements("${_node}" "${_module_base_paths}")
 
       set(_source_paths)
       foreach(_logical IN LISTS _sources)

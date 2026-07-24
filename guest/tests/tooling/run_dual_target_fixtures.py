@@ -231,6 +231,60 @@ forge_add_contract(expression LIBRARIES protocol SOURCES contract.cpp)
         contains="generator expressions are not supported",
     )
 
+    compile_definition = write_negative_project(
+        output / "compile-definition",
+        """forge_add_contract_library(
+   protocol ID negative.compile.definition SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+target_compile_definitions(protocol PRIVATE PROTOCOL_LAYOUT_VERSION=2)
+forge_add_contract(definition LIBRARIES protocol SOURCES contract.cpp)
+""",
+    )
+    configure(
+        args,
+        compile_definition,
+        output / "compile-definition-build",
+        succeeds=False,
+        contains="COMPILE_DEFINITIONS;",
+    )
+
+    compile_option = write_negative_project(
+        output / "compile-option",
+        """forge_add_contract_library(
+   protocol ID negative.compile.option SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+target_compile_options(protocol PRIVATE -fpack-struct=1)
+forge_add_contract(option LIBRARIES protocol SOURCES contract.cpp)
+""",
+    )
+    configure(
+        args,
+        compile_option,
+        output / "compile-option-build",
+        succeeds=False,
+        contains="COMPILE_OPTIONS;",
+    )
+
+    include_directory = write_negative_project(
+        output / "include-directory",
+        """forge_add_contract_library(
+   protocol ID negative.include.directory SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+target_include_directories(protocol PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
+forge_add_contract(includedirectory LIBRARIES protocol SOURCES contract.cpp)
+""",
+    )
+    configure(
+        args,
+        include_directory,
+        output / "include-directory-build",
+        succeeds=False,
+        contains="INCLUDE_DIRECTORIES:",
+    )
+
     directory_scope = write_negative_project(
         output / "directory-scope",
         """forge_add_contract_library(
