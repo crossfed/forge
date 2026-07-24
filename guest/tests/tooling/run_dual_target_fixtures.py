@@ -894,7 +894,9 @@ def main() -> None:
     producer_build = output / "producer-build"
     producer_install = output / "producer-install"
     configure(args, args.source / "producer", producer_build)
-    build(args, producer_build)
+    build(args, producer_build, "product_protocol_host_tests")
+    run(str(producer_build / "product_protocol_host_tests"))
+    build(args, producer_build, "product")
     run(
         args.cmake,
         "--install",
@@ -902,7 +904,6 @@ def main() -> None:
         "--prefix",
         str(producer_install),
     )
-    run(str(producer_build / "product_protocol_host_tests"))
 
     producer_abi, producer_manifest = verify_artifacts(producer_build, "product")
     verify_direct_action(producer_abi)
