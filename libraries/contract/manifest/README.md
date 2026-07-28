@@ -11,6 +11,7 @@ forge::contract::manifest::generate({
    .wasm = "token.wasm",
    .abi = "token.abi",
    .imports = "intrinsics.json",
+   .source_graph = "token.contract-graph.json",
    .output = "token.contract.json",
    .sdk_version = "8.5.0",
    .profile = "release",
@@ -19,7 +20,7 @@ forge::contract::manifest::generate({
 ```
 
 The manifest records artifact hashes, imported functions, enabled WASM
-features and toolchain identity without modifying WASM bytes. Reproducible
+features, the canonical source graph and toolchain identity without modifying WASM bytes. Reproducible
 release profiles record the pinned LLVM tag and commit. Developer profiles
 record the selected Clang version line and omit the unknown source commit.
 This library does not require Clang and does not validate policy; use
@@ -33,7 +34,7 @@ dependency is transitive through package component `contract_manifest`.
 
 ## Stability And Tests
 
-The generator request is experimental; manifest schema and deterministic field
+The generator request is experimental; manifest schema v2 and deterministic field
 meaning are versioned compatibility surfaces. Tests verify hashes, import and
-feature capture, reproducible output, command failures, standalone package
+feature capture, source ownership and scoped dependency digests, reproducible output, command failures, standalone package
 consumption and relocated SDK generation.

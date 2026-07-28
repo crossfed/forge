@@ -40,10 +40,52 @@ def invoke(
     ricardian_clauses=None,
     bare_outputs=False,
     error_contains=None,
+    headers=(),
 ):
     output.mkdir(parents=True, exist_ok=True)
     abi = output / f"{source.stem}.abi"
     dispatch = output / f"{source.stem}.dispatcher.cpp"
+    graph = output / f"{source.stem}.contract-graph.json"
+    source_root = args.fixtures.parent.resolve()
+    graph_files = []
+    for role, paths in (
+        ("source", (source, *additional_sources)),
+        ("header", headers),
+        ("ricardian_contracts", (() if ricardian_contracts is None else (ricardian_contracts,))),
+        ("ricardian_clauses", (() if ricardian_clauses is None else (ricardian_clauses,))),
+    ):
+        for path in paths:
+            physical = path.resolve()
+            try:
+                relative = physical.relative_to(source_root)
+            except ValueError as error:
+                raise RuntimeError(f"fixture input is outside its source root: {physical}") from error
+            graph_files.append(
+                {
+                    "role": role,
+                    "logical_path": f"contract/{role}/{relative.as_posix()}",
+                    "physical_path": str(physical),
+                }
+            )
+    graph.write_text(
+        json.dumps(
+            {
+                "schema": 2,
+                "root": {
+                    "owner": f"contract:{contract}",
+                    "source_root": str(source_root),
+                    "files": graph_files,
+                    "libraries": [],
+                    "components": [],
+                },
+                "libraries": [],
+                "components": [],
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     abi_argument = abi.name if bare_outputs else abi
     dispatch_argument = dispatch.name if bare_outputs else dispatch
     command = [
@@ -54,6 +96,8 @@ def invoke(
         str(abi_argument),
         "--dispatch",
         str(dispatch_argument),
+        "--contract-graph",
+        str(graph),
         "--attribute-plugin",
         str(args.plugin),
         "--sysroot",
@@ -200,12 +244,14 @@ def run_donor_fixtures(args, manifest):
 
     for name, contract in PASS_FIXTURES.items():
         source = local_root / "abigen-pass" / f"{name}.cpp"
-        kwargs = {}
+        kwargs = {"headers": (local_root / "cdt_support.hpp",)}
         if name == "ricardian_contract_test":
-            kwargs = {
+            kwargs |= {
                 "ricardian_contracts": source.with_suffix(".contracts.md"),
                 "ricardian_clauses": source.with_suffix(".clauses.md"),
             }
+        if name == "singleton_contract":
+            kwargs["headers"] += (source.with_name("singleton_contract_support.hpp"),)
         abi = invoke(args, contract, source, args.output / "cdt", **kwargs)
         check_fixture_semantics(name, abi)
         if donor_root is not None:
@@ -216,7 +262,14 @@ def run_donor_fixtures(args, manifest):
 
     for name, contract in FAIL_FIXTURES.items():
         source = local_root / "abigen-fail" / f"{name}.cpp"
-        invoke(args, contract, source, args.output / "cdt", succeeds=False)
+        invoke(
+            args,
+            contract,
+            source,
+            args.output / "cdt",
+            succeeds=False,
+            headers=(local_root / "cdt_support.hpp",),
+        )
 
     mapped = {fixture["forge_case"] for fixture in manifest["fixtures"]}
     expected = {
@@ -364,6 +417,7 @@ def main():
         multi_source_contract,
         args.output / "multi-source-valid",
         additional_sources=(multi_source_helper,),
+        headers=(args.fixtures / "multi_source_contract.hpp",),
     )
     if [action["name"] for action in multi_source["actions"]] != ["next", "previous"]:
         raise RuntimeError("shared multi-source action was not de-duplicated")

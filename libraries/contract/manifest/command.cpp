@@ -76,6 +76,7 @@ int run(int argc, const char* const* argv) {
           .wasm = require(values, "wasm"),
           .abi = require(values, "abi"),
           .imports = require(values, "imports"),
+          .source_graph = require(values, "source-graph"),
           .output = require(values, "output"),
           .sdk_version = require(values, "sdk-version"),
           .profile = require(values, "profile"),

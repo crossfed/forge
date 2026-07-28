@@ -8,6 +8,7 @@ target_sources(
 )
 target_compile_features(forge_crypto_bls_values PUBLIC cxx_std_23)
 target_include_directories(forge_crypto_bls_values PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
+forge_target_contract_guest_component(forge_crypto_bls_values ID forge.crypto.bls_values)
 
 add_library(
    forge_crypto_bls STATIC

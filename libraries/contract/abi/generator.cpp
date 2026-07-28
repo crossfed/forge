@@ -5,13 +5,16 @@ module;
 #include <clang/AST/RecursiveASTVisitor.h>
 #include <clang/AST/TypeLoc.h>
 #include <clang/Basic/Diagnostic.h>
+#include <clang/Basic/Module.h>
 #include <clang/Frontend/CompilerInstance.h>
 #include <clang/Frontend/FrontendAction.h>
+#include <clang/Frontend/FrontendActions.h>
 #include <clang/Index/USRGeneration.h>
 #include <clang/Sema/Lookup.h>
 #include <clang/Tooling/CompilationDatabase.h>
 #include <clang/Tooling/Tooling.h>
 #include <llvm/ADT/SmallString.h>
+#include <llvm/ADT/SmallVector.h>
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/Support/DynamicLibrary.h>
 
@@ -21,9 +24,11 @@ module;
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
+#include <iterator>
 #include <memory>
 #include <map>
 #include <optional>
+#include <ranges>
 #include <set>
 #include <sstream>
 #include <stdexcept>
@@ -37,6 +42,7 @@ module forge.contract.abi.generator;
 import forge.chain.protocol.abi;
 import forge.chain.protocol.types;
 import forge.codec.json;
+import forge.contract.graph;
 import forge.variant.value;
 
 namespace {
@@ -1014,8 +1020,7 @@ class type_encoder {
 
 class visitor final : public clang::RecursiveASTVisitor<visitor> {
  public:
-   visitor(clang::ASTContext& context, clang::Sema& sema, schema& output,
-           std::set<std::string>& source_record_codecs,
+   visitor(clang::ASTContext& context, clang::Sema& sema, schema& output, std::set<std::string>& source_record_codecs,
            std::string_view contract_name, std::filesystem::path source)
        : context_(context), sema_(sema), output_(output), encoder_(context, output, source_record_codecs),
          contract_name_(contract_name), source_(std::move(source)) {}
@@ -1442,9 +1447,9 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
 
 class consumer final : public clang::ASTConsumer {
  public:
-   consumer(clang::CompilerInstance& compiler, schema& output, std::set<std::string>& source_record_codecs,
-            bool& found, bool& dispatch_source_found, std::string_view contract_name,
-            std::filesystem::path source, bool is_dispatch_source)
+   consumer(clang::CompilerInstance& compiler, schema& output, std::set<std::string>& source_record_codecs, bool& found,
+            bool& dispatch_source_found, std::string_view contract_name, std::filesystem::path source,
+            bool is_dispatch_source)
        : compiler_(compiler), output_(output), source_record_codecs_(source_record_codecs), found_(found),
          dispatch_source_found_(dispatch_source_found), contract_name_(contract_name), source_(std::move(source)),
          is_dispatch_source_(is_dispatch_source) {}
@@ -1469,28 +1474,89 @@ class consumer final : public clang::ASTConsumer {
    bool is_dispatch_source_ = false;
 };
 
+using source_dependencies = std::map<std::filesystem::path, bool>;
+using module_dependencies = std::set<std::string>;
+
+void collect_module_dependencies(clang::ASTContext& context, module_dependencies& imported,
+                                 module_dependencies* exported = nullptr, module_dependencies* provided = nullptr) {
+   for (const auto* declaration : context.local_imports()) {
+      if (const auto* module = declaration->getImportedModule(); module != nullptr) {
+         imported.insert(module->getFullModuleName());
+      }
+   }
+   const auto* current = context.getCurrentNamedModule();
+   if (current == nullptr) {
+      return;
+   }
+   if (provided != nullptr) {
+      provided->insert(current->getFullModuleName());
+   }
+   if (exported != nullptr) {
+      auto modules = llvm::SmallVector<clang::Module*, 4>{};
+      current->getExportedModules(modules);
+      for (const auto* module : modules) {
+         exported->insert(module->getFullModuleName());
+      }
+   }
+}
+
+void collect_source_dependencies(clang::CompilerInstance& compiler, source_dependencies& dependencies) {
+   const auto& source_manager = compiler.getSourceManager();
+   auto files = std::vector<clang::FileEntryRef>{};
+   files.reserve(std::distance(source_manager.fileinfo_begin(), source_manager.fileinfo_end()));
+   for (auto iterator = source_manager.fileinfo_begin(); iterator != source_manager.fileinfo_end(); ++iterator) {
+      files.push_back(iterator->first);
+   }
+   for (const auto& file : files) {
+      const auto path = std::filesystem::path{file.getName().str()};
+      if (path.empty() || !std::filesystem::exists(path)) {
+         continue;
+      }
+      const auto file_id = source_manager.translateFile(file);
+      const auto system =
+          file_id.isValid() && source_manager.isInSystemHeader(source_manager.getLocForStartOfFile(file_id));
+      const auto canonical = std::filesystem::weakly_canonical(path);
+      const auto [entry, inserted] = dependencies.emplace(canonical, system);
+      if (!inserted) {
+         entry->second = entry->second && system;
+      }
+   }
+}
+
 class action final : public clang::ASTFrontendAction {
  public:
    action(schema& output, bool& found, bool& dispatch_source_found, std::string_view contract_name,
-          std::filesystem::path dispatch_source, std::set<std::filesystem::path>& dependencies)
+          std::filesystem::path dispatch_source, source_dependencies& dependencies,
+          module_dependencies& imported_modules)
        : output_(output), found_(found), dispatch_source_found_(dispatch_source_found), contract_name_(contract_name),
-         dispatch_source_(std::move(dispatch_source)), dependencies_(dependencies) {}
+         dispatch_source_(std::move(dispatch_source)), dependencies_(dependencies),
+         imported_modules_(imported_modules) {}
 
    std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance& compiler,
                                                          llvm::StringRef input_file) override {
       const auto input = std::filesystem::weakly_canonical(std::filesystem::path{input_file.str()});
-      return std::make_unique<consumer>(compiler, output_, output_.source_record_codecs[input], found_,
-                                        dispatch_source_found_, contract_name_, input, input == dispatch_source_);
+      class combined_consumer final : public clang::ASTConsumer {
+       public:
+         combined_consumer(std::unique_ptr<clang::ASTConsumer> wrapped, module_dependencies& imported)
+             : wrapped_{std::move(wrapped)}, imported_{imported} {}
+
+         void HandleTranslationUnit(clang::ASTContext& context) override {
+            collect_module_dependencies(context, imported_);
+            wrapped_->HandleTranslationUnit(context);
+         }
+
+       private:
+         std::unique_ptr<clang::ASTConsumer> wrapped_;
+         module_dependencies& imported_;
+      };
+      return std::make_unique<combined_consumer>(
+          std::make_unique<consumer>(compiler, output_, output_.source_record_codecs[input], found_,
+                                     dispatch_source_found_, contract_name_, input, input == dispatch_source_),
+          imported_modules_);
    }
 
    void EndSourceFileAction() override {
-      const auto& source_manager = getCompilerInstance().getSourceManager();
-      for (auto iterator = source_manager.fileinfo_begin(); iterator != source_manager.fileinfo_end(); ++iterator) {
-         const auto path = std::filesystem::path{iterator->first.getName().str()};
-         if (!path.empty() && std::filesystem::exists(path)) {
-            dependencies_.insert(std::filesystem::weakly_canonical(path));
-         }
-      }
+      collect_source_dependencies(getCompilerInstance(), dependencies_);
    }
 
  private:
@@ -1499,19 +1565,22 @@ class action final : public clang::ASTFrontendAction {
    bool& dispatch_source_found_;
    std::string contract_name_;
    std::filesystem::path dispatch_source_;
-   std::set<std::filesystem::path>& dependencies_;
+   source_dependencies& dependencies_;
+   module_dependencies& imported_modules_;
 };
 
 class action_factory final : public clang::tooling::FrontendActionFactory {
  public:
    action_factory(schema& output, bool& found, bool& dispatch_source_found, std::string_view contract_name,
-                  std::filesystem::path dispatch_source, std::set<std::filesystem::path>& dependencies)
+                  std::filesystem::path dispatch_source, source_dependencies& dependencies,
+                  module_dependencies& imported_modules)
        : output_(output), found_(found), dispatch_source_found_(dispatch_source_found), contract_name_(contract_name),
-         dispatch_source_(std::move(dispatch_source)), dependencies_(dependencies) {}
+         dispatch_source_(std::move(dispatch_source)), dependencies_(dependencies),
+         imported_modules_(imported_modules) {}
 
    std::unique_ptr<clang::FrontendAction> create() override {
       return std::make_unique<action>(output_, found_, dispatch_source_found_, contract_name_, dispatch_source_,
-                                      dependencies_);
+                                      dependencies_, imported_modules_);
    }
 
  private:
@@ -1520,7 +1589,52 @@ class action_factory final : public clang::tooling::FrontendActionFactory {
    bool& dispatch_source_found_;
    std::string contract_name_;
    std::filesystem::path dispatch_source_;
-   std::set<std::filesystem::path>& dependencies_;
+   source_dependencies& dependencies_;
+   module_dependencies& imported_modules_;
+};
+
+class dependency_consumer final : public clang::ASTConsumer {
+ public:
+   explicit dependency_consumer(module_dependencies& imported) : imported_{imported} {}
+
+   void HandleTranslationUnit(clang::ASTContext& context) override {
+      collect_module_dependencies(context, imported_);
+   }
+
+ private:
+   module_dependencies& imported_;
+};
+
+class dependency_action final : public clang::SyntaxOnlyAction {
+ public:
+   dependency_action(source_dependencies& dependencies, module_dependencies& imported)
+       : dependencies_{dependencies}, imported_{imported} {}
+
+   std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance&, llvm::StringRef) override {
+      return std::make_unique<dependency_consumer>(imported_);
+   }
+
+   void EndSourceFileAction() override {
+      collect_source_dependencies(getCompilerInstance(), dependencies_);
+   }
+
+ private:
+   source_dependencies& dependencies_;
+   module_dependencies& imported_;
+};
+
+class dependency_action_factory final : public clang::tooling::FrontendActionFactory {
+ public:
+   dependency_action_factory(source_dependencies& dependencies, module_dependencies& imported)
+       : dependencies_{dependencies}, imported_{imported} {}
+
+   std::unique_ptr<clang::FrontendAction> create() override {
+      return std::make_unique<dependency_action>(dependencies_, imported_);
+   }
+
+ private:
+   source_dependencies& dependencies_;
+   module_dependencies& imported_;
 };
 
 std::string read_text(const std::filesystem::path& path) {
@@ -1561,17 +1675,342 @@ std::string depfile_path(const std::filesystem::path& path) {
    return result;
 }
 
-void write_depfile(const forge::contract::abi::request& options, const std::set<std::filesystem::path>& dependencies) {
+void write_depfile(const forge::contract::abi::request& options, const source_dependencies& dependencies) {
    if (options.depfile.empty()) {
       return;
    }
    auto output = std::ostringstream{};
    output << depfile_path(options.abi) << ':';
-   for (const auto& dependency : dependencies) {
+   for (const auto& dependency : dependencies | std::views::keys) {
       output << " \\\n  " << depfile_path(dependency);
    }
    output << '\n';
    write_text(options.depfile, output.str());
+}
+
+struct graph_file {
+   std::string owner;
+   forge::contract::graph::file_role role;
+   std::filesystem::path physical_path;
+};
+
+struct graph_edge {
+   std::string owner;
+   std::string dependency;
+   forge::contract::graph::dependency_scope scope;
+};
+
+struct contract_graph {
+   std::string root_owner;
+   std::map<std::filesystem::path, graph_file> files;
+   std::map<std::string, std::set<std::filesystem::path>> files_by_owner;
+   std::map<std::string, std::vector<graph_edge>> edges_by_owner;
+   std::map<std::string, std::string> module_owners;
+   std::set<std::filesystem::path> source_roots;
+};
+
+const forge::variant_object& graph_object(const forge::variant& value, std::string_view description) {
+   if (!value.is_object()) {
+      throw std::runtime_error{std::string{description} + " must be an object"};
+   }
+   return value.get_object();
+}
+
+const forge::variants& graph_array(const forge::variant_object& object, const char* name,
+                                   std::string_view description) {
+   if (!object.contains(name) || !object[name].is_array()) {
+      throw std::runtime_error{std::string{description} + " has no " + name + " array"};
+   }
+   return object[name].get_array();
+}
+
+std::string graph_string(const forge::variant_object& object, const char* name, std::string_view description) {
+   if (!object.contains(name) || !object[name].is_string() || object[name].get_string().empty()) {
+      throw std::runtime_error{std::string{description} + " has no " + name};
+   }
+   return object[name].get_string();
+}
+
+contract_graph make_contract_graph(const forge::contract::graph::descriptor& descriptor) {
+   auto graph = contract_graph{};
+   graph.root_owner = descriptor.root_owner;
+   for (const auto& root : descriptor.source_roots) {
+      graph.source_roots.insert(root.physical_path);
+   }
+   for (const auto& file : descriptor.files) {
+      auto indexed = graph_file{
+          .owner = file.owner,
+          .role = file.role,
+          .physical_path = file.physical_path,
+      };
+      graph.files.emplace(indexed.physical_path, indexed);
+      graph.files_by_owner[indexed.owner].insert(indexed.physical_path);
+   }
+   for (const auto& edge : descriptor.dependencies) {
+      graph.edges_by_owner[edge.owner].push_back(graph_edge{
+          .owner = edge.owner,
+          .dependency = edge.target,
+          .scope = edge.scope,
+      });
+   }
+   for (const auto& component : descriptor.components) {
+      for (const auto& module : component.modules) {
+         graph.module_owners.emplace(module, component.id);
+      }
+   }
+   return graph;
+}
+
+struct compilation_metadata {
+   std::filesystem::path source;
+   source_dependencies dependencies;
+   module_dependencies imported_modules;
+   module_dependencies exported_modules;
+   module_dependencies provided_modules;
+};
+
+module_dependencies metadata_modules(const forge::variant_object& object, const char* name,
+                                     const std::filesystem::path& path) {
+   const auto& values = graph_array(object, name, "contract compilation metadata");
+   auto result = module_dependencies{};
+   for (const auto& value : values) {
+      if (!value.is_string() || value.get_string().empty() || !result.insert(value.get_string()).second) {
+         throw std::runtime_error{"contract compilation metadata has invalid " + std::string{name} + ": " +
+                                  path.string()};
+      }
+   }
+   return result;
+}
+
+compilation_metadata read_compilation_metadata(const std::filesystem::path& object_path) {
+   auto path = object_path;
+   path += ".forge-contract-metadata.json";
+   if (!std::filesystem::is_regular_file(path)) {
+      throw std::runtime_error{"contract compilation metadata does not exist: " + path.string()};
+   }
+   const auto parsed = forge::codec::json::read_value(read_text(path), {.source_name = path.string()});
+   if (!parsed.ok() || !parsed.value.is_object()) {
+      throw std::runtime_error{"contract compilation metadata is not valid JSON: " + path.string()};
+   }
+   const auto& object = parsed.value.get_object();
+   if (!object.contains("version") || object["version"].as_uint64() != 1U) {
+      throw std::runtime_error{"contract compilation metadata has an unsupported schema: " + path.string()};
+   }
+   auto result = compilation_metadata{
+       .source = std::filesystem::weakly_canonical(graph_string(object, "source", "contract compilation metadata")),
+       .imported_modules = metadata_modules(object, "imports", path),
+       .exported_modules = metadata_modules(object, "exports", path),
+       .provided_modules = metadata_modules(object, "provides", path),
+   };
+   for (const auto& value : graph_array(object, "dependencies", "contract compilation metadata")) {
+      const auto& dependency = graph_object(value, "contract compilation dependency");
+      if (!dependency.contains("system") || !dependency["system"].is_bool()) {
+         throw std::runtime_error{"contract compilation dependency has no system flag: " + path.string()};
+      }
+      const auto dependency_path =
+          std::filesystem::weakly_canonical(graph_string(dependency, "path", "contract compilation dependency"));
+      const auto [entry, inserted] = result.dependencies.emplace(dependency_path, dependency["system"].as_bool());
+      if (!inserted) {
+         entry->second = entry->second && dependency["system"].as_bool();
+      }
+   }
+   return result;
+}
+
+std::vector<compilation_metadata> read_compilation_list(const std::filesystem::path& path) {
+   if (!std::filesystem::is_regular_file(path)) {
+      throw std::runtime_error{"contract compilation list does not exist: " + path.string()};
+   }
+   auto input = std::istringstream{read_text(path)};
+   auto result = std::vector<compilation_metadata>{};
+   auto line = std::string{};
+   while (std::getline(input, line)) {
+      if (!line.empty()) {
+         result.push_back(read_compilation_metadata(line));
+      }
+   }
+   if (result.empty()) {
+      throw std::runtime_error{"contract compilation list is empty: " + path.string()};
+   }
+   return result;
+}
+
+bool path_is_under(const std::filesystem::path& path, const std::filesystem::path& root) {
+   const auto relative = path.lexically_relative(root);
+   if (relative.empty() || relative.is_absolute()) {
+      return false;
+   }
+   return std::ranges::none_of(relative, [](const auto& component) { return component == ".."; });
+}
+
+bool is_local_dependency(const contract_graph& graph, const std::filesystem::path& path) {
+   return std::ranges::any_of(graph.source_roots, [&](const auto& root) { return path_is_under(path, root); });
+}
+
+std::set<std::string> public_closure(const contract_graph& graph, std::set<std::string> visible) {
+   auto pending = std::vector<std::string>{visible.begin(), visible.end()};
+   while (!pending.empty()) {
+      auto owner = std::move(pending.back());
+      pending.pop_back();
+      const auto found = graph.edges_by_owner.find(owner);
+      if (found == graph.edges_by_owner.end()) {
+         continue;
+      }
+      for (const auto& edge : found->second) {
+         if (edge.scope == forge::contract::graph::dependency_scope::public_ &&
+             visible.insert(edge.dependency).second) {
+            pending.push_back(edge.dependency);
+         }
+      }
+   }
+   return visible;
+}
+
+std::set<std::string> visible_owners(const contract_graph& graph, std::string_view owner, bool public_surface) {
+   auto visible = std::set<std::string>{std::string{owner}};
+   const auto found = graph.edges_by_owner.find(std::string{owner});
+   if (found != graph.edges_by_owner.end()) {
+      for (const auto& edge : found->second) {
+         if (!public_surface || edge.scope == forge::contract::graph::dependency_scope::public_) {
+            visible.insert(edge.dependency);
+         }
+      }
+   }
+   return public_closure(graph, std::move(visible));
+}
+
+void validate_source_dependency(const contract_graph& graph, std::string_view owner,
+                                forge::contract::graph::file_role source_role, const std::set<std::string>& visible,
+                                const std::filesystem::path& dependency, bool system) {
+   const auto declared = graph.files.find(dependency);
+   if (declared == graph.files.end()) {
+      if (!system && is_local_dependency(graph, dependency)) {
+         throw std::runtime_error{"contract source dependency is not declared: " + dependency.string()};
+      }
+      return;
+   }
+
+   const auto& file = declared->second;
+   if (!visible.contains(file.owner)) {
+      throw std::runtime_error{"contract source dependency owner is not visible: " + dependency.string()};
+   }
+   if (file.owner != owner && !forge::contract::graph::is_public(file.role)) {
+      throw std::runtime_error{"contract source uses a private dependency file: " + dependency.string()};
+   }
+   if (source_role == forge::contract::graph::file_role::module && file.owner != owner &&
+       !forge::contract::graph::is_public(file.role)) {
+      throw std::runtime_error{"contract public module uses a private source: " + dependency.string()};
+   }
+}
+
+struct validated_contract_graph {
+   contract_graph graph;
+   std::map<std::string, std::string> module_owners;
+};
+
+validated_contract_graph validate_contract_libraries(const forge::contract::abi::request& options) {
+   auto graph = make_contract_graph(forge::contract::graph::read(options.contract_graph));
+   if (graph.root_owner != "contract:" + options.contract) {
+      throw std::runtime_error{"contract graph root owner does not match requested contract"};
+   }
+
+   auto metadata_by_owner = std::map<std::string, std::vector<compilation_metadata>>{};
+   for (const auto& compilation : options.library_compilations) {
+      if (!graph.files_by_owner.contains(compilation.owner)) {
+         throw std::runtime_error{"contract compilation has an unknown owner: " + compilation.owner};
+      }
+      if (metadata_by_owner.contains(compilation.owner)) {
+         throw std::runtime_error{"contract compilation owner is specified more than once: " + compilation.owner};
+      }
+      metadata_by_owner.emplace(compilation.owner, read_compilation_list(compilation.object_list));
+   }
+
+   auto module_owners = graph.module_owners;
+   auto compiled_sources = std::map<std::string, std::set<std::filesystem::path>>{};
+   for (const auto& [owner, metadata_values] : metadata_by_owner) {
+      for (const auto& metadata : metadata_values) {
+         const auto file = graph.files.find(metadata.source);
+         if (file == graph.files.end() || file->second.owner != owner ||
+             (file->second.role != forge::contract::graph::file_role::module &&
+              file->second.role != forge::contract::graph::file_role::implementation)) {
+            throw std::runtime_error{"contract compilation source is not owned by descriptor " + owner + ": " +
+                                     metadata.source.string()};
+         }
+         if (!compiled_sources[owner].insert(metadata.source).second) {
+            throw std::runtime_error{"contract compilation source appears more than once: " + metadata.source.string()};
+         }
+         for (const auto& module : metadata.provided_modules) {
+            const auto [existing, inserted] = module_owners.emplace(module, owner);
+            if (!inserted && existing->second != owner) {
+               throw std::runtime_error{"contract module has multiple owners: " + module};
+            }
+         }
+      }
+   }
+
+   for (const auto& [owner, files] : graph.files_by_owner) {
+      if (owner == graph.root_owner) {
+         continue;
+      }
+      auto expected = std::set<std::filesystem::path>{};
+      for (const auto& path : files) {
+         const auto& role = graph.files.at(path).role;
+         if (role == forge::contract::graph::file_role::module ||
+             role == forge::contract::graph::file_role::implementation) {
+            expected.insert(path);
+         }
+      }
+      const auto found = compiled_sources.find(owner);
+      if (found == compiled_sources.end() || found->second != expected) {
+         throw std::runtime_error{"contract compilation metadata does not match descriptor owner: " + owner};
+      }
+   }
+
+   for (const auto& [owner, metadata_values] : metadata_by_owner) {
+      for (const auto& metadata : metadata_values) {
+         const auto role = graph.files.at(metadata.source).role;
+         const auto visible = visible_owners(graph, owner, false);
+         for (const auto& [dependency, system] : metadata.dependencies) {
+            validate_source_dependency(graph, owner, role, visible, dependency, system);
+         }
+         for (const auto& module : metadata.imported_modules) {
+            const auto found = module_owners.find(module);
+            if (found != module_owners.end() && !visible.contains(found->second)) {
+               throw std::runtime_error{"contract library " + owner +
+                                        " imports a module through an undeclared dependency: " + module};
+            }
+         }
+         const auto public_visible = visible_owners(graph, owner, true);
+         for (const auto& module : metadata.exported_modules) {
+            const auto found = module_owners.find(module);
+            if (found != module_owners.end() && !public_visible.contains(found->second)) {
+               throw std::runtime_error{"contract library " + owner +
+                                        " exports a module through a private dependency: " + module};
+            }
+         }
+      }
+   }
+
+   return {
+       .graph = std::move(graph),
+       .module_owners = std::move(module_owners),
+   };
+}
+
+void validate_contract_root(const validated_contract_graph& validated, const source_dependencies& contract_dependencies,
+                            const module_dependencies& contract_modules) {
+   const auto& graph = validated.graph;
+   const auto root_visible = visible_owners(graph, graph.root_owner, false);
+   for (const auto& [dependency, system] : contract_dependencies) {
+      validate_source_dependency(graph, graph.root_owner, forge::contract::graph::file_role::source, root_visible,
+                                 dependency, system);
+   }
+   for (const auto& module : contract_modules) {
+      const auto found = validated.module_owners.find(module);
+      if (found != validated.module_owners.end() && !root_visible.contains(found->second)) {
+         throw std::runtime_error{"contract imports a module through an undeclared library: " + module};
+      }
+   }
 }
 
 std::string trim_lines(std::string value) {
@@ -1982,6 +2421,7 @@ artifacts generate(const request& options) {
    if (llvm::sys::DynamicLibrary::LoadLibraryPermanently(options.attribute_plugin.c_str(), &load_error)) {
       throw std::runtime_error{"failed to load contract attribute plugin: " + load_error};
    }
+   const auto validated_graph = validate_contract_libraries(options);
 
    auto arguments = std::vector<std::string>{
        "-std=c++23",
@@ -2014,10 +2454,12 @@ artifacts generate(const request& options) {
    auto discovery = schema{};
    auto discovery_found = false;
    auto discovery_dispatch_source_found = false;
-   auto discovery_dependencies = std::set<std::filesystem::path>{};
+   auto discovery_dependencies = source_dependencies{};
+   auto discovery_modules = module_dependencies{};
    const auto dispatch_source = std::filesystem::weakly_canonical(options.sources.front());
    auto discovery_factory = action_factory{discovery,        discovery_found, discovery_dispatch_source_found,
-                                           options.contract, dispatch_source, discovery_dependencies};
+                                           options.contract, dispatch_source, discovery_dependencies,
+                                           discovery_modules};
    auto ignored_diagnostics = clang::IgnoringDiagConsumer{};
    discovery_tool.setDiagnosticConsumer(&ignored_diagnostics);
    static_cast<void>(discovery_tool.run(&discovery_factory));
@@ -2037,8 +2479,10 @@ artifacts generate(const request& options) {
    auto output = schema{};
    auto found = false;
    auto dispatch_source_found = false;
-   auto dependencies = std::set<std::filesystem::path>{};
-   auto factory = action_factory{output, found, dispatch_source_found, options.contract, dispatch_source, dependencies};
+   auto dependencies = source_dependencies{};
+   auto imported_modules = module_dependencies{};
+   auto factory = action_factory{output,          found,        dispatch_source_found, options.contract,
+                                 dispatch_source, dependencies, imported_modules};
    const auto result = tool.run(&factory);
    if (result != 0 || output.failed) {
       throw std::runtime_error{"contract source analysis failed"};
@@ -2055,6 +2499,23 @@ artifacts generate(const request& options) {
       throw std::runtime_error{"contract '" + options.contract + "' has no ABI entries"};
    }
 
+   if (!options.dependency_sources.empty()) {
+      auto dependency_paths = std::vector<std::string>{};
+      dependency_paths.reserve(options.dependency_sources.size());
+      for (const auto& source : options.dependency_sources) {
+         dependency_paths.push_back(source.string());
+      }
+      auto dependency_tool = clang::tooling::ClangTool{compilation, dependency_paths};
+      if (!codec_prelude.empty()) {
+         dependency_tool.mapVirtualFile(codec_prelude_path, codec_prelude);
+      }
+      auto dependency_factory = dependency_action_factory{dependencies, imported_modules};
+      if (dependency_tool.run(&dependency_factory) != 0) {
+         throw std::runtime_error{"contract compile-check dependency analysis failed"};
+      }
+   }
+
+   validate_contract_root(validated_graph, dependencies, imported_modules);
    load_ricardian(output, options);
    canonicalize(output);
    write_abi(output, options);

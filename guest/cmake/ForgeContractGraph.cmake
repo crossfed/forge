@@ -74,6 +74,9 @@ function(_forge_contract_normalize_directory root input description output_absol
    if(IS_ABSOLUTE "${_logical}" OR _logical MATCHES "^\\.\\.(/|$)")
       message(FATAL_ERROR "${description} is outside SOURCE_ROOT: ${_absolute}")
    endif()
+   if(_logical STREQUAL "")
+      set(_logical ".")
+   endif()
    _forge_contract_reject_unsafe_value("${_absolute}" "${description}")
    _forge_contract_reject_unsafe_value("${_logical}" "${description}")
    set(${output_absolute} "${_absolute}" PARENT_SCOPE)
@@ -116,12 +119,28 @@ function(_forge_contract_register_library_target target)
    set_property(GLOBAL PROPERTY "FORGE_CONTRACT_LIBRARY_TARGET_${_key}" "${target}")
 endfunction()
 
-function(_forge_contract_register_visible_imported_libraries)
+function(_forge_contract_register_component_target target)
+   get_target_property(_id "${target}" FORGE_CONTRACT_GUEST_COMPONENT_ID)
+   if(NOT _id)
+      message(FATAL_ERROR "Forge guest component target has no stable ID: ${target}")
+   endif()
+   _forge_contract_id_key("${_id}" _key)
+   get_property(_registered GLOBAL PROPERTY "FORGE_CONTRACT_COMPONENT_TARGET_${_key}")
+   if(_registered AND NOT _registered STREQUAL target)
+      message(FATAL_ERROR "duplicate Forge guest component ID: ${_id}")
+   endif()
+   set_property(GLOBAL PROPERTY "FORGE_CONTRACT_COMPONENT_TARGET_${_key}" "${target}")
+endfunction()
+
+function(_forge_contract_register_visible_imported_descriptors)
    get_property(_imported DIRECTORY PROPERTY IMPORTED_TARGETS)
    foreach(_target IN LISTS _imported)
       get_target_property(_contract_library "${_target}" FORGE_CONTRACT_LIBRARY)
+      get_target_property(_component_id "${_target}" FORGE_CONTRACT_GUEST_COMPONENT_ID)
       if(_contract_library)
          _forge_contract_register_library_target("${_target}")
+      elseif(_component_id)
+         _forge_contract_register_component_target("${_target}")
       endif()
    endforeach()
 endfunction()
@@ -130,11 +149,24 @@ function(_forge_contract_find_library_target id output)
    _forge_contract_id_key("${id}" _key)
    get_property(_target GLOBAL PROPERTY "FORGE_CONTRACT_LIBRARY_TARGET_${_key}")
    if(NOT _target)
-      _forge_contract_register_visible_imported_libraries()
+      _forge_contract_register_visible_imported_descriptors()
       get_property(_target GLOBAL PROPERTY "FORGE_CONTRACT_LIBRARY_TARGET_${_key}")
    endif()
    if(NOT _target)
       message(FATAL_ERROR "contract library dependency ID is not visible: ${id}")
+   endif()
+   set(${output} "${_target}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_find_component_target id output)
+   _forge_contract_id_key("${id}" _key)
+   get_property(_target GLOBAL PROPERTY "FORGE_CONTRACT_COMPONENT_TARGET_${_key}")
+   if(NOT _target)
+      _forge_contract_register_visible_imported_descriptors()
+      get_property(_target GLOBAL PROPERTY "FORGE_CONTRACT_COMPONENT_TARGET_${_key}")
+   endif()
+   if(NOT _target)
+      message(FATAL_ERROR "Forge guest component ID is not visible: ${id}")
    endif()
    set(${output} "${_target}" PARENT_SCOPE)
 endfunction()
@@ -150,6 +182,7 @@ function(_forge_contract_classify_dependency input kind_output id_output target_
    elseif(_component_id)
       set(_id "${_component_id}")
       set(_kind component)
+      _forge_contract_register_component_target("${_target}")
    else()
       message(FATAL_ERROR "contract dependency is not guest-compatible: ${input}")
    endif()
@@ -500,11 +533,56 @@ function(_forge_contract_collect_library graph id)
          _forge_contract_collect_library("${graph}" "${_dependency}")
       endforeach()
    endforeach()
+   foreach(_property FORGE_CONTRACT_PUBLIC_COMPONENT_IDS FORGE_CONTRACT_PRIVATE_COMPONENT_IDS)
+      get_target_property(_dependencies "${_target}" "${_property}")
+      if(_dependencies STREQUAL "_dependencies-NOTFOUND")
+         set(_dependencies)
+      endif()
+      foreach(_dependency IN LISTS _dependencies)
+         _forge_contract_collect_component("${graph}" "${_dependency}")
+      endforeach()
+   endforeach()
    set_property(GLOBAL APPEND PROPERTY "FORGE_CONTRACT_GRAPH_${graph}_NODES" "${id}")
    set_property(GLOBAL PROPERTY "FORGE_CONTRACT_GRAPH_${graph}_${_key}_STATE" visited)
 endfunction()
 
-function(_forge_contract_library_physical_inputs target bases modules sources public_headers private_headers)
+function(_forge_contract_collect_component graph id)
+   _forge_contract_id_key("${id}" _key)
+   get_property(
+      _state GLOBAL PROPERTY
+      "FORGE_CONTRACT_GRAPH_${graph}_COMPONENT_${_key}_STATE"
+   )
+   if(_state STREQUAL "visited")
+      return()
+   endif()
+   if(_state STREQUAL "visiting")
+      message(FATAL_ERROR "cycle in Forge guest component dependencies at ${id}")
+   endif()
+   set_property(
+      GLOBAL PROPERTY "FORGE_CONTRACT_GRAPH_${graph}_COMPONENT_${_key}_STATE"
+      visiting
+   )
+   _forge_contract_find_component_target("${id}" _target)
+   get_target_property(
+      _dependencies "${_target}" FORGE_CONTRACT_GUEST_PUBLIC_COMPONENT_IDS
+   )
+   if(_dependencies STREQUAL "_dependencies-NOTFOUND")
+      set(_dependencies)
+   endif()
+   foreach(_dependency IN LISTS _dependencies)
+      _forge_contract_collect_component("${graph}" "${_dependency}")
+   endforeach()
+   set_property(
+      GLOBAL APPEND PROPERTY
+      "FORGE_CONTRACT_GRAPH_${graph}_COMPONENT_NODES" "${id}"
+   )
+   set_property(
+      GLOBAL PROPERTY "FORGE_CONTRACT_GRAPH_${graph}_COMPONENT_${_key}_STATE"
+      visited
+   )
+endfunction()
+
+function(_forge_contract_library_physical_inputs target roots bases modules sources public_headers private_headers)
    get_target_property(_imported "${target}" IMPORTED)
    get_target_property(_module_logical "${target}" FORGE_CONTRACT_MODULE_SOURCES)
    get_target_property(_source_logical "${target}" FORGE_CONTRACT_SOURCES)
@@ -557,6 +635,12 @@ function(_forge_contract_library_physical_inputs target bases modules sources pu
          message(FATAL_ERROR "contract descriptor input does not exist: ${_input}")
       endif()
    endforeach()
+   set(_roots ${_bases})
+   if(_sources OR _private_headers)
+      list(APPEND _roots "${_source_root}")
+   endif()
+   list(REMOVE_DUPLICATES _roots)
+   set(${roots} "${_roots}" PARENT_SCOPE)
    set(${bases} "${_bases}" PARENT_SCOPE)
    set(${modules} "${_modules}" PARENT_SCOPE)
    set(${sources} "${_sources}" PARENT_SCOPE)
@@ -579,15 +663,31 @@ function(_forge_contract_edge_json kind id scope output)
    set(${output} "{\"kind\":${_kind},\"id\":${_id},\"scope\":${_scope}}" PARENT_SCOPE)
 endfunction()
 
-function(_forge_contract_write_graph target libraries output_file output_hash build_dependencies)
-   string(SHA256 _graph_key "${CMAKE_CURRENT_BINARY_DIR}/${target}")
+function(_forge_contract_write_graph)
+   cmake_parse_arguments(
+      ARG
+      ""
+      "TARGET;CONTRACT;SOURCE_ROOT;DISPATCH_SOURCE;RICARDIAN_CONTRACTS;RICARDIAN_CONTRACTS_LOGICAL;RICARDIAN_CLAUSES;RICARDIAN_CLAUSES_LOGICAL;OUTPUT_FILE;OUTPUT_HASH;BUILD_DEPENDENCIES"
+      "SOURCES;SOURCE_LOGICAL;HEADERS;HEADER_LOGICAL;COMPILE_CHECKS;COMPILE_CHECK_LOGICAL;LIBRARIES"
+      ${ARGN}
+   )
+   foreach(_required
+      TARGET CONTRACT SOURCE_ROOT DISPATCH_SOURCE OUTPUT_FILE OUTPUT_HASH BUILD_DEPENDENCIES
+   )
+      if(NOT ARG_${_required})
+         message(FATAL_ERROR "_forge_contract_write_graph requires ${_required}")
+      endif()
+   endforeach()
+
+   string(SHA256 _graph_key "${CMAKE_CURRENT_BINARY_DIR}/${ARG_TARGET}")
    set_property(GLOBAL PROPERTY "FORGE_CONTRACT_GRAPH_${_graph_key}_NODES" "")
-   _forge_contract_register_visible_imported_libraries()
+   set_property(GLOBAL PROPERTY "FORGE_CONTRACT_GRAPH_${_graph_key}_COMPONENT_NODES" "")
+   _forge_contract_register_visible_imported_descriptors()
 
    set(_root_library_ids)
    set(_root_component_ids)
    set(_build_dependencies)
-   foreach(_dependency IN LISTS libraries)
+   foreach(_dependency IN LISTS ARG_LIBRARIES)
       _forge_contract_classify_dependency("${_dependency}" _kind _id _dependency_target)
       if(_kind STREQUAL "library")
          if(_id IN_LIST _root_library_ids)
@@ -600,11 +700,47 @@ function(_forge_contract_write_graph target libraries output_file output_hash bu
             message(FATAL_ERROR "duplicate root Forge guest component ID: ${_id}")
          endif()
          list(APPEND _root_component_ids "${_id}")
+         _forge_contract_collect_component("${_graph_key}" "${_id}")
       endif()
       get_target_property(_imported "${_dependency_target}" IMPORTED)
       if(NOT _imported)
          list(APPEND _build_dependencies "${_dependency_target}")
       endif()
+   endforeach()
+
+   get_property(
+      _component_ids GLOBAL PROPERTY
+      "FORGE_CONTRACT_GRAPH_${_graph_key}_COMPONENT_NODES"
+   )
+   set(_components "[]")
+   set(_component_index 0)
+   foreach(_id IN LISTS _component_ids)
+      _forge_contract_find_component_target("${_id}" _component_target)
+      get_target_property(
+         _module_names "${_component_target}" FORGE_CONTRACT_GUEST_MODULE_NAMES
+      )
+      get_target_property(
+         _dependencies "${_component_target}"
+         FORGE_CONTRACT_GUEST_PUBLIC_COMPONENT_IDS
+      )
+      if(_dependencies STREQUAL "_dependencies-NOTFOUND")
+         set(_dependencies)
+      endif()
+      if(NOT _module_names)
+         message(FATAL_ERROR "Forge guest component ${_id} has no module names")
+      endif()
+      _forge_contract_json_quote("${_id}" _quoted_id)
+      _forge_contract_json_array("${_module_names}" _module_names_json)
+      _forge_contract_json_array("${_dependencies}" _dependencies_json)
+      set(
+         _component
+         "{\"id\":${_quoted_id},\"modules\":${_module_names_json},\"dependencies\":${_dependencies_json}}"
+      )
+      string(
+         JSON _components SET "${_components}" ${_component_index}
+         "${_component}"
+      )
+      math(EXPR _component_index "${_component_index} + 1")
    endforeach()
 
    get_property(_node_ids GLOBAL PROPERTY "FORGE_CONTRACT_GRAPH_${_graph_key}_NODES")
@@ -613,7 +749,7 @@ function(_forge_contract_write_graph target libraries output_file output_hash bu
    foreach(_id IN LISTS _node_ids)
       _forge_contract_find_library_target("${_id}" _node_target)
       _forge_contract_library_physical_inputs(
-         "${_node_target}" _bases _modules _sources _public_headers _private_headers
+         "${_node_target}" _roots _bases _modules _sources _public_headers _private_headers
       )
       get_target_property(_module_logical "${_node_target}" FORGE_CONTRACT_MODULE_SOURCES)
       get_target_property(_source_logical "${_node_target}" FORGE_CONTRACT_SOURCES)
@@ -671,10 +807,11 @@ function(_forge_contract_write_graph target libraries output_file output_hash bu
       endforeach()
 
       _forge_contract_json_quote("${_id}" _quoted_id)
+      _forge_contract_json_array("${_roots}" _roots_json)
       _forge_contract_json_array("${_bases}" _bases_json)
       set(
          _node
-         "{\"id\":${_quoted_id},\"module_bases\":${_bases_json},\"files\":${_files},\"dependencies\":${_edges}}"
+         "{\"id\":${_quoted_id},\"source_roots\":${_roots_json},\"module_bases\":${_bases_json},\"files\":${_files},\"dependencies\":${_edges}}"
       )
       string(JSON _nodes SET "${_nodes}" ${_node_index} "${_node}")
       math(EXPR _node_index "${_node_index} + 1")
@@ -682,14 +819,60 @@ function(_forge_contract_write_graph target libraries output_file output_hash bu
 
    _forge_contract_json_array("${_root_library_ids}" _root_libraries)
    _forge_contract_json_array("${_root_component_ids}" _root_components)
+   set(_root_files "[]")
+   set(_root_file_index 0)
+   foreach(_role source header compile_check)
+      if(_role STREQUAL "source")
+         set(_logical_values ${ARG_SOURCE_LOGICAL})
+         set(_physical_values ${ARG_SOURCES})
+      elseif(_role STREQUAL "header")
+         set(_logical_values ${ARG_HEADER_LOGICAL})
+         set(_physical_values ${ARG_HEADERS})
+      else()
+         set(_logical_values ${ARG_COMPILE_CHECK_LOGICAL})
+         set(_physical_values ${ARG_COMPILE_CHECKS})
+      endif()
+      list(LENGTH _logical_values _count)
+      if(_count GREATER 0)
+         math(EXPR _last "${_count} - 1")
+         foreach(_index RANGE 0 ${_last})
+            list(GET _logical_values ${_index} _logical)
+            list(GET _physical_values ${_index} _physical)
+            set(_file_role "${_role}")
+            if(_role STREQUAL "source" AND _physical STREQUAL ARG_DISPATCH_SOURCE)
+               set(_file_role dispatch_source)
+            endif()
+            _forge_contract_file_json(
+               "${_file_role}" "${_logical}" "${_physical}" _file
+            )
+            string(JSON _root_files SET "${_root_files}" ${_root_file_index} "${_file}")
+            math(EXPR _root_file_index "${_root_file_index} + 1")
+         endforeach()
+      endif()
+   endforeach()
+   foreach(_ricardian CONTRACTS CLAUSES)
+      if(ARG_RICARDIAN_${_ricardian})
+         string(TOLOWER "${_ricardian}" _suffix)
+         _forge_contract_file_json(
+            "ricardian_${_suffix}"
+            "contract/ricardian/${_suffix}/${ARG_RICARDIAN_${_ricardian}_LOGICAL}"
+            "${ARG_RICARDIAN_${_ricardian}}"
+            _file
+         )
+         string(JSON _root_files SET "${_root_files}" ${_root_file_index} "${_file}")
+         math(EXPR _root_file_index "${_root_file_index} + 1")
+      endif()
+   endforeach()
+   _forge_contract_json_quote("contract:${ARG_CONTRACT}" _root_owner)
+   _forge_contract_json_quote("${ARG_SOURCE_ROOT}" _root_source_root)
    set(
       _json
-      "{\"schema\":2,\"root\":{\"libraries\":${_root_libraries},\"components\":${_root_components}},\"libraries\":${_nodes}}"
+      "{\"schema\":2,\"root\":{\"owner\":${_root_owner},\"source_root\":${_root_source_root},\"files\":${_root_files},\"libraries\":${_root_libraries},\"components\":${_root_components}},\"libraries\":${_nodes},\"components\":${_components}}"
    )
-   set(_path "${CMAKE_CURRENT_BINARY_DIR}/${target}.contract-graph.json")
+   set(_path "${CMAKE_CURRENT_BINARY_DIR}/${ARG_TARGET}.contract-graph.json")
    file(WRITE "${_path}" "${_json}\n")
    file(SHA256 "${_path}" _hash)
-   set(${output_file} "${_path}" PARENT_SCOPE)
-   set(${output_hash} "${_hash}" PARENT_SCOPE)
-   set(${build_dependencies} "${_build_dependencies}" PARENT_SCOPE)
+   set(${ARG_OUTPUT_FILE} "${_path}" PARENT_SCOPE)
+   set(${ARG_OUTPUT_HASH} "${_hash}" PARENT_SCOPE)
+   set(${ARG_BUILD_DEPENDENCIES} "${_build_dependencies}" PARENT_SCOPE)
 endfunction()

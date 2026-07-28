@@ -30,6 +30,8 @@ request parse(int argc, const char* const* argv) {
          result.dispatcher = next();
       } else if (option == "--depfile") {
          result.depfile = next();
+      } else if (option == "--contract-graph") {
+         result.contract_graph = next();
       } else if (option == "--attribute-plugin") {
          result.attribute_plugin = next();
       } else if (option == "--sysroot") {
@@ -42,6 +44,13 @@ request parse(int argc, const char* const* argv) {
          result.module_paths.emplace_back(next());
       } else if (option == "--include") {
          result.include_paths.emplace_back(next());
+      } else if (option == "--dependency-source") {
+         result.dependency_sources.emplace_back(next());
+      } else if (option == "--library-compilation") {
+         result.library_compilations.push_back(library_compilation{
+             .owner = std::string{next()},
+             .object_list = next(),
+         });
       } else if (option == "--source-wrapper") {
          result.source_wrappers.emplace_back(next());
       } else if (option.starts_with("--")) {
@@ -50,10 +59,10 @@ request parse(int argc, const char* const* argv) {
          result.sources.emplace_back(option);
       }
    }
-   if (result.contract.empty() || result.abi.empty() || result.dispatcher.empty() || result.attribute_plugin.empty() ||
-       result.sysroot.empty() || result.sources.empty()) {
-      throw std::runtime_error{
-          "--contract, --abi, --dispatch, --attribute-plugin, --sysroot and contract sources are required"};
+   if (result.contract.empty() || result.abi.empty() || result.dispatcher.empty() || result.contract_graph.empty() ||
+       result.attribute_plugin.empty() || result.sysroot.empty() || result.sources.empty()) {
+      throw std::runtime_error{"--contract, --abi, --dispatch, --contract-graph, --attribute-plugin, "
+                               "--sysroot and contract sources are required"};
    }
    if (!result.source_wrappers.empty() && result.source_wrappers.size() + 1U != result.sources.size()) {
       throw std::runtime_error{"--source-wrapper must be specified once for every non-dispatch source"};

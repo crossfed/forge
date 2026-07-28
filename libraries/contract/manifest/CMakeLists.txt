@@ -10,6 +10,7 @@ target_link_libraries(
    forge_contract_manifest
    PUBLIC
       forge_codec_json
+      forge_contract_graph
       forge_crypto_digest
       forge_vm_wasm
 )

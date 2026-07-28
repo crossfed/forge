@@ -1,3 +1,4 @@
+add_subdirectory(graph)
 add_subdirectory(abi)
 add_subdirectory(attributes)
 add_subdirectory(validation)

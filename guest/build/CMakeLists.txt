@@ -4,9 +4,6 @@ project(ForgeContractConsumer LANGUAGES CXX)
 
 foreach(_required
    FORGE_CONTRACT_TARGET
-   FORGE_CONTRACT_NAME
-   FORGE_CONTRACT_SOURCE_ROOT
-   FORGE_CONTRACT_SOURCES_ENCODED
    FORGE_CONTRACT_GRAPH_FILE
    FORGE_CONTRACT_GRAPH_HASH
    FORGE_CONTRACT_COMPONENTS
@@ -35,10 +32,55 @@ if(NOT _contract_graph_schema EQUAL 2)
    message(FATAL_ERROR "unsupported Forge Contract graph schema: ${_contract_graph_schema}")
 endif()
 
-string(REPLACE "|" ";" FORGE_CONTRACT_SOURCES "${FORGE_CONTRACT_SOURCES_ENCODED}")
-string(REPLACE "|" ";" FORGE_CONTRACT_HEADERS "${FORGE_CONTRACT_HEADERS_ENCODED}")
-string(REPLACE "|" ";" FORGE_CONTRACT_COMPILE_CHECKS "${FORGE_CONTRACT_COMPILE_CHECKS_ENCODED}")
-string(REPLACE "|" ";" FORGE_CONTRACT_INCLUDE_DIRECTORIES "${FORGE_CONTRACT_INCLUDE_DIRECTORIES_ENCODED}")
+string(JSON _root_owner GET "${_contract_graph}" root owner)
+if(NOT _root_owner MATCHES "^contract:(.+)$")
+   message(FATAL_ERROR "Forge Contract graph has an invalid root owner: ${_root_owner}")
+endif()
+set(FORGE_CONTRACT_NAME "${CMAKE_MATCH_1}")
+string(JSON FORGE_CONTRACT_SOURCE_ROOT GET "${_contract_graph}" root source_root)
+if(NOT IS_DIRECTORY "${FORGE_CONTRACT_SOURCE_ROOT}")
+   message(FATAL_ERROR "Forge Contract graph root does not exist: ${FORGE_CONTRACT_SOURCE_ROOT}")
+endif()
+
+set(_dispatch_source)
+set(_other_sources)
+set(FORGE_CONTRACT_HEADERS)
+set(FORGE_CONTRACT_COMPILE_CHECKS)
+set(FORGE_CONTRACT_RICARDIAN_CONTRACTS)
+set(FORGE_CONTRACT_RICARDIAN_CLAUSES)
+string(JSON _root_file_count LENGTH "${_contract_graph}" root files)
+if(_root_file_count GREATER 0)
+   math(EXPR _root_file_last "${_root_file_count} - 1")
+   foreach(_index RANGE 0 ${_root_file_last})
+      string(JSON _role GET "${_contract_graph}" root files ${_index} role)
+      string(JSON _path GET "${_contract_graph}" root files ${_index} physical_path)
+      if(NOT EXISTS "${_path}" OR IS_DIRECTORY "${_path}")
+         message(FATAL_ERROR "Forge Contract graph root input is not a file: ${_path}")
+      endif()
+      if(_role STREQUAL "dispatch_source")
+         if(_dispatch_source)
+            message(FATAL_ERROR "Forge Contract graph has multiple dispatch sources")
+         endif()
+         set(_dispatch_source "${_path}")
+      elseif(_role STREQUAL "source")
+         list(APPEND _other_sources "${_path}")
+      elseif(_role STREQUAL "header")
+         list(APPEND FORGE_CONTRACT_HEADERS "${_path}")
+      elseif(_role STREQUAL "compile_check")
+         list(APPEND FORGE_CONTRACT_COMPILE_CHECKS "${_path}")
+      elseif(_role STREQUAL "ricardian_contracts")
+         set(FORGE_CONTRACT_RICARDIAN_CONTRACTS "${_path}")
+      elseif(_role STREQUAL "ricardian_clauses")
+         set(FORGE_CONTRACT_RICARDIAN_CLAUSES "${_path}")
+      else()
+         message(FATAL_ERROR "Forge Contract graph has an invalid root file role: ${_role}")
+      endif()
+   endforeach()
+endif()
+if(NOT _dispatch_source)
+   message(FATAL_ERROR "Forge Contract graph has no dispatch source")
+endif()
+set(FORGE_CONTRACT_SOURCES "${_dispatch_source}" ${_other_sources})
 set(_implementation_sources ${FORGE_CONTRACT_SOURCES})
 list(REMOVE_AT _implementation_sources 0)
 
@@ -57,7 +99,9 @@ foreach(_source IN LISTS _implementation_sources)
 endforeach()
 set(_depfile "${_generated}/${FORGE_CONTRACT_TARGET}.abi.d")
 set(_manifest "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_TARGET}.contract.json")
-set(_contract_optimization "$<$<NOT:$<CONFIG:Debug>>:-O3>")
+# Deployable WASM must remain within chain limits in every host configuration.
+# Debug builds retain symbols while using the same optimization as CDT contracts.
+set(_contract_optimization -O3)
 
 function(_forge_contract_component_key id output)
    string(SHA256 _key "${id}")
@@ -66,9 +110,25 @@ function(_forge_contract_component_key id output)
 endfunction()
 
 function(forge_contract_register_guest_component)
-   cmake_parse_arguments(ARG "" "ID;ARCHIVE" "MODULES;PUBLIC_LIBRARIES" ${ARGN})
-   if(ARG_UNPARSED_ARGUMENTS OR NOT ARG_ID OR NOT ARG_MODULES)
+   cmake_parse_arguments(
+      ARG
+      ""
+      "ID;ARCHIVE"
+      "MODULES;MODULE_NAMES;PUBLIC_LIBRARIES"
+      ${ARGN}
+   )
+   if(
+      ARG_UNPARSED_ARGUMENTS
+      OR NOT ARG_ID
+      OR NOT ARG_MODULES
+      OR NOT ARG_MODULE_NAMES
+   )
       message(FATAL_ERROR "invalid Forge Contract guest component declaration")
+   endif()
+   list(LENGTH ARG_MODULES _module_count)
+   list(LENGTH ARG_MODULE_NAMES _module_name_count)
+   if(NOT _module_count EQUAL _module_name_count)
+      message(FATAL_ERROR "Forge Contract guest component ${ARG_ID} has mismatched module metadata")
    endif()
    _forge_contract_component_key("${ARG_ID}" _key)
    get_property(_existing GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_COMPONENT_${_key}_ID")
@@ -104,6 +164,10 @@ function(forge_contract_register_guest_component)
    set_property(GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_COMPONENT_${_key}_ID" "${ARG_ID}")
    set_property(GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_COMPONENT_${_key}_TARGET" "${_target}")
    set_property(
+      GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_COMPONENT_${_key}_MODULE_NAMES"
+      "${ARG_MODULE_NAMES}"
+   )
+   set_property(
       GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_COMPONENT_${_key}_DEPENDENCIES"
       "${ARG_PUBLIC_LIBRARIES}"
    )
@@ -133,6 +197,63 @@ foreach(_id IN LISTS _guest_component_ids)
       target_link_libraries("${_target}" PUBLIC "${_dependency_target}")
    endforeach()
 endforeach()
+
+string(JSON _descriptor_component_count LENGTH "${_contract_graph}" components)
+if(_descriptor_component_count GREATER 0)
+   math(EXPR _descriptor_component_last "${_descriptor_component_count} - 1")
+   foreach(_index RANGE 0 ${_descriptor_component_last})
+      string(JSON _id GET "${_contract_graph}" components ${_index} id)
+      _forge_contract_component_key("${_id}" _key)
+      get_property(
+         _expected_modules GLOBAL PROPERTY
+         "FORGE_CONTRACT_GUEST_COMPONENT_${_key}_MODULE_NAMES"
+      )
+      get_property(
+         _expected_dependencies GLOBAL PROPERTY
+         "FORGE_CONTRACT_GUEST_COMPONENT_${_key}_DEPENDENCIES"
+      )
+      if(NOT _expected_modules)
+         message(FATAL_ERROR "contract graph references unknown Forge guest component: ${_id}")
+      endif()
+      set(_actual_modules)
+      string(
+         JSON _module_count LENGTH
+         "${_contract_graph}" components ${_index} modules
+      )
+      if(_module_count GREATER 0)
+         math(EXPR _module_last "${_module_count} - 1")
+         foreach(_module_index RANGE 0 ${_module_last})
+            string(
+               JSON _module GET
+               "${_contract_graph}" components ${_index} modules ${_module_index}
+            )
+            list(APPEND _actual_modules "${_module}")
+         endforeach()
+      endif()
+      set(_actual_dependencies)
+      string(
+         JSON _dependency_count LENGTH
+         "${_contract_graph}" components ${_index} dependencies
+      )
+      if(_dependency_count GREATER 0)
+         math(EXPR _dependency_last "${_dependency_count} - 1")
+         foreach(_dependency_index RANGE 0 ${_dependency_last})
+            string(
+               JSON _dependency GET
+               "${_contract_graph}" components ${_index} dependencies
+               ${_dependency_index}
+            )
+            list(APPEND _actual_dependencies "${_dependency}")
+         endforeach()
+      endif()
+      if(
+         NOT "${_actual_modules}" STREQUAL "${_expected_modules}"
+         OR NOT "${_actual_dependencies}" STREQUAL "${_expected_dependencies}"
+      )
+         message(FATAL_ERROR "contract graph component descriptor does not match SDK: ${_id}")
+      endif()
+   endforeach()
+endif()
 
 _forge_contract_guest_component_target(forge.raw _raw_target)
 _forge_contract_guest_component_target(forge.codec.base64 _codec_base64_target)
@@ -371,6 +492,9 @@ if(_library_count GREATER 0)
       endif()
 
       add_library("${_target}" STATIC)
+      set_target_properties(
+         "${_target}" PROPERTIES FORGE_CONTRACT_LIBRARY_ID "${_id}"
+      )
       target_sources(
          "${_target}"
          PUBLIC
@@ -381,6 +505,10 @@ if(_library_count GREATER 0)
       if(_implementation OR _headers)
          target_sources("${_target}" PRIVATE ${_implementation} ${_headers})
       endif()
+      set_source_files_properties(
+         ${_modules} ${_implementation}
+         PROPERTIES OBJECT_DEPENDS "${FORGE_CONTRACT_ATTR_PLUGIN}"
+      )
       target_include_directories("${_target}" PUBLIC ${_module_bases})
       if(_public_dependencies)
          target_link_libraries("${_target}" PUBLIC ${_public_dependencies})
@@ -474,6 +602,7 @@ foreach(
    target_compile_options(
       ${_target}
       PRIVATE
+      -fplugin=${FORGE_CONTRACT_ATTR_PLUGIN}
       -fno-exceptions
       -fno-rtti
       -fno-threadsafe-statics
@@ -504,18 +633,53 @@ foreach(_target IN LISTS _module_targets)
    )
 endforeach()
 
+file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/contract-compilations")
+function(_forge_contract_generate_object_list target identity output)
+   set(
+      _path
+      "${CMAKE_CURRENT_BINARY_DIR}/contract-compilations/${identity}-$<CONFIG>.objects"
+   )
+   file(
+      GENERATE
+      OUTPUT "${_path}"
+      CONTENT "$<JOIN:$<TARGET_OBJECTS:${target}>,\n>\n"
+   )
+   set(${output} "${_path}" PARENT_SCOPE)
+endfunction()
+
+set(_contract_compilation_arguments)
+set(_contract_compilation_object_lists)
+foreach(_target IN LISTS _contract_library_targets)
+   get_target_property(_owner "${_target}" FORGE_CONTRACT_LIBRARY_ID)
+   if(NOT _owner)
+      message(FATAL_ERROR "materialized contract library has no descriptor owner")
+   endif()
+   _forge_contract_component_key("${_owner}" _owner_key)
+   _forge_contract_generate_object_list(
+      "${_target}" "library-${_owner_key}" _object_list
+   )
+   list(
+      APPEND _contract_compilation_arguments
+      --library-compilation "${_owner}" "${_object_list}"
+   )
+   list(APPEND _contract_compilation_object_lists "${_object_list}")
+endforeach()
+
 set(_abigen_command
    "${FORGE_CONTRACT_ABIGEN}"
    --contract "${FORGE_CONTRACT_NAME}"
    --abi "${_abi}"
    --dispatch "${_dispatcher}"
    --depfile "${_depfile}"
+   --contract-graph "${FORGE_CONTRACT_GRAPH_FILE}"
    --attribute-plugin "${FORGE_CONTRACT_ATTR_PLUGIN}"
    --sysroot "${CMAKE_SYSROOT}"
    --include "${_include}"
+   --include "${FORGE_CONTRACT_SOURCE_ROOT}"
 )
-foreach(_include_directory IN LISTS FORGE_CONTRACT_INCLUDE_DIRECTORIES)
-   list(APPEND _abigen_command --include "${_include_directory}")
+list(APPEND _abigen_command ${_contract_compilation_arguments})
+foreach(_source IN LISTS FORGE_CONTRACT_COMPILE_CHECKS)
+   list(APPEND _abigen_command --dependency-source "${_source}")
 endforeach()
 foreach(_include_directory IN LISTS _visible_library_module_bases)
    list(APPEND _abigen_command --include "${_include_directory}")
@@ -543,6 +707,7 @@ set(
    ${FORGE_CONTRACT_COMPILE_CHECKS}
    ${_contract_library_targets}
    ${_contract_library_source_paths}
+   ${_contract_compilation_object_lists}
 )
 foreach(_ricardian_file FORGE_CONTRACT_RICARDIAN_CONTRACTS FORGE_CONTRACT_RICARDIAN_CLAUSES)
    if(NOT "${${_ricardian_file}}" STREQUAL "")
@@ -565,6 +730,10 @@ add_executable(
    "${_dispatcher}"
    ${_implementation_wrappers}
 )
+set_source_files_properties(
+   "${_dispatcher}" ${_implementation_wrappers}
+   PROPERTIES OBJECT_DEPENDS "${FORGE_CONTRACT_ATTR_PLUGIN}"
+)
 target_link_libraries(
    ${FORGE_CONTRACT_TARGET}
    PRIVATE
@@ -576,7 +745,7 @@ target_include_directories(
    ${FORGE_CONTRACT_TARGET}
    PRIVATE
       "${_include}"
-      ${FORGE_CONTRACT_INCLUDE_DIRECTORIES}
+      "${FORGE_CONTRACT_SOURCE_ROOT}"
       ${_visible_library_module_bases}
 )
 target_compile_definitions(${FORGE_CONTRACT_TARGET} PRIVATE FORGE_CONTRACT_GUEST=1)
@@ -606,6 +775,10 @@ endforeach()
 
 if(FORGE_CONTRACT_COMPILE_CHECKS)
    add_library(${FORGE_CONTRACT_TARGET}_compile_checks OBJECT ${FORGE_CONTRACT_COMPILE_CHECKS})
+   set_source_files_properties(
+      ${FORGE_CONTRACT_COMPILE_CHECKS}
+      PROPERTIES OBJECT_DEPENDS "${FORGE_CONTRACT_ATTR_PLUGIN}"
+   )
    target_link_libraries(
       ${FORGE_CONTRACT_TARGET}_compile_checks
       PRIVATE
@@ -617,7 +790,7 @@ if(FORGE_CONTRACT_COMPILE_CHECKS)
       ${FORGE_CONTRACT_TARGET}_compile_checks
       PRIVATE
          "${_include}"
-         ${FORGE_CONTRACT_INCLUDE_DIRECTORIES}
+         "${FORGE_CONTRACT_SOURCE_ROOT}"
          ${_visible_library_module_bases}
    )
    target_compile_definitions(${FORGE_CONTRACT_TARGET}_compile_checks PRIVATE FORGE_CONTRACT_GUEST=1)
@@ -742,6 +915,7 @@ add_custom_command(
       --wasm "$<TARGET_FILE:${FORGE_CONTRACT_TARGET}>"
       --abi "${_abi}"
       --imports "${FORGE_CONTRACT_DATA_DIR}/registry/intrinsics.json"
+      --source-graph "${FORGE_CONTRACT_GRAPH_FILE}"
       --output "${_manifest}"
       --sdk-version "${FORGE_CONTRACT_SDK_VERSION}"
       --llvm-version "${FORGE_CONTRACT_LLVM_VERSION}"
