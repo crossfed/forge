@@ -36,18 +36,6 @@ SOURCE_PATTERNS = ("*.cpp", "*.cppm", "*.hxx")
 EXCLUDED_DIRECTORIES = {"build", "donor", "donors", "vendor"}
 
 
-def is_temporary_digest_span(expression: str) -> bool:
-    if TEMPORARY_SPAN_EXPRESSION.fullmatch(expression):
-        return True
-
-    constructed = EXPLICIT_SPAN_CONSTRUCTION.fullmatch(expression)
-    if not constructed:
-        return False
-    if (constructed.group("open"), constructed.group("close")) not in (("(", ")"), ("{", "}")):
-        return False
-    return is_temporary_digest_span(constructed.group("expression"))
-
-
 def is_live_source(path: pathlib.Path, root: pathlib.Path) -> bool:
     directories = path.relative_to(root).parts[:-1]
     return not any(
@@ -72,6 +60,29 @@ def find_closing_delimiter(text: str, start: int) -> int | None:
             if not stack:
                 return offset
     return None
+
+
+def unwrap_grouping_parentheses(expression: str) -> str:
+    unwrapped = expression.strip()
+    while unwrapped.startswith("("):
+        close_offset = find_closing_delimiter(unwrapped, 0)
+        if close_offset != len(unwrapped) - 1:
+            break
+        unwrapped = unwrapped[1:close_offset].strip()
+    return unwrapped
+
+
+def is_temporary_digest_span(expression: str) -> bool:
+    expression = unwrap_grouping_parentheses(expression)
+    if TEMPORARY_SPAN_EXPRESSION.fullmatch(expression):
+        return True
+
+    constructed = EXPLICIT_SPAN_CONSTRUCTION.fullmatch(expression)
+    if not constructed:
+        return False
+    if (constructed.group("open"), constructed.group("close")) not in (("(", ")"), ("{", "}")):
+        return False
+    return is_temporary_digest_span(constructed.group("expression"))
 
 
 def direct_initializations(body: str) -> list[tuple[re.Match[str], str]]:

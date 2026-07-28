@@ -49,6 +49,18 @@ def main() -> int:
             "libraries/details/value.hxx:2: span refers to a temporary digest",
             "plugins/details/value.hxx:2: span refers to a temporary digest",
         ],
+        "grouped": [
+            "libraries/value.cpp:3: span refers to a temporary digest",
+            "libraries/value.cpp:4: span refers to a temporary digest",
+            "libraries/value.cpp:8: span refers to a temporary digest",
+            "libraries/value.cpp:9: span refers to a temporary digest",
+            "libraries/value.cpp:13: span refers to a temporary digest",
+            "libraries/value.cpp:14: span refers to a temporary digest",
+            "libraries/value.cpp:18: span refers to a temporary digest",
+            "libraries/value.cpp:22: span refers to a temporary digest",
+            "libraries/value.cpp:26: span refers to a temporary digest",
+            "libraries/value.cpp:30: span refers to a temporary digest",
+        ],
     }
     for name, expected in expected_diagnostics.items():
         invalid = run(checker, fixtures / name)

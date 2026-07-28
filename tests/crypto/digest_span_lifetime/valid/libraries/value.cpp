@@ -44,3 +44,23 @@ void initialize_wrapped_lvalue(const sha256& value) {
    const auto direct(std::span<const std::uint8_t>(value.to_uint8_span()));
    const auto list{std::span<const std::uint8_t>{value.to_uint8_span()}};
 }
+
+std::span<const std::uint8_t> return_grouped_lvalue(const sha256& value) {
+   return ((value.to_uint8_span()));
+}
+
+bytes return_grouped_copy(std::span<const std::uint8_t> data) {
+   return ((copy(sha256::hash(data).to_uint8_span())));
+}
+
+task<std::span<const std::uint8_t>> co_return_grouped_lvalue(const sha256& value) {
+   co_return ((std::span{value.to_uint8_span()}));
+}
+
+void use_grouped_safely(std::span<const std::uint8_t> data, const sha256& value) {
+   consume(((sha256::hash(data).to_uint8_span())));
+   const auto direct((copy(sha256::hash(data).to_uint8_span())));
+   const auto list{((copy(sha256::hash(data).to_uint8_span())))};
+   std::span<const std::uint8_t> assigned;
+   assigned = ((value.to_uint8_span()));
+}
