@@ -2,6 +2,9 @@ module;
 
 #include <boost/test/unit_test.hpp>
 
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/cancellation_signal.hpp>
+#include <boost/asio/cancellation_type.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/redirect_error.hpp>
@@ -53,9 +56,17 @@ BOOST_AUTO_TEST_CASE(p2p_session_teardown_waits_for_started_transport_cleanup) {
       std::this_thread::sleep_for(std::chrono::milliseconds{1});
    }
 
-   auto stopped = boost::asio::co_spawn(runtime.context(), teardown.wait(), boost::asio::use_future);
+   auto cancellation = boost::asio::cancellation_signal{};
+   auto stopped =
+       boost::asio::co_spawn(runtime.context(), teardown.wait(),
+                             boost::asio::bind_cancellation_slot(cancellation.slot(), boost::asio::use_future));
    const auto waiting_for_cleanup = stopped.wait_for(std::chrono::milliseconds{50}) == std::future_status::timeout;
    BOOST_TEST(waiting_for_cleanup);
+
+   cancellation.emit(boost::asio::cancellation_type::total);
+   const auto cancellation_did_not_bypass_cleanup =
+       stopped.wait_for(std::chrono::milliseconds{50}) == std::future_status::timeout;
+   BOOST_TEST(cancellation_did_not_bypass_cleanup);
 
    boost::asio::post(runtime.context(), [release] { release->cancel(); });
    const auto cleanup_completed = stopped.wait_for(std::chrono::seconds{2}) == std::future_status::ready;

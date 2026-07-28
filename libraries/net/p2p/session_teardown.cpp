@@ -1,6 +1,7 @@
 module;
 
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/cancellation_state.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/redirect_error.hpp>
@@ -158,6 +159,7 @@ void session_teardown::start(std::vector<operation> operations) noexcept {
 }
 
 boost::asio::awaitable<void> session_teardown::wait() const {
+   co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
    const auto executor = co_await boost::asio::this_coro::executor;
    auto waiter = std::make_shared<teardown_waiter>(executor);
 
