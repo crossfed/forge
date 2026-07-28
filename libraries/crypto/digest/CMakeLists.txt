@@ -16,6 +16,10 @@ target_compile_definitions(
    PUBLIC OPENSSL_API_COMPAT=0x30000000L
           OPENSSL_NO_DEPRECATED
 )
+target_compile_options(
+   forge_crypto_digest
+   PUBLIC $<$<COMPILE_LANG_AND_ID:CXX,Clang>:-Wdangling>
+)
 target_link_libraries(
    forge_crypto_digest
    PUBLIC

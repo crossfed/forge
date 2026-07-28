@@ -11,6 +11,12 @@ module;
 #include <string>
 #endif
 
+#if defined(__clang__)
+#define FORGE_CRYPTO_DIGEST_LIFETIME_BOUND [[clang::lifetimebound]]
+#else
+#define FORGE_CRYPTO_DIGEST_LIFETIME_BOUND
+#endif
+
 export module forge.crypto.digest.sha256:value;
 
 #if !defined(FORGE_CONTRACT_GUEST)
@@ -74,11 +80,11 @@ class sha256
    static double inverse_approx_log_32_double(std::uint32_t value);
 #endif
 
-   [[nodiscard]] constexpr const char* data() const noexcept {
+   [[nodiscard]] constexpr const char* data() const noexcept FORGE_CRYPTO_DIGEST_LIFETIME_BOUND {
       return reinterpret_cast<const char*>(_hash);
    }
 
-   [[nodiscard]] constexpr char* data() noexcept {
+   [[nodiscard]] constexpr char* data() noexcept FORGE_CRYPTO_DIGEST_LIFETIME_BOUND {
       return reinterpret_cast<char*>(_hash);
    }
 
@@ -86,7 +92,8 @@ class sha256
       return byte_size;
    }
 
-   [[nodiscard]] constexpr std::span<const std::uint8_t, byte_size> to_uint8_span() const noexcept {
+   [[nodiscard]] constexpr std::span<const std::uint8_t, byte_size>
+   to_uint8_span() const noexcept FORGE_CRYPTO_DIGEST_LIFETIME_BOUND {
       return std::span<const std::uint8_t, byte_size>{reinterpret_cast<const std::uint8_t*>(_hash), byte_size};
    }
 
@@ -142,4 +149,6 @@ using uint256 = sha256;
    return static_cast<std::size_t>(value._hash[3]);
 }
 
-} // namespace forge::crypto
+} // namespace forge::crypto::digest
+
+#undef FORGE_CRYPTO_DIGEST_LIFETIME_BOUND

@@ -18,8 +18,13 @@ const auto value = forge::crypto::digest::sha256::hash(
    std::string{"canonical bytes"});
 ```
 
+`data()` and `to_uint8_span()` return borrowed views. Clang lifetime analysis
+tracks them back to the owning digest, so a view cannot be retained after a
+temporary digest is destroyed. Name the digest before retaining its view;
+passing a temporary view directly to a non-retaining operation remains valid.
+
 Dependencies are `forge_crypto_core`, Codec Hex, Raw, Variant, Forge Core and
 OpenSSL Crypto. Digest values preserve their existing Raw and Variant layouts.
 The library does not own text transport profiles or signing policy.
 `test_forge_crypto_digest` covers golden vectors, incremental encoders, HMAC,
-BLAKE2 and serialization.
+BLAKE2, serialization and compiler-enforced borrowed-view lifetimes.

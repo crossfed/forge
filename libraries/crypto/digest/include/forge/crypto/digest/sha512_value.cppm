@@ -10,6 +10,12 @@ module;
 #include <string>
 #endif
 
+#if defined(__clang__)
+#define FORGE_CRYPTO_DIGEST_LIFETIME_BOUND [[clang::lifetimebound]]
+#else
+#define FORGE_CRYPTO_DIGEST_LIFETIME_BOUND
+#endif
+
 export module forge.crypto.digest.sha512:value;
 
 #if !defined(FORGE_CONTRACT_GUEST)
@@ -64,11 +70,11 @@ class sha512
    friend sha512 operator^(const sha512& left, const sha512& right);
 #endif
 
-   [[nodiscard]] constexpr char* data() noexcept {
+   [[nodiscard]] constexpr char* data() noexcept FORGE_CRYPTO_DIGEST_LIFETIME_BOUND {
       return reinterpret_cast<char*>(_hash);
    }
 
-   [[nodiscard]] constexpr const char* data() const noexcept {
+   [[nodiscard]] constexpr const char* data() const noexcept FORGE_CRYPTO_DIGEST_LIFETIME_BOUND {
       return reinterpret_cast<const char*>(_hash);
    }
 
@@ -76,7 +82,8 @@ class sha512
       return byte_size;
    }
 
-   [[nodiscard]] constexpr std::span<const std::uint8_t, byte_size> to_uint8_span() const noexcept {
+   [[nodiscard]] constexpr std::span<const std::uint8_t, byte_size>
+   to_uint8_span() const noexcept FORGE_CRYPTO_DIGEST_LIFETIME_BOUND {
       return std::span<const std::uint8_t, byte_size>{reinterpret_cast<const std::uint8_t*>(_hash), byte_size};
    }
 
@@ -119,4 +126,6 @@ class sha512
 
 using uint512 = sha512;
 
-} // namespace forge::crypto
+} // namespace forge::crypto::digest
+
+#undef FORGE_CRYPTO_DIGEST_LIFETIME_BOUND
