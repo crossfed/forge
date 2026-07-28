@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <cstdint>
@@ -311,6 +312,10 @@ class udp_fault_proxy : public std::enable_shared_from_this<udp_fault_proxy> {
       return metrics_;
    }
 
+   [[nodiscard]] std::uint64_t server_packets_received() const noexcept {
+      return server_packets_received_.load(std::memory_order_acquire);
+   }
+
    void start() {
       do_receive();
    }
@@ -351,6 +356,9 @@ class udp_fault_proxy : public std::enable_shared_from_this<udp_fault_proxy> {
 
    void handle_packet(std::size_t bytes) {
       const auto from_server = source_endpoint_ == server_endpoint_;
+      if (from_server) {
+         server_packets_received_.fetch_add(1, std::memory_order_release);
+      }
       if (!from_server) {
          client_endpoint_ = source_endpoint_;
          has_client_endpoint_ = true;
@@ -466,6 +474,7 @@ class udp_fault_proxy : public std::enable_shared_from_this<udp_fault_proxy> {
    direction_state client_to_server_;
    direction_state server_to_client_;
    fault_proxy_metrics metrics_;
+   std::atomic_uint64_t server_packets_received_{0};
 };
 
 BOOST_AUTO_TEST_CASE(quic_endpoint_parses_ipv4_authority) {
@@ -622,7 +631,7 @@ BOOST_AUTO_TEST_CASE(quic_loopback_handshake_and_echo_frame_over_udp) {
    BOOST_TEST(client_connection.metrics().streams_opened >= 1U);
 
    forge::asio::blocking::run(runtime, client_connection.async_close());
-   server.stop();
+   forge::asio::blocking::run(runtime, server.async_stop());
 }
 
 BOOST_AUTO_TEST_CASE(quic_loopback_medium_frame_and_small_frame_burst) {
@@ -919,7 +928,7 @@ BOOST_AUTO_TEST_CASE(quic_listener_shared_socket_serializes_concurrent_sends_and
                         "stop race request");
    }
 
-   server.stop();
+   forge::asio::blocking::run(runtime, server.async_stop());
 
    for (auto& task : server_tasks) {
       BOOST_REQUIRE(task.wait_for(std::chrono::milliseconds{5'000}) == std::future_status::ready);
@@ -1751,26 +1760,77 @@ BOOST_AUTO_TEST_CASE(quic_framed_stream_rejects_oversized_remote_frame) {
       (void)forge::asio::blocking::run(runtime, framed.async_read_frame());
       BOOST_FAIL("expected oversized frame rejection");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::net::quic::exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::frame_too_large));
+      BOOST_TEST(static_cast<int>(forge::net::quic::exceptions::code_of(error).value()) ==
+                 static_cast<int>(exceptions::code::frame_too_large));
    }
    server_send.get();
    forge::asio::blocking::run(runtime, client_connection.async_close());
    server.stop();
 }
 
-BOOST_AUTO_TEST_CASE(quic_listener_stop_unblocks_pending_accept) {
-   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+BOOST_AUTO_TEST_CASE(quic_listener_async_stop_waits_for_pending_accept_and_concurrent_stop) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
    auto server = listener{runtime, endpoint{.host = "127.0.0.1", .port = 0}, loopback_server_options()};
    auto accept_future = boost::asio::co_spawn(runtime.context(), server.async_accept(), boost::asio::use_future);
+   auto first_stop = boost::asio::co_spawn(runtime.context(), server.async_stop(), boost::asio::use_future);
+   auto second_stop = boost::asio::co_spawn(runtime.context(), server.async_stop(), boost::asio::use_future);
 
-   server.stop();
+   get_with_deadline_or_stop(runtime, first_stop, std::chrono::milliseconds{5'000}, "first listener async stop");
+   get_with_deadline_or_stop(runtime, second_stop, std::chrono::milliseconds{5'000}, "second listener async stop");
+   BOOST_REQUIRE(accept_future.wait_for(std::chrono::seconds{0}) == std::future_status::ready);
 
    try {
       (void)accept_future.get();
       BOOST_FAIL("expected stopped listener to unblock accept with an error");
    } catch (const forge::exceptions::base& error) {
-      BOOST_TEST(static_cast<int>(forge::net::quic::exceptions::code_of(error).value()) == static_cast<int>(exceptions::code::connection_closed));
+      BOOST_TEST(static_cast<int>(forge::net::quic::exceptions::code_of(error).value()) ==
+                 static_cast<int>(exceptions::code::connection_closed));
    }
+}
+
+BOOST_AUTO_TEST_CASE(quic_listener_async_stop_cancels_half_open_handshake_deadline) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   auto server_options = loopback_server_options();
+   server_options.handshake_timeout = std::chrono::seconds{30};
+   auto server = listener{runtime, endpoint{.host = "127.0.0.1", .port = 0}, std::move(server_options)};
+   auto proxy = std::make_shared<udp_fault_proxy>(runtime.context(), server.local_endpoint(),
+                                                  fault_proxy_rules{.server_to_client = fault_rule{.drop_every = 1}});
+   proxy->start();
+
+   auto accept_future = boost::asio::co_spawn(runtime.context(), server.async_accept(), boost::asio::use_future);
+   auto client = connector{runtime};
+   auto client_options = loopback_client_options();
+   client_options.connect_timeout = std::chrono::seconds{30};
+   client_options.handshake_timeout = std::chrono::seconds{30};
+   auto connect_future = boost::asio::co_spawn(runtime.context(),
+                                               client.async_connect(proxy->local_endpoint(), std::move(client_options)),
+                                               boost::asio::use_future);
+
+   run_with_deadline(
+       runtime,
+       [proxy]() -> boost::asio::awaitable<void> {
+          auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+          while (proxy->server_packets_received() == 0) {
+             timer.expires_after(std::chrono::milliseconds{5});
+             co_await timer.async_wait(boost::asio::use_awaitable);
+          }
+       }(),
+       std::chrono::milliseconds{5'000}, "half-open server handshake");
+
+   const auto started = std::chrono::steady_clock::now();
+   run_with_deadline(runtime, server.async_stop(), std::chrono::milliseconds{2'000}, "half-open listener async stop");
+   const auto elapsed =
+       std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
+   BOOST_TEST(elapsed < std::chrono::milliseconds{2'000});
+
+   proxy->stop();
+   client.cancel();
+   BOOST_CHECK_THROW(
+       get_with_deadline_or_stop(runtime, accept_future, std::chrono::milliseconds{2'000}, "half-open listener accept"),
+       forge::exceptions::base);
+   BOOST_CHECK_THROW(
+       get_with_deadline_or_stop(runtime, connect_future, std::chrono::milliseconds{2'000}, "half-open client connect"),
+       forge::exceptions::base);
 }
 
 } // namespace
