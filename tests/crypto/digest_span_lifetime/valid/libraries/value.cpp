@@ -70,3 +70,10 @@ bytes use_conditional_safely(bool flag, std::span<const std::uint8_t> data, cons
    const auto selected = flag ? value.to_uint8_span() : value.to_uint8_span();
    return copy(flag ? sha256::hash(data).to_uint8_span() : value.to_uint8_span());
 }
+
+bytes use_copy_list_safely(std::span<const std::uint8_t> data, const sha256& value) {
+   const auto copied = bytes{sha256::hash(data).to_uint8_span()};
+   std::span<const std::uint8_t> selected = {value.to_uint8_span()};
+   consume({sha256::packhash(data).to_uint8_span()});
+   return copied;
+}

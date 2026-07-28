@@ -23,7 +23,7 @@ DIRECT_INITIALIZATION_PREFIX = re.compile(
     re.DOTALL,
 )
 TEMPORARY_SPAN_EXPRESSION = re.compile(
-    r"^\s*(?:(?![=+*/?!&|]).)*?\b(?:hash|digest)\s*\((?:(?!;).)*?\)\s*"
+    r"^\s*(?:(?![=+*/?!&|]).)*?\b(?:hash|packhash|digest)\s*\((?:(?!;).)*?\)\s*"
     r"\.to_(?:uint8_)?span\s*\(\s*\)\s*$",
     re.DOTALL,
 )
@@ -72,6 +72,32 @@ def unwrap_grouping_parentheses(expression: str) -> str:
     return unwrapped
 
 
+def unwrap_single_element_list(expression: str) -> str:
+    unwrapped = expression.strip()
+    while unwrapped.startswith("{"):
+        close_offset = find_closing_delimiter(unwrapped, 0)
+        if close_offset != len(unwrapped) - 1:
+            break
+        element = unwrapped[1:close_offset]
+        stack: list[str] = []
+        pairs = {"(": ")", "{": "}", "[": "]"}
+        has_separator = False
+        for character in element:
+            if character in pairs:
+                stack.append(character)
+            elif character in pairs.values():
+                if not stack or pairs[stack[-1]] != character:
+                    return unwrapped
+                stack.pop()
+            elif character == "," and not stack:
+                has_separator = True
+                break
+        if has_separator:
+            break
+        unwrapped = element.strip()
+    return unwrapped
+
+
 def conditional_operands(expression: str) -> tuple[str, str] | None:
     stack: list[str] = []
     question_offset: int | None = None
@@ -110,6 +136,8 @@ def conditional_operands(expression: str) -> tuple[str, str] | None:
 
 
 def is_temporary_digest_span(expression: str) -> bool:
+    expression = unwrap_grouping_parentheses(expression)
+    expression = unwrap_single_element_list(expression)
     expression = unwrap_grouping_parentheses(expression)
     if TEMPORARY_SPAN_EXPRESSION.fullmatch(expression):
         return True
