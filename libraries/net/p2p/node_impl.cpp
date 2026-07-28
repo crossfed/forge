@@ -417,6 +417,11 @@ void node::impl::learn_from_identify(const peer_id& peer, const identify::docume
 std::vector<std::shared_ptr<node::impl::session_state>>
 node::impl::remember_session(std::shared_ptr<node::impl::session_state> session, connection_manager::direction direction) {
    auto lock = std::scoped_lock{mutex};
+   if (stopped) {
+      session->closed = true;
+      detail::cancel_rejected_session(session);
+      FORGE_THROW_EXCEPTION(exceptions::closed, "P2P node is stopped");
+   }
    session->direction = direction;
    if (session->id == 0) {
       session->id = next_session_id++;

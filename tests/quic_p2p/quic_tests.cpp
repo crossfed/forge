@@ -822,6 +822,120 @@ BOOST_AUTO_TEST_CASE(quic_loopback_repeated_connect_transfer_close_soak) {
    }
 }
 
+BOOST_AUTO_TEST_CASE(quic_listener_shared_socket_serializes_concurrent_sends_and_stop) {
+   constexpr auto connection_count = 8U;
+   constexpr auto reply_size = 256U * 1024U;
+   auto limits = transport_limits{
+       .max_connections = connection_count,
+       .max_streams_per_connection = 4,
+       .max_queued_bytes = 32U * 1024U * 1024U,
+   };
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   auto server = listener{
+       runtime,
+       endpoint{.host = "127.0.0.1", .port = 0},
+       loopback_server_options("forge-p2p/1", limits),
+   };
+   auto connector_value = connector{runtime};
+   auto clients = std::vector<connection>{};
+   auto servers = std::vector<connection>{};
+   clients.reserve(connection_count);
+   servers.reserve(connection_count);
+
+   for (auto index = 0U; index < connection_count; ++index) {
+      auto accepted = boost::asio::co_spawn(runtime.context(), server.async_accept(), boost::asio::use_future);
+
+      clients.push_back(run_with_deadline(
+          runtime,
+          connector_value.async_connect(server.local_endpoint(), loopback_client_options("forge-p2p/1", limits)),
+          std::chrono::milliseconds{5'000}, "shared socket client connect"));
+
+      servers.push_back(
+          get_with_deadline_or_stop(runtime, accepted, std::chrono::milliseconds{5'000}, "shared socket accept"));
+   }
+
+   auto server_tasks = std::vector<std::future<void>>{};
+   server_tasks.reserve(connection_count);
+
+   for (auto index = 0U; index < connection_count; ++index) {
+      server_tasks.push_back(boost::asio::co_spawn(
+          runtime.context(),
+          [&server_connection = servers[index], index]() -> boost::asio::awaitable<void> {
+             auto stream_value = framed_stream{co_await server_connection.async_accept_stream()};
+
+             auto request = co_await stream_value.async_read_frame();
+             BOOST_REQUIRE(request == std::vector<std::uint8_t>{static_cast<std::uint8_t>(index)});
+
+             auto reply = std::vector<std::uint8_t>(reply_size, static_cast<std::uint8_t>(index));
+             co_await stream_value.async_write_frame(reply);
+          },
+          boost::asio::use_future));
+   }
+
+   auto client_streams = std::vector<framed_stream>{};
+   client_streams.reserve(connection_count);
+
+   for (auto index = 0U; index < connection_count; ++index) {
+      client_streams.emplace_back(run_with_deadline(runtime, clients[index].async_open_stream(),
+                                                    std::chrono::milliseconds{5'000}, "shared socket open stream"));
+
+      const auto request = std::vector<std::uint8_t>{static_cast<std::uint8_t>(index)};
+      run_with_deadline(runtime, client_streams.back().async_write_frame(request), std::chrono::milliseconds{5'000},
+                        "shared socket request");
+   }
+
+   for (auto index = 0U; index < connection_count; ++index) {
+      auto reply = run_with_deadline(runtime, client_streams[index].async_read_frame(),
+                                     std::chrono::milliseconds{10'000}, "shared socket reply");
+
+      BOOST_REQUIRE(reply.size() == reply_size);
+      BOOST_TEST(std::ranges::all_of(
+          reply, [index](std::uint8_t value) { return value == static_cast<std::uint8_t>(index); }));
+   }
+
+   for (auto& task : server_tasks) {
+      get_with_deadline_or_stop(runtime, task, std::chrono::milliseconds{5'000}, "shared socket server send");
+   }
+
+   server_tasks.clear();
+
+   for (auto index = 0U; index < connection_count; ++index) {
+      server_tasks.push_back(boost::asio::co_spawn(
+          runtime.context(),
+          [&server_connection = servers[index]]() -> boost::asio::awaitable<void> {
+             auto stream_value = framed_stream{co_await server_connection.async_accept_stream()};
+             (void)co_await stream_value.async_read_frame();
+
+             auto reply = std::vector<std::uint8_t>(reply_size, 0xa5U);
+             co_await stream_value.async_write_frame(reply);
+          },
+          boost::asio::use_future));
+
+      client_streams[index] = framed_stream{run_with_deadline(
+          runtime, clients[index].async_open_stream(), std::chrono::milliseconds{5'000}, "stop race open stream")};
+
+      const auto request = std::vector<std::uint8_t>{0x01U};
+      run_with_deadline(runtime, client_streams[index].async_write_frame(request), std::chrono::milliseconds{5'000},
+                        "stop race request");
+   }
+
+   server.stop();
+
+   for (auto& task : server_tasks) {
+      BOOST_REQUIRE(task.wait_for(std::chrono::milliseconds{5'000}) == std::future_status::ready);
+
+      try {
+         task.get();
+      } catch (const forge::exceptions::base&) {
+         // Listener stop may abort a server write already queued on the shared socket.
+      }
+   }
+
+   for (auto& client : clients) {
+      client.cancel();
+   }
+}
+
 BOOST_AUTO_TEST_CASE(quic_fault_proxy_handshake_survives_mild_loss) {
    auto limits =
        transport_limits{.max_connections = 16, .max_streams_per_connection = 16, .max_queued_bytes = 16 * 1024 * 1024};

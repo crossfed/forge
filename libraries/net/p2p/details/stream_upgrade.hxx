@@ -3,11 +3,24 @@
 #include <chrono>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 
 #include <boost/asio/awaitable.hpp>
 
 namespace forge::net::p2p {
+
+class cancellation_latch {
+ public:
+   void set(std::function<void()> cancel);
+   void cancel() noexcept;
+   void clear() noexcept;
+
+ private:
+   std::mutex mutex_;
+   std::function<void()> current_;
+   bool canceled_ = false;
+};
 
 struct upgraded_session {
    peer_id peer;
@@ -23,7 +36,7 @@ upgrade_inbound_stream(forge::net::p2p::stream stream, const node::options& opti
 struct tcp_upgrade_deadline {
    boost::asio::io_context* context = nullptr;
    std::chrono::milliseconds timeout{0};
-   std::shared_ptr<std::function<void()>> cancel_current;
+   std::shared_ptr<cancellation_latch> cancel_current;
 };
 
 boost::asio::awaitable<upgraded_session>

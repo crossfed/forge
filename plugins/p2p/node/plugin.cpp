@@ -129,19 +129,21 @@ void plugin::request_stop() noexcept {
 boost::asio::awaitable<void> plugin::shutdown() {
    request_stop();
    auto failure = std::exception_ptr{};
-   try {
-      co_await impl_->stop_bootstrap_maintenance();
-   } catch (...) {
-      failure = std::current_exception();
-   }
    if (impl_->node) {
       try {
          co_await impl_->node->async_stop();
       } catch (...) {
-         if (!failure) {
-            failure = std::current_exception();
-         }
+         failure = std::current_exception();
       }
+   }
+   try {
+      co_await impl_->stop_bootstrap_maintenance();
+   } catch (...) {
+      if (!failure) {
+         failure = std::current_exception();
+      }
+   }
+   if (impl_->node) {
       impl_->node.reset();
    }
    impl_->started = false;
