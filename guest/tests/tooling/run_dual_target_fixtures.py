@@ -141,7 +141,7 @@ def verify_source_graph(manifest: dict) -> None:
         ("contract:product", "library", "product.chain.protocol", "public"),
         ("product.chain.protocol", "library", "product.chain.values", "public"),
         ("product.chain.protocol", "library", "product.chain.limits", "private"),
-        ("product.chain.limits", "component", "forge.crypto.digest", "private"),
+        ("product.chain.limits", "component", "forge.crypto.digest", "public"),
     }
     if not expected_edges <= observed_edges:
         raise RuntimeError(f"source graph omits dependency edges: {sorted(expected_edges - observed_edges)}")
@@ -597,12 +597,74 @@ export inline constexpr auto protocol_value = private_value;
         encoding="utf-8",
     )
 
+    private_module_import = write_project(
+        fixtures / "private-module-import",
+        """forge_add_contract_library(
+   private_library ID negative.private SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/private"
+   MODULE_BASE_DIRS . MODULE_SOURCES detail.cppm
+)
+forge_add_contract_library(
+   protocol ID negative.protocol SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+   PRIVATE_LIBRARIES private_library
+)
+forge_add_contract(negative SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}" SOURCES contract.cpp LIBRARIES protocol)
+""",
+    )
+    (private_module_import / "private").mkdir()
+    (private_module_import / "private" / "detail.cppm").write_text(
+        "export module negative.detail;\nexport inline constexpr auto private_value = 42;\n",
+        encoding="utf-8",
+    )
+    (private_module_import / "include" / "protocol.cppm").write_text(
+        """export module negative.protocol;
+import negative.detail;
+export inline constexpr auto protocol_value = private_value;
+""",
+        encoding="utf-8",
+    )
+
+    private_header_include = write_project(
+        fixtures / "private-header-include",
+        """forge_add_contract_library(
+   private_library ID negative.private SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/private"
+   MODULE_BASE_DIRS . MODULE_SOURCES detail.cppm
+   PUBLIC_HEADERS detail.hpp
+)
+forge_add_contract_library(
+   protocol ID negative.protocol SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+   PRIVATE_LIBRARIES private_library
+)
+forge_add_contract(negative SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}" SOURCES contract.cpp LIBRARIES protocol)
+""",
+    )
+    (private_header_include / "private").mkdir()
+    (private_header_include / "private" / "detail.cppm").write_text(
+        "export module negative.detail;\n",
+        encoding="utf-8",
+    )
+    (private_header_include / "private" / "detail.hpp").write_text(
+        "#pragma once\ninline constexpr auto private_value = 42;\n",
+        encoding="utf-8",
+    )
+    (private_header_include / "include" / "protocol.cppm").write_text(
+        """module;
+#include "detail.hpp"
+export module negative.protocol;
+export inline constexpr auto protocol_value = private_value;
+""",
+        encoding="utf-8",
+    )
+
     cases = [
         (undeclared, "contract source dependency is not declared"),
         (external, "contract source dependency is not declared"),
         (owner_private, "contract public module uses a private source"),
         (private_import, "module 'negative.detail' not found"),
         (private_export, "exports a module through a private dependency"),
+        (private_module_import, "imports a module through an undeclared dependency"),
+        (private_header_include, "source dependency owner is not visible"),
     ]
     for source, diagnostic in cases:
         build_directory = fixtures / f"{source.name}-build"

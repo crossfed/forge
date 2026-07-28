@@ -29,7 +29,7 @@ forge_add_contract_library(
    MODULE_BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
    MODULE_SOURCES include/product/chain/limits.cppm
    SOURCES src/limits.cpp
-   PRIVATE_LIBRARIES Forge::forge_crypto_digest
+   PUBLIC_LIBRARIES Forge::forge_crypto_digest
 )
 
 forge_add_contract_library(
