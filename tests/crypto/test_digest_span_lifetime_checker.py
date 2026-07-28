@@ -26,14 +26,29 @@ def main() -> int:
         return 1
 
     expected_diagnostics = {
-        "auto": 1,
-        "typed": 1,
-        "existing": 1,
-        "member": 1,
-        "returned": 3,
-        "co_return": 1,
-        "direct": 1,
-        "list": 1,
+        "auto": ["libraries/value.cpp:2: span refers to a temporary digest"],
+        "typed": ["libraries/value.cpp:2: span refers to a temporary digest"],
+        "existing": ["libraries/value.cpp:3: span refers to a temporary digest"],
+        "member": ["libraries/value.cpp:2: span refers to a temporary digest"],
+        "returned": [
+            "libraries/value.cpp:2: span refers to a temporary digest",
+            "libraries/value.cpp:6: span refers to a temporary digest",
+            "libraries/value.cpp:10: span refers to a temporary digest",
+        ],
+        "co_return": ["libraries/value.cpp:2: span refers to a temporary digest"],
+        "direct": ["libraries/value.cpp:2: span refers to a temporary digest"],
+        "list": ["libraries/value.cpp:2: span refers to a temporary digest"],
+        "wrapped": [
+            "libraries/value.cpp:3: span refers to a temporary digest",
+            "libraries/value.cpp:4: span refers to a temporary digest",
+            "libraries/value.cpp:5: span refers to a temporary digest",
+            "libraries/value.cpp:9: span refers to a temporary digest",
+            "libraries/value.cpp:13: span refers to a temporary digest",
+        ],
+        "hxx": [
+            "libraries/details/value.hxx:2: span refers to a temporary digest",
+            "plugins/details/value.hxx:2: span refers to a temporary digest",
+        ],
     }
     for name, expected in expected_diagnostics.items():
         invalid = run(checker, fixtures / name)
@@ -43,10 +58,12 @@ def main() -> int:
         if "span refers to a temporary digest" not in invalid.stderr:
             print(f"{name}: checker returned an unexpected diagnostic:\n{invalid.stderr}", file=sys.stderr)
             return 1
-        actual = invalid.stderr.count("span refers to a temporary digest")
+        actual = invalid.stderr.strip().splitlines()
         if actual != expected:
             print(
-                f"{name}: checker produced {actual} diagnostics instead of {expected}:\n{invalid.stderr}",
+                f"{name}: checker produced unexpected diagnostics:\n"
+                f"expected: {expected}\n"
+                f"actual:   {actual}",
                 file=sys.stderr,
             )
             return 1
