@@ -183,6 +183,7 @@ struct session::impl : std::enable_shared_from_this<impl> {
          if (!executor_) {
             executor_ = executor;
             accept_timer_ = std::make_shared<boost::asio::steady_timer>(executor, far_future());
+            read_loop_timer_ = std::make_shared<boost::asio::steady_timer>(executor, far_future());
          }
          if (!started_) {
             started_ = true;
@@ -259,7 +260,7 @@ struct session::impl : std::enable_shared_from_this<impl> {
       } catch (...) {
       }
       fail_session(exceptions::code::closed, "yamux session closed");
-      co_return;
+      co_await wait_for_read_loop();
    }
 
    void cancel() {
@@ -665,6 +666,36 @@ struct session::impl : std::enable_shared_from_this<impl> {
          }
       }
       fail_session(terminal, std::move(message));
+      finish_read_loop();
+   }
+
+   boost::asio::awaitable<void> wait_for_read_loop() {
+      auto error = boost::system::error_code{};
+      while (true) {
+         auto timer = std::shared_ptr<boost::asio::steady_timer>{};
+         {
+            auto lock = std::scoped_lock{mutex_};
+            if (read_loop_done_) {
+               co_return;
+            }
+            arm_wait(read_loop_timer_);
+            timer = read_loop_timer_;
+         }
+         co_await timer->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
+         if (error && error != boost::asio::error::operation_aborted) {
+            throw boost::system::system_error{error};
+         }
+      }
+   }
+
+   void finish_read_loop() {
+      auto timer = std::shared_ptr<boost::asio::steady_timer>{};
+      {
+         auto lock = std::scoped_lock{mutex_};
+         read_loop_done_ = true;
+         timer = read_loop_timer_;
+      }
+      notify_waiters(timer);
    }
 
    static void compact_read_buffer(bytes& buffer, std::size_t& consumed) {
@@ -979,12 +1010,14 @@ struct session::impl : std::enable_shared_from_this<impl> {
    mutable std::mutex mutex_;
    std::optional<boost::asio::any_io_executor> executor_;
    std::shared_ptr<boost::asio::steady_timer> accept_timer_;
+   std::shared_ptr<boost::asio::steady_timer> read_loop_timer_;
    std::map<std::uint32_t, std::shared_ptr<stream_state>> streams_;
    std::deque<std::uint32_t> pending_accepts_;
    std::deque<std::shared_ptr<write_waiter>> write_waiters_;
    std::size_t session_buffer_ = 0;
    std::uint32_t next_stream_id_ = 1;
    bool started_ = false;
+   bool read_loop_done_ = false;
    bool closed_ = false;
    bool canceled_ = false;
    bool write_busy_ = false;

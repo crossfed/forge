@@ -5,6 +5,7 @@ module;
 #include <boost/asio/awaitable.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <coroutine>
 #include <cstdint>
@@ -35,6 +36,7 @@ import forge.api.transport.server;
 import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.asio.runtime;
+import forge.asio.task;
 import forge.config.core.component;
 import forge.config.core.decode;
 import forge.exceptions;
@@ -102,7 +104,8 @@ boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provide
 
 boost::asio::awaitable<void> plugin::initialize(forge::app::plugin_context& context) {
    impl_->runtime = &context.scheduler().runtime_context();
-   impl_->stopping = false;
+   impl_->scheduler = &context.scheduler();
+   impl_->stopping.store(false, std::memory_order_release);
    co_return;
 }
 
@@ -114,39 +117,43 @@ boost::asio::awaitable<void> plugin::startup() {
    for (const auto& endpoint : impl_->listen) {
       co_await node.async_listen(endpoint);
    }
-   for (const auto& endpoint : impl_->bootstrap) {
-      try {
-         (void)co_await node.async_connect(endpoint);
-      } catch (...) {
-         forge::exceptions::capture_and_log("P2P bootstrap connect failed");
-      }
-   }
+   co_await impl_->refresh_bootstrap();
    impl_->started = true;
+   impl_->start_bootstrap_maintenance();
 }
 
 void plugin::request_stop() noexcept {
-   impl_->stopping = true;
-   if (impl_->raw) {
-      impl_->raw->stop();
-   }
+   impl_->request_bootstrap_stop();
 }
 
 boost::asio::awaitable<void> plugin::shutdown() {
    request_stop();
+   auto failure = std::exception_ptr{};
+   try {
+      co_await impl_->stop_bootstrap_maintenance();
+   } catch (...) {
+      failure = std::current_exception();
+   }
    if (impl_->node) {
-      co_await impl_->node->async_stop();
+      try {
+         co_await impl_->node->async_stop();
+      } catch (...) {
+         if (!failure) {
+            failure = std::current_exception();
+         }
+      }
       impl_->node.reset();
-      impl_->raw = nullptr;
    }
    impl_->started = false;
+   if (failure) {
+      std::rethrow_exception(failure);
+   }
 }
 
 forge::app::plugin_descriptor descriptor() {
    return forge::app::plugin_descriptor{
-      .id = forge::app::plugin_id{.value = "forge.plugins.p2p.node"},
-      .factory = [] {
-         return std::make_unique<plugin>();
-      },
+       .id = forge::app::plugin_id{.value = "forge.plugins.p2p.node"},
+       .factory = [] { return std::make_unique<plugin>(); },
    };
 }
 

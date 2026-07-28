@@ -39,9 +39,15 @@ contribution APIs for protocol handlers and API-over-P2P publication.
 
 - Starts and stops a shared P2P node through the `forge_app` lifecycle.
 - Maps config into listen/bootstrap/advertised endpoints and relay/path policy.
+- Maintains configured bootstrap sessions with bounded reconnect backoff and
+  protects them from connection-manager pruning.
 - Lets application plugins publish typed APIs over a P2P protocol id.
 - Opens typed remote API handles to peers through `remote<Interface>()`.
 - Provides internal source APIs used by focused diagnostics and pubsub plugins.
+
+Shutdown first cancels and drains bootstrap maintenance, then awaits the shared
+node shutdown. Active STCP/Yamux reads are drained before the plugin releases
+the node.
 
 The plugin does not implement product routing policy or durable application
 queues. Core libp2p-style mechanics belong to `forge_net_p2p`; this plugin composes
@@ -138,4 +144,7 @@ registry.register_plugin(forge::plugins::p2p::node::descriptor());
 ## Tests
 
 - `test_forge_quic_p2p`
+- `test_forge_yamux`
+- `test_forge_stcp`
+- `test_forge_plugins`
 - `test_forge_package_plugins_p2p_node`
