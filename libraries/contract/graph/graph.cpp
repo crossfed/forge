@@ -3,6 +3,7 @@ module;
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <forge/exceptions/macros.hpp>
 #include <iterator>
 #include <map>
 #include <set>
@@ -16,6 +17,7 @@ module;
 module forge.contract.graph;
 
 import forge.codec.json;
+import forge.contract.graph.exceptions;
 import forge.variant.value;
 
 namespace forge::contract::graph {
@@ -28,7 +30,8 @@ using forge::variants;
 std::string read_text(const std::filesystem::path& path) {
    auto input = std::ifstream{path, std::ios::binary};
    if (!input) {
-      throw std::runtime_error{"cannot read contract graph: " + path.string()};
+      FORGE_THROW_EXCEPTION(exceptions::read_error, "cannot read contract graph",
+                            forge::exceptions::ctx("path", path.string()));
    }
    return {std::istreambuf_iterator<char>{input}, std::istreambuf_iterator<char>{}};
 }
@@ -305,7 +308,7 @@ class builder {
 
 } // namespace
 
-descriptor read(const std::filesystem::path& path) {
+descriptor read_impl(const std::filesystem::path& path) {
    const auto parsed = forge::codec::json::read_value(read_text(path), {.source_name = path.string()});
    if (!parsed.ok() || !parsed.value.is_object()) {
       throw std::runtime_error{"contract graph is not a valid JSON object"};
@@ -353,6 +356,18 @@ descriptor read(const std::filesystem::path& path) {
                            require_array(component, "dependencies", "contract graph component"));
    }
    return result.finish(root_owner);
+}
+
+descriptor read(const std::filesystem::path& path) {
+   try {
+      return read_impl(path);
+   } catch (const exceptions::read_error&) {
+      throw;
+   } catch (const std::exception& error) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "invalid contract graph descriptor",
+                            forge::exceptions::ctx("path", path.string()),
+                            forge::exceptions::ctx("cause", error.what()));
+   }
 }
 
 bool is_public(file_role value) {

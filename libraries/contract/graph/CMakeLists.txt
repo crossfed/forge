@@ -9,4 +9,5 @@ target_link_libraries(
    forge_contract_graph
    PUBLIC
       forge_codec_json
+      forge_exceptions
 )

@@ -21,13 +21,16 @@ for (const auto& file : graph.files) {
 
 `read()` rejects unsupported schemas, duplicate owners or paths, unknown
 dependencies, dependency cycles, invalid file roles and files outside their
-declared source roots. Callers should report these diagnostics as build errors
-rather than attempting to repair an incomplete graph.
+declared source roots. Unreadable inputs throw
+`forge::contract::graph::exceptions::read_error`; malformed descriptors throw
+`forge::contract::graph::exceptions::invalid_descriptor`. Both include the
+input path in structured Forge exception context.
 
 ## Dependencies
 
-`forge_codec_json` provides canonical JSON decoding. The library has no CMake,
-Clang, ABI-generation or WASM-runtime dependency.
+`forge_codec_json` provides canonical JSON decoding and `forge_exceptions`
+provides the typed public error boundary. The library has no CMake, Clang,
+ABI-generation or WASM-runtime dependency.
 
 ## Tests And Boundaries
 

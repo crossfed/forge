@@ -6,6 +6,8 @@ module;
 
 export module forge.contract.graph;
 
+export import forge.contract.graph.exceptions;
+
 export namespace forge::contract::graph {
 
 enum class file_role {
