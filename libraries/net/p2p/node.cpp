@@ -1278,12 +1278,11 @@ void node::stop() {
       if (impl_->stopped) {
          return;
       }
-      operations.reserve(impl_->sessions.size());
+      operations.reserve(impl_->sessions.size() + 1);
+      operations.push_back(impl_->direct_registry.teardown_operation());
       for (auto& [_, session] : impl_->sessions) {
          operations.push_back(detail::session_teardown::operation{
-             .close = [session]() -> boost::asio::awaitable<void> {
-                co_await session->connection.async_close();
-             },
+             .close = [session]() -> boost::asio::awaitable<void> { co_await session->connection.async_close(); },
              .cancel = [session] { session->connection.cancel(); },
          });
       }

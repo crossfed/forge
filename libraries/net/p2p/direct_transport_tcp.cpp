@@ -177,6 +177,13 @@ class tcp_profile final {
       }
    }
 
+   boost::asio::awaitable<void> async_stop() {
+      stop();
+      for (auto& [_, listener] : listeners_) {
+         co_await listener.value->async_close();
+      }
+   }
+
    boost::asio::awaitable<connection> async_connect(forge::net::p2p::endpoint endpoint,
                                                     const node::connect_options& options) {
       if (!endpoint.is_direct_tcp()) {
@@ -294,6 +301,7 @@ void register_tcp_profile(registry& value, forge::asio::runtime& runtime, const 
        .local_endpoints = [owned] { return owned->local_endpoints(); },
        .listen = [owned](forge::net::p2p::endpoint endpoint) { return owned->listen(std::move(endpoint)); },
        .stop = [owned] { owned->stop(); },
+       .async_stop = [owned] { return owned->async_stop(); },
        .async_connect =
            [owned](forge::net::p2p::endpoint endpoint, const node::connect_options& options) {
               return owned->async_connect(std::move(endpoint), options);

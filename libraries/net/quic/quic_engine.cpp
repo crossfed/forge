@@ -2217,6 +2217,28 @@ struct engine_listener::impl {
    bool stopped = false;
    bool receive_started = false;
 
+   void stop() {
+      if (stopped) {
+         return;
+      }
+      stopped = true;
+      server_socket->stop();
+      wake(accept_waiters);
+      auto connections = std::vector<std::shared_ptr<engine_connection::impl>>{};
+      connections.reserve(cids_by_connection.size());
+      for (const auto& [_, keys] : cids_by_connection) {
+         if (keys.empty()) {
+            continue;
+         }
+         if (auto it = connections_by_cid.find(keys.front()); it != connections_by_cid.end()) {
+            connections.push_back(it->second);
+         }
+      }
+      for (auto& connection : connections) {
+         asio::post(connection->strand, [connection] { connection->fail_all(); });
+      }
+   }
+
    void start() {
       if (receive_started) {
          return;
@@ -2504,24 +2526,15 @@ void engine_listener::stop() {
    if (!impl_) {
       return;
    }
-   asio::post(impl_->strand, [impl = impl_] {
-      impl->stopped = true;
-      impl->server_socket->stop();
-      wake(impl->accept_waiters);
-      auto connections = std::vector<std::shared_ptr<engine_connection::impl>>{};
-      connections.reserve(impl->cids_by_connection.size());
-      for (const auto& [_, keys] : impl->cids_by_connection) {
-         if (keys.empty()) {
-            continue;
-         }
-         if (auto it = impl->connections_by_cid.find(keys.front()); it != impl->connections_by_cid.end()) {
-            connections.push_back(it->second);
-         }
-      }
-      for (auto& connection : connections) {
-         asio::post(connection->strand, [connection] { connection->fail_all(); });
-      }
-   });
+   asio::post(impl_->strand, [impl = impl_] { impl->stop(); });
+}
+
+boost::asio::awaitable<void> engine_listener::async_stop() {
+   if (!impl_) {
+      co_return;
+   }
+   co_await asio::dispatch(impl_->strand, asio::use_awaitable);
+   impl_->stop();
 }
 
 } // namespace forge::net::quic::detail

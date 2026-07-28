@@ -16,14 +16,18 @@ module;
 #include <chrono>
 #include <future>
 #include <memory>
+#include <stdexcept>
 #include <thread>
 #include <utility>
 #include <vector>
 
 module forge.net.p2p.node;
 
+import forge.asio.blocking;
 import forge.asio.runtime;
+import forge.net.transport.session;
 
+#include "../../libraries/net/p2p/details/direct_transport.hxx"
 #include "../../libraries/net/p2p/details/session_teardown.hxx"
 
 namespace forge::net::p2p {
@@ -73,6 +77,60 @@ BOOST_AUTO_TEST_CASE(p2p_session_teardown_waits_for_started_transport_cleanup) {
    BOOST_REQUIRE(cleanup_completed);
    stopped.get();
    BOOST_TEST(cancel_called.load(std::memory_order_acquire) == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_direct_transport_teardown_continues_after_profile_failure) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto registry = direct::registry{runtime, node::options{}};
+   auto failed_stop = std::atomic_size_t{0};
+   auto next_stop = std::atomic_size_t{0};
+   auto failed_async_stop = std::atomic_size_t{0};
+   auto next_async_stop = std::atomic_size_t{0};
+
+   const auto add_profile = [&](auto stop, auto async_stop) {
+      registry.add(direct::profile{
+          .supports = [](const endpoint&) { return false; },
+          .listening = [] { return false; },
+          .local_endpoints = [] { return std::vector<endpoint>{}; },
+          .listen = [](endpoint value) { return value; },
+          .stop = std::move(stop),
+          .async_stop = std::move(async_stop),
+          .async_connect = [](endpoint, const node::connect_options&) -> boost::asio::awaitable<direct::connection> {
+             co_return direct::connection{};
+          },
+          .async_accept = [](endpoint) -> boost::asio::awaitable<direct::connection> {
+             co_return direct::connection{};
+          },
+      });
+   };
+
+   add_profile(
+       [&] {
+          failed_stop.fetch_add(1, std::memory_order_release);
+          throw std::runtime_error{"expected stop failure"};
+       },
+       [&]() -> boost::asio::awaitable<void> {
+          failed_async_stop.fetch_add(1, std::memory_order_release);
+          throw std::runtime_error{"expected async stop failure"};
+          co_return;
+       });
+   add_profile([&] { next_stop.fetch_add(1, std::memory_order_release); },
+               [&]() -> boost::asio::awaitable<void> {
+                  next_async_stop.fetch_add(1, std::memory_order_release);
+                  co_return;
+               });
+
+   auto teardown = detail::session_teardown{runtime.context().get_executor()};
+   auto operations = std::vector<detail::session_teardown::operation>{};
+   operations.push_back(registry.teardown_operation());
+   registry.stop();
+   teardown.start(std::move(operations));
+   forge::asio::blocking::run(runtime, teardown.wait());
+
+   BOOST_TEST(failed_stop.load(std::memory_order_acquire) == 1U);
+   BOOST_TEST(next_stop.load(std::memory_order_acquire) == 1U);
+   BOOST_TEST(failed_async_stop.load(std::memory_order_acquire) == 1U);
+   BOOST_TEST(next_async_stop.load(std::memory_order_acquire) == 1U);
 }
 
 } // namespace

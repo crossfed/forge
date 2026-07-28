@@ -146,6 +146,12 @@ boost::asio::awaitable<connection> listener::async_accept() {
    }
 }
 
+boost::asio::awaitable<void> listener::async_stop() {
+   if (impl_) {
+      co_await impl_->engine.async_stop();
+   }
+}
+
 void listener::stop() {
    if (impl_) {
       impl_->engine.stop();
