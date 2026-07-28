@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import shutil
@@ -119,10 +120,22 @@ def verify_direct_action(abi: dict) -> None:
         raise RuntimeError("named action ABI contains a synthetic handler wrapper")
 
 
-def verify_source_graph(manifest: dict) -> None:
+def append_length(output: bytearray, value: int) -> None:
+    output.extend(value.to_bytes(8, byteorder="big"))
+
+
+def append_field(output: bytearray, value: str) -> None:
+    encoded = value.encode("utf-8")
+    append_length(output, len(encoded))
+    output.extend(encoded)
+
+
+def verify_source_graph(manifest: dict, descriptor: dict) -> None:
     if manifest["schema_version"] != 2:
         raise RuntimeError("dual-target contract manifest does not use schema v2")
     graph = manifest["source_graph"]
+    if graph["root_owner"] != descriptor["root"]["owner"]:
+        raise RuntimeError("source graph has the wrong root owner")
     expected_roles = {
         "product.chain.values": {"module", "public_header"},
         "product.chain.limits": {"module", "implementation"},
@@ -157,6 +170,43 @@ def verify_source_graph(manifest: dict) -> None:
         key=lambda entry: (entry["owner"], entry["kind"], entry["dependency"], entry["scope"]),
     ):
         raise RuntimeError("source graph dependencies are not canonicalized")
+    expected_components = sorted(
+        (
+            {"id": component["id"], "modules": sorted(component["modules"])}
+            for component in descriptor["components"]
+        ),
+        key=lambda component: (component["id"], component["modules"]),
+    )
+    if graph["components"] != expected_components:
+        raise RuntimeError("source graph component module ownership does not match the descriptor")
+
+    encoded = bytearray()
+    append_field(encoded, "forge.contract.source-graph.v2")
+    append_field(encoded, "root")
+    append_field(encoded, graph["root_owner"])
+    append_length(encoded, len(graph["files"]))
+    for file in graph["files"]:
+        append_field(encoded, "file")
+        append_field(encoded, file["owner"])
+        append_field(encoded, file["role"])
+        append_field(encoded, file["logical_path"])
+        append_field(encoded, file["sha256"])
+    append_length(encoded, len(graph["dependencies"]))
+    for edge in graph["dependencies"]:
+        append_field(encoded, "dependency")
+        append_field(encoded, edge["owner"])
+        append_field(encoded, edge["kind"])
+        append_field(encoded, edge["dependency"])
+        append_field(encoded, edge["scope"])
+    append_length(encoded, len(graph["components"]))
+    for component in graph["components"]:
+        append_field(encoded, "component")
+        append_field(encoded, component["id"])
+        append_length(encoded, len(component["modules"]))
+        for module in component["modules"]:
+            append_field(encoded, module)
+    if graph["sha256"] != hashlib.sha256(encoded).hexdigest():
+        raise RuntimeError("source graph digest does not cover its canonical semantic fields")
 
 
 def verify_contract_graph(build_directory: Path) -> tuple[dict[str, str], dict[Path, str]]:
@@ -721,7 +771,7 @@ def validate(
     run(str(producer_build / "product_protocol_host_tests"))
     abi, manifest = verify_artifacts(producer_build, "product")
     verify_direct_action(abi)
-    verify_source_graph(manifest)
+    verify_source_graph(manifest, read_json(producer_build / "product.contract-graph.json"))
     module_owners, source_owners = verify_contract_graph(producer_build)
     verify_component_module_metadata(producer_build, module_owners)
     verify_compilation_metadata(producer_build, module_owners, source_owners)

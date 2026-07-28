@@ -45,3 +45,8 @@ the Forge 8.16 Contract SDK. Consumers that validate `schema_version` must add
 schema v2 before upgrading; v2 adds the attested `source_graph` and does not
 offer a v1 output mode. The Forge 8.16 release note repeats this migration when
 the release version is cut.
+
+The source graph attests its root owner, logical file identities and hashes,
+scoped dependency edges, and canonical component-to-module ownership. Absolute
+source roots and physical paths are transport details and are excluded so the
+same installed package produces the same digest after relocation.

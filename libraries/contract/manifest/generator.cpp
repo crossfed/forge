@@ -77,9 +77,16 @@ struct dependency_edge {
    std::string scope;
 };
 
+struct source_component {
+   std::string id;
+   std::vector<std::string> modules;
+};
+
 struct source_graph {
+   std::string root_owner;
    std::vector<source_file> files;
    std::vector<dependency_edge> dependencies;
+   std::vector<source_component> components;
    std::string sha256;
 };
 
@@ -100,7 +107,7 @@ void write_field(forge::crypto::digest::sha256::encoder& encoder, std::string_vi
 }
 
 source_graph build_source_graph(const forge::contract::graph::descriptor& descriptor) {
-   auto graph = source_graph{};
+   auto graph = source_graph{.root_owner = descriptor.root_owner};
    graph.files.reserve(descriptor.files.size());
    for (const auto& file : descriptor.files) {
       graph.files.push_back(source_file{
@@ -119,6 +126,15 @@ source_graph build_source_graph(const forge::contract::graph::descriptor& descri
           .scope = forge::contract::graph::to_string(edge.scope),
       });
    }
+   graph.components.reserve(descriptor.components.size());
+   for (const auto& component : descriptor.components) {
+      auto modules = component.modules;
+      std::ranges::sort(modules);
+      graph.components.push_back(source_component{
+          .id = component.id,
+          .modules = std::move(modules),
+      });
+   }
 
    std::ranges::sort(graph.files, {}, [](const auto& value) {
       return std::tie(value.owner, value.role, value.logical_path, value.sha256);
@@ -126,9 +142,12 @@ source_graph build_source_graph(const forge::contract::graph::descriptor& descri
    std::ranges::sort(graph.dependencies, {}, [](const auto& value) {
       return std::tie(value.owner, value.kind, value.dependency, value.scope);
    });
+   std::ranges::sort(graph.components, {}, [](const auto& value) { return std::tie(value.id, value.modules); });
 
    auto encoder = forge::crypto::digest::sha256::encoder{};
    write_field(encoder, "forge.contract.source-graph.v2");
+   write_field(encoder, "root");
+   write_field(encoder, graph.root_owner);
    write_length(encoder, graph.files.size());
    for (const auto& file : graph.files) {
       write_field(encoder, "file");
@@ -144,6 +163,15 @@ source_graph build_source_graph(const forge::contract::graph::descriptor& descri
       write_field(encoder, edge.kind);
       write_field(encoder, edge.dependency);
       write_field(encoder, edge.scope);
+   }
+   write_length(encoder, graph.components.size());
+   for (const auto& component : graph.components) {
+      write_field(encoder, "component");
+      write_field(encoder, component.id);
+      write_length(encoder, component.modules.size());
+      for (const auto& module : component.modules) {
+         write_field(encoder, module);
+      }
    }
    graph.sha256 = encoder.result().str();
    return graph;
@@ -162,8 +190,18 @@ forge::variant source_graph_value(const source_graph& graph) {
       dependencies.emplace_back(forge::mutable_variant_object{}("owner", edge.owner)("kind", edge.kind)(
           "dependency", edge.dependency)("scope", edge.scope));
    }
-   return forge::mutable_variant_object{}("files", std::move(files))("dependencies",
-                                                                     std::move(dependencies))("sha256", graph.sha256);
+   auto components = forge::variants{};
+   components.reserve(graph.components.size());
+   for (const auto& component : graph.components) {
+      auto modules = forge::variants{};
+      modules.reserve(component.modules.size());
+      for (const auto& module : component.modules) {
+         modules.emplace_back(module);
+      }
+      components.emplace_back(forge::mutable_variant_object{}("id", component.id)("modules", std::move(modules)));
+   }
+   return forge::mutable_variant_object{}("root_owner", graph.root_owner)("files", std::move(files))(
+       "dependencies", std::move(dependencies))("components", std::move(components))("sha256", graph.sha256);
 }
 
 void write_text(const std::filesystem::path& path, std::string_view value) {
