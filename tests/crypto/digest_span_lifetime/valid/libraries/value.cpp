@@ -64,3 +64,9 @@ void use_grouped_safely(std::span<const std::uint8_t> data, const sha256& value)
    std::span<const std::uint8_t> assigned;
    assigned = ((value.to_uint8_span()));
 }
+
+bytes use_conditional_safely(bool flag, std::span<const std::uint8_t> data, const sha256& value) {
+   consume(flag ? sha256::hash(data).to_uint8_span() : value.to_uint8_span());
+   const auto selected = flag ? value.to_uint8_span() : value.to_uint8_span();
+   return copy(flag ? sha256::hash(data).to_uint8_span() : value.to_uint8_span());
+}

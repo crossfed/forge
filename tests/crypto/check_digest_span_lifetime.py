@@ -72,17 +72,56 @@ def unwrap_grouping_parentheses(expression: str) -> str:
     return unwrapped
 
 
+def conditional_operands(expression: str) -> tuple[str, str] | None:
+    stack: list[str] = []
+    question_offset: int | None = None
+    nested_conditionals = 0
+    pairs = {"(": ")", "{": "}", "[": "]"}
+
+    for offset, character in enumerate(expression):
+        if character in pairs:
+            stack.append(character)
+            continue
+        if character in pairs.values():
+            if not stack or pairs[stack[-1]] != character:
+                return None
+            stack.pop()
+            continue
+        if stack:
+            continue
+        if character == "?":
+            if question_offset is None:
+                question_offset = offset
+            else:
+                nested_conditionals += 1
+            continue
+        if character != ":" or question_offset is None:
+            continue
+        if (offset > 0 and expression[offset - 1] == ":") or (
+            offset + 1 < len(expression) and expression[offset + 1] == ":"
+        ):
+            continue
+        if nested_conditionals > 0:
+            nested_conditionals -= 1
+            continue
+        return expression[question_offset + 1 : offset], expression[offset + 1 :]
+
+    return None
+
+
 def is_temporary_digest_span(expression: str) -> bool:
     expression = unwrap_grouping_parentheses(expression)
     if TEMPORARY_SPAN_EXPRESSION.fullmatch(expression):
         return True
 
     constructed = EXPLICIT_SPAN_CONSTRUCTION.fullmatch(expression)
-    if not constructed:
-        return False
-    if (constructed.group("open"), constructed.group("close")) not in (("(", ")"), ("{", "}")):
-        return False
-    return is_temporary_digest_span(constructed.group("expression"))
+    if constructed:
+        if (constructed.group("open"), constructed.group("close")) not in (("(", ")"), ("{", "}")):
+            return False
+        return is_temporary_digest_span(constructed.group("expression"))
+
+    conditional = conditional_operands(expression)
+    return conditional is not None and any(is_temporary_digest_span(operand) for operand in conditional)
 
 
 def direct_initializations(body: str) -> list[tuple[re.Match[str], str]]:

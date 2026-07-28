@@ -61,6 +61,15 @@ def main() -> int:
             "libraries/value.cpp:26: span refers to a temporary digest",
             "libraries/value.cpp:30: span refers to a temporary digest",
         ],
+        "conditional": [
+            "libraries/value.cpp:2: span refers to a temporary digest",
+            "libraries/value.cpp:3: span refers to a temporary digest",
+            "libraries/value.cpp:4: span refers to a temporary digest",
+            "libraries/value.cpp:8: span refers to a temporary digest",
+            "libraries/value.cpp:9: span refers to a temporary digest",
+            "libraries/value.cpp:14: span refers to a temporary digest",
+            "libraries/value.cpp:19: span refers to a temporary digest",
+        ],
     }
     for name, expected in expected_diagnostics.items():
         invalid = run(checker, fixtures / name)
