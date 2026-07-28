@@ -477,6 +477,64 @@ class [[forge::contract("negative")]] negative_contract : public forge::contract
         encoding="utf-8",
     )
 
+    external = write_project(
+        fixtures / "external-header",
+        """forge_add_contract_library(
+   protocol ID negative.external SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/include"
+   MODULE_BASE_DIRS . MODULE_SOURCES protocol.cppm
+)
+forge_add_contract(
+   negative SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/contract"
+   SOURCES contract.cpp LIBRARIES protocol
+)
+""",
+    )
+    (external / "shared.hpp").write_text(
+        "#pragma once\ninline constexpr auto shared_value = 42;\n",
+        encoding="utf-8",
+    )
+    (external / "contract").mkdir()
+    (external / "contract.cpp").replace(external / "contract" / "contract.cpp")
+    (external / "contract" / "contract.cpp").write_text(
+        """#include "../shared.hpp"
+import forge.contract;
+import negative.protocol;
+
+class [[forge::contract("negative")]] negative_contract : public forge::contract::context {
+ public:
+   using context::context;
+   [[forge::action]] void verify() {
+      forge::contract::check(shared_value == protocol_value, "invalid value");
+   }
+};
+""",
+        encoding="utf-8",
+    )
+
+    owner_private = write_project(
+        fixtures / "owner-private-header",
+        """forge_add_contract_library(
+   protocol ID negative.owner.private SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+   PRIVATE_HEADERS private/detail.hpp
+)
+forge_add_contract(negative SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}" SOURCES contract.cpp LIBRARIES protocol)
+""",
+    )
+    (owner_private / "private").mkdir()
+    (owner_private / "private" / "detail.hpp").write_text(
+        "#pragma once\ninline constexpr auto private_value = 42;\n",
+        encoding="utf-8",
+    )
+    (owner_private / "include" / "protocol.cppm").write_text(
+        """module;
+#include "../private/detail.hpp"
+export module negative.protocol;
+export inline constexpr auto protocol_value = private_value;
+""",
+        encoding="utf-8",
+    )
+
     private_import = write_project(
         fixtures / "private-import",
         """forge_add_contract_library(
@@ -541,6 +599,8 @@ export inline constexpr auto protocol_value = private_value;
 
     cases = [
         (undeclared, "contract source dependency is not declared"),
+        (external, "contract source dependency is not declared"),
+        (owner_private, "contract public module uses a private source"),
         (private_import, "module 'negative.detail' not found"),
         (private_export, "exports a module through a private dependency"),
     ]

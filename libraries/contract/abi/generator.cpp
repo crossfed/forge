@@ -1290,6 +1290,10 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
 
    void add_action(const clang::CXXRecordDecl& declaration, const clang::CXXMethodDecl& method,
                    std::string_view annotated_name) {
+      if (method.getCanonicalDecl()->getStorageClass() == clang::SC_Static) {
+         report(method.getLocation(), "contract entry point must be a non-static member function");
+         return;
+      }
       register_method_types(method);
       const auto identity = declaration_identity(method);
       auto action_name = annotated_name.empty() ? method.getNameAsString() : std::string{annotated_name};
@@ -1706,7 +1710,6 @@ struct contract_graph {
    std::map<std::string, std::set<std::filesystem::path>> files_by_owner;
    std::map<std::string, std::vector<graph_edge>> edges_by_owner;
    std::map<std::string, std::string> module_owners;
-   std::set<std::filesystem::path> source_roots;
 };
 
 const forge::variant_object& graph_object(const forge::variant& value, std::string_view description) {
@@ -1734,9 +1737,6 @@ std::string graph_string(const forge::variant_object& object, const char* name, 
 contract_graph make_contract_graph(const forge::contract::graph::descriptor& descriptor) {
    auto graph = contract_graph{};
    graph.root_owner = descriptor.root_owner;
-   for (const auto& root : descriptor.source_roots) {
-      graph.source_roots.insert(root.physical_path);
-   }
    for (const auto& file : descriptor.files) {
       auto indexed = graph_file{
           .owner = file.owner,
@@ -1835,18 +1835,6 @@ std::vector<compilation_metadata> read_compilation_list(const std::filesystem::p
    return result;
 }
 
-bool path_is_under(const std::filesystem::path& path, const std::filesystem::path& root) {
-   const auto relative = path.lexically_relative(root);
-   if (relative.empty() || relative.is_absolute()) {
-      return false;
-   }
-   return std::ranges::none_of(relative, [](const auto& component) { return component == ".."; });
-}
-
-bool is_local_dependency(const contract_graph& graph, const std::filesystem::path& path) {
-   return std::ranges::any_of(graph.source_roots, [&](const auto& root) { return path_is_under(path, root); });
-}
-
 std::set<std::string> public_closure(const contract_graph& graph, std::set<std::string> visible) {
    auto pending = std::vector<std::string>{visible.begin(), visible.end()};
    while (!pending.empty()) {
@@ -1879,12 +1867,23 @@ std::set<std::string> visible_owners(const contract_graph& graph, std::string_vi
    return public_closure(graph, std::move(visible));
 }
 
+bool path_is_under(const std::filesystem::path& path, const std::filesystem::path& root) {
+   const auto relative = path.lexically_relative(root);
+   return !relative.empty() && !relative.is_absolute() &&
+          std::ranges::none_of(relative, [](const auto& component) { return component == ".."; });
+}
+
+bool is_system_dependency(const std::vector<std::filesystem::path>& roots, const std::filesystem::path& path) {
+   return std::ranges::any_of(roots, [&](const auto& root) { return path_is_under(path, root); });
+}
+
 void validate_source_dependency(const contract_graph& graph, std::string_view owner,
                                 forge::contract::graph::file_role source_role, const std::set<std::string>& visible,
+                                const std::vector<std::filesystem::path>& system_roots,
                                 const std::filesystem::path& dependency, bool system) {
    const auto declared = graph.files.find(dependency);
    if (declared == graph.files.end()) {
-      if (!system && is_local_dependency(graph, dependency)) {
+      if (!system && !is_system_dependency(system_roots, dependency)) {
          throw std::runtime_error{"contract source dependency is not declared: " + dependency.string()};
       }
       return;
@@ -1894,22 +1893,27 @@ void validate_source_dependency(const contract_graph& graph, std::string_view ow
    if (!visible.contains(file.owner)) {
       throw std::runtime_error{"contract source dependency owner is not visible: " + dependency.string()};
    }
-   if (file.owner != owner && !forge::contract::graph::is_public(file.role)) {
-      throw std::runtime_error{"contract source uses a private dependency file: " + dependency.string()};
-   }
-   if (source_role == forge::contract::graph::file_role::module && file.owner != owner &&
+   if (source_role == forge::contract::graph::file_role::module &&
        !forge::contract::graph::is_public(file.role)) {
       throw std::runtime_error{"contract public module uses a private source: " + dependency.string()};
+   }
+   if (file.owner != owner && !forge::contract::graph::is_public(file.role)) {
+      throw std::runtime_error{"contract source uses a private dependency file: " + dependency.string()};
    }
 }
 
 struct validated_contract_graph {
    contract_graph graph;
    std::map<std::string, std::string> module_owners;
+   std::vector<std::filesystem::path> system_roots;
 };
 
 validated_contract_graph validate_contract_libraries(const forge::contract::abi::request& options) {
    auto graph = make_contract_graph(forge::contract::graph::read(options.contract_graph));
+   auto system_roots = std::vector<std::filesystem::path>{};
+   system_roots.reserve(options.system_include_paths.size());
+   std::ranges::transform(options.system_include_paths, std::back_inserter(system_roots),
+                          [](const auto& path) { return std::filesystem::weakly_canonical(path); });
    if (graph.root_owner != "contract:" + options.contract) {
       throw std::runtime_error{"contract graph root owner does not match requested contract"};
    }
@@ -1971,7 +1975,7 @@ validated_contract_graph validate_contract_libraries(const forge::contract::abi:
          const auto role = graph.files.at(metadata.source).role;
          const auto visible = visible_owners(graph, owner, false);
          for (const auto& [dependency, system] : metadata.dependencies) {
-            validate_source_dependency(graph, owner, role, visible, dependency, system);
+            validate_source_dependency(graph, owner, role, visible, system_roots, dependency, system);
          }
          for (const auto& module : metadata.imported_modules) {
             const auto found = module_owners.find(module);
@@ -2000,6 +2004,7 @@ validated_contract_graph validate_contract_libraries(const forge::contract::abi:
    return {
        .graph = std::move(graph),
        .module_owners = std::move(module_owners),
+       .system_roots = std::move(system_roots),
    };
 }
 
@@ -2009,7 +2014,7 @@ void validate_contract_root(const validated_contract_graph& validated, const sou
    const auto root_visible = visible_owners(graph, graph.root_owner, false);
    for (const auto& [dependency, system] : contract_dependencies) {
       validate_source_dependency(graph, graph.root_owner, forge::contract::graph::file_role::source, root_visible,
-                                 dependency, system);
+                                 validated.system_roots, dependency, system);
    }
    for (const auto& module : contract_modules) {
       const auto found = validated.module_owners.find(module);
@@ -2446,6 +2451,10 @@ artifacts generate(const request& options) {
    };
    for (const auto& path : options.include_paths) {
       arguments.push_back("-I" + path.string());
+   }
+   for (const auto& path : options.system_include_paths) {
+      arguments.push_back("-isystem");
+      arguments.push_back(path.string());
    }
    for (const auto& path : options.module_paths) {
       arguments.push_back("-fprebuilt-module-path=" + path.string());

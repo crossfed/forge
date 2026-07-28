@@ -42,6 +42,8 @@ request parse(int argc, const char* const* argv) {
          result.ricardian_clauses = next();
       } else if (option == "--module-path") {
          result.module_paths.emplace_back(next());
+      } else if (option == "--system-include") {
+         result.system_include_paths.emplace_back(next());
       } else if (option == "--include") {
          result.include_paths.emplace_back(next());
       } else if (option == "--dependency-source") {

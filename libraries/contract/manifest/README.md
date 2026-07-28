@@ -38,3 +38,10 @@ The generator request is experimental; manifest schema v2 and deterministic fiel
 meaning are versioned compatibility surfaces. Tests verify hashes, import and
 feature capture, source ownership and scoped dependency digests, reproducible output, command failures, standalone package
 consumption and relocated SDK generation.
+
+Schema v2 is the intentional Forge 8.16 migration from schema v1. Existing
+schema-v1 sidecars are generated build artifacts and must be regenerated with
+the Forge 8.16 Contract SDK. Consumers that validate `schema_version` must add
+schema v2 before upgrading; v2 adds the attested `source_graph` and does not
+offer a v1 output mode. The Forge 8.16 release note repeats this migration when
+the release version is cut.

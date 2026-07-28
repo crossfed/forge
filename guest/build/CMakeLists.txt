@@ -84,8 +84,8 @@ set(FORGE_CONTRACT_SOURCES "${_dispatch_source}" ${_other_sources})
 set(_implementation_sources ${FORGE_CONTRACT_SOURCES})
 list(REMOVE_AT _implementation_sources 0)
 
-set(_modules "${FORGE_CONTRACT_DATA_DIR}/modules")
-set(_include "${FORGE_CONTRACT_DATA_DIR}/include")
+set(_sdk_modules_root "${FORGE_CONTRACT_DATA_DIR}/modules")
+set(_sdk_include_root "${FORGE_CONTRACT_DATA_DIR}/include")
 set(_runtime_archive "${CMAKE_SYSROOT}/lib/libforge_guest_runtime.a")
 set(_generated "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(_abi "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_TARGET}.abi")
@@ -137,7 +137,7 @@ function(forge_contract_register_guest_component)
    set(_target "forge_contract_component_${_key}")
    set(_module_paths)
    foreach(_module IN LISTS ARG_MODULES)
-      set(_path "${_modules}/${_module}")
+      set(_path "${_sdk_modules_root}/${_module}")
       if(NOT EXISTS "${_path}")
          message(FATAL_ERROR "Forge Contract guest component module is missing: ${_path}")
       endif()
@@ -148,7 +148,7 @@ function(forge_contract_register_guest_component)
       "${_target}"
       PUBLIC
          FILE_SET forge_contract_component_modules TYPE CXX_MODULES
-         BASE_DIRS "${_modules}"
+         BASE_DIRS "${_sdk_modules_root}"
          FILES ${_module_paths}
    )
    if(ARG_ARCHIVE)
@@ -272,7 +272,7 @@ add_library(forge_guest_runtime STATIC IMPORTED GLOBAL)
 set_target_properties(forge_guest_runtime PROPERTIES IMPORTED_LOCATION "${_runtime_archive}")
 
 add_library(forge_guest_eosio INTERFACE)
-target_include_directories(forge_guest_eosio INTERFACE "${_include}")
+target_include_directories(forge_guest_eosio INTERFACE "${_sdk_include_root}")
 target_link_libraries(forge_guest_eosio INTERFACE "${_contract_runtime_target}")
 
 function(_forge_contract_library_target id output)
@@ -558,7 +558,7 @@ foreach(
    if(_target IN_LIST _guest_component_ids)
       _forge_contract_guest_component_target("${_target}" _target)
    endif()
-   target_include_directories(${_target} PRIVATE "${_include}")
+   target_include_directories(${_target} PRIVATE "${_sdk_include_root}")
    target_compile_definitions(${_target} PRIVATE FORGE_CONTRACT_GUEST=1)
    target_compile_options(
       ${_target}
@@ -635,7 +635,8 @@ set(_abigen_command
    --contract-graph "${FORGE_CONTRACT_GRAPH_FILE}"
    --attribute-plugin "${FORGE_CONTRACT_ATTR_PLUGIN}"
    --sysroot "${CMAKE_SYSROOT}"
-   --include "${_include}"
+   --system-include "${_sdk_include_root}"
+   --system-include "${_sdk_modules_root}"
    --include "${FORGE_CONTRACT_SOURCE_ROOT}"
 )
 list(APPEND _abigen_command ${_contract_compilation_arguments})
@@ -705,7 +706,7 @@ target_link_libraries(
 target_include_directories(
    ${FORGE_CONTRACT_TARGET}
    PRIVATE
-      "${_include}"
+      "${_sdk_include_root}"
       "${FORGE_CONTRACT_SOURCE_ROOT}"
       ${_visible_library_module_bases}
 )
@@ -750,7 +751,7 @@ if(FORGE_CONTRACT_COMPILE_CHECKS)
    target_include_directories(
       ${FORGE_CONTRACT_TARGET}_compile_checks
       PRIVATE
-         "${_include}"
+         "${_sdk_include_root}"
          "${FORGE_CONTRACT_SOURCE_ROOT}"
          ${_visible_library_module_bases}
    )

@@ -92,8 +92,10 @@ def invoke(
         str(args.plugin),
         "--sysroot",
         str(args.sysroot),
-        "--include",
+        "--system-include",
         str(args.include),
+        "--system-include",
+        str(args.modules),
     ]
     module_dirs = sorted(
         path
@@ -296,6 +298,7 @@ def main():
     parser.add_argument("--plugin", required=True, type=pathlib.Path)
     parser.add_argument("--sysroot", required=True, type=pathlib.Path)
     parser.add_argument("--include", required=True, type=pathlib.Path)
+    parser.add_argument("--modules", required=True, type=pathlib.Path)
     parser.add_argument("--build-dir", required=True, type=pathlib.Path)
     parser.add_argument("--contract-graph", required=True, type=pathlib.Path)
     parser.add_argument("--fixtures", required=True, type=pathlib.Path)
@@ -372,6 +375,14 @@ def main():
         args.output / "named-action-mismatch",
         succeeds=False,
         error_contains="action attribute name does not match payload get_name()",
+    )
+    invoke(
+        args,
+        "namedstatic",
+        args.fixtures / "named_action_static.cpp",
+        args.output / "named-action-static",
+        succeeds=False,
+        error_contains="contract entry point must be a non-static member function",
     )
 
     guest_macro = invoke(

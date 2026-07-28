@@ -86,6 +86,10 @@ rediscover dependencies from generated build state.
   Forge components with stable IDs.
 - Public edges are visible to downstream libraries and contracts.
 - Private edges are visible only while compiling the owner implementation.
+- Every non-system compiler dependency is declared by the descriptor, even when
+  it is outside the owner's source root.
+- A public module may depend only on public files, including files owned by the
+  same library.
 - The descriptor graph is acyclic.
 - An installed descriptor contains prefix-relative paths only.
 - Installed packages contain source and module inputs, never BMI or PCM files.
@@ -117,3 +121,11 @@ attestation fixtures.
 
 Ubuntu and macOS CI are portability confirmation after a clean review, not the
 primary graph debugger.
+
+## Manifest Migration
+
+The dual-target graph moves the experimental contract manifest from schema v1
+to schema v2 for Forge 8.16. Schema-v1 sidecars are regenerated rather than
+translated. Consumers must accept schema v2 and its required `source_graph`
+before upgrading. Forge does not emit both schemas or retain a graph-free v1
+mode.
