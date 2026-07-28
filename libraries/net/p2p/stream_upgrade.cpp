@@ -674,7 +674,7 @@ boost::asio::awaitable<void> negotiate_yamux(Connection& connection, bool outbou
 
 void set_cancel(tcp_upgrade_deadline& deadline, std::function<void()> cancel) {
    if (deadline.cancel_current) {
-      *deadline.cancel_current = std::move(cancel);
+      deadline.cancel_current->set(std::move(cancel));
    }
 }
 
@@ -682,10 +682,7 @@ void clear_cancel(tcp_upgrade_deadline& deadline) noexcept {
    if (!deadline.cancel_current) {
       return;
    }
-   try {
-      *deadline.cancel_current = {};
-   } catch (...) {
-   }
+   deadline.cancel_current->clear();
 }
 
 struct cancel_cleanup {
@@ -750,6 +747,7 @@ boost::asio::awaitable<upgraded_session> finish_tls_outbound(forge::net::tcp::co
                                                                 deadline.timeout)
                      : co_await forge::net::stcp::async_upgrade_client(std::move(connection),
                                                                 make_libp2p_tls_client_options(options));
+      auto tls_cleanup = cancel_cleanup{&deadline};
       set_cancel(deadline, [&tls] { tls.cancel(); });
       const auto peer = verify_libp2p_tls_chain(tls.peer_certificate_chain(),
                                                 options.allow_insecure_test_mode ? std::nullopt : expected_peer);
@@ -780,6 +778,7 @@ boost::asio::awaitable<upgraded_session> finish_tls_inbound(forge::net::tcp::con
                                                                 deadline.timeout)
                      : co_await forge::net::stcp::async_upgrade_server(std::move(connection),
                                                                 make_libp2p_tls_server_options(options));
+      auto tls_cleanup = cancel_cleanup{&deadline};
       set_cancel(deadline, [&tls] { tls.cancel(); });
       const auto peer = verify_libp2p_tls_chain(tls.peer_certificate_chain(),
                                                 options.allow_insecure_test_mode ? std::nullopt : expected_peer);
@@ -798,6 +797,42 @@ boost::asio::awaitable<upgraded_session> finish_tls_inbound(forge::net::tcp::con
 }
 
 } // namespace
+
+void cancellation_latch::set(std::function<void()> cancel) {
+   auto lock = std::scoped_lock{mutex_};
+   if (!canceled_) {
+      current_ = std::move(cancel);
+      return;
+   }
+   // Keep callback invocation serialized with clear(); its owner may destroy the referenced operation immediately.
+   try {
+      if (cancel) {
+         cancel();
+      }
+   } catch (...) {
+   }
+}
+
+void cancellation_latch::cancel() noexcept {
+   auto lock = std::scoped_lock{mutex_};
+   if (canceled_) {
+      return;
+   }
+   canceled_ = true;
+   // See set(): clear() must not return while a borrowed operation is still being canceled.
+   try {
+      if (current_) {
+         current_();
+      }
+   } catch (...) {
+   }
+   current_ = {};
+}
+
+void cancellation_latch::clear() noexcept {
+   auto lock = std::scoped_lock{mutex_};
+   current_ = {};
+}
 
 boost::asio::awaitable<upgraded_session>
 upgrade_outbound_stream(forge::net::p2p::stream stream, const node::options& options, std::optional<peer_id> expected_peer) {
