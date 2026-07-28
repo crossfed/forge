@@ -4,16 +4,23 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 
-def run(*command: str, succeeds: bool = True, contains: str | None = None) -> str:
+def run(
+    *command: str,
+    succeeds: bool = True,
+    contains: str | None = None,
+    environment: dict[str, str] | None = None,
+) -> str:
     result = subprocess.run(
         command,
         check=False,
+        env=environment,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -51,6 +58,7 @@ def configure(
     definitions: tuple[str, ...] = (),
     succeeds: bool = True,
     contains: str | None = None,
+    environment: dict[str, str] | None = None,
 ) -> None:
     command = [
         cmake,
@@ -71,7 +79,7 @@ def configure(
     if product_package is not None:
         command.append(f"-DProductProtocol_DIR={product_package}")
     command.extend(definitions)
-    run(*command, succeeds=succeeds, contains=contains)
+    run(*command, succeeds=succeeds, contains=contains, environment=environment)
 
 
 def build(
@@ -80,11 +88,12 @@ def build(
     *targets: str,
     succeeds: bool = True,
     contains: str | None = None,
+    environment: dict[str, str] | None = None,
 ) -> None:
     command = [cmake, "--build", str(directory), "-j", "4"]
     if targets:
         command.extend(["--target", *targets])
-    run(*command, succeeds=succeeds, contains=contains)
+    run(*command, succeeds=succeeds, contains=contains, environment=environment)
 
 
 def read_json(path: Path) -> dict:
@@ -180,6 +189,22 @@ def verify_compilation_metadata(build_directory: Path) -> None:
             metadata_count += 1
     if metadata_count != 5:
         raise RuntimeError(f"expected five contract-library translation units, found {metadata_count}")
+
+
+def verify_compiler_launcher_bypass(log: Path, source: Path) -> None:
+    if not log.is_file() or not log.read_text(encoding="utf-8").strip():
+        raise RuntimeError("compiler launcher regression did not exercise the guest build")
+    invocations = log.read_text(encoding="utf-8")
+    library_sources = (
+        source / "include/product/chain/values.cppm",
+        source / "include/product/chain/limits.cppm",
+        source / "include/product/chain/protocol.cppm",
+        source / "src/limits.cpp",
+        source / "src/protocol.cpp",
+    )
+    for library_source in library_sources:
+        if str(library_source.resolve()) in invocations:
+            raise RuntimeError(f"contract-library compilation used a compiler cache launcher: {library_source}")
 
 
 def verify_relocatable_package(prefix: Path, forbidden: list[Path]) -> None:
@@ -452,6 +477,16 @@ def validate(
 
     producer_build = output / "producer-build"
     producer_install = output / "producer-install"
+    compiler_launcher = output / "compiler-launcher.sh"
+    compiler_launcher_log = output / "compiler-launcher.log"
+    compiler_launcher.write_text(
+        '#!/bin/sh\nprintf "%s\\n" "$*" >> "$FORGE_TEST_COMPILER_LAUNCHER_LOG"\nexec "$@"\n',
+        encoding="utf-8",
+    )
+    compiler_launcher.chmod(0o755)
+    compiler_environment = os.environ.copy()
+    compiler_environment["CMAKE_CXX_COMPILER_LAUNCHER"] = str(compiler_launcher)
+    compiler_environment["FORGE_TEST_COMPILER_LAUNCHER_LOG"] = str(compiler_launcher_log)
     configure(
         cmake=cmake,
         cxx_compiler=cxx_compiler,
@@ -459,16 +494,21 @@ def validate(
         contract_package=contract_package,
         source=source / "producer",
         build=producer_build,
-        definitions=(f"-DCMAKE_INSTALL_PREFIX={producer_install}",),
+        definitions=(
+            f"-DCMAKE_INSTALL_PREFIX={producer_install}",
+            "-DCMAKE_CXX_COMPILER_LAUNCHER=",
+        ),
+        environment=compiler_environment,
     )
-    build(cmake, producer_build)
+    build(cmake, producer_build, environment=compiler_environment)
     run(str(producer_build / "product_protocol_host_tests"))
     abi, manifest = verify_artifacts(producer_build, "product")
     verify_direct_action(abi)
     verify_source_graph(manifest)
     verify_compilation_metadata(producer_build)
+    verify_compiler_launcher_bypass(compiler_launcher_log, source / "producer")
     initial_digest = manifest["source_graph"]["sha256"]
-    build(cmake, producer_build)
+    build(cmake, producer_build, environment=compiler_environment)
     if verify_artifacts(producer_build, "product")[1]["source_graph"]["sha256"] != initial_digest:
         raise RuntimeError("source graph digest changed across an incremental rebuild")
     run(cmake, "--install", str(producer_build))

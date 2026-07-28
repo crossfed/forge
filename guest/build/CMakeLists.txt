@@ -588,6 +588,12 @@ list(REMOVE_DUPLICATES _visible_library_targets)
 list(REMOVE_DUPLICATES _visible_library_module_bases)
 list(REMOVE_DUPLICATES _visible_component_targets)
 
+# Compiler caches do not preserve the metadata sidecar emitted by the Clang
+# plugin. These targets must execute the compiler whenever CMake rebuilds them.
+foreach(_target IN LISTS _contract_library_targets)
+   set_property(TARGET "${_target}" PROPERTY CXX_COMPILER_LAUNCHER "")
+endforeach()
+
 foreach(
    _target
    ${_guest_component_ids}
