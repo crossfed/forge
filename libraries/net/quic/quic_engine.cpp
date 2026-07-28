@@ -907,6 +907,7 @@ struct engine_connection::impl {
                 auto ec = boost::system::error_code{};
                 if (shared->server_socket) {
                    ec = co_await shared->server_socket->async_send(std::move(packet), shared->remote_endpoint);
+                   co_await asio::dispatch(shared->strand, asio::use_awaitable);
                 } else {
                    co_await shared->socket->async_send_to(asio::buffer(packet), shared->remote_endpoint,
                                                           asio::redirect_error(asio::use_awaitable, ec));
