@@ -3,6 +3,7 @@ module;
 #include <forge/exceptions/macros.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <exception>
@@ -12,10 +13,13 @@ module;
 #include <utility>
 #include <vector>
 
+#include <boost/asio/awaitable.hpp>
+
 module forge.plugins.p2p.node.plugin;
 
 import forge.api.transport.options;
 import forge.asio.runtime;
+import forge.asio.task;
 import forge.config.core.component;
 import forge.config.core.decode;
 import forge.exceptions;
@@ -117,7 +121,14 @@ void apply_config(plugin::impl& state, const config& config) {
       .max_frame_size = static_cast<std::uint32_t>(config.api_max_frame_size),
    };
    state.listen = parse_endpoint_list(config.listen);
-   state.bootstrap = parse_endpoint_list(config.bootstrap);
+   state.bootstrap.clear();
+   for (auto& endpoint : parse_endpoint_list(config.bootstrap)) {
+      auto peer = endpoint.peer;
+      state.bootstrap.push_back(bootstrap_peer{
+         .endpoint = std::move(endpoint),
+         .peer = std::move(peer),
+      });
+   }
    state.options.advertised_endpoints = parse_endpoint_list(config.advertised_endpoints);
    state.options.certificate_pem = config.certificate_pem;
    state.options.private_key_pem = config.private_key_pem;

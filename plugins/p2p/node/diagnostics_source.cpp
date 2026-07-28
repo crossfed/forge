@@ -2,6 +2,7 @@ module;
 
 #include <boost/asio/awaitable.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -15,6 +16,7 @@ module forge.plugins.p2p.node.plugin;
 
 import forge.api.transport.options;
 import forge.asio.runtime;
+import forge.asio.task;
 import forge.net.p2p.diagnostics;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.identity;
