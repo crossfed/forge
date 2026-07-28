@@ -16,6 +16,11 @@ add_test(
    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 add_test(
+   NAME test_forge_digest_span_lifetime
+   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/crypto/check_digest_span_lifetime.py ${CMAKE_SOURCE_DIR}
+   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+add_test(
    NAME test_forge_contract_sdk_cmake_runtime_policy
    COMMAND
       ${CMAKE_COMMAND}

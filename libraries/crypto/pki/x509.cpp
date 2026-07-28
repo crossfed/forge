@@ -138,8 +138,9 @@ core::bytes certificate::extension(std::string_view oid) const {
 }
 
 core::bytes certificate::fingerprint_sha256() const {
-   const auto digest = digest::sha256::hash(der_).to_uint8_span();
-   return core::bytes(digest.begin(), digest.end());
+   const auto fingerprint = digest::sha256::hash(der_);
+   const auto bytes = fingerprint.to_uint8_span();
+   return core::bytes(bytes.begin(), bytes.end());
 }
 
 std::string certificate::fingerprint_sha256_text() const {
