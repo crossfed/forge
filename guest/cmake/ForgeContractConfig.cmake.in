@@ -42,7 +42,27 @@ foreach(_required
    endif()
 endforeach()
 
-include("${ForgeContract_COMPONENTS}")
+file(REAL_PATH "${ForgeContract_COMPONENTS}" _forge_contract_components_file)
+get_property(
+   _forge_contract_registered_components_file
+   GLOBAL PROPERTY FORGE_CONTRACT_REGISTERED_COMPONENTS_FILE
+)
+if(_forge_contract_registered_components_file)
+   if(NOT _forge_contract_registered_components_file STREQUAL _forge_contract_components_file)
+      set(ForgeContract_FOUND FALSE)
+      set(
+         ForgeContract_NOT_FOUND_MESSAGE
+         "a different Forge Contract component registry is already loaded: ${_forge_contract_registered_components_file}"
+      )
+      return()
+   endif()
+else()
+   include("${_forge_contract_components_file}")
+   set_property(
+      GLOBAL PROPERTY FORGE_CONTRACT_REGISTERED_COMPONENTS_FILE
+      "${_forge_contract_components_file}"
+   )
+endif()
 
 set(_forge_contract_foundation_manifest "${ForgeContract_DATA_DIR}/foundation.json")
 if(NOT EXISTS "${_forge_contract_foundation_manifest}")

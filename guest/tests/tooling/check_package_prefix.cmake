@@ -100,7 +100,17 @@ file(MAKE_DIRECTORY "${_prefix}/${CMAKE_INSTALL_LIBDIR}/forge-contract")
 file(WRITE "${_prefix}/${CMAKE_INSTALL_LIBDIR}/forge-contract/attr-plugin${CMAKE_SHARED_MODULE_SUFFIX}" "")
 
 set(_consumer "${FORGE_CONTRACT_TEST_ROOT}/consumer")
+set(_repeated_dependency "${FORGE_CONTRACT_TEST_ROOT}/repeated-dependency")
 file(MAKE_DIRECTORY "${_consumer}")
+file(MAKE_DIRECTORY "${_repeated_dependency}")
+file(
+   WRITE
+   "${_repeated_dependency}/RepeatedDependencyConfig.cmake"
+   [=[
+include(CMakeFindDependencyMacro)
+find_dependency(ForgeContract CONFIG)
+]=]
+)
 file(
    WRITE
    "${_consumer}/CMakeLists.txt"
@@ -108,6 +118,7 @@ file(
 cmake_minimum_required(VERSION 3.31)
 project(ForgeContractPackagePrefixTest NONE)
 find_package(ForgeContract CONFIG REQUIRED)
+find_package(RepeatedDependency CONFIG REQUIRED)
 
 if(NOT "${ForgeContract_PREFIX}" STREQUAL "${EXPECTED_PREFIX}")
    message(FATAL_ERROR "ForgeContractConfig resolved the wrong prefix: ${ForgeContract_PREFIX}")
@@ -137,6 +148,7 @@ execute_process(
       -S "${_consumer}"
       -B "${FORGE_CONTRACT_TEST_ROOT}/build"
       -DForgeContract_DIR=${_config_dir}
+      -DRepeatedDependency_DIR=${_repeated_dependency}
       -DCMAKE_TOOLCHAIN_FILE=${_config_dir}/ForgeContractToolchain.cmake
       -DEXPECTED_PREFIX=${_prefix}
       -DEXPECTED_PLUGIN=${_prefix}/${CMAKE_INSTALL_LIBDIR}/forge-contract/attr-plugin${CMAKE_SHARED_MODULE_SUFFIX}
@@ -153,6 +165,7 @@ execute_process(
       -S "${_consumer}"
       -B "${FORGE_CONTRACT_TEST_ROOT}/tampered-build"
       -DForgeContract_DIR=${_config_dir}
+      -DRepeatedDependency_DIR=${_repeated_dependency}
       -DCMAKE_TOOLCHAIN_FILE=${_config_dir}/ForgeContractToolchain.cmake
       -DEXPECTED_PREFIX=${_prefix}
       -DEXPECTED_PLUGIN=${_prefix}/${CMAKE_INSTALL_LIBDIR}/forge-contract/attr-plugin${CMAKE_SHARED_MODULE_SUFFIX}
