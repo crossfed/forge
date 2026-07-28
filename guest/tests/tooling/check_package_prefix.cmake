@@ -5,6 +5,8 @@ foreach(
    FORGE_CONTRACT_CONFIG_TEMPLATE
    FORGE_CONTRACT_TOOLCHAIN_TEMPLATE
    FORGE_CONTRACT_FUNCTIONS
+   FORGE_CONTRACT_GRAPH
+   FORGE_CONTRACT_GUEST_COMPONENTS
    FORGE_CONTRACT_TEST_ROOT
 )
    if(NOT DEFINED ${_required} OR "${${_required}}" STREQUAL "")
@@ -49,6 +51,12 @@ configure_file(
    @ONLY
 )
 configure_file("${FORGE_CONTRACT_FUNCTIONS}" "${_config_dir}/ForgeContractFunctions.cmake" COPYONLY)
+configure_file("${FORGE_CONTRACT_GRAPH}" "${_config_dir}/ForgeContractGraph.cmake" COPYONLY)
+configure_file(
+   "${FORGE_CONTRACT_GUEST_COMPONENTS}"
+   "${_config_dir}/ForgeContractGuestComponents.cmake"
+   COPYONLY
+)
 
 file(MAKE_DIRECTORY "${_prefix}/bin")
 foreach(_tool clang++ wasm-ld abigen contract-check contract-manifest)

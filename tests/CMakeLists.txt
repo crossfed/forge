@@ -51,6 +51,8 @@ add_test(
       -DFORGE_CONTRACT_CONFIG_TEMPLATE=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractConfig.cmake.in
       -DFORGE_CONTRACT_TOOLCHAIN_TEMPLATE=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractToolchain.cmake.in
       -DFORGE_CONTRACT_FUNCTIONS=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractFunctions.cmake
+      -DFORGE_CONTRACT_GRAPH=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractGraph.cmake
+      -DFORGE_CONTRACT_GUEST_COMPONENTS=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractGuestComponents.cmake
       -DFORGE_CONTRACT_TEST_ROOT=${CMAKE_BINARY_DIR}/tests/contract-package-prefix
       -P ${CMAKE_SOURCE_DIR}/guest/tests/tooling/check_package_prefix.cmake
 )
