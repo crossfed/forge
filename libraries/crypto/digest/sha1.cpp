@@ -45,10 +45,10 @@ sha1::operator std::string() const {
    return str();
 }
 
-char* sha1::data() {
+char* sha1::data() & {
    return (char*)&_hash[0];
 }
-const char* sha1::data() const {
+const char* sha1::data() const& {
    return (char*)&_hash[0];
 }
 
@@ -123,4 +123,4 @@ void from_variant(const variant& v, sha1& bi) {
       memset(bi.data(), char(0), sizeof(bi));
 }
 
-} // namespace forge::crypto
+} // namespace forge::crypto::digest

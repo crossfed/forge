@@ -976,7 +976,7 @@ add_custom_target(
       ${CMAKE_BINARY_DIR}/forge-package-crypto-digest-component
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
-      --test-command forge_package_crypto_digest_component
+      --test-command ${CMAKE_CTEST_COMMAND} --output-on-failure
    DEPENDS test_forge_package_install
 )
 add_custom_target(
@@ -1759,7 +1759,7 @@ add_test(
       ${CMAKE_BINARY_DIR}/forge-package-crypto-digest-component
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
-      --test-command forge_package_crypto_digest_component
+      --test-command ${CMAKE_CTEST_COMMAND} --output-on-failure
 )
 set_tests_properties(test_forge_package_crypto_digest_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(

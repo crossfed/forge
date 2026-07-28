@@ -65,13 +65,16 @@ class ripemd160
    friend ripemd160 operator^(const ripemd160& left, const ripemd160& right);
 #endif
 
-   [[nodiscard]] constexpr char* data() noexcept {
+   [[nodiscard]] constexpr char* data() & noexcept {
       return reinterpret_cast<char*>(_hash);
    }
 
-   [[nodiscard]] constexpr const char* data() const noexcept {
+   [[nodiscard]] constexpr const char* data() const& noexcept {
       return reinterpret_cast<const char*>(_hash);
    }
+
+   [[nodiscard]] constexpr char* data() && noexcept = delete;
+   [[nodiscard]] constexpr const char* data() const&& noexcept = delete;
 
    [[nodiscard]] static constexpr std::size_t data_size() noexcept {
       return byte_size;
@@ -110,4 +113,4 @@ class ripemd160
 using uint160_t = ripemd160;
 using uint160 = ripemd160;
 
-} // namespace forge::crypto
+} // namespace forge::crypto::digest

@@ -54,14 +54,16 @@ namespace {
 }
 
 [[nodiscard]] std::vector<std::uint8_t> sha256(std::span<const std::uint8_t> value) {
-   const auto digest = forge::crypto::digest::sha256::hash(value).to_uint8_span();
-   return {digest.begin(), digest.end()};
+   const auto digest = forge::crypto::digest::sha256::hash(value);
+   const auto bytes = digest.to_uint8_span();
+   return {bytes.begin(), bytes.end()};
 }
 
 [[nodiscard]] std::vector<std::uint8_t> hmac_sha256(std::span<const std::uint8_t> key,
                                                     std::span<const std::uint8_t> value) {
-   const auto digest = forge::crypto::digest::hmac_sha256{}.digest(key, value).to_uint8_span();
-   return {digest.begin(), digest.end()};
+   const auto digest = forge::crypto::digest::hmac_sha256{}.digest(key, value);
+   const auto bytes = digest.to_uint8_span();
+   return {bytes.begin(), bytes.end()};
 }
 
 [[nodiscard]] std::vector<std::uint8_t> concat(std::span<const std::uint8_t> left,

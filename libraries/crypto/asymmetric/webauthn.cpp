@@ -391,8 +391,8 @@ asymmetric::webauthn_public_key recover(const asymmetric::webauthn_signature& va
 
    static_assert(min_auth_data_size >= sizeof(forge::crypto::digest::sha256),
                  "auth_data min size not enough to store a sha256");
-   FORGE_ASSERT(memcmp(value.auth_data.data(), forge::crypto::digest::sha256::hash(result.rpid).data(),
-                       sizeof(forge::crypto::digest::sha256)) == 0,
+   const auto rp_id_hash = forge::crypto::digest::sha256::hash(result.rpid);
+   FORGE_ASSERT(memcmp(value.auth_data.data(), rp_id_hash.data(), sizeof(rp_id_hash)) == 0,
                 "webauthn rpid hash doesn't match origin");
 
    // the signature (and thus public key we need to return) will be over
