@@ -159,11 +159,56 @@ def verify_source_graph(manifest: dict) -> None:
         raise RuntimeError("source graph dependencies are not canonicalized")
 
 
-def verify_compilation_metadata(build_directory: Path) -> None:
+def verify_contract_graph(build_directory: Path) -> tuple[dict[str, str], dict[Path, str]]:
+    graph = read_json(build_directory / "product.contract-graph.json")
+    root_components = graph["root"]["components"]
+    if root_components != ["forge.contract.runtime"]:
+        raise RuntimeError(f"contract graph has unexpected foundation components: {root_components}")
+
+    components = {entry["id"]: entry for entry in graph["components"]}
+    runtime = components.get("forge.contract.runtime")
+    if runtime is None:
+        raise RuntimeError("contract graph omits the Forge Contract runtime component")
+    if runtime["dependencies"] != [
+        "forge.raw",
+        "forge.codec.base64",
+        "forge.codec.base58",
+        "forge.codec.hex",
+        "forge.chain.protocol",
+    ]:
+        raise RuntimeError(f"contract runtime dependency graph is incomplete: {runtime['dependencies']}")
+
+    module_owners: dict[str, str] = {}
+    for component_id, component in components.items():
+        for module in component["modules"]:
+            if module in module_owners:
+                raise RuntimeError(f"contract graph gives module {module} multiple owners")
+            module_owners[module] = component_id
+    for required in ("forge.contract", "forge.contract.multi_index", "forge.crypto.digest.sha256"):
+        if required not in module_owners:
+            raise RuntimeError(f"contract graph does not own exposed SDK module {required}")
+
+    source_owners: dict[Path, str] = {}
+    for library in graph["libraries"]:
+        for file in library["files"]:
+            if file["role"] not in ("module", "implementation"):
+                continue
+            source = Path(file["physical_path"]).resolve()
+            if source in source_owners:
+                raise RuntimeError(f"contract graph gives source {source} multiple owners")
+            source_owners[source] = library["id"]
+    return module_owners, source_owners
+
+
+def verify_compilation_metadata(
+    build_directory: Path,
+    module_owners: dict[str, str],
+    source_owners: dict[Path, str],
+) -> None:
     object_lists = sorted((build_directory / "product.contract" / "contract-compilations").glob("library-*.objects"))
     if len(object_lists) != 3:
         raise RuntimeError(f"expected three contract-library compilations, found {len(object_lists)}")
-    metadata_count = 0
+    metadata_records: list[tuple[Path, str, dict]] = []
     for object_list in object_lists:
         for object_name in object_list.read_text(encoding="utf-8").splitlines():
             if not object_name:
@@ -176,6 +221,14 @@ def verify_compilation_metadata(build_directory: Path) -> None:
                 values = metadata.get(field)
                 if not isinstance(values, list) or values != sorted(set(values)):
                     raise RuntimeError(f"compilation metadata has non-canonical {field}: {metadata_path}")
+            source = Path(metadata["source"]).resolve()
+            owner = source_owners.get(source)
+            if owner is None:
+                raise RuntimeError(f"compilation metadata source has no descriptor owner: {source}")
+            for module in metadata["provides"]:
+                existing = module_owners.setdefault(module, owner)
+                if existing != owner:
+                    raise RuntimeError(f"contract module {module} has multiple owners")
             dependencies = metadata.get("dependencies")
             if not isinstance(dependencies, list):
                 raise RuntimeError(f"compilation metadata has no dependencies: {metadata_path}")
@@ -186,9 +239,13 @@ def verify_compilation_metadata(build_directory: Path) -> None:
                     or not isinstance(dependency.get("system"), bool)
                 ):
                     raise RuntimeError(f"invalid compilation dependency: {metadata_path}")
-            metadata_count += 1
-    if metadata_count != 5:
-        raise RuntimeError(f"expected five contract-library translation units, found {metadata_count}")
+            metadata_records.append((metadata_path, owner, metadata))
+    if len(metadata_records) != 5:
+        raise RuntimeError(f"expected five contract-library translation units, found {len(metadata_records)}")
+    for metadata_path, _, metadata in metadata_records:
+        for module in (*metadata["imports"], *metadata["exports"]):
+            if module not in module_owners:
+                raise RuntimeError(f"compilation metadata references unowned module {module}: {metadata_path}")
 
 
 def verify_compiler_launcher_bypass(log: Path, source: Path) -> None:
@@ -515,7 +572,8 @@ def validate(
     abi, manifest = verify_artifacts(producer_build, "product")
     verify_direct_action(abi)
     verify_source_graph(manifest)
-    verify_compilation_metadata(producer_build)
+    module_owners, source_owners = verify_contract_graph(producer_build)
+    verify_compilation_metadata(producer_build, module_owners, source_owners)
     verify_compiler_launcher_bypass(compiler_launcher_log, source / "producer")
     initial_digest = manifest["source_graph"]["sha256"]
     build(cmake, producer_build, environment=compiler_environment)

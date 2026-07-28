@@ -42,6 +42,8 @@ foreach(_required
    endif()
 endforeach()
 
+include("${ForgeContract_COMPONENTS}")
+
 set(_forge_contract_foundation_manifest "${ForgeContract_DATA_DIR}/foundation.json")
 if(NOT EXISTS "${_forge_contract_foundation_manifest}")
    set(ForgeContract_FOUND FALSE)

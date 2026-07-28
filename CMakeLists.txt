@@ -450,7 +450,7 @@ endif()
 function(forge_contract_register_guest_component)
    cmake_parse_arguments(
       ARG
-      ""
+      "FOUNDATION"
       "ID;ARCHIVE"
       "MODULES;MODULE_NAMES;PUBLIC_LIBRARIES"
       ${ARGN}
@@ -481,6 +481,10 @@ function(forge_contract_register_guest_component)
    set_property(
       GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_DEPENDENCIES"
       "${ARG_PUBLIC_LIBRARIES}"
+   )
+   set_property(
+      GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_FOUNDATION"
+      "${ARG_FOUNDATION}"
    )
 endfunction()
 

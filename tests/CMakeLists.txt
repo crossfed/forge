@@ -42,6 +42,7 @@ add_test(
       -DFORGE_CONTRACT_BUILD_CMAKE=${CMAKE_SOURCE_DIR}/guest/build/CMakeLists.txt
       -DFORGE_CONTRACT_FOUNDATION_CMAKE=${CMAKE_SOURCE_DIR}/guest/cmake/foundation-build/CMakeLists.txt
       -DFORGE_CONTRACT_CONFIG_TEMPLATE=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractConfig.cmake.in
+      -DFORGE_CONTRACT_GUEST_COMPONENTS=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractGuestComponents.cmake
       -P ${CMAKE_SOURCE_DIR}/guest/tests/tooling/check_guest_runtime_archive.cmake
 )
 add_test(

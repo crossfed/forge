@@ -103,6 +103,64 @@ function(_forge_contract_id_key id output)
    set(${output} "${_key}" PARENT_SCOPE)
 endfunction()
 
+if(NOT COMMAND forge_contract_register_guest_component)
+   function(forge_contract_register_guest_component)
+      cmake_parse_arguments(
+         ARG
+         "FOUNDATION"
+         "ID;ARCHIVE"
+         "MODULES;MODULE_NAMES;PUBLIC_LIBRARIES"
+         ${ARGN}
+      )
+      if(
+         ARG_UNPARSED_ARGUMENTS
+         OR NOT ARG_ID
+         OR NOT ARG_MODULES
+         OR NOT ARG_MODULE_NAMES
+      )
+         message(FATAL_ERROR "invalid Forge Contract guest component declaration")
+      endif()
+      list(LENGTH ARG_MODULES _module_count)
+      list(LENGTH ARG_MODULE_NAMES _module_name_count)
+      if(NOT _module_count EQUAL _module_name_count)
+         message(FATAL_ERROR "Forge Contract guest component ${ARG_ID} has mismatched module metadata")
+      endif()
+      _forge_contract_id_key("${ARG_ID}" _key)
+      get_property(_existing GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_ID")
+      if(_existing)
+         message(FATAL_ERROR "duplicate Forge Contract guest component ID: ${ARG_ID}")
+      endif()
+      set_property(GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_ID" "${ARG_ID}")
+      set_property(
+         GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_MODULE_NAMES"
+         "${ARG_MODULE_NAMES}"
+      )
+      set_property(
+         GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_DEPENDENCIES"
+         "${ARG_PUBLIC_LIBRARIES}"
+      )
+      if(ARG_FOUNDATION)
+         set_property(GLOBAL APPEND PROPERTY FORGE_CONTRACT_FOUNDATION_COMPONENT_IDS "${ARG_ID}")
+      endif()
+   endfunction()
+endif()
+
+function(_forge_contract_component_descriptor id modules dependencies)
+   _forge_contract_id_key("${id}" _key)
+   get_property(_registered GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_ID")
+   get_property(
+      _modules GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_MODULE_NAMES"
+   )
+   get_property(
+      _dependencies GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_DEPENDENCIES"
+   )
+   if(NOT _registered STREQUAL id OR NOT _modules)
+      message(FATAL_ERROR "unknown Forge Contract guest component descriptor: ${id}")
+   endif()
+   set(${modules} "${_modules}" PARENT_SCOPE)
+   set(${dependencies} "${_dependencies}" PARENT_SCOPE)
+endfunction()
+
 function(_forge_contract_register_library_target target)
    get_target_property(_id "${target}" FORGE_CONTRACT_LIBRARY_ID)
    if(NOT _id)
@@ -136,6 +194,20 @@ function(_forge_contract_register_component_target target)
    get_property(_registered GLOBAL PROPERTY "FORGE_CONTRACT_COMPONENT_TARGET_${_key}")
    if(_registered AND NOT _registered STREQUAL target)
       message(FATAL_ERROR "duplicate Forge guest component ID: ${_id}")
+   endif()
+   _forge_contract_component_descriptor("${_id}" _descriptor_modules _descriptor_dependencies)
+   get_target_property(_target_modules "${target}" FORGE_CONTRACT_GUEST_MODULE_NAMES)
+   get_target_property(
+      _target_dependencies "${target}" FORGE_CONTRACT_GUEST_PUBLIC_COMPONENT_IDS
+   )
+   if(_target_dependencies STREQUAL "_target_dependencies-NOTFOUND")
+      set(_target_dependencies)
+   endif()
+   if(
+      NOT "${_target_modules}" STREQUAL "${_descriptor_modules}"
+      OR NOT "${_target_dependencies}" STREQUAL "${_descriptor_dependencies}"
+   )
+      message(FATAL_ERROR "Forge guest component target does not match SDK descriptor: ${_id}")
    endif()
    set_property(GLOBAL PROPERTY "FORGE_CONTRACT_COMPONENT_TARGET_${_key}" "${target}")
 endfunction()
@@ -579,13 +651,7 @@ function(_forge_contract_collect_component graph id)
       GLOBAL PROPERTY "FORGE_CONTRACT_GRAPH_${graph}_COMPONENT_${_key}_STATE"
       visiting
    )
-   _forge_contract_find_component_target("${id}" _target)
-   get_target_property(
-      _dependencies "${_target}" FORGE_CONTRACT_GUEST_PUBLIC_COMPONENT_IDS
-   )
-   if(_dependencies STREQUAL "_dependencies-NOTFOUND")
-      set(_dependencies)
-   endif()
+   _forge_contract_component_descriptor("${id}" _modules _dependencies)
    foreach(_dependency IN LISTS _dependencies)
       _forge_contract_collect_component("${graph}" "${_dependency}")
    endforeach()
@@ -704,6 +770,12 @@ function(_forge_contract_write_graph)
    set(_root_library_ids)
    set(_root_component_ids)
    set(_build_dependencies)
+   get_property(_foundation_component_ids GLOBAL PROPERTY FORGE_CONTRACT_FOUNDATION_COMPONENT_IDS)
+   list(REMOVE_DUPLICATES _foundation_component_ids)
+   foreach(_id IN LISTS _foundation_component_ids)
+      list(APPEND _root_component_ids "${_id}")
+      _forge_contract_collect_component("${_graph_key}" "${_id}")
+   endforeach()
    foreach(_dependency IN LISTS ARG_LIBRARIES)
       _forge_contract_classify_dependency("${_dependency}" _kind _id _dependency_target)
       if(_kind STREQUAL "library")
@@ -732,20 +804,7 @@ function(_forge_contract_write_graph)
    set(_components "[]")
    set(_component_index 0)
    foreach(_id IN LISTS _component_ids)
-      _forge_contract_find_component_target("${_id}" _component_target)
-      get_target_property(
-         _module_names "${_component_target}" FORGE_CONTRACT_GUEST_MODULE_NAMES
-      )
-      get_target_property(
-         _dependencies "${_component_target}"
-         FORGE_CONTRACT_GUEST_PUBLIC_COMPONENT_IDS
-      )
-      if(_dependencies STREQUAL "_dependencies-NOTFOUND")
-         set(_dependencies)
-      endif()
-      if(NOT _module_names)
-         message(FATAL_ERROR "Forge guest component ${_id} has no module names")
-      endif()
+      _forge_contract_component_descriptor("${_id}" _module_names _dependencies)
       _forge_contract_json_quote("${_id}" _quoted_id)
       _forge_contract_json_array("${_module_names}" _module_names_json)
       _forge_contract_json_array("${_dependencies}" _dependencies_json)

@@ -147,3 +147,79 @@ forge_contract_register_guest_component(
       forge.chain.protocol.call_access_mode
       forge.chain.protocol.call_data_header
 )
+
+forge_contract_register_guest_component(
+   FOUNDATION
+   ID forge.contract.runtime
+   ARCHIVE libforge_guest_contract.a
+   PUBLIC_LIBRARIES
+      forge.raw
+      forge.codec.base64
+      forge.codec.base58
+      forge.codec.hex
+      forge.chain.protocol
+   MODULES
+      forge/contract/intrinsics.cppm
+      forge/contract/contract.cppm
+      forge/contract/datastream.cppm
+      forge/contract/varint.cppm
+      forge/contract/fixed_bytes.cppm
+      forge/contract/binary_extension.cppm
+      forge/contract/ignore.cppm
+      forge/contract/hash_id.cppm
+      forge/contract/action.cppm
+      forge/contract/transaction.cppm
+      forge/contract/system.cppm
+      forge/contract/deferred_transaction.cppm
+      forge/contract/authorization.cppm
+      forge/contract/bitset.cppm
+      forge/contract/call.cppm
+      forge/contract/crypto.cppm
+      forge/contract/crypto_bls_ext.cppm
+      forge/contract/crypto_ext.cppm
+      forge/contract/instant_finality.cppm
+      forge/contract/key.cppm
+      forge/contract/powers.cppm
+      forge/contract/print.cppm
+      forge/contract/privileged.cppm
+      forge/contract/producer_schedule.cppm
+      forge/contract/rope.cppm
+      forge/contract/string.cppm
+      forge/contract/dispatcher.cppm
+      forge/contract/multi_index.cppm
+      forge/contract/singleton.cppm
+      forge/contract/compatibility_name.cppm
+      forge/contract/compatibility_asset.cppm
+   MODULE_NAMES
+      forge.contract.intrinsics
+      forge.contract
+      forge.contract.datastream
+      forge.contract.varint
+      forge.contract.fixed_bytes
+      forge.contract.binary_extension
+      forge.contract.ignore
+      forge.contract.hash_id
+      forge.contract.action
+      forge.contract.transaction
+      forge.contract.system
+      forge.contract.deferred_transaction
+      forge.contract.authorization
+      forge.contract.bitset
+      forge.contract.call
+      forge.contract.crypto
+      forge.contract.crypto_bls_ext
+      forge.contract.crypto_ext
+      forge.contract.instant_finality
+      forge.contract.key
+      forge.contract.powers
+      forge.contract.print
+      forge.contract.privileged
+      forge.contract.producer_schedule
+      forge.contract.rope
+      forge.contract.string
+      forge.contract.dispatcher
+      forge.contract.multi_index
+      forge.contract.singleton
+      forge.contract.compatibility_name
+      forge.contract.compatibility_asset
+)

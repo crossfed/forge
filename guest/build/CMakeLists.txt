@@ -87,7 +87,6 @@ list(REMOVE_AT _implementation_sources 0)
 set(_modules "${FORGE_CONTRACT_DATA_DIR}/modules")
 set(_include "${FORGE_CONTRACT_DATA_DIR}/include")
 set(_runtime_archive "${CMAKE_SYSROOT}/lib/libforge_guest_runtime.a")
-set(_contract_archive "${CMAKE_SYSROOT}/lib/libforge_guest_contract.a")
 set(_generated "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(_abi "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_TARGET}.abi")
 set(_dispatcher "${_generated}/${FORGE_CONTRACT_TARGET}.dispatcher.cpp")
@@ -112,7 +111,7 @@ endfunction()
 function(forge_contract_register_guest_component)
    cmake_parse_arguments(
       ARG
-      ""
+      "FOUNDATION"
       "ID;ARCHIVE"
       "MODULES;MODULE_NAMES;PUBLIC_LIBRARIES"
       ${ARGN}
@@ -171,7 +170,14 @@ function(forge_contract_register_guest_component)
       GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_COMPONENT_${_key}_DEPENDENCIES"
       "${ARG_PUBLIC_LIBRARIES}"
    )
+   set_property(
+      GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_COMPONENT_${_key}_FOUNDATION"
+      "${ARG_FOUNDATION}"
+   )
    set_property(GLOBAL APPEND PROPERTY FORGE_CONTRACT_GUEST_COMPONENT_IDS "${ARG_ID}")
+   if(ARG_FOUNDATION)
+      set_property(GLOBAL APPEND PROPERTY FORGE_CONTRACT_GUEST_FOUNDATION_IDS "${ARG_ID}")
+   endif()
 endfunction()
 
 function(_forge_contract_guest_component_target id output)
@@ -255,13 +261,9 @@ if(_descriptor_component_count GREATER 0)
    endforeach()
 endif()
 
-_forge_contract_guest_component_target(forge.raw _raw_target)
-_forge_contract_guest_component_target(forge.codec.base64 _codec_base64_target)
-_forge_contract_guest_component_target(forge.codec.base58 _codec_base58_target)
-_forge_contract_guest_component_target(forge.codec.hex _codec_hex_target)
-_forge_contract_guest_component_target(forge.chain.protocol _chain_protocol_target)
+_forge_contract_guest_component_target(forge.contract.runtime _contract_runtime_target)
 
-foreach(_archive IN ITEMS "${_runtime_archive}" "${_contract_archive}")
+foreach(_archive IN ITEMS "${_runtime_archive}")
    if(NOT EXISTS "${_archive}")
       message(FATAL_ERROR "Forge Contract sysroot is missing ${_archive}")
    endif()
@@ -269,61 +271,9 @@ endforeach()
 add_library(forge_guest_runtime STATIC IMPORTED GLOBAL)
 set_target_properties(forge_guest_runtime PROPERTIES IMPORTED_LOCATION "${_runtime_archive}")
 
-add_library(forge_guest_contract STATIC)
-target_sources(
-   forge_guest_contract
-   PUBLIC
-      FILE_SET forge_guest_contract_modules TYPE CXX_MODULES
-      BASE_DIRS "${_modules}"
-      FILES
-         "${_modules}/forge/contract/intrinsics.cppm"
-         "${_modules}/forge/contract/contract.cppm"
-         "${_modules}/forge/contract/datastream.cppm"
-         "${_modules}/forge/contract/varint.cppm"
-         "${_modules}/forge/contract/fixed_bytes.cppm"
-         "${_modules}/forge/contract/binary_extension.cppm"
-         "${_modules}/forge/contract/ignore.cppm"
-         "${_modules}/forge/contract/hash_id.cppm"
-         "${_modules}/forge/contract/action.cppm"
-         "${_modules}/forge/contract/transaction.cppm"
-         "${_modules}/forge/contract/system.cppm"
-         "${_modules}/forge/contract/deferred_transaction.cppm"
-         "${_modules}/forge/contract/authorization.cppm"
-         "${_modules}/forge/contract/bitset.cppm"
-         "${_modules}/forge/contract/call.cppm"
-         "${_modules}/forge/contract/crypto.cppm"
-         "${_modules}/forge/contract/crypto_bls_ext.cppm"
-         "${_modules}/forge/contract/crypto_ext.cppm"
-         "${_modules}/forge/contract/instant_finality.cppm"
-         "${_modules}/forge/contract/key.cppm"
-         "${_modules}/forge/contract/powers.cppm"
-         "${_modules}/forge/contract/print.cppm"
-         "${_modules}/forge/contract/privileged.cppm"
-         "${_modules}/forge/contract/producer_schedule.cppm"
-         "${_modules}/forge/contract/rope.cppm"
-         "${_modules}/forge/contract/string.cppm"
-         "${_modules}/forge/contract/dispatcher.cppm"
-         "${_modules}/forge/contract/multi_index.cppm"
-         "${_modules}/forge/contract/singleton.cppm"
-         "${_modules}/forge/contract/compatibility_name.cppm"
-         "${_modules}/forge/contract/compatibility_asset.cppm"
-)
-add_library(forge_guest_contract_implementation STATIC IMPORTED GLOBAL)
-set_target_properties(forge_guest_contract_implementation PROPERTIES IMPORTED_LOCATION "${_contract_archive}")
-target_link_libraries(
-   forge_guest_contract
-   PUBLIC
-      forge_guest_contract_implementation
-      ${_raw_target}
-      ${_chain_protocol_target}
-      ${_codec_base64_target}
-      ${_codec_base58_target}
-      ${_codec_hex_target}
-)
-
 add_library(forge_guest_eosio INTERFACE)
 target_include_directories(forge_guest_eosio INTERFACE "${_include}")
-target_link_libraries(forge_guest_eosio INTERFACE forge_guest_contract)
+target_link_libraries(forge_guest_eosio INTERFACE "${_contract_runtime_target}")
 
 function(_forge_contract_library_target id output)
    _forge_contract_component_key("${id}" _key)
@@ -554,6 +504,12 @@ if(_root_component_count GREATER 0)
       list(APPEND _root_component_ids "${_id}")
    endforeach()
 endif()
+get_property(_foundation_ids GLOBAL PROPERTY FORGE_CONTRACT_GUEST_FOUNDATION_IDS)
+foreach(_id IN LISTS _foundation_ids)
+   if(NOT _id IN_LIST _root_component_ids)
+      message(FATAL_ERROR "contract graph omits Forge foundation component: ${_id}")
+   endif()
+endforeach()
 
 set_property(GLOBAL PROPERTY FORGE_CONTRACT_VISIBLE_LIBRARY_TARGETS "")
 set_property(GLOBAL PROPERTY FORGE_CONTRACT_VISIBLE_LIBRARY_MODULE_BASES "")
@@ -598,7 +554,6 @@ foreach(
    _target
    ${_guest_component_ids}
    ${_contract_library_targets}
-   forge_guest_contract
 )
    if(_target IN_LIST _guest_component_ids)
       _forge_contract_guest_component_target("${_target}" _target)
@@ -626,7 +581,7 @@ if(CMAKE_CONFIGURATION_TYPES)
 endif()
 set(
    _module_targets
-   forge_guest_contract
+   "${_contract_runtime_target}"
    ${_visible_library_targets}
    ${_visible_component_targets}
 )
@@ -705,7 +660,7 @@ endif()
 list(APPEND _abigen_command ${FORGE_CONTRACT_SOURCES})
 set(
    _abigen_dependencies
-   forge_guest_contract
+   "${_contract_runtime_target}"
    "${FORGE_CONTRACT_ABIGEN}"
    "${FORGE_CONTRACT_ATTR_PLUGIN}"
    ${FORGE_CONTRACT_SOURCES}
@@ -743,7 +698,7 @@ set_source_files_properties(
 target_link_libraries(
    ${FORGE_CONTRACT_TARGET}
    PRIVATE
-      forge_guest_contract
+      "${_contract_runtime_target}"
       forge_guest_eosio
       ${_root_contract_targets}
 )
@@ -788,7 +743,7 @@ if(FORGE_CONTRACT_COMPILE_CHECKS)
    target_link_libraries(
       ${FORGE_CONTRACT_TARGET}_compile_checks
       PRIVATE
-         forge_guest_contract
+         "${_contract_runtime_target}"
          forge_guest_eosio
          ${_root_contract_targets}
    )

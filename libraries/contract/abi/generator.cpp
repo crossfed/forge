@@ -1975,7 +1975,10 @@ validated_contract_graph validate_contract_libraries(const forge::contract::abi:
          }
          for (const auto& module : metadata.imported_modules) {
             const auto found = module_owners.find(module);
-            if (found != module_owners.end() && !visible.contains(found->second)) {
+            if (found == module_owners.end()) {
+               throw std::runtime_error{"contract library " + owner + " imports an unknown module: " + module};
+            }
+            if (!visible.contains(found->second)) {
                throw std::runtime_error{"contract library " + owner +
                                         " imports a module through an undeclared dependency: " + module};
             }
@@ -1983,7 +1986,10 @@ validated_contract_graph validate_contract_libraries(const forge::contract::abi:
          const auto public_visible = visible_owners(graph, owner, true);
          for (const auto& module : metadata.exported_modules) {
             const auto found = module_owners.find(module);
-            if (found != module_owners.end() && !public_visible.contains(found->second)) {
+            if (found == module_owners.end()) {
+               throw std::runtime_error{"contract library " + owner + " exports an unknown module: " + module};
+            }
+            if (!public_visible.contains(found->second)) {
                throw std::runtime_error{"contract library " + owner +
                                         " exports a module through a private dependency: " + module};
             }
@@ -2007,7 +2013,10 @@ void validate_contract_root(const validated_contract_graph& validated, const sou
    }
    for (const auto& module : contract_modules) {
       const auto found = validated.module_owners.find(module);
-      if (found != validated.module_owners.end() && !root_visible.contains(found->second)) {
+      if (found == validated.module_owners.end()) {
+         throw std::runtime_error{"contract imports an unknown module: " + module};
+      }
+      if (!root_visible.contains(found->second)) {
          throw std::runtime_error{"contract imports a module through an undeclared library: " + module};
       }
    }
