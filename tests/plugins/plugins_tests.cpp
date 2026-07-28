@@ -3154,16 +3154,17 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_cancels_bootstrap_sleep_from_an_external_th
    auto stop_thread = std::thread{[&] { client.request_stop(); }};
    stop_thread.join();
 
+   const auto disconnected_on_request = forge::asio::blocking::run(
+       server.runtime(),
+       async_wait_for_condition([&] { return server_diagnostics->snapshot().metrics.active_sessions == 0U; },
+                                std::chrono::seconds{5}));
+   BOOST_TEST(disconnected_on_request);
+
    const auto started = std::chrono::steady_clock::now();
    forge::asio::blocking::run(client.runtime(), client.shutdown());
    const auto elapsed = std::chrono::steady_clock::now() - started;
    BOOST_TEST(elapsed < std::chrono::milliseconds{750});
 
-   const auto disconnected = forge::asio::blocking::run(
-       server.runtime(),
-       async_wait_for_condition([&] { return server_diagnostics->snapshot().metrics.active_sessions == 0U; },
-                                std::chrono::seconds{5}));
-   BOOST_TEST(disconnected);
    forge::asio::blocking::run(server.runtime(), server.shutdown());
 }
 
