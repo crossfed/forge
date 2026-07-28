@@ -1,11 +1,12 @@
 include(ExternalProject)
+include("${CMAKE_CURRENT_LIST_DIR}/ForgeContractGraph.cmake")
 
 function(forge_add_contract target)
    cmake_parse_arguments(
       ARG
       ""
-      "CONTRACT;DISPATCH_SOURCE;RICARDIAN_CONTRACTS;RICARDIAN_CLAUSES"
-      "SOURCES;COMPILE_CHECKS;INCLUDE_DIRECTORIES"
+      "CONTRACT;SOURCE_ROOT;DISPATCH_SOURCE;RICARDIAN_CONTRACTS;RICARDIAN_CLAUSES"
+      "SOURCES;HEADERS;COMPILE_CHECKS;INCLUDE_DIRECTORIES;LIBRARIES"
       ${ARGN}
    )
    if(NOT ARG_SOURCES)
@@ -17,13 +18,17 @@ function(forge_add_contract target)
    if(NOT ARG_CONTRACT)
       set(ARG_CONTRACT "${target}")
    endif()
+   if(ARG_SOURCE_ROOT)
+      _forge_contract_normalize_root("${ARG_SOURCE_ROOT}" "contract SOURCE_ROOT" _source_root)
+   else()
+      _forge_contract_normalize_root("${CMAKE_CURRENT_SOURCE_DIR}" "contract SOURCE_ROOT" _source_root)
+   endif()
 
    set(_sources)
    foreach(_source IN LISTS ARG_SOURCES)
-      get_filename_component(_absolute "${_source}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-      if(NOT EXISTS "${_absolute}")
-         message(FATAL_ERROR "contract source does not exist: ${_absolute}")
-      endif()
+      _forge_contract_normalize_file(
+         "${_source_root}" "${_source}" "contract source" _absolute _unused_logical
+      )
       list(APPEND _sources "${_absolute}")
    endforeach()
 
@@ -34,11 +39,9 @@ function(forge_add_contract target)
       endif()
       list(GET _sources 0 _dispatch_source)
    else()
-      get_filename_component(
-         _dispatch_source
-         "${ARG_DISPATCH_SOURCE}"
-         ABSOLUTE
-         BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+      _forge_contract_normalize_file(
+         "${_source_root}" "${ARG_DISPATCH_SOURCE}" "contract dispatch source"
+         _dispatch_source _unused_logical
       )
       list(FIND _sources "${_dispatch_source}" _dispatch_source_index)
       if(_dispatch_source_index EQUAL -1)
@@ -49,6 +52,15 @@ function(forge_add_contract target)
    list(REMOVE_ITEM _sources "${_dispatch_source}")
    list(INSERT _sources 0 "${_dispatch_source}")
    string(JOIN "|" _encoded_sources ${_sources})
+
+   set(_headers)
+   foreach(_header IN LISTS ARG_HEADERS)
+      _forge_contract_normalize_file(
+         "${_source_root}" "${_header}" "contract header" _absolute _unused_logical
+      )
+      list(APPEND _headers "${_absolute}")
+   endforeach()
+   string(JOIN "|" _encoded_headers ${_headers})
 
    set(_compile_checks)
    foreach(_source IN LISTS ARG_COMPILE_CHECKS)
@@ -102,6 +114,9 @@ function(forge_add_contract target)
    endif()
 
    set(_binary_dir "${CMAKE_CURRENT_BINARY_DIR}/${target}.contract")
+   _forge_contract_write_graph(
+      "${target}" "${ARG_LIBRARIES}" _graph_file _graph_hash _build_dependencies
+   )
    ExternalProject_Add(
       ${target}
       SOURCE_DIR "${ForgeContract_DATA_DIR}/build"
@@ -111,6 +126,7 @@ function(forge_add_contract target)
       PATCH_COMMAND ""
       INSTALL_COMMAND ""
       BUILD_ALWAYS TRUE
+      DEPENDS ${_build_dependencies}
       CMAKE_GENERATOR "${CMAKE_GENERATOR}"
       CMAKE_ARGS
          -DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}
@@ -118,9 +134,14 @@ function(forge_add_contract target)
          -DFORGE_CONTRACT_SDK_PREFIX:PATH=${ForgeContract_PREFIX}
          -DFORGE_CONTRACT_TARGET=${target}
          -DFORGE_CONTRACT_NAME=${ARG_CONTRACT}
+         -DFORGE_CONTRACT_SOURCE_ROOT:PATH=${_source_root}
          -DFORGE_CONTRACT_SOURCES_ENCODED=${_encoded_sources}
+         -DFORGE_CONTRACT_HEADERS_ENCODED=${_encoded_headers}
          -DFORGE_CONTRACT_COMPILE_CHECKS_ENCODED=${_encoded_compile_checks}
          -DFORGE_CONTRACT_INCLUDE_DIRECTORIES_ENCODED=${_encoded_include_directories}
+         -DFORGE_CONTRACT_GRAPH_FILE=${_graph_file}
+         -DFORGE_CONTRACT_GRAPH_HASH=${_graph_hash}
+         -DFORGE_CONTRACT_COMPONENTS=${ForgeContract_COMPONENTS}
          -DFORGE_CONTRACT_OUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}
          -DFORGE_CONTRACT_DATA_DIR=${ForgeContract_DATA_DIR}
          -DFORGE_CONTRACT_ABIGEN=${ForgeContract_ABIGEN}

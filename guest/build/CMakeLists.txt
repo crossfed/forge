@@ -5,7 +5,11 @@ project(ForgeContractConsumer LANGUAGES CXX)
 foreach(_required
    FORGE_CONTRACT_TARGET
    FORGE_CONTRACT_NAME
+   FORGE_CONTRACT_SOURCE_ROOT
    FORGE_CONTRACT_SOURCES_ENCODED
+   FORGE_CONTRACT_GRAPH_FILE
+   FORGE_CONTRACT_GRAPH_HASH
+   FORGE_CONTRACT_COMPONENTS
    FORGE_CONTRACT_OUTPUT_DIR
    FORGE_CONTRACT_DATA_DIR
    FORGE_CONTRACT_ABIGEN
@@ -18,7 +22,21 @@ foreach(_required
    endif()
 endforeach()
 
+if(NOT EXISTS "${FORGE_CONTRACT_GRAPH_FILE}")
+   message(FATAL_ERROR "Forge Contract graph does not exist: ${FORGE_CONTRACT_GRAPH_FILE}")
+endif()
+file(SHA256 "${FORGE_CONTRACT_GRAPH_FILE}" _contract_graph_hash)
+if(NOT _contract_graph_hash STREQUAL FORGE_CONTRACT_GRAPH_HASH)
+   message(FATAL_ERROR "Forge Contract graph hash mismatch")
+endif()
+file(READ "${FORGE_CONTRACT_GRAPH_FILE}" _contract_graph)
+string(JSON _contract_graph_schema GET "${_contract_graph}" schema)
+if(NOT _contract_graph_schema EQUAL 2)
+   message(FATAL_ERROR "unsupported Forge Contract graph schema: ${_contract_graph_schema}")
+endif()
+
 string(REPLACE "|" ";" FORGE_CONTRACT_SOURCES "${FORGE_CONTRACT_SOURCES_ENCODED}")
+string(REPLACE "|" ";" FORGE_CONTRACT_HEADERS "${FORGE_CONTRACT_HEADERS_ENCODED}")
 string(REPLACE "|" ";" FORGE_CONTRACT_COMPILE_CHECKS "${FORGE_CONTRACT_COMPILE_CHECKS_ENCODED}")
 string(REPLACE "|" ";" FORGE_CONTRACT_INCLUDE_DIRECTORIES "${FORGE_CONTRACT_INCLUDE_DIRECTORIES_ENCODED}")
 set(_implementation_sources ${FORGE_CONTRACT_SOURCES})
@@ -27,11 +45,6 @@ list(REMOVE_AT _implementation_sources 0)
 set(_modules "${FORGE_CONTRACT_DATA_DIR}/modules")
 set(_include "${FORGE_CONTRACT_DATA_DIR}/include")
 set(_runtime_archive "${CMAKE_SYSROOT}/lib/libforge_guest_runtime.a")
-set(_raw_archive "${CMAKE_SYSROOT}/lib/libforge_guest_raw.a")
-set(_codec_base64_archive "${CMAKE_SYSROOT}/lib/libforge_guest_codec_base64.a")
-set(_codec_base58_archive "${CMAKE_SYSROOT}/lib/libforge_guest_codec_base58.a")
-set(_codec_hex_archive "${CMAKE_SYSROOT}/lib/libforge_guest_codec_hex.a")
-set(_chain_protocol_archive "${CMAKE_SYSROOT}/lib/libforge_guest_chain_protocol.a")
 set(_contract_archive "${CMAKE_SYSROOT}/lib/libforge_guest_contract.a")
 set(_generated "${CMAKE_CURRENT_BINARY_DIR}/generated")
 set(_abi "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_TARGET}.abi")
@@ -46,139 +59,88 @@ set(_depfile "${_generated}/${FORGE_CONTRACT_TARGET}.abi.d")
 set(_manifest "${FORGE_CONTRACT_OUTPUT_DIR}/${FORGE_CONTRACT_TARGET}.contract.json")
 set(_contract_optimization "$<$<NOT:$<CONFIG:Debug>>:-O3>")
 
-add_library(forge_guest_raw STATIC)
-target_sources(
-   forge_guest_raw
-   PUBLIC
-      FILE_SET forge_guest_raw_modules TYPE CXX_MODULES
-      BASE_DIRS "${_modules}"
-      FILES
-         "${_modules}/forge/raw/stream.cppm"
-         "${_modules}/forge/raw/varint_value.cppm"
-         "${_modules}/forge/raw/codec.cppm"
-)
-add_library(forge_guest_raw_implementation STATIC IMPORTED GLOBAL)
-set_target_properties(forge_guest_raw_implementation PROPERTIES IMPORTED_LOCATION "${_raw_archive}")
-target_link_libraries(forge_guest_raw PUBLIC forge_guest_raw_implementation)
+function(_forge_contract_component_key id output)
+   string(SHA256 _key "${id}")
+   string(SUBSTRING "${_key}" 0 16 _key)
+   set(${output} "${_key}" PARENT_SCOPE)
+endfunction()
 
-add_library(forge_guest_codec_base64 STATIC)
-target_sources(
-   forge_guest_codec_base64
-   PUBLIC
-      FILE_SET forge_guest_codec_base64_modules TYPE CXX_MODULES
-      BASE_DIRS "${_modules}"
-      FILES
-         "${_modules}/forge/codec/base64/exceptions.cppm"
-         "${_modules}/forge/codec/base64/base64.cppm"
-)
-add_library(forge_guest_codec_base64_runtime STATIC IMPORTED GLOBAL)
-set_target_properties(forge_guest_codec_base64_runtime PROPERTIES IMPORTED_LOCATION "${_codec_base64_archive}")
-target_link_libraries(forge_guest_codec_base64 PUBLIC forge_guest_codec_base64_runtime)
+function(forge_contract_register_guest_component)
+   cmake_parse_arguments(ARG "" "ID;ARCHIVE" "MODULES;PUBLIC_LIBRARIES" ${ARGN})
+   if(ARG_UNPARSED_ARGUMENTS OR NOT ARG_ID OR NOT ARG_MODULES)
+      message(FATAL_ERROR "invalid Forge Contract guest component declaration")
+   endif()
+   _forge_contract_component_key("${ARG_ID}" _key)
+   get_property(_existing GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_COMPONENT_${_key}_ID")
+   if(_existing)
+      message(FATAL_ERROR "duplicate Forge Contract guest component ID: ${ARG_ID}")
+   endif()
+   set(_target "forge_contract_component_${_key}")
+   set(_module_paths)
+   foreach(_module IN LISTS ARG_MODULES)
+      set(_path "${_modules}/${_module}")
+      if(NOT EXISTS "${_path}")
+         message(FATAL_ERROR "Forge Contract guest component module is missing: ${_path}")
+      endif()
+      list(APPEND _module_paths "${_path}")
+   endforeach()
+   add_library("${_target}" STATIC)
+   target_sources(
+      "${_target}"
+      PUBLIC
+         FILE_SET forge_contract_component_modules TYPE CXX_MODULES
+         BASE_DIRS "${_modules}"
+         FILES ${_module_paths}
+   )
+   if(ARG_ARCHIVE)
+      set(_archive "${CMAKE_SYSROOT}/lib/${ARG_ARCHIVE}")
+      if(NOT EXISTS "${_archive}")
+         message(FATAL_ERROR "Forge Contract guest component archive is missing: ${_archive}")
+      endif()
+      add_library("${_target}_archive" STATIC IMPORTED GLOBAL)
+      set_target_properties("${_target}_archive" PROPERTIES IMPORTED_LOCATION "${_archive}")
+      target_link_libraries("${_target}" PUBLIC "${_target}_archive")
+   endif()
+   set_property(GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_COMPONENT_${_key}_ID" "${ARG_ID}")
+   set_property(GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_COMPONENT_${_key}_TARGET" "${_target}")
+   set_property(
+      GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_COMPONENT_${_key}_DEPENDENCIES"
+      "${ARG_PUBLIC_LIBRARIES}"
+   )
+   set_property(GLOBAL APPEND PROPERTY FORGE_CONTRACT_GUEST_COMPONENT_IDS "${ARG_ID}")
+endfunction()
 
-add_library(forge_guest_codec_base58 STATIC)
-target_sources(
-   forge_guest_codec_base58
-   PUBLIC
-      FILE_SET forge_guest_codec_base58_modules TYPE CXX_MODULES
-      BASE_DIRS "${_modules}"
-      FILES
-         "${_modules}/forge/codec/base58/exceptions.cppm"
-         "${_modules}/forge/codec/base58/base58.cppm"
-)
-add_library(forge_guest_codec_base58_runtime STATIC IMPORTED GLOBAL)
-set_target_properties(forge_guest_codec_base58_runtime PROPERTIES IMPORTED_LOCATION "${_codec_base58_archive}")
-target_link_libraries(forge_guest_codec_base58 PUBLIC forge_guest_codec_base58_runtime)
+function(_forge_contract_guest_component_target id output)
+   _forge_contract_component_key("${id}" _key)
+   get_property(_registered GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_COMPONENT_${_key}_ID")
+   get_property(_target GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_COMPONENT_${_key}_TARGET")
+   if(NOT _registered STREQUAL id OR NOT _target)
+      message(FATAL_ERROR "unknown Forge Contract guest component ID: ${id}")
+   endif()
+   set(${output} "${_target}" PARENT_SCOPE)
+endfunction()
 
-add_library(forge_guest_codec_hex STATIC)
-target_sources(
-   forge_guest_codec_hex
-   PUBLIC
-      FILE_SET forge_guest_codec_hex_modules TYPE CXX_MODULES
-      BASE_DIRS "${_modules}"
-      FILES
-         "${_modules}/forge/codec/hex/exceptions.cppm"
-         "${_modules}/forge/codec/hex/hex.cppm"
-)
-add_library(forge_guest_codec_hex_runtime STATIC IMPORTED GLOBAL)
-set_target_properties(forge_guest_codec_hex_runtime PROPERTIES IMPORTED_LOCATION "${_codec_hex_archive}")
-target_link_libraries(forge_guest_codec_hex PUBLIC forge_guest_codec_hex_runtime)
+include("${FORGE_CONTRACT_COMPONENTS}")
+get_property(_guest_component_ids GLOBAL PROPERTY FORGE_CONTRACT_GUEST_COMPONENT_IDS)
+foreach(_id IN LISTS _guest_component_ids)
+   _forge_contract_component_key("${_id}" _key)
+   get_property(_target GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_COMPONENT_${_key}_TARGET")
+   get_property(
+      _dependencies GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_COMPONENT_${_key}_DEPENDENCIES"
+   )
+   foreach(_dependency IN LISTS _dependencies)
+      _forge_contract_guest_component_target("${_dependency}" _dependency_target)
+      target_link_libraries("${_target}" PUBLIC "${_dependency_target}")
+   endforeach()
+endforeach()
 
-add_library(forge_guest_crypto STATIC)
-target_sources(
-   forge_guest_crypto
-   PUBLIC
-      FILE_SET forge_guest_crypto_modules TYPE CXX_MODULES
-      BASE_DIRS "${_modules}"
-      FILES
-         "${_modules}/forge/crypto/digest/sha256_value.cppm"
-         "${_modules}/forge/crypto/digest/sha256.cppm"
-         "${_modules}/forge/crypto/digest/sha512_value.cppm"
-         "${_modules}/forge/crypto/digest/sha512.cppm"
-         "${_modules}/forge/crypto/digest/ripemd160_value.cppm"
-         "${_modules}/forge/crypto/digest/ripemd160.cppm"
-         "${_modules}/forge/crypto/asymmetric/values.cppm"
-         "${_modules}/forge/crypto/asymmetric/asymmetric.cppm"
-         "${_modules}/forge/crypto/bls/bls_values.cppm"
-)
-target_link_libraries(forge_guest_crypto PUBLIC forge_guest_raw)
+_forge_contract_guest_component_target(forge.raw _raw_target)
+_forge_contract_guest_component_target(forge.codec.base64 _codec_base64_target)
+_forge_contract_guest_component_target(forge.codec.base58 _codec_base58_target)
+_forge_contract_guest_component_target(forge.codec.hex _codec_hex_target)
+_forge_contract_guest_component_target(forge.chain.protocol _chain_protocol_target)
 
-add_library(forge_guest_chain_protocol STATIC)
-target_sources(
-   forge_guest_chain_protocol
-   PUBLIC
-      FILE_SET forge_guest_chain_protocol_modules TYPE CXX_MODULES
-      BASE_DIRS "${_modules}"
-      FILES
-         "${_modules}/forge/chain/protocol/values.cppm"
-         "${_modules}/forge/chain/protocol/time.cppm"
-         "${_modules}/forge/chain/protocol/types_value.cppm"
-         "${_modules}/forge/chain/protocol/types.cppm"
-         "${_modules}/forge/chain/protocol/fixed_key_value.cppm"
-         "${_modules}/forge/chain/protocol/fixed_key.cppm"
-         "${_modules}/forge/chain/protocol/action_value.cppm"
-         "${_modules}/forge/chain/protocol/action.cppm"
-         "${_modules}/forge/chain/protocol/transaction_value.cppm"
-         "${_modules}/forge/chain/protocol/transaction.cppm"
-         "${_modules}/forge/chain/protocol/authority_value.cppm"
-         "${_modules}/forge/chain/protocol/authority.cppm"
-         "${_modules}/forge/chain/protocol/producer_schedule_value.cppm"
-         "${_modules}/forge/chain/protocol/producer_schedule.cppm"
-         "${_modules}/forge/chain/protocol/producer_authority.cppm"
-         "${_modules}/forge/chain/protocol/system_value.cppm"
-         "${_modules}/forge/chain/protocol/system.cppm"
-         "${_modules}/forge/chain/protocol/code_hash_result.cppm"
-         "${_modules}/forge/chain/protocol/blockchain_parameters.cppm"
-         "${_modules}/forge/chain/protocol/kv_parameters.cppm"
-         "${_modules}/forge/chain/protocol/finalizer_authority.cppm"
-         "${_modules}/forge/chain/protocol/finalizer_policy.cppm"
-         "${_modules}/forge/chain/protocol/hash_id.cppm"
-         "${_modules}/forge/chain/protocol/call_access_mode.cppm"
-         "${_modules}/forge/chain/protocol/call_data_header.cppm"
-)
-add_library(forge_guest_chain_protocol_implementation STATIC IMPORTED GLOBAL)
-set_target_properties(
-   forge_guest_chain_protocol_implementation
-   PROPERTIES IMPORTED_LOCATION "${_chain_protocol_archive}"
-)
-target_link_libraries(
-   forge_guest_chain_protocol
-   PUBLIC
-      forge_guest_chain_protocol_implementation
-      forge_guest_raw
-      forge_guest_crypto
-)
-
-foreach(
-   _archive
-   IN ITEMS
-      "${_runtime_archive}"
-      "${_raw_archive}"
-      "${_codec_base64_archive}"
-      "${_codec_base58_archive}"
-      "${_codec_hex_archive}"
-      "${_chain_protocol_archive}"
-      "${_contract_archive}"
-)
+foreach(_archive IN ITEMS "${_runtime_archive}" "${_contract_archive}")
    if(NOT EXISTS "${_archive}")
       message(FATAL_ERROR "Forge Contract sysroot is missing ${_archive}")
    endif()
@@ -231,27 +193,282 @@ target_link_libraries(
    forge_guest_contract
    PUBLIC
       forge_guest_contract_implementation
-      forge_guest_raw
-      forge_guest_chain_protocol
-      forge_guest_codec_base64
-      forge_guest_codec_base58
-      forge_guest_codec_hex
+      ${_raw_target}
+      ${_chain_protocol_target}
+      ${_codec_base64_target}
+      ${_codec_base58_target}
+      ${_codec_hex_target}
 )
 
 add_library(forge_guest_eosio INTERFACE)
 target_include_directories(forge_guest_eosio INTERFACE "${_include}")
 target_link_libraries(forge_guest_eosio INTERFACE forge_guest_contract)
 
+function(_forge_contract_library_target id output)
+   _forge_contract_component_key("${id}" _key)
+   if(NOT DEFINED "_forge_contract_library_target_${_key}")
+      message(FATAL_ERROR "contract library dependency is missing from graph: ${id}")
+   endif()
+   set(${output} "${_forge_contract_library_target_${_key}}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_collect_visible_component id)
+   _forge_contract_component_key("${id}" _key)
+   get_property(_visited GLOBAL PROPERTY "FORGE_CONTRACT_VISIBLE_COMPONENT_${_key}")
+   if(_visited)
+      return()
+   endif()
+   set_property(GLOBAL PROPERTY "FORGE_CONTRACT_VISIBLE_COMPONENT_${_key}" TRUE)
+   get_property(
+      _dependencies GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_COMPONENT_${_key}_DEPENDENCIES"
+   )
+   foreach(_dependency IN LISTS _dependencies)
+      _forge_contract_collect_visible_component("${_dependency}")
+   endforeach()
+   _forge_contract_guest_component_target("${id}" _target)
+   set_property(GLOBAL APPEND PROPERTY FORGE_CONTRACT_VISIBLE_COMPONENT_TARGETS "${_target}")
+endfunction()
+
+function(_forge_contract_collect_visible_library id)
+   _forge_contract_component_key("${id}" _key)
+   get_property(_visited GLOBAL PROPERTY "FORGE_CONTRACT_VISIBLE_LIBRARY_${_key}")
+   if(_visited)
+      return()
+   endif()
+   set_property(GLOBAL PROPERTY "FORGE_CONTRACT_VISIBLE_LIBRARY_${_key}" TRUE)
+   get_property(
+      _library_dependencies GLOBAL PROPERTY
+      "FORGE_CONTRACT_LIBRARY_${_key}_PUBLIC_LIBRARY_IDS"
+   )
+   get_property(
+      _component_dependencies GLOBAL PROPERTY
+      "FORGE_CONTRACT_LIBRARY_${_key}_PUBLIC_COMPONENT_IDS"
+   )
+   foreach(_dependency IN LISTS _library_dependencies)
+      _forge_contract_collect_visible_library("${_dependency}")
+   endforeach()
+   foreach(_dependency IN LISTS _component_dependencies)
+      _forge_contract_collect_visible_component("${_dependency}")
+   endforeach()
+   _forge_contract_library_target("${id}" _target)
+   get_property(
+      _module_bases GLOBAL PROPERTY "FORGE_CONTRACT_LIBRARY_${_key}_MODULE_BASES"
+   )
+   set_property(GLOBAL APPEND PROPERTY FORGE_CONTRACT_VISIBLE_LIBRARY_TARGETS "${_target}")
+   set_property(
+      GLOBAL APPEND PROPERTY FORGE_CONTRACT_VISIBLE_LIBRARY_MODULE_BASES "${_module_bases}"
+   )
+endfunction()
+
+set(_contract_library_targets)
+set(_contract_library_source_paths)
+string(JSON _library_count LENGTH "${_contract_graph}" libraries)
+if(_library_count GREATER 0)
+   math(EXPR _library_last "${_library_count} - 1")
+   foreach(_library_index RANGE 0 ${_library_last})
+      string(JSON _id GET "${_contract_graph}" libraries ${_library_index} id)
+      _forge_contract_component_key("${_id}" _key)
+      set(_target "forge_contract_library_${_key}")
+      if(DEFINED "_forge_contract_library_target_${_key}")
+         message(FATAL_ERROR "duplicate contract library ID in graph: ${_id}")
+      endif()
+      set("_forge_contract_library_target_${_key}" "${_target}")
+
+      set(_module_bases)
+      string(JSON _base_count LENGTH "${_contract_graph}" libraries ${_library_index} module_bases)
+      if(_base_count GREATER 0)
+         math(EXPR _base_last "${_base_count} - 1")
+         foreach(_base_index RANGE 0 ${_base_last})
+            string(
+               JSON _base GET
+               "${_contract_graph}" libraries ${_library_index} module_bases ${_base_index}
+            )
+            list(APPEND _module_bases "${_base}")
+         endforeach()
+      endif()
+
+      set(_modules)
+      set(_implementation)
+      set(_headers)
+      string(JSON _file_count LENGTH "${_contract_graph}" libraries ${_library_index} files)
+      if(_file_count GREATER 0)
+         math(EXPR _file_last "${_file_count} - 1")
+         foreach(_file_index RANGE 0 ${_file_last})
+            string(
+               JSON _role GET
+               "${_contract_graph}" libraries ${_library_index} files ${_file_index} role
+            )
+            string(
+               JSON _path GET
+               "${_contract_graph}" libraries ${_library_index} files ${_file_index} physical_path
+            )
+            if(NOT EXISTS "${_path}")
+               message(FATAL_ERROR "contract graph input does not exist: ${_path}")
+            endif()
+            if(_role STREQUAL "module")
+               list(APPEND _modules "${_path}")
+            elseif(_role STREQUAL "implementation")
+               list(APPEND _implementation "${_path}")
+            elseif(_role STREQUAL "public_header" OR _role STREQUAL "private_header")
+               list(APPEND _headers "${_path}")
+            else()
+               message(FATAL_ERROR "contract graph has unknown file role: ${_role}")
+            endif()
+            list(APPEND _contract_library_source_paths "${_path}")
+         endforeach()
+      endif()
+      if(NOT _modules)
+         message(FATAL_ERROR "contract library has no module inputs: ${_id}")
+      endif()
+
+      set(_public_dependencies)
+      set(_private_dependencies)
+      set(_public_library_ids)
+      set(_public_component_ids)
+      string(
+         JSON _dependency_count LENGTH
+         "${_contract_graph}" libraries ${_library_index} dependencies
+      )
+      if(_dependency_count GREATER 0)
+         math(EXPR _dependency_last "${_dependency_count} - 1")
+         foreach(_dependency_index RANGE 0 ${_dependency_last})
+            string(
+               JSON _kind GET
+               "${_contract_graph}" libraries ${_library_index} dependencies
+               ${_dependency_index} kind
+            )
+            string(
+               JSON _dependency_id GET
+               "${_contract_graph}" libraries ${_library_index} dependencies
+               ${_dependency_index} id
+            )
+            string(
+               JSON _scope GET
+               "${_contract_graph}" libraries ${_library_index} dependencies
+               ${_dependency_index} scope
+            )
+            if(_kind STREQUAL "component")
+               _forge_contract_guest_component_target("${_dependency_id}" _dependency_target)
+               if(_scope STREQUAL "public")
+                  list(APPEND _public_component_ids "${_dependency_id}")
+               endif()
+            elseif(_kind STREQUAL "library")
+               _forge_contract_library_target("${_dependency_id}" _dependency_target)
+               if(_scope STREQUAL "public")
+                  list(APPEND _public_library_ids "${_dependency_id}")
+               endif()
+            else()
+               message(FATAL_ERROR "contract graph has unknown dependency kind: ${_kind}")
+            endif()
+            if(_scope STREQUAL "public")
+               list(APPEND _public_dependencies "${_dependency_target}")
+            elseif(_scope STREQUAL "private")
+               list(APPEND _private_dependencies "${_dependency_target}")
+            else()
+               message(FATAL_ERROR "contract graph has unknown dependency scope: ${_scope}")
+            endif()
+         endforeach()
+      endif()
+
+      add_library("${_target}" STATIC)
+      target_sources(
+         "${_target}"
+         PUBLIC
+            FILE_SET forge_contract_modules TYPE CXX_MODULES
+            BASE_DIRS ${_module_bases}
+            FILES ${_modules}
+      )
+      if(_implementation OR _headers)
+         target_sources("${_target}" PRIVATE ${_implementation} ${_headers})
+      endif()
+      target_include_directories("${_target}" PUBLIC ${_module_bases})
+      if(_public_dependencies)
+         target_link_libraries("${_target}" PUBLIC ${_public_dependencies})
+      endif()
+      if(_private_dependencies)
+         target_link_libraries("${_target}" PRIVATE ${_private_dependencies})
+      endif()
+      list(APPEND _contract_library_targets "${_target}")
+      set_property(
+         GLOBAL PROPERTY "FORGE_CONTRACT_LIBRARY_${_key}_MODULE_BASES" "${_module_bases}"
+      )
+      set_property(
+         GLOBAL PROPERTY "FORGE_CONTRACT_LIBRARY_${_key}_PUBLIC_LIBRARY_IDS"
+         "${_public_library_ids}"
+      )
+      set_property(
+         GLOBAL PROPERTY "FORGE_CONTRACT_LIBRARY_${_key}_PUBLIC_COMPONENT_IDS"
+         "${_public_component_ids}"
+      )
+   endforeach()
+endif()
+
+set(_root_contract_targets)
+set(_root_library_ids)
+string(JSON _root_library_count LENGTH "${_contract_graph}" root libraries)
+if(_root_library_count GREATER 0)
+   math(EXPR _root_library_last "${_root_library_count} - 1")
+   foreach(_index RANGE 0 ${_root_library_last})
+      string(JSON _id GET "${_contract_graph}" root libraries ${_index})
+      _forge_contract_library_target("${_id}" _target)
+      list(APPEND _root_contract_targets "${_target}")
+      list(APPEND _root_library_ids "${_id}")
+   endforeach()
+endif()
+set(_root_component_ids)
+string(JSON _root_component_count LENGTH "${_contract_graph}" root components)
+if(_root_component_count GREATER 0)
+   math(EXPR _root_component_last "${_root_component_count} - 1")
+   foreach(_index RANGE 0 ${_root_component_last})
+      string(JSON _id GET "${_contract_graph}" root components ${_index})
+      _forge_contract_guest_component_target("${_id}" _target)
+      list(APPEND _root_contract_targets "${_target}")
+      list(APPEND _root_component_ids "${_id}")
+   endforeach()
+endif()
+
+set_property(GLOBAL PROPERTY FORGE_CONTRACT_VISIBLE_LIBRARY_TARGETS "")
+set_property(GLOBAL PROPERTY FORGE_CONTRACT_VISIBLE_LIBRARY_MODULE_BASES "")
+set_property(GLOBAL PROPERTY FORGE_CONTRACT_VISIBLE_COMPONENT_TARGETS "")
+foreach(
+   _id IN ITEMS
+   forge.raw
+   forge.codec.base64
+   forge.codec.base58
+   forge.codec.hex
+   forge.chain.protocol
+)
+   _forge_contract_collect_visible_component("${_id}")
+endforeach()
+foreach(_id IN LISTS _root_library_ids)
+   _forge_contract_collect_visible_library("${_id}")
+endforeach()
+foreach(_id IN LISTS _root_component_ids)
+   _forge_contract_collect_visible_component("${_id}")
+endforeach()
+get_property(
+   _visible_library_targets GLOBAL PROPERTY FORGE_CONTRACT_VISIBLE_LIBRARY_TARGETS
+)
+get_property(
+   _visible_library_module_bases
+   GLOBAL PROPERTY FORGE_CONTRACT_VISIBLE_LIBRARY_MODULE_BASES
+)
+get_property(
+   _visible_component_targets GLOBAL PROPERTY FORGE_CONTRACT_VISIBLE_COMPONENT_TARGETS
+)
+list(REMOVE_DUPLICATES _visible_library_targets)
+list(REMOVE_DUPLICATES _visible_library_module_bases)
+list(REMOVE_DUPLICATES _visible_component_targets)
+
 foreach(
    _target
-   forge_guest_raw
-   forge_guest_codec_base64
-   forge_guest_codec_base58
-   forge_guest_codec_hex
-   forge_guest_crypto
-   forge_guest_chain_protocol
+   ${_guest_component_ids}
+   ${_contract_library_targets}
    forge_guest_contract
 )
+   if(_target IN_LIST _guest_component_ids)
+      _forge_contract_guest_component_target("${_target}" _target)
+   endif()
    target_include_directories(${_target} PRIVATE "${_include}")
    target_compile_definitions(${_target} PRIVATE FORGE_CONTRACT_GUEST=1)
    target_compile_options(
@@ -273,110 +490,20 @@ if(CMAKE_CONFIGURATION_TYPES)
    set(_module_configuration_directory "$<CONFIG>/")
 endif()
 set(
-   _raw_module_directory
-   "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_raw.dir/${_module_configuration_directory}"
+   _module_targets
+   forge_guest_contract
+   ${_visible_library_targets}
+   ${_visible_component_targets}
 )
-set(
-   _codec_base64_module_directory
-   "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_codec_base64.dir/${_module_configuration_directory}"
-)
-set(
-   _codec_base58_module_directory
-   "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_codec_base58.dir/${_module_configuration_directory}"
-)
-set(
-   _codec_hex_module_directory
-   "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_codec_hex.dir/${_module_configuration_directory}"
-)
-set(
-   _crypto_module_directory
-   "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_crypto.dir/${_module_configuration_directory}"
-)
-set(
-   _protocol_module_directory
-   "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_chain_protocol.dir/${_module_configuration_directory}"
-)
-set(
-   _contract_module_directory
-   "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/forge_guest_contract.dir/${_module_configuration_directory}"
-)
+list(REMOVE_DUPLICATES _module_targets)
+set(_module_search_paths)
+foreach(_target IN LISTS _module_targets)
+   list(
+      APPEND _module_search_paths
+      "${CMAKE_CURRENT_BINARY_DIR}/CMakeFiles/${_target}.dir/${_module_configuration_directory}"
+   )
+endforeach()
 
-set(_module_arguments
-   "forge.raw.stream=${_raw_module_directory}forge.raw.stream.pcm"
-   "forge.raw.varint_value=${_raw_module_directory}forge.raw.varint_value.pcm"
-   "forge.raw.codec=${_raw_module_directory}forge.raw.codec.pcm"
-   "forge.codec.base64.exceptions=${_codec_base64_module_directory}forge.codec.base64.exceptions.pcm"
-   "forge.codec.base64=${_codec_base64_module_directory}forge.codec.base64.pcm"
-   "forge.codec.base58.exceptions=${_codec_base58_module_directory}forge.codec.base58.exceptions.pcm"
-   "forge.codec.base58=${_codec_base58_module_directory}forge.codec.base58.pcm"
-   "forge.codec.hex.exceptions=${_codec_hex_module_directory}forge.codec.hex.exceptions.pcm"
-   "forge.codec.hex=${_codec_hex_module_directory}forge.codec.hex.pcm"
-   "forge.crypto.digest.sha256:value=${_crypto_module_directory}forge.crypto.digest.sha256-value.pcm"
-   "forge.crypto.digest.sha256=${_crypto_module_directory}forge.crypto.digest.sha256.pcm"
-   "forge.crypto.digest.sha512:value=${_crypto_module_directory}forge.crypto.digest.sha512-value.pcm"
-   "forge.crypto.digest.sha512=${_crypto_module_directory}forge.crypto.digest.sha512.pcm"
-   "forge.crypto.digest.ripemd160:value=${_crypto_module_directory}forge.crypto.digest.ripemd160-value.pcm"
-   "forge.crypto.digest.ripemd160=${_crypto_module_directory}forge.crypto.digest.ripemd160.pcm"
-   "forge.crypto.asymmetric.values=${_crypto_module_directory}forge.crypto.asymmetric.values.pcm"
-   "forge.crypto.asymmetric=${_crypto_module_directory}forge.crypto.asymmetric.pcm"
-   "forge.crypto.bls.values=${_crypto_module_directory}forge.crypto.bls.values.pcm"
-   "forge.chain.protocol.values=${_protocol_module_directory}forge.chain.protocol.values.pcm"
-   "forge.chain.protocol.time=${_protocol_module_directory}forge.chain.protocol.time.pcm"
-   "forge.chain.protocol.types:value=${_protocol_module_directory}forge.chain.protocol.types-value.pcm"
-   "forge.chain.protocol.types=${_protocol_module_directory}forge.chain.protocol.types.pcm"
-   "forge.chain.protocol.fixed_key:value=${_protocol_module_directory}forge.chain.protocol.fixed_key-value.pcm"
-   "forge.chain.protocol.fixed_key=${_protocol_module_directory}forge.chain.protocol.fixed_key.pcm"
-   "forge.chain.protocol.action:value=${_protocol_module_directory}forge.chain.protocol.action-value.pcm"
-   "forge.chain.protocol.action=${_protocol_module_directory}forge.chain.protocol.action.pcm"
-   "forge.chain.protocol.transaction:value=${_protocol_module_directory}forge.chain.protocol.transaction-value.pcm"
-   "forge.chain.protocol.transaction=${_protocol_module_directory}forge.chain.protocol.transaction.pcm"
-   "forge.chain.protocol.authority:value=${_protocol_module_directory}forge.chain.protocol.authority-value.pcm"
-   "forge.chain.protocol.authority=${_protocol_module_directory}forge.chain.protocol.authority.pcm"
-   "forge.chain.protocol.producer_schedule:value=${_protocol_module_directory}forge.chain.protocol.producer_schedule-value.pcm"
-   "forge.chain.protocol.producer_schedule=${_protocol_module_directory}forge.chain.protocol.producer_schedule.pcm"
-   "forge.chain.protocol.producer_authority=${_protocol_module_directory}forge.chain.protocol.producer_authority.pcm"
-   "forge.chain.protocol.system:value=${_protocol_module_directory}forge.chain.protocol.system-value.pcm"
-   "forge.chain.protocol.system=${_protocol_module_directory}forge.chain.protocol.system.pcm"
-   "forge.chain.protocol.code_hash_result=${_protocol_module_directory}forge.chain.protocol.code_hash_result.pcm"
-   "forge.chain.protocol.blockchain_parameters=${_protocol_module_directory}forge.chain.protocol.blockchain_parameters.pcm"
-   "forge.chain.protocol.kv_parameters=${_protocol_module_directory}forge.chain.protocol.kv_parameters.pcm"
-   "forge.chain.protocol.finalizer_authority=${_protocol_module_directory}forge.chain.protocol.finalizer_authority.pcm"
-   "forge.chain.protocol.finalizer_policy=${_protocol_module_directory}forge.chain.protocol.finalizer_policy.pcm"
-   "forge.chain.protocol.hash_id=${_protocol_module_directory}forge.chain.protocol.hash_id.pcm"
-   "forge.chain.protocol.call_access_mode=${_protocol_module_directory}forge.chain.protocol.call_access_mode.pcm"
-   "forge.chain.protocol.call_data_header=${_protocol_module_directory}forge.chain.protocol.call_data_header.pcm"
-   "forge.contract.intrinsics=${_contract_module_directory}forge.contract.intrinsics.pcm"
-   "forge.contract=${_contract_module_directory}forge.contract.pcm"
-   "forge.contract.datastream=${_contract_module_directory}forge.contract.datastream.pcm"
-   "forge.contract.varint=${_contract_module_directory}forge.contract.varint.pcm"
-   "forge.contract.fixed_bytes=${_contract_module_directory}forge.contract.fixed_bytes.pcm"
-   "forge.contract.binary_extension=${_contract_module_directory}forge.contract.binary_extension.pcm"
-   "forge.contract.ignore=${_contract_module_directory}forge.contract.ignore.pcm"
-   "forge.contract.hash_id=${_contract_module_directory}forge.contract.hash_id.pcm"
-   "forge.contract.action=${_contract_module_directory}forge.contract.action.pcm"
-   "forge.contract.transaction=${_contract_module_directory}forge.contract.transaction.pcm"
-   "forge.contract.system=${_contract_module_directory}forge.contract.system.pcm"
-   "forge.contract.deferred_transaction=${_contract_module_directory}forge.contract.deferred_transaction.pcm"
-   "forge.contract.authorization=${_contract_module_directory}forge.contract.authorization.pcm"
-   "forge.contract.bitset=${_contract_module_directory}forge.contract.bitset.pcm"
-   "forge.contract.call=${_contract_module_directory}forge.contract.call.pcm"
-   "forge.contract.crypto=${_contract_module_directory}forge.contract.crypto.pcm"
-   "forge.contract.crypto_bls_ext=${_contract_module_directory}forge.contract.crypto_bls_ext.pcm"
-   "forge.contract.crypto_ext=${_contract_module_directory}forge.contract.crypto_ext.pcm"
-   "forge.contract.instant_finality=${_contract_module_directory}forge.contract.instant_finality.pcm"
-   "forge.contract.key=${_contract_module_directory}forge.contract.key.pcm"
-   "forge.contract.powers=${_contract_module_directory}forge.contract.powers.pcm"
-   "forge.contract.print=${_contract_module_directory}forge.contract.print.pcm"
-   "forge.contract.privileged=${_contract_module_directory}forge.contract.privileged.pcm"
-   "forge.contract.producer_schedule=${_contract_module_directory}forge.contract.producer_schedule.pcm"
-   "forge.contract.rope=${_contract_module_directory}forge.contract.rope.pcm"
-   "forge.contract.string=${_contract_module_directory}forge.contract.string.pcm"
-   "forge.contract.dispatcher=${_contract_module_directory}forge.contract.dispatcher.pcm"
-   "forge.contract.multi_index=${_contract_module_directory}forge.contract.multi_index.pcm"
-   "forge.contract.singleton=${_contract_module_directory}forge.contract.singleton.pcm"
-   "forge.contract.compatibility_name=${_contract_module_directory}forge.contract.compatibility_name.pcm"
-   "forge.contract.compatibility_asset=${_contract_module_directory}forge.contract.compatibility_asset.pcm"
-)
 set(_abigen_command
    "${FORGE_CONTRACT_ABIGEN}"
    --contract "${FORGE_CONTRACT_NAME}"
@@ -390,8 +517,11 @@ set(_abigen_command
 foreach(_include_directory IN LISTS FORGE_CONTRACT_INCLUDE_DIRECTORIES)
    list(APPEND _abigen_command --include "${_include_directory}")
 endforeach()
-foreach(_module IN LISTS _module_arguments)
-   list(APPEND _abigen_command --module-file "${_module}")
+foreach(_include_directory IN LISTS _visible_library_module_bases)
+   list(APPEND _abigen_command --include "${_include_directory}")
+endforeach()
+foreach(_module_path IN LISTS _module_search_paths)
+   list(APPEND _abigen_command --module-path "${_module_path}")
 endforeach()
 foreach(_wrapper IN LISTS _implementation_wrappers)
    list(APPEND _abigen_command --source-wrapper "${_wrapper}")
@@ -409,6 +539,10 @@ set(
    "${FORGE_CONTRACT_ABIGEN}"
    "${FORGE_CONTRACT_ATTR_PLUGIN}"
    ${FORGE_CONTRACT_SOURCES}
+   ${FORGE_CONTRACT_HEADERS}
+   ${FORGE_CONTRACT_COMPILE_CHECKS}
+   ${_contract_library_targets}
+   ${_contract_library_source_paths}
 )
 foreach(_ricardian_file FORGE_CONTRACT_RICARDIAN_CONTRACTS FORGE_CONTRACT_RICARDIAN_CLAUSES)
    if(NOT "${${_ricardian_file}}" STREQUAL "")
@@ -431,12 +565,19 @@ add_executable(
    "${_dispatcher}"
    ${_implementation_wrappers}
 )
-target_link_libraries(${FORGE_CONTRACT_TARGET} PRIVATE forge_guest_contract forge_guest_eosio)
+target_link_libraries(
+   ${FORGE_CONTRACT_TARGET}
+   PRIVATE
+      forge_guest_contract
+      forge_guest_eosio
+      ${_root_contract_targets}
+)
 target_include_directories(
    ${FORGE_CONTRACT_TARGET}
    PRIVATE
       "${_include}"
       ${FORGE_CONTRACT_INCLUDE_DIRECTORIES}
+      ${_visible_library_module_bases}
 )
 target_compile_definitions(${FORGE_CONTRACT_TARGET} PRIVATE FORGE_CONTRACT_GUEST=1)
 target_compile_options(
@@ -454,7 +595,14 @@ target_compile_options(
       ${_contract_optimization}
       -ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=.
       -ffile-prefix-map=${CMAKE_CURRENT_BINARY_DIR}=.
+      -ffile-prefix-map=${FORGE_CONTRACT_SOURCE_ROOT}=./source
 )
+foreach(_module_path IN LISTS _module_search_paths)
+   target_compile_options(
+      ${FORGE_CONTRACT_TARGET}
+      PRIVATE "-fprebuilt-module-path=${_module_path}"
+   )
+endforeach()
 
 if(FORGE_CONTRACT_COMPILE_CHECKS)
    add_library(${FORGE_CONTRACT_TARGET}_compile_checks OBJECT ${FORGE_CONTRACT_COMPILE_CHECKS})
@@ -463,12 +611,14 @@ if(FORGE_CONTRACT_COMPILE_CHECKS)
       PRIVATE
          forge_guest_contract
          forge_guest_eosio
+         ${_root_contract_targets}
    )
    target_include_directories(
       ${FORGE_CONTRACT_TARGET}_compile_checks
       PRIVATE
          "${_include}"
          ${FORGE_CONTRACT_INCLUDE_DIRECTORIES}
+         ${_visible_library_module_bases}
    )
    target_compile_definitions(${FORGE_CONTRACT_TARGET}_compile_checks PRIVATE FORGE_CONTRACT_GUEST=1)
    target_compile_options(
@@ -486,7 +636,14 @@ if(FORGE_CONTRACT_COMPILE_CHECKS)
          ${_contract_optimization}
          -ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=.
          -ffile-prefix-map=${CMAKE_CURRENT_BINARY_DIR}=.
+         -ffile-prefix-map=${FORGE_CONTRACT_SOURCE_ROOT}=./source
    )
+   foreach(_module_path IN LISTS _module_search_paths)
+      target_compile_options(
+         ${FORGE_CONTRACT_TARGET}_compile_checks
+         PRIVATE "-fprebuilt-module-path=${_module_path}"
+      )
+   endforeach()
    add_dependencies(${FORGE_CONTRACT_TARGET} ${FORGE_CONTRACT_TARGET}_compile_checks)
 endif()
 

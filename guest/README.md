@@ -59,6 +59,7 @@ find_package(ForgeContract CONFIG REQUIRED)
 
 forge_add_contract(
    hello
+   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
    SOURCES hello.cpp
 )
 ```
@@ -69,10 +70,52 @@ class. Other sources remain ordinary separately compiled implementation files:
 ```cmake
 forge_add_contract(
    token
+   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
    SOURCES token_helpers.cpp token.cpp
    DISPATCH_SOURCE token.cpp
 )
 ```
+
+## Shared Host And Guest Protocol
+
+Declare reusable protocol code once. Forge materializes the declaration as a
+normal host library and as an isolated wasm32 build graph:
+
+```cmake
+find_package(Forge CONFIG REQUIRED COMPONENTS chain_protocol raw)
+find_package(ForgeContract CONFIG REQUIRED)
+
+forge_add_contract_library(
+   product_protocol
+   ID product.chain.protocol
+   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
+   MODULE_SOURCES
+      include/product/chain/ids.cppm
+      include/product/chain/actions.cppm
+   SOURCES protocol.cpp
+   PUBLIC_HEADERS include/product/chain/limits.hpp
+   PRIVATE_HEADERS details/validation.hpp
+   PUBLIC_LIBRARIES
+      Forge::forge_chain_protocol
+      Forge::forge_raw
+)
+
+forge_add_contract(
+   product
+   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   SOURCES contract.cpp
+   HEADERS contract.hpp
+   COMPILE_CHECKS protocol_checks.cpp
+   LIBRARIES product_protocol
+)
+```
+
+`ID` is the stable package and guest-graph identity. `PUBLIC_LIBRARIES` are
+visible to consumers; `PRIVATE_LIBRARIES` are available only while compiling
+the owning library. Files, dependency scope and source roots are immutable
+after declaration. Native CMake target properties are not inspected or
+serialized into the guest graph.
 
 Configure the host project normally. `forge_add_contract` creates an isolated
 wasm32 sub-build, so the parent project does not use the SDK toolchain file:

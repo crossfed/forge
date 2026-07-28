@@ -525,6 +525,8 @@ install(
       "${CMAKE_CURRENT_BINARY_DIR}/ForgeContractConfigVersion.cmake"
       "${CMAKE_CURRENT_BINARY_DIR}/ForgeContractToolchain.cmake"
       cmake/ForgeContractFunctions.cmake
+      cmake/ForgeContractGraph.cmake
+      cmake/ForgeContractGuestComponents.cmake
    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ForgeContract"
 )
 install(DIRECTORY build DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract")

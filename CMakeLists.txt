@@ -499,10 +499,49 @@ set(
    forge_crypto_asymmetric
    forge_crypto_pki
    forge_crypto_math
+   forge_crypto_bls_values
    forge_crypto_bls
    forge_crypto_bn256
    forge_asio
 )
+
+function(forge_register_contract_guest_component target id)
+   if(NOT TARGET "${target}")
+      message(FATAL_ERROR "Forge guest component target does not exist: ${target}")
+   endif()
+   if(NOT id MATCHES "^forge\\.[a-z0-9_]+(\\.[a-z0-9_]+)*$")
+      message(FATAL_ERROR "Forge guest component ID is not canonical: ${id}")
+   endif()
+   get_target_property(_existing "${target}" FORGE_CONTRACT_GUEST_COMPONENT_ID)
+   if(_existing AND NOT _existing STREQUAL id)
+      message(FATAL_ERROR "Forge target ${target} already has guest component ID ${_existing}")
+   endif()
+   get_target_property(_exported "${target}" EXPORT_PROPERTIES)
+   if(_exported STREQUAL "_exported-NOTFOUND")
+      set(_exported)
+   endif()
+   list(APPEND _exported FORGE_CONTRACT_GUEST_COMPONENT_ID)
+   list(REMOVE_DUPLICATES _exported)
+   set_target_properties(
+      "${target}"
+      PROPERTIES
+         FORGE_CONTRACT_GUEST_COMPONENT_ID "${id}"
+         EXPORT_PROPERTIES "${_exported}"
+   )
+endfunction()
+
+forge_register_contract_guest_component(forge_raw forge.raw)
+forge_register_contract_guest_component(forge_codec_base64 forge.codec.base64)
+forge_register_contract_guest_component(forge_codec_base58 forge.codec.base58)
+forge_register_contract_guest_component(forge_codec_hex forge.codec.hex)
+forge_register_contract_guest_component(forge_crypto_digest forge.crypto.digest)
+forge_register_contract_guest_component(
+   forge_crypto_asymmetric_values
+   forge.crypto.asymmetric_values
+)
+forge_register_contract_guest_component(forge_crypto_asymmetric forge.crypto.asymmetric)
+forge_register_contract_guest_component(forge_crypto_bls_values forge.crypto.bls_values)
+forge_register_contract_guest_component(forge_chain_protocol forge.chain.protocol)
 
 if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
    add_subdirectory(libraries/db/blob)
@@ -630,6 +669,7 @@ set(
    crypto_asymmetric
    crypto_pki
    crypto_math
+   crypto_bls_values
    crypto_bls
    crypto_bn256
    asio
