@@ -2878,6 +2878,81 @@ BOOST_AUTO_TEST_CASE(p2p_connection_manager_rejects_pending_outbound_limit_witho
    forge::asio::blocking::run(runtime, client.async_stop());
 }
 
+BOOST_AUTO_TEST_CASE(p2p_stop_cancels_pending_direct_connect) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto client = node{runtime, options_for(peer(248))};
+   const auto stalled_endpoint = start_stalling_tcp_peer(runtime, std::chrono::seconds{5});
+
+   auto pending = boost::asio::co_spawn(runtime.context(),
+                                        client.async_connect(stalled_endpoint,
+                                                             node::connect_options{
+                                                                 .expected_peer = peer(249),
+                                                                 .allow_relay = false,
+                                                                 .timeout = std::chrono::seconds{5},
+                                                             }),
+                                        boost::asio::use_future);
+   wait_on_runtime(runtime, std::chrono::milliseconds{50}, "pending direct connect");
+
+   const auto started = std::chrono::steady_clock::now();
+   forge::asio::blocking::run(runtime, client.async_stop());
+   const auto elapsed = std::chrono::steady_clock::now() - started;
+
+   BOOST_TEST(elapsed < std::chrono::milliseconds{750});
+   BOOST_REQUIRE(pending.wait_for(std::chrono::milliseconds{750}) == std::future_status::ready);
+   try {
+      (void)pending.get();
+      BOOST_FAIL("expected pending direct connect cancellation");
+   } catch (const forge::exceptions::base& error) {
+      BOOST_REQUIRE(forge::net::p2p::exceptions::code_of(error).has_value());
+      BOOST_TEST(static_cast<int>(*forge::net::p2p::exceptions::code_of(error)) ==
+                 static_cast<int>(exceptions::code::canceled));
+   }
+}
+
+BOOST_AUTO_TEST_CASE(p2p_stop_rejects_session_completing_during_shutdown) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+
+   for (auto remaining = 32U; remaining != 0U; --remaining) {
+      auto server = node{runtime, options_for(peer(250))};
+      auto client = node{runtime, options_for(peer(251))};
+      const auto endpoint = listen(server, runtime);
+
+      auto pending = boost::asio::co_spawn(runtime.context(),
+                                           client.async_connect(endpoint,
+                                                                node::connect_options{
+                                                                    .expected_peer = server.local_peer(),
+                                                                    .allow_relay = false,
+                                                                    .timeout = std::chrono::seconds{2},
+                                                                }),
+                                           boost::asio::use_future);
+
+      const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+      while (server.metrics().active_sessions == 0U &&
+             pending.wait_for(std::chrono::milliseconds{0}) != std::future_status::ready) {
+         BOOST_REQUIRE(std::chrono::steady_clock::now() < deadline);
+         wait_on_runtime(runtime, std::chrono::milliseconds{1}, "outbound shutdown race");
+      }
+
+      forge::asio::blocking::run(runtime, client.async_stop());
+      BOOST_REQUIRE(pending.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+      try {
+         (void)pending.get();
+      } catch (const forge::exceptions::base& error) {
+         BOOST_REQUIRE(forge::net::p2p::exceptions::code_of(error).has_value());
+         const auto code = *forge::net::p2p::exceptions::code_of(error);
+         const auto canceled_or_closed = code == exceptions::code::canceled || code == exceptions::code::closed;
+         BOOST_TEST(canceled_or_closed);
+      }
+
+      const auto snapshot = client.diagnostics();
+      BOOST_TEST(snapshot.metrics.active_sessions == 0U);
+      BOOST_TEST(snapshot.sessions.empty());
+      BOOST_TEST(snapshot.network.stopped);
+
+      forge::asio::blocking::run(runtime, server.async_stop());
+   }
+}
+
 BOOST_AUTO_TEST_CASE(p2p_libp2p_relay_hop_codec_matches_spec_shape) {
    auto reserve = relay::hop_message{.kind = relay::hop_message::message_kind::reserve};
    BOOST_TEST(relay::codec::encode_hop(reserve) == std::vector<std::uint8_t>({0x02, 0x08, 0x00}),

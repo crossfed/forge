@@ -13,6 +13,7 @@
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
+#include <boost/asio/ip/udp.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
@@ -29,6 +30,8 @@
 import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.exceptions;
+import forge.net.quic.connection;
+import forge.net.quic.connector;
 import forge.net.quic.endpoint;
 import forge.net.quic.exceptions;
 import forge.net.quic.options;
@@ -460,6 +463,34 @@ boost::asio::awaitable<void> cancellation_unblocks_listener_and_rejects_connecto
    }
 }
 
+boost::asio::awaitable<void> cancellation_unblocks_active_connector(forge::asio::runtime& runtime) {
+   namespace asio = boost::asio;
+   using udp = asio::ip::udp;
+
+   const auto material = make_tls_material();
+   auto blackhole = udp::socket{runtime.context(), udp::endpoint{udp::v4(), 0}};
+   auto connector = forge::net::quic::connector{runtime};
+   auto executor = co_await asio::this_coro::executor;
+   auto pending = spawn_result<forge::net::quic::connection>(
+       executor, connector.async_connect(
+                     forge::net::quic::endpoint{.host = "127.0.0.1", .port = blackhole.local_endpoint().port()},
+                     make_client_options(material)));
+
+   auto timer = asio::steady_timer{executor, std::chrono::milliseconds{25}};
+   co_await timer.async_wait(asio::use_awaitable);
+   connector.cancel();
+
+   try {
+      (void)co_await take_result(pending);
+      BOOST_FAIL("expected active connector operation to be canceled");
+   } catch (const forge::exceptions::base& error) {
+      require_quic_code(error, forge::net::quic::exceptions::code::canceled);
+   }
+
+   auto ignored = boost::system::error_code{};
+   blackhole.close(ignored);
+}
+
 } // namespace
 
 BOOST_AUTO_TEST_SUITE(forge_quic_transport_tests)
@@ -517,6 +548,8 @@ BOOST_AUTO_TEST_CASE(invalid_transport_endpoints_throw_typed_quic_errors) {
 BOOST_AUTO_TEST_CASE(cancel_contract_rejects_and_unblocks) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    forge::asio::blocking::run(runtime, cancellation_unblocks_listener_and_rejects_connector(runtime));
+   BOOST_TEST(forge::asio::blocking::run_for(runtime, cancellation_unblocks_active_connector(runtime),
+                                             std::chrono::seconds{2}));
 }
 
 BOOST_AUTO_TEST_SUITE_END()

@@ -94,9 +94,7 @@ void registry::stop() {
       return;
    }
    for (auto& value : state_->profiles) {
-      if (value.listening()) {
-         value.stop();
-      }
+      value.stop();
    }
 }
 

@@ -3,6 +3,7 @@
 #include <boost/asio/detached.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/redirect_error.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
@@ -22,6 +23,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -3163,6 +3165,59 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_cancels_bootstrap_sleep_from_an_external_th
                                 std::chrono::seconds{5}));
    BOOST_TEST(disconnected);
    forge::asio::blocking::run(server.runtime(), server.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_node_plugin_cancels_active_bootstrap_dial) {
+   namespace asio = boost::asio;
+   using asio_tcp = asio::ip::tcp;
+
+   auto app = p2p_only_application{forge::app::application_shell_options{
+       .name = "p2p-active-bootstrap-stop",
+       .runtime = {.worker_threads = 2, .thread_name = "p2p-active-stop"},
+   }};
+   auto acceptor = std::make_shared<asio_tcp::acceptor>(app.runtime().context());
+   acceptor->open(asio_tcp::v4());
+   acceptor->bind({asio::ip::make_address("127.0.0.1"), 0});
+   const auto port = acceptor->local_endpoint().port();
+
+   auto config = test_p2p_config(test_peer(120));
+   config.set("plugins.p2p.node.bootstrap",
+              forge::config::core::value::array_type{
+                  forge::config::core::value{
+                      "/ip4/127.0.0.1/tcp/" + std::to_string(port) + "/p2p/" + test_peer(121).to_string(),
+                  },
+              });
+   app.configure(config);
+   forge::asio::blocking::run(app.runtime(), app.startup());
+
+   acceptor->listen();
+   auto socket = std::make_shared<asio_tcp::socket>(app.runtime().context());
+   auto hold = std::make_shared<asio::steady_timer>(app.runtime().context());
+   auto accepted = std::make_shared<std::promise<void>>();
+   auto accepted_future = accepted->get_future();
+   asio::co_spawn(
+       app.runtime().context(),
+       [acceptor, socket, hold, accepted]() -> asio::awaitable<void> {
+          auto error = boost::system::error_code{};
+          co_await acceptor->async_accept(*socket, asio::redirect_error(asio::use_awaitable, error));
+          if (!error) {
+             accepted->set_value();
+             hold->expires_after(std::chrono::seconds{5});
+             co_await hold->async_wait(asio::redirect_error(asio::use_awaitable, error));
+          }
+       },
+       asio::detached);
+
+   BOOST_REQUIRE(accepted_future.wait_for(std::chrono::seconds{3}) == std::future_status::ready);
+   const auto started = std::chrono::steady_clock::now();
+   forge::asio::blocking::run(app.runtime(), app.shutdown());
+   const auto elapsed = std::chrono::steady_clock::now() - started;
+
+   BOOST_TEST(elapsed < std::chrono::milliseconds{750});
+   auto ignored = boost::system::error_code{};
+   (void)hold->cancel();
+   socket->close(ignored);
+   acceptor->close(ignored);
 }
 
 BOOST_AUTO_TEST_CASE(p2p_node_plugin_closes_node_after_maintenance_submission_is_rejected) {

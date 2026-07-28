@@ -135,6 +135,9 @@ struct connector::impl final : transport::detail::stream_connector_concept {
       auto resolver = std::make_shared<asio_tcp::resolver>(executor);
       {
          const auto lock = std::scoped_lock{mutex};
+         if (!active.load(std::memory_order_acquire)) {
+            FORGE_THROW_EXCEPTION(exceptions::closed, "invalid tcp connector");
+         }
          sockets.push_back(socket);
          resolvers.push_back(resolver);
       }
@@ -189,18 +192,30 @@ struct connector::impl final : transport::detail::stream_connector_concept {
    }
 
    void cancel() override {
-      active.store(false, std::memory_order_release);
-      const auto lock = std::scoped_lock{mutex};
-      for (auto& value : resolvers) {
-         if (auto resolver = value.lock()) {
-            resolver->cancel();
+      auto active_resolvers = std::vector<std::shared_ptr<asio_tcp::resolver>>{};
+      auto active_sockets = std::vector<std::shared_ptr<asio_tcp::socket>>{};
+      {
+         const auto lock = std::scoped_lock{mutex};
+         active.store(false, std::memory_order_release);
+         active_resolvers.reserve(resolvers.size());
+         active_sockets.reserve(sockets.size());
+         for (auto& value : resolvers) {
+            if (auto resolver = value.lock()) {
+               active_resolvers.push_back(std::move(resolver));
+            }
+         }
+         for (auto& value : sockets) {
+            if (auto socket = value.lock()) {
+               active_sockets.push_back(std::move(socket));
+            }
          }
       }
-      for (auto& value : sockets) {
-         if (auto socket = value.lock()) {
-            auto ignored = boost::system::error_code{};
-            socket->cancel(ignored);
-         }
+      for (auto& resolver : active_resolvers) {
+         resolver->cancel();
+      }
+      for (auto& socket : active_sockets) {
+         auto ignored = boost::system::error_code{};
+         socket->cancel(ignored);
       }
    }
 

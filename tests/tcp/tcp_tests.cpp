@@ -275,6 +275,19 @@ boost::asio::awaitable<void> connection_cancel_unblocks_pending_read() {
    co_await listener.async_close();
 }
 
+boost::asio::awaitable<void> connector_cancel_rejects_future_connects() {
+   auto executor = co_await boost::asio::this_coro::executor;
+   auto listener = forge::net::tcp::listener{executor, loopback(0)};
+   auto connector = forge::net::tcp::connector{executor};
+
+   connector.cancel();
+   BOOST_CHECK(!connector.valid());
+   BOOST_CHECK_THROW((void)co_await connector.async_connect_connection(listener.local_endpoint()),
+                     forge::net::tcp::exceptions::closed);
+
+   co_await listener.async_close();
+}
+
 boost::asio::awaitable<void> tcp_invalid_endpoint_checks() {
    auto executor = co_await boost::asio::this_coro::executor;
    auto connector = forge::net::tcp::connector{executor};
@@ -323,6 +336,8 @@ BOOST_AUTO_TEST_CASE(tcp_accept_can_be_canceled_or_closed) {
    BOOST_CHECK(forge::asio::blocking::run_for(runtime, close_unblocks_accept(), std::chrono::seconds{2}));
    forge::asio::blocking::run(runtime, close_releases_bound_port());
    BOOST_CHECK(forge::asio::blocking::run_for(runtime, connection_cancel_unblocks_pending_read(), std::chrono::seconds{2}));
+   BOOST_CHECK(
+       forge::asio::blocking::run_for(runtime, connector_cancel_rejects_future_connects(), std::chrono::seconds{2}));
 }
 
 BOOST_AUTO_TEST_CASE(tcp_rejects_invalid_endpoints_and_refused_connects) {

@@ -218,6 +218,7 @@ class quic_profile final {
    }
 
    void stop() {
+      connector_.cancel();
       for (auto& [_, listener] : listeners_) {
          listener.active = false;
          listener.value->stop();
