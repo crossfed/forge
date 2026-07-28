@@ -25,13 +25,16 @@ def main() -> int:
         print(valid.stderr, file=sys.stderr)
         return 1
 
-    for name in ("auto", "typed", "existing", "member"):
+    for name in ("auto", "typed", "existing", "member", "returned"):
         invalid = run(checker, fixtures / name)
         if invalid.returncode == 0:
             print(f"{name}: checker accepted a dangling digest span", file=sys.stderr)
             return 1
         if "span refers to a temporary digest" not in invalid.stderr:
             print(f"{name}: checker returned an unexpected diagnostic:\n{invalid.stderr}", file=sys.stderr)
+            return 1
+        if name == "returned" and invalid.stderr.count("span refers to a temporary digest") != 3:
+            print(f"{name}: checker did not reject every temporary digest return:\n{invalid.stderr}", file=sys.stderr)
             return 1
     return 0
 
