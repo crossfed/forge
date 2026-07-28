@@ -42,6 +42,7 @@ forge_add_contract(
 
 forge_add_contract(
    equivalent
+   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.."
    SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/equivalent_struct.cpp"
 )
 

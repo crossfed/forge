@@ -8,6 +8,7 @@ module;
 #include <clang/Frontend/CompilerInstance.h>
 #include <clang/Frontend/FrontendAction.h>
 #include <clang/Index/USRGeneration.h>
+#include <clang/Sema/Lookup.h>
 #include <clang/Tooling/CompilationDatabase.h>
 #include <clang/Tooling/Tooling.h>
 #include <llvm/ADT/SmallString.h>
@@ -1013,9 +1014,10 @@ class type_encoder {
 
 class visitor final : public clang::RecursiveASTVisitor<visitor> {
  public:
-   visitor(clang::ASTContext& context, schema& output, std::set<std::string>& source_record_codecs,
+   visitor(clang::ASTContext& context, clang::Sema& sema, schema& output,
+           std::set<std::string>& source_record_codecs,
            std::string_view contract_name, std::filesystem::path source)
-       : context_(context), output_(output), encoder_(context, output, source_record_codecs),
+       : context_(context), sema_(sema), output_(output), encoder_(context, output, source_record_codecs),
          contract_name_(contract_name), source_(std::move(source)) {}
 
    bool VisitCXXRecordDecl(clang::CXXRecordDecl* declaration) {
@@ -1191,6 +1193,58 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       std::string result;
    };
 
+   std::optional<std::uint64_t> named_action_value(const clang::ParmVarDecl& parameter) {
+      const auto* record = parameter.getType().getNonReferenceType()->getAsCXXRecordDecl();
+      record = record == nullptr ? nullptr : record->getDefinition();
+      if (record == nullptr) {
+         return std::nullopt;
+      }
+
+      auto lookup = clang::LookupResult{
+          sema_,
+          context_.DeclarationNames.getIdentifier(&context_.Idents.get("get_name")),
+          parameter.getLocation(),
+          clang::Sema::LookupOrdinaryName,
+      };
+      lookup.suppressDiagnostics();
+      if (!sema_.LookupQualifiedName(lookup, const_cast<clang::CXXRecordDecl*>(record)) || lookup.isAmbiguous()) {
+         return std::nullopt;
+      }
+
+      const clang::CXXMethodDecl* named_method = nullptr;
+      for (auto declaration = lookup.begin(); declaration != lookup.end(); ++declaration) {
+         const auto* method = llvm::dyn_cast<clang::CXXMethodDecl>((*declaration)->getUnderlyingDecl());
+         if (method == nullptr) {
+            continue;
+         }
+         const auto* result_record = method->getReturnType()->getAsCXXRecordDecl();
+         if (!method->isStatic() || !method->isConstexpr() || method->getNumParams() != 0U ||
+             declaration.getAccess() != clang::AS_public || method->isDeleted() || result_record == nullptr ||
+             result_record->getCanonicalDecl()->getQualifiedNameAsString() != "forge::chain::protocol::name") {
+            continue;
+         }
+         if (named_method != nullptr) {
+            return std::nullopt;
+         }
+         named_method = method;
+      }
+      if (named_method == nullptr) {
+         return std::nullopt;
+      }
+
+      const auto location = named_method->getLocation();
+      auto* callee = sema_.BuildDeclRefExpr(const_cast<clang::CXXMethodDecl*>(named_method), named_method->getType(),
+                                            clang::VK_LValue, location);
+      auto call = sema_.BuildCallExpr(nullptr, callee, location, {}, location);
+      auto result = clang::Expr::EvalResult{};
+      if (call.isInvalid() || !call.get()->EvaluateAsConstantExpr(result, context_) || !result.Val.isStruct() ||
+          result.Val.getStructNumFields() != 1U || !result.Val.getStructField(0).isInt()) {
+         report(location, "typed action get_name() must have a constant action name");
+         return std::nullopt;
+      }
+      return result.Val.getStructField(0).getInt().getZExtValue();
+   }
+
    void register_method_types(const clang::CXXMethodDecl& method) {
       if (!method.getReturnType()->isVoidType()) {
          static_cast<void>(encoder_.encode(method.getReturnType()));
@@ -1233,7 +1287,20 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
                    std::string_view annotated_name) {
       register_method_types(method);
       const auto identity = declaration_identity(method);
-      const auto action_name = annotated_name.empty() ? method.getNameAsString() : std::string{annotated_name};
+      auto action_name = annotated_name.empty() ? method.getNameAsString() : std::string{annotated_name};
+      auto action_type = method.getNameAsString();
+      const auto* named_parameter = method.getNumParams() == 1U ? method.getParamDecl(0) : nullptr;
+      const auto named_value =
+          named_parameter == nullptr ? std::optional<std::uint64_t>{} : named_action_value(*named_parameter);
+      if (named_value.has_value()) {
+         const auto canonical_name = protocol::to_string(protocol::action_name{*named_value});
+         if (!annotated_name.empty() && annotated_name != canonical_name) {
+            report(method.getLocation(), "action attribute name does not match payload get_name()");
+            return;
+         }
+         action_name = canonical_name;
+         action_type = encoder_.encode(*named_parameter);
+      }
       const auto [existing, inserted] = output_.action_declarations.try_emplace(action_name, identity);
       if (!inserted && existing->second == identity) {
          return;
@@ -1248,8 +1315,16 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
          report(method.getLocation(), "overloaded contract action methods are not supported");
          return;
       }
-      const auto method_info =
-          add_method(method, annotated_name, has_annotation(method, "forge.attribute_scope:action:eosio"));
+      const auto method_info = named_value.has_value()
+                                   ? method_shape{
+                                         .name = action_name,
+                                         .type = action_type,
+                                         .result = method.getReturnType()->isVoidType()
+                                                       ? std::string{}
+                                                       : encoder_.encode(method.getReturnType()),
+                                     }
+                                   : add_method(method, annotated_name,
+                                                has_annotation(method, "forge.attribute_scope:action:eosio"));
       output_.actions.push_back(action_shape{
           .name = method_info.name,
           .type = method_info.type,
@@ -1357,6 +1432,7 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
    }
 
    clang::ASTContext& context_;
+   clang::Sema& sema_;
    schema& output_;
    type_encoder encoder_;
    std::string contract_name_;
@@ -1366,23 +1442,30 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
 
 class consumer final : public clang::ASTConsumer {
  public:
-   consumer(clang::ASTContext& context, schema& output, std::set<std::string>& source_record_codecs, bool& found,
-            bool& dispatch_source_found, std::string_view contract_name, std::filesystem::path source,
-            bool is_dispatch_source)
-       : visitor_(context, output, source_record_codecs, contract_name, std::move(source)), found_(found),
-         dispatch_source_found_(dispatch_source_found), is_dispatch_source_(is_dispatch_source) {}
+   consumer(clang::CompilerInstance& compiler, schema& output, std::set<std::string>& source_record_codecs,
+            bool& found, bool& dispatch_source_found, std::string_view contract_name,
+            std::filesystem::path source, bool is_dispatch_source)
+       : compiler_(compiler), output_(output), source_record_codecs_(source_record_codecs), found_(found),
+         dispatch_source_found_(dispatch_source_found), contract_name_(contract_name), source_(std::move(source)),
+         is_dispatch_source_(is_dispatch_source) {}
 
    void HandleTranslationUnit(clang::ASTContext& context) override {
-      visitor_.TraverseDecl(context.getTranslationUnitDecl());
-      const auto found = visitor_.found_contract();
+      auto contract_visitor =
+          visitor{context, compiler_.getSema(), output_, source_record_codecs_, contract_name_, source_};
+      contract_visitor.TraverseDecl(context.getTranslationUnitDecl());
+      const auto found = contract_visitor.found_contract();
       found_ = found_ || found;
       dispatch_source_found_ = dispatch_source_found_ || (is_dispatch_source_ && found);
    }
 
  private:
-   visitor visitor_;
+   clang::CompilerInstance& compiler_;
+   schema& output_;
+   std::set<std::string>& source_record_codecs_;
    bool& found_;
    bool& dispatch_source_found_;
+   std::string contract_name_;
+   std::filesystem::path source_;
    bool is_dispatch_source_ = false;
 };
 
@@ -1396,7 +1479,7 @@ class action final : public clang::ASTFrontendAction {
    std::unique_ptr<clang::ASTConsumer> CreateASTConsumer(clang::CompilerInstance& compiler,
                                                          llvm::StringRef input_file) override {
       const auto input = std::filesystem::weakly_canonical(std::filesystem::path{input_file.str()});
-      return std::make_unique<consumer>(compiler.getASTContext(), output_, output_.source_record_codecs[input], found_,
+      return std::make_unique<consumer>(compiler, output_, output_.source_record_codecs[input], found_,
                                         dispatch_source_found_, contract_name_, input, input == dispatch_source_);
    }
 
@@ -1915,8 +1998,8 @@ artifacts generate(const request& options) {
    for (const auto& path : options.include_paths) {
       arguments.push_back("-I" + path.string());
    }
-   for (const auto& module : options.module_files) {
-      arguments.push_back("-fmodule-file=" + module);
+   for (const auto& path : options.module_paths) {
+      arguments.push_back("-fprebuilt-module-path=" + path.string());
    }
 
    auto source_paths = std::vector<std::string>{};

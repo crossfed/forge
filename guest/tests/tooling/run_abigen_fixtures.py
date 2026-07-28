@@ -9,116 +9,6 @@ import subprocess
 import sys
 
 
-MODULES = (
-    "forge.raw.stream",
-    "forge.raw.varint_value",
-    "forge.raw.codec",
-    "forge.codec.base64.exceptions",
-    "forge.codec.base64",
-    "forge.codec.base58.exceptions",
-    "forge.codec.base58",
-    "forge.codec.hex.exceptions",
-    "forge.codec.hex",
-    "forge.crypto.digest.sha256:value",
-    "forge.crypto.digest.sha256",
-    "forge.crypto.digest.sha512:value",
-    "forge.crypto.digest.sha512",
-    "forge.crypto.digest.ripemd160:value",
-    "forge.crypto.digest.ripemd160",
-    "forge.crypto.asymmetric.values",
-    "forge.crypto.asymmetric",
-    "forge.crypto.bls.values",
-    "forge.chain.protocol.values",
-    "forge.chain.protocol.time",
-    "forge.chain.protocol.types:value",
-    "forge.chain.protocol.types",
-    "forge.chain.protocol.fixed_key:value",
-    "forge.chain.protocol.fixed_key",
-    "forge.chain.protocol.action:value",
-    "forge.chain.protocol.action",
-    "forge.chain.protocol.transaction:value",
-    "forge.chain.protocol.transaction",
-    "forge.chain.protocol.authority:value",
-    "forge.chain.protocol.authority",
-    "forge.chain.protocol.producer_schedule:value",
-    "forge.chain.protocol.producer_schedule",
-    "forge.chain.protocol.producer_authority",
-    "forge.chain.protocol.system:value",
-    "forge.chain.protocol.system",
-    "forge.chain.protocol.code_hash_result",
-    "forge.chain.protocol.blockchain_parameters",
-    "forge.chain.protocol.kv_parameters",
-    "forge.chain.protocol.finalizer_authority",
-    "forge.chain.protocol.finalizer_policy",
-    "forge.chain.protocol.hash_id",
-    "forge.chain.protocol.call_access_mode",
-    "forge.chain.protocol.call_data_header",
-    "forge.contract.intrinsics",
-    "forge.contract",
-    "forge.contract.datastream",
-    "forge.contract.varint",
-    "forge.contract.fixed_bytes",
-    "forge.contract.binary_extension",
-    "forge.contract.ignore",
-    "forge.contract.hash_id",
-    "forge.contract.action",
-    "forge.contract.transaction",
-    "forge.contract.system",
-    "forge.contract.deferred_transaction",
-    "forge.contract.authorization",
-    "forge.contract.bitset",
-    "forge.contract.call",
-    "forge.contract.crypto",
-    "forge.contract.crypto_bls_ext",
-    "forge.contract.crypto_ext",
-    "forge.contract.instant_finality",
-    "forge.contract.key",
-    "forge.contract.powers",
-    "forge.contract.print",
-    "forge.contract.privileged",
-    "forge.contract.producer_schedule",
-    "forge.contract.rope",
-    "forge.contract.string",
-    "forge.contract.dispatcher",
-    "forge.contract.multi_index",
-    "forge.contract.singleton",
-    "forge.contract.compatibility_name",
-    "forge.contract.compatibility_asset",
-)
-
-MODULE_TARGETS = {
-    module: (
-        "forge_guest_raw"
-        if module.startswith("forge.raw.")
-        else "forge_guest_codec_base64"
-        if module.startswith("forge.codec.base64")
-        else "forge_guest_codec_base58"
-        if module.startswith("forge.codec.base58")
-        else "forge_guest_codec_hex"
-        if module.startswith("forge.codec.hex")
-        else "forge_guest_crypto"
-        if module.startswith("forge.crypto.")
-        else "forge_guest_chain_protocol"
-        if module.startswith("forge.chain.protocol.")
-        else "forge_guest_contract"
-    )
-    for module in MODULES
-}
-
-MODULE_FILES = {
-    "forge.crypto.digest.sha256:value": "forge.crypto.digest.sha256-value.pcm",
-    "forge.crypto.digest.sha512:value": "forge.crypto.digest.sha512-value.pcm",
-    "forge.crypto.digest.ripemd160:value": "forge.crypto.digest.ripemd160-value.pcm",
-    "forge.crypto.asymmetric.values": "forge.crypto.asymmetric.values.pcm",
-    "forge.chain.protocol.types:value": "forge.chain.protocol.types-value.pcm",
-    "forge.chain.protocol.fixed_key:value": "forge.chain.protocol.fixed_key-value.pcm",
-    "forge.chain.protocol.action:value": "forge.chain.protocol.action-value.pcm",
-    "forge.chain.protocol.transaction:value": "forge.chain.protocol.transaction-value.pcm",
-    "forge.chain.protocol.authority:value": "forge.chain.protocol.authority-value.pcm",
-    "forge.chain.protocol.producer_schedule:value": "forge.chain.protocol.producer_schedule-value.pcm",
-    "forge.chain.protocol.system:value": "forge.chain.protocol.system-value.pcm",
-}
-
 PASS_FIXTURES = {
     "action_results_test": "action_results_test",
     "aliased_type_variant_template_arg": "aliased_type_variant_template_arg",
@@ -171,10 +61,15 @@ def invoke(
         "--include",
         str(args.include),
     ]
-    for module in MODULES:
-        module_dir = args.build_dir / "CMakeFiles" / f"{MODULE_TARGETS[module]}.dir"
-        module_file = MODULE_FILES.get(module, module + ".pcm")
-        command.extend(("--module-file", f"{module}={module_dir / module_file}"))
+    module_dirs = sorted(
+        path
+        for path in (args.build_dir / "CMakeFiles").glob("*.dir")
+        if any(path.glob("*.pcm"))
+    )
+    if not module_dirs:
+        raise RuntimeError(f"no prebuilt module directories found under {args.build_dir}")
+    for module_dir in module_dirs:
+        command.extend(("--module-path", str(module_dir)))
     if ricardian_contracts is not None:
         command.extend(("--ricardian-contracts", str(ricardian_contracts)))
     if ricardian_clauses is not None:
@@ -375,6 +270,65 @@ def main():
         ricardian_clauses=args.fixtures / "ricardian.clauses.md",
     )
     check_features(features)
+
+    named_action = invoke(
+        args,
+        "namedaction",
+        args.fixtures / "named_action.cpp",
+        args.output / "named-action",
+    )
+    named_action_structs = by_name(named_action["structs"])
+    if by_name(named_action["actions"])["beginrev"]["type"] != "begin_revision":
+        raise RuntimeError("named action did not use its DTO as the direct ABI payload")
+    if named_action_structs["begin_revision"]["fields"] != [
+        {"name": "workspace", "type": "uint64"},
+        {"name": "inode", "type": "uint64"},
+    ]:
+        raise RuntimeError("named action ABI payload fields changed")
+    if "submit" in named_action_structs:
+        raise RuntimeError("named action generated a legacy method wrapper")
+
+    named_helpers = invoke(
+        args,
+        "namedhelpers",
+        args.fixtures / "named_action_unrelated_get_name.cpp",
+        args.output / "named-action-unrelated-get-name",
+    )
+    named_helper_actions = by_name(named_helpers["actions"])
+    named_helper_structs = by_name(named_helpers["structs"])
+    if named_helper_actions["submit"]["type"] != "submit":
+        raise RuntimeError("unrelated get_name method changed the legacy action ABI")
+    if named_helper_structs["submit"]["fields"] != [
+        {"name": "request", "type": "legacy_request"}
+    ]:
+        raise RuntimeError("legacy action wrapper fields changed")
+    if named_helper_actions["publishrev"]["type"] != "overloaded_named_request":
+        raise RuntimeError("valid named action hook was hidden by an unrelated overload")
+    if "publish" in named_helper_structs:
+        raise RuntimeError("overloaded named action generated a legacy method wrapper")
+    if named_helper_actions["archive"]["type"] != "archive":
+        raise RuntimeError("inaccessible get_name method changed the legacy action ABI")
+    if named_helper_actions["erase"]["type"] != "erase":
+        raise RuntimeError("deleted get_name method changed the legacy action ABI")
+    if named_helper_actions["inherited"]["type"] != "inherited_named_request":
+        raise RuntimeError("public inherited named action hook did not produce direct DTO ABI")
+    if "restore" in named_helper_structs:
+        raise RuntimeError("inherited named action generated a legacy method wrapper")
+    if named_helper_actions["runtime"]["type"] != "runtime":
+        raise RuntimeError("non-constexpr get_name method changed the legacy action ABI")
+    if named_helper_actions["defaulted"]["type"] != "defaulted":
+        raise RuntimeError("get_name method with parameters changed the legacy action ABI")
+    if named_helper_actions["hidden"]["type"] != "hidden":
+        raise RuntimeError("derived get_name overload did not hide the inherited named action hook")
+
+    invoke(
+        args,
+        "namedmismatch",
+        args.fixtures / "named_action_mismatch.cpp",
+        args.output / "named-action-mismatch",
+        succeeds=False,
+        error_contains="action attribute name does not match payload get_name()",
+    )
 
     guest_macro = invoke(
         args,

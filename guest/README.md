@@ -117,6 +117,37 @@ the owning library. Files, dependency scope and source roots are immutable
 after declaration. Native CMake target properties are not inspected or
 serialized into the guest graph.
 
+## Named Action Payloads
+
+A shared action DTO owns its canonical action name:
+
+```cpp
+struct begin_revision {
+   workspace_id workspace;
+   inode_id inode;
+
+   static constexpr forge::chain::protocol::action_name get_name() {
+      return forge::chain::protocol::make_name("beginrev");
+   }
+};
+```
+
+For a handler with exactly one such parameter, ABI generation exposes the DTO
+fields directly and dispatch unpacks the same DTO. An explicit action attribute
+is allowed only when its value matches `get_name()`. Legacy handlers without a
+valid public, static, zero-argument, constant `get_name()` retain the
+method-parameter wrapper ABI.
+
+Host code constructs an action without repeating the name:
+
+```cpp
+auto action = forge::chain::protocol::action{
+    permission, contract_account, begin_revision{...}};
+```
+
+Host packing and guest dispatch both use `forge.raw`, so the binary action
+payload has one type definition.
+
 Configure the host project normally. `forge_add_contract` creates an isolated
 wasm32 sub-build, so the parent project does not use the SDK toolchain file:
 
