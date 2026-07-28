@@ -837,9 +837,11 @@ BOOST_AUTO_TEST_CASE(named_action_payload_owns_name_and_raw_bytes) {
    const auto payload = named_action_payload{.workspace = 41U, .inode = 73U};
    const auto action = protocol::action{permission, account, payload};
 
-   BOOST_TEST(action.account == account);
-   BOOST_TEST(action.name == named_action_payload::get_name());
-   BOOST_TEST(action.authorization == std::vector{permission});
+   BOOST_TEST(action.account.value == account.value);
+   BOOST_TEST(action.name.value == named_action_payload::get_name().value);
+   BOOST_TEST(action.authorization.size() == 1U);
+   BOOST_TEST(action.authorization.front().actor.value == permission.actor.value);
+   BOOST_TEST(action.authorization.front().permission.value == permission.permission.value);
    BOOST_TEST(action.data == forge::raw::pack(payload));
 }
 
