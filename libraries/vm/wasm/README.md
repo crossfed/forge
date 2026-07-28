@@ -199,9 +199,7 @@ void execute(wasm::wasm_code code) {
       });
    }
 
-   // wasm_allocator deliberately follows the donor's explicit lifetime API.
-   // Release it after every backend that references it has been destroyed.
-   memory.free();
+   // wasm_allocator owns and releases its guarded mapping.
 }
 ```
 
@@ -317,7 +315,7 @@ The allocator family is specialized; it is not a general application allocator.
 
 | Allocator | Role | Production ownership |
 |---|---|---|
-| `wasm_allocator` | Guarded guest linear memory, committed in 64 KiB WASM pages | One long-lived instance per execution lane; never share concurrently; call `free()` exactly once after referencing backends are destroyed |
+| `wasm_allocator` | Guarded guest linear memory, committed in 64 KiB WASM pages | One long-lived instance per execution lane; never share concurrently; call `reset()` between invocations |
 | `growable_allocator` | Arena for parsed module structures and generated code | Owned by `module`; backend manages it |
 | `jit_allocator` | Process-wide executable-page pool using large virtual segments | Internal singleton used by x86_64 JIT; consumers do not allocate from it directly |
 | `stack_allocator` | Optional native stack with room for host and signal handling | Low-level runtime primitive; RAII-managed |
@@ -330,10 +328,12 @@ commit the whole region as resident memory. WASM pages become readable/writable
 through `mprotect` as the guest memory grows. Guard pages and the surrounding
 signal machinery are part of bounds enforcement.
 
-The backend stores a non-owning pointer to `wasm_allocator`. Therefore:
+The backend stores a non-owning pointer to `wasm_allocator`. The allocator owns
+its guarded mapping and releases it on destruction; `free()` is an idempotent
+early-release operation. Therefore:
 
 - construct the allocator before the backend;
-- destroy all referencing backends before `memory.free()`;
+- destroy all referencing backends before an explicit `memory.free()`;
 - do not copy the allocator;
 - do not reuse it concurrently;
 - use `reset(page_count)` or backend `initialize` for a new isolated run, not
@@ -429,7 +429,7 @@ ported. They are not part of the active EOS VM build or public VM behavior.
 - Keep one backend/context and `wasm_allocator` per concurrent execution lane.
 - Use guarded spans/proxies and never retain guest pointers.
 - Execute untrusted code under a deadline.
-- Destroy backends before explicitly releasing `wasm_allocator`.
+- Reset long-lived execution-lane allocators between invocations.
 - Keep product state changes inside a transaction owned by the caller.
 - Test interpreter/JIT equivalence for every supported architecture and release.
 - Run donor mapping, spec, sanitizer, fuzz-build, and relocatable-package gates.

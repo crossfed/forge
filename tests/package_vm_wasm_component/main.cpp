@@ -21,9 +21,6 @@ struct linear_memory {
    linear_memory& operator=(const linear_memory&) = delete;
 
    linear_memory() = default;
-   ~linear_memory() {
-      value.free();
-   }
 
    forge::vm::wasm::wasm_allocator value;
 };

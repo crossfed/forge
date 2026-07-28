@@ -480,6 +480,9 @@ class wasm_allocator {
    int32_t page = 0;
 
  public:
+   wasm_allocator();
+   ~wasm_allocator();
+
    wasm_allocator(const wasm_allocator&) = delete;
    wasm_allocator& operator=(const wasm_allocator&) = delete;
    wasm_allocator(wasm_allocator&&) = delete;
@@ -505,24 +508,14 @@ class wasm_allocator {
       int err = mprotect(raw + (page_size * page), (page_size * size), PROT_NONE);
       detail::check<exceptions::allocation>((err == 0), "mprotect failed");
    }
-   void free() {
-      std::size_t syspagesize = static_cast<std::size_t>(::sysconf(_SC_PAGESIZE));
-      munmap(raw - syspagesize, max_memory + 2 * syspagesize);
-   }
-   wasm_allocator() {
-      std::size_t syspagesize = static_cast<std::size_t>(::sysconf(_SC_PAGESIZE));
-      raw = (char*)mmap(NULL, max_memory + 2 * syspagesize, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-      detail::check<exceptions::allocation>((raw != MAP_FAILED), "mmap failed to alloca pages");
-      int err = mprotect(raw, syspagesize, PROT_READ);
-      detail::check<exceptions::allocation>((err == 0), "mprotect failed");
-      raw += syspagesize;
-      page = 0;
-   }
+   void free() noexcept;
+
    // Initializes the memory controlled by the allocator.
    //
    // \post get_current_page() == new_pages
    // \post all allocated pages are zero-filled.
    void reset(uint32_t new_pages) {
+      detail::check<exceptions::allocation>((raw != nullptr), "require memory to reset");
       if (page >= 0) {
          std::memset(raw, '\0', page_size * page); // zero the memory
       } else {
@@ -540,6 +533,7 @@ class wasm_allocator {
 
    // Signal no memory defined
    void reset() {
+      detail::check<exceptions::allocation>((raw != nullptr), "require memory to reset");
       if (page >= 0) {
          std::size_t syspagesize = static_cast<std::size_t>(::sysconf(_SC_PAGESIZE));
          std::memset(raw, '\0', page_size * page); // zero the memory
@@ -553,16 +547,20 @@ class wasm_allocator {
       return reinterpret_cast<T*>(raw);
    }
    template <typename T> inline T* create_pointer(uint32_t offset) {
+      detail::check<exceptions::allocation>((raw != nullptr), "require memory to create pointer");
       return reinterpret_cast<T*>(raw + offset);
    }
    inline int32_t get_current_page() const {
       return page;
    }
    bool is_in_region(char* p) {
+      if (raw == nullptr)
+         return false;
       return p >= raw && p < raw + max_memory;
    }
 
    span<std::byte> get_span() const {
+      detail::check<exceptions::allocation>((raw != nullptr), "require memory to create span");
       const std::size_t syspagesize = static_cast<std::size_t>(::sysconf(_SC_PAGESIZE));
       return {(std::byte*)raw - syspagesize, max_memory + 2 * syspagesize};
    }
