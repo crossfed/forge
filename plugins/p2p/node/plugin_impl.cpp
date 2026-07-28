@@ -13,9 +13,11 @@ module;
 #include <utility>
 #include <vector>
 
+#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <boost/asio/strand.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/system/error_code.hpp>
@@ -161,22 +163,29 @@ void plugin::impl::start_bootstrap_maintenance() {
        .name = "p2p-bootstrap-maintenance",
        .work = [self = std::move(self)](forge::asio::task::context& context) -> boost::asio::awaitable<void> {
           auto executor = co_await boost::asio::this_coro::executor;
-          while (!context.cancel_requested() && !self->stopping.load(std::memory_order_acquire)) {
-             co_await self->refresh_bootstrap();
-             if (context.cancel_requested() || self->stopping.load(std::memory_order_acquire)) {
-                co_return;
-             }
+          auto lane = boost::asio::make_strand(executor);
+          co_await boost::asio::co_spawn(
+              lane,
+              [self, &context]() -> boost::asio::awaitable<void> {
+                 auto executor = co_await boost::asio::this_coro::executor;
+                 while (!context.cancel_requested() && !self->stopping.load(std::memory_order_acquire)) {
+                    co_await self->refresh_bootstrap();
+                    if (context.cancel_requested() || self->stopping.load(std::memory_order_acquire)) {
+                       co_return;
+                    }
 
-             auto timer = std::make_shared<boost::asio::steady_timer>(executor, bootstrap_scan_interval);
-             auto stop = std::stop_callback{context.stop_token(), [executor, timer] {
-                                               boost::asio::post(executor, [timer] { timer->cancel(); });
-                                            }};
-             auto error = boost::system::error_code{};
-             co_await timer->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
-             if (error && error != boost::asio::error::operation_aborted) {
-                throw boost::system::system_error{error};
-             }
-          }
+                    auto timer = std::make_shared<boost::asio::steady_timer>(executor, bootstrap_scan_interval);
+                    auto stop = std::stop_callback{context.stop_token(), [executor, timer] {
+                                                      boost::asio::post(executor, [timer] { timer->cancel(); });
+                                                   }};
+                    auto error = boost::system::error_code{};
+                    co_await timer->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
+                    if (error && error != boost::asio::error::operation_aborted) {
+                       throw boost::system::system_error{error};
+                    }
+                 }
+              },
+              boost::asio::use_awaitable);
        },
    });
 
