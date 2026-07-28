@@ -1267,59 +1267,43 @@ boost::asio::awaitable<forge::net::p2p::stream> node::async_open_protocol_stream
 }
 
 boost::asio::awaitable<void> node::async_stop() {
-   auto self = impl_;
-   std::vector<std::shared_ptr<impl::session_state>> sessions;
-   {
-      auto lock = std::scoped_lock{self->mutex};
-      if (self->stopped) {
-         co_return;
-      }
-      self->stopped = true;
-      self->direct_registry.stop();
-      for (auto& [_, session] : self->sessions) {
-         session->closed = true;
-         sessions.push_back(session);
-      }
-      self->connections.clear(self->resources);
-      self->sessions.clear();
-      self->inbound_relay_reservations.clear();
-      self->outbound_relay_reservations.clear();
-      self->pubsub_value.outbound_streams.clear();
-      self->pubsub_value.active_validations_by_peer.clear();
-      self->pubsub_value.active_validations = 0;
-      self->metrics_value.active_sessions = 0;
-      self->metrics_value.active_relay_reservations = 0;
-      self->metrics_value.stopped = true;
-   }
-   for (auto& session : sessions) {
-      try {
-         co_await session->connection.async_close();
-      } catch (...) {
-         session->connection.cancel();
-      }
-   }
+   stop();
+   co_await impl_->teardown.wait();
 }
 
 void node::stop() {
+   auto operations = std::vector<detail::session_teardown::operation>{};
    {
       auto lock = std::scoped_lock{impl_->mutex};
       if (impl_->stopped) {
          return;
       }
+      operations.reserve(impl_->sessions.size());
+      for (auto& [_, session] : impl_->sessions) {
+         operations.push_back(detail::session_teardown::operation{
+             .close = [session]() -> boost::asio::awaitable<void> {
+                co_await session->connection.async_close();
+             },
+             .cancel = [session] { session->connection.cancel(); },
+         });
+      }
       impl_->stopped = true;
       impl_->direct_registry.stop();
       for (auto& [_, session] : impl_->sessions) {
          session->closed = true;
-         session->connection.cancel();
       }
       impl_->connections.clear(impl_->resources);
       impl_->sessions.clear();
       impl_->inbound_relay_reservations.clear();
       impl_->outbound_relay_reservations.clear();
+      impl_->pubsub_value.outbound_streams.clear();
+      impl_->pubsub_value.active_validations_by_peer.clear();
+      impl_->pubsub_value.active_validations = 0;
       impl_->metrics_value.active_sessions = 0;
       impl_->metrics_value.active_relay_reservations = 0;
       impl_->metrics_value.stopped = true;
    }
+   impl_->teardown.start(std::move(operations));
 }
 
 } // namespace forge::net::p2p

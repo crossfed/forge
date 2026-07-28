@@ -8,6 +8,7 @@
 #include "peer_exchange_codec.hxx"
 #include "relay_discovery.hxx"
 #include "relay_transport.hxx"
+#include "session_teardown.hxx"
 
 namespace forge::net::p2p {
 
@@ -83,6 +84,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
    node::options options;
    peer_id local;
    direct::registry direct_registry;
+   detail::session_teardown teardown;
 
    mutable std::mutex mutex;
    peer_store store;

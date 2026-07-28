@@ -125,7 +125,11 @@ boost::asio::awaitable<void> plugin::startup() {
 void plugin::request_stop() noexcept {
    impl_->request_bootstrap_stop();
    if (impl_->node) {
-      impl_->node->stop();
+      try {
+         impl_->node->stop();
+      } catch (...) {
+         // shutdown() retries and reports a synchronous initiation failure.
+      }
    }
 }
 

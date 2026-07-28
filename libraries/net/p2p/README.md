@@ -250,9 +250,20 @@ boost::asio::awaitable<void> stop_node(forge::net::p2p::node& node) {
    co_await node.async_stop();
 }
 
-// From a synchronous signal path:
-node.stop();
+void request_node_stop(forge::net::p2p::node& node) {
+   node.stop();
+}
+
+boost::asio::awaitable<void> finish_node_stop(forge::net::p2p::node& node) {
+   co_await node.async_stop();
+}
 ```
+
+`stop()` closes admission and listeners and starts disconnecting current
+sessions without blocking the caller. It intentionally removes those sessions
+from the active set before their transport teardown has finished.
+`async_stop()` is the completion barrier: it always waits for the teardown
+started by `stop()`, including STCP/Yamux read-loop cleanup.
 
 ## Security Notes
 

@@ -335,7 +335,8 @@ node::impl::impl(forge::asio::runtime& runtime_value, node::options options_valu
     : runtime(runtime_value), options(std::move(options_value)),
       local(options.explicit_peer_id ? *options.explicit_peer_id
                                      : make_peer_id_from_certificate_pem(options.certificate_pem)),
-      direct_registry(runtime_value, options), store(peer_store::options{.backend = make_peer_store_backend(options)}) {
+      direct_registry(runtime_value, options), teardown(runtime_value.context().get_executor()),
+      store(peer_store::options{.backend = make_peer_store_backend(options)}) {
 }
 
 std::vector<forge::net::p2p::endpoint> node::impl::local_endpoints_for_control() const {
