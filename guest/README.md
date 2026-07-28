@@ -117,6 +117,30 @@ the owning library. Files, dependency scope and source roots are immutable
 after declaration. Native CMake target properties are not inspected or
 serialized into the guest graph.
 
+Install the source package and standard CMake module metadata together:
+
+```cmake
+forge_install_contract_library(
+   TARGET product_protocol
+   EXPORT ProductProtocolTargets
+   MODULE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/modules"
+   SOURCE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/sources"
+)
+install(
+   EXPORT ProductProtocolTargets
+   NAMESPACE Product::
+   FILE ProductProtocolTargets.cmake
+   CXX_MODULES_DIRECTORY cxx-modules
+   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ProductProtocol"
+)
+```
+
+The package config must use `find_dependency(Forge)` for the declared host
+dependencies and `find_dependency(ForgeContract)` before loading the targets
+file. Installed packages contain module sources, implementation inputs,
+headers and relocatable descriptor metadata. Compiler-specific BMI or PCM
+artifacts are never transported.
+
 ## Named Action Payloads
 
 A shared action DTO owns its canonical action name:
