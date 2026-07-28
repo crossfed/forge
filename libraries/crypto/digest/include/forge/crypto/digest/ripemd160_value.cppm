@@ -9,12 +9,6 @@ module;
 #include <string>
 #endif
 
-#if defined(__clang__)
-#define FORGE_CRYPTO_DIGEST_LIFETIME_BOUND [[clang::lifetimebound]]
-#else
-#define FORGE_CRYPTO_DIGEST_LIFETIME_BOUND
-#endif
-
 export module forge.crypto.digest.ripemd160:value;
 
 #if !defined(FORGE_CONTRACT_GUEST)
@@ -71,13 +65,16 @@ class ripemd160
    friend ripemd160 operator^(const ripemd160& left, const ripemd160& right);
 #endif
 
-   [[nodiscard]] constexpr char* data() noexcept FORGE_CRYPTO_DIGEST_LIFETIME_BOUND {
+   [[nodiscard]] constexpr char* data() & noexcept {
       return reinterpret_cast<char*>(_hash);
    }
 
-   [[nodiscard]] constexpr const char* data() const noexcept FORGE_CRYPTO_DIGEST_LIFETIME_BOUND {
+   [[nodiscard]] constexpr const char* data() const& noexcept {
       return reinterpret_cast<const char*>(_hash);
    }
+
+   [[nodiscard]] constexpr char* data() && noexcept = delete;
+   [[nodiscard]] constexpr const char* data() const&& noexcept = delete;
 
    [[nodiscard]] static constexpr std::size_t data_size() noexcept {
       return byte_size;
@@ -117,5 +114,3 @@ using uint160_t = ripemd160;
 using uint160 = ripemd160;
 
 } // namespace forge::crypto::digest
-
-#undef FORGE_CRYPTO_DIGEST_LIFETIME_BOUND

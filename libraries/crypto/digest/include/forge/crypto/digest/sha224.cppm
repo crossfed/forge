@@ -31,8 +31,10 @@ class sha224 : public add_packhash_to_hash<sha224> {
    std::string str() const;
    operator std::string() const;
 
-   char* data();
-   const char* data() const;
+   char* data() &;
+   const char* data() const&;
+   char* data() && = delete;
+   const char* data() const&& = delete;
    size_t data_size() const {
       return 224 / 8;
    }
@@ -88,7 +90,7 @@ class sha224 : public add_packhash_to_hash<sha224> {
 void to_variant(const sha224& bi, variant& v);
 void from_variant(const variant& v, sha224& bi);
 
-} // namespace forge::crypto
+} // namespace forge::crypto::digest
 export namespace std {
 template <> struct hash<forge::crypto::digest::sha224> {
    size_t operator()(const forge::crypto::digest::sha224& s) const {

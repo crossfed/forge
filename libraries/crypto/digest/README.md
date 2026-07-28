@@ -18,10 +18,10 @@ const auto value = forge::crypto::digest::sha256::hash(
    std::string{"canonical bytes"});
 ```
 
-`data()` and `to_uint8_span()` return borrowed views. Clang lifetime analysis
-tracks them back to the owning digest, so a view cannot be retained after a
-temporary digest is destroyed. Name the digest before retaining its view;
-passing a temporary view directly to a non-retaining operation remains valid.
+`data()` and `to_uint8_span()` return borrowed views and are available only on
+lvalues. Their rvalue overloads are deleted, so a view cannot be obtained from
+a temporary digest. Keep the digest in a named object for the full lifetime of
+the pointer or span.
 
 Dependencies are `forge_crypto_core`, Codec Hex, Raw, Variant, Forge Core and
 OpenSSL Crypto. Digest values preserve their existing Raw and Variant layouts.

@@ -1,0 +1,12 @@
+set(
+   FORGE_DIGEST_COMPILE_FAIL_CASES
+   "dangling_constructor|to_uint8_span"
+   "dangling_copy_list|to_uint8_span"
+   "dangling_co_return|to_uint8_span"
+   "dangling_data|data"
+   "dangling_direct|to_uint8_span"
+   "dangling_encoder_result|to_uint8_span"
+   "dangling_hash|to_uint8_span"
+   "dangling_list|to_uint8_span"
+   "dangling_return|to_uint8_span"
+)

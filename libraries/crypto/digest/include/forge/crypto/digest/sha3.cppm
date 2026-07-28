@@ -31,8 +31,10 @@ class sha3 {
    std::string str() const;
    operator std::string() const;
 
-   const char* data() const;
-   char* data();
+   const char* data() const&;
+   char* data() &;
+   const char* data() const&& = delete;
+   char* data() && = delete;
    size_t data_size() const {
       return 256 / 8;
    }
@@ -121,7 +123,7 @@ class sha3 {
 void to_variant(const sha3& bi, variant& v);
 void from_variant(const variant& v, sha3& bi);
 
-} // namespace forge::crypto
+} // namespace forge::crypto::digest
 
 export namespace std {
 template <> struct hash<forge::crypto::digest::sha3> {

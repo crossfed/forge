@@ -213,10 +213,10 @@ sha3::operator std::string() const {
    return str();
 }
 
-const char* sha3::data() const {
+const char* sha3::data() const& {
    return (const char*)&_hash[0];
 }
-char* sha3::data() {
+char* sha3::data() & {
    return (char*)&_hash[0];
 }
 
@@ -289,4 +289,4 @@ void from_variant(const variant& v, sha3& bi) {
    else
       memset(bi.data(), char(0), sizeof(bi));
 }
-} // namespace forge::crypto
+} // namespace forge::crypto::digest
