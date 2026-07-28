@@ -1923,6 +1923,17 @@ add_test(
 set_tests_properties(test_forge_package_chain_savanna_component PROPERTIES DEPENDS test_forge_package_install)
 if(FORGE_ENABLE_CONTRACT_TOOLING)
    add_test(
+      NAME test_forge_package_contract_graph_component
+      COMMAND ${CMAKE_CTEST_COMMAND}
+         --build-and-test
+         ${CMAKE_CURRENT_SOURCE_DIR}/package_contract_graph_component
+         ${CMAKE_BINARY_DIR}/forge-package-contract-graph-component
+         --build-generator ${CMAKE_GENERATOR}
+         --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         --test-command forge_package_contract_graph_component
+   )
+   set_tests_properties(test_forge_package_contract_graph_component PROPERTIES DEPENDS test_forge_package_install)
+   add_test(
       NAME test_forge_package_contract_abi_component
       COMMAND ${CMAKE_CTEST_COMMAND}
          --build-and-test

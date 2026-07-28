@@ -783,6 +783,7 @@ endif()
 if(FORGE_ENABLE_CONTRACT_TOOLING)
    list(
       APPEND FORGE_BUILT_COMPONENTS
+      contract_graph
       contract_abi
       contract_attributes
       contract_validation
