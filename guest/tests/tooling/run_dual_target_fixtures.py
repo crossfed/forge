@@ -495,7 +495,7 @@ def validate(
     )
     build(cmake, consumer_build)
     run(str(consumer_build / "product_protocol_consumer"))
-    verify_artifacts(consumer_build, "consumer")
+    verify_artifacts(consumer_build / "contract", "consumer")
 
     vm_build = output / "vm-build"
     configure(
