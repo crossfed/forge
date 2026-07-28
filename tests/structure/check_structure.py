@@ -457,6 +457,40 @@ def check_eosio_veneer(root: Path, errors: list[str]) -> None:
 
 
 def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
+   graph_sources = (
+      root / "guest" / "cmake" / "ForgeContractGraph.cmake",
+      root / "guest" / "build" / "CMakeLists.txt",
+      root / "libraries" / "contract" / "graph" / "graph.cpp",
+   )
+   reverse_graph_tokens = (
+      re.compile(r"\bINTERFACE_LINK_LIBRARIES\b"),
+      re.compile(r"\bLINK_LIBRARIES\b"),
+      re.compile(r"\$<LINK_ONLY:"),
+      re.compile(r"::@\("),
+      re.compile(r"_forge_contract_guest_dependency"),
+   )
+   for path in graph_sources:
+      source = path.read_text(errors="ignore")
+      for token in reverse_graph_tokens:
+         if token.search(source):
+            errors.append(
+               f"{path.relative_to(root)}: Contract SDK must not reverse-parse the native CMake graph ({token.pattern})"
+            )
+
+   root_cmake = (root / "CMakeLists.txt").read_text(errors="ignore")
+   if re.search(r"(?m)^(?!function\()\s*forge_target_contract_guest_component\(", root_cmake):
+      errors.append("CMakeLists.txt: host targets must declare guest identities beside their own definitions")
+   if "forge_register_contract_guest_component" in root_cmake:
+      errors.append("CMakeLists.txt: legacy central guest-component mapping is forbidden")
+
+   attribute_plugin = root / "tools" / "attr-plugin" / "plugin.cpp"
+   attribute_source = attribute_plugin.read_text(errors="ignore")
+   for token in ("forge.contract.graph", "dependency_scope", "source_graph"):
+      if token in attribute_source:
+         errors.append(
+            f"{attribute_plugin.relative_to(root)}: attribute plugin must not own contract graph policy ({token})"
+         )
+
    guest_codec = root / "guest" / "libraries" / "codec"
    if guest_codec.exists():
       errors.append("guest/libraries/codec: guest codec forwarding family is forbidden")

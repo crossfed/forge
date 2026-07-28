@@ -2,7 +2,7 @@
 
 include(CMakeFindDependencyMacro)
 
-find_dependency(Forge CONFIG COMPONENTS raw chain_protocol)
+find_dependency(Forge CONFIG COMPONENTS raw chain_protocol crypto_digest)
 find_dependency(ForgeContract CONFIG)
 
 include("${CMAKE_CURRENT_LIST_DIR}/ProductProtocolTargets.cmake")

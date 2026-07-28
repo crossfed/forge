@@ -209,6 +209,7 @@ if(FORGE_ENABLE_CONTRACT_TOOLING)
       test_forge_contract
       forge_contract_abi
       forge_contract_attributes
+      forge_contract_graph
       forge_contract_validation
       forge_contract_manifest
       Boost::included_unit_test_framework

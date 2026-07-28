@@ -9,8 +9,28 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Forge CONFIG REQUIRED COMPONENTS raw chain_protocol)
+find_package(Forge CONFIG REQUIRED COMPONENTS raw chain_protocol crypto_digest)
 find_package(ForgeContract CONFIG REQUIRED)
+
+forge_add_contract_library(
+   values
+   ID product.chain.values
+   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
+   MODULE_SOURCES include/product/chain/values.cppm
+   PUBLIC_HEADERS include/product/chain/version.hpp
+   PUBLIC_LIBRARIES Forge::forge_chain_protocol
+)
+
+forge_add_contract_library(
+   limits
+   ID product.chain.limits
+   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
+   MODULE_SOURCES include/product/chain/limits.cppm
+   SOURCES src/limits.cpp
+   PRIVATE_LIBRARIES Forge::forge_crypto_digest
+)
 
 forge_add_contract_library(
    protocol
@@ -19,11 +39,11 @@ forge_add_contract_library(
    MODULE_BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
    MODULE_SOURCES include/product/chain/protocol.cppm
    SOURCES src/protocol.cpp
-   PUBLIC_HEADERS include/product/chain/version.hpp
    PRIVATE_HEADERS src/limits.hpp
    PUBLIC_LIBRARIES
       Forge::forge_raw
-      Forge::forge_chain_protocol
+      values
+   PRIVATE_LIBRARIES limits
 )
 
 add_executable(product_protocol_host_tests host_tests.cpp)
@@ -45,10 +65,22 @@ forge_add_contract(
 )
 
 forge_install_contract_library(
+   TARGET values
+   EXPORT ProductProtocolTargets
+   MODULE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/modules"
+   SOURCE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/sources/values"
+)
+forge_install_contract_library(
+   TARGET limits
+   EXPORT ProductProtocolTargets
+   MODULE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/modules"
+   SOURCE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/sources/limits"
+)
+forge_install_contract_library(
    TARGET protocol
    EXPORT ProductProtocolTargets
    MODULE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/modules"
-   SOURCE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/sources"
+   SOURCE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/sources/protocol"
 )
 install(
    EXPORT ProductProtocolTargets
