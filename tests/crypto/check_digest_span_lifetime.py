@@ -9,7 +9,19 @@ import sys
 
 STATEMENT = re.compile(r"(?P<body>[^;]+);", re.DOTALL)
 ASSIGNMENT = re.compile(r"(?<![=!<>])=(?!=)")
-RETURN_EXPRESSION = re.compile(r"\breturn\s+(?P<expression>.+)\s*$", re.DOTALL)
+RETURN_EXPRESSION = re.compile(r"\b(?:co_return|return)\s+(?P<expression>.+)\s*$", re.DOTALL)
+DIRECT_INITIALIZATION = re.compile(
+    r"(?:^|[{}])\s*"
+    r"(?P<type>"
+    r"(?:(?:const|volatile)\s+)*"
+    r"(?:auto|(?:(?:[A-Za-z_]\w*)::)*span(?:\s*<[^;{}]+>)?)"
+    r"(?:\s+(?:const|volatile))*"
+    r"(?:\s*&&?)?"
+    r")"
+    r"\s+(?P<name>[A-Za-z_]\w*)\s*"
+    r"(?P<open>[\(\{])\s*(?P<expression>.+)\s*(?P<close>[\)\}])\s*$",
+    re.DOTALL,
+)
 TEMPORARY_SPAN_EXPRESSION = re.compile(
     r"^\s*(?:(?![=+*/?!&|]).)*?\b(?:hash|digest)\s*\((?:(?!;).)*?\)\s*"
     r"\.to_(?:uint8_)?span\s*\(\s*\)\s*$",
@@ -28,6 +40,13 @@ def find_dangling_spans(text: str) -> list[int]:
         returned = RETURN_EXPRESSION.search(body)
         if returned and TEMPORARY_SPAN_EXPRESSION.fullmatch(returned.group("expression")):
             result.append(statement.start("body") + returned.start())
+        initialized = DIRECT_INITIALIZATION.search(body)
+        if (
+            initialized
+            and (initialized.group("open"), initialized.group("close")) in (("(", ")"), ("{", "}"))
+            and TEMPORARY_SPAN_EXPRESSION.fullmatch(initialized.group("expression"))
+        ):
+            result.append(statement.start("body") + initialized.start())
     return result
 
 
