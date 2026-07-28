@@ -22,7 +22,7 @@ forge_contract_register_guest_component(
       forge/codec/base64/base64.cppm
    MODULE_NAMES
       forge.codec.base64.exceptions
-      forge.codec.base64.base64
+      forge.codec.base64
 )
 
 forge_contract_register_guest_component(
@@ -33,7 +33,7 @@ forge_contract_register_guest_component(
       forge/codec/base58/base58.cppm
    MODULE_NAMES
       forge.codec.base58.exceptions
-      forge.codec.base58.base58
+      forge.codec.base58
 )
 
 forge_contract_register_guest_component(
@@ -44,7 +44,7 @@ forge_contract_register_guest_component(
       forge/codec/hex/hex.cppm
    MODULE_NAMES
       forge.codec.hex.exceptions
-      forge.codec.hex.hex
+      forge.codec.hex
 )
 
 forge_contract_register_guest_component(
@@ -58,11 +58,11 @@ forge_contract_register_guest_component(
       forge/crypto/digest/ripemd160_value.cppm
       forge/crypto/digest/ripemd160.cppm
    MODULE_NAMES
-      forge.crypto.digest.sha256_value
+      forge.crypto.digest.sha256:value
       forge.crypto.digest.sha256
-      forge.crypto.digest.sha512_value
+      forge.crypto.digest.sha512:value
       forge.crypto.digest.sha512
-      forge.crypto.digest.ripemd160_value
+      forge.crypto.digest.ripemd160:value
       forge.crypto.digest.ripemd160
 )
 
@@ -77,13 +77,13 @@ forge_contract_register_guest_component(
    ID forge.crypto.asymmetric
    PUBLIC_LIBRARIES forge.crypto.asymmetric_values
    MODULES forge/crypto/asymmetric/asymmetric.cppm
-   MODULE_NAMES forge.crypto.asymmetric.asymmetric
+   MODULE_NAMES forge.crypto.asymmetric
 )
 
 forge_contract_register_guest_component(
    ID forge.crypto.bls_values
    MODULES forge/crypto/bls/bls_values.cppm
-   MODULE_NAMES forge.crypto.bls.bls_values
+   MODULE_NAMES forge.crypto.bls.values
 )
 
 forge_contract_register_guest_component(
@@ -123,20 +123,20 @@ forge_contract_register_guest_component(
    MODULE_NAMES
       forge.chain.protocol.values
       forge.chain.protocol.time
-      forge.chain.protocol.types_value
+      forge.chain.protocol.types:value
       forge.chain.protocol.types
-      forge.chain.protocol.fixed_key_value
+      forge.chain.protocol.fixed_key:value
       forge.chain.protocol.fixed_key
-      forge.chain.protocol.action_value
+      forge.chain.protocol.action:value
       forge.chain.protocol.action
-      forge.chain.protocol.transaction_value
+      forge.chain.protocol.transaction:value
       forge.chain.protocol.transaction
-      forge.chain.protocol.authority_value
+      forge.chain.protocol.authority:value
       forge.chain.protocol.authority
-      forge.chain.protocol.producer_schedule_value
+      forge.chain.protocol.producer_schedule:value
       forge.chain.protocol.producer_schedule
       forge.chain.protocol.producer_authority
-      forge.chain.protocol.system_value
+      forge.chain.protocol.system:value
       forge.chain.protocol.system
       forge.chain.protocol.code_hash_result
       forge.chain.protocol.blockchain_parameters

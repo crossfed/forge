@@ -235,6 +235,7 @@ add_custom_target(
       --sysroot "${ForgeContract_SYSROOT}"
       --include "${ForgeContract_DATA_DIR}/include"
       --build-dir "${_tooling_build_dir}"
+      --contract-graph "${CMAKE_CURRENT_BINARY_DIR}/hello.contract-graph.json"
       --fixtures "${CMAKE_CURRENT_SOURCE_DIR}/../tooling"
       --output "${_tooling_output}"
    DEPENDS hello

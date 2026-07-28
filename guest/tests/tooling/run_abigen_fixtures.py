@@ -67,25 +67,15 @@ def invoke(
                     "physical_path": str(physical),
                 }
             )
-    graph.write_text(
-        json.dumps(
-            {
-                "schema": 2,
-                "root": {
-                    "owner": f"contract:{contract}",
-                    "source_root": str(source_root),
-                    "files": graph_files,
-                    "libraries": [],
-                    "components": [],
-                },
-                "libraries": [],
-                "components": [],
-            },
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
+    graph_descriptor = json.loads(args.contract_graph.read_text(encoding="utf-8"))
+    graph_descriptor["root"] = {
+        "owner": f"contract:{contract}",
+        "source_root": str(source_root),
+        "files": graph_files,
+        "libraries": graph_descriptor["root"]["libraries"],
+        "components": graph_descriptor["root"]["components"],
+    }
+    graph.write_text(json.dumps(graph_descriptor, sort_keys=True) + "\n", encoding="utf-8")
     abi_argument = abi.name if bare_outputs else abi
     dispatch_argument = dispatch.name if bare_outputs else dispatch
     command = [
@@ -307,6 +297,7 @@ def main():
     parser.add_argument("--sysroot", required=True, type=pathlib.Path)
     parser.add_argument("--include", required=True, type=pathlib.Path)
     parser.add_argument("--build-dir", required=True, type=pathlib.Path)
+    parser.add_argument("--contract-graph", required=True, type=pathlib.Path)
     parser.add_argument("--fixtures", required=True, type=pathlib.Path)
     parser.add_argument("--output", required=True, type=pathlib.Path)
     args = parser.parse_args()

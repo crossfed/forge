@@ -200,6 +200,34 @@ def verify_contract_graph(build_directory: Path) -> tuple[dict[str, str], dict[P
     return module_owners, source_owners
 
 
+def verify_component_module_metadata(build_directory: Path, module_owners: dict[str, str]) -> None:
+    component_root = build_directory / "product.contract" / "CMakeFiles"
+    dependency_files = sorted(component_root.glob("forge_contract_component_*.dir/**/*.ddi"))
+    if not dependency_files:
+        raise RuntimeError("guest component compilation produced no module dependency metadata")
+
+    provided_modules: set[str] = set()
+    for path in dependency_files:
+        metadata = read_json(path)
+        for rule in metadata.get("rules", []):
+            for provided in rule.get("provides", []):
+                name = provided.get("logical-name")
+                if not isinstance(name, str) or not name:
+                    raise RuntimeError(f"invalid compiler-provided module name: {path}")
+                if name in provided_modules:
+                    raise RuntimeError(f"compiler reports duplicate guest component module: {name}")
+                provided_modules.add(name)
+
+    described_modules = set(module_owners)
+    if provided_modules != described_modules:
+        missing = sorted(provided_modules - described_modules)
+        stale = sorted(described_modules - provided_modules)
+        raise RuntimeError(
+            "guest component descriptor differs from compiler module metadata: "
+            f"missing={missing}, stale={stale}"
+        )
+
+
 def verify_compilation_metadata(
     build_directory: Path,
     module_owners: dict[str, str],
@@ -573,6 +601,7 @@ def validate(
     verify_direct_action(abi)
     verify_source_graph(manifest)
     module_owners, source_owners = verify_contract_graph(producer_build)
+    verify_component_module_metadata(producer_build, module_owners)
     verify_compilation_metadata(producer_build, module_owners, source_owners)
     verify_compiler_launcher_bypass(compiler_launcher_log, source / "producer")
     initial_digest = manifest["source_graph"]["sha256"]
