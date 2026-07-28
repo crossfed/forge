@@ -101,6 +101,13 @@ def read_json(path: Path) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def write_json_newer_than(path: Path, value: dict, previous_mtime_ns: int) -> None:
+    path.write_text(json.dumps(value, separators=(",", ":")) + "\n", encoding="utf-8")
+    current = path.stat()
+    if current.st_mtime_ns <= previous_mtime_ns:
+        os.utime(path, ns=(current.st_atime_ns, previous_mtime_ns + 1))
+
+
 def verify_artifacts(directory: Path, contract: str) -> tuple[dict, dict]:
     for suffix in ("wasm", "abi", "contract.json"):
         artifact = directory / f"{contract}.{suffix}"
@@ -780,6 +787,32 @@ def validate(
     build(cmake, producer_build, environment=compiler_environment)
     if verify_artifacts(producer_build, "product")[1]["source_graph"]["sha256"] != initial_digest:
         raise RuntimeError("source graph digest changed across an incremental rebuild")
+
+    graph_path = producer_build / "product.contract-graph.json"
+    abi_path = producer_build / "product.abi"
+    original_graph = graph_path.read_text(encoding="utf-8")
+    graph = json.loads(original_graph)
+    component = next(entry for entry in graph["components"] if entry["id"] == "forge.contract.runtime")
+    component["modules"].append("forge.contract.synthetic")
+    previous_abi_mtime_ns = abi_path.stat().st_mtime_ns
+    write_json_newer_than(graph_path, graph, previous_abi_mtime_ns)
+    build(cmake, producer_build, environment=compiler_environment)
+    _, changed_manifest = verify_artifacts(producer_build, "product")
+    if abi_path.stat().st_mtime_ns <= previous_abi_mtime_ns:
+        raise RuntimeError("ABI generation did not rerun after a contract graph change")
+    if changed_manifest["source_graph"]["sha256"] == initial_digest:
+        raise RuntimeError("contract manifest did not rerun after a contract graph change")
+    verify_source_graph(changed_manifest, graph)
+
+    changed_abi_mtime_ns = abi_path.stat().st_mtime_ns
+    graph_path.write_text(original_graph, encoding="utf-8")
+    current_graph = graph_path.stat()
+    if current_graph.st_mtime_ns <= changed_abi_mtime_ns:
+        os.utime(graph_path, ns=(current_graph.st_atime_ns, changed_abi_mtime_ns + 1))
+    build(cmake, producer_build, environment=compiler_environment)
+    if verify_artifacts(producer_build, "product")[1]["source_graph"]["sha256"] != initial_digest:
+        raise RuntimeError("source graph digest did not recover after restoring the descriptor")
+
     run(cmake, "--install", str(producer_build))
     verify_relocatable_package(producer_install, [source, producer_build])
 

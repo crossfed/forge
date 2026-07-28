@@ -664,6 +664,7 @@ set(
    "${_contract_runtime_target}"
    "${FORGE_CONTRACT_ABIGEN}"
    "${FORGE_CONTRACT_ATTR_PLUGIN}"
+   "${FORGE_CONTRACT_GRAPH_FILE}"
    ${FORGE_CONTRACT_SOURCES}
    ${FORGE_CONTRACT_HEADERS}
    ${FORGE_CONTRACT_COMPILE_CHECKS}
@@ -863,20 +864,20 @@ foreach(_configuration IN LISTS CMAKE_CONFIGURATION_TYPES)
    )
 endforeach()
 
+set(_intrinsics "${FORGE_CONTRACT_DATA_DIR}/registry/intrinsics.json")
 add_custom_command(
-   TARGET ${FORGE_CONTRACT_TARGET}
-   POST_BUILD
+   OUTPUT "${_manifest}"
    COMMAND
       "${FORGE_CONTRACT_CHECK}"
       --wasm "$<TARGET_FILE:${FORGE_CONTRACT_TARGET}>"
       --abi "${_abi}"
-      --imports "${FORGE_CONTRACT_DATA_DIR}/registry/intrinsics.json"
+      --imports "${_intrinsics}"
       --required-export apply
    COMMAND
       "${FORGE_CONTRACT_MANIFEST}"
       --wasm "$<TARGET_FILE:${FORGE_CONTRACT_TARGET}>"
       --abi "${_abi}"
-      --imports "${FORGE_CONTRACT_DATA_DIR}/registry/intrinsics.json"
+      --imports "${_intrinsics}"
       --source-graph "${FORGE_CONTRACT_GRAPH_FILE}"
       --output "${_manifest}"
       --sdk-version "${FORGE_CONTRACT_SDK_VERSION}"
@@ -887,5 +888,16 @@ add_custom_command(
       --intrinsic-version "${FORGE_CONTRACT_INTRINSIC_VERSION}"
       --profile "${FORGE_CONTRACT_PROFILE}"
       --reproducible "${FORGE_CONTRACT_REPRODUCIBLE}"
+   DEPENDS
+      "$<TARGET_FILE:${FORGE_CONTRACT_TARGET}>"
+      "${_abi}"
+      "${_intrinsics}"
+      "${FORGE_CONTRACT_GRAPH_FILE}"
+      "${FORGE_CONTRACT_CHECK}"
+      "${FORGE_CONTRACT_MANIFEST}"
    VERBATIM
+)
+add_custom_target(
+   ${FORGE_CONTRACT_TARGET}_artifacts ALL
+   DEPENDS "${_manifest}"
 )
