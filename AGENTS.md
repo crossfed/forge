@@ -225,6 +225,13 @@ class service_node {
 - `guest/libraries/contract/intrinsics.hpp` is the only intrinsic signature
   registry. Generated guest C declarations, EOSIO headers, host skeletons and
   import manifests must derive from it.
+- Dual-target contract libraries declare their complete source and dependency
+  graph through `forge_add_contract_library`. The immutable Forge descriptor is
+  the only host/guest graph source; native CMake target properties are not a
+  serializable cross-toolchain protocol.
+- Do not recover contract dependencies from `LINK_LIBRARIES`,
+  `INTERFACE_LINK_LIBRARIES`, `$<LINK_ONLY:...>` or CMake directory wrappers.
+  Add files and scoped dependencies to the Forge declaration instead.
 - Contract SDK C ABI support records are generated from templates under
   `guest/cmake/`; generated `.h` files never live in a guest library's source
   `include/forge` tree.
