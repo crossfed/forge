@@ -322,6 +322,16 @@ forge_add_contract_library(
             "duplicate Forge Contract library ID",
         ),
         (
+            "library-component-id",
+            """forge_add_contract_library(
+   protocol ID forge.raw SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+   PUBLIC_LIBRARIES Forge::forge_raw
+)
+""",
+            "shared by a library and component",
+        ),
+        (
             "immutable-alias",
             """forge_add_contract_library(
    protocol ID negative.immutable SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"

@@ -128,6 +128,9 @@ dependency_scope parse_scope(std::string_view value) {
 class builder {
  public:
    void add_owner(std::string owner, const variants& roots, const variants& files, bool root) {
+      if (component_ids_.contains(owner)) {
+         throw std::runtime_error{"contract graph ID is shared by a library and component: " + owner};
+      }
       if (!owners_.insert(owner).second) {
          throw std::runtime_error{"contract graph contains a duplicate owner: " + owner};
       }
@@ -204,6 +207,9 @@ class builder {
    }
 
    void add_component(std::string id, const variants& modules, const variants& dependencies) {
+      if (owners_.contains(id)) {
+         throw std::runtime_error{"contract graph ID is shared by a library and component: " + id};
+      }
       if (!component_ids_.insert(id).second) {
          throw std::runtime_error{"contract graph contains a duplicate component ID: " + id};
       }

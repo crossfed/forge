@@ -114,6 +114,15 @@ BOOST_AUTO_TEST_CASE(contract_graph_rejects_missing_component_ids) {
                          [](const auto& error) { return contains_message(error, "unknown component: forge.missing"); });
 }
 
+BOOST_AUTO_TEST_CASE(contract_graph_rejects_ids_shared_by_libraries_and_components) {
+   const auto fixture = graph_fixture{};
+   BOOST_CHECK_EXCEPTION(
+       read_graph(fixture.graph(fixture.library(),
+                                R"([{"id":"product.protocol","modules":["product.component"],"dependencies":[]}])")),
+       std::runtime_error,
+       [](const auto& error) { return contains_message(error, "shared by a library and component"); });
+}
+
 BOOST_AUTO_TEST_CASE(contract_graph_rejects_duplicate_module_ownership) {
    const auto fixture = graph_fixture{};
    BOOST_CHECK_EXCEPTION(read_graph(fixture.graph("[]",
