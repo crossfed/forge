@@ -13,6 +13,7 @@ Documents below explain cross-library architecture decisions.
 
 | Document | Purpose |
 | --- | --- |
+| [releases/8.15.1.md](releases/8.15.1.md) | Forge 8.15.1 digest-lifetime and P2P lifecycle fixes. |
 | [releases/8.15.0.md](releases/8.15.0.md) | Forge 8.15.0 purpose-scoped BLS signer API for downstream finality services. |
 | [releases/8.14.0.md](releases/8.14.0.md) | Forge 8.14.0 bounded Savanna validation, vote accumulation and finalizer safety. |
 | [releases/8.13.0.md](releases/8.13.0.md) | Forge 8.13.0 neutral Chain quorum, fork and Savanna primitives. |
