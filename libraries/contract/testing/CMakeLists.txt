@@ -58,7 +58,7 @@ target_link_libraries(
 
 target_compile_features(forge_contract_testing PUBLIC cxx_std_23)
 
-if(BUILD_TESTING AND NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
+if(BUILD_TESTING OR FORGE_CONTRACT_SDK_HOST_PROFILE)
    add_executable(
       forge_contract_testing_tests
       "${PROJECT_SOURCE_DIR}/tests/contract_testing/compiler_builtins_tests.cpp"
@@ -71,5 +71,15 @@ if(BUILD_TESTING AND NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
          forge_vm_wasm
          Boost::headers
    )
-   add_test(NAME forge_contract_testing_tests COMMAND forge_contract_testing_tests)
+
+   add_custom_target(
+      forge_contract_testing_check
+      COMMAND "$<TARGET_FILE:forge_contract_testing_tests>"
+      DEPENDS forge_contract_testing_tests
+      USES_TERMINAL
+   )
+
+   if(BUILD_TESTING)
+      add_test(NAME forge_contract_testing_tests COMMAND forge_contract_testing_tests)
+   endif()
 endif()
