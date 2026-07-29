@@ -15,3 +15,4 @@ target_link_libraries(
       Boost::headers
       Boost::multiprecision
 )
+forge_target_contract_guest_component(forge_raw ID forge.raw)

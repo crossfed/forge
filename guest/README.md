@@ -35,6 +35,15 @@ SDK and Forge versions are identical. The sysroot schema and intrinsic
 interface have independent versions because either contract can evolve without
 changing C++ source compatibility.
 
+## Stability
+
+The `forge_add_contract_library()` declaration/materialization API and its
+matching install/register functions are Experimental in Forge 8.16.0. Stable
+library IDs, emitted contract-graph descriptors, source identities, dependency
+scope and artifact wire formats are versioned compatibility contracts.
+`forge_add_contract()` and the existing guest C/C++ compatibility surface retain
+the stability stated by their owning SDK libraries and headers.
+
 ## Install A Release Archive
 
 Extract one platform archive and point CMake at its package directory:
@@ -59,6 +68,7 @@ find_package(ForgeContract CONFIG REQUIRED)
 
 forge_add_contract(
    hello
+   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
    SOURCES hello.cpp
 )
 ```
@@ -69,10 +79,129 @@ class. Other sources remain ordinary separately compiled implementation files:
 ```cmake
 forge_add_contract(
    token
+   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
    SOURCES token_helpers.cpp token.cpp
    DISPATCH_SOURCE token.cpp
 )
 ```
+
+## Shared Host And Guest Protocol
+
+Declare reusable protocol code once. Forge materializes the declaration as a
+normal host library and as an isolated wasm32 build graph:
+
+```cmake
+find_package(Forge CONFIG REQUIRED COMPONENTS chain_protocol raw)
+find_package(ForgeContract CONFIG REQUIRED)
+
+forge_add_contract_library(
+   product_protocol
+   ID product.chain.protocol
+   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
+   MODULE_SOURCES
+      include/product/chain/ids.cppm
+      include/product/chain/actions.cppm
+   SOURCES protocol.cpp
+   PUBLIC_HEADERS include/product/chain/limits.hpp
+   PRIVATE_HEADERS details/validation.hpp
+   PUBLIC_LIBRARIES
+      Forge::forge_chain_protocol
+      Forge::forge_raw
+)
+
+forge_add_contract(
+   product
+   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   SOURCES contract.cpp
+   HEADERS contract.hpp
+   COMPILE_CHECKS protocol_checks.cpp
+   LIBRARIES product_protocol
+)
+```
+
+`ID` is the stable package and guest-graph identity. `PUBLIC_LIBRARIES` are
+visible to consumers; `PRIVATE_LIBRARIES` are available only while compiling
+the owning library. Files, dependency scope and source roots are immutable
+after declaration. Source-file build properties are rejected because the
+descriptor does not model them. Native CMake target state is never serialized
+into the guest graph; Forge only verifies that the materialized target still
+matches the state produced by the declaration.
+
+Install the source package and standard CMake module metadata together:
+
+```cmake
+forge_install_contract_library(
+   TARGET product_protocol
+   EXPORT ProductProtocolTargets
+   MODULE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/modules"
+   SOURCE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/sources"
+)
+install(
+   EXPORT ProductProtocolTargets
+   NAMESPACE Product::
+   FILE ProductProtocolTargets.cmake
+   CXX_MODULES_DIRECTORY cxx-modules
+   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ProductProtocol"
+)
+```
+
+The package config must use `find_dependency(Forge)` for the declared host
+dependencies and `find_dependency(ForgeContract)` before loading the targets
+file. Immediately after loading it, register every exported protocol target so
+Forge seals the imported host materialization before returning control to the
+consumer:
+
+```cmake
+include("${CMAKE_CURRENT_LIST_DIR}/ProductProtocolTargets.cmake")
+forge_register_contract_library_targets(Product::product_protocol)
+```
+
+Installed packages contain module sources, implementation inputs, headers and
+relocatable descriptor metadata. Compiler-specific BMI or PCM artifacts are
+never transported. An imported contract-library target that was not registered
+by its package config is rejected instead of being accepted with a late,
+consumer-controlled baseline.
+
+Seal checks run at the end of every CMake directory where a registered target
+is visible. This preserves normal non-`GLOBAL` imported-target scope when a
+package is loaded from a nested `CMakeLists.txt`. The check remains at the tail
+of that directory's deferred-call queue, so a later deferred target or source
+mutation cannot run after validation. For installed targets, source paths are
+derived from the exported prefix-relative module and source roots; relocated
+packages therefore receive the same source-property checks as build-tree
+targets.
+
+## Named Action Payloads
+
+A shared action DTO owns its canonical action name:
+
+```cpp
+struct begin_revision {
+   workspace_id workspace;
+   inode_id inode;
+
+   static constexpr forge::chain::protocol::action_name get_name() {
+      return forge::chain::protocol::make_name("beginrev");
+   }
+};
+```
+
+For a handler with exactly one such parameter, ABI generation exposes the DTO
+fields directly and dispatch unpacks the same DTO. An explicit action attribute
+is allowed only when its value matches `get_name()`. Legacy handlers without a
+valid public, static, zero-argument, constant `get_name()` retain the
+method-parameter wrapper ABI.
+
+Host code constructs an action without repeating the name:
+
+```cpp
+auto action = forge::chain::protocol::action{
+    permission, contract_account, begin_revision{...}};
+```
+
+Host packing and guest dispatch both use `forge.raw`, so the binary action
+payload has one type definition.
 
 Configure the host project normally. `forge_add_contract` creates an isolated
 wasm32 sub-build, so the parent project does not use the SDK toolchain file:

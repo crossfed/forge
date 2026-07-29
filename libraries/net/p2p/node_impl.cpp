@@ -134,6 +134,22 @@ namespace asio = boost::asio;
    return {bytes.begin(), bytes.end()};
 }
 
+[[nodiscard]] bool same_pubsub_message(const pubsub::message& left, const pubsub::message& right) noexcept {
+   return left.from == right.from && left.data == right.data && left.seqno == right.seqno &&
+          left.subject == right.subject;
+}
+
+[[nodiscard]] std::chrono::milliseconds validation_retry_delay(const pubsub::limits& limits, std::size_t ordinal) {
+   auto delay = limits.validation_retry_initial_delay;
+   for (auto attempt = std::size_t{1}; attempt < ordinal && delay < limits.validation_retry_max_delay; ++attempt) {
+      if (delay > limits.validation_retry_max_delay / 2) {
+         return limits.validation_retry_max_delay;
+      }
+      delay *= 2;
+   }
+   return std::min(delay, limits.validation_retry_max_delay);
+}
+
 [[nodiscard]] std::vector<std::uint8_t> uint64_be(std::uint64_t value) {
    auto out = std::vector<std::uint8_t>(8);
    for (auto i = std::size_t{}; i < out.size(); ++i) {
@@ -142,8 +158,9 @@ namespace asio = boost::asio;
    return out;
 }
 
-boost::asio::awaitable<std::vector<std::uint8_t>>
-async_read_length_delimited(forge::net::p2p::stream& stream, std::vector<std::uint8_t>& buffer, std::size_t max_payload_size) {
+boost::asio::awaitable<std::vector<std::uint8_t>> async_read_length_delimited(forge::net::p2p::stream& stream,
+                                                                              std::vector<std::uint8_t>& buffer,
+                                                                              std::size_t max_payload_size) {
    while (true) {
       try {
          const auto decoded = forge::multiformats::varint_decode(buffer);
@@ -238,7 +255,8 @@ resource_manager::limits resource_limits_for(const node::limits& limits) {
 
 void validate(const node::options& options) {
    if (!options.allow_insecure_test_mode && (options.certificate_pem.empty() || options.private_key_pem.empty())) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "production P2P node requires mTLS certificate and private key");
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                            "production P2P node requires mTLS certificate and private key");
    }
    if (options.certificate_pem.empty() != options.private_key_pem.empty()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P certificate and private key must be provided together");
@@ -248,7 +266,7 @@ void validate(const node::options& options) {
    }
    if (options.allow_insecure_test_mode && options.certificate_pem.empty() && !options.explicit_peer_id) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options,
-                          "insecure P2P test node without certificate requires explicit peer id");
+                            "insecure P2P test node without certificate requires explicit peer id");
    }
    if (options.peer_store_backend && options.peer_store_path) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P peer store backend and path are mutually exclusive");
@@ -262,21 +280,22 @@ void validate(const node::options& options) {
    if (options.limits.max_sessions == 0 || options.limits.max_pending_inbound_sessions == 0 ||
        options.limits.max_pending_outbound_sessions == 0 || options.limits.max_inbound_sessions == 0 ||
        options.limits.max_outbound_sessions == 0 || options.limits.max_sessions_per_peer == 0 ||
-       options.limits.session_low_watermark == 0 || options.limits.session_low_watermark > options.limits.max_sessions ||
+       options.limits.session_low_watermark == 0 ||
+       options.limits.session_low_watermark > options.limits.max_sessions ||
        options.limits.session_grace_period.count() < 0 || options.limits.session_prune_silence.count() <= 0 ||
        options.limits.dial_backoff_base.count() <= 0 || options.limits.dial_backoff_step.count() <= 0 ||
        options.limits.dial_backoff_max.count() <= 0 ||
        options.limits.dial_backoff_base > options.limits.dial_backoff_max ||
-       options.limits.max_protocol_handlers == 0 ||
-       options.limits.max_peer_exchange_message_size == 0 || options.limits.max_peer_exchange_records == 0 ||
-       options.limits.max_peer_exchange_queue == 0 || options.limits.relay.max_active_relays == 0 ||
-       options.limits.relay.max_reservations == 0 || options.limits.relay.max_streams_per_reservation == 0 ||
-       options.limits.relay.max_relay_bytes == 0 || options.limits.relay.max_queued_bytes == 0 ||
-       options.limits.relay.max_duration.count() <= 0 || options.limits.relay.reservation_ttl.count() <= 0 ||
-       options.limits.resources.max_streams == 0 || options.limits.resources.max_streams_per_peer == 0 ||
-       options.limits.resources.max_streams_per_protocol == 0 || options.limits.resources.max_relay_reservations == 0 ||
-       options.limits.resources.max_relay_streams == 0 || options.limits.resources.max_relay_bytes == 0 ||
-       options.limits.resources.max_queued_bytes == 0 || options.limits.resources.max_dial_attempts_per_peer == 0 ||
+       options.limits.max_protocol_handlers == 0 || options.limits.max_peer_exchange_message_size == 0 ||
+       options.limits.max_peer_exchange_records == 0 || options.limits.max_peer_exchange_queue == 0 ||
+       options.limits.relay.max_active_relays == 0 || options.limits.relay.max_reservations == 0 ||
+       options.limits.relay.max_streams_per_reservation == 0 || options.limits.relay.max_relay_bytes == 0 ||
+       options.limits.relay.max_queued_bytes == 0 || options.limits.relay.max_duration.count() <= 0 ||
+       options.limits.relay.reservation_ttl.count() <= 0 || options.limits.resources.max_streams == 0 ||
+       options.limits.resources.max_streams_per_peer == 0 || options.limits.resources.max_streams_per_protocol == 0 ||
+       options.limits.resources.max_relay_reservations == 0 || options.limits.resources.max_relay_streams == 0 ||
+       options.limits.resources.max_relay_bytes == 0 || options.limits.resources.max_queued_bytes == 0 ||
+       options.limits.resources.max_dial_attempts_per_peer == 0 ||
        options.limits.resources.max_malformed_messages_per_peer == 0 ||
        options.limits.discovery.query_timeout.count() <= 0 || options.limits.discovery.refresh_interval.count() <= 0 ||
        options.limits.discovery.max_parallel_queries == 0 || options.limits.discovery.max_results == 0 ||
@@ -300,7 +319,13 @@ void validate(const node::options& options) {
        options.limits.pubsub.limits.heartbeat_interval.count() <= 0 ||
        options.limits.pubsub.limits.fanout_ttl.count() <= 0 ||
        options.limits.pubsub.limits.prune_backoff.count() <= 0 ||
-       options.limits.pubsub.limits.unsubscribe_backoff.count() <= 0 || options.limits.pubsub.limits.mesh_n == 0 ||
+       options.limits.pubsub.limits.unsubscribe_backoff.count() <= 0 ||
+       options.limits.pubsub.limits.validation_retry_initial_delay.count() <= 0 ||
+       options.limits.pubsub.limits.validation_retry_max_delay <
+           options.limits.pubsub.limits.validation_retry_initial_delay ||
+       options.limits.pubsub.limits.max_validation_attempts == 0 ||
+       options.limits.pubsub.limits.max_validation_redeliveries == 0 ||
+       options.limits.pubsub.limits.max_validation_requests == 0 || options.limits.pubsub.limits.mesh_n == 0 ||
        options.limits.pubsub.limits.mesh_n_low == 0 ||
        options.limits.pubsub.limits.mesh_n_high < options.limits.pubsub.limits.mesh_n_low ||
        options.limits.pubsub.limits.history_length == 0 || options.limits.pubsub.limits.history_gossip == 0 ||
@@ -315,8 +340,8 @@ void validate(const node::options& options) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P path policy limits must be positive");
    }
    if (options.relay_policy.target_reservations == 0 || options.relay_policy.refresh_margin.count() <= 0 ||
-       options.relay_policy.max_candidates_per_refresh == 0 ||
-       options.relay_policy.max_parallel_reservations == 0 || options.relay_policy.candidate_backoff.count() <= 0) {
+       options.relay_policy.max_candidates_per_refresh == 0 || options.relay_policy.max_parallel_reservations == 0 ||
+       options.relay_policy.candidate_backoff.count() <= 0) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P AutoRelay policy limits must be positive");
    }
 }
@@ -335,8 +360,8 @@ node::impl::impl(forge::asio::runtime& runtime_value, node::options options_valu
     : runtime(runtime_value), options(std::move(options_value)),
       local(options.explicit_peer_id ? *options.explicit_peer_id
                                      : make_peer_id_from_certificate_pem(options.certificate_pem)),
-      direct_registry(runtime_value, options), store(peer_store::options{.backend = make_peer_store_backend(options)}) {
-}
+      direct_registry(runtime_value, options), teardown(runtime_value.context().get_executor()),
+      store(peer_store::options{.backend = make_peer_store_backend(options)}) {}
 
 std::vector<forge::net::p2p::endpoint> node::impl::local_endpoints_for_control() const {
    auto lock = std::scoped_lock{mutex};
@@ -415,8 +440,14 @@ void node::impl::learn_from_identify(const peer_id& peer, const identify::docume
 }
 
 std::vector<std::shared_ptr<node::impl::session_state>>
-node::impl::remember_session(std::shared_ptr<node::impl::session_state> session, connection_manager::direction direction) {
+node::impl::remember_session(std::shared_ptr<node::impl::session_state> session,
+                             connection_manager::direction direction) {
    auto lock = std::scoped_lock{mutex};
+   if (stopped) {
+      session->closed = true;
+      detail::cancel_rejected_session(session);
+      FORGE_THROW_EXCEPTION(exceptions::closed, "P2P node is stopped");
+   }
    session->direction = direction;
    if (session->id == 0) {
       session->id = next_session_id++;
@@ -454,7 +485,7 @@ node::impl::remember_session(std::shared_ptr<node::impl::session_state> session,
       metrics_value.sessions_pruned += pruned.size();
       metrics_value.sessions_closed += pruned.size();
       FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected,
-                          admission.reason.empty() ? "P2P session admission rejected" : admission.reason);
+                            admission.reason.empty() ? "P2P session admission rejected" : admission.reason);
    }
    sessions[session->id] = std::move(session);
    metrics_value.active_sessions = sessions.size();
@@ -874,8 +905,8 @@ void node::impl::record_direct_failure(const peer_id& peer) {
 }
 
 std::chrono::system_clock::time_point node::impl::endpoint_backoff_until(const peer_id& peer,
-                                                                        const forge::net::p2p::endpoint& endpoint,
-                                                                        path::kind kind) const {
+                                                                         const forge::net::p2p::endpoint& endpoint,
+                                                                         path::kind kind) const {
    auto failures = std::uint64_t{1};
    if (auto record = store.find(peer)) {
       const auto endpoint_string = endpoint.to_string();
@@ -891,8 +922,8 @@ std::chrono::system_clock::time_point node::impl::endpoint_backoff_until(const p
    const auto cap = options.limits.dial_backoff_max;
    const auto cap_count = cap.count() > base.count() ? cap.count() - base.count() : 0;
    const auto step_count = step.count();
-   const auto max_square = cap_count > 0 && step_count > 0 ? static_cast<std::uint64_t>(cap_count / step_count)
-                                                           : std::uint64_t{0};
+   const auto max_square =
+       cap_count > 0 && step_count > 0 ? static_cast<std::uint64_t>(cap_count / step_count) : std::uint64_t{0};
    const auto square = failures > std::numeric_limits<std::uint64_t>::max() / failures
                            ? std::numeric_limits<std::uint64_t>::max()
                            : failures * failures;
@@ -1123,21 +1154,6 @@ boost::asio::awaitable<void> node::impl::announce_pubsub_subscriptions(const pee
    }
 }
 
-bool node::impl::try_begin_pubsub_validation(const peer_id& peer) {
-   auto lock = std::scoped_lock{mutex};
-   if (pubsub_value.active_validations >= options.limits.pubsub.limits.max_validation_queue) {
-      ++metrics_value.backpressure_rejections;
-      ++metrics_value.protocol_rejections;
-      ++metrics_value.pubsub_invalid_messages;
-      pubsub_value.scores[peer].invalid_messages += 1;
-      pubsub_value.scores[peer].value -= 1.0;
-      return false;
-   }
-   ++pubsub_value.active_validations;
-   ++pubsub_value.active_validations_by_peer[peer];
-   return true;
-}
-
 void node::impl::finish_pubsub_validation(const peer_id& peer) {
    auto lock = std::scoped_lock{mutex};
    if (pubsub_value.active_validations > 0) {
@@ -1149,6 +1165,216 @@ void node::impl::finish_pubsub_validation(const peer_id& peer) {
          --it->second;
       } else {
          pubsub_value.active_validations_by_peer.erase(it);
+      }
+   }
+}
+
+node::impl::pubsub_state::claim node::impl::claim_pubsub_message(const peer_id& peer, const std::string& key,
+                                                                 const pubsub::message& value,
+                                                                 bool requires_validation) {
+   auto lock = std::scoped_lock{mutex};
+   const auto begin_validation = [&](pubsub_state::validation& validation) {
+      if (!requires_validation) {
+         validation.state = pubsub_state::validation::status::accepted;
+         return pubsub_state::claim_status::claimed;
+      }
+      if (pubsub_value.active_validations >= options.limits.pubsub.limits.max_validation_queue) {
+         ++metrics_value.backpressure_rejections;
+         const auto ordinal = std::max(validation.attempts, validation.redeliveries + 1);
+         const auto retry_after =
+             std::chrono::steady_clock::now() + validation_retry_delay(options.limits.pubsub.limits, ordinal);
+         validation.state = pubsub_state::validation::status::retryable;
+         validation.retry_after = retry_after;
+         validation.request_after = retry_after;
+         return pubsub_state::claim_status::backpressured;
+      }
+      validation.state = pubsub_state::validation::status::in_progress;
+      ++validation.attempts;
+      validation.requests = 0;
+      ++pubsub_value.active_validations;
+      ++pubsub_value.active_validations_by_peer[peer];
+      return pubsub_state::claim_status::claimed;
+   };
+
+   const auto cached = pubsub_value.cache.find(key);
+   if (cached == pubsub_value.cache.end()) {
+      const auto generation = pubsub_value.next_validation_generation++;
+      pubsub_value.cache.emplace(key, value);
+      pubsub_value.history.push_back(key);
+      const auto validation = pubsub_value.validations
+                                  .emplace(key,
+                                           pubsub_state::validation{
+                                               .source = peer,
+                                               .generation = generation,
+                                           })
+                                  .first;
+      const auto status = begin_validation(validation->second);
+      prune_pubsub_cache_locked();
+      return pubsub_state::claim{
+          .status = status,
+          .generation = generation,
+      };
+   }
+
+   const auto validation = pubsub_value.validations.find(key);
+   if (!same_pubsub_message(cached->second, value)) {
+      return pubsub_state::claim{.status = pubsub_state::claim_status::invalid};
+   }
+   if (validation != pubsub_value.validations.end() &&
+       validation->second.state == pubsub_state::validation::status::retryable &&
+       std::chrono::steady_clock::now() >= validation->second.retry_after) {
+      if (validation->second.redeliveries >= options.limits.pubsub.limits.max_validation_redeliveries) {
+         validation->second.state = pubsub_state::validation::status::ignored;
+         validation->second.retry_after = {};
+         validation->second.request_after = {};
+         return pubsub_state::claim{.status = pubsub_state::claim_status::duplicate};
+      }
+      ++validation->second.redeliveries;
+      validation->second.state = pubsub_state::validation::status::claimed;
+      validation->second.source = peer;
+      validation->second.retry_after = {};
+      validation->second.request_after = {};
+      const auto status = begin_validation(validation->second);
+      prune_pubsub_cache_locked();
+      return pubsub_state::claim{
+          .status = status,
+          .generation = validation->second.generation,
+      };
+   }
+
+   ++pubsub_value.scores[peer].duplicate_messages;
+   ++metrics_value.pubsub_duplicates;
+   return pubsub_state::claim{.status = pubsub_state::claim_status::duplicate};
+}
+
+bool node::impl::complete_pubsub_message(const std::string& key, std::uint64_t generation,
+                                         pubsub::validation_result result) {
+   auto lock = std::scoped_lock{mutex};
+   const auto found = pubsub_value.validations.find(key);
+   if (found == pubsub_value.validations.end() || found->second.generation != generation) {
+      return false;
+   }
+   switch (result) {
+   case pubsub::validation_result::accept:
+      found->second.state = pubsub_state::validation::status::accepted;
+      found->second.retry_after = {};
+      found->second.request_after = {};
+      found->second.requests = 0;
+      break;
+   case pubsub::validation_result::reject:
+      found->second.state = pubsub_state::validation::status::rejected;
+      found->second.retry_after = {};
+      found->second.request_after = {};
+      found->second.requests = 0;
+      break;
+   case pubsub::validation_result::ignore:
+      found->second.state = pubsub_state::validation::status::ignored;
+      found->second.retry_after = {};
+      found->second.request_after = {};
+      found->second.requests = 0;
+      break;
+   case pubsub::validation_result::retry:
+      return false;
+   }
+   prune_pubsub_cache_locked();
+   return true;
+}
+
+void node::impl::defer_pubsub_message(const std::string& key, std::uint64_t generation) {
+   auto lock = std::scoped_lock{mutex};
+   const auto found = pubsub_value.validations.find(key);
+   if (found == pubsub_value.validations.end() || found->second.generation != generation) {
+      return;
+   }
+   if (found->second.attempts >= options.limits.pubsub.limits.max_validation_attempts ||
+       found->second.redeliveries >= options.limits.pubsub.limits.max_validation_redeliveries) {
+      found->second.state = pubsub_state::validation::status::ignored;
+      found->second.retry_after = {};
+      found->second.request_after = {};
+      found->second.requests = 0;
+      prune_pubsub_cache_locked();
+      return;
+   }
+
+   const auto ordinal = std::max(found->second.attempts, found->second.redeliveries + 1);
+   const auto retry_after =
+       std::chrono::steady_clock::now() + validation_retry_delay(options.limits.pubsub.limits, ordinal);
+   found->second.state = pubsub_state::validation::status::retryable;
+   found->second.retry_after = retry_after;
+   found->second.request_after = retry_after;
+   prune_pubsub_cache_locked();
+}
+
+bool node::impl::should_request_pubsub_message_locked(const std::string& key, const peer_id& source,
+                                                      std::chrono::steady_clock::time_point now) {
+   if (!pubsub_value.cache.contains(key)) {
+      return true;
+   }
+   const auto validation = pubsub_value.validations.find(key);
+   if (validation == pubsub_value.validations.end() ||
+       validation->second.state != pubsub_state::validation::status::retryable || validation->second.source != source ||
+       now < validation->second.retry_after || now < validation->second.request_after) {
+      return false;
+   }
+   if (validation->second.requests >= options.limits.pubsub.limits.max_validation_requests) {
+      validation->second.state = pubsub_state::validation::status::ignored;
+      validation->second.retry_after = {};
+      validation->second.request_after = {};
+      return false;
+   }
+
+   ++validation->second.requests;
+   auto delay = options.limits.pubsub.limits.validation_retry_initial_delay;
+   const auto maximum = options.limits.pubsub.limits.validation_retry_max_delay;
+   for (auto request = std::size_t{1}; request < validation->second.requests && delay < maximum; ++request) {
+      if (delay > maximum / 2) {
+         delay = maximum;
+      } else {
+         delay *= 2;
+      }
+   }
+   validation->second.request_after =
+       now + std::max(options.limits.pubsub.limits.heartbeat_interval, std::min(delay, maximum));
+   return true;
+}
+
+bool node::impl::can_serve_pubsub_message_locked(const std::string& key) const {
+   const auto validation = pubsub_value.validations.find(key);
+   return validation != pubsub_value.validations.end() &&
+          validation->second.state == pubsub_state::validation::status::accepted;
+}
+
+void node::impl::remember_local_pubsub_message_locked(const std::string& key, pubsub::message value) {
+   if (!pubsub_value.cache.contains(key)) {
+      pubsub_value.history.push_back(key);
+   }
+   pubsub_value.cache[key] = std::move(value);
+   pubsub_value.validations[key] = pubsub_state::validation{
+       .state = pubsub_state::validation::status::accepted,
+       .generation = pubsub_value.next_validation_generation++,
+   };
+   prune_pubsub_cache_locked();
+}
+
+void node::impl::prune_pubsub_cache_locked() {
+   const auto max_cached = std::max<std::size_t>(
+       options.limits.pubsub.limits.history_length * options.limits.pubsub.limits.max_messages, 1);
+   while (pubsub_value.history.size() > max_cached) {
+      auto evicted = false;
+      for (auto history = pubsub_value.history.begin(); history != pubsub_value.history.end(); ++history) {
+         const auto validation = pubsub_value.validations.find(*history);
+         if (validation != pubsub_value.validations.end() &&
+             validation->second.state == pubsub_state::validation::status::in_progress) {
+            continue;
+         }
+         pubsub_value.cache.erase(*history);
+         pubsub_value.validations.erase(*history);
+         pubsub_value.history.erase(history);
+         evicted = true;
+         break;
+      }
+      if (!evicted) {
+         break;
       }
    }
 }
@@ -1198,11 +1424,13 @@ boost::asio::awaitable<void> node::impl::pubsub_heartbeat_once() {
    auto grafts = std::map<peer_id, std::vector<pubsub::control::graft>>{};
    auto prunes = std::map<peer_id, std::vector<pubsub::control::prune>>{};
    auto gossip = std::map<peer_id, std::vector<pubsub::control::ihave>>{};
+   auto retries = std::map<peer_id, std::vector<std::vector<std::uint8_t>>>{};
    {
       auto lock = std::scoped_lock{mutex};
       if (stopped) {
          co_return;
       }
+      const auto now = std::chrono::steady_clock::now();
       const auto mesh_high =
           std::min(options.limits.pubsub.limits.mesh_n_high, options.limits.pubsub.limits.max_peers_per_topic);
       const auto mesh_target = std::min(options.limits.pubsub.limits.mesh_n, mesh_high);
@@ -1252,8 +1480,9 @@ boost::asio::awaitable<void> node::impl::pubsub_heartbeat_once() {
          auto seen = std::size_t{};
          for (auto it = pubsub_value.history.rbegin();
               it != pubsub_value.history.rend() && seen < options.limits.pubsub.limits.history_gossip; ++it, ++seen) {
-            if (const auto found = pubsub_value.cache.find(*it);
-                found != pubsub_value.cache.end() && found->second.subject.value == topic_value) {
+            if (const auto found = pubsub_value.cache.find(*it); found != pubsub_value.cache.end() &&
+                                                                 found->second.subject.value == topic_value &&
+                                                                 can_serve_pubsub_message_locked(*it)) {
                ids.push_back(pubsub::codec::message_id(found->second));
             }
          }
@@ -1268,6 +1497,38 @@ boost::asio::awaitable<void> node::impl::pubsub_heartbeat_once() {
                });
             }
          }
+      }
+      auto retry_count = std::size_t{};
+      auto retry = pubsub_value.retry_cursor.empty() ? pubsub_value.validations.begin()
+                                                     : pubsub_value.validations.upper_bound(pubsub_value.retry_cursor);
+      const auto retry_budget =
+          std::min(options.limits.pubsub.limits.gossip_lazy, options.limits.pubsub.limits.max_messages);
+      for (auto inspected = std::size_t{}; inspected < pubsub_value.validations.size() && retry_count < retry_budget;
+           ++inspected) {
+         if (retry == pubsub_value.validations.end()) {
+            retry = pubsub_value.validations.begin();
+         }
+         auto& [key, validation] = *retry;
+         pubsub_value.retry_cursor = key;
+         ++retry;
+         if (validation.state != pubsub_state::validation::status::retryable || validation.source.value.empty() ||
+             now < validation.retry_after || now < validation.request_after) {
+            continue;
+         }
+         const auto cached = pubsub_value.cache.find(key);
+         if (cached == pubsub_value.cache.end()) {
+            continue;
+         }
+         const auto source = validation.source;
+         const auto existing = retries.find(source);
+         if (existing != retries.end() && existing->second.size() >= options.limits.pubsub.limits.max_message_ids) {
+            continue;
+         }
+         if (!should_request_pubsub_message_locked(key, source, now)) {
+            continue;
+         }
+         retries[source].push_back(pubsub::codec::message_id(cached->second));
+         ++retry_count;
       }
    }
    for (const auto& [peer, items] : grafts) {
@@ -1287,6 +1548,15 @@ boost::asio::awaitable<void> node::impl::pubsub_heartbeat_once() {
    for (const auto& [peer, items] : gossip) {
       try {
          co_await send_pubsub_rpc(peer, pubsub::rpc{.control_value = pubsub::control{.have = items}});
+      } catch (const forge::exceptions::base&) {
+         store.mark_failure(peer);
+      }
+   }
+   for (const auto& [peer, message_ids] : retries) {
+      try {
+         co_await send_pubsub_rpc(peer, pubsub::rpc{.control_value = pubsub::control{
+                                                        .want = std::vector<pubsub::control::iwant>{
+                                                            pubsub::control::iwant{.message_ids = message_ids}}}});
       } catch (const forge::exceptions::base&) {
          store.mark_failure(peer);
       }
@@ -1472,8 +1742,8 @@ node::impl::request_relay_reservation(const peer_id& relay_peer, relay::reservat
       if (response.kind != relay::hop_message::message_kind::status || response.status != relay::status::ok ||
           !response.reservation_value) {
          FORGE_THROW_CODE(response.kind == relay::hop_message::message_kind::status ? exceptions::code::relay_rejected
-                                                                                  : exceptions::code::protocol_error,
-                        "P2P relay reservation rejected");
+                                                                                    : exceptions::code::protocol_error,
+                          "P2P relay reservation rejected");
       }
       const auto now_seconds =
           std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch());
@@ -1561,14 +1831,13 @@ node::impl::refresh_relay_candidates(std::optional<peer_id> target, std::chrono:
    }
 
    const auto snapshot = store.snapshot();
-   auto candidates = relay_discovery::select_candidates(
-       snapshot,
-       relay_discovery::request{
-           .local = local,
-           .target = target.value_or(peer_id{}),
-           .now = system_now,
-           .limit = options.relay_policy.max_candidates_per_refresh,
-       });
+   auto candidates =
+       relay_discovery::select_candidates(snapshot, relay_discovery::request{
+                                                        .local = local,
+                                                        .target = target.value_or(peer_id{}),
+                                                        .now = system_now,
+                                                        .limit = options.relay_policy.max_candidates_per_refresh,
+                                                    });
    auto out = std::vector<relay::reservation::info>{};
    out.reserve(std::min(candidates.size(), target_reservations - fresh_count));
 
@@ -1593,15 +1862,15 @@ node::impl::refresh_relay_candidates(std::optional<peer_id> target, std::chrono:
       }
       try {
          const auto remaining = remaining_timeout(started, timeout, "P2P AutoRelay refresh");
-         auto info = co_await request_relay_reservation(
-             candidate.peer,
-             relay::reservation::options{
-                 .ttl = options.limits.relay.reservation_ttl,
-                 .max_streams = options.limits.relay.max_streams_per_reservation,
-                 .max_bytes = options.limits.relay.max_relay_bytes,
-                 .max_queued_bytes = options.limits.relay.max_queued_bytes,
-             },
-             remaining);
+         auto info =
+             co_await request_relay_reservation(candidate.peer,
+                                                relay::reservation::options{
+                                                    .ttl = options.limits.relay.reservation_ttl,
+                                                    .max_streams = options.limits.relay.max_streams_per_reservation,
+                                                    .max_bytes = options.limits.relay.max_relay_bytes,
+                                                    .max_queued_bytes = options.limits.relay.max_queued_bytes,
+                                                },
+                                                remaining);
          store.mark_success(candidate.peer, path::kind::relay, std::chrono::milliseconds{0});
          {
             auto lock = std::scoped_lock{mutex};
@@ -1647,7 +1916,8 @@ void node::impl::launch_relay_discovery_maintenance() {
                 }
              }
              try {
-                (void)co_await self->refresh_relay_candidates(std::nullopt, self->options.limits.discovery.query_timeout);
+                (void)co_await self->refresh_relay_candidates(std::nullopt,
+                                                              self->options.limits.discovery.query_timeout);
              } catch (const forge::exceptions::base&) {
                 auto lock = std::scoped_lock{self->mutex};
                 ++self->metrics_value.relay_discovery_failures;
@@ -1680,11 +1950,11 @@ node::impl::open_relay_yamux(const peer_id& peer, const peer_id& relay_peer, std
       }
       if (response.kind != relay::hop_message::message_kind::status || response.status != relay::status::ok) {
          FORGE_THROW_CODE(response.kind == relay::hop_message::message_kind::status ? exceptions::code::relay_rejected
-                                                                                  : exceptions::code::protocol_error,
-                        response.kind == relay::hop_message::message_kind::status
-                            ? "P2P relay open rejected with status " +
-                                  std::to_string(static_cast<std::uint16_t>(response.status))
-                            : "P2P relay open rejected with unexpected response");
+                                                                                    : exceptions::code::protocol_error,
+                          response.kind == relay::hop_message::message_kind::status
+                              ? "P2P relay open rejected with status " +
+                                    std::to_string(static_cast<std::uint16_t>(response.status))
+                              : "P2P relay open rejected with unexpected response");
       }
       record_path_open(path::kind::relay);
       stream = detail::stream_access::with_buffer(std::move(stream), std::move(relay_buffer));
@@ -1701,9 +1971,9 @@ node::impl::open_relay_yamux(const peer_id& peer, const peer_id& relay_peer, std
 }
 
 boost::asio::awaitable<forge::net::p2p::stream> node::impl::open_protocol_via_relay(const peer_id& peer,
-                                                                             const protocol_id& protocol,
-                                                                             const peer_id& relay_peer,
-                                                                             std::chrono::milliseconds timeout) {
+                                                                                    const protocol_id& protocol,
+                                                                                    const peer_id& relay_peer,
+                                                                                    std::chrono::milliseconds timeout) {
    auto yamux = co_await open_relay_yamux(peer, relay_peer, timeout);
    trace_relay("outbound upgrade: open yamux stream");
    auto substream = forge::net::p2p::stream{co_await yamux->async_open_stream()};
@@ -2454,9 +2724,8 @@ namespace {
       return registration.endpoints;
    }
    try {
-      const auto record =
-          rendezvous::codec::open_peer_record(signed_envelope::decode(registration.signed_peer_record),
-                                              registration.peer);
+      const auto record = rendezvous::codec::open_peer_record(signed_envelope::decode(registration.signed_peer_record),
+                                                              registration.peer);
       return record.endpoints;
    } catch (const forge::exceptions::base&) {
       return {};
@@ -2783,15 +3052,23 @@ boost::asio::awaitable<void> node::impl::handle_pubsub(std::shared_ptr<node::imp
                if (!pubsub_value.handlers.contains(ihave.subject.value)) {
                   continue;
                }
+               const auto now = std::chrono::steady_clock::now();
                for (const auto& id : ihave.message_ids) {
-                  if (!pubsub_value.cache.contains(bytes_key(id))) {
+                  const auto key = bytes_key(id);
+                  const auto cached_message = pubsub_value.cache.find(key);
+                  if (cached_message != pubsub_value.cache.end() && cached_message->second.subject != ihave.subject) {
+                     continue;
+                  }
+                  if (should_request_pubsub_message_locked(key, session->info.remote_peer, now)) {
                      missing.push_back(id);
                   }
                }
             }
             for (const auto& iwant : value.control_value->want) {
                for (const auto& id : iwant.message_ids) {
-                  if (const auto found = pubsub_value.cache.find(bytes_key(id)); found != pubsub_value.cache.end()) {
+                  const auto key = bytes_key(id);
+                  if (const auto found = pubsub_value.cache.find(key);
+                      found != pubsub_value.cache.end() && can_serve_pubsub_message_locked(key)) {
                      cached.push_back(found->second);
                   }
                }
@@ -2841,24 +3118,6 @@ boost::asio::awaitable<void> node::impl::handle_pubsub(std::shared_ptr<node::imp
 
          const auto id = pubsub::codec::message_id(published);
          const auto key = bytes_key(id);
-         {
-            auto lock = std::scoped_lock{mutex};
-            if (pubsub_value.cache.contains(key)) {
-               ++pubsub_value.scores[session->info.remote_peer].duplicate_messages;
-               ++metrics_value.pubsub_duplicates;
-               continue;
-            }
-            pubsub_value.cache.emplace(key, published);
-            pubsub_value.history.push_back(key);
-            const auto max_cached = std::max<std::size_t>(
-                options.limits.pubsub.limits.history_length * options.limits.pubsub.limits.max_messages, 1);
-            while (pubsub_value.history.size() > max_cached) {
-               pubsub_value.cache.erase(pubsub_value.history.front());
-               pubsub_value.history.pop_front();
-            }
-         }
-
-         auto result = pubsub::validation_result::accept;
          auto handler = std::optional<pubsub::handler>{};
          {
             auto lock = std::scoped_lock{mutex};
@@ -2867,20 +3126,37 @@ boost::asio::awaitable<void> node::impl::handle_pubsub(std::shared_ptr<node::imp
                handler = found->second;
             }
          }
+         const auto claim = claim_pubsub_message(session->info.remote_peer, key, published, handler.has_value());
+         if (claim.status == pubsub_state::claim_status::invalid) {
+            increment_pubsub_invalid(session->info.remote_peer);
+            increment_protocol_rejected();
+            continue;
+         }
+         if (claim.status == pubsub_state::claim_status::duplicate ||
+             claim.status == pubsub_state::claim_status::backpressured) {
+            continue;
+         }
+
+         auto result = pubsub::validation_result::accept;
          if (handler) {
-            if (!try_begin_pubsub_validation(session->info.remote_peer)) {
-               continue;
-            }
             try {
                result = co_await (*handler)(pubsub::event{
-                   .source = published.from.value_or(session->info.remote_peer),
+                   .source = session->info.remote_peer,
                    .value = published,
                });
                finish_pubsub_validation(session->info.remote_peer);
             } catch (...) {
                finish_pubsub_validation(session->info.remote_peer);
+               defer_pubsub_message(key, claim.generation);
                throw;
             }
+         }
+         if (result == pubsub::validation_result::retry) {
+            defer_pubsub_message(key, claim.generation);
+            continue;
+         }
+         if (handler && !complete_pubsub_message(key, claim.generation, result)) {
+            continue;
          }
          if (result == pubsub::validation_result::reject) {
             increment_pubsub_invalid(session->info.remote_peer);
@@ -2929,9 +3205,9 @@ boost::asio::awaitable<bool> node::impl::wait_for_direct_session(const peer_id& 
    co_return false;
 }
 
-boost::asio::awaitable<hole_punch::status> node::impl::run_dcutr_initiator(const peer_id& peer,
-                                                                           std::shared_ptr<forge::net::yamux::session> yamux,
-                                                                           std::chrono::milliseconds timeout) {
+boost::asio::awaitable<hole_punch::status>
+node::impl::run_dcutr_initiator(const peer_id& peer, std::shared_ptr<forge::net::yamux::session> yamux,
+                                std::chrono::milliseconds timeout) {
    auto observed = local_endpoints_for_control();
    if (observed.empty()) {
       record_hole_punch_result(hole_punch::status::failed);
@@ -3081,7 +3357,8 @@ node::impl::serve_relayed_streams_until_hole_punch(peer_id peer, std::optional<p
    co_return hole_punch::status::failed;
 }
 
-boost::asio::awaitable<void> node::impl::handle_peer_exchange(forge::net::p2p::stream stream, std::uint64_t request_id) {
+boost::asio::awaitable<void> node::impl::handle_peer_exchange(forge::net::p2p::stream stream,
+                                                              std::uint64_t request_id) {
    auto endpoints = std::vector<peer_exchange_message::endpoint_record>{};
    for (const auto& endpoint : local_endpoints_for_control()) {
       endpoints.push_back(peer_exchange_message::endpoint_record{

@@ -9,6 +9,7 @@ module;
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ranges>
 #include <string>
@@ -87,15 +88,11 @@ namespace {
 }
 
 struct cancel_current_scope {
-   std::shared_ptr<std::function<void()>> value;
+   std::shared_ptr<cancellation_latch> value;
 
    ~cancel_current_scope() {
-      if (!value) {
-         return;
-      }
-      try {
-         *value = {};
-      } catch (...) {
+      if (value) {
+         value->clear();
       }
    }
 };
@@ -162,6 +159,29 @@ class tcp_profile final {
          listener.active = false;
          listener.value->close();
       }
+      auto active = std::vector<std::shared_ptr<cancellation_latch>>{};
+      {
+         auto lock = std::scoped_lock{active_mutex_};
+         stopped_ = true;
+         for (auto iterator = active_.begin(); iterator != active_.end();) {
+            if (auto operation = iterator->lock()) {
+               active.push_back(std::move(operation));
+               ++iterator;
+            } else {
+               iterator = active_.erase(iterator);
+            }
+         }
+      }
+      for (const auto& operation : active) {
+         operation->cancel();
+      }
+   }
+
+   boost::asio::awaitable<void> async_stop() {
+      stop();
+      for (auto& [_, listener] : listeners_) {
+         co_await listener.value->async_close();
+      }
    }
 
    boost::asio::awaitable<connection> async_connect(forge::net::p2p::endpoint endpoint,
@@ -172,17 +192,15 @@ class tcp_profile final {
       auto expected_peer = expected_peer_for(endpoint, options);
       auto remote_transport = endpoint.transport;
       auto connector = forge::net::tcp::connector{runtime_.context().get_executor()};
-      auto cancel_current = std::make_shared<std::function<void()>>([&connector] { connector.cancel(); });
+      auto cancel_current = std::make_shared<cancellation_latch>();
+      track(cancel_current);
+      cancel_current->set([&connector] { connector.cancel(); });
       auto deadline = operation_deadline{runtime_.context(), options.timeout};
       auto cancel_scope = cancel_current_scope{cancel_current};
-      deadline.arm([cancel_current] {
-         if (*cancel_current) {
-            (*cancel_current)();
-         }
-      });
+      deadline.arm([cancel_current] { cancel_current->cancel(); });
       try {
          auto tcp = co_await connector.async_connect_connection(std::move(remote_transport));
-         *cancel_current = [&tcp] { tcp.cancel(); };
+         cancel_current->set([&tcp] { tcp.cancel(); });
          const auto local_endpoint = p2p_endpoint_for(tcp.local_endpoint());
          const auto remote_endpoint = p2p_endpoint_for(tcp.remote_endpoint());
          auto upgraded = co_await upgrade_outbound_tcp(
@@ -214,14 +232,12 @@ class tcp_profile final {
          auto tcp = co_await found->second.value->async_accept_connection();
          const auto local_endpoint = p2p_endpoint_for(tcp.local_endpoint());
          const auto remote_endpoint = p2p_endpoint_for(tcp.remote_endpoint());
-         auto cancel_current = std::make_shared<std::function<void()>>([&tcp] { tcp.cancel(); });
+         auto cancel_current = std::make_shared<cancellation_latch>();
+         track(cancel_current);
+         cancel_current->set([&tcp] { tcp.cancel(); });
          auto deadline = operation_deadline{runtime_.context(), node::connect_options{}.timeout};
          auto cancel_scope = cancel_current_scope{cancel_current};
-         deadline.arm([cancel_current] {
-            if (*cancel_current) {
-               (*cancel_current)();
-            }
-         });
+         deadline.arm([cancel_current] { cancel_current->cancel(); });
          auto upgraded = upgraded_session{};
          try {
             upgraded = co_await upgrade_inbound_tcp(
@@ -250,9 +266,29 @@ class tcp_profile final {
    }
 
  private:
+   void track(const std::shared_ptr<cancellation_latch>& operation) {
+      auto cancel_now = false;
+      {
+         auto lock = std::scoped_lock{active_mutex_};
+         cancel_now = stopped_;
+         if (!cancel_now) {
+            active_.erase(std::remove_if(active_.begin(), active_.end(),
+                                         [](const auto& operation) { return operation.expired(); }),
+                          active_.end());
+            active_.push_back(operation);
+         }
+      }
+      if (cancel_now) {
+         operation->cancel();
+      }
+   }
+
    forge::asio::runtime& runtime_;
    const node::options& options_;
    std::map<std::string, listener_entry> listeners_;
+   std::mutex active_mutex_;
+   std::vector<std::weak_ptr<cancellation_latch>> active_;
+   bool stopped_ = false;
 };
 
 } // namespace
@@ -265,6 +301,7 @@ void register_tcp_profile(registry& value, forge::asio::runtime& runtime, const 
        .local_endpoints = [owned] { return owned->local_endpoints(); },
        .listen = [owned](forge::net::p2p::endpoint endpoint) { return owned->listen(std::move(endpoint)); },
        .stop = [owned] { owned->stop(); },
+       .async_stop = [owned] { return owned->async_stop(); },
        .async_connect =
            [owned](forge::net::p2p::endpoint endpoint, const node::connect_options& options) {
               return owned->async_connect(std::move(endpoint), options);

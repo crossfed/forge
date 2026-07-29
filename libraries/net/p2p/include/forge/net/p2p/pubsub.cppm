@@ -29,6 +29,7 @@ enum class validation_result : std::uint8_t {
    accept,
    reject,
    ignore,
+   retry,
 };
 
 enum class signature_policy : std::uint8_t {
@@ -57,6 +58,9 @@ struct limits {
    std::size_t max_peers_per_topic = 12;
    std::size_t max_topics = 1024;
    std::size_t max_validation_queue = 4096;
+   std::size_t max_validation_attempts = 3;
+   std::size_t max_validation_redeliveries = 8;
+   std::size_t max_validation_requests = 8;
    std::size_t max_outbound_queue_bytes = 4 * 1024 * 1024;
    std::size_t max_ihave_per_peer = 10;
    std::size_t max_iwant_per_peer = 10;
@@ -66,6 +70,8 @@ struct limits {
    std::chrono::seconds fanout_ttl{60};
    std::chrono::seconds prune_backoff{60};
    std::chrono::seconds unsubscribe_backoff{10};
+   std::chrono::milliseconds validation_retry_initial_delay{250};
+   std::chrono::milliseconds validation_retry_max_delay{5'000};
    std::size_t mesh_n = 6;
    std::size_t mesh_n_low = 5;
    std::size_t mesh_n_high = 12;

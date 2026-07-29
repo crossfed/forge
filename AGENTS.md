@@ -57,11 +57,12 @@ The repository must stay neutral. Public APIs must not contain downstream produc
   source APIs, package contracts, wire formats or persisted storage formats,
   and for broad architectural-generation changes, except for the narrow
   pre-stabilization exception below.
-- Before FORGE source contracts are declared stabilized, the maintainer may
-  approve one explicitly scoped source/package break in a `MINOR` release.
-  The release notes must name every removed surface and provide a mechanical
-  migration path. This exception never permits an undocumented wire or
-  persisted-storage format change and is not implied by ordinary refactoring.
+- Before FORGE contracts are declared stabilized, the maintainer may approve
+  an explicitly scoped source, package, wire or persisted-storage break in a
+  `MINOR` release. The release notes must name every affected surface and
+  provide a mechanical migration, regeneration or reset path. Compatibility
+  aliases and legacy output modes are not required for an approved clean
+  break. This exception is never implied by ordinary refactoring.
 - Source, wire and storage stability are independent. Marking a C++ API as
   `Preview` does not make its documented wire or persisted storage layout
   unstable. Any non-stable wire or storage contract must be marked separately
@@ -225,6 +226,13 @@ class service_node {
 - `guest/libraries/contract/intrinsics.hpp` is the only intrinsic signature
   registry. Generated guest C declarations, EOSIO headers, host skeletons and
   import manifests must derive from it.
+- Dual-target contract libraries declare their complete source and dependency
+  graph through `forge_add_contract_library`. The immutable Forge descriptor is
+  the only host/guest graph source; native CMake target properties are not a
+  serializable cross-toolchain protocol.
+- Do not recover contract dependencies from `LINK_LIBRARIES`,
+  `INTERFACE_LINK_LIBRARIES`, `$<LINK_ONLY:...>` or CMake directory wrappers.
+  Add files and scoped dependencies to the Forge declaration instead.
 - Contract SDK C ABI support records are generated from templates under
   `guest/cmake/`; generated `.h` files never live in a guest library's source
   `include/forge` tree.

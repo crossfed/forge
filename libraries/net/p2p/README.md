@@ -83,6 +83,16 @@ Network-level behaviors that must not be pushed into plugins:
 policy. Application protocols own idempotency, acknowledgement and
 permission checks above P2P.
 
+GossipSub validation keeps `accept`, `reject` and `ignore` terminal while the
+message remains in bounded history. `retry`, handler failure and local
+validation backpressure are transient: the receiving heartbeat requests the
+cached payload from its source peer after a capped exponential cooldown,
+independently of ordinary `IHAVE` history. A message becomes terminally ignored
+after the configured validation or request-attempt limit. Each heartbeat
+applies a round-robin retry budget, and retry records are evicted with the
+payload history, so unreachable peers and repeated transient failures cannot
+create unbounded work or a second cache.
+
 ## Examples
 
 ### Start A Node
@@ -250,9 +260,20 @@ boost::asio::awaitable<void> stop_node(forge::net::p2p::node& node) {
    co_await node.async_stop();
 }
 
-// From a synchronous signal path:
-node.stop();
+void request_node_stop(forge::net::p2p::node& node) {
+   node.stop();
+}
+
+boost::asio::awaitable<void> finish_node_stop(forge::net::p2p::node& node) {
+   co_await node.async_stop();
+}
 ```
+
+`stop()` closes admission and listeners and starts disconnecting current
+sessions without blocking the caller. It intentionally removes those sessions
+from the active set before their transport teardown has finished.
+`async_stop()` is the completion barrier: it always waits for the teardown
+started by `stop()`, including STCP/Yamux read-loop cleanup.
 
 ## Security Notes
 

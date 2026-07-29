@@ -9,6 +9,36 @@ module forge.vm.wasm.allocator;
 
 namespace forge::vm::wasm {
 
+wasm_allocator::wasm_allocator() {
+   const auto system_page_size = static_cast<std::size_t>(::sysconf(_SC_PAGESIZE));
+   const auto mapping_size = max_memory + 2 * system_page_size;
+   auto* mapping = static_cast<char*>(::mmap(nullptr, mapping_size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+   detail::check<exceptions::allocation>((mapping != MAP_FAILED), "mmap failed to allocate pages");
+
+   if (::mprotect(mapping, system_page_size, PROT_READ) != 0) {
+      ::munmap(mapping, mapping_size);
+      detail::fail<exceptions::allocation>("mprotect failed");
+   }
+
+   raw = mapping + system_page_size;
+   page = 0;
+}
+
+wasm_allocator::~wasm_allocator() {
+   free();
+}
+
+void wasm_allocator::free() noexcept {
+   if (raw == nullptr)
+      return;
+
+   const auto system_page_size = static_cast<std::size_t>(::sysconf(_SC_PAGESIZE));
+   auto* mapping = raw - system_page_size;
+   raw = nullptr;
+   page = -1;
+   ::munmap(mapping, max_memory + 2 * system_page_size);
+}
+
 stack_allocator::stack_allocator(std::size_t min_size) {
    if (min_size > 4 * 1024 * 1024) {
       const auto page_size = static_cast<std::size_t>(::sysconf(_SC_PAGESIZE));

@@ -97,8 +97,15 @@ registry.register_plugin(forge::plugins::p2p::pubsub::descriptor());
 ## Security And Boundaries
 
 - Topic allow/deny lists and max message size are config controls.
-- Message validation callbacks decide accept/reject at the pubsub boundary; they
-  are not product authorization by themselves.
+- Message validation callbacks return terminal `accept`, `reject` or `ignore`,
+  or transient `retry`. Handler deadlines, failures and local active-handler
+  backpressure map to bounded retries; they are not product authorization by
+  themselves.
+- `message.source` is the immediate peer for the current gossip hop.
+  `message.author` is present only for a successfully verified signed message.
+  Use `source` for per-peer quotas and a present `author` for signed-origin
+  attribution or signature policy. Unsigned messages never expose their
+  unverified wire `from` value as `author`.
 - Signing publish messages is transport/pubsub integrity support, not business
   trust policy.
 

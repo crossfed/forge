@@ -3,6 +3,7 @@
 #include <boost/asio/detached.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/redirect_error.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
@@ -22,6 +23,7 @@
 #include <exception>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -63,6 +65,7 @@ import forge.app.runner;
 import forge.app.daemon;
 import forge.asio.blocking;
 import forge.asio.runtime;
+import forge.asio.task;
 import forge.config.core.component;
 import forge.config.core.document;
 import forge.config.core.value;
@@ -749,6 +752,8 @@ struct received_pubsub_messages {
       case forge::net::p2p::pubsub::validation_result::ignore:
          ++ignored;
          break;
+      case forge::net::p2p::pubsub::validation_result::retry:
+         break;
       }
    }
 
@@ -1326,13 +1331,19 @@ class duplicate_p2p_plugin_application final : public forge::app::application_sh
 };
 
 class p2p_only_application final : public forge::app::application_shell {
-   protected:
+ public:
+   using forge::app::application_shell::application_shell;
+
+ protected:
    void on_register_plugins(forge::app::plugin_registry& registry) override {
       registry.register_plugin(forge::plugins::p2p::node::descriptor());
    }
 };
 
 class diagnostics_application final : public forge::app::application_shell {
+ public:
+   using forge::app::application_shell::application_shell;
+
  protected:
    void on_register_plugins(forge::app::plugin_registry& registry) override {
       registry.register_plugin(forge::plugins::p2p::node::descriptor());
@@ -2982,6 +2993,298 @@ BOOST_AUTO_TEST_CASE(p2p_diagnostics_plugin_reports_live_p2p_node_state) {
    forge::asio::blocking::run(server.runtime(), server.shutdown());
 }
 
+BOOST_AUTO_TEST_CASE(p2p_node_plugin_maintains_bootstrap_session_after_peer_restart) {
+   const auto server_peer = test_peer(112);
+   auto server_config = test_p2p_config(server_peer);
+   server_config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{
+                                                    forge::config::core::value{"/ip4/127.0.0.1/tcp/0"},
+                                                });
+
+   auto server = diagnostics_application{};
+   server.configure(server_config);
+   forge::asio::blocking::run(server.runtime(), server.startup());
+
+   auto server_p2p = server.apis().get<forge::plugins::p2p::node::api>(
+       {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+   const auto server_endpoint = server_p2p->local_endpoint();
+   BOOST_REQUIRE(server_endpoint.has_value());
+   BOOST_TEST(server_endpoint->is_direct_tcp());
+   BOOST_REQUIRE(server_endpoint->peer.has_value());
+   const auto bootstrap_peer = *server_endpoint->peer;
+   BOOST_TEST(bootstrap_peer.to_string() == server_peer.to_string());
+
+   auto client_config = test_p2p_config(test_peer(113));
+   client_config.set("plugins.p2p.node.bootstrap", forge::config::core::value::array_type{
+                                                       forge::config::core::value{server_endpoint->to_string()},
+                                                   });
+
+   auto client = diagnostics_application{};
+   client.configure(client_config);
+   forge::asio::blocking::run(client.runtime(), client.startup());
+   auto client_diagnostics = client.apis().get<forge::plugins::p2p::diagnostics::api>(
+       {.id = {"forge.plugins.p2p.diagnostics"}, .major = 1, .min_revision = 0});
+
+   const auto connected = forge::asio::blocking::run(
+       client.runtime(),
+       async_wait_for_condition(
+           [&] {
+              const auto snapshot = client_diagnostics->snapshot();
+              return snapshot.metrics.active_sessions >= 1U && snapshot.metrics.sessions_opened >= 1U &&
+                     std::ranges::any_of(snapshot.sessions, [](const auto& session) { return session.protected_peer; });
+           },
+           std::chrono::seconds{8}));
+   const auto connected_snapshot = client_diagnostics->snapshot();
+   BOOST_TEST_CONTEXT("opened=" << connected_snapshot.metrics.sessions_opened
+                                << " closed=" << connected_snapshot.metrics.sessions_closed
+                                << " active=" << connected_snapshot.metrics.active_sessions
+                                << " protected=" << connected_snapshot.connections.protected_peers.size()) {
+      BOOST_REQUIRE(connected);
+   }
+
+   auto replacement_endpoint = *server_endpoint;
+   replacement_endpoint.peer.reset();
+   forge::asio::blocking::run(server.runtime(), server.shutdown());
+
+   const auto disconnected = forge::asio::blocking::run(
+       client.runtime(),
+       async_wait_for_condition([&] { return client_diagnostics->snapshot().metrics.active_sessions == 0U; },
+                                std::chrono::seconds{5}));
+   BOOST_REQUIRE(disconnected);
+
+   auto replacement_config = test_p2p_config(server_peer);
+   replacement_config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{
+                                                         forge::config::core::value{replacement_endpoint.to_string()},
+                                                     });
+
+   auto replacement = diagnostics_application{};
+   replacement.configure(replacement_config);
+   forge::asio::blocking::run(replacement.runtime(), replacement.startup());
+   auto replacement_diagnostics = replacement.apis().get<forge::plugins::p2p::diagnostics::api>(
+       {.id = {"forge.plugins.p2p.diagnostics"}, .major = 1, .min_revision = 0});
+
+   const auto reconnected = forge::asio::blocking::run(
+       client.runtime(),
+       async_wait_for_condition(
+           [&] {
+              const auto snapshot = client_diagnostics->snapshot();
+              return snapshot.metrics.active_sessions == 1U && snapshot.metrics.sessions_opened >= 2U &&
+                     std::ranges::any_of(snapshot.sessions, [](const auto& session) { return session.protected_peer; });
+           },
+           std::chrono::seconds{12}));
+   const auto reconnected_snapshot = client_diagnostics->snapshot();
+   BOOST_TEST_CONTEXT("opened=" << reconnected_snapshot.metrics.sessions_opened
+                                << " closed=" << reconnected_snapshot.metrics.sessions_closed
+                                << " active=" << reconnected_snapshot.metrics.active_sessions
+                                << " protected=" << reconnected_snapshot.connections.protected_peers.size()) {
+      BOOST_TEST(reconnected);
+   }
+
+   forge::asio::blocking::run(client.runtime(), client.shutdown());
+   const auto gracefully_closed = forge::asio::blocking::run(
+       replacement.runtime(),
+       async_wait_for_condition([&] { return replacement_diagnostics->snapshot().metrics.active_sessions == 0U; },
+                                std::chrono::seconds{5}));
+   BOOST_TEST(gracefully_closed);
+   forge::asio::blocking::run(replacement.runtime(), replacement.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_node_plugin_preserves_stop_requested_before_maintenance_handle_publication) {
+   auto config = test_p2p_config(test_peer(114));
+   config.set("plugins.p2p.node.bootstrap", forge::config::core::value::array_type{
+                                                forge::config::core::value{
+                                                    "/ip4/127.0.0.1/tcp/1/p2p/" + test_peer(115).to_string(),
+                                                },
+                                            });
+
+   auto app = p2p_only_application{forge::app::application_shell_options{
+       .name = "p2p-stop-before-maintenance",
+       .runtime = {.worker_threads = 2, .thread_name = "p2p-stop-before"},
+   }};
+   app.configure(config);
+   forge::asio::blocking::run(app.runtime(), app.initialize());
+
+   auto stop_thread = std::thread{[&] { app.request_stop(); }};
+   stop_thread.join();
+
+   forge::asio::blocking::run(app.runtime(), app.startup());
+   const auto started = std::chrono::steady_clock::now();
+   forge::asio::blocking::run(app.runtime(), app.shutdown());
+   const auto elapsed = std::chrono::steady_clock::now() - started;
+
+   BOOST_TEST(elapsed < std::chrono::seconds{2});
+   const auto scheduler = app.scheduler().snapshot();
+   BOOST_TEST(scheduler.submitted >= 1U);
+   BOOST_TEST(scheduler.completed + scheduler.canceled >= 1U);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_node_plugin_cancels_bootstrap_sleep_from_an_external_thread) {
+   const auto server_peer = test_peer(116);
+   auto server_config = test_p2p_config(server_peer);
+   server_config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{
+                                                    forge::config::core::value{"/ip4/127.0.0.1/tcp/0"},
+                                                });
+
+   auto server = diagnostics_application{};
+   server.configure(server_config);
+   forge::asio::blocking::run(server.runtime(), server.startup());
+
+   auto server_p2p = server.apis().get<forge::plugins::p2p::node::api>(
+       {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+   const auto server_endpoint = server_p2p->local_endpoint();
+   BOOST_REQUIRE(server_endpoint.has_value());
+
+   auto client_config = test_p2p_config(test_peer(117));
+   client_config.set("plugins.p2p.node.bootstrap", forge::config::core::value::array_type{
+                                                       forge::config::core::value{server_endpoint->to_string()},
+                                                   });
+
+   auto client = diagnostics_application{forge::app::application_shell_options{
+       .name = "p2p-cross-thread-stop",
+       .runtime = {.worker_threads = 2, .thread_name = "p2p-cross-stop"},
+   }};
+   client.configure(client_config);
+   forge::asio::blocking::run(client.runtime(), client.startup());
+
+   auto server_diagnostics = server.apis().get<forge::plugins::p2p::diagnostics::api>(
+       {.id = {"forge.plugins.p2p.diagnostics"}, .major = 1, .min_revision = 0});
+   BOOST_REQUIRE(forge::asio::blocking::run(
+       server.runtime(),
+       async_wait_for_condition([&] { return server_diagnostics->snapshot().metrics.active_sessions == 1U; },
+                                std::chrono::seconds{5})));
+
+   std::this_thread::sleep_for(std::chrono::milliseconds{100});
+   auto stop_thread = std::thread{[&] { client.request_stop(); }};
+   stop_thread.join();
+
+   const auto disconnected_on_request = forge::asio::blocking::run(
+       server.runtime(),
+       async_wait_for_condition([&] { return server_diagnostics->snapshot().metrics.active_sessions == 0U; },
+                                std::chrono::seconds{5}));
+   BOOST_TEST(disconnected_on_request);
+
+   const auto started = std::chrono::steady_clock::now();
+   forge::asio::blocking::run(client.runtime(), client.shutdown());
+   const auto elapsed = std::chrono::steady_clock::now() - started;
+   BOOST_TEST(elapsed < std::chrono::milliseconds{750});
+
+   forge::asio::blocking::run(server.runtime(), server.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_node_plugin_cancels_active_bootstrap_dial) {
+   namespace asio = boost::asio;
+   using asio_tcp = asio::ip::tcp;
+
+   auto app = p2p_only_application{forge::app::application_shell_options{
+       .name = "p2p-active-bootstrap-stop",
+       .runtime = {.worker_threads = 2, .thread_name = "p2p-active-stop"},
+   }};
+   auto acceptor = std::make_shared<asio_tcp::acceptor>(app.runtime().context());
+   acceptor->open(asio_tcp::v4());
+   acceptor->bind({asio::ip::make_address("127.0.0.1"), 0});
+   const auto port = acceptor->local_endpoint().port();
+
+   auto config = test_p2p_config(test_peer(120));
+   config.set("plugins.p2p.node.bootstrap",
+              forge::config::core::value::array_type{
+                  forge::config::core::value{
+                      "/ip4/127.0.0.1/tcp/" + std::to_string(port) + "/p2p/" + test_peer(121).to_string(),
+                  },
+              });
+   app.configure(config);
+   forge::asio::blocking::run(app.runtime(), app.startup());
+
+   acceptor->listen();
+   auto socket = std::make_shared<asio_tcp::socket>(app.runtime().context());
+   auto hold = std::make_shared<asio::steady_timer>(app.runtime().context());
+   auto accepted = std::make_shared<std::promise<void>>();
+   auto accepted_future = accepted->get_future();
+   asio::co_spawn(
+       app.runtime().context(),
+       [acceptor, socket, hold, accepted]() -> asio::awaitable<void> {
+          auto error = boost::system::error_code{};
+          co_await acceptor->async_accept(*socket, asio::redirect_error(asio::use_awaitable, error));
+          if (!error) {
+             accepted->set_value();
+             hold->expires_after(std::chrono::seconds{5});
+             co_await hold->async_wait(asio::redirect_error(asio::use_awaitable, error));
+          }
+       },
+       asio::detached);
+
+   BOOST_REQUIRE(accepted_future.wait_for(std::chrono::seconds{3}) == std::future_status::ready);
+   const auto started = std::chrono::steady_clock::now();
+   forge::asio::blocking::run(app.runtime(), app.shutdown());
+   const auto elapsed = std::chrono::steady_clock::now() - started;
+
+   BOOST_TEST(elapsed < std::chrono::milliseconds{750});
+   auto ignored = boost::system::error_code{};
+   (void)hold->cancel();
+   socket->close(ignored);
+   acceptor->close(ignored);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_node_plugin_closes_node_after_maintenance_submission_is_rejected) {
+   const auto server_peer = test_peer(118);
+   auto server_config = test_p2p_config(server_peer);
+   server_config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{
+                                                    forge::config::core::value{"/ip4/127.0.0.1/tcp/0"},
+                                                });
+
+   auto server = diagnostics_application{};
+   server.configure(server_config);
+   forge::asio::blocking::run(server.runtime(), server.startup());
+
+   auto server_p2p = server.apis().get<forge::plugins::p2p::node::api>(
+       {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
+   const auto server_endpoint = server_p2p->local_endpoint();
+   BOOST_REQUIRE(server_endpoint.has_value());
+
+   auto client_config = test_p2p_config(test_peer(119));
+   client_config.set("plugins.p2p.node.bootstrap", forge::config::core::value::array_type{
+                                                       forge::config::core::value{server_endpoint->to_string()},
+                                                   });
+
+   auto client = p2p_only_application{forge::app::application_shell_options{
+       .name = "p2p-rejected-maintenance",
+       .runtime = {.worker_threads = 2, .thread_name = "p2p-rejected"},
+       .scheduler = {.max_blocking_tasks = 1, .max_awaitable_tasks = 1, .max_pending_tasks = 1},
+   }};
+   client.configure(client_config);
+   auto queue_slot = client.scheduler().submit_after(
+       forge::asio::task::task{
+           .name = "occupy-p2p-test-queue",
+           .work = [] {},
+       },
+       std::chrono::seconds{30});
+   BOOST_REQUIRE(queue_slot.valid());
+   BOOST_REQUIRE(client.scheduler().pending_count() == 1U);
+
+   forge::asio::blocking::run(client.runtime(), client.startup());
+   BOOST_TEST(client.scheduler().snapshot().rejected >= 1U);
+
+   auto server_diagnostics = server.apis().get<forge::plugins::p2p::diagnostics::api>(
+       {.id = {"forge.plugins.p2p.diagnostics"}, .major = 1, .min_revision = 0});
+   BOOST_REQUIRE(forge::asio::blocking::run(
+       server.runtime(),
+       async_wait_for_condition([&] { return server_diagnostics->snapshot().metrics.active_sessions == 1U; },
+                                std::chrono::seconds{5})));
+
+   forge::asio::blocking::run(client.runtime(), client.shutdown());
+   const auto diagnostics = client.diagnostics().snapshot(client.events());
+   const auto failed_plugin = std::ranges::find_if(
+       diagnostics.plugins, [](const auto& plugin) { return plugin.id == "forge.plugins.p2p.node"; });
+   BOOST_REQUIRE(failed_plugin != diagnostics.plugins.end());
+   BOOST_TEST(static_cast<int>(failed_plugin->state) == static_cast<int>(forge::app::lifecycle_state::failed));
+   BOOST_TEST(!failed_plugin->last_error.empty());
+
+   const auto disconnected = forge::asio::blocking::run(
+       server.runtime(),
+       async_wait_for_condition([&] { return server_diagnostics->snapshot().metrics.active_sessions == 0U; },
+                                std::chrono::seconds{5}));
+   BOOST_TEST(disconnected);
+   forge::asio::blocking::run(server.runtime(), server.shutdown());
+}
+
 BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_config_is_described_from_public_schema) {
    auto plugin = forge::plugins::p2p::pubsub::plugin{};
    const auto descriptor = plugin.describe_config();
@@ -3053,6 +3356,25 @@ BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_requests_core_pubsub_capability_before_st
    BOOST_TEST(subscription.id != 0U);
    BOOST_TEST(pubsub->snapshot().core.topics == 1U);
    BOOST_TEST(pubsub->subscriptions().size() == 1U);
+
+   forge::asio::blocking::run(app.runtime(), app.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_omits_unverified_author_from_unsigned_messages) {
+   auto source_state = std::make_shared<fake_pubsub_source_state>();
+   auto app = fake_pubsub_application{source_state};
+   forge::asio::blocking::run(app.runtime(), app.startup());
+
+   auto pubsub = app.apis().get<forge::plugins::p2p::pubsub::api>(
+      {.id = {"forge.plugins.p2p.pubsub"}, .major = 1, .min_revision = 0});
+   const auto published = forge::asio::blocking::run(
+      app.runtime(),
+      pubsub->publish(forge::net::p2p::pubsub::topic{.value = "forge.fake.unsigned"}, {1, 2, 3},
+                      forge::plugins::p2p::pubsub::publish_options{.sign = false}));
+
+   BOOST_TEST(published.source.to_string() == "fake-pubsub-peer");
+   BOOST_TEST(!published.author.has_value());
+   BOOST_TEST(published.data == (std::vector<std::uint8_t>{1, 2, 3}), boost::test_tools::per_element());
 
    forge::asio::blocking::run(app.runtime(), app.shutdown());
 }
@@ -3309,6 +3631,7 @@ BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_aggregates_handler_results_and_deadlines)
 
    const auto aggregate_topic = forge::net::p2p::pubsub::topic{.value = "forge.plugins.aggregate"};
    const auto timeout_topic = forge::net::p2p::pubsub::topic{.value = "forge.plugins.timeout"};
+   const auto mixed_retry_topic = forge::net::p2p::pubsub::topic{.value = "forge.plugins.mixed-retry"};
    (void)forge::asio::blocking::run(
       subscriber.runtime(),
       subscriber_pubsub->subscribe(
@@ -3340,17 +3663,40 @@ BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_aggregates_handler_results_and_deadlines)
             received->push(std::move(message), forge::net::p2p::pubsub::validation_result::reject);
             co_return forge::net::p2p::pubsub::validation_result::reject;
          }));
+   auto timeout_attempts = std::make_shared<std::atomic_uint64_t>(0);
    (void)forge::asio::blocking::run(
       subscriber.runtime(),
       subscriber_pubsub->subscribe(
          timeout_topic,
-         [](forge::plugins::p2p::pubsub::message) -> boost::asio::awaitable<forge::net::p2p::pubsub::validation_result> {
-            auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
-            timer.expires_after(std::chrono::milliseconds{100});
-            co_await timer.async_wait(boost::asio::use_awaitable);
+         [timeout_attempts](forge::plugins::p2p::pubsub::message)
+            -> boost::asio::awaitable<forge::net::p2p::pubsub::validation_result> {
+            if (timeout_attempts->fetch_add(1, std::memory_order_relaxed) == 0) {
+               auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+               timer.expires_after(std::chrono::milliseconds{100});
+               co_await timer.async_wait(boost::asio::use_awaitable);
+            }
             co_return forge::net::p2p::pubsub::validation_result::accept;
          },
          forge::plugins::p2p::pubsub::subscribe_options{.handler_deadline = std::chrono::milliseconds{10}}));
+   auto mixed_retry_attempts = std::make_shared<std::atomic_uint64_t>(0);
+   (void)forge::asio::blocking::run(
+      subscriber.runtime(),
+      subscriber_pubsub->subscribe(
+         mixed_retry_topic,
+         [mixed_retry_attempts](forge::plugins::p2p::pubsub::message)
+            -> boost::asio::awaitable<forge::net::p2p::pubsub::validation_result> {
+            if (mixed_retry_attempts->fetch_add(1, std::memory_order_relaxed) == 0) {
+               co_return forge::net::p2p::pubsub::validation_result::retry;
+            }
+            co_return forge::net::p2p::pubsub::validation_result::accept;
+         }));
+   (void)forge::asio::blocking::run(
+      subscriber.runtime(),
+      subscriber_pubsub->subscribe(
+         mixed_retry_topic, [](forge::plugins::p2p::pubsub::message)
+                               -> boost::asio::awaitable<forge::net::p2p::pubsub::validation_result> {
+            co_return forge::net::p2p::pubsub::validation_result::accept;
+         }));
 
    BOOST_REQUIRE_MESSAGE(wait_for_pubsub_peer(*publisher_pubsub.shared(), std::chrono::seconds{5}),
                          "publisher did not learn a remote PubSub topic subscription");
@@ -3378,11 +3724,25 @@ BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_aggregates_handler_results_and_deadlines)
       wait_for_pubsub_snapshot(
          *subscriber_pubsub.shared(),
          [](const forge::plugins::p2p::pubsub::snapshot& snapshot) {
-            return snapshot.messages_ignored >= 1 && snapshot.handler_failures >= 2;
+            return snapshot.messages_retried >= 1 && snapshot.messages_accepted >= 1 &&
+                   snapshot.handler_failures >= 2;
          },
          std::chrono::seconds{5}),
-      "PubSub handler timeout did not finish");
+      "PubSub handler timeout was not redelivered successfully");
+   BOOST_TEST(timeout_attempts->load(std::memory_order_relaxed) == 2U);
    BOOST_TEST(subscriber_pubsub->snapshot().active_handlers == 0U);
+
+   (void)forge::asio::blocking::run(
+      publisher.runtime(), publisher_pubsub->publish(mixed_retry_topic, std::vector<std::uint8_t>{11}));
+   BOOST_REQUIRE_MESSAGE(
+      wait_for_pubsub_snapshot(
+         *subscriber_pubsub.shared(),
+         [](const forge::plugins::p2p::pubsub::snapshot& snapshot) {
+            return snapshot.messages_retried >= 2 && snapshot.messages_accepted >= 2;
+         },
+         std::chrono::seconds{5}),
+      "PubSub accept masked a transient sibling handler result");
+   BOOST_TEST(mixed_retry_attempts->load(std::memory_order_relaxed) == 2U);
 
    forge::asio::blocking::run(publisher.runtime(), publisher.shutdown());
    forge::asio::blocking::run(subscriber.runtime(), subscriber.shutdown());

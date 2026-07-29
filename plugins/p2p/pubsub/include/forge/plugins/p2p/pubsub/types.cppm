@@ -70,6 +70,7 @@ struct snapshot {
    std::uint64_t messages_accepted = 0;
    std::uint64_t messages_rejected = 0;
    std::uint64_t messages_ignored = 0;
+   std::uint64_t messages_retried = 0;
    std::uint64_t messages_dropped = 0;
    std::uint64_t handler_failures = 0;
    forge::net::p2p::pubsub::snapshot core;
@@ -84,8 +85,8 @@ BOOST_DESCRIBE_STRUCT(message, (), (source, author, subject, data, seqno))
 BOOST_DESCRIBE_STRUCT(subscription, (), (id, subject))
 BOOST_DESCRIBE_STRUCT(snapshot, (),
                       (topics, subscriptions, active_handlers, messages_published, messages_delivered,
-                       messages_accepted, messages_rejected, messages_ignored, messages_dropped, handler_failures,
-                       core))
+                       messages_accepted, messages_rejected, messages_ignored, messages_retried, messages_dropped,
+                       handler_failures, core))
 
 } // namespace forge::plugins::p2p::pubsub
 

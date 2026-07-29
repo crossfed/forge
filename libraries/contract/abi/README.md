@@ -32,6 +32,14 @@ notifications require an explicit notification dispatcher. The library contains
 no CLI `main`, compiler patches or guest runtime. Its tests are the pinned CDT
 pass/fail fixtures plus local-include and wasm32-width regressions.
 
+`sdk_include_paths` and the matching `abigen --sdk-include` option are reserved
+for roots shipped by the selected Contract SDK. They remain ordinary C++
+include roots so SDK-owned compatibility aliases retain their ABI meaning, but
+are separately trusted by dependency validation. Files reached through other
+include paths must be declared by the contract graph even when they are outside
+a descriptor's source root. This keeps SDK implementation headers out of
+product attestation without treating them as compiler system headers.
+
 For a multi-source build, `request::source_wrappers` contains one generated
 output path for each source after the dispatch source. Each wrapper includes
 its original translation unit and emits only the generated record codec
@@ -73,7 +81,7 @@ causes Forge package discovery to require Clang.
 
 ## Stability And Tests
 
-The request/artifact API is experimental until the first Contract SDK release;
-the generated ABI and dispatcher behavior are compatibility contracts. Unit,
-CDT fixture, quoted-include, wasm32 integer-width, action-result, package and
-relocation tests cover the public surface.
+The request/artifact API is Experimental in Forge 8.16.0; the generated ABI and
+dispatcher behavior are Stable compatibility contracts. Unit, CDT fixture,
+quoted-include, wasm32 integer-width, action-result, package and relocation
+tests cover the public surface.

@@ -45,10 +45,10 @@ sha224::operator std::string() const {
    return str();
 }
 
-char* sha224::data() {
+char* sha224::data() & {
    return (char*)&_hash[0];
 }
-const char* sha224::data() const {
+const char* sha224::data() const& {
    return (const char*)&_hash[0];
 }
 
@@ -123,4 +123,4 @@ void from_variant(const variant& v, sha224& bi) {
 template <> unsigned int hmac<sha224>::internal_block_size() const {
    return 64;
 }
-} // namespace forge::crypto
+} // namespace forge::crypto::digest

@@ -44,8 +44,8 @@ std::string normalize_sha256_fingerprint(std::string_view value) {
 }
 
 std::string sha256_fingerprint(std::span<const std::uint8_t> data) {
-   const auto digest = forge::crypto::digest::sha256::hash(data).to_uint8_span();
-   return forge::codec::hex::encode(digest);
+   const auto fingerprint = forge::crypto::digest::sha256::hash(data);
+   return forge::codec::hex::encode(fingerprint.to_uint8_span());
 }
 
 std::string certificate_sha256_fingerprint_from_pem(std::string_view certificate_pem) {

@@ -1,6 +1,7 @@
 #include "details/quic_engine.hxx"
 
 #include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/cancellation_state.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/ip/udp.hpp>
@@ -382,12 +383,24 @@ void configure_default_trust(SSL_CTX* ctx, const engine_security_options& securi
    return der;
 }
 
-void wake(std::vector<std::weak_ptr<asio::steady_timer>>& waiters) {
+void wake(const std::shared_ptr<asio::steady_timer>& timer) noexcept {
+   try {
+      asio::dispatch(timer->get_executor(), [timer] {
+         try {
+            timer->cancel();
+         } catch (...) {
+         }
+      });
+   } catch (...) {
+   }
+}
+
+void wake(std::vector<std::weak_ptr<asio::steady_timer>>& waiters) noexcept {
    auto current = std::move(waiters);
    waiters.clear();
    for (auto& weak : current) {
       if (auto timer = weak.lock()) {
-         timer->cancel();
+         wake(timer);
       }
    }
 }
@@ -432,8 +445,8 @@ std::string normalize_engine_sha256_fingerprint(std::string_view value) {
 }
 
 std::string engine_sha256_fingerprint(std::span<const std::uint8_t> data) {
-   const auto digest = forge::crypto::digest::sha256::hash(data).to_uint8_span();
-   return forge::codec::hex::encode(digest);
+   const auto fingerprint = forge::crypto::digest::sha256::hash(data);
+   return forge::codec::hex::encode(fingerprint.to_uint8_span());
 }
 
 struct engine_stream::impl {
@@ -519,6 +532,69 @@ struct engine_connection_metrics_state {
    }
 };
 
+struct server_udp_socket : std::enable_shared_from_this<server_udp_socket> {
+   explicit server_udp_socket(asio::strand<asio::io_context::executor_type> strand_value)
+       : strand(std::move(strand_value)), socket(strand) {}
+
+   void open_and_bind(const udp::endpoint& endpoint) {
+      auto ec = boost::system::error_code{};
+      socket.open(endpoint.protocol(), ec);
+      if (ec) {
+         throw_engine(engine_error_kind::internal_error, "failed to open QUIC listener socket: " + ec.message());
+      }
+      socket.bind(endpoint, ec);
+      if (ec) {
+         throw_engine(engine_error_kind::internal_error, "failed to bind QUIC listener socket: " + ec.message());
+      }
+      bound_endpoint = socket.local_endpoint();
+   }
+
+   [[nodiscard]] udp::endpoint local_endpoint() const noexcept {
+      return bound_endpoint;
+   }
+
+   boost::asio::awaitable<std::pair<std::vector<std::uint8_t>, udp::endpoint>> async_receive() {
+      co_await asio::dispatch(strand, asio::use_awaitable);
+      if (stopped) {
+         throw boost::system::system_error{asio::error::operation_aborted};
+      }
+      auto packet = std::vector<std::uint8_t>(65'536);
+      auto from = udp::endpoint{};
+      const auto read = co_await socket.async_receive_from(asio::buffer(packet), from, asio::use_awaitable);
+      packet.resize(read);
+      co_return std::pair{std::move(packet), std::move(from)};
+   }
+
+   boost::asio::awaitable<boost::system::error_code> async_send(std::vector<std::uint8_t> packet,
+                                                                udp::endpoint destination) {
+      co_await asio::dispatch(strand, asio::use_awaitable);
+      if (stopped) {
+         co_return asio::error::operation_aborted;
+      }
+      auto ec = boost::system::error_code{};
+      co_await socket.async_send_to(asio::buffer(packet), destination, asio::redirect_error(asio::use_awaitable, ec));
+      co_return ec;
+   }
+
+   void stop() {
+      auto self = shared_from_this();
+      asio::dispatch(strand, [self] {
+         if (self->stopped) {
+            return;
+         }
+         self->stopped = true;
+         auto ignored = boost::system::error_code{};
+         self->socket.cancel(ignored);
+         self->socket.close(ignored);
+      });
+   }
+
+   asio::strand<asio::io_context::executor_type> strand;
+   udp::socket socket;
+   udp::endpoint bound_endpoint;
+   bool stopped = false;
+};
+
 struct engine_connection::impl {
    struct queued_packet {
       std::vector<std::uint8_t> bytes;
@@ -528,7 +604,14 @@ struct engine_connection::impl {
    impl(asio::io_context& context_value, std::shared_ptr<udp::socket> socket_value, udp::endpoint remote_endpoint_value,
         engine_transport_limits limits_value)
        : context(context_value), strand(asio::make_strand(context_value)), socket(std::move(socket_value)),
-         remote_endpoint(std::move(remote_endpoint_value)), limits(limits_value), expiry_timer(strand) {}
+         remote_endpoint(std::move(remote_endpoint_value)), limits(limits_value), handshake_timer(strand),
+         expiry_timer(strand) {}
+
+   impl(asio::io_context& context_value, std::shared_ptr<server_udp_socket> server_socket_value,
+        udp::endpoint remote_endpoint_value, engine_transport_limits limits_value)
+       : context(context_value), strand(asio::make_strand(context_value)),
+         server_socket(std::move(server_socket_value)), remote_endpoint(std::move(remote_endpoint_value)),
+         limits(limits_value), handshake_timer(strand), expiry_timer(strand) {}
 
    ~impl() {
       if (conn != nullptr) {
@@ -545,6 +628,7 @@ struct engine_connection::impl {
    asio::io_context& context;
    asio::strand<asio::io_context::executor_type> strand;
    std::shared_ptr<udp::socket> socket;
+   std::shared_ptr<server_udp_socket> server_socket;
    udp::endpoint remote_endpoint;
    engine_transport_limits limits;
    engine_connection_metrics_state metrics{};
@@ -562,12 +646,13 @@ struct engine_connection::impl {
    std::deque<std::shared_ptr<engine_stream::impl>> accepted_streams;
    std::vector<std::weak_ptr<asio::steady_timer>> handshake_waiters;
    std::vector<std::weak_ptr<asio::steady_timer>> accept_stream_waiters;
-   std::vector<std::weak_ptr<asio::steady_timer>> receive_loop_waiters;
+   std::vector<std::weak_ptr<asio::steady_timer>> background_waiters;
    std::function<void()> handshake_completed_hook;
    std::function<void(std::shared_ptr<impl>)> closed_hook;
    std::function<void(const ngtcp2_cid&)> local_connection_id_issued_hook;
    std::function<void(const ngtcp2_cid&)> local_connection_id_retired_hook;
 
+   asio::steady_timer handshake_timer;
    asio::steady_timer expiry_timer;
    std::deque<std::vector<std::uint8_t>> outbound_datagrams;
    std::deque<queued_packet> inbound_packets;
@@ -577,8 +662,9 @@ struct engine_connection::impl {
    bool closing = false;
    bool canceled = false;
    bool closed_hook_called = false;
+   bool closed_hook_delivered = false;
    bool receive_loop_started = false;
-   bool receive_loop_active = false;
+   std::atomic_size_t background_jobs{0};
    bool drain_active = false;
    bool drain_requested = false;
    bool udp_send_active = false;
@@ -588,6 +674,9 @@ struct engine_connection::impl {
    bool listener_accept_notified = false;
 
    [[nodiscard]] udp::endpoint local_endpoint() const {
+      if (server_socket) {
+         return server_socket->local_endpoint();
+      }
       boost::system::error_code ec;
       const auto local = socket->local_endpoint(ec);
       if (ec) {
@@ -674,30 +763,86 @@ struct engine_connection::impl {
       update_active_stream_metrics();
    }
 
-   void notify_closed_once() {
-      if (closed_hook_called) {
+   void deliver_closed_hook_if_idle() noexcept {
+      if (!closed_hook_called || closed_hook_delivered || background_jobs.load(std::memory_order_acquire) != 0 ||
+          !closed_hook) {
          return;
       }
-      closed_hook_called = true;
-      if (closed_hook) {
-         if (auto shared = self.lock()) {
+      closed_hook_delivered = true;
+      if (auto shared = self.lock()) {
+         try {
             closed_hook(std::move(shared));
+         } catch (...) {
          }
       }
    }
 
-   void finish_client_receive_loop() {
-      receive_loop_active = false;
-      wake(receive_loop_waiters);
+   void notify_closed_once() noexcept {
+      if (!closed_hook_called) {
+         closed_hook_called = true;
+      }
+      deliver_closed_hook_if_idle();
    }
 
-   boost::asio::awaitable<void> wait_client_receive_loop_idle() {
-      while (receive_loop_active) {
+   void finish_background_job() noexcept {
+      const auto previous = background_jobs.fetch_sub(1, std::memory_order_acq_rel);
+      if (previous == 0) {
+         background_jobs.store(0, std::memory_order_release);
+         return;
+      }
+      if (previous == 1) {
+         wake(background_waiters);
+         deliver_closed_hook_if_idle();
+      }
+   }
+
+   boost::asio::awaitable<void> wait_background_idle() {
+      co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
+      co_await asio::dispatch(strand, asio::use_awaitable);
+      while (background_jobs.load(std::memory_order_acquire) != 0) {
          auto timer = std::make_shared<asio::steady_timer>(strand);
          timer->expires_after(std::chrono::minutes{10});
-         receive_loop_waiters.emplace_back(timer);
+         background_waiters.emplace_back(timer);
          boost::system::error_code ec;
          co_await timer->async_wait(asio::redirect_error(asio::use_awaitable, ec));
+         co_await asio::dispatch(strand, asio::use_awaitable);
+      }
+   }
+
+   template <typename Operation> void spawn_background(Operation operation) {
+      auto shared = self.lock();
+      if (!shared) {
+         return;
+      }
+      shared->background_jobs.fetch_add(1, std::memory_order_release);
+      try {
+         asio::dispatch(strand, [shared, operation = std::move(operation)]() mutable {
+            if (shared->closing || shared->canceled) {
+               shared->finish_background_job();
+               return;
+            }
+            try {
+               asio::co_spawn(
+                   shared->strand,
+                   [shared, operation = std::move(operation)]() mutable -> asio::awaitable<void> {
+                      struct completion_guard {
+                         std::shared_ptr<engine_connection::impl> value;
+
+                         ~completion_guard() {
+                            value->finish_background_job();
+                         }
+                      } guard{shared};
+                      co_await operation(shared);
+                   },
+                   asio::detached);
+            } catch (...) {
+               shared->finish_background_job();
+               shared->fail_all();
+            }
+         });
+      } catch (...) {
+         shared->finish_background_job();
+         throw;
       }
    }
 
@@ -707,10 +852,19 @@ struct engine_connection::impl {
          socket->cancel(ignored);
          socket->close(ignored);
       }
-      expiry_timer.cancel();
+      try {
+         handshake_timer.cancel();
+      } catch (...) {
+         // Continue draining the remaining transport work.
+      }
+      try {
+         expiry_timer.cancel();
+      } catch (...) {
+         // Continue draining the remaining transport work.
+      }
    }
 
-   void fail_all() {
+   void fail_all() noexcept {
       canceled = true;
       closing = true;
       metrics.closed.store(true, std::memory_order_relaxed);
@@ -771,6 +925,10 @@ struct engine_connection::impl {
          return;
       }
       handshake_done = true;
+      try {
+         handshake_timer.cancel();
+      } catch (...) {
+      }
       metrics.handshakes_completed.fetch_add(1, std::memory_order_relaxed);
       wake(handshake_waiters);
       if (handshake_completed_hook) {
@@ -810,45 +968,49 @@ struct engine_connection::impl {
       if (udp_send_active) {
          return;
       }
-      auto shared = self.lock();
-      if (!shared) {
+      if (self.expired()) {
          return;
       }
       udp_send_active = true;
-      asio::co_spawn(
-          strand,
-          [shared]() -> asio::awaitable<void> {
-             while (!shared->closing && !shared->canceled) {
-                if (shared->outbound_datagrams.empty()) {
-                   break;
-                }
-                auto packet = std::move(shared->outbound_datagrams.front());
-                shared->outbound_datagrams.pop_front();
-                if (shared->queued_datagram_bytes >= packet.size()) {
-                   shared->queued_datagram_bytes -= packet.size();
-                } else {
-                   shared->queued_datagram_bytes = 0;
-                }
+      spawn_background([](const std::shared_ptr<impl>& value) -> asio::awaitable<void> {
+         while (!value->closing && !value->canceled) {
+            if (value->outbound_datagrams.empty()) {
+               break;
+            }
+            auto packet = std::move(value->outbound_datagrams.front());
+            value->outbound_datagrams.pop_front();
+            if (value->queued_datagram_bytes >= packet.size()) {
+               value->queued_datagram_bytes -= packet.size();
+            } else {
+               value->queued_datagram_bytes = 0;
+            }
 
-                boost::system::error_code ec;
-                co_await shared->socket->async_send_to(asio::buffer(packet.data(), packet.size()),
-                                                       shared->remote_endpoint,
-                                                       asio::redirect_error(asio::use_awaitable, ec));
-                if (ec) {
-                   if (!shared->closing) {
-                      shared->fail_all();
-                   }
-                   break;
-                }
-                shared->metrics.packets_sent.fetch_add(1, std::memory_order_relaxed);
-                shared->metrics.bytes_sent.fetch_add(packet.size(), std::memory_order_relaxed);
-             }
-             shared->udp_send_active = false;
-             if (!shared->outbound_datagrams.empty() && !shared->closing && !shared->canceled) {
-                shared->start_udp_send_loop();
-             }
-          },
-          asio::detached);
+            const auto packet_size = packet.size();
+            auto ec = boost::system::error_code{};
+            if (value->server_socket) {
+               ec = co_await value->server_socket->async_send(std::move(packet), value->remote_endpoint);
+               co_await asio::dispatch(value->strand, asio::use_awaitable);
+            } else {
+               co_await value->socket->async_send_to(asio::buffer(packet), value->remote_endpoint,
+                                                     asio::redirect_error(asio::use_awaitable, ec));
+            }
+            if (ec) {
+               if (!value->closing) {
+                  value->fail_all();
+               }
+               break;
+            }
+            value->metrics.packets_sent.fetch_add(1, std::memory_order_relaxed);
+            value->metrics.bytes_sent.fetch_add(packet_size, std::memory_order_relaxed);
+         }
+         value->udp_send_active = false;
+         if (!value->outbound_datagrams.empty() && !value->closing && !value->canceled) {
+            value->start_udp_send_loop();
+         }
+      });
+      if (closing || canceled) {
+         udp_send_active = false;
+      }
    }
 
    void enqueue_datagram(std::span<const std::uint8_t> packet) {
@@ -869,37 +1031,29 @@ struct engine_connection::impl {
       if (packet_processing_active || drain_active || inbound_packets.empty()) {
          return;
       }
-      auto shared = self.lock();
-      if (!shared) {
+      if (self.expired()) {
          return;
       }
-      asio::co_spawn(
-          strand,
-          [shared]() -> asio::awaitable<void> {
-             try {
-                co_await shared->process_queued_packets();
-             } catch (const engine_failure&) {
-                shared->fail_all();
-             }
-          },
-          asio::detached);
+      spawn_background([](const std::shared_ptr<impl>& value) -> asio::awaitable<void> {
+         try {
+            co_await value->process_queued_packets();
+         } catch (const engine_failure&) {
+            value->fail_all();
+         }
+      });
    }
 
    void request_expiry_processing() {
-      auto shared = self.lock();
-      if (!shared) {
+      if (self.expired()) {
          return;
       }
-      asio::co_spawn(
-          strand,
-          [shared]() -> asio::awaitable<void> {
-             try {
-                co_await shared->handle_expiry_event();
-             } catch (const engine_failure&) {
-                shared->fail_all();
-             }
-          },
-          asio::detached);
+      spawn_background([](const std::shared_ptr<impl>& value) -> asio::awaitable<void> {
+         try {
+            co_await value->handle_expiry_event();
+         } catch (const engine_failure&) {
+            value->fail_all();
+         }
+      });
    }
 
    void schedule_post_ngtcp2_work() {
@@ -923,21 +1077,40 @@ struct engine_connection::impl {
       if (!shared) {
          return;
       }
-      expiry_timer.async_wait([shared](boost::system::error_code ec) {
-         if (ec) {
-            return;
-         }
-         asio::co_spawn(
-             shared->strand,
-             [shared]() -> asio::awaitable<void> {
-                try {
-                   co_await shared->handle_expiry_event();
-                } catch (const engine_failure&) {
-                   shared->fail_all();
-                }
-             },
-             asio::detached);
-      });
+      background_jobs.fetch_add(1, std::memory_order_release);
+      try {
+         expiry_timer.async_wait([shared](boost::system::error_code ec) {
+            if (ec) {
+               shared->finish_background_job();
+               return;
+            }
+            try {
+               asio::co_spawn(
+                   shared->strand,
+                   [shared]() -> asio::awaitable<void> {
+                      struct completion_guard {
+                         std::shared_ptr<impl> value;
+
+                         ~completion_guard() {
+                            value->finish_background_job();
+                         }
+                      } guard{shared};
+                      try {
+                         co_await shared->handle_expiry_event();
+                      } catch (const engine_failure&) {
+                         shared->fail_all();
+                      }
+                   },
+                   asio::detached);
+            } catch (...) {
+               shared->finish_background_job();
+               shared->fail_all();
+            }
+         });
+      } catch (...) {
+         finish_background_job();
+         fail_all();
+      }
    }
 
    boost::asio::awaitable<void> handle_expiry_event() {
@@ -1006,6 +1179,9 @@ struct engine_connection::impl {
 
    boost::asio::awaitable<void> drain_send() {
       co_await asio::dispatch(strand, asio::use_awaitable);
+      if (closing || canceled || conn == nullptr) {
+         co_return;
+      }
       if (drain_active) {
          drain_requested = true;
          co_return;
@@ -1016,6 +1192,9 @@ struct engine_connection::impl {
           this, [](void* ptr) { static_cast<impl*>(ptr)->drain_active = false; }};
 
       do {
+         if (closing || canceled || conn == nullptr) {
+            break;
+         }
          drain_requested = false;
          auto packets_this_drain = std::size_t{0};
          for (;;) {
@@ -1085,14 +1264,19 @@ struct engine_connection::impl {
             if (packets_this_drain >= max_packets_per_drain) {
                drain_requested = true;
                co_await asio::post(strand, asio::use_awaitable);
+               if (closing || canceled || conn == nullptr) {
+                  drain_requested = false;
+               }
                break;
             }
          }
-      } while (drain_requested);
+      } while (drain_requested && !closing && !canceled && conn != nullptr);
 
       clear.reset();
-      schedule_expiry();
-      schedule_post_ngtcp2_work();
+      if (!closing && !canceled && conn != nullptr) {
+         schedule_expiry();
+         schedule_post_ngtcp2_work();
+      }
    }
 
    boost::asio::awaitable<void> handle_packet(std::vector<std::uint8_t> packet, udp::endpoint from) {
@@ -1159,47 +1343,34 @@ struct engine_connection::impl {
       if (receive_loop_started) {
          return;
       }
-      receive_loop_started = true;
-      auto self = this->self.lock();
-      if (!self) {
+      if (self.expired()) {
          return;
       }
-      receive_loop_active = true;
-      asio::co_spawn(
-          strand,
-          [self]() -> asio::awaitable<void> {
-             struct receive_loop_guard {
-                std::shared_ptr<engine_connection::impl> value;
-
-                ~receive_loop_guard() {
-                   value->finish_client_receive_loop();
-                }
-             } guard{self};
-
-             try {
-                while (!self->closing && !self->canceled) {
-                   auto packet = std::vector<std::uint8_t>(65536);
-                   auto from = udp::endpoint{};
-                   boost::system::error_code ec;
-                   const auto nread = co_await self->socket->async_receive_from(
-                       asio::buffer(packet), from, asio::redirect_error(asio::use_awaitable, ec));
-                   if (ec) {
-                      if (ec != asio::error::operation_aborted && !self->closing) {
-                         self->fail_all();
-                      }
-                      co_return;
-                   }
-                   packet.resize(nread);
-                   co_await self->handle_packet(std::move(packet), std::move(from));
-                }
-             } catch (...) {
-                if (!self->closing && !self->canceled) {
-                   self->fail_all();
-                }
-                co_return;
-             }
-          },
-          asio::detached);
+      receive_loop_started = true;
+      spawn_background([](const std::shared_ptr<impl>& value) -> asio::awaitable<void> {
+         try {
+            while (!value->closing && !value->canceled) {
+               auto packet = std::vector<std::uint8_t>(65536);
+               auto from = udp::endpoint{};
+               boost::system::error_code ec;
+               const auto nread = co_await value->socket->async_receive_from(
+                   asio::buffer(packet), from, asio::redirect_error(asio::use_awaitable, ec));
+               if (ec) {
+                  if (ec != asio::error::operation_aborted && !value->closing) {
+                     value->fail_all();
+                  }
+                  co_return;
+               }
+               packet.resize(nread);
+               co_await value->handle_packet(std::move(packet), std::move(from));
+            }
+         } catch (...) {
+            if (!value->closing && !value->canceled) {
+               value->fail_all();
+            }
+            co_return;
+         }
+      });
    }
 };
 
@@ -1257,6 +1428,9 @@ int handshake_completed_cb(ngtcp2_conn*, void* user_data) {
       }
       connection->complete_handshake();
    } catch (const engine_failure&) {
+      connection->fail_all();
+      return NGTCP2_ERR_CALLBACK_FAILURE;
+   } catch (...) {
       connection->fail_all();
       return NGTCP2_ERR_CALLBACK_FAILURE;
    }
@@ -1586,16 +1760,13 @@ boost::asio::awaitable<void> engine_stream::async_write(std::span<const std::uin
    });
    connection->metrics.queued_bytes.fetch_add(bytes.size(), std::memory_order_relaxed);
    connection->metrics.frames_sent.fetch_add(1, std::memory_order_relaxed);
-   asio::co_spawn(
-       connection->strand,
-       [connection]() -> asio::awaitable<void> {
-          try {
-             co_await connection->drain_send();
-          } catch (const engine_failure&) {
-             connection->fail_all();
-          }
-       },
-       asio::detached);
+   connection->spawn_background([](const std::shared_ptr<engine_connection::impl>& value) -> asio::awaitable<void> {
+      try {
+         co_await value->drain_send();
+      } catch (const engine_failure&) {
+         value->fail_all();
+      }
+   });
    co_await asio::post(connection->strand, asio::use_awaitable);
 }
 
@@ -1615,6 +1786,7 @@ boost::asio::awaitable<std::vector<std::uint8_t>> engine_stream::async_read() {
       impl_->read_waiters.emplace_back(timer);
       boost::system::error_code ec;
       co_await timer->async_wait(asio::redirect_error(asio::use_awaitable, ec));
+      co_await asio::dispatch(connection->strand, asio::use_awaitable);
    }
    if (!impl_->inbound_ready.empty()) {
       auto out = std::move(impl_->inbound_ready.front());
@@ -1642,6 +1814,9 @@ boost::asio::awaitable<void> engine_stream::async_close() {
       co_return;
    }
    co_await asio::dispatch(connection->strand, asio::use_awaitable);
+   if (connection->closing || connection->canceled) {
+      co_return;
+   }
    if (!impl_->local_write_closed && !impl_->reset && !impl_->closed) {
       impl_->outbound.push_back(engine_stream::impl::pending_write{.fin = true});
       co_await connection->drain_send();
@@ -1681,16 +1856,13 @@ void engine_stream::cancel() {
       if (!should_drain) {
          return;
       }
-      asio::co_spawn(
-          connection->strand,
-          [connection]() -> asio::awaitable<void> {
-             try {
-                co_await connection->drain_send();
-             } catch (const engine_failure&) {
-                connection->fail_all();
-             }
-          },
-          asio::detached);
+      connection->spawn_background([](const std::shared_ptr<engine_connection::impl>& value) -> asio::awaitable<void> {
+         try {
+            co_await value->drain_send();
+         } catch (const engine_failure&) {
+            value->fail_all();
+         }
+      });
    });
 }
 
@@ -1749,6 +1921,9 @@ boost::asio::awaitable<std::shared_ptr<engine_stream>> engine_connection::async_
    impl_->update_active_stream_metrics();
    impl_->metrics.streams_opened.fetch_add(1, std::memory_order_relaxed);
    co_await impl_->drain_send();
+   if (impl_->closing || impl_->canceled) {
+      throw_engine(engine_error_kind::connection_closed, "QUIC connection closed while opening stream");
+   }
    co_return std::shared_ptr<engine_stream>{new engine_stream{std::move(stream_impl)}};
 }
 
@@ -1763,6 +1938,7 @@ boost::asio::awaitable<std::shared_ptr<engine_stream>> engine_connection::async_
       impl_->accept_stream_waiters.emplace_back(timer);
       boost::system::error_code ec;
       co_await timer->async_wait(asio::redirect_error(asio::use_awaitable, ec));
+      co_await asio::dispatch(impl_->strand, asio::use_awaitable);
    }
    if (impl_->accepted_streams.empty()) {
       throw_engine(engine_error_kind::connection_closed, "QUIC connection closed before accepting stream");
@@ -1778,12 +1954,12 @@ boost::asio::awaitable<void> engine_connection::async_close() {
    }
    co_await asio::dispatch(impl_->strand, asio::use_awaitable);
    if (impl_->closing) {
-      co_await impl_->wait_client_receive_loop_idle();
+      co_await impl_->wait_background_idle();
       co_return;
    }
    impl_->metrics.connections_closed.fetch_add(1, std::memory_order_relaxed);
    impl_->close_transport(!impl_->server_side);
-   co_await impl_->wait_client_receive_loop_idle();
+   co_await impl_->wait_background_idle();
 }
 
 void engine_connection::cancel() {
@@ -1875,12 +2051,16 @@ struct engine_connector::impl {
       return !canceled.load(std::memory_order_acquire);
    }
 
-   [[nodiscard]] std::shared_ptr<active_connect> track_connect() {
+   [[nodiscard]] std::shared_ptr<active_connect> track_connect(std::shared_ptr<udp::resolver> resolver) {
+      auto connect = std::make_shared<active_connect>();
+      {
+         auto lock = std::scoped_lock{connect->mutex};
+         connect->resolver = std::move(resolver);
+      }
+      auto lock = std::scoped_lock{mutex};
       if (!valid()) {
          throw_engine(engine_error_kind::canceled, "QUIC connector is canceled");
       }
-      auto connect = std::make_shared<active_connect>();
-      auto lock = std::scoped_lock{mutex};
       active.erase(std::remove_if(active.begin(), active.end(), [](const auto& value) { return value.expired(); }),
                    active.end());
       active.push_back(connect);
@@ -1888,10 +2068,10 @@ struct engine_connector::impl {
    }
 
    void cancel() {
-      canceled.store(true, std::memory_order_release);
       auto connections = std::vector<std::shared_ptr<active_connect>>{};
       {
          auto lock = std::scoped_lock{mutex};
+         canceled.store(true, std::memory_order_release);
          connections.reserve(active.size());
          for (auto& value : active) {
             if (auto connect = value.lock()) {
@@ -1921,11 +2101,7 @@ engine_connector::async_connect(engine_endpoint remote, engine_client_options op
    const auto connect_started = std::chrono::steady_clock::now();
    auto resolver = std::make_shared<udp::resolver>(executor);
    auto connect_timer = std::make_shared<asio::steady_timer>(executor);
-   auto active_connect = impl_->track_connect();
-   {
-      auto lock = std::scoped_lock{active_connect->mutex};
-      active_connect->resolver = resolver;
-   }
+   auto active_connect = impl_->track_connect(resolver);
    connect_timer->expires_after(options.connect_timeout);
    connect_timer->async_wait([connect_timer, active_connect](boost::system::error_code ec) {
       if (ec) {
@@ -2059,16 +2235,14 @@ engine_connector::async_connect(engine_endpoint remote, engine_client_options op
       configure_client_tls(*connection_impl, remote, options);
       ngtcp2_conn_set_tls_native_handle(connection_impl->conn, connection_impl->ossl_ctx);
       connection_impl->start_client_receive_loop();
-      asio::co_spawn(
-          connection_impl->strand,
-          [connection_impl]() -> asio::awaitable<void> {
+      connection_impl->spawn_background(
+          [](const std::shared_ptr<engine_connection::impl>& value) -> asio::awaitable<void> {
              try {
-                co_await connection_impl->drain_send();
+                co_await value->drain_send();
              } catch (const engine_failure&) {
-                connection_impl->fail_all();
+                value->fail_all();
              }
-          },
-          asio::detached);
+          });
       const auto remaining_connect_timeout = remaining_timeout_budget(connect_started, options.connect_timeout);
       if (remaining_connect_timeout.count() <= 0) {
          throw_engine(engine_error_kind::connect_timeout, "QUIC client connect timed out");
@@ -2119,12 +2293,12 @@ void engine_connector::cancel() {
 struct engine_listener::impl {
    impl(boost::asio::io_context& context_value, engine_endpoint endpoint_value, engine_server_options options_value)
        : context(context_value), strand(asio::make_strand(context_value)),
-         socket(std::make_shared<udp::socket>(strand)), bind_endpoint(std::move(endpoint_value)),
+         server_socket(std::make_shared<server_udp_socket>(strand)), bind_endpoint(std::move(endpoint_value)),
          options(std::move(options_value)) {}
 
    boost::asio::io_context& context;
    asio::strand<asio::io_context::executor_type> strand;
-   std::shared_ptr<udp::socket> socket;
+   std::shared_ptr<server_udp_socket> server_socket;
    engine_endpoint bind_endpoint;
    engine_server_options options;
    stateless_reset_secret reset_secret = random_stateless_reset_secret();
@@ -2136,8 +2310,148 @@ struct engine_listener::impl {
    std::optional<engine_error_kind> pending_accept_error;
    std::string pending_accept_failure_text;
    std::weak_ptr<impl> self;
+   std::vector<std::weak_ptr<asio::steady_timer>> operation_waiters;
+   mutable std::mutex shutdown_mutex;
+   std::vector<std::shared_ptr<asio::steady_timer>> shutdown_waiters;
+   std::exception_ptr shutdown_error;
    bool stopped = false;
    bool receive_started = false;
+   bool shutdown_started = false;
+   bool shutdown_complete = false;
+   std::size_t active_operations = 0;
+
+   enum class shutdown_action : std::uint8_t {
+      run,
+      wait,
+      done,
+   };
+
+   [[nodiscard]] std::vector<std::shared_ptr<engine_connection::impl>> connections() {
+      auto out = std::vector<std::shared_ptr<engine_connection::impl>>{};
+      const auto append = [&](std::shared_ptr<engine_connection::impl> connection) {
+         if (connection &&
+             std::ranges::none_of(out, [&](const auto& current) { return current.get() == connection.get(); })) {
+            out.push_back(std::move(connection));
+         }
+      };
+      {
+         auto lock = std::scoped_lock{cid_mutex};
+         out.reserve(cids_by_connection.size() + accepted.size());
+         for (const auto& [_, keys] : cids_by_connection) {
+            if (keys.empty()) {
+               continue;
+            }
+            if (auto it = connections_by_cid.find(keys.front()); it != connections_by_cid.end()) {
+               append(it->second);
+            }
+         }
+      }
+      for (const auto& connection : accepted) {
+         if (connection) {
+            append(connection->impl_);
+         }
+      }
+      return out;
+   }
+
+   void finish_operation() {
+      if (active_operations == 0) {
+         return;
+      }
+      --active_operations;
+      if (active_operations == 0) {
+         wake(operation_waiters);
+      }
+   }
+
+   boost::asio::awaitable<void> wait_operations_idle() {
+      co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
+      while (active_operations != 0) {
+         auto timer = std::make_shared<asio::steady_timer>(strand);
+         timer->expires_after(std::chrono::minutes{10});
+         operation_waiters.emplace_back(timer);
+         boost::system::error_code ec;
+         co_await timer->async_wait(asio::redirect_error(asio::use_awaitable, ec));
+         co_await asio::dispatch(strand, asio::use_awaitable);
+      }
+   }
+
+   [[nodiscard]] shutdown_action begin_shutdown() {
+      auto lock = std::scoped_lock{shutdown_mutex};
+      if (shutdown_complete) {
+         return shutdown_action::done;
+      }
+      if (shutdown_started) {
+         return shutdown_action::wait;
+      }
+      shutdown_started = true;
+      return shutdown_action::run;
+   }
+
+   [[nodiscard]] std::exception_ptr shutdown_failure() const {
+      auto lock = std::scoped_lock{shutdown_mutex};
+      return shutdown_error;
+   }
+
+   boost::asio::awaitable<void> wait_shutdown_complete() {
+      co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
+      for (;;) {
+         auto timer = std::make_shared<asio::steady_timer>(strand);
+         timer->expires_at(asio::steady_timer::time_point::max());
+         auto ready = false;
+         {
+            auto lock = std::scoped_lock{shutdown_mutex};
+            ready = shutdown_complete;
+            if (!ready) {
+               shutdown_waiters.push_back(timer);
+            }
+         }
+         if (ready) {
+            co_return;
+         }
+         boost::system::error_code ec;
+         co_await timer->async_wait(asio::redirect_error(asio::use_awaitable, ec));
+      }
+   }
+
+   void finish_shutdown(std::exception_ptr error = {}) noexcept {
+      auto ready = std::vector<std::shared_ptr<asio::steady_timer>>{};
+      {
+         auto lock = std::scoped_lock{shutdown_mutex};
+         if (shutdown_complete) {
+            return;
+         }
+         shutdown_error = std::move(error);
+         shutdown_complete = true;
+         ready.swap(shutdown_waiters);
+      }
+      for (const auto& timer : ready) {
+         wake(timer);
+      }
+   }
+
+   void clear_connection_registry() {
+      {
+         auto lock = std::scoped_lock{cid_mutex};
+         connections_by_cid.clear();
+         cids_by_connection.clear();
+      }
+      accepted.clear();
+      pending_accept_error.reset();
+      pending_accept_failure_text.clear();
+   }
+
+   void stop() {
+      if (stopped) {
+         return;
+      }
+      stopped = true;
+      server_socket->stop();
+      wake(accept_waiters);
+      for (auto& connection : connections()) {
+         asio::post(connection->strand, [connection] { connection->fail_all(); });
+      }
+   }
 
    void start() {
       if (receive_started) {
@@ -2148,27 +2462,40 @@ struct engine_listener::impl {
       if (!self) {
          return;
       }
-      asio::co_spawn(
-          strand,
-          [self]() -> asio::awaitable<void> {
-             while (!self->stopped) {
-                auto packet = std::vector<std::uint8_t>(65536);
-                auto from = udp::endpoint{};
-                boost::system::error_code ec;
-                const auto nread = co_await self->socket->async_receive_from(
-                    asio::buffer(packet), from, asio::redirect_error(asio::use_awaitable, ec));
-                if (ec) {
-                   co_return;
+      ++active_operations;
+      try {
+         asio::co_spawn(
+             strand,
+             [self]() -> asio::awaitable<void> {
+                struct completion_guard {
+                   std::shared_ptr<engine_listener::impl> value;
+
+                   ~completion_guard() {
+                      value->finish_operation();
+                   }
+                } guard{self};
+                while (!self->stopped) {
+                   auto received = std::pair<std::vector<std::uint8_t>, udp::endpoint>{};
+                   try {
+                      received = co_await self->server_socket->async_receive();
+                   } catch (const boost::system::system_error&) {
+                      co_return;
+                   }
+                   if (self->stopped) {
+                      co_return;
+                   }
+                   try {
+                      co_await self->handle_packet(std::move(received.first), std::move(received.second));
+                   } catch (const engine_failure&) {
+                      // Malformed/adversarial packets must not permanently stop the listener.
+                   }
                 }
-                packet.resize(nread);
-                try {
-                   co_await self->handle_packet(std::move(packet), std::move(from));
-                } catch (const engine_failure&) {
-                   // Malformed/adversarial packets must not permanently stop the listener.
-                }
-             }
-          },
-          asio::detached);
+             },
+             asio::detached);
+      } catch (...) {
+         finish_operation();
+         throw;
+      }
    }
 
    [[nodiscard]] std::shared_ptr<engine_connection::impl> find_connection_by_cid(const std::string& key) {
@@ -2238,6 +2565,26 @@ struct engine_listener::impl {
       }
    }
 
+   void start_handshake_deadline(const std::shared_ptr<engine_connection::impl>& connection) {
+      connection->handshake_timer.expires_after(options.handshake_timeout);
+      connection->spawn_background([](const std::shared_ptr<engine_connection::impl>& value) -> asio::awaitable<void> {
+         if (value->handshake_done || value->closing || value->canceled) {
+            co_return;
+         }
+         auto ec = boost::system::error_code{};
+         co_await value->handshake_timer.async_wait(asio::redirect_error(asio::use_awaitable, ec));
+         if (ec) {
+            co_return;
+         }
+         if (value->handshake_done || value->closing || value->canceled) {
+            co_return;
+         }
+         value->metrics.handshakes_failed.fetch_add(1, std::memory_order_relaxed);
+         value->metrics.timeouts.fetch_add(1, std::memory_order_relaxed);
+         value->fail_all();
+      });
+   }
+
    boost::asio::awaitable<void> handle_packet(std::vector<std::uint8_t> packet, udp::endpoint from) {
       auto vcid = ngtcp2_version_cid{};
       auto rv = ngtcp2_pkt_decode_version_cid(&vcid, packet.data(), packet.size(), cid_length);
@@ -2257,6 +2604,7 @@ struct engine_listener::impl {
          auto local_cid = ngtcp2_cid{};
          ngtcp2_conn_get_scid(connection->conn, &local_cid);
          register_connection_cid(connection, cid_key(local_cid));
+         start_handshake_deadline(connection);
       }
       try {
          co_await connection->handle_packet(std::move(packet), std::move(from));
@@ -2270,7 +2618,7 @@ struct engine_listener::impl {
       if (connection_count() >= options.limits.max_connections) {
          throw_engine(engine_error_kind::backpressure_rejected, "QUIC listener max connections exceeded");
       }
-      auto connection = std::make_shared<engine_connection::impl>(context, socket, from, options.limits);
+      auto connection = std::make_shared<engine_connection::impl>(context, server_socket, from, options.limits);
       connection->self = connection;
       connection->server_side = true;
       connection->reset_secret = reset_secret;
@@ -2323,26 +2671,6 @@ struct engine_listener::impl {
             wake(listener->accept_waiters);
          });
       };
-      auto handshake_timer = std::make_shared<asio::steady_timer>(connection->strand);
-      handshake_timer->expires_after(options.handshake_timeout);
-      handshake_timer->async_wait([connection_weak, handshake_timer](boost::system::error_code ec) {
-         if (ec) {
-            return;
-         }
-         auto connection = connection_weak.lock();
-         if (!connection || connection->handshake_done || connection->closing || connection->canceled) {
-            return;
-         }
-         asio::post(connection->strand, [connection] {
-            if (connection->handshake_done || connection->closing || connection->canceled) {
-               return;
-            }
-            connection->metrics.handshakes_failed.fetch_add(1, std::memory_order_relaxed);
-            connection->metrics.timeouts.fetch_add(1, std::memory_order_relaxed);
-            connection->fail_all();
-         });
-      });
-
       auto callbacks = server_callbacks();
       auto settings = ngtcp2_settings{};
       auto params = ngtcp2_transport_params{};
@@ -2357,7 +2685,7 @@ struct engine_listener::impl {
                                                        reset_secret.size(), &scid) != 0) {
          throw_engine(engine_error_kind::tls_failed, "failed to generate stateless reset token");
       }
-      auto path = make_path(socket->local_endpoint(), from);
+      auto path = make_path(server_socket->local_endpoint(), from);
       const auto rv = ngtcp2_conn_server_new(&connection->conn, &hd.scid, &scid, &path.path, hd.version, &callbacks,
                                              &settings, &params, nullptr, connection.get());
       if (rv != 0) {
@@ -2381,15 +2709,8 @@ engine_listener::engine_listener(boost::asio::io_context& context, engine_endpoi
       throw_engine(engine_error_kind::invalid_endpoint, "invalid QUIC listener address: " + ec.message());
    }
    auto endpoint = udp::endpoint{address, impl_->bind_endpoint.port};
-   impl_->socket->open(endpoint.protocol(), ec);
-   if (ec) {
-      throw_engine(engine_error_kind::internal_error, "failed to open QUIC listener socket: " + ec.message());
-   }
-   impl_->socket->bind(endpoint, ec);
-   if (ec) {
-      throw_engine(engine_error_kind::internal_error, "failed to bind QUIC listener socket: " + ec.message());
-   }
-   const auto local = impl_->socket->local_endpoint();
+   impl_->server_socket->open_and_bind(endpoint);
+   const auto local = impl_->server_socket->local_endpoint();
    impl_->bind_endpoint.host = local.address().to_string();
    impl_->bind_endpoint.port = local.port();
    impl_->start();
@@ -2407,28 +2728,38 @@ boost::asio::awaitable<std::shared_ptr<engine_connection>> engine_listener::asyn
    if (!impl_) {
       throw_engine(engine_error_kind::connection_closed, "invalid QUIC listener");
    }
-   co_await asio::dispatch(impl_->strand, asio::use_awaitable);
-   while (impl_->accepted.empty() && !impl_->stopped && !impl_->pending_accept_error) {
-      auto timer = std::make_shared<asio::steady_timer>(impl_->strand);
+   auto state = impl_;
+   co_await asio::dispatch(state->strand, asio::use_awaitable);
+   ++state->active_operations;
+   struct completion_guard {
+      std::shared_ptr<engine_listener::impl> value;
+
+      ~completion_guard() {
+         value->finish_operation();
+      }
+   } guard{state};
+   while (state->accepted.empty() && !state->stopped && !state->pending_accept_error) {
+      auto timer = std::make_shared<asio::steady_timer>(state->strand);
       timer->expires_after(std::chrono::minutes{10});
-      impl_->accept_waiters.emplace_back(timer);
+      state->accept_waiters.emplace_back(timer);
       boost::system::error_code ec;
       co_await timer->async_wait(asio::redirect_error(asio::use_awaitable, ec));
+      co_await asio::dispatch(state->strand, asio::use_awaitable);
    }
-   if (impl_->accepted.empty() && impl_->pending_accept_error) {
-      const auto kind = *impl_->pending_accept_error;
-      auto message = std::move(impl_->pending_accept_failure_text);
-      impl_->pending_accept_error.reset();
-      impl_->pending_accept_failure_text.clear();
+   if (state->accepted.empty() && state->pending_accept_error) {
+      const auto kind = *state->pending_accept_error;
+      auto message = std::move(state->pending_accept_failure_text);
+      state->pending_accept_error.reset();
+      state->pending_accept_failure_text.clear();
       throw_engine(kind, message.empty() ? "QUIC listener accept failed" : message);
    }
-   if (impl_->accepted.empty()) {
+   if (state->accepted.empty()) {
       throw_engine(engine_error_kind::connection_closed, "QUIC listener stopped before accept");
    }
-   impl_->pending_accept_error.reset();
-   impl_->pending_accept_failure_text.clear();
-   auto connection = std::move(impl_->accepted.front());
-   impl_->accepted.pop_front();
+   state->pending_accept_error.reset();
+   state->pending_accept_failure_text.clear();
+   auto connection = std::move(state->accepted.front());
+   state->accepted.pop_front();
    co_return connection;
 }
 
@@ -2436,26 +2767,73 @@ void engine_listener::stop() {
    if (!impl_) {
       return;
    }
-   asio::post(impl_->strand, [impl = impl_] {
-      impl->stopped = true;
-      boost::system::error_code ignored;
-      impl->socket->cancel(ignored);
-      impl->socket->close(ignored);
-      wake(impl->accept_waiters);
-      auto connections = std::vector<std::shared_ptr<engine_connection::impl>>{};
-      connections.reserve(impl->cids_by_connection.size());
-      for (const auto& [_, keys] : impl->cids_by_connection) {
-         if (keys.empty()) {
-            continue;
-         }
-         if (auto it = impl->connections_by_cid.find(keys.front()); it != impl->connections_by_cid.end()) {
-            connections.push_back(it->second);
+   asio::post(impl_->strand, [impl = impl_] { impl->stop(); });
+}
+
+boost::asio::awaitable<void> engine_listener::async_stop() {
+   if (!impl_) {
+      co_return;
+   }
+   auto state = impl_;
+   co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
+   co_await asio::dispatch(state->strand, asio::use_awaitable);
+   const auto shutdown_action = state->begin_shutdown();
+   if (shutdown_action == engine_listener::impl::shutdown_action::done) {
+      if (auto error = state->shutdown_failure()) {
+         std::rethrow_exception(error);
+      }
+      co_return;
+   }
+   if (shutdown_action == engine_listener::impl::shutdown_action::wait) {
+      co_await state->wait_shutdown_complete();
+      if (auto error = state->shutdown_failure()) {
+         std::rethrow_exception(error);
+      }
+      co_return;
+   }
+   auto shutdown_error = std::exception_ptr{};
+   const auto remember_shutdown_error = [&] {
+      if (!shutdown_error) {
+         shutdown_error = std::current_exception();
+      }
+   };
+   auto connections = std::vector<std::shared_ptr<engine_connection::impl>>{};
+   try {
+      connections = state->connections();
+      state->stop();
+      co_await state->wait_operations_idle();
+      for (auto& candidate : state->connections()) {
+         if (std::ranges::none_of(connections, [&](const auto& current) { return current.get() == candidate.get(); })) {
+            connections.push_back(std::move(candidate));
          }
       }
-      for (auto& connection : connections) {
-         asio::post(connection->strand, [connection] { connection->fail_all(); });
+   } catch (...) {
+      remember_shutdown_error();
+   }
+   for (const auto& connection : connections) {
+      try {
+         co_await asio::dispatch(connection->strand, asio::use_awaitable);
+         connection->fail_all();
+         co_await connection->wait_background_idle();
+         co_await asio::dispatch(connection->strand, asio::use_awaitable);
+         connection->handshake_completed_hook = {};
+         connection->closed_hook = {};
+         connection->local_connection_id_issued_hook = {};
+         connection->local_connection_id_retired_hook = {};
+      } catch (...) {
+         remember_shutdown_error();
       }
-   });
+   }
+   try {
+      co_await asio::dispatch(state->strand, asio::use_awaitable);
+      state->clear_connection_registry();
+   } catch (...) {
+      remember_shutdown_error();
+   }
+   state->finish_shutdown(shutdown_error);
+   if (shutdown_error) {
+      std::rethrow_exception(shutdown_error);
+   }
 }
 
 } // namespace forge::net::quic::detail

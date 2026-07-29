@@ -218,9 +218,17 @@ class quic_profile final {
    }
 
    void stop() {
+      connector_.cancel();
       for (auto& [_, listener] : listeners_) {
          listener.active = false;
          listener.value->stop();
+      }
+   }
+
+   boost::asio::awaitable<void> async_stop() {
+      stop();
+      for (auto& [_, listener] : listeners_) {
+         co_await listener.value->async_stop();
       }
    }
 
@@ -326,6 +334,7 @@ void register_quic_profile(registry& value, forge::asio::runtime& runtime, const
        .local_endpoints = [owned] { return owned->local_endpoints(); },
        .listen = [owned](forge::net::p2p::endpoint endpoint) { return owned->listen(std::move(endpoint)); },
        .stop = [owned] { owned->stop(); },
+       .async_stop = [owned] { return owned->async_stop(); },
        .async_connect =
            [owned](forge::net::p2p::endpoint endpoint, const node::connect_options& options) {
               return owned->async_connect(std::move(endpoint), options);

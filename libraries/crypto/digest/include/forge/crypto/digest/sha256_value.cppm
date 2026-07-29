@@ -74,21 +74,27 @@ class sha256
    static double inverse_approx_log_32_double(std::uint32_t value);
 #endif
 
-   [[nodiscard]] constexpr const char* data() const noexcept {
+   [[nodiscard]] constexpr const char* data() const& noexcept {
       return reinterpret_cast<const char*>(_hash);
    }
 
-   [[nodiscard]] constexpr char* data() noexcept {
+   [[nodiscard]] constexpr char* data() & noexcept {
       return reinterpret_cast<char*>(_hash);
    }
+
+   [[nodiscard]] constexpr char* data() && noexcept = delete;
+   [[nodiscard]] constexpr const char* data() const&& noexcept = delete;
 
    [[nodiscard]] static constexpr std::size_t data_size() noexcept {
       return byte_size;
    }
 
-   [[nodiscard]] constexpr std::span<const std::uint8_t, byte_size> to_uint8_span() const noexcept {
+   [[nodiscard]] constexpr std::span<const std::uint8_t, byte_size> to_uint8_span() const& noexcept {
       return std::span<const std::uint8_t, byte_size>{reinterpret_cast<const std::uint8_t*>(_hash), byte_size};
    }
+
+   [[nodiscard]] constexpr std::span<const std::uint8_t, byte_size> to_uint8_span() && noexcept = delete;
+   [[nodiscard]] constexpr std::span<const std::uint8_t, byte_size> to_uint8_span() const&& noexcept = delete;
 
    [[nodiscard]] constexpr std::array<std::uint8_t, byte_size> extract_as_byte_array() const noexcept {
       auto result = std::array<std::uint8_t, byte_size>{};
@@ -142,4 +148,4 @@ using uint256 = sha256;
    return static_cast<std::size_t>(value._hash[3]);
 }
 
-} // namespace forge::crypto
+} // namespace forge::crypto::digest

@@ -363,8 +363,10 @@ dht::key make_dht_key(const peer_id& peer) {
 }
 
 dht::distance distance_between(std::span<const std::uint8_t> left, std::span<const std::uint8_t> right) {
-   const auto left_hash = forge::crypto::digest::sha256::hash(left).to_uint8_span();
-   const auto right_hash = forge::crypto::digest::sha256::hash(right).to_uint8_span();
+   const auto left_digest = forge::crypto::digest::sha256::hash(left);
+   const auto right_digest = forge::crypto::digest::sha256::hash(right);
+   const auto left_hash = left_digest.to_uint8_span();
+   const auto right_hash = right_digest.to_uint8_span();
    auto out = dht::distance{};
    for (auto i = std::size_t{}; i < out.bytes.size(); ++i) {
       out.bytes[i] = static_cast<std::uint8_t>(left_hash[i] ^ right_hash[i]);

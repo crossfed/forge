@@ -57,6 +57,25 @@ bool has_message(const std::exception& error, std::string_view message) {
    return error.what() == message;
 }
 
+struct named_action_payload {
+   std::uint64_t workspace = 0;
+   std::uint64_t inode = 0;
+
+   static constexpr protocol::action_name get_name() {
+      return protocol::make_name("beginrev");
+   }
+};
+
+template <typename Stream> void raw_pack(Stream& stream, const named_action_payload& value) {
+   forge::raw::pack(stream, value.workspace);
+   forge::raw::pack(stream, value.inode);
+}
+
+template <typename Stream> void raw_unpack(Stream& stream, named_action_payload& value) {
+   forge::raw::unpack(stream, value.workspace);
+   forge::raw::unpack(stream, value.inode);
+}
+
 std::string hex(std::span<const std::uint8_t> bytes) {
    std::ostringstream out;
    out << std::hex << std::setfill('0');
@@ -807,6 +826,23 @@ BOOST_AUTO_TEST_CASE(transaction_mroot_uses_core_merkle_over_receipt_digests) {
        receipts[2].digest(),
    };
    BOOST_TEST(protocol::calculate_transaction_mroot(receipts) == core::calculate_merkle_root(digests));
+}
+
+BOOST_AUTO_TEST_CASE(named_action_payload_owns_name_and_raw_bytes) {
+   const auto permission = protocol::permission_level{
+       .actor = protocol::make_name("alice"),
+       .permission = protocol::make_name("storlane"),
+   };
+   const auto account = protocol::make_name("storlane");
+   const auto payload = named_action_payload{.workspace = 41U, .inode = 73U};
+   const auto action = protocol::action{permission, account, payload};
+
+   BOOST_TEST(action.account.value == account.value);
+   BOOST_TEST(action.name.value == named_action_payload::get_name().value);
+   BOOST_TEST(action.authorization.size() == 1U);
+   BOOST_TEST(action.authorization.front().actor.value == permission.actor.value);
+   BOOST_TEST(action.authorization.front().permission.value == permission.permission.value);
+   BOOST_TEST(action.data == forge::raw::pack(payload));
 }
 
 BOOST_AUTO_TEST_CASE(forge_secp256k1_is_the_crypto_surface_for_runtime_signatures) {

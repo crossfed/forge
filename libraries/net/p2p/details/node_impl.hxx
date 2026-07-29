@@ -8,6 +8,7 @@
 #include "peer_exchange_codec.hxx"
 #include "relay_discovery.hxx"
 #include "relay_transport.hxx"
+#include "session_teardown.hxx"
 
 namespace forge::net::p2p {
 
@@ -57,15 +58,50 @@ struct node::impl : std::enable_shared_from_this<impl> {
    };
 
    struct pubsub_state {
+      struct validation {
+         enum class status : std::uint8_t {
+            claimed,
+            in_progress,
+            accepted,
+            rejected,
+            retryable,
+            ignored,
+         };
+
+         status state = status::claimed;
+         std::size_t attempts = 0;
+         std::size_t redeliveries = 0;
+         std::size_t requests = 0;
+         peer_id source;
+         std::uint64_t generation = 0;
+         std::chrono::steady_clock::time_point retry_after{};
+         std::chrono::steady_clock::time_point request_after{};
+      };
+
+      enum class claim_status : std::uint8_t {
+         claimed,
+         backpressured,
+         duplicate,
+         invalid,
+      };
+
+      struct claim {
+         claim_status status = claim_status::duplicate;
+         std::uint64_t generation = 0;
+      };
+
       std::map<std::string, pubsub::handler> handlers;
       std::map<peer_id, std::set<std::string>> peer_topics;
       std::map<std::string, std::set<peer_id>> mesh;
       std::map<std::string, pubsub::message> cache;
       std::deque<std::string> history;
+      std::map<std::string, validation> validations;
+      std::string retry_cursor;
       std::map<peer_id, pubsub::score> scores;
       std::map<peer_id, std::shared_ptr<forge::net::p2p::stream>> outbound_streams;
       std::map<peer_id, std::size_t> active_validations_by_peer;
       std::size_t active_validations = 0;
+      std::uint64_t next_validation_generation = 1;
       std::uint64_t next_seqno = 1;
       bool heartbeat_started = false;
    };
@@ -83,6 +119,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
    node::options options;
    peer_id local;
    direct::registry direct_registry;
+   detail::session_teardown teardown;
 
    mutable std::mutex mutex;
    peer_store store;
@@ -222,9 +259,24 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    boost::asio::awaitable<void> announce_pubsub_subscriptions(const peer_id& peer);
 
-   [[nodiscard]] bool try_begin_pubsub_validation(const peer_id& peer);
-
    void finish_pubsub_validation(const peer_id& peer);
+
+   [[nodiscard]] pubsub_state::claim claim_pubsub_message(const peer_id& peer, const std::string& key,
+                                                          const pubsub::message& value, bool requires_validation);
+
+   [[nodiscard]] bool complete_pubsub_message(const std::string& key, std::uint64_t generation,
+                                              pubsub::validation_result result);
+
+   void defer_pubsub_message(const std::string& key, std::uint64_t generation);
+
+   [[nodiscard]] bool should_request_pubsub_message_locked(const std::string& key, const peer_id& source,
+                                                           std::chrono::steady_clock::time_point now);
+
+   [[nodiscard]] bool can_serve_pubsub_message_locked(const std::string& key) const;
+
+   void remember_local_pubsub_message_locked(const std::string& key, pubsub::message value);
+
+   void prune_pubsub_cache_locked();
 
    [[nodiscard]] bool pubsub_control_over_limit(const pubsub::control& value) const noexcept;
 
