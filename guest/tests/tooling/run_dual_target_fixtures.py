@@ -582,6 +582,38 @@ set_source_files_properties(
 """,
             "uses unsupported source property: COMPILE_OPTIONS",
         ),
+        (
+            "immutable-late-deferred-mutation",
+            """forge_add_contract_library(
+   protocol ID negative.immutable.late.deferred SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+function(mutate_contract_target)
+   get_target_property(concrete protocol ALIASED_TARGET)
+   set_property(TARGET "${concrete}" PROPERTY CXX_SCAN_FOR_MODULES OFF)
+endfunction()
+cmake_language(DEFER CALL mutate_contract_target)
+""",
+            "modified after descriptor declaration: CXX_SCAN_FOR_MODULES",
+        ),
+        (
+            "immutable-late-deferred-source-mutation",
+            """forge_add_contract_library(
+   protocol ID negative.immutable.late.deferred.source SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+function(mutate_contract_source)
+   get_target_property(concrete protocol ALIASED_TARGET)
+   set_source_files_properties(
+      "${CMAKE_CURRENT_SOURCE_DIR}/include/protocol.cppm"
+      TARGET_DIRECTORY "${concrete}"
+      PROPERTIES COMPILE_OPTIONS "-include;${CMAKE_CURRENT_SOURCE_DIR}/extra.hpp"
+   )
+endfunction()
+cmake_language(DEFER CALL mutate_contract_source)
+""",
+            "uses unsupported source property: COMPILE_OPTIONS",
+        ),
     ]
     for name, body, diagnostic in cases:
         source = write_project(fixtures / name, body)
@@ -668,6 +700,18 @@ def check_imported_target_seal(
             'set_property(TARGET Product::protocol PROPERTY INTERFACE_LINK_LIBRARIES_DIRECT_EXCLUDE Product::values)',
             (),
             "descriptor declaration: INTERFACE_LINK_LIBRARIES_DIRECT_EXCLUDE",
+        ),
+        (
+            "source-options",
+            """get_target_property(protocol_modules Product::protocol CXX_MODULE_SET_forge_contract_modules)
+list(GET protocol_modules 0 protocol_module)
+set_source_files_properties(
+   "${protocol_module}"
+   TARGET_DIRECTORY Product::protocol
+   PROPERTIES COMPILE_OPTIONS "-include;${CMAKE_CURRENT_SOURCE_DIR}/extra.hpp"
+)""",
+            (),
+            "uses unsupported source property: COMPILE_OPTIONS",
         ),
     )
     for name, mutation, definitions, diagnostic in cases:

@@ -156,7 +156,12 @@ consumer-controlled baseline.
 
 Seal checks run at the end of every CMake directory where a registered target
 is visible. This preserves normal non-`GLOBAL` imported-target scope when a
-package is loaded from a nested `CMakeLists.txt`.
+package is loaded from a nested `CMakeLists.txt`. The check remains at the tail
+of that directory's deferred-call queue, so a later deferred target or source
+mutation cannot run after validation. For installed targets, source paths are
+derived from the exported prefix-relative module and source roots; relocated
+packages therefore receive the same source-property checks as build-tree
+targets.
 
 ## Named Action Payloads
 

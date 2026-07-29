@@ -234,28 +234,71 @@ endfunction()
 
 function(_forge_contract_declared_source_paths target output)
    get_target_property(_source_root "${target}" FORGE_CONTRACT_BUILD_SOURCE_ROOT)
-   if(NOT _source_root OR _source_root STREQUAL "_source_root-NOTFOUND")
-      set(${output} "" PARENT_SCOPE)
-      return()
-   endif()
-
    set(_sources)
-   foreach(
-      _property
-      IN ITEMS
-         FORGE_CONTRACT_MODULE_SOURCES
-         FORGE_CONTRACT_SOURCES
-         FORGE_CONTRACT_PUBLIC_HEADERS
-         FORGE_CONTRACT_PRIVATE_HEADERS
-   )
-      get_target_property(_logical_paths "${target}" "${_property}")
-      if(_logical_paths STREQUAL "_logical_paths-NOTFOUND")
-         set(_logical_paths)
-      endif()
-      foreach(_logical_path IN LISTS _logical_paths)
-         list(APPEND _sources "${_source_root}/${_logical_path}")
+   if(_source_root AND NOT _source_root STREQUAL "_source_root-NOTFOUND")
+      foreach(
+         _property
+         IN ITEMS
+            FORGE_CONTRACT_MODULE_SOURCES
+            FORGE_CONTRACT_SOURCES
+            FORGE_CONTRACT_PUBLIC_HEADERS
+            FORGE_CONTRACT_PRIVATE_HEADERS
+      )
+         get_target_property(_logical_paths "${target}" "${_property}")
+         if(_logical_paths STREQUAL "_logical_paths-NOTFOUND")
+            set(_logical_paths)
+         endif()
+         foreach(_logical_path IN LISTS _logical_paths)
+            list(APPEND _sources "${_source_root}/${_logical_path}")
+         endforeach()
       endforeach()
-   endforeach()
+   else()
+      get_target_property(_imported "${target}" IMPORTED)
+      if(NOT _imported)
+         set(${output} "" PARENT_SCOPE)
+         return()
+      endif()
+      _forge_contract_imported_location("${target}" _location)
+      get_filename_component(_library_directory "${_location}" DIRECTORY)
+      get_target_property(
+         _module_root_relative "${target}" FORGE_CONTRACT_INSTALL_MODULE_ROOT_RELATIVE
+      )
+      get_target_property(
+         _source_root_relative "${target}" FORGE_CONTRACT_INSTALL_SOURCE_ROOT_RELATIVE
+      )
+      if(NOT _module_root_relative OR _module_root_relative STREQUAL "_module_root_relative-NOTFOUND")
+         message(FATAL_ERROR "imported contract library has no module install root: ${target}")
+      endif()
+      if(NOT _source_root_relative OR _source_root_relative STREQUAL "_source_root_relative-NOTFOUND")
+         message(FATAL_ERROR "imported contract library has no source install root: ${target}")
+      endif()
+      get_filename_component(
+         _installed_module_root "${_library_directory}/${_module_root_relative}" ABSOLUTE
+      )
+      get_filename_component(
+         _installed_source_root "${_library_directory}/${_source_root_relative}" ABSOLUTE
+      )
+      get_target_property(_module_paths "${target}" FORGE_CONTRACT_INSTALL_MODULE_PATHS)
+      get_target_property(_public_header_paths "${target}" FORGE_CONTRACT_INSTALL_PUBLIC_HEADER_PATHS)
+      if(_module_paths STREQUAL "_module_paths-NOTFOUND")
+         set(_module_paths)
+      endif()
+      if(_public_header_paths STREQUAL "_public_header_paths-NOTFOUND")
+         set(_public_header_paths)
+      endif()
+      foreach(_logical_path IN LISTS _module_paths _public_header_paths)
+         list(APPEND _sources "${_installed_module_root}/${_logical_path}")
+      endforeach()
+      foreach(_property IN ITEMS FORGE_CONTRACT_SOURCES FORGE_CONTRACT_PRIVATE_HEADERS)
+         get_target_property(_logical_paths "${target}" "${_property}")
+         if(_logical_paths STREQUAL "_logical_paths-NOTFOUND")
+            set(_logical_paths)
+         endif()
+         foreach(_logical_path IN LISTS _logical_paths)
+            list(APPEND _sources "${_installed_source_root}/${_logical_path}")
+         endforeach()
+      endforeach()
+   endif()
    list(REMOVE_DUPLICATES _sources)
    set(${output} "${_sources}" PARENT_SCOPE)
 endfunction()
@@ -325,6 +368,16 @@ function(_forge_contract_assert_sealed_target target)
 endfunction()
 
 function(_forge_contract_assert_directory_sealed_targets)
+   cmake_language(DEFER GET_CALL_IDS _remaining_calls)
+   list(FILTER _remaining_calls EXCLUDE REGEX "^forge_contract_assert_sealed_targets$")
+   if(_remaining_calls)
+      cmake_language(
+         DEFER
+         ID forge_contract_assert_sealed_targets
+         CALL _forge_contract_assert_directory_sealed_targets
+      )
+      return()
+   endif()
    get_property(_targets DIRECTORY PROPERTY FORGE_CONTRACT_SEALED_TARGETS)
    foreach(_target IN LISTS _targets)
       _forge_contract_assert_sealed_target("${_target}")

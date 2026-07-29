@@ -520,6 +520,18 @@ def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
             errors.append(
                f"{path.relative_to(root)}: Contract SDK requires directory-scoped deferred seal checks"
             )
+         if "cmake_language(DEFER GET_CALL_IDS _remaining_calls)" not in source:
+            errors.append(
+               f"{path.relative_to(root)}: Contract SDK seal checks must remain after later deferred calls"
+            )
+         for required in (
+            "FORGE_CONTRACT_INSTALL_MODULE_ROOT_RELATIVE",
+            "FORGE_CONTRACT_INSTALL_SOURCE_ROOT_RELATIVE",
+         ):
+            if required not in source:
+               errors.append(
+                  f"{path.relative_to(root)}: installed Contract source sealing requires {required}"
+               )
          if "function(forge_register_contract_library_targets)" not in source:
             errors.append(
                f"{path.relative_to(root)}: installed Contract libraries require an explicit package registration API"

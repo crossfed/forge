@@ -108,7 +108,10 @@ descriptor materialization. Incomplete descriptors therefore remain configure
 errors instead of platform-dependent build failures.
 Installed package configs register and seal their exported protocol targets
 immediately after loading the CMake targets file. Lazy registration is rejected
-because it would let consumer mutations define the initial baseline.
+because it would let consumer mutations define the initial baseline. Installed
+source identities are reconstructed only from exported prefix-relative roots,
+and the directory seal follows later deferred calls before asserting the final
+materialization.
 
 ## Rejected Mechanisms
 
