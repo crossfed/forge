@@ -257,31 +257,63 @@ def verify_contract_graph(build_directory: Path) -> tuple[dict[str, str], dict[P
     return module_owners, source_owners
 
 
-def verify_component_module_metadata(build_directory: Path, module_owners: dict[str, str]) -> None:
+def component_metadata_target(path: Path) -> str:
+    target_parts = [
+        part.removesuffix(".dir").split("@", 1)[0]
+        for part in path.parts
+        if part.startswith("forge_contract_component_")
+    ]
+    if len(target_parts) != 1:
+        raise RuntimeError(f"cannot identify guest component target for module metadata: {path}")
+    return target_parts[0]
+
+
+def component_metadata_files(build_directory: Path) -> list[Path]:
     component_root = build_directory / "product.contract" / "CMakeFiles"
     dependency_files = sorted(component_root.glob("forge_contract_component_*.dir/**/*.ddi"))
     if not dependency_files:
         raise RuntimeError("guest component compilation produced no module dependency metadata")
+    return dependency_files
 
-    provided_modules: set[str] = set()
-    for path in dependency_files:
+
+def verify_component_module_metadata(build_directory: Path, module_owners: dict[str, str]) -> None:
+    component_owners = {
+        hashlib.sha256(component_id.encode()).hexdigest()[:16]: component_id
+        for component_id in set(module_owners.values())
+    }
+    provided_modules: dict[str, str] = {}
+    for path in component_metadata_files(build_directory):
+        target_key = component_metadata_target(path).removeprefix("forge_contract_component_")
+        component_owner = component_owners.get(target_key)
+        if component_owner is None:
+            raise RuntimeError(f"module metadata belongs to an unknown guest component target: {path}")
+
         metadata = read_json(path)
         for rule in metadata.get("rules", []):
             for provided in rule.get("provides", []):
                 name = provided.get("logical-name")
                 if not isinstance(name, str) or not name:
                     raise RuntimeError(f"invalid compiler-provided module name: {path}")
-                if name in provided_modules:
-                    raise RuntimeError(f"compiler reports duplicate guest component module: {name}")
-                provided_modules.add(name)
+                expected_owner = module_owners.get(name)
+                if expected_owner is None:
+                    raise RuntimeError(f"compiler reports an undescribed guest component module: {name}")
+                if expected_owner != component_owner:
+                    raise RuntimeError(
+                        "compiler reports a guest component module under the wrong owner: "
+                        f"module={name}, expected={expected_owner}, actual={component_owner}"
+                    )
+                previous_owner = provided_modules.setdefault(name, component_owner)
+                if previous_owner != component_owner:
+                    raise RuntimeError(f"compiler reports multiple owners for guest component module: {name}")
 
     described_modules = set(module_owners)
-    if provided_modules != described_modules:
-        missing = sorted(provided_modules - described_modules)
-        stale = sorted(described_modules - provided_modules)
+    compiled_modules = set(provided_modules)
+    if compiled_modules != described_modules:
+        missing = sorted(described_modules - compiled_modules)
+        unexpected = sorted(compiled_modules - described_modules)
         raise RuntimeError(
             "guest component descriptor differs from compiler module metadata: "
-            f"missing={missing}, stale={stale}"
+            f"missing={missing}, unexpected={unexpected}"
         )
 
 
@@ -781,6 +813,39 @@ def validate(
     verify_source_graph(manifest, read_json(producer_build / "product.contract-graph.json"))
     module_owners, source_owners = verify_contract_graph(producer_build)
     verify_component_module_metadata(producer_build, module_owners)
+    dependency_file = next(
+        path
+        for path in component_metadata_files(producer_build)
+        if any(rule.get("provides", []) for rule in read_json(path).get("rules", []))
+    )
+    duplicate_dependency_file = dependency_file.with_name(f"duplicate-{dependency_file.name}")
+    shutil.copy2(dependency_file, duplicate_dependency_file)
+    try:
+        verify_component_module_metadata(producer_build, module_owners)
+    finally:
+        duplicate_dependency_file.unlink()
+
+    source_target = component_metadata_target(dependency_file)
+    wrong_owner_target = next(
+        path
+        for path in {
+            candidate.parent
+            for candidate in component_metadata_files(producer_build)
+            if component_metadata_target(candidate) != source_target
+        }
+    )
+    wrong_owner_dependency_file = wrong_owner_target / f"wrong-owner-{dependency_file.name}"
+    shutil.copy2(dependency_file, wrong_owner_dependency_file)
+    try:
+        try:
+            verify_component_module_metadata(producer_build, module_owners)
+        except RuntimeError as error:
+            if "under the wrong owner" not in str(error):
+                raise
+        else:
+            raise RuntimeError("component metadata ownership check accepted a wrong-owner module")
+    finally:
+        wrong_owner_dependency_file.unlink()
     verify_compilation_metadata(producer_build, module_owners, source_owners)
     verify_compiler_launcher_bypass(compiler_launcher_log, source / "producer")
     initial_digest = manifest["source_graph"]["sha256"]
