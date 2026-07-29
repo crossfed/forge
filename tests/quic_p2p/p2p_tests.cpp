@@ -27,6 +27,7 @@
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
@@ -1654,6 +1655,77 @@ BOOST_AUTO_TEST_CASE(p2p_direct_tcp_nodes_prefer_tls_yamux_and_echo_frames) {
 
    forge::asio::blocking::run(runtime, client.async_stop());
    forge::asio::blocking::run(runtime, server.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_direct_tcp_concurrent_handshakes_reuse_configured_node_identity) {
+   constexpr auto connection_count = std::size_t{4};
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = connection_count * 2}};
+   const auto client_identity = make_test_identity();
+   auto client = node{runtime, options_for(client_identity)};
+   auto servers = std::vector<std::unique_ptr<node>>{};
+   auto endpoints = std::vector<endpoint>{};
+   servers.reserve(connection_count);
+   endpoints.reserve(connection_count);
+
+   for (auto index = std::size_t{}; index < connection_count; ++index) {
+      const auto server_identity = make_test_identity();
+      auto server = std::make_unique<node>(runtime, options_for(server_identity));
+      register_echo(*server);
+      endpoints.push_back(listen_tcp(*server, runtime));
+      servers.push_back(std::move(server));
+   }
+
+   auto ready = std::atomic_size_t{};
+   auto connections = std::vector<std::future<node::session_info>>{};
+   connections.reserve(connection_count);
+   for (auto index = std::size_t{}; index < connection_count; ++index) {
+      connections.push_back(boost::asio::co_spawn(
+          runtime.context(),
+          [&client, &servers, &endpoints, &ready, index]() -> boost::asio::awaitable<node::session_info> {
+             ready.fetch_add(1, std::memory_order_acq_rel);
+             while (ready.load(std::memory_order_acquire) != connection_count) {
+                co_await boost::asio::post(boost::asio::use_awaitable);
+             }
+             co_return co_await client.async_connect(endpoints[index],
+                                                     node::connect_options{
+                                                         .expected_peer = servers[index]->local_peer(),
+                                                         .allow_relay = false,
+                                                     });
+          },
+          boost::asio::use_future));
+   }
+
+   for (auto index = std::size_t{}; index < connection_count; ++index) {
+      BOOST_REQUIRE(connections[index].wait_for(std::chrono::seconds{5}) == std::future_status::ready);
+      const auto session = connections[index].get();
+      BOOST_TEST(session.remote_peer.value == servers[index]->local_peer().value);
+
+      auto stream = forge::asio::blocking::run(
+          runtime, client.async_open_protocol_stream(servers[index]->local_peer(), builtins::echo,
+                                                     node::open_options{.allow_relay = false}));
+      const auto payload = std::vector<std::uint8_t>{'t', 'l', 's', static_cast<std::uint8_t>(index)};
+      forge::asio::blocking::run(runtime, stream.async_write_frame(payload));
+      const auto reply = forge::asio::blocking::run(runtime, stream.async_read_frame());
+      BOOST_TEST(reply == payload, boost::test_tools::per_element());
+   }
+
+   BOOST_TEST(client.metrics().active_sessions == connection_count);
+   forge::asio::blocking::run(runtime, client.async_stop());
+   for (auto& server : servers) {
+      forge::asio::blocking::run(runtime, server->async_stop());
+   }
+}
+
+BOOST_AUTO_TEST_CASE(p2p_insecure_quic_node_does_not_require_signing_identity) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto options = options_for(peer(218));
+   options.certificate_pem.clear();
+   options.private_key_pem.clear();
+   options.public_key.clear();
+
+   auto value = node{runtime, std::move(options)};
+   BOOST_TEST(value.local_peer().value == peer(218).value);
+   forge::asio::blocking::run(runtime, value.async_stop());
 }
 
 BOOST_AUTO_TEST_CASE(p2p_direct_tcp_rejects_tls_peer_mismatch) {

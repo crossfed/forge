@@ -25,9 +25,11 @@ module forge.net.p2p.node;
 
 import forge.asio.blocking;
 import forge.asio.runtime;
+import forge.crypto.asymmetric;
 import forge.net.transport.session;
 
 #include "../../libraries/net/p2p/details/direct_transport.hxx"
+#include "../../libraries/net/p2p/details/libp2p_identity_material.hxx"
 #include "../../libraries/net/p2p/details/session_teardown.hxx"
 
 namespace forge::net::p2p {
@@ -81,7 +83,9 @@ BOOST_AUTO_TEST_CASE(p2p_session_teardown_waits_for_started_transport_cleanup) {
 
 BOOST_AUTO_TEST_CASE(p2p_direct_transport_teardown_continues_after_profile_failure) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
-   auto registry = direct::registry{runtime, node::options{}};
+   const auto options = node::options{};
+   const auto identity = make_libp2p_identity_material(options);
+   auto registry = direct::registry{runtime, options, identity};
    auto failed_stop = std::atomic_size_t{0};
    auto next_stop = std::atomic_size_t{0};
    auto failed_async_stop = std::atomic_size_t{0};

@@ -24,6 +24,7 @@ module;
 module forge.net.p2p.node;
 
 import forge.asio.runtime;
+import forge.crypto.asymmetric;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.stream;
@@ -31,12 +32,14 @@ import forge.net.tcp.connection;
 import forge.net.tcp.connector;
 import forge.net.tcp.exceptions;
 import forge.net.tcp.listener;
+import forge.net.stcp.options;
 import forge.net.transport.connector;
 import forge.net.transport.session;
 import forge.net.transport.stream;
 import forge.net.yamux.session;
 
 #include "details/direct_transport.hxx"
+#include "details/libp2p_tls.hxx"
 #include "details/operation_deadline.hxx"
 #include "details/stream_upgrade.hxx"
 
@@ -104,17 +107,16 @@ class tcp_profile final {
    };
 
  public:
-   tcp_profile(forge::asio::runtime& runtime_value, const node::options& options_value)
-       : runtime_(runtime_value), options_(options_value) {}
+   tcp_profile(forge::asio::runtime& runtime_value, const node::options& options_value,
+               const libp2p_identity_material& identity_value)
+       : runtime_(runtime_value), options_(options_value), identity_(identity_value) {}
 
    [[nodiscard]] bool supports(const forge::net::p2p::endpoint& endpoint) const noexcept {
       return endpoint.is_direct_tcp();
    }
 
    [[nodiscard]] bool listening() const noexcept {
-      return std::ranges::any_of(listeners_, [](const auto& item) {
-         return item.second.active;
-      });
+      return std::ranges::any_of(listeners_, [](const auto& item) { return item.second.active; });
    }
 
    [[nodiscard]] std::vector<forge::net::p2p::endpoint> local_endpoints() const {
@@ -203,9 +205,10 @@ class tcp_profile final {
          cancel_current->set([&tcp] { tcp.cancel(); });
          const auto local_endpoint = p2p_endpoint_for(tcp.local_endpoint());
          const auto remote_endpoint = p2p_endpoint_for(tcp.remote_endpoint());
-         auto upgraded = co_await upgrade_outbound_tcp(
-             std::move(tcp), options_, std::move(expected_peer),
-             tcp_upgrade_deadline{.context = &runtime_.context(), .timeout = options.timeout, .cancel_current = cancel_current});
+         auto upgraded = co_await upgrade_outbound_tcp(std::move(tcp), options_, identity_, std::move(expected_peer),
+                                                       tcp_upgrade_deadline{.context = &runtime_.context(),
+                                                                            .timeout = options.timeout,
+                                                                            .cancel_current = cancel_current});
          if (!deadline.finish()) {
             throw_operation_timeout("P2P TCP direct connect");
          }
@@ -240,11 +243,10 @@ class tcp_profile final {
          deadline.arm([cancel_current] { cancel_current->cancel(); });
          auto upgraded = upgraded_session{};
          try {
-            upgraded = co_await upgrade_inbound_tcp(
-                std::move(tcp), options_, std::nullopt,
-                tcp_upgrade_deadline{.context = &runtime_.context(),
-                                     .timeout = node::connect_options{}.timeout,
-                                     .cancel_current = cancel_current});
+            upgraded = co_await upgrade_inbound_tcp(std::move(tcp), options_, identity_, std::nullopt,
+                                                    tcp_upgrade_deadline{.context = &runtime_.context(),
+                                                                         .timeout = node::connect_options{}.timeout,
+                                                                         .cancel_current = cancel_current});
             if (!deadline.finish()) {
                throw_operation_timeout("P2P TCP direct accept");
             }
@@ -285,6 +287,7 @@ class tcp_profile final {
 
    forge::asio::runtime& runtime_;
    const node::options& options_;
+   const libp2p_identity_material& identity_;
    std::map<std::string, listener_entry> listeners_;
    std::mutex active_mutex_;
    std::vector<std::weak_ptr<cancellation_latch>> active_;
@@ -293,8 +296,9 @@ class tcp_profile final {
 
 } // namespace
 
-void register_tcp_profile(registry& value, forge::asio::runtime& runtime, const node::options& options) {
-   auto owned = std::make_shared<tcp_profile>(runtime, options);
+void register_tcp_profile(registry& value, forge::asio::runtime& runtime, const node::options& options,
+                          const libp2p_identity_material& identity) {
+   auto owned = std::make_shared<tcp_profile>(runtime, options, identity);
    value.add(profile{
        .supports = [owned](const forge::net::p2p::endpoint& endpoint) { return owned->supports(endpoint); },
        .listening = [owned] { return owned->listening(); },
