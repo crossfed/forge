@@ -486,6 +486,8 @@ def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
                "SOURCES",
                "LINK_LIBRARIES",
                "INTERFACE_LINK_LIBRARIES",
+               "INTERFACE_LINK_LIBRARIES_DIRECT",
+               "INTERFACE_LINK_LIBRARIES_DIRECT_EXCLUDE",
                "CXX_MODULE_STD",
                "CXX_SCAN_FOR_MODULES",
             ):

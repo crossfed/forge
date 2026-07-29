@@ -13,6 +13,7 @@ find_package(Forge CONFIG REQUIRED COMPONENTS raw chain_protocol crypto_digest)
 find_package(ForgeContract CONFIG REQUIRED)
 
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+set(CMAKE_LINK_LIBRARIES_STRATEGY REORDER_FREELY)
 
 forge_add_contract_library(
    values
@@ -52,11 +53,21 @@ foreach(_library IN ITEMS values limits protocol)
    get_target_property(_concrete "${_library}" ALIASED_TARGET)
    get_target_property(_module_scanning "${_concrete}" CXX_SCAN_FOR_MODULES)
    get_target_property(_module_std "${_concrete}" CXX_MODULE_STD)
-   if(NOT _module_scanning OR _module_std)
+   get_target_property(_link_targets "${_concrete}" LINK_LIBRARIES_ONLY_TARGETS)
+   get_target_property(_link_strategy "${_concrete}" LINK_LIBRARIES_STRATEGY)
+   get_target_property(_optimized_dependencies "${_concrete}" OPTIMIZE_DEPENDENCIES)
+   if(
+      NOT _module_scanning
+      OR _module_std
+      OR NOT _link_targets
+      OR NOT _link_strategy STREQUAL "REORDER_MINIMALLY"
+      OR _optimized_dependencies
+   )
       message(FATAL_ERROR "Forge Contract library did not enforce canonical module settings")
    endif()
 endforeach()
 set(CMAKE_CXX_SCAN_FOR_MODULES ON)
+unset(CMAKE_LINK_LIBRARIES_STRATEGY)
 
 add_executable(product_protocol_host_tests host_tests.cpp)
 set_target_properties(product_protocol_host_tests PROPERTIES NO_SYSTEM_FROM_IMPORTED TRUE)

@@ -604,6 +604,18 @@ def check_imported_target_seal(
             ("-DCMAKE_BUILD_TYPE=ASAN",),
             "descriptor declaration: MAP_IMPORTED_CONFIG_ASAN",
         ),
+        (
+            "direct-link-injection",
+            'set_property(TARGET Product::protocol PROPERTY INTERFACE_LINK_LIBRARIES_DIRECT host_only)',
+            (),
+            "descriptor declaration: INTERFACE_LINK_LIBRARIES_DIRECT",
+        ),
+        (
+            "direct-link-exclusion",
+            'set_property(TARGET Product::protocol PROPERTY INTERFACE_LINK_LIBRARIES_DIRECT_EXCLUDE Product::values)',
+            (),
+            "descriptor declaration: INTERFACE_LINK_LIBRARIES_DIRECT_EXCLUDE",
+        ),
     )
     for name, mutation, definitions, diagnostic in cases:
         source = output / name

@@ -33,14 +33,41 @@ function(_forge_contract_sealed_target_properties target output)
       INTERFACE_COMPILE_DEFINITIONS
       COMPILE_FEATURES
       INTERFACE_COMPILE_FEATURES
+      COMPILE_FLAGS
       COMPILE_OPTIONS
       INTERFACE_COMPILE_OPTIONS
+      COMPILE_WARNING_AS_ERROR
       LINK_DIRECTORIES
       INTERFACE_LINK_DIRECTORIES
+      INTERFACE_LINK_DEPENDS
+      LINK_FLAGS
       LINK_OPTIONS
       INTERFACE_LINK_OPTIONS
+      INTERFACE_LINK_LIBRARIES_DIRECT
+      INTERFACE_LINK_LIBRARIES_DIRECT_EXCLUDE
+      INTERFACE_POSITION_INDEPENDENT_CODE
+      INTERFACE_SYSTEM_INCLUDE_DIRECTORIES
+      INTERFACE_HEADER_SETS_TO_VERIFY
+      LINK_DEPENDS
+      LINK_DEPENDS_NO_SHARED
+      LINK_INTERFACE_LIBRARIES
+      LINK_INTERFACE_MULTIPLICITY
+      LINK_LIBRARIES_ONLY_TARGETS
+      LINK_LIBRARIES_STRATEGY
+      LINK_LIBRARY_OVERRIDE
+      LINK_SEARCH_END_STATIC
+      LINK_SEARCH_START_STATIC
+      LINK_WHAT_YOU_USE
+      OPTIMIZE_DEPENDENCIES
+      TRANSITIVE_COMPILE_PROPERTIES
+      TRANSITIVE_LINK_PROPERTIES
+      COMPATIBLE_INTERFACE_BOOL
+      COMPATIBLE_INTERFACE_NUMBER_MAX
+      COMPATIBLE_INTERFACE_NUMBER_MIN
+      COMPATIBLE_INTERFACE_STRING
       PRECOMPILE_HEADERS
       INTERFACE_PRECOMPILE_HEADERS
+      PRECOMPILE_HEADERS_REUSE_FROM
       MANUALLY_ADDED_DEPENDENCIES
       CXX_STANDARD
       CXX_STANDARD_REQUIRED
@@ -80,6 +107,26 @@ function(_forge_contract_sealed_target_properties target output)
       FORGE_CONTRACT_INSTALL_MODULE_PATHS
       FORGE_CONTRACT_INSTALL_PUBLIC_HEADER_PATHS
    )
+   set(
+      _build_configurations
+      ${CMAKE_BUILD_TYPE}
+      ${CMAKE_CONFIGURATION_TYPES}
+      DEBUG
+      RELEASE
+      RELWITHDEBINFO
+      MINSIZEREL
+   )
+   list(REMOVE_DUPLICATES _build_configurations)
+   foreach(_configuration IN LISTS _build_configurations)
+      string(TOUPPER "${_configuration}" _configuration)
+      list(
+         APPEND _properties
+         "COMPILE_DEFINITIONS_${_configuration}"
+         "LINK_FLAGS_${_configuration}"
+         "LINK_INTERFACE_LIBRARIES_${_configuration}"
+         "LINK_INTERFACE_MULTIPLICITY_${_configuration}"
+      )
+   endforeach()
    get_target_property(_imported "${target}" IMPORTED)
    if(_imported)
       list(
@@ -106,15 +153,7 @@ function(_forge_contract_sealed_target_properties target output)
       if(_configurations STREQUAL "_configurations-NOTFOUND")
          set(_configurations)
       endif()
-      list(
-         APPEND _configurations
-         ${CMAKE_BUILD_TYPE}
-         ${CMAKE_CONFIGURATION_TYPES}
-         DEBUG
-         RELEASE
-         RELWITHDEBINFO
-         MINSIZEREL
-      )
+      list(APPEND _configurations ${_build_configurations})
       list(REMOVE_DUPLICATES _configurations)
       foreach(_configuration IN LISTS _configurations)
          string(TOUPPER "${_configuration}" _configuration)
@@ -631,6 +670,9 @@ function(forge_add_contract_library target)
       PROPERTIES
          CXX_MODULE_STD OFF
          CXX_SCAN_FOR_MODULES ON
+         LINK_LIBRARIES_ONLY_TARGETS ON
+         LINK_LIBRARIES_STRATEGY REORDER_MINIMALLY
+         OPTIMIZE_DEPENDENCIES OFF
          OUTPUT_NAME "${target}"
          EXPORT_NAME "${target}"
          EXPORT_NO_SYSTEM TRUE
