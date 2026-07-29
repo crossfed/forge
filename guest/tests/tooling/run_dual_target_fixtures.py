@@ -515,6 +515,29 @@ target_sources(protocol PRIVATE src/protocol.cpp)
 """,
             "ALIAS target",
         ),
+        (
+            "immutable-concrete-sources",
+            """forge_add_contract_library(
+   protocol ID negative.immutable.sources SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+get_target_property(concrete protocol ALIASED_TARGET)
+target_sources("${concrete}" PRIVATE src/protocol.cpp)
+""",
+            "modified after descriptor declaration: SOURCES",
+        ),
+        (
+            "immutable-concrete-libraries",
+            """add_library(extra_dependency INTERFACE)
+forge_add_contract_library(
+   protocol ID negative.immutable.libraries SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+get_target_property(concrete protocol ALIASED_TARGET)
+target_link_libraries("${concrete}" PRIVATE extra_dependency)
+""",
+            "modified after descriptor declaration: LINK_LIBRARIES",
+        ),
     ]
     for name, body, diagnostic in cases:
         source = write_project(fixtures / name, body)

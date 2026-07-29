@@ -471,6 +471,23 @@ def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
    )
    for path in graph_sources:
       source = path.read_text(errors="ignore")
+      if path.name == "ForgeContractGraph.cmake":
+         seal = re.search(
+            r"function\(_forge_contract_sealed_target_properties output\).*?endfunction\(\)",
+            source,
+            flags=re.DOTALL,
+         )
+         if seal is None:
+            errors.append(
+               f"{path.relative_to(root)}: Contract SDK concrete targets must have a sealed property set"
+            )
+         else:
+            for required in ("SOURCES", "LINK_LIBRARIES", "INTERFACE_LINK_LIBRARIES"):
+               if not re.search(rf"(?m)^\s+{required}\s*$", seal.group()):
+                  errors.append(
+                     f"{path.relative_to(root)}: Contract SDK sealed property set omits {required}"
+                  )
+            source = source[: seal.start()] + source[seal.end() :]
       for token in reverse_graph_tokens:
          if token.search(source):
             errors.append(

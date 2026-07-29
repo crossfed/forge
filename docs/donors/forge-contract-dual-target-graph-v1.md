@@ -97,9 +97,13 @@ rediscover dependencies from generated build state.
   schema or digest mismatch.
 
 Native CMake mutation is intentionally unavailable through the public alias.
-All files, dependencies and supported options must be declared in the Forge
-call. This makes incomplete descriptors configure errors instead of
-platform-dependent build failures.
+Because CMake exposes an alias's concrete target through `ALIASED_TARGET`,
+Forge also seals the materialized target properties and verifies them at the
+end of the top-level configure. All files, dependencies and supported options
+must be declared in the Forge call. This consistency check does not derive a
+second graph from CMake; it only rejects native target state that differs from
+the canonical descriptor materialization. Incomplete descriptors therefore
+remain configure errors instead of platform-dependent build failures.
 
 ## Rejected Mechanisms
 

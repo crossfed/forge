@@ -20,6 +20,139 @@ set(
    FORGE_CONTRACT_INSTALL_PUBLIC_HEADER_PATHS
 )
 
+function(_forge_contract_sealed_target_properties output)
+   set(
+      _properties
+      SOURCES
+      INTERFACE_SOURCES
+      LINK_LIBRARIES
+      INTERFACE_LINK_LIBRARIES
+      INCLUDE_DIRECTORIES
+      INTERFACE_INCLUDE_DIRECTORIES
+      COMPILE_DEFINITIONS
+      INTERFACE_COMPILE_DEFINITIONS
+      COMPILE_FEATURES
+      INTERFACE_COMPILE_FEATURES
+      COMPILE_OPTIONS
+      INTERFACE_COMPILE_OPTIONS
+      LINK_DIRECTORIES
+      INTERFACE_LINK_DIRECTORIES
+      LINK_OPTIONS
+      INTERFACE_LINK_OPTIONS
+      PRECOMPILE_HEADERS
+      INTERFACE_PRECOMPILE_HEADERS
+      MANUALLY_ADDED_DEPENDENCIES
+      CXX_STANDARD
+      CXX_STANDARD_REQUIRED
+      CXX_EXTENSIONS
+      POSITION_INDEPENDENT_CODE
+      CXX_MODULE_SETS
+      INTERFACE_CXX_MODULE_SETS
+      CXX_MODULE_SET_forge_contract_modules
+      CXX_MODULE_DIRS_forge_contract_modules
+      HEADER_SETS
+      INTERFACE_HEADER_SETS
+      HEADER_SET_forge_contract_public_headers
+      HEADER_DIRS_forge_contract_public_headers
+      OUTPUT_NAME
+      EXPORT_NAME
+      EXPORT_PROPERTIES
+      EXPORT_NO_SYSTEM
+      NO_SYSTEM_FROM_IMPORTED
+      FORGE_CONTRACT_BUILD_SOURCE_ROOT
+      FORGE_CONTRACT_DESCRIPTOR_SCHEMA
+      FORGE_CONTRACT_LIBRARY
+      FORGE_CONTRACT_LIBRARY_ID
+      FORGE_CONTRACT_MODULE_BASE_DIRS
+      FORGE_CONTRACT_MODULE_SOURCES
+      FORGE_CONTRACT_SOURCES
+      FORGE_CONTRACT_PUBLIC_HEADERS
+      FORGE_CONTRACT_PRIVATE_HEADERS
+      FORGE_CONTRACT_PUBLIC_LIBRARY_IDS
+      FORGE_CONTRACT_PRIVATE_LIBRARY_IDS
+      FORGE_CONTRACT_PUBLIC_COMPONENT_IDS
+      FORGE_CONTRACT_PRIVATE_COMPONENT_IDS
+      FORGE_CONTRACT_INSTALL_MODULE_ROOT_RELATIVE
+      FORGE_CONTRACT_INSTALL_SOURCE_ROOT_RELATIVE
+      FORGE_CONTRACT_INSTALL_MODULE_PATHS
+      FORGE_CONTRACT_INSTALL_PUBLIC_HEADER_PATHS
+   )
+   set(${output} "${_properties}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_assert_sealed_target target)
+   string(SHA256 _target_key "${target}")
+   _forge_contract_sealed_target_properties(_properties)
+   foreach(_property IN LISTS _properties)
+      get_property(
+         _expected_set GLOBAL
+         PROPERTY "FORGE_CONTRACT_SEALED_TARGET_${_target_key}_${_property}_SET"
+      )
+      get_property(_actual_set TARGET "${target}" PROPERTY "${_property}" SET)
+      if(NOT "${_actual_set}" STREQUAL "${_expected_set}")
+         message(
+            FATAL_ERROR
+            "Forge Contract library target ${target} was modified after descriptor "
+            "declaration: ${_property}"
+         )
+      endif()
+      if(_actual_set)
+         get_property(
+            _expected GLOBAL
+            PROPERTY "FORGE_CONTRACT_SEALED_TARGET_${_target_key}_${_property}"
+         )
+         get_property(_actual TARGET "${target}" PROPERTY "${_property}")
+         if(NOT "${_actual}" STREQUAL "${_expected}")
+            message(
+               FATAL_ERROR
+               "Forge Contract library target ${target} was modified after descriptor "
+               "declaration: ${_property}"
+            )
+         endif()
+      endif()
+   endforeach()
+endfunction()
+
+function(_forge_contract_assert_all_sealed_targets)
+   get_property(_targets GLOBAL PROPERTY FORGE_CONTRACT_SEALED_TARGETS)
+   foreach(_target IN LISTS _targets)
+      _forge_contract_assert_sealed_target("${_target}")
+   endforeach()
+endfunction()
+
+function(_forge_contract_seal_target target)
+   string(SHA256 _target_key "${target}")
+   get_property(_targets GLOBAL PROPERTY FORGE_CONTRACT_SEALED_TARGETS)
+   if(NOT target IN_LIST _targets)
+      set_property(GLOBAL APPEND PROPERTY FORGE_CONTRACT_SEALED_TARGETS "${target}")
+   endif()
+   _forge_contract_sealed_target_properties(_properties)
+   foreach(_property IN LISTS _properties)
+      get_property(_is_set TARGET "${target}" PROPERTY "${_property}" SET)
+      set_property(
+         GLOBAL PROPERTY
+         "FORGE_CONTRACT_SEALED_TARGET_${_target_key}_${_property}_SET" "${_is_set}"
+      )
+      if(_is_set)
+         get_property(_value TARGET "${target}" PROPERTY "${_property}")
+         set_property(
+            GLOBAL PROPERTY
+            "FORGE_CONTRACT_SEALED_TARGET_${_target_key}_${_property}" "${_value}"
+         )
+      endif()
+   endforeach()
+
+   get_property(_scheduled GLOBAL PROPERTY FORGE_CONTRACT_SEALED_TARGET_CHECK_SCHEDULED)
+   if(NOT _scheduled)
+      set_property(GLOBAL PROPERTY FORGE_CONTRACT_SEALED_TARGET_CHECK_SCHEDULED TRUE)
+      cmake_language(
+         DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
+         ID forge_contract_assert_sealed_targets
+         CALL _forge_contract_assert_all_sealed_targets
+      )
+   endif()
+endfunction()
+
 function(_forge_contract_resolve_target input output)
    if(NOT TARGET "${input}")
       message(FATAL_ERROR "unknown Contract SDK dependency target: ${input}")
@@ -456,6 +589,7 @@ function(forge_add_contract_library target)
          FORGE_CONTRACT_INSTALL_PUBLIC_HEADER_PATHS ""
    )
    _forge_contract_register_library_target("${_concrete}")
+   _forge_contract_seal_target("${_concrete}")
 endfunction()
 
 function(_forge_contract_imported_location target output)
@@ -502,6 +636,7 @@ function(forge_install_contract_library)
    if(NOT _contract_library)
       message(FATAL_ERROR "forge_install_contract_library target is not a contract library: ${ARG_TARGET}")
    endif()
+   _forge_contract_assert_sealed_target("${_target}")
    if(ARG_EXPORT_NAME)
       set_target_properties("${_target}" PROPERTIES EXPORT_NAME "${ARG_EXPORT_NAME}")
    endif()
@@ -580,6 +715,7 @@ function(forge_install_contract_library)
       endif()
       install(FILES "${_source_root}/${_logical}" DESTINATION "${_destination}")
    endforeach()
+   _forge_contract_seal_target("${_target}")
 endfunction()
 
 function(_forge_contract_json_quote value output)
