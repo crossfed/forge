@@ -47,7 +47,7 @@ to the Contract SDK CMake API.
 
 ## Stability
 
-The public graph values, schema v1 descriptor, reader validation rules and
+The public graph values, schema v2 descriptor, reader validation rules and
 typed exception contract are Stable. The CMake API that produces and
 materializes dual-target graphs is separately marked Experimental in
 `guest/README.md`.
