@@ -3360,6 +3360,25 @@ BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_requests_core_pubsub_capability_before_st
    forge::asio::blocking::run(app.runtime(), app.shutdown());
 }
 
+BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_omits_unverified_author_from_unsigned_messages) {
+   auto source_state = std::make_shared<fake_pubsub_source_state>();
+   auto app = fake_pubsub_application{source_state};
+   forge::asio::blocking::run(app.runtime(), app.startup());
+
+   auto pubsub = app.apis().get<forge::plugins::p2p::pubsub::api>(
+      {.id = {"forge.plugins.p2p.pubsub"}, .major = 1, .min_revision = 0});
+   const auto published = forge::asio::blocking::run(
+      app.runtime(),
+      pubsub->publish(forge::net::p2p::pubsub::topic{.value = "forge.fake.unsigned"}, {1, 2, 3},
+                      forge::plugins::p2p::pubsub::publish_options{.sign = false}));
+
+   BOOST_TEST(published.source.to_string() == "fake-pubsub-peer");
+   BOOST_TEST(!published.author.has_value());
+   BOOST_TEST(published.data == (std::vector<std::uint8_t>{1, 2, 3}), boost::test_tools::per_element());
+
+   forge::asio::blocking::run(app.runtime(), app.shutdown());
+}
+
 BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_serializes_first_join_per_topic) {
    auto source_state = std::make_shared<fake_pubsub_source_state>();
    auto app = fake_pubsub_application{source_state};

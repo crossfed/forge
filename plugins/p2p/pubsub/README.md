@@ -102,8 +102,10 @@ registry.register_plugin(forge::plugins::p2p::pubsub::descriptor());
   backpressure map to bounded retries; they are not product authorization by
   themselves.
 - `message.source` is the immediate peer for the current gossip hop.
-  `message.author` is the optional signed origin. Use `source` for per-peer
-  quotas and `author` for origin attribution or signature policy.
+  `message.author` is present only for a successfully verified signed message.
+  Use `source` for per-peer quotas and a present `author` for signed-origin
+  attribution or signature policy. Unsigned messages never expose their
+  unverified wire `from` value as `author`.
 - Signing publish messages is transport/pubsub integrity support, not business
   trust policy.
 
