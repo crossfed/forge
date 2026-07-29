@@ -101,6 +101,9 @@ registry.register_plugin(forge::plugins::p2p::pubsub::descriptor());
   or transient `retry`. Handler deadlines, failures and local active-handler
   backpressure map to bounded retries; they are not product authorization by
   themselves.
+- `message.source` is the immediate peer for the current gossip hop.
+  `message.author` is the optional signed origin. Use `source` for per-peer
+  quotas and `author` for origin attribution or signature policy.
 - Signing publish messages is transport/pubsub integrity support, not business
   trust policy.
 
