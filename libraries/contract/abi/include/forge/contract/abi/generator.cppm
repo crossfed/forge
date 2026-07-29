@@ -24,7 +24,7 @@ struct request {
    std::filesystem::path ricardian_contracts;
    std::filesystem::path ricardian_clauses;
    std::vector<std::filesystem::path> module_paths;
-   std::vector<std::filesystem::path> system_include_paths;
+   std::vector<std::filesystem::path> sdk_include_paths;
    std::vector<std::filesystem::path> include_paths;
    std::vector<std::filesystem::path> sources;
    std::vector<std::filesystem::path> dependency_sources;

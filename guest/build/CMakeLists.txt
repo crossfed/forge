@@ -635,8 +635,8 @@ set(_abigen_command
    --contract-graph "${FORGE_CONTRACT_GRAPH_FILE}"
    --attribute-plugin "${FORGE_CONTRACT_ATTR_PLUGIN}"
    --sysroot "${CMAKE_SYSROOT}"
-   --system-include "${_sdk_include_root}"
-   --system-include "${_sdk_modules_root}"
+   --sdk-include "${_sdk_include_root}"
+   --sdk-include "${_sdk_modules_root}"
    --include "${FORGE_CONTRACT_SOURCE_ROOT}"
 )
 list(APPEND _abigen_command ${_contract_compilation_arguments})

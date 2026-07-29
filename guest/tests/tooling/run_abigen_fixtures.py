@@ -92,9 +92,9 @@ def invoke(
         str(args.plugin),
         "--sysroot",
         str(args.sysroot),
-        "--system-include",
+        "--sdk-include",
         str(args.include),
-        "--system-include",
+        "--sdk-include",
         str(args.modules),
     ]
     module_dirs = sorted(
@@ -491,6 +491,19 @@ def main():
         raise RuntimeError("EOSIO fixed_bytes adapters changed their canonical ABI names")
     if any(item["name"].startswith("fixed_bytes") for item in eosio_fixed_bytes["structs"]):
         raise RuntimeError("EOSIO fixed_bytes adapter leaked an implementation record into the ABI")
+
+    sdk_alias = invoke(
+        args,
+        "sdkalias",
+        args.fixtures / "sdk_type_alias.cpp",
+        args.output / "sdk-type-alias",
+    )
+    sdk_alias_types = {item["new_type_name"]: item["type"] for item in sdk_alias["types"]}
+    if sdk_alias_types.get("block_signing_authority") != "variant_block_signing_authority_v0":
+        raise RuntimeError("SDK-owned type alias was erased from the contract ABI")
+    authority_fields = by_name(by_name(sdk_alias["structs"])["producer_authority"]["fields"])
+    if authority_fields["authority"]["type"] != "block_signing_authority":
+        raise RuntimeError("SDK-owned type alias was desugared at its use site")
 
     equivalent_struct = invoke(
         args,
