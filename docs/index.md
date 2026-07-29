@@ -13,6 +13,8 @@ Documents below explain cross-library architecture decisions.
 
 | Document | Purpose |
 | --- | --- |
+| [releases/8.17.0.md](releases/8.17.0.md) | Forge 8.17.0 DB Store durability status and API 2.0 migration. |
+| [releases/8.16.1.md](releases/8.16.1.md) | Forge 8.16.1 P2P identity reuse and concurrent handshake safety. |
 | [releases/8.16.0.md](releases/8.16.0.md) | Forge 8.16.0 dual-target Contract SDK, digest-lifetime and P2P lifecycle changes. |
 | [releases/8.15.0.md](releases/8.15.0.md) | Forge 8.15.0 purpose-scoped BLS signer API for downstream finality services. |
 | [releases/8.14.0.md](releases/8.14.0.md) | Forge 8.14.0 bounded Savanna validation, vote accumulation and finalizer safety. |
