@@ -1033,6 +1033,7 @@ install(
 )
 
 if(FORGE_ENABLE_CONTRACT_TOOLING)
+   get_property(_forge_contract_testing_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
    set(_forge_contract_testing_package_prefix "${CMAKE_BINARY_DIR}/forge-contract-testing-package")
    set(_forge_contract_testing_relocated_prefix "${CMAKE_BINARY_DIR}/forge-contract-testing-relocated")
    set(_forge_contract_testing_consumer_build "${CMAKE_BINARY_DIR}/forge-contract-testing-consumer")
@@ -1047,6 +1048,8 @@ if(FORGE_ENABLE_CONTRACT_TOOLING)
       "-DFORGE_PACKAGE_TEST_SOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}"
       "-DFORGE_PACKAGE_TEST_BUILD_ROOT=${CMAKE_BINARY_DIR}"
       "-DFORGE_PACKAGE_TEST_GENERATOR=${CMAKE_GENERATOR}"
+      "-DFORGE_PACKAGE_TEST_CONFIG=$<CONFIG>"
+      "-DFORGE_PACKAGE_TEST_MULTI_CONFIG=${_forge_contract_testing_multi_config}"
       "-DFORGE_PACKAGE_TEST_C_COMPILER=${CMAKE_C_COMPILER}"
       "-DFORGE_PACKAGE_TEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
       "-DFORGE_PACKAGE_TEST_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}"

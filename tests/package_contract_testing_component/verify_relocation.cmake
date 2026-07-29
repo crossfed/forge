@@ -11,6 +11,8 @@ foreach(
       FORGE_PACKAGE_TEST_SOURCE_ROOT
       FORGE_PACKAGE_TEST_BUILD_ROOT
       FORGE_PACKAGE_TEST_GENERATOR
+      FORGE_PACKAGE_TEST_CONFIG
+      FORGE_PACKAGE_TEST_MULTI_CONFIG
       FORGE_PACKAGE_TEST_C_COMPILER
       FORGE_PACKAGE_TEST_CXX_COMPILER
 )
@@ -30,6 +32,7 @@ execute_process(
       "${CMAKE_COMMAND}" --install "${FORGE_PACKAGE_TEST_BUILD_ROOT}"
       --prefix "${FORGE_PACKAGE_TEST_INSTALL_PREFIX}"
       --component dev
+      --config "${FORGE_PACKAGE_TEST_CONFIG}"
    COMMAND_ERROR_IS_FATAL ANY
 )
 file(RENAME "${FORGE_PACKAGE_TEST_INSTALL_PREFIX}" "${FORGE_PACKAGE_TEST_RELOCATED_PREFIX}")
@@ -85,9 +88,17 @@ endif()
 execute_process(COMMAND ${configure_command} COMMAND_ERROR_IS_FATAL ANY)
 execute_process(
    COMMAND "${CMAKE_COMMAND}" --build "${FORGE_PACKAGE_TEST_BINARY_DIR}"
+      --config "${FORGE_PACKAGE_TEST_CONFIG}"
    COMMAND_ERROR_IS_FATAL ANY
 )
+set(consumer_executable "${FORGE_PACKAGE_TEST_BINARY_DIR}/forge_package_contract_testing_component")
+if(FORGE_PACKAGE_TEST_MULTI_CONFIG)
+   set(
+      consumer_executable
+      "${FORGE_PACKAGE_TEST_BINARY_DIR}/${FORGE_PACKAGE_TEST_CONFIG}/forge_package_contract_testing_component"
+   )
+endif()
 execute_process(
-   COMMAND "${FORGE_PACKAGE_TEST_BINARY_DIR}/forge_package_contract_testing_component"
+   COMMAND "${consumer_executable}"
    COMMAND_ERROR_IS_FATAL ANY
 )
