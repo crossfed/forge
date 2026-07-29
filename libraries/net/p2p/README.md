@@ -83,6 +83,16 @@ Network-level behaviors that must not be pushed into plugins:
 policy. Application protocols own idempotency, acknowledgement and
 permission checks above P2P.
 
+GossipSub validation keeps `accept`, `reject` and `ignore` terminal while the
+message remains in bounded history. `retry`, handler failure and local
+validation backpressure are transient: the receiving heartbeat requests the
+cached payload from its source peer after a capped exponential cooldown,
+independently of ordinary `IHAVE` history. A message becomes terminally ignored
+after the configured validation or request-attempt limit. Each heartbeat
+applies a round-robin retry budget, and retry records are evicted with the
+payload history, so unreachable peers and repeated transient failures cannot
+create unbounded work or a second cache.
+
 ## Examples
 
 ### Start A Node

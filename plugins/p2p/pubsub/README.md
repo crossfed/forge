@@ -97,8 +97,10 @@ registry.register_plugin(forge::plugins::p2p::pubsub::descriptor());
 ## Security And Boundaries
 
 - Topic allow/deny lists and max message size are config controls.
-- Message validation callbacks decide accept/reject at the pubsub boundary; they
-  are not product authorization by themselves.
+- Message validation callbacks return terminal `accept`, `reject` or `ignore`,
+  or transient `retry`. Handler deadlines, failures and local active-handler
+  backpressure map to bounded retries; they are not product authorization by
+  themselves.
 - Signing publish messages is transport/pubsub integrity support, not business
   trust policy.
 

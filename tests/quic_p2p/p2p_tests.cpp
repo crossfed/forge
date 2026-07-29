@@ -4246,6 +4246,717 @@ BOOST_AUTO_TEST_CASE(p2p_gossipsub_nodes_deliver_signed_publish_over_negotiated_
    forge::asio::blocking::run(runtime, subscriber.async_stop());
 }
 
+BOOST_AUTO_TEST_CASE(p2p_gossipsub_retry_is_redelivered_after_bounded_cooldown) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   auto publisher_options = pubsub_options_for();
+   auto subscriber_options = pubsub_options_for();
+   publisher_options.limits.pubsub.signatures = pubsub::signature_policy::lax_no_sign;
+   subscriber_options.limits.pubsub.signatures = pubsub::signature_policy::lax_no_sign;
+   subscriber_options.explicit_peer_id = peer(153);
+   for (auto* options : {&publisher_options, &subscriber_options}) {
+      options->limits.pubsub.limits.heartbeat_initial_delay = std::chrono::milliseconds{10};
+      options->limits.pubsub.limits.heartbeat_interval = std::chrono::milliseconds{20};
+      options->limits.pubsub.limits.validation_retry_initial_delay = std::chrono::milliseconds{40};
+      options->limits.pubsub.limits.validation_retry_max_delay = std::chrono::milliseconds{80};
+      options->limits.pubsub.limits.history_gossip = 1;
+   }
+
+   auto publisher = node{runtime, std::move(publisher_options)};
+   auto subscriber = node{runtime, std::move(subscriber_options)};
+   (void)listen(publisher, runtime);
+   const auto subscriber_endpoint = listen(subscriber, runtime);
+   publisher.peers().learn_endpoint(subscriber.local_peer(), subscriber_endpoint,
+                                    capability_set{.bits = capabilities::direct_quic | capabilities::pubsub});
+
+   const auto subject = pubsub::topic{.value = "forge.pubsub.retry"};
+   forge::asio::blocking::run(
+       runtime,
+       publisher.async_subscribe(subject, [](pubsub::event) -> boost::asio::awaitable<pubsub::validation_result> {
+          co_return pubsub::validation_result::accept;
+       }));
+
+   auto attempts = std::make_shared<std::atomic_uint64_t>(0);
+   auto first_attempt = std::make_shared<std::promise<void>>();
+   auto first_attempt_future = first_attempt->get_future();
+   auto accepted = std::make_shared<std::promise<void>>();
+   auto accepted_future = accepted->get_future();
+   forge::asio::blocking::run(
+       runtime, subscriber.async_subscribe(
+                    subject,
+                    [attempts, first_attempt,
+                     accepted](pubsub::event) mutable -> boost::asio::awaitable<pubsub::validation_result> {
+                       const auto attempt = attempts->fetch_add(1, std::memory_order_relaxed);
+                       if (attempt == 0) {
+                          first_attempt->set_value();
+                          auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+                          timer.expires_after(std::chrono::milliseconds{25});
+                          boost::system::error_code ec;
+                          co_await timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, ec));
+                          co_return pubsub::validation_result::retry;
+                       }
+                       if (attempt == 1) {
+                          accepted->set_value();
+                       }
+                       co_return pubsub::validation_result::accept;
+                    }));
+
+   (void)forge::asio::blocking::run(runtime,
+                                    publisher.async_publish(subject, std::vector<std::uint8_t>{'r', 'e', 't', 'r', 'y'},
+                                                            pubsub::publish_options{.sign = false}));
+   BOOST_REQUIRE(first_attempt_future.wait_for(std::chrono::seconds{5}) == std::future_status::ready);
+   first_attempt_future.get();
+   const auto noise_subject = pubsub::topic{.value = "forge.pubsub.retry.noise"};
+   for (auto value = std::uint8_t{}; value < 8; ++value) {
+      (void)forge::asio::blocking::run(runtime, publisher.async_publish(noise_subject, std::vector<std::uint8_t>{value},
+                                                                        pubsub::publish_options{.sign = false}));
+   }
+
+   if (accepted_future.wait_for(std::chrono::seconds{5}) != std::future_status::ready) {
+      const auto snapshot = subscriber.pubsub_snapshot();
+      BOOST_FAIL("retryable PubSub message was not redelivered; attempts="
+                 << attempts->load(std::memory_order_relaxed) << " received=" << snapshot.messages_received
+                 << " delivered=" << snapshot.messages_delivered << " duplicates=" << snapshot.duplicates
+                 << " controls=" << snapshot.control_messages);
+   }
+   accepted_future.get();
+   wait_on_runtime(runtime, std::chrono::milliseconds{50}, "post-redelivery accounting");
+
+   BOOST_TEST(attempts->load(std::memory_order_relaxed) == 2U);
+   BOOST_TEST(subscriber.pubsub_snapshot().messages_delivered == 1U);
+
+   forge::asio::blocking::run(runtime, publisher.async_stop());
+   forge::asio::blocking::run(runtime, subscriber.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_gossipsub_ignore_remains_terminal_during_history_window) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   auto publisher_options = pubsub_options_for();
+   auto subscriber_options = pubsub_options_for();
+   publisher_options.limits.pubsub.signatures = pubsub::signature_policy::lax_no_sign;
+   subscriber_options.limits.pubsub.signatures = pubsub::signature_policy::lax_no_sign;
+   for (auto* options : {&publisher_options, &subscriber_options}) {
+      options->limits.pubsub.limits.heartbeat_initial_delay = std::chrono::milliseconds{10};
+      options->limits.pubsub.limits.heartbeat_interval = std::chrono::milliseconds{20};
+      options->limits.pubsub.limits.validation_retry_initial_delay = std::chrono::milliseconds{20};
+      options->limits.pubsub.limits.validation_retry_max_delay = std::chrono::milliseconds{40};
+   }
+
+   auto publisher = node{runtime, std::move(publisher_options)};
+   auto subscriber = node{runtime, std::move(subscriber_options)};
+   (void)listen(publisher, runtime);
+   const auto subscriber_endpoint = listen(subscriber, runtime);
+   publisher.peers().learn_endpoint(subscriber.local_peer(), subscriber_endpoint,
+                                    capability_set{.bits = capabilities::direct_quic | capabilities::pubsub});
+
+   const auto subject = pubsub::topic{.value = "forge.pubsub.ignore"};
+   forge::asio::blocking::run(
+       runtime,
+       publisher.async_subscribe(subject, [](pubsub::event) -> boost::asio::awaitable<pubsub::validation_result> {
+          co_return pubsub::validation_result::accept;
+       }));
+   auto attempts = std::make_shared<std::atomic_uint64_t>(0);
+   auto ignored = std::make_shared<std::promise<void>>();
+   auto ignored_future = ignored->get_future();
+   forge::asio::blocking::run(
+       runtime,
+       subscriber.async_subscribe(
+           subject, [attempts, ignored](pubsub::event) mutable -> boost::asio::awaitable<pubsub::validation_result> {
+              if (attempts->fetch_add(1, std::memory_order_relaxed) == 0) {
+                 ignored->set_value();
+              }
+              co_return pubsub::validation_result::ignore;
+           }));
+
+   (void)forge::asio::blocking::run(
+       runtime, publisher.async_publish(subject, std::vector<std::uint8_t>{'i', 'g', 'n', 'o', 'r', 'e'},
+                                        pubsub::publish_options{.sign = false}));
+   BOOST_REQUIRE(ignored_future.wait_for(std::chrono::seconds{5}) == std::future_status::ready);
+   ignored_future.get();
+   wait_on_runtime(runtime, std::chrono::milliseconds{250}, "terminal ignore window");
+
+   BOOST_TEST(attempts->load(std::memory_order_relaxed) == 1U);
+   BOOST_TEST(subscriber.pubsub_snapshot().messages_delivered == 0U);
+
+   forge::asio::blocking::run(runtime, publisher.async_stop());
+   forge::asio::blocking::run(runtime, subscriber.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_gossipsub_retry_rejects_signed_equivocation_for_same_message_id) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   const auto publisher_identity = make_test_certificate_identity("pubsub-retry-equivocation-publisher");
+   const auto subscriber_identity = make_test_certificate_identity("pubsub-retry-equivocation-subscriber");
+   auto subscriber_options = pubsub_options_for(subscriber_identity);
+   subscriber_options.limits.pubsub.limits.validation_retry_initial_delay = std::chrono::milliseconds{40};
+   subscriber_options.limits.pubsub.limits.validation_retry_max_delay = std::chrono::milliseconds{40};
+   auto publisher_options = pubsub_options_for(publisher_identity);
+
+   auto subscriber = node{runtime, std::move(subscriber_options)};
+   auto publisher = node{runtime, std::move(publisher_options)};
+   const auto subscriber_endpoint = listen(subscriber, runtime);
+   publisher.peers().learn_endpoint(subscriber.local_peer(), subscriber_endpoint,
+                                    capability_set{.bits = capabilities::direct_quic | capabilities::pubsub});
+
+   const auto subject = pubsub::topic{.value = "forge.pubsub.retry.equivocation"};
+   auto attempts = std::make_shared<std::atomic_uint64_t>(0);
+   auto ignored = std::make_shared<std::promise<void>>();
+   auto ignored_future = ignored->get_future();
+   forge::asio::blocking::run(
+       runtime,
+       subscriber.async_subscribe(
+           subject, [attempts, ignored](pubsub::event) mutable -> boost::asio::awaitable<pubsub::validation_result> {
+              if (attempts->fetch_add(1, std::memory_order_relaxed) == 0) {
+                 ignored->set_value();
+              }
+              co_return pubsub::validation_result::retry;
+           }));
+
+   auto first = pubsub::message{
+       .data = std::vector<std::uint8_t>{'f', 'i', 'r', 's', 't'},
+       .seqno = std::vector<std::uint8_t>{0, 0, 0, 0, 0, 0, 0, 17},
+       .subject = subject,
+   };
+   const auto private_key = forge::crypto::pki::pem::read_private_key(publisher_identity.private_key_pem);
+   pubsub::codec::sign_message(first, private_key);
+   auto second = first;
+   second.data = std::vector<std::uint8_t>{'s', 'e', 'c', 'o', 'n', 'd'};
+   pubsub::codec::sign_message(second, private_key);
+   BOOST_REQUIRE(pubsub::codec::verify_message(first));
+   BOOST_REQUIRE(pubsub::codec::verify_message(second));
+   BOOST_TEST(pubsub::codec::message_id(first) == pubsub::codec::message_id(second),
+              boost::test_tools::per_element());
+
+   auto stream = forge::asio::blocking::run(
+       runtime, publisher.async_open_protocol_stream(subscriber.local_peer(), builtins::meshsub_v11));
+   forge::asio::blocking::run(
+       runtime, stream.async_write(pubsub::codec::encode(pubsub::rpc{.messages = std::vector<pubsub::message>{first}})));
+   BOOST_REQUIRE(ignored_future.wait_for(std::chrono::seconds{5}) == std::future_status::ready);
+   ignored_future.get();
+   wait_on_runtime(runtime, std::chrono::milliseconds{60}, "signed equivocation retry cooldown");
+
+   forge::asio::blocking::run(
+       runtime, stream.async_write(pubsub::codec::encode(pubsub::rpc{.messages = std::vector<pubsub::message>{second}})));
+   wait_on_runtime(runtime, std::chrono::milliseconds{100}, "signed equivocation accounting");
+
+   BOOST_TEST(attempts->load(std::memory_order_relaxed) == 1U);
+   BOOST_TEST(subscriber.metrics().pubsub_invalid_messages >= 1U);
+   BOOST_TEST(subscriber.metrics().protocol_rejections >= 1U);
+   BOOST_TEST(subscriber.pubsub_snapshot().messages_delivered == 0U);
+
+   forge::asio::blocking::run(runtime, stream.async_close());
+   forge::asio::blocking::run(runtime, publisher.async_stop());
+   forge::asio::blocking::run(runtime, subscriber.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_gossipsub_retry_accepts_equivalent_signed_envelope_without_inline_key) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   const auto publisher_identity = make_test_certificate_identity("pubsub-retry-envelope-publisher");
+   const auto subscriber_identity = make_test_certificate_identity("pubsub-retry-envelope-subscriber");
+   auto publisher_options = pubsub_options_for(publisher_identity);
+   auto subscriber_options = pubsub_options_for(subscriber_identity);
+   subscriber_options.limits.pubsub.limits.validation_retry_initial_delay = std::chrono::milliseconds{40};
+   subscriber_options.limits.pubsub.limits.validation_retry_max_delay = std::chrono::milliseconds{40};
+
+   auto publisher = node{runtime, std::move(publisher_options)};
+   auto subscriber = node{runtime, std::move(subscriber_options)};
+   const auto subscriber_endpoint = listen(subscriber, runtime);
+   publisher.peers().learn_endpoint(subscriber.local_peer(), subscriber_endpoint,
+                                    capability_set{.bits = capabilities::direct_quic | capabilities::pubsub});
+
+   const auto subject = pubsub::topic{.value = "forge.pubsub.retry.envelope"};
+   auto attempts = std::make_shared<std::atomic_uint64_t>(0);
+   auto retryable = std::make_shared<std::promise<void>>();
+   auto retryable_future = retryable->get_future();
+   auto accepted = std::make_shared<std::promise<void>>();
+   auto accepted_future = accepted->get_future();
+   forge::asio::blocking::run(
+       runtime, subscriber.async_subscribe(
+                    subject,
+                    [attempts, retryable,
+                     accepted](pubsub::event) mutable -> boost::asio::awaitable<pubsub::validation_result> {
+                       const auto attempt = attempts->fetch_add(1, std::memory_order_relaxed);
+                       if (attempt == 0) {
+                          retryable->set_value();
+                          co_return pubsub::validation_result::retry;
+                       }
+                       accepted->set_value();
+                       co_return pubsub::validation_result::accept;
+                    }));
+
+   const auto author = make_test_identity();
+   auto with_key = pubsub::message{
+       .data = std::vector<std::uint8_t>{'e', 'n', 'v', 'e', 'l', 'o', 'p', 'e'},
+       .seqno = std::vector<std::uint8_t>{0, 0, 0, 0, 0, 0, 0, 18},
+       .subject = subject,
+   };
+   pubsub::codec::sign_message(with_key, author.private_key);
+   auto without_key = with_key;
+   without_key.key.clear();
+   BOOST_REQUIRE(pubsub::codec::verify_message(with_key));
+   BOOST_REQUIRE(pubsub::codec::verify_message(without_key));
+
+   auto stream = forge::asio::blocking::run(
+       runtime, publisher.async_open_protocol_stream(subscriber.local_peer(), builtins::meshsub_v11));
+   forge::asio::blocking::run(runtime, stream.async_write(pubsub::codec::encode(
+                                                   pubsub::rpc{.messages = std::vector<pubsub::message>{with_key}})));
+   BOOST_REQUIRE(retryable_future.wait_for(std::chrono::seconds{5}) == std::future_status::ready);
+   retryable_future.get();
+   wait_on_runtime(runtime, std::chrono::milliseconds{60}, "equivalent envelope retry cooldown");
+   forge::asio::blocking::run(runtime, stream.async_write(pubsub::codec::encode(
+                                                   pubsub::rpc{.messages = std::vector<pubsub::message>{without_key}})));
+
+   BOOST_REQUIRE(accepted_future.wait_for(std::chrono::seconds{5}) == std::future_status::ready);
+   accepted_future.get();
+   BOOST_TEST(attempts->load(std::memory_order_relaxed) == 2U);
+   BOOST_TEST(subscriber.metrics().pubsub_invalid_messages == 0U);
+   BOOST_TEST(subscriber.pubsub_snapshot().messages_delivered == 1U);
+
+   forge::asio::blocking::run(runtime, stream.async_close());
+   forge::asio::blocking::run(runtime, publisher.async_stop());
+   forge::asio::blocking::run(runtime, subscriber.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_gossipsub_in_progress_validation_is_not_replaced_after_cache_pressure) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 6}};
+   const auto first_transport_identity = make_test_certificate_identity("pubsub-validation-first-transport");
+   const auto competing_transport_identity = make_test_certificate_identity("pubsub-validation-competing-transport");
+   const auto subscriber_identity = make_test_certificate_identity("pubsub-validation-pressure-subscriber");
+   auto first_options = pubsub_options_for(first_transport_identity);
+   auto competing_options = pubsub_options_for(competing_transport_identity);
+   auto subscriber_options = pubsub_options_for(subscriber_identity);
+   subscriber_options.limits.pubsub.limits.history_length = 1;
+   subscriber_options.limits.pubsub.limits.max_messages = 1;
+
+   auto first_transport = node{runtime, std::move(first_options)};
+   auto competing_transport = node{runtime, std::move(competing_options)};
+   auto subscriber = node{runtime, std::move(subscriber_options)};
+   const auto subscriber_endpoint = listen(subscriber, runtime);
+   first_transport.peers().learn_endpoint(subscriber.local_peer(), subscriber_endpoint,
+                                          capability_set{.bits = capabilities::direct_quic | capabilities::pubsub});
+   competing_transport.peers().learn_endpoint(
+       subscriber.local_peer(), subscriber_endpoint,
+       capability_set{.bits = capabilities::direct_quic | capabilities::pubsub});
+
+   const auto subject = pubsub::topic{.value = "forge.pubsub.validation.pressure"};
+   auto first_entered = std::make_shared<std::promise<void>>();
+   auto first_entered_future = first_entered->get_future();
+   auto second_payloads = std::make_shared<std::atomic_uint64_t>(0);
+   forge::asio::blocking::run(
+       runtime, subscriber.async_subscribe(
+                    subject,
+                    [first_entered,
+                     second_payloads](pubsub::event event) mutable -> boost::asio::awaitable<pubsub::validation_result> {
+                       if (event.value.data == std::vector<std::uint8_t>{'f', 'i', 'r', 's', 't'}) {
+                          first_entered->set_value();
+                          auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+                          timer.expires_after(std::chrono::milliseconds{300});
+                          co_await timer.async_wait(boost::asio::use_awaitable);
+                       } else if (event.value.data == std::vector<std::uint8_t>{'s', 'e', 'c', 'o', 'n', 'd'}) {
+                          second_payloads->fetch_add(1, std::memory_order_relaxed);
+                       }
+                       co_return pubsub::validation_result::accept;
+                    }));
+
+   const auto author = make_test_identity();
+   auto first = pubsub::message{
+       .data = std::vector<std::uint8_t>{'f', 'i', 'r', 's', 't'},
+       .seqno = std::vector<std::uint8_t>{0, 0, 0, 0, 0, 0, 0, 19},
+       .subject = subject,
+   };
+   pubsub::codec::sign_message(first, author.private_key);
+   auto second = first;
+   second.data = std::vector<std::uint8_t>{'s', 'e', 'c', 'o', 'n', 'd'};
+   pubsub::codec::sign_message(second, author.private_key);
+   auto filler = pubsub::message{
+       .data = std::vector<std::uint8_t>{'f', 'i', 'l', 'l', 'e', 'r'},
+       .seqno = std::vector<std::uint8_t>{0, 0, 0, 0, 0, 0, 0, 20},
+       .subject = subject,
+   };
+   pubsub::codec::sign_message(filler, author.private_key);
+
+   auto first_stream = forge::asio::blocking::run(
+       runtime, first_transport.async_open_protocol_stream(subscriber.local_peer(), builtins::meshsub_v11));
+   auto competing_stream = forge::asio::blocking::run(
+       runtime, competing_transport.async_open_protocol_stream(subscriber.local_peer(), builtins::meshsub_v11));
+   forge::asio::blocking::run(runtime, first_stream.async_write(pubsub::codec::encode(
+                                                         pubsub::rpc{.messages = std::vector<pubsub::message>{first}})));
+   BOOST_REQUIRE(first_entered_future.wait_for(std::chrono::seconds{5}) == std::future_status::ready);
+   first_entered_future.get();
+   forge::asio::blocking::run(runtime, competing_stream.async_write(pubsub::codec::encode(
+                                                             pubsub::rpc{.messages = std::vector<pubsub::message>{filler}})));
+   forge::asio::blocking::run(runtime, competing_stream.async_write(pubsub::codec::encode(
+                                                             pubsub::rpc{.messages = std::vector<pubsub::message>{second}})));
+   wait_on_runtime(runtime, std::chrono::milliseconds{500}, "in-progress validation completion");
+
+   BOOST_TEST(second_payloads->load(std::memory_order_relaxed) == 0U);
+   BOOST_TEST(subscriber.metrics().pubsub_invalid_messages >= 1U);
+   BOOST_TEST(subscriber.pubsub_snapshot().messages_delivered == 2U);
+
+   forge::asio::blocking::run(runtime, first_stream.async_close());
+   forge::asio::blocking::run(runtime, competing_stream.async_close());
+   forge::asio::blocking::run(runtime, first_transport.async_stop());
+   forge::asio::blocking::run(runtime, competing_transport.async_stop());
+   forge::asio::blocking::run(runtime, subscriber.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_gossipsub_proactive_redelivery_stops_after_backpressure_budget) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 6}};
+   const auto occupying_identity = make_test_certificate_identity("pubsub-redelivery-occupying");
+   const auto retrying_identity = make_test_certificate_identity("pubsub-redelivery-retrying");
+   const auto subscriber_identity = make_test_certificate_identity("pubsub-redelivery-subscriber");
+   auto occupying_options = pubsub_options_for(occupying_identity);
+   auto retrying_options = pubsub_options_for(retrying_identity);
+   auto subscriber_options = pubsub_options_for(subscriber_identity);
+   subscriber_options.limits.pubsub.limits.max_validation_queue = 1;
+   subscriber_options.limits.pubsub.limits.max_validation_redeliveries = 2;
+   subscriber_options.limits.pubsub.limits.validation_retry_initial_delay = std::chrono::milliseconds{20};
+   subscriber_options.limits.pubsub.limits.validation_retry_max_delay = std::chrono::milliseconds{20};
+
+   auto occupying = node{runtime, std::move(occupying_options)};
+   auto retrying = node{runtime, std::move(retrying_options)};
+   auto subscriber = node{runtime, std::move(subscriber_options)};
+   const auto subscriber_endpoint = listen(subscriber, runtime);
+   occupying.peers().learn_endpoint(subscriber.local_peer(), subscriber_endpoint,
+                                    capability_set{.bits = capabilities::direct_quic | capabilities::pubsub});
+   retrying.peers().learn_endpoint(subscriber.local_peer(), subscriber_endpoint,
+                                   capability_set{.bits = capabilities::direct_quic | capabilities::pubsub});
+
+   const auto subject = pubsub::topic{.value = "forge.pubsub.redelivery.budget"};
+   auto occupying_entered = std::make_shared<std::promise<void>>();
+   auto occupying_entered_future = occupying_entered->get_future();
+   auto retrying_callbacks = std::make_shared<std::atomic_uint64_t>(0);
+   forge::asio::blocking::run(
+       runtime, subscriber.async_subscribe(
+                    subject,
+                    [occupying_entered,
+                     retrying_callbacks](pubsub::event event) mutable -> boost::asio::awaitable<pubsub::validation_result> {
+                       if (event.value.data == std::vector<std::uint8_t>{'o', 'c', 'c', 'u', 'p', 'y'}) {
+                          occupying_entered->set_value();
+                          auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+                          timer.expires_after(std::chrono::milliseconds{400});
+                          co_await timer.async_wait(boost::asio::use_awaitable);
+                       } else {
+                          retrying_callbacks->fetch_add(1, std::memory_order_relaxed);
+                       }
+                       co_return pubsub::validation_result::accept;
+                    }));
+
+   const auto author = make_test_identity();
+   auto occupying_message = pubsub::message{
+       .data = std::vector<std::uint8_t>{'o', 'c', 'c', 'u', 'p', 'y'},
+       .seqno = std::vector<std::uint8_t>{0, 0, 0, 0, 0, 0, 0, 21},
+       .subject = subject,
+   };
+   pubsub::codec::sign_message(occupying_message, author.private_key);
+   auto retrying_message = pubsub::message{
+       .data = std::vector<std::uint8_t>{'r', 'e', 't', 'r', 'y'},
+       .seqno = std::vector<std::uint8_t>{0, 0, 0, 0, 0, 0, 0, 22},
+       .subject = subject,
+   };
+   pubsub::codec::sign_message(retrying_message, author.private_key);
+
+   auto occupying_stream = forge::asio::blocking::run(
+       runtime, occupying.async_open_protocol_stream(subscriber.local_peer(), builtins::meshsub_v11));
+   auto retrying_stream = forge::asio::blocking::run(
+       runtime, retrying.async_open_protocol_stream(subscriber.local_peer(), builtins::meshsub_v11));
+   forge::asio::blocking::run(runtime, occupying_stream.async_write(pubsub::codec::encode(
+                                                             pubsub::rpc{.messages = {occupying_message}})));
+   BOOST_REQUIRE(occupying_entered_future.wait_for(std::chrono::seconds{5}) == std::future_status::ready);
+   occupying_entered_future.get();
+
+   for (auto delivery = 0; delivery < 4; ++delivery) {
+      forge::asio::blocking::run(
+          runtime,
+          retrying_stream.async_write(pubsub::codec::encode(pubsub::rpc{.messages = {retrying_message}})));
+      wait_on_runtime(runtime, std::chrono::milliseconds{40}, "proactive redelivery");
+   }
+   wait_on_runtime(runtime, std::chrono::milliseconds{450}, "validation queue release");
+   forge::asio::blocking::run(
+       runtime, retrying_stream.async_write(pubsub::codec::encode(pubsub::rpc{.messages = {retrying_message}})));
+   wait_on_runtime(runtime, std::chrono::milliseconds{100}, "post-redelivery-budget delivery");
+
+   BOOST_TEST(retrying_callbacks->load(std::memory_order_relaxed) == 0U);
+   BOOST_TEST(subscriber.metrics().backpressure_rejections == 3U);
+   BOOST_TEST(subscriber.metrics().pubsub_invalid_messages == 0U);
+
+   forge::asio::blocking::run(runtime, occupying_stream.async_close());
+   forge::asio::blocking::run(runtime, retrying_stream.async_close());
+   forge::asio::blocking::run(runtime, occupying.async_stop());
+   forge::asio::blocking::run(runtime, retrying.async_stop());
+   forge::asio::blocking::run(runtime, subscriber.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_gossipsub_retry_source_is_not_replaced_by_foreign_ihave) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 6}};
+   const auto publisher_identity = make_test_certificate_identity("pubsub-retry-source-publisher");
+   const auto subscriber_identity = make_test_certificate_identity("pubsub-retry-source-subscriber");
+   const auto attacker_identity = make_test_certificate_identity("pubsub-retry-source-attacker");
+   auto publisher_options = pubsub_options_for(publisher_identity);
+   auto subscriber_options = pubsub_options_for(subscriber_identity);
+   auto attacker_options = pubsub_options_for(attacker_identity);
+   publisher_options.limits.pubsub.signatures = pubsub::signature_policy::lax_no_sign;
+   subscriber_options.limits.pubsub.signatures = pubsub::signature_policy::lax_no_sign;
+   attacker_options.limits.pubsub.signatures = pubsub::signature_policy::lax_no_sign;
+   subscriber_options.limits.pubsub.limits.heartbeat_initial_delay = std::chrono::milliseconds{500};
+   subscriber_options.limits.pubsub.limits.heartbeat_interval = std::chrono::milliseconds{100};
+   subscriber_options.limits.pubsub.limits.validation_retry_initial_delay = std::chrono::milliseconds{100};
+   subscriber_options.limits.pubsub.limits.validation_retry_max_delay = std::chrono::milliseconds{100};
+   subscriber_options.limits.pubsub.limits.max_validation_requests = 2;
+
+   auto publisher = node{runtime, std::move(publisher_options)};
+   auto subscriber = node{runtime, std::move(subscriber_options)};
+   auto attacker = node{runtime, std::move(attacker_options)};
+   (void)listen(publisher, runtime);
+   const auto subscriber_endpoint = listen(subscriber, runtime);
+   (void)listen(attacker, runtime);
+   publisher.peers().learn_endpoint(subscriber.local_peer(), subscriber_endpoint,
+                                    capability_set{.bits = capabilities::direct_quic | capabilities::pubsub});
+   attacker.peers().learn_endpoint(subscriber.local_peer(), subscriber_endpoint,
+                                   capability_set{.bits = capabilities::direct_quic | capabilities::pubsub});
+
+   const auto subject = pubsub::topic{.value = "forge.pubsub.retry.source"};
+   forge::asio::blocking::run(
+       runtime,
+       publisher.async_subscribe(subject, [](pubsub::event) -> boost::asio::awaitable<pubsub::validation_result> {
+          co_return pubsub::validation_result::accept;
+       }));
+
+   auto attempts = std::make_shared<std::atomic_uint64_t>(0);
+   auto ignored = std::make_shared<std::promise<void>>();
+   auto ignored_future = ignored->get_future();
+   auto accepted = std::make_shared<std::promise<peer_id>>();
+   auto accepted_future = accepted->get_future();
+   forge::asio::blocking::run(
+       runtime, subscriber.async_subscribe(
+                    subject,
+                    [attempts, ignored,
+                     accepted](pubsub::event event) mutable -> boost::asio::awaitable<pubsub::validation_result> {
+                       const auto attempt = attempts->fetch_add(1, std::memory_order_relaxed);
+                       if (attempt == 0) {
+                          ignored->set_value();
+                          co_return pubsub::validation_result::retry;
+                       }
+                       if (attempt == 1) {
+                          accepted->set_value(event.source);
+                       }
+                       co_return pubsub::validation_result::accept;
+                    }));
+
+   const auto published = forge::asio::blocking::run(
+       runtime, publisher.async_publish(subject, std::vector<std::uint8_t>{'s', 'o', 'u', 'r', 'c', 'e'},
+                                        pubsub::publish_options{.sign = false}));
+   BOOST_REQUIRE(ignored_future.wait_for(std::chrono::seconds{5}) == std::future_status::ready);
+   ignored_future.get();
+   wait_on_runtime(runtime, std::chrono::milliseconds{120}, "foreign IHAVE injection window");
+
+   auto attacker_stream = forge::asio::blocking::run(
+       runtime, attacker.async_open_protocol_stream(subscriber.local_peer(), builtins::meshsub_v11));
+   forge::asio::blocking::run(
+       runtime, attacker_stream.async_write(pubsub::codec::encode(pubsub::rpc{
+                    .control_value = pubsub::control{
+                        .have = std::vector<pubsub::control::ihave>{pubsub::control::ihave{
+                            .subject = subject,
+                            .message_ids =
+                                std::vector<std::vector<std::uint8_t>>{pubsub::codec::message_id(published)}}},
+                    },
+                })));
+
+   BOOST_REQUIRE(accepted_future.wait_for(std::chrono::seconds{5}) == std::future_status::ready);
+   BOOST_TEST(accepted_future.get().to_string() == publisher.local_peer().to_string());
+   BOOST_TEST(attempts->load(std::memory_order_relaxed) == 2U);
+   BOOST_TEST(subscriber.pubsub_snapshot().messages_delivered == 1U);
+
+   forge::asio::blocking::run(runtime, attacker_stream.async_close());
+   forge::asio::blocking::run(runtime, attacker.async_stop());
+   forge::asio::blocking::run(runtime, publisher.async_stop());
+   forge::asio::blocking::run(runtime, subscriber.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_gossipsub_retry_stops_after_max_attempts_without_duplicate_history) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   auto publisher_options = pubsub_options_for();
+   auto subscriber_options = pubsub_options_for();
+   publisher_options.limits.pubsub.signatures = pubsub::signature_policy::lax_no_sign;
+   subscriber_options.limits.pubsub.signatures = pubsub::signature_policy::lax_no_sign;
+   subscriber_options.explicit_peer_id = peer(155);
+   for (auto* options : {&publisher_options, &subscriber_options}) {
+      options->limits.pubsub.limits.heartbeat_initial_delay = std::chrono::milliseconds{10};
+      options->limits.pubsub.limits.heartbeat_interval = std::chrono::milliseconds{20};
+      options->limits.pubsub.limits.validation_retry_initial_delay = std::chrono::milliseconds{20};
+      options->limits.pubsub.limits.validation_retry_max_delay = std::chrono::milliseconds{40};
+      options->limits.pubsub.limits.max_validation_attempts = 3;
+   }
+   subscriber_options.limits.pubsub.limits.history_length = 1;
+   subscriber_options.limits.pubsub.limits.max_messages = 1;
+
+   auto publisher = node{runtime, std::move(publisher_options)};
+   auto subscriber = node{runtime, std::move(subscriber_options)};
+   (void)listen(publisher, runtime);
+   const auto subscriber_endpoint = listen(subscriber, runtime);
+   publisher.peers().learn_endpoint(subscriber.local_peer(), subscriber_endpoint,
+                                    capability_set{.bits = capabilities::direct_quic | capabilities::pubsub});
+
+   const auto subject = pubsub::topic{.value = "forge.pubsub.retry.limit"};
+   forge::asio::blocking::run(
+       runtime,
+       publisher.async_subscribe(subject, [](pubsub::event) -> boost::asio::awaitable<pubsub::validation_result> {
+          co_return pubsub::validation_result::accept;
+       }));
+
+   auto attempts = std::make_shared<std::atomic_uint64_t>(0);
+   auto exhausted = std::make_shared<std::promise<void>>();
+   auto exhausted_future = exhausted->get_future();
+   forge::asio::blocking::run(
+       runtime,
+       subscriber.async_subscribe(
+           subject, [attempts, exhausted](pubsub::event) mutable -> boost::asio::awaitable<pubsub::validation_result> {
+              if (attempts->fetch_add(1, std::memory_order_relaxed) == 2) {
+                 exhausted->set_value();
+              }
+              co_return pubsub::validation_result::retry;
+           }));
+
+   (void)forge::asio::blocking::run(runtime,
+                                    publisher.async_publish(subject, std::vector<std::uint8_t>{'l', 'i', 'm', 'i', 't'},
+                                                            pubsub::publish_options{.sign = false}));
+   BOOST_REQUIRE(exhausted_future.wait_for(std::chrono::seconds{5}) == std::future_status::ready);
+   exhausted_future.get();
+   wait_on_runtime(runtime, std::chrono::milliseconds{250}, "terminal retry limit window");
+
+   const auto snapshot = subscriber.pubsub_snapshot();
+   BOOST_TEST(attempts->load(std::memory_order_relaxed) == 3U);
+   BOOST_TEST(snapshot.messages_delivered == 0U);
+   BOOST_TEST(snapshot.cached_messages == 1U);
+
+   forge::asio::blocking::run(runtime, publisher.async_stop());
+   forge::asio::blocking::run(runtime, subscriber.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_gossipsub_unavailable_source_stops_retry_requests_after_limit) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   auto publisher_options = pubsub_options_for();
+   auto subscriber_options = pubsub_options_for();
+   publisher_options.limits.pubsub.signatures = pubsub::signature_policy::lax_no_sign;
+   subscriber_options.limits.pubsub.signatures = pubsub::signature_policy::lax_no_sign;
+   subscriber_options.explicit_peer_id = peer(156);
+   for (auto* options : {&publisher_options, &subscriber_options}) {
+      options->limits.pubsub.limits.heartbeat_initial_delay = std::chrono::milliseconds{10};
+      options->limits.pubsub.limits.heartbeat_interval = std::chrono::milliseconds{20};
+      options->limits.pubsub.limits.validation_retry_initial_delay = std::chrono::milliseconds{100};
+      options->limits.pubsub.limits.validation_retry_max_delay = std::chrono::milliseconds{100};
+   }
+   publisher_options.limits.pubsub.limits.history_length = 1;
+   publisher_options.limits.pubsub.limits.max_messages = 1;
+   subscriber_options.limits.pubsub.limits.max_validation_requests = 2;
+
+   auto publisher = node{runtime, std::move(publisher_options)};
+   auto subscriber = node{runtime, std::move(subscriber_options)};
+   (void)listen(publisher, runtime);
+   const auto subscriber_endpoint = listen(subscriber, runtime);
+   publisher.peers().learn_endpoint(subscriber.local_peer(), subscriber_endpoint,
+                                    capability_set{.bits = capabilities::direct_quic | capabilities::pubsub});
+
+   const auto subject = pubsub::topic{.value = "forge.pubsub.retry.unavailable"};
+   forge::asio::blocking::run(
+       runtime,
+       publisher.async_subscribe(subject, [](pubsub::event) -> boost::asio::awaitable<pubsub::validation_result> {
+          co_return pubsub::validation_result::accept;
+       }));
+
+   auto attempts = std::make_shared<std::atomic_uint64_t>(0);
+   auto ignored = std::make_shared<std::promise<void>>();
+   auto ignored_future = ignored->get_future();
+   forge::asio::blocking::run(
+       runtime,
+       subscriber.async_subscribe(
+           subject, [attempts, ignored](pubsub::event) mutable -> boost::asio::awaitable<pubsub::validation_result> {
+              if (attempts->fetch_add(1, std::memory_order_relaxed) == 0) {
+                 ignored->set_value();
+              }
+              co_return pubsub::validation_result::retry;
+           }));
+
+   (void)forge::asio::blocking::run(
+       runtime, publisher.async_publish(subject, std::vector<std::uint8_t>{'u', 'n', 'a', 'v', 'a', 'i', 'l'},
+                                        pubsub::publish_options{.sign = false}));
+   BOOST_REQUIRE(ignored_future.wait_for(std::chrono::seconds{5}) == std::future_status::ready);
+   ignored_future.get();
+   wait_on_runtime(runtime, std::chrono::milliseconds{25}, "initial ignore completion");
+
+   const auto noise_subject = pubsub::topic{.value = "forge.pubsub.retry.eviction"};
+   (void)forge::asio::blocking::run(runtime, publisher.async_publish(noise_subject, std::vector<std::uint8_t>{0xff},
+                                                                     pubsub::publish_options{.sign = false}));
+   const auto control_before = publisher.pubsub_snapshot().control_messages;
+   for (auto poll = 0; poll < 100 && publisher.pubsub_snapshot().control_messages < control_before + 2; ++poll) {
+      wait_on_runtime(runtime, std::chrono::milliseconds{20}, "bounded unavailable-source retry");
+   }
+   const auto control_at_limit = publisher.pubsub_snapshot().control_messages;
+   BOOST_REQUIRE(control_at_limit >= control_before + 2);
+
+   wait_on_runtime(runtime, std::chrono::milliseconds{350}, "post-request-limit window");
+   BOOST_TEST(publisher.pubsub_snapshot().control_messages == control_at_limit);
+   BOOST_TEST(attempts->load(std::memory_order_relaxed) == 1U);
+
+   forge::asio::blocking::run(runtime, publisher.async_stop());
+   forge::asio::blocking::run(runtime, subscriber.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_gossipsub_reject_remains_terminal_during_history_window) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   auto publisher_options = pubsub_options_for();
+   auto subscriber_options = pubsub_options_for();
+   publisher_options.limits.pubsub.signatures = pubsub::signature_policy::lax_no_sign;
+   subscriber_options.limits.pubsub.signatures = pubsub::signature_policy::lax_no_sign;
+   subscriber_options.explicit_peer_id = peer(154);
+   for (auto* options : {&publisher_options, &subscriber_options}) {
+      options->limits.pubsub.limits.heartbeat_initial_delay = std::chrono::milliseconds{10};
+      options->limits.pubsub.limits.heartbeat_interval = std::chrono::milliseconds{20};
+      options->limits.pubsub.limits.validation_retry_initial_delay = std::chrono::milliseconds{30};
+      options->limits.pubsub.limits.validation_retry_max_delay = std::chrono::milliseconds{60};
+   }
+
+   auto publisher = node{runtime, std::move(publisher_options)};
+   auto subscriber = node{runtime, std::move(subscriber_options)};
+   (void)listen(publisher, runtime);
+   const auto subscriber_endpoint = listen(subscriber, runtime);
+   publisher.peers().learn_endpoint(subscriber.local_peer(), subscriber_endpoint,
+                                    capability_set{.bits = capabilities::direct_quic | capabilities::pubsub});
+
+   const auto subject = pubsub::topic{.value = "forge.pubsub.reject"};
+   forge::asio::blocking::run(
+       runtime,
+       publisher.async_subscribe(subject, [](pubsub::event) -> boost::asio::awaitable<pubsub::validation_result> {
+          co_return pubsub::validation_result::accept;
+       }));
+
+   auto attempts = std::make_shared<std::atomic_uint64_t>(0);
+   auto rejected = std::make_shared<std::promise<void>>();
+   auto rejected_future = rejected->get_future();
+   forge::asio::blocking::run(
+       runtime,
+       subscriber.async_subscribe(
+           subject, [attempts, rejected](pubsub::event) mutable -> boost::asio::awaitable<pubsub::validation_result> {
+              const auto attempt = attempts->fetch_add(1, std::memory_order_relaxed);
+              if (attempt == 0) {
+                 rejected->set_value();
+              }
+              co_return pubsub::validation_result::reject;
+           }));
+
+   (void)forge::asio::blocking::run(
+       runtime, publisher.async_publish(subject, std::vector<std::uint8_t>{'r', 'e', 'j', 'e', 'c', 't'},
+                                        pubsub::publish_options{.sign = false}));
+   BOOST_REQUIRE(rejected_future.wait_for(std::chrono::seconds{5}) == std::future_status::ready);
+   rejected_future.get();
+   wait_on_runtime(runtime, std::chrono::milliseconds{250}, "terminal rejection gossip window");
+
+   BOOST_TEST(attempts->load(std::memory_order_relaxed) == 1U);
+   BOOST_TEST(subscriber.pubsub_snapshot().messages_delivered == 0U);
+   BOOST_TEST(subscriber.pubsub_snapshot().invalid_messages >= 1U);
+
+   forge::asio::blocking::run(runtime, publisher.async_stop());
+   forge::asio::blocking::run(runtime, subscriber.async_stop());
+}
+
 BOOST_AUTO_TEST_CASE(p2p_gossipsub_forwards_between_subscribed_peers) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 6}};
    auto publisher_options = pubsub_options_for();
@@ -4447,10 +5158,13 @@ BOOST_AUTO_TEST_CASE(p2p_gossipsub_outbound_byte_limit_rejects_publish_without_s
    forge::asio::blocking::run(runtime, subscriber.async_stop());
 }
 
-BOOST_AUTO_TEST_CASE(p2p_gossipsub_validation_queue_limit_drops_excess_and_shutdown_is_clean) {
+BOOST_AUTO_TEST_CASE(p2p_gossipsub_validation_queue_limit_retries_excess_without_penalizing_peer) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 6}};
    auto subscriber_options = pubsub_options_for(make_test_certificate_identity("pubsub-validation-subscriber"));
    subscriber_options.limits.pubsub.limits.max_validation_queue = 1;
+   subscriber_options.limits.pubsub.limits.max_validation_attempts = 1;
+   subscriber_options.limits.pubsub.limits.validation_retry_initial_delay = std::chrono::milliseconds{600};
+   subscriber_options.limits.pubsub.limits.validation_retry_max_delay = std::chrono::milliseconds{600};
    subscriber_options.limits.pubsub.signatures = pubsub::signature_policy::lax_no_sign;
    auto publisher_a_options = pubsub_options_for(make_test_certificate_identity("pubsub-validation-a"));
    publisher_a_options.limits.pubsub.signatures = pubsub::signature_policy::lax_no_sign;
@@ -4497,11 +5211,17 @@ BOOST_AUTO_TEST_CASE(p2p_gossipsub_validation_queue_limit_drops_excess_and_shutd
        boost::asio::use_future);
    wait_for_server(publish_a, std::chrono::seconds{5}, "first validation publish");
    wait_for_server(publish_b, std::chrono::seconds{5}, "second validation publish");
-   wait_on_runtime(runtime, std::chrono::milliseconds{750}, "validation queue drain");
+   for (auto poll = 0; poll < 100 && entered->load(std::memory_order_relaxed) < 2U; ++poll) {
+      wait_on_runtime(runtime, std::chrono::milliseconds{20}, "validation queue retry");
+   }
+   for (auto poll = 0; poll < 100 && subscriber.pubsub_snapshot().messages_delivered < 2U; ++poll) {
+      wait_on_runtime(runtime, std::chrono::milliseconds{20}, "validation completion");
+   }
 
-   BOOST_TEST(entered->load(std::memory_order_relaxed) == 1U);
-   BOOST_TEST(subscriber.metrics().pubsub_invalid_messages >= 1U);
-   BOOST_TEST(subscriber.pubsub_snapshot().messages_delivered == 1U);
+   BOOST_TEST(entered->load(std::memory_order_relaxed) == 2U);
+   BOOST_TEST(subscriber.metrics().backpressure_rejections >= 1U);
+   BOOST_TEST(subscriber.metrics().pubsub_invalid_messages == 0U);
+   BOOST_TEST(subscriber.pubsub_snapshot().messages_delivered == 2U);
 
    forge::asio::blocking::run(runtime, subscriber.async_stop());
    BOOST_TEST(subscriber.metrics().stopped);

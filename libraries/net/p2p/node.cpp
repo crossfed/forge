@@ -1101,13 +1101,7 @@ boost::asio::awaitable<pubsub::message> node::async_publish(pubsub::topic subjec
    {
       auto lock = std::scoped_lock{self->mutex};
       const auto key = bytes_key(id);
-      self->pubsub_value.cache[key] = value;
-      self->pubsub_value.history.push_back(key);
-      while (self->pubsub_value.history.size() >
-             self->options.limits.pubsub.limits.history_length * self->options.limits.pubsub.limits.max_messages) {
-         self->pubsub_value.cache.erase(self->pubsub_value.history.front());
-         self->pubsub_value.history.pop_front();
-      }
+      self->remember_local_pubsub_message_locked(key, value);
    }
    self->increment_pubsub_published();
 

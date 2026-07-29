@@ -203,6 +203,7 @@ std::vector<subscription> plugin::api_impl::subscriptions() const {
       .messages_accepted = impl_->messages_accepted,
       .messages_rejected = impl_->messages_rejected,
       .messages_ignored = impl_->messages_ignored,
+      .messages_retried = impl_->messages_retried,
       .messages_dropped = impl_->messages_dropped,
       .handler_failures = impl_->handler_failures,
       .core = source.snapshot(),
