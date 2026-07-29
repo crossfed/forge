@@ -81,7 +81,7 @@ causes Forge package discovery to require Clang.
 
 ## Stability And Tests
 
-The request/artifact API is experimental until the first Contract SDK release;
-the generated ABI and dispatcher behavior are compatibility contracts. Unit,
-CDT fixture, quoted-include, wasm32 integer-width, action-result, package and
-relocation tests cover the public surface.
+The request/artifact API is Experimental in Forge 8.16.0; the generated ABI and
+dispatcher behavior are Stable compatibility contracts. Unit, CDT fixture,
+quoted-include, wasm32 integer-width, action-result, package and relocation
+tests cover the public surface.

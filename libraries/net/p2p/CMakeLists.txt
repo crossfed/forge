@@ -45,6 +45,8 @@ add_library(
    details/protocol_capabilities.hxx
    details/relay_accounting.hxx
    details/session_lifecycle.hxx
+   session_teardown.cpp
+   details/session_teardown.hxx
    stream_upgrade.cpp
    details/stream_upgrade.hxx
 )

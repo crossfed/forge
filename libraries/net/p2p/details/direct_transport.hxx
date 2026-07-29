@@ -8,6 +8,8 @@
 
 #include <boost/asio/awaitable.hpp>
 
+#include "session_teardown.hxx"
+
 namespace forge::net::p2p::direct {
 
 struct connection {
@@ -23,7 +25,9 @@ struct profile {
    std::function<std::vector<forge::net::p2p::endpoint>()> local_endpoints;
    std::function<forge::net::p2p::endpoint(forge::net::p2p::endpoint)> listen;
    std::function<void()> stop;
-   std::function<boost::asio::awaitable<connection>(forge::net::p2p::endpoint, const node::connect_options&)> async_connect;
+   std::function<boost::asio::awaitable<void>()> async_stop;
+   std::function<boost::asio::awaitable<connection>(forge::net::p2p::endpoint, const node::connect_options&)>
+       async_connect;
    std::function<boost::asio::awaitable<connection>(forge::net::p2p::endpoint)> async_accept;
 };
 
@@ -41,7 +45,8 @@ class registry {
 
    void add(profile value);
    [[nodiscard]] forge::net::p2p::endpoint listen(forge::net::p2p::endpoint endpoint);
-   void stop();
+   void stop() noexcept;
+   [[nodiscard]] detail::session_teardown::operation teardown_operation() const;
 
    boost::asio::awaitable<connection> async_connect(forge::net::p2p::endpoint endpoint,
                                                     const node::connect_options& options);

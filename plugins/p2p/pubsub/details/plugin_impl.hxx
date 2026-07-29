@@ -15,6 +15,7 @@ struct plugin::impl : public std::enable_shared_from_this<plugin::impl> {
    std::uint64_t messages_accepted = 0;
    std::uint64_t messages_rejected = 0;
    std::uint64_t messages_ignored = 0;
+   std::uint64_t messages_retried = 0;
    std::uint64_t messages_dropped = 0;
    std::uint64_t handler_failures = 0;
    mutable std::mutex mutex;

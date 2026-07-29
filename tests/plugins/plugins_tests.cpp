@@ -752,6 +752,8 @@ struct received_pubsub_messages {
       case forge::net::p2p::pubsub::validation_result::ignore:
          ++ignored;
          break;
+      case forge::net::p2p::pubsub::validation_result::retry:
+         break;
       }
    }
 
@@ -3154,16 +3156,17 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_cancels_bootstrap_sleep_from_an_external_th
    auto stop_thread = std::thread{[&] { client.request_stop(); }};
    stop_thread.join();
 
+   const auto disconnected_on_request = forge::asio::blocking::run(
+       server.runtime(),
+       async_wait_for_condition([&] { return server_diagnostics->snapshot().metrics.active_sessions == 0U; },
+                                std::chrono::seconds{5}));
+   BOOST_TEST(disconnected_on_request);
+
    const auto started = std::chrono::steady_clock::now();
    forge::asio::blocking::run(client.runtime(), client.shutdown());
    const auto elapsed = std::chrono::steady_clock::now() - started;
    BOOST_TEST(elapsed < std::chrono::milliseconds{750});
 
-   const auto disconnected = forge::asio::blocking::run(
-       server.runtime(),
-       async_wait_for_condition([&] { return server_diagnostics->snapshot().metrics.active_sessions == 0U; },
-                                std::chrono::seconds{5}));
-   BOOST_TEST(disconnected);
    forge::asio::blocking::run(server.runtime(), server.shutdown());
 }
 
@@ -3353,6 +3356,25 @@ BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_requests_core_pubsub_capability_before_st
    BOOST_TEST(subscription.id != 0U);
    BOOST_TEST(pubsub->snapshot().core.topics == 1U);
    BOOST_TEST(pubsub->subscriptions().size() == 1U);
+
+   forge::asio::blocking::run(app.runtime(), app.shutdown());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_omits_unverified_author_from_unsigned_messages) {
+   auto source_state = std::make_shared<fake_pubsub_source_state>();
+   auto app = fake_pubsub_application{source_state};
+   forge::asio::blocking::run(app.runtime(), app.startup());
+
+   auto pubsub = app.apis().get<forge::plugins::p2p::pubsub::api>(
+      {.id = {"forge.plugins.p2p.pubsub"}, .major = 1, .min_revision = 0});
+   const auto published = forge::asio::blocking::run(
+      app.runtime(),
+      pubsub->publish(forge::net::p2p::pubsub::topic{.value = "forge.fake.unsigned"}, {1, 2, 3},
+                      forge::plugins::p2p::pubsub::publish_options{.sign = false}));
+
+   BOOST_TEST(published.source.to_string() == "fake-pubsub-peer");
+   BOOST_TEST(!published.author.has_value());
+   BOOST_TEST(published.data == (std::vector<std::uint8_t>{1, 2, 3}), boost::test_tools::per_element());
 
    forge::asio::blocking::run(app.runtime(), app.shutdown());
 }
@@ -3609,6 +3631,7 @@ BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_aggregates_handler_results_and_deadlines)
 
    const auto aggregate_topic = forge::net::p2p::pubsub::topic{.value = "forge.plugins.aggregate"};
    const auto timeout_topic = forge::net::p2p::pubsub::topic{.value = "forge.plugins.timeout"};
+   const auto mixed_retry_topic = forge::net::p2p::pubsub::topic{.value = "forge.plugins.mixed-retry"};
    (void)forge::asio::blocking::run(
       subscriber.runtime(),
       subscriber_pubsub->subscribe(
@@ -3640,17 +3663,40 @@ BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_aggregates_handler_results_and_deadlines)
             received->push(std::move(message), forge::net::p2p::pubsub::validation_result::reject);
             co_return forge::net::p2p::pubsub::validation_result::reject;
          }));
+   auto timeout_attempts = std::make_shared<std::atomic_uint64_t>(0);
    (void)forge::asio::blocking::run(
       subscriber.runtime(),
       subscriber_pubsub->subscribe(
          timeout_topic,
-         [](forge::plugins::p2p::pubsub::message) -> boost::asio::awaitable<forge::net::p2p::pubsub::validation_result> {
-            auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
-            timer.expires_after(std::chrono::milliseconds{100});
-            co_await timer.async_wait(boost::asio::use_awaitable);
+         [timeout_attempts](forge::plugins::p2p::pubsub::message)
+            -> boost::asio::awaitable<forge::net::p2p::pubsub::validation_result> {
+            if (timeout_attempts->fetch_add(1, std::memory_order_relaxed) == 0) {
+               auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+               timer.expires_after(std::chrono::milliseconds{100});
+               co_await timer.async_wait(boost::asio::use_awaitable);
+            }
             co_return forge::net::p2p::pubsub::validation_result::accept;
          },
          forge::plugins::p2p::pubsub::subscribe_options{.handler_deadline = std::chrono::milliseconds{10}}));
+   auto mixed_retry_attempts = std::make_shared<std::atomic_uint64_t>(0);
+   (void)forge::asio::blocking::run(
+      subscriber.runtime(),
+      subscriber_pubsub->subscribe(
+         mixed_retry_topic,
+         [mixed_retry_attempts](forge::plugins::p2p::pubsub::message)
+            -> boost::asio::awaitable<forge::net::p2p::pubsub::validation_result> {
+            if (mixed_retry_attempts->fetch_add(1, std::memory_order_relaxed) == 0) {
+               co_return forge::net::p2p::pubsub::validation_result::retry;
+            }
+            co_return forge::net::p2p::pubsub::validation_result::accept;
+         }));
+   (void)forge::asio::blocking::run(
+      subscriber.runtime(),
+      subscriber_pubsub->subscribe(
+         mixed_retry_topic, [](forge::plugins::p2p::pubsub::message)
+                               -> boost::asio::awaitable<forge::net::p2p::pubsub::validation_result> {
+            co_return forge::net::p2p::pubsub::validation_result::accept;
+         }));
 
    BOOST_REQUIRE_MESSAGE(wait_for_pubsub_peer(*publisher_pubsub.shared(), std::chrono::seconds{5}),
                          "publisher did not learn a remote PubSub topic subscription");
@@ -3678,11 +3724,25 @@ BOOST_AUTO_TEST_CASE(p2p_pubsub_plugin_aggregates_handler_results_and_deadlines)
       wait_for_pubsub_snapshot(
          *subscriber_pubsub.shared(),
          [](const forge::plugins::p2p::pubsub::snapshot& snapshot) {
-            return snapshot.messages_ignored >= 1 && snapshot.handler_failures >= 2;
+            return snapshot.messages_retried >= 1 && snapshot.messages_accepted >= 1 &&
+                   snapshot.handler_failures >= 2;
          },
          std::chrono::seconds{5}),
-      "PubSub handler timeout did not finish");
+      "PubSub handler timeout was not redelivered successfully");
+   BOOST_TEST(timeout_attempts->load(std::memory_order_relaxed) == 2U);
    BOOST_TEST(subscriber_pubsub->snapshot().active_handlers == 0U);
+
+   (void)forge::asio::blocking::run(
+      publisher.runtime(), publisher_pubsub->publish(mixed_retry_topic, std::vector<std::uint8_t>{11}));
+   BOOST_REQUIRE_MESSAGE(
+      wait_for_pubsub_snapshot(
+         *subscriber_pubsub.shared(),
+         [](const forge::plugins::p2p::pubsub::snapshot& snapshot) {
+            return snapshot.messages_retried >= 2 && snapshot.messages_accepted >= 2;
+         },
+         std::chrono::seconds{5}),
+      "PubSub accept masked a transient sibling handler result");
+   BOOST_TEST(mixed_retry_attempts->load(std::memory_order_relaxed) == 2U);
 
    forge::asio::blocking::run(publisher.runtime(), publisher.shutdown());
    forge::asio::blocking::run(subscriber.runtime(), subscriber.shutdown());

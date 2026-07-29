@@ -23,6 +23,7 @@ class listener {
 
    [[nodiscard]] endpoint local_endpoint() const;
    boost::asio::awaitable<connection> async_accept();
+   boost::asio::awaitable<void> async_stop();
    void stop();
 
  private:

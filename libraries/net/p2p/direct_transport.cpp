@@ -73,7 +73,7 @@ std::vector<forge::net::p2p::endpoint> registry::local_endpoints() const {
 
 void registry::add(profile value) {
    if (!value.supports || !value.listening || !value.local_endpoints || !value.listen || !value.stop ||
-       !value.async_connect || !value.async_accept) {
+       !value.async_stop || !value.async_connect || !value.async_accept) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P direct transport profile is empty");
    }
    state_->profiles.push_back(std::move(value));
@@ -89,13 +89,42 @@ forge::net::p2p::endpoint registry::listen(forge::net::p2p::endpoint endpoint) {
    return selected.listen(std::move(endpoint));
 }
 
-void registry::stop() {
+void registry::stop() noexcept {
    if (!state_) {
       return;
    }
    for (auto& value : state_->profiles) {
-      value.stop();
+      try {
+         value.stop();
+      } catch (...) {
+         // Teardown cancellation is best effort and must reach every transport.
+      }
    }
+}
+
+detail::session_teardown::operation registry::teardown_operation() const {
+   auto close_profiles = state_ ? state_->profiles : std::vector<profile>{};
+   auto cancel_profiles = close_profiles;
+   return detail::session_teardown::operation{
+       .close = [profiles = std::move(close_profiles)]() mutable -> boost::asio::awaitable<void> {
+          for (auto& value : profiles) {
+             try {
+                co_await value.async_stop();
+             } catch (...) {
+                // A failed backend must not bypass the remaining teardown operations.
+             }
+          }
+       },
+       .cancel =
+           [profiles = std::move(cancel_profiles)]() mutable noexcept {
+              for (auto& value : profiles) {
+                 try {
+                    value.stop();
+                 } catch (...) {
+                 }
+              }
+           },
+   };
 }
 
 boost::asio::awaitable<connection> registry::async_connect(forge::net::p2p::endpoint endpoint,

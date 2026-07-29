@@ -149,6 +149,7 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [chain/core](libraries/chain/core/README.md) | `forge_chain_core` | Fundamental chain digest and Merkle primitives. | `forge_crypto_digest`, `forge_exceptions`, `forge_raw`. |
 | [chain/protocol](libraries/chain/protocol/README.md) | `forge_chain_protocol` | Canonical protocol values, ordered keys, transactions, blocks, ABI and signing rules. | `forge_chain_core`, `forge_compression`, `forge_raw`, `forge_variant`, `forge_crypto_asymmetric_values`, `forge_crypto_digest`. |
 | [vm/wasm](libraries/vm/wasm/README.md) | `forge_vm_wasm` | Native WebAssembly parser, validator, interpreter, host-function runtime and x86_64 JIT. | `forge_exceptions`, threads, internal SoftFloat. |
+| [contract/graph](libraries/contract/graph/README.md) | `forge_contract_graph` | Typed canonical contract source and dependency graph validation. | `forge_codec_json`, `forge_exceptions`. |
 | [contract/abi](libraries/contract/abi/README.md) | `forge_contract_abi` | Optional Clang AST based contract ABI and dispatcher generation. | Clang/LLVM privately, `forge_chain_protocol`, `forge_codec_json`. |
 | [contract/attributes](libraries/contract/attributes/README.md) | `forge_contract_attributes` | Optional Forge/EOSIO Clang attribute registrations. | Clang/LLVM privately. |
 | [contract/validation](libraries/contract/validation/README.md) | `forge_contract_validation` | Optional contract ABI, WASM, import and export validation. | `forge_vm_wasm`, `forge_chain_protocol`, `forge_codec_json`. |
@@ -213,7 +214,10 @@ it.
 Contract development is distributed separately from the ordinary host package.
 The standalone [guest SDK](guest/README.md) builds the pinned wasm32 sysroot,
 guest runtime, modern contract API, EOSIO compatibility veneer and thin tools.
-Host applications may request the four optional `contract_*` components above
+Experimental dual-target contract libraries declare one immutable source and
+dependency graph for host compilation, wasm32 compilation, ABI generation,
+relocatable source packaging and manifest attestation. Host applications may
+request the five optional `contract_*` components above
 without installing the guest sysroot; only `contract_abi` and
 `contract_attributes` require a compatible Clang package.
 
@@ -253,7 +257,7 @@ FORGE использует версию `MAJOR.MINOR.PATCH` вместе с яв
 описано в release notes вместе с migration path.
 
 Текущие изменения и переходы описаны в
-[Forge 8.15.0 release notes](docs/releases/8.15.0.md).
+[Forge 8.16.0 release notes](docs/releases/8.16.0.md).
 
 ## Совместимость
 

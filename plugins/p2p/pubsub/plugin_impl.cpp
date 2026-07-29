@@ -105,7 +105,7 @@ void plugin::impl::record_drop() {
 boost::asio::awaitable<forge::net::p2p::pubsub::validation_result>
 plugin::impl::call_handler(handler_record handler, message value) {
    if (!try_begin_handler()) {
-      co_return forge::net::p2p::pubsub::validation_result::ignore;
+      co_return forge::net::p2p::pubsub::validation_result::retry;
    }
 
    if (handler.deadline.count() <= 0) {
@@ -116,7 +116,7 @@ plugin::impl::call_handler(handler_record handler, message value) {
       } catch (...) {
          finish_handler();
          record_handler_failure();
-         co_return forge::net::p2p::pubsub::validation_result::ignore;
+         co_return forge::net::p2p::pubsub::validation_result::retry;
       }
    }
 
@@ -144,14 +144,14 @@ plugin::impl::call_handler(handler_record handler, message value) {
          if (value.has_value()) {
             co_return *value;
          }
-         co_return forge::net::p2p::pubsub::validation_result::ignore;
+         co_return forge::net::p2p::pubsub::validation_result::retry;
       }
       record_handler_failure();
    } catch (...) {
       finish_handler();
       record_handler_failure();
    }
-   co_return forge::net::p2p::pubsub::validation_result::ignore;
+   co_return forge::net::p2p::pubsub::validation_result::retry;
 }
 
 boost::asio::awaitable<forge::net::p2p::pubsub::validation_result>
@@ -171,8 +171,12 @@ plugin::impl::handle_event(forge::net::p2p::pubsub::event event) {
       auto result = co_await call_handler(handler, project_message(event.source, event.value));
       if (result == forge::net::p2p::pubsub::validation_result::reject) {
          final_result = forge::net::p2p::pubsub::validation_result::reject;
-      } else if (result == forge::net::p2p::pubsub::validation_result::accept &&
+      } else if (result == forge::net::p2p::pubsub::validation_result::retry &&
                  final_result != forge::net::p2p::pubsub::validation_result::reject) {
+         final_result = forge::net::p2p::pubsub::validation_result::retry;
+      } else if (result == forge::net::p2p::pubsub::validation_result::accept &&
+                 final_result != forge::net::p2p::pubsub::validation_result::reject &&
+                 final_result != forge::net::p2p::pubsub::validation_result::retry) {
          final_result = forge::net::p2p::pubsub::validation_result::accept;
       }
    }
@@ -188,6 +192,9 @@ plugin::impl::handle_event(forge::net::p2p::pubsub::event event) {
       break;
    case forge::net::p2p::pubsub::validation_result::ignore:
       ++messages_ignored;
+      break;
+   case forge::net::p2p::pubsub::validation_result::retry:
+      ++messages_retried;
       break;
    }
    co_return final_result;

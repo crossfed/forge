@@ -45,9 +45,10 @@ contribution APIs for protocol handlers and API-over-P2P publication.
 - Opens typed remote API handles to peers through `remote<Interface>()`.
 - Provides internal source APIs used by focused diagnostics and pubsub plugins.
 
-Shutdown first cancels and drains bootstrap maintenance, then awaits the shared
-node shutdown. Active STCP/Yamux reads are drained before the plugin releases
-the node.
+`request_stop()` synchronously closes admission and listeners and initiates
+session disconnect. `shutdown()` then awaits both the already-started transport
+teardown and bootstrap maintenance before releasing the node. An empty active
+session set is not treated as proof that STCP/Yamux cleanup has completed.
 
 The plugin does not implement product routing policy or durable application
 queues. Core libp2p-style mechanics belong to `forge_net_p2p`; this plugin composes

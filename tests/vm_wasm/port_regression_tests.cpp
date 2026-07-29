@@ -28,6 +28,7 @@ static_assert(!std::is_copy_constructible_v<wasm::wasm_allocator>);
 static_assert(!std::is_copy_assignable_v<wasm::wasm_allocator>);
 static_assert(!std::is_move_constructible_v<wasm::wasm_allocator>);
 static_assert(!std::is_move_assignable_v<wasm::wasm_allocator>);
+static_assert(std::is_nothrow_destructible_v<wasm::wasm_allocator>);
 static_assert(!std::is_copy_constructible_v<wasm::growable_allocator>);
 static_assert(!std::is_copy_assignable_v<wasm::growable_allocator>);
 static_assert(!std::is_move_constructible_v<wasm::growable_allocator>);
@@ -233,6 +234,30 @@ template <typename Implementation> void check_flat_control_depth() {
    BOOST_CHECK_NO_THROW(runtime(code, static_cast<wasm::wasm_allocator*>(nullptr), one_control_depth_options{}));
 }
 } // namespace
+
+TEST_CASE("wasm allocator owns and safely releases its guarded mapping", "[allocator]") {
+   auto memory = wasm::wasm_allocator{};
+   memory.alloc<char>(1);
+
+   memory.free();
+
+   BOOST_TEST(memory.get_base_ptr<char>() == nullptr);
+   BOOST_TEST(memory.get_current_page() == -1);
+   BOOST_CHECK_NO_THROW(memory.free());
+   BOOST_CHECK_THROW(memory.reset(1), wasm::exceptions::allocation);
+}
+
+TEST_CASE("wasm allocator reset preserves reusable execution-lane ownership", "[allocator]") {
+   auto memory = wasm::wasm_allocator{};
+   memory.reset(1);
+   memory.get_base_ptr<std::uint8_t>()[0] = 0xff;
+
+   memory.reset();
+   memory.reset(1);
+
+   BOOST_TEST(memory.get_current_page() == 1);
+   BOOST_TEST(memory.get_base_ptr<std::uint8_t>()[0] == 0);
+}
 
 TEST_CASE("function type equality includes non-void result types", "[func_type]") {
    auto lhs_allocator = wasm::growable_allocator{64};

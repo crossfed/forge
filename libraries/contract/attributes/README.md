@@ -24,7 +24,7 @@ what activates Clang discovery; unrelated Forge components remain Clang-free.
 
 ## Stability And Tests
 
-Canonical annotation payloads are stable compatibility data. The C++ registry
-entry point remains experimental until the first Contract SDK release. Tests
-load all Forge and EOSIO spellings, compare their ABI output and build the
-relocated loadable plugin through the package component.
+Canonical annotation payloads are Stable compatibility data. The C++ registry
+entry point is Experimental in Forge 8.16.0. Tests load all Forge and EOSIO
+spellings, compare their ABI output and build the relocated loadable plugin
+through the package component.

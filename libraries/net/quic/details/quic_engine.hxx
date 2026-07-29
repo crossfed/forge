@@ -198,6 +198,7 @@ class engine_listener {
 
    [[nodiscard]] engine_endpoint local_endpoint() const;
    boost::asio::awaitable<std::shared_ptr<engine_connection>> async_accept();
+   boost::asio::awaitable<void> async_stop();
    void stop();
 
  private:

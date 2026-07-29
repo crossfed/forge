@@ -1,6 +1,7 @@
 module;
 
 #include <algorithm>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -14,14 +15,13 @@ import forge.plugins.p2p.pubsub.types;
 
 namespace forge::plugins::p2p::pubsub {
 
-message project_message(const forge::net::p2p::peer_id& source,
-                        const forge::net::p2p::pubsub::message& value) {
+message project_message(const forge::net::p2p::peer_id& source, const forge::net::p2p::pubsub::message& value) {
    return message{
-      .source = source,
-      .author = value.from,
-      .subject = value.subject,
-      .data = value.data,
-      .seqno = value.seqno,
+       .source = source,
+       .author = value.signature.empty() ? std::nullopt : value.from,
+       .subject = value.subject,
+       .data = value.data,
+       .seqno = value.seqno,
    };
 }
 

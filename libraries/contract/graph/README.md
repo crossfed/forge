@@ -44,3 +44,10 @@ native CMake link properties, discover undeclared files, hash sources or infer
 host-to-guest target mappings. Source attestation belongs to
 `forge_contract_manifest`; graph production and dependency visibility belong
 to the Contract SDK CMake API.
+
+## Stability
+
+The public graph values, schema v2 descriptor, reader validation rules and
+typed exception contract are Stable. The CMake API that produces and
+materializes dual-target graphs is separately marked Experimental in
+`guest/README.md`.
