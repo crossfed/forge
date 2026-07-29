@@ -54,6 +54,9 @@ void plugin::impl::configure(config value) {
       auto record = std::make_shared<managed_store>();
       record->name = item.name;
       record->driver_name = item.driver;
+      if (item.driver == "mdbx") {
+         record->durability = item.mdbx.value_or(mdbx_driver_config{}).durability;
+      }
       record->path = item.path;
       record->options = detail::parse_options(item);
       configured.emplace(record->name, std::move(record));
@@ -385,13 +388,14 @@ status plugin::impl::current_status() const {
    out.stores.reserve(stores.size());
    for (const auto& [_, record] : stores) {
       out.stores.push_back(store_status{
-         .name = record->name,
-         .driver = record->driver_name,
-         .path = record->path,
-         .object = record->options.object.has_value(),
-         .blob = record->options.blob.has_value(),
-         .revision = record->options.revision.has_value(),
-         .started = record->started,
+          .name = record->name,
+          .driver = record->driver_name,
+          .durability = record->durability,
+          .path = record->path,
+          .object = record->options.object.has_value(),
+          .blob = record->options.blob.has_value(),
+          .revision = record->options.revision.has_value(),
+          .started = record->started,
       });
    }
    return out;
