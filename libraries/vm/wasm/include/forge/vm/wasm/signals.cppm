@@ -102,7 +102,9 @@ void setup_signal_handler();
 template <typename F, typename E>
 [[gnu::noinline]] auto invoke_with_signal_handler(F&& f, E&& e, growable_allocator* code_allocator,
                                                   wasm_allocator* mem_allocator) {
-   setup_signal_handler();
+   if (std::atomic_load(&signal_dest) == nullptr) {
+      setup_signal_handler();
+   }
    sigjmp_buf dest;
    sigjmp_buf* volatile old_signal_handler = nullptr;
    const auto old_code_memory_range = code_memory_range;

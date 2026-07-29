@@ -73,17 +73,13 @@ bool is_forge_signal_handler(const struct sigaction& action) noexcept {
    return (action.sa_flags & SA_SIGINFO) != 0 && action.sa_sigaction == &signal_handler;
 }
 
-template <int Signal> void ensure_signal_handler(const struct sigaction& action) {
-   struct sigaction current{};
-   detail::check<exceptions::interpreter>(::sigaction(Signal, nullptr, &current) == 0,
-                                          "failed to inspect VM signal handler");
-   if (is_forge_signal_handler(current)) {
-      return;
-   }
-
-   prev_signal_handler<Signal> = current;
-   detail::check<exceptions::interpreter>(::sigaction(Signal, &action, nullptr) == 0,
+template <int Signal> void install_signal_handler(const struct sigaction& action) {
+   struct sigaction displaced{};
+   detail::check<exceptions::interpreter>(::sigaction(Signal, &action, &displaced) == 0,
                                           "failed to install VM signal handler");
+   if (!is_forge_signal_handler(displaced)) {
+      prev_signal_handler<Signal> = displaced;
+   }
 }
 
 } // namespace
@@ -95,11 +91,11 @@ void setup_signal_handler_impl() {
    sigemptyset(&action.sa_mask);
    sigaddset(&action.sa_mask, SIGPROF);
    action.sa_flags = SA_NODEFER | SA_SIGINFO;
-   ensure_signal_handler<SIGSEGV>(action);
+   install_signal_handler<SIGSEGV>(action);
 #ifndef __linux__
-   ensure_signal_handler<SIGBUS>(action);
+   install_signal_handler<SIGBUS>(action);
 #endif
-   ensure_signal_handler<SIGFPE>(action);
+   install_signal_handler<SIGFPE>(action);
 }
 
 void setup_signal_handler() {
