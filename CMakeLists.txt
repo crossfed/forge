@@ -296,6 +296,7 @@ if(FORGE_ENABLE_CONTRACT_TOOLING)
    find_package(Clang 22.1 CONFIG REQUIRED)
    list(APPEND
       FORGE_SOURCE_INCLUDE_DIRS
+      "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/graph/include"
       "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/abi/include"
       "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/attributes/include"
       "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/validation/include"
@@ -446,6 +447,97 @@ if(NOT FORGE_ENABLE_VENDOR_TESTS)
    )
 endif()
 
+function(forge_contract_register_guest_component)
+   cmake_parse_arguments(
+      ARG
+      "FOUNDATION"
+      "ID;ARCHIVE"
+      "MODULES;MODULE_NAMES;PUBLIC_LIBRARIES"
+      ${ARGN}
+   )
+   if(
+      ARG_UNPARSED_ARGUMENTS
+      OR NOT ARG_ID
+      OR NOT ARG_MODULES
+      OR NOT ARG_MODULE_NAMES
+   )
+      message(FATAL_ERROR "invalid Forge Contract guest component declaration")
+   endif()
+   list(LENGTH ARG_MODULES _module_count)
+   list(LENGTH ARG_MODULE_NAMES _module_name_count)
+   if(NOT _module_count EQUAL _module_name_count)
+      message(FATAL_ERROR "Forge Contract guest component ${ARG_ID} has mismatched module metadata")
+   endif()
+   string(SHA256 _key "${ARG_ID}")
+   get_property(_existing GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_ID")
+   if(_existing)
+      message(FATAL_ERROR "duplicate Forge Contract guest component ID: ${ARG_ID}")
+   endif()
+   set_property(GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_ID" "${ARG_ID}")
+   set_property(
+      GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_MODULE_NAMES"
+      "${ARG_MODULE_NAMES}"
+   )
+   set_property(
+      GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_DEPENDENCIES"
+      "${ARG_PUBLIC_LIBRARIES}"
+   )
+   set_property(
+      GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_FOUNDATION"
+      "${ARG_FOUNDATION}"
+   )
+endfunction()
+
+include("${CMAKE_CURRENT_SOURCE_DIR}/guest/cmake/ForgeContractGuestComponents.cmake")
+
+function(forge_target_contract_guest_component target)
+   cmake_parse_arguments(ARG "" "ID" "" ${ARGN})
+   if(ARG_UNPARSED_ARGUMENTS OR NOT ARG_ID)
+      message(FATAL_ERROR "forge_target_contract_guest_component(${target}) requires ID")
+   endif()
+   if(NOT TARGET "${target}")
+      message(FATAL_ERROR "Forge guest component target does not exist: ${target}")
+   endif()
+   if(NOT ARG_ID MATCHES "^forge\\.[a-z0-9_]+(\\.[a-z0-9_]+)*$")
+      message(FATAL_ERROR "Forge guest component ID is not canonical: ${ARG_ID}")
+   endif()
+   get_target_property(_existing "${target}" FORGE_CONTRACT_GUEST_COMPONENT_ID)
+   if(_existing AND NOT _existing STREQUAL ARG_ID)
+      message(FATAL_ERROR "Forge target ${target} already has guest component ID ${_existing}")
+   endif()
+   get_target_property(_exported "${target}" EXPORT_PROPERTIES)
+   if(_exported STREQUAL "_exported-NOTFOUND")
+      set(_exported)
+   endif()
+   string(SHA256 _key "${ARG_ID}")
+   get_property(_descriptor_id GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_ID")
+   get_property(
+      _module_names GLOBAL PROPERTY
+      "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_MODULE_NAMES"
+   )
+   get_property(
+      _dependencies GLOBAL PROPERTY
+      "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_DEPENDENCIES"
+   )
+   if(NOT _descriptor_id STREQUAL ARG_ID OR NOT _module_names)
+      message(FATAL_ERROR "Forge target ${target} has no guest component descriptor for ${ARG_ID}")
+   endif()
+   list(
+      APPEND _exported
+      FORGE_CONTRACT_GUEST_COMPONENT_ID
+      FORGE_CONTRACT_GUEST_MODULE_NAMES
+      FORGE_CONTRACT_GUEST_PUBLIC_COMPONENT_IDS
+   )
+   list(REMOVE_DUPLICATES _exported)
+   set_target_properties(
+      "${target}"
+      PROPERTIES
+         FORGE_CONTRACT_GUEST_COMPONENT_ID "${ARG_ID}"
+         FORGE_CONTRACT_GUEST_MODULE_NAMES "${_module_names}"
+         FORGE_CONTRACT_GUEST_PUBLIC_COMPONENT_IDS "${_dependencies}"
+         EXPORT_PROPERTIES "${_exported}"
+   )
+endfunction()
 
 add_subdirectory(libraries/core)
 add_subdirectory(libraries/exceptions)
@@ -499,6 +591,7 @@ set(
    forge_crypto_asymmetric
    forge_crypto_pki
    forge_crypto_math
+   forge_crypto_bls_values
    forge_crypto_bls
    forge_crypto_bn256
    forge_asio
@@ -592,6 +685,7 @@ endif()
 if(FORGE_ENABLE_CONTRACT_TOOLING)
    list(
       APPEND FORGE_LEAF_TARGETS
+      forge_contract_graph
       forge_contract_abi
       forge_contract_attributes
       forge_contract_validation
@@ -630,6 +724,7 @@ set(
    crypto_asymmetric
    crypto_pki
    crypto_math
+   crypto_bls_values
    crypto_bls
    crypto_bn256
    asio
@@ -692,6 +787,7 @@ endif()
 if(FORGE_ENABLE_CONTRACT_TOOLING)
    list(
       APPEND FORGE_BUILT_COMPONENTS
+      contract_graph
       contract_abi
       contract_attributes
       contract_validation
@@ -707,6 +803,10 @@ target_link_libraries(
    forge PUBLIC
       ${FORGE_LEAF_TARGETS}
 )
+
+# Imported targets are SYSTEM by default. Preserve Forge's include precedence so
+# an unrelated machine-wide installation cannot shadow headers from this package.
+set_property(TARGET forge ${FORGE_LEAF_TARGETS} PROPERTY EXPORT_NO_SYSTEM TRUE)
 
 if(DEFINED BUILD_TESTING AND BUILD_TESTING AND NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
    add_subdirectory(tests)
@@ -811,7 +911,8 @@ install(
 
 if(FORGE_ENABLE_CONTRACT_TOOLING)
    install(
-      DIRECTORY libraries/contract/abi/include/forge
+      DIRECTORY libraries/contract/graph/include/forge
+                libraries/contract/abi/include/forge
                 libraries/contract/attributes/include/forge
                 libraries/contract/validation/include/forge
                 libraries/contract/manifest/include/forge

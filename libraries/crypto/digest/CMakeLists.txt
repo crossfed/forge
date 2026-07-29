@@ -28,3 +28,4 @@ target_link_libraries(
       Boost::headers
    PRIVATE OpenSSL::Crypto
 )
+forge_target_contract_guest_component(forge_crypto_digest ID forge.crypto.digest)

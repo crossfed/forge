@@ -20,59 +20,145 @@ forge_add_contract(
    spring_eosio_boot
    CONTRACT eosio.boot
    SOURCES "${_spring}/contracts/eosio.boot/eosio.boot.cpp"
+   HEADERS "${_spring}/contracts/eosio.boot/eosio.boot.hpp"
 )
 forge_add_contract(
    spring_eosio_token
    CONTRACT eosio.token
    SOURCES "${_spring}/contracts/eosio.token/eosio.token.cpp"
+   HEADERS "${_spring}/contracts/eosio.token/eosio.token.hpp"
 )
 forge_add_contract(
    spring_eosio_msig
    CONTRACT eosio.msig
    SOURCES "${_spring}/contracts/eosio.msig/eosio.msig.cpp"
+   HEADERS "${_spring}/contracts/eosio.msig/eosio.msig.hpp"
 )
 forge_add_contract(
    spring_eosio_wrap
    CONTRACT eosio.wrap
    SOURCES "${_spring}/contracts/eosio.wrap/eosio.wrap.cpp"
+   HEADERS "${_spring}/contracts/eosio.wrap/eosio.wrap.hpp"
+)
+
+set(_spring_system_root "${CMAKE_CURRENT_BINARY_DIR}/corpus-source/spring-eosio-system")
+file(MAKE_DIRECTORY "${_spring_system_root}")
+set(
+   _spring_system_inputs
+   eosio.system.cpp
+   peer_keys.cpp
+   producer_pay.cpp
+   delegate_bandwidth.cpp
+   voting.cpp
+   exchange_state.cpp
+   rex.cpp
+   eosio.system.hpp
+   exchange_state.hpp
+   native.hpp
+   peer_keys.hpp
+)
+foreach(_input IN LISTS _spring_system_inputs)
+   configure_file(
+      "${_spring}/contracts/eosio.system/${_input}"
+      "${_spring_system_root}/${_input}"
+      COPYONLY
+   )
+endforeach()
+configure_file(
+   "${_spring}/contracts/eosio.token/eosio.token.hpp"
+   "${_spring_system_root}/eosio.token.hpp"
+   COPYONLY
 )
 forge_add_contract(
    spring_eosio_system
    CONTRACT eosio.system
+   SOURCE_ROOT "${_spring_system_root}"
    SOURCES
-      "${_spring}/contracts/eosio.system/eosio.system.cpp"
-      "${_spring}/contracts/eosio.system/peer_keys.cpp"
-   DISPATCH_SOURCE "${_spring}/contracts/eosio.system/eosio.system.cpp"
-   INCLUDE_DIRECTORIES
-      "${_spring}/contracts/eosio.system"
-      "${_spring}/contracts/eosio.token"
+      eosio.system.cpp
+      peer_keys.cpp
+   DISPATCH_SOURCE eosio.system.cpp
+   HEADERS
+      producer_pay.cpp
+      delegate_bandwidth.cpp
+      voting.cpp
+      exchange_state.cpp
+      rex.cpp
+      eosio.system.hpp
+      exchange_state.hpp
+      native.hpp
+      peer_keys.hpp
+      eosio.token.hpp
 )
 forge_add_contract(
    spring_test_api
    CONTRACT test_api
    SOURCES "${_spring}/test-contracts/test_api/test_api.cpp"
+   HEADERS
+      "${_spring}/test-contracts/test_api/test_action.cpp"
+      "${_spring}/test-contracts/test_api/test_api.hpp"
+      "${_spring}/test-contracts/test_api/test_api_common.hpp"
+      "${_spring}/test-contracts/test_api/test_chain.cpp"
+      "${_spring}/test-contracts/test_api/test_checktime.cpp"
+      "${_spring}/test-contracts/test_api/test_compiler_builtins.cpp"
+      "${_spring}/test-contracts/test_api/test_crypto.cpp"
+      "${_spring}/test-contracts/test_api/test_datastream.cpp"
+      "${_spring}/test-contracts/test_api/test_permission.cpp"
+      "${_spring}/test-contracts/test_api/test_print.cpp"
+      "${_spring}/test-contracts/test_api/test_transaction.cpp"
+      "${_spring}/test-contracts/test_api/test_types.cpp"
+      "${_spring}/test-contracts/capi/eosio/types.h"
 )
 forge_add_contract(
    spring_test_api_db
    CONTRACT test_api_db
    SOURCES "${_spring}/test-contracts/test_api_db/test_api_db.cpp"
+   HEADERS "${_spring}/test-contracts/test_api_db/test_api_db.hpp"
 )
 forge_add_contract(
    spring_test_api_multi_index
    CONTRACT test_api_multi_index
    SOURCES "${_spring}/test-contracts/test_api_multi_index/test_api_multi_index.cpp"
+   HEADERS "${_spring}/test-contracts/test_api_multi_index/test_api_multi_index.hpp"
+)
+
+set(_eosio_bios_root "${CMAKE_CURRENT_BINARY_DIR}/corpus-source/eosio-bios")
+file(MAKE_DIRECTORY "${_eosio_bios_root}/eosio.bios")
+configure_file(
+   "${_eosio}/contracts/eosio.bios/src/eosio.bios.cpp"
+   "${_eosio_bios_root}/eosio.bios.cpp"
+   COPYONLY
+)
+configure_file(
+   "${_eosio}/contracts/eosio.bios/include/eosio.bios/eosio.bios.hpp"
+   "${_eosio_bios_root}/eosio.bios/eosio.bios.hpp"
+   COPYONLY
 )
 forge_add_contract(
    eosio_bios
    CONTRACT eosio.bios
-   SOURCES "${_eosio}/contracts/eosio.bios/src/eosio.bios.cpp"
-   INCLUDE_DIRECTORIES "${_eosio}/contracts/eosio.bios/include"
+   SOURCE_ROOT "${_eosio_bios_root}"
+   SOURCES eosio.bios.cpp
+   HEADERS eosio.bios/eosio.bios.hpp
+)
+
+set(_eosio_boot_root "${CMAKE_CURRENT_BINARY_DIR}/corpus-source/eosio-boot")
+file(MAKE_DIRECTORY "${_eosio_boot_root}/eosio.boot")
+configure_file(
+   "${_eosio}/contracts/eosio.boot/src/eosio.boot.cpp"
+   "${_eosio_boot_root}/eosio.boot.cpp"
+   COPYONLY
+)
+configure_file(
+   "${_eosio}/contracts/eosio.boot/include/eosio.boot/eosio.boot.hpp"
+   "${_eosio_boot_root}/eosio.boot/eosio.boot.hpp"
+   COPYONLY
 )
 forge_add_contract(
    eosio_boot
    CONTRACT eosio.boot
-   SOURCES "${_eosio}/contracts/eosio.boot/src/eosio.boot.cpp"
-   INCLUDE_DIRECTORIES "${_eosio}/contracts/eosio.boot/include"
+   SOURCE_ROOT "${_eosio_boot_root}"
+   SOURCES eosio.boot.cpp
+   HEADERS eosio.boot/eosio.boot.hpp
 )
 
 set(

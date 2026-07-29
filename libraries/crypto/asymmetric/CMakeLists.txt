@@ -9,6 +9,10 @@ target_sources(
 target_compile_features(forge_crypto_asymmetric_values PUBLIC cxx_std_23)
 target_include_directories(forge_crypto_asymmetric_values PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
 target_link_libraries(forge_crypto_asymmetric_values PUBLIC forge_raw)
+forge_target_contract_guest_component(
+   forge_crypto_asymmetric_values
+   ID forge.crypto.asymmetric_values
+)
 
 add_library(
    forge_crypto_asymmetric STATIC
@@ -53,3 +57,4 @@ target_link_libraries(
       OpenSSL::Crypto
       secp256k1
 )
+forge_target_contract_guest_component(forge_crypto_asymmetric ID forge.crypto.asymmetric)

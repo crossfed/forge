@@ -12,6 +12,7 @@ struct request {
    std::filesystem::path wasm;
    std::filesystem::path abi;
    std::filesystem::path imports;
+   std::filesystem::path source_graph;
    std::filesystem::path output;
    std::string sdk_version;
    std::string profile;

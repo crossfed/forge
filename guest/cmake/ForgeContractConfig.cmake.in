@@ -20,6 +20,7 @@ set(ForgeContract_ABIGEN "${ForgeContract_PREFIX}/bin/abigen")
 set(ForgeContract_ATTR_PLUGIN "${ForgeContract_PREFIX}/@CMAKE_INSTALL_LIBDIR@/forge-contract/attr-plugin@CMAKE_SHARED_MODULE_SUFFIX@")
 set(ForgeContract_CHECK "${ForgeContract_PREFIX}/bin/contract-check")
 set(ForgeContract_MANIFEST "${ForgeContract_PREFIX}/bin/contract-manifest")
+set(ForgeContract_COMPONENTS "${CMAKE_CURRENT_LIST_DIR}/ForgeContractGuestComponents.cmake")
 
 include("${CMAKE_CURRENT_LIST_DIR}/ForgeContractFunctions.cmake")
 
@@ -32,6 +33,7 @@ foreach(_required
    ForgeContract_ATTR_PLUGIN
    ForgeContract_CHECK
    ForgeContract_MANIFEST
+   ForgeContract_COMPONENTS
 )
    if(NOT EXISTS "${${_required}}")
       set(ForgeContract_FOUND FALSE)
@@ -39,6 +41,28 @@ foreach(_required
       return()
    endif()
 endforeach()
+
+file(REAL_PATH "${ForgeContract_COMPONENTS}" _forge_contract_components_file)
+get_property(
+   _forge_contract_registered_components_file
+   GLOBAL PROPERTY FORGE_CONTRACT_REGISTERED_COMPONENTS_FILE
+)
+if(_forge_contract_registered_components_file)
+   if(NOT _forge_contract_registered_components_file STREQUAL _forge_contract_components_file)
+      set(ForgeContract_FOUND FALSE)
+      set(
+         ForgeContract_NOT_FOUND_MESSAGE
+         "a different Forge Contract component registry is already loaded: ${_forge_contract_registered_components_file}"
+      )
+      return()
+   endif()
+else()
+   include("${_forge_contract_components_file}")
+   set_property(
+      GLOBAL PROPERTY FORGE_CONTRACT_REGISTERED_COMPONENTS_FILE
+      "${_forge_contract_components_file}"
+   )
+endif()
 
 set(_forge_contract_foundation_manifest "${ForgeContract_DATA_DIR}/foundation.json")
 if(NOT EXISTS "${_forge_contract_foundation_manifest}")

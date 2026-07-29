@@ -1,13 +1,17 @@
 include(ExternalProject)
+include("${CMAKE_CURRENT_LIST_DIR}/ForgeContractGraph.cmake")
 
 function(forge_add_contract target)
    cmake_parse_arguments(
       ARG
       ""
-      "CONTRACT;DISPATCH_SOURCE;RICARDIAN_CONTRACTS;RICARDIAN_CLAUSES"
-      "SOURCES;COMPILE_CHECKS;INCLUDE_DIRECTORIES"
+      "CONTRACT;SOURCE_ROOT;DISPATCH_SOURCE;RICARDIAN_CONTRACTS;RICARDIAN_CLAUSES"
+      "SOURCES;HEADERS;COMPILE_CHECKS;LIBRARIES"
       ${ARGN}
    )
+   if(ARG_UNPARSED_ARGUMENTS)
+      message(FATAL_ERROR "forge_add_contract(${target}) received unknown arguments: ${ARG_UNPARSED_ARGUMENTS}")
+   endif()
    if(NOT ARG_SOURCES)
       message(FATAL_ERROR "forge_add_contract(${target}) requires SOURCES")
    endif()
@@ -17,14 +21,25 @@ function(forge_add_contract target)
    if(NOT ARG_CONTRACT)
       set(ARG_CONTRACT "${target}")
    endif()
+   if(ARG_SOURCE_ROOT)
+      _forge_contract_normalize_root("${ARG_SOURCE_ROOT}" "contract SOURCE_ROOT" _source_root)
+   else()
+      _forge_contract_normalize_root("${CMAKE_CURRENT_SOURCE_DIR}" "contract SOURCE_ROOT" _source_root)
+   endif()
 
+   set(_all_logical)
    set(_sources)
+   set(_source_logical)
    foreach(_source IN LISTS ARG_SOURCES)
-      get_filename_component(_absolute "${_source}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-      if(NOT EXISTS "${_absolute}")
-         message(FATAL_ERROR "contract source does not exist: ${_absolute}")
+      _forge_contract_normalize_file(
+         "${_source_root}" "${_source}" "contract source" _absolute _logical
+      )
+      if(_logical IN_LIST _all_logical)
+         message(FATAL_ERROR "contract input is declared more than once: ${_logical}")
       endif()
+      list(APPEND _all_logical "${_logical}")
       list(APPEND _sources "${_absolute}")
+      list(APPEND _source_logical "contract/source/${_logical}")
    endforeach()
 
    list(LENGTH _sources _source_count)
@@ -34,11 +49,9 @@ function(forge_add_contract target)
       endif()
       list(GET _sources 0 _dispatch_source)
    else()
-      get_filename_component(
-         _dispatch_source
-         "${ARG_DISPATCH_SOURCE}"
-         ABSOLUTE
-         BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+      _forge_contract_normalize_file(
+         "${_source_root}" "${ARG_DISPATCH_SOURCE}" "contract dispatch source"
+         _dispatch_source _unused_logical
       )
       list(FIND _sources "${_dispatch_source}" _dispatch_source_index)
       if(_dispatch_source_index EQUAL -1)
@@ -46,62 +59,71 @@ function(forge_add_contract target)
       endif()
    endif()
 
-   list(REMOVE_ITEM _sources "${_dispatch_source}")
-   list(INSERT _sources 0 "${_dispatch_source}")
-   string(JOIN "|" _encoded_sources ${_sources})
-
+   set(_headers)
+   set(_header_logical)
+   foreach(_header IN LISTS ARG_HEADERS)
+      _forge_contract_normalize_file(
+         "${_source_root}" "${_header}" "contract header" _absolute _logical
+      )
+      if(_logical IN_LIST _all_logical)
+         message(FATAL_ERROR "contract input is declared more than once: ${_logical}")
+      endif()
+      list(APPEND _all_logical "${_logical}")
+      list(APPEND _headers "${_absolute}")
+      list(APPEND _header_logical "contract/header/${_logical}")
+   endforeach()
    set(_compile_checks)
+   set(_compile_check_logical)
    foreach(_source IN LISTS ARG_COMPILE_CHECKS)
-      get_filename_component(_absolute "${_source}" ABSOLUTE BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
-      if(NOT EXISTS "${_absolute}")
-         message(FATAL_ERROR "contract compile-check source does not exist: ${_absolute}")
+      _forge_contract_normalize_file(
+         "${_source_root}" "${_source}" "contract compile-check source" _absolute _logical
+      )
+      if(_logical IN_LIST _all_logical)
+         message(FATAL_ERROR "contract input is declared more than once: ${_logical}")
       endif()
+      list(APPEND _all_logical "${_logical}")
       list(APPEND _compile_checks "${_absolute}")
+      list(APPEND _compile_check_logical "contract/compile-check/${_logical}")
    endforeach()
-   string(JOIN "|" _encoded_compile_checks ${_compile_checks})
-
-   set(_include_directories)
-   foreach(_include_directory IN LISTS ARG_INCLUDE_DIRECTORIES)
-      get_filename_component(
-         _absolute
-         "${_include_directory}"
-         REALPATH
-         BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
-      )
-      if(NOT IS_DIRECTORY "${_absolute}")
-         message(FATAL_ERROR "contract include directory does not exist: ${_absolute}")
-      endif()
-      list(APPEND _include_directories "${_absolute}")
-   endforeach()
-   string(JOIN "|" _encoded_include_directories ${_include_directories})
-
    set(_ricardian_contracts "")
+   set(_ricardian_contracts_logical "")
    if(ARG_RICARDIAN_CONTRACTS)
-      get_filename_component(
-         _ricardian_contracts
-         "${ARG_RICARDIAN_CONTRACTS}"
-         REALPATH
-         BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+      _forge_contract_normalize_file(
+         "${_source_root}" "${ARG_RICARDIAN_CONTRACTS}" "Ricardian contracts file"
+         _ricardian_contracts _ricardian_contracts_logical
       )
-      if(NOT EXISTS "${_ricardian_contracts}")
-         message(FATAL_ERROR "Ricardian contracts file does not exist: ${_ricardian_contracts}")
-      endif()
    endif()
 
    set(_ricardian_clauses "")
+   set(_ricardian_clauses_logical "")
    if(ARG_RICARDIAN_CLAUSES)
-      get_filename_component(
-         _ricardian_clauses
-         "${ARG_RICARDIAN_CLAUSES}"
-         REALPATH
-         BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+      _forge_contract_normalize_file(
+         "${_source_root}" "${ARG_RICARDIAN_CLAUSES}" "Ricardian clauses file"
+         _ricardian_clauses _ricardian_clauses_logical
       )
-      if(NOT EXISTS "${_ricardian_clauses}")
-         message(FATAL_ERROR "Ricardian clauses file does not exist: ${_ricardian_clauses}")
-      endif()
    endif()
 
    set(_binary_dir "${CMAKE_CURRENT_BINARY_DIR}/${target}.contract")
+   _forge_contract_write_graph(
+      TARGET "${target}"
+      CONTRACT "${ARG_CONTRACT}"
+      SOURCE_ROOT "${_source_root}"
+      DISPATCH_SOURCE "${_dispatch_source}"
+      SOURCES ${_sources}
+      SOURCE_LOGICAL ${_source_logical}
+      HEADERS ${_headers}
+      HEADER_LOGICAL ${_header_logical}
+      COMPILE_CHECKS ${_compile_checks}
+      COMPILE_CHECK_LOGICAL ${_compile_check_logical}
+      RICARDIAN_CONTRACTS "${_ricardian_contracts}"
+      RICARDIAN_CONTRACTS_LOGICAL "${_ricardian_contracts_logical}"
+      RICARDIAN_CLAUSES "${_ricardian_clauses}"
+      RICARDIAN_CLAUSES_LOGICAL "${_ricardian_clauses_logical}"
+      LIBRARIES ${ARG_LIBRARIES}
+      OUTPUT_FILE _graph_file
+      OUTPUT_HASH _graph_hash
+      BUILD_DEPENDENCIES _build_dependencies
+   )
    ExternalProject_Add(
       ${target}
       SOURCE_DIR "${ForgeContract_DATA_DIR}/build"
@@ -111,16 +133,16 @@ function(forge_add_contract target)
       PATCH_COMMAND ""
       INSTALL_COMMAND ""
       BUILD_ALWAYS TRUE
+      DEPENDS ${_build_dependencies}
       CMAKE_GENERATOR "${CMAKE_GENERATOR}"
       CMAKE_ARGS
          -DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}
          -DCMAKE_TOOLCHAIN_FILE=${ForgeContract_TOOLCHAIN}
          -DFORGE_CONTRACT_SDK_PREFIX:PATH=${ForgeContract_PREFIX}
          -DFORGE_CONTRACT_TARGET=${target}
-         -DFORGE_CONTRACT_NAME=${ARG_CONTRACT}
-         -DFORGE_CONTRACT_SOURCES_ENCODED=${_encoded_sources}
-         -DFORGE_CONTRACT_COMPILE_CHECKS_ENCODED=${_encoded_compile_checks}
-         -DFORGE_CONTRACT_INCLUDE_DIRECTORIES_ENCODED=${_encoded_include_directories}
+         -DFORGE_CONTRACT_GRAPH_FILE=${_graph_file}
+         -DFORGE_CONTRACT_GRAPH_HASH=${_graph_hash}
+         -DFORGE_CONTRACT_COMPONENTS=${ForgeContract_COMPONENTS}
          -DFORGE_CONTRACT_OUTPUT_DIR=${CMAKE_CURRENT_BINARY_DIR}
          -DFORGE_CONTRACT_DATA_DIR=${ForgeContract_DATA_DIR}
          -DFORGE_CONTRACT_ABIGEN=${ForgeContract_ABIGEN}
@@ -135,8 +157,6 @@ function(forge_add_contract target)
          -DFORGE_CONTRACT_INTRINSIC_VERSION=${ForgeContract_INTRINSIC_VERSION}
          -DFORGE_CONTRACT_PROFILE=${ForgeContract_PROFILE}
          -DFORGE_CONTRACT_REPRODUCIBLE=${ForgeContract_REPRODUCIBLE}
-         -DFORGE_CONTRACT_RICARDIAN_CONTRACTS=${_ricardian_contracts}
-         -DFORGE_CONTRACT_RICARDIAN_CLAUSES=${_ricardian_clauses}
       BUILD_BYPRODUCTS
          "${CMAKE_CURRENT_BINARY_DIR}/${target}.wasm"
          "${CMAKE_CURRENT_BINARY_DIR}/${target}.abi"
