@@ -11,7 +11,6 @@ foreach(
       FORGE_PACKAGE_TEST_SOURCE_ROOT
       FORGE_PACKAGE_TEST_BUILD_ROOT
       FORGE_PACKAGE_TEST_GENERATOR
-      FORGE_PACKAGE_TEST_CONFIG
       FORGE_PACKAGE_TEST_MULTI_CONFIG
       FORGE_PACKAGE_TEST_C_COMPILER
       FORGE_PACKAGE_TEST_CXX_COMPILER
@@ -20,6 +19,9 @@ foreach(
       message(FATAL_ERROR "${required} is required")
    endif()
 endforeach()
+if(FORGE_PACKAGE_TEST_MULTI_CONFIG AND "${FORGE_PACKAGE_TEST_CONFIG}" STREQUAL "")
+   message(FATAL_ERROR "FORGE_PACKAGE_TEST_CONFIG is required for a multi-config generator")
+endif()
 
 file(
    REMOVE_RECURSE
@@ -27,12 +29,17 @@ file(
    "${FORGE_PACKAGE_TEST_RELOCATED_PREFIX}"
    "${FORGE_PACKAGE_TEST_BINARY_DIR}"
 )
+set(
+   install_command
+   "${CMAKE_COMMAND}" --install "${FORGE_PACKAGE_TEST_BUILD_ROOT}"
+   --prefix "${FORGE_PACKAGE_TEST_INSTALL_PREFIX}"
+   --component dev
+)
+if(NOT "${FORGE_PACKAGE_TEST_CONFIG}" STREQUAL "")
+   list(APPEND install_command --config "${FORGE_PACKAGE_TEST_CONFIG}")
+endif()
 execute_process(
-   COMMAND
-      "${CMAKE_COMMAND}" --install "${FORGE_PACKAGE_TEST_BUILD_ROOT}"
-      --prefix "${FORGE_PACKAGE_TEST_INSTALL_PREFIX}"
-      --component dev
-      --config "${FORGE_PACKAGE_TEST_CONFIG}"
+   COMMAND ${install_command}
    COMMAND_ERROR_IS_FATAL ANY
 )
 file(RENAME "${FORGE_PACKAGE_TEST_INSTALL_PREFIX}" "${FORGE_PACKAGE_TEST_RELOCATED_PREFIX}")
@@ -86,9 +93,12 @@ if(DEFINED FORGE_PACKAGE_TEST_OSX_SYSROOT AND NOT "${FORGE_PACKAGE_TEST_OSX_SYSR
 endif()
 
 execute_process(COMMAND ${configure_command} COMMAND_ERROR_IS_FATAL ANY)
+set(build_command "${CMAKE_COMMAND}" --build "${FORGE_PACKAGE_TEST_BINARY_DIR}")
+if(NOT "${FORGE_PACKAGE_TEST_CONFIG}" STREQUAL "")
+   list(APPEND build_command --config "${FORGE_PACKAGE_TEST_CONFIG}")
+endif()
 execute_process(
-   COMMAND "${CMAKE_COMMAND}" --build "${FORGE_PACKAGE_TEST_BINARY_DIR}"
-      --config "${FORGE_PACKAGE_TEST_CONFIG}"
+   COMMAND ${build_command}
    COMMAND_ERROR_IS_FATAL ANY
 )
 set(consumer_executable "${FORGE_PACKAGE_TEST_BINARY_DIR}/forge_package_contract_testing_component")
