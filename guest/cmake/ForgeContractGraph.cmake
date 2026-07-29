@@ -20,7 +20,7 @@ set(
    FORGE_CONTRACT_INSTALL_PUBLIC_HEADER_PATHS
 )
 
-function(_forge_contract_sealed_target_properties output)
+function(_forge_contract_sealed_target_properties target output)
    set(
       _properties
       SOURCES
@@ -61,6 +61,7 @@ function(_forge_contract_sealed_target_properties output)
       EXPORT_PROPERTIES
       EXPORT_NO_SYSTEM
       NO_SYSTEM_FROM_IMPORTED
+      SYSTEM
       FORGE_CONTRACT_BUILD_SOURCE_ROOT
       FORGE_CONTRACT_DESCRIPTOR_SCHEMA
       FORGE_CONTRACT_LIBRARY
@@ -79,12 +80,58 @@ function(_forge_contract_sealed_target_properties output)
       FORGE_CONTRACT_INSTALL_MODULE_PATHS
       FORGE_CONTRACT_INSTALL_PUBLIC_HEADER_PATHS
    )
+   get_target_property(_imported "${target}" IMPORTED)
+   if(_imported)
+      list(
+         APPEND _properties
+         IMPORTED_CONFIGURATIONS
+         IMPORTED_CXX_MODULES_COMPILE_DEFINITIONS
+         IMPORTED_CXX_MODULES_COMPILE_FEATURES
+         IMPORTED_CXX_MODULES_COMPILE_OPTIONS
+         IMPORTED_CXX_MODULES_INCLUDE_DIRECTORIES
+         IMPORTED_CXX_MODULES_LINK_LIBRARIES
+         IMPORTED_IMPLIB
+         IMPORTED_LIBNAME
+         IMPORTED_LINK_DEPENDENT_LIBRARIES
+         IMPORTED_LINK_INTERFACE_LANGUAGES
+         IMPORTED_LINK_INTERFACE_LIBRARIES
+         IMPORTED_LINK_INTERFACE_MULTIPLICITY
+         IMPORTED_LOCATION
+         IMPORTED_NO_SONAME
+         IMPORTED_NO_SYSTEM
+         IMPORTED_OBJECTS
+         IMPORTED_SONAME
+      )
+      get_target_property(_configurations "${target}" IMPORTED_CONFIGURATIONS)
+      if(_configurations STREQUAL "_configurations-NOTFOUND")
+         set(_configurations)
+      endif()
+      list(APPEND _configurations DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+      list(REMOVE_DUPLICATES _configurations)
+      foreach(_configuration IN LISTS _configurations)
+         string(TOUPPER "${_configuration}" _configuration)
+         list(
+            APPEND _properties
+            "IMPORTED_IMPLIB_${_configuration}"
+            "IMPORTED_LIBNAME_${_configuration}"
+            "IMPORTED_LINK_DEPENDENT_LIBRARIES_${_configuration}"
+            "IMPORTED_LINK_INTERFACE_LANGUAGES_${_configuration}"
+            "IMPORTED_LINK_INTERFACE_LIBRARIES_${_configuration}"
+            "IMPORTED_LINK_INTERFACE_MULTIPLICITY_${_configuration}"
+            "IMPORTED_LOCATION_${_configuration}"
+            "IMPORTED_NO_SONAME_${_configuration}"
+            "IMPORTED_OBJECTS_${_configuration}"
+            "IMPORTED_SONAME_${_configuration}"
+            "MAP_IMPORTED_CONFIG_${_configuration}"
+         )
+      endforeach()
+   endif()
    set(${output} "${_properties}" PARENT_SCOPE)
 endfunction()
 
 function(_forge_contract_assert_sealed_target target)
    string(SHA256 _target_key "${target}")
-   _forge_contract_sealed_target_properties(_properties)
+   _forge_contract_sealed_target_properties("${target}" _properties)
    foreach(_property IN LISTS _properties)
       get_property(
          _expected_set GLOBAL
@@ -122,13 +169,24 @@ function(_forge_contract_assert_all_sealed_targets)
    endforeach()
 endfunction()
 
+function(_forge_contract_require_sealed_target target)
+   get_property(_targets GLOBAL PROPERTY FORGE_CONTRACT_SEALED_TARGETS)
+   if(NOT target IN_LIST _targets)
+      message(
+         FATAL_ERROR
+         "imported Forge Contract library target ${target} was not registered by its package config"
+      )
+   endif()
+   _forge_contract_assert_sealed_target("${target}")
+endfunction()
+
 function(_forge_contract_seal_target target)
    string(SHA256 _target_key "${target}")
    get_property(_targets GLOBAL PROPERTY FORGE_CONTRACT_SEALED_TARGETS)
    if(NOT target IN_LIST _targets)
       set_property(GLOBAL APPEND PROPERTY FORGE_CONTRACT_SEALED_TARGETS "${target}")
    endif()
-   _forge_contract_sealed_target_properties(_properties)
+   _forge_contract_sealed_target_properties("${target}" _properties)
    foreach(_property IN LISTS _properties)
       get_property(_is_set TARGET "${target}" PROPERTY "${_property}" SET)
       set_property(
@@ -301,6 +359,7 @@ function(_forge_contract_register_library_target target)
    if(NOT _id)
       message(FATAL_ERROR "contract library target has no stable ID: ${target}")
    endif()
+   _forge_contract_require_sealed_target("${target}")
    _forge_contract_id_key("${_id}" _key)
    get_property(_component GLOBAL PROPERTY "FORGE_CONTRACT_COMPONENT_TARGET_${_key}")
    if(_component)
@@ -314,6 +373,31 @@ function(_forge_contract_register_library_target target)
       endif()
    endif()
    set_property(GLOBAL PROPERTY "FORGE_CONTRACT_LIBRARY_TARGET_${_key}" "${target}")
+endfunction()
+
+function(forge_register_contract_library_targets)
+   if(NOT ARGN)
+      message(FATAL_ERROR "forge_register_contract_library_targets requires imported targets")
+   endif()
+   foreach(_input IN LISTS ARGN)
+      _forge_contract_resolve_target("${_input}" _target)
+      get_target_property(_imported "${_target}" IMPORTED)
+      get_target_property(_contract_library "${_target}" FORGE_CONTRACT_LIBRARY)
+      if(NOT _imported OR NOT _contract_library)
+         message(
+            FATAL_ERROR
+            "forge_register_contract_library_targets requires an imported "
+            "Forge Contract library target: ${_input}"
+         )
+      endif()
+      get_property(_sealed GLOBAL PROPERTY FORGE_CONTRACT_SEALED_TARGETS)
+      if(_target IN_LIST _sealed)
+         _forge_contract_assert_sealed_target("${_target}")
+      else()
+         _forge_contract_seal_target("${_target}")
+      endif()
+      _forge_contract_register_library_target("${_target}")
+   endforeach()
 endfunction()
 
 function(_forge_contract_register_component_target target)
@@ -537,6 +621,8 @@ function(forge_add_contract_library target)
    set_target_properties(
       "${_concrete}"
       PROPERTIES
+         CXX_MODULE_STD OFF
+         CXX_SCAN_FOR_MODULES ON
          OUTPUT_NAME "${target}"
          EXPORT_NAME "${target}"
          EXPORT_NO_SYSTEM TRUE
@@ -590,8 +676,8 @@ function(forge_add_contract_library target)
          FORGE_CONTRACT_INSTALL_MODULE_PATHS ""
          FORGE_CONTRACT_INSTALL_PUBLIC_HEADER_PATHS ""
    )
-   _forge_contract_register_library_target("${_concrete}")
    _forge_contract_seal_target("${_concrete}")
+   _forge_contract_register_library_target("${_concrete}")
 endfunction()
 
 function(_forge_contract_imported_location target output)

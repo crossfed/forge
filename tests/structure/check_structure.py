@@ -473,7 +473,7 @@ def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
       source = path.read_text(errors="ignore")
       if path.name == "ForgeContractGraph.cmake":
          seal = re.search(
-            r"function\(_forge_contract_sealed_target_properties output\).*?endfunction\(\)",
+            r"function\(_forge_contract_sealed_target_properties target output\).*?endfunction\(\)",
             source,
             flags=re.DOTALL,
          )
@@ -494,6 +494,10 @@ def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
                      f"{path.relative_to(root)}: Contract SDK sealed property set omits {required}"
                   )
             source = source[: seal.start()] + source[seal.end() :]
+         if "function(forge_register_contract_library_targets)" not in source:
+            errors.append(
+               f"{path.relative_to(root)}: installed Contract libraries require an explicit package registration API"
+            )
       for token in reverse_graph_tokens:
          if token.search(source):
             errors.append(
@@ -505,6 +509,15 @@ def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
       errors.append("CMakeLists.txt: host targets must declare guest identities beside their own definitions")
    if "forge_register_contract_guest_component" in root_cmake:
       errors.append("CMakeLists.txt: legacy central guest-component mapping is forbidden")
+
+   package_config = (
+      root / "guest" / "tests" / "dual_target" / "producer" / "ProductProtocolConfig.cmake.in"
+   ).read_text(errors="ignore")
+   if "forge_register_contract_library_targets(" not in package_config:
+      errors.append(
+         "guest/tests/dual_target/producer/ProductProtocolConfig.cmake.in: "
+         "installed contract targets must be registered immediately"
+      )
 
    attribute_plugin = root / "tools" / "attr-plugin" / "plugin.cpp"
    attribute_source = attribute_plugin.read_text(errors="ignore")

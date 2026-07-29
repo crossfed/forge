@@ -481,6 +481,23 @@ forge_add_contract_library(
             "not guest-compatible",
         ),
         (
+            "unregistered-imported-library",
+            """add_library(unregistered STATIC IMPORTED)
+set_target_properties(
+   unregistered
+   PROPERTIES
+      FORGE_CONTRACT_LIBRARY TRUE
+      FORGE_CONTRACT_LIBRARY_ID negative.unregistered
+)
+forge_add_contract_library(
+   protocol ID negative.imported.consumer SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+   PUBLIC_LIBRARIES unregistered
+)
+""",
+            "its package config",
+        ),
+        (
             "duplicate-id",
             """forge_add_contract_library(
    first ID negative.duplicate.id SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
@@ -563,6 +580,39 @@ set_property(TARGET "${concrete}" PROPERTY CXX_SCAN_FOR_MODULES OFF)
             succeeds=False,
             contains=diagnostic,
         )
+
+
+def check_imported_target_seal(
+    *,
+    cmake: str,
+    cxx_compiler: Path,
+    forge_package: Path,
+    contract_package: Path,
+    product_package: Path,
+    output: Path,
+) -> None:
+    output.mkdir(parents=True)
+    (output / "CMakeLists.txt").write_text(
+        """cmake_minimum_required(VERSION 3.31)
+project(ImportedContractMutation LANGUAGES CXX)
+find_package(ForgeContract CONFIG REQUIRED)
+find_package(ProductProtocol CONFIG REQUIRED)
+add_library(host_only INTERFACE)
+target_link_libraries(Product::protocol INTERFACE host_only)
+""",
+        encoding="utf-8",
+    )
+    configure(
+        cmake=cmake,
+        cxx_compiler=cxx_compiler,
+        forge_package=forge_package,
+        contract_package=contract_package,
+        product_package=product_package,
+        source=output,
+        build=output / "build",
+        succeeds=False,
+        contains="descriptor declaration: INTERFACE_LINK_LIBRARIES",
+    )
 
 
 def check_build_failures(
@@ -924,6 +974,14 @@ def validate(
     product_package = relocated / "lib" / "cmake" / "ProductProtocol"
     if not any((product_package / "cxx-modules").glob("*.cmake")):
         raise RuntimeError("installed protocol package has no CMake module metadata")
+    check_imported_target_seal(
+        cmake=cmake,
+        cxx_compiler=cxx_compiler,
+        forge_package=forge_package,
+        contract_package=contract_package,
+        product_package=product_package,
+        output=output / "imported-target-seal",
+    )
 
     consumer_build = output / "consumer-build"
     configure(

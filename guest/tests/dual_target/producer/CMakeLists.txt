@@ -12,6 +12,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Forge CONFIG REQUIRED COMPONENTS raw chain_protocol crypto_digest)
 find_package(ForgeContract CONFIG REQUIRED)
 
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+
 forge_add_contract_library(
    values
    ID product.chain.values
@@ -45,6 +47,16 @@ forge_add_contract_library(
       values
    PRIVATE_LIBRARIES limits
 )
+
+foreach(_library IN ITEMS values limits protocol)
+   get_target_property(_concrete "${_library}" ALIASED_TARGET)
+   get_target_property(_module_scanning "${_concrete}" CXX_SCAN_FOR_MODULES)
+   get_target_property(_module_std "${_concrete}" CXX_MODULE_STD)
+   if(NOT _module_scanning OR _module_std)
+      message(FATAL_ERROR "Forge Contract library did not enforce canonical module settings")
+   endif()
+endforeach()
+set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 
 add_executable(product_protocol_host_tests host_tests.cpp)
 set_target_properties(product_protocol_host_tests PROPERTIES NO_SYSTEM_FROM_IMPORTED TRUE)

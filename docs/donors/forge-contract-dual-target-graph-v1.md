@@ -104,6 +104,9 @@ must be declared in the Forge call. This consistency check does not derive a
 second graph from CMake; it only rejects native target state that differs from
 the canonical descriptor materialization. Incomplete descriptors therefore
 remain configure errors instead of platform-dependent build failures.
+Installed package configs register and seal their exported protocol targets
+immediately after loading the CMake targets file. Lazy registration is rejected
+because it would let consumer mutations define the initial baseline.
 
 ## Rejected Mechanisms
 

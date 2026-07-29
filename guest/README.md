@@ -137,9 +137,20 @@ install(
 
 The package config must use `find_dependency(Forge)` for the declared host
 dependencies and `find_dependency(ForgeContract)` before loading the targets
-file. Installed packages contain module sources, implementation inputs,
-headers and relocatable descriptor metadata. Compiler-specific BMI or PCM
-artifacts are never transported.
+file. Immediately after loading it, register every exported protocol target so
+Forge seals the imported host materialization before returning control to the
+consumer:
+
+```cmake
+include("${CMAKE_CURRENT_LIST_DIR}/ProductProtocolTargets.cmake")
+forge_register_contract_library_targets(Product::product_protocol)
+```
+
+Installed packages contain module sources, implementation inputs, headers and
+relocatable descriptor metadata. Compiler-specific BMI or PCM artifacts are
+never transported. An imported contract-library target that was not registered
+by its package config is rejected instead of being accepted with a late,
+consumer-controlled baseline.
 
 ## Named Action Payloads
 
