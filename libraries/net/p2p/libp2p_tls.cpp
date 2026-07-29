@@ -22,7 +22,6 @@ module;
 module forge.net.p2p.node;
 
 import forge.crypto.asymmetric;
-import forge.crypto.pki.pem;
 import forge.crypto.pki.x509;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.identity;
@@ -118,25 +117,6 @@ void require_openssl(bool ok, std::string_view message) {
    return out;
 }
 
-[[nodiscard]] forge::crypto::asymmetric::private_key identity_private_key(const node::options& options) {
-   if (options.private_key_pem.empty()) {
-      throw_identity("libp2p TLS requires identity private key material");
-   }
-   try {
-      return forge::crypto::pki::pem::read_private_key(options.private_key_pem);
-   } catch (const forge::exceptions::base& error) {
-      throw_identity(error.what());
-   }
-}
-
-[[nodiscard]] std::vector<std::uint8_t> identity_public_key_bytes(const node::options& options,
-                                                                  const forge::crypto::asymmetric::private_key& key) {
-   if (!options.public_key.empty()) {
-      return options.public_key;
-   }
-   return encode_public_key(public_key_from_crypto(key.get_public_key()));
-}
-
 void append_der_length(std::vector<std::uint8_t>& out, std::size_t value) {
    if (value < 128) {
       out.push_back(static_cast<std::uint8_t>(value));
@@ -177,8 +157,7 @@ void add_libp2p_extension(X509* certificate, std::span<const std::uint8_t> value
    require_openssl(octets != nullptr, "failed to allocate libp2p TLS extension value");
    require_openssl(ASN1_OCTET_STRING_set(octets.get(), value.data(), static_cast<int>(value.size())) == 1,
                    "failed to set libp2p TLS extension value");
-   auto extension =
-       x509_extension_ptr{X509_EXTENSION_create_by_OBJ(nullptr, object.get(), 1, octets.get())};
+   auto extension = x509_extension_ptr{X509_EXTENSION_create_by_OBJ(nullptr, object.get(), 1, octets.get())};
    require_openssl(extension != nullptr, "failed to create libp2p TLS public key extension");
    require_openssl(X509_add_ext(certificate, extension.get(), -1) == 1,
                    "failed to add libp2p TLS public key extension");
@@ -215,7 +194,7 @@ void verify_certificate_basics(X509* certificate) {
    const auto value = certificate.extension(extension_oid);
    if (value.empty()) {
       FORGE_THROW_EXCEPTION(exceptions::peer_verification_failed,
-                          "libp2p TLS certificate is missing public key extension");
+                            "libp2p TLS certificate is missing public key extension");
    }
    auto offset = std::size_t{};
    auto read_length = [&value](std::size_t& cursor) {
@@ -238,8 +217,7 @@ void verify_certificate_basics(X509* certificate) {
    };
    auto read_octet = [&value, &read_length](std::size_t& cursor) {
       if (cursor >= value.size() || value[cursor++] != 0x04) {
-         FORGE_THROW_EXCEPTION(exceptions::peer_verification_failed,
-                             "libp2p TLS extension expected octet string");
+         FORGE_THROW_EXCEPTION(exceptions::peer_verification_failed, "libp2p TLS extension expected octet string");
       }
       const auto length = read_length(cursor);
       if (length > value.size() - cursor) {
@@ -271,20 +249,19 @@ void verify_certificate_basics(X509* certificate) {
    const auto message = make_signing_message(certificate.public_key_der());
    if (!verify_identity_signature(key, message, signature)) {
       FORGE_THROW_EXCEPTION(exceptions::peer_verification_failed,
-                          "libp2p TLS public key extension signature is invalid");
+                            "libp2p TLS public key extension signature is invalid");
    }
    return peer;
 }
 
 } // namespace
 
-libp2p_tls_material make_libp2p_tls_material(const node::options& options) {
-   const auto identity_key = identity_private_key(options);
+libp2p_tls_material make_libp2p_tls_material(const libp2p_identity_material& identity) {
    auto certificate_key = generate_certificate_key();
    const auto spki = public_key_spki_der(certificate_key.get());
    const auto message = make_signing_message(spki);
-   const auto signature = sign_identity(identity_key, message);
-   const auto extension = signed_key_der(identity_public_key_bytes(options, identity_key), signature);
+   const auto signature = sign_identity(require_libp2p_identity_private_key(identity), message);
+   const auto extension = signed_key_der(identity.public_key, signature);
 
    auto certificate = x509_ptr{X509_new()};
    require_openssl(certificate != nullptr, "failed to allocate libp2p TLS certificate");
@@ -301,8 +278,7 @@ libp2p_tls_material make_libp2p_tls_material(const node::options& options) {
                                               reinterpret_cast<const unsigned char*>(organization.data()),
                                               static_cast<int>(organization.size()), -1, 0) == 1,
                    "failed to set libp2p TLS certificate subject");
-   require_openssl(X509_set_issuer_name(certificate.get(), name) == 1,
-                   "failed to set libp2p TLS certificate issuer");
+   require_openssl(X509_set_issuer_name(certificate.get(), name) == 1, "failed to set libp2p TLS certificate issuer");
    add_libp2p_extension(certificate.get(), extension);
    require_openssl(X509_sign(certificate.get(), certificate_key.get(), nullptr) > 0,
                    "failed to self-sign libp2p TLS certificate");
@@ -312,9 +288,9 @@ libp2p_tls_material make_libp2p_tls_material(const node::options& options) {
    require_openssl(certificate_bio != nullptr && key_bio != nullptr, "failed to allocate libp2p TLS PEM BIO");
    require_openssl(PEM_write_bio_X509(certificate_bio.get(), certificate.get()) == 1,
                    "failed to write libp2p TLS certificate PEM");
-   require_openssl(PEM_write_bio_PrivateKey(key_bio.get(), certificate_key.get(), nullptr, nullptr, 0, nullptr,
-                                            nullptr) == 1,
-                   "failed to write libp2p TLS private key PEM");
+   require_openssl(
+       PEM_write_bio_PrivateKey(key_bio.get(), certificate_key.get(), nullptr, nullptr, 0, nullptr, nullptr) == 1,
+       "failed to write libp2p TLS private key PEM");
    return libp2p_tls_material{.certificate_pem = bio_to_string(certificate_bio.get()),
                               .private_key_pem = bio_to_string(key_bio.get())};
 }
@@ -322,8 +298,7 @@ libp2p_tls_material make_libp2p_tls_material(const node::options& options) {
 peer_id verify_libp2p_tls_chain(const forge::net::stcp::certificate_chain& chain,
                                 const std::optional<peer_id>& expected_peer) {
    if (chain.certificates.size() != 1) {
-      FORGE_THROW_EXCEPTION(exceptions::peer_verification_failed,
-                          "libp2p TLS requires exactly one peer certificate");
+      FORGE_THROW_EXCEPTION(exceptions::peer_verification_failed, "libp2p TLS requires exactly one peer certificate");
    }
    auto certificate = parse_certificate(chain.certificates.front().der);
    verify_certificate_basics(certificate.get());
@@ -331,8 +306,8 @@ peer_id verify_libp2p_tls_chain(const forge::net::stcp::certificate_chain& chain
    return verify_certificate_identity(parsed, expected_peer);
 }
 
-forge::net::stcp::client_options make_libp2p_tls_client_options(const node::options& options) {
-   auto material = make_libp2p_tls_material(options);
+forge::net::stcp::client_options make_libp2p_tls_client_options(const libp2p_identity_material& identity) {
+   auto material = make_libp2p_tls_material(identity);
    auto out = forge::net::stcp::client_options{};
    out.security.verify_peer = false;
    out.security.require_peer_certificate = false;
@@ -343,8 +318,8 @@ forge::net::stcp::client_options make_libp2p_tls_client_options(const node::opti
    return out;
 }
 
-forge::net::stcp::server_options make_libp2p_tls_server_options(const node::options& options) {
-   auto material = make_libp2p_tls_material(options);
+forge::net::stcp::server_options make_libp2p_tls_server_options(const libp2p_identity_material& identity) {
+   auto material = make_libp2p_tls_material(identity);
    auto out = forge::net::stcp::server_options{};
    out.security.verify_peer = false;
    out.security.require_peer_certificate = true;

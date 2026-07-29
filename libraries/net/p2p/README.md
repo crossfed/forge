@@ -283,6 +283,11 @@ experiments only; in that mode the node may use the in-memory peer store when no
 path/backend is provided. Peer mismatch, TLS verification failure, missing
 identity extension and invalid envelopes are correctness failures.
 
+The node parses its configured identity key once during construction and reuses
+the immutable key material for TLS, Noise, PubSub, rendezvous and relay
+signatures. Insecure QUIC-only test nodes may omit signing material until an
+operation that requires a signature is used.
+
 ## Risks And Anti-Patterns
 
 - Do not treat peer identity as application authorization. It proves transport

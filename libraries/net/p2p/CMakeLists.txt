@@ -28,6 +28,8 @@ add_library(
    libp2p_tls.cpp
    details/libp2p_tls.hxx
    node.cpp
+   node_identity.cpp
+   details/node_identity.hxx
    node_impl.cpp
    details/node_impl.hxx
    operation_deadline.cpp

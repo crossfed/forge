@@ -10,6 +10,8 @@
 
 namespace forge::net::p2p {
 
+struct libp2p_identity_material;
+
 class cancellation_latch {
  public:
    void set(std::function<void()> cancel);
@@ -27,11 +29,15 @@ struct upgraded_session {
    std::shared_ptr<forge::net::yamux::session> session;
 };
 
-boost::asio::awaitable<upgraded_session>
-upgrade_outbound_stream(forge::net::p2p::stream stream, const node::options& options, std::optional<peer_id> expected_peer);
+boost::asio::awaitable<upgraded_session> upgrade_outbound_stream(forge::net::p2p::stream stream,
+                                                                 const node::options& options,
+                                                                 const libp2p_identity_material& identity,
+                                                                 std::optional<peer_id> expected_peer);
 
-boost::asio::awaitable<upgraded_session>
-upgrade_inbound_stream(forge::net::p2p::stream stream, const node::options& options, std::optional<peer_id> expected_peer);
+boost::asio::awaitable<upgraded_session> upgrade_inbound_stream(forge::net::p2p::stream stream,
+                                                                const node::options& options,
+                                                                const libp2p_identity_material& identity,
+                                                                std::optional<peer_id> expected_peer);
 
 struct tcp_upgrade_deadline {
    boost::asio::io_context* context = nullptr;
@@ -39,19 +45,25 @@ struct tcp_upgrade_deadline {
    std::shared_ptr<cancellation_latch> cancel_current;
 };
 
-boost::asio::awaitable<upgraded_session>
-upgrade_outbound_tcp(forge::net::tcp::connection connection, const node::options& options, std::optional<peer_id> expected_peer);
+boost::asio::awaitable<upgraded_session> upgrade_outbound_tcp(forge::net::tcp::connection connection,
+                                                              const node::options& options,
+                                                              const libp2p_identity_material& identity,
+                                                              std::optional<peer_id> expected_peer);
 
-boost::asio::awaitable<upgraded_session>
-upgrade_inbound_tcp(forge::net::tcp::connection connection, const node::options& options, std::optional<peer_id> expected_peer);
+boost::asio::awaitable<upgraded_session> upgrade_inbound_tcp(forge::net::tcp::connection connection,
+                                                             const node::options& options,
+                                                             const libp2p_identity_material& identity,
+                                                             std::optional<peer_id> expected_peer);
 
 boost::asio::awaitable<upgraded_session> upgrade_outbound_tcp(forge::net::tcp::connection connection,
                                                               const node::options& options,
+                                                              const libp2p_identity_material& identity,
                                                               std::optional<peer_id> expected_peer,
                                                               tcp_upgrade_deadline deadline);
 
 boost::asio::awaitable<upgraded_session> upgrade_inbound_tcp(forge::net::tcp::connection connection,
                                                              const node::options& options,
+                                                             const libp2p_identity_material& identity,
                                                              std::optional<peer_id> expected_peer,
                                                              tcp_upgrade_deadline deadline);
 
