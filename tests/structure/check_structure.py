@@ -9,8 +9,8 @@ from pathlib import Path
 
 
 SOURCE_SUFFIXES = {".cpp", ".cppm", ".hpp", ".hxx"}
-LAYOUT_ROOTS = ("libraries", "plugins", "guest/libraries", "guest/tests/host")
-SCAN_ROOTS = ("libraries", "plugins", "guest/libraries", "guest/tests/host", "tests")
+LAYOUT_ROOTS = ("libraries", "plugins", "guest/libraries")
+SCAN_ROOTS = ("libraries", "plugins", "guest/libraries", "tests")
 EXCLUDED_PARTS = {".git", "legacy", "vendor", "__pycache__"}
 MODULE_NAME = r"forge(?:\.[A-Za-z_][A-Za-z0-9_]*)+(?::[A-Za-z_][A-Za-z0-9_]*)?"
 MODULE_DECLARATION = re.compile(rf"^\s*export\s+module\s+({MODULE_NAME})\s*;")
@@ -369,10 +369,10 @@ def check_contract_sdk_components(root: Path, errors: list[str]) -> None:
 
    root_cmake = (root / "CMakeLists.txt").read_text(errors="ignore")
    for required in (
-      '"-ffile-prefix-map=${_forge_contract_host_source_root}=."',
-      '"-fdebug-prefix-map=${_forge_contract_host_source_root}=."',
-      '"-ffile-prefix-map=${CMAKE_BINARY_DIR}=./build"',
-      '"-fdebug-prefix-map=${CMAKE_BINARY_DIR}=./build"',
+      '"$<BUILD_INTERFACE:-ffile-prefix-map=${_forge_contract_host_source_root}=.>"',
+      '"$<BUILD_INTERFACE:-fdebug-prefix-map=${_forge_contract_host_source_root}=.>"',
+      '"$<BUILD_INTERFACE:-ffile-prefix-map=${CMAKE_BINARY_DIR}=./build>"',
+      '"$<BUILD_INTERFACE:-fdebug-prefix-map=${CMAKE_BINARY_DIR}=./build>"',
    ):
       if required not in root_cmake:
          errors.append(

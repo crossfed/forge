@@ -7,8 +7,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(ForgeContract CONFIG REQUIRED)
 find_package(
    Forge CONFIG REQUIRED
-   COMPONENTS asio chain_protocol crypto_asymmetric crypto_bls crypto_bn256 crypto_digest crypto_math db_core
-              db_object exceptions raw vm_wasm
+   COMPONENTS chain_protocol contract_testing crypto_digest exceptions raw vm_wasm
 )
 find_package(Boost REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
@@ -175,18 +174,16 @@ set(
    eosio_boot
 )
 
-add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../host" "${CMAKE_CURRENT_BINARY_DIR}/host")
-
 add_executable(forge_contract_corpus_tests e2e/contract_tests.cpp)
 target_link_libraries(
    forge_contract_corpus_tests
    PRIVATE
       Forge::forge_chain_protocol
+      Forge::forge_contract_testing
       Forge::forge_crypto_digest
       Forge::forge_exceptions
       Forge::forge_raw
       Forge::forge_vm_wasm
-      forge_contract_test_host
       Boost::headers
 )
 target_compile_definitions(

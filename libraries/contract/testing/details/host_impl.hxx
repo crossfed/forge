@@ -57,6 +57,7 @@ struct host::impl : compiler_builtins {
 
    using functions =
        forge::vm::wasm::registered_host_functions<impl, forge::vm::wasm::execution_interface, type_converter>;
+   using backend = forge::vm::wasm::backend<functions, wasm, forge::vm::wasm::compatibility_options>;
    template <typename T, std::size_t Alignment = alignof(T)>
    using input = forge::vm::wasm::argument_proxy<const T*, Alignment>;
    template <typename T, std::size_t Alignment = alignof(T)>
@@ -76,7 +77,7 @@ struct host::impl : compiler_builtins {
    using checksum512_input = input<capi_checksum512>;
    using checksum512_output = output<capi_checksum512>;
 
-   impl();
+   explicit impl(execution_limits limits);
    ~impl();
 
    invocation_result invoke(std::span<const std::uint8_t> code, std::uint64_t receiver, std::uint64_t first_receiver,
@@ -292,6 +293,12 @@ struct host::impl : compiler_builtins {
    void begin_invocation(std::uint64_t receiver, std::uint64_t first_receiver, std::vector<std::uint8_t> data);
    void commit_invocation();
    void rollback_invocation();
+   [[nodiscard]] std::chrono::steady_clock::duration remaining_execution_time() const;
+   template <typename... Args> void execute(backend& vm, std::string_view function, Args&&... args) {
+      const auto remaining = remaining_execution_time();
+      vm.timed_run(forge::vm::wasm::watchdog{remaining},
+                   [&] { vm(*this, "env", function, std::forward<Args>(args)...); });
+   }
    void register_intrinsics();
    void require_writable() const;
    std::int32_t cache(row_kind kind, forge::db::ids::object_id id, table::id_t table_id);
@@ -323,12 +330,14 @@ struct host::impl : compiler_builtins {
    std::int32_t secondary_end(std::uint64_t code, std::uint64_t scope, std::uint64_t table_name);
 
    forge::asio::runtime runtime_;
+   execution_limits limits_;
    std::shared_ptr<memory_driver> driver_;
    std::optional<forge::db::object::store> store_;
    std::optional<forge::db::object::transaction> transaction_;
    forge::vm::wasm::wasm_allocator allocator_;
    oracle_state state_;
    std::optional<oracle_state> state_before_invocation_;
+   std::optional<std::chrono::steady_clock::time_point> invocation_deadline_;
    std::map<std::uint64_t, std::vector<std::uint8_t>> contracts_;
    std::uint64_t receiver_ = 0;
    std::uint64_t first_receiver_ = 0;

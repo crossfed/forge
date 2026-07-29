@@ -5,6 +5,7 @@ module;
 #include <forge/vm/wasm/host_function.hpp>
 
 #include <concepts>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -12,6 +13,7 @@ module;
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -30,7 +32,7 @@ import forge.vm.wasm.backend;
 
 namespace forge::contract::testing {
 
-host::host() : impl_{std::make_unique<impl>()} {}
+host::host(execution_limits limits) : impl_{std::make_unique<impl>(limits)} {}
 
 host::~host() = default;
 

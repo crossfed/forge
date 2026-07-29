@@ -10,6 +10,9 @@ The repository must stay neutral. Public APIs must not contain downstream produc
 
 - Before creating, extending, moving, renaming or reviewing a library under
   `libraries/`, load and apply `create-library`.
+- Before creating, extending, moving, renaming or reviewing a dual-target
+  contract library, apply `create-library` first and then
+  `create-contract-library`.
 - Apply the same `create-library` rules to libraries under `guest/libraries/`.
   Guest targeting changes dependencies and compiler flags, not file ownership
   or pairing rules.
@@ -211,8 +214,9 @@ class service_node {
 ## Contract Build Boundary
 
 - `libraries/contract` is an empty host-library family. It has no aggregate
-  target or module. ABI generation, attributes, validation and manifests are
-  independent optional package components.
+  target or module. ABI generation, attributes, validation, manifests and the
+  deterministic contract test host are independent optional package
+  components.
 - Host contract libraries are enabled by `FORGE_ENABLE_CONTRACT_TOOLING`.
   Only ABI and attribute components may depend on Clang/LLVM.
 - `guest/` owns wasm32 code, the sysroot, contract examples and guest tests.

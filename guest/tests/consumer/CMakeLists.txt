@@ -84,6 +84,11 @@ forge_add_contract(
    SOURCES recovery_contract.cpp
 )
 
+forge_add_contract(
+   looping
+   SOURCES looping_contract.cpp
+)
+
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/sdk_surface_manifest.json" _sdk_surface_json)
 set(_surface_source_root "${CMAKE_CURRENT_BINARY_DIR}/surface-source")
 set(_surface_generated_dir "${_surface_source_root}/checks")

@@ -29,6 +29,7 @@ set(
    chain_fork
    chain_savanna
    vm_wasm
+   contract_testing
    contract_graph
    contract_abi
    contract_attributes
@@ -154,6 +155,21 @@ macro(_forge_add_component component)
          _forge_add_component(variant)
       elseif("${component}" STREQUAL "vm_wasm")
          _forge_add_component(exceptions)
+      elseif("${component}" STREQUAL "contract_testing")
+         _forge_add_component(asio)
+         _forge_add_component(chain_protocol)
+         _forge_add_component(codec_hex)
+         _forge_add_component(crypto_asymmetric)
+         _forge_add_component(crypto_bls)
+         _forge_add_component(crypto_bn256)
+         _forge_add_component(crypto_digest)
+         _forge_add_component(crypto_math)
+         _forge_add_component(db_core)
+         _forge_add_component(db_ids)
+         _forge_add_component(db_object)
+         _forge_add_component(exceptions)
+         _forge_add_component(raw)
+         _forge_add_component(vm_wasm)
       elseif("${component}" STREQUAL "contract_graph")
          if(NOT Forge_BUILT_WITH_CONTRACT_TOOLING)
             set(Forge_contract_graph_FOUND FALSE)

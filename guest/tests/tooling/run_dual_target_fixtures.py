@@ -986,7 +986,6 @@ def validate(
     forge_package: Path,
     contract_package: Path,
     source: Path,
-    host_source: Path,
     output: Path,
 ) -> None:
     shutil.rmtree(output, ignore_errors=True)
@@ -1142,7 +1141,6 @@ def validate(
         build=vm_build,
         definitions=(
             f"-DPRODUCT_PROTOCOL_WASM={product_wasm}",
-            f"-DFORGE_CONTRACT_TEST_HOST_SOURCE={host_source}",
         ),
     )
     build(cmake, vm_build)
@@ -1171,7 +1169,6 @@ def main() -> None:
     parser.add_argument("--forge-package", required=True, type=Path)
     parser.add_argument("--contract-package", required=True, type=Path)
     parser.add_argument("--source", required=True, type=Path)
-    parser.add_argument("--host-source", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
 
@@ -1181,7 +1178,6 @@ def main() -> None:
         forge_package=args.forge_package.resolve(),
         contract_package=args.contract_package.resolve(),
         source=args.source.resolve(),
-        host_source=args.host_source.resolve(),
         output=args.output.resolve(),
     )
 

@@ -42,11 +42,13 @@ interfaces for each header.
 
 ## Executable Oracle
 
-`guest/tests/host` registers every intrinsic directly from the canonical macro
-registry. Database behavior uses Forge ObjectDB. Hashing, recovery, BN254 and
-BLS use Forge crypto. The remaining capability families use explicit,
-deterministic invocation state. Successful execution commits; assertion, VM or
-host failure restores both ObjectDB and all observable side effects.
+`libraries/contract/testing` registers every intrinsic directly from the
+canonical macro registry and is exported as
+`Forge::forge_contract_testing`. Database behavior uses Forge ObjectDB.
+Hashing, recovery, BN254 and BLS use Forge crypto. The remaining capability
+families use explicit, deterministic invocation state. Successful execution
+commits; assertion, VM or host failure restores both ObjectDB and all
+observable side effects.
 
 This host proves SDK behavior but is not a blockchain controller. RAM billing,
 consensus, fork choice, producer policy and durable product schemas remain in
