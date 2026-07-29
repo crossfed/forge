@@ -591,28 +591,45 @@ def check_imported_target_seal(
     product_package: Path,
     output: Path,
 ) -> None:
-    output.mkdir(parents=True)
-    (output / "CMakeLists.txt").write_text(
-        """cmake_minimum_required(VERSION 3.31)
+    cases = (
+        (
+            "link-interface",
+            "target_link_libraries(Product::protocol INTERFACE host_only)",
+            (),
+            "descriptor declaration: INTERFACE_LINK_LIBRARIES",
+        ),
+        (
+            "configuration-map",
+            'set_property(TARGET Product::protocol PROPERTY MAP_IMPORTED_CONFIG_ASAN RELEASE)',
+            ("-DCMAKE_BUILD_TYPE=ASAN",),
+            "descriptor declaration: MAP_IMPORTED_CONFIG_ASAN",
+        ),
+    )
+    for name, mutation, definitions, diagnostic in cases:
+        source = output / name
+        source.mkdir(parents=True)
+        (source / "CMakeLists.txt").write_text(
+            f"""cmake_minimum_required(VERSION 3.31)
 project(ImportedContractMutation LANGUAGES CXX)
 find_package(ForgeContract CONFIG REQUIRED)
 find_package(ProductProtocol CONFIG REQUIRED)
 add_library(host_only INTERFACE)
-target_link_libraries(Product::protocol INTERFACE host_only)
+{mutation}
 """,
-        encoding="utf-8",
-    )
-    configure(
-        cmake=cmake,
-        cxx_compiler=cxx_compiler,
-        forge_package=forge_package,
-        contract_package=contract_package,
-        product_package=product_package,
-        source=output,
-        build=output / "build",
-        succeeds=False,
-        contains="descriptor declaration: INTERFACE_LINK_LIBRARIES",
-    )
+            encoding="utf-8",
+        )
+        configure(
+            cmake=cmake,
+            cxx_compiler=cxx_compiler,
+            forge_package=forge_package,
+            contract_package=contract_package,
+            product_package=product_package,
+            source=source,
+            build=source / "build",
+            definitions=definitions,
+            succeeds=False,
+            contains=diagnostic,
+        )
 
 
 def check_build_failures(

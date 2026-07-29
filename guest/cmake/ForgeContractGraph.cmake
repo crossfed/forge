@@ -106,7 +106,15 @@ function(_forge_contract_sealed_target_properties target output)
       if(_configurations STREQUAL "_configurations-NOTFOUND")
          set(_configurations)
       endif()
-      list(APPEND _configurations DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+      list(
+         APPEND _configurations
+         ${CMAKE_BUILD_TYPE}
+         ${CMAKE_CONFIGURATION_TYPES}
+         DEBUG
+         RELEASE
+         RELWITHDEBINFO
+         MINSIZEREL
+      )
       list(REMOVE_DUPLICATES _configurations)
       foreach(_configuration IN LISTS _configurations)
          string(TOUPPER "${_configuration}" _configuration)
