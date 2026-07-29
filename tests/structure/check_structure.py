@@ -482,7 +482,13 @@ def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
                f"{path.relative_to(root)}: Contract SDK concrete targets must have a sealed property set"
             )
          else:
-            for required in ("SOURCES", "LINK_LIBRARIES", "INTERFACE_LINK_LIBRARIES"):
+            for required in (
+               "SOURCES",
+               "LINK_LIBRARIES",
+               "INTERFACE_LINK_LIBRARIES",
+               "CXX_MODULE_STD",
+               "CXX_SCAN_FOR_MODULES",
+            ):
                if not re.search(rf"(?m)^\s+{required}\s*$", seal.group()):
                   errors.append(
                      f"{path.relative_to(root)}: Contract SDK sealed property set omits {required}"

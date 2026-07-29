@@ -45,6 +45,8 @@ function(_forge_contract_sealed_target_properties output)
       CXX_STANDARD
       CXX_STANDARD_REQUIRED
       CXX_EXTENSIONS
+      CXX_MODULE_STD
+      CXX_SCAN_FOR_MODULES
       POSITION_INDEPENDENT_CODE
       CXX_MODULE_SETS
       INTERFACE_CXX_MODULE_SETS

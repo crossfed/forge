@@ -538,6 +538,18 @@ target_link_libraries("${concrete}" PRIVATE extra_dependency)
 """,
             "modified after descriptor declaration: LINK_LIBRARIES",
         ),
+        (
+            "immutable-concrete-module-scanning",
+            """forge_add_contract_library(
+   protocol ID negative.immutable.module.scanning SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+   SOURCES src/protocol.cpp
+)
+get_target_property(concrete protocol ALIASED_TARGET)
+set_property(TARGET "${concrete}" PROPERTY CXX_SCAN_FOR_MODULES OFF)
+""",
+            "modified after descriptor declaration: CXX_SCAN_FOR_MODULES",
+        ),
     ]
     for name, body, diagnostic in cases:
         source = write_project(fixtures / name, body)
