@@ -38,17 +38,17 @@ struct registry::state {
    std::vector<profile> profiles;
 };
 
-registry::registry(forge::asio::runtime& runtime, const node::options& options) : state_(std::make_unique<state>()) {
+registry::registry(forge::asio::runtime& runtime, const node::options& options,
+                   const libp2p_identity_material& identity)
+    : state_(std::make_unique<state>()) {
    register_quic_profile(*this, runtime, options);
-   register_tcp_profile(*this, runtime, options);
+   register_tcp_profile(*this, runtime, options, identity);
 }
 
 registry::~registry() = default;
 
 bool registry::listening() const noexcept {
-   return state_ && std::ranges::any_of(state_->profiles, [](const profile& value) {
-      return value.listening();
-   });
+   return state_ && std::ranges::any_of(state_->profiles, [](const profile& value) { return value.listening(); });
 }
 
 std::optional<forge::net::p2p::endpoint> registry::local_endpoint() const {

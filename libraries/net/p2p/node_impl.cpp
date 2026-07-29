@@ -39,7 +39,6 @@ import forge.crypto.symmetric.chacha20_poly1305;
 import forge.crypto.pki.der;
 import forge.crypto.asymmetric.ed25519;
 import forge.crypto.digest.hmac;
-import forge.crypto.pki.pem;
 import forge.crypto.asymmetric;
 import forge.net.p2p.dht;
 import forge.net.p2p.discovery;
@@ -360,7 +359,8 @@ node::impl::impl(forge::asio::runtime& runtime_value, node::options options_valu
     : runtime(runtime_value), options(std::move(options_value)),
       local(options.explicit_peer_id ? *options.explicit_peer_id
                                      : make_peer_id_from_certificate_pem(options.certificate_pem)),
-      direct_registry(runtime_value, options), teardown(runtime_value.context().get_executor()),
+      identity(make_libp2p_identity_material(options)), direct_registry(runtime_value, options, identity),
+      teardown(runtime_value.context().get_executor()),
       store(peer_store::options{.backend = make_peer_store_backend(options)}) {}
 
 std::vector<forge::net::p2p::endpoint> node::impl::local_endpoints_for_control() const {
@@ -1958,7 +1958,7 @@ node::impl::open_relay_yamux(const peer_id& peer, const peer_id& relay_peer, std
       }
       record_path_open(path::kind::relay);
       stream = detail::stream_access::with_buffer(std::move(stream), std::move(relay_buffer));
-      co_return co_await upgrade_relay_outbound_session(std::move(stream), options, peer);
+      co_return co_await upgrade_relay_outbound_session(std::move(stream), options, identity, peer);
    } catch (const forge::exceptions::base& error) {
       record_relay_failure();
       if (deadline.timed_out()) {
@@ -2470,7 +2470,7 @@ boost::asio::awaitable<void> node::impl::handle_relay_stop(std::shared_ptr<node:
    trace_relay("stop: ok sent");
 
    stream = detail::stream_access::with_buffer(std::move(stream), std::move(relay_buffer));
-   auto yamux = co_await upgrade_relay_inbound_session(std::move(stream), options, request.source->id);
+   auto yamux = co_await upgrade_relay_inbound_session(std::move(stream), options, identity, request.source->id);
    auto dcutr_started = false;
    while (true) {
       try {
@@ -2546,14 +2546,13 @@ boost::asio::awaitable<void> node::impl::handle_relay_hop(std::shared_ptr<node::
           std::chrono::system_clock::now().time_since_epoch() + options.limits.relay.reservation_ttl);
       auto voucher = std::optional<signed_envelope>{};
       if (!options.public_key.empty()) {
-         const auto private_key = private_key_from_pem(options.private_key_pem);
          voucher = relay::codec::seal_reservation_voucher(
              relay::voucher{
                  .relay_peer = local,
                  .peer = session->info.remote_peer,
                  .expires_at = static_cast<std::uint64_t>(expires_at.count()),
              },
-             decode_public_key(options.public_key), private_key);
+             decode_public_key(identity.public_key), require_libp2p_identity_private_key(identity));
       }
       co_await stream.async_write(relay::codec::encode_hop(relay::hop_message{
           .kind = relay::hop_message::message_kind::status,

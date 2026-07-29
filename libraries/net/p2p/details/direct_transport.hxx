@@ -10,6 +10,12 @@
 
 #include "session_teardown.hxx"
 
+namespace forge::net::p2p {
+
+struct libp2p_identity_material;
+
+} // namespace forge::net::p2p
+
 namespace forge::net::p2p::direct {
 
 struct connection {
@@ -33,7 +39,7 @@ struct profile {
 
 class registry {
  public:
-   registry(forge::asio::runtime& runtime, const node::options& options);
+   registry(forge::asio::runtime& runtime, const node::options& options, const libp2p_identity_material& identity);
    ~registry();
 
    registry(const registry&) = delete;
@@ -58,6 +64,7 @@ class registry {
 };
 
 void register_quic_profile(registry& value, forge::asio::runtime& runtime, const node::options& options);
-void register_tcp_profile(registry& value, forge::asio::runtime& runtime, const node::options& options);
+void register_tcp_profile(registry& value, forge::asio::runtime& runtime, const node::options& options,
+                          const libp2p_identity_material& identity);
 
 } // namespace forge::net::p2p::direct
