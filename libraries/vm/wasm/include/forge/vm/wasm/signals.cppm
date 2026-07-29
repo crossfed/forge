@@ -42,6 +42,8 @@ __attribute__((visibility("default"))) extern thread_local std::span<std::byte> 
 
 __attribute__((visibility("default"))) extern thread_local std::atomic<bool> timed_run_has_timed_out;
 
+__attribute__((visibility("default"))) extern thread_local std::atomic<std::size_t> timed_run_timeout_count;
+
 // Fixes a duplicate symbol build issue when building with `-fvisibility=hidden`
 __attribute__((visibility("default"))) extern thread_local std::exception_ptr saved_exception;
 

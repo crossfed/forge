@@ -9,25 +9,12 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 if(NOT PRODUCT_PROTOCOL_WASM OR NOT EXISTS "${PRODUCT_PROTOCOL_WASM}")
    message(FATAL_ERROR "PRODUCT_PROTOCOL_WASM must name the built product contract")
 endif()
-if(NOT FORGE_CONTRACT_TEST_HOST_SOURCE OR NOT IS_DIRECTORY "${FORGE_CONTRACT_TEST_HOST_SOURCE}")
-   message(FATAL_ERROR "FORGE_CONTRACT_TEST_HOST_SOURCE must name the Forge contract test host")
-endif()
-
 find_package(
    Forge CONFIG REQUIRED
    COMPONENTS
-      asio
       chain_protocol
-      crypto_asymmetric
-      crypto_bls
-      crypto_bn256
-      crypto_digest
-      crypto_math
-      db_core
-      db_object
-      exceptions
+      contract_testing
       raw
-      vm_wasm
 )
 find_package(ProductProtocol CONFIG REQUIRED)
 find_package(Boost REQUIRED)
@@ -38,8 +25,6 @@ foreach(_imported_target IN LISTS _imported_targets)
       set_property(TARGET ${_imported_target} PROPERTY SYSTEM FALSE)
    endif()
 endforeach()
-
-add_subdirectory("${FORGE_CONTRACT_TEST_HOST_SOURCE}" contract-test-host)
 
 add_executable(product_protocol_vm_tests vm_tests.cpp)
 set_target_properties(product_protocol_vm_tests PROPERTIES NO_SYSTEM_FROM_IMPORTED TRUE)
@@ -52,6 +37,6 @@ target_link_libraries(
    PRIVATE
       Product::protocol
       Forge::forge_chain_protocol
+      Forge::forge_contract_testing
       Forge::forge_raw
-      forge_contract_test_host
 )

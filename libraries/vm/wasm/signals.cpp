@@ -188,6 +188,7 @@ __attribute__((visibility("default"))) thread_local std::atomic<sigjmp_buf*> sig
 __attribute__((visibility("default"))) thread_local std::span<std::byte> code_memory_range;
 __attribute__((visibility("default"))) thread_local std::span<std::byte> memory_range;
 __attribute__((visibility("default"))) thread_local std::atomic<bool> timed_run_has_timed_out{false};
+__attribute__((visibility("default"))) thread_local std::atomic<std::size_t> timed_run_timeout_count{0};
 __attribute__((visibility("default"))) thread_local std::exception_ptr saved_exception{nullptr};
 
 void signal_handler(int signal, siginfo_t* info, void* context) {

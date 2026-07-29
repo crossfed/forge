@@ -764,7 +764,6 @@ add_custom_target(
       --forge-package "${FORGE_CONTRACT_FORGE_DIR}"
       --source-root "${CMAKE_CURRENT_SOURCE_DIR}/.."
       --dual-target-source "${CMAKE_CURRENT_SOURCE_DIR}/tests/dual_target"
-      --host-source "${CMAKE_CURRENT_SOURCE_DIR}/tests/host"
       --output "${CMAKE_CURRENT_BINARY_DIR}/relocation"
    DEPENDS forge_contract_sdk_archive
    VERBATIM

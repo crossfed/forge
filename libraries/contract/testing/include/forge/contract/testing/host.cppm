@@ -1,5 +1,6 @@
 module;
 
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -15,6 +16,10 @@ export import forge.contract.testing.state;
 
 export namespace forge::contract::testing {
 
+struct execution_limits {
+   std::chrono::milliseconds timeout{std::chrono::seconds{5}};
+};
+
 struct invocation_result {
    std::vector<std::uint8_t> return_value;
    std::optional<std::int32_t> exit_code;
@@ -22,7 +27,7 @@ struct invocation_result {
 
 class host final {
  public:
-   host();
+   explicit host(execution_limits limits = {});
    ~host();
 
    host(const host&) = delete;

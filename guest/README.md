@@ -419,11 +419,12 @@ primary `db_*_i64` operations and ten operations for each of `idx64`, `idx128`,
 `idx256`, `idx_double` and `idx_long_double`. `<forge/contract/intrinsics.h>`
 is canonical. The pinned CDT family headers under `<eosio/*.h>` are generated
 from that registry without a second declaration list. The shipped interface
-defines signatures only. Forge's non-installed test host registers all 152
-functions directly from the same registry. It executes the database family
-against `forge.db.object`, uses Forge crypto for contract-visible primitives,
-and supplies deterministic state for the remaining capability families. This
-is an executable SDK oracle, not a product host binding. Authorization policy,
+defines signatures only. The optional installed
+`Forge::forge_contract_testing` target registers all 152 functions directly
+from the same registry. It executes the database family against
+`forge.db.object`, uses Forge crypto for contract-visible primitives, and
+supplies deterministic state for the remaining capability families. This is
+an executable SDK oracle, not a product host binding. Authorization policy,
 RAM accounting, consensus and the blockchain-owned storage schema remain
 responsibilities of the product runtime.
 
@@ -510,8 +511,8 @@ Release mode builds the exact pinned LLVM and guest runtimes from source. Use
 - Spring and CDT are pinned compatibility donors and test oracles, never build
   dependencies of a released SDK.
 - Blockchain controller bindings and deployment are outside this vertical
-  block. The executable DB host under `guest/tests/host` is
-  intentionally test-only and is never installed or exported.
+  block. `Forge::forge_contract_testing` is an installed deterministic VM and
+  ObjectDB test host, not a production blockchain controller.
 
 See `docs/iterations/forge-contract-sdk-toolchain-v1.md` for the accepted
 design, donor pins and compatibility scope.

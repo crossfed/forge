@@ -33,6 +33,9 @@ endif()
 if(NOT FORGE_CONTRACT_TEST_RECOVERY_WASM OR NOT EXISTS "${FORGE_CONTRACT_TEST_RECOVERY_WASM}")
    message(FATAL_ERROR "FORGE_CONTRACT_TEST_RECOVERY_WASM must name the public-key recovery contract")
 endif()
+if(NOT FORGE_CONTRACT_TEST_LOOPING_WASM OR NOT EXISTS "${FORGE_CONTRACT_TEST_LOOPING_WASM}")
+   message(FATAL_ERROR "FORGE_CONTRACT_TEST_LOOPING_WASM must name the bounded-execution contract")
+endif()
 if(NOT FORGE_CONTRACT_TEST_MULTI_INDEX_WASM OR NOT EXISTS "${FORGE_CONTRACT_TEST_MULTI_INDEX_WASM}")
    message(FATAL_ERROR "FORGE_CONTRACT_TEST_MULTI_INDEX_WASM must name the multi_index contract")
 endif()
@@ -57,24 +60,20 @@ endif()
 
 find_package(
    Forge CONFIG REQUIRED
-   COMPONENTS asio chain_protocol crypto_asymmetric crypto_bls crypto_bn256 crypto_digest crypto_math db_core
-              db_object exceptions raw vm_wasm
+   COMPONENTS chain_protocol contract_testing crypto_asymmetric crypto_digest raw vm_wasm
 )
 find_package(Boost REQUIRED)
 
-add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../host" "${CMAKE_CURRENT_BINARY_DIR}/host")
-
-add_executable(forge_contract_e2e_tests compiler_builtins_tests.cpp contract_tests.cpp)
-target_include_directories(forge_contract_e2e_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../host")
+add_executable(forge_contract_e2e_tests contract_tests.cpp)
 target_link_libraries(
    forge_contract_e2e_tests
    PRIVATE
       Forge::forge_chain_protocol
       Forge::forge_crypto_asymmetric
       Forge::forge_crypto_digest
+      Forge::forge_contract_testing
       Forge::forge_raw
       Forge::forge_vm_wasm
-      forge_contract_test_host
       Boost::headers
 )
 target_compile_definitions(
@@ -89,6 +88,7 @@ target_compile_definitions(
       FORGE_CONTRACT_TEST_DB_HOST_WASM="${FORGE_CONTRACT_TEST_DB_HOST_WASM}"
       FORGE_CONTRACT_TEST_ORACLE_WASM="${FORGE_CONTRACT_TEST_ORACLE_WASM}"
       FORGE_CONTRACT_TEST_RECOVERY_WASM="${FORGE_CONTRACT_TEST_RECOVERY_WASM}"
+      FORGE_CONTRACT_TEST_LOOPING_WASM="${FORGE_CONTRACT_TEST_LOOPING_WASM}"
       FORGE_CONTRACT_TEST_MULTI_INDEX_WASM="${FORGE_CONTRACT_TEST_MULTI_INDEX_WASM}"
       FORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_WASM="${FORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_WASM}"
       FORGE_CONTRACT_TEST_MULTI_INDEX_ERRORS_WASM="${FORGE_CONTRACT_TEST_MULTI_INDEX_ERRORS_WASM}"
