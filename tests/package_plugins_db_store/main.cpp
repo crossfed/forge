@@ -73,7 +73,7 @@ int main() {
       .lane = {.max_pending_operations = 32U,
                .max_waiting_submissions = 32U},
    };
-   return descriptor.id.value == "forge.plugins.db.store" && api.version.major == 1U && api.version.revision == 3U &&
+   return descriptor.id.value == "forge.plugins.db.store" && api.version.major == 2U && api.version.revision == 0U &&
                   options.max_revisions == 1U && mdbx.max_readers == 64U
               ? 0
               : 1;

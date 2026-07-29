@@ -657,8 +657,8 @@ BOOST_AUTO_TEST_CASE(store_plugin_descriptor_api_and_config_are_nested) {
 
    const auto api_descriptor = store_plugin::api::describe();
    BOOST_TEST(api_descriptor.id.value == "forge.plugins.db.store");
-   BOOST_TEST(api_descriptor.version.major == 1U);
-   BOOST_TEST(api_descriptor.version.revision == 3U);
+   BOOST_TEST(api_descriptor.version.major == 2U);
+   BOOST_TEST(api_descriptor.version.revision == 0U);
    BOOST_TEST(api_descriptor.methods.empty());
 }
 
