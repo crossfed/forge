@@ -57,24 +57,20 @@ endif()
 
 find_package(
    Forge CONFIG REQUIRED
-   COMPONENTS asio chain_protocol crypto_asymmetric crypto_bls crypto_bn256 crypto_digest crypto_math db_core
-              db_object exceptions raw vm_wasm
+   COMPONENTS chain_protocol contract_testing crypto_asymmetric crypto_digest raw vm_wasm
 )
 find_package(Boost REQUIRED)
 
-add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../host" "${CMAKE_CURRENT_BINARY_DIR}/host")
-
-add_executable(forge_contract_e2e_tests compiler_builtins_tests.cpp contract_tests.cpp)
-target_include_directories(forge_contract_e2e_tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/../host")
+add_executable(forge_contract_e2e_tests contract_tests.cpp)
 target_link_libraries(
    forge_contract_e2e_tests
    PRIVATE
       Forge::forge_chain_protocol
       Forge::forge_crypto_asymmetric
       Forge::forge_crypto_digest
+      Forge::forge_contract_testing
       Forge::forge_raw
       Forge::forge_vm_wasm
-      forge_contract_test_host
       Boost::headers
 )
 target_compile_definitions(

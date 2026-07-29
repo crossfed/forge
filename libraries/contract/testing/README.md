@@ -1,8 +1,29 @@
-# Contract Test Host
+# Contract Testing
 
-`forge_contract_test_host` is the executable oracle for the Contract SDK host
-interface. It is a test-only library in namespace `forge::contract::testing`
-and is neither installed nor exported as a Forge component.
+`forge_contract_testing` is the executable oracle for the Contract SDK host
+interface. It is an installed Forge library in namespace
+`forge::contract::testing` and is exported as the `contract_testing`
+component.
+
+## Usage
+
+```cmake
+find_package(Forge CONFIG REQUIRED COMPONENTS contract_testing)
+
+add_executable(contract_state_tests contract_state_tests.cpp)
+target_link_libraries(
+   contract_state_tests
+   PRIVATE Forge::forge_contract_testing
+)
+```
+
+```cpp
+import forge.contract.testing.host;
+import forge.contract.testing.state;
+
+auto host = forge::contract::testing::host{};
+host.configure(forge::contract::testing::oracle_state{});
+```
 
 ## Responsibilities
 

@@ -1,6 +1,7 @@
 module;
 
-#include <boost/test/unit_test.hpp>
+#define BOOST_TEST_MODULE forge_contract_testing_tests
+#include <boost/test/included/unit_test.hpp>
 
 #include <cstdint>
 

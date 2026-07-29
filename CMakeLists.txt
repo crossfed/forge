@@ -43,10 +43,10 @@ endif()
 if(FORGE_CONTRACT_SDK_HOST_PROFILE)
    file(REAL_PATH "${CMAKE_CURRENT_SOURCE_DIR}" _forge_contract_host_source_root)
    add_compile_options(
-      "-ffile-prefix-map=${_forge_contract_host_source_root}=."
-      "-fdebug-prefix-map=${_forge_contract_host_source_root}=."
-      "-ffile-prefix-map=${CMAKE_BINARY_DIR}=./build"
-      "-fdebug-prefix-map=${CMAKE_BINARY_DIR}=./build"
+      "$<BUILD_INTERFACE:-ffile-prefix-map=${_forge_contract_host_source_root}=.>"
+      "$<BUILD_INTERFACE:-fdebug-prefix-map=${_forge_contract_host_source_root}=.>"
+      "$<BUILD_INTERFACE:-ffile-prefix-map=${CMAKE_BINARY_DIR}=./build>"
+      "$<BUILD_INTERFACE:-fdebug-prefix-map=${CMAKE_BINARY_DIR}=./build>"
    )
 endif()
 
@@ -301,6 +301,7 @@ if(FORGE_ENABLE_CONTRACT_TOOLING)
       "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/attributes/include"
       "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/validation/include"
       "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/manifest/include"
+      "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/testing/include"
    )
 endif()
 
@@ -690,6 +691,7 @@ if(FORGE_ENABLE_CONTRACT_TOOLING)
       forge_contract_attributes
       forge_contract_validation
       forge_contract_manifest
+      forge_contract_testing
    )
 endif()
 
@@ -792,6 +794,7 @@ if(FORGE_ENABLE_CONTRACT_TOOLING)
       contract_attributes
       contract_validation
       contract_manifest
+      contract_testing
    )
 endif()
 
@@ -916,6 +919,7 @@ if(FORGE_ENABLE_CONTRACT_TOOLING)
                 libraries/contract/attributes/include/forge
                 libraries/contract/validation/include/forge
                 libraries/contract/manifest/include/forge
+                libraries/contract/testing/include/forge
       DESTINATION ${CMAKE_INSTALL_INCLUDEDIR} COMPONENT dev EXCLUDE_FROM_ALL
    )
 endif()
@@ -1027,6 +1031,41 @@ install(
    COMPONENT dev
    EXCLUDE_FROM_ALL
 )
+
+if(FORGE_ENABLE_CONTRACT_TOOLING)
+   set(_forge_contract_testing_package_prefix "${CMAKE_BINARY_DIR}/forge-contract-testing-package")
+   set(_forge_contract_testing_relocated_prefix "${CMAKE_BINARY_DIR}/forge-contract-testing-relocated")
+   set(_forge_contract_testing_consumer_build "${CMAKE_BINARY_DIR}/forge-contract-testing-consumer")
+   set(
+      _forge_contract_testing_package_test
+      "${CMAKE_COMMAND}"
+      "-DFORGE_PACKAGE_TEST_INSTALL_PREFIX=${_forge_contract_testing_package_prefix}"
+      "-DFORGE_PACKAGE_TEST_INSTALL_LIBDIR=${CMAKE_INSTALL_LIBDIR}"
+      "-DFORGE_PACKAGE_TEST_RELOCATED_PREFIX=${_forge_contract_testing_relocated_prefix}"
+      "-DFORGE_PACKAGE_TEST_SOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/tests/package_contract_testing_component"
+      "-DFORGE_PACKAGE_TEST_BINARY_DIR=${_forge_contract_testing_consumer_build}"
+      "-DFORGE_PACKAGE_TEST_SOURCE_ROOT=${CMAKE_CURRENT_SOURCE_DIR}"
+      "-DFORGE_PACKAGE_TEST_BUILD_ROOT=${CMAKE_BINARY_DIR}"
+      "-DFORGE_PACKAGE_TEST_GENERATOR=${CMAKE_GENERATOR}"
+      "-DFORGE_PACKAGE_TEST_C_COMPILER=${CMAKE_C_COMPILER}"
+      "-DFORGE_PACKAGE_TEST_CXX_COMPILER=${CMAKE_CXX_COMPILER}"
+      "-DFORGE_PACKAGE_TEST_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}"
+      -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/package_contract_testing_component/verify_relocation.cmake"
+   )
+   add_custom_target(
+      test_forge_package_contract_testing_component
+      COMMAND ${_forge_contract_testing_package_test}
+      DEPENDS forge
+      VERBATIM
+   )
+   if(BUILD_TESTING AND NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
+      add_test(
+         NAME test_forge_package_contract_testing_component
+         COMMAND ${_forge_contract_testing_package_test}
+      )
+      set_tests_properties(test_forge_package_contract_testing_component PROPERTIES RUN_SERIAL TRUE)
+   endif()
+endif()
 install(
    DIRECTORY cmake/
    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/Forge/modules

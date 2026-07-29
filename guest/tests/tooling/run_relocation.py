@@ -142,7 +142,6 @@ def main() -> None:
     parser.add_argument("--forge-package", required=True, type=Path)
     parser.add_argument("--source-root", required=True, type=Path)
     parser.add_argument("--dual-target-source", required=True, type=Path)
-    parser.add_argument("--host-source", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
 
@@ -263,7 +262,6 @@ def main() -> None:
         forge_package=args.forge_package,
         contract_package=package,
         source=args.dual_target_source.resolve(),
-        host_source=args.host_source.resolve(),
         output=output / "dual-target",
     )
 
