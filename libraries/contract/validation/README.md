@@ -29,8 +29,8 @@ Clang/LLVM.
 
 ## Stability And Tests
 
-The validation request is experimental; accepted feature/import policy is a
-versioned SDK contract. Tests cover valid contracts, malformed ABI and WASM,
-unknown or mismatched imports, WASI, disabled features, missing exports,
-wrongly typed `apply`, standalone package consumption and the generated SDK
-artifacts.
+The validation request is Experimental in Forge 8.16.0; accepted feature/import
+policy is a Stable, versioned SDK contract. Tests cover valid contracts,
+malformed ABI and WASM, unknown or mismatched imports, WASI, disabled features,
+missing exports, wrongly typed `apply`, standalone package consumption and the
+generated SDK artifacts.

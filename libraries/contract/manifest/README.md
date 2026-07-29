@@ -34,9 +34,10 @@ dependency is transitive through package component `contract_manifest`.
 
 ## Stability And Tests
 
-The generator request is experimental; manifest schema v2 and deterministic field
-meaning are versioned compatibility surfaces. Tests verify hashes, import and
-feature capture, source ownership and scoped dependency digests, reproducible output, command failures, standalone package
+The generator request is Experimental in Forge 8.16.0; manifest schema v2 and
+deterministic field meaning are Stable, versioned compatibility surfaces. Tests
+verify hashes, import and feature capture, source ownership and scoped
+dependency digests, reproducible output, command failures, standalone package
 consumption and relocated SDK generation.
 
 Schema v2 is the intentional Forge 8.16 migration from schema v1. Existing

@@ -35,6 +35,15 @@ SDK and Forge versions are identical. The sysroot schema and intrinsic
 interface have independent versions because either contract can evolve without
 changing C++ source compatibility.
 
+## Stability
+
+The `forge_add_contract_library()` declaration/materialization API and its
+matching install/register functions are Experimental in Forge 8.16.0. Stable
+library IDs, emitted contract-graph descriptors, source identities, dependency
+scope and artifact wire formats are versioned compatibility contracts.
+`forge_add_contract()` and the existing guest C/C++ compatibility surface retain
+the stability stated by their owning SDK libraries and headers.
+
 ## Install A Release Archive
 
 Extract one platform archive and point CMake at its package directory:
