@@ -6,12 +6,12 @@ module;
 #include <bit>
 #include <cstddef>
 #include <cstdint>
-#include <stdexcept>
 #include <vector>
 
 export module forge.contract.testing.schema;
 
 import forge.chain.protocol.fixed_key;
+import forge.contract.testing.exceptions;
 import forge.db.object.index;
 import forge.db.object.object;
 
@@ -111,7 +111,7 @@ template <> struct sort_key<forge::contract::testing::float64> {
       auto bits = value.bits;
       const auto magnitude = bits & 0x7fff'ffff'ffff'ffffULL;
       if (magnitude > 0x7ff0'0000'0000'0000ULL) {
-         throw std::domain_error{"NaN is not an ordered database key"};
+         throw forge::contract::testing::exceptions::database_error{"NaN is not an ordered database key"};
       }
       if (magnitude == 0U) {
          bits = 0U;
@@ -128,7 +128,7 @@ template <> struct sort_key<forge::contract::testing::float128> {
       const auto exponent = high & 0x7fff'0000'0000'0000ULL;
       const auto fraction = (high & 0x0000'ffff'ffff'ffffULL) | low;
       if (exponent == 0x7fff'0000'0000'0000ULL && fraction != 0U) {
-         throw std::domain_error{"NaN is not an ordered database key"};
+         throw forge::contract::testing::exceptions::database_error{"NaN is not an ordered database key"};
       }
       if (exponent == 0U && fraction == 0U) {
          high = 0U;
