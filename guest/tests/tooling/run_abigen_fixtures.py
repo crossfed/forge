@@ -9,116 +9,6 @@ import subprocess
 import sys
 
 
-MODULES = (
-    "forge.raw.stream",
-    "forge.raw.varint_value",
-    "forge.raw.codec",
-    "forge.codec.base64.exceptions",
-    "forge.codec.base64",
-    "forge.codec.base58.exceptions",
-    "forge.codec.base58",
-    "forge.codec.hex.exceptions",
-    "forge.codec.hex",
-    "forge.crypto.digest.sha256:value",
-    "forge.crypto.digest.sha256",
-    "forge.crypto.digest.sha512:value",
-    "forge.crypto.digest.sha512",
-    "forge.crypto.digest.ripemd160:value",
-    "forge.crypto.digest.ripemd160",
-    "forge.crypto.asymmetric.values",
-    "forge.crypto.asymmetric",
-    "forge.crypto.bls.values",
-    "forge.chain.protocol.values",
-    "forge.chain.protocol.time",
-    "forge.chain.protocol.types:value",
-    "forge.chain.protocol.types",
-    "forge.chain.protocol.fixed_key:value",
-    "forge.chain.protocol.fixed_key",
-    "forge.chain.protocol.action:value",
-    "forge.chain.protocol.action",
-    "forge.chain.protocol.transaction:value",
-    "forge.chain.protocol.transaction",
-    "forge.chain.protocol.authority:value",
-    "forge.chain.protocol.authority",
-    "forge.chain.protocol.producer_schedule:value",
-    "forge.chain.protocol.producer_schedule",
-    "forge.chain.protocol.producer_authority",
-    "forge.chain.protocol.system:value",
-    "forge.chain.protocol.system",
-    "forge.chain.protocol.code_hash_result",
-    "forge.chain.protocol.blockchain_parameters",
-    "forge.chain.protocol.kv_parameters",
-    "forge.chain.protocol.finalizer_authority",
-    "forge.chain.protocol.finalizer_policy",
-    "forge.chain.protocol.hash_id",
-    "forge.chain.protocol.call_access_mode",
-    "forge.chain.protocol.call_data_header",
-    "forge.contract.intrinsics",
-    "forge.contract",
-    "forge.contract.datastream",
-    "forge.contract.varint",
-    "forge.contract.fixed_bytes",
-    "forge.contract.binary_extension",
-    "forge.contract.ignore",
-    "forge.contract.hash_id",
-    "forge.contract.action",
-    "forge.contract.transaction",
-    "forge.contract.system",
-    "forge.contract.deferred_transaction",
-    "forge.contract.authorization",
-    "forge.contract.bitset",
-    "forge.contract.call",
-    "forge.contract.crypto",
-    "forge.contract.crypto_bls_ext",
-    "forge.contract.crypto_ext",
-    "forge.contract.instant_finality",
-    "forge.contract.key",
-    "forge.contract.powers",
-    "forge.contract.print",
-    "forge.contract.privileged",
-    "forge.contract.producer_schedule",
-    "forge.contract.rope",
-    "forge.contract.string",
-    "forge.contract.dispatcher",
-    "forge.contract.multi_index",
-    "forge.contract.singleton",
-    "forge.contract.compatibility_name",
-    "forge.contract.compatibility_asset",
-)
-
-MODULE_TARGETS = {
-    module: (
-        "forge_guest_raw"
-        if module.startswith("forge.raw.")
-        else "forge_guest_codec_base64"
-        if module.startswith("forge.codec.base64")
-        else "forge_guest_codec_base58"
-        if module.startswith("forge.codec.base58")
-        else "forge_guest_codec_hex"
-        if module.startswith("forge.codec.hex")
-        else "forge_guest_crypto"
-        if module.startswith("forge.crypto.")
-        else "forge_guest_chain_protocol"
-        if module.startswith("forge.chain.protocol.")
-        else "forge_guest_contract"
-    )
-    for module in MODULES
-}
-
-MODULE_FILES = {
-    "forge.crypto.digest.sha256:value": "forge.crypto.digest.sha256-value.pcm",
-    "forge.crypto.digest.sha512:value": "forge.crypto.digest.sha512-value.pcm",
-    "forge.crypto.digest.ripemd160:value": "forge.crypto.digest.ripemd160-value.pcm",
-    "forge.crypto.asymmetric.values": "forge.crypto.asymmetric.values.pcm",
-    "forge.chain.protocol.types:value": "forge.chain.protocol.types-value.pcm",
-    "forge.chain.protocol.fixed_key:value": "forge.chain.protocol.fixed_key-value.pcm",
-    "forge.chain.protocol.action:value": "forge.chain.protocol.action-value.pcm",
-    "forge.chain.protocol.transaction:value": "forge.chain.protocol.transaction-value.pcm",
-    "forge.chain.protocol.authority:value": "forge.chain.protocol.authority-value.pcm",
-    "forge.chain.protocol.producer_schedule:value": "forge.chain.protocol.producer_schedule-value.pcm",
-    "forge.chain.protocol.system:value": "forge.chain.protocol.system-value.pcm",
-}
-
 PASS_FIXTURES = {
     "action_results_test": "action_results_test",
     "aliased_type_variant_template_arg": "aliased_type_variant_template_arg",
@@ -150,10 +40,42 @@ def invoke(
     ricardian_clauses=None,
     bare_outputs=False,
     error_contains=None,
+    headers=(),
 ):
     output.mkdir(parents=True, exist_ok=True)
     abi = output / f"{source.stem}.abi"
     dispatch = output / f"{source.stem}.dispatcher.cpp"
+    graph = output / f"{source.stem}.contract-graph.json"
+    source_root = args.fixtures.parent.resolve()
+    graph_files = []
+    for role, paths in (
+        ("source", (source, *additional_sources)),
+        ("header", headers),
+        ("ricardian_contracts", (() if ricardian_contracts is None else (ricardian_contracts,))),
+        ("ricardian_clauses", (() if ricardian_clauses is None else (ricardian_clauses,))),
+    ):
+        for path in paths:
+            physical = path.resolve()
+            try:
+                relative = physical.relative_to(source_root)
+            except ValueError as error:
+                raise RuntimeError(f"fixture input is outside its source root: {physical}") from error
+            graph_files.append(
+                {
+                    "role": role,
+                    "logical_path": f"contract/{role}/{relative.as_posix()}",
+                    "physical_path": str(physical),
+                }
+            )
+    graph_descriptor = json.loads(args.contract_graph.read_text(encoding="utf-8"))
+    graph_descriptor["root"] = {
+        "owner": f"contract:{contract}",
+        "source_root": str(source_root),
+        "files": graph_files,
+        "libraries": graph_descriptor["root"]["libraries"],
+        "components": graph_descriptor["root"]["components"],
+    }
+    graph.write_text(json.dumps(graph_descriptor, sort_keys=True) + "\n", encoding="utf-8")
     abi_argument = abi.name if bare_outputs else abi
     dispatch_argument = dispatch.name if bare_outputs else dispatch
     command = [
@@ -164,17 +86,26 @@ def invoke(
         str(abi_argument),
         "--dispatch",
         str(dispatch_argument),
+        "--contract-graph",
+        str(graph),
         "--attribute-plugin",
         str(args.plugin),
         "--sysroot",
         str(args.sysroot),
-        "--include",
+        "--sdk-include",
         str(args.include),
+        "--sdk-include",
+        str(args.modules),
     ]
-    for module in MODULES:
-        module_dir = args.build_dir / "CMakeFiles" / f"{MODULE_TARGETS[module]}.dir"
-        module_file = MODULE_FILES.get(module, module + ".pcm")
-        command.extend(("--module-file", f"{module}={module_dir / module_file}"))
+    module_dirs = sorted(
+        path
+        for path in (args.build_dir / "CMakeFiles").glob("*.dir")
+        if any(path.glob("*.pcm"))
+    )
+    if not module_dirs:
+        raise RuntimeError(f"no prebuilt module directories found under {args.build_dir}")
+    for module_dir in module_dirs:
+        command.extend(("--module-path", str(module_dir)))
     if ricardian_contracts is not None:
         command.extend(("--ricardian-contracts", str(ricardian_contracts)))
     if ricardian_clauses is not None:
@@ -305,12 +236,14 @@ def run_donor_fixtures(args, manifest):
 
     for name, contract in PASS_FIXTURES.items():
         source = local_root / "abigen-pass" / f"{name}.cpp"
-        kwargs = {}
+        kwargs = {"headers": (local_root / "cdt_support.hpp",)}
         if name == "ricardian_contract_test":
-            kwargs = {
+            kwargs |= {
                 "ricardian_contracts": source.with_suffix(".contracts.md"),
                 "ricardian_clauses": source.with_suffix(".clauses.md"),
             }
+        if name == "singleton_contract":
+            kwargs["headers"] += (source.with_name("singleton_contract_support.hpp"),)
         abi = invoke(args, contract, source, args.output / "cdt", **kwargs)
         check_fixture_semantics(name, abi)
         if donor_root is not None:
@@ -321,7 +254,14 @@ def run_donor_fixtures(args, manifest):
 
     for name, contract in FAIL_FIXTURES.items():
         source = local_root / "abigen-fail" / f"{name}.cpp"
-        invoke(args, contract, source, args.output / "cdt", succeeds=False)
+        invoke(
+            args,
+            contract,
+            source,
+            args.output / "cdt",
+            succeeds=False,
+            headers=(local_root / "cdt_support.hpp",),
+        )
 
     mapped = {fixture["forge_case"] for fixture in manifest["fixtures"]}
     expected = {
@@ -358,7 +298,9 @@ def main():
     parser.add_argument("--plugin", required=True, type=pathlib.Path)
     parser.add_argument("--sysroot", required=True, type=pathlib.Path)
     parser.add_argument("--include", required=True, type=pathlib.Path)
+    parser.add_argument("--modules", required=True, type=pathlib.Path)
     parser.add_argument("--build-dir", required=True, type=pathlib.Path)
+    parser.add_argument("--contract-graph", required=True, type=pathlib.Path)
     parser.add_argument("--fixtures", required=True, type=pathlib.Path)
     parser.add_argument("--output", required=True, type=pathlib.Path)
     args = parser.parse_args()
@@ -375,6 +317,73 @@ def main():
         ricardian_clauses=args.fixtures / "ricardian.clauses.md",
     )
     check_features(features)
+
+    named_action = invoke(
+        args,
+        "namedaction",
+        args.fixtures / "named_action.cpp",
+        args.output / "named-action",
+    )
+    named_action_structs = by_name(named_action["structs"])
+    if by_name(named_action["actions"])["beginrev"]["type"] != "begin_revision":
+        raise RuntimeError("named action did not use its DTO as the direct ABI payload")
+    if named_action_structs["begin_revision"]["fields"] != [
+        {"name": "workspace", "type": "uint64"},
+        {"name": "inode", "type": "uint64"},
+    ]:
+        raise RuntimeError("named action ABI payload fields changed")
+    if "submit" in named_action_structs:
+        raise RuntimeError("named action generated a legacy method wrapper")
+
+    named_helpers = invoke(
+        args,
+        "namedhelpers",
+        args.fixtures / "named_action_unrelated_get_name.cpp",
+        args.output / "named-action-unrelated-get-name",
+    )
+    named_helper_actions = by_name(named_helpers["actions"])
+    named_helper_structs = by_name(named_helpers["structs"])
+    if named_helper_actions["submit"]["type"] != "submit":
+        raise RuntimeError("unrelated get_name method changed the legacy action ABI")
+    if named_helper_structs["submit"]["fields"] != [
+        {"name": "request", "type": "legacy_request"}
+    ]:
+        raise RuntimeError("legacy action wrapper fields changed")
+    if named_helper_actions["publishrev"]["type"] != "overloaded_named_request":
+        raise RuntimeError("valid named action hook was hidden by an unrelated overload")
+    if "publish" in named_helper_structs:
+        raise RuntimeError("overloaded named action generated a legacy method wrapper")
+    if named_helper_actions["archive"]["type"] != "archive":
+        raise RuntimeError("inaccessible get_name method changed the legacy action ABI")
+    if named_helper_actions["erase"]["type"] != "erase":
+        raise RuntimeError("deleted get_name method changed the legacy action ABI")
+    if named_helper_actions["inherited"]["type"] != "inherited_named_request":
+        raise RuntimeError("public inherited named action hook did not produce direct DTO ABI")
+    if "restore" in named_helper_structs:
+        raise RuntimeError("inherited named action generated a legacy method wrapper")
+    if named_helper_actions["runtime"]["type"] != "runtime":
+        raise RuntimeError("non-constexpr get_name method changed the legacy action ABI")
+    if named_helper_actions["defaulted"]["type"] != "defaulted":
+        raise RuntimeError("get_name method with parameters changed the legacy action ABI")
+    if named_helper_actions["hidden"]["type"] != "hidden":
+        raise RuntimeError("derived get_name overload did not hide the inherited named action hook")
+
+    invoke(
+        args,
+        "namedmismatch",
+        args.fixtures / "named_action_mismatch.cpp",
+        args.output / "named-action-mismatch",
+        succeeds=False,
+        error_contains="action attribute name does not match payload get_name()",
+    )
+    invoke(
+        args,
+        "namedstatic",
+        args.fixtures / "named_action_static.cpp",
+        args.output / "named-action-static",
+        succeeds=False,
+        error_contains="contract entry point must be a non-static member function",
+    )
 
     guest_macro = invoke(
         args,
@@ -410,6 +419,7 @@ def main():
         multi_source_contract,
         args.output / "multi-source-valid",
         additional_sources=(multi_source_helper,),
+        headers=(args.fixtures / "multi_source_contract.hpp",),
     )
     if [action["name"] for action in multi_source["actions"]] != ["next", "previous"]:
         raise RuntimeError("shared multi-source action was not de-duplicated")
@@ -481,6 +491,19 @@ def main():
         raise RuntimeError("EOSIO fixed_bytes adapters changed their canonical ABI names")
     if any(item["name"].startswith("fixed_bytes") for item in eosio_fixed_bytes["structs"]):
         raise RuntimeError("EOSIO fixed_bytes adapter leaked an implementation record into the ABI")
+
+    sdk_alias = invoke(
+        args,
+        "sdkalias",
+        args.fixtures / "sdk_type_alias.cpp",
+        args.output / "sdk-type-alias",
+    )
+    sdk_alias_types = {item["new_type_name"]: item["type"] for item in sdk_alias["types"]}
+    if sdk_alias_types.get("block_signing_authority") != "variant_block_signing_authority_v0":
+        raise RuntimeError("SDK-owned type alias was erased from the contract ABI")
+    authority_fields = by_name(by_name(sdk_alias["structs"])["producer_authority"]["fields"])
+    if authority_fields["authority"]["type"] != "block_signing_authority":
+        raise RuntimeError("SDK-owned type alias was desugared at its use site")
 
     equivalent_struct = invoke(
         args,

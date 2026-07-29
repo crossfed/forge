@@ -10,6 +10,8 @@ import tarfile
 import time
 from pathlib import Path
 
+from run_dual_target_fixtures import validate as validate_dual_target
+
 LINUX_SDK_RUNTIME_PREFIXES = (
     "libstdc++.so",
     "libc++.so",
@@ -136,7 +138,11 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--archive", required=True, type=Path)
     parser.add_argument("--cmake", required=True)
+    parser.add_argument("--cxx-compiler", required=True, type=Path)
+    parser.add_argument("--forge-package", required=True, type=Path)
     parser.add_argument("--source-root", required=True, type=Path)
+    parser.add_argument("--dual-target-source", required=True, type=Path)
+    parser.add_argument("--host-source", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     args = parser.parse_args()
 
@@ -185,6 +191,10 @@ def main() -> None:
             raise RuntimeError(f"missing relocated SDK artifact: {artifact}")
 
     manifest = json.loads((build / "hello.contract.json").read_text(encoding="utf-8"))
+    if manifest["schema_version"] != 2:
+        raise RuntimeError("contract manifest schema is not version 2")
+    if not manifest["source_graph"]["files"] or len(manifest["source_graph"]["sha256"]) != 64:
+        raise RuntimeError("contract manifest has no attested source graph")
     if manifest["sdk"]["profile"] == "release":
         expected_llvm = {
             "version": "llvmorg-22.1.8",
@@ -246,6 +256,16 @@ def main() -> None:
     build_project(args.cmake, build)
     if wasm.stat().st_mtime_ns <= first_mtime:
         raise RuntimeError("contract source change did not rebuild the WebAssembly artifact")
+
+    validate_dual_target(
+        cmake=args.cmake,
+        cxx_compiler=args.cxx_compiler,
+        forge_package=args.forge_package,
+        contract_package=package,
+        source=args.dual_target_source.resolve(),
+        host_source=args.host_source.resolve(),
+        output=output / "dual-target",
+    )
 
 
 if __name__ == "__main__":

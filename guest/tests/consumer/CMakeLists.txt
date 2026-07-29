@@ -23,6 +23,7 @@ target_include_directories(
 forge_add_contract(
    hello
    SOURCES hello.cpp
+   HEADERS local_value.hpp
 )
 
 forge_add_contract(
@@ -42,12 +43,14 @@ forge_add_contract(
 
 forge_add_contract(
    equivalent
+   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.."
    SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/equivalent_struct.cpp"
 )
 
 forge_add_contract(
    multisource
    SOURCES multi_source_helper.cpp multi_source.cpp
+   HEADERS multi_source.hpp
    DISPATCH_SOURCE multi_source.cpp
 )
 
@@ -82,15 +85,30 @@ forge_add_contract(
 )
 
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/sdk_surface_manifest.json" _sdk_surface_json)
-set(_surface_generated_dir "${CMAKE_CURRENT_BINARY_DIR}/surface")
+set(_surface_source_root "${CMAKE_CURRENT_BINARY_DIR}/surface-source")
+set(_surface_generated_dir "${_surface_source_root}/checks")
 file(MAKE_DIRECTORY "${_surface_generated_dir}")
+configure_file(
+   "${CMAKE_CURRENT_SOURCE_DIR}/surface_contract.cpp"
+   "${_surface_source_root}/surface_contract.cpp"
+   COPYONLY
+)
 set(
    _surface_sources
-   "${CMAKE_CURRENT_SOURCE_DIR}/asset_source_compat.cpp"
-   "${CMAKE_CURRENT_SOURCE_DIR}/eosio_datastream_adl.cpp"
-   "${CMAKE_CURRENT_SOURCE_DIR}/eosio_internal_db_header.cpp"
-   "${CMAKE_CURRENT_SOURCE_DIR}/wire_aliases.cpp"
+   asset_source_compat.cpp
+   eosio_datastream_adl.cpp
+   eosio_internal_db_header.cpp
+   wire_aliases.cpp
 )
+set(_surface_staged_sources)
+foreach(_source IN LISTS _surface_sources)
+   configure_file(
+      "${CMAKE_CURRENT_SOURCE_DIR}/${_source}"
+      "${_surface_generated_dir}/${_source}"
+      COPYONLY
+   )
+   list(APPEND _surface_staged_sources "checks/${_source}")
+endforeach()
 
 string(JSON _surface_header_count LENGTH "${_sdk_surface_json}" donor_cpp_headers)
 math(EXPR _surface_header_last "${_surface_header_count} - 1")
@@ -99,7 +117,7 @@ foreach(_index RANGE 0 ${_surface_header_last})
    string(REGEX REPLACE "[^A-Za-z0-9_]" "_" _stem "${SURFACE_HEADER}")
    set(_output "${_surface_generated_dir}/header_${_stem}.cpp")
    configure_file(surface_header.cpp.in "${_output}" @ONLY)
-   list(APPEND _surface_sources "${_output}")
+   list(APPEND _surface_staged_sources "checks/header_${_stem}.cpp")
 endforeach()
 
 string(JSON _surface_module_count LENGTH "${_sdk_surface_json}" modern_modules)
@@ -114,43 +132,50 @@ foreach(_index RANGE 0 ${_surface_module_last})
    string(REPLACE "." "_" _stem "${SURFACE_MODULE}")
    set(_output "${_surface_generated_dir}/module_${_stem}.cpp")
    configure_file(surface_module.cpp.in "${_output}" @ONLY)
-   list(APPEND _surface_sources "${_output}")
+   list(APPEND _surface_staged_sources "checks/module_${_stem}.cpp")
 endforeach()
 
 forge_add_contract(
    surface
+   SOURCE_ROOT "${_surface_source_root}"
    SOURCES surface_contract.cpp
-   COMPILE_CHECKS ${_surface_sources}
+   COMPILE_CHECKS ${_surface_staged_sources}
 )
 
 forge_add_contract(
    multiidx
    SOURCES multi_index_contract.cpp
+   HEADERS multi_index_cases.hpp
 )
 
 forge_add_contract(
    legacymidx
    SOURCES legacy_multi_index_contract.cpp
+   HEADERS multi_index_cases.hpp
 )
 
 forge_add_contract(
    midxerrors
    SOURCES multi_index_errors_contract.cpp
+   HEADERS multi_index_cases.hpp
 )
 
 forge_add_contract(
    legmidxerr
    SOURCES legacy_multi_index_errors_contract.cpp
+   HEADERS multi_index_cases.hpp
 )
 
 forge_add_contract(
    midxextend
    SOURCES multi_index_extended_contract.cpp
+   HEADERS multi_index_cases.hpp
 )
 
 forge_add_contract(
    legmidxext
    SOURCES legacy_multi_index_extended_contract.cpp
+   HEADERS multi_index_cases.hpp
 )
 
 add_custom_target(
@@ -209,7 +234,9 @@ add_custom_target(
       --plugin "${ForgeContract_ATTR_PLUGIN}"
       --sysroot "${ForgeContract_SYSROOT}"
       --include "${ForgeContract_DATA_DIR}/include"
+      --modules "${ForgeContract_DATA_DIR}/modules"
       --build-dir "${_tooling_build_dir}"
+      --contract-graph "${CMAKE_CURRENT_BINARY_DIR}/hello.contract-graph.json"
       --fixtures "${CMAKE_CURRENT_SOURCE_DIR}/../tooling"
       --output "${_tooling_output}"
    DEPENDS hello
@@ -228,6 +255,7 @@ add_custom_target(
       --abi "${CMAKE_CURRENT_BINARY_DIR}/hello.abi"
       --imports "${ForgeContract_DATA_DIR}/registry/intrinsics.json"
       --manifest "${CMAKE_CURRENT_BINARY_DIR}/hello.contract.json"
+      --source-graph "${CMAKE_CURRENT_BINARY_DIR}/hello.contract-graph.json"
       --output "${CMAKE_CURRENT_BINARY_DIR}/checker"
    DEPENDS hello
    VERBATIM

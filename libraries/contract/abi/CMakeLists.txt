@@ -1,9 +1,12 @@
 add_library(
    forge_contract_abi STATIC
    command.cpp
+   compilation_metadata.cpp
    generator.cpp
 )
 forge_target_modules_at(forge_contract_abi contract/abi)
+
+set_target_properties(forge_contract_abi PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 target_include_directories(forge_contract_abi PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
 target_include_directories(forge_contract_abi SYSTEM PRIVATE ${CLANG_INCLUDE_DIRS} ${LLVM_INCLUDE_DIRS})
@@ -13,6 +16,7 @@ target_link_libraries(
    PUBLIC
       forge_chain_protocol
       forge_codec_json
+      forge_contract_graph
    PRIVATE
       clang-cpp
       LLVM

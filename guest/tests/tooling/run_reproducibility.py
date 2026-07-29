@@ -26,7 +26,7 @@ def build(args, root):
         "cmake_minimum_required(VERSION 3.31)\n"
         "project(reproducible_contract LANGUAGES NONE)\n"
         "find_package(ForgeContract CONFIG REQUIRED)\n"
-        "forge_add_contract(hello SOURCES hello.cpp)\n",
+        "forge_add_contract(hello SOURCES hello.cpp HEADERS local_value.hpp)\n",
         encoding="utf-8",
     )
     run(

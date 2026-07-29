@@ -11,6 +11,7 @@ forge::contract::manifest::generate({
    .wasm = "token.wasm",
    .abi = "token.abi",
    .imports = "intrinsics.json",
+   .source_graph = "token.contract-graph.json",
    .output = "token.contract.json",
    .sdk_version = "8.5.0",
    .profile = "release",
@@ -19,7 +20,7 @@ forge::contract::manifest::generate({
 ```
 
 The manifest records artifact hashes, imported functions, enabled WASM
-features and toolchain identity without modifying WASM bytes. Reproducible
+features, the canonical source graph and toolchain identity without modifying WASM bytes. Reproducible
 release profiles record the pinned LLVM tag and commit. Developer profiles
 record the selected Clang version line and omit the unknown source commit.
 This library does not require Clang and does not validate policy; use
@@ -33,7 +34,19 @@ dependency is transitive through package component `contract_manifest`.
 
 ## Stability And Tests
 
-The generator request is experimental; manifest schema and deterministic field
+The generator request is experimental; manifest schema v2 and deterministic field
 meaning are versioned compatibility surfaces. Tests verify hashes, import and
-feature capture, reproducible output, command failures, standalone package
+feature capture, source ownership and scoped dependency digests, reproducible output, command failures, standalone package
 consumption and relocated SDK generation.
+
+Schema v2 is the intentional Forge 8.16 migration from schema v1. Existing
+schema-v1 sidecars are generated build artifacts and must be regenerated with
+the Forge 8.16 Contract SDK. Consumers that validate `schema_version` must add
+schema v2 before upgrading; v2 adds the attested `source_graph` and does not
+offer a v1 output mode. The Forge 8.16 release note repeats this migration when
+the release version is cut.
+
+The source graph attests its root owner, logical file identities and hashes,
+scoped dependency edges, and canonical component-to-module ownership. Absolute
+source roots and physical paths are transport details and are excluded so the
+same installed package produces the same digest after relocation.

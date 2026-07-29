@@ -6,6 +6,7 @@ module. Consumers select only the capability they need:
 
 | Library | Package component | Purpose |
 |---|---|---|
+| `graph` | `contract_graph` | Explicit dual-target source and dependency descriptors |
 | `abi` | `contract_abi` | Clang AST to chain ABI and dispatcher |
 | `attributes` | `contract_attributes` | Clang attribute registration |
 | `validation` | `contract_validation` | ABI and WebAssembly validation |

@@ -1,6 +1,9 @@
 # Forge Crypto BLS
 
-`forge_crypto_bls` owns BLS12-381 values, signatures and deterministic contract
+`forge_crypto_bls_values` owns freestanding BLS12-381 value types shared with
+contracts. Package component: `crypto_bls_values`.
+
+`forge_crypto_bls` owns host-side keys, signatures and deterministic contract
 primitives. Package component: `crypto_bls`. Public namespace:
 `forge::crypto::bls`.
 
@@ -15,6 +18,10 @@ import forge.crypto.bls.values;
 
 const auto signature = forge::crypto::bls::signature_value{};
 ```
+
+Consumers importing `forge.crypto.bls.values` link
+`Forge::forge_crypto_bls_values`; consumers importing `forge.crypto.bls` link
+`Forge::forge_crypto_bls`.
 
 `forge.crypto.bls` also owns proof-of-possession validation and grouped
 aggregate verification. A raw public key becomes a

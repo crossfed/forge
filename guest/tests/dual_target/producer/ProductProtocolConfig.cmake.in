@@ -1,0 +1,15 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(Forge CONFIG COMPONENTS raw chain_protocol crypto_digest)
+find_dependency(ForgeContract CONFIG)
+
+include("${CMAKE_CURRENT_LIST_DIR}/ProductProtocolTargets.cmake")
+forge_register_contract_library_targets(
+   Product::values
+   Product::limits
+   Product::protocol
+)
+
+check_required_components(ProductProtocol)
