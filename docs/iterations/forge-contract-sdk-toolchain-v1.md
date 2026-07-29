@@ -232,9 +232,10 @@ versions.
 
 Interface version 1 currently contains seven lifecycle/action-data functions
 and all 60 Spring/CDT database functions. The distributed DB portion is a
-declarative ABI, not a storage implementation. A non-installed executable test
-host validates that ABI against `forge.db.object`; its exact donor surface and
-runtime scenario mapping are recorded in
+declarative ABI, not a storage implementation. The optional installed
+`Forge::forge_contract_testing` component validates that ABI against
+`forge.db.object`; its exact donor surface and runtime scenario mapping are
+recorded in
 `docs/donors/forge-contract-db-intrinsics-v1.md`.
 
 ## Dual-Target Libraries
