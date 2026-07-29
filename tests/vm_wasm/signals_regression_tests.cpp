@@ -4,6 +4,7 @@ module;
 
 #include <array>
 #include <cstddef>
+#include <csignal>
 #include <cstdint>
 #include <limits>
 
@@ -28,6 +29,27 @@ struct reexport_host {
 struct escaped_signal {};
 
 using reexport_host_functions = wasm::registered_host_functions<std::nullptr_t>;
+
+volatile std::sig_atomic_t external_signal_count = 0;
+
+void external_signal_handler(int) {
+   external_signal_count = external_signal_count + 1;
+}
+
+class signal_action_guard {
+ public:
+   explicit signal_action_guard(int signal) : signal_{signal} {
+      BOOST_REQUIRE(::sigaction(signal_, nullptr, &previous_) == 0);
+   }
+
+   ~signal_action_guard() {
+      static_cast<void>(::sigaction(signal_, &previous_, nullptr));
+   }
+
+ private:
+   int signal_;
+   struct sigaction previous_{};
+};
 
 void register_reexport_host() {
    static const auto registered = [] {
@@ -89,6 +111,25 @@ TEST_CASE("signal ranges classify addresses without pointer ordering", "[signals
    BOOST_TEST(!wasm::detail::contains_address(range, start - 1));
    BOOST_TEST(!wasm::detail::contains_address(range, start + range.size()));
    BOOST_TEST(!wasm::detail::contains_address({}, start));
+}
+
+TEST_CASE("signal handlers are restored after an external replacement", "[signals]") {
+   const auto guard = signal_action_guard{SIGFPE};
+   wasm::setup_signal_handler();
+
+   struct sigaction external{};
+   external.sa_handler = &external_signal_handler;
+   sigemptyset(&external.sa_mask);
+   external.sa_flags = 0;
+   BOOST_REQUIRE(::sigaction(SIGFPE, &external, nullptr) == 0);
+   external_signal_count = 0;
+
+   const auto invoke = [] {
+      wasm::invoke_with_signal_handler([] { std::raise(SIGFPE); }, [](int) { throw escaped_signal{}; }, nullptr,
+                                       nullptr);
+   };
+   BOOST_CHECK_THROW(invoke(), escaped_signal);
+   BOOST_TEST(external_signal_count == 0);
 }
 
 TEST_CASE("interpreter re-exported host imports translate guest memory faults", "[signals]") {

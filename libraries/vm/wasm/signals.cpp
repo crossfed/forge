@@ -5,6 +5,7 @@ module;
 #include <cstdint>
 #include <cstdlib>
 #include <exception>
+#include <mutex>
 #include <setjmp.h>
 #include <signal.h>
 #include <span>
@@ -64,22 +65,45 @@ void signal_handler(int signal, siginfo_t* info, void* context) {
    }
 }
 
+namespace {
+
+std::mutex signal_handler_mutex;
+
+bool is_forge_signal_handler(const struct sigaction& action) noexcept {
+   return (action.sa_flags & SA_SIGINFO) != 0 && action.sa_sigaction == &signal_handler;
+}
+
+template <int Signal> void ensure_signal_handler(const struct sigaction& action) {
+   struct sigaction current{};
+   detail::check<exceptions::interpreter>(::sigaction(Signal, nullptr, &current) == 0,
+                                          "failed to inspect VM signal handler");
+   if (is_forge_signal_handler(current)) {
+      return;
+   }
+
+   prev_signal_handler<Signal> = current;
+   detail::check<exceptions::interpreter>(::sigaction(Signal, &action, nullptr) == 0,
+                                          "failed to install VM signal handler");
+}
+
+} // namespace
+
 void setup_signal_handler_impl() {
+   const auto lock = std::scoped_lock{signal_handler_mutex};
    struct sigaction action{};
    action.sa_sigaction = &signal_handler;
    sigemptyset(&action.sa_mask);
    sigaddset(&action.sa_mask, SIGPROF);
    action.sa_flags = SA_NODEFER | SA_SIGINFO;
-   sigaction(SIGSEGV, &action, &prev_signal_handler<SIGSEGV>);
+   ensure_signal_handler<SIGSEGV>(action);
 #ifndef __linux__
-   sigaction(SIGBUS, &action, &prev_signal_handler<SIGBUS>);
+   ensure_signal_handler<SIGBUS>(action);
 #endif
-   sigaction(SIGFPE, &action, &prev_signal_handler<SIGFPE>);
+   ensure_signal_handler<SIGFPE>(action);
 }
 
 void setup_signal_handler() {
-   static const int initialized = (setup_signal_handler_impl(), 0);
-   static_cast<void>(initialized);
+   setup_signal_handler_impl();
    static_assert(std::atomic<sigjmp_buf*>::is_always_lock_free,
                  "Atomic pointers must be lock-free to be async signal safe.");
 }
