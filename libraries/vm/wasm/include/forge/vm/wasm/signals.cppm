@@ -83,8 +83,10 @@ template <typename E> [[noreturn]] inline void throw_(const char* msg) {
    siglongjmp(*dest, -1);
 }
 
+// Preserves the donor internal test hook. Production ownership is scoped by acquire/release below.
 void setup_signal_handler_impl();
-void setup_signal_handler();
+void acquire_signal_handler_scope();
+void release_signal_handler_scope();
 
 /// Call a function with a signal handler installed.  If this thread is
 /// signalled during the execution of f, the function e will be called with
@@ -94,21 +96,28 @@ void setup_signal_handler();
 ///
 /// signals handled: SIGSEGV, SIGBUS (except on Linux), SIGFPE
 ///
+/// Components that replace these process-wide handlers must not mutate them
+/// while an outer VM invocation is active. POSIX does not provide an atomic
+/// compare-and-restore operation for signal dispositions.
+///
 // Make this noinline to prevent possible corruption of the caller's local variables.
 // It's unlikely, but I'm not sure that it can definitely be ruled out if both
 // this and f are inlined and f modifies locals from the caller.
 template <typename F, typename E>
 [[gnu::noinline]] auto invoke_with_signal_handler(F&& f, E&& e, growable_allocator* code_allocator,
                                                   wasm_allocator* mem_allocator) {
-   if (std::atomic_load(&signal_dest) == nullptr) {
-      setup_signal_handler();
+   const auto next_code_memory_range = code_allocator ? code_allocator->get_code_span() : std::span<std::byte>{};
+   const auto next_memory_range = mem_allocator ? mem_allocator->get_span() : std::span<std::byte>{};
+   const bool owns_process_signal_scope = std::atomic_load(&signal_dest) == nullptr;
+   if (owns_process_signal_scope) {
+      acquire_signal_handler_scope();
    }
    sigjmp_buf dest;
    sigjmp_buf* volatile old_signal_handler = nullptr;
    const auto old_code_memory_range = code_memory_range;
    const auto old_memory_range = memory_range;
-   code_memory_range = code_allocator ? code_allocator->get_code_span() : std::span<std::byte>{};
-   memory_range = mem_allocator ? mem_allocator->get_span() : std::span<std::byte>{};
+   code_memory_range = next_code_memory_range;
+   memory_range = next_memory_range;
    int sig;
    if ((sig = sigsetjmp(dest, 1)) == 0) {
       // Note: Cannot use RAII, as non-trivial destructors w/ longjmp
@@ -137,12 +146,21 @@ template <typename F, typename E>
          std::atomic_store(&signal_dest, old_signal_handler);
          code_memory_range = old_code_memory_range;
          memory_range = old_memory_range;
+         if (owns_process_signal_scope) {
+            release_signal_handler_scope();
+         }
          throw;
+      }
+      if (owns_process_signal_scope) {
+         release_signal_handler_scope();
       }
    } else {
       std::atomic_store(&signal_dest, old_signal_handler);
       code_memory_range = old_code_memory_range;
       memory_range = old_memory_range;
+      if (owns_process_signal_scope) {
+         release_signal_handler_scope();
+      }
       if (sig == -1) {
          std::exception_ptr exception = std::move(saved_exception);
          saved_exception = nullptr;

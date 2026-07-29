@@ -8,6 +8,8 @@ module;
 #include <cstddef>
 #include <csignal>
 #include <cstdint>
+#include <functional>
+#include <latch>
 #include <limits>
 #include <thread>
 
@@ -122,7 +124,6 @@ TEST_CASE("signal ranges classify addresses without pointer ordering", "[signals
 
 TEST_CASE("signal handlers are restored after an external replacement", "[signals]") {
    const auto guard = signal_action_guard{SIGFPE};
-   wasm::setup_signal_handler();
 
    struct sigaction external{};
    external.sa_handler = &external_signal_handler;
@@ -142,10 +143,36 @@ TEST_CASE("signal handlers are restored after an external replacement", "[signal
    BOOST_TEST(external_signal_count == 1);
 }
 
-TEST_CASE("signal handler publication remains coherent during concurrent ownership changes", "[signals]") {
-   constexpr auto iterations = 4096;
+TEST_CASE("reinstalling a managed signal handler preserves the displaced action", "[signals]") {
    const auto guard = signal_action_guard{SIGFPE};
-   auto synchronize = std::barrier{2};
+   struct sigaction external{};
+   external.sa_handler = &external_signal_handler;
+   sigemptyset(&external.sa_mask);
+   external.sa_flags = 0;
+   BOOST_REQUIRE(::sigaction(SIGFPE, &external, nullptr) == 0);
+   external_signal_count = 0;
+
+   wasm::acquire_signal_handler_scope();
+   {
+      const auto release = wasm::scope_guard{[] { wasm::release_signal_handler_scope(); }};
+      wasm::setup_signal_handler_impl();
+   }
+
+   struct sigaction restored{};
+   BOOST_REQUIRE(::sigaction(SIGFPE, nullptr, &restored) == 0);
+   BOOST_TEST((restored.sa_flags & SA_SIGINFO) == 0);
+   BOOST_TEST(restored.sa_handler == &external_signal_handler);
+   std::raise(SIGFPE);
+   BOOST_TEST(external_signal_count == 1);
+}
+
+TEST_CASE("signal handler publication remains coherent during concurrent ownership changes", "[signals]") {
+   constexpr auto iterations = 512;
+   const auto guard = signal_action_guard{SIGFPE};
+   auto start = std::barrier{2};
+   auto active = std::barrier{2};
+   auto release = std::barrier{2};
+   auto restored = std::barrier{2};
    auto install_failed = std::atomic<bool>{false};
    external_signal_count = 0;
 
@@ -153,7 +180,7 @@ TEST_CASE("signal handler publication remains coherent during concurrent ownersh
       for (auto iteration = 0; iteration < iterations; ++iteration) {
          struct sigaction external{};
          sigemptyset(&external.sa_mask);
-         if ((iteration & 1) == 0) {
+         if ((iteration % 3) == 0) {
             external.sa_handler = &external_signal_handler;
             external.sa_flags = 0;
          } else {
@@ -164,31 +191,97 @@ TEST_CASE("signal handler publication remains coherent during concurrent ownersh
             install_failed.store(true);
          }
 
-         synchronize.arrive_and_wait();
-         if ((iteration & 1) == 0) {
-            std::this_thread::yield();
-         }
+         start.arrive_and_wait();
          try {
-            wasm::setup_signal_handler();
+            wasm::invoke_with_signal_handler(
+                [&] {
+                   active.arrive_and_wait();
+                   release.arrive_and_wait();
+                },
+                [](int) {}, nullptr, nullptr);
          } catch (...) {
             install_failed.store(true);
          }
-         synchronize.arrive_and_wait();
+         restored.arrive_and_wait();
       }
    }};
 
-   for (auto iteration = 0; iteration < iterations; ++iteration) {
-      synchronize.arrive_and_wait();
-      if ((iteration & 1) != 0) {
-         std::this_thread::yield();
+   for ([[maybe_unused]] auto iteration = 0; iteration < iterations; ++iteration) {
+      start.arrive_and_wait();
+      active.arrive_and_wait();
+      if ((iteration % 3) == 2) {
+         struct sigaction replacement{};
+         replacement.sa_handler = &external_signal_handler;
+         sigemptyset(&replacement.sa_mask);
+         replacement.sa_flags = 0;
+         if (::sigaction(SIGFPE, &replacement, nullptr) != 0) {
+            install_failed.store(true);
+         }
       }
       std::raise(SIGFPE);
-      synchronize.arrive_and_wait();
+      release.arrive_and_wait();
+      restored.arrive_and_wait();
+      std::raise(SIGFPE);
    }
    installer.join();
 
    BOOST_TEST(!install_failed.load());
-   BOOST_TEST(external_signal_count == iterations);
+   BOOST_TEST(external_signal_count == iterations * 2);
+}
+
+TEST_CASE("concurrent outer signal scopes restore handlers after the last invocation", "[signals]") {
+   const auto guard = signal_action_guard{SIGFPE};
+   struct sigaction external{};
+   external.sa_handler = &external_signal_handler;
+   sigemptyset(&external.sa_mask);
+   external.sa_flags = 0;
+   BOOST_REQUIRE(::sigaction(SIGFPE, &external, nullptr) == 0);
+   external_signal_count = 0;
+
+   auto entered = std::barrier{3};
+   auto release_first = std::latch{1};
+   auto release_second = std::latch{1};
+   auto invocation_failed = std::atomic<bool>{false};
+   const auto run = [&](std::latch& release) {
+      try {
+         wasm::invoke_with_signal_handler(
+             [&] {
+                entered.arrive_and_wait();
+                release.wait();
+             },
+             [](int) {}, nullptr, nullptr);
+      } catch (...) {
+         invocation_failed.store(true);
+      }
+   };
+
+   auto first = std::thread{run, std::ref(release_first)};
+   auto second = std::thread{run, std::ref(release_second)};
+   entered.arrive_and_wait();
+
+   release_first.count_down();
+   first.join();
+   struct sigaction current{};
+   const auto active_query = ::sigaction(SIGFPE, nullptr, &current);
+   BOOST_CHECK(active_query == 0);
+   if (active_query == 0) {
+      BOOST_CHECK((current.sa_flags & SA_SIGINFO) != 0);
+      BOOST_CHECK(current.sa_sigaction == &wasm::signal_handler);
+   }
+   std::raise(SIGFPE);
+   BOOST_TEST(external_signal_count == 1);
+
+   release_second.count_down();
+   second.join();
+   const auto restored_query = ::sigaction(SIGFPE, nullptr, &current);
+   BOOST_CHECK(restored_query == 0);
+   if (restored_query == 0) {
+      BOOST_CHECK((current.sa_flags & SA_SIGINFO) == 0);
+      BOOST_CHECK(current.sa_handler == &external_signal_handler);
+   }
+   std::raise(SIGFPE);
+   BOOST_TEST(external_signal_count == 2);
+   BOOST_TEST(!invocation_failed.load());
 }
 
 TEST_CASE("interpreter re-exported host imports translate guest memory faults", "[signals]") {
