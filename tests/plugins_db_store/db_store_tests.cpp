@@ -542,32 +542,31 @@ configured_object_blob_store(std::string name,
    return forge::config::core::value{std::move(object)};
 }
 
-[[nodiscard]] forge::config::core::value
-configured_mdbx_store(std::string name,
-                      std::filesystem::path path,
-                      bool blob = false,
-                      bool revision = true,
-                      std::string durability = "durable-sync") {
+[[nodiscard]] forge::config::core::value configured_mdbx_store(std::string name, std::filesystem::path path,
+                                                               bool blob = false, bool revision = true,
+                                                               std::optional<std::string> durability = "durable-sync") {
    auto object = forge::config::core::value::object_type{};
    object.emplace("name", forge::config::core::value{std::move(name)});
    object.emplace("driver", forge::config::core::value{std::string{"mdbx"}});
    object.emplace("path", forge::config::core::value{path.string()});
 
-   auto lane = forge::config::core::value::object_type{};
-   lane.emplace("max-pending-operations", forge::config::core::value{std::uint64_t{64U}});
-   lane.emplace("max-waiting-submissions", forge::config::core::value{std::uint64_t{64U}});
-   lane.emplace("thread-name", forge::config::core::value{std::string{"store-mdbx-test"}});
+   if (durability) {
+      auto lane = forge::config::core::value::object_type{};
+      lane.emplace("max-pending-operations", forge::config::core::value{std::uint64_t{64U}});
+      lane.emplace("max-waiting-submissions", forge::config::core::value{std::uint64_t{64U}});
+      lane.emplace("thread-name", forge::config::core::value{std::string{"store-mdbx-test"}});
 
-   auto map = forge::config::core::value::object_type{};
-   map.emplace("upper-size", forge::config::core::value{std::uint64_t{64U * 1024U * 1024U}});
-   map.emplace("growth-step", forge::config::core::value{std::uint64_t{1024U * 1024U}});
+      auto map = forge::config::core::value::object_type{};
+      map.emplace("upper-size", forge::config::core::value{std::uint64_t{64U * 1024U * 1024U}});
+      map.emplace("growth-step", forge::config::core::value{std::uint64_t{1024U * 1024U}});
 
-   auto mdbx = forge::config::core::value::object_type{};
-   mdbx.emplace("durability", forge::config::core::value{std::move(durability)});
-   mdbx.emplace("max-readers", forge::config::core::value{std::uint64_t{64U}});
-   mdbx.emplace("map", forge::config::core::value{std::move(map)});
-   mdbx.emplace("lane", forge::config::core::value{std::move(lane)});
-   object.emplace("mdbx", forge::config::core::value{std::move(mdbx)});
+      auto mdbx = forge::config::core::value::object_type{};
+      mdbx.emplace("durability", forge::config::core::value{std::move(*durability)});
+      mdbx.emplace("max-readers", forge::config::core::value{std::uint64_t{64U}});
+      mdbx.emplace("map", forge::config::core::value{std::move(map)});
+      mdbx.emplace("lane", forge::config::core::value{std::move(lane)});
+      object.emplace("mdbx", forge::config::core::value{std::move(mdbx)});
+   }
 
    auto object_layer = forge::config::core::value::object_type{};
    object_layer.emplace("family", forge::config::core::value{std::string{"objectdb"}});
@@ -646,7 +645,7 @@ BOOST_AUTO_TEST_SUITE(store_plugin_test_suite)
 BOOST_AUTO_TEST_CASE(store_plugin_descriptor_api_and_config_are_nested) {
    auto plugin = store_plugin::plugin{};
    BOOST_TEST(plugin.id().value == "forge.plugins.db.store");
-   BOOST_TEST(plugin.version() == "1.3.0");
+   BOOST_TEST(plugin.version() == "2.0.0");
    BOOST_TEST(store_plugin::api::ref().id.value == "forge.plugins.db.store");
 
    const auto descriptor = plugin.describe_config();
@@ -658,8 +657,8 @@ BOOST_AUTO_TEST_CASE(store_plugin_descriptor_api_and_config_are_nested) {
 
    const auto api_descriptor = store_plugin::api::describe();
    BOOST_TEST(api_descriptor.id.value == "forge.plugins.db.store");
-   BOOST_TEST(api_descriptor.version.major == 1U);
-   BOOST_TEST(api_descriptor.version.revision == 2U);
+   BOOST_TEST(api_descriptor.version.major == 2U);
+   BOOST_TEST(api_descriptor.version.revision == 0U);
    BOOST_TEST(api_descriptor.methods.empty());
 }
 
@@ -1023,6 +1022,7 @@ BOOST_AUTO_TEST_CASE(store_plugin_custom_driver_store_handle_reads_writes_flushe
    BOOST_REQUIRE_EQUAL(status.stores.size(), 1U);
    BOOST_TEST(status.stores.front().name == "accounts");
    BOOST_TEST(status.stores.front().driver == "custom");
+   BOOST_TEST(!status.stores.front().durability.has_value());
    BOOST_TEST(status.stores.front().started);
 
    forge::asio::blocking::run(app->runtime(), app->shutdown());
@@ -1999,6 +1999,10 @@ BOOST_AUTO_TEST_CASE(store_plugin_configured_mdbx_store_persists_all_layers) {
    {
       auto app = make_app(document_for_mdbx(path, true, true, "safe-nosync"));
       auto api = app->apis().get<store_plugin::api>(store_plugin::api::ref());
+      const auto status = forge::asio::blocking::run(app->runtime(), api->status());
+      BOOST_REQUIRE_EQUAL(status.stores.size(), 1U);
+      BOOST_REQUIRE(status.stores.front().durability.has_value());
+      BOOST_TEST(*status.stores.front().durability == "safe-nosync");
       auto handle = forge::asio::blocking::run(app->runtime(), api->store("files"));
       handle.objects().register_object<file_object>();
       handle.objects().register_object<usage_object>();
@@ -2061,6 +2065,21 @@ BOOST_AUTO_TEST_CASE(store_plugin_configured_mdbx_store_persists_all_layers) {
       read = {};
       forge::asio::blocking::run(app->runtime(), app->shutdown());
    }
+}
+
+BOOST_AUTO_TEST_CASE(store_plugin_configured_mdbx_reports_default_durability) {
+   auto root = root_guard{};
+   auto document = forge::config::core::document{};
+   document.set("plugins.db.store.stores", forge::config::core::value::array_type{configured_mdbx_store(
+                                               "files", root.root / "default-mdbx", false, false, std::nullopt)});
+
+   auto app = make_app(std::move(document));
+   auto api = app->apis().get<store_plugin::api>(store_plugin::api::ref());
+   const auto status = forge::asio::blocking::run(app->runtime(), api->status());
+   BOOST_REQUIRE_EQUAL(status.stores.size(), 1U);
+   BOOST_REQUIRE(status.stores.front().durability.has_value());
+   BOOST_TEST(*status.stores.front().durability == "durable-sync");
+   forge::asio::blocking::run(app->runtime(), app->shutdown());
 }
 
 BOOST_AUTO_TEST_CASE(store_plugin_configured_mdbx_snapshot_defers_physical_close) {
