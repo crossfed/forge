@@ -3,10 +3,13 @@ module;
 #include "test_prelude.hpp"
 
 #include <array>
+#include <atomic>
+#include <barrier>
 #include <cstddef>
 #include <csignal>
 #include <cstdint>
 #include <limits>
+#include <thread>
 
 module forge.vm.wasm.backend;
 
@@ -33,6 +36,10 @@ using reexport_host_functions = wasm::registered_host_functions<std::nullptr_t>;
 volatile std::sig_atomic_t external_signal_count = 0;
 
 void external_signal_handler(int) {
+   external_signal_count = external_signal_count + 1;
+}
+
+void external_detailed_signal_handler(int, siginfo_t*, void*) {
    external_signal_count = external_signal_count + 1;
 }
 
@@ -130,6 +137,58 @@ TEST_CASE("signal handlers are restored after an external replacement", "[signal
    };
    BOOST_CHECK_THROW(invoke(), escaped_signal);
    BOOST_TEST(external_signal_count == 0);
+
+   std::raise(SIGFPE);
+   BOOST_TEST(external_signal_count == 1);
+}
+
+TEST_CASE("signal handler publication remains coherent during concurrent ownership changes", "[signals]") {
+   constexpr auto iterations = 4096;
+   const auto guard = signal_action_guard{SIGFPE};
+   auto synchronize = std::barrier{2};
+   auto install_failed = std::atomic<bool>{false};
+   external_signal_count = 0;
+
+   auto installer = std::thread{[&] {
+      for (auto iteration = 0; iteration < iterations; ++iteration) {
+         struct sigaction external{};
+         sigemptyset(&external.sa_mask);
+         if ((iteration & 1) == 0) {
+            external.sa_handler = &external_signal_handler;
+            external.sa_flags = 0;
+         } else {
+            external.sa_sigaction = &external_detailed_signal_handler;
+            external.sa_flags = SA_SIGINFO;
+         }
+         if (::sigaction(SIGFPE, &external, nullptr) != 0) {
+            install_failed.store(true);
+         }
+
+         synchronize.arrive_and_wait();
+         if ((iteration & 1) == 0) {
+            std::this_thread::yield();
+         }
+         try {
+            wasm::setup_signal_handler();
+         } catch (...) {
+            install_failed.store(true);
+         }
+         synchronize.arrive_and_wait();
+      }
+   }};
+
+   for (auto iteration = 0; iteration < iterations; ++iteration) {
+      synchronize.arrive_and_wait();
+      if ((iteration & 1) != 0) {
+         std::this_thread::yield();
+      }
+      std::raise(SIGFPE);
+      synchronize.arrive_and_wait();
+   }
+   installer.join();
+
+   BOOST_TEST(!install_failed.load());
+   BOOST_TEST(external_signal_count == iterations);
 }
 
 TEST_CASE("interpreter re-exported host imports translate guest memory faults", "[signals]") {

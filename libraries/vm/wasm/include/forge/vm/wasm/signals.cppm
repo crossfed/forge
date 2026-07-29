@@ -45,8 +45,6 @@ __attribute__((visibility("default"))) extern thread_local std::atomic<bool> tim
 // Fixes a duplicate symbol build issue when building with `-fvisibility=hidden`
 __attribute__((visibility("default"))) extern thread_local std::exception_ptr saved_exception;
 
-template <int Sig> inline struct sigaction prev_signal_handler;
-
 void signal_handler(int signal, siginfo_t* info, void* context);
 
 // only valid inside invoke_with_signal_handler.
