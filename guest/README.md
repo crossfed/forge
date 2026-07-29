@@ -114,8 +114,10 @@ forge_add_contract(
 `ID` is the stable package and guest-graph identity. `PUBLIC_LIBRARIES` are
 visible to consumers; `PRIVATE_LIBRARIES` are available only while compiling
 the owning library. Files, dependency scope and source roots are immutable
-after declaration. Native CMake target properties are not inspected or
-serialized into the guest graph.
+after declaration. Source-file build properties are rejected because the
+descriptor does not model them. Native CMake target state is never serialized
+into the guest graph; Forge only verifies that the materialized target still
+matches the state produced by the declaration.
 
 Install the source package and standard CMake module metadata together:
 
@@ -151,6 +153,10 @@ relocatable descriptor metadata. Compiler-specific BMI or PCM artifacts are
 never transported. An imported contract-library target that was not registered
 by its package config is rejected instead of being accepted with a late,
 consumer-controlled baseline.
+
+Seal checks run at the end of every CMake directory where a registered target
+is visible. This preserves normal non-`GLOBAL` imported-target scope when a
+package is loaded from a nested `CMakeLists.txt`.
 
 ## Named Action Payloads
 

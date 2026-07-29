@@ -176,6 +176,120 @@ function(_forge_contract_sealed_target_properties target output)
    set(${output} "${_properties}" PARENT_SCOPE)
 endfunction()
 
+function(_forge_contract_sealed_source_properties output)
+   set(
+      _properties
+      AUTORCC_OPTIONS
+      AUTOUIC_OPTIONS
+      COMPILE_DEFINITIONS
+      COMPILE_FLAGS
+      COMPILE_OPTIONS
+      CXX_SCAN_FOR_MODULES
+      EXTERNAL_OBJECT
+      GENERATED
+      HEADER_FILE_ONLY
+      INCLUDE_DIRECTORIES
+      KEEP_EXTENSION
+      LANGUAGE
+      MACOSX_PACKAGE_LOCATION
+      OBJECT_DEPENDS
+      OBJECT_OUTPUTS
+      SKIP_AUTOGEN
+      SKIP_AUTOMOC
+      SKIP_AUTORCC
+      SKIP_AUTOUIC
+      SKIP_LINTING
+      SKIP_PRECOMPILE_HEADERS
+      SKIP_UNITY_BUILD_INCLUSION
+      SYMBOLIC
+      UNITY_GROUP
+      VS_COPY_TO_OUT_DIR
+      VS_DEPLOYMENT_CONTENT
+      VS_DEPLOYMENT_LOCATION
+      VS_INCLUDE_IN_VSIX
+      VS_RESOURCE_GENERATOR
+      VS_SETTINGS
+      VS_TOOL_OVERRIDE
+      VS_XAML_TYPE
+      XCODE_EXPLICIT_FILE_TYPE
+      XCODE_FILE_ATTRIBUTES
+      XCODE_LAST_KNOWN_FILE_TYPE
+   )
+   set(
+      _build_configurations
+      ${CMAKE_BUILD_TYPE}
+      ${CMAKE_CONFIGURATION_TYPES}
+      DEBUG
+      RELEASE
+      RELWITHDEBINFO
+      MINSIZEREL
+   )
+   list(REMOVE_DUPLICATES _build_configurations)
+   foreach(_configuration IN LISTS _build_configurations)
+      string(TOUPPER "${_configuration}" _configuration)
+      list(APPEND _properties "COMPILE_DEFINITIONS_${_configuration}")
+   endforeach()
+   set(${output} "${_properties}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_declared_source_paths target output)
+   get_target_property(_source_root "${target}" FORGE_CONTRACT_BUILD_SOURCE_ROOT)
+   if(NOT _source_root OR _source_root STREQUAL "_source_root-NOTFOUND")
+      set(${output} "" PARENT_SCOPE)
+      return()
+   endif()
+
+   set(_sources)
+   foreach(
+      _property
+      IN ITEMS
+         FORGE_CONTRACT_MODULE_SOURCES
+         FORGE_CONTRACT_SOURCES
+         FORGE_CONTRACT_PUBLIC_HEADERS
+         FORGE_CONTRACT_PRIVATE_HEADERS
+   )
+      get_target_property(_logical_paths "${target}" "${_property}")
+      if(_logical_paths STREQUAL "_logical_paths-NOTFOUND")
+         set(_logical_paths)
+      endif()
+      foreach(_logical_path IN LISTS _logical_paths)
+         list(APPEND _sources "${_source_root}/${_logical_path}")
+      endforeach()
+   endforeach()
+   list(REMOVE_DUPLICATES _sources)
+   set(${output} "${_sources}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_assert_sealed_sources target)
+   _forge_contract_declared_source_paths("${target}" _sources)
+   _forge_contract_sealed_source_properties(_properties)
+   foreach(_source IN LISTS _sources)
+      foreach(_property IN LISTS _properties)
+         get_property(
+            _is_set SOURCE "${_source}" TARGET_DIRECTORY "${target}"
+            PROPERTY "${_property}" SET
+         )
+         if(_is_set)
+            get_property(
+               _value SOURCE "${_source}" TARGET_DIRECTORY "${target}"
+               PROPERTY "${_property}"
+            )
+            if(_property STREQUAL "GENERATED" AND NOT _value)
+               continue()
+            endif()
+            if(_property STREQUAL "LANGUAGE" AND (NOT _value OR _value STREQUAL "CXX"))
+               continue()
+            endif()
+            message(
+               FATAL_ERROR
+               "Forge Contract library source ${_source} uses unsupported source property: "
+               "${_property}; declare the input through forge_add_contract_library instead"
+            )
+         endif()
+      endforeach()
+   endforeach()
+endfunction()
+
 function(_forge_contract_assert_sealed_target target)
    string(SHA256 _target_key "${target}")
    _forge_contract_sealed_target_properties("${target}" _properties)
@@ -207,13 +321,31 @@ function(_forge_contract_assert_sealed_target target)
          endif()
       endif()
    endforeach()
+   _forge_contract_assert_sealed_sources("${target}")
 endfunction()
 
-function(_forge_contract_assert_all_sealed_targets)
-   get_property(_targets GLOBAL PROPERTY FORGE_CONTRACT_SEALED_TARGETS)
+function(_forge_contract_assert_directory_sealed_targets)
+   get_property(_targets DIRECTORY PROPERTY FORGE_CONTRACT_SEALED_TARGETS)
    foreach(_target IN LISTS _targets)
       _forge_contract_assert_sealed_target("${_target}")
    endforeach()
+endfunction()
+
+function(_forge_contract_schedule_sealed_target_check target)
+   get_property(_targets DIRECTORY PROPERTY FORGE_CONTRACT_SEALED_TARGETS)
+   if(NOT target IN_LIST _targets)
+      set_property(DIRECTORY APPEND PROPERTY FORGE_CONTRACT_SEALED_TARGETS "${target}")
+   endif()
+   get_property(_scheduled DIRECTORY PROPERTY FORGE_CONTRACT_SEALED_TARGET_CHECK_SCHEDULED)
+   if(_scheduled)
+      return()
+   endif()
+   set_property(DIRECTORY PROPERTY FORGE_CONTRACT_SEALED_TARGET_CHECK_SCHEDULED TRUE)
+   cmake_language(
+      DEFER DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+      ID forge_contract_assert_sealed_targets
+      CALL _forge_contract_assert_directory_sealed_targets
+   )
 endfunction()
 
 function(_forge_contract_require_sealed_target target)
@@ -225,6 +357,7 @@ function(_forge_contract_require_sealed_target target)
       )
    endif()
    _forge_contract_assert_sealed_target("${target}")
+   _forge_contract_schedule_sealed_target_check("${target}")
 endfunction()
 
 function(_forge_contract_seal_target target)
@@ -249,15 +382,8 @@ function(_forge_contract_seal_target target)
       endif()
    endforeach()
 
-   get_property(_scheduled GLOBAL PROPERTY FORGE_CONTRACT_SEALED_TARGET_CHECK_SCHEDULED)
-   if(NOT _scheduled)
-      set_property(GLOBAL PROPERTY FORGE_CONTRACT_SEALED_TARGET_CHECK_SCHEDULED TRUE)
-      cmake_language(
-         DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
-         ID forge_contract_assert_sealed_targets
-         CALL _forge_contract_assert_all_sealed_targets
-      )
-   endif()
+   _forge_contract_assert_sealed_sources("${target}")
+   _forge_contract_schedule_sealed_target_check("${target}")
 endfunction()
 
 function(_forge_contract_resolve_target input output)

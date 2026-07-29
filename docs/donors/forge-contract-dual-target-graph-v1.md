@@ -99,11 +99,13 @@ rediscover dependencies from generated build state.
 Native CMake mutation is intentionally unavailable through the public alias.
 Because CMake exposes an alias's concrete target through `ALIASED_TARGET`,
 Forge also seals the materialized target properties and verifies them at the
-end of the top-level configure. All files, dependencies and supported options
-must be declared in the Forge call. This consistency check does not derive a
-second graph from CMake; it only rejects native target state that differs from
-the canonical descriptor materialization. Incomplete descriptors therefore
-remain configure errors instead of platform-dependent build failures.
+end of each CMake directory where that target is visible. Source-file build
+properties are rejected rather than captured because the descriptor has no
+source-property channel. All files, dependencies and supported options must be
+declared in the Forge call. This consistency check does not derive a second
+graph from CMake; it only rejects native state that differs from the canonical
+descriptor materialization. Incomplete descriptors therefore remain configure
+errors instead of platform-dependent build failures.
 Installed package configs register and seal their exported protocol targets
 immediately after loading the CMake targets file. Lazy registration is rejected
 because it would let consumer mutations define the initial baseline.

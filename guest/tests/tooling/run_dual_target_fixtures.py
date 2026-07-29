@@ -567,6 +567,21 @@ set_property(TARGET "${concrete}" PROPERTY CXX_SCAN_FOR_MODULES OFF)
 """,
             "modified after descriptor declaration: CXX_SCAN_FOR_MODULES",
         ),
+        (
+            "immutable-source-options",
+            """forge_add_contract_library(
+   protocol ID negative.immutable.source.options SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+get_target_property(concrete protocol ALIASED_TARGET)
+set_source_files_properties(
+   "${CMAKE_CURRENT_SOURCE_DIR}/include/protocol.cppm"
+   TARGET_DIRECTORY "${concrete}"
+   PROPERTIES COMPILE_OPTIONS "-include;${CMAKE_CURRENT_SOURCE_DIR}/extra.hpp"
+)
+""",
+            "uses unsupported source property: COMPILE_OPTIONS",
+        ),
     ]
     for name, body, diagnostic in cases:
         source = write_project(fixtures / name, body)
@@ -580,6 +595,44 @@ set_property(TARGET "${concrete}" PROPERTY CXX_SCAN_FOR_MODULES OFF)
             succeeds=False,
             contains=diagnostic,
         )
+
+
+def check_imported_target_subdirectory_scope(
+    *,
+    cmake: str,
+    cxx_compiler: Path,
+    forge_package: Path,
+    contract_package: Path,
+    product_package: Path,
+    output: Path,
+) -> None:
+    source = output / "source"
+    child = source / "consumer"
+    child.mkdir(parents=True)
+    (source / "CMakeLists.txt").write_text(
+        """cmake_minimum_required(VERSION 3.31)
+project(ImportedContractSubdirectory LANGUAGES CXX)
+add_subdirectory(consumer)
+""",
+        encoding="utf-8",
+    )
+    (child / "CMakeLists.txt").write_text(
+        """find_package(ForgeContract CONFIG REQUIRED)
+find_package(ProductProtocol CONFIG REQUIRED)
+add_library(child_consumer INTERFACE)
+target_link_libraries(child_consumer INTERFACE Product::protocol)
+""",
+        encoding="utf-8",
+    )
+    configure(
+        cmake=cmake,
+        cxx_compiler=cxx_compiler,
+        forge_package=forge_package,
+        contract_package=contract_package,
+        product_package=product_package,
+        source=source,
+        build=output / "build",
+    )
 
 
 def check_imported_target_seal(
@@ -1003,6 +1056,14 @@ def validate(
     product_package = relocated / "lib" / "cmake" / "ProductProtocol"
     if not any((product_package / "cxx-modules").glob("*.cmake")):
         raise RuntimeError("installed protocol package has no CMake module metadata")
+    check_imported_target_subdirectory_scope(
+        cmake=cmake,
+        cxx_compiler=cxx_compiler,
+        forge_package=forge_package,
+        contract_package=contract_package,
+        product_package=product_package,
+        output=output / "imported-target-subdirectory",
+    )
     check_imported_target_seal(
         cmake=cmake,
         cxx_compiler=cxx_compiler,

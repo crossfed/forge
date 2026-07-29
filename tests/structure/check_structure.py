@@ -496,6 +496,30 @@ def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
                      f"{path.relative_to(root)}: Contract SDK sealed property set omits {required}"
                   )
             source = source[: seal.start()] + source[seal.end() :]
+         source_seal = re.search(
+            r"function\(_forge_contract_sealed_source_properties output\).*?endfunction\(\)",
+            source,
+            flags=re.DOTALL,
+         )
+         if source_seal is None:
+            errors.append(
+               f"{path.relative_to(root)}: Contract SDK declared sources require a sealed property set"
+            )
+         else:
+            for required in ("COMPILE_DEFINITIONS", "COMPILE_OPTIONS", "CXX_SCAN_FOR_MODULES", "INCLUDE_DIRECTORIES"):
+               if not re.search(rf"(?m)^\s+{required}\s*$", source_seal.group()):
+                  errors.append(
+                     f"{path.relative_to(root)}: Contract SDK source property set omits {required}"
+                  )
+            source = source[: source_seal.start()] + source[source_seal.end() :]
+         if 'DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"' in source:
+            errors.append(
+               f"{path.relative_to(root)}: imported-target checks must stay in their visible directory"
+            )
+         if "function(_forge_contract_assert_directory_sealed_targets)" not in source:
+            errors.append(
+               f"{path.relative_to(root)}: Contract SDK requires directory-scoped deferred seal checks"
+            )
          if "function(forge_register_contract_library_targets)" not in source:
             errors.append(
                f"{path.relative_to(root)}: installed Contract libraries require an explicit package registration API"
