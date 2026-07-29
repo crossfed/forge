@@ -137,7 +137,10 @@ builder.after_initialize([](const forge::app::application_context& context)
 ```
 
 `status().stores[i].started` remains false in `ready` and becomes true only
-after plugin startup. In `ready`, `objects()` permits only object registration,
+after plugin startup. A configured MDBX store also reports its exact
+`durability` mode; programmatic custom drivers report no durability because
+DB Store cannot infer an external driver's acknowledgement contract. In
+`ready`, `objects()` permits only object registration,
 interceptor registration and observer registration. Transactions, reads,
 writes, indexes, Blob access and flushes remain unavailable until startup. New
 stores are rejected from `ready` onward, while opened handles remain available

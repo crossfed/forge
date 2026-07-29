@@ -101,6 +101,7 @@ struct config {
 struct store_status {
    std::string name;
    std::string driver;
+   std::optional<std::string> durability;
    std::string path;
    bool object = false;
    bool blob = false;
@@ -149,7 +150,7 @@ BOOST_DESCRIBE_STRUCT(store_config,
                        create_if_missing,
                        create_missing_column_families))
 BOOST_DESCRIBE_STRUCT(config, (), (stores))
-BOOST_DESCRIBE_STRUCT(store_status, (), (name, driver, path, object, blob, revision, started))
+BOOST_DESCRIBE_STRUCT(store_status, (), (name, driver, durability, path, object, blob, revision, started))
 BOOST_DESCRIBE_STRUCT(status, (), (stores))
 
 } // namespace forge::plugins::db::store

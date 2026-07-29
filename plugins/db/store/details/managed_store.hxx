@@ -5,6 +5,7 @@ namespace forge::plugins::db::store {
 struct managed_store {
    std::string name;
    std::string driver_name;
+   std::optional<std::string> durability;
    std::string path;
    store_options options;
    bool owns_driver = false;
