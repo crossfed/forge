@@ -57,11 +57,12 @@ The repository must stay neutral. Public APIs must not contain downstream produc
   source APIs, package contracts, wire formats or persisted storage formats,
   and for broad architectural-generation changes, except for the narrow
   pre-stabilization exception below.
-- Before FORGE source contracts are declared stabilized, the maintainer may
-  approve one explicitly scoped source/package break in a `MINOR` release.
-  The release notes must name every removed surface and provide a mechanical
-  migration path. This exception never permits an undocumented wire or
-  persisted-storage format change and is not implied by ordinary refactoring.
+- Before FORGE contracts are declared stabilized, the maintainer may approve
+  an explicitly scoped source, package, wire or persisted-storage break in a
+  `MINOR` release. The release notes must name every affected surface and
+  provide a mechanical migration, regeneration or reset path. Compatibility
+  aliases and legacy output modes are not required for an approved clean
+  break. This exception is never implied by ordinary refactoring.
 - Source, wire and storage stability are independent. Marking a C++ API as
   `Preview` does not make its documented wire or persisted storage layout
   unstable. Any non-stable wire or storage contract must be marked separately
