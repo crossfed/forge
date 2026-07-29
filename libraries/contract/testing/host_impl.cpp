@@ -8,6 +8,7 @@ module;
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
@@ -323,9 +324,12 @@ void host::impl::run(boost::asio::awaitable<void> operation) {
    forge::asio::blocking::run(runtime_, std::move(operation));
 }
 
-host::impl::impl()
-    : runtime_{forge::asio::runtime_options{.worker_threads = 1, .thread_name = "contract-db-test"}},
+host::impl::impl(execution_limits limits)
+    : runtime_{forge::asio::runtime_options{.worker_threads = 1, .thread_name = "contract-db-test"}}, limits_{limits},
       driver_{std::make_shared<memory_driver>()} {
+   if (limits_.timeout <= std::chrono::milliseconds::zero()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "contract execution timeout must be positive");
+   }
    store_.emplace(run(forge::db::object::store::open(driver_)));
    store_->register_object<table_index>();
    store_->register_object<key_value_index>();
@@ -365,6 +369,7 @@ void host::impl::begin_invocation(std::uint64_t receiver, std::uint64_t first_re
       fail_database("contract database invocation is already active");
    }
    transaction_.emplace(run(store_->begin_transaction()));
+   invocation_deadline_ = std::chrono::steady_clock::now() + limits_.timeout;
    state_before_invocation_ = state_;
    receiver_ = receiver;
    first_receiver_ = first_receiver;
@@ -382,6 +387,7 @@ void host::impl::commit_invocation() {
    run(transaction_->commit());
    transaction_.reset();
    state_before_invocation_.reset();
+   invocation_deadline_.reset();
 }
 
 void host::impl::rollback_invocation() {
@@ -391,6 +397,18 @@ void host::impl::rollback_invocation() {
       state_ = std::move(*state_before_invocation_);
       state_before_invocation_.reset();
    }
+   invocation_deadline_.reset();
+}
+
+std::chrono::steady_clock::duration host::impl::remaining_execution_time() const {
+   if (!invocation_deadline_) {
+      FORGE_THROW_EXCEPTION(exceptions::database_error, "contract execution is not active");
+   }
+   const auto now = std::chrono::steady_clock::now();
+   if (now >= *invocation_deadline_) {
+      FORGE_THROW_EXCEPTION(exceptions::execution_timeout, "contract execution timed out");
+   }
+   return *invocation_deadline_ - now;
 }
 
 invocation_result host::impl::invoke(std::span<const std::uint8_t> code, std::uint64_t receiver,
@@ -399,13 +417,15 @@ invocation_result host::impl::invoke(std::span<const std::uint8_t> code, std::ui
    begin_invocation(receiver, first_receiver, std::move(data));
    auto bytes = forge::vm::wasm::wasm_code{code.begin(), code.end()};
    try {
-      auto vm =
-          forge::vm::wasm::backend<functions, wasm, forge::vm::wasm::compatibility_options>{bytes, *this, &allocator_};
-      vm(*this, "env", "apply", receiver, first_receiver, action);
+      auto vm = backend{bytes, *this, &allocator_};
+      execute(vm, "apply", receiver, first_receiver, action);
       commit_invocation();
    } catch (const exit_signal& signal) {
       result_.exit_code = signal.code;
       commit_invocation();
+   } catch (const forge::vm::wasm::exceptions::timeout&) {
+      rollback_invocation();
+      FORGE_THROW_EXCEPTION(exceptions::execution_timeout, "contract execution timed out");
    } catch (...) {
       const auto failure = std::current_exception();
       rollback_invocation();
@@ -589,8 +609,7 @@ std::int64_t host::impl::call(std::uint64_t receiver, std::uint64_t flags, std::
    auto code = forge::vm::wasm::wasm_code{target->second.begin(), target->second.end()};
    auto nested_allocator = forge::vm::wasm::wasm_allocator{};
    auto allocator_guard = wasm_allocator_guard{nested_allocator};
-   auto vm = forge::vm::wasm::backend<functions, wasm, forge::vm::wasm::compatibility_options>{code, *this,
-                                                                                               &nested_allocator};
+   auto vm = backend{code, *this, &nested_allocator};
    if (vm.get_module().get_exported_function("__forge_call") == std::numeric_limits<std::uint32_t>::max()) {
       return -1;
    }
@@ -604,7 +623,7 @@ std::int64_t host::impl::call(std::uint64_t receiver, std::uint64_t flags, std::
       read_only_ = previous_read_only || (flags & std::uint64_t{1}) != 0U;
       call_data_.assign(as_bytes(data).begin(), as_bytes(data).end());
       call_return_value_.clear();
-      vm(*this, "env", "__forge_call", previous_receiver, receiver);
+      execute(vm, "__forge_call", previous_receiver, receiver);
       const auto result = std::move(call_return_value_);
       receiver_ = previous_receiver;
       read_only_ = previous_read_only;
@@ -672,7 +691,8 @@ void host::impl::assert_ripemd160(std::span<const char> data, checksum160_input 
 }
 
 void host::impl::sha256(std::span<const char> data, checksum256_output result) const {
-   copy_digest(forge::crypto::digest::sha256::hash(data.data(), static_cast<std::uint32_t>(data.size())), *result.get());
+   copy_digest(forge::crypto::digest::sha256::hash(data.data(), static_cast<std::uint32_t>(data.size())),
+               *result.get());
 }
 
 void host::impl::sha1(std::span<const char> data, checksum160_output result) const {
@@ -680,11 +700,13 @@ void host::impl::sha1(std::span<const char> data, checksum160_output result) con
 }
 
 void host::impl::sha512(std::span<const char> data, checksum512_output result) const {
-   copy_digest(forge::crypto::digest::sha512::hash(data.data(), static_cast<std::uint32_t>(data.size())), *result.get());
+   copy_digest(forge::crypto::digest::sha512::hash(data.data(), static_cast<std::uint32_t>(data.size())),
+               *result.get());
 }
 
 void host::impl::ripemd160(std::span<const char> data, checksum160_output result) const {
-   copy_digest(forge::crypto::digest::ripemd160::hash(data.data(), static_cast<std::uint32_t>(data.size())), *result.get());
+   copy_digest(forge::crypto::digest::ripemd160::hash(data.data(), static_cast<std::uint32_t>(data.size())),
+               *result.get());
 }
 
 std::int32_t host::impl::recover_key(checksum256_input digest, std::span<const char> signature,
@@ -773,7 +795,8 @@ std::int32_t host::impl::bls_fp_exp(std::span<const char> base, std::span<const 
 }
 
 void host::impl::sha3(std::span<const char> data, std::span<char> hash, std::int32_t keccak) const {
-   const auto value = forge::crypto::digest::sha3::hash(data.data(), static_cast<std::uint32_t>(data.size()), keccak != 1);
+   const auto value =
+       forge::crypto::digest::sha3::hash(data.data(), static_cast<std::uint32_t>(data.size()), keccak != 1);
    const auto size = std::min(hash.size(), value.data_size());
    std::memcpy(hash.data(), value.data(), size);
 }
@@ -784,10 +807,10 @@ std::int32_t host::impl::blake2_f(std::uint32_t rounds, std::span<const char> st
    try {
       const auto bytes = [](std::span<const char> value) {
          return forge::crypto::core::bytes{reinterpret_cast<const std::uint8_t*>(value.data()),
-                                     reinterpret_cast<const std::uint8_t*>(value.data() + value.size())};
+                                           reinterpret_cast<const std::uint8_t*>(value.data() + value.size())};
       };
-      const auto value = forge::crypto::digest::blake2b(rounds, bytes(state), bytes(message), bytes(offset0), bytes(offset1),
-                                                final == 1, [] {});
+      const auto value = forge::crypto::digest::blake2b(rounds, bytes(state), bytes(message), bytes(offset0),
+                                                        bytes(offset1), final == 1, [] {});
       if (result.size() < value.size()) {
          return -1;
       }

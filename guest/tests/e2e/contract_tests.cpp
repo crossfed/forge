@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <chrono>
 #include <cstdint>
 #include <deque>
 #include <filesystem>
@@ -923,6 +924,33 @@ BOOST_AUTO_TEST_CASE(contract_oracle_rejects_out_of_bounds_wasm_memory) {
    auto host = forge::contract::testing::host{};
 
    BOOST_CHECK_THROW(invoke_oracle(host, code, 11U), std::exception);
+}
+
+BOOST_AUTO_TEST_CASE(contract_testing_host_bounds_direct_and_nested_execution) {
+   using namespace std::chrono_literals;
+
+   const auto code = read_contract(FORGE_CONTRACT_TEST_LOOPING_WASM);
+   const auto account = protocol::make_name("looping").value;
+   const auto callee = protocol::make_name("loopcallee").value;
+   const auto table = protocol::make_name("looprows").value;
+
+   for (const auto action : {"direct", "nested"}) {
+      auto host = forge::contract::testing::host{
+          forge::contract::testing::execution_limits{.timeout = 50ms},
+      };
+      host.register_contract(callee, {code.begin(), code.end()});
+      host.invoke({code.data(), code.size()}, account, account, protocol::make_name("warmup").value);
+      const auto before = host.snapshot();
+      const auto started = std::chrono::steady_clock::now();
+
+      BOOST_CHECK_THROW(host.invoke({code.data(), code.size()}, account, account, protocol::make_name(action).value),
+                        forge::contract::testing::exceptions::execution_timeout);
+      const auto elapsed =
+          std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
+      BOOST_TEST(elapsed < 2'000);
+      BOOST_TEST(host.snapshot() == before, boost::test_tools::per_element());
+      BOOST_TEST(host.find_primary(account, account, table, 1U).has_value());
+   }
 }
 
 #if defined(__x86_64__) || defined(_M_X64)

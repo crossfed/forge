@@ -201,7 +201,8 @@ jobs:
             -DFORGE_CONTRACT_TEST_MULTI_INDEX_EXTENDED_WASM="$GITHUB_WORKSPACE/build/contract-consumer/midxextend.wasm" \
             -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_EXTENDED_WASM="$GITHUB_WORKSPACE/build/contract-consumer/legmidxext.wasm" \
             -DFORGE_CONTRACT_TEST_ORACLE_WASM="$GITHUB_WORKSPACE/build/contract-consumer/oracle.wasm" \
-            -DFORGE_CONTRACT_TEST_RECOVERY_WASM="$GITHUB_WORKSPACE/build/contract-consumer/recovery.wasm"
+            -DFORGE_CONTRACT_TEST_RECOVERY_WASM="$GITHUB_WORKSPACE/build/contract-consumer/recovery.wasm" \
+            -DFORGE_CONTRACT_TEST_LOOPING_WASM="$GITHUB_WORKSPACE/build/contract-consumer/looping.wasm"
           cmake --build build/contract-e2e -j 4
           ctest --test-dir build/contract-e2e --output-on-failure
 
@@ -330,7 +331,7 @@ jobs:
           cmake --build build/contract-release-consumer \
             --target hello recordtest allocatortst legacyhello legacynotify multisource dbhost \
                      multiidx legacymidx midxerrors legmidxerr midxextend legmidxext \
-                     oracle recovery surface \
+                     oracle recovery looping surface \
                      forge_contract_database_intrinsic_fixtures forge_contract_multi_index_fixtures \
             -j 4
           cmake -S guest/tests/e2e -B build/contract-release-e2e -G Ninja \
@@ -352,7 +353,8 @@ jobs:
             -DFORGE_CONTRACT_TEST_MULTI_INDEX_EXTENDED_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/midxextend.wasm" \
             -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_EXTENDED_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/legmidxext.wasm" \
             -DFORGE_CONTRACT_TEST_ORACLE_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/oracle.wasm" \
-            -DFORGE_CONTRACT_TEST_RECOVERY_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/recovery.wasm"
+            -DFORGE_CONTRACT_TEST_RECOVERY_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/recovery.wasm" \
+            -DFORGE_CONTRACT_TEST_LOOPING_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/looping.wasm"
           cmake --build build/contract-release-e2e -j 4
           ctest --test-dir build/contract-release-e2e --output-on-failure
 

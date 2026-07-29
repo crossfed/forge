@@ -363,24 +363,31 @@ class backend {
       //  that has timed out. This thread local also need to be an atomic because the thread that a Watchdog callback
       //  will be called from may not be the same as the executing thread.
       std::atomic<bool>& _timed_out = timed_run_has_timed_out;
+      std::atomic<std::size_t>& _timeout_count = timed_run_timeout_count;
+      auto local_timed_out = std::atomic<bool>{false};
       auto reenable_code = scope_guard{[&]() {
-         if (_timed_out.load(std::memory_order_acquire)) {
+         if (local_timed_out.load(std::memory_order_acquire)) {
             mod->allocator.enable_code(Impl::is_jit);
-            _timed_out.store(false, std::memory_order_release);
+            const auto previous = _timeout_count.fetch_sub(1, std::memory_order_acq_rel);
+            assert(previous > 0U);
+            _timed_out.store(previous > 1U, std::memory_order_release);
          }
       }};
       try {
          {
-            auto wd_guard = std::forward<Watchdog>(wd).scoped_run([this, &_timed_out]() {
-               _timed_out.store(true, std::memory_order_release);
-               mod->allocator.disable_code();
-            });
+            auto wd_guard =
+                std::forward<Watchdog>(wd).scoped_run([this, &_timed_out, &_timeout_count, &local_timed_out]() {
+                   local_timed_out.store(true, std::memory_order_release);
+                   _timeout_count.fetch_add(1, std::memory_order_acq_rel);
+                   _timed_out.store(true, std::memory_order_release);
+                   mod->allocator.disable_code();
+                });
             std::forward<F>(f)();
          }
-         if (_timed_out.load(std::memory_order_acquire))
+         if (local_timed_out.load(std::memory_order_acquire))
             throw exceptions::timeout{"execution timed out"};
       } catch (exceptions::memory&) {
-         if (_timed_out.load(std::memory_order_acquire)) {
+         if (local_timed_out.load(std::memory_order_acquire)) {
             throw exceptions::timeout{"execution timed out"};
          } else {
             throw;
