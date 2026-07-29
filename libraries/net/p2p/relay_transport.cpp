@@ -21,7 +21,7 @@ import forge.net.tcp.connection;
 import forge.net.yamux.session;
 
 #include "details/relay_transport.hxx"
-#include "details/node_identity.hxx"
+#include "details/libp2p_identity_material.hxx"
 #include "details/stream_upgrade.hxx"
 
 namespace forge::net::p2p {

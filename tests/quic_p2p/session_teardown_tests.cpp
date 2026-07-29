@@ -29,7 +29,7 @@ import forge.crypto.asymmetric;
 import forge.net.transport.session;
 
 #include "../../libraries/net/p2p/details/direct_transport.hxx"
-#include "../../libraries/net/p2p/details/node_identity.hxx"
+#include "../../libraries/net/p2p/details/libp2p_identity_material.hxx"
 #include "../../libraries/net/p2p/details/session_teardown.hxx"
 
 namespace forge::net::p2p {

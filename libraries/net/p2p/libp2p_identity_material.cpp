@@ -17,7 +17,7 @@ import forge.net.p2p.exceptions;
 import forge.net.p2p.identity;
 
 #include "details/identity_signature.hxx"
-#include "details/node_identity.hxx"
+#include "details/libp2p_identity_material.hxx"
 
 namespace forge::net::p2p {
 

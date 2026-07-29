@@ -3,7 +3,7 @@
 #include "connection_manager.hxx"
 #include "direct_transport.hxx"
 #include "host_addresses.hxx"
-#include "node_identity.hxx"
+#include "libp2p_identity_material.hxx"
 #include "operation_deadline.hxx"
 #include "path_selector.hxx"
 #include "peer_exchange_codec.hxx"

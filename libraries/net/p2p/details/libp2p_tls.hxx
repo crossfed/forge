@@ -3,7 +3,7 @@
 #include <optional>
 #include <string>
 
-#include "node_identity.hxx"
+#include "libp2p_identity_material.hxx"
 
 namespace forge::net::p2p {
 
