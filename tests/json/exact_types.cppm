@@ -59,6 +59,10 @@ struct exact_dotted_parent {
    exact_dotted_leaf config;
 };
 
+struct exact_dotted_schema_parent {
+   exact_dotted_leaf config;
+};
+
 struct exact_wide_integer_record {
    __int128 signed_value = 0;
    unsigned __int128 unsigned_value = 0;
@@ -140,6 +144,7 @@ BOOST_DESCRIBE_STRUCT(exact_scalar_record, (), (enabled, signed_value, unsigned_
 BOOST_DESCRIBE_STRUCT(exact_double_record, (), (value))
 BOOST_DESCRIBE_STRUCT(exact_dotted_leaf, (), (deadline_ms))
 BOOST_DESCRIBE_STRUCT(exact_dotted_parent, (), (config))
+BOOST_DESCRIBE_STRUCT(exact_dotted_schema_parent, (), (config))
 BOOST_DESCRIBE_STRUCT(exact_wide_integer_record, (), (signed_value, unsigned_value))
 BOOST_DESCRIBE_STRUCT(exact_varint_record, (), (signed_value, unsigned_value))
 BOOST_DESCRIBE_STRUCT(exact_chrono_record, (), (delay, timestamp))

@@ -480,6 +480,17 @@ template <typename T> class object_schema {
       return result;
    }
 
+   [[nodiscard]] input_value::object_type encode_object(const T& input) const {
+      auto output = input_value::object_type{};
+      for (const auto& field : *fields_) {
+         auto value = field.read_input(input);
+         if (!std::holds_alternative<std::monostate>(value.storage)) {
+            set_input_path(output, field.name, std::move(value));
+         }
+      }
+      return output;
+   }
+
    [[nodiscard]] std::vector<diagnostic> validate(const T& object, std::string_view base_path = {}) const {
       auto result = std::vector<diagnostic>{};
       for (const auto& field : *fields_) {
@@ -577,6 +588,33 @@ template <typename T> class object_schema {
       const input_value* value = nullptr;
       bool blocked = false;
    };
+
+   static void set_input_path(input_value::object_type& output, std::string_view name, input_value value) {
+      auto* object = &output;
+      auto begin = std::size_t{0};
+      while (begin <= name.size()) {
+         const auto end = name.find('.', begin);
+         const auto segment = name.substr(begin, end == std::string_view::npos ? name.size() - begin : end - begin);
+         if (segment.empty()) {
+            if (end == std::string_view::npos) {
+               break;
+            }
+            begin = end + 1;
+            continue;
+         }
+         if (end == std::string_view::npos) {
+            object->insert_or_assign(std::string{segment}, std::move(value));
+            return;
+         }
+
+         auto& child = (*object)[std::string{segment}];
+         if (!child.as_object()) {
+            child = input_value::object_type{};
+         }
+         object = std::get_if<input_value::object_type>(&child.storage);
+         begin = end + 1;
+      }
+   }
 
    [[nodiscard]] path_catalog known_paths() const {
       auto output = path_catalog{};
@@ -1339,18 +1377,20 @@ template <typename T> [[nodiscard]] input_value to_input_value(const T& input) {
       }
       return input_value{std::move(array)};
    } else {
-      auto object = input_value::object_type{};
       const auto nested_rules = rules<clean_type>::define();
       if (!nested_rules.fields().empty()) {
-         for (const auto& field : nested_rules.fields()) {
-            auto value = field.read_input(input);
-            if (!std::holds_alternative<std::monostate>(value.storage)) {
-               object.emplace(field.name, std::move(value));
-            }
-         }
-         return input_value{std::move(object)};
+         return input_value{nested_rules.encode_object(input)};
       }
       if constexpr (boost::describe::has_describe_members<clean_type>::value) {
+         auto object = input_value::object_type{};
+         using members = boost::describe::describe_members<clean_type, boost::describe::mod_any_access |
+                                                                           boost::describe::mod_inherited>;
+         boost::mp11::mp_for_each<members>([&](auto descriptor) {
+            auto value = to_input_value(input.*descriptor.pointer);
+            if (!std::holds_alternative<std::monostate>(value.storage)) {
+               object.emplace(descriptor.name, std::move(value));
+            }
+         });
          return input_value{std::move(object)};
       } else {
          return input_value{};

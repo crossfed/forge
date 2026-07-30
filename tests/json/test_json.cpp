@@ -152,6 +152,14 @@ template <> struct forge::schema::rules<forge_json_tests::exact_dotted_leaf> {
    }
 };
 
+template <> struct forge::schema::rules<forge_json_tests::exact_dotted_schema_parent> {
+   [[nodiscard]] static forge::schema::object_schema<forge_json_tests::exact_dotted_schema_parent> define() {
+      auto schema = forge::schema::object<forge_json_tests::exact_dotted_schema_parent>();
+      static_cast<void>(schema.field<&forge_json_tests::exact_dotted_schema_parent::config>("config"));
+      return schema;
+   }
+};
+
 BOOST_AUTO_TEST_SUITE(json_codec_tests)
 
 BOOST_AUTO_TEST_CASE(json_value_roundtrip_preserves_generic_shapes) {
@@ -580,6 +588,25 @@ BOOST_AUTO_TEST_CASE(json_exact_schema_paths_roundtrip_through_typed_writers) {
    BOOST_REQUIRE(nested.ok());
    BOOST_TEST(nested.diagnostics.empty());
    BOOST_TEST(nested.value.config.deadline_ms == 2500U);
+
+   const auto nested_written =
+       forge::codec::json::write(forge_json_tests::exact_dotted_parent{.config = {.deadline_ms = 2500}});
+   BOOST_REQUIRE(nested_written.ok());
+   BOOST_TEST(nested_written.text.find(R"("config":{"api":{"deadline-ms":2500}})") != std::string::npos);
+   BOOST_TEST(nested_written.text.find("deadline_ms") == std::string::npos);
+   const auto nested_roundtrip =
+       forge::codec::json::read<forge_json_tests::exact_dotted_parent>(nested_written.text, options);
+   BOOST_REQUIRE(nested_roundtrip.ok());
+   BOOST_TEST(nested_roundtrip.diagnostics.empty());
+   BOOST_TEST(nested_roundtrip.value.config.deadline_ms == 2500U);
+
+   const auto schema_parent_input = forge_json_tests::exact_dotted_schema_parent{.config = {.deadline_ms = 2500}};
+   const auto encoded_parent = forge::config::core::encode(schema_parent_input);
+   const auto decoded_parent =
+       forge::config::core::decode<forge_json_tests::exact_dotted_schema_parent>(encoded_parent);
+   BOOST_REQUIRE(decoded_parent.ok());
+   BOOST_TEST(decoded_parent.diagnostics.entries.empty());
+   BOOST_TEST(decoded_parent.value.config.deadline_ms == 2500U);
 
    const auto alias = forge::codec::json::read<forge_json_tests::dotted_config>(
        R"({"deadline-ms":2500,"path":{"policy":"direct-preferred"}})", options);

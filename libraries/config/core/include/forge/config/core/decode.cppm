@@ -88,18 +88,11 @@ template <typename T> [[nodiscard]] decode_result<T> decode(const document& sour
 template <typename T> [[nodiscard]] document encode(const T& source, std::string_view section = {}) {
    auto output = document{};
    const auto rules = schema::rules<T>::define();
-   for (const auto& field : rules.fields()) {
-      auto value = field.read_input(source);
-      if (std::holds_alternative<std::monostate>(value.storage)) {
-         continue;
-      }
-
-      auto field_path = std::string{section};
-      if (!field_path.empty()) {
-         field_path += ".";
-      }
-      field_path += field.name;
-      output.set(std::move(field_path), from_schema_value(value));
+   auto value = from_schema_value(schema::input_value{rules.encode_object(source)});
+   if (section.empty()) {
+      output.root = std::move(*value.as_object());
+   } else {
+      output.set(std::string{section}, std::move(value));
    }
    return output;
 }

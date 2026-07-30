@@ -362,6 +362,105 @@ void normalize_exact(variant& source, std::string_view path, std::vector<schema:
    throw std::invalid_argument{"unsupported JSON schema value"};
 }
 
+[[nodiscard]] inline variant from_schema_input(const schema::input_value& source) {
+   return std::visit(
+       []<typename Value>(const Value& value) -> variant {
+          using value_type = clean_type<Value>;
+          if constexpr (std::same_as<value_type, std::monostate>) {
+             return {};
+          } else if constexpr (std::same_as<value_type, schema::input_value::array_type>) {
+             auto output = variants{};
+             output.reserve(value.size());
+             for (const auto& entry : value) {
+                output.push_back(from_schema_input(entry));
+             }
+             return variant{std::move(output)};
+          } else if constexpr (std::same_as<value_type, schema::input_value::object_type>) {
+             auto output = mutable_variant_object{};
+             for (const auto& [name, entry] : value) {
+                output.set(name, from_schema_input(entry));
+             }
+             return variant{std::move(output)};
+          } else {
+             return variant{value};
+          }
+       },
+       source.storage);
+}
+
+template <typename T> void apply_schema_encoding(const T& input, variant& output);
+
+template <typename T> void apply_schema_encoding(const T& input, variant& output) {
+   using value_type = clean_type<T>;
+
+   if constexpr (is_optional_v<value_type>) {
+      if (input) {
+         apply_schema_encoding(*input, output);
+      }
+   } else if constexpr (is_pointer_v<value_type>) {
+      if (input) {
+         apply_schema_encoding(*input, output);
+      }
+   } else if constexpr (reflect::is_described_object_v<value_type>) {
+      if (output.is_string()) {
+         return;
+      }
+
+      const auto rules = schema::rules<value_type>::define();
+      if (!rules.fields().empty()) {
+         output = from_schema_input(schema::input_value{rules.encode_object(input)});
+         return;
+      }
+
+      auto object = mutable_variant_object{output.get_object()};
+      reflect::for_each_member<value_type>([&](const char* name, auto member) {
+         const auto found = object.find(name);
+         if (found != object.end()) {
+            apply_schema_encoding(input.*member, found->value());
+         }
+      });
+      output = variant{std::move(object)};
+   } else if constexpr (is_variant_v<value_type>) {
+      if (!output.is_string() && output.is_array() && output.get_array().size() == 2U) {
+         std::visit([&](const auto& value) { apply_schema_encoding(value, output.get_array()[1]); }, input);
+      }
+   } else if constexpr (is_multi_index_v<value_type> || is_sequence_v<value_type>) {
+      if (!output.is_array()) {
+         return;
+      }
+      auto& encoded = output.get_array();
+      auto current = input.begin();
+      for (std::size_t index = 0; index < encoded.size() && current != input.end(); ++index, ++current) {
+         apply_schema_encoding(*current, encoded[index]);
+      }
+   } else if constexpr (is_associative_v<value_type>) {
+      if (!output.is_array()) {
+         return;
+      }
+      auto& encoded = output.get_array();
+      auto current = input.begin();
+      for (std::size_t index = 0; index < encoded.size() && current != input.end(); ++index, ++current) {
+         if (!encoded[index].is_array() || encoded[index].get_array().size() != 2U) {
+            continue;
+         }
+         apply_schema_encoding(current->first, encoded[index].get_array()[0]);
+         apply_schema_encoding(current->second, encoded[index].get_array()[1]);
+      }
+   } else if constexpr (is_pair_v<value_type>) {
+      if (output.is_array() && output.get_array().size() == 2U) {
+         apply_schema_encoding(input.first, output.get_array()[0]);
+         apply_schema_encoding(input.second, output.get_array()[1]);
+      }
+   }
+}
+
+template <typename T> [[nodiscard]] variant to_schema_aware_variant(const T& input) {
+   auto output = variant{};
+   to_variant(input, output);
+   apply_schema_encoding(input, output);
+   return output;
+}
+
 inline void append_schema_diagnostics(std::vector<schema::diagnostic>& output,
                                       std::vector<schema::diagnostic> diagnostics) {
    for (auto& entry : diagnostics) {

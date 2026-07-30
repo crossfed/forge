@@ -320,9 +320,7 @@ template <typename T> [[nodiscard]] write_result write(const T& input, write_opt
       return write_document(config::core::encode(input), std::move(options));
    }
    if constexpr (requires(const T& source, variant& output) { to_variant(source, output); }) {
-      auto value = variant{};
-      to_variant(input, value);
-      return write_value(value, std::move(options));
+      return write_value(detail::to_schema_aware_variant(input), std::move(options));
    } else {
       return write_result{
           .diagnostics = {schema::diagnostic{
@@ -342,9 +340,7 @@ template <typename T>
       return save_document(path, config::core::encode(input), std::move(options));
    }
    if constexpr (requires(const T& source, variant& output) { to_variant(source, output); }) {
-      auto value = variant{};
-      to_variant(input, value);
-      return save_value(path, value, std::move(options));
+      return save_value(path, detail::to_schema_aware_variant(input), std::move(options));
    } else {
       return write_result{
           .diagnostics = {schema::diagnostic{
