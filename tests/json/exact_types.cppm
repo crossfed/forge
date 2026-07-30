@@ -20,6 +20,8 @@ module;
 
 export module forge.tests.codec.json.exact_types;
 
+import forge.variant.value;
+
 export namespace forge_json_tests {
 
 struct exact_leaf {
@@ -50,6 +52,10 @@ struct exact_wide_integer_record {
 struct exact_chrono_record {
    std::chrono::microseconds delay{};
    std::chrono::sys_time<std::chrono::microseconds> timestamp{};
+};
+
+struct exact_blob_record {
+   forge::blob payload;
 };
 
 struct exact_record {
@@ -92,6 +98,7 @@ BOOST_DESCRIBE_STRUCT(exact_alias_leaf, (), (bind_port))
 BOOST_DESCRIBE_STRUCT(exact_scalar_record, (), (enabled, signed_value, unsigned_value, ratio, label))
 BOOST_DESCRIBE_STRUCT(exact_wide_integer_record, (), (signed_value, unsigned_value))
 BOOST_DESCRIBE_STRUCT(exact_chrono_record, (), (delay, timestamp))
+BOOST_DESCRIBE_STRUCT(exact_blob_record, (), (payload))
 BOOST_DESCRIBE_STRUCT(exact_record, (), (items, choice, optional))
 BOOST_DESCRIBE_STRUCT(exact_map_record, (), (values))
 BOOST_DESCRIBE_STRUCT(exact_pointer_record, (), (shared, unique))

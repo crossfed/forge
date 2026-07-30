@@ -557,6 +557,27 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_chrono_scalar_contrac
    BOOST_TEST(malformed_timestamp.diagnostics.front().path == "timestamp");
 }
 
+BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_blob_scalar_contracts) {
+   const auto options = forge::codec::json::read_options{
+       .described_records = forge::codec::json::described_record_policy::exact,
+   };
+
+   const auto canonical =
+       forge::codec::json::read<forge_json_tests::exact_blob_record>(R"({"payload":"AQI="})", options);
+   BOOST_REQUIRE(canonical.ok());
+   BOOST_TEST(canonical.value.payload.data == std::vector<std::uint8_t>({1, 2}));
+
+   const auto boolean = forge::codec::json::read<forge_json_tests::exact_blob_record>(R"({"payload":true})", options);
+   BOOST_REQUIRE(!boolean.ok());
+   BOOST_TEST(boolean.diagnostics.front().code == "json.type");
+   BOOST_TEST(boolean.diagnostics.front().path == "payload");
+
+   const auto malformed = forge::codec::json::read<forge_json_tests::exact_blob_record>(R"({"payload":"!"})", options);
+   BOOST_REQUIRE(!malformed.ok());
+   BOOST_TEST(malformed.diagnostics.front().code == "json.type");
+   BOOST_TEST(malformed.diagnostics.front().path == "payload");
+}
+
 BOOST_AUTO_TEST_CASE(json_exact_duplicate_scan_respects_max_depth) {
    const auto parsed = forge::codec::json::read_value(
        R"({"outer":{"inner":1}})",

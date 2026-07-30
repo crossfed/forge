@@ -379,6 +379,16 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
       } catch (const std::exception& error) {
          add_exact_error(diagnostics, std::string{path}, "json.type", error.what());
       }
+   } else if constexpr (std::same_as<value_type, forge::blob>) {
+      if (!source.is_string()) {
+         add_exact_error(diagnostics, std::string{path}, "json.type", "blob must be a Base64 string");
+         return;
+      }
+      try {
+         static_cast<void>(source.template as<value_type>());
+      } catch (const std::exception& error) {
+         add_exact_error(diagnostics, std::string{path}, "json.type", error.what());
+      }
    } else if constexpr (reflect::is_described_object_v<value_type>) {
       // Some described value types intentionally use a canonical string adapter.
       // Their own from_variant overload remains the authority for that scalar form.
