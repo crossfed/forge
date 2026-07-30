@@ -78,6 +78,15 @@ struct exact_fixed_key_record {
    forge::chain::protocol::key256 value;
 };
 
+enum class exact_path_policy {
+   direct_only,
+   direct_preferred,
+};
+
+struct exact_enum_record {
+   exact_path_policy policy = exact_path_policy::direct_only;
+};
+
 struct exact_record {
    std::vector<exact_leaf> items;
    std::variant<exact_leaf, std::string> choice;
@@ -123,6 +132,8 @@ BOOST_DESCRIBE_STRUCT(exact_blob_record, (), (payload))
 BOOST_DESCRIBE_STRUCT(exact_byte_vector_record, (), (payload))
 BOOST_DESCRIBE_STRUCT(exact_digest_record, (), (value))
 BOOST_DESCRIBE_STRUCT(exact_fixed_key_record, (), (value))
+BOOST_DESCRIBE_ENUM(exact_path_policy, direct_only, direct_preferred)
+BOOST_DESCRIBE_STRUCT(exact_enum_record, (), (policy))
 BOOST_DESCRIBE_STRUCT(exact_record, (), (items, choice, optional))
 BOOST_DESCRIBE_STRUCT(exact_map_record, (), (values))
 BOOST_DESCRIBE_STRUCT(exact_pointer_record, (), (shared, unique))

@@ -417,8 +417,7 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
          validate_exact<typename pointer_traits<value_type>::value_type>(source, path, diagnostics);
       }
    } else if constexpr (std::same_as<value_type, bool> || schema::integral_value<value_type> ||
-                        std::floating_point<value_type> || std::same_as<value_type, std::string> ||
-                        reflect::is_described_enum_v<value_type>) {
+                        std::floating_point<value_type> || std::same_as<value_type, std::string>) {
       try {
          const auto input = to_schema_input(source);
          auto nested = std::vector<schema::diagnostic>{};
@@ -427,6 +426,8 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
       } catch (const std::exception& error) {
          add_exact_error(diagnostics, std::string{path}, "json.type", error.what());
       }
+   } else if constexpr (reflect::is_described_enum_v<value_type>) {
+      validate_canonical_string_adapter<value_type>(source, path, diagnostics, "described enum");
    } else if constexpr (is_microseconds_duration_v<value_type>) {
       try {
          const auto input = to_schema_input(source);

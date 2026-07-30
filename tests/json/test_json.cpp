@@ -662,6 +662,29 @@ BOOST_AUTO_TEST_CASE(json_exact_schema_enum_lists_decode_canonical_config_names)
    BOOST_TEST(numeric.diagnostics.front().path == "policies[0]");
 }
 
+BOOST_AUTO_TEST_CASE(json_exact_schema_less_enums_match_public_writer_spelling) {
+   const auto value = forge_json_tests::exact_enum_record{
+       .policy = forge_json_tests::exact_path_policy::direct_only,
+   };
+   const auto written = forge::codec::json::write(value);
+   BOOST_REQUIRE(written.ok());
+   BOOST_TEST(written.text.find(R"("direct_only")") != std::string::npos);
+
+   const auto options = forge::codec::json::read_options{
+       .described_records = forge::codec::json::described_record_policy::exact,
+   };
+   const auto roundtrip = forge::codec::json::read<forge_json_tests::exact_enum_record>(written.text, options);
+   BOOST_REQUIRE(roundtrip.ok());
+   BOOST_TEST(static_cast<int>(roundtrip.value.policy) ==
+              static_cast<int>(forge_json_tests::exact_path_policy::direct_only));
+
+   const auto config_spelling =
+       forge::codec::json::read<forge_json_tests::exact_enum_record>(R"({"policy":"direct-only"})", options);
+   BOOST_REQUIRE(!config_spelling.ok());
+   BOOST_TEST(config_spelling.diagnostics.front().code == "json.type");
+   BOOST_TEST(config_spelling.diagnostics.front().path == "policy");
+}
+
 BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_chrono_scalar_contracts) {
    const auto options = forge::codec::json::read_options{
        .described_records = forge::codec::json::described_record_policy::exact,
