@@ -31,6 +31,13 @@ template <typename T> struct scalar_optional<std::optional<T>> : std::true_type 
    using value_type = T;
 };
 
+template <typename T>
+concept canonical_string_scalar =
+    std::constructible_from<std::remove_cvref_t<T>, std::string> &&
+    (std::convertible_to<const std::remove_cvref_t<T>&, std::string> || requires(const std::remove_cvref_t<T>& value) {
+       { value.str() } -> std::convertible_to<std::string>;
+    });
+
 [[nodiscard]] inline bool parse_bool_text(std::string text, bool& output) {
    std::ranges::transform(text, text.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });
    if (text == "true" || text == "1" || text == "yes" || text == "on") {
@@ -151,6 +158,8 @@ template <typename T> [[nodiscard]] T parse_scalar_text(std::string_view text) {
          return parsed;
       }
       throw std::invalid_argument{"enum value is invalid"};
+   } else if constexpr (canonical_string_scalar<clean>) {
+      return clean{std::string{text}};
    } else {
       static_assert(sizeof(clean) == 0, "parse_scalar_text requires a scalar text type");
    }
@@ -195,6 +204,12 @@ template <typename T> [[nodiscard]] std::optional<std::string> format_scalar_tex
       return stream.str();
    } else if constexpr (std::is_enum_v<clean>) {
       return enum_to_config_string(value);
+   } else if constexpr (canonical_string_scalar<clean>) {
+      if constexpr (std::convertible_to<const clean&, std::string>) {
+         return static_cast<std::string>(value);
+      } else {
+         return value.str();
+      }
    } else {
       return std::nullopt;
    }

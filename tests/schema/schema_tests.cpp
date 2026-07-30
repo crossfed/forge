@@ -56,6 +56,17 @@ import forge.schema.value_kind;
 import forge.schema.object;
 import forge.schema.enums;
 import forge.schema.scalar;
+import forge.crypto.digest.sha256;
+
+namespace forge_schema_tests {
+
+struct digest_list_config {
+   std::vector<forge::crypto::digest::sha256> values;
+};
+
+} // namespace forge_schema_tests
+
+BOOST_DESCRIBE_STRUCT(forge_schema_tests::digest_list_config, (), (values))
 
 template <> struct forge::schema::rules<forge_schema_tests::http_config> {
    [[nodiscard]] static forge::schema::object_schema<forge_schema_tests::http_config> define() {
@@ -102,6 +113,14 @@ template <> struct forge::schema::rules<forge_schema_tests::optional_list_config
       schema.field<&forge_schema_tests::optional_list_config::items>("items")
           .items<forge_schema_tests::optional_list_item>()
           .unique_by<&forge_schema_tests::optional_list_item::id>();
+      return schema;
+   }
+};
+
+template <> struct forge::schema::rules<forge_schema_tests::digest_list_config> {
+   [[nodiscard]] static forge::schema::object_schema<forge_schema_tests::digest_list_config> define() {
+      auto schema = forge::schema::object<forge_schema_tests::digest_list_config>();
+      static_cast<void>(schema.field<&forge_schema_tests::digest_list_config::values>("values"));
       return schema;
    }
 };
@@ -277,4 +296,33 @@ BOOST_AUTO_TEST_CASE(schema_exact_enum_validation_accepts_canonical_config_names
    BOOST_REQUIRE_EQUAL(malformed.size(), 1U);
    BOOST_TEST(malformed.front().code == "config.type");
    BOOST_TEST(malformed.front().path == "path-policy");
+}
+
+BOOST_AUTO_TEST_CASE(schema_exact_lists_require_canonical_string_scalar_spelling) {
+   const auto schema = forge::schema::rules<forge_schema_tests::digest_list_config>::define();
+   const auto canonical_value = std::string(64U, '0');
+   const auto canonical = schema.validate_exact_input(
+       forge::schema::input_value::object_type{
+           {"values", forge::schema::input_value::array_type{forge::schema::input_value{canonical_value}}},
+       },
+       "config");
+   BOOST_TEST(canonical.empty());
+
+   const auto shortened = schema.validate_exact_input(
+       forge::schema::input_value::object_type{
+           {"values", forge::schema::input_value::array_type{forge::schema::input_value{std::string{"00"}}}},
+       },
+       "config");
+   BOOST_REQUIRE_EQUAL(shortened.size(), 1U);
+   BOOST_TEST(shortened.front().code == "config.type");
+   BOOST_TEST(shortened.front().path == "config.values[0]");
+
+   const auto uppercase = schema.validate_exact_input(
+       forge::schema::input_value::object_type{
+           {"values", forge::schema::input_value::array_type{forge::schema::input_value{std::string(64U, 'A')}}},
+       },
+       "config");
+   BOOST_REQUIRE_EQUAL(uppercase.size(), 1U);
+   BOOST_TEST(uppercase.front().code == "config.type");
+   BOOST_TEST(uppercase.front().path == "config.values[0]");
 }

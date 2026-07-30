@@ -958,7 +958,13 @@ template <typename T>
       const auto item_path = append_index(path, i);
       if constexpr (std::constructible_from<T, std::string>) {
          if (const auto* text = std::get_if<std::string>(&(*values)[i].storage)) {
-            auto item = T{*text};
+            auto item = [&] {
+               if constexpr (canonical_string_scalar<T>) {
+                  return parse_scalar_text<T>(*text);
+               } else {
+                  return T{*text};
+               }
+            }();
             auto nested = nested_rules.validate(item, item_path);
             diagnostics.insert(diagnostics.end(), nested.begin(), nested.end());
             output.push_back(std::move(item));
@@ -1099,7 +1105,22 @@ void validate_exact_input_value(const input_value& input, std::string_view path,
       }
       using item_type = typename vector_item<clean_type>::type;
       for (std::size_t index = 0; index < values->size(); ++index) {
-         if constexpr (std::constructible_from<item_type, std::string>) {
+         if constexpr (canonical_string_scalar<item_type>) {
+            if (std::holds_alternative<std::string>((*values)[index].storage)) {
+               const auto& text = std::get<std::string>((*values)[index].storage);
+               try {
+                  const auto value = parse_scalar_text<item_type>(text);
+                  const auto canonical = format_scalar_text(value);
+                  if (!canonical || *canonical != text) {
+                     diagnostics.push_back(make_path_error(append_index(path, index), "config.type",
+                                                           "scalar adapter must use its canonical config spelling"));
+                  }
+               } catch (const std::exception& error) {
+                  diagnostics.push_back(make_path_error(append_index(path, index), "config.type", error.what()));
+               }
+               continue;
+            }
+         } else if constexpr (std::constructible_from<item_type, std::string>) {
             if (std::holds_alternative<std::string>((*values)[index].storage)) {
                continue;
             }
@@ -1180,6 +1201,12 @@ template <typename T> [[nodiscard]] input_value to_input_value(const T& input) {
       } else {
          return input_value{static_cast<std::uint64_t>(input)};
       }
+   } else if constexpr (canonical_string_scalar<clean_type>) {
+      const auto text = format_scalar_text(input);
+      if (!text) {
+         throw std::invalid_argument{"scalar adapter has no canonical config spelling"};
+      }
+      return input_value{*text};
    } else if constexpr (std::same_as<clean_type, std::vector<std::string>>) {
       auto array = input_value::array_type{};
       array.reserve(input.size());

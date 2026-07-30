@@ -596,7 +596,15 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
       }
    } else if constexpr (requires(const variant& input, value_type& output) { from_variant(input, output); }) {
       try {
-         static_cast<void>(source.template as<value_type>());
+         const auto value = source.template as<value_type>();
+         if constexpr (requires(const value_type& input, variant& output) { to_variant(input, output); }) {
+            auto canonical = variant{};
+            to_variant(value, canonical);
+            if (canonical.is_string() && (!source.is_string() || canonical.get_string() != source.get_string())) {
+               add_exact_error(diagnostics, std::string{path}, "json.type",
+                               "scalar adapter must use its canonical JSON spelling");
+            }
+         }
       } catch (const std::exception& error) {
          add_exact_error(diagnostics, std::string{path}, "json.type", error.what());
       }

@@ -20,6 +20,8 @@ module;
 
 export module forge.tests.codec.json.exact_types;
 
+export import forge.chain.protocol.fixed_key;
+export import forge.crypto.digest.sha256;
 import forge.variant.value;
 
 export namespace forge_json_tests {
@@ -60,6 +62,14 @@ struct exact_blob_record {
 
 struct exact_byte_vector_record {
    std::vector<char> payload;
+};
+
+struct exact_digest_record {
+   forge::crypto::digest::sha256 value;
+};
+
+struct exact_fixed_key_record {
+   forge::chain::protocol::key256 value;
 };
 
 struct exact_record {
@@ -104,6 +114,8 @@ BOOST_DESCRIBE_STRUCT(exact_wide_integer_record, (), (signed_value, unsigned_val
 BOOST_DESCRIBE_STRUCT(exact_chrono_record, (), (delay, timestamp))
 BOOST_DESCRIBE_STRUCT(exact_blob_record, (), (payload))
 BOOST_DESCRIBE_STRUCT(exact_byte_vector_record, (), (payload))
+BOOST_DESCRIBE_STRUCT(exact_digest_record, (), (value))
+BOOST_DESCRIBE_STRUCT(exact_fixed_key_record, (), (value))
 BOOST_DESCRIBE_STRUCT(exact_record, (), (items, choice, optional))
 BOOST_DESCRIBE_STRUCT(exact_map_record, (), (values))
 BOOST_DESCRIBE_STRUCT(exact_pointer_record, (), (shared, unique))

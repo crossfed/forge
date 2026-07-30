@@ -606,6 +606,37 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_require_canonical_hex_scalar_s
    BOOST_TEST(uppercase.diagnostics.front().path == "payload");
 }
 
+BOOST_AUTO_TEST_CASE(json_exact_described_records_canonicalize_fallback_string_adapters) {
+   const auto options = forge::codec::json::read_options{
+       .described_records = forge::codec::json::described_record_policy::exact,
+   };
+   const auto canonical_json = std::string{R"({"value":")"} + std::string(64U, '0') + R"("})";
+   const auto canonical = forge::codec::json::read<forge_json_tests::exact_digest_record>(canonical_json, options);
+   BOOST_REQUIRE(canonical.ok());
+
+   const auto short_value =
+       forge::codec::json::read<forge_json_tests::exact_digest_record>(R"({"value":"00"})", options);
+   BOOST_REQUIRE(!short_value.ok());
+   BOOST_TEST(short_value.diagnostics.front().code == "json.type");
+   BOOST_TEST(short_value.diagnostics.front().path == "value");
+
+   const auto uppercase_json = std::string{R"({"value":")"} + std::string(64U, 'A') + R"("})";
+   const auto uppercase = forge::codec::json::read<forge_json_tests::exact_digest_record>(uppercase_json, options);
+   BOOST_REQUIRE(!uppercase.ok());
+   BOOST_TEST(uppercase.diagnostics.front().code == "json.type");
+   BOOST_TEST(uppercase.diagnostics.front().path == "value");
+
+   const auto fixed_key_canonical =
+       forge::codec::json::read<forge_json_tests::exact_fixed_key_record>(canonical_json, options);
+   BOOST_REQUIRE(fixed_key_canonical.ok());
+
+   const auto fixed_key_uppercase =
+       forge::codec::json::read<forge_json_tests::exact_fixed_key_record>(uppercase_json, options);
+   BOOST_REQUIRE(!fixed_key_uppercase.ok());
+   BOOST_TEST(fixed_key_uppercase.diagnostics.front().code == "json.type");
+   BOOST_TEST(fixed_key_uppercase.diagnostics.front().path == "value");
+}
+
 BOOST_AUTO_TEST_CASE(json_exact_duplicate_scan_respects_max_depth) {
    const auto parsed = forge::codec::json::read_value(
        R"({"outer":{"inner":1}})",
