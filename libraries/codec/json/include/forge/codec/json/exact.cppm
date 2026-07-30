@@ -244,6 +244,29 @@ inline void add_exact_error(std::vector<schema::diagnostic>& diagnostics, std::s
 }
 
 template <typename T>
+void validate_canonical_string_adapter(const variant& source, std::string_view path,
+                                       std::vector<schema::diagnostic>& diagnostics, std::string_view description,
+                                       std::string_view code = "json.type") {
+   if (!source.is_string()) {
+      add_exact_error(diagnostics, std::string{path}, std::string{code},
+                      std::string{description} + " must be a JSON string");
+      return;
+   }
+
+   try {
+      const auto value = source.template as<T>();
+      auto canonical = variant{};
+      to_variant(value, canonical);
+      if (!canonical.is_string() || canonical.get_string() != source.get_string()) {
+         add_exact_error(diagnostics, std::string{path}, std::string{code},
+                         std::string{description} + " must use its canonical JSON spelling");
+      }
+   } catch (const std::exception& error) {
+      add_exact_error(diagnostics, std::string{path}, std::string{code}, error.what());
+   }
+}
+
+template <typename T>
 void validate_exact(const variant& source, std::string_view path, std::vector<schema::diagnostic>& diagnostics);
 
 template <typename T>
@@ -359,48 +382,18 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
          add_exact_error(diagnostics, std::string{path}, "json.type", error.what());
       }
    } else if constexpr (is_chrono_time_point_v<value_type>) {
-      if (!source.is_string()) {
-         add_exact_error(diagnostics, std::string{path}, "json.type",
-                         "chrono time point must be an ISO timestamp string");
-         return;
-      }
-      try {
-         static_cast<void>(source.template as<value_type>());
-      } catch (const std::exception& error) {
-         add_exact_error(diagnostics, std::string{path}, "json.type", error.what());
-      }
+      validate_canonical_string_adapter<value_type>(source, path, diagnostics, "chrono time point");
    } else if constexpr (is_byte_vector_v<value_type>) {
-      if (!source.is_string()) {
-         add_exact_error(diagnostics, std::string{path}, "json.type", "byte vector must be a hexadecimal string");
-         return;
-      }
-      try {
-         static_cast<void>(source.template as<value_type>());
-      } catch (const std::exception& error) {
-         add_exact_error(diagnostics, std::string{path}, "json.type", error.what());
-      }
+      validate_canonical_string_adapter<value_type>(source, path, diagnostics, "hexadecimal byte vector");
    } else if constexpr (std::same_as<value_type, forge::blob>) {
-      if (!source.is_string()) {
-         add_exact_error(diagnostics, std::string{path}, "json.type", "blob must be a Base64 string");
-         return;
-      }
-      try {
-         static_cast<void>(source.template as<value_type>());
-      } catch (const std::exception& error) {
-         add_exact_error(diagnostics, std::string{path}, "json.type", error.what());
-      }
+      validate_canonical_string_adapter<value_type>(source, path, diagnostics, "Base64 blob");
    } else if constexpr (reflect::is_described_object_v<value_type>) {
       // Some described value types intentionally use a canonical string adapter.
       // Their own from_variant overload remains the authority for that scalar form.
       if (source.is_string()) {
-         try {
-            static_cast<void>(source.template as<value_type>());
-            return;
-         } catch (const std::exception&) {
-            add_exact_error(diagnostics, std::string{path}, "json.object",
-                            "described record must be a JSON object or valid scalar adapter");
-            return;
-         }
+         validate_canonical_string_adapter<value_type>(source, path, diagnostics, "described scalar adapter",
+                                                       "json.object");
+         return;
       }
       if (!source.is_object()) {
          add_exact_error(diagnostics, std::string{path}, "json.object", "described record must be a JSON object");
@@ -459,14 +452,9 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
    } else if constexpr (is_variant_v<value_type>) {
       // Public-key and signature variants use canonical string encodings.
       if (source.is_string()) {
-         try {
-            static_cast<void>(source.template as<value_type>());
-            return;
-         } catch (const std::exception&) {
-            add_exact_error(diagnostics, std::string{path}, "json.variant",
-                            "variant must be encoded as [index, payload] or a valid scalar adapter");
-            return;
-         }
+         validate_canonical_string_adapter<value_type>(source, path, diagnostics, "variant scalar adapter",
+                                                       "json.variant");
+         return;
       }
       if (!source.is_array()) {
          add_exact_error(diagnostics, std::string{path}, "json.variant", "variant must be encoded as [index, payload]");

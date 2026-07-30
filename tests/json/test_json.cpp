@@ -576,6 +576,34 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_blob_scalar_contracts
    BOOST_REQUIRE(!malformed.ok());
    BOOST_TEST(malformed.diagnostics.front().code == "json.type");
    BOOST_TEST(malformed.diagnostics.front().path == "payload");
+
+   const auto missing_padding =
+       forge::codec::json::read<forge_json_tests::exact_blob_record>(R"({"payload":"AQI"})", options);
+   BOOST_REQUIRE(!missing_padding.ok());
+   BOOST_TEST(missing_padding.diagnostics.front().code == "json.type");
+   BOOST_TEST(missing_padding.diagnostics.front().path == "payload");
+
+   const auto excess_padding =
+       forge::codec::json::read<forge_json_tests::exact_blob_record>(R"({"payload":"AQI=="})", options);
+   BOOST_REQUIRE(!excess_padding.ok());
+   BOOST_TEST(excess_padding.diagnostics.front().code == "json.type");
+   BOOST_TEST(excess_padding.diagnostics.front().path == "payload");
+}
+
+BOOST_AUTO_TEST_CASE(json_exact_described_records_require_canonical_hex_scalar_spelling) {
+   const auto options = forge::codec::json::read_options{
+       .described_records = forge::codec::json::described_record_policy::exact,
+   };
+
+   const auto canonical =
+       forge::codec::json::read<forge_json_tests::exact_byte_vector_record>(R"({"payload":"0a0b"})", options);
+   BOOST_REQUIRE(canonical.ok());
+
+   const auto uppercase =
+       forge::codec::json::read<forge_json_tests::exact_byte_vector_record>(R"({"payload":"0A0B"})", options);
+   BOOST_REQUIRE(!uppercase.ok());
+   BOOST_TEST(uppercase.diagnostics.front().code == "json.type");
+   BOOST_TEST(uppercase.diagnostics.front().path == "payload");
 }
 
 BOOST_AUTO_TEST_CASE(json_exact_duplicate_scan_respects_max_depth) {
