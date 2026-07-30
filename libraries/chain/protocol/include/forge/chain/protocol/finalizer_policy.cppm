@@ -1,29 +1,25 @@
 module;
 
-#include <cstdint>
-#include <vector>
+#if !defined(FORGE_CONTRACT_GUEST)
+#include <boost/describe.hpp>
+#include <forge/raw/serialization.hpp>
+#endif
 
 export module forge.chain.protocol.finalizer_policy;
 
 export import forge.chain.protocol.finalizer_authority;
+export import :value;
 
-import forge.raw.codec;
+#if !defined(FORGE_CONTRACT_GUEST)
+import forge.crypto.digest.sha256;
+import forge.raw.datastream;
+import forge.raw.raw;
+import forge.variant.described;
+import forge.variant.value;
 
 export namespace forge::chain::protocol {
-
-struct finalizer_policy {
-   std::uint64_t threshold = 0;
-   std::vector<finalizer_authority> finalizers;
-};
-
-template <typename Stream> void raw_pack(Stream& stream, const finalizer_policy& value) {
-   forge::raw::pack(stream, value.threshold);
-   forge::raw::pack(stream, value.finalizers);
-}
-
-template <typename Stream> void raw_unpack(Stream& stream, finalizer_policy& value) {
-   forge::raw::unpack(stream, value.threshold);
-   forge::raw::unpack(stream, value.finalizers);
-}
-
+BOOST_DESCRIBE_STRUCT(finalizer_policy, (), (threshold, finalizers))
 } // namespace forge::chain::protocol
+
+FORGE_DECLARE_SERIALIZATION(forge::chain::protocol::finalizer_policy)
+#endif
