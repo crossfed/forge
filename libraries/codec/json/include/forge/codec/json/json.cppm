@@ -98,6 +98,22 @@ struct sequence_traits<std::unordered_set<T, Hash, Equal, Allocator>> {
 
 template <typename T> inline constexpr bool is_sequence_v = sequence_traits<clean_type<T>>::value;
 
+template <typename T> struct unique_sequence_traits {
+   static constexpr bool value = false;
+};
+
+template <typename T, typename Compare, typename Allocator>
+struct unique_sequence_traits<std::set<T, Compare, Allocator>> {
+   static constexpr bool value = true;
+   using seen_type = std::set<T, Compare>;
+};
+
+template <typename T, typename Hash, typename Equal, typename Allocator>
+struct unique_sequence_traits<std::unordered_set<T, Hash, Equal, Allocator>> {
+   static constexpr bool value = true;
+   using seen_type = std::unordered_set<T, Hash, Equal>;
+};
+
 template <typename T> struct pair_traits {
    static constexpr bool value = false;
 };
@@ -344,6 +360,20 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
          validate_exact<typename sequence_traits<value_type>::value_type>(elements[index], element_path(path, index),
                                                                           diagnostics);
       }
+      if constexpr (unique_sequence_traits<value_type>::value) {
+         auto seen = typename unique_sequence_traits<value_type>::seen_type{};
+         for (std::size_t index = 0; index < elements.size(); ++index) {
+            try {
+               const auto value = elements[index].template as<typename sequence_traits<value_type>::value_type>();
+               if (!seen.insert(value).second) {
+                  add_exact_error(diagnostics, element_path(path, index), "json.duplicate",
+                                  "duplicate element in unique sequence");
+               }
+            } catch (const std::exception&) {
+               // Conversion reports the canonical type diagnostic after structural validation.
+            }
+         }
+      }
    }
 }
 
@@ -425,6 +455,8 @@ template <typename T> [[nodiscard]] read_result<T> read(std::string_view input, 
                entry.code = "json.unknown";
             } else if (entry.code == "config.missing") {
                entry.code = "json.missing";
+            } else if (entry.code == "config.duplicate") {
+               entry.code = "json.duplicate";
             } else if (entry.code == "config.type") {
                entry.code = "json.type";
             }
@@ -537,6 +569,8 @@ template <typename T> [[nodiscard]] read_result<T> load(const std::filesystem::p
                entry.code = "json.unknown";
             } else if (entry.code == "config.missing") {
                entry.code = "json.missing";
+            } else if (entry.code == "config.duplicate") {
+               entry.code = "json.duplicate";
             } else if (entry.code == "config.type") {
                entry.code = "json.type";
             }

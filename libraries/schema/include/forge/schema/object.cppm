@@ -511,18 +511,22 @@ template <typename T> class object_schema {
 
       for (const auto& field : *fields_) {
          auto field_path = append_path(base_path, field.name);
-         const auto* found = [&]() -> const input_value* {
-            if (const auto exact = input.find(field.name); exact != input.end()) {
-               return &exact->second;
-            }
-            for (const auto& alias : field.aliases) {
-               if (const auto alias_entry = input.find(alias); alias_entry != input.end()) {
-                  field_path = append_path(base_path, alias);
-                  return &alias_entry->second;
+         const input_value* found = nullptr;
+         const auto find_name = [&](const std::string& name) {
+            if (const auto entry = input.find(name); entry != input.end()) {
+               if (found) {
+                  result.push_back(make_path_error(append_path(base_path, name), "config.duplicate",
+                                                   "multiple names supplied for the same config field"));
+               } else {
+                  found = &entry->second;
+                  field_path = append_path(base_path, name);
                }
             }
-            return nullptr;
-         }();
+         };
+         find_name(field.name);
+         for (const auto& alias : field.aliases) {
+            find_name(alias);
+         }
 
          if (!found) {
             if (!field.optional) {

@@ -62,6 +62,7 @@ template <> struct forge::schema::rules<forge_json_tests::http_config> {
    [[nodiscard]] static forge::schema::object_schema<forge_json_tests::http_config> define() {
       auto schema = forge::schema::object<forge_json_tests::http_config>();
       schema.field<&forge_json_tests::http_config::bind_port>("bind-port")
+          .alias("port")
           .required()
           .default_value(8080)
           .range(1, 65535);
@@ -297,6 +298,12 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_schema_names_and_asso
    BOOST_TEST(schema_unknown.diagnostics.front().code == "json.unknown");
    BOOST_TEST(schema_unknown.diagnostics.front().path == "extra");
 
+   const auto schema_duplicate = forge::codec::json::read<forge_json_tests::http_config>(
+       R"({"bind-port":9090,"port":9091,"bind-host":"127.0.0.1","tls-enabled":false,"tags":[]})", options);
+   BOOST_REQUIRE(!schema_duplicate.ok());
+   BOOST_TEST(schema_duplicate.diagnostics.front().code == "json.duplicate");
+   BOOST_TEST(schema_duplicate.diagnostics.front().path == "port");
+
    const auto map_record =
        forge::codec::json::read<forge_json_tests::exact_map_record>(R"({"values":[["first",{"value":7}]]})", options);
    BOOST_REQUIRE(map_record.ok());
@@ -319,6 +326,18 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_schema_names_and_asso
    BOOST_REQUIRE(!map_duplicate.ok());
    BOOST_TEST(map_duplicate.diagnostics.front().code == "json.duplicate");
    BOOST_TEST(map_duplicate.diagnostics.front().path == "values[1][0]");
+
+   const auto set_duplicate = forge::codec::json::read<forge_json_tests::exact_set_record>(
+       R"({"ordered":["first","first"],"unordered":[]})", options);
+   BOOST_REQUIRE(!set_duplicate.ok());
+   BOOST_TEST(set_duplicate.diagnostics.front().code == "json.duplicate");
+   BOOST_TEST(set_duplicate.diagnostics.front().path == "ordered[1]");
+
+   const auto unordered_set_duplicate = forge::codec::json::read<forge_json_tests::exact_set_record>(
+       R"({"ordered":[],"unordered":["first","first"]})", options);
+   BOOST_REQUIRE(!unordered_set_duplicate.ok());
+   BOOST_TEST(unordered_set_duplicate.diagnostics.front().code == "json.duplicate");
+   BOOST_TEST(unordered_set_duplicate.diagnostics.front().path == "unordered[1]");
 
    const auto shorthand = forge::codec::json::read<forge_json_tests::tag_config>(R"({"tags":["alpha"]})", options);
    BOOST_REQUIRE(shorthand.ok());
