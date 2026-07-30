@@ -2,6 +2,7 @@ module;
 
 #include <any>
 #include <algorithm>
+#include <bit>
 #include <boost/describe.hpp>
 #include <boost/mp11.hpp>
 #include <charconv>
@@ -31,6 +32,37 @@ import forge.schema.diagnostic;
 import forge.schema.value_kind;
 import forge.schema.enums;
 import forge.schema.scalar;
+
+namespace forge::schema::detail {
+
+template <std::floating_point Float, std::integral Integer>
+[[nodiscard]] constexpr bool integer_exactly_representable(Integer value) {
+   using unsigned_type = std::make_unsigned_t<Integer>;
+
+   const auto encoded = static_cast<unsigned_type>(value);
+   const auto magnitude = [&] {
+      if constexpr (std::signed_integral<Integer>) {
+         return value < 0 ? unsigned_type{} - encoded : encoded;
+      } else {
+         return encoded;
+      }
+   }();
+   if (magnitude == 0) {
+      return true;
+   }
+
+   const auto width = std::bit_width(magnitude);
+   constexpr auto precision = std::numeric_limits<Float>::digits;
+   if (width <= precision) {
+      return true;
+   }
+
+   const auto discarded = width - precision;
+   const auto discarded_mask = (unsigned_type{1} << discarded) - 1;
+   return (magnitude & discarded_mask) == 0;
+}
+
+} // namespace forge::schema::detail
 
 export namespace forge::schema {
 
@@ -1043,6 +1075,18 @@ void validate_exact_input_value(const input_value& input, std::string_view path,
           !std::holds_alternative<std::uint64_t>(input.storage)) {
          diagnostics.push_back(
              make_path_error(std::string{path}, "config.type", "floating-point field must be a numeric value"));
+         return;
+      }
+
+      const auto integer_is_exact =
+          std::holds_alternative<std::int64_t>(input.storage)
+              ? detail::integer_exactly_representable<clean_type>(std::get<std::int64_t>(input.storage))
+          : std::holds_alternative<std::uint64_t>(input.storage)
+              ? detail::integer_exactly_representable<clean_type>(std::get<std::uint64_t>(input.storage))
+              : true;
+      if (!integer_is_exact) {
+         diagnostics.push_back(make_path_error(std::string{path}, "config.range",
+                                               "value is not exactly representable by the floating-point field"));
          return;
       }
 

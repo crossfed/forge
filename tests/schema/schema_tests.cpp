@@ -309,6 +309,30 @@ BOOST_AUTO_TEST_CASE(schema_exact_scalar_validation_rejects_lossy_floating_point
    BOOST_TEST(lossy.front().path == "ratio");
 }
 
+BOOST_AUTO_TEST_CASE(schema_exact_scalar_validation_checks_integer_precision_before_floating_conversion) {
+   constexpr auto largest_consecutive_double_integer = std::uint64_t{9007199254740992};
+   constexpr auto first_inexact_double_integer = largest_consecutive_double_integer + 1;
+
+   auto exact = std::vector<forge::schema::diagnostic>{};
+   forge::schema::validate_exact_input_value<double>(forge::schema::input_value{largest_consecutive_double_integer},
+                                                     "value", exact);
+   BOOST_TEST(exact.empty());
+
+   auto unsigned_lossy = std::vector<forge::schema::diagnostic>{};
+   forge::schema::validate_exact_input_value<double>(forge::schema::input_value{first_inexact_double_integer}, "value",
+                                                     unsigned_lossy);
+   BOOST_REQUIRE_EQUAL(unsigned_lossy.size(), 1U);
+   BOOST_TEST(unsigned_lossy.front().code == "config.range");
+   BOOST_TEST(unsigned_lossy.front().path == "value");
+
+   auto signed_lossy = std::vector<forge::schema::diagnostic>{};
+   forge::schema::validate_exact_input_value<double>(
+       forge::schema::input_value{static_cast<std::int64_t>(first_inexact_double_integer)}, "value", signed_lossy);
+   BOOST_REQUIRE_EQUAL(signed_lossy.size(), 1U);
+   BOOST_TEST(signed_lossy.front().code == "config.range");
+   BOOST_TEST(signed_lossy.front().path == "value");
+}
+
 BOOST_AUTO_TEST_CASE(schema_exact_wide_integers_require_canonical_decimal_spelling) {
    auto canonical = std::vector<forge::schema::diagnostic>{};
    forge::schema::validate_exact_input_value<__int128>(forge::schema::input_value{std::string{"1"}}, "signed",

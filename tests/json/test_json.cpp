@@ -550,6 +550,23 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_scalar_kinds_and_rang
    BOOST_TEST(floating_underflow.diagnostics.front().path == "ratio");
 }
 
+BOOST_AUTO_TEST_CASE(json_exact_described_records_reject_integer_precision_loss_before_conversion) {
+   const auto options = forge::codec::json::read_options{
+       .described_records = forge::codec::json::described_record_policy::exact,
+   };
+
+   const auto exact =
+       forge::codec::json::read<forge_json_tests::exact_double_record>(R"({"value":9007199254740992})", options);
+   BOOST_REQUIRE(exact.ok());
+   BOOST_TEST(exact.value.value == 9007199254740992.0);
+
+   const auto lossy =
+       forge::codec::json::read<forge_json_tests::exact_double_record>(R"({"value":9007199254740993})", options);
+   BOOST_REQUIRE(!lossy.ok());
+   BOOST_TEST(lossy.diagnostics.front().code == "json.range");
+   BOOST_TEST(lossy.diagnostics.front().path == "value");
+}
+
 BOOST_AUTO_TEST_CASE(json_exact_described_records_preserve_wide_integer_strings) {
    const auto options = forge::codec::json::read_options{
        .described_records = forge::codec::json::described_record_policy::exact,
