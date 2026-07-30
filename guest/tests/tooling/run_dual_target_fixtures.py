@@ -114,14 +114,43 @@ def configure_guest(
     run(*command, succeeds=succeeds, contains=contains)
 
 
+def configure_multi_config_host(
+    *,
+    cmake: str,
+    cxx_compiler: Path,
+    contract_package: Path,
+    source: Path,
+    build: Path,
+) -> None:
+    command = [
+        cmake,
+        "-S",
+        str(source),
+        "-B",
+        str(build),
+        "-G",
+        "Ninja Multi-Config",
+        "-DCMAKE_CONFIGURATION_TYPES=Debug;Release",
+        "-DCMAKE_NO_SYSTEM_FROM_IMPORTED=ON",
+        f"-DCMAKE_CXX_COMPILER={cxx_compiler}",
+        f"-DForgeContract_DIR={contract_package}",
+    ]
+    if (sysroot := macos_sysroot()) is not None:
+        command.append(f"-DCMAKE_OSX_SYSROOT={sysroot}")
+    run(*command)
+
+
 def build(
     cmake: str,
     directory: Path,
     *targets: str,
+    configuration: str | None = None,
     succeeds: bool = True,
     contains: str | None = None,
 ) -> None:
     command = [cmake, "--build", str(directory), "-j", "4"]
+    if configuration is not None:
+        command.extend(["--config", configuration])
     if targets:
         command.extend(["--target", *targets])
     run(*command, succeeds=succeeds, contains=contains)
@@ -145,6 +174,34 @@ def verify_identical_artifacts(left: Path, right: Path, contract: str) -> None:
         right_path = right / f"{contract}.{suffix}"
         if left_path.read_bytes() != right_path.read_bytes():
             raise RuntimeError(f"direct and helper builds differ: {suffix}")
+
+
+def verify_multi_config_forwarding(
+    *,
+    cmake: str,
+    cxx_compiler: Path,
+    contract_package: Path,
+    source: Path,
+    output: Path,
+) -> None:
+    build_directory = output / "multi-config-host"
+    configure_multi_config_host(
+        cmake=cmake,
+        cxx_compiler=cxx_compiler,
+        contract_package=contract_package,
+        source=source / "multi_config",
+        build=build_directory,
+    )
+    build(cmake, build_directory, "configuration_guest", configuration="Release")
+
+    artifact_directory = build_directory / "configuration.guest" / "artifacts"
+    release_marker = artifact_directory / "built-Release.txt"
+    debug_marker = artifact_directory / "built-Debug.txt"
+    if release_marker.read_text(encoding="utf-8").strip() != "Release":
+        raise RuntimeError("host Release did not select the guest Release configuration")
+    if debug_marker.exists():
+        raise RuntimeError("host Release unexpectedly built the guest Debug configuration")
+    verify_artifacts(artifact_directory, "configuration")
 
 
 def verify_direct_action(abi: dict) -> None:
@@ -627,6 +684,14 @@ def validate(
 ) -> None:
     shutil.rmtree(output, ignore_errors=True)
     output.mkdir(parents=True)
+
+    verify_multi_config_forwarding(
+        cmake=cmake,
+        cxx_compiler=cxx_compiler,
+        contract_package=contract_package,
+        source=source,
+        output=output,
+    )
 
     producer_build = output / "producer-host"
     producer_install = output / "producer-install"

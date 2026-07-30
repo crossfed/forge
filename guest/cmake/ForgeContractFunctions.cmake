@@ -78,6 +78,7 @@ function(forge_add_contract_project target)
          "-DFORGE_CONTRACT_ARTIFACT_DIR:PATH=${_artifact_dir}"
       BUILD_COMMAND
          "${CMAKE_COMMAND}" --build <BINARY_DIR>
+         --config "$<CONFIG>"
          --target "${ARG_CONTRACT}_artifacts" --parallel 4
       BUILD_BYPRODUCTS
          "${_artifact_dir}/${ARG_CONTRACT}.wasm"
