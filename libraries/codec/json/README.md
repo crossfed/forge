@@ -105,13 +105,14 @@ Associative containers use arrays of exact `[key, value]` entries.
 
 ```cpp
 import forge.codec.json;
-import my.product.genesis;
+import forge.chain.protocol.producer_authority;
 
 auto options = forge::codec::json::read_options{
    .described_records = forge::codec::json::described_record_policy::exact,
 };
 
-auto loaded = forge::codec::json::load<my::product::genesis>("genesis.json", options);
+auto loaded = forge::codec::json::load<forge::chain::protocol::producer_authority_schedule>(
+   "producer-schedule.json", options);
 if (!loaded.ok()) {
    report_diagnostics(loaded.diagnostics);
 }
