@@ -102,6 +102,19 @@ BOOST_AUTO_TEST_CASE(authority_records_use_spring_variant_shape_and_roundtrip) {
    BOOST_REQUIRE(!object_only.ok());
    BOOST_TEST(object_only.diagnostics.front().code == "json.variant");
    BOOST_TEST(object_only.diagnostics.front().path == "producers[0].authority");
+
+   const auto boolean_version = forge::codec::json::read<protocol::producer_authority_schedule>(
+       R"({"version":true,"producers":[]})", {.described_records = forge::codec::json::described_record_policy::exact});
+   BOOST_REQUIRE(!boolean_version.ok());
+   BOOST_TEST(boolean_version.diagnostics.front().code == "json.type");
+   BOOST_TEST(boolean_version.diagnostics.front().path == "version");
+
+   const auto overflowing_version = forge::codec::json::read<protocol::producer_authority_schedule>(
+       R"({"version":4294967296,"producers":[]})",
+       {.described_records = forge::codec::json::described_record_policy::exact});
+   BOOST_REQUIRE(!overflowing_version.ok());
+   BOOST_TEST(overflowing_version.diagnostics.front().code == "json.range");
+   BOOST_TEST(overflowing_version.diagnostics.front().path == "version");
 }
 
 BOOST_AUTO_TEST_CASE(finalizer_policy_has_canonical_equality_and_variant_roundtrip) {

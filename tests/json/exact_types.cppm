@@ -33,6 +33,14 @@ struct exact_alias_leaf {
    auto operator<=>(const exact_alias_leaf&) const = default;
 };
 
+struct exact_scalar_record {
+   bool enabled = false;
+   std::int8_t signed_value = 0;
+   std::uint8_t unsigned_value = 0;
+   float ratio = 0.0F;
+   std::string label;
+};
+
 struct exact_record {
    std::vector<exact_leaf> items;
    std::variant<exact_leaf, std::string> choice;
@@ -70,6 +78,7 @@ struct exact_multi_index_record {
 
 BOOST_DESCRIBE_STRUCT(exact_leaf, (), (value))
 BOOST_DESCRIBE_STRUCT(exact_alias_leaf, (), (bind_port))
+BOOST_DESCRIBE_STRUCT(exact_scalar_record, (), (enabled, signed_value, unsigned_value, ratio, label))
 BOOST_DESCRIBE_STRUCT(exact_record, (), (items, choice, optional))
 BOOST_DESCRIBE_STRUCT(exact_map_record, (), (values))
 BOOST_DESCRIBE_STRUCT(exact_pointer_record, (), (shared, unique))

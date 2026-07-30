@@ -450,6 +450,50 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_schema_names_and_asso
    BOOST_TEST(shorthand.value.tags.front().value == "alpha");
 }
 
+BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_scalar_kinds_and_ranges) {
+   const auto options = forge::codec::json::read_options{
+       .described_records = forge::codec::json::described_record_policy::exact,
+   };
+   const auto canonical = forge::codec::json::read<forge_json_tests::exact_scalar_record>(
+       R"({"enabled":true,"signed_value":-8,"unsigned_value":8,"ratio":1.5,"label":"ready"})", options);
+   BOOST_REQUIRE(canonical.ok());
+   BOOST_TEST(canonical.value.enabled);
+   BOOST_TEST(canonical.value.signed_value == -8);
+   BOOST_TEST(canonical.value.unsigned_value == 8U);
+   BOOST_TEST(canonical.value.ratio == 1.5F);
+   BOOST_TEST(canonical.value.label == "ready");
+
+   const auto boolean_integer = forge::codec::json::read<forge_json_tests::exact_scalar_record>(
+       R"({"enabled":true,"signed_value":false,"unsigned_value":8,"ratio":1.5,"label":"ready"})", options);
+   BOOST_REQUIRE(!boolean_integer.ok());
+   BOOST_TEST(boolean_integer.diagnostics.front().code == "json.type");
+   BOOST_TEST(boolean_integer.diagnostics.front().path == "signed_value");
+
+   const auto signed_overflow = forge::codec::json::read<forge_json_tests::exact_scalar_record>(
+       R"({"enabled":true,"signed_value":-129,"unsigned_value":8,"ratio":1.5,"label":"ready"})", options);
+   BOOST_REQUIRE(!signed_overflow.ok());
+   BOOST_TEST(signed_overflow.diagnostics.front().code == "json.range");
+   BOOST_TEST(signed_overflow.diagnostics.front().path == "signed_value");
+
+   const auto unsigned_overflow = forge::codec::json::read<forge_json_tests::exact_scalar_record>(
+       R"({"enabled":true,"signed_value":-8,"unsigned_value":256,"ratio":1.5,"label":"ready"})", options);
+   BOOST_REQUIRE(!unsigned_overflow.ok());
+   BOOST_TEST(unsigned_overflow.diagnostics.front().code == "json.range");
+   BOOST_TEST(unsigned_overflow.diagnostics.front().path == "unsigned_value");
+
+   const auto string_boolean = forge::codec::json::read<forge_json_tests::exact_scalar_record>(
+       R"({"enabled":"true","signed_value":-8,"unsigned_value":8,"ratio":1.5,"label":"ready"})", options);
+   BOOST_REQUIRE(!string_boolean.ok());
+   BOOST_TEST(string_boolean.diagnostics.front().code == "json.type");
+   BOOST_TEST(string_boolean.diagnostics.front().path == "enabled");
+
+   const auto lossy_float_integer = forge::codec::json::read<forge_json_tests::exact_scalar_record>(
+       R"({"enabled":true,"signed_value":-8,"unsigned_value":8,"ratio":16777217,"label":"ready"})", options);
+   BOOST_REQUIRE(!lossy_float_integer.ok());
+   BOOST_TEST(lossy_float_integer.diagnostics.front().code == "json.range");
+   BOOST_TEST(lossy_float_integer.diagnostics.front().path == "ratio");
+}
+
 BOOST_AUTO_TEST_CASE(json_exact_duplicate_scan_respects_max_depth) {
    const auto parsed = forge::codec::json::read_value(
        R"({"outer":{"inner":1}})",
