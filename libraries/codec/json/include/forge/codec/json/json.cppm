@@ -303,7 +303,7 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
                          "variant must contain exactly an index and payload");
          return;
       }
-      if (!elements[0].is_integer()) {
+      if (!elements[0].is_int64() && !elements[0].is_uint64()) {
          add_exact_error(diagnostics, element_path(path, 0U), "json.variant", "variant index must be an integer");
          return;
       }

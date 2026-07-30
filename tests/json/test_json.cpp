@@ -270,6 +270,18 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_nested_fields_and_var
    BOOST_TEST(negative_index.diagnostics.front().code == "json.variant");
    BOOST_TEST(negative_index.diagnostics.front().path == "choice[0]");
 
+   const auto false_index = forge::codec::json::read<forge_json_tests::exact_record>(
+       R"({"items":[],"choice":[false,{"value":2}]})", options);
+   BOOST_REQUIRE(!false_index.ok());
+   BOOST_TEST(false_index.diagnostics.front().code == "json.variant");
+   BOOST_TEST(false_index.diagnostics.front().path == "choice[0]");
+
+   const auto true_index =
+       forge::codec::json::read<forge_json_tests::exact_record>(R"({"items":[],"choice":[true,{"value":2}]})", options);
+   BOOST_REQUIRE(!true_index.ok());
+   BOOST_TEST(true_index.diagnostics.front().code == "json.variant");
+   BOOST_TEST(true_index.diagnostics.front().path == "choice[0]");
+
    const auto extra_variant_element = forge::codec::json::read<forge_json_tests::exact_record>(
        R"({"items":[],"choice":[0,{"value":2},false]})", options);
    BOOST_REQUIRE(!extra_variant_element.ok());
