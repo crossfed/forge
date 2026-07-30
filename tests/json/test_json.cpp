@@ -304,6 +304,21 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_schema_names_and_asso
    BOOST_TEST(schema_duplicate.diagnostics.front().code == "json.duplicate");
    BOOST_TEST(schema_duplicate.diagnostics.front().path == "port");
 
+   const auto duplicate_member = forge::codec::json::read<forge_json_tests::http_config>(
+       R"({"bind-port":9090,"bind-port":9091,"bind-host":"127.0.0.1","tls-enabled":false,"tags":[]})", options);
+   BOOST_REQUIRE(!duplicate_member.ok());
+   BOOST_TEST(duplicate_member.diagnostics.front().code == "json.duplicate");
+   BOOST_TEST(duplicate_member.diagnostics.front().path == "bind-port");
+
+   const auto escaped_duplicate =
+       forge::codec::json::read<forge_json_tests::exact_leaf>(R"({"value":7,"\u0076alue":8})", options);
+   BOOST_REQUIRE(!escaped_duplicate.ok());
+   BOOST_TEST(escaped_duplicate.diagnostics.front().code == "json.duplicate");
+   BOOST_TEST(escaped_duplicate.diagnostics.front().path == "value");
+
+   const auto permissive_duplicate = forge::codec::json::read_value(R"({"value":7,"value":8})");
+   BOOST_REQUIRE(permissive_duplicate.ok());
+
    const auto map_record =
        forge::codec::json::read<forge_json_tests::exact_map_record>(R"({"values":[["first",{"value":7}]]})", options);
    BOOST_REQUIRE(map_record.ok());
@@ -320,6 +335,12 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_schema_names_and_asso
    BOOST_REQUIRE(!map_unknown.ok());
    BOOST_TEST(map_unknown.diagnostics.front().code == "json.unknown");
    BOOST_TEST(map_unknown.diagnostics.front().path == "values[0][1].extra");
+
+   const auto nested_duplicate = forge::codec::json::read<forge_json_tests::exact_map_record>(
+       R"({"values":[["first",{"value":7,"value":8}]]})", options);
+   BOOST_REQUIRE(!nested_duplicate.ok());
+   BOOST_TEST(nested_duplicate.diagnostics.front().code == "json.duplicate");
+   BOOST_TEST(nested_duplicate.diagnostics.front().path == "values[0][1].value");
 
    const auto map_duplicate = forge::codec::json::read<forge_json_tests::exact_map_record>(
        R"({"values":[["first",{"value":7}],["first",{"value":8}]]})", options);

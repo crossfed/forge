@@ -7,6 +7,7 @@ module;
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <set>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -43,6 +44,13 @@ using codec_value = glz::generic_json<glz::num_mode::u64>;
 constexpr glz::opts json_read_options{
     .format = glz::JSON,
     .null_terminated = true,
+    .comments = false,
+    .error_on_unknown_keys = false,
+};
+
+constexpr glz::opts json_lazy_options{
+    .format = glz::JSON,
+    .null_terminated = false,
     .comments = false,
     .error_on_unknown_keys = false,
 };
@@ -116,6 +124,52 @@ template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
        .level = schema::severity::error,
        .message = std::move(message),
    };
+}
+
+[[nodiscard]] std::string object_path(std::string_view path, std::string_view field) {
+   if (path.empty()) {
+      return std::string{field};
+   }
+   return std::string{path} + "." + std::string{field};
+}
+
+[[nodiscard]] std::string array_path(std::string_view path, std::size_t index) {
+   return std::string{path} + "[" + std::to_string(index) + "]";
+}
+
+[[nodiscard]] std::string decode_object_key(std::string_view raw_key) {
+   auto encoded = std::string{"\""};
+   encoded.append(raw_key);
+   encoded.push_back('"');
+
+   auto decoded = std::string{};
+   if (glz::read<json_read_options>(decoded, encoded)) {
+      return std::string{raw_key};
+   }
+   return decoded;
+}
+
+void validate_unique_object_members(const glz::lazy_json_view<json_lazy_options>& input, std::string_view path,
+                                    std::vector<schema::diagnostic>& diagnostics) {
+   if (input.is_object()) {
+      auto members = std::set<std::string>{};
+      for (const auto& entry : input) {
+         auto key = decode_object_key(entry.key());
+         const auto entry_path = object_path(path, key);
+         if (!members.insert(key).second) {
+            diagnostics.push_back(make_error(entry_path, "json.duplicate", "duplicate JSON member"));
+         }
+         validate_unique_object_members(entry, entry_path, diagnostics);
+      }
+      return;
+   }
+   if (input.is_array()) {
+      auto index = std::size_t{0};
+      for (const auto& entry : input) {
+         validate_unique_object_members(entry, array_path(path, index), diagnostics);
+         ++index;
+      }
+   }
 }
 
 [[nodiscard]] variant to_variant_value(const codec_value& input);
@@ -298,6 +352,17 @@ template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
       result.diagnostics.push_back(make_error(options.source_name, "json.parse", glz::format_error(error, input)));
       return result;
    }
+   if (options.described_records == described_record_policy::exact) {
+      auto lazy = glz::lazy_json<json_lazy_options>(input);
+      if (!lazy) {
+         result.diagnostics.push_back(make_error(options.source_name, "json.parse", "failed to inspect JSON input"));
+         return result;
+      }
+      validate_unique_object_members(lazy->root(), {}, result.diagnostics);
+      if (!result.ok()) {
+         return result;
+      }
+   }
    result.value = std::move(parsed);
    return result;
 }
@@ -434,7 +499,8 @@ read_result<config::core::document> load_document(const std::filesystem::path& p
    return read_document(text, std::move(options));
 }
 
-write_result save_document(const std::filesystem::path& path, const config::core::document& input, write_options options) {
+write_result save_document(const std::filesystem::path& path, const config::core::document& input,
+                           write_options options) {
    auto result = write_document(input, std::move(options));
    if (!result.ok()) {
       return result;
