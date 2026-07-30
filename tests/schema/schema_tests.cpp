@@ -324,6 +324,20 @@ BOOST_AUTO_TEST_CASE(schema_exact_wide_integers_require_canonical_decimal_spelli
    BOOST_REQUIRE_EQUAL(unsigned_leading_zero.size(), 1U);
    BOOST_TEST(unsigned_leading_zero.front().code == "config.type");
    BOOST_TEST(unsigned_leading_zero.front().path == "unsigned");
+
+   auto numeric_signed = std::vector<forge::schema::diagnostic>{};
+   forge::schema::validate_exact_input_value<__int128>(forge::schema::input_value{std::int64_t{1}}, "signed",
+                                                       numeric_signed);
+   BOOST_REQUIRE_EQUAL(numeric_signed.size(), 1U);
+   BOOST_TEST(numeric_signed.front().code == "config.type");
+   BOOST_TEST(numeric_signed.front().path == "signed");
+
+   auto numeric_unsigned = std::vector<forge::schema::diagnostic>{};
+   forge::schema::validate_exact_input_value<unsigned __int128>(forge::schema::input_value{std::uint64_t{1}},
+                                                                "unsigned", numeric_unsigned);
+   BOOST_REQUIRE_EQUAL(numeric_unsigned.size(), 1U);
+   BOOST_TEST(numeric_unsigned.front().code == "config.type");
+   BOOST_TEST(numeric_unsigned.front().path == "unsigned");
 }
 
 BOOST_AUTO_TEST_CASE(schema_exact_enum_validation_accepts_canonical_config_names) {

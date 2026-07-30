@@ -550,6 +550,42 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_preserve_wide_integer_strings)
    BOOST_REQUIRE(!negative_zero.ok());
    BOOST_TEST(negative_zero.diagnostics.front().code == "json.type");
    BOOST_TEST(negative_zero.diagnostics.front().path == "signed_value");
+
+   const auto numeric_signed = forge::codec::json::read<forge_json_tests::exact_wide_integer_record>(
+       R"({"signed_value":1,"unsigned_value":"1"})", options);
+   BOOST_REQUIRE(!numeric_signed.ok());
+   BOOST_TEST(numeric_signed.diagnostics.front().code == "json.type");
+   BOOST_TEST(numeric_signed.diagnostics.front().path == "signed_value");
+
+   const auto numeric_unsigned = forge::codec::json::read<forge_json_tests::exact_wide_integer_record>(
+       R"({"signed_value":"1","unsigned_value":1})", options);
+   BOOST_REQUIRE(!numeric_unsigned.ok());
+   BOOST_TEST(numeric_unsigned.diagnostics.front().code == "json.type");
+   BOOST_TEST(numeric_unsigned.diagnostics.front().path == "unsigned_value");
+}
+
+BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_numeric_scalar_adapters) {
+   const auto options = forge::codec::json::read_options{
+       .described_records = forge::codec::json::described_record_policy::exact,
+   };
+
+   const auto canonical = forge::codec::json::read<forge_json_tests::exact_varint_record>(
+       R"({"signed_value":1,"unsigned_value":1})", options);
+   BOOST_REQUIRE(canonical.ok());
+   BOOST_TEST(canonical.value.signed_value.value == 1);
+   BOOST_TEST(canonical.value.unsigned_value.value == 1U);
+
+   const auto boolean = forge::codec::json::read<forge_json_tests::exact_varint_record>(
+       R"({"signed_value":true,"unsigned_value":1})", options);
+   BOOST_REQUIRE(!boolean.ok());
+   BOOST_TEST(boolean.diagnostics.front().code == "json.type");
+   BOOST_TEST(boolean.diagnostics.front().path == "signed_value");
+
+   const auto overflow = forge::codec::json::read<forge_json_tests::exact_varint_record>(
+       R"({"signed_value":1,"unsigned_value":4294967296})", options);
+   BOOST_REQUIRE(!overflow.ok());
+   BOOST_TEST(overflow.diagnostics.front().code == "json.type");
+   BOOST_TEST(overflow.diagnostics.front().path == "unsigned_value");
 }
 
 BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_chrono_scalar_contracts) {

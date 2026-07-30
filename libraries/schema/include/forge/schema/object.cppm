@@ -1012,10 +1012,9 @@ void validate_exact_input_value(const input_value& input, std::string_view path,
             diagnostics.push_back(
                 make_path_error(std::string{path}, "config.range", "signed integer field is out of range"));
          }
-      } else if (!std::holds_alternative<std::int64_t>(input.storage) &&
-                 !std::holds_alternative<std::string>(input.storage)) {
-         diagnostics.push_back(make_path_error(std::string{path}, "config.type",
-                                               "wide signed integer field must be an integer or decimal string"));
+      } else if (!std::holds_alternative<std::string>(input.storage)) {
+         diagnostics.push_back(
+             make_path_error(std::string{path}, "config.type", "wide signed integer field must be a decimal string"));
       } else if (const auto* text = std::get_if<std::string>(&input.storage)) {
          try {
             const auto value = parse_scalar_text<clean_type>(*text);
@@ -1042,10 +1041,9 @@ void validate_exact_input_value(const input_value& input, std::string_view path,
             diagnostics.push_back(
                 make_path_error(std::string{path}, "config.range", "unsigned integer field is out of range"));
          }
-      } else if (!std::holds_alternative<std::uint64_t>(input.storage) &&
-                 !std::holds_alternative<std::string>(input.storage)) {
-         diagnostics.push_back(make_path_error(std::string{path}, "config.type",
-                                               "wide unsigned integer field must be an integer or decimal string"));
+      } else if (!std::holds_alternative<std::string>(input.storage)) {
+         diagnostics.push_back(
+             make_path_error(std::string{path}, "config.type", "wide unsigned integer field must be a decimal string"));
       } else if (const auto* text = std::get_if<std::string>(&input.storage)) {
          try {
             const auto value = parse_scalar_text<clean_type>(*text);

@@ -22,6 +22,7 @@ export module forge.tests.codec.json.exact_types;
 
 export import forge.chain.protocol.fixed_key;
 export import forge.crypto.digest.sha256;
+export import forge.raw.varint;
 import forge.variant.value;
 
 export namespace forge_json_tests {
@@ -49,6 +50,11 @@ struct exact_scalar_record {
 struct exact_wide_integer_record {
    __int128 signed_value = 0;
    unsigned __int128 unsigned_value = 0;
+};
+
+struct exact_varint_record {
+   forge::signed_int signed_value;
+   forge::unsigned_int unsigned_value;
 };
 
 struct exact_chrono_record {
@@ -111,6 +117,7 @@ BOOST_DESCRIBE_STRUCT(exact_leaf, (), (value))
 BOOST_DESCRIBE_STRUCT(exact_alias_leaf, (), (bind_port))
 BOOST_DESCRIBE_STRUCT(exact_scalar_record, (), (enabled, signed_value, unsigned_value, ratio, label))
 BOOST_DESCRIBE_STRUCT(exact_wide_integer_record, (), (signed_value, unsigned_value))
+BOOST_DESCRIBE_STRUCT(exact_varint_record, (), (signed_value, unsigned_value))
 BOOST_DESCRIBE_STRUCT(exact_chrono_record, (), (delay, timestamp))
 BOOST_DESCRIBE_STRUCT(exact_blob_record, (), (payload))
 BOOST_DESCRIBE_STRUCT(exact_byte_vector_record, (), (payload))

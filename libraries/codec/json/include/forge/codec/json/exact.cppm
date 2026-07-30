@@ -7,6 +7,7 @@ module;
 #include <chrono>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <deque>
 #include <filesystem>
 #include <flat_map>
@@ -241,6 +242,60 @@ inline void add_exact_error(std::vector<schema::diagnostic>& diagnostics, std::s
        .level = schema::severity::error,
        .message = std::move(message),
    });
+}
+
+[[nodiscard]] inline bool matches_canonical_json_value(const variant& source, const variant& canonical) {
+   switch (canonical.get_type()) {
+   case variant::null_type:
+      return source.is_null();
+   case variant::int64_type: {
+      const auto expected = canonical.as_int64();
+      if (source.is_int64()) {
+         return source.as_int64() == expected;
+      }
+      return expected >= 0 && source.is_uint64() && source.as_uint64() == static_cast<std::uint64_t>(expected);
+   }
+   case variant::uint64_type: {
+      const auto expected = canonical.as_uint64();
+      if (source.is_uint64()) {
+         return source.as_uint64() == expected;
+      }
+      return source.is_int64() && source.as_int64() >= 0 && static_cast<std::uint64_t>(source.as_int64()) == expected;
+   }
+   case variant::double_type:
+      return source.is_double() && source.as_double() == canonical.as_double();
+   case variant::bool_type:
+      return source.is_bool() && source.as_bool() == canonical.as_bool();
+   case variant::string_type:
+      return source.is_string() && source.get_string() == canonical.get_string();
+   case variant::array_type: {
+      if (!source.is_array() || source.get_array().size() != canonical.get_array().size()) {
+         return false;
+      }
+      for (std::size_t index = 0; index < canonical.get_array().size(); ++index) {
+         if (!matches_canonical_json_value(source.get_array()[index], canonical.get_array()[index])) {
+            return false;
+         }
+      }
+      return true;
+   }
+   case variant::object_type: {
+      if (!source.is_object() || source.get_object().size() != canonical.get_object().size()) {
+         return false;
+      }
+      for (const auto& entry : canonical.get_object()) {
+         const auto source_entry = source.get_object().find(entry.key());
+         if (source_entry == source.get_object().end() ||
+             !matches_canonical_json_value(source_entry->value(), entry.value())) {
+            return false;
+         }
+      }
+      return true;
+   }
+   case variant::blob_type:
+      return source.is_blob() && source.get_blob().data == canonical.get_blob().data;
+   }
+   return false;
 }
 
 template <typename T>
@@ -600,9 +655,9 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
          if constexpr (requires(const value_type& input, variant& output) { to_variant(input, output); }) {
             auto canonical = variant{};
             to_variant(value, canonical);
-            if (canonical.is_string() && (!source.is_string() || canonical.get_string() != source.get_string())) {
+            if (!matches_canonical_json_value(source, canonical)) {
                add_exact_error(diagnostics, std::string{path}, "json.type",
-                               "scalar adapter must use its canonical JSON spelling");
+                               "scalar adapter must use its canonical JSON representation");
             }
          }
       } catch (const std::exception& error) {
