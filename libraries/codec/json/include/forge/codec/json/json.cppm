@@ -12,6 +12,7 @@ module;
 #include <flat_map>
 #include <limits>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -62,6 +63,22 @@ template <typename T> struct optional_traits<std::optional<T>> {
 };
 
 template <typename T> inline constexpr bool is_optional_v = optional_traits<clean_type<T>>::value;
+
+template <typename T> struct pointer_traits {
+   static constexpr bool value = false;
+};
+
+template <typename T> struct pointer_traits<std::shared_ptr<T>> {
+   static constexpr bool value = true;
+   using value_type = T;
+};
+
+template <typename T> struct pointer_traits<std::unique_ptr<T>> {
+   static constexpr bool value = true;
+   using value_type = T;
+};
+
+template <typename T> inline constexpr bool is_pointer_v = pointer_traits<clean_type<T>>::value;
 
 template <typename T> struct sequence_traits {
    static constexpr bool value = false;
@@ -236,6 +253,10 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
    if constexpr (is_optional_v<value_type>) {
       if (!source.is_null()) {
          validate_exact<typename optional_traits<value_type>::value_type>(source, path, diagnostics);
+      }
+   } else if constexpr (is_pointer_v<value_type>) {
+      if (!source.is_null()) {
+         validate_exact<typename pointer_traits<value_type>::value_type>(source, path, diagnostics);
       }
    } else if constexpr (reflect::is_described_object_v<value_type>) {
       // Some described value types intentionally use a canonical string adapter.

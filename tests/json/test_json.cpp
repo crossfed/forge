@@ -287,6 +287,32 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_nested_fields_and_var
    BOOST_REQUIRE(!extra_variant_element.ok());
    BOOST_TEST(extra_variant_element.diagnostics.front().code == "json.variant");
    BOOST_TEST(extra_variant_element.diagnostics.front().path == "choice");
+
+   const auto pointers = forge::codec::json::read<forge_json_tests::exact_pointer_record>(
+       R"({"shared":{"value":3},"unique":{"value":4}})", options);
+   BOOST_REQUIRE(pointers.ok());
+   BOOST_REQUIRE(pointers.value.shared);
+   BOOST_REQUIRE(pointers.value.unique);
+   BOOST_TEST(pointers.value.shared->value == 3U);
+   BOOST_TEST(pointers.value.unique->value == 4U);
+
+   const auto null_pointers =
+       forge::codec::json::read<forge_json_tests::exact_pointer_record>(R"({"shared":null,"unique":null})", options);
+   BOOST_REQUIRE(null_pointers.ok());
+   BOOST_TEST(!null_pointers.value.shared);
+   BOOST_TEST(!null_pointers.value.unique);
+
+   const auto shared_missing = forge::codec::json::read<forge_json_tests::exact_pointer_record>(
+       R"({"shared":{},"unique":{"value":4}})", options);
+   BOOST_REQUIRE(!shared_missing.ok());
+   BOOST_TEST(shared_missing.diagnostics.front().code == "json.missing");
+   BOOST_TEST(shared_missing.diagnostics.front().path == "shared.value");
+
+   const auto unique_unknown = forge::codec::json::read<forge_json_tests::exact_pointer_record>(
+       R"({"shared":{"value":3},"unique":{"value":4,"extra":5}})", options);
+   BOOST_REQUIRE(!unique_unknown.ok());
+   BOOST_TEST(unique_unknown.diagnostics.front().code == "json.unknown");
+   BOOST_TEST(unique_unknown.diagnostics.front().path == "unique.extra");
 }
 
 BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_schema_names_and_associative_entries) {
