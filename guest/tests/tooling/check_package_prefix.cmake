@@ -6,7 +6,9 @@ foreach(
    FORGE_CONTRACT_TOOLCHAIN_TEMPLATE
    FORGE_CONTRACT_FUNCTIONS
    FORGE_CONTRACT_GRAPH
+   FORGE_CONTRACT_BUILD
    FORGE_CONTRACT_GUEST_COMPONENTS
+   FORGE_CONTRACT_TEST_CXX_COMPILER
    FORGE_CONTRACT_TEST_ROOT
 )
    if(NOT DEFINED ${_required} OR "${${_required}}" STREQUAL "")
@@ -52,14 +54,43 @@ configure_file(
 )
 configure_file("${FORGE_CONTRACT_FUNCTIONS}" "${_config_dir}/ForgeContractFunctions.cmake" COPYONLY)
 configure_file("${FORGE_CONTRACT_GRAPH}" "${_config_dir}/ForgeContractGraph.cmake" COPYONLY)
+configure_file("${FORGE_CONTRACT_BUILD}" "${_config_dir}/ForgeContractBuild.cmake" COPYONLY)
 configure_file(
    "${FORGE_CONTRACT_GUEST_COMPONENTS}"
    "${_config_dir}/ForgeContractGuestComponents.cmake"
    COPYONLY
 )
 
+function(forge_contract_register_guest_component)
+   cmake_parse_arguments(
+      ARG
+      "FOUNDATION"
+      "ID;TARGET;ARCHIVE"
+      "PUBLIC_LIBRARIES;MODULES;MODULE_NAMES"
+      ${ARGN}
+   )
+   foreach(_module IN LISTS ARG_MODULES)
+      get_filename_component(_module_directory "${_module}" DIRECTORY)
+      file(MAKE_DIRECTORY "${_prefix}/${CMAKE_INSTALL_DATADIR}/forge-contract/modules/${_module_directory}")
+      file(
+         WRITE
+         "${_prefix}/${CMAKE_INSTALL_DATADIR}/forge-contract/modules/${_module}"
+         "export module fixture;\n"
+      )
+   endforeach()
+endfunction()
+include("${FORGE_CONTRACT_GUEST_COMPONENTS}")
+
 file(MAKE_DIRECTORY "${_prefix}/bin")
-foreach(_tool clang++ wasm-ld abigen contract-check contract-manifest)
+file(CREATE_LINK "${FORGE_CONTRACT_TEST_CXX_COMPILER}" "${_prefix}/bin/clang++" SYMBOLIC)
+get_filename_component(_tool_directory "${FORGE_CONTRACT_TEST_CXX_COMPILER}" DIRECTORY)
+foreach(_tool clang-scan-deps wasm-ld llvm-ar llvm-ranlib)
+   unset(_tool_path CACHE)
+   unset(_tool_path)
+   find_program(_tool_path NAMES "${_tool}" HINTS "${_tool_directory}" REQUIRED)
+   file(CREATE_LINK "${_tool_path}" "${_prefix}/bin/${_tool}" SYMBOLIC)
+endforeach()
+foreach(_tool abigen contract-check contract-manifest)
    file(WRITE "${_prefix}/bin/${_tool}" "")
 endforeach()
 file(MAKE_DIRECTORY "${_prefix}/sysroot/lib")
@@ -116,7 +147,7 @@ file(
    "${_consumer}/CMakeLists.txt"
    [=[
 cmake_minimum_required(VERSION 3.31)
-project(ForgeContractPackagePrefixTest NONE)
+project(ForgeContractPackagePrefixTest LANGUAGES CXX)
 find_package(ForgeContract CONFIG REQUIRED)
 find_package(RepeatedDependency CONFIG REQUIRED)
 
@@ -145,6 +176,7 @@ endforeach()
 execute_process(
    COMMAND
       "${CMAKE_COMMAND}"
+      -G Ninja
       -S "${_consumer}"
       -B "${FORGE_CONTRACT_TEST_ROOT}/build"
       -DForgeContract_DIR=${_config_dir}
@@ -162,6 +194,7 @@ file(APPEND "${_prefix}/sysroot/lib/libforge_guest_raw.a" "tampered")
 execute_process(
    COMMAND
       "${CMAKE_COMMAND}"
+      -G Ninja
       -S "${_consumer}"
       -B "${FORGE_CONTRACT_TEST_ROOT}/tampered-build"
       -DForgeContract_DIR=${_config_dir}
