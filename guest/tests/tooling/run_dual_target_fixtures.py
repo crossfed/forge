@@ -487,23 +487,23 @@ def verify_native_package_diamond(
 ) -> None:
     source = output / "source"
     build_directory = output / "build"
-    for side, package in (
-        ("left", "ProductValues"),
-        ("right", "ProductProtocol"),
-    ):
+    overlap_contract = values_package / "ProductValuesAsProductContract.cmake"
+    overlap_contract.write_text(
+        (values_package / "ProductValuesContract.cmake")
+        .read_text(encoding="utf-8")
+        .replace("Values::values", "Product::values"),
+        encoding="utf-8",
+    )
+    for side in ("left", "right"):
         side_source = source / side
         side_source.mkdir(parents=True)
-        body = f"find_package({package} CONFIG REQUIRED)\n"
-        if side == "right":
-            body += """
-add_executable(native_package_diamond ../main.cpp)
-target_link_libraries(
-   native_package_diamond
-   PRIVATE
-      Values::values
-      Product::values
-)
-"""
+        if side == "left":
+            body = (
+                "find_package(ProductValues CONFIG REQUIRED)\n"
+                f'include("{overlap_contract.as_posix()}")\n'
+            )
+        else:
+            body = "find_package(ProductProtocol CONFIG REQUIRED)\n"
         (side_source / "CMakeLists.txt").write_text(body, encoding="utf-8")
     (source / "main.cpp").write_text(
         """import product.chain.values;
@@ -524,6 +524,8 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(ForgeContract CONFIG REQUIRED)
 add_subdirectory(left)
 add_subdirectory(right)
+add_executable(native_package_diamond main.cpp)
+target_link_libraries(native_package_diamond PRIVATE Product::values)
 """,
         encoding="utf-8",
     )
@@ -541,7 +543,7 @@ add_subdirectory(right)
         ),
     )
     build(cmake, build_directory, "native_package_diamond")
-    run(str(build_directory / "right" / "native_package_diamond"))
+    run(str(build_directory / "native_package_diamond"))
 
 
 def verify_keyword_like_descriptor_values(
@@ -589,7 +591,6 @@ install(
    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KeywordProtocol"
 )
 forge_install_contract_package(
-   EXPORT KeywordProtocolTargets
    FILE KeywordProtocolContract.cmake
    NAMESPACE Keyword::
    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KeywordProtocol"
@@ -662,6 +663,117 @@ forge_add_contract(
     )
     build(cmake, consumer_build, "keyword_artifacts")
     verify_artifacts(consumer_build / "artifacts", "keyword")
+
+
+def verify_literal_descriptor_values(
+    *,
+    cmake: str,
+    cxx_compiler: Path,
+    forge_package: Path,
+    contract_package: Path,
+    output: Path,
+) -> None:
+    producer = output / "producer"
+    module_directory = producer / "LITERAL_SOURCES" / "${literal}"
+    module_directory.mkdir(parents=True)
+    module_source = module_directory / "protocol.cppm"
+    module_source.write_text(
+        """export module product.literal.protocol;
+export inline constexpr int literal_protocol_value = 42;
+""",
+        encoding="utf-8",
+    )
+    (producer / "CMakeLists.txt").write_text(
+        """cmake_minimum_required(VERSION 3.31)
+project(LiteralDescriptorProducer LANGUAGES CXX)
+include(GNUInstallDirs)
+find_package(Forge CONFIG REQUIRED)
+find_package(ForgeContract CONFIG REQUIRED)
+forge_add_contract_library(
+   literal_protocol
+   ID product.literal.protocol
+   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS [=[LITERAL_SOURCES/${literal}]=]
+   MODULE_SOURCES [=[LITERAL_SOURCES/${literal}/protocol.cppm]=]
+   PUBLIC_LIBRARIES Forge::forge_raw
+)
+forge_install_contract_library(
+   TARGET literal_protocol
+   EXPORT LiteralProtocolTargets
+   EXPORT_NAME protocol
+   MODULE_DESTINATION "share/literal-protocol/modules"
+   SOURCE_DESTINATION "share/literal-protocol/sources"
+)
+forge_install_contract_package(
+   FILE LiteralProtocolContract.cmake
+   NAMESPACE Literal::
+   DESTINATION "lib/cmake/LiteralProtocol"
+   TARGETS literal_protocol
+)
+""",
+        encoding="utf-8",
+    )
+    producer_build = output / "producer-build"
+    configure_host(
+        cmake=cmake,
+        cxx_compiler=cxx_compiler,
+        forge_package=forge_package,
+        contract_package=contract_package,
+        source=producer,
+        build=producer_build,
+    )
+
+    generated_contract = producer_build / "LiteralProtocolContract.cmake"
+    contract_text = generated_contract.read_text(encoding="utf-8")
+    if r"LITERAL_SOURCES/\${literal}/protocol.cppm" not in contract_text:
+        raise RuntimeError("installed Contract descriptor did not escape a literal CMake variable")
+
+    install_prefix = output / "install"
+    package_directory = install_prefix / "lib" / "cmake" / "LiteralProtocol"
+    installed_module = (
+        install_prefix / "share" / "literal-protocol" / "modules" / "protocol.cppm"
+    )
+    package_directory.mkdir(parents=True)
+    installed_module.parent.mkdir(parents=True)
+    shutil.copy2(generated_contract, package_directory / generated_contract.name)
+    shutil.copy2(module_source, installed_module)
+
+    consumer = output / "consumer"
+    consumer.mkdir()
+    (consumer / "host.cpp").write_text(
+        """import product.literal.protocol;
+
+int main() {
+   return literal_protocol_value == 42 ? 0 : 1;
+}
+""",
+        encoding="utf-8",
+    )
+    (consumer / "CMakeLists.txt").write_text(
+        f"""cmake_minimum_required(VERSION 3.31)
+project(LiteralDescriptorConsumer LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+find_package(Forge CONFIG REQUIRED COMPONENTS raw)
+find_package(ForgeContract CONFIG REQUIRED)
+include("{(package_directory / generated_contract.name).as_posix()}")
+add_executable(literal_descriptor_consumer host.cpp)
+target_link_libraries(literal_descriptor_consumer PRIVATE Literal::protocol)
+""",
+        encoding="utf-8",
+    )
+    consumer_build = output / "consumer-build"
+    configure_host(
+        cmake=cmake,
+        cxx_compiler=cxx_compiler,
+        forge_package=forge_package,
+        contract_package=contract_package,
+        source=consumer,
+        build=consumer_build,
+        prefixes=(install_prefix,),
+    )
+    build(cmake, consumer_build, "literal_descriptor_consumer")
+    run(str(consumer_build / "literal_descriptor_consumer"))
 
 
 def verify_conflicting_package_descriptor(
@@ -1054,46 +1166,6 @@ cmake_language(DEFER CALL mutate_contract_target)
 """,
             "modified after descriptor declaration: CXX_SCAN_FOR_MODULES",
         ),
-        (
-            "cycle",
-            """add_library(cycle_a STATIC IMPORTED GLOBAL)
-add_library(cycle_b STATIC IMPORTED GLOBAL)
-set_target_properties(
-   cycle_a PROPERTIES
-      FORGE_CONTRACT_LIBRARY TRUE
-      FORGE_CONTRACT_LIBRARY_ID negative.cycle.a
-      FORGE_CONTRACT_PUBLIC_LIBRARY_IDS negative.cycle.b
-      FORGE_CONTRACT_PRIVATE_LIBRARY_IDS ""
-      FORGE_CONTRACT_PUBLIC_COMPONENT_IDS ""
-      FORGE_CONTRACT_PRIVATE_COMPONENT_IDS ""
-      FORGE_CONTRACT_INSTALL_MODULE_ROOT_RELATIVE "."
-      FORGE_CONTRACT_INSTALL_SOURCE_ROOT_RELATIVE "."
-      FORGE_CONTRACT_INSTALL_MODULE_PATHS ""
-      FORGE_CONTRACT_INSTALL_PUBLIC_HEADER_PATHS ""
-      IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/libcycle_a.a"
-)
-set_target_properties(
-   cycle_b PROPERTIES
-      FORGE_CONTRACT_LIBRARY TRUE
-      FORGE_CONTRACT_LIBRARY_ID negative.cycle.b
-      FORGE_CONTRACT_PUBLIC_LIBRARY_IDS negative.cycle.a
-      FORGE_CONTRACT_PRIVATE_LIBRARY_IDS ""
-      FORGE_CONTRACT_PUBLIC_COMPONENT_IDS ""
-      FORGE_CONTRACT_PRIVATE_COMPONENT_IDS ""
-      FORGE_CONTRACT_INSTALL_MODULE_ROOT_RELATIVE "."
-      FORGE_CONTRACT_INSTALL_SOURCE_ROOT_RELATIVE "."
-      FORGE_CONTRACT_INSTALL_MODULE_PATHS ""
-      FORGE_CONTRACT_INSTALL_PUBLIC_HEADER_PATHS ""
-      IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/libcycle_b.a"
-)
-forge_register_contract_library_targets(cycle_a cycle_b)
-forge_add_contract(
-   negative SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
-   SOURCES entry.cpp LIBRARIES cycle_a
-)
-""",
-            "cycle in Forge Contract library dependencies",
-        ),
     )
     for name, body, diagnostic in cases:
         source = write_project(fixtures / name, body)
@@ -1107,7 +1179,7 @@ forge_add_contract(
         )
 
 
-def check_imported_target_seal(
+def check_package_target_seal(
     *,
     cmake: str,
     cxx_compiler: Path,
@@ -1123,7 +1195,8 @@ project(ImportedContractMutation LANGUAGES CXX)
 find_package(ForgeContract CONFIG REQUIRED)
 find_package(ProductProtocol CONFIG REQUIRED)
 add_library(host_only INTERFACE)
-target_link_libraries(Product::protocol INTERFACE host_only)
+get_target_property(protocol_target Product::protocol ALIASED_TARGET)
+target_link_libraries("${protocol_target}" INTERFACE host_only)
 """,
         encoding="utf-8",
     )
@@ -1137,6 +1210,40 @@ target_link_libraries(Product::protocol INTERFACE host_only)
         definitions=(f"-DProductProtocol_DIR={product_package}",),
         succeeds=False,
         contains="descriptor declaration: INTERFACE_LINK_LIBRARIES",
+    )
+
+
+def check_imported_contract_target_rejected(
+    *,
+    cmake: str,
+    cxx_compiler: Path,
+    forge_package: Path,
+    contract_package: Path,
+    product_package: Path,
+    output: Path,
+) -> None:
+    output.mkdir(parents=True)
+    targets_file = product_package / "ProductProtocolTargets.cmake"
+    contract_file = product_package / "ProductProtocolContract.cmake"
+    (output / "CMakeLists.txt").write_text(
+        f"""cmake_minimum_required(VERSION 3.31)
+project(ImportedContractTargetRejected LANGUAGES CXX)
+find_package(Forge CONFIG REQUIRED COMPONENTS raw chain_protocol crypto_digest)
+find_package(ForgeContract CONFIG REQUIRED)
+include("{targets_file.as_posix()}")
+include("{contract_file.as_posix()}")
+""",
+        encoding="utf-8",
+    )
+    configure_host(
+        cmake=cmake,
+        cxx_compiler=cxx_compiler,
+        forge_package=forge_package,
+        contract_package=contract_package,
+        source=output,
+        build=output / "build",
+        succeeds=False,
+        contains="must be materialized from sources",
     )
 
 
@@ -1343,6 +1450,11 @@ def validate(
         raise RuntimeError("installed protocol package has no guest source materialization")
     if not (values_package / "ProductValuesContract.cmake").is_file():
         raise RuntimeError("installed values package has no guest source materialization")
+    contract_text = (product_package / "ProductProtocolContract.cmake").read_text(
+        encoding="utf-8"
+    )
+    if "Targets.cmake" in contract_text or "forge_register_contract_library_targets" in contract_text:
+        raise RuntimeError("installed Contract package still consumes a native export payload")
     targets_file = product_package / "ProductProtocolTargets.cmake"
     if "FILE_SET \"forge_contract_modules\"" not in targets_file.read_text(encoding="utf-8"):
         raise RuntimeError("installed protocol package has no relocatable host module sources")
@@ -1392,6 +1504,13 @@ def validate(
         contract_package=contract_package,
         output=output / "keyword-descriptor-values",
     )
+    verify_literal_descriptor_values(
+        cmake=cmake,
+        cxx_compiler=cxx_compiler,
+        forge_package=forge_package,
+        contract_package=contract_package,
+        output=output / "literal-descriptor-values",
+    )
     verify_conflicting_package_descriptor(
         cmake=cmake,
         contract_package=contract_package,
@@ -1408,13 +1527,21 @@ def validate(
         values_package=values_package,
         output=output / "conflicting-package-materialization",
     )
-    check_imported_target_seal(
+    check_package_target_seal(
         cmake=cmake,
         cxx_compiler=cxx_compiler,
         forge_package=forge_package,
         contract_package=contract_package,
         product_package=product_package,
-        output=output / "imported-target-seal",
+        output=output / "package-target-seal",
+    )
+    check_imported_contract_target_rejected(
+        cmake=cmake,
+        cxx_compiler=cxx_compiler,
+        forge_package=forge_package,
+        contract_package=contract_package,
+        product_package=product_package,
+        output=output / "imported-contract-target-rejected",
     )
 
     consumer_build = output / "consumer-host"

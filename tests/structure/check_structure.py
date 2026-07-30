@@ -534,13 +534,16 @@ def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
       "function(forge_add_contract_library target)",
       "function(forge_install_contract_library)",
       "function(forge_install_contract_package)",
-      "function(forge_register_contract_library_targets)",
       "function(_forge_contract_sealed_target_properties target output)",
       "function(_forge_contract_assert_sealed_target target)",
       "function(_forge_contract_package_target_materialized output)",
    ):
       if required not in graph_cmake:
          errors.append(f"guest/cmake/ForgeContractGraph.cmake: missing native graph API {required}")
+   if "forge_register_contract_library_targets" in graph_cmake:
+      errors.append(
+         "guest/cmake/ForgeContractGraph.cmake: imported native Contract targets are forbidden"
+      )
 
    build_cmake = graph_sources[1].read_text(errors="ignore")
    if "function(forge_add_contract target)" not in build_cmake:

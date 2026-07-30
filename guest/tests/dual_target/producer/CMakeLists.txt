@@ -85,7 +85,6 @@ install(
    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ProductProtocol"
 )
 forge_install_contract_package(
-   EXPORT ProductProtocolTargets
    FILE ProductProtocolContract.cmake
    NAMESPACE Product::
    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ProductProtocol"
@@ -98,7 +97,6 @@ install(
    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ProductValues"
 )
 forge_install_contract_package(
-   EXPORT ProductValuesTargets
    FILE ProductValuesContract.cmake
    NAMESPACE Values::
    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ProductValues"

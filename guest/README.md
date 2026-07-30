@@ -152,36 +152,35 @@ installed `FILE_SET CXX_MODULES` is the portable host input; each toolchain
 builds its own BMI.
 
 The package config must use `find_dependency(Forge)` for the declared host
-dependencies and `find_dependency(ForgeContract)` before loading the targets
-file. Immediately after loading it, register every exported protocol target so
-Forge seals the imported host materialization before returning control to the
-consumer:
+dependencies and `find_dependency(ForgeContract)` before loading the generated
+Contract source package:
 
 ```cmake
-include("${CMAKE_CURRENT_LIST_DIR}/ProductProtocolTargets.cmake")
-forge_register_contract_library_targets(Product::product_protocol)
+include("${CMAKE_CURRENT_LIST_DIR}/ProductProtocolContract.cmake")
 ```
 
-Installed packages contain module sources, implementation inputs, headers and
-relocatable descriptor metadata. Compiler-specific BMI or PCM artifacts are
-never transported. An imported contract-library target that was not registered
-by its package config is rejected instead of being accepted with a late,
-consumer-controlled baseline.
+Installed Contract packages contain module sources, implementation inputs,
+headers and relocatable descriptor metadata. They materialize the same
+`forge_add_contract_library` declaration in each consumer configuration:
+native sources compile for a host consumer and the same sources compile for a
+WASM consumer. Host archives and compiler-specific BMI or PCM artifacts are
+never Contract package inputs. A conventional native CMake export may coexist
+for non-Contract consumers, but loading it before the Contract source package
+is rejected instead of mixing the two materialization models.
 
-Guest packages materialize each target independently. If two installed
-packages share a canonical target, the later package reuses it only when the
-target is a sealed contract library with the same stable `ID`; missing targets
-are created and conflicting targets fail closed. This permits dependency
-diamonds without weakening package identity.
+Installed packages materialize each target independently. If two packages
+share a canonical target, the later package reuses it only when the target is a
+sealed source-materialized contract library with the same stable `ID` and
+descriptor fingerprint; missing targets are created and conflicting targets
+fail closed. This permits partial dependency diamonds without including an
+entire native export set.
 
-Seal checks run at the end of every CMake directory where a registered target
-is visible. This preserves normal non-`GLOBAL` imported-target scope when a
-package is loaded from a nested `CMakeLists.txt`. The check remains at the tail
-of that directory's deferred-call queue, so a later deferred target or source
-mutation cannot run after validation. For installed targets, source paths are
-derived from the exported prefix-relative module and source roots; relocated
-packages therefore receive the same source-property checks as build-tree
-targets.
+Seal checks run at the end of every CMake directory where a materialized target
+is visible. The check remains at the tail of that directory's deferred-call
+queue, so a later deferred target or source mutation cannot run after
+validation. Installed source paths are derived from prefix-relative module and
+source roots; relocated packages therefore receive the same source-property
+checks as build-tree targets.
 
 ## Named Action Payloads
 
