@@ -283,6 +283,8 @@ inline void append_schema_diagnostics(std::vector<schema::diagnostic>& output,
          entry.code = "json.duplicate";
       } else if (entry.code == "config.type") {
          entry.code = "json.type";
+      } else if (entry.code == "config.range") {
+         entry.code = "json.range";
       }
       output.push_back(std::move(entry));
    }
@@ -324,84 +326,14 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
       if (!source.is_null()) {
          validate_exact<typename pointer_traits<value_type>::value_type>(source, path, diagnostics);
       }
-   } else if constexpr (std::same_as<value_type, bool>) {
-      if (!source.is_bool()) {
-         add_exact_error(diagnostics, std::string{path}, "json.type", "boolean field must be a JSON boolean");
-      }
-   } else if constexpr (std::signed_integral<value_type>) {
-      if constexpr (sizeof(value_type) <= sizeof(std::int64_t)) {
-         const auto in_range = source.is_int64()    ? std::in_range<value_type>(source.as_int64())
-                               : source.is_uint64() ? std::in_range<value_type>(source.as_uint64())
-                                                    : false;
-         if (!source.is_int64() && !source.is_uint64()) {
-            add_exact_error(diagnostics, std::string{path}, "json.type", "signed integer field must be a JSON integer");
-         } else if (!in_range) {
-            add_exact_error(diagnostics, std::string{path}, "json.range", "signed integer field is out of range");
-         }
-      } else if (!source.is_int64() && !source.is_string()) {
-         add_exact_error(diagnostics, std::string{path}, "json.type",
-                         "wide signed integer field must be a JSON integer or decimal string");
-      } else {
-         try {
-            static_cast<void>(source.template as<value_type>());
-         } catch (const std::exception& error) {
-            add_exact_error(diagnostics, std::string{path}, "json.range", error.what());
-         }
-      }
-   } else if constexpr (std::unsigned_integral<value_type>) {
-      if constexpr (sizeof(value_type) <= sizeof(std::uint64_t)) {
-         const auto in_range = source.is_int64()    ? std::in_range<value_type>(source.as_int64())
-                               : source.is_uint64() ? std::in_range<value_type>(source.as_uint64())
-                                                    : false;
-         if (!source.is_int64() && !source.is_uint64()) {
-            add_exact_error(diagnostics, std::string{path}, "json.type",
-                            "unsigned integer field must be a JSON integer");
-         } else if (!in_range) {
-            add_exact_error(diagnostics, std::string{path}, "json.range", "unsigned integer field is out of range");
-         }
-      } else if (!source.is_uint64() && !source.is_string()) {
-         add_exact_error(diagnostics, std::string{path}, "json.type",
-                         "wide unsigned integer field must be a JSON integer or decimal string");
-      } else {
-         try {
-            static_cast<void>(source.template as<value_type>());
-         } catch (const std::exception& error) {
-            add_exact_error(diagnostics, std::string{path}, "json.range", error.what());
-         }
-      }
-   } else if constexpr (std::floating_point<value_type>) {
-      if (!source.is_double() && !source.is_int64() && !source.is_uint64()) {
-         add_exact_error(diagnostics, std::string{path}, "json.type", "floating-point field must be a JSON number");
-         return;
-      }
-
-      const auto input = source.is_double()  ? static_cast<long double>(source.as_double())
-                         : source.is_int64() ? static_cast<long double>(source.as_int64())
-                                             : static_cast<long double>(source.as_uint64());
-      if (input < static_cast<long double>(std::numeric_limits<value_type>::lowest()) ||
-          input > static_cast<long double>((std::numeric_limits<value_type>::max)())) {
-         add_exact_error(diagnostics, std::string{path}, "json.range", "floating-point field is out of range");
-      } else if (!source.is_double() && static_cast<long double>(static_cast<value_type>(input)) != input) {
-         add_exact_error(diagnostics, std::string{path}, "json.range",
-                         "integer is not exactly representable by the floating-point field");
-      }
-   } else if constexpr (std::same_as<value_type, std::string>) {
-      if (!source.is_string()) {
-         add_exact_error(diagnostics, std::string{path}, "json.type", "string field must be a JSON string");
-      }
-   } else if constexpr (reflect::is_described_enum_v<value_type>) {
+   } else if constexpr (std::same_as<value_type, bool> || std::integral<value_type> ||
+                        std::floating_point<value_type> || std::same_as<value_type, std::string> ||
+                        reflect::is_described_enum_v<value_type>) {
       try {
-         if (source.is_string()) {
-            static_cast<void>(reflect::enum_from_string<value_type>(source.get_string().c_str()));
-         } else if (source.is_int64()) {
-            static_cast<void>(reflect::enum_from_int<value_type>(source.as_int64()));
-         } else if (source.is_uint64() &&
-                    source.as_uint64() <= static_cast<std::uint64_t>((std::numeric_limits<std::int64_t>::max)())) {
-            static_cast<void>(reflect::enum_from_int<value_type>(static_cast<std::int64_t>(source.as_uint64())));
-         } else {
-            add_exact_error(diagnostics, std::string{path}, "json.type",
-                            "enum field must be a named string or integer");
-         }
+         const auto input = to_schema_input(source);
+         auto nested = std::vector<schema::diagnostic>{};
+         schema::validate_exact_input_value<value_type>(input, path, nested);
+         append_schema_diagnostics(diagnostics, std::move(nested));
       } catch (const std::exception& error) {
          add_exact_error(diagnostics, std::string{path}, "json.type", error.what());
       }
@@ -779,6 +711,8 @@ template <typename T> [[nodiscard]] read_result<T> read(std::string_view input, 
                entry.code = "json.duplicate";
             } else if (entry.code == "config.type") {
                entry.code = "json.type";
+            } else if (entry.code == "config.range") {
+               entry.code = "json.range";
             }
             output.diagnostics.push_back(std::move(entry));
          }
@@ -897,6 +831,8 @@ template <typename T> [[nodiscard]] read_result<T> load(const std::filesystem::p
                entry.code = "json.duplicate";
             } else if (entry.code == "config.type") {
                entry.code = "json.type";
+            } else if (entry.code == "config.range") {
+               entry.code = "json.range";
             }
             output.diagnostics.push_back(std::move(entry));
          }

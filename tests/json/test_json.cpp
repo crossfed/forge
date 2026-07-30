@@ -377,6 +377,12 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_schema_names_and_asso
    BOOST_TEST(duplicate_member.diagnostics.front().code == "json.duplicate");
    BOOST_TEST(duplicate_member.diagnostics.front().path == "bind-port");
 
+   const auto textual_scalars = forge::codec::json::read<forge_json_tests::http_config>(
+       R"({"bind-port":"9090","bind-host":"127.0.0.1","tls-enabled":"false","tags":[]})", options);
+   BOOST_REQUIRE(!textual_scalars.ok());
+   BOOST_TEST(textual_scalars.diagnostics.front().code == "json.type");
+   BOOST_TEST(textual_scalars.diagnostics.front().path == "bind-port");
+
    const auto escaped_duplicate =
        forge::codec::json::read<forge_json_tests::exact_leaf>(R"({"value":7,"\u0076alue":8})", options);
    BOOST_REQUIRE(!escaped_duplicate.ok());
@@ -492,6 +498,12 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_scalar_kinds_and_rang
    BOOST_REQUIRE(!lossy_float_integer.ok());
    BOOST_TEST(lossy_float_integer.diagnostics.front().code == "json.range");
    BOOST_TEST(lossy_float_integer.diagnostics.front().path == "ratio");
+
+   const auto floating_underflow = forge::codec::json::read<forge_json_tests::exact_scalar_record>(
+       R"({"enabled":true,"signed_value":-8,"unsigned_value":8,"ratio":1e-100,"label":"ready"})", options);
+   BOOST_REQUIRE(!floating_underflow.ok());
+   BOOST_TEST(floating_underflow.diagnostics.front().code == "json.range");
+   BOOST_TEST(floating_underflow.diagnostics.front().path == "ratio");
 }
 
 BOOST_AUTO_TEST_CASE(json_exact_duplicate_scan_respects_max_depth) {

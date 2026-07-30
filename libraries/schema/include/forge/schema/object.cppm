@@ -977,6 +977,108 @@ void validate_exact_input_value(const input_value& input, std::string_view path,
       if (!std::holds_alternative<std::monostate>(input.storage)) {
          validate_exact_input_value<typename is_optional<clean_type>::value_type>(input, path, diagnostics);
       }
+   } else if constexpr (std::same_as<clean_type, bool>) {
+      if (!std::holds_alternative<bool>(input.storage)) {
+         diagnostics.push_back(
+             make_path_error(std::string{path}, "config.type", "boolean field must be a boolean value"));
+      }
+   } else if constexpr (std::signed_integral<clean_type>) {
+      if constexpr (sizeof(clean_type) <= sizeof(std::int64_t)) {
+         const auto in_range = std::holds_alternative<std::int64_t>(input.storage)
+                                   ? std::in_range<clean_type>(std::get<std::int64_t>(input.storage))
+                               : std::holds_alternative<std::uint64_t>(input.storage)
+                                   ? std::in_range<clean_type>(std::get<std::uint64_t>(input.storage))
+                                   : false;
+         if (!std::holds_alternative<std::int64_t>(input.storage) &&
+             !std::holds_alternative<std::uint64_t>(input.storage)) {
+            diagnostics.push_back(
+                make_path_error(std::string{path}, "config.type", "signed integer field must be an integer value"));
+         } else if (!in_range) {
+            diagnostics.push_back(
+                make_path_error(std::string{path}, "config.range", "signed integer field is out of range"));
+         }
+      } else if (!std::holds_alternative<std::int64_t>(input.storage) &&
+                 !std::holds_alternative<std::string>(input.storage)) {
+         diagnostics.push_back(make_path_error(std::string{path}, "config.type",
+                                               "wide signed integer field must be an integer or decimal string"));
+      } else if (const auto* text = std::get_if<std::string>(&input.storage)) {
+         try {
+            static_cast<void>(parse_scalar_text<clean_type>(*text));
+         } catch (const std::exception& error) {
+            diagnostics.push_back(make_path_error(std::string{path}, "config.range", error.what()));
+         }
+      }
+   } else if constexpr (std::unsigned_integral<clean_type>) {
+      if constexpr (sizeof(clean_type) <= sizeof(std::uint64_t)) {
+         const auto in_range = std::holds_alternative<std::int64_t>(input.storage)
+                                   ? std::in_range<clean_type>(std::get<std::int64_t>(input.storage))
+                               : std::holds_alternative<std::uint64_t>(input.storage)
+                                   ? std::in_range<clean_type>(std::get<std::uint64_t>(input.storage))
+                                   : false;
+         if (!std::holds_alternative<std::int64_t>(input.storage) &&
+             !std::holds_alternative<std::uint64_t>(input.storage)) {
+            diagnostics.push_back(
+                make_path_error(std::string{path}, "config.type", "unsigned integer field must be an integer value"));
+         } else if (!in_range) {
+            diagnostics.push_back(
+                make_path_error(std::string{path}, "config.range", "unsigned integer field is out of range"));
+         }
+      } else if (!std::holds_alternative<std::uint64_t>(input.storage) &&
+                 !std::holds_alternative<std::string>(input.storage)) {
+         diagnostics.push_back(make_path_error(std::string{path}, "config.type",
+                                               "wide unsigned integer field must be an integer or decimal string"));
+      } else if (const auto* text = std::get_if<std::string>(&input.storage)) {
+         try {
+            static_cast<void>(parse_scalar_text<clean_type>(*text));
+         } catch (const std::exception& error) {
+            diagnostics.push_back(make_path_error(std::string{path}, "config.range", error.what()));
+         }
+      }
+   } else if constexpr (std::floating_point<clean_type>) {
+      if (!std::holds_alternative<double>(input.storage) && !std::holds_alternative<std::int64_t>(input.storage) &&
+          !std::holds_alternative<std::uint64_t>(input.storage)) {
+         diagnostics.push_back(
+             make_path_error(std::string{path}, "config.type", "floating-point field must be a numeric value"));
+         return;
+      }
+
+      const auto numeric = std::holds_alternative<double>(input.storage)
+                               ? static_cast<long double>(std::get<double>(input.storage))
+                           : std::holds_alternative<std::int64_t>(input.storage)
+                               ? static_cast<long double>(std::get<std::int64_t>(input.storage))
+                               : static_cast<long double>(std::get<std::uint64_t>(input.storage));
+      const auto converted = static_cast<clean_type>(numeric);
+      if (numeric < static_cast<long double>(std::numeric_limits<clean_type>::lowest()) ||
+          numeric > static_cast<long double>((std::numeric_limits<clean_type>::max)())) {
+         diagnostics.push_back(
+             make_path_error(std::string{path}, "config.range", "floating-point field is out of range"));
+      } else if (numeric != 0.0L && converted == static_cast<clean_type>(0)) {
+         diagnostics.push_back(
+             make_path_error(std::string{path}, "config.range", "floating-point field underflows to zero"));
+      } else if (!std::holds_alternative<double>(input.storage) && static_cast<long double>(converted) != numeric) {
+         diagnostics.push_back(make_path_error(std::string{path}, "config.range",
+                                               "integer is not exactly representable by the floating-point field"));
+      }
+   } else if constexpr (std::same_as<clean_type, std::string>) {
+      if (!std::holds_alternative<std::string>(input.storage)) {
+         diagnostics.push_back(
+             make_path_error(std::string{path}, "config.type", "string field must be a string value"));
+      }
+   } else if constexpr (std::is_enum_v<clean_type>) {
+      auto parsed = clean_type{};
+      const auto valid = std::holds_alternative<std::string>(input.storage)
+                             ? enum_from_string(std::get<std::string>(input.storage), parsed)
+                         : std::holds_alternative<std::int64_t>(input.storage)
+                             ? enum_from_int(std::get<std::int64_t>(input.storage), parsed)
+                         : std::holds_alternative<std::uint64_t>(input.storage) &&
+                                 std::get<std::uint64_t>(input.storage) <=
+                                     static_cast<std::uint64_t>((std::numeric_limits<std::int64_t>::max)())
+                             ? enum_from_int(static_cast<std::int64_t>(std::get<std::uint64_t>(input.storage)), parsed)
+                             : false;
+      if (!valid) {
+         diagnostics.push_back(
+             make_path_error(std::string{path}, "config.type", "enum field must contain a known name or value"));
+      }
    } else if constexpr (is_vector<clean_type>::value) {
       const auto* values = input.as_array();
       if (!values) {
