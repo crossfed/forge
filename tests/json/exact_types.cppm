@@ -26,6 +26,10 @@ struct exact_leaf {
    bool operator==(const exact_leaf&) const = default;
 };
 
+struct exact_alias_leaf {
+   std::uint32_t bind_port = 0;
+};
+
 struct exact_record {
    std::vector<exact_leaf> items;
    std::variant<exact_leaf, std::string> choice;
@@ -39,8 +43,8 @@ struct exact_map_record {
 };
 
 struct exact_pointer_record {
-   std::shared_ptr<exact_leaf> shared;
-   std::unique_ptr<exact_leaf> unique;
+   std::shared_ptr<exact_alias_leaf> shared;
+   std::unique_ptr<exact_alias_leaf> unique;
 };
 
 struct exact_set_record {
@@ -58,6 +62,7 @@ struct exact_multi_index_record {
 };
 
 BOOST_DESCRIBE_STRUCT(exact_leaf, (), (value))
+BOOST_DESCRIBE_STRUCT(exact_alias_leaf, (), (bind_port))
 BOOST_DESCRIBE_STRUCT(exact_record, (), (items, choice, optional))
 BOOST_DESCRIBE_STRUCT(exact_map_record, (), (values))
 BOOST_DESCRIBE_STRUCT(exact_pointer_record, (), (shared, unique))

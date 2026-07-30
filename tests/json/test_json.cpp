@@ -89,6 +89,14 @@ template <> struct forge::schema::rules<forge_json_tests::tag_config> {
    }
 };
 
+template <> struct forge::schema::rules<forge_json_tests::exact_alias_leaf> {
+   [[nodiscard]] static forge::schema::object_schema<forge_json_tests::exact_alias_leaf> define() {
+      auto schema = forge::schema::object<forge_json_tests::exact_alias_leaf>();
+      schema.field<&forge_json_tests::exact_alias_leaf::bind_port>("bind-port").alias("port").default_value(8080);
+      return schema;
+   }
+};
+
 BOOST_AUTO_TEST_SUITE(json_codec_tests)
 
 BOOST_AUTO_TEST_CASE(json_value_roundtrip_preserves_generic_shapes) {
@@ -289,12 +297,12 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_nested_fields_and_var
    BOOST_TEST(extra_variant_element.diagnostics.front().path == "choice");
 
    const auto pointers = forge::codec::json::read<forge_json_tests::exact_pointer_record>(
-       R"({"shared":{"value":3},"unique":{"value":4}})", options);
+       R"({"shared":{"bind-port":3},"unique":{"port":4}})", options);
    BOOST_REQUIRE(pointers.ok());
    BOOST_REQUIRE(pointers.value.shared);
    BOOST_REQUIRE(pointers.value.unique);
-   BOOST_TEST(pointers.value.shared->value == 3U);
-   BOOST_TEST(pointers.value.unique->value == 4U);
+   BOOST_TEST(pointers.value.shared->bind_port == 3U);
+   BOOST_TEST(pointers.value.unique->bind_port == 4U);
 
    const auto null_pointers =
        forge::codec::json::read<forge_json_tests::exact_pointer_record>(R"({"shared":null,"unique":null})", options);
@@ -303,13 +311,13 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_nested_fields_and_var
    BOOST_TEST(!null_pointers.value.unique);
 
    const auto shared_missing = forge::codec::json::read<forge_json_tests::exact_pointer_record>(
-       R"({"shared":{},"unique":{"value":4}})", options);
+       R"({"shared":{},"unique":{"bind-port":4}})", options);
    BOOST_REQUIRE(!shared_missing.ok());
    BOOST_TEST(shared_missing.diagnostics.front().code == "json.missing");
-   BOOST_TEST(shared_missing.diagnostics.front().path == "shared.value");
+   BOOST_TEST(shared_missing.diagnostics.front().path == "shared.bind-port");
 
    const auto unique_unknown = forge::codec::json::read<forge_json_tests::exact_pointer_record>(
-       R"({"shared":{"value":3},"unique":{"value":4,"extra":5}})", options);
+       R"({"shared":{"bind-port":3},"unique":{"bind-port":4,"extra":5}})", options);
    BOOST_REQUIRE(!unique_unknown.ok());
    BOOST_TEST(unique_unknown.diagnostics.front().code == "json.unknown");
    BOOST_TEST(unique_unknown.diagnostics.front().path == "unique.extra");

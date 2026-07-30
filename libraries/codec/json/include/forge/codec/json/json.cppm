@@ -234,6 +234,60 @@ inline void add_exact_error(std::vector<schema::diagnostic>& diagnostics, std::s
 template <typename T>
 void validate_exact(const variant& source, std::string_view path, std::vector<schema::diagnostic>& diagnostics);
 
+template <typename T>
+void normalize_exact(variant& source, std::string_view path, std::vector<schema::diagnostic>& diagnostics);
+
+[[nodiscard]] inline schema::input_value to_schema_input(const variant& source) {
+   switch (source.get_type()) {
+   case variant::null_type:
+      return {};
+   case variant::int64_type:
+      return schema::input_value{source.as_int64()};
+   case variant::uint64_type:
+      return schema::input_value{source.as_uint64()};
+   case variant::double_type:
+      return schema::input_value{source.as_double()};
+   case variant::bool_type:
+      return schema::input_value{source.as_bool()};
+   case variant::string_type:
+      return schema::input_value{source.get_string()};
+   case variant::array_type: {
+      auto output = schema::input_value::array_type{};
+      output.reserve(source.get_array().size());
+      for (const auto& entry : source.get_array()) {
+         output.push_back(to_schema_input(entry));
+      }
+      return schema::input_value{std::move(output)};
+   }
+   case variant::object_type: {
+      auto output = schema::input_value::object_type{};
+      for (const auto& entry : source.get_object()) {
+         output.emplace(entry.key(), to_schema_input(entry.value()));
+      }
+      return schema::input_value{std::move(output)};
+   }
+   case variant::blob_type:
+      throw std::invalid_argument{"JSON schema records cannot contain blob values"};
+   }
+   throw std::invalid_argument{"unsupported JSON schema value"};
+}
+
+inline void append_schema_diagnostics(std::vector<schema::diagnostic>& output,
+                                      std::vector<schema::diagnostic> diagnostics) {
+   for (auto& entry : diagnostics) {
+      if (entry.code == "config.unknown") {
+         entry.code = "json.unknown";
+      } else if (entry.code == "config.missing") {
+         entry.code = "json.missing";
+      } else if (entry.code == "config.duplicate") {
+         entry.code = "json.duplicate";
+      } else if (entry.code == "config.type") {
+         entry.code = "json.type";
+      }
+      output.push_back(std::move(entry));
+   }
+}
+
 template <typename Variant, std::size_t Index = 0>
 void validate_variant_payload(std::size_t selected, const variant& payload, std::string_view path,
                               std::vector<schema::diagnostic>& diagnostics) {
@@ -243,6 +297,18 @@ void validate_variant_payload(std::size_t selected, const variant& payload, std:
          return;
       }
       validate_variant_payload<Variant, Index + 1>(selected, payload, path, diagnostics);
+   }
+}
+
+template <typename Variant, std::size_t Index = 0>
+void normalize_variant_payload(std::size_t selected, variant& payload, std::string_view path,
+                               std::vector<schema::diagnostic>& diagnostics) {
+   if constexpr (Index < std::variant_size_v<Variant>) {
+      if (selected == Index) {
+         normalize_exact<std::variant_alternative_t<Index, Variant>>(payload, path, diagnostics);
+         return;
+      }
+      normalize_variant_payload<Variant, Index + 1>(selected, payload, path, diagnostics);
    }
 }
 
@@ -435,6 +501,92 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
    }
 }
 
+template <typename T>
+void normalize_exact(variant& source, std::string_view path, std::vector<schema::diagnostic>& diagnostics) {
+   using value_type = clean_type<T>;
+
+   if constexpr (is_optional_v<value_type>) {
+      if (!source.is_null()) {
+         normalize_exact<typename optional_traits<value_type>::value_type>(source, path, diagnostics);
+      }
+   } else if constexpr (is_pointer_v<value_type>) {
+      if (!source.is_null()) {
+         normalize_exact<typename pointer_traits<value_type>::value_type>(source, path, diagnostics);
+      }
+   } else if constexpr (reflect::is_described_object_v<value_type>) {
+      if (source.is_string()) {
+         return;
+      }
+
+      const auto rules = schema::rules<value_type>::define();
+      if (!rules.fields().empty()) {
+         try {
+            const auto input = to_schema_input(source);
+            const auto* object = input.as_object();
+            if (!object) {
+               add_exact_error(diagnostics, std::string{path}, "json.type",
+                               "schema-bound record must be a JSON object");
+               return;
+            }
+            auto output = value_type{};
+            rules.apply_defaults(output);
+            auto nested = rules.decode_object(*object, path, output);
+            const auto has_errors = std::ranges::any_of(
+                nested, [](const schema::diagnostic& entry) { return entry.level == schema::severity::error; });
+            append_schema_diagnostics(diagnostics, std::move(nested));
+            if (!has_errors) {
+               source = variant{output};
+            }
+         } catch (const std::exception& error) {
+            add_exact_error(diagnostics, std::string{path}, "json.type", error.what());
+         }
+         return;
+      }
+
+      auto object = mutable_variant_object{source.get_object()};
+      reflect::for_each_member<value_type>([&](const char* name, auto member) {
+         const auto found = object.find(name);
+         if (found == object.end()) {
+            return;
+         }
+         using member_type = clean_type<decltype(std::declval<value_type>().*member)>;
+         normalize_exact<member_type>(found->value(), field_path(path, name), diagnostics);
+      });
+      source = variant{std::move(object)};
+   } else if constexpr (is_variant_v<value_type>) {
+      if (source.is_string()) {
+         return;
+      }
+      auto& elements = source.get_array();
+      normalize_variant_payload<value_type>(elements[0].as_uint64(), elements[1], element_path(path, 1U), diagnostics);
+   } else if constexpr (is_multi_index_v<value_type>) {
+      auto& elements = source.get_array();
+      for (std::size_t index = 0; index < elements.size(); ++index) {
+         normalize_exact<typename multi_index_traits<value_type>::value_type>(elements[index],
+                                                                              element_path(path, index), diagnostics);
+      }
+   } else if constexpr (is_sequence_v<value_type>) {
+      auto& elements = source.get_array();
+      for (std::size_t index = 0; index < elements.size(); ++index) {
+         normalize_exact<typename sequence_traits<value_type>::value_type>(elements[index], element_path(path, index),
+                                                                           diagnostics);
+      }
+   } else if constexpr (is_associative_v<value_type>) {
+      auto& elements = source.get_array();
+      for (std::size_t index = 0; index < elements.size(); ++index) {
+         auto& pair = elements[index].get_array();
+         normalize_exact<typename associative_traits<value_type>::key_type>(
+             pair[0], element_path(element_path(path, index), 0U), diagnostics);
+         normalize_exact<typename associative_traits<value_type>::mapped_type>(
+             pair[1], element_path(element_path(path, index), 1U), diagnostics);
+      }
+   } else if constexpr (is_pair_v<value_type>) {
+      auto& elements = source.get_array();
+      normalize_exact<typename pair_traits<value_type>::first_type>(elements[0], element_path(path, 0U), diagnostics);
+      normalize_exact<typename pair_traits<value_type>::second_type>(elements[1], element_path(path, 1U), diagnostics);
+   }
+}
+
 } // namespace forge::codec::json::detail
 
 export namespace forge::codec::json {
@@ -554,6 +706,10 @@ template <typename T> [[nodiscard]] read_result<T> read(std::string_view input, 
       if (!output.ok()) {
          return output;
       }
+      detail::normalize_exact<T>(parsed.value, {}, output.diagnostics);
+      if (!output.ok()) {
+         return output;
+      }
    }
 
    if constexpr (requires(const variant& source, T& target) { from_variant(source, target); }) {
@@ -658,6 +814,10 @@ template <typename T> [[nodiscard]] read_result<T> load(const std::filesystem::p
    rules.apply_defaults(output.value);
    if (options.described_records == described_record_policy::exact) {
       detail::validate_exact<T>(parsed.value, {}, output.diagnostics);
+      if (!output.ok()) {
+         return output;
+      }
+      detail::normalize_exact<T>(parsed.value, {}, output.diagnostics);
       if (!output.ok()) {
          return output;
       }
