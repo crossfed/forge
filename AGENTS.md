@@ -231,12 +231,18 @@ class service_node {
   registry. Generated guest C declarations, EOSIO headers, host skeletons and
   import manifests must derive from it.
 - Dual-target contract libraries declare their complete source and dependency
-  graph through `forge_add_contract_library`. The immutable Forge descriptor is
-  the only host/guest graph source; native CMake target properties are not a
-  serializable cross-toolchain protocol.
+  graph through `forge_add_contract_library` in every configuration that builds
+  them. Host and guest configurations compile the same physical sources
+  independently with their selected toolchains.
+- A product guest directory is a standalone CMake project and the source of
+  truth for its WASM target graph. A host helper may launch that project, but it
+  must not serialize or reconstruct downstream targets.
 - Do not recover contract dependencies from `LINK_LIBRARIES`,
   `INTERFACE_LINK_LIBRARIES`, `$<LINK_ONLY:...>` or CMake directory wrappers.
   Add files and scoped dependencies to the Forge declaration instead.
+- Do not reuse native archives, BMI or PCM files in the guest configuration.
+  Installed protocol packages expose source materialization for wasm32 and
+  native imported targets for host consumers.
 - Contract SDK C ABI support records are generated from templates under
   `guest/cmake/`; generated `.h` files never live in a guest library's source
   `include/forge` tree.

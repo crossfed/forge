@@ -18,7 +18,8 @@ This skill applies only to dual-target protocol libraries declared with
 
 ## Declaration
 
-Declare the complete source and dependency graph once:
+Declare the complete source and dependency graph in the library's own
+`CMakeLists.txt`:
 
 ```cmake
 forge_add_contract_library(
@@ -99,6 +100,30 @@ wrappers, or target-name conventions to reconstruct a guest graph.
 7. Verify the contract manifest contains the deterministic declared source
    graph and no absolute paths.
 
-The SDK is the owner of graph materialization. Product projects must not create
-compatibility modules, copy guest runtimes, invent a second serializer, or
-reimplement the contract test host.
+## Host And Guest Projects
+
+The library directory may be added to two independent CMake projects:
+
+```cmake
+# Native product project.
+add_subdirectory(libraries/chain/protocol)
+
+# Standalone guest project configured with ForgeContractToolchain.
+add_subdirectory(../libraries/chain/protocol chain/protocol)
+add_subdirectory(libraries/contract)
+forge_add_contract(product SOURCES entry.cpp LIBRARIES product_contract)
+```
+
+Both configurations compile the same physical protocol sources. They do not
+share objects, archives, BMI or PCM files. Guest-only implementation libraries
+follow this skill and `create-library`, but are added only by the guest project.
+
+`forge_add_contract()` is called only by the guest project. A native root may
+use `forge_add_contract_project()` as an optional launcher so VM tests can
+depend on the generated WASM, ABI and manifest. The launcher configures the same
+guest project and must not inspect or recreate its target graph.
+
+The SDK owns validation, ABI generation, attestation and package
+materialization. Product projects must not create compatibility modules, copy
+sources or guest runtimes, invent a second serializer, or reimplement the
+contract test host.
