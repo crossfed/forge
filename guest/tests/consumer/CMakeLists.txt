@@ -183,15 +183,22 @@ forge_add_contract(
    HEADERS multi_index_cases.hpp
 )
 
+foreach(_target IN ITEMS multiidx legacymidx midxerrors legmidxerr midxextend legmidxext)
+   get_target_property(_${_target}_abi "${_target}" FORGE_CONTRACT_ABI_FILE)
+endforeach()
+get_target_property(_hello_wasm hello FORGE_CONTRACT_WASM_FILE)
+get_target_property(_hello_abi hello FORGE_CONTRACT_ABI_FILE)
+get_target_property(_hello_manifest hello FORGE_CONTRACT_MANIFEST_FILE)
+
 add_custom_target(
    forge_contract_multi_index_fixtures ALL
    COMMAND
       "${Python3_EXECUTABLE}"
       "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/run_multi_index_fixtures.py"
       --mapping "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/multi_index_donor_mapping.json"
-      --abi-pair "${CMAKE_CURRENT_BINARY_DIR}/multiidx.abi" "${CMAKE_CURRENT_BINARY_DIR}/legacymidx.abi"
-      --abi-pair "${CMAKE_CURRENT_BINARY_DIR}/midxerrors.abi" "${CMAKE_CURRENT_BINARY_DIR}/legmidxerr.abi"
-      --abi-pair "${CMAKE_CURRENT_BINARY_DIR}/midxextend.abi" "${CMAKE_CURRENT_BINARY_DIR}/legmidxext.abi"
+      --abi-pair "${_multiidx_abi}" "${_legacymidx_abi}"
+      --abi-pair "${_midxerrors_abi}" "${_legmidxerr_abi}"
+      --abi-pair "${_midxextend_abi}" "${_legmidxext_abi}"
    DEPENDS multiidx legacymidx midxerrors legmidxerr midxextend legmidxext
    VERBATIM
 )
@@ -229,7 +236,6 @@ add_custom_target(
 )
 
 set(_tooling_output "${CMAKE_CURRENT_BINARY_DIR}/tooling")
-set(_tooling_build_dir "${CMAKE_CURRENT_BINARY_DIR}/hello.contract")
 add_custom_target(
    forge_contract_tooling_fixtures ALL
    COMMAND
@@ -240,7 +246,7 @@ add_custom_target(
       --sysroot "${ForgeContract_SYSROOT}"
       --include "${ForgeContract_DATA_DIR}/include"
       --modules "${ForgeContract_DATA_DIR}/modules"
-      --build-dir "${_tooling_build_dir}"
+      --build-dir "${CMAKE_CURRENT_BINARY_DIR}"
       --contract-graph "${CMAKE_CURRENT_BINARY_DIR}/hello.contract-graph.json"
       --fixtures "${CMAKE_CURRENT_SOURCE_DIR}/../tooling"
       --output "${_tooling_output}"
@@ -256,10 +262,10 @@ add_custom_target(
       --checker "${ForgeContract_CHECK}"
       --manifest-tool "${ForgeContract_MANIFEST}"
       --clang "${ForgeContract_CLANG}"
-      --wasm "${CMAKE_CURRENT_BINARY_DIR}/hello.wasm"
-      --abi "${CMAKE_CURRENT_BINARY_DIR}/hello.abi"
+      --wasm "${_hello_wasm}"
+      --abi "${_hello_abi}"
       --imports "${ForgeContract_DATA_DIR}/registry/intrinsics.json"
-      --manifest "${CMAKE_CURRENT_BINARY_DIR}/hello.contract.json"
+      --manifest "${_hello_manifest}"
       --source-graph "${CMAKE_CURRENT_BINARY_DIR}/hello.contract-graph.json"
       --output "${CMAKE_CURRENT_BINARY_DIR}/checker"
    DEPENDS hello

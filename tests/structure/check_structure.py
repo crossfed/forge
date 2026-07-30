@@ -280,6 +280,50 @@ def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
          f"{path.relative_to(root)}: macOS developer and release jobs must export the selected SDKROOT"
       )
 
+   lines = source.splitlines()
+
+   def configure_blocks(project: str) -> list[str]:
+      blocks = []
+      index = 0
+      marker = f"cmake -S {project} "
+      while index < len(lines):
+         if marker not in lines[index]:
+            index += 1
+            continue
+         block = [lines[index]]
+         while block[-1].rstrip().endswith("\\") and index + 1 < len(lines):
+            index += 1
+            block.append(lines[index])
+         blocks.append("\n".join(block))
+         index += 1
+      return blocks
+
+   consumer_blocks = configure_blocks("guest/tests/consumer")
+   if len(consumer_blocks) != 2 or any(
+      "-DCMAKE_TOOLCHAIN_FILE=" not in block or "-DCMAKE_BUILD_TYPE=Release" not in block
+      for block in consumer_blocks
+   ):
+      errors.append(
+         f"{path.relative_to(root)}: installed consumer builds must use ForgeContractToolchain in Release"
+      )
+
+   corpus_blocks = configure_blocks("guest/tests/corpus")
+   guest_corpus_blocks = [block for block in corpus_blocks if "-guest " in block.splitlines()[0]]
+   host_corpus_blocks = [block for block in corpus_blocks if "-host " in block.splitlines()[0]]
+   if len(guest_corpus_blocks) != 2 or any(
+      "-DCMAKE_TOOLCHAIN_FILE=" not in block or "-DCMAKE_BUILD_TYPE=Release" not in block
+      for block in guest_corpus_blocks
+   ):
+      errors.append(
+         f"{path.relative_to(root)}: compatibility contracts must build in direct guest projects"
+      )
+   if len(host_corpus_blocks) != 2 or any(
+      "-DFORGE_CONTRACT_CORPUS_GUEST_ARTIFACT_DIR=" not in block for block in host_corpus_blocks
+   ):
+      errors.append(
+         f"{path.relative_to(root)}: compatibility VM tests must consume an explicit completed guest build"
+      )
+
    recovery_contract = "-DFORGE_CONTRACT_TEST_RECOVERY_WASM="
    if source.count(recovery_contract) != 2:
       errors.append(

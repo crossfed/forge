@@ -5,13 +5,23 @@ project(ForgeContractCompatibilityCorpus LANGUAGES CXX)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(ForgeContract CONFIG REQUIRED)
-find_package(
-   Forge CONFIG REQUIRED
-   COMPONENTS chain_protocol contract_testing crypto_digest exceptions raw vm_wasm
-)
-find_package(Boost REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
+set(
+   _contracts
+   spring_eosio_boot
+   spring_eosio_token
+   spring_eosio_msig
+   spring_eosio_wrap
+   spring_eosio_system
+   spring_test_api
+   spring_test_api_db
+   spring_test_api_multi_index
+   eosio_bios
+   eosio_boot
+)
+
+if(FORGE_CONTRACT_GUEST)
 set(_spring "${CMAKE_CURRENT_SOURCE_DIR}/spring")
 set(_eosio "${CMAKE_CURRENT_SOURCE_DIR}/eosio")
 
@@ -160,19 +170,60 @@ forge_add_contract(
    HEADERS eosio.boot/eosio.boot.hpp
 )
 
-set(
-   _contracts
-   spring_eosio_boot
-   spring_eosio_token
-   spring_eosio_msig
-   spring_eosio_wrap
-   spring_eosio_system
-   spring_test_api
-   spring_test_api_db
-   spring_test_api_multi_index
-   eosio_bios
-   eosio_boot
+add_custom_target(
+   forge_contract_corpus_integrity ALL
+   COMMAND
+      "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/check.py"
+      integrity
+      --root "${CMAKE_CURRENT_SOURCE_DIR}"
+   COMMAND
+      "${Python3_EXECUTABLE}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/check.py"
+      matrix
+      --root "${CMAKE_CURRENT_SOURCE_DIR}"
+   VERBATIM
 )
+
+set(_contract_artifact_targets)
+foreach(_contract IN LISTS _contracts)
+   list(APPEND _contract_artifact_targets "${_contract}_artifacts")
+endforeach()
+add_custom_target(
+   forge_contract_corpus ALL
+   DEPENDS ${_contract_artifact_targets} forge_contract_corpus_integrity
+)
+else()
+find_package(
+   Forge CONFIG REQUIRED
+   COMPONENTS chain_protocol contract_testing crypto_digest exceptions raw vm_wasm
+)
+find_package(Boost REQUIRED)
+
+set(
+   FORGE_CONTRACT_CORPUS_GUEST_ARTIFACT_DIR
+   ""
+   CACHE PATH
+   "Directory containing completed Spring/EOSIO guest artifacts"
+)
+if(NOT IS_DIRECTORY "${FORGE_CONTRACT_CORPUS_GUEST_ARTIFACT_DIR}")
+   message(
+      FATAL_ERROR
+      "Host corpus validation requires "
+      "-DFORGE_CONTRACT_CORPUS_GUEST_ARTIFACT_DIR=<completed guest artifacts>"
+   )
+endif()
+foreach(_contract IN LISTS _contracts)
+   foreach(_extension IN ITEMS wasm abi contract.json)
+      if(NOT EXISTS "${FORGE_CONTRACT_CORPUS_GUEST_ARTIFACT_DIR}/${_contract}.${_extension}")
+         message(
+            FATAL_ERROR
+            "Guest corpus artifact is missing: "
+            "${FORGE_CONTRACT_CORPUS_GUEST_ARTIFACT_DIR}/${_contract}.${_extension}"
+         )
+      endif()
+   endforeach()
+endforeach()
 
 add_executable(forge_contract_corpus_tests e2e/contract_tests.cpp)
 target_link_libraries(
@@ -189,10 +240,9 @@ target_link_libraries(
 target_compile_definitions(
    forge_contract_corpus_tests
    PRIVATE
-      FORGE_CONTRACT_CORPUS_BUILD_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+      FORGE_CONTRACT_CORPUS_BUILD_DIR="${FORGE_CONTRACT_CORPUS_GUEST_ARTIFACT_DIR}"
       FORGE_CONTRACT_CORPUS_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
-add_dependencies(forge_contract_corpus_tests ${_contracts})
 
 enable_testing()
 add_test(
@@ -210,7 +260,7 @@ add_test(
       "${CMAKE_CURRENT_SOURCE_DIR}/check.py"
       abi
       --root "${CMAKE_CURRENT_SOURCE_DIR}"
-      --build-dir "${CMAKE_CURRENT_BINARY_DIR}"
+      --build-dir "${FORGE_CONTRACT_CORPUS_GUEST_ARTIFACT_DIR}"
 )
 add_test(
    NAME forge_contract_corpus_artifacts
@@ -219,7 +269,7 @@ add_test(
       "${CMAKE_CURRENT_SOURCE_DIR}/check.py"
       artifacts
       --root "${CMAKE_CURRENT_SOURCE_DIR}"
-      --build-dir "${CMAKE_CURRENT_BINARY_DIR}"
+      --build-dir "${FORGE_CONTRACT_CORPUS_GUEST_ARTIFACT_DIR}"
       --intrinsics "${ForgeContract_DATA_DIR}/registry/intrinsics.json"
 )
 add_test(NAME forge_contract_corpus_e2e COMMAND forge_contract_corpus_tests)
@@ -241,5 +291,6 @@ add_custom_target(
 
 add_custom_target(
    forge_contract_corpus ALL
-   DEPENDS ${_contracts} forge_contract_corpus_integrity forge_contract_corpus_tests
+   DEPENDS forge_contract_corpus_integrity forge_contract_corpus_tests
 )
+endif()
