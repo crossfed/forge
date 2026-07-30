@@ -337,6 +337,16 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
 
       const auto& object = source.get_object();
       const auto rules = schema::rules<value_type>::define();
+      if (!rules.fields().empty()) {
+         try {
+            const auto input = to_schema_input(source);
+            append_schema_diagnostics(diagnostics, rules.validate_exact_input(*input.as_object(), path));
+         } catch (const std::exception& error) {
+            add_exact_error(diagnostics, std::string{path}, "json.type", error.what());
+         }
+         return;
+      }
+
       auto known = std::set<std::string>{};
       for (const auto& field : rules.fields()) {
          known.emplace(field.name);
@@ -416,9 +426,17 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
       auto seen = value_type{};
       for (std::size_t index = 0; index < elements.size(); ++index) {
          const auto entry_path = element_path(path, index);
+         const auto diagnostic_count = diagnostics.size();
          validate_exact<typename multi_index_traits<value_type>::value_type>(elements[index], entry_path, diagnostics);
+         if (std::ranges::any_of(
+                 diagnostics.begin() + static_cast<std::ptrdiff_t>(diagnostic_count), diagnostics.end(),
+                 [](const schema::diagnostic& entry) { return entry.level == schema::severity::error; })) {
+            continue;
+         }
          try {
-            const auto value = elements[index].template as<typename multi_index_traits<value_type>::value_type>();
+            auto normalized = elements[index];
+            normalize_exact<typename multi_index_traits<value_type>::value_type>(normalized, entry_path, diagnostics);
+            const auto value = normalized.template as<typename multi_index_traits<value_type>::value_type>();
             const auto previous_size = seen.size();
             seen.insert(value);
             if (seen.size() == previous_size) {
@@ -439,16 +457,24 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
       auto seen = typename associative_traits<value_type>::seen_type{};
       for (std::size_t index = 0; index < elements.size(); ++index) {
          const auto entry_path = element_path(path, index);
+         const auto diagnostic_count = diagnostics.size();
          validate_exact<std::pair<typename associative_traits<value_type>::key_type,
                                   typename associative_traits<value_type>::mapped_type>>(elements[index], entry_path,
                                                                                          diagnostics);
+         if (std::ranges::any_of(
+                 diagnostics.begin() + static_cast<std::ptrdiff_t>(diagnostic_count), diagnostics.end(),
+                 [](const schema::diagnostic& entry) { return entry.level == schema::severity::error; })) {
+            continue;
+         }
          if constexpr (associative_traits<value_type>::unique) {
             if (!elements[index].is_array() || elements[index].get_array().size() != 2U) {
                continue;
             }
             try {
-               const auto key =
-                   elements[index].get_array()[0].template as<typename associative_traits<value_type>::key_type>();
+               auto normalized = elements[index].get_array()[0];
+               normalize_exact<typename associative_traits<value_type>::key_type>(
+                   normalized, element_path(entry_path, 0U), diagnostics);
+               const auto key = normalized.template as<typename associative_traits<value_type>::key_type>();
                if (!seen.insert(key).second) {
                   add_exact_error(diagnostics, element_path(entry_path, 0U), "json.duplicate",
                                   "duplicate key in unique associative container");
@@ -488,7 +514,10 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
          auto seen = typename unique_sequence_traits<value_type>::seen_type{};
          for (std::size_t index = 0; index < elements.size(); ++index) {
             try {
-               const auto value = elements[index].template as<typename sequence_traits<value_type>::value_type>();
+               auto normalized = elements[index];
+               normalize_exact<typename sequence_traits<value_type>::value_type>(normalized, element_path(path, index),
+                                                                                 diagnostics);
+               const auto value = normalized.template as<typename sequence_traits<value_type>::value_type>();
                if (!seen.insert(value).second) {
                   add_exact_error(diagnostics, element_path(path, index), "json.duplicate",
                                   "duplicate element in unique sequence");

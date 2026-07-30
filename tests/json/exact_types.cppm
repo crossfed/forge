@@ -6,6 +6,7 @@ module;
 #include <boost/multi_index/ordered_index.hpp>
 #include <boost/multi_index_container.hpp>
 
+#include <compare>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -28,6 +29,8 @@ struct exact_leaf {
 
 struct exact_alias_leaf {
    std::uint32_t bind_port = 0;
+
+   auto operator<=>(const exact_alias_leaf&) const = default;
 };
 
 struct exact_record {
@@ -45,6 +48,10 @@ struct exact_map_record {
 struct exact_pointer_record {
    std::shared_ptr<exact_alias_leaf> shared;
    std::unique_ptr<exact_alias_leaf> unique;
+};
+
+struct exact_schema_set_record {
+   std::set<exact_alias_leaf> values;
 };
 
 struct exact_set_record {
@@ -66,6 +73,7 @@ BOOST_DESCRIBE_STRUCT(exact_alias_leaf, (), (bind_port))
 BOOST_DESCRIBE_STRUCT(exact_record, (), (items, choice, optional))
 BOOST_DESCRIBE_STRUCT(exact_map_record, (), (values))
 BOOST_DESCRIBE_STRUCT(exact_pointer_record, (), (shared, unique))
+BOOST_DESCRIBE_STRUCT(exact_schema_set_record, (), (values))
 BOOST_DESCRIBE_STRUCT(exact_set_record, (), (ordered, unordered))
 BOOST_DESCRIBE_STRUCT(exact_multi_index_record, (), (values))
 

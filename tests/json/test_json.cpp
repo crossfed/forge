@@ -321,6 +321,27 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_nested_fields_and_var
    BOOST_REQUIRE(!unique_unknown.ok());
    BOOST_TEST(unique_unknown.diagnostics.front().code == "json.unknown");
    BOOST_TEST(unique_unknown.diagnostics.front().path == "unique.extra");
+
+   const auto duplicate_alias = forge::codec::json::read<forge_json_tests::exact_pointer_record>(
+       R"({"shared":{"bind-port":3,"port":4},"unique":{"bind-port":5}})", options);
+   BOOST_REQUIRE(!duplicate_alias.ok());
+   BOOST_TEST(duplicate_alias.diagnostics.front().code == "json.duplicate");
+   BOOST_TEST(duplicate_alias.diagnostics.front().path == "shared.port");
+
+   const auto schema_set = forge::codec::json::read<forge_json_tests::exact_schema_set_record>(
+       R"({"values":[{"bind-port":1},{"port":2}]})", options);
+   BOOST_REQUIRE(schema_set.ok());
+   BOOST_REQUIRE_EQUAL(schema_set.value.values.size(), 2U);
+   auto set_entry = schema_set.value.values.begin();
+   BOOST_TEST(set_entry->bind_port == 1U);
+   ++set_entry;
+   BOOST_TEST(set_entry->bind_port == 2U);
+
+   const auto schema_set_duplicate = forge::codec::json::read<forge_json_tests::exact_schema_set_record>(
+       R"({"values":[{"bind-port":1},{"port":1}]})", options);
+   BOOST_REQUIRE(!schema_set_duplicate.ok());
+   BOOST_TEST(schema_set_duplicate.diagnostics.front().code == "json.duplicate");
+   BOOST_TEST(schema_set_duplicate.diagnostics.front().path == "values[1]");
 }
 
 BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_schema_names_and_associative_entries) {
