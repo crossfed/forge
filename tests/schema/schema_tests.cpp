@@ -43,6 +43,10 @@ enum class path_policy {
 
 BOOST_DESCRIBE_ENUM(path_policy, direct_only, direct_preferred)
 
+struct policy_list_config {
+   std::vector<path_policy> policies;
+};
+
 } // namespace forge_schema_tests
 
 BOOST_DESCRIBE_STRUCT(forge_schema_tests::http_config, (), (bind_port, bind_host, tls_enabled, tags, token))
@@ -50,6 +54,7 @@ BOOST_DESCRIBE_STRUCT(forge_schema_tests::optional_config, (), (token, port))
 BOOST_DESCRIBE_STRUCT(forge_schema_tests::optional_default_config, (), (wrapped_port, raw_port))
 BOOST_DESCRIBE_STRUCT(forge_schema_tests::optional_list_item, (), (id))
 BOOST_DESCRIBE_STRUCT(forge_schema_tests::optional_list_config, (), (tags, items))
+BOOST_DESCRIBE_STRUCT(forge_schema_tests::policy_list_config, (), (policies))
 
 import forge.schema.diagnostic;
 import forge.schema.value_kind;
@@ -121,6 +126,14 @@ template <> struct forge::schema::rules<forge_schema_tests::digest_list_config> 
    [[nodiscard]] static forge::schema::object_schema<forge_schema_tests::digest_list_config> define() {
       auto schema = forge::schema::object<forge_schema_tests::digest_list_config>();
       static_cast<void>(schema.field<&forge_schema_tests::digest_list_config::values>("values"));
+      return schema;
+   }
+};
+
+template <> struct forge::schema::rules<forge_schema_tests::policy_list_config> {
+   [[nodiscard]] static forge::schema::object_schema<forge_schema_tests::policy_list_config> define() {
+      auto schema = forge::schema::object<forge_schema_tests::policy_list_config>();
+      static_cast<void>(schema.field<&forge_schema_tests::policy_list_config::policies>("policies"));
       return schema;
    }
 };
@@ -366,6 +379,27 @@ BOOST_AUTO_TEST_CASE(schema_exact_enum_validation_accepts_canonical_config_names
    BOOST_REQUIRE_EQUAL(noncanonical.size(), 1U);
    BOOST_TEST(noncanonical.front().code == "config.type");
    BOOST_TEST(noncanonical.front().path == "path-policy");
+}
+
+BOOST_AUTO_TEST_CASE(schema_enum_lists_decode_canonical_config_names) {
+   const auto schema = forge::schema::rules<forge_schema_tests::policy_list_config>::define();
+   const auto input = forge::schema::input_value::object_type{
+       {"policies",
+        forge::schema::input_value::array_type{
+            forge::schema::input_value{std::string{"direct-only"}},
+            forge::schema::input_value{std::string{"direct-preferred"}},
+        }},
+   };
+   const auto exact = schema.validate_exact_input(input, "config");
+   BOOST_TEST(exact.empty());
+
+   auto decoded = forge_schema_tests::policy_list_config{};
+   const auto diagnostics = schema.decode_object(input, "config", decoded);
+   BOOST_TEST(diagnostics.empty());
+   BOOST_REQUIRE_EQUAL(decoded.policies.size(), 2U);
+   BOOST_TEST(static_cast<int>(decoded.policies[0]) == static_cast<int>(forge_schema_tests::path_policy::direct_only));
+   BOOST_TEST(static_cast<int>(decoded.policies[1]) ==
+              static_cast<int>(forge_schema_tests::path_policy::direct_preferred));
 }
 
 BOOST_AUTO_TEST_CASE(schema_exact_lists_require_canonical_string_scalar_spelling) {

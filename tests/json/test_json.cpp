@@ -41,12 +41,17 @@ struct policy_config {
    path_policy policy = path_policy::direct_only;
 };
 
+struct policy_list_config {
+   std::vector<path_policy> policies;
+};
+
 } // namespace forge_json_tests
 
 BOOST_DESCRIBE_STRUCT(forge_json_tests::http_config, (), (bind_port, bind_host, tls_enabled, tags))
 BOOST_DESCRIBE_STRUCT(forge_json_tests::named_tag, (), (value))
 BOOST_DESCRIBE_STRUCT(forge_json_tests::tag_config, (), (tags))
 BOOST_DESCRIBE_STRUCT(forge_json_tests::policy_config, (), (policy))
+BOOST_DESCRIBE_STRUCT(forge_json_tests::policy_list_config, (), (policies))
 
 import forge.config.core.key_path;
 import forge.config.core.value;
@@ -104,6 +109,14 @@ template <> struct forge::schema::rules<forge_json_tests::policy_config> {
    [[nodiscard]] static forge::schema::object_schema<forge_json_tests::policy_config> define() {
       auto schema = forge::schema::object<forge_json_tests::policy_config>();
       static_cast<void>(schema.field<&forge_json_tests::policy_config::policy>("path-policy"));
+      return schema;
+   }
+};
+
+template <> struct forge::schema::rules<forge_json_tests::policy_list_config> {
+   [[nodiscard]] static forge::schema::object_schema<forge_json_tests::policy_list_config> define() {
+      auto schema = forge::schema::object<forge_json_tests::policy_list_config>();
+      static_cast<void>(schema.field<&forge_json_tests::policy_list_config::policies>("policies"));
       return schema;
    }
 };
@@ -627,6 +640,26 @@ BOOST_AUTO_TEST_CASE(json_exact_schema_enums_require_canonical_config_names) {
    BOOST_REQUIRE(!noncanonical.ok());
    BOOST_TEST(noncanonical.diagnostics.front().code == "json.type");
    BOOST_TEST(noncanonical.diagnostics.front().path == "path-policy");
+}
+
+BOOST_AUTO_TEST_CASE(json_exact_schema_enum_lists_decode_canonical_config_names) {
+   const auto options = forge::codec::json::read_options{
+       .described_records = forge::codec::json::described_record_policy::exact,
+   };
+
+   const auto canonical = forge::codec::json::read<forge_json_tests::policy_list_config>(
+       R"({"policies":["direct-only","direct-preferred"]})", options);
+   BOOST_REQUIRE(canonical.ok());
+   BOOST_REQUIRE_EQUAL(canonical.value.policies.size(), 2U);
+   BOOST_TEST(static_cast<int>(canonical.value.policies[0]) ==
+              static_cast<int>(forge_json_tests::path_policy::direct_only));
+   BOOST_TEST(static_cast<int>(canonical.value.policies[1]) ==
+              static_cast<int>(forge_json_tests::path_policy::direct_preferred));
+
+   const auto numeric = forge::codec::json::read<forge_json_tests::policy_list_config>(R"({"policies":[0]})", options);
+   BOOST_REQUIRE(!numeric.ok());
+   BOOST_TEST(numeric.diagnostics.front().code == "json.type");
+   BOOST_TEST(numeric.diagnostics.front().path == "policies[0]");
 }
 
 BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_chrono_scalar_contracts) {

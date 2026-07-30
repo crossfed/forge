@@ -869,23 +869,6 @@ template <typename T>
       if (const auto* value = std::get_if<std::string>(&input.storage)) {
          return *value;
       }
-   } else if constexpr (std::is_enum_v<clean_type>) {
-      if (const auto* text = std::get_if<std::string>(&input.storage)) {
-         auto parsed = clean_type{};
-         if (enum_from_string(*text, parsed)) {
-            return parsed;
-         }
-         diagnostics.push_back(make_path_error(std::string{path}, "config.enum", "unknown enum value"));
-         return {};
-      }
-      if (const auto* value = std::get_if<std::int64_t>(&input.storage)) {
-         auto parsed = clean_type{};
-         if (enum_from_int(*value, parsed)) {
-            return parsed;
-         }
-         diagnostics.push_back(make_path_error(std::string{path}, "config.enum", "unknown enum value"));
-         return {};
-      }
    } else if constexpr (std::same_as<clean_type, std::vector<std::string>>) {
       if (const auto* values = input.as_array()) {
          auto output = std::vector<std::string>{};
@@ -907,7 +890,7 @@ template <typename T>
          for (std::size_t i = 0; i < values->size(); ++i) {
             auto parsed = enum_type{};
             if (const auto* text = std::get_if<std::string>(&(*values)[i].storage)) {
-               if (enum_from_string(*text, parsed)) {
+               if (enum_from_config_string(*text, parsed)) {
                   output.push_back(parsed);
                   continue;
                }
