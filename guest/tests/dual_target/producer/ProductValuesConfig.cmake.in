@@ -1,0 +1,12 @@
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+
+find_dependency(ForgeContract CONFIG)
+if(NOT FORGE_CONTRACT_GUEST)
+   find_dependency(Forge CONFIG COMPONENTS chain_protocol)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/ProductValuesContract.cmake")
+
+check_required_components(ProductValues)

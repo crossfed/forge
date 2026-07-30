@@ -20,6 +20,457 @@ set(
    FORGE_CONTRACT_INSTALL_PUBLIC_HEADER_PATHS
 )
 
+function(_forge_contract_sealed_target_properties target output)
+   set(
+      _properties
+      SOURCES
+      INTERFACE_SOURCES
+      LINK_LIBRARIES
+      INTERFACE_LINK_LIBRARIES
+      INCLUDE_DIRECTORIES
+      INTERFACE_INCLUDE_DIRECTORIES
+      COMPILE_DEFINITIONS
+      INTERFACE_COMPILE_DEFINITIONS
+      COMPILE_FEATURES
+      INTERFACE_COMPILE_FEATURES
+      COMPILE_FLAGS
+      COMPILE_OPTIONS
+      INTERFACE_COMPILE_OPTIONS
+      COMPILE_WARNING_AS_ERROR
+      LINK_DIRECTORIES
+      INTERFACE_LINK_DIRECTORIES
+      INTERFACE_LINK_DEPENDS
+      LINK_FLAGS
+      LINK_OPTIONS
+      INTERFACE_LINK_OPTIONS
+      INTERFACE_LINK_LIBRARIES_DIRECT
+      INTERFACE_LINK_LIBRARIES_DIRECT_EXCLUDE
+      INTERFACE_POSITION_INDEPENDENT_CODE
+      INTERFACE_SYSTEM_INCLUDE_DIRECTORIES
+      INTERFACE_HEADER_SETS_TO_VERIFY
+      LINK_DEPENDS
+      LINK_DEPENDS_NO_SHARED
+      LINK_INTERFACE_LIBRARIES
+      LINK_INTERFACE_MULTIPLICITY
+      LINK_LIBRARIES_ONLY_TARGETS
+      LINK_LIBRARIES_STRATEGY
+      LINK_LIBRARY_OVERRIDE
+      LINK_SEARCH_END_STATIC
+      LINK_SEARCH_START_STATIC
+      LINK_WHAT_YOU_USE
+      OPTIMIZE_DEPENDENCIES
+      TRANSITIVE_COMPILE_PROPERTIES
+      TRANSITIVE_LINK_PROPERTIES
+      COMPATIBLE_INTERFACE_BOOL
+      COMPATIBLE_INTERFACE_NUMBER_MAX
+      COMPATIBLE_INTERFACE_NUMBER_MIN
+      COMPATIBLE_INTERFACE_STRING
+      PRECOMPILE_HEADERS
+      INTERFACE_PRECOMPILE_HEADERS
+      PRECOMPILE_HEADERS_REUSE_FROM
+      MANUALLY_ADDED_DEPENDENCIES
+      CXX_STANDARD
+      CXX_STANDARD_REQUIRED
+      CXX_EXTENSIONS
+      CXX_MODULE_STD
+      CXX_SCAN_FOR_MODULES
+      POSITION_INDEPENDENT_CODE
+      CXX_MODULE_SETS
+      INTERFACE_CXX_MODULE_SETS
+      CXX_MODULE_SET_forge_contract_modules
+      CXX_MODULE_DIRS_forge_contract_modules
+      HEADER_SETS
+      INTERFACE_HEADER_SETS
+      HEADER_SET_forge_contract_public_headers
+      HEADER_DIRS_forge_contract_public_headers
+      OUTPUT_NAME
+      EXPORT_NAME
+      EXPORT_PROPERTIES
+      EXPORT_NO_SYSTEM
+      NO_SYSTEM_FROM_IMPORTED
+      SYSTEM
+      FORGE_CONTRACT_BUILD_SOURCE_ROOT
+      FORGE_CONTRACT_DESCRIPTOR_SCHEMA
+      FORGE_CONTRACT_LIBRARY
+      FORGE_CONTRACT_LIBRARY_ID
+      FORGE_CONTRACT_MODULE_BASE_DIRS
+      FORGE_CONTRACT_MODULE_SOURCES
+      FORGE_CONTRACT_SOURCES
+      FORGE_CONTRACT_PUBLIC_HEADERS
+      FORGE_CONTRACT_PRIVATE_HEADERS
+      FORGE_CONTRACT_PUBLIC_LIBRARY_IDS
+      FORGE_CONTRACT_PRIVATE_LIBRARY_IDS
+      FORGE_CONTRACT_PUBLIC_COMPONENT_IDS
+      FORGE_CONTRACT_PRIVATE_COMPONENT_IDS
+      FORGE_CONTRACT_PUBLIC_LIBRARY_TARGETS
+      FORGE_CONTRACT_PRIVATE_LIBRARY_TARGETS
+      FORGE_CONTRACT_INSTALL_MODULE_ROOT_RELATIVE
+      FORGE_CONTRACT_INSTALL_SOURCE_ROOT_RELATIVE
+      FORGE_CONTRACT_INSTALL_MODULE_PATHS
+      FORGE_CONTRACT_INSTALL_PUBLIC_HEADER_PATHS
+      FORGE_CONTRACT_INSTALL_MODULE_DESTINATION
+      FORGE_CONTRACT_INSTALL_SOURCE_DESTINATION
+   )
+   set(
+      _build_configurations
+      ${CMAKE_BUILD_TYPE}
+      ${CMAKE_CONFIGURATION_TYPES}
+      DEBUG
+      RELEASE
+      RELWITHDEBINFO
+      MINSIZEREL
+   )
+   list(REMOVE_DUPLICATES _build_configurations)
+   foreach(_configuration IN LISTS _build_configurations)
+      string(TOUPPER "${_configuration}" _configuration)
+      list(
+         APPEND _properties
+         "COMPILE_DEFINITIONS_${_configuration}"
+         "LINK_FLAGS_${_configuration}"
+         "LINK_INTERFACE_LIBRARIES_${_configuration}"
+         "LINK_INTERFACE_MULTIPLICITY_${_configuration}"
+      )
+   endforeach()
+   get_target_property(_imported "${target}" IMPORTED)
+   if(_imported)
+      list(
+         APPEND _properties
+         IMPORTED_CONFIGURATIONS
+         IMPORTED_CXX_MODULES_COMPILE_DEFINITIONS
+         IMPORTED_CXX_MODULES_COMPILE_FEATURES
+         IMPORTED_CXX_MODULES_COMPILE_OPTIONS
+         IMPORTED_CXX_MODULES_INCLUDE_DIRECTORIES
+         IMPORTED_CXX_MODULES_LINK_LIBRARIES
+         IMPORTED_IMPLIB
+         IMPORTED_LIBNAME
+         IMPORTED_LINK_DEPENDENT_LIBRARIES
+         IMPORTED_LINK_INTERFACE_LANGUAGES
+         IMPORTED_LINK_INTERFACE_LIBRARIES
+         IMPORTED_LINK_INTERFACE_MULTIPLICITY
+         IMPORTED_LOCATION
+         IMPORTED_NO_SONAME
+         IMPORTED_NO_SYSTEM
+         IMPORTED_OBJECTS
+         IMPORTED_SONAME
+      )
+      get_target_property(_configurations "${target}" IMPORTED_CONFIGURATIONS)
+      if(_configurations STREQUAL "_configurations-NOTFOUND")
+         set(_configurations)
+      endif()
+      list(APPEND _configurations ${_build_configurations})
+      list(REMOVE_DUPLICATES _configurations)
+      foreach(_configuration IN LISTS _configurations)
+         string(TOUPPER "${_configuration}" _configuration)
+         list(
+            APPEND _properties
+            "IMPORTED_IMPLIB_${_configuration}"
+            "IMPORTED_LIBNAME_${_configuration}"
+            "IMPORTED_LINK_DEPENDENT_LIBRARIES_${_configuration}"
+            "IMPORTED_LINK_INTERFACE_LANGUAGES_${_configuration}"
+            "IMPORTED_LINK_INTERFACE_LIBRARIES_${_configuration}"
+            "IMPORTED_LINK_INTERFACE_MULTIPLICITY_${_configuration}"
+            "IMPORTED_LOCATION_${_configuration}"
+            "IMPORTED_NO_SONAME_${_configuration}"
+            "IMPORTED_OBJECTS_${_configuration}"
+            "IMPORTED_SONAME_${_configuration}"
+            "MAP_IMPORTED_CONFIG_${_configuration}"
+         )
+      endforeach()
+   endif()
+   set(${output} "${_properties}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_sealed_source_properties output)
+   set(
+      _properties
+      AUTORCC_OPTIONS
+      AUTOUIC_OPTIONS
+      COMPILE_DEFINITIONS
+      COMPILE_FLAGS
+      COMPILE_OPTIONS
+      CXX_SCAN_FOR_MODULES
+      EXTERNAL_OBJECT
+      GENERATED
+      HEADER_FILE_ONLY
+      INCLUDE_DIRECTORIES
+      KEEP_EXTENSION
+      LANGUAGE
+      MACOSX_PACKAGE_LOCATION
+      OBJECT_DEPENDS
+      OBJECT_OUTPUTS
+      SKIP_AUTOGEN
+      SKIP_AUTOMOC
+      SKIP_AUTORCC
+      SKIP_AUTOUIC
+      SKIP_LINTING
+      SKIP_PRECOMPILE_HEADERS
+      SKIP_UNITY_BUILD_INCLUSION
+      SYMBOLIC
+      UNITY_GROUP
+      VS_COPY_TO_OUT_DIR
+      VS_DEPLOYMENT_CONTENT
+      VS_DEPLOYMENT_LOCATION
+      VS_INCLUDE_IN_VSIX
+      VS_RESOURCE_GENERATOR
+      VS_SETTINGS
+      VS_TOOL_OVERRIDE
+      VS_XAML_TYPE
+      XCODE_EXPLICIT_FILE_TYPE
+      XCODE_FILE_ATTRIBUTES
+      XCODE_LAST_KNOWN_FILE_TYPE
+   )
+   set(
+      _build_configurations
+      ${CMAKE_BUILD_TYPE}
+      ${CMAKE_CONFIGURATION_TYPES}
+      DEBUG
+      RELEASE
+      RELWITHDEBINFO
+      MINSIZEREL
+   )
+   list(REMOVE_DUPLICATES _build_configurations)
+   foreach(_configuration IN LISTS _build_configurations)
+      string(TOUPPER "${_configuration}" _configuration)
+      list(APPEND _properties "COMPILE_DEFINITIONS_${_configuration}")
+   endforeach()
+   set(${output} "${_properties}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_imported_location target output)
+   get_target_property(_location "${target}" IMPORTED_LOCATION)
+   if(NOT _location)
+      get_target_property(_configurations "${target}" IMPORTED_CONFIGURATIONS)
+      foreach(_configuration IN LISTS _configurations)
+         string(TOUPPER "${_configuration}" _upper)
+         get_target_property(_candidate "${target}" "IMPORTED_LOCATION_${_upper}")
+         if(_candidate)
+            set(_location "${_candidate}")
+            break()
+         endif()
+      endforeach()
+   endif()
+   if(NOT _location)
+      message(FATAL_ERROR "imported contract library has no archive location: ${target}")
+   endif()
+   set(${output} "${_location}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_declared_source_paths target output)
+   get_target_property(_source_root "${target}" FORGE_CONTRACT_BUILD_SOURCE_ROOT)
+   set(_sources)
+   if(_source_root AND NOT _source_root STREQUAL "_source_root-NOTFOUND")
+      foreach(
+         _property
+         IN ITEMS
+            FORGE_CONTRACT_MODULE_SOURCES
+            FORGE_CONTRACT_SOURCES
+            FORGE_CONTRACT_PUBLIC_HEADERS
+            FORGE_CONTRACT_PRIVATE_HEADERS
+      )
+         get_target_property(_logical_paths "${target}" "${_property}")
+         if(_logical_paths STREQUAL "_logical_paths-NOTFOUND")
+            set(_logical_paths)
+         endif()
+         foreach(_logical_path IN LISTS _logical_paths)
+            list(APPEND _sources "${_source_root}/${_logical_path}")
+         endforeach()
+      endforeach()
+   else()
+      get_target_property(_imported "${target}" IMPORTED)
+      if(NOT _imported)
+         set(${output} "" PARENT_SCOPE)
+         return()
+      endif()
+      _forge_contract_imported_location("${target}" _location)
+      get_filename_component(_library_directory "${_location}" DIRECTORY)
+      get_target_property(
+         _module_root_relative "${target}" FORGE_CONTRACT_INSTALL_MODULE_ROOT_RELATIVE
+      )
+      get_target_property(
+         _source_root_relative "${target}" FORGE_CONTRACT_INSTALL_SOURCE_ROOT_RELATIVE
+      )
+      if(NOT _module_root_relative OR _module_root_relative STREQUAL "_module_root_relative-NOTFOUND")
+         message(FATAL_ERROR "imported contract library has no module install root: ${target}")
+      endif()
+      if(NOT _source_root_relative OR _source_root_relative STREQUAL "_source_root_relative-NOTFOUND")
+         message(FATAL_ERROR "imported contract library has no source install root: ${target}")
+      endif()
+      get_filename_component(
+         _installed_module_root "${_library_directory}/${_module_root_relative}" ABSOLUTE
+      )
+      get_filename_component(
+         _installed_source_root "${_library_directory}/${_source_root_relative}" ABSOLUTE
+      )
+      get_target_property(_module_paths "${target}" FORGE_CONTRACT_INSTALL_MODULE_PATHS)
+      get_target_property(
+         _public_header_paths "${target}" FORGE_CONTRACT_INSTALL_PUBLIC_HEADER_PATHS
+      )
+      if(_module_paths STREQUAL "_module_paths-NOTFOUND")
+         set(_module_paths)
+      endif()
+      if(_public_header_paths STREQUAL "_public_header_paths-NOTFOUND")
+         set(_public_header_paths)
+      endif()
+      foreach(_logical_path IN LISTS _module_paths _public_header_paths)
+         list(APPEND _sources "${_installed_module_root}/${_logical_path}")
+      endforeach()
+      foreach(_property IN ITEMS FORGE_CONTRACT_SOURCES FORGE_CONTRACT_PRIVATE_HEADERS)
+         get_target_property(_logical_paths "${target}" "${_property}")
+         if(_logical_paths STREQUAL "_logical_paths-NOTFOUND")
+            set(_logical_paths)
+         endif()
+         foreach(_logical_path IN LISTS _logical_paths)
+            list(APPEND _sources "${_installed_source_root}/${_logical_path}")
+         endforeach()
+      endforeach()
+   endif()
+   list(REMOVE_DUPLICATES _sources)
+   set(${output} "${_sources}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_assert_sealed_sources target)
+   _forge_contract_declared_source_paths("${target}" _sources)
+   _forge_contract_sealed_source_properties(_properties)
+   foreach(_source IN LISTS _sources)
+      foreach(_property IN LISTS _properties)
+         get_property(
+            _is_set SOURCE "${_source}" TARGET_DIRECTORY "${target}"
+            PROPERTY "${_property}" SET
+         )
+         if(NOT _is_set)
+            continue()
+         endif()
+         get_property(
+            _value SOURCE "${_source}" TARGET_DIRECTORY "${target}"
+            PROPERTY "${_property}"
+         )
+         if(_property STREQUAL "GENERATED" AND NOT _value)
+            continue()
+         endif()
+         if(_property STREQUAL "LANGUAGE" AND (NOT _value OR _value STREQUAL "CXX"))
+            continue()
+         endif()
+         if(
+            _property STREQUAL "OBJECT_DEPENDS"
+            AND FORGE_CONTRACT_GUEST
+            AND "${_value}" STREQUAL "${ForgeContract_ATTR_PLUGIN}"
+         )
+            continue()
+         endif()
+         message(
+            FATAL_ERROR
+            "Forge Contract library source ${_source} uses unsupported source property: "
+            "${_property}; declare the input through forge_add_contract_library instead"
+         )
+      endforeach()
+   endforeach()
+endfunction()
+
+function(_forge_contract_assert_sealed_target target)
+   string(SHA256 _target_key "${target}")
+   _forge_contract_sealed_target_properties("${target}" _properties)
+   foreach(_property IN LISTS _properties)
+      get_property(
+         _expected_set GLOBAL
+         PROPERTY "FORGE_CONTRACT_SEALED_TARGET_${_target_key}_${_property}_SET"
+      )
+      get_property(_actual_set TARGET "${target}" PROPERTY "${_property}" SET)
+      if(NOT "${_actual_set}" STREQUAL "${_expected_set}")
+         message(
+            FATAL_ERROR
+            "Forge Contract library target ${target} was modified after descriptor "
+            "declaration: ${_property}"
+         )
+      endif()
+      if(_actual_set)
+         get_property(
+            _expected GLOBAL
+            PROPERTY "FORGE_CONTRACT_SEALED_TARGET_${_target_key}_${_property}"
+         )
+         get_property(_actual TARGET "${target}" PROPERTY "${_property}")
+         if(NOT "${_actual}" STREQUAL "${_expected}")
+            message(
+               FATAL_ERROR
+               "Forge Contract library target ${target} was modified after descriptor "
+               "declaration: ${_property}"
+            )
+         endif()
+      endif()
+   endforeach()
+   _forge_contract_assert_sealed_sources("${target}")
+endfunction()
+
+function(_forge_contract_assert_directory_sealed_targets)
+   cmake_language(DEFER GET_CALL_IDS _remaining_calls)
+   list(FILTER _remaining_calls EXCLUDE REGEX "^forge_contract_assert_sealed_targets$")
+   if(_remaining_calls)
+      cmake_language(
+         DEFER
+         ID forge_contract_assert_sealed_targets
+         CALL _forge_contract_assert_directory_sealed_targets
+      )
+      return()
+   endif()
+   get_property(_targets DIRECTORY PROPERTY FORGE_CONTRACT_SEALED_TARGETS)
+   foreach(_target IN LISTS _targets)
+      _forge_contract_assert_sealed_target("${_target}")
+   endforeach()
+endfunction()
+
+function(_forge_contract_schedule_sealed_target_check target)
+   get_property(_targets DIRECTORY PROPERTY FORGE_CONTRACT_SEALED_TARGETS)
+   if(NOT target IN_LIST _targets)
+      set_property(DIRECTORY APPEND PROPERTY FORGE_CONTRACT_SEALED_TARGETS "${target}")
+   endif()
+   get_property(_scheduled DIRECTORY PROPERTY FORGE_CONTRACT_SEALED_TARGET_CHECK_SCHEDULED)
+   if(_scheduled)
+      return()
+   endif()
+   set_property(DIRECTORY PROPERTY FORGE_CONTRACT_SEALED_TARGET_CHECK_SCHEDULED TRUE)
+   cmake_language(
+      DEFER DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+      ID forge_contract_assert_sealed_targets
+      CALL _forge_contract_assert_directory_sealed_targets
+   )
+endfunction()
+
+function(_forge_contract_require_sealed_target target)
+   get_property(_targets GLOBAL PROPERTY FORGE_CONTRACT_SEALED_TARGETS)
+   if(NOT target IN_LIST _targets)
+      message(
+         FATAL_ERROR
+         "imported Forge Contract library target ${target} was not registered by its package config"
+      )
+   endif()
+   _forge_contract_assert_sealed_target("${target}")
+   _forge_contract_schedule_sealed_target_check("${target}")
+endfunction()
+
+function(_forge_contract_seal_target target)
+   string(SHA256 _target_key "${target}")
+   get_property(_targets GLOBAL PROPERTY FORGE_CONTRACT_SEALED_TARGETS)
+   if(NOT target IN_LIST _targets)
+      set_property(GLOBAL APPEND PROPERTY FORGE_CONTRACT_SEALED_TARGETS "${target}")
+   endif()
+   _forge_contract_sealed_target_properties("${target}" _properties)
+   foreach(_property IN LISTS _properties)
+      get_property(_is_set TARGET "${target}" PROPERTY "${_property}" SET)
+      set_property(
+         GLOBAL PROPERTY
+         "FORGE_CONTRACT_SEALED_TARGET_${_target_key}_${_property}_SET" "${_is_set}"
+      )
+      if(_is_set)
+         get_property(_value TARGET "${target}" PROPERTY "${_property}")
+         set_property(
+            GLOBAL PROPERTY
+            "FORGE_CONTRACT_SEALED_TARGET_${_target_key}_${_property}" "${_value}"
+         )
+      endif()
+   endforeach()
+   _forge_contract_assert_sealed_sources("${target}")
+   _forge_contract_schedule_sealed_target_check("${target}")
+endfunction()
+
 function(_forge_contract_resolve_target input output)
    if(NOT TARGET "${input}")
       message(FATAL_ERROR "unknown Contract SDK dependency target: ${input}")
@@ -298,6 +749,7 @@ function(_forge_contract_register_library_target target)
    if(NOT _id)
       message(FATAL_ERROR "contract library target has no stable ID: ${target}")
    endif()
+   _forge_contract_require_sealed_target("${target}")
    _forge_contract_id_key("${_id}" _key)
    get_property(_component GLOBAL PROPERTY "FORGE_CONTRACT_COMPONENT_TARGET_${_key}")
    if(_component)
@@ -325,59 +777,43 @@ function(forge_register_contract_library_targets)
             "Forge Contract library target: ${_input}"
          )
       endif()
+      get_property(_sealed GLOBAL PROPERTY FORGE_CONTRACT_SEALED_TARGETS)
+      if(_target IN_LIST _sealed)
+         _forge_contract_assert_sealed_target("${_target}")
+      else()
+         _forge_contract_seal_target("${_target}")
+      endif()
       _forge_contract_register_library_target("${_target}")
    endforeach()
 endfunction()
 
-function(_forge_contract_package_targets_materialized output)
+function(_forge_contract_package_target_materialized output)
    cmake_parse_arguments(
       ARG
       ""
-      "PACKAGE"
-      "TARGETS;IDS"
+      "PACKAGE;TARGET;ID"
+      ""
       ${ARGN}
    )
-   if(ARG_UNPARSED_ARGUMENTS OR NOT ARG_PACKAGE OR NOT ARG_TARGETS OR NOT ARG_IDS)
+   if(ARG_UNPARSED_ARGUMENTS OR NOT ARG_PACKAGE OR NOT ARG_TARGET OR NOT ARG_ID)
       message(FATAL_ERROR "invalid installed Forge Contract package descriptor")
    endif()
-
-   list(LENGTH ARG_TARGETS _target_count)
-   list(LENGTH ARG_IDS _id_count)
-   if(NOT _target_count EQUAL _id_count)
-      message(FATAL_ERROR "installed Forge Contract package has mismatched target metadata: ${ARG_PACKAGE}")
-   endif()
-
-   set(_existing_count 0)
-   foreach(_target IN LISTS ARG_TARGETS)
-      if(TARGET "${_target}")
-         math(EXPR _existing_count "${_existing_count} + 1")
-      endif()
-   endforeach()
-   if(_existing_count EQUAL 0)
+   if(NOT TARGET "${ARG_TARGET}")
       set(${output} FALSE PARENT_SCOPE)
       return()
    endif()
-   if(NOT _existing_count EQUAL _target_count)
-      message(FATAL_ERROR "installed Forge Contract package is only partially materialized: ${ARG_PACKAGE}")
+
+   _forge_contract_resolve_target("${ARG_TARGET}" _target)
+   get_target_property(_contract_library "${_target}" FORGE_CONTRACT_LIBRARY)
+   get_target_property(_actual_id "${_target}" FORGE_CONTRACT_LIBRARY_ID)
+   if(NOT _contract_library OR NOT "${_actual_id}" STREQUAL "${ARG_ID}")
+      message(
+         FATAL_ERROR
+         "existing target does not match installed Forge Contract package "
+         "${ARG_PACKAGE}: ${ARG_TARGET}"
+      )
    endif()
-
-   math(EXPR _target_last "${_target_count} - 1")
-   foreach(_index RANGE 0 ${_target_last})
-      list(GET ARG_TARGETS ${_index} _input)
-      list(GET ARG_IDS ${_index} _expected_id)
-      _forge_contract_resolve_target("${_input}" _target)
-      get_target_property(_contract_library "${_target}" FORGE_CONTRACT_LIBRARY)
-      get_target_property(_actual_id "${_target}" FORGE_CONTRACT_LIBRARY_ID)
-      if(NOT _contract_library OR NOT "${_actual_id}" STREQUAL "${_expected_id}")
-         message(
-            FATAL_ERROR
-            "existing target does not match installed Forge Contract package "
-            "${ARG_PACKAGE}: ${_input}"
-         )
-      endif()
-      _forge_contract_register_library_target("${_target}")
-   endforeach()
-
+   _forge_contract_register_library_target("${_target}")
    set(${output} TRUE PARENT_SCOPE)
 endfunction()
 
@@ -646,6 +1082,7 @@ function(forge_add_contract_library target)
          FORGE_CONTRACT_INSTALL_MODULE_PATHS ""
          FORGE_CONTRACT_INSTALL_PUBLIC_HEADER_PATHS ""
    )
+   _forge_contract_seal_target("${_concrete}")
    _forge_contract_register_library_target("${_concrete}")
 endfunction()
 
@@ -674,6 +1111,7 @@ function(forge_install_contract_library)
    if(NOT _contract_library)
       message(FATAL_ERROR "forge_install_contract_library target is not a contract library: ${ARG_TARGET}")
    endif()
+   _forge_contract_assert_sealed_target("${_target}")
    if(ARG_EXPORT_NAME)
       set_target_properties("${_target}" PROPERTIES EXPORT_NAME "${ARG_EXPORT_NAME}")
    endif()
@@ -758,6 +1196,7 @@ function(forge_install_contract_library)
       endif()
       install(FILES "${_source_root}/${_logical}" DESTINATION "${_destination}")
    endforeach()
+   _forge_contract_seal_target("${_target}")
 endfunction()
 
 function(_forge_contract_cmake_quote value output)
@@ -846,19 +1285,6 @@ function(forge_install_contract_package)
       "${_anchor}"
    )
    file(APPEND "${_output}" "${_prefix_relative}\" ABSOLUTE)\n")
-   file(APPEND "${_output}" "   _forge_contract_package_targets_materialized(\n")
-   file(APPEND "${_output}" "      _forge_contract_package_ready\n")
-   file(APPEND "${_output}" "      PACKAGE \"${ARG_FILE}\"\n")
-   file(APPEND "${_output}" "      TARGETS\n")
-   foreach(_package_name IN LISTS _package_names)
-      file(APPEND "${_output}" "         ${_package_name}\n")
-   endforeach()
-   file(APPEND "${_output}" "      IDS\n")
-   foreach(_package_id IN LISTS _package_ids)
-      file(APPEND "${_output}" "         ${_package_id}\n")
-   endforeach()
-   file(APPEND "${_output}" "   )\n")
-   file(APPEND "${_output}" "   if(NOT _forge_contract_package_ready)\n")
 
    list(LENGTH _package_targets _target_count)
    math(EXPR _target_last "${_target_count} - 1")
@@ -899,6 +1325,13 @@ function(forge_install_contract_package)
          set(_${_scope}_dependencies "${_dependencies}")
       endforeach()
 
+      file(APPEND "${_output}" "   _forge_contract_package_target_materialized(\n")
+      file(APPEND "${_output}" "      _forge_contract_package_target_ready\n")
+      file(APPEND "${_output}" "      PACKAGE \"${ARG_FILE}\"\n")
+      file(APPEND "${_output}" "      TARGET ${_package_name}\n")
+      file(APPEND "${_output}" "      ID ${_id}\n")
+      file(APPEND "${_output}" "   )\n")
+      file(APPEND "${_output}" "   if(NOT _forge_contract_package_target_ready)\n")
       file(
          APPEND "${_output}"
          "      forge_add_contract_library(${_package_name}\n"
@@ -937,9 +1370,9 @@ function(forge_install_contract_package)
          endif()
       endforeach()
       file(APPEND "${_output}" "      )\n")
+      file(APPEND "${_output}" "   endif()\n")
    endforeach()
-   file(APPEND "${_output}" "   endif()\n")
-   file(APPEND "${_output}" "   unset(_forge_contract_package_ready)\n")
+   file(APPEND "${_output}" "   unset(_forge_contract_package_target_ready)\n")
    file(APPEND "${_output}" "else()\n")
    file(APPEND "${_output}" "   include(\"\${CMAKE_CURRENT_LIST_DIR}/${ARG_EXPORT}.cmake\")\n")
    file(APPEND "${_output}" "   forge_register_contract_library_targets(\n")

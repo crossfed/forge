@@ -367,10 +367,18 @@ def verify_guest_package_diamond(
     contract_package: Path,
     product_prefix: Path,
     product_package: Path,
+    values_package: Path,
     output: Path,
 ) -> None:
     source = output / "source"
     build_directory = output / "build"
+    shared_source = source / "shared"
+    shared_source.mkdir(parents=True)
+    (shared_source / "CMakeLists.txt").write_text(
+        """find_package(ProductValues CONFIG REQUIRED)
+""",
+        encoding="utf-8",
+    )
     for side in ("left", "right"):
         side_source = source / side
         include = side_source / "include"
@@ -433,6 +441,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(ForgeContract CONFIG REQUIRED)
+add_subdirectory(shared)
 add_subdirectory(left)
 add_subdirectory(right)
 
@@ -451,7 +460,10 @@ forge_add_contract(
         source=source,
         build=build_directory,
         prefixes=(product_prefix,),
-        definitions=(f"-DProductProtocol_DIR={product_package}",),
+        definitions=(
+            f"-DProductProtocol_DIR={product_package}",
+            f"-DProductValues_DIR={values_package}",
+        ),
     )
     build(cmake, build_directory, "pkgdiamond_artifacts")
     verify_artifacts(build_directory / "artifacts", "pkgdiamond")
@@ -597,6 +609,58 @@ target_sources(protocol PRIVATE src/protocol.cpp)
             "ALIAS target",
         ),
         (
+            "immutable-concrete-sources",
+            """forge_add_contract_library(
+   protocol ID negative.immutable.sources SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+get_target_property(concrete protocol ALIASED_TARGET)
+target_sources("${concrete}" PRIVATE src/protocol.cpp)
+""",
+            "modified after descriptor declaration: SOURCES",
+        ),
+        (
+            "immutable-concrete-libraries",
+            """add_library(extra_dependency INTERFACE)
+forge_add_contract_library(
+   protocol ID negative.immutable.libraries SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+get_target_property(concrete protocol ALIASED_TARGET)
+target_link_libraries("${concrete}" PRIVATE extra_dependency)
+""",
+            "modified after descriptor declaration: LINK_LIBRARIES",
+        ),
+        (
+            "immutable-source-options",
+            """forge_add_contract_library(
+   protocol ID negative.immutable.source.options SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+get_target_property(concrete protocol ALIASED_TARGET)
+set_source_files_properties(
+   "${CMAKE_CURRENT_SOURCE_DIR}/include/protocol.cppm"
+   TARGET_DIRECTORY "${concrete}"
+   PROPERTIES COMPILE_OPTIONS "-include;${CMAKE_CURRENT_SOURCE_DIR}/extra.hpp"
+)
+""",
+            "uses unsupported source property: COMPILE_OPTIONS",
+        ),
+        (
+            "immutable-late-deferred-mutation",
+            """forge_add_contract_library(
+   protocol ID negative.immutable.late.deferred SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+function(mutate_contract_target)
+   get_target_property(concrete protocol ALIASED_TARGET)
+   set_property(TARGET "${concrete}" PROPERTY CXX_SCAN_FOR_MODULES OFF)
+endfunction()
+cmake_language(DEFER CALL mutate_contract_target)
+""",
+            "modified after descriptor declaration: CXX_SCAN_FOR_MODULES",
+        ),
+        (
             "cycle",
             """add_library(cycle_a STATIC IMPORTED GLOBAL)
 add_library(cycle_b STATIC IMPORTED GLOBAL)
@@ -608,6 +672,11 @@ set_target_properties(
       FORGE_CONTRACT_PRIVATE_LIBRARY_IDS ""
       FORGE_CONTRACT_PUBLIC_COMPONENT_IDS ""
       FORGE_CONTRACT_PRIVATE_COMPONENT_IDS ""
+      FORGE_CONTRACT_INSTALL_MODULE_ROOT_RELATIVE "."
+      FORGE_CONTRACT_INSTALL_SOURCE_ROOT_RELATIVE "."
+      FORGE_CONTRACT_INSTALL_MODULE_PATHS ""
+      FORGE_CONTRACT_INSTALL_PUBLIC_HEADER_PATHS ""
+      IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/libcycle_a.a"
 )
 set_target_properties(
    cycle_b PROPERTIES
@@ -617,6 +686,11 @@ set_target_properties(
       FORGE_CONTRACT_PRIVATE_LIBRARY_IDS ""
       FORGE_CONTRACT_PUBLIC_COMPONENT_IDS ""
       FORGE_CONTRACT_PRIVATE_COMPONENT_IDS ""
+      FORGE_CONTRACT_INSTALL_MODULE_ROOT_RELATIVE "."
+      FORGE_CONTRACT_INSTALL_SOURCE_ROOT_RELATIVE "."
+      FORGE_CONTRACT_INSTALL_MODULE_PATHS ""
+      FORGE_CONTRACT_INSTALL_PUBLIC_HEADER_PATHS ""
+      IMPORTED_LOCATION "${CMAKE_CURRENT_BINARY_DIR}/libcycle_b.a"
 )
 forge_register_contract_library_targets(cycle_a cycle_b)
 forge_add_contract(
@@ -637,6 +711,39 @@ forge_add_contract(
             succeeds=False,
             contains=diagnostic,
         )
+
+
+def check_imported_target_seal(
+    *,
+    cmake: str,
+    cxx_compiler: Path,
+    forge_package: Path,
+    contract_package: Path,
+    product_package: Path,
+    output: Path,
+) -> None:
+    output.mkdir(parents=True)
+    (output / "CMakeLists.txt").write_text(
+        """cmake_minimum_required(VERSION 3.31)
+project(ImportedContractMutation LANGUAGES CXX)
+find_package(ForgeContract CONFIG REQUIRED)
+find_package(ProductProtocol CONFIG REQUIRED)
+add_library(host_only INTERFACE)
+target_link_libraries(Product::protocol INTERFACE host_only)
+""",
+        encoding="utf-8",
+    )
+    configure_host(
+        cmake=cmake,
+        cxx_compiler=cxx_compiler,
+        forge_package=forge_package,
+        contract_package=contract_package,
+        source=output,
+        build=output / "build",
+        definitions=(f"-DProductProtocol_DIR={product_package}",),
+        succeeds=False,
+        contains="descriptor declaration: INTERFACE_LINK_LIBRARIES",
+    )
 
 
 def check_build_failures(
@@ -837,8 +944,11 @@ def validate(
     shutil.copytree(producer_install, relocated)
     shutil.rmtree(producer_install)
     product_package = relocated / "lib" / "cmake" / "ProductProtocol"
+    values_package = relocated / "lib" / "cmake" / "ProductValues"
     if not (product_package / "ProductProtocolContract.cmake").is_file():
         raise RuntimeError("installed protocol package has no guest source materialization")
+    if not (values_package / "ProductValuesContract.cmake").is_file():
+        raise RuntimeError("installed values package has no guest source materialization")
     targets_file = product_package / "ProductProtocolTargets.cmake"
     if "FILE_SET \"forge_contract_modules\"" not in targets_file.read_text(encoding="utf-8"):
         raise RuntimeError("installed protocol package has no relocatable host module sources")
@@ -848,7 +958,16 @@ def validate(
         contract_package=contract_package,
         product_prefix=relocated,
         product_package=product_package,
+        values_package=values_package,
         output=output / "package-diamond",
+    )
+    check_imported_target_seal(
+        cmake=cmake,
+        cxx_compiler=cxx_compiler,
+        forge_package=forge_package,
+        contract_package=contract_package,
+        product_package=product_package,
+        output=output / "imported-target-seal",
     )
 
     consumer_build = output / "consumer-host"

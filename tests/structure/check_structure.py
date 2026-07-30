@@ -516,6 +516,13 @@ def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
    )
    for path in graph_sources:
       source = path.read_text(errors="ignore")
+      if path.name == "ForgeContractGraph.cmake":
+         source = re.sub(
+            r"function\(_forge_contract_sealed_target_properties\b.*?\nendfunction\(\)",
+            "",
+            source,
+            flags=re.DOTALL,
+         )
       for token in reverse_graph_tokens:
          if token.search(source):
             errors.append(
@@ -528,6 +535,9 @@ def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
       "function(forge_install_contract_library)",
       "function(forge_install_contract_package)",
       "function(forge_register_contract_library_targets)",
+      "function(_forge_contract_sealed_target_properties target output)",
+      "function(_forge_contract_assert_sealed_target target)",
+      "function(_forge_contract_package_target_materialized output)",
    ):
       if required not in graph_cmake:
          errors.append(f"guest/cmake/ForgeContractGraph.cmake: missing native graph API {required}")

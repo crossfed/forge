@@ -85,6 +85,19 @@ forge_install_contract_package(
    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ProductProtocol"
    TARGETS protocol values limits
 )
+install(
+   EXPORT ProductProtocolTargets
+   FILE ProductValuesTargets.cmake
+   NAMESPACE Product::
+   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ProductValues"
+)
+forge_install_contract_package(
+   EXPORT ProductValuesTargets
+   FILE ProductValuesContract.cmake
+   NAMESPACE Product::
+   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ProductValues"
+   TARGETS values
+)
 
 configure_package_config_file(
    ProductProtocolConfig.cmake.in
@@ -97,9 +110,26 @@ write_basic_package_version_file(
    COMPATIBILITY SameMajorVersion
    ARCH_INDEPENDENT
 )
+configure_package_config_file(
+   ProductValuesConfig.cmake.in
+   "${CMAKE_CURRENT_BINARY_DIR}/ProductValuesConfig.cmake"
+   INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ProductValues"
+)
+write_basic_package_version_file(
+   "${CMAKE_CURRENT_BINARY_DIR}/ProductValuesConfigVersion.cmake"
+   VERSION "${PROJECT_VERSION}"
+   COMPATIBILITY SameMajorVersion
+   ARCH_INDEPENDENT
+)
 install(
    FILES
       "${CMAKE_CURRENT_BINARY_DIR}/ProductProtocolConfig.cmake"
       "${CMAKE_CURRENT_BINARY_DIR}/ProductProtocolConfigVersion.cmake"
    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ProductProtocol"
+)
+install(
+   FILES
+      "${CMAKE_CURRENT_BINARY_DIR}/ProductValuesConfig.cmake"
+      "${CMAKE_CURRENT_BINARY_DIR}/ProductValuesConfigVersion.cmake"
+   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ProductValues"
 )

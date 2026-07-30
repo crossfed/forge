@@ -168,6 +168,12 @@ never transported. An imported contract-library target that was not registered
 by its package config is rejected instead of being accepted with a late,
 consumer-controlled baseline.
 
+Guest packages materialize each target independently. If two installed
+packages share a canonical target, the later package reuses it only when the
+target is a sealed contract library with the same stable `ID`; missing targets
+are created and conflicting targets fail closed. This permits dependency
+diamonds without weakening package identity.
+
 Seal checks run at the end of every CMake directory where a registered target
 is visible. This preserves normal non-`GLOBAL` imported-target scope when a
 package is loaded from a nested `CMakeLists.txt`. The check remains at the tail
