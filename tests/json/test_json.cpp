@@ -247,6 +247,45 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_nested_fields_and_var
    BOOST_TEST(extra_variant_element.diagnostics.front().path == "choice");
 }
 
+BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_schema_names_and_associative_entries) {
+   const auto options = forge::codec::json::read_options{
+       .described_records = forge::codec::json::described_record_policy::exact,
+   };
+
+   const auto schema_record = forge::codec::json::read<forge_json_tests::http_config>(
+       R"({"bind-port":9090,"bind-host":"127.0.0.1","tls-enabled":false,"tags":[]})", options);
+   BOOST_REQUIRE(schema_record.ok());
+
+   const auto schema_missing = forge::codec::json::read<forge_json_tests::http_config>(
+       R"({"bind-port":9090,"bind-host":"127.0.0.1","tls-enabled":false})", options);
+   BOOST_REQUIRE(!schema_missing.ok());
+   BOOST_TEST(schema_missing.diagnostics.front().code == "json.missing");
+   BOOST_TEST(schema_missing.diagnostics.front().path == "tags");
+
+   const auto schema_unknown = forge::codec::json::read<forge_json_tests::http_config>(
+       R"({"bind-port":9090,"bind-host":"127.0.0.1","tls-enabled":false,"tags":[],"extra":1})", options);
+   BOOST_REQUIRE(!schema_unknown.ok());
+   BOOST_TEST(schema_unknown.diagnostics.front().code == "json.unknown");
+   BOOST_TEST(schema_unknown.diagnostics.front().path == "extra");
+
+   const auto map_record =
+       forge::codec::json::read<forge_json_tests::exact_map_record>(R"({"values":[["first",{"value":7}]]})", options);
+   BOOST_REQUIRE(map_record.ok());
+   BOOST_TEST(map_record.value.values.at("first").value == 7U);
+
+   const auto map_missing_value =
+       forge::codec::json::read<forge_json_tests::exact_map_record>(R"({"values":[["first"]]})", options);
+   BOOST_REQUIRE(!map_missing_value.ok());
+   BOOST_TEST(map_missing_value.diagnostics.front().code == "json.pair");
+   BOOST_TEST(map_missing_value.diagnostics.front().path == "values[0]");
+
+   const auto map_unknown = forge::codec::json::read<forge_json_tests::exact_map_record>(
+       R"({"values":[["first",{"value":7,"extra":1}]]})", options);
+   BOOST_REQUIRE(!map_unknown.ok());
+   BOOST_TEST(map_unknown.diagnostics.front().code == "json.unknown");
+   BOOST_TEST(map_unknown.diagnostics.front().path == "values[0][1].extra");
+}
+
 BOOST_AUTO_TEST_CASE(json_malformed_input_returns_forge_diagnostic) {
    const auto parsed = forge::codec::json::read_value(R"({"unterminated":)");
    BOOST_TEST(!parsed.ok());

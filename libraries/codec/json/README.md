@@ -100,7 +100,8 @@ non-optional Boost.Describe member must be present, unknown members are rejected
 nested sequences and `std::variant` values are validated before conversion. Ordinary
 variants use the canonical `[index, payload]` representation; types with an owning
 canonical scalar adapter, such as encoded public keys and signatures, retain that
-adapter's JSON form.
+adapter's JSON form. Schema-bound records use their declared field names and aliases.
+Associative containers use arrays of exact `[key, value]` entries.
 
 ```cpp
 import forge.codec.json;

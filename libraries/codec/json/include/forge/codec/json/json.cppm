@@ -7,12 +7,15 @@ module;
 #include <cstddef>
 #include <deque>
 #include <filesystem>
+#include <flat_map>
 #include <limits>
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <variant>
@@ -95,6 +98,52 @@ struct sequence_traits<std::unordered_set<T, Hash, Equal, Allocator>> {
 
 template <typename T> inline constexpr bool is_sequence_v = sequence_traits<clean_type<T>>::value;
 
+template <typename T> struct pair_traits {
+   static constexpr bool value = false;
+};
+
+template <typename First, typename Second> struct pair_traits<std::pair<First, Second>> {
+   static constexpr bool value = true;
+   using first_type = First;
+   using second_type = Second;
+};
+
+template <typename T> inline constexpr bool is_pair_v = pair_traits<clean_type<T>>::value;
+
+template <typename T> struct associative_traits {
+   static constexpr bool value = false;
+};
+
+template <typename Key, typename Value, typename Compare, typename Allocator>
+struct associative_traits<std::map<Key, Value, Compare, Allocator>> {
+   static constexpr bool value = true;
+   using key_type = Key;
+   using mapped_type = Value;
+};
+
+template <typename Key, typename Value, typename Compare, typename Allocator>
+struct associative_traits<std::multimap<Key, Value, Compare, Allocator>> {
+   static constexpr bool value = true;
+   using key_type = Key;
+   using mapped_type = Value;
+};
+
+template <typename Key, typename Value, typename Hash, typename Equal, typename Allocator>
+struct associative_traits<std::unordered_map<Key, Value, Hash, Equal, Allocator>> {
+   static constexpr bool value = true;
+   using key_type = Key;
+   using mapped_type = Value;
+};
+
+template <typename Key, typename Value, typename Compare, typename KeyContainer, typename MappedContainer>
+struct associative_traits<std::flat_map<Key, Value, Compare, KeyContainer, MappedContainer>> {
+   static constexpr bool value = true;
+   using key_type = Key;
+   using mapped_type = Value;
+};
+
+template <typename T> inline constexpr bool is_associative_v = associative_traits<clean_type<T>>::value;
+
 template <typename T> struct variant_traits {
    static constexpr bool value = false;
 };
@@ -162,18 +211,37 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
       }
 
       const auto& object = source.get_object();
+      const auto rules = schema::rules<value_type>::define();
       auto known = std::set<std::string>{};
+      for (const auto& field : rules.fields()) {
+         known.emplace(field.name);
+         known.insert(field.aliases.begin(), field.aliases.end());
+      }
+
       reflect::for_each_member<value_type>([&](const char* name, auto member) {
-         known.emplace(name);
-         const auto found = object.find(name);
+         const auto rule = std::ranges::find_if(
+             rules.fields(), [name](const auto& field) { return field.member_name == std::string_view{name}; });
+         auto expected_name = std::string{name};
+         auto found = object.end();
+         if (rule != rules.fields().end()) {
+            expected_name = rule->name;
+            found = object.find(rule->name);
+            for (auto alias = rule->aliases.begin(); found == object.end() && alias != rule->aliases.end(); ++alias) {
+               found = object.find(*alias);
+            }
+         } else {
+            known.emplace(name);
+            found = object.find(name);
+         }
+
          using member_type = clean_type<decltype(std::declval<value_type>().*member)>;
          if (found == object.end()) {
             if constexpr (!is_optional_v<member_type>) {
-               add_exact_error(diagnostics, field_path(path, name), "json.missing", "missing JSON field");
+               add_exact_error(diagnostics, field_path(path, expected_name), "json.missing", "missing JSON field");
             }
             return;
          }
-         validate_exact<member_type>(found->value(), field_path(path, name), diagnostics);
+         validate_exact<member_type>(found->value(), field_path(path, found->key()), diagnostics);
       });
 
       for (const auto& entry : object) {
@@ -213,6 +281,28 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
          return;
       }
       validate_variant_payload<value_type>(selected, elements[1], element_path(path, 1U), diagnostics);
+   } else if constexpr (is_associative_v<value_type>) {
+      if (!source.is_array()) {
+         add_exact_error(diagnostics, std::string{path}, "json.array", "associative container must be a JSON array");
+         return;
+      }
+
+      const auto& elements = source.get_array();
+      for (std::size_t index = 0; index < elements.size(); ++index) {
+         const auto entry_path = element_path(path, index);
+         validate_exact<std::pair<typename associative_traits<value_type>::key_type,
+                                  typename associative_traits<value_type>::mapped_type>>(elements[index], entry_path,
+                                                                                         diagnostics);
+      }
+   } else if constexpr (is_pair_v<value_type>) {
+      if (!source.is_array() || source.get_array().size() != 2U) {
+         add_exact_error(diagnostics, std::string{path}, "json.pair", "pair must contain exactly a key and value");
+         return;
+      }
+
+      const auto& elements = source.get_array();
+      validate_exact<typename pair_traits<value_type>::first_type>(elements[0], element_path(path, 0U), diagnostics);
+      validate_exact<typename pair_traits<value_type>::second_type>(elements[1], element_path(path, 1U), diagnostics);
    } else if constexpr (is_sequence_v<value_type>) {
       if (!source.is_array()) {
          add_exact_error(diagnostics, std::string{path}, "json.array", "sequence must be a JSON array");
@@ -302,6 +392,23 @@ template <typename T> [[nodiscard]] read_result<T> read(std::string_view input, 
       output.diagnostics = std::move(parsed_document.diagnostics);
       if (!parsed_document.ok()) {
          return output;
+      }
+      if (options.described_records == described_record_policy::exact) {
+         const auto input = config::core::to_schema_value(config::core::value{parsed_document.value.root});
+         auto exact = rules.validate_exact_input(*input.as_object());
+         for (auto& entry : exact) {
+            if (entry.code == "config.unknown") {
+               entry.code = "json.unknown";
+            } else if (entry.code == "config.missing") {
+               entry.code = "json.missing";
+            } else if (entry.code == "config.type") {
+               entry.code = "json.type";
+            }
+            output.diagnostics.push_back(std::move(entry));
+         }
+         if (!output.ok()) {
+            return output;
+         }
       }
       auto decoded = config::core::decode<T>(parsed_document.value);
       output.value = std::move(decoded.value);
@@ -397,6 +504,23 @@ template <typename T> [[nodiscard]] read_result<T> load(const std::filesystem::p
       output.diagnostics = std::move(parsed_document.diagnostics);
       if (!parsed_document.ok()) {
          return output;
+      }
+      if (options.described_records == described_record_policy::exact) {
+         const auto input = config::core::to_schema_value(config::core::value{parsed_document.value.root});
+         auto exact = rules.validate_exact_input(*input.as_object());
+         for (auto& entry : exact) {
+            if (entry.code == "config.unknown") {
+               entry.code = "json.unknown";
+            } else if (entry.code == "config.missing") {
+               entry.code = "json.missing";
+            } else if (entry.code == "config.type") {
+               entry.code = "json.type";
+            }
+            output.diagnostics.push_back(std::move(entry));
+         }
+         if (!output.ok()) {
+            return output;
+         }
       }
       auto decoded = config::core::decode<T>(parsed_document.value);
       output.value = std::move(decoded.value);

@@ -3,6 +3,7 @@ module;
 #include <boost/describe.hpp>
 
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <variant>
@@ -26,7 +27,12 @@ struct exact_record {
    bool operator==(const exact_record&) const = default;
 };
 
+struct exact_map_record {
+   std::map<std::string, exact_leaf> values;
+};
+
 BOOST_DESCRIBE_STRUCT(exact_leaf, (), (value))
 BOOST_DESCRIBE_STRUCT(exact_record, (), (items, choice, optional))
+BOOST_DESCRIBE_STRUCT(exact_map_record, (), (values))
 
 } // namespace forge_json_tests

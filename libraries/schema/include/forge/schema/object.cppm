@@ -44,7 +44,8 @@ template <typename Object, typename Member> struct member_pointer_traits<Member 
 template <typename T, auto Member> [[nodiscard]] std::string described_member_name() {
    auto output = std::string{};
    if constexpr (boost::describe::has_describe_members<T>::value) {
-      using members = boost::describe::describe_members<T, boost::describe::mod_any_access | boost::describe::mod_inherited>;
+      using members =
+          boost::describe::describe_members<T, boost::describe::mod_any_access | boost::describe::mod_inherited>;
       boost::mp11::mp_for_each<members>([&](auto descriptor) {
          if (!output.empty()) {
             return;
@@ -63,7 +64,7 @@ struct input_value {
    using array_type = std::vector<input_value>;
    using object_type = std::map<std::string, input_value>;
    using storage_type =
-      std::variant<std::monostate, bool, std::int64_t, std::uint64_t, double, std::string, array_type, object_type>;
+       std::variant<std::monostate, bool, std::int64_t, std::uint64_t, double, std::string, array_type, object_type>;
 
    storage_type storage;
 
@@ -84,6 +85,9 @@ struct input_value {
       return std::get_if<object_type>(&storage);
    }
 };
+
+template <typename T>
+void validate_exact_input_value(const input_value& input, std::string_view path, std::vector<diagnostic>& diagnostics);
 
 template <typename T> [[nodiscard]] T cast_any_to(const std::any& value) {
    using clean_type = std::remove_cvref_t<T>;
@@ -186,27 +190,26 @@ template <typename T> [[nodiscard]] T cast_any_to(const std::any& value) {
 
 [[nodiscard]] inline diagnostic make_path_error(std::string path, std::string code, std::string message) {
    return diagnostic{
-      .path = std::move(path),
-      .code = std::move(code),
-      .level = severity::error,
-      .message = std::move(message),
+       .path = std::move(path),
+       .code = std::move(code),
+       .level = severity::error,
+       .message = std::move(message),
    };
 }
 
 [[nodiscard]] inline diagnostic make_path_warning(std::string path, std::string code, std::string message) {
    return diagnostic{
-      .path = std::move(path),
-      .code = std::move(code),
-      .level = severity::warning,
-      .message = std::move(message),
+       .path = std::move(path),
+       .code = std::move(code),
+       .level = severity::warning,
+       .message = std::move(message),
    };
 }
 
 template <typename T>
 [[nodiscard]] T cast_input_to(const input_value& input, std::string_view path, std::vector<diagnostic>& diagnostics);
 
-template <typename T>
-[[nodiscard]] input_value to_input_value(const T& input);
+template <typename T> [[nodiscard]] input_value to_input_value(const T& input);
 
 template <typename T> [[nodiscard]] std::any to_default_any(const T& input) {
    using clean_type = std::remove_cvref_t<T>;
@@ -236,8 +239,7 @@ template <typename T> [[nodiscard]] std::any to_default_any(const T& input) {
 }
 
 template <typename T>
-[[nodiscard]] std::vector<T> decode_object_list(const input_value& input,
-                                                std::string_view path,
+[[nodiscard]] std::vector<T> decode_object_list(const input_value& input, std::string_view path,
                                                 std::vector<diagnostic>& diagnostics);
 
 template <typename T> struct field_rule {
@@ -247,6 +249,7 @@ template <typename T> struct field_rule {
    value_kind kind = value_kind::string;
    std::type_index type = std::type_index{typeid(void)};
    bool required = false;
+   bool optional = false;
    bool secret = false;
    bool deprecated = false;
    std::string deprecated_message;
@@ -262,6 +265,7 @@ template <typename T> struct field_rule {
    std::function<std::any(const std::any&)> normalize_default;
    std::function<input_value(const std::any&)> default_input;
    std::function<void(T&, const input_value&, std::string_view, std::vector<diagnostic>&)> assign_input;
+   std::function<void(const input_value&, std::string_view, std::vector<diagnostic>&)> validate_exact_input;
    std::function<std::any(const T&)> read_any;
    std::function<std::optional<std::any>(const T&)> read_validation_any;
    std::function<input_value(const T&)> read_input;
@@ -286,6 +290,7 @@ template <typename T> class object_schema {
       rule.member_name = described_member_name<T, Member>();
       rule.kind = member_kind<member_type>::value;
       rule.type = std::type_index{typeid(member_type)};
+      rule.optional = is_optional<member_type>::value;
       rule.assign_any = [](T& object, const std::any& value) {
          if constexpr (is_optional<member_type>::value) {
             using item_type = typename is_optional<member_type>::value_type;
@@ -342,6 +347,10 @@ template <typename T> class object_schema {
             diagnostics.push_back(make_path_error(std::string{path}, "config.type", error.what()));
          }
       };
+      rule.validate_exact_input = [](const input_value& value, std::string_view path,
+                                     std::vector<diagnostic>& diagnostics) {
+         validate_exact_input_value<member_type>(value, path, diagnostics);
+      };
       rule.read_any = [](const T& object) -> std::any { return object.*Member; };
       rule.read_validation_any = [](const T& object) -> std::optional<std::any> {
          const auto& value = object.*Member;
@@ -358,7 +367,7 @@ template <typename T> class object_schema {
       if constexpr (is_vector<member_type>::value) {
          rule.read_size = [](const T& object) -> std::optional<std::size_t> { return (object.*Member).size(); };
       } else if constexpr (is_optional<member_type>::value &&
-                            is_vector<typename is_optional<member_type>::value_type>::value) {
+                           is_vector<typename is_optional<member_type>::value_type>::value) {
          rule.read_size = [](const T& object) -> std::optional<std::size_t> {
             const auto& value = object.*Member;
             if (!value) {
@@ -389,8 +398,7 @@ template <typename T> class object_schema {
    }
 
    [[nodiscard]] std::vector<diagnostic> decode_object(const input_value::object_type& input,
-                                                       std::string_view base_path,
-                                                       T& output) const {
+                                                       std::string_view base_path, T& output) const {
       auto result = std::vector<diagnostic>{};
       auto known_fields = std::set<std::string>{};
       for (const auto& field : *fields_) {
@@ -422,16 +430,15 @@ template <typename T> class object_schema {
          if (!found) {
             if (field.required) {
                result.push_back(
-                  make_path_error(std::move(field_path), "config.required", "required config field is missing"));
+                   make_path_error(std::move(field_path), "config.required", "required config field is missing"));
             }
             continue;
          }
 
          if (field.deprecated) {
-            result.push_back(make_path_warning(
-               field_path,
-               "config.deprecated",
-               field.deprecated_message.empty() ? "deprecated config field" : field.deprecated_message));
+            result.push_back(make_path_warning(field_path, "config.deprecated",
+                                               field.deprecated_message.empty() ? "deprecated config field"
+                                                                                : field.deprecated_message));
          }
 
          field.assign_input(output, *found, field_path, result);
@@ -448,9 +455,8 @@ template <typename T> class object_schema {
          if (field.minimum || field.maximum) {
             auto numeric = std::optional<long double>{};
             try {
-               const auto any_value = field.read_validation_any
-                                         ? field.read_validation_any(object)
-                                         : std::optional<std::any>{field.read_any(object)};
+               const auto any_value = field.read_validation_any ? field.read_validation_any(object)
+                                                                : std::optional<std::any>{field.read_any(object)};
                if (!any_value) {
                   continue;
                }
@@ -473,15 +479,60 @@ template <typename T> class object_schema {
             }
 
             if (numeric && field.minimum && *numeric < *field.minimum) {
-               result.push_back(make_error(base_path, field.name, "schema.range", "value is below the allowed minimum"));
+               result.push_back(
+                   make_error(base_path, field.name, "schema.range", "value is below the allowed minimum"));
             }
             if (numeric && field.maximum && *numeric > *field.maximum) {
-               result.push_back(make_error(base_path, field.name, "schema.range", "value is above the allowed maximum"));
+               result.push_back(
+                   make_error(base_path, field.name, "schema.range", "value is above the allowed maximum"));
             }
          }
          for (const auto& validator : field.validators) {
             validator(object, base_path, result);
          }
+      }
+      return result;
+   }
+
+   [[nodiscard]] std::vector<diagnostic> validate_exact_input(const input_value::object_type& input,
+                                                              std::string_view base_path = {}) const {
+      auto result = std::vector<diagnostic>{};
+      auto known_fields = std::set<std::string>{};
+      for (const auto& field : *fields_) {
+         known_fields.insert(field.name);
+         known_fields.insert(field.aliases.begin(), field.aliases.end());
+      }
+
+      for (const auto& [name, ignored] : input) {
+         if (!known_fields.contains(name)) {
+            result.push_back(make_path_error(append_path(base_path, name), "config.unknown", "unknown config field"));
+         }
+      }
+
+      for (const auto& field : *fields_) {
+         auto field_path = append_path(base_path, field.name);
+         const auto* found = [&]() -> const input_value* {
+            if (const auto exact = input.find(field.name); exact != input.end()) {
+               return &exact->second;
+            }
+            for (const auto& alias : field.aliases) {
+               if (const auto alias_entry = input.find(alias); alias_entry != input.end()) {
+                  field_path = append_path(base_path, alias);
+                  return &alias_entry->second;
+               }
+            }
+            return nullptr;
+         }();
+
+         if (!found) {
+            if (!field.optional) {
+               result.push_back(
+                   make_path_error(std::move(field_path), "config.missing", "exact config field is missing"));
+            }
+            continue;
+         }
+
+         field.validate_exact_input(*found, field_path, result);
       }
       return result;
    }
@@ -608,9 +659,9 @@ template <typename T> class field_builder {
    }
 
    field_builder& non_empty() {
-      current().validators.push_back([state = schema_.fields_, index = index_](
-                                        const T& object, std::string_view base_path,
-                                        std::vector<diagnostic>& diagnostics) {
+      current().validators.push_back([state = schema_.fields_, index = index_](const T& object,
+                                                                               std::string_view base_path,
+                                                                               std::vector<diagnostic>& diagnostics) {
          const auto& field = (*state)[index];
          if (field.kind != value_kind::string) {
             return;
@@ -623,52 +674,50 @@ template <typename T> class field_builder {
          const auto& value = std::any_cast<const std::string&>(*any_value);
          if (value.empty()) {
             diagnostics.push_back(
-               make_path_error(append_path(base_path, field.name), "schema.non_empty", "value must not be empty"));
+                make_path_error(append_path(base_path, field.name), "schema.non_empty", "value must not be empty"));
          }
       });
       return *this;
    }
 
    field_builder& min_items(std::size_t count) {
-      current().validators.push_back([state = schema_.fields_, index = index_, count](
-                                        const T& object, std::string_view base_path,
-                                        std::vector<diagnostic>& diagnostics) {
-         const auto& field = (*state)[index];
-         if (!field.read_size) {
-            return;
-         }
-         const auto size = field.read_size(object);
-         if (size && *size < count) {
-            diagnostics.push_back(make_path_error(append_path(base_path, field.name),
-                                                 "schema.min_items",
-                                                 "list has fewer items than allowed"));
-         }
-      });
+      current().validators.push_back(
+          [state = schema_.fields_, index = index_, count](const T& object, std::string_view base_path,
+                                                           std::vector<diagnostic>& diagnostics) {
+             const auto& field = (*state)[index];
+             if (!field.read_size) {
+                return;
+             }
+             const auto size = field.read_size(object);
+             if (size && *size < count) {
+                diagnostics.push_back(make_path_error(append_path(base_path, field.name), "schema.min_items",
+                                                      "list has fewer items than allowed"));
+             }
+          });
       return *this;
    }
 
    field_builder& max_items(std::size_t count) {
-      current().validators.push_back([state = schema_.fields_, index = index_, count](
-                                        const T& object, std::string_view base_path,
-                                        std::vector<diagnostic>& diagnostics) {
-         const auto& field = (*state)[index];
-         if (!field.read_size) {
-            return;
-         }
-         const auto size = field.read_size(object);
-         if (size && *size > count) {
-            diagnostics.push_back(make_path_error(append_path(base_path, field.name),
-                                                 "schema.max_items",
-                                                 "list has more items than allowed"));
-         }
-      });
+      current().validators.push_back(
+          [state = schema_.fields_, index = index_, count](const T& object, std::string_view base_path,
+                                                           std::vector<diagnostic>& diagnostics) {
+             const auto& field = (*state)[index];
+             if (!field.read_size) {
+                return;
+             }
+             const auto size = field.read_size(object);
+             if (size && *size > count) {
+                diagnostics.push_back(make_path_error(append_path(base_path, field.name), "schema.max_items",
+                                                      "list has more items than allowed"));
+             }
+          });
       return *this;
    }
 
    field_builder& each_non_empty() {
-      current().validators.push_back([state = schema_.fields_, index = index_](
-                                        const T& object, std::string_view base_path,
-                                        std::vector<diagnostic>& diagnostics) {
+      current().validators.push_back([state = schema_.fields_, index = index_](const T& object,
+                                                                               std::string_view base_path,
+                                                                               std::vector<diagnostic>& diagnostics) {
          const auto& field = (*state)[index];
          if (field.kind != value_kind::string_list) {
             return;
@@ -682,8 +731,7 @@ template <typename T> class field_builder {
          for (std::size_t i = 0; i < values.size(); ++i) {
             if (values[i].empty()) {
                diagnostics.push_back(make_path_error(append_index(append_path(base_path, field.name), i),
-                                                    "schema.non_empty",
-                                                    "list item must not be empty"));
+                                                     "schema.non_empty", "list item must not be empty"));
             }
          }
       });
@@ -693,9 +741,9 @@ template <typename T> class field_builder {
    template <auto Member> field_builder& unique_by() {
       using item_type = typename member_pointer_traits<decltype(Member)>::object_type;
       using member_type = std::remove_cvref_t<typename member_pointer_traits<decltype(Member)>::member_type>;
-      current().validators.push_back([state = schema_.fields_, index = index_](
-                                        const T& object, std::string_view base_path,
-                                        std::vector<diagnostic>& diagnostics) {
+      current().validators.push_back([state = schema_.fields_, index = index_](const T& object,
+                                                                               std::string_view base_path,
+                                                                               std::vector<diagnostic>& diagnostics) {
          const auto& field = (*state)[index];
          const auto any_value = field.read_validation_any ? field.read_validation_any(object)
                                                           : std::optional<std::any>{field.read_any(object)};
@@ -706,9 +754,8 @@ template <typename T> class field_builder {
          auto seen = std::set<member_type>{};
          for (const auto& item : values) {
             if (!seen.insert(item.*Member).second) {
-               diagnostics.push_back(make_path_error(append_path(base_path, field.name),
-                                                    "schema.unique",
-                                                    "list items must be unique"));
+               diagnostics.push_back(
+                   make_path_error(append_path(base_path, field.name), "schema.unique", "list items must be unique"));
                return;
             }
          }
@@ -884,8 +931,7 @@ template <typename T>
 }
 
 template <typename T>
-[[nodiscard]] std::vector<T> decode_object_list(const input_value& input,
-                                                std::string_view path,
+[[nodiscard]] std::vector<T> decode_object_list(const input_value& input, std::string_view path,
                                                 std::vector<diagnostic>& diagnostics) {
    const auto* values = input.as_array();
    if (!values) {
@@ -921,7 +967,62 @@ template <typename T>
 }
 
 template <typename T>
-[[nodiscard]] input_value to_input_value(const T& input) {
+void validate_exact_input_value(const input_value& input, std::string_view path, std::vector<diagnostic>& diagnostics) {
+   using clean_type = std::remove_cvref_t<T>;
+   if constexpr (is_optional<clean_type>::value) {
+      if (!std::holds_alternative<std::monostate>(input.storage)) {
+         validate_exact_input_value<typename is_optional<clean_type>::value_type>(input, path, diagnostics);
+      }
+   } else if constexpr (is_vector<clean_type>::value) {
+      const auto* values = input.as_array();
+      if (!values) {
+         diagnostics.push_back(make_path_error(std::string{path}, "config.type", "exact list must be an array"));
+         return;
+      }
+      using item_type = typename vector_item<clean_type>::type;
+      for (std::size_t index = 0; index < values->size(); ++index) {
+         validate_exact_input_value<item_type>((*values)[index], append_index(path, index), diagnostics);
+      }
+   } else if constexpr (boost::describe::has_describe_members<clean_type>::value) {
+      const auto* object = input.as_object();
+      if (!object) {
+         diagnostics.push_back(make_path_error(std::string{path}, "config.type", "exact record must be an object"));
+         return;
+      }
+
+      const auto nested_rules = rules<clean_type>::define();
+      if (!nested_rules.fields().empty()) {
+         auto nested = nested_rules.validate_exact_input(*object, path);
+         diagnostics.insert(diagnostics.end(), nested.begin(), nested.end());
+         return;
+      }
+
+      auto known_fields = std::set<std::string>{};
+      using members = boost::describe::describe_members<clean_type, boost::describe::mod_any_access |
+                                                                        boost::describe::mod_inherited>;
+      boost::mp11::mp_for_each<members>([&](auto descriptor) {
+         known_fields.emplace(descriptor.name);
+         const auto found = object->find(descriptor.name);
+         using member_type = std::remove_cvref_t<decltype(std::declval<clean_type>().*descriptor.pointer)>;
+         if (found == object->end()) {
+            if constexpr (!is_optional<member_type>::value) {
+               diagnostics.push_back(make_path_error(append_path(path, descriptor.name), "config.missing",
+                                                     "exact config field is missing"));
+            }
+            return;
+         }
+         validate_exact_input_value<member_type>(found->second, append_path(path, descriptor.name), diagnostics);
+      });
+
+      for (const auto& [name, ignored] : *object) {
+         if (!known_fields.contains(name)) {
+            diagnostics.push_back(make_path_error(append_path(path, name), "config.unknown", "unknown config field"));
+         }
+      }
+   }
+}
+
+template <typename T> [[nodiscard]] input_value to_input_value(const T& input) {
    using clean_type = std::remove_cvref_t<T>;
    if constexpr (is_optional<clean_type>::value) {
       if (!input.has_value()) {
