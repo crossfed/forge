@@ -121,6 +121,26 @@ BOOST_AUTO_TEST_CASE(yaml_typed_read_uses_schema_defaults_validation_and_unknown
    BOOST_TEST(!invalid.ok());
 }
 
+BOOST_AUTO_TEST_CASE(yaml_typed_write_uses_canonical_schema_field_names) {
+   const auto input = forge_yaml_tests::http_config{
+       .bind_port = 9090,
+       .bind_host = "127.0.0.1",
+       .tls_enabled = true,
+       .tags = {"alpha"},
+   };
+   const auto written = forge::codec::yaml::write(input);
+   BOOST_REQUIRE(written.ok());
+   BOOST_TEST(written.text.find("bind-port:") != std::string::npos);
+   BOOST_TEST(written.text.find("bind_port:") == std::string::npos);
+
+   const auto roundtrip = forge::codec::yaml::read<forge_yaml_tests::http_config>(written.text);
+   BOOST_REQUIRE(roundtrip.ok());
+   BOOST_TEST(roundtrip.value.bind_port == input.bind_port);
+   BOOST_TEST(roundtrip.value.bind_host == input.bind_host);
+   BOOST_TEST(roundtrip.value.tls_enabled == input.tls_enabled);
+   BOOST_TEST(roundtrip.value.tags == input.tags);
+}
+
 BOOST_AUTO_TEST_CASE(yaml_typed_load_uses_same_unknown_policy_as_read) {
    const auto path = std::filesystem::temp_directory_path() /
                      ("forge_yaml_unknown_policy_" +

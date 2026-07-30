@@ -227,12 +227,46 @@ template <typename T> [[nodiscard]] read_result<T> load(const std::filesystem::p
 }
 
 template <typename T> [[nodiscard]] write_result write(const T& input, write_options options = {}) {
-   return write_value(variant{input}, std::move(options));
+   const auto rules = schema::rules<T>::define();
+   if (!rules.fields().empty()) {
+      return write_document(config::core::encode(input), std::move(options));
+   }
+   if constexpr (requires(const T& source, variant& output) { to_variant(source, output); }) {
+      auto value = variant{};
+      to_variant(input, value);
+      return write_value(value, std::move(options));
+   } else {
+      return write_result{
+          .diagnostics = {schema::diagnostic{
+              .path = {},
+              .code = "yaml.type",
+              .level = schema::severity::error,
+              .message = "type is not writable to YAML without schema rules or forge::to_variant",
+          }},
+      };
+   }
 }
 
 template <typename T>
 [[nodiscard]] write_result save(const std::filesystem::path& path, const T& input, write_options options = {}) {
-   return save_value(path, variant{input}, std::move(options));
+   const auto rules = schema::rules<T>::define();
+   if (!rules.fields().empty()) {
+      return save_document(path, config::core::encode(input), std::move(options));
+   }
+   if constexpr (requires(const T& source, variant& output) { to_variant(source, output); }) {
+      auto value = variant{};
+      to_variant(input, value);
+      return save_value(path, value, std::move(options));
+   } else {
+      return write_result{
+          .diagnostics = {schema::diagnostic{
+              .path = {},
+              .code = "yaml.type",
+              .level = schema::severity::error,
+              .message = "type is not writable to YAML without schema rules or forge::to_variant",
+          }},
+      };
+   }
 }
 
 } // namespace forge::codec::yaml

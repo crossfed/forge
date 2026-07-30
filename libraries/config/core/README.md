@@ -23,7 +23,7 @@ decodes typed objects and redacts secret fields using schema metadata.
 - `forge.config.core.key_path` — dotted config key helper.
 - `forge.config.core.document` — `document`, `merge`, `effective_document`.
 - `forge.config.core.component` — component descriptors, registry, views, redaction.
-- `forge.config.core.decode` — `decode<T>`, `defaults_for<T>`, `describe_component<T>`.
+- `forge.config.core.decode` — `decode<T>`, `encode<T>`, `defaults_for<T>`, `describe_component<T>`.
 - `forge.config.core.migration` — document migrations before typed decode.
 
 Target: `forge_config_core`.
@@ -100,6 +100,9 @@ if (!decoded.ok()) {
    }
 }
 ```
+
+`encode<T>` performs the inverse schema mapping and emits canonical field names rather
+than C++ member names. Format adapters use it for schema-bound typed writes.
 
 Nested object lists are decoded through `forge_schema` rules too. Diagnostics use
 indexed paths such as `plugins.crypto.signer.keys[0].private-key`, while the config

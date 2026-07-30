@@ -102,6 +102,8 @@ variants use the canonical `[index, payload]` representation; types with an owni
 canonical scalar adapter, such as encoded public keys and signatures, retain that
 adapter's JSON form. Schema-bound records use their declared field names and aliases.
 Associative containers use arrays of exact `[key, value]` entries.
+Typed `write<T>` and `save<T>` emit the schema's canonical field names, so their output
+round-trips through exact reads even when C++ member names differ.
 
 ```cpp
 import forge.codec.json;

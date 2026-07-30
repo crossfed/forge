@@ -391,6 +391,37 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_schema_names_and_asso
        R"({"bind-port":9090,"bind-host":"127.0.0.1","tls-enabled":false,"tags":[]})", options);
    BOOST_REQUIRE(schema_record.ok());
 
+   const auto written_schema_record = forge::codec::json::write(schema_record.value);
+   BOOST_REQUIRE(written_schema_record.ok());
+   BOOST_TEST(written_schema_record.text.find(R"("bind-port")") != std::string::npos);
+   BOOST_TEST(written_schema_record.text.find(R"("bind_port")") == std::string::npos);
+   const auto written_schema_roundtrip =
+       forge::codec::json::read<forge_json_tests::http_config>(written_schema_record.text, options);
+   BOOST_REQUIRE(written_schema_roundtrip.ok());
+   BOOST_TEST(written_schema_roundtrip.value.bind_port == schema_record.value.bind_port);
+   BOOST_TEST(written_schema_roundtrip.value.bind_host == schema_record.value.bind_host);
+   BOOST_TEST(written_schema_roundtrip.value.tls_enabled == schema_record.value.tls_enabled);
+   BOOST_TEST(written_schema_roundtrip.value.tags == schema_record.value.tags);
+
+   const auto schema_path = std::filesystem::temp_directory_path() /
+                            ("forge_json_exact_schema_" +
+                             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
+   struct schema_cleanup {
+      std::filesystem::path path;
+      ~schema_cleanup() {
+         auto ignored = std::error_code{};
+         std::filesystem::remove(path, ignored);
+      }
+   } remove_schema_file{schema_path};
+   const auto saved_schema_record = forge::codec::json::save(schema_path, schema_record.value);
+   BOOST_REQUIRE(saved_schema_record.ok());
+   const auto saved_schema_roundtrip = forge::codec::json::load<forge_json_tests::http_config>(schema_path, options);
+   BOOST_REQUIRE(saved_schema_roundtrip.ok());
+   BOOST_TEST(saved_schema_roundtrip.value.bind_port == schema_record.value.bind_port);
+   BOOST_TEST(saved_schema_roundtrip.value.bind_host == schema_record.value.bind_host);
+   BOOST_TEST(saved_schema_roundtrip.value.tls_enabled == schema_record.value.tls_enabled);
+   BOOST_TEST(saved_schema_roundtrip.value.tags == schema_record.value.tags);
+
    const auto schema_missing = forge::codec::json::read<forge_json_tests::http_config>(
        R"({"bind-port":9090,"bind-host":"127.0.0.1","tls-enabled":false})", options);
    BOOST_REQUIRE(!schema_missing.ok());
