@@ -487,7 +487,24 @@ def verify_native_package_diamond(
 ) -> None:
     source = output / "source"
     build_directory = output / "build"
-    source.mkdir(parents=True)
+    for side, package in (
+        ("left", "ProductValues"),
+        ("right", "ProductProtocol"),
+    ):
+        side_source = source / side
+        side_source.mkdir(parents=True)
+        body = f"find_package({package} CONFIG REQUIRED)\n"
+        if side == "right":
+            body += """
+add_executable(native_package_diamond ../main.cpp)
+target_link_libraries(
+   native_package_diamond
+   PRIVATE
+      Values::values
+      Product::values
+)
+"""
+        (side_source / "CMakeLists.txt").write_text(body, encoding="utf-8")
     (source / "main.cpp").write_text(
         """import product.chain.values;
 
@@ -505,16 +522,8 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(ForgeContract CONFIG REQUIRED)
-find_package(ProductValues CONFIG REQUIRED)
-find_package(ProductProtocol CONFIG REQUIRED)
-
-add_executable(native_package_diamond main.cpp)
-target_link_libraries(
-   native_package_diamond
-   PRIVATE
-      Values::values
-      Product::values
-)
+add_subdirectory(left)
+add_subdirectory(right)
 """,
         encoding="utf-8",
     )
@@ -532,7 +541,7 @@ target_link_libraries(
         ),
     )
     build(cmake, build_directory, "native_package_diamond")
-    run(str(build_directory / "native_package_diamond"))
+    run(str(build_directory / "right" / "native_package_diamond"))
 
 
 def verify_conflicting_package_descriptor(

@@ -902,6 +902,12 @@ function(forge_register_contract_library_targets)
             "Forge Contract library target: ${_input}"
          )
       endif()
+      get_target_property(_imported_global "${_target}" IMPORTED_GLOBAL)
+      if(NOT _imported_global)
+         # Stable contract IDs are project-wide, so package targets must outlive
+         # the directory scope in which find_package created them.
+         set_property(TARGET "${_target}" PROPERTY IMPORTED_GLOBAL TRUE)
+      endif()
       get_property(_sealed GLOBAL PROPERTY FORGE_CONTRACT_SEALED_TARGETS)
       if(_target IN_LIST _sealed)
          _forge_contract_assert_sealed_target("${_target}")
