@@ -234,6 +234,9 @@ BOOST_AUTO_TEST_CASE(schema_converts_described_enums) {
 }
 
 BOOST_AUTO_TEST_CASE(schema_checked_integral_cast_handles_widening_and_narrowing) {
+   static_assert(forge::schema::signed_integral_value<__int128>);
+   static_assert(forge::schema::unsigned_integral_value<unsigned __int128>);
+
    BOOST_TEST(forge::schema::checked_integral_cast<long long>(int{-1}) == -1LL);
    BOOST_TEST(forge::schema::checked_integral_cast<std::int64_t>(std::int32_t{-123}) == -123);
    BOOST_TEST(forge::schema::checked_integral_cast<long long>(std::uint32_t{123}) == 123LL);

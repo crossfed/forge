@@ -266,6 +266,12 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_nested_fields_and_var
    BOOST_TEST(object_variant.diagnostics.front().code == "json.variant");
    BOOST_TEST(object_variant.diagnostics.front().path == "choice");
 
+   const auto string_variant =
+       forge::codec::json::read<forge_json_tests::exact_record>(R"({"items":[],"choice":"bad"})", options);
+   BOOST_REQUIRE(!string_variant.ok());
+   BOOST_TEST(string_variant.diagnostics.front().code == "json.variant");
+   BOOST_TEST(string_variant.diagnostics.front().path == "choice");
+
    const auto invalid_index =
        forge::codec::json::read<forge_json_tests::exact_record>(R"({"items":[],"choice":[2,{"value":2}]})", options);
    BOOST_REQUIRE(!invalid_index.ok());
@@ -520,6 +526,12 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_preserve_wide_integer_strings)
    BOOST_REQUIRE(decoded.ok());
    BOOST_CHECK(decoded.value.signed_value == signed_value);
    BOOST_CHECK(decoded.value.unsigned_value == unsigned_value);
+
+   const auto overflow = forge::codec::json::read<forge_json_tests::exact_wide_integer_record>(
+       R"({"signed_value":"0","unsigned_value":"340282366920938463463374607431768211456"})", options);
+   BOOST_REQUIRE(!overflow.ok());
+   BOOST_TEST(overflow.diagnostics.front().code == "json.range");
+   BOOST_TEST(overflow.diagnostics.front().path == "unsigned_value");
 }
 
 BOOST_AUTO_TEST_CASE(json_exact_duplicate_scan_respects_max_depth) {

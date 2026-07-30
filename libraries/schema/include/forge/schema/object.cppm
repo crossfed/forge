@@ -102,7 +102,7 @@ template <typename T> [[nodiscard]] T cast_any_to(const std::any& value) {
       if (value.type() == typeid(char*)) {
          return std::string{std::any_cast<char*>(value)};
       }
-   } else if constexpr (std::integral<clean_type> && !std::same_as<clean_type, bool>) {
+   } else if constexpr (integral_value<clean_type> && !std::same_as<clean_type, bool>) {
       if (value.type() == typeid(int)) {
          return checked_integral_cast<clean_type>(std::any_cast<int>(value));
       }
@@ -216,10 +216,18 @@ template <typename T> [[nodiscard]] std::any to_default_any(const T& input) {
    using clean_type = std::remove_cvref_t<T>;
    if constexpr (std::same_as<clean_type, bool>) {
       return std::any{input};
-   } else if constexpr (std::signed_integral<clean_type> && !std::same_as<clean_type, bool>) {
-      return std::any{static_cast<std::int64_t>(input)};
-   } else if constexpr (std::unsigned_integral<clean_type> && !std::same_as<clean_type, bool>) {
-      return std::any{static_cast<std::uint64_t>(input)};
+   } else if constexpr (signed_integral_value<clean_type> && !std::same_as<clean_type, bool>) {
+      if constexpr (sizeof(clean_type) <= sizeof(std::int64_t)) {
+         return std::any{static_cast<std::int64_t>(input)};
+      } else {
+         return std::any{input};
+      }
+   } else if constexpr (unsigned_integral_value<clean_type> && !std::same_as<clean_type, bool>) {
+      if constexpr (sizeof(clean_type) <= sizeof(std::uint64_t)) {
+         return std::any{static_cast<std::uint64_t>(input)};
+      } else {
+         return std::any{input};
+      }
    } else if constexpr (std::floating_point<clean_type>) {
       return std::any{static_cast<double>(input)};
    } else if constexpr (std::same_as<clean_type, std::string>) {
@@ -229,7 +237,7 @@ template <typename T> [[nodiscard]] std::any to_default_any(const T& input) {
          return std::any{std::move(*text)};
       }
       using underlying_type = std::underlying_type_t<clean_type>;
-      if constexpr (std::signed_integral<underlying_type>) {
+      if constexpr (signed_integral_value<underlying_type>) {
          return std::any{static_cast<std::int64_t>(input)};
       } else {
          return std::any{static_cast<std::uint64_t>(input)};
@@ -804,7 +812,7 @@ template <typename T>
             return parsed;
          }
       }
-   } else if constexpr (std::signed_integral<clean_type> && !std::same_as<clean_type, bool>) {
+   } else if constexpr (signed_integral_value<clean_type> && !std::same_as<clean_type, bool>) {
       if (const auto* value = std::get_if<std::int64_t>(&input.storage)) {
          return checked_integral_cast<clean_type>(*value);
       }
@@ -814,7 +822,7 @@ template <typename T>
       if (const auto* text = std::get_if<std::string>(&input.storage)) {
          return parse_scalar_text<clean_type>(*text);
       }
-   } else if constexpr (std::unsigned_integral<clean_type> && !std::same_as<clean_type, bool>) {
+   } else if constexpr (unsigned_integral_value<clean_type> && !std::same_as<clean_type, bool>) {
       if (const auto* value = std::get_if<std::uint64_t>(&input.storage)) {
          return checked_integral_cast<clean_type>(*value);
       }
@@ -983,7 +991,7 @@ void validate_exact_input_value(const input_value& input, std::string_view path,
          diagnostics.push_back(
              make_path_error(std::string{path}, "config.type", "boolean field must be a boolean value"));
       }
-   } else if constexpr (std::signed_integral<clean_type>) {
+   } else if constexpr (signed_integral_value<clean_type>) {
       if constexpr (sizeof(clean_type) <= sizeof(std::int64_t)) {
          const auto in_range = std::holds_alternative<std::int64_t>(input.storage)
                                    ? std::in_range<clean_type>(std::get<std::int64_t>(input.storage))
@@ -1009,7 +1017,7 @@ void validate_exact_input_value(const input_value& input, std::string_view path,
             diagnostics.push_back(make_path_error(std::string{path}, "config.range", error.what()));
          }
       }
-   } else if constexpr (std::unsigned_integral<clean_type>) {
+   } else if constexpr (unsigned_integral_value<clean_type>) {
       if constexpr (sizeof(clean_type) <= sizeof(std::uint64_t)) {
          const auto in_range = std::holds_alternative<std::int64_t>(input.storage)
                                    ? std::in_range<clean_type>(std::get<std::int64_t>(input.storage))
@@ -1146,10 +1154,18 @@ template <typename T> [[nodiscard]] input_value to_input_value(const T& input) {
       return to_input_value(*input);
    } else if constexpr (std::same_as<clean_type, bool>) {
       return input_value{input};
-   } else if constexpr (std::signed_integral<clean_type> && !std::same_as<clean_type, bool>) {
-      return input_value{static_cast<std::int64_t>(input)};
-   } else if constexpr (std::unsigned_integral<clean_type> && !std::same_as<clean_type, bool>) {
-      return input_value{static_cast<std::uint64_t>(input)};
+   } else if constexpr (signed_integral_value<clean_type> && !std::same_as<clean_type, bool>) {
+      if constexpr (sizeof(clean_type) <= sizeof(std::int64_t)) {
+         return input_value{static_cast<std::int64_t>(input)};
+      } else {
+         return input_value{format_integral_text(input)};
+      }
+   } else if constexpr (unsigned_integral_value<clean_type> && !std::same_as<clean_type, bool>) {
+      if constexpr (sizeof(clean_type) <= sizeof(std::uint64_t)) {
+         return input_value{static_cast<std::uint64_t>(input)};
+      } else {
+         return input_value{format_integral_text(input)};
+      }
    } else if constexpr (std::floating_point<clean_type>) {
       return input_value{static_cast<double>(input)};
    } else if constexpr (std::same_as<clean_type, std::string>) {
@@ -1159,7 +1175,7 @@ template <typename T> [[nodiscard]] input_value to_input_value(const T& input) {
          return input_value{std::move(*text)};
       }
       using underlying_type = std::underlying_type_t<clean_type>;
-      if constexpr (std::signed_integral<underlying_type>) {
+      if constexpr (signed_integral_value<underlying_type>) {
          return input_value{static_cast<std::int64_t>(input)};
       } else {
          return input_value{static_cast<std::uint64_t>(input)};

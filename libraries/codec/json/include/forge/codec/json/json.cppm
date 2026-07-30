@@ -326,7 +326,7 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
       if (!source.is_null()) {
          validate_exact<typename pointer_traits<value_type>::value_type>(source, path, diagnostics);
       }
-   } else if constexpr (std::same_as<value_type, bool> || std::integral<value_type> ||
+   } else if constexpr (std::same_as<value_type, bool> || schema::integral_value<value_type> ||
                         std::floating_point<value_type> || std::same_as<value_type, std::string> ||
                         reflect::is_described_enum_v<value_type>) {
       try {
@@ -341,7 +341,14 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
       // Some described value types intentionally use a canonical string adapter.
       // Their own from_variant overload remains the authority for that scalar form.
       if (source.is_string()) {
-         return;
+         try {
+            static_cast<void>(source.template as<value_type>());
+            return;
+         } catch (const std::exception&) {
+            add_exact_error(diagnostics, std::string{path}, "json.object",
+                            "described record must be a JSON object or valid scalar adapter");
+            return;
+         }
       }
       if (!source.is_object()) {
          add_exact_error(diagnostics, std::string{path}, "json.object", "described record must be a JSON object");
@@ -400,7 +407,14 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
    } else if constexpr (is_variant_v<value_type>) {
       // Public-key and signature variants use canonical string encodings.
       if (source.is_string()) {
-         return;
+         try {
+            static_cast<void>(source.template as<value_type>());
+            return;
+         } catch (const std::exception&) {
+            add_exact_error(diagnostics, std::string{path}, "json.variant",
+                            "variant must be encoded as [index, payload] or a valid scalar adapter");
+            return;
+         }
       }
       if (!source.is_array()) {
          add_exact_error(diagnostics, std::string{path}, "json.variant", "variant must be encoded as [index, payload]");

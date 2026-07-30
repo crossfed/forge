@@ -22,6 +22,7 @@ module;
 export module forge.schema.scalar;
 
 import forge.schema.enums;
+import forge.schema.value_kind;
 
 export namespace forge::schema {
 
@@ -44,33 +45,33 @@ template <typename T> struct scalar_optional<std::optional<T>> : std::true_type 
 }
 
 template <typename Target, typename Source> [[nodiscard]] Target checked_integral_cast(Source value) {
+   static_assert(integral_value<Target> && integral_value<Source>);
    using limits = std::numeric_limits<Target>;
-   if constexpr (std::signed_integral<Source> && std::signed_integral<Target>) {
+   if constexpr (signed_integral_value<Source> && signed_integral_value<Target>) {
       if constexpr (std::numeric_limits<Target>::digits < std::numeric_limits<Source>::digits) {
-         const auto input = static_cast<std::intmax_t>(value);
-         if (input < static_cast<std::intmax_t>((limits::min)()) ||
-             input > static_cast<std::intmax_t>((limits::max)())) {
+         if (value < static_cast<Source>((limits::min)()) || value > static_cast<Source>((limits::max)())) {
             throw std::invalid_argument{"integer is outside target type range"};
          }
       }
-   } else if constexpr (std::signed_integral<Source> && std::unsigned_integral<Target>) {
+   } else if constexpr (signed_integral_value<Source> && unsigned_integral_value<Target>) {
       if (value < 0) {
          throw std::invalid_argument{"integer is outside target type range"};
       }
       if constexpr (std::numeric_limits<Target>::digits < std::numeric_limits<Source>::digits) {
-         if (static_cast<std::uintmax_t>(value) > static_cast<std::uintmax_t>((limits::max)())) {
+         using unsigned_source = unsigned_integral_t<Source>;
+         if (static_cast<unsigned_source>(value) > static_cast<unsigned_source>((limits::max)())) {
             throw std::invalid_argument{"integer is outside target type range"};
          }
       }
-   } else if constexpr (std::unsigned_integral<Source> && std::signed_integral<Target>) {
+   } else if constexpr (unsigned_integral_value<Source> && signed_integral_value<Target>) {
       if constexpr (std::numeric_limits<Target>::digits < std::numeric_limits<Source>::digits) {
-         if (static_cast<std::uintmax_t>(value) > static_cast<std::uintmax_t>((limits::max)())) {
+         if (value > static_cast<Source>((limits::max)())) {
             throw std::invalid_argument{"integer is outside target type range"};
          }
       }
    } else {
       if constexpr (std::numeric_limits<Target>::digits < std::numeric_limits<Source>::digits) {
-         if (static_cast<std::uintmax_t>(value) > static_cast<std::uintmax_t>((limits::max)())) {
+         if (value > static_cast<Source>((limits::max)())) {
             throw std::invalid_argument{"integer is outside target type range"};
          }
       }
@@ -79,15 +80,15 @@ template <typename Target, typename Source> [[nodiscard]] Target checked_integra
 }
 
 template <typename Value> [[nodiscard]] Value parse_integral_text(std::string_view text) {
-   static_assert(std::integral<Value> && !std::same_as<Value, bool>);
+   static_assert(integral_value<Value> && !std::same_as<Value, bool>);
    if (text.empty()) {
       throw std::invalid_argument{"integer has invalid syntax"};
    }
 
-   using unsigned_value = std::make_unsigned_t<Value>;
+   using unsigned_value = unsigned_integral_t<Value>;
    auto position = std::size_t{0};
    auto negative = false;
-   if constexpr (std::signed_integral<Value>) {
+   if constexpr (signed_integral_value<Value>) {
       negative = text.front() == '-';
       position = negative ? 1 : 0;
    }
@@ -110,7 +111,7 @@ template <typename Value> [[nodiscard]] Value parse_integral_text(std::string_vi
       magnitude = static_cast<unsigned_value>(magnitude * unsigned_value{10} + digit);
    }
 
-   if constexpr (std::signed_integral<Value>) {
+   if constexpr (signed_integral_value<Value>) {
       if (negative) {
          if (magnitude == static_cast<unsigned_value>(positive_limit + unsigned_value{1})) {
             return (std::numeric_limits<Value>::min)();
@@ -131,9 +132,9 @@ template <typename T> [[nodiscard]] T parse_scalar_text(std::string_view text) {
          throw std::invalid_argument{"boolean has invalid syntax"};
       }
       return parsed;
-   } else if constexpr (std::signed_integral<clean> && !std::same_as<clean, bool>) {
+   } else if constexpr (signed_integral_value<clean> && !std::same_as<clean, bool>) {
       return parse_integral_text<clean>(text);
-   } else if constexpr (std::unsigned_integral<clean> && !std::same_as<clean, bool>) {
+   } else if constexpr (unsigned_integral_value<clean> && !std::same_as<clean, bool>) {
       return parse_integral_text<clean>(text);
    } else if constexpr (std::floating_point<clean>) {
       auto copy = std::string{text};
@@ -155,6 +156,26 @@ template <typename T> [[nodiscard]] T parse_scalar_text(std::string_view text) {
    }
 }
 
+template <integral_value Value> [[nodiscard]] std::string format_integral_text(Value value) {
+   using unsigned_value = unsigned_integral_t<Value>;
+   const auto negative = signed_integral_value<Value> && value < 0;
+   auto magnitude = static_cast<unsigned_value>(value);
+   if (negative) {
+      magnitude = static_cast<unsigned_value>(unsigned_value{0} - magnitude);
+   }
+
+   auto output = std::string{};
+   do {
+      output.push_back(static_cast<char>('0' + magnitude % unsigned_value{10}));
+      magnitude /= unsigned_value{10};
+   } while (magnitude != 0);
+   if (negative) {
+      output.push_back('-');
+   }
+   std::ranges::reverse(output);
+   return output;
+}
+
 template <typename T> [[nodiscard]] std::optional<std::string> format_scalar_text(const T& value) {
    using clean = std::remove_cvref_t<T>;
    if constexpr (scalar_optional<clean>::value) {
@@ -166,8 +187,8 @@ template <typename T> [[nodiscard]] std::optional<std::string> format_scalar_tex
       return value;
    } else if constexpr (std::same_as<clean, bool>) {
       return value ? std::string{"true"} : std::string{"false"};
-   } else if constexpr (std::integral<clean> && !std::same_as<clean, bool>) {
-      return std::to_string(value);
+   } else if constexpr (integral_value<clean> && !std::same_as<clean, bool>) {
+      return format_integral_text(value);
    } else if constexpr (std::floating_point<clean>) {
       auto stream = std::ostringstream{};
       stream << value;
