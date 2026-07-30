@@ -600,6 +600,53 @@ BOOST_AUTO_TEST_CASE(json_exact_schema_paths_roundtrip_through_typed_writers) {
    BOOST_TEST(nested_roundtrip.diagnostics.empty());
    BOOST_TEST(nested_roundtrip.value.config.deadline_ms == 2500U);
 
+   const auto nested_permissive_roundtrip =
+       forge::codec::json::read<forge_json_tests::exact_dotted_parent>(nested_written.text);
+   BOOST_REQUIRE(nested_permissive_roundtrip.ok());
+   BOOST_TEST(nested_permissive_roundtrip.diagnostics.empty());
+   BOOST_TEST(nested_permissive_roundtrip.value.config.deadline_ms == 2500U);
+
+   const auto nested_path = std::filesystem::temp_directory_path() /
+                            ("forge_json_nested_schema_" +
+                             std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
+   struct nested_cleanup {
+      std::filesystem::path path;
+      ~nested_cleanup() {
+         auto ignored = std::error_code{};
+         std::filesystem::remove(path, ignored);
+      }
+   } remove_nested_file{nested_path};
+   const auto nested_saved =
+       forge::codec::json::save(nested_path, forge_json_tests::exact_dotted_parent{.config = {.deadline_ms = 2500}});
+   BOOST_REQUIRE(nested_saved.ok());
+   const auto nested_loaded = forge::codec::json::load<forge_json_tests::exact_dotted_parent>(nested_path);
+   BOOST_REQUIRE(nested_loaded.ok());
+   BOOST_TEST(nested_loaded.diagnostics.empty());
+   BOOST_TEST(nested_loaded.value.config.deadline_ms == 2500U);
+
+   const auto nested_unknown = forge::codec::json::read<forge_json_tests::exact_dotted_parent>(
+       R"({"config":{"api":{"deadline-ms":2500,"extra":1}}})");
+   BOOST_REQUIRE(nested_unknown.ok());
+   BOOST_REQUIRE_EQUAL(nested_unknown.diagnostics.size(), 1U);
+   BOOST_TEST(nested_unknown.diagnostics.front().code == "json.unknown");
+   BOOST_TEST(nested_unknown.diagnostics.front().path == "config.api.extra");
+   BOOST_TEST(nested_unknown.value.config.deadline_ms == 2500U);
+
+   const auto nested_unknown_ignored = forge::codec::json::read<forge_json_tests::exact_dotted_parent>(
+       R"({"config":{"api":{"deadline-ms":2500,"extra":1}}})",
+       {.unknown_fields = forge::codec::json::unknown_field_policy::ignore});
+   BOOST_REQUIRE(nested_unknown_ignored.ok());
+   BOOST_TEST(nested_unknown_ignored.diagnostics.empty());
+   BOOST_TEST(nested_unknown_ignored.value.config.deadline_ms == 2500U);
+
+   const auto nested_unknown_rejected = forge::codec::json::read<forge_json_tests::exact_dotted_parent>(
+       R"({"config":{"api":{"deadline-ms":2500,"extra":1}}})",
+       {.unknown_fields = forge::codec::json::unknown_field_policy::error});
+   BOOST_REQUIRE(!nested_unknown_rejected.ok());
+   BOOST_REQUIRE_EQUAL(nested_unknown_rejected.diagnostics.size(), 1U);
+   BOOST_TEST(nested_unknown_rejected.diagnostics.front().code == "json.unknown");
+   BOOST_TEST(nested_unknown_rejected.diagnostics.front().path == "config.api.extra");
+
    const auto schema_parent_input = forge_json_tests::exact_dotted_schema_parent{.config = {.deadline_ms = 2500}};
    const auto encoded_parent = forge::config::core::encode(schema_parent_input);
    const auto decoded_parent =

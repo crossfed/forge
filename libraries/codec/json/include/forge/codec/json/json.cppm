@@ -168,10 +168,27 @@ template <typename T> [[nodiscard]] read_result<T> read(std::string_view input, 
       if (!output.ok()) {
          return output;
       }
-      detail::normalize_exact<T>(parsed.value, {}, output.diagnostics);
-      if (!output.ok()) {
-         return output;
+   }
+
+   const auto schema_diagnostic_offset = output.diagnostics.size();
+   detail::materialize_schema_records<T>(parsed.value, {}, output.diagnostics);
+   if (options.described_records == described_record_policy::permissive) {
+      auto first = output.diagnostics.begin() + static_cast<std::ptrdiff_t>(schema_diagnostic_offset);
+      if (options.unknown_fields == unknown_field_policy::ignore) {
+         output.diagnostics.erase(
+             std::remove_if(first, output.diagnostics.end(),
+                            [](const schema::diagnostic& entry) { return entry.code == "json.unknown"; }),
+             output.diagnostics.end());
+      } else if (options.unknown_fields == unknown_field_policy::error) {
+         for (auto iterator = first; iterator != output.diagnostics.end(); ++iterator) {
+            if (iterator->code == "json.unknown") {
+               iterator->level = schema::severity::error;
+            }
+         }
       }
+   }
+   if (!output.ok()) {
+      return output;
    }
 
    if constexpr (requires(const variant& source, T& target) { from_variant(source, target); }) {
@@ -281,10 +298,27 @@ template <typename T> [[nodiscard]] read_result<T> load(const std::filesystem::p
       if (!output.ok()) {
          return output;
       }
-      detail::normalize_exact<T>(parsed.value, {}, output.diagnostics);
-      if (!output.ok()) {
-         return output;
+   }
+
+   const auto schema_diagnostic_offset = output.diagnostics.size();
+   detail::materialize_schema_records<T>(parsed.value, {}, output.diagnostics);
+   if (options.described_records == described_record_policy::permissive) {
+      auto first = output.diagnostics.begin() + static_cast<std::ptrdiff_t>(schema_diagnostic_offset);
+      if (options.unknown_fields == unknown_field_policy::ignore) {
+         output.diagnostics.erase(
+             std::remove_if(first, output.diagnostics.end(),
+                            [](const schema::diagnostic& entry) { return entry.code == "json.unknown"; }),
+             output.diagnostics.end());
+      } else if (options.unknown_fields == unknown_field_policy::error) {
+         for (auto iterator = first; iterator != output.diagnostics.end(); ++iterator) {
+            if (iterator->code == "json.unknown") {
+               iterator->level = schema::severity::error;
+            }
+         }
       }
+   }
+   if (!output.ok()) {
+      return output;
    }
 
    if constexpr (requires(const variant& source, T& target) { from_variant(source, target); }) {

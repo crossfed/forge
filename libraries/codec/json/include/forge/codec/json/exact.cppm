@@ -325,7 +325,7 @@ template <typename T>
 void validate_exact(const variant& source, std::string_view path, std::vector<schema::diagnostic>& diagnostics);
 
 template <typename T>
-void normalize_exact(variant& source, std::string_view path, std::vector<schema::diagnostic>& diagnostics);
+void materialize_schema_records(variant& source, std::string_view path, std::vector<schema::diagnostic>& diagnostics);
 
 [[nodiscard]] inline schema::input_value to_schema_input(const variant& source) {
    switch (source.get_type()) {
@@ -492,14 +492,14 @@ void validate_variant_payload(std::size_t selected, const variant& payload, std:
 }
 
 template <typename Variant, std::size_t Index = 0>
-void normalize_variant_payload(std::size_t selected, variant& payload, std::string_view path,
-                               std::vector<schema::diagnostic>& diagnostics) {
+void materialize_variant_payload(std::size_t selected, variant& payload, std::string_view path,
+                                 std::vector<schema::diagnostic>& diagnostics) {
    if constexpr (Index < std::variant_size_v<Variant>) {
       if (selected == Index) {
-         normalize_exact<std::variant_alternative_t<Index, Variant>>(payload, path, diagnostics);
+         materialize_schema_records<std::variant_alternative_t<Index, Variant>>(payload, path, diagnostics);
          return;
       }
-      normalize_variant_payload<Variant, Index + 1>(selected, payload, path, diagnostics);
+      materialize_variant_payload<Variant, Index + 1>(selected, payload, path, diagnostics);
    }
 }
 
@@ -657,7 +657,8 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
          }
          try {
             auto normalized = elements[index];
-            normalize_exact<typename multi_index_traits<value_type>::value_type>(normalized, entry_path, diagnostics);
+            materialize_schema_records<typename multi_index_traits<value_type>::value_type>(normalized, entry_path,
+                                                                                            diagnostics);
             const auto value = normalized.template as<typename multi_index_traits<value_type>::value_type>();
             const auto previous_size = seen.size();
             seen.insert(value);
@@ -694,7 +695,7 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
             }
             try {
                auto normalized = elements[index].get_array()[0];
-               normalize_exact<typename associative_traits<value_type>::key_type>(
+               materialize_schema_records<typename associative_traits<value_type>::key_type>(
                    normalized, element_path(entry_path, 0U), diagnostics);
                const auto key = normalized.template as<typename associative_traits<value_type>::key_type>();
                if (!seen.insert(key).second) {
@@ -737,8 +738,8 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
          for (std::size_t index = 0; index < elements.size(); ++index) {
             try {
                auto normalized = elements[index];
-               normalize_exact<typename sequence_traits<value_type>::value_type>(normalized, element_path(path, index),
-                                                                                 diagnostics);
+               materialize_schema_records<typename sequence_traits<value_type>::value_type>(
+                   normalized, element_path(path, index), diagnostics);
                const auto value = normalized.template as<typename sequence_traits<value_type>::value_type>();
                if (!seen.insert(value).second) {
                   add_exact_error(diagnostics, element_path(path, index), "json.duplicate",
@@ -767,16 +768,16 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
 }
 
 template <typename T>
-void normalize_exact(variant& source, std::string_view path, std::vector<schema::diagnostic>& diagnostics) {
+void materialize_schema_records(variant& source, std::string_view path, std::vector<schema::diagnostic>& diagnostics) {
    using value_type = clean_type<T>;
 
    if constexpr (is_optional_v<value_type>) {
       if (!source.is_null()) {
-         normalize_exact<typename optional_traits<value_type>::value_type>(source, path, diagnostics);
+         materialize_schema_records<typename optional_traits<value_type>::value_type>(source, path, diagnostics);
       }
    } else if constexpr (is_pointer_v<value_type>) {
       if (!source.is_null()) {
-         normalize_exact<typename pointer_traits<value_type>::value_type>(source, path, diagnostics);
+         materialize_schema_records<typename pointer_traits<value_type>::value_type>(source, path, diagnostics);
       }
    } else if constexpr (reflect::is_described_object_v<value_type>) {
       if (source.is_string()) {
@@ -808,6 +809,9 @@ void normalize_exact(variant& source, std::string_view path, std::vector<schema:
          return;
       }
 
+      if (!source.is_object()) {
+         return;
+      }
       auto object = mutable_variant_object{source.get_object()};
       reflect::for_each_member<value_type>([&](const char* name, auto member) {
          const auto found = object.find(name);
@@ -815,40 +819,71 @@ void normalize_exact(variant& source, std::string_view path, std::vector<schema:
             return;
          }
          using member_type = clean_type<decltype(std::declval<value_type>().*member)>;
-         normalize_exact<member_type>(found->value(), field_path(path, name), diagnostics);
+         materialize_schema_records<member_type>(found->value(), field_path(path, name), diagnostics);
       });
       source = variant{std::move(object)};
    } else if constexpr (is_variant_v<value_type>) {
       if (source.is_string()) {
          return;
       }
+      if (!source.is_array() || source.get_array().size() != 2U) {
+         return;
+      }
       auto& elements = source.get_array();
-      normalize_variant_payload<value_type>(elements[0].as_uint64(), elements[1], element_path(path, 1U), diagnostics);
+      std::uint64_t selected = 0;
+      if (elements[0].is_uint64()) {
+         selected = elements[0].as_uint64();
+      } else if (elements[0].is_int64() && elements[0].as_int64() >= 0) {
+         selected = static_cast<std::uint64_t>(elements[0].as_int64());
+      } else {
+         return;
+      }
+      if (selected >= variant_traits<value_type>::size) {
+         return;
+      }
+      materialize_variant_payload<value_type>(selected, elements[1], element_path(path, 1U), diagnostics);
    } else if constexpr (is_multi_index_v<value_type>) {
+      if (!source.is_array()) {
+         return;
+      }
       auto& elements = source.get_array();
       for (std::size_t index = 0; index < elements.size(); ++index) {
-         normalize_exact<typename multi_index_traits<value_type>::value_type>(elements[index],
-                                                                              element_path(path, index), diagnostics);
+         materialize_schema_records<typename multi_index_traits<value_type>::value_type>(
+             elements[index], element_path(path, index), diagnostics);
       }
    } else if constexpr (is_sequence_v<value_type>) {
+      if (!source.is_array()) {
+         return;
+      }
       auto& elements = source.get_array();
       for (std::size_t index = 0; index < elements.size(); ++index) {
-         normalize_exact<typename sequence_traits<value_type>::value_type>(elements[index], element_path(path, index),
-                                                                           diagnostics);
+         materialize_schema_records<typename sequence_traits<value_type>::value_type>(
+             elements[index], element_path(path, index), diagnostics);
       }
    } else if constexpr (is_associative_v<value_type>) {
+      if (!source.is_array()) {
+         return;
+      }
       auto& elements = source.get_array();
       for (std::size_t index = 0; index < elements.size(); ++index) {
+         if (!elements[index].is_array() || elements[index].get_array().size() != 2U) {
+            continue;
+         }
          auto& pair = elements[index].get_array();
-         normalize_exact<typename associative_traits<value_type>::key_type>(
+         materialize_schema_records<typename associative_traits<value_type>::key_type>(
              pair[0], element_path(element_path(path, index), 0U), diagnostics);
-         normalize_exact<typename associative_traits<value_type>::mapped_type>(
+         materialize_schema_records<typename associative_traits<value_type>::mapped_type>(
              pair[1], element_path(element_path(path, index), 1U), diagnostics);
       }
    } else if constexpr (is_pair_v<value_type>) {
+      if (!source.is_array() || source.get_array().size() != 2U) {
+         return;
+      }
       auto& elements = source.get_array();
-      normalize_exact<typename pair_traits<value_type>::first_type>(elements[0], element_path(path, 0U), diagnostics);
-      normalize_exact<typename pair_traits<value_type>::second_type>(elements[1], element_path(path, 1U), diagnostics);
+      materialize_schema_records<typename pair_traits<value_type>::first_type>(elements[0], element_path(path, 0U),
+                                                                               diagnostics);
+      materialize_schema_records<typename pair_traits<value_type>::second_type>(elements[1], element_path(path, 1U),
+                                                                                diagnostics);
    }
 }
 
