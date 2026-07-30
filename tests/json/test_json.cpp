@@ -45,6 +45,11 @@ struct policy_list_config {
    std::vector<path_policy> policies;
 };
 
+struct dotted_config {
+   std::uint32_t deadline_ms = 0;
+   path_policy policy = path_policy::direct_only;
+};
+
 } // namespace forge_json_tests
 
 BOOST_DESCRIBE_STRUCT(forge_json_tests::http_config, (), (bind_port, bind_host, tls_enabled, tags))
@@ -52,6 +57,7 @@ BOOST_DESCRIBE_STRUCT(forge_json_tests::named_tag, (), (value))
 BOOST_DESCRIBE_STRUCT(forge_json_tests::tag_config, (), (tags))
 BOOST_DESCRIBE_STRUCT(forge_json_tests::policy_config, (), (policy))
 BOOST_DESCRIBE_STRUCT(forge_json_tests::policy_list_config, (), (policies))
+BOOST_DESCRIBE_STRUCT(forge_json_tests::dotted_config, (), (deadline_ms, policy))
 
 import forge.config.core.key_path;
 import forge.config.core.value;
@@ -117,6 +123,15 @@ template <> struct forge::schema::rules<forge_json_tests::policy_list_config> {
    [[nodiscard]] static forge::schema::object_schema<forge_json_tests::policy_list_config> define() {
       auto schema = forge::schema::object<forge_json_tests::policy_list_config>();
       static_cast<void>(schema.field<&forge_json_tests::policy_list_config::policies>("policies"));
+      return schema;
+   }
+};
+
+template <> struct forge::schema::rules<forge_json_tests::dotted_config> {
+   [[nodiscard]] static forge::schema::object_schema<forge_json_tests::dotted_config> define() {
+      auto schema = forge::schema::object<forge_json_tests::dotted_config>();
+      schema.field<&forge_json_tests::dotted_config::deadline_ms>("api.deadline-ms").alias("deadline-ms");
+      static_cast<void>(schema.field<&forge_json_tests::dotted_config::policy>("path.policy"));
       return schema;
    }
 };
@@ -523,6 +538,53 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_schema_names_and_asso
    BOOST_REQUIRE(shorthand.ok());
    BOOST_REQUIRE_EQUAL(shorthand.value.tags.size(), 1U);
    BOOST_TEST(shorthand.value.tags.front().value == "alpha");
+}
+
+BOOST_AUTO_TEST_CASE(json_exact_schema_paths_roundtrip_through_typed_writers) {
+   const auto input = forge_json_tests::dotted_config{
+       .deadline_ms = 2500,
+       .policy = forge_json_tests::path_policy::direct_preferred,
+   };
+   const auto written = forge::codec::json::write(input);
+   BOOST_REQUIRE(written.ok());
+   BOOST_TEST(written.text.find(R"("api":{"deadline-ms":2500})") != std::string::npos);
+   BOOST_TEST(written.text.find(R"("path":{"policy":"direct-preferred"})") != std::string::npos);
+
+   const auto options = forge::codec::json::read_options{
+       .described_records = forge::codec::json::described_record_policy::exact,
+   };
+   const auto roundtrip = forge::codec::json::read<forge_json_tests::dotted_config>(written.text, options);
+   BOOST_REQUIRE(roundtrip.ok());
+   BOOST_TEST(roundtrip.value.deadline_ms == input.deadline_ms);
+   BOOST_TEST(static_cast<int>(roundtrip.value.policy) == static_cast<int>(input.policy));
+
+   const auto alias = forge::codec::json::read<forge_json_tests::dotted_config>(
+       R"({"deadline-ms":2500,"path":{"policy":"direct-preferred"}})", options);
+   BOOST_REQUIRE(alias.ok());
+
+   const auto duplicate = forge::codec::json::read<forge_json_tests::dotted_config>(
+       R"({"api":{"deadline-ms":2500},"deadline-ms":3000,"path":{"policy":"direct-preferred"}})", options);
+   BOOST_REQUIRE(!duplicate.ok());
+   BOOST_TEST(duplicate.diagnostics.front().code == "json.duplicate");
+   BOOST_TEST(duplicate.diagnostics.front().path == "deadline-ms");
+
+   const auto unknown = forge::codec::json::read<forge_json_tests::dotted_config>(
+       R"({"api":{"deadline-ms":2500,"extra":1},"path":{"policy":"direct-preferred"}})", options);
+   BOOST_REQUIRE(!unknown.ok());
+   BOOST_TEST(unknown.diagnostics.front().code == "json.unknown");
+   BOOST_TEST(unknown.diagnostics.front().path == "api.extra");
+
+   const auto missing = forge::codec::json::read<forge_json_tests::dotted_config>(
+       R"({"api":{},"path":{"policy":"direct-preferred"}})", options);
+   BOOST_REQUIRE(!missing.ok());
+   BOOST_TEST(missing.diagnostics.front().code == "json.missing");
+   BOOST_TEST(missing.diagnostics.front().path == "api.deadline-ms");
+
+   const auto blocked = forge::codec::json::read<forge_json_tests::dotted_config>(
+       R"({"api":2500,"path":{"policy":"direct-preferred"}})", options);
+   BOOST_REQUIRE(!blocked.ok());
+   BOOST_TEST(blocked.diagnostics.front().code == "json.type");
+   BOOST_TEST(blocked.diagnostics.front().path == "api");
 }
 
 BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_scalar_kinds_and_ranges) {

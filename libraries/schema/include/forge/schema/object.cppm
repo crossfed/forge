@@ -539,27 +539,98 @@ template <typename T> class object_schema {
                                                               std::string_view base_path = {}) const {
       auto result = std::vector<diagnostic>{};
       auto known_fields = std::set<std::string>{};
+      auto known_prefixes = std::set<std::string>{};
+      const auto register_name = [&](std::string_view name) {
+         known_fields.emplace(name);
+         auto separator = name.find('.');
+         while (separator != std::string_view::npos) {
+            known_prefixes.emplace(name.substr(0, separator));
+            separator = name.find('.', separator + 1);
+         }
+      };
       for (const auto& field : *fields_) {
-         known_fields.insert(field.name);
-         known_fields.insert(field.aliases.begin(), field.aliases.end());
-      }
-
-      for (const auto& [name, ignored] : input) {
-         if (!known_fields.contains(name)) {
-            result.push_back(make_path_error(append_path(base_path, name), "config.unknown", "unknown config field"));
+         register_name(field.name);
+         for (const auto& alias : field.aliases) {
+            register_name(alias);
          }
       }
+
+      const auto inspect_known_paths = [&](auto& self, const input_value::object_type& object,
+                                           std::string_view relative_path) -> void {
+         for (const auto& [name, value] : object) {
+            auto path = std::string{relative_path};
+            if (!path.empty()) {
+               path += ".";
+            }
+            path += name;
+
+            const auto is_field = known_fields.contains(path);
+            const auto is_prefix = known_prefixes.contains(path);
+            if (!is_field && !is_prefix) {
+               result.push_back(
+                   make_path_error(append_path(base_path, path), "config.unknown", "unknown config field"));
+            } else if (!is_field && is_prefix) {
+               if (const auto* child = value.as_object()) {
+                  self(self, *child, path);
+               } else {
+                  result.push_back(make_path_error(append_path(base_path, path), "config.type",
+                                                   "config path segment must be an object"));
+               }
+            }
+         }
+      };
+      inspect_known_paths(inspect_known_paths, input, std::string_view{});
+
+      struct path_lookup {
+         const input_value* value = nullptr;
+         bool blocked = false;
+      };
+      const auto find_path = [&](std::string_view name) {
+         auto lookup = path_lookup{};
+         auto* object = &input;
+         auto begin = std::size_t{0};
+         while (begin <= name.size()) {
+            const auto end = name.find('.', begin);
+            const auto segment = name.substr(begin, end == std::string_view::npos ? name.size() - begin : end - begin);
+            if (segment.empty()) {
+               if (end == std::string_view::npos) {
+                  break;
+               }
+               begin = end + 1;
+               continue;
+            }
+
+            const auto entry = object->find(std::string{segment});
+            if (entry == object->end()) {
+               return lookup;
+            }
+            if (end == std::string_view::npos) {
+               lookup.value = &entry->second;
+               return lookup;
+            }
+            object = entry->second.as_object();
+            if (!object) {
+               lookup.blocked = true;
+               return lookup;
+            }
+            begin = end + 1;
+         }
+         return lookup;
+      };
 
       for (const auto& field : *fields_) {
          auto field_path = append_path(base_path, field.name);
          const input_value* found = nullptr;
+         auto blocked = false;
          const auto find_name = [&](const std::string& name) {
-            if (const auto entry = input.find(name); entry != input.end()) {
+            const auto lookup = find_path(name);
+            blocked = blocked || lookup.blocked;
+            if (lookup.value) {
                if (found) {
                   result.push_back(make_path_error(append_path(base_path, name), "config.duplicate",
                                                    "multiple names supplied for the same config field"));
                } else {
-                  found = &entry->second;
+                  found = lookup.value;
                   field_path = append_path(base_path, name);
                }
             }
@@ -570,7 +641,7 @@ template <typename T> class object_schema {
          }
 
          if (!found) {
-            if (!field.optional) {
+            if (!field.optional && !blocked) {
                result.push_back(
                    make_path_error(std::move(field_path), "config.missing", "exact config field is missing"));
             }
