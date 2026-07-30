@@ -534,6 +534,29 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_preserve_wide_integer_strings)
    BOOST_TEST(overflow.diagnostics.front().path == "unsigned_value");
 }
 
+BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_chrono_scalar_contracts) {
+   const auto options = forge::codec::json::read_options{
+       .described_records = forge::codec::json::described_record_policy::exact,
+   };
+
+   const auto canonical = forge::codec::json::read<forge_json_tests::exact_chrono_record>(
+       R"({"delay":42,"timestamp":"1970-01-01T00:00:01.000"})", options);
+   BOOST_REQUIRE(canonical.ok());
+   BOOST_TEST(canonical.value.delay.count() == 42);
+
+   const auto boolean_duration = forge::codec::json::read<forge_json_tests::exact_chrono_record>(
+       R"({"delay":true,"timestamp":"1970-01-01T00:00:01.000"})", options);
+   BOOST_REQUIRE(!boolean_duration.ok());
+   BOOST_TEST(boolean_duration.diagnostics.front().code == "json.type");
+   BOOST_TEST(boolean_duration.diagnostics.front().path == "delay");
+
+   const auto malformed_timestamp = forge::codec::json::read<forge_json_tests::exact_chrono_record>(
+       R"({"delay":42,"timestamp":"not-a-timestamp"})", options);
+   BOOST_REQUIRE(!malformed_timestamp.ok());
+   BOOST_TEST(malformed_timestamp.diagnostics.front().code == "json.type");
+   BOOST_TEST(malformed_timestamp.diagnostics.front().path == "timestamp");
+}
+
 BOOST_AUTO_TEST_CASE(json_exact_duplicate_scan_respects_max_depth) {
    const auto parsed = forge::codec::json::read_value(
        R"({"outer":{"inner":1}})",

@@ -134,6 +134,13 @@ BOOST_AUTO_TEST_CASE(finalizer_policy_has_canonical_equality_and_variant_roundtr
 
    BOOST_CHECK(decoded == policy);
    BOOST_TEST(forge::codec::hex::encode(forge::raw::pack(policy)) == "04000000000000000101660300000000000000020102");
+
+   const auto malformed_key = forge::codec::json::read<protocol::finalizer_policy>(
+       R"({"threshold":4,"finalizers":[{"description":"f","weight":3,"public_key":"0"}]})",
+       {.described_records = forge::codec::json::described_record_policy::exact});
+   BOOST_REQUIRE(!malformed_key.ok());
+   BOOST_TEST(malformed_key.diagnostics.front().code == "json.type");
+   BOOST_TEST(malformed_key.diagnostics.front().path == "finalizers[0].public_key");
 }
 
 BOOST_AUTO_TEST_SUITE_END()

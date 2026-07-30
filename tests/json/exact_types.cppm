@@ -6,6 +6,7 @@ module;
 #include <boost/multi_index/ordered_index.hpp>
 #include <boost/multi_index_container.hpp>
 
+#include <chrono>
 #include <compare>
 #include <cstdint>
 #include <map>
@@ -44,6 +45,11 @@ struct exact_scalar_record {
 struct exact_wide_integer_record {
    __int128 signed_value = 0;
    unsigned __int128 unsigned_value = 0;
+};
+
+struct exact_chrono_record {
+   std::chrono::microseconds delay{};
+   std::chrono::sys_time<std::chrono::microseconds> timestamp{};
 };
 
 struct exact_record {
@@ -85,6 +91,7 @@ BOOST_DESCRIBE_STRUCT(exact_leaf, (), (value))
 BOOST_DESCRIBE_STRUCT(exact_alias_leaf, (), (bind_port))
 BOOST_DESCRIBE_STRUCT(exact_scalar_record, (), (enabled, signed_value, unsigned_value, ratio, label))
 BOOST_DESCRIBE_STRUCT(exact_wide_integer_record, (), (signed_value, unsigned_value))
+BOOST_DESCRIBE_STRUCT(exact_chrono_record, (), (delay, timestamp))
 BOOST_DESCRIBE_STRUCT(exact_record, (), (items, choice, optional))
 BOOST_DESCRIBE_STRUCT(exact_map_record, (), (values))
 BOOST_DESCRIBE_STRUCT(exact_pointer_record, (), (shared, unique))
