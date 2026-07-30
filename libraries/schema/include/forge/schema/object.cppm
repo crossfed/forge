@@ -1089,19 +1089,19 @@ void validate_exact_input_value(const input_value& input, std::string_view path,
              make_path_error(std::string{path}, "config.type", "string field must be a string value"));
       }
    } else if constexpr (std::is_enum_v<clean_type>) {
-      auto parsed = clean_type{};
-      const auto valid = std::holds_alternative<std::string>(input.storage)
-                             ? enum_from_config_string(std::get<std::string>(input.storage), parsed)
-                         : std::holds_alternative<std::int64_t>(input.storage)
-                             ? enum_from_int(std::get<std::int64_t>(input.storage), parsed)
-                         : std::holds_alternative<std::uint64_t>(input.storage) &&
-                                 std::get<std::uint64_t>(input.storage) <=
-                                     static_cast<std::uint64_t>((std::numeric_limits<std::int64_t>::max)())
-                             ? enum_from_int(static_cast<std::int64_t>(std::get<std::uint64_t>(input.storage)), parsed)
-                             : false;
-      if (!valid) {
+      if (!std::holds_alternative<std::string>(input.storage)) {
          diagnostics.push_back(
-             make_path_error(std::string{path}, "config.type", "enum field must contain a known name or value"));
+             make_path_error(std::string{path}, "config.type", "enum field must contain its canonical config name"));
+         return;
+      }
+
+      auto parsed = clean_type{};
+      const auto& text = std::get<std::string>(input.storage);
+      const auto valid = enum_from_config_string(text, parsed);
+      const auto canonical = valid ? enum_to_config_string(parsed) : std::nullopt;
+      if (!canonical || *canonical != text) {
+         diagnostics.push_back(
+             make_path_error(std::string{path}, "config.type", "enum field must contain its canonical config name"));
       }
    } else if constexpr (is_vector<clean_type>::value) {
       const auto* values = input.as_array();

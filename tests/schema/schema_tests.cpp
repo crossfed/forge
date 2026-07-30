@@ -352,6 +352,20 @@ BOOST_AUTO_TEST_CASE(schema_exact_enum_validation_accepts_canonical_config_names
    BOOST_REQUIRE_EQUAL(malformed.size(), 1U);
    BOOST_TEST(malformed.front().code == "config.type");
    BOOST_TEST(malformed.front().path == "path-policy");
+
+   auto numeric = std::vector<forge::schema::diagnostic>{};
+   forge::schema::validate_exact_input_value<forge_schema_tests::path_policy>(
+       forge::schema::input_value{std::uint64_t{0}}, "path-policy", numeric);
+   BOOST_REQUIRE_EQUAL(numeric.size(), 1U);
+   BOOST_TEST(numeric.front().code == "config.type");
+   BOOST_TEST(numeric.front().path == "path-policy");
+
+   auto noncanonical = std::vector<forge::schema::diagnostic>{};
+   forge::schema::validate_exact_input_value<forge_schema_tests::path_policy>(
+       forge::schema::input_value{std::string{"direct_only"}}, "path-policy", noncanonical);
+   BOOST_REQUIRE_EQUAL(noncanonical.size(), 1U);
+   BOOST_TEST(noncanonical.front().code == "config.type");
+   BOOST_TEST(noncanonical.front().path == "path-policy");
 }
 
 BOOST_AUTO_TEST_CASE(schema_exact_lists_require_canonical_string_scalar_spelling) {
