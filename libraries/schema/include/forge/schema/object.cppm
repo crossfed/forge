@@ -1018,7 +1018,11 @@ void validate_exact_input_value(const input_value& input, std::string_view path,
                                                "wide signed integer field must be an integer or decimal string"));
       } else if (const auto* text = std::get_if<std::string>(&input.storage)) {
          try {
-            static_cast<void>(parse_scalar_text<clean_type>(*text));
+            const auto value = parse_scalar_text<clean_type>(*text);
+            if (format_integral_text(value) != *text) {
+               diagnostics.push_back(make_path_error(std::string{path}, "config.type",
+                                                     "wide signed integer must use canonical decimal spelling"));
+            }
          } catch (const std::exception& error) {
             diagnostics.push_back(make_path_error(std::string{path}, "config.range", error.what()));
          }
@@ -1044,7 +1048,11 @@ void validate_exact_input_value(const input_value& input, std::string_view path,
                                                "wide unsigned integer field must be an integer or decimal string"));
       } else if (const auto* text = std::get_if<std::string>(&input.storage)) {
          try {
-            static_cast<void>(parse_scalar_text<clean_type>(*text));
+            const auto value = parse_scalar_text<clean_type>(*text);
+            if (format_integral_text(value) != *text) {
+               diagnostics.push_back(make_path_error(std::string{path}, "config.type",
+                                                     "wide unsigned integer must use canonical decimal spelling"));
+            }
          } catch (const std::exception& error) {
             diagnostics.push_back(make_path_error(std::string{path}, "config.range", error.what()));
          }
@@ -1073,9 +1081,9 @@ void validate_exact_input_value(const input_value& input, std::string_view path,
       if (numeric != 0.0L && converted == static_cast<clean_type>(0)) {
          diagnostics.push_back(
              make_path_error(std::string{path}, "config.range", "floating-point field underflows to zero"));
-      } else if (!std::holds_alternative<double>(input.storage) && static_cast<long double>(converted) != numeric) {
+      } else if (static_cast<long double>(converted) != numeric) {
          diagnostics.push_back(make_path_error(std::string{path}, "config.range",
-                                               "integer is not exactly representable by the floating-point field"));
+                                               "value is not exactly representable by the floating-point field"));
       }
    } else if constexpr (std::same_as<clean_type, std::string>) {
       if (!std::holds_alternative<std::string>(input.storage)) {

@@ -505,6 +505,12 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_scalar_kinds_and_rang
    BOOST_TEST(lossy_float_integer.diagnostics.front().code == "json.range");
    BOOST_TEST(lossy_float_integer.diagnostics.front().path == "ratio");
 
+   const auto lossy_float_fraction = forge::codec::json::read<forge_json_tests::exact_scalar_record>(
+       R"({"enabled":true,"signed_value":-8,"unsigned_value":8,"ratio":1.00000001,"label":"ready"})", options);
+   BOOST_REQUIRE(!lossy_float_fraction.ok());
+   BOOST_TEST(lossy_float_fraction.diagnostics.front().code == "json.range");
+   BOOST_TEST(lossy_float_fraction.diagnostics.front().path == "ratio");
+
    const auto floating_underflow = forge::codec::json::read<forge_json_tests::exact_scalar_record>(
        R"({"enabled":true,"signed_value":-8,"unsigned_value":8,"ratio":1e-100,"label":"ready"})", options);
    BOOST_REQUIRE(!floating_underflow.ok());
@@ -532,6 +538,18 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_preserve_wide_integer_strings)
    BOOST_REQUIRE(!overflow.ok());
    BOOST_TEST(overflow.diagnostics.front().code == "json.range");
    BOOST_TEST(overflow.diagnostics.front().path == "unsigned_value");
+
+   const auto leading_zero = forge::codec::json::read<forge_json_tests::exact_wide_integer_record>(
+       R"({"signed_value":"0001","unsigned_value":"1"})", options);
+   BOOST_REQUIRE(!leading_zero.ok());
+   BOOST_TEST(leading_zero.diagnostics.front().code == "json.type");
+   BOOST_TEST(leading_zero.diagnostics.front().path == "signed_value");
+
+   const auto negative_zero = forge::codec::json::read<forge_json_tests::exact_wide_integer_record>(
+       R"({"signed_value":"-0","unsigned_value":"1"})", options);
+   BOOST_REQUIRE(!negative_zero.ok());
+   BOOST_TEST(negative_zero.diagnostics.front().code == "json.type");
+   BOOST_TEST(negative_zero.diagnostics.front().path == "signed_value");
 }
 
 BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_chrono_scalar_contracts) {

@@ -284,6 +284,48 @@ BOOST_AUTO_TEST_CASE(schema_exact_scalar_validation_checks_float_range_before_na
    BOOST_TEST(diagnostics.front().path == "ratio");
 }
 
+BOOST_AUTO_TEST_CASE(schema_exact_scalar_validation_rejects_lossy_floating_point_narrowing) {
+   auto exact = std::vector<forge::schema::diagnostic>{};
+   forge::schema::validate_exact_input_value<float>(forge::schema::input_value{1.5}, "ratio", exact);
+   BOOST_TEST(exact.empty());
+
+   auto lossy = std::vector<forge::schema::diagnostic>{};
+   forge::schema::validate_exact_input_value<float>(forge::schema::input_value{1.00000001}, "ratio", lossy);
+   BOOST_REQUIRE_EQUAL(lossy.size(), 1U);
+   BOOST_TEST(lossy.front().code == "config.range");
+   BOOST_TEST(lossy.front().path == "ratio");
+}
+
+BOOST_AUTO_TEST_CASE(schema_exact_wide_integers_require_canonical_decimal_spelling) {
+   auto canonical = std::vector<forge::schema::diagnostic>{};
+   forge::schema::validate_exact_input_value<__int128>(forge::schema::input_value{std::string{"1"}}, "signed",
+                                                       canonical);
+   forge::schema::validate_exact_input_value<unsigned __int128>(forge::schema::input_value{std::string{"1"}},
+                                                                "unsigned", canonical);
+   BOOST_TEST(canonical.empty());
+
+   auto leading_zero = std::vector<forge::schema::diagnostic>{};
+   forge::schema::validate_exact_input_value<__int128>(forge::schema::input_value{std::string{"0001"}}, "signed",
+                                                       leading_zero);
+   BOOST_REQUIRE_EQUAL(leading_zero.size(), 1U);
+   BOOST_TEST(leading_zero.front().code == "config.type");
+   BOOST_TEST(leading_zero.front().path == "signed");
+
+   auto negative_zero = std::vector<forge::schema::diagnostic>{};
+   forge::schema::validate_exact_input_value<__int128>(forge::schema::input_value{std::string{"-0"}}, "signed",
+                                                       negative_zero);
+   BOOST_REQUIRE_EQUAL(negative_zero.size(), 1U);
+   BOOST_TEST(negative_zero.front().code == "config.type");
+   BOOST_TEST(negative_zero.front().path == "signed");
+
+   auto unsigned_leading_zero = std::vector<forge::schema::diagnostic>{};
+   forge::schema::validate_exact_input_value<unsigned __int128>(forge::schema::input_value{std::string{"0001"}},
+                                                                "unsigned", unsigned_leading_zero);
+   BOOST_REQUIRE_EQUAL(unsigned_leading_zero.size(), 1U);
+   BOOST_TEST(unsigned_leading_zero.front().code == "config.type");
+   BOOST_TEST(unsigned_leading_zero.front().path == "unsigned");
+}
+
 BOOST_AUTO_TEST_CASE(schema_exact_enum_validation_accepts_canonical_config_names) {
    auto canonical = std::vector<forge::schema::diagnostic>{};
    forge::schema::validate_exact_input_value<forge_schema_tests::path_policy>(
