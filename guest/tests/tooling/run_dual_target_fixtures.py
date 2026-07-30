@@ -370,7 +370,7 @@ def verify_guest_package_diamond(
     *,
     cmake: str,
     contract_package: Path,
-    product_prefix: Path,
+    product_prefixes: tuple[Path, ...],
     product_package: Path,
     values_package: Path,
     output: Path,
@@ -464,7 +464,7 @@ forge_add_contract(
         contract_package=contract_package,
         source=source,
         build=build_directory,
-        prefixes=(product_prefix,),
+        prefixes=product_prefixes,
         definitions=(
             f"-DProductProtocol_DIR={product_package}",
             f"-DProductValues_DIR={values_package}",
@@ -480,7 +480,7 @@ def verify_native_package_diamond(
     cxx_compiler: Path,
     forge_package: Path,
     contract_package: Path,
-    product_prefix: Path,
+    product_prefixes: tuple[Path, ...],
     product_package: Path,
     values_package: Path,
     output: Path,
@@ -534,7 +534,7 @@ add_subdirectory(right)
         contract_package=contract_package,
         source=source,
         build=build_directory,
-        prefixes=(product_prefix,),
+        prefixes=product_prefixes,
         definitions=(
             f"-DProductProtocol_DIR={product_package}",
             f"-DProductValues_DIR={values_package}",
@@ -542,6 +542,126 @@ add_subdirectory(right)
     )
     build(cmake, build_directory, "native_package_diamond")
     run(str(build_directory / "right" / "native_package_diamond"))
+
+
+def verify_keyword_like_descriptor_values(
+    *,
+    cmake: str,
+    cxx_compiler: Path,
+    forge_package: Path,
+    contract_package: Path,
+    output: Path,
+) -> None:
+    producer = output / "producer"
+    module_directory = producer / "CANONICAL_SOURCES"
+    module_directory.mkdir(parents=True)
+    (module_directory / "protocol.cppm").write_text(
+        """export module product.keyword.protocol;
+export inline constexpr int keyword_protocol_value = 42;
+""",
+        encoding="utf-8",
+    )
+    (producer / "CMakeLists.txt").write_text(
+        """cmake_minimum_required(VERSION 3.31)
+project(KeywordDescriptorProducer LANGUAGES CXX)
+include(GNUInstallDirs)
+find_package(Forge CONFIG REQUIRED)
+find_package(ForgeContract CONFIG REQUIRED)
+forge_add_contract_library(
+   keyword_protocol
+   ID product.keyword.protocol
+   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS CANONICAL_SOURCES
+   MODULE_SOURCES CANONICAL_SOURCES/protocol.cppm
+   PUBLIC_LIBRARIES Forge::forge_raw
+)
+forge_install_contract_library(
+   TARGET keyword_protocol
+   EXPORT KeywordProtocolTargets
+   EXPORT_NAME protocol
+   MODULE_DESTINATION "${CMAKE_INSTALL_DATADIR}/keyword-protocol/modules"
+   SOURCE_DESTINATION "${CMAKE_INSTALL_DATADIR}/keyword-protocol/sources"
+)
+install(
+   EXPORT KeywordProtocolTargets
+   FILE KeywordProtocolTargets.cmake
+   NAMESPACE Keyword::
+   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KeywordProtocol"
+)
+forge_install_contract_package(
+   EXPORT KeywordProtocolTargets
+   FILE KeywordProtocolContract.cmake
+   NAMESPACE Keyword::
+   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/KeywordProtocol"
+   TARGETS keyword_protocol
+)
+""",
+        encoding="utf-8",
+    )
+    install_prefix = output / "install"
+    producer_build = output / "producer-build"
+    configure_host(
+        cmake=cmake,
+        cxx_compiler=cxx_compiler,
+        forge_package=forge_package,
+        contract_package=contract_package,
+        source=producer,
+        build=producer_build,
+        definitions=(f"-DCMAKE_INSTALL_PREFIX={install_prefix}",),
+    )
+    build(cmake, producer_build, "all")
+    run(cmake, "--install", str(producer_build))
+
+    consumer = output / "consumer"
+    consumer.mkdir()
+    contract_file = (
+        install_prefix
+        / "lib"
+        / "cmake"
+        / "KeywordProtocol"
+        / "KeywordProtocolContract.cmake"
+    )
+    (consumer / "entry.cpp").write_text(
+        """import forge.contract;
+import product.keyword.protocol;
+
+class [[forge::contract("keyword")]] keyword_contract
+   : public forge::contract::context {
+ public:
+   using context::context;
+
+   [[forge::action]]
+   void verify() {
+      forge::contract::check(keyword_protocol_value == 42, "invalid value");
+   }
+};
+""",
+        encoding="utf-8",
+    )
+    (consumer / "CMakeLists.txt").write_text(
+        f"""cmake_minimum_required(VERSION 3.31)
+project(KeywordDescriptorConsumer LANGUAGES CXX)
+find_package(ForgeContract CONFIG REQUIRED)
+include("{contract_file.as_posix()}")
+forge_add_contract(
+   keyword
+   SOURCE_ROOT "${{CMAKE_CURRENT_SOURCE_DIR}}"
+   SOURCES entry.cpp
+   LIBRARIES Keyword::protocol
+)
+""",
+        encoding="utf-8",
+    )
+    consumer_build = output / "consumer-build"
+    configure_guest(
+        cmake=cmake,
+        contract_package=contract_package,
+        source=consumer,
+        build=consumer_build,
+        prefixes=(install_prefix,),
+    )
+    build(cmake, consumer_build, "keyword_artifacts")
+    verify_artifacts(consumer_build / "artifacts", "keyword")
 
 
 def verify_conflicting_package_descriptor(
@@ -586,6 +706,96 @@ find_package(ProductProtocol CONFIG REQUIRED)
         prefixes=(product_prefix, conflicting_prefix),
         definitions=(
             f"-DProductProtocol_DIR={conflicting_package}",
+            f"-DProductValues_DIR={values_package}",
+        ),
+        succeeds=False,
+        contains="conflicting installed Forge Contract package descriptor",
+    )
+
+
+def verify_conflicting_package_materialization(
+    *,
+    cmake: str,
+    cxx_compiler: Path,
+    forge_package: Path,
+    contract_package: Path,
+    product_prefix: Path,
+    values_package: Path,
+    output: Path,
+) -> None:
+    conflicting_prefix = output / "conflicting-prefix"
+    shutil.copytree(product_prefix, conflicting_prefix)
+    protocol_module = (
+        conflicting_prefix
+        / "share"
+        / "product-protocol"
+        / "modules"
+        / "product"
+        / "chain"
+        / "protocol.cppm"
+    )
+    protocol_module.write_text(
+        protocol_module.read_text(encoding="utf-8") + "\n// tampered package input\n",
+        encoding="utf-8",
+    )
+    conflicting_config = (
+        conflicting_prefix
+        / "lib"
+        / "cmake"
+        / "ProductProtocol"
+        / "ProductProtocolConfig.cmake"
+    )
+
+    guest_source = output / "guest-source"
+    guest_source.mkdir(parents=True)
+    (guest_source / "CMakeLists.txt").write_text(
+        f"""cmake_minimum_required(VERSION 3.31)
+project(ConflictingContractPackageMaterialization LANGUAGES CXX)
+find_package(ForgeContract CONFIG REQUIRED)
+find_package(ProductValues CONFIG REQUIRED)
+find_package(ProductProtocol CONFIG REQUIRED)
+include("{conflicting_config.as_posix()}")
+""",
+        encoding="utf-8",
+    )
+    product_package = product_prefix / "lib" / "cmake" / "ProductProtocol"
+    configure_guest(
+        cmake=cmake,
+        contract_package=contract_package,
+        source=guest_source,
+        build=output / "guest-build",
+        prefixes=(product_prefix,),
+        definitions=(
+            f"-DProductProtocol_DIR={product_package}",
+            f"-DProductValues_DIR={values_package}",
+        ),
+        succeeds=False,
+        contains="conflicting installed Forge Contract package descriptor",
+    )
+
+    native_source = output / "native-source"
+    native_source.mkdir()
+    (native_source / "CMakeLists.txt").write_text(
+        f"""cmake_minimum_required(VERSION 3.31)
+project(ConflictingNativePackageMaterialization LANGUAGES CXX)
+find_package(Forge CONFIG REQUIRED)
+find_package(ForgeContract CONFIG REQUIRED)
+find_package(ProductValues CONFIG REQUIRED)
+find_package(ProductProtocol CONFIG REQUIRED)
+include("{conflicting_config.as_posix()}")
+""",
+        encoding="utf-8",
+    )
+    configure_host(
+        cmake=cmake,
+        cxx_compiler=cxx_compiler,
+        forge_package=forge_package,
+        contract_package=contract_package,
+        source=native_source,
+        build=output / "native-build",
+        prefixes=(product_prefix,),
+        definitions=(
+            f"-DProductProtocol_DIR={product_package}",
             f"-DProductValues_DIR={values_package}",
         ),
         succeeds=False,
@@ -1137,11 +1347,31 @@ def validate(
     if "FILE_SET \"forge_contract_modules\"" not in targets_file.read_text(encoding="utf-8"):
         raise RuntimeError("installed protocol package has no relocatable host module sources")
 
+    alternate_build = output / "alternate-layout-build"
+    alternate_install = output / "alternate-layout-install"
+    configure_host(
+        cmake=cmake,
+        cxx_compiler=cxx_compiler,
+        forge_package=forge_package,
+        contract_package=contract_package,
+        source=source / "producer",
+        build=alternate_build,
+        definitions=(
+            f"-DCMAKE_INSTALL_PREFIX={alternate_install}",
+            "-DPRODUCT_PROTOCOL_DATA_DESTINATION=share/product-layout-alternate",
+        ),
+    )
+    build(cmake, alternate_build, "product_protocol_host_tests")
+    run(cmake, "--install", str(alternate_build))
+    alternate_product_package = (
+        alternate_install / "lib" / "cmake" / "ProductProtocol"
+    )
+
     verify_guest_package_diamond(
         cmake=cmake,
         contract_package=contract_package,
-        product_prefix=relocated,
-        product_package=product_package,
+        product_prefixes=(relocated, alternate_install),
+        product_package=alternate_product_package,
         values_package=values_package,
         output=output / "package-diamond",
     )
@@ -1150,10 +1380,17 @@ def validate(
         cxx_compiler=cxx_compiler,
         forge_package=forge_package,
         contract_package=contract_package,
-        product_prefix=relocated,
-        product_package=product_package,
+        product_prefixes=(relocated, alternate_install),
+        product_package=alternate_product_package,
         values_package=values_package,
         output=output / "native-package-diamond",
+    )
+    verify_keyword_like_descriptor_values(
+        cmake=cmake,
+        cxx_compiler=cxx_compiler,
+        forge_package=forge_package,
+        contract_package=contract_package,
+        output=output / "keyword-descriptor-values",
     )
     verify_conflicting_package_descriptor(
         cmake=cmake,
@@ -1161,6 +1398,15 @@ def validate(
         product_prefix=relocated,
         values_package=values_package,
         output=output / "conflicting-package-descriptor",
+    )
+    verify_conflicting_package_materialization(
+        cmake=cmake,
+        cxx_compiler=cxx_compiler,
+        forge_package=forge_package,
+        contract_package=contract_package,
+        product_prefix=relocated,
+        values_package=values_package,
+        output=output / "conflicting-package-materialization",
     )
     check_imported_target_seal(
         cmake=cmake,

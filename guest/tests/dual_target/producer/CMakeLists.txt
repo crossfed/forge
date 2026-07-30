@@ -14,6 +14,12 @@ find_package(ForgeContract CONFIG REQUIRED)
 
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 set(CMAKE_LINK_LIBRARIES_STRATEGY REORDER_FREELY)
+set(
+   PRODUCT_PROTOCOL_DATA_DESTINATION
+   "${CMAKE_INSTALL_DATADIR}/product-protocol"
+   CACHE STRING
+   "Relative install data directory for the product protocol package"
+)
 
 add_subdirectory(libraries/chain)
 
@@ -57,20 +63,20 @@ forge_add_contract_project(
 forge_install_contract_library(
    TARGET values
    EXPORT ProductProtocolTargets
-   MODULE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/modules"
-   SOURCE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/sources/values"
+   MODULE_DESTINATION "${PRODUCT_PROTOCOL_DATA_DESTINATION}/modules"
+   SOURCE_DESTINATION "${PRODUCT_PROTOCOL_DATA_DESTINATION}/sources/values"
 )
 forge_install_contract_library(
    TARGET limits
    EXPORT ProductProtocolTargets
-   MODULE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/modules"
-   SOURCE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/sources/limits"
+   MODULE_DESTINATION "${PRODUCT_PROTOCOL_DATA_DESTINATION}/modules"
+   SOURCE_DESTINATION "${PRODUCT_PROTOCOL_DATA_DESTINATION}/sources/limits"
 )
 forge_install_contract_library(
    TARGET protocol
    EXPORT ProductProtocolTargets
-   MODULE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/modules"
-   SOURCE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/sources/protocol"
+   MODULE_DESTINATION "${PRODUCT_PROTOCOL_DATA_DESTINATION}/modules"
+   SOURCE_DESTINATION "${PRODUCT_PROTOCOL_DATA_DESTINATION}/sources/protocol"
 )
 install(
    EXPORT ProductProtocolTargets
