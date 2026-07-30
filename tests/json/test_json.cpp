@@ -360,10 +360,36 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_schema_names_and_asso
    BOOST_TEST(unordered_set_duplicate.diagnostics.front().code == "json.duplicate");
    BOOST_TEST(unordered_set_duplicate.diagnostics.front().path == "unordered[1]");
 
+   const auto multi_index_record =
+       forge::codec::json::read<forge_json_tests::exact_multi_index_record>(R"({"values":[{"value":7}]})", options);
+   BOOST_REQUIRE(multi_index_record.ok());
+   BOOST_REQUIRE_EQUAL(multi_index_record.value.values.size(), 1U);
+
+   const auto multi_index_unknown = forge::codec::json::read<forge_json_tests::exact_multi_index_record>(
+       R"({"values":[{"value":7,"extra":1}]})", options);
+   BOOST_REQUIRE(!multi_index_unknown.ok());
+   BOOST_TEST(multi_index_unknown.diagnostics.front().code == "json.unknown");
+   BOOST_TEST(multi_index_unknown.diagnostics.front().path == "values[0].extra");
+
+   const auto multi_index_duplicate = forge::codec::json::read<forge_json_tests::exact_multi_index_record>(
+       R"({"values":[{"value":7},{"value":7}]})", options);
+   BOOST_REQUIRE(!multi_index_duplicate.ok());
+   BOOST_TEST(multi_index_duplicate.diagnostics.front().code == "json.duplicate");
+   BOOST_TEST(multi_index_duplicate.diagnostics.front().path == "values[1]");
+
    const auto shorthand = forge::codec::json::read<forge_json_tests::tag_config>(R"({"tags":["alpha"]})", options);
    BOOST_REQUIRE(shorthand.ok());
    BOOST_REQUIRE_EQUAL(shorthand.value.tags.size(), 1U);
    BOOST_TEST(shorthand.value.tags.front().value == "alpha");
+}
+
+BOOST_AUTO_TEST_CASE(json_exact_duplicate_scan_respects_max_depth) {
+   const auto parsed = forge::codec::json::read_value(
+       R"({"outer":{"inner":1}})",
+       {.max_depth = 1, .described_records = forge::codec::json::described_record_policy::exact});
+   BOOST_REQUIRE(!parsed.ok());
+   BOOST_TEST(parsed.diagnostics.front().code == "json.depth");
+   BOOST_TEST(parsed.diagnostics.front().path == "outer.inner");
 }
 
 BOOST_AUTO_TEST_CASE(json_malformed_input_returns_forge_diagnostic) {

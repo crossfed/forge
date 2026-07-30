@@ -149,8 +149,9 @@ template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
    return decoded;
 }
 
-void validate_unique_object_members(const glz::lazy_json_view<json_lazy_options>& input, std::string_view path,
-                                    std::vector<schema::diagnostic>& diagnostics) {
+[[nodiscard]] bool validate_unique_object_members(const glz::lazy_json_view<json_lazy_options>& input,
+                                                  std::string_view path, std::size_t max_depth, std::size_t depth,
+                                                  std::vector<schema::diagnostic>& diagnostics) {
    if (input.is_object()) {
       auto members = std::set<std::string>{};
       for (const auto& entry : input) {
@@ -159,17 +160,31 @@ void validate_unique_object_members(const glz::lazy_json_view<json_lazy_options>
          if (!members.insert(key).second) {
             diagnostics.push_back(make_error(entry_path, "json.duplicate", "duplicate JSON member"));
          }
-         validate_unique_object_members(entry, entry_path, diagnostics);
+         if (depth >= max_depth) {
+            diagnostics.push_back(make_error(entry_path, "json.depth", "JSON input exceeds configured maximum depth"));
+            return false;
+         }
+         if (!validate_unique_object_members(entry, entry_path, max_depth, depth + 1U, diagnostics)) {
+            return false;
+         }
       }
-      return;
+      return true;
    }
    if (input.is_array()) {
       auto index = std::size_t{0};
       for (const auto& entry : input) {
-         validate_unique_object_members(entry, array_path(path, index), diagnostics);
+         const auto entry_path = array_path(path, index);
+         if (depth >= max_depth) {
+            diagnostics.push_back(make_error(entry_path, "json.depth", "JSON input exceeds configured maximum depth"));
+            return false;
+         }
+         if (!validate_unique_object_members(entry, entry_path, max_depth, depth + 1U, diagnostics)) {
+            return false;
+         }
          ++index;
       }
    }
+   return true;
 }
 
 [[nodiscard]] variant to_variant_value(const codec_value& input);
@@ -358,7 +373,7 @@ void validate_unique_object_members(const glz::lazy_json_view<json_lazy_options>
          result.diagnostics.push_back(make_error(options.source_name, "json.parse", "failed to inspect JSON input"));
          return result;
       }
-      validate_unique_object_members(lazy->root(), {}, result.diagnostics);
+      static_cast<void>(validate_unique_object_members(lazy->root(), {}, options.max_depth, 0U, result.diagnostics));
       if (!result.ok()) {
          return result;
       }

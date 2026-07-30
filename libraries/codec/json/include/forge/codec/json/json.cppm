@@ -1,5 +1,7 @@
 module;
 
+#include <boost/multi_index_container.hpp>
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -97,6 +99,18 @@ struct sequence_traits<std::unordered_set<T, Hash, Equal, Allocator>> {
 };
 
 template <typename T> inline constexpr bool is_sequence_v = sequence_traits<clean_type<T>>::value;
+
+template <typename T> struct multi_index_traits {
+   static constexpr bool value = false;
+};
+
+template <typename Value, typename IndexSpecifierList, typename Allocator>
+struct multi_index_traits<boost::multi_index_container<Value, IndexSpecifierList, Allocator>> {
+   static constexpr bool value = true;
+   using value_type = Value;
+};
+
+template <typename T> inline constexpr bool is_multi_index_v = multi_index_traits<clean_type<T>>::value;
 
 template <typename T> struct unique_sequence_traits {
    static constexpr bool value = false;
@@ -305,6 +319,29 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
          return;
       }
       validate_variant_payload<value_type>(selected, elements[1], element_path(path, 1U), diagnostics);
+   } else if constexpr (is_multi_index_v<value_type>) {
+      if (!source.is_array()) {
+         add_exact_error(diagnostics, std::string{path}, "json.array", "multi-index container must be a JSON array");
+         return;
+      }
+
+      const auto& elements = source.get_array();
+      auto seen = value_type{};
+      for (std::size_t index = 0; index < elements.size(); ++index) {
+         const auto entry_path = element_path(path, index);
+         validate_exact<typename multi_index_traits<value_type>::value_type>(elements[index], entry_path, diagnostics);
+         try {
+            const auto value = elements[index].template as<typename multi_index_traits<value_type>::value_type>();
+            const auto previous_size = seen.size();
+            seen.insert(value);
+            if (seen.size() == previous_size) {
+               add_exact_error(diagnostics, entry_path, "json.duplicate",
+                               "element violates a unique multi-index constraint");
+            }
+         } catch (const std::exception&) {
+            // Conversion reports the canonical type diagnostic after structural validation.
+         }
+      }
    } else if constexpr (is_associative_v<value_type>) {
       if (!source.is_array()) {
          add_exact_error(diagnostics, std::string{path}, "json.array", "associative container must be a JSON array");

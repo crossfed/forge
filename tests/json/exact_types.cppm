@@ -1,6 +1,10 @@
 module;
 
 #include <boost/describe.hpp>
+#include <boost/multi_index/indexed_by.hpp>
+#include <boost/multi_index/member.hpp>
+#include <boost/multi_index/ordered_index.hpp>
+#include <boost/multi_index_container.hpp>
 
 #include <cstdint>
 #include <map>
@@ -38,9 +42,19 @@ struct exact_set_record {
    std::unordered_set<std::string> unordered;
 };
 
+using exact_multi_index =
+    boost::multi_index_container<exact_leaf,
+                                 boost::multi_index::indexed_by<boost::multi_index::ordered_unique<
+                                     boost::multi_index::member<exact_leaf, std::uint32_t, &exact_leaf::value>>>>;
+
+struct exact_multi_index_record {
+   exact_multi_index values;
+};
+
 BOOST_DESCRIBE_STRUCT(exact_leaf, (), (value))
 BOOST_DESCRIBE_STRUCT(exact_record, (), (items, choice, optional))
 BOOST_DESCRIBE_STRUCT(exact_map_record, (), (values))
 BOOST_DESCRIBE_STRUCT(exact_set_record, (), (ordered, unordered))
+BOOST_DESCRIBE_STRUCT(exact_multi_index_record, (), (values))
 
 } // namespace forge_json_tests
