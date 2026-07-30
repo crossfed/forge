@@ -1,4 +1,6 @@
 #include <boost/test/unit_test.hpp>
+
+#include <cstdint>
 #include <string>
 #include <variant>
 
@@ -49,6 +51,19 @@ BOOST_AUTO_TEST_CASE(static_variant_from_index) {
 
    forge::from_index(v, 2);
    BOOST_REQUIRE(std::string{} == std::get<std::string>(v));
+}
+
+BOOST_AUTO_TEST_CASE(static_variant_rejects_indices_before_narrowing) {
+   using variant_type = std::variant<int32_t, bool>;
+   auto value = variant_type{};
+   const auto encoded = forge::variant{
+       forge::variants{
+           forge::variant{std::uint64_t{1} << 32U},
+           forge::variant{7},
+       },
+   };
+
+   BOOST_CHECK_THROW(forge::from_variant(encoded, value), std::out_of_range);
 }
 
 BOOST_AUTO_TEST_CASE(static_variant_get_index) {

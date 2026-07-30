@@ -668,6 +668,12 @@ BOOST_AUTO_TEST_CASE(json_exact_schema_paths_roundtrip_through_typed_writers) {
    BOOST_TEST(permissive_variant.diagnostics.empty());
    BOOST_TEST(std::get<forge_json_tests::exact_dotted_leaf>(permissive_variant.value.value).deadline_ms == 2500U);
 
+   const auto oversized_variant = forge::codec::json::read<forge_json_tests::exact_dotted_variant_parent>(
+       R"({"value":[4294967296,{"api":{"deadline-ms":2500}}]})");
+   BOOST_REQUIRE(!oversized_variant.ok());
+   BOOST_REQUIRE_EQUAL(oversized_variant.diagnostics.size(), 1U);
+   BOOST_TEST(oversized_variant.diagnostics.front().code == "json.type");
+
    const auto schema_parent_input = forge_json_tests::exact_dotted_schema_parent{.config = {.deadline_ms = 2500}};
    const auto encoded_parent = forge::config::core::encode(schema_parent_input);
    const auto decoded_parent =
