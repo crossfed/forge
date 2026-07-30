@@ -267,6 +267,8 @@ function(forge_add_contract target)
          ${_sources}
          ${_headers}
          ${_compile_checks}
+         ${_ricardian_contracts}
+         ${_ricardian_clauses}
          ${_library_targets}
          ${_library_inputs}
          ${_contract_compilation_object_lists}

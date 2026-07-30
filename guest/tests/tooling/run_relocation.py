@@ -172,6 +172,7 @@ def main() -> None:
     shutil.copytree(sdk / "share" / "forge-contract" / "examples" / "hello", source)
     build = output / "build"
     package = sdk / "lib" / "cmake" / "ForgeContract"
+    artifacts = build / "artifacts"
     run(
         args.cmake,
         "-S",
@@ -181,15 +182,16 @@ def main() -> None:
         "-G",
         "Ninja Multi-Config",
         f"-DForgeContract_DIR={package}",
+        f"-DCMAKE_TOOLCHAIN_FILE={package / 'ForgeContractToolchain.cmake'}",
     )
     build_project(args.cmake, build)
 
     for suffix in ("wasm", "abi", "contract.json"):
-        artifact = build / f"hello.{suffix}"
+        artifact = artifacts / f"hello.{suffix}"
         if not artifact.is_file() or artifact.stat().st_size == 0:
             raise RuntimeError(f"missing relocated SDK artifact: {artifact}")
 
-    manifest = json.loads((build / "hello.contract.json").read_text(encoding="utf-8"))
+    manifest = json.loads((artifacts / "hello.contract.json").read_text(encoding="utf-8"))
     if manifest["schema_version"] != 2:
         raise RuntimeError("contract manifest schema is not version 2")
     if not manifest["source_graph"]["files"] or len(manifest["source_graph"]["sha256"]) != 64:
@@ -210,7 +212,7 @@ def main() -> None:
     ):
         raise RuntimeError("contract manifest intrinsic interface version is not the numeric version 1")
 
-    abi_path = build / "hello.abi"
+    abi_path = artifacts / "hello.abi"
     initial_abi = read_abi(abi_path)
     if type_target(initial_abi, "counter") != "uint32":
         raise RuntimeError("initial header ABI type was not generated")
@@ -247,7 +249,7 @@ def main() -> None:
     if clause_body(read_abi(abi_path), "positive-counter") != "The updated counter value must be greater than zero.":
         raise RuntimeError("Ricardian clauses change did not regenerate the contract ABI")
 
-    wasm = build / "hello.wasm"
+    wasm = artifacts / "hello.wasm"
     first_mtime = wasm.stat().st_mtime_ns
     time.sleep(0.01)
     with (source / "hello.cpp").open("a", encoding="utf-8") as stream:

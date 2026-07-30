@@ -24,7 +24,7 @@ def build(args, root):
     shutil.copytree(args.source.parent, source)
     (source / "CMakeLists.txt").write_text(
         "cmake_minimum_required(VERSION 3.31)\n"
-        "project(reproducible_contract LANGUAGES NONE)\n"
+        "project(reproducible_contract LANGUAGES CXX)\n"
         "find_package(ForgeContract CONFIG REQUIRED)\n"
         "forge_add_contract(hello SOURCES hello.cpp HEADERS local_value.hpp)\n",
         encoding="utf-8",
@@ -40,10 +40,11 @@ def build(args, root):
             "Ninja",
             "-DCMAKE_BUILD_TYPE=Release",
             f"-DForgeContract_DIR={args.package}",
+            f"-DCMAKE_TOOLCHAIN_FILE={args.package / 'ForgeContractToolchain.cmake'}",
         ]
     )
-    run([str(args.cmake), "--build", str(binary), "--target", "hello", "-j", "4"])
-    cache = (binary / "hello.contract" / "CMakeCache.txt").read_text(encoding="utf-8")
+    run([str(args.cmake), "--build", str(binary), "--target", "hello_artifacts", "-j", "4"])
+    cache = (binary / "CMakeCache.txt").read_text(encoding="utf-8")
     if "CMAKE_BUILD_TYPE:STRING=Release" not in cache:
         raise RuntimeError("forge_add_contract did not propagate the parent Release build type")
     return binary
@@ -62,8 +63,8 @@ def main():
     first = build(args, args.output / "absolute-path-a")
     second = build(args, args.output / "different" / "absolute-path-b")
     for artifact in ("hello.wasm", "hello.abi", "hello.contract.json"):
-        left = first / artifact
-        right = second / artifact
+        left = first / "artifacts" / artifact
+        right = second / "artifacts" / artifact
         if left.read_bytes() != right.read_bytes():
             raise RuntimeError(
                 f"contract artifact depends on its absolute build path: {artifact} "
