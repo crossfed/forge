@@ -14,6 +14,7 @@ set(
    FORGE_CONTRACT_PRIVATE_LIBRARY_IDS
    FORGE_CONTRACT_PUBLIC_COMPONENT_IDS
    FORGE_CONTRACT_PRIVATE_COMPONENT_IDS
+   FORGE_CONTRACT_PACKAGE_FINGERPRINT
    FORGE_CONTRACT_INSTALL_MODULE_ROOT_RELATIVE
    FORGE_CONTRACT_INSTALL_SOURCE_ROOT_RELATIVE
    FORGE_CONTRACT_INSTALL_MODULE_PATHS
@@ -48,6 +49,7 @@ function(_forge_contract_sealed_target_properties target output)
       INTERFACE_POSITION_INDEPENDENT_CODE
       INTERFACE_SYSTEM_INCLUDE_DIRECTORIES
       INTERFACE_HEADER_SETS_TO_VERIFY
+      INTERPROCEDURAL_OPTIMIZATION
       LINK_DEPENDS
       LINK_DEPENDS_NO_SHARED
       LINK_INTERFACE_LIBRARIES
@@ -75,6 +77,11 @@ function(_forge_contract_sealed_target_properties target output)
       CXX_MODULE_STD
       CXX_SCAN_FOR_MODULES
       POSITION_INDEPENDENT_CODE
+      STATIC_LIBRARY_OPTIONS
+      UNITY_BUILD
+      UNITY_BUILD_BATCH_SIZE
+      UNITY_BUILD_MODE
+      VERIFY_INTERFACE_HEADER_SETS
       CXX_MODULE_SETS
       INTERFACE_CXX_MODULE_SETS
       CXX_MODULE_SET_forge_contract_modules
@@ -104,6 +111,7 @@ function(_forge_contract_sealed_target_properties target output)
       FORGE_CONTRACT_PRIVATE_COMPONENT_IDS
       FORGE_CONTRACT_PUBLIC_LIBRARY_TARGETS
       FORGE_CONTRACT_PRIVATE_LIBRARY_TARGETS
+      FORGE_CONTRACT_PACKAGE_FINGERPRINT
       FORGE_CONTRACT_INSTALL_MODULE_ROOT_RELATIVE
       FORGE_CONTRACT_INSTALL_SOURCE_ROOT_RELATIVE
       FORGE_CONTRACT_INSTALL_MODULE_PATHS
@@ -126,6 +134,7 @@ function(_forge_contract_sealed_target_properties target output)
       list(
          APPEND _properties
          "COMPILE_DEFINITIONS_${_configuration}"
+         "INTERPROCEDURAL_OPTIMIZATION_${_configuration}"
          "LINK_FLAGS_${_configuration}"
          "LINK_INTERFACE_LIBRARIES_${_configuration}"
          "LINK_INTERFACE_MULTIPLICITY_${_configuration}"
@@ -253,6 +262,78 @@ function(_forge_contract_imported_location target output)
       message(FATAL_ERROR "imported contract library has no archive location: ${target}")
    endif()
    set(${output} "${_location}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_hash_fingerprint_records output)
+   set(_serialized)
+   foreach(_record IN LISTS ARGN)
+      string(LENGTH "${_record}" _length)
+      string(APPEND _serialized "${_length}:${_record}")
+   endforeach()
+   string(SHA256 _fingerprint "${_serialized}")
+   set(${output} "${_fingerprint}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_target_materialization_fingerprint target output)
+   get_target_property(_source_root "${target}" FORGE_CONTRACT_BUILD_SOURCE_ROOT)
+   if(NOT _source_root OR _source_root STREQUAL "_source_root-NOTFOUND")
+      message(FATAL_ERROR "materialized contract library has no source root: ${target}")
+   endif()
+
+   set(_records)
+   foreach(
+      _property
+      IN ITEMS
+         FORGE_CONTRACT_DESCRIPTOR_SCHEMA
+         FORGE_CONTRACT_LIBRARY_ID
+         FORGE_CONTRACT_MODULE_BASE_DIRS
+         FORGE_CONTRACT_MODULE_SOURCES
+         FORGE_CONTRACT_SOURCES
+         FORGE_CONTRACT_PUBLIC_HEADERS
+         FORGE_CONTRACT_PRIVATE_HEADERS
+         FORGE_CONTRACT_PUBLIC_LIBRARY_IDS
+         FORGE_CONTRACT_PRIVATE_LIBRARY_IDS
+         FORGE_CONTRACT_PUBLIC_COMPONENT_IDS
+         FORGE_CONTRACT_PRIVATE_COMPONENT_IDS
+   )
+      get_target_property(_value "${target}" "${_property}")
+      if(_value STREQUAL "_value-NOTFOUND")
+         set(_value)
+      endif()
+      string(SHA256 _value_hash "${_value}")
+      list(APPEND _records "property:${_property}:${_value_hash}")
+   endforeach()
+
+   set(_roles module source public_header private_header)
+   set(
+      _source_properties
+      FORGE_CONTRACT_MODULE_SOURCES
+      FORGE_CONTRACT_SOURCES
+      FORGE_CONTRACT_PUBLIC_HEADERS
+      FORGE_CONTRACT_PRIVATE_HEADERS
+   )
+   foreach(_index RANGE 0 3)
+      list(GET _roles ${_index} _role)
+      list(GET _source_properties ${_index} _property)
+      get_target_property(_logical_paths "${target}" "${_property}")
+      if(_logical_paths STREQUAL "_logical_paths-NOTFOUND")
+         set(_logical_paths)
+      endif()
+      foreach(_logical_path IN LISTS _logical_paths)
+         set(_physical_path "${_source_root}/${_logical_path}")
+         if(NOT EXISTS "${_physical_path}" OR IS_DIRECTORY "${_physical_path}")
+            message(
+               FATAL_ERROR
+               "materialized contract library input is missing: ${_physical_path}"
+            )
+         endif()
+         file(SHA256 "${_physical_path}" _content_hash)
+         list(APPEND _records "file:${_role}:${_logical_path}:${_content_hash}")
+      endforeach()
+   endforeach()
+
+   _forge_contract_hash_fingerprint_records(_fingerprint ${_records})
+   set(${output} "${_fingerprint}" PARENT_SCOPE)
 endfunction()
 
 function(_forge_contract_declared_source_paths target output)
@@ -786,7 +867,22 @@ function(_forge_contract_register_library_target target)
    endif()
    get_property(_registered GLOBAL PROPERTY "FORGE_CONTRACT_LIBRARY_TARGET_${_key}")
    if(_registered AND NOT _registered STREQUAL target)
-      message(FATAL_ERROR "duplicate Forge Contract library ID: ${_id}")
+      get_target_property(
+         _registered_fingerprint "${_registered}" FORGE_CONTRACT_PACKAGE_FINGERPRINT
+      )
+      get_target_property(
+         _target_fingerprint "${target}" FORGE_CONTRACT_PACKAGE_FINGERPRINT
+      )
+      if(
+         NOT _registered_fingerprint
+         OR _registered_fingerprint STREQUAL "_registered_fingerprint-NOTFOUND"
+         OR NOT _target_fingerprint
+         OR _target_fingerprint STREQUAL "_target_fingerprint-NOTFOUND"
+         OR NOT "${_registered_fingerprint}" STREQUAL "${_target_fingerprint}"
+      )
+         message(FATAL_ERROR "conflicting Forge Contract library ID: ${_id}")
+      endif()
+      return()
    endif()
    set_property(GLOBAL PROPERTY "FORGE_CONTRACT_LIBRARY_TARGET_${_key}" "${target}")
 endfunction()
@@ -820,11 +916,17 @@ function(_forge_contract_package_target_materialized output)
    cmake_parse_arguments(
       ARG
       ""
-      "PACKAGE;TARGET;ID"
+      "PACKAGE;TARGET;ID;FINGERPRINT"
       ""
       ${ARGN}
    )
-   if(ARG_UNPARSED_ARGUMENTS OR NOT ARG_PACKAGE OR NOT ARG_TARGET OR NOT ARG_ID)
+   if(
+      ARG_UNPARSED_ARGUMENTS
+      OR NOT ARG_PACKAGE
+      OR NOT ARG_TARGET
+      OR NOT ARG_ID
+      OR NOT ARG_FINGERPRINT
+   )
       message(FATAL_ERROR "invalid installed Forge Contract package descriptor")
    endif()
    if(TARGET "${ARG_TARGET}")
@@ -836,6 +938,16 @@ function(_forge_contract_package_target_materialized output)
             FATAL_ERROR
             "existing target does not match installed Forge Contract package "
             "${ARG_PACKAGE}: ${ARG_TARGET}"
+         )
+      endif()
+      get_target_property(
+         _actual_fingerprint "${_target}" FORGE_CONTRACT_PACKAGE_FINGERPRINT
+      )
+      if(NOT "${_actual_fingerprint}" STREQUAL "${ARG_FINGERPRINT}")
+         message(
+            FATAL_ERROR
+            "conflicting installed Forge Contract package descriptor "
+            "${ARG_PACKAGE}: ${ARG_ID}"
          )
       endif()
       _forge_contract_register_library_target("${_target}")
@@ -853,8 +965,63 @@ function(_forge_contract_package_target_materialized output)
    endif()
 
    _forge_contract_require_sealed_target("${_registered}")
+   get_target_property(
+      _registered_fingerprint "${_registered}" FORGE_CONTRACT_PACKAGE_FINGERPRINT
+   )
+   if(NOT "${_registered_fingerprint}" STREQUAL "${ARG_FINGERPRINT}")
+      message(
+         FATAL_ERROR
+         "conflicting installed Forge Contract package descriptor "
+         "${ARG_PACKAGE}: ${ARG_ID}"
+      )
+   endif()
    add_library("${ARG_TARGET}" ALIAS "${_registered}")
    set(${output} TRUE PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_bind_package_target)
+   cmake_parse_arguments(
+      ARG
+      ""
+      "PACKAGE;TARGET;ID;FINGERPRINT"
+      ""
+      ${ARGN}
+   )
+   if(
+      ARG_UNPARSED_ARGUMENTS
+      OR NOT ARG_PACKAGE
+      OR NOT ARG_TARGET
+      OR NOT ARG_ID
+      OR NOT ARG_FINGERPRINT
+   )
+      message(FATAL_ERROR "invalid installed Forge Contract package binding")
+   endif()
+
+   _forge_contract_resolve_target("${ARG_TARGET}" _target)
+   get_target_property(_actual_id "${_target}" FORGE_CONTRACT_LIBRARY_ID)
+   if(NOT "${_actual_id}" STREQUAL "${ARG_ID}")
+      message(
+         FATAL_ERROR
+         "installed Forge Contract package target has the wrong ID "
+         "${ARG_PACKAGE}: ${ARG_TARGET}"
+      )
+   endif()
+   _forge_contract_target_materialization_fingerprint("${_target}" _actual_fingerprint)
+   if(NOT "${_actual_fingerprint}" STREQUAL "${ARG_FINGERPRINT}")
+      message(
+         FATAL_ERROR
+         "conflicting installed Forge Contract package descriptor "
+         "${ARG_PACKAGE}: ${ARG_ID}"
+      )
+   endif()
+
+   _forge_contract_assert_sealed_target("${_target}")
+   set_property(
+      TARGET "${_target}"
+      PROPERTY FORGE_CONTRACT_PACKAGE_FINGERPRINT "${ARG_FINGERPRINT}"
+   )
+   _forge_contract_seal_target("${_target}")
+   _forge_contract_register_library_target("${_target}")
 endfunction()
 
 function(_forge_contract_register_component_target target)
@@ -1245,6 +1412,176 @@ function(_forge_contract_cmake_quote value output)
    set(${output} "\"${_escaped}\"" PARENT_SCOPE)
 endfunction()
 
+function(_forge_contract_install_materialization_fingerprint target output)
+   get_target_property(_schema "${target}" FORGE_CONTRACT_DESCRIPTOR_SCHEMA)
+   get_target_property(_id "${target}" FORGE_CONTRACT_LIBRARY_ID)
+   get_target_property(_source_root "${target}" FORGE_CONTRACT_BUILD_SOURCE_ROOT)
+   get_target_property(
+      _module_destination "${target}" FORGE_CONTRACT_INSTALL_MODULE_DESTINATION
+   )
+   get_target_property(
+      _source_destination "${target}" FORGE_CONTRACT_INSTALL_SOURCE_DESTINATION
+   )
+   get_target_property(_module_sources "${target}" FORGE_CONTRACT_MODULE_SOURCES)
+   get_target_property(_sources "${target}" FORGE_CONTRACT_SOURCES)
+   get_target_property(_public_headers "${target}" FORGE_CONTRACT_PUBLIC_HEADERS)
+   get_target_property(_private_headers "${target}" FORGE_CONTRACT_PRIVATE_HEADERS)
+   get_target_property(_module_paths "${target}" FORGE_CONTRACT_INSTALL_MODULE_PATHS)
+   get_target_property(
+      _public_header_paths "${target}" FORGE_CONTRACT_INSTALL_PUBLIC_HEADER_PATHS
+   )
+   foreach(
+      _property
+      IN ITEMS
+         FORGE_CONTRACT_PUBLIC_LIBRARY_IDS
+         FORGE_CONTRACT_PRIVATE_LIBRARY_IDS
+         FORGE_CONTRACT_PUBLIC_COMPONENT_IDS
+         FORGE_CONTRACT_PRIVATE_COMPONENT_IDS
+   )
+      get_target_property(_value "${target}" "${_property}")
+      if(_value STREQUAL "_value-NOTFOUND")
+         set(_value)
+      endif()
+      set("_${_property}" "${_value}")
+   endforeach()
+
+   set(_materialized_module_bases "${_module_destination}")
+   set(_materialized_module_sources)
+   foreach(_path IN LISTS _module_paths)
+      list(APPEND _materialized_module_sources "${_module_destination}/${_path}")
+   endforeach()
+   set(_materialized_sources)
+   foreach(_path IN LISTS _sources)
+      list(APPEND _materialized_sources "${_source_destination}/${_path}")
+   endforeach()
+   set(_materialized_public_headers)
+   foreach(_path IN LISTS _public_header_paths)
+      list(APPEND _materialized_public_headers "${_module_destination}/${_path}")
+   endforeach()
+   set(_materialized_private_headers)
+   foreach(_path IN LISTS _private_headers)
+      list(APPEND _materialized_private_headers "${_source_destination}/${_path}")
+   endforeach()
+
+   set(
+      _metadata_properties
+      FORGE_CONTRACT_DESCRIPTOR_SCHEMA
+      FORGE_CONTRACT_LIBRARY_ID
+      FORGE_CONTRACT_MODULE_BASE_DIRS
+      FORGE_CONTRACT_MODULE_SOURCES
+      FORGE_CONTRACT_SOURCES
+      FORGE_CONTRACT_PUBLIC_HEADERS
+      FORGE_CONTRACT_PRIVATE_HEADERS
+      FORGE_CONTRACT_PUBLIC_LIBRARY_IDS
+      FORGE_CONTRACT_PRIVATE_LIBRARY_IDS
+      FORGE_CONTRACT_PUBLIC_COMPONENT_IDS
+      FORGE_CONTRACT_PRIVATE_COMPONENT_IDS
+   )
+   set(
+      _metadata_variables
+      _schema
+      _id
+      _materialized_module_bases
+      _materialized_module_sources
+      _materialized_sources
+      _materialized_public_headers
+      _materialized_private_headers
+      _FORGE_CONTRACT_PUBLIC_LIBRARY_IDS
+      _FORGE_CONTRACT_PRIVATE_LIBRARY_IDS
+      _FORGE_CONTRACT_PUBLIC_COMPONENT_IDS
+      _FORGE_CONTRACT_PRIVATE_COMPONENT_IDS
+   )
+   set(_records)
+   foreach(_index RANGE 0 10)
+      list(GET _metadata_properties ${_index} _property)
+      list(GET _metadata_variables ${_index} _variable)
+      set(_value "${${_variable}}")
+      string(SHA256 _value_hash "${_value}")
+      list(APPEND _records "property:${_property}:${_value_hash}")
+   endforeach()
+
+   set(
+      _roles
+      module
+      source
+      public_header
+      private_header
+   )
+   set(
+      _original_path_variables
+      _module_sources
+      _sources
+      _public_headers
+      _private_headers
+   )
+   set(
+      _materialized_path_variables
+      _materialized_module_sources
+      _materialized_sources
+      _materialized_public_headers
+      _materialized_private_headers
+   )
+   foreach(_role_index RANGE 0 3)
+      list(GET _roles ${_role_index} _role)
+      list(GET _original_path_variables ${_role_index} _original_variable)
+      list(GET _materialized_path_variables ${_role_index} _materialized_variable)
+      set(_original_paths "${${_original_variable}}")
+      set(_materialized_paths "${${_materialized_variable}}")
+      list(LENGTH _original_paths _original_count)
+      list(LENGTH _materialized_paths _materialized_count)
+      if(NOT _original_count EQUAL _materialized_count)
+         message(
+            FATAL_ERROR
+            "installed Forge Contract package has inconsistent ${_role} paths: ${target}"
+         )
+      endif()
+      if(_original_count EQUAL 0)
+         continue()
+      endif()
+      math(EXPR _last "${_original_count} - 1")
+      foreach(_index RANGE 0 ${_last})
+         list(GET _original_paths ${_index} _original_path)
+         list(GET _materialized_paths ${_index} _materialized_path)
+         set(_physical_path "${_source_root}/${_original_path}")
+         if(NOT EXISTS "${_physical_path}" OR IS_DIRECTORY "${_physical_path}")
+            message(
+               FATAL_ERROR
+               "installed Forge Contract package input is missing: ${_physical_path}"
+            )
+         endif()
+         file(SHA256 "${_physical_path}" _content_hash)
+         list(
+            APPEND _records
+            "file:${_role}:${_materialized_path}:${_content_hash}"
+         )
+      endforeach()
+   endforeach()
+
+   _forge_contract_hash_fingerprint_records(_fingerprint ${_records})
+   set(${output} "${_fingerprint}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_assign_package_fingerprint target fingerprint)
+   _forge_contract_assert_sealed_target("${target}")
+   get_target_property(
+      _existing "${target}" FORGE_CONTRACT_PACKAGE_FINGERPRINT
+   )
+   if(_existing AND NOT _existing STREQUAL "_existing-NOTFOUND")
+      if(NOT "${_existing}" STREQUAL "${fingerprint}")
+         message(
+            FATAL_ERROR
+            "contract library is assigned conflicting package fingerprints: ${target}"
+         )
+      endif()
+      return()
+   endif()
+   set_property(
+      TARGET "${target}"
+      PROPERTY FORGE_CONTRACT_PACKAGE_FINGERPRINT "${fingerprint}"
+   )
+   _forge_contract_seal_target("${target}")
+endfunction()
+
 function(forge_install_contract_package)
    cmake_parse_arguments(
       ARG
@@ -1276,6 +1613,12 @@ function(forge_install_contract_package)
       if(NOT _id OR NOT _module_destination OR NOT _source_destination)
          message(FATAL_ERROR "contract package target was not installed through Forge: ${_input}")
       endif()
+      _forge_contract_install_materialization_fingerprint(
+         "${_target}" _package_fingerprint
+      )
+      _forge_contract_assign_package_fingerprint(
+         "${_target}" "${_package_fingerprint}"
+      )
       get_target_property(_export_name "${_target}" EXPORT_NAME)
       if(NOT _export_name)
          set(_export_name "${_input}")
@@ -1342,6 +1685,9 @@ function(forge_install_contract_package)
       get_target_property(_private_library_ids "${_target}" FORGE_CONTRACT_PRIVATE_LIBRARY_IDS)
       get_target_property(_public_component_ids "${_target}" FORGE_CONTRACT_PUBLIC_COMPONENT_IDS)
       get_target_property(_private_component_ids "${_target}" FORGE_CONTRACT_PRIVATE_COMPONENT_IDS)
+      get_target_property(
+         _package_fingerprint "${_target}" FORGE_CONTRACT_PACKAGE_FINGERPRINT
+      )
 
       set(_public_dependencies)
       set(_private_dependencies)
@@ -1370,6 +1716,7 @@ function(forge_install_contract_package)
       file(APPEND "${_output}" "      PACKAGE \"${ARG_FILE}\"\n")
       file(APPEND "${_output}" "      TARGET ${_package_name}\n")
       file(APPEND "${_output}" "      ID ${_id}\n")
+      file(APPEND "${_output}" "      FINGERPRINT ${_package_fingerprint}\n")
       file(APPEND "${_output}" "   )\n")
       file(APPEND "${_output}" "   if(NOT _forge_contract_package_target_ready)\n")
       file(
@@ -1409,6 +1756,12 @@ function(forge_install_contract_package)
             endforeach()
          endif()
       endforeach()
+      file(APPEND "${_output}" "      )\n")
+      file(APPEND "${_output}" "      _forge_contract_bind_package_target(\n")
+      file(APPEND "${_output}" "         PACKAGE \"${ARG_FILE}\"\n")
+      file(APPEND "${_output}" "         TARGET ${_package_name}\n")
+      file(APPEND "${_output}" "         ID ${_id}\n")
+      file(APPEND "${_output}" "         FINGERPRINT ${_package_fingerprint}\n")
       file(APPEND "${_output}" "      )\n")
       file(APPEND "${_output}" "   endif()\n")
    endforeach()

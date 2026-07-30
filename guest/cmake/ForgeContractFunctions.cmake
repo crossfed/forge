@@ -58,6 +58,8 @@ function(forge_add_contract_project target)
    list(APPEND _prefix_path "${ForgeContract_PREFIX}")
    list(REMOVE_DUPLICATES _prefix_path)
    string(REPLACE ";" "|" _prefix_path "${_prefix_path}")
+   set(_configuration_types ${CMAKE_CONFIGURATION_TYPES})
+   string(REPLACE ";" "|" _configuration_types "${_configuration_types}")
 
    ExternalProject_Add(
       "${target}"
@@ -72,6 +74,7 @@ function(forge_add_contract_project target)
       LIST_SEPARATOR "|"
       CMAKE_ARGS
          "-DCMAKE_BUILD_TYPE:STRING=${CMAKE_BUILD_TYPE}"
+         "-DCMAKE_CONFIGURATION_TYPES:STRING=${_configuration_types}"
          "-DCMAKE_TOOLCHAIN_FILE:FILEPATH=${ForgeContract_TOOLCHAIN}"
          "-DForgeContract_DIR:PATH=${CMAKE_CURRENT_FUNCTION_LIST_DIR}"
          "-DCMAKE_PREFIX_PATH:PATH=${_prefix_path}"

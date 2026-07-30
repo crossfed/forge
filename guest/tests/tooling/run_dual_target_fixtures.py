@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -130,7 +131,7 @@ def configure_multi_config_host(
         str(build),
         "-G",
         "Ninja Multi-Config",
-        "-DCMAKE_CONFIGURATION_TYPES=Debug;Release",
+        "-DCMAKE_CONFIGURATION_TYPES=Debug;Release;Checked",
         "-DCMAKE_NO_SYSTEM_FROM_IMPORTED=ON",
         f"-DCMAKE_CXX_COMPILER={cxx_compiler}",
         f"-DForgeContract_DIR={contract_package}",
@@ -193,14 +194,18 @@ def verify_multi_config_forwarding(
         build=build_directory,
     )
     build(cmake, build_directory, "configuration_guest", configuration="Release")
+    build(cmake, build_directory, "configuration_guest", configuration="Checked")
 
     artifact_directory = build_directory / "configuration.guest" / "artifacts"
     release_marker = artifact_directory / "built-Release.txt"
+    checked_marker = artifact_directory / "built-Checked.txt"
     debug_marker = artifact_directory / "built-Debug.txt"
     if release_marker.read_text(encoding="utf-8").strip() != "Release":
         raise RuntimeError("host Release did not select the guest Release configuration")
     if debug_marker.exists():
         raise RuntimeError("host Release unexpectedly built the guest Debug configuration")
+    if checked_marker.read_text(encoding="utf-8").strip() != "Checked":
+        raise RuntimeError("host Checked configuration was not forwarded to the guest project")
     verify_artifacts(artifact_directory, "configuration")
 
 
@@ -469,6 +474,116 @@ forge_add_contract(
     verify_artifacts(build_directory / "artifacts", "pkgdiamond")
 
 
+def verify_native_package_diamond(
+    *,
+    cmake: str,
+    cxx_compiler: Path,
+    forge_package: Path,
+    contract_package: Path,
+    product_prefix: Path,
+    product_package: Path,
+    values_package: Path,
+    output: Path,
+) -> None:
+    source = output / "source"
+    build_directory = output / "build"
+    source.mkdir(parents=True)
+    (source / "main.cpp").write_text(
+        """import product.chain.values;
+
+int main() {
+   return product::chain::workspace_id{42}.value == 42 ? 0 : 1;
+}
+""",
+        encoding="utf-8",
+    )
+    (source / "CMakeLists.txt").write_text(
+        """cmake_minimum_required(VERSION 3.31)
+project(NativeContractPackageDiamond LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+find_package(ForgeContract CONFIG REQUIRED)
+find_package(ProductValues CONFIG REQUIRED)
+find_package(ProductProtocol CONFIG REQUIRED)
+
+add_executable(native_package_diamond main.cpp)
+target_link_libraries(
+   native_package_diamond
+   PRIVATE
+      Values::values
+      Product::values
+)
+""",
+        encoding="utf-8",
+    )
+    configure_host(
+        cmake=cmake,
+        cxx_compiler=cxx_compiler,
+        forge_package=forge_package,
+        contract_package=contract_package,
+        source=source,
+        build=build_directory,
+        prefixes=(product_prefix,),
+        definitions=(
+            f"-DProductProtocol_DIR={product_package}",
+            f"-DProductValues_DIR={values_package}",
+        ),
+    )
+    build(cmake, build_directory, "native_package_diamond")
+    run(str(build_directory / "native_package_diamond"))
+
+
+def verify_conflicting_package_descriptor(
+    *,
+    cmake: str,
+    contract_package: Path,
+    product_prefix: Path,
+    values_package: Path,
+    output: Path,
+) -> None:
+    conflicting_prefix = output / "conflicting-prefix"
+    shutil.copytree(product_prefix, conflicting_prefix)
+    conflicting_package = conflicting_prefix / "lib" / "cmake" / "ProductProtocol"
+    contract_file = conflicting_package / "ProductProtocolContract.cmake"
+    contract_text = contract_file.read_text(encoding="utf-8")
+    contract_text, replacements = re.subn(
+        r"(FINGERPRINT )[0-9a-f]{64}",
+        r"\g<1>" + ("0" * 64),
+        contract_text,
+        count=1,
+    )
+    if replacements != 1:
+        raise RuntimeError("installed protocol package has no materialization fingerprint")
+    contract_file.write_text(contract_text, encoding="utf-8")
+
+    source = output / "source"
+    source.mkdir(parents=True)
+    (source / "CMakeLists.txt").write_text(
+        """cmake_minimum_required(VERSION 3.31)
+project(ConflictingContractPackages LANGUAGES CXX)
+find_package(ForgeContract CONFIG REQUIRED)
+find_package(ProductValues CONFIG REQUIRED)
+find_package(ProductProtocol CONFIG REQUIRED)
+""",
+        encoding="utf-8",
+    )
+    configure_guest(
+        cmake=cmake,
+        contract_package=contract_package,
+        source=source,
+        build=output / "build",
+        prefixes=(product_prefix, conflicting_prefix),
+        definitions=(
+            f"-DProductProtocol_DIR={conflicting_package}",
+            f"-DProductValues_DIR={values_package}",
+        ),
+        succeeds=False,
+        contains="conflicting installed Forge Contract package descriptor",
+    )
+
+
 def write_project(root: Path, body: str) -> Path:
     (root / "include").mkdir(parents=True)
     (root / "src").mkdir()
@@ -668,6 +783,28 @@ get_target_property(concrete protocol ALIASED_TARGET)
 target_link_libraries("${concrete}" PRIVATE extra_dependency)
 """,
             "modified after descriptor declaration: LINK_LIBRARIES",
+        ),
+        (
+            "immutable-interprocedural-optimization",
+            """forge_add_contract_library(
+   protocol ID negative.immutable.ipo SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+get_target_property(concrete protocol ALIASED_TARGET)
+set_property(TARGET "${concrete}" PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+""",
+            "modified after descriptor declaration: INTERPROCEDURAL_OPTIMIZATION",
+        ),
+        (
+            "immutable-static-library-options",
+            """forge_add_contract_library(
+   protocol ID negative.immutable.static.options SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+get_target_property(concrete protocol ALIASED_TARGET)
+set_property(TARGET "${concrete}" PROPERTY STATIC_LIBRARY_OPTIONS "unexpected")
+""",
+            "modified after descriptor declaration: STATIC_LIBRARY_OPTIONS",
         ),
         (
             "immutable-source-options",
@@ -998,6 +1135,23 @@ def validate(
         product_package=product_package,
         values_package=values_package,
         output=output / "package-diamond",
+    )
+    verify_native_package_diamond(
+        cmake=cmake,
+        cxx_compiler=cxx_compiler,
+        forge_package=forge_package,
+        contract_package=contract_package,
+        product_prefix=relocated,
+        product_package=product_package,
+        values_package=values_package,
+        output=output / "native-package-diamond",
+    )
+    verify_conflicting_package_descriptor(
+        cmake=cmake,
+        contract_package=contract_package,
+        product_prefix=relocated,
+        values_package=values_package,
+        output=output / "conflicting-package-descriptor",
     )
     check_imported_target_seal(
         cmake=cmake,

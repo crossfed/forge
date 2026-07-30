@@ -14,6 +14,10 @@ add_library(
    OBJECT
       release_probe.cpp
 )
+target_compile_definitions(
+   configuration_compile_probe
+   PRIVATE "$<$<CONFIG:Checked>:FORGE_CONTRACT_CHECKED_CONFIGURATION>"
+)
 
 set(_artifact_directory "${CMAKE_CURRENT_BINARY_DIR}/artifacts")
 set(_configuration_marker "${_artifact_directory}/built-$<CONFIG>.txt")
