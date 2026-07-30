@@ -18,11 +18,24 @@ struct http_config {
    std::vector<std::string> tags;
 };
 
+struct named_tag {
+   std::string value;
+
+   named_tag() = default;
+   explicit named_tag(std::string input) : value(std::move(input)) {}
+};
+
+struct tag_config {
+   std::vector<named_tag> tags;
+};
+
 } // namespace forge_json_tests
 
 #include <boost/describe.hpp>
 
 BOOST_DESCRIBE_STRUCT(forge_json_tests::http_config, (), (bind_port, bind_host, tls_enabled, tags))
+BOOST_DESCRIBE_STRUCT(forge_json_tests::named_tag, (), (value))
+BOOST_DESCRIBE_STRUCT(forge_json_tests::tag_config, (), (tags))
 
 import forge.config.core.key_path;
 import forge.config.core.value;
@@ -55,6 +68,22 @@ template <> struct forge::schema::rules<forge_json_tests::http_config> {
       schema.field<&forge_json_tests::http_config::bind_host>("bind-host").default_value("127.0.0.1");
       schema.field<&forge_json_tests::http_config::tls_enabled>("tls-enabled").default_value(false);
       static_cast<void>(schema.field<&forge_json_tests::http_config::tags>("tags"));
+      return schema;
+   }
+};
+
+template <> struct forge::schema::rules<forge_json_tests::named_tag> {
+   [[nodiscard]] static forge::schema::object_schema<forge_json_tests::named_tag> define() {
+      auto schema = forge::schema::object<forge_json_tests::named_tag>();
+      static_cast<void>(schema.field<&forge_json_tests::named_tag::value>("value"));
+      return schema;
+   }
+};
+
+template <> struct forge::schema::rules<forge_json_tests::tag_config> {
+   [[nodiscard]] static forge::schema::object_schema<forge_json_tests::tag_config> define() {
+      auto schema = forge::schema::object<forge_json_tests::tag_config>();
+      static_cast<void>(schema.field<&forge_json_tests::tag_config::tags>("tags"));
       return schema;
    }
 };
@@ -284,6 +313,17 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_schema_names_and_asso
    BOOST_REQUIRE(!map_unknown.ok());
    BOOST_TEST(map_unknown.diagnostics.front().code == "json.unknown");
    BOOST_TEST(map_unknown.diagnostics.front().path == "values[0][1].extra");
+
+   const auto map_duplicate = forge::codec::json::read<forge_json_tests::exact_map_record>(
+       R"({"values":[["first",{"value":7}],["first",{"value":8}]]})", options);
+   BOOST_REQUIRE(!map_duplicate.ok());
+   BOOST_TEST(map_duplicate.diagnostics.front().code == "json.duplicate");
+   BOOST_TEST(map_duplicate.diagnostics.front().path == "values[1][0]");
+
+   const auto shorthand = forge::codec::json::read<forge_json_tests::tag_config>(R"({"tags":["alpha"]})", options);
+   BOOST_REQUIRE(shorthand.ok());
+   BOOST_REQUIRE_EQUAL(shorthand.value.tags.size(), 1U);
+   BOOST_TEST(shorthand.value.tags.front().value == "alpha");
 }
 
 BOOST_AUTO_TEST_CASE(json_malformed_input_returns_forge_diagnostic) {

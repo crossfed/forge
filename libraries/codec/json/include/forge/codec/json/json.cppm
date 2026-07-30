@@ -117,29 +117,37 @@ template <typename T> struct associative_traits {
 template <typename Key, typename Value, typename Compare, typename Allocator>
 struct associative_traits<std::map<Key, Value, Compare, Allocator>> {
    static constexpr bool value = true;
+   static constexpr bool unique = true;
    using key_type = Key;
    using mapped_type = Value;
+   using seen_type = std::set<Key, Compare>;
 };
 
 template <typename Key, typename Value, typename Compare, typename Allocator>
 struct associative_traits<std::multimap<Key, Value, Compare, Allocator>> {
    static constexpr bool value = true;
+   static constexpr bool unique = false;
    using key_type = Key;
    using mapped_type = Value;
+   using seen_type = std::set<Key, Compare>;
 };
 
 template <typename Key, typename Value, typename Hash, typename Equal, typename Allocator>
 struct associative_traits<std::unordered_map<Key, Value, Hash, Equal, Allocator>> {
    static constexpr bool value = true;
+   static constexpr bool unique = true;
    using key_type = Key;
    using mapped_type = Value;
+   using seen_type = std::unordered_set<Key, Hash, Equal>;
 };
 
 template <typename Key, typename Value, typename Compare, typename KeyContainer, typename MappedContainer>
 struct associative_traits<std::flat_map<Key, Value, Compare, KeyContainer, MappedContainer>> {
    static constexpr bool value = true;
+   static constexpr bool unique = true;
    using key_type = Key;
    using mapped_type = Value;
+   using seen_type = std::set<Key, Compare>;
 };
 
 template <typename T> inline constexpr bool is_associative_v = associative_traits<clean_type<T>>::value;
@@ -288,11 +296,27 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
       }
 
       const auto& elements = source.get_array();
+      auto seen = typename associative_traits<value_type>::seen_type{};
       for (std::size_t index = 0; index < elements.size(); ++index) {
          const auto entry_path = element_path(path, index);
          validate_exact<std::pair<typename associative_traits<value_type>::key_type,
                                   typename associative_traits<value_type>::mapped_type>>(elements[index], entry_path,
                                                                                          diagnostics);
+         if constexpr (associative_traits<value_type>::unique) {
+            if (!elements[index].is_array() || elements[index].get_array().size() != 2U) {
+               continue;
+            }
+            try {
+               const auto key =
+                   elements[index].get_array()[0].template as<typename associative_traits<value_type>::key_type>();
+               if (!seen.insert(key).second) {
+                  add_exact_error(diagnostics, element_path(entry_path, 0U), "json.duplicate",
+                                  "duplicate key in unique associative container");
+               }
+            } catch (const std::exception&) {
+               // Conversion reports the canonical type diagnostic after structural validation.
+            }
+         }
       }
    } else if constexpr (is_pair_v<value_type>) {
       if (!source.is_array() || source.get_array().size() != 2U) {

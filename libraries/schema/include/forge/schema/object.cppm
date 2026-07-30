@@ -981,6 +981,11 @@ void validate_exact_input_value(const input_value& input, std::string_view path,
       }
       using item_type = typename vector_item<clean_type>::type;
       for (std::size_t index = 0; index < values->size(); ++index) {
+         if constexpr (std::constructible_from<item_type, std::string>) {
+            if (std::holds_alternative<std::string>((*values)[index].storage)) {
+               continue;
+            }
+         }
          validate_exact_input_value<item_type>((*values)[index], append_index(path, index), diagnostics);
       }
    } else if constexpr (boost::describe::has_describe_members<clean_type>::value) {
