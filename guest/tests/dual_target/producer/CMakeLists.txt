@@ -15,39 +15,7 @@ find_package(ForgeContract CONFIG REQUIRED)
 set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
 set(CMAKE_LINK_LIBRARIES_STRATEGY REORDER_FREELY)
 
-forge_add_contract_library(
-   values
-   ID product.chain.values
-   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
-   MODULE_BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
-   MODULE_SOURCES include/product/chain/values.cppm
-   PUBLIC_HEADERS include/product/chain/version.hpp
-   PUBLIC_LIBRARIES Forge::forge_chain_protocol
-)
-
-forge_add_contract_library(
-   limits
-   ID product.chain.limits
-   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
-   MODULE_BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
-   MODULE_SOURCES include/product/chain/limits.cppm
-   SOURCES src/limits.cpp
-   PUBLIC_LIBRARIES Forge::forge_crypto_digest
-)
-
-forge_add_contract_library(
-   protocol
-   ID product.chain.protocol
-   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
-   MODULE_BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
-   MODULE_SOURCES include/product/chain/protocol.cppm
-   SOURCES src/protocol.cpp
-   PRIVATE_HEADERS src/limits.hpp
-   PUBLIC_LIBRARIES
-      Forge::forge_raw
-      values
-   PRIVATE_LIBRARIES limits
-)
+add_subdirectory(libraries/chain)
 
 foreach(_library IN ITEMS values limits protocol)
    get_target_property(_concrete "${_library}" ALIASED_TARGET)
@@ -79,12 +47,11 @@ target_link_libraries(
       Forge::forge_chain_protocol
 )
 
-forge_add_contract(
-   product
-   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
-   SOURCES contract/product.cpp
-   HEADERS contract/support/local_value.hpp
-   LIBRARIES protocol
+forge_add_contract_project(
+   product_guest
+   SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/guest"
+   BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/product.guest"
+   CONTRACT product
 )
 
 forge_install_contract_library(
@@ -109,8 +76,14 @@ install(
    EXPORT ProductProtocolTargets
    FILE ProductProtocolTargets.cmake
    NAMESPACE Product::
-   CXX_MODULES_DIRECTORY cxx-modules
    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ProductProtocol"
+)
+forge_install_contract_package(
+   EXPORT ProductProtocolTargets
+   FILE ProductProtocolContract.cmake
+   NAMESPACE Product::
+   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ProductProtocol"
+   TARGETS protocol values limits
 )
 
 configure_package_config_file(
@@ -122,6 +95,7 @@ write_basic_package_version_file(
    "${CMAKE_CURRENT_BINARY_DIR}/ProductProtocolConfigVersion.cmake"
    VERSION "${PROJECT_VERSION}"
    COMPATIBILITY SameMajorVersion
+   ARCH_INDEPENDENT
 )
 install(
    FILES

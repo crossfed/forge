@@ -29,14 +29,20 @@ Standard CMake cross-compilation supplies the implementation model:
 - a toolchain file selects wasm32 before `project()`;
 - `add_subdirectory()` adds shared and guest-only source libraries directly;
 - `FILE_SET CXX_MODULES` owns module interface inputs;
-- `install(EXPORT ... CXX_MODULES_DIRECTORY ...)` exports native package
-  metadata without installing BMI or PCM files;
+- `install(EXPORT ...)` exports installed module source file sets and native
+  archives;
 - `ExternalProject` may launch a standalone guest project from a host build,
   but does not describe or recreate its targets.
 
 The host and guest configurations may produce different object files from the
 same physical sources. Host objects, archives and module artifacts are never
 reused by the guest configuration.
+
+`CXX_MODULES_DIRECTORY` is intentionally not used for protocol packages.
+CMake 3.31 records configuration-specific module source paths from the build
+tree in that metadata. The normal exported `FILE_SET CXX_MODULES` already
+points at installed relocatable sources, while each consumer compiles its own
+BMI for the active toolchain.
 
 ### Cargo And Bazel
 

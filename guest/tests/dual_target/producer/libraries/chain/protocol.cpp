@@ -1,6 +1,6 @@
 module;
 
-#include "limits.hpp"
+#include "details/limits.hxx"
 
 #include <cstdint>
 #include <optional>

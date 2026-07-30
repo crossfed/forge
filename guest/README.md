@@ -87,8 +87,9 @@ forge_add_contract(
 
 ## Shared Host And Guest Protocol
 
-Declare reusable protocol code once. Forge materializes the declaration as a
-normal host library and as an isolated wasm32 build graph:
+Declare reusable protocol code once. The native product and the standalone
+guest project add the same library source directory, so CMake compiles the
+physical sources independently for each active toolchain:
 
 ```cmake
 find_package(Forge CONFIG REQUIRED COMPONENTS chain_protocol raw)
@@ -128,7 +129,7 @@ descriptor does not model them. Native CMake target state is never serialized
 into the guest graph; Forge only verifies that the materialized target still
 matches the state produced by the declaration.
 
-Install the source package and standard CMake module metadata together:
+Install the source package and its relocatable CMake targets together:
 
 ```cmake
 forge_install_contract_library(
@@ -141,10 +142,14 @@ install(
    EXPORT ProductProtocolTargets
    NAMESPACE Product::
    FILE ProductProtocolTargets.cmake
-   CXX_MODULES_DIRECTORY cxx-modules
    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ProductProtocol"
 )
 ```
+
+Do not add `CXX_MODULES_DIRECTORY`: on the supported CMake 3.31 baseline its
+configuration metadata retains build-tree module source paths. The exported
+installed `FILE_SET CXX_MODULES` is the portable host input; each toolchain
+builds its own BMI.
 
 The package config must use `find_dependency(Forge)` for the declared host
 dependencies and `find_dependency(ForgeContract)` before loading the targets
@@ -203,20 +208,33 @@ auto action = forge::chain::protocol::action{
 Host packing and guest dispatch both use `forge.raw`, so the binary action
 payload has one type definition.
 
-Configure the host project normally. `forge_add_contract` creates an isolated
-wasm32 sub-build, so the parent project does not use the SDK toolchain file:
+Configure the standalone guest project with the SDK toolchain:
 
 ```bash
-cmake -S . -B build -G Ninja -DForgeContract_DIR="$ForgeContract_DIR"
-cmake --build build -j 4
+cmake -S guest -B build/guest -G Ninja \
+  -DCMAKE_TOOLCHAIN_FILE="$ForgeContract_DIR/ForgeContractToolchain.cmake"
+cmake --build build/guest -j 4
 ```
 
-The target always produces:
+`forge_add_contract()` creates the contract directly in that guest configure
+and always produces:
 
 ```text
 hello.wasm
 hello.abi
 hello.contract.json
+```
+
+A native root that needs contract artifacts for host-side VM tests may launch
+the same guest project without inspecting its target graph:
+
+```cmake
+forge_add_contract_project(
+   hello_guest
+   SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/guest"
+   BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/guest"
+   CONTRACT hello
+)
 ```
 
 ## Modern Contract

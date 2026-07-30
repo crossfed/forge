@@ -13,4 +13,9 @@ add_executable(product_protocol_consumer host.cpp)
 set_target_properties(product_protocol_consumer PROPERTIES NO_SYSTEM_FROM_IMPORTED TRUE)
 target_link_libraries(product_protocol_consumer PRIVATE Product::protocol)
 
-add_subdirectory(contract)
+forge_add_contract_project(
+   consumer_guest
+   SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/contract"
+   BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/consumer.guest"
+   CONTRACT consumer
+)
