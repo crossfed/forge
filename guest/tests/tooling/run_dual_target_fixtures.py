@@ -361,6 +361,102 @@ def verify_relocatable_package(prefix: Path, forbidden: tuple[Path, ...]) -> Non
                 raise RuntimeError(f"protocol package retains an absolute path: {path}: {needle}")
 
 
+def verify_guest_package_diamond(
+    *,
+    cmake: str,
+    contract_package: Path,
+    product_prefix: Path,
+    product_package: Path,
+    output: Path,
+) -> None:
+    source = output / "source"
+    build_directory = output / "build"
+    for side in ("left", "right"):
+        side_source = source / side
+        include = side_source / "include"
+        include.mkdir(parents=True)
+        (include / f"{side}.cppm").write_text(
+            f"""export module package.diamond.{side};
+
+import product.chain.protocol;
+
+export namespace package::diamond {{
+
+inline bool {side}_valid() {{
+   const auto value = product::chain::checked_add(20, 22);
+   return value && *value == 42;
+}}
+
+}} // namespace package::diamond
+""",
+            encoding="utf-8",
+        )
+        (side_source / "CMakeLists.txt").write_text(
+            f"""find_package(ProductProtocol CONFIG REQUIRED)
+
+forge_add_contract_library(
+   diamond_{side}
+   ID package.diamond.{side}
+   SOURCE_ROOT "${{CMAKE_CURRENT_SOURCE_DIR}}"
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/{side}.cppm
+   PUBLIC_LIBRARIES Product::protocol
+)
+""",
+            encoding="utf-8",
+        )
+
+    (source / "entry.cpp").write_text(
+        """import forge.contract;
+import package.diamond.left;
+import package.diamond.right;
+
+class [[forge::contract("pkgdiamond")]] package_diamond_contract final
+    : public forge::contract::context {
+ public:
+   using context::context;
+
+   [[forge::action]] void verify() {
+      forge::contract::check(
+          package::diamond::left_valid() && package::diamond::right_valid(),
+          "installed package dependency diamond is invalid");
+   }
+};
+""",
+        encoding="utf-8",
+    )
+    (source / "CMakeLists.txt").write_text(
+        """cmake_minimum_required(VERSION 3.31)
+project(InstalledContractPackageDiamond LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+find_package(ForgeContract CONFIG REQUIRED)
+add_subdirectory(left)
+add_subdirectory(right)
+
+forge_add_contract(
+   pkgdiamond
+   SOURCES entry.cpp
+   LIBRARIES diamond_left diamond_right
+)
+""",
+        encoding="utf-8",
+    )
+
+    configure_guest(
+        cmake=cmake,
+        contract_package=contract_package,
+        source=source,
+        build=build_directory,
+        prefixes=(product_prefix,),
+        definitions=(f"-DProductProtocol_DIR={product_package}",),
+    )
+    build(cmake, build_directory, "pkgdiamond_artifacts")
+    verify_artifacts(build_directory / "artifacts", "pkgdiamond")
+
+
 def write_project(root: Path, body: str) -> Path:
     (root / "include").mkdir(parents=True)
     (root / "src").mkdir()
@@ -746,6 +842,14 @@ def validate(
     targets_file = product_package / "ProductProtocolTargets.cmake"
     if "FILE_SET \"forge_contract_modules\"" not in targets_file.read_text(encoding="utf-8"):
         raise RuntimeError("installed protocol package has no relocatable host module sources")
+
+    verify_guest_package_diamond(
+        cmake=cmake,
+        contract_package=contract_package,
+        product_prefix=relocated,
+        product_package=product_package,
+        output=output / "package-diamond",
+    )
 
     consumer_build = output / "consumer-host"
     configure_host(

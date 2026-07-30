@@ -329,6 +329,58 @@ function(forge_register_contract_library_targets)
    endforeach()
 endfunction()
 
+function(_forge_contract_package_targets_materialized output)
+   cmake_parse_arguments(
+      ARG
+      ""
+      "PACKAGE"
+      "TARGETS;IDS"
+      ${ARGN}
+   )
+   if(ARG_UNPARSED_ARGUMENTS OR NOT ARG_PACKAGE OR NOT ARG_TARGETS OR NOT ARG_IDS)
+      message(FATAL_ERROR "invalid installed Forge Contract package descriptor")
+   endif()
+
+   list(LENGTH ARG_TARGETS _target_count)
+   list(LENGTH ARG_IDS _id_count)
+   if(NOT _target_count EQUAL _id_count)
+      message(FATAL_ERROR "installed Forge Contract package has mismatched target metadata: ${ARG_PACKAGE}")
+   endif()
+
+   set(_existing_count 0)
+   foreach(_target IN LISTS ARG_TARGETS)
+      if(TARGET "${_target}")
+         math(EXPR _existing_count "${_existing_count} + 1")
+      endif()
+   endforeach()
+   if(_existing_count EQUAL 0)
+      set(${output} FALSE PARENT_SCOPE)
+      return()
+   endif()
+   if(NOT _existing_count EQUAL _target_count)
+      message(FATAL_ERROR "installed Forge Contract package is only partially materialized: ${ARG_PACKAGE}")
+   endif()
+
+   math(EXPR _target_last "${_target_count} - 1")
+   foreach(_index RANGE 0 ${_target_last})
+      list(GET ARG_TARGETS ${_index} _input)
+      list(GET ARG_IDS ${_index} _expected_id)
+      _forge_contract_resolve_target("${_input}" _target)
+      get_target_property(_contract_library "${_target}" FORGE_CONTRACT_LIBRARY)
+      get_target_property(_actual_id "${_target}" FORGE_CONTRACT_LIBRARY_ID)
+      if(NOT _contract_library OR NOT "${_actual_id}" STREQUAL "${_expected_id}")
+         message(
+            FATAL_ERROR
+            "existing target does not match installed Forge Contract package "
+            "${ARG_PACKAGE}: ${_input}"
+         )
+      endif()
+      _forge_contract_register_library_target("${_target}")
+   endforeach()
+
+   set(${output} TRUE PARENT_SCOPE)
+endfunction()
+
 function(_forge_contract_register_component_target target)
    get_target_property(_id "${target}" FORGE_CONTRACT_GUEST_COMPONENT_ID)
    if(NOT _id)
@@ -794,6 +846,19 @@ function(forge_install_contract_package)
       "${_anchor}"
    )
    file(APPEND "${_output}" "${_prefix_relative}\" ABSOLUTE)\n")
+   file(APPEND "${_output}" "   _forge_contract_package_targets_materialized(\n")
+   file(APPEND "${_output}" "      _forge_contract_package_ready\n")
+   file(APPEND "${_output}" "      PACKAGE \"${ARG_FILE}\"\n")
+   file(APPEND "${_output}" "      TARGETS\n")
+   foreach(_package_name IN LISTS _package_names)
+      file(APPEND "${_output}" "         ${_package_name}\n")
+   endforeach()
+   file(APPEND "${_output}" "      IDS\n")
+   foreach(_package_id IN LISTS _package_ids)
+      file(APPEND "${_output}" "         ${_package_id}\n")
+   endforeach()
+   file(APPEND "${_output}" "   )\n")
+   file(APPEND "${_output}" "   if(NOT _forge_contract_package_ready)\n")
 
    list(LENGTH _package_targets _target_count)
    math(EXPR _target_last "${_target_count} - 1")
@@ -836,43 +901,45 @@ function(forge_install_contract_package)
 
       file(
          APPEND "${_output}"
-         "   forge_add_contract_library(${_package_name}\n"
-         "      ID ${_id}\n"
-         "      SOURCE_ROOT \"\${_forge_contract_package_prefix}\"\n"
-         "      MODULE_BASE_DIRS \"\${_forge_contract_package_prefix}/${_module_destination}\"\n"
-         "      MODULE_SOURCES\n"
+         "      forge_add_contract_library(${_package_name}\n"
+         "         ID ${_id}\n"
+         "         SOURCE_ROOT \"\${_forge_contract_package_prefix}\"\n"
+         "         MODULE_BASE_DIRS \"\${_forge_contract_package_prefix}/${_module_destination}\"\n"
+         "         MODULE_SOURCES\n"
       )
       foreach(_path IN LISTS _module_paths)
-         file(APPEND "${_output}" "         \"\${_forge_contract_package_prefix}/${_module_destination}/${_path}\"\n")
+         file(APPEND "${_output}" "            \"\${_forge_contract_package_prefix}/${_module_destination}/${_path}\"\n")
       endforeach()
       if(_sources)
-         file(APPEND "${_output}" "      SOURCES\n")
+         file(APPEND "${_output}" "         SOURCES\n")
          foreach(_path IN LISTS _sources)
-            file(APPEND "${_output}" "         \"\${_forge_contract_package_prefix}/${_source_destination}/${_path}\"\n")
+            file(APPEND "${_output}" "            \"\${_forge_contract_package_prefix}/${_source_destination}/${_path}\"\n")
          endforeach()
       endif()
       if(_public_header_paths)
-         file(APPEND "${_output}" "      PUBLIC_HEADERS\n")
+         file(APPEND "${_output}" "         PUBLIC_HEADERS\n")
          foreach(_path IN LISTS _public_header_paths)
-            file(APPEND "${_output}" "         \"\${_forge_contract_package_prefix}/${_module_destination}/${_path}\"\n")
+            file(APPEND "${_output}" "            \"\${_forge_contract_package_prefix}/${_module_destination}/${_path}\"\n")
          endforeach()
       endif()
       if(_private_headers)
-         file(APPEND "${_output}" "      PRIVATE_HEADERS\n")
+         file(APPEND "${_output}" "         PRIVATE_HEADERS\n")
          foreach(_path IN LISTS _private_headers)
-            file(APPEND "${_output}" "         \"\${_forge_contract_package_prefix}/${_source_destination}/${_path}\"\n")
+            file(APPEND "${_output}" "            \"\${_forge_contract_package_prefix}/${_source_destination}/${_path}\"\n")
          endforeach()
       endif()
       foreach(_scope PUBLIC PRIVATE)
          if(_${_scope}_dependencies)
-            file(APPEND "${_output}" "      ${_scope}_LIBRARIES\n")
+            file(APPEND "${_output}" "         ${_scope}_LIBRARIES\n")
             foreach(_dependency IN LISTS _${_scope}_dependencies)
-               file(APPEND "${_output}" "         ${_dependency}\n")
+               file(APPEND "${_output}" "            ${_dependency}\n")
             endforeach()
          endif()
       endforeach()
-      file(APPEND "${_output}" "   )\n")
+      file(APPEND "${_output}" "      )\n")
    endforeach()
+   file(APPEND "${_output}" "   endif()\n")
+   file(APPEND "${_output}" "   unset(_forge_contract_package_ready)\n")
    file(APPEND "${_output}" "else()\n")
    file(APPEND "${_output}" "   include(\"\${CMAKE_CURRENT_LIST_DIR}/${ARG_EXPORT}.cmake\")\n")
    file(APPEND "${_output}" "   forge_register_contract_library_targets(\n")
