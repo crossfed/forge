@@ -144,6 +144,14 @@ template <> struct forge::schema::rules<forge_json_tests::exact_alias_leaf> {
    }
 };
 
+template <> struct forge::schema::rules<forge_json_tests::exact_dotted_leaf> {
+   [[nodiscard]] static forge::schema::object_schema<forge_json_tests::exact_dotted_leaf> define() {
+      auto schema = forge::schema::object<forge_json_tests::exact_dotted_leaf>();
+      static_cast<void>(schema.field<&forge_json_tests::exact_dotted_leaf::deadline_ms>("api.deadline-ms"));
+      return schema;
+   }
+};
+
 BOOST_AUTO_TEST_SUITE(json_codec_tests)
 
 BOOST_AUTO_TEST_CASE(json_value_roundtrip_preserves_generic_shapes) {
@@ -555,8 +563,23 @@ BOOST_AUTO_TEST_CASE(json_exact_schema_paths_roundtrip_through_typed_writers) {
    };
    const auto roundtrip = forge::codec::json::read<forge_json_tests::dotted_config>(written.text, options);
    BOOST_REQUIRE(roundtrip.ok());
+   BOOST_TEST(roundtrip.diagnostics.empty());
    BOOST_TEST(roundtrip.value.deadline_ms == input.deadline_ms);
    BOOST_TEST(static_cast<int>(roundtrip.value.policy) == static_cast<int>(input.policy));
+
+   const auto strict_unknown_options = forge::codec::json::read_options{
+       .unknown_fields = forge::codec::json::unknown_field_policy::error,
+   };
+   const auto permissive_roundtrip =
+       forge::codec::json::read<forge_json_tests::dotted_config>(written.text, strict_unknown_options);
+   BOOST_REQUIRE(permissive_roundtrip.ok());
+   BOOST_TEST(permissive_roundtrip.diagnostics.empty());
+
+   const auto nested = forge::codec::json::read<forge_json_tests::exact_dotted_parent>(
+       R"({"config":{"api":{"deadline-ms":2500}}})", options);
+   BOOST_REQUIRE(nested.ok());
+   BOOST_TEST(nested.diagnostics.empty());
+   BOOST_TEST(nested.value.config.deadline_ms == 2500U);
 
    const auto alias = forge::codec::json::read<forge_json_tests::dotted_config>(
        R"({"deadline-ms":2500,"path":{"policy":"direct-preferred"}})", options);

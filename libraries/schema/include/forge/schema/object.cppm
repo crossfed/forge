@@ -441,35 +441,25 @@ template <typename T> class object_schema {
    [[nodiscard]] std::vector<diagnostic> decode_object(const input_value::object_type& input,
                                                        std::string_view base_path, T& output) const {
       auto result = std::vector<diagnostic>{};
-      auto known_fields = std::set<std::string>{};
-      for (const auto& field : *fields_) {
-         known_fields.insert(field.name);
-         known_fields.insert(field.aliases.begin(), field.aliases.end());
-      }
-
-      for (const auto& [name, ignored] : input) {
-         if (!known_fields.contains(name)) {
-            result.push_back(make_path_warning(append_path(base_path, name), "config.unknown", "unknown config field"));
-         }
-      }
+      inspect_input_paths(input, base_path, false, result);
 
       for (const auto& field : *fields_) {
          auto field_path = append_path(base_path, field.name);
-         const auto* found = [&]() -> const input_value* {
-            if (const auto exact = input.find(field.name); exact != input.end()) {
-               return &exact->second;
-            }
+         auto lookup = find_input_path(input, field.name);
+         if (!lookup.value) {
             for (const auto& alias : field.aliases) {
-               if (const auto alias_entry = input.find(alias); alias_entry != input.end()) {
+               auto alias_lookup = find_input_path(input, alias);
+               lookup.blocked = lookup.blocked || alias_lookup.blocked;
+               if (alias_lookup.value) {
                   field_path = append_path(base_path, alias);
-                  return &alias_entry->second;
+                  lookup.value = alias_lookup.value;
+                  break;
                }
             }
-            return nullptr;
-         }();
+         }
 
-         if (!found) {
-            if (field.required) {
+         if (!lookup.value) {
+            if (field.required && !lookup.blocked) {
                result.push_back(
                    make_path_error(std::move(field_path), "config.required", "required config field is missing"));
             }
@@ -482,7 +472,7 @@ template <typename T> class object_schema {
                                                                                 : field.deprecated_message));
          }
 
-         field.assign_input(output, *found, field_path, result);
+         field.assign_input(output, *lookup.value, field_path, result);
       }
 
       auto validation = validate(output, base_path);
@@ -538,92 +528,14 @@ template <typename T> class object_schema {
    [[nodiscard]] std::vector<diagnostic> validate_exact_input(const input_value::object_type& input,
                                                               std::string_view base_path = {}) const {
       auto result = std::vector<diagnostic>{};
-      auto known_fields = std::set<std::string>{};
-      auto known_prefixes = std::set<std::string>{};
-      const auto register_name = [&](std::string_view name) {
-         known_fields.emplace(name);
-         auto separator = name.find('.');
-         while (separator != std::string_view::npos) {
-            known_prefixes.emplace(name.substr(0, separator));
-            separator = name.find('.', separator + 1);
-         }
-      };
-      for (const auto& field : *fields_) {
-         register_name(field.name);
-         for (const auto& alias : field.aliases) {
-            register_name(alias);
-         }
-      }
-
-      const auto inspect_known_paths = [&](auto& self, const input_value::object_type& object,
-                                           std::string_view relative_path) -> void {
-         for (const auto& [name, value] : object) {
-            auto path = std::string{relative_path};
-            if (!path.empty()) {
-               path += ".";
-            }
-            path += name;
-
-            const auto is_field = known_fields.contains(path);
-            const auto is_prefix = known_prefixes.contains(path);
-            if (!is_field && !is_prefix) {
-               result.push_back(
-                   make_path_error(append_path(base_path, path), "config.unknown", "unknown config field"));
-            } else if (!is_field && is_prefix) {
-               if (const auto* child = value.as_object()) {
-                  self(self, *child, path);
-               } else {
-                  result.push_back(make_path_error(append_path(base_path, path), "config.type",
-                                                   "config path segment must be an object"));
-               }
-            }
-         }
-      };
-      inspect_known_paths(inspect_known_paths, input, std::string_view{});
-
-      struct path_lookup {
-         const input_value* value = nullptr;
-         bool blocked = false;
-      };
-      const auto find_path = [&](std::string_view name) {
-         auto lookup = path_lookup{};
-         auto* object = &input;
-         auto begin = std::size_t{0};
-         while (begin <= name.size()) {
-            const auto end = name.find('.', begin);
-            const auto segment = name.substr(begin, end == std::string_view::npos ? name.size() - begin : end - begin);
-            if (segment.empty()) {
-               if (end == std::string_view::npos) {
-                  break;
-               }
-               begin = end + 1;
-               continue;
-            }
-
-            const auto entry = object->find(std::string{segment});
-            if (entry == object->end()) {
-               return lookup;
-            }
-            if (end == std::string_view::npos) {
-               lookup.value = &entry->second;
-               return lookup;
-            }
-            object = entry->second.as_object();
-            if (!object) {
-               lookup.blocked = true;
-               return lookup;
-            }
-            begin = end + 1;
-         }
-         return lookup;
-      };
+      inspect_input_paths(input, base_path, true, result);
 
       for (const auto& field : *fields_) {
          auto field_path = append_path(base_path, field.name);
          const input_value* found = nullptr;
          auto blocked = false;
          const auto find_name = [&](const std::string& name) {
-            const auto lookup = find_path(name);
+            const auto lookup = find_input_path(input, name);
             blocked = blocked || lookup.blocked;
             if (lookup.value) {
                if (found) {
@@ -655,6 +567,100 @@ template <typename T> class object_schema {
 
  private:
    friend class field_builder<T>;
+
+   struct path_catalog {
+      std::set<std::string> fields;
+      std::set<std::string> prefixes;
+   };
+
+   struct path_lookup {
+      const input_value* value = nullptr;
+      bool blocked = false;
+   };
+
+   [[nodiscard]] path_catalog known_paths() const {
+      auto output = path_catalog{};
+      const auto register_name = [&](std::string_view name) {
+         output.fields.emplace(name);
+         auto separator = name.find('.');
+         while (separator != std::string_view::npos) {
+            output.prefixes.emplace(name.substr(0, separator));
+            separator = name.find('.', separator + 1);
+         }
+      };
+      for (const auto& field : *fields_) {
+         register_name(field.name);
+         for (const auto& alias : field.aliases) {
+            register_name(alias);
+         }
+      }
+      return output;
+   }
+
+   [[nodiscard]] static path_lookup find_input_path(const input_value::object_type& input, std::string_view name) {
+      auto lookup = path_lookup{};
+      auto* object = &input;
+      auto begin = std::size_t{0};
+      while (begin <= name.size()) {
+         const auto end = name.find('.', begin);
+         const auto segment = name.substr(begin, end == std::string_view::npos ? name.size() - begin : end - begin);
+         if (segment.empty()) {
+            if (end == std::string_view::npos) {
+               break;
+            }
+            begin = end + 1;
+            continue;
+         }
+
+         const auto entry = object->find(std::string{segment});
+         if (entry == object->end()) {
+            return lookup;
+         }
+         if (end == std::string_view::npos) {
+            lookup.value = &entry->second;
+            return lookup;
+         }
+         object = entry->second.as_object();
+         if (!object) {
+            lookup.blocked = true;
+            return lookup;
+         }
+         begin = end + 1;
+      }
+      return lookup;
+   }
+
+   void inspect_input_paths(const input_value::object_type& input, std::string_view base_path, bool exact,
+                            std::vector<diagnostic>& diagnostics) const {
+      const auto paths = known_paths();
+      const auto inspect = [&](auto& self, const input_value::object_type& object,
+                               std::string_view relative_path) -> void {
+         for (const auto& [name, value] : object) {
+            auto path = std::string{relative_path};
+            if (!path.empty()) {
+               path += ".";
+            }
+            path += name;
+
+            const auto is_field = paths.fields.contains(path);
+            const auto is_prefix = paths.prefixes.contains(path);
+            if (!is_field && !is_prefix) {
+               auto entry =
+                   exact ? make_path_error(append_path(base_path, path), "config.unknown", "unknown config field")
+                         : make_path_warning(append_path(base_path, path), "config.unknown", "unknown config field");
+               diagnostics.push_back(std::move(entry));
+            } else if (!is_field && is_prefix) {
+               if (const auto* child = value.as_object()) {
+                  self(self, *child, path);
+               } else {
+                  diagnostics.push_back(make_path_error(append_path(base_path, path), "config.type",
+                                                        "config path segment must be an object"));
+               }
+            }
+         }
+      };
+      inspect(inspect, input, std::string_view{});
+   }
 
    field_rule<T>& field_at(std::size_t index) {
       return (*fields_)[index];
