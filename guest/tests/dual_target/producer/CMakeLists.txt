@@ -88,13 +88,13 @@ forge_install_contract_package(
 install(
    EXPORT ProductProtocolTargets
    FILE ProductValuesTargets.cmake
-   NAMESPACE Product::
+   NAMESPACE Values::
    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ProductValues"
 )
 forge_install_contract_package(
    EXPORT ProductValuesTargets
    FILE ProductValuesContract.cmake
-   NAMESPACE Product::
+   NAMESPACE Values::
    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ProductValues"
    TARGETS values
 )

@@ -517,6 +517,44 @@ def check_configure_failures(
     outside.parent.mkdir(parents=True)
     outside.write_text("export module negative.outside;\n", encoding="utf-8")
 
+    ancestor_mutation = fixtures / "immutable-ancestor-mutation"
+    ancestor_library = ancestor_mutation / "library"
+    (ancestor_library / "include").mkdir(parents=True)
+    (ancestor_library / "include" / "protocol.cppm").write_text(
+        "export module negative.ancestor;\n",
+        encoding="utf-8",
+    )
+    (ancestor_mutation / "extra.cpp").write_text(
+        "inline constexpr auto ancestor_mutation = true;\n",
+        encoding="utf-8",
+    )
+    (ancestor_library / "CMakeLists.txt").write_text(
+        """forge_add_contract_library(
+   protocol ID negative.immutable.ancestor SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   MODULE_BASE_DIRS include MODULE_SOURCES include/protocol.cppm
+)
+""",
+        encoding="utf-8",
+    )
+    (ancestor_mutation / "CMakeLists.txt").write_text(
+        """cmake_minimum_required(VERSION 3.31)
+project(AncestorContractMutation LANGUAGES CXX)
+find_package(ForgeContract CONFIG REQUIRED)
+add_subdirectory(library)
+get_target_property(concrete protocol ALIASED_TARGET)
+target_sources("${concrete}" PRIVATE extra.cpp)
+""",
+        encoding="utf-8",
+    )
+    configure_guest(
+        cmake=cmake,
+        contract_package=contract_package,
+        source=ancestor_mutation,
+        build=fixtures / "immutable-ancestor-mutation-build",
+        succeeds=False,
+        contains="modified after descriptor declaration: SOURCES",
+    )
+
     cases = (
         (
             "outside-root",

@@ -417,21 +417,50 @@ function(_forge_contract_assert_directory_sealed_targets)
    endforeach()
 endfunction()
 
-function(_forge_contract_schedule_sealed_target_check target)
-   get_property(_targets DIRECTORY PROPERTY FORGE_CONTRACT_SEALED_TARGETS)
+function(_forge_contract_schedule_directory_sealed_target_check target directory)
+   get_property(
+      _targets DIRECTORY "${directory}" PROPERTY FORGE_CONTRACT_SEALED_TARGETS
+   )
    if(NOT target IN_LIST _targets)
-      set_property(DIRECTORY APPEND PROPERTY FORGE_CONTRACT_SEALED_TARGETS "${target}")
+      set_property(
+         DIRECTORY "${directory}" APPEND PROPERTY FORGE_CONTRACT_SEALED_TARGETS "${target}"
+      )
    endif()
-   get_property(_scheduled DIRECTORY PROPERTY FORGE_CONTRACT_SEALED_TARGET_CHECK_SCHEDULED)
+   get_property(
+      _scheduled DIRECTORY "${directory}"
+      PROPERTY FORGE_CONTRACT_SEALED_TARGET_CHECK_SCHEDULED
+   )
    if(_scheduled)
       return()
    endif()
-   set_property(DIRECTORY PROPERTY FORGE_CONTRACT_SEALED_TARGET_CHECK_SCHEDULED TRUE)
+   set_property(
+      DIRECTORY "${directory}"
+      PROPERTY FORGE_CONTRACT_SEALED_TARGET_CHECK_SCHEDULED TRUE
+   )
    cmake_language(
-      DEFER DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+      DEFER DIRECTORY "${directory}"
       ID forge_contract_assert_sealed_targets
       CALL _forge_contract_assert_directory_sealed_targets
    )
+endfunction()
+
+function(_forge_contract_schedule_sealed_target_check target)
+   _forge_contract_schedule_directory_sealed_target_check(
+      "${target}" "${CMAKE_CURRENT_BINARY_DIR}"
+   )
+
+   get_target_property(_imported "${target}" IMPORTED)
+   if(_imported)
+      get_target_property(_imported_global "${target}" IMPORTED_GLOBAL)
+   endif()
+   if(
+      (NOT _imported OR _imported_global)
+      AND NOT CMAKE_CURRENT_BINARY_DIR STREQUAL CMAKE_BINARY_DIR
+   )
+      _forge_contract_schedule_directory_sealed_target_check(
+         "${target}" "${CMAKE_BINARY_DIR}"
+      )
+   endif()
 endfunction()
 
 function(_forge_contract_require_sealed_target target)
@@ -798,22 +827,33 @@ function(_forge_contract_package_target_materialized output)
    if(ARG_UNPARSED_ARGUMENTS OR NOT ARG_PACKAGE OR NOT ARG_TARGET OR NOT ARG_ID)
       message(FATAL_ERROR "invalid installed Forge Contract package descriptor")
    endif()
-   if(NOT TARGET "${ARG_TARGET}")
+   if(TARGET "${ARG_TARGET}")
+      _forge_contract_resolve_target("${ARG_TARGET}" _target)
+      get_target_property(_contract_library "${_target}" FORGE_CONTRACT_LIBRARY)
+      get_target_property(_actual_id "${_target}" FORGE_CONTRACT_LIBRARY_ID)
+      if(NOT _contract_library OR NOT "${_actual_id}" STREQUAL "${ARG_ID}")
+         message(
+            FATAL_ERROR
+            "existing target does not match installed Forge Contract package "
+            "${ARG_PACKAGE}: ${ARG_TARGET}"
+         )
+      endif()
+      _forge_contract_register_library_target("${_target}")
+      set(${output} TRUE PARENT_SCOPE)
+      return()
+   endif()
+
+   _forge_contract_id_key("${ARG_ID}" _key)
+   get_property(
+      _registered GLOBAL PROPERTY "FORGE_CONTRACT_LIBRARY_TARGET_${_key}"
+   )
+   if(NOT _registered)
       set(${output} FALSE PARENT_SCOPE)
       return()
    endif()
 
-   _forge_contract_resolve_target("${ARG_TARGET}" _target)
-   get_target_property(_contract_library "${_target}" FORGE_CONTRACT_LIBRARY)
-   get_target_property(_actual_id "${_target}" FORGE_CONTRACT_LIBRARY_ID)
-   if(NOT _contract_library OR NOT "${_actual_id}" STREQUAL "${ARG_ID}")
-      message(
-         FATAL_ERROR
-         "existing target does not match installed Forge Contract package "
-         "${ARG_PACKAGE}: ${ARG_TARGET}"
-      )
-   endif()
-   _forge_contract_register_library_target("${_target}")
+   _forge_contract_require_sealed_target("${_registered}")
+   add_library("${ARG_TARGET}" ALIAS "${_registered}")
    set(${output} TRUE PARENT_SCOPE)
 endfunction()
 
