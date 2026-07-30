@@ -245,3 +245,12 @@ BOOST_AUTO_TEST_CASE(schema_checked_integral_cast_handles_widening_and_narrowing
    BOOST_CHECK_THROW(static_cast<void>(forge::schema::checked_integral_cast<std::uint8_t>(std::int16_t{-1})),
                      std::invalid_argument);
 }
+
+BOOST_AUTO_TEST_CASE(schema_exact_scalar_validation_checks_float_range_before_narrowing) {
+   auto diagnostics = std::vector<forge::schema::diagnostic>{};
+   forge::schema::validate_exact_input_value<float>(forge::schema::input_value{1e100}, "ratio", diagnostics);
+
+   BOOST_REQUIRE_EQUAL(diagnostics.size(), 1U);
+   BOOST_TEST(diagnostics.front().code == "config.range");
+   BOOST_TEST(diagnostics.front().path == "ratio");
+}

@@ -5,6 +5,7 @@ module;
 #include <boost/describe.hpp>
 #include <boost/mp11.hpp>
 #include <charconv>
+#include <cmath>
 #include <concepts>
 #include <cstdint>
 #include <cctype>
@@ -1047,12 +1048,15 @@ void validate_exact_input_value(const input_value& input, std::string_view path,
                            : std::holds_alternative<std::int64_t>(input.storage)
                                ? static_cast<long double>(std::get<std::int64_t>(input.storage))
                                : static_cast<long double>(std::get<std::uint64_t>(input.storage));
-      const auto converted = static_cast<clean_type>(numeric);
-      if (numeric < static_cast<long double>(std::numeric_limits<clean_type>::lowest()) ||
+      if (!std::isfinite(numeric) || numeric < static_cast<long double>(std::numeric_limits<clean_type>::lowest()) ||
           numeric > static_cast<long double>((std::numeric_limits<clean_type>::max)())) {
          diagnostics.push_back(
              make_path_error(std::string{path}, "config.range", "floating-point field is out of range"));
-      } else if (numeric != 0.0L && converted == static_cast<clean_type>(0)) {
+         return;
+      }
+
+      const auto converted = static_cast<clean_type>(numeric);
+      if (numeric != 0.0L && converted == static_cast<clean_type>(0)) {
          diagnostics.push_back(
              make_path_error(std::string{path}, "config.range", "floating-point field underflows to zero"));
       } else if (!std::holds_alternative<double>(input.storage) && static_cast<long double>(converted) != numeric) {

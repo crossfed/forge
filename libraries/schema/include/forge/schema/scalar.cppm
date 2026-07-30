@@ -43,8 +43,7 @@ template <typename T> struct scalar_optional<std::optional<T>> : std::true_type 
    return false;
 }
 
-template <typename Target, typename Source>
-[[nodiscard]] Target checked_integral_cast(Source value) {
+template <typename Target, typename Source> [[nodiscard]] Target checked_integral_cast(Source value) {
    using limits = std::numeric_limits<Target>;
    if constexpr (std::signed_integral<Source> && std::signed_integral<Target>) {
       if constexpr (std::numeric_limits<Target>::digits < std::numeric_limits<Source>::digits) {
@@ -79,26 +78,50 @@ template <typename Target, typename Source>
    return static_cast<Target>(value);
 }
 
-template <typename Value>
-[[nodiscard]] Value parse_integral_text(std::string_view text) {
+template <typename Value> [[nodiscard]] Value parse_integral_text(std::string_view text) {
+   static_assert(std::integral<Value> && !std::same_as<Value, bool>);
    if (text.empty()) {
       throw std::invalid_argument{"integer has invalid syntax"};
    }
-   auto value = Value{};
-   const auto* first = text.data();
-   const auto* last = text.data() + text.size();
-   const auto [next, error] = std::from_chars(first, last, value);
-   if (error == std::errc::result_out_of_range) {
-      throw std::invalid_argument{"integer is outside target type range"};
+
+   using unsigned_value = std::make_unsigned_t<Value>;
+   auto position = std::size_t{0};
+   auto negative = false;
+   if constexpr (std::signed_integral<Value>) {
+      negative = text.front() == '-';
+      position = negative ? 1 : 0;
    }
-   if (error != std::errc{} || next != last) {
+   if (position == text.size()) {
       throw std::invalid_argument{"integer has invalid syntax"};
    }
-   return value;
+
+   const auto positive_limit = static_cast<unsigned_value>((std::numeric_limits<Value>::max)());
+   const auto limit = negative ? static_cast<unsigned_value>(positive_limit + unsigned_value{1}) : positive_limit;
+   auto magnitude = unsigned_value{};
+   for (; position < text.size(); ++position) {
+      const auto character = text[position];
+      if (character < '0' || character > '9') {
+         throw std::invalid_argument{"integer has invalid syntax"};
+      }
+      const auto digit = static_cast<unsigned_value>(character - '0');
+      if (magnitude > static_cast<unsigned_value>((limit - digit) / unsigned_value{10})) {
+         throw std::invalid_argument{"integer is outside target type range"};
+      }
+      magnitude = static_cast<unsigned_value>(magnitude * unsigned_value{10} + digit);
+   }
+
+   if constexpr (std::signed_integral<Value>) {
+      if (negative) {
+         if (magnitude == static_cast<unsigned_value>(positive_limit + unsigned_value{1})) {
+            return (std::numeric_limits<Value>::min)();
+         }
+         return static_cast<Value>(-static_cast<Value>(magnitude));
+      }
+   }
+   return static_cast<Value>(magnitude);
 }
 
-template <typename T>
-[[nodiscard]] T parse_scalar_text(std::string_view text) {
+template <typename T> [[nodiscard]] T parse_scalar_text(std::string_view text) {
    using clean = std::remove_cvref_t<T>;
    if constexpr (std::same_as<clean, std::string>) {
       return std::string{text};
@@ -109,9 +132,9 @@ template <typename T>
       }
       return parsed;
    } else if constexpr (std::signed_integral<clean> && !std::same_as<clean, bool>) {
-      return checked_integral_cast<clean>(parse_integral_text<std::int64_t>(text));
+      return parse_integral_text<clean>(text);
    } else if constexpr (std::unsigned_integral<clean> && !std::same_as<clean, bool>) {
-      return checked_integral_cast<clean>(parse_integral_text<std::uint64_t>(text));
+      return parse_integral_text<clean>(text);
    } else if constexpr (std::floating_point<clean>) {
       auto copy = std::string{text};
       char* end = nullptr;
@@ -132,8 +155,7 @@ template <typename T>
    }
 }
 
-template <typename T>
-[[nodiscard]] std::optional<std::string> format_scalar_text(const T& value) {
+template <typename T> [[nodiscard]] std::optional<std::string> format_scalar_text(const T& value) {
    using clean = std::remove_cvref_t<T>;
    if constexpr (scalar_optional<clean>::value) {
       if (!value.has_value()) {

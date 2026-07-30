@@ -41,6 +41,11 @@ struct exact_scalar_record {
    std::string label;
 };
 
+struct exact_wide_integer_record {
+   __int128 signed_value = 0;
+   unsigned __int128 unsigned_value = 0;
+};
+
 struct exact_record {
    std::vector<exact_leaf> items;
    std::variant<exact_leaf, std::string> choice;
@@ -79,6 +84,7 @@ struct exact_multi_index_record {
 BOOST_DESCRIBE_STRUCT(exact_leaf, (), (value))
 BOOST_DESCRIBE_STRUCT(exact_alias_leaf, (), (bind_port))
 BOOST_DESCRIBE_STRUCT(exact_scalar_record, (), (enabled, signed_value, unsigned_value, ratio, label))
+BOOST_DESCRIBE_STRUCT(exact_wide_integer_record, (), (signed_value, unsigned_value))
 BOOST_DESCRIBE_STRUCT(exact_record, (), (items, choice, optional))
 BOOST_DESCRIBE_STRUCT(exact_map_record, (), (values))
 BOOST_DESCRIBE_STRUCT(exact_pointer_record, (), (shared, unique))

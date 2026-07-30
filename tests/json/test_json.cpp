@@ -506,6 +506,22 @@ BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_scalar_kinds_and_rang
    BOOST_TEST(floating_underflow.diagnostics.front().path == "ratio");
 }
 
+BOOST_AUTO_TEST_CASE(json_exact_described_records_preserve_wide_integer_strings) {
+   const auto options = forge::codec::json::read_options{
+       .described_records = forge::codec::json::described_record_policy::exact,
+   };
+
+   constexpr auto unsigned_value = static_cast<unsigned __int128>(1) << 100;
+   constexpr auto signed_value = -static_cast<__int128>(unsigned_value);
+   const auto decoded = forge::codec::json::read<forge_json_tests::exact_wide_integer_record>(
+       R"({"signed_value":"-1267650600228229401496703205376","unsigned_value":"1267650600228229401496703205376"})",
+       options);
+
+   BOOST_REQUIRE(decoded.ok());
+   BOOST_CHECK(decoded.value.signed_value == signed_value);
+   BOOST_CHECK(decoded.value.unsigned_value == unsigned_value);
+}
+
 BOOST_AUTO_TEST_CASE(json_exact_duplicate_scan_respects_max_depth) {
    const auto parsed = forge::codec::json::read_value(
        R"({"outer":{"inner":1}})",
