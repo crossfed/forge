@@ -36,6 +36,13 @@ struct optional_list_config {
    std::optional<std::vector<optional_list_item>> items;
 };
 
+enum class path_policy {
+   direct_only,
+   direct_preferred,
+};
+
+BOOST_DESCRIBE_ENUM(path_policy, direct_only, direct_preferred)
+
 } // namespace forge_schema_tests
 
 BOOST_DESCRIBE_STRUCT(forge_schema_tests::http_config, (), (bind_port, bind_host, tls_enabled, tags, token))
@@ -256,4 +263,18 @@ BOOST_AUTO_TEST_CASE(schema_exact_scalar_validation_checks_float_range_before_na
    BOOST_REQUIRE_EQUAL(diagnostics.size(), 1U);
    BOOST_TEST(diagnostics.front().code == "config.range");
    BOOST_TEST(diagnostics.front().path == "ratio");
+}
+
+BOOST_AUTO_TEST_CASE(schema_exact_enum_validation_accepts_canonical_config_names) {
+   auto canonical = std::vector<forge::schema::diagnostic>{};
+   forge::schema::validate_exact_input_value<forge_schema_tests::path_policy>(
+       forge::schema::input_value{std::string{"direct-only"}}, "path-policy", canonical);
+   BOOST_TEST(canonical.empty());
+
+   auto malformed = std::vector<forge::schema::diagnostic>{};
+   forge::schema::validate_exact_input_value<forge_schema_tests::path_policy>(
+       forge::schema::input_value{std::string{"unknown-policy"}}, "path-policy", malformed);
+   BOOST_REQUIRE_EQUAL(malformed.size(), 1U);
+   BOOST_TEST(malformed.front().code == "config.type");
+   BOOST_TEST(malformed.front().path == "path-policy");
 }

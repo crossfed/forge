@@ -1079,7 +1079,7 @@ void validate_exact_input_value(const input_value& input, std::string_view path,
    } else if constexpr (std::is_enum_v<clean_type>) {
       auto parsed = clean_type{};
       const auto valid = std::holds_alternative<std::string>(input.storage)
-                             ? enum_from_string(std::get<std::string>(input.storage), parsed)
+                             ? enum_from_config_string(std::get<std::string>(input.storage), parsed)
                          : std::holds_alternative<std::int64_t>(input.storage)
                              ? enum_from_int(std::get<std::int64_t>(input.storage), parsed)
                          : std::holds_alternative<std::uint64_t>(input.storage) &&
