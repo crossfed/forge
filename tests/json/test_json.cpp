@@ -1,11 +1,12 @@
-#include <boost/describe.hpp>
 #include <boost/test/unit_test.hpp>
 
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <optional>
 #include <string>
+#include <variant>
 #include <vector>
 
 namespace forge_json_tests {
@@ -18,6 +19,8 @@ struct http_config {
 };
 
 } // namespace forge_json_tests
+
+#include <boost/describe.hpp>
 
 BOOST_DESCRIBE_STRUCT(forge_json_tests::http_config, (), (bind_port, bind_host, tls_enabled, tags))
 
@@ -40,11 +43,15 @@ import forge.variant.chrono;
 import forge.variant.multiprecision;
 import forge.variant.format;
 import forge.variant.described;
+import forge.tests.codec.json.exact_types;
 
 template <> struct forge::schema::rules<forge_json_tests::http_config> {
    [[nodiscard]] static forge::schema::object_schema<forge_json_tests::http_config> define() {
       auto schema = forge::schema::object<forge_json_tests::http_config>();
-      schema.field<&forge_json_tests::http_config::bind_port>("bind-port").required().default_value(8080).range(1, 65535);
+      schema.field<&forge_json_tests::http_config::bind_port>("bind-port")
+          .required()
+          .default_value(8080)
+          .range(1, 65535);
       schema.field<&forge_json_tests::http_config::bind_host>("bind-host").default_value("127.0.0.1");
       schema.field<&forge_json_tests::http_config::tls_enabled>("tls-enabled").default_value(false);
       static_cast<void>(schema.field<&forge_json_tests::http_config::tags>("tags"));
@@ -55,7 +62,8 @@ template <> struct forge::schema::rules<forge_json_tests::http_config> {
 BOOST_AUTO_TEST_SUITE(json_codec_tests)
 
 BOOST_AUTO_TEST_CASE(json_value_roundtrip_preserves_generic_shapes) {
-   const auto parsed = forge::codec::json::read_value(R"({"null":null,"flag":true,"i":-2,"u":7,"d":3.5,"s":"x","a":[1,"b"]})");
+   const auto parsed =
+       forge::codec::json::read_value(R"({"null":null,"flag":true,"i":-2,"u":7,"d":3.5,"s":"x","a":[1,"b"]})");
    BOOST_REQUIRE(parsed.ok());
 
    const auto& object = parsed.value.get_object();
@@ -90,7 +98,8 @@ BOOST_AUTO_TEST_CASE(json_document_roundtrip_uses_config_document) {
    auto document = forge::config::core::document{};
    document.set("http.bind-host", "127.0.0.1");
    document.set("http.bind-port", 8080);
-   document.set("http.tags", forge::config::core::value::array_type{forge::config::core::value{"alpha"}, forge::config::core::value{"beta"}});
+   document.set("http.tags", forge::config::core::value::array_type{forge::config::core::value{"alpha"},
+                                                                    forge::config::core::value{"beta"}});
 
    const auto written = forge::codec::json::write_document(document, {.pretty = true});
    BOOST_REQUIRE(written.ok());
@@ -113,7 +122,8 @@ BOOST_AUTO_TEST_CASE(json_typed_read_uses_schema_defaults_validation_and_unknown
 
    auto options = forge::codec::json::read_options{};
    options.unknown_fields = forge::codec::json::unknown_field_policy::error;
-   const auto rejected = forge::codec::json::read<forge_json_tests::http_config>(R"({"bind-port":9090,"extra":1})", options);
+   const auto rejected =
+       forge::codec::json::read<forge_json_tests::http_config>(R"({"bind-port":9090,"extra":1})", options);
    BOOST_TEST(!rejected.ok());
    BOOST_TEST(rejected.diagnostics.front().code == "json.unknown");
 
@@ -157,6 +167,86 @@ BOOST_AUTO_TEST_CASE(json_typed_load_uses_same_unknown_policy_as_read) {
    BOOST_TEST(ignored.value.bind_port == 9090U);
 }
 
+BOOST_AUTO_TEST_CASE(json_exact_described_records_validate_nested_fields_and_variants) {
+   const auto options = forge::codec::json::read_options{
+       .described_records = forge::codec::json::described_record_policy::exact,
+   };
+   const auto canonical = forge::codec::json::read<forge_json_tests::exact_record>(
+       R"({"items":[{"value":1}],"choice":[0,{"value":2}]})", options);
+   for (const auto& diagnostic : canonical.diagnostics) {
+      BOOST_TEST_MESSAGE(diagnostic.code << " at " << diagnostic.path << ": " << diagnostic.message);
+   }
+   BOOST_REQUIRE(canonical.ok());
+   BOOST_REQUIRE_EQUAL(canonical.value.items.size(), 1U);
+   BOOST_TEST(canonical.value.items.front().value == 1U);
+   BOOST_TEST(std::get<forge_json_tests::exact_leaf>(canonical.value.choice).value == 2U);
+   BOOST_TEST(!canonical.value.optional.has_value());
+
+   const auto written = forge::codec::json::write(canonical.value, {.pretty = true});
+   BOOST_REQUIRE(written.ok());
+   const auto written_roundtrip = forge::codec::json::read<forge_json_tests::exact_record>(written.text, options);
+   BOOST_REQUIRE(written_roundtrip.ok());
+   BOOST_CHECK(written_roundtrip.value == canonical.value);
+
+   const auto path =
+       std::filesystem::temp_directory_path() /
+       ("forge_json_exact_" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()) + ".json");
+   struct cleanup {
+      std::filesystem::path path;
+      ~cleanup() {
+         auto ignored = std::error_code{};
+         std::filesystem::remove(path, ignored);
+      }
+   } remove_file{path};
+   const auto saved = forge::codec::json::save(path, canonical.value, {.pretty = true});
+   BOOST_REQUIRE(saved.ok());
+   const auto loaded = forge::codec::json::load<forge_json_tests::exact_record>(path, options);
+   BOOST_REQUIRE(loaded.ok());
+   BOOST_CHECK(loaded.value == canonical.value);
+
+   const auto unknown = forge::codec::json::read<forge_json_tests::exact_record>(
+       R"({"items":[{"value":1,"extra":2}],"choice":[0,{"value":2}]})", options);
+   BOOST_REQUIRE(!unknown.ok());
+   BOOST_TEST(unknown.diagnostics.front().code == "json.unknown");
+   BOOST_TEST(unknown.diagnostics.front().path == "items[0].extra");
+
+   const auto missing =
+       forge::codec::json::read<forge_json_tests::exact_record>(R"({"items":[{}],"choice":[0,{"value":2}]})", options);
+   BOOST_REQUIRE(!missing.ok());
+   BOOST_TEST(missing.diagnostics.front().code == "json.missing");
+   BOOST_TEST(missing.diagnostics.front().path == "items[0].value");
+
+   const auto invalid_array =
+       forge::codec::json::read<forge_json_tests::exact_record>(R"({"items":{},"choice":[0,{"value":2}]})", options);
+   BOOST_REQUIRE(!invalid_array.ok());
+   BOOST_TEST(invalid_array.diagnostics.front().code == "json.array");
+   BOOST_TEST(invalid_array.diagnostics.front().path == "items");
+
+   const auto object_variant =
+       forge::codec::json::read<forge_json_tests::exact_record>(R"({"items":[],"choice":{"value":2}})", options);
+   BOOST_REQUIRE(!object_variant.ok());
+   BOOST_TEST(object_variant.diagnostics.front().code == "json.variant");
+   BOOST_TEST(object_variant.diagnostics.front().path == "choice");
+
+   const auto invalid_index =
+       forge::codec::json::read<forge_json_tests::exact_record>(R"({"items":[],"choice":[2,{"value":2}]})", options);
+   BOOST_REQUIRE(!invalid_index.ok());
+   BOOST_TEST(invalid_index.diagnostics.front().code == "json.variant");
+   BOOST_TEST(invalid_index.diagnostics.front().path == "choice[0]");
+
+   const auto negative_index =
+       forge::codec::json::read<forge_json_tests::exact_record>(R"({"items":[],"choice":[-1,{"value":2}]})", options);
+   BOOST_REQUIRE(!negative_index.ok());
+   BOOST_TEST(negative_index.diagnostics.front().code == "json.variant");
+   BOOST_TEST(negative_index.diagnostics.front().path == "choice[0]");
+
+   const auto extra_variant_element = forge::codec::json::read<forge_json_tests::exact_record>(
+       R"({"items":[],"choice":[0,{"value":2},false]})", options);
+   BOOST_REQUIRE(!extra_variant_element.ok());
+   BOOST_TEST(extra_variant_element.diagnostics.front().code == "json.variant");
+   BOOST_TEST(extra_variant_element.diagnostics.front().path == "choice");
+}
+
 BOOST_AUTO_TEST_CASE(json_malformed_input_returns_forge_diagnostic) {
    const auto parsed = forge::codec::json::read_value(R"({"unterminated":)");
    BOOST_TEST(!parsed.ok());
@@ -167,7 +257,8 @@ BOOST_AUTO_TEST_CASE(json_malformed_input_returns_forge_diagnostic) {
 
 BOOST_AUTO_TEST_CASE(json_write_escapes_control_bytes_inside_strings) {
    const auto expected = std::string{"a\x01\b\0z", 5};
-   const auto written = forge::codec::json::write_value(forge::variant{forge::mutable_variant_object{}("text", expected)});
+   const auto written =
+       forge::codec::json::write_value(forge::variant{forge::mutable_variant_object{}("text", expected)});
    BOOST_REQUIRE(written.ok());
    BOOST_TEST(written.text.find("\\u0001") != std::string::npos);
    const auto escaped_backspace =
