@@ -452,7 +452,7 @@ function(forge_contract_register_guest_component)
    cmake_parse_arguments(
       ARG
       "FOUNDATION"
-      "ID;ARCHIVE"
+      "ID;TARGET;ARCHIVE"
       "MODULES;MODULE_NAMES;PUBLIC_LIBRARIES"
       ${ARGN}
    )
@@ -475,6 +475,10 @@ function(forge_contract_register_guest_component)
       message(FATAL_ERROR "duplicate Forge Contract guest component ID: ${ARG_ID}")
    endif()
    set_property(GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_ID" "${ARG_ID}")
+   set_property(
+      GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_TARGET"
+      "${ARG_TARGET}"
+   )
    set_property(
       GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_MODULE_NAMES"
       "${ARG_MODULE_NAMES}"
@@ -513,6 +517,10 @@ function(forge_target_contract_guest_component target)
    string(SHA256 _key "${ARG_ID}")
    get_property(_descriptor_id GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_ID")
    get_property(
+      _descriptor_target GLOBAL PROPERTY
+      "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_TARGET"
+   )
+   get_property(
       _module_names GLOBAL PROPERTY
       "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_MODULE_NAMES"
    )
@@ -520,7 +528,11 @@ function(forge_target_contract_guest_component target)
       _dependencies GLOBAL PROPERTY
       "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_DEPENDENCIES"
    )
-   if(NOT _descriptor_id STREQUAL ARG_ID OR NOT _module_names)
+   if(
+      NOT _descriptor_id STREQUAL ARG_ID
+      OR NOT _descriptor_target STREQUAL target
+      OR NOT _module_names
+   )
       message(FATAL_ERROR "Forge target ${target} has no guest component descriptor for ${ARG_ID}")
    endif()
    list(

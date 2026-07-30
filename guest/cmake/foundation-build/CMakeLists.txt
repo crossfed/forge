@@ -14,6 +14,10 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_SCAN_FOR_MODULES ON)
+set(
+   CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES
+   "${CMAKE_SYSROOT}/include/c++/v1"
+)
 
 set(_forge_guest_compile_options
     -fno-exceptions

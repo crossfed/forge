@@ -3,6 +3,7 @@
 
 forge_contract_register_guest_component(
    ID forge.raw
+   TARGET forge_raw
    ARCHIVE libforge_guest_raw.a
    MODULES
       forge/raw/stream.cppm
@@ -16,6 +17,7 @@ forge_contract_register_guest_component(
 
 forge_contract_register_guest_component(
    ID forge.codec.base64
+   TARGET forge_codec_base64
    ARCHIVE libforge_guest_codec_base64.a
    MODULES
       forge/codec/base64/exceptions.cppm
@@ -27,6 +29,7 @@ forge_contract_register_guest_component(
 
 forge_contract_register_guest_component(
    ID forge.codec.base58
+   TARGET forge_codec_base58
    ARCHIVE libforge_guest_codec_base58.a
    MODULES
       forge/codec/base58/exceptions.cppm
@@ -38,6 +41,7 @@ forge_contract_register_guest_component(
 
 forge_contract_register_guest_component(
    ID forge.codec.hex
+   TARGET forge_codec_hex
    ARCHIVE libforge_guest_codec_hex.a
    MODULES
       forge/codec/hex/exceptions.cppm
@@ -49,6 +53,7 @@ forge_contract_register_guest_component(
 
 forge_contract_register_guest_component(
    ID forge.crypto.digest
+   TARGET forge_crypto_digest
    PUBLIC_LIBRARIES forge.raw
    MODULES
       forge/crypto/digest/sha256_value.cppm
@@ -68,6 +73,7 @@ forge_contract_register_guest_component(
 
 forge_contract_register_guest_component(
    ID forge.crypto.asymmetric_values
+   TARGET forge_crypto_asymmetric_values
    PUBLIC_LIBRARIES forge.raw
    MODULES forge/crypto/asymmetric/values.cppm
    MODULE_NAMES forge.crypto.asymmetric.values
@@ -75,6 +81,7 @@ forge_contract_register_guest_component(
 
 forge_contract_register_guest_component(
    ID forge.crypto.asymmetric
+   TARGET forge_crypto_asymmetric
    PUBLIC_LIBRARIES forge.crypto.asymmetric_values
    MODULES forge/crypto/asymmetric/asymmetric.cppm
    MODULE_NAMES forge.crypto.asymmetric
@@ -82,12 +89,14 @@ forge_contract_register_guest_component(
 
 forge_contract_register_guest_component(
    ID forge.crypto.bls_values
+   TARGET forge_crypto_bls_values
    MODULES forge/crypto/bls/bls_values.cppm
    MODULE_NAMES forge.crypto.bls.values
 )
 
 forge_contract_register_guest_component(
    ID forge.chain.protocol
+   TARGET forge_chain_protocol
    ARCHIVE libforge_guest_chain_protocol.a
    PUBLIC_LIBRARIES
       forge.raw
@@ -157,6 +166,7 @@ forge_contract_register_guest_component(
 forge_contract_register_guest_component(
    FOUNDATION
    ID forge.contract.runtime
+   TARGET forge_contract_runtime
    ARCHIVE libforge_guest_contract.a
    PUBLIC_LIBRARIES
       forge.raw
