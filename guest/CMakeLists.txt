@@ -517,6 +517,7 @@ write_basic_package_version_file(
    "${CMAKE_CURRENT_BINARY_DIR}/ForgeContractConfigVersion.cmake"
    VERSION ${PROJECT_VERSION}
    COMPATIBILITY SameMajorVersion
+   ARCH_INDEPENDENT
 )
 
 install(
@@ -526,10 +527,10 @@ install(
       "${CMAKE_CURRENT_BINARY_DIR}/ForgeContractToolchain.cmake"
       cmake/ForgeContractFunctions.cmake
       cmake/ForgeContractGraph.cmake
+      cmake/ForgeContractBuild.cmake
       cmake/ForgeContractGuestComponents.cmake
    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ForgeContract"
 )
-install(DIRECTORY build DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract")
 install(DIRECTORY libraries/contract/include/ DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/modules")
 install(
    FILES
