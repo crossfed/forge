@@ -647,6 +647,27 @@ BOOST_AUTO_TEST_CASE(json_exact_schema_paths_roundtrip_through_typed_writers) {
    BOOST_TEST(nested_unknown_rejected.diagnostics.front().code == "json.unknown");
    BOOST_TEST(nested_unknown_rejected.diagnostics.front().path == "config.api.extra");
 
+   const auto partial_pair = forge::codec::json::read<forge_json_tests::exact_dotted_pair_parent>(
+       R"({"value":[{"api":{"deadline-ms":2500}}]})");
+   BOOST_REQUIRE(partial_pair.ok());
+   BOOST_TEST(partial_pair.diagnostics.empty());
+   BOOST_TEST(partial_pair.value.value.first.deadline_ms == 2500U);
+   BOOST_TEST(partial_pair.value.value.second == 0U);
+
+   const auto partial_map_entry = forge::codec::json::read<forge_json_tests::exact_dotted_map_key_parent>(
+       R"({"values":[[{"api":{"deadline-ms":2500}}]]})");
+   BOOST_REQUIRE(partial_map_entry.ok());
+   BOOST_TEST(partial_map_entry.diagnostics.empty());
+   BOOST_REQUIRE_EQUAL(partial_map_entry.value.values.size(), 1U);
+   BOOST_TEST(partial_map_entry.value.values.begin()->first.deadline_ms == 2500U);
+   BOOST_TEST(partial_map_entry.value.values.begin()->second == 0U);
+
+   const auto permissive_variant = forge::codec::json::read<forge_json_tests::exact_dotted_variant_parent>(
+       R"({"value":[0,{"api":{"deadline-ms":2500}},"ignored"]})");
+   BOOST_REQUIRE(permissive_variant.ok());
+   BOOST_TEST(permissive_variant.diagnostics.empty());
+   BOOST_TEST(std::get<forge_json_tests::exact_dotted_leaf>(permissive_variant.value.value).deadline_ms == 2500U);
+
    const auto schema_parent_input = forge_json_tests::exact_dotted_schema_parent{.config = {.deadline_ms = 2500}};
    const auto encoded_parent = forge::config::core::encode(schema_parent_input);
    const auto decoded_parent =

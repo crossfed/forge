@@ -15,6 +15,7 @@ module;
 #include <set>
 #include <string>
 #include <unordered_set>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -53,6 +54,8 @@ struct exact_double_record {
 
 struct exact_dotted_leaf {
    std::uint32_t deadline_ms = 0;
+
+   auto operator<=>(const exact_dotted_leaf&) const = default;
 };
 
 struct exact_dotted_parent {
@@ -61,6 +64,18 @@ struct exact_dotted_parent {
 
 struct exact_dotted_schema_parent {
    exact_dotted_leaf config;
+};
+
+struct exact_dotted_pair_parent {
+   std::pair<exact_dotted_leaf, std::uint32_t> value;
+};
+
+struct exact_dotted_map_key_parent {
+   std::map<exact_dotted_leaf, std::uint32_t> values;
+};
+
+struct exact_dotted_variant_parent {
+   std::variant<exact_dotted_leaf, std::string> value;
 };
 
 struct exact_wide_integer_record {
@@ -145,6 +160,9 @@ BOOST_DESCRIBE_STRUCT(exact_double_record, (), (value))
 BOOST_DESCRIBE_STRUCT(exact_dotted_leaf, (), (deadline_ms))
 BOOST_DESCRIBE_STRUCT(exact_dotted_parent, (), (config))
 BOOST_DESCRIBE_STRUCT(exact_dotted_schema_parent, (), (config))
+BOOST_DESCRIBE_STRUCT(exact_dotted_pair_parent, (), (value))
+BOOST_DESCRIBE_STRUCT(exact_dotted_map_key_parent, (), (values))
+BOOST_DESCRIBE_STRUCT(exact_dotted_variant_parent, (), (value))
 BOOST_DESCRIBE_STRUCT(exact_wide_integer_record, (), (signed_value, unsigned_value))
 BOOST_DESCRIBE_STRUCT(exact_varint_record, (), (signed_value, unsigned_value))
 BOOST_DESCRIBE_STRUCT(exact_chrono_record, (), (delay, timestamp))

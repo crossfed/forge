@@ -826,16 +826,14 @@ void materialize_schema_records(variant& source, std::string_view path, std::vec
       if (source.is_string()) {
          return;
       }
-      if (!source.is_array() || source.get_array().size() != 2U) {
+      if (!source.is_array() || source.get_array().size() < 2U) {
          return;
       }
       auto& elements = source.get_array();
-      std::uint64_t selected = 0;
-      if (elements[0].is_uint64()) {
+      auto selected = std::uint64_t{};
+      try {
          selected = elements[0].as_uint64();
-      } else if (elements[0].is_int64() && elements[0].as_int64() >= 0) {
-         selected = static_cast<std::uint64_t>(elements[0].as_int64());
-      } else {
+      } catch (const std::exception&) {
          return;
       }
       if (selected >= variant_traits<value_type>::size) {
@@ -866,24 +864,32 @@ void materialize_schema_records(variant& source, std::string_view path, std::vec
       }
       auto& elements = source.get_array();
       for (std::size_t index = 0; index < elements.size(); ++index) {
-         if (!elements[index].is_array() || elements[index].get_array().size() != 2U) {
+         if (!elements[index].is_array()) {
             continue;
          }
          auto& pair = elements[index].get_array();
-         materialize_schema_records<typename associative_traits<value_type>::key_type>(
-             pair[0], element_path(element_path(path, index), 0U), diagnostics);
-         materialize_schema_records<typename associative_traits<value_type>::mapped_type>(
-             pair[1], element_path(element_path(path, index), 1U), diagnostics);
+         if (!pair.empty()) {
+            materialize_schema_records<typename associative_traits<value_type>::key_type>(
+                pair[0], element_path(element_path(path, index), 0U), diagnostics);
+         }
+         if (pair.size() > 1U) {
+            materialize_schema_records<typename associative_traits<value_type>::mapped_type>(
+                pair[1], element_path(element_path(path, index), 1U), diagnostics);
+         }
       }
    } else if constexpr (is_pair_v<value_type>) {
-      if (!source.is_array() || source.get_array().size() != 2U) {
+      if (!source.is_array()) {
          return;
       }
       auto& elements = source.get_array();
-      materialize_schema_records<typename pair_traits<value_type>::first_type>(elements[0], element_path(path, 0U),
-                                                                               diagnostics);
-      materialize_schema_records<typename pair_traits<value_type>::second_type>(elements[1], element_path(path, 1U),
-                                                                                diagnostics);
+      if (!elements.empty()) {
+         materialize_schema_records<typename pair_traits<value_type>::first_type>(elements[0], element_path(path, 0U),
+                                                                                  diagnostics);
+      }
+      if (elements.size() > 1U) {
+         materialize_schema_records<typename pair_traits<value_type>::second_type>(elements[1], element_path(path, 1U),
+                                                                                   diagnostics);
+      }
    }
 }
 
