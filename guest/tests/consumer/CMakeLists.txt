@@ -188,9 +188,9 @@ add_custom_target(
       "${Python3_EXECUTABLE}"
       "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/run_multi_index_fixtures.py"
       --mapping "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/multi_index_donor_mapping.json"
-      --abi-pair "${CMAKE_CURRENT_BINARY_DIR}/artifacts/multiidx.abi" "${CMAKE_CURRENT_BINARY_DIR}/artifacts/legacymidx.abi"
-      --abi-pair "${CMAKE_CURRENT_BINARY_DIR}/artifacts/midxerrors.abi" "${CMAKE_CURRENT_BINARY_DIR}/artifacts/legmidxerr.abi"
-      --abi-pair "${CMAKE_CURRENT_BINARY_DIR}/artifacts/midxextend.abi" "${CMAKE_CURRENT_BINARY_DIR}/artifacts/legmidxext.abi"
+      --abi-pair "$<TARGET_GENEX_EVAL:multiidx,$<TARGET_PROPERTY:multiidx,FORGE_CONTRACT_ABI_FILE>>" "$<TARGET_GENEX_EVAL:legacymidx,$<TARGET_PROPERTY:legacymidx,FORGE_CONTRACT_ABI_FILE>>"
+      --abi-pair "$<TARGET_GENEX_EVAL:midxerrors,$<TARGET_PROPERTY:midxerrors,FORGE_CONTRACT_ABI_FILE>>" "$<TARGET_GENEX_EVAL:legmidxerr,$<TARGET_PROPERTY:legmidxerr,FORGE_CONTRACT_ABI_FILE>>"
+      --abi-pair "$<TARGET_GENEX_EVAL:midxextend,$<TARGET_PROPERTY:midxextend,FORGE_CONTRACT_ABI_FILE>>" "$<TARGET_GENEX_EVAL:legmidxext,$<TARGET_PROPERTY:legmidxext,FORGE_CONTRACT_ABI_FILE>>"
    DEPENDS multiidx legacymidx midxerrors legmidxerr midxextend legmidxext
    VERBATIM
 )
@@ -254,11 +254,11 @@ add_custom_target(
       --checker "${ForgeContract_CHECK}"
       --manifest-tool "${ForgeContract_MANIFEST}"
       --clang "${ForgeContract_CLANG}"
-      --wasm "${CMAKE_CURRENT_BINARY_DIR}/artifacts/hello.wasm"
-      --abi "${CMAKE_CURRENT_BINARY_DIR}/artifacts/hello.abi"
+      --wasm "$<TARGET_GENEX_EVAL:hello,$<TARGET_PROPERTY:hello,FORGE_CONTRACT_WASM_FILE>>"
+      --abi "$<TARGET_GENEX_EVAL:hello,$<TARGET_PROPERTY:hello,FORGE_CONTRACT_ABI_FILE>>"
       --imports "${ForgeContract_DATA_DIR}/registry/intrinsics.json"
-      --manifest "${CMAKE_CURRENT_BINARY_DIR}/artifacts/hello.contract.json"
-      --output "${CMAKE_CURRENT_BINARY_DIR}/checker"
+      --manifest "$<TARGET_GENEX_EVAL:hello,$<TARGET_PROPERTY:hello,FORGE_CONTRACT_MANIFEST_FILE>>"
+      --output "${CMAKE_CURRENT_BINARY_DIR}/checker/$<CONFIG>"
    DEPENDS hello_artifacts
    VERBATIM
 )

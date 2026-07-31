@@ -64,7 +64,45 @@ template <> struct forge::schema::rules<forge_yaml_tests::nested_limits> {
    }
 };
 
+template <> struct forge::schema::rules<forge_yaml_tests::long_double_config> {
+   [[nodiscard]] static forge::schema::object_schema<forge_yaml_tests::long_double_config> define() {
+      auto schema = forge::schema::object<forge_yaml_tests::long_double_config>();
+      static_cast<void>(schema.field<&forge_yaml_tests::long_double_config::value>("value"));
+      return schema;
+   }
+};
+
 BOOST_AUTO_TEST_SUITE(yaml_codec_tests)
+
+BOOST_AUTO_TEST_CASE(yaml_schema_writer_rejects_long_double_without_narrowing) {
+   const auto written = forge::codec::yaml::write(forge_yaml_tests::long_double_config{.value = 1.0L});
+
+   BOOST_REQUIRE(!written.ok());
+   BOOST_TEST(written.text.empty());
+   BOOST_REQUIRE_EQUAL(written.diagnostics.size(), 1U);
+   BOOST_TEST(written.diagnostics.front().path == "value");
+   BOOST_TEST(written.diagnostics.front().code == "yaml.type");
+   BOOST_TEST(written.diagnostics.front().message == "long double schema fields are not supported by config codecs");
+}
+
+BOOST_AUTO_TEST_CASE(yaml_schema_writer_reports_nested_encoding_path) {
+   const auto input = forge_yaml_tests::long_double_parent{.nested = {.value = 1.0L}};
+   const auto written = forge::codec::yaml::write(input);
+
+   BOOST_REQUIRE(!written.ok());
+   BOOST_TEST(written.text.empty());
+   BOOST_REQUIRE_EQUAL(written.diagnostics.size(), 1U);
+   BOOST_TEST(written.diagnostics.front().path == "nested.value");
+   BOOST_TEST(written.diagnostics.front().code == "yaml.type");
+   BOOST_TEST(written.diagnostics.front().message == "long double schema fields are not supported by config codecs");
+
+   const auto saved = forge::codec::yaml::save({}, input);
+   BOOST_REQUIRE(!saved.ok());
+   BOOST_REQUIRE_EQUAL(saved.diagnostics.size(), 1U);
+   BOOST_TEST(saved.diagnostics.front().path == "nested.value");
+   BOOST_TEST(saved.diagnostics.front().code == "yaml.type");
+   BOOST_TEST(saved.diagnostics.front().message == "long double schema fields are not supported by config codecs");
+}
 
 BOOST_AUTO_TEST_CASE(yaml_value_roundtrip_preserves_scalars_lists_and_maps) {
    const auto parsed = forge::codec::yaml::read_value("flag: true\n"

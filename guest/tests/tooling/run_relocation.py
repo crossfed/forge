@@ -23,6 +23,7 @@ LINUX_SDK_RUNTIME_PREFIXES = (
 )
 
 BOOST_INCLUDE = re.compile(rb'^\s*#\s*include\s*[<"](?P<path>boost/[^>"]+)[>"]', re.MULTILINE)
+BUILD_CONFIGURATION = "Debug"
 
 
 def is_linux_sdk_runtime(dependency: str) -> bool:
@@ -34,7 +35,7 @@ def run(*command: str) -> None:
 
 
 def build_project(cmake: str, directory: Path) -> None:
-    run(cmake, "--build", str(directory), "--config", "Debug", "-j", "4")
+    run(cmake, "--build", str(directory), "--config", BUILD_CONFIGURATION, "-j", "4")
 
 
 def contains_path(path: Path, needle: bytes) -> bool:
@@ -186,7 +187,7 @@ def main() -> None:
     )
     build_project(args.cmake, build)
 
-    artifacts = build / "artifacts"
+    artifacts = build / "artifacts" / BUILD_CONFIGURATION
     for suffix in ("wasm", "abi", "contract.json"):
         artifact = artifacts / f"hello.{suffix}"
         if not artifact.is_file() or artifact.stat().st_size == 0:
@@ -278,7 +279,9 @@ def main() -> None:
     )
     build_project(args.cmake, aligned_build)
     for suffix in ("wasm", "abi", "contract.json"):
-        artifact = aligned_build / "artifacts" / f"alignedidx.{suffix}"
+        artifact = (
+            aligned_build / "artifacts" / BUILD_CONFIGURATION / f"alignedidx.{suffix}"
+        )
         if not artifact.is_file() or artifact.stat().st_size == 0:
             raise RuntimeError(f"missing aligned multi-index artifact: {artifact}")
 
@@ -294,7 +297,10 @@ def main() -> None:
         "-DCMAKE_BUILD_TYPE=Debug",
         f"-DCMAKE_CXX_COMPILER={args.cxx_compiler}",
         f"-DForge_DIR={forge_package}",
-        f"-DALIGNED_MULTI_INDEX_WASM={aligned_build / 'artifacts' / 'alignedidx.wasm'}",
+        (
+            "-DALIGNED_MULTI_INDEX_WASM="
+            f"{aligned_build / 'artifacts' / BUILD_CONFIGURATION / 'alignedidx.wasm'}"
+        ),
     ]
     if platform.system() == "Darwin":
         aligned_host_command.append(

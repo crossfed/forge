@@ -10,6 +10,7 @@ export import :value;
 
 #if !defined(FORGE_CONTRACT_GUEST)
 export import forge.chain.core.types;
+export import forge.crypto.asymmetric;
 
 import forge.variant.value;
 

@@ -47,6 +47,11 @@ struct policy_list_config {
    std::vector<path_policy> policies;
 };
 
+struct wide_range_config {
+   __int128 signed_value = 0;
+   unsigned __int128 unsigned_value = 0;
+};
+
 } // namespace forge_schema_tests
 
 BOOST_DESCRIBE_STRUCT(forge_schema_tests::http_config, (), (bind_port, bind_host, tls_enabled, tags, token))
@@ -55,6 +60,7 @@ BOOST_DESCRIBE_STRUCT(forge_schema_tests::optional_default_config, (), (wrapped_
 BOOST_DESCRIBE_STRUCT(forge_schema_tests::optional_list_item, (), (id))
 BOOST_DESCRIBE_STRUCT(forge_schema_tests::optional_list_config, (), (tags, items))
 BOOST_DESCRIBE_STRUCT(forge_schema_tests::policy_list_config, (), (policies))
+BOOST_DESCRIBE_STRUCT(forge_schema_tests::wide_range_config, (), (signed_value, unsigned_value))
 
 import forge.schema.diagnostic;
 import forge.schema.value_kind;
@@ -138,10 +144,21 @@ template <> struct forge::schema::rules<forge_schema_tests::policy_list_config> 
    }
 };
 
+template <> struct forge::schema::rules<forge_schema_tests::wide_range_config> {
+   [[nodiscard]] static forge::schema::object_schema<forge_schema_tests::wide_range_config> define() {
+      constexpr auto boundary = static_cast<unsigned __int128>(1) << 100;
+      auto schema = forge::schema::object<forge_schema_tests::wide_range_config>();
+      schema.field<&forge_schema_tests::wide_range_config::signed_value>("signed-value")
+          .range(-static_cast<__int128>(boundary), static_cast<__int128>(boundary));
+      schema.field<&forge_schema_tests::wide_range_config::unsigned_value>("unsigned-value")
+          .range(boundary, boundary + 10);
+      return schema;
+   }
+};
+
 namespace {
 
-[[nodiscard]] bool has_error_code(const std::vector<forge::schema::diagnostic>& diagnostics,
-                                  std::string_view code) {
+[[nodiscard]] bool has_error_code(const std::vector<forge::schema::diagnostic>& diagnostics, std::string_view code) {
    return std::ranges::any_of(diagnostics, [&](const forge::schema::diagnostic& entry) {
       return entry.level == forge::schema::severity::error && entry.code == code;
    });
@@ -201,6 +218,35 @@ BOOST_AUTO_TEST_CASE(schema_optional_defaults_apply_wrapped_and_raw_values) {
    BOOST_TEST(schema.validate(config, "config").empty());
 }
 
+BOOST_AUTO_TEST_CASE(schema_range_validation_preserves_wide_integer_precision) {
+   constexpr auto boundary = static_cast<unsigned __int128>(1) << 100;
+   const auto schema = forge::schema::rules<forge_schema_tests::wide_range_config>::define();
+
+   const auto valid = forge_schema_tests::wide_range_config{
+       .signed_value = static_cast<__int128>(boundary),
+       .unsigned_value = boundary,
+   };
+   BOOST_TEST(schema.validate(valid, "wide").empty());
+
+   const auto signed_overflow = forge_schema_tests::wide_range_config{
+       .signed_value = static_cast<__int128>(boundary) + 1,
+       .unsigned_value = boundary,
+   };
+   const auto signed_diagnostics = schema.validate(signed_overflow, "wide");
+   BOOST_REQUIRE_EQUAL(signed_diagnostics.size(), 1U);
+   BOOST_TEST(signed_diagnostics.front().path == "wide.signed-value");
+   BOOST_TEST(signed_diagnostics.front().code == "schema.range");
+
+   const auto unsigned_underflow = forge_schema_tests::wide_range_config{
+       .signed_value = 0,
+       .unsigned_value = boundary - 1,
+   };
+   const auto unsigned_diagnostics = schema.validate(unsigned_underflow, "wide");
+   BOOST_REQUIRE_EQUAL(unsigned_diagnostics.size(), 1U);
+   BOOST_TEST(unsigned_diagnostics.front().path == "wide.unsigned-value");
+   BOOST_TEST(unsigned_diagnostics.front().code == "schema.range");
+}
+
 BOOST_AUTO_TEST_CASE(schema_optional_list_validators_unwrap_present_values_and_skip_absent) {
    const auto schema = forge::schema::rules<forge_schema_tests::optional_list_config>::define();
 
@@ -208,8 +254,8 @@ BOOST_AUTO_TEST_CASE(schema_optional_list_validators_unwrap_present_values_and_s
    BOOST_TEST(schema.validate(absent, "config").empty());
 
    auto valid = forge_schema_tests::optional_list_config{
-      .tags = std::vector<std::string>{"alpha"},
-      .items = std::vector<forge_schema_tests::optional_list_item>{{.id = "a"}, {.id = "b"}},
+       .tags = std::vector<std::string>{"alpha"},
+       .items = std::vector<forge_schema_tests::optional_list_item>{{.id = "a"}, {.id = "b"}},
    };
    BOOST_TEST(schema.validate(valid, "config").empty());
 
@@ -222,7 +268,7 @@ BOOST_AUTO_TEST_CASE(schema_optional_list_validators_unwrap_present_values_and_s
    BOOST_TEST(has_error_code(invalid_tag_diagnostics, "schema.non_empty"));
 
    auto duplicate_items = forge_schema_tests::optional_list_config{
-      .items = std::vector<forge_schema_tests::optional_list_item>{{.id = "same"}, {.id = "same"}},
+       .items = std::vector<forge_schema_tests::optional_list_item>{{.id = "same"}, {.id = "same"}},
    };
    const auto duplicate_item_diagnostics = schema.validate(duplicate_items, "config");
    BOOST_TEST(has_error_code(duplicate_item_diagnostics, "schema.unique"));
@@ -233,12 +279,11 @@ BOOST_AUTO_TEST_CASE(schema_decode_explicit_null_optionals_as_absent_values) {
    auto scalar_config = forge_schema_tests::optional_config{.token = "secret", .port = 443};
 
    const auto scalar_diagnostics = scalar_schema.decode_object(
-      forge::schema::input_value::object_type{
-         {"token", forge::schema::input_value{}},
-         {"port", forge::schema::input_value{}},
-      },
-      "config",
-      scalar_config);
+       forge::schema::input_value::object_type{
+           {"token", forge::schema::input_value{}},
+           {"port", forge::schema::input_value{}},
+       },
+       "config", scalar_config);
 
    BOOST_TEST(scalar_diagnostics.empty());
    BOOST_TEST(!scalar_config.token.has_value());
@@ -246,17 +291,16 @@ BOOST_AUTO_TEST_CASE(schema_decode_explicit_null_optionals_as_absent_values) {
 
    const auto list_schema = forge::schema::rules<forge_schema_tests::optional_list_config>::define();
    auto list_config = forge_schema_tests::optional_list_config{
-      .tags = std::vector<std::string>{"alpha"},
-      .items = std::vector<forge_schema_tests::optional_list_item>{{.id = "a"}, {.id = "b"}},
+       .tags = std::vector<std::string>{"alpha"},
+       .items = std::vector<forge_schema_tests::optional_list_item>{{.id = "a"}, {.id = "b"}},
    };
 
    const auto list_diagnostics = list_schema.decode_object(
-      forge::schema::input_value::object_type{
-         {"tags", forge::schema::input_value{}},
-         {"items", forge::schema::input_value{}},
-      },
-      "config",
-      list_config);
+       forge::schema::input_value::object_type{
+           {"tags", forge::schema::input_value{}},
+           {"items", forge::schema::input_value{}},
+       },
+       "config", list_config);
 
    BOOST_TEST(list_diagnostics.empty());
    BOOST_TEST(!list_config.tags.has_value());
