@@ -231,6 +231,16 @@ BOOST_AUTO_TEST_CASE(json_schema_roundtrip_preserves_described_children_without_
    const auto parsed = forge::codec::json::read<forge_json_tests::exact_schema_plain_parent>(written.text);
    BOOST_REQUIRE(parsed.ok());
    BOOST_CHECK(parsed.value == input);
+
+   const auto options = forge::codec::json::read_options{
+       .described_records = forge::codec::json::described_record_policy::exact,
+   };
+   const auto noncanonical = forge::codec::json::read<forge_json_tests::exact_schema_plain_parent>(
+       R"({"child":{"value":7},"children":[],"canonical":{"digest":"00"}})", options);
+   BOOST_REQUIRE(!noncanonical.ok());
+   BOOST_REQUIRE_EQUAL(noncanonical.diagnostics.size(), 1U);
+   BOOST_TEST(noncanonical.diagnostics.front().path == "canonical.digest");
+   BOOST_TEST(noncanonical.diagnostics.front().code == "json.type");
 }
 
 BOOST_AUTO_TEST_CASE(json_value_roundtrip_preserves_generic_shapes) {

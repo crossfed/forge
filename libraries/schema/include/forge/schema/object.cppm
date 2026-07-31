@@ -1292,6 +1292,23 @@ void validate_exact_input_value(const input_value& input, std::string_view path,
          diagnostics.push_back(
              make_path_error(std::string{path}, "config.type", "string field must be a string value"));
       }
+   } else if constexpr (canonical_string_scalar<clean_type>) {
+      if (!std::holds_alternative<std::string>(input.storage)) {
+         diagnostics.push_back(make_path_error(std::string{path}, "config.type",
+                                               "scalar field must contain its canonical config spelling"));
+         return;
+      }
+      const auto& text = std::get<std::string>(input.storage);
+      try {
+         const auto value = parse_scalar_text<clean_type>(text);
+         const auto canonical = format_scalar_text(value);
+         if (!canonical || *canonical != text) {
+            diagnostics.push_back(make_path_error(std::string{path}, "config.type",
+                                                  "scalar field must contain its canonical config spelling"));
+         }
+      } catch (const std::exception& error) {
+         diagnostics.push_back(make_path_error(std::string{path}, "config.type", error.what()));
+      }
    } else if constexpr (std::is_enum_v<clean_type>) {
       if (!std::holds_alternative<std::string>(input.storage)) {
          diagnostics.push_back(
