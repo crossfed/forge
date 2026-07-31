@@ -747,8 +747,20 @@ cmake_language(DEFER CALL schedule_nested_mutation)
         named_nested_deferred_mutation,
         cmake_body="""
 function(schedule_named_nested_mutation)
+   cmake_language(DEFER GET_CALL_IDS pending_calls)
+   foreach(call_id IN LISTS pending_calls)
+      cmake_language(DEFER GET_CALL "${call_id}" deferred_call)
+      list(GET deferred_call 0 command)
+      if(command STREQUAL "_forge_contract_validate_guest_targets_final")
+         set(target_validation_id "${call_id}")
+         break()
+      endif()
+   endforeach()
+   if(NOT target_validation_id)
+      message(FATAL_ERROR "Forge target validator was not scheduled")
+   endif()
    cmake_language(
-      DEFER ID forge_contract_product_mutation
+      DEFER ID "${target_validation_id}"
       CALL set_property
       TARGET negative_protocol APPEND
       PROPERTY COMPILE_DEFINITIONS NAMED_NESTED_DEFERRED_MUTATION=1

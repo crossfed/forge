@@ -385,39 +385,76 @@ function(_forge_contract_validate_guest_targets)
    endforeach()
 endfunction()
 
+function(_forge_contract_register_internal_deferred id command)
+   string(SHA256 _id_key "${id}")
+   set_property(
+      GLOBAL PROPERTY "FORGE_CONTRACT_INTERNAL_DEFERRED_${_id_key}"
+      "${command}"
+   )
+   set_property(
+      GLOBAL APPEND PROPERTY FORGE_CONTRACT_INTERNAL_DEFERRED_IDS "${id}"
+   )
+endfunction()
+
 function(_forge_contract_defer_guest_environment_validation)
    cmake_language(
-      DEFER ID forge_contract_environment_validation
+      DEFER ID_VAR _validation_id
       CALL _forge_contract_validate_guest_environment_final
+   )
+   _forge_contract_register_internal_deferred(
+      "${_validation_id}" "_forge_contract_validate_guest_environment_final"
    )
 endfunction()
 
 function(_forge_contract_defer_guest_target_validation)
    cmake_language(
       DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
-      ID forge_contract_target_validation
+      ID_VAR _validation_id
       CALL _forge_contract_validate_guest_targets_final
+   )
+   _forge_contract_register_internal_deferred(
+      "${_validation_id}" "_forge_contract_validate_guest_targets_final"
    )
 endfunction()
 
 function(_forge_contract_downstream_deferred_calls output)
    cmake_language(DEFER GET_CALL_IDS _pending_calls)
-   list(
-      REMOVE_ITEM _pending_calls
-      forge_contract_environment_scheduler
-      forge_contract_environment_validation
-      forge_contract_target_scheduler
-      forge_contract_target_validation
+   get_property(
+      _internal_ids GLOBAL PROPERTY FORGE_CONTRACT_INTERNAL_DEFERRED_IDS
    )
-   set(${output} "${_pending_calls}" PARENT_SCOPE)
+   set(_downstream_calls ${_pending_calls})
+   foreach(_internal_id IN LISTS _internal_ids)
+      set(_occurrences 0)
+      foreach(_pending_id IN LISTS _pending_calls)
+         if("${_pending_id}" STREQUAL "${_internal_id}")
+            math(EXPR _occurrences "${_occurrences} + 1")
+         endif()
+      endforeach()
+      if(NOT _occurrences EQUAL 1)
+         continue()
+      endif()
+      string(SHA256 _id_key "${_internal_id}")
+      get_property(
+         _expected GLOBAL
+         PROPERTY "FORGE_CONTRACT_INTERNAL_DEFERRED_${_id_key}"
+      )
+      cmake_language(DEFER GET_CALL "${_internal_id}" _actual)
+      if("${_actual}" STREQUAL "${_expected}")
+         list(REMOVE_ITEM _downstream_calls "${_internal_id}")
+      endif()
+   endforeach()
+   set(${output} "${_downstream_calls}" PARENT_SCOPE)
 endfunction()
 
 function(_forge_contract_validate_guest_environment_final)
    _forge_contract_downstream_deferred_calls(_pending_calls)
    if(_pending_calls)
       cmake_language(
-         DEFER ID forge_contract_environment_validation
+         DEFER ID_VAR _validation_id
          CALL _forge_contract_validate_guest_environment_final
+      )
+      _forge_contract_register_internal_deferred(
+         "${_validation_id}" "_forge_contract_validate_guest_environment_final"
       )
       return()
    endif()
@@ -428,8 +465,11 @@ function(_forge_contract_validate_guest_targets_final)
    _forge_contract_downstream_deferred_calls(_pending_calls)
    if(_pending_calls)
       cmake_language(
-         DEFER ID forge_contract_target_validation
+         DEFER ID_VAR _validation_id
          CALL _forge_contract_validate_guest_targets_final
+      )
+      _forge_contract_register_internal_deferred(
+         "${_validation_id}" "_forge_contract_validate_guest_targets_final"
       )
       return()
    endif()
@@ -492,8 +532,12 @@ function(_forge_contract_freeze_guest_target target declaration)
       )
       cmake_language(
          DEFER DIRECTORY "${_source_directory}"
-         ID forge_contract_environment_scheduler
+         ID_VAR _scheduler_id
          CALL _forge_contract_defer_guest_environment_validation
+      )
+      _forge_contract_register_internal_deferred(
+         "${_scheduler_id}"
+         "_forge_contract_defer_guest_environment_validation"
       )
    endif()
    set_property(GLOBAL APPEND PROPERTY FORGE_CONTRACT_FROZEN_TARGETS "${target}")
@@ -506,8 +550,11 @@ function(_forge_contract_freeze_guest_target target declaration)
       )
       cmake_language(
          DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
-         ID forge_contract_target_scheduler
+         ID_VAR _scheduler_id
          CALL _forge_contract_defer_guest_target_validation
+      )
+      _forge_contract_register_internal_deferred(
+         "${_scheduler_id}" "_forge_contract_defer_guest_target_validation"
       )
    endif()
 endfunction()
