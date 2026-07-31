@@ -12,7 +12,7 @@ function(forge_add_contract_project target)
    cmake_parse_arguments(
       ARG
       ""
-      "SOURCE_DIR;BINARY_DIR;CONTRACT"
+      "SOURCE_DIR;BINARY_DIR;CONTRACT;SOURCE_ROOT"
       ""
       ${ARGN}
    )
@@ -52,6 +52,20 @@ function(forge_add_contract_project target)
    if(_source_dir STREQUAL _binary_dir)
       message(FATAL_ERROR "Forge Contract guest source and binary directories must differ")
    endif()
+   if(ARG_SOURCE_ROOT)
+      get_filename_component(
+         _source_root "${ARG_SOURCE_ROOT}" REALPATH
+         BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}"
+      )
+   else()
+      set(_source_root "${_source_dir}")
+   endif()
+   if(NOT IS_DIRECTORY "${_source_root}")
+      message(
+         FATAL_ERROR
+         "Forge Contract product source root is not a directory: ${_source_root}"
+      )
+   endif()
 
    set(_artifact_dir "${_binary_dir}/artifacts")
    set(_prefix_path ${CMAKE_PREFIX_PATH})
@@ -76,6 +90,7 @@ function(forge_add_contract_project target)
          "-DForgeContract_DIR:PATH=${CMAKE_CURRENT_FUNCTION_LIST_DIR}"
          "-DCMAKE_PREFIX_PATH:PATH=${_prefix_path}"
          "-DFORGE_CONTRACT_ARTIFACT_DIR:PATH=${_artifact_dir}"
+         "-DFORGE_CONTRACT_SOURCE_ROOT:PATH=${_source_root}"
       BUILD_COMMAND
          "${CMAKE_COMMAND}" --build <BINARY_DIR>
          --config "$<CONFIG>"

@@ -856,16 +856,15 @@ class type_encoder {
       if (name.empty() || name == target) {
          return;
       }
-      const auto [existing, inserted] =
-          output_.type_declarations.try_emplace(name, type_declaration{target, identity});
+      const auto [existing, inserted] = output_.type_declarations.try_emplace(name, type_declaration{target, identity});
       if (inserted) {
          output_.types.push_back(type_shape{name, target});
          return;
       }
       if (existing->second.type != target ||
           (!existing->second.identity.empty() && !identity.empty() && existing->second.identity != identity)) {
-         const auto id = context_.getDiagnostics().getCustomDiagID(
-             clang::DiagnosticsEngine::Error, "conflicting contract ABI type alias '%0'");
+         const auto id = context_.getDiagnostics().getCustomDiagID(clang::DiagnosticsEngine::Error,
+                                                                   "conflicting contract ABI type alias '%0'");
          context_.getDiagnostics().Report(location, id) << name;
          output_.failed = true;
       }
@@ -1032,8 +1031,7 @@ class type_encoder {
       const auto* specialization =
           record == nullptr ? nullptr : llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record->getDecl());
       return specialization != nullptr &&
-             specialization->getSpecializedTemplate()->getQualifiedNameAsString() ==
-                "forge::chain::protocol::typed_id";
+             specialization->getSpecializedTemplate()->getQualifiedNameAsString() == "forge::chain::protocol::typed_id";
    }
 
    void fail(std::string_view type, clang::SourceLocation location) const {
@@ -1066,18 +1064,13 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
          if (selected || (!owner.has_value() && !table->empty())) {
             auto table_name = *table;
             if (!table->empty()) {
-               const auto typed_name =
-                  typed_table_name(*declaration, declaration->getLocation());
-               if (typed_name.has_value() &&
-                   protocol::make_name(*table).value != *typed_name) {
-                  report(
-                     declaration->getLocation(),
-                     "table attribute name does not match row get_table_name()");
+               const auto typed_name = typed_table_name(*declaration, declaration->getLocation());
+               if (typed_name.has_value() && protocol::make_name(*table).value != *typed_name) {
+                  report(declaration->getLocation(), "table attribute name does not match row get_table_name()");
                   return true;
                }
                if (typed_name.has_value()) {
-                  table_name =
-                     protocol::to_string(protocol::table_name{*typed_name});
+                  table_name = protocol::to_string(protocol::table_name{*typed_name});
                }
             }
             encoder_.add_table(*declaration, table_name, table->empty());
@@ -1177,8 +1170,7 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       const auto* record = specialization == nullptr ? nullptr : specialization_record(*specialization);
       const auto owned_record = record != nullptr && belongs_to_selected_contract(*record);
       const auto typed_name =
-          record == nullptr ? std::optional<std::uint64_t>{}
-                            : typed_table_name(*record, declaration->getLocation());
+          record == nullptr ? std::optional<std::uint64_t>{} : typed_table_name(*record, declaration->getLocation());
       if (specialization != nullptr &&
           (belongs_to_selected_contract(*declaration) || owned_record || typed_name.has_value())) {
          add_table(*specialization, typed_name);
@@ -1237,29 +1229,22 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       return owner.has_value() && *owner == contract_name_;
    }
 
-   std::optional<std::uint64_t> typed_table_name(
-      const clang::CXXRecordDecl& record,
-      clang::SourceLocation use_location) {
+   std::optional<std::uint64_t> typed_table_name(const clang::CXXRecordDecl& record,
+                                                 clang::SourceLocation use_location) {
       return named_protocol_value(
-         record,
-         "get_table_name",
-         use_location,
-         "typed table get_table_name() must have a constant table name",
-         "typed table get_table_name() must be a public static constexpr zero-argument function returning table_name");
+          record, "get_table_name", use_location, "typed table get_table_name() must have a constant table name",
+          "typed table get_table_name() must be a public static constexpr zero-argument function returning table_name");
    }
 
-   void add_table(
-      const clang::ClassTemplateSpecializationDecl& declaration,
-      std::optional<std::uint64_t> typed_name = std::nullopt) {
+   void add_table(const clang::ClassTemplateSpecializationDecl& declaration,
+                  std::optional<std::uint64_t> typed_name = std::nullopt) {
       const auto* record = specialization_record(declaration);
       if (record == nullptr) {
          return;
       }
       const auto value = declaration.getTemplateArgs()[0].getAsIntegral().getZExtValue();
       if (typed_name.has_value() && *typed_name != value) {
-         report(
-            declaration.getLocation(),
-            "multi_index or singleton name does not match row get_table_name()");
+         report(declaration.getLocation(), "multi_index or singleton name does not match row get_table_name()");
          return;
       }
       encoder_.add_table(*record, protocol::to_string(protocol::name{value}));
@@ -1271,16 +1256,12 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       std::string result;
    };
 
-   std::optional<std::uint64_t> named_protocol_value(
-      const clang::CXXRecordDecl& record,
-      const char* method_name,
-      clang::SourceLocation use_location,
-      const char* constant_error,
-      const char* declaration_error = nullptr) {
+   std::optional<std::uint64_t> named_protocol_value(const clang::CXXRecordDecl& record, const char* method_name,
+                                                     clang::SourceLocation use_location, const char* constant_error,
+                                                     const char* declaration_error = nullptr) {
       auto lookup = clang::LookupResult{
           sema_,
-          context_.DeclarationNames.getIdentifier(
-             &context_.Idents.get(method_name)),
+          context_.DeclarationNames.getIdentifier(&context_.Idents.get(method_name)),
           use_location,
           clang::Sema::LookupOrdinaryName,
       };
@@ -1323,11 +1304,8 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       }
 
       const auto location = named_method->getLocation();
-      auto* callee = sema_.BuildDeclRefExpr(
-         const_cast<clang::CXXMethodDecl*>(named_method),
-         named_method->getType(),
-         clang::VK_LValue,
-         location);
+      auto* callee = sema_.BuildDeclRefExpr(const_cast<clang::CXXMethodDecl*>(named_method), named_method->getType(),
+                                            clang::VK_LValue, location);
       auto call = sema_.BuildCallExpr(nullptr, callee, location, {}, location);
       auto result = clang::Expr::EvalResult{};
       if (call.isInvalid() || !call.get()->EvaluateAsConstantExpr(result, context_) || !result.Val.isStruct() ||
@@ -1338,19 +1316,14 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       return result.Val.getStructField(0).getInt().getZExtValue();
    }
 
-   std::optional<std::uint64_t> named_action_value(
-      const clang::ParmVarDecl& parameter) {
-      const auto* record =
-         parameter.getType().getNonReferenceType()->getAsCXXRecordDecl();
+   std::optional<std::uint64_t> named_action_value(const clang::ParmVarDecl& parameter) {
+      const auto* record = parameter.getType().getNonReferenceType()->getAsCXXRecordDecl();
       record = record == nullptr ? nullptr : record->getDefinition();
       if (record == nullptr) {
          return std::nullopt;
       }
-      return named_protocol_value(
-         *record,
-         "get_name",
-         parameter.getLocation(),
-         "typed action get_name() must have a constant action name");
+      return named_protocol_value(*record, "get_name", parameter.getLocation(),
+                                  "typed action get_name() must have a constant action name");
    }
 
    void register_method_types(const clang::CXXMethodDecl& method) {
@@ -1406,8 +1379,7 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
           named_parameter == nullptr ? std::optional<std::uint64_t>{} : named_action_value(*named_parameter);
       if (named_value.has_value()) {
          const auto canonical_name = protocol::to_string(protocol::action_name{*named_value});
-         if (!annotated_name.empty() &&
-             protocol::make_name(annotated_name).value != *named_value) {
+         if (!annotated_name.empty() && protocol::make_name(annotated_name).value != *named_value) {
             report(method.getLocation(), "action attribute name does not match payload get_name()");
             return;
          }
@@ -2372,14 +2344,20 @@ artifacts generate(const request& options) {
        "-std=c++23",
        "--target=wasm32",
        "-fsyntax-only",
-       "-fno-exceptions",
-       "-fno-rtti",
-       "-ffreestanding",
-       "--sysroot=" + options.sysroot.string(),
-       "-mcpu=mvp",
-       "-DFORGE_CONTRACT_GUEST=1",
-       "-DFORGE_CONTRACT_DEFER_EOSIO_DISPATCH=1",
    };
+   arguments.insert(arguments.end(), options.compiler_arguments.begin(), options.compiler_arguments.end());
+   arguments.insert(arguments.end(), {
+                                         "-fno-exceptions",
+                                         "-fno-rtti",
+                                         "-fno-threadsafe-statics",
+                                         "-ffreestanding",
+                                         "-fvisibility=hidden",
+                                         "-fno-ident",
+                                         "--sysroot=" + options.sysroot.string(),
+                                         "-mcpu=mvp",
+                                         "-DFORGE_CONTRACT_GUEST=1",
+                                         "-DFORGE_CONTRACT_DEFER_EOSIO_DISPATCH=1",
+                                     });
    for (const auto& path : options.include_paths) {
       arguments.push_back("-I" + path.string());
    }

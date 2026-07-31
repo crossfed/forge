@@ -34,15 +34,231 @@ function(_forge_contract_normalize_file root input description output)
    set(${output} "${_absolute}" PARENT_SCOPE)
 endfunction()
 
+function(_forge_contract_product_source_root output)
+   if(
+      DEFINED FORGE_CONTRACT_SOURCE_ROOT
+      AND NOT "${FORGE_CONTRACT_SOURCE_ROOT}" STREQUAL ""
+   )
+      set(_candidate "${FORGE_CONTRACT_SOURCE_ROOT}")
+   else()
+      set(_candidate "${CMAKE_SOURCE_DIR}")
+   endif()
+   get_filename_component(
+      _candidate "${_candidate}" REALPATH BASE_DIR "${CMAKE_SOURCE_DIR}"
+   )
+   if(NOT IS_DIRECTORY "${_candidate}")
+      message(
+         FATAL_ERROR
+         "Forge Contract product source root is not a directory: ${_candidate}"
+      )
+   endif()
+   get_property(
+      _root GLOBAL PROPERTY FORGE_CONTRACT_CANONICAL_SOURCE_ROOT
+   )
+   if(_root AND NOT "${_candidate}" STREQUAL "${_root}")
+      message(
+         FATAL_ERROR
+         "FORGE_CONTRACT_SOURCE_ROOT changed after the guest SDK fixed its "
+         "canonical source root: ${_root} -> ${_candidate}"
+      )
+   endif()
+   if(NOT _root)
+      set(_root "${_candidate}")
+      set_property(
+         GLOBAL PROPERTY FORGE_CONTRACT_CANONICAL_SOURCE_ROOT "${_root}"
+      )
+   endif()
+   set(${output} "${_root}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_require_product_source path description)
+   if(NOT FORGE_CONTRACT_GUEST)
+      return()
+   endif()
+   _forge_contract_product_source_root(_product_root)
+   get_filename_component(_absolute "${path}" REALPATH)
+   file(RELATIVE_PATH _relative "${_product_root}" "${_absolute}")
+   if(IS_ABSOLUTE "${_relative}" OR _relative MATCHES "^\\.\\.(/|$)")
+      message(
+         FATAL_ERROR
+         "${description} is outside FORGE_CONTRACT_SOURCE_ROOT: ${_absolute}\n"
+         "product source root: ${_product_root}"
+      )
+   endif()
+endfunction()
+
+function(_forge_contract_semantic_properties output)
+   set(
+      ${output}
+      SOURCES
+      INTERFACE_SOURCES
+      COMPILE_OPTIONS
+      INTERFACE_COMPILE_OPTIONS
+      COMPILE_DEFINITIONS
+      INTERFACE_COMPILE_DEFINITIONS
+      INCLUDE_DIRECTORIES
+      INTERFACE_INCLUDE_DIRECTORIES
+      COMPILE_FEATURES
+      INTERFACE_COMPILE_FEATURES
+      LINK_OPTIONS
+      INTERFACE_LINK_OPTIONS
+      # These values are compared verbatim only. Forge never interprets them as
+      # a second dependency graph.
+      LINK_LIBRARIES
+      INTERFACE_LINK_LIBRARIES
+      CXX_STANDARD
+      CXX_STANDARD_REQUIRED
+      CXX_EXTENSIONS
+      CXX_MODULE_STD
+      CXX_SCAN_FOR_MODULES
+      PARENT_SCOPE
+   )
+endfunction()
+
+function(_forge_contract_validate_guest_targets)
+   _forge_contract_validate_guest_environment()
+   get_property(_targets GLOBAL PROPERTY FORGE_CONTRACT_FROZEN_TARGETS)
+   foreach(target IN LISTS _targets)
+      if(NOT TARGET "${target}")
+         message(FATAL_ERROR "frozen Forge Contract guest target disappeared: ${target}")
+      endif()
+      get_target_property(
+         _declaration "${target}" FORGE_CONTRACT_FROZEN_DECLARATION
+      )
+      _forge_contract_semantic_properties(_properties)
+      foreach(_property IN LISTS _properties)
+         get_property(_is_set TARGET "${target}" PROPERTY "${_property}" SET)
+         if(_is_set)
+            get_target_property(_current "${target}" "${_property}")
+         else()
+            set(_current "<FORGE_UNSET>")
+         endif()
+         get_target_property(
+            _expected "${target}" "FORGE_CONTRACT_FROZEN_${_property}"
+         )
+         if(NOT "${_current}" STREQUAL "${_expected}")
+            message(
+               FATAL_ERROR
+               "Forge Contract guest target '${target}' was modified after "
+               "${_declaration}; post-declaration target mutation is unsupported "
+               "because CMake compilation and Abigen must use one semantic profile "
+               "(changed property: ${_property})"
+            )
+         endif()
+      endforeach()
+   endforeach()
+endfunction()
+
+function(_forge_contract_freeze_guest_target target declaration)
+   if(NOT FORGE_CONTRACT_GUEST)
+      return()
+   endif()
+   _forge_contract_semantic_properties(_properties)
+   foreach(_property IN LISTS _properties)
+      get_property(_is_set TARGET "${target}" PROPERTY "${_property}" SET)
+      if(_is_set)
+         get_target_property(_current "${target}" "${_property}")
+      else()
+         set(_current "<FORGE_UNSET>")
+      endif()
+      set_property(
+         TARGET "${target}" PROPERTY
+         "FORGE_CONTRACT_FROZEN_${_property}" "${_current}"
+      )
+   endforeach()
+   set_property(
+      TARGET "${target}" PROPERTY
+      FORGE_CONTRACT_FROZEN_DECLARATION "${declaration}"
+   )
+   get_target_property(_source_directory "${target}" SOURCE_DIR)
+   string(SHA256 _directory_key "${_source_directory}")
+   get_property(
+      _directory_scheduled GLOBAL PROPERTY
+      "FORGE_CONTRACT_ENVIRONMENT_VALIDATION_${_directory_key}"
+   )
+   if(NOT _directory_scheduled)
+      set_property(
+         GLOBAL PROPERTY
+         "FORGE_CONTRACT_ENVIRONMENT_VALIDATION_${_directory_key}" TRUE
+      )
+      cmake_language(
+         DEFER DIRECTORY "${_source_directory}"
+         CALL _forge_contract_validate_guest_environment
+      )
+   endif()
+   set_property(GLOBAL APPEND PROPERTY FORGE_CONTRACT_FROZEN_TARGETS "${target}")
+   get_property(
+      _scheduled GLOBAL PROPERTY FORGE_CONTRACT_FROZEN_VALIDATION_SCHEDULED
+   )
+   if(NOT _scheduled)
+      set_property(
+         GLOBAL PROPERTY FORGE_CONTRACT_FROZEN_VALIDATION_SCHEDULED TRUE
+      )
+      cmake_language(
+         DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
+         CALL _forge_contract_validate_guest_targets
+      )
+   endif()
+endfunction()
+
+function(_forge_contract_validate_guest_environment)
+   if(NOT FORGE_CONTRACT_GUEST)
+      return()
+   endif()
+   if(NOT "${CMAKE_CXX_FLAGS}" STREQUAL "")
+      message(
+         FATAL_ERROR
+         "CMAKE_CXX_FLAGS must remain empty in a Forge Contract guest project; "
+         "the SDK owns the compile profile shared by CMake and Abigen"
+      )
+   endif()
+   if(
+      NOT CMAKE_CXX_STANDARD EQUAL 23
+      OR NOT CMAKE_CXX_STANDARD_REQUIRED
+      OR CMAKE_CXX_EXTENSIONS
+      OR NOT CMAKE_CXX_SCAN_FOR_MODULES
+   )
+      message(
+         FATAL_ERROR
+         "Forge Contract guest projects require strict C++23 with required "
+         "standard, extensions disabled, and CMake module scanning enabled"
+      )
+   endif()
+   foreach(_entry
+      "CMAKE_CXX_FLAGS_DEBUG|-g"
+      "CMAKE_CXX_FLAGS_RELEASE|-O3 -DNDEBUG"
+      "CMAKE_CXX_FLAGS_MINSIZEREL|-Os -DNDEBUG"
+      "CMAKE_CXX_FLAGS_RELWITHDEBINFO|-O2 -g -DNDEBUG"
+   )
+      string(REPLACE "|" ";" _parts "${_entry}")
+      list(GET _parts 0 _variable)
+      list(GET _parts 1 _expected)
+      if(NOT "${${_variable}}" STREQUAL "${_expected}")
+         message(
+            FATAL_ERROR
+            "${_variable} must remain '${_expected}' in a Forge Contract guest "
+            "project; the SDK owns the compile profile shared by CMake and Abigen"
+         )
+      endif()
+   endforeach()
+   foreach(_property COMPILE_OPTIONS COMPILE_DEFINITIONS INCLUDE_DIRECTORIES)
+      get_directory_property(_value "${_property}")
+      if(_value)
+         message(
+            FATAL_ERROR
+            "directory ${_property} are unsupported in a Forge Contract guest "
+            "project; declare the complete target through Forge Contract helpers"
+         )
+      endif()
+   endforeach()
+endfunction()
+
 function(_forge_contract_configure_guest_target target)
    if(NOT FORGE_CONTRACT_GUEST)
       return()
    endif()
-   get_target_property(_source_dir "${target}" SOURCE_DIR)
-   get_target_property(_binary_dir "${target}" BINARY_DIR)
-   if(NOT _source_dir OR NOT _binary_dir)
-      message(FATAL_ERROR "cannot determine guest target paths: ${target}")
-   endif()
+   _forge_contract_validate_guest_environment()
+   _forge_contract_product_source_root(_product_source_root)
    target_include_directories(
       "${target}" PRIVATE "${ForgeContract_DATA_DIR}/include"
    )
@@ -58,11 +274,10 @@ function(_forge_contract_configure_guest_target target)
          -fvisibility=hidden
          -fno-ident
          -mcpu=mvp
-         -O3
-         "-ffile-prefix-map=${_source_dir}=./source"
-         "-fdebug-prefix-map=${_source_dir}=./source"
-         "-ffile-prefix-map=${_binary_dir}=./build"
-         "-fdebug-prefix-map=${_binary_dir}=./build"
+         "-ffile-prefix-map=${_product_source_root}=./source"
+         "-fdebug-prefix-map=${_product_source_root}=./source"
+         "-ffile-prefix-map=${CMAKE_BINARY_DIR}=./build"
+         "-fdebug-prefix-map=${CMAKE_BINARY_DIR}=./build"
    )
    set_property(TARGET "${target}" PROPERTY CXX_COMPILER_LAUNCHER "")
 endfunction()
@@ -396,6 +611,9 @@ function(forge_add_contract_library target)
       )
    endif()
    set(_source_root "${CMAKE_CURRENT_SOURCE_DIR}")
+   _forge_contract_require_product_source(
+      "${_source_root}" "contract library source root"
+   )
 
    set(_module_bases)
    foreach(_base IN LISTS ARG_MODULE_BASE_DIRS)
@@ -501,4 +719,7 @@ function(forge_add_contract_library target)
       )
    endif()
    _forge_contract_register_owner("${ARG_ID}" "${target}")
+   _forge_contract_freeze_guest_target(
+      "${target}" "forge_add_contract_library(${target})"
+   )
 endfunction()

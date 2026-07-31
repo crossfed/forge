@@ -30,6 +30,7 @@ forge_add_contract_project(
    SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/guest"
    BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/product.guest"
    CONTRACT product
+   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
 )
 get_target_property(
    _product_wasm product_guest FORGE_CONTRACT_WASM_FILE

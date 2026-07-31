@@ -117,12 +117,22 @@ forge_add_contract(
 
 `ID` identifies the library in ABI module-owner diagnostics.
 `PUBLIC_LIBRARIES` and `PRIVATE_LIBRARIES` create ordinary CMake dependency
-scopes. The returned target is a normal static-library target: products may
-extend or install it with standard CMake commands. CMake and Clang remain
-responsible for module visibility. ABI tooling reads compilation metadata only
-to require that every imported module has exactly one owner in the active guest
-configuration; it does not reconstruct dependency scopes. Textual includes are
-tracked by the generated depfile.
+scopes. In a native configuration, the returned target is a normal static
+library that products may extend or install with standard CMake commands. In a
+guest configuration, the declaration is complete: sources, compile settings
+and include paths must not be mutated after `forge_add_contract_library()` or
+`forge_add_contract()`. This keeps CMake compilation and Abigen on one semantic
+profile instead of creating consumer-specific module variants.
+Directory-wide compile options, definitions and includes are rejected for the
+same reason. The guest toolchain rejects external configuration-specific C++
+customization and owns the standard Debug, Release, MinSizeRel and
+RelWithDebInfo flags. Abigen receives that same selected configuration profile,
+so `NDEBUG` and other configuration semantics match the compiled guest modules.
+
+CMake and Clang remain responsible for module visibility. ABI tooling reads
+compilation metadata only to require that every imported module has exactly one
+owner in the active guest configuration; it does not reconstruct dependency
+scopes. Textual includes are tracked by the generated depfile.
 
 ABI-visible `multi_index` and `singleton` aliases belong in an imported guest
 module interface. Library implementation units are compiled only by CMake and
@@ -174,7 +184,22 @@ cmake --build build/guest --target hello_artifacts -j 4
 ```
 
 A native project may call `forge_add_contract_project()` as a convenience
-launcher for that same guest project.
+launcher for that same guest project. Products that add shared directories
+outside the guest directory pass their common root once:
+
+```cmake
+forge_add_contract_project(
+   product_guest
+   SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/guest"
+   BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/guest"
+   CONTRACT product
+   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+```
+
+The launcher forwards that root as `FORGE_CONTRACT_SOURCE_ROOT`. A direct guest
+configure sets the same cache variable. Every guest target uses it for one
+project-wide reproducible path mapping.
 
 The target always produces:
 

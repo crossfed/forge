@@ -6,6 +6,10 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if(NOT DEFINED FORGE_CONTRACT_SOURCE_ROOT)
+   message(FATAL_ERROR "ProductGuest requires FORGE_CONTRACT_SOURCE_ROOT")
+endif()
+
 find_package(ForgeContract CONFIG REQUIRED)
 
 add_subdirectory(../libraries/chain product-chain)

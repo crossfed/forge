@@ -17,6 +17,7 @@ request parse(int argc, const char* const* argv) {
    constexpr auto library_compilation_prefix = std::string_view{"--library-compilation="};
    constexpr auto module_path_prefix = std::string_view{"--module-path="};
    constexpr auto include_prefix = std::string_view{"--include="};
+   constexpr auto compiler_argument_prefix = std::string_view{"--compiler-argument="};
    for (auto index = 1; index < argc; ++index) {
       const auto option = std::string_view{argv[index]};
       const auto next = [&]() -> std::string_view {
@@ -75,6 +76,10 @@ request parse(int argc, const char* const* argv) {
          });
       } else if (option == "--source-wrapper") {
          result.source_wrappers.emplace_back(next());
+      } else if (option == "--compiler-argument") {
+         result.compiler_arguments.emplace_back(next());
+      } else if (option.starts_with(compiler_argument_prefix)) {
+         result.compiler_arguments.emplace_back(option.substr(compiler_argument_prefix.size()));
       } else if (option.starts_with("--")) {
          throw std::runtime_error{"unknown argument: " + std::string{option}};
       } else {

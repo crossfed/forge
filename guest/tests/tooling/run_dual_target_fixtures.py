@@ -39,7 +39,8 @@ def run_failure(*command: str, contains: str, cwd: Path | None = None) -> None:
         raise RuntimeError(
             f"command unexpectedly succeeded:\n{' '.join(command)}"
         )
-    if contains not in result.stdout:
+    normalized = " ".join(result.stdout.split())
+    if contains not in normalized:
         raise RuntimeError(
             f"command did not report {contains!r}:\n"
             f"{' '.join(command)}\n{result.stdout}"
@@ -70,8 +71,11 @@ def configure(
         f"-DForgeContract_DIR={contract_package}",
     ]
     if guest:
-        command.append(
-            f"-DCMAKE_TOOLCHAIN_FILE={contract_package / 'ForgeContractToolchain.cmake'}"
+        command.extend(
+            (
+                f"-DCMAKE_TOOLCHAIN_FILE={contract_package / 'ForgeContractToolchain.cmake'}",
+                f"-DFORGE_CONTRACT_SOURCE_ROOT={source.parent}",
+            )
         )
     else:
         command.append(f"-DForge_DIR={forge_package}")
@@ -177,6 +181,49 @@ def validate_multi_config(
     if (artifacts / "built-Debug.txt").exists():
         raise RuntimeError("launcher built an unexpected Debug guest configuration")
 
+    commands = subprocess.run(
+        (
+            "ninja",
+            "-C",
+            str(build_directory / "configuration.guest"),
+            "-f",
+            "build-Release.ninja",
+            "-t",
+            "commands",
+        ),
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    compilation = next(
+        (
+            command
+            for command in commands
+            if "configuration.cpp" in command and "clang++" in command and " -c " in command
+        ),
+        "",
+    )
+    abigen = next(
+        (
+            command
+            for command in commands
+            if "/bin/abigen " in command and "/entry.cpp" in command
+        ),
+        "",
+    )
+    if not compilation or " -O3 " not in compilation or " -DNDEBUG " not in compilation:
+        raise RuntimeError("Release guest compilation did not use the canonical profile")
+    if " -g " in compilation:
+        raise RuntimeError("Release guest compilation leaked Debug flags")
+    if (
+        not abigen
+        or "--compiler-argument=-O3" not in abigen
+        or "--compiler-argument=-DNDEBUG" not in abigen
+    ):
+        raise RuntimeError("Release Abigen invocation did not use the canonical profile")
+    if "--compiler-argument=-g" in abigen:
+        raise RuntimeError("Release Abigen invocation leaked Debug flags")
+
 
 def write_negative_project(
     root: Path,
@@ -207,11 +254,58 @@ find_package(ForgeContract CONFIG REQUIRED)
 def validate_negative_projects(
     *,
     cmake: str,
+    cxx_compiler: Path,
     contract_package: Path,
     output: Path,
 ) -> None:
     source_root = output / "negative-source"
     build_root = output / "negative-build"
+
+    host_source = output / "host-source"
+    host_project = host_source / "project"
+    host_library = host_source / "shared"
+    host_project.mkdir(parents=True)
+    host_library.mkdir(parents=True)
+    (host_project / "CMakeLists.txt").write_text(
+        """cmake_minimum_required(VERSION 3.31)
+project(ForgeContractHostSibling LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+find_package(ForgeContract CONFIG REQUIRED)
+add_subdirectory(../shared shared-build)
+""",
+        encoding="utf-8",
+    )
+    (host_library / "CMakeLists.txt").write_text(
+        """forge_add_contract_library(
+   host_sibling ID host.sibling
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/value.cppm
+)
+""",
+        encoding="utf-8",
+    )
+    (host_library / "include").mkdir()
+    (host_library / "include" / "value.cppm").write_text(
+        "export module host.sibling;\n",
+        encoding="utf-8",
+    )
+    host_command = [
+        cmake,
+        "-S",
+        str(host_project),
+        "-B",
+        str(output / "host-build"),
+        "-G",
+        "Ninja",
+        f"-DCMAKE_CXX_COMPILER={cxx_compiler}",
+        f"-DForgeContract_DIR={contract_package}",
+    ]
+    if sys.platform == "darwin":
+        sdk = run("xcrun", "--sdk", "macosx", "--show-sdk-path").strip()
+        host_command.append(f"-DCMAKE_OSX_SYSROOT={sdk}")
+    run(*host_command)
 
     duplicate = source_root / "duplicate-id"
     write_negative_project(
@@ -267,6 +361,131 @@ forge_add_contract_library(
         },
     )
 
+    mutated_target = source_root / "mutated-target"
+    write_negative_project(
+        mutated_target,
+        cmake_body="""
+forge_add_contract_library(
+   negative_protocol ID negative.mutated
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+target_compile_definitions(negative_protocol PRIVATE MUTATED_AFTER_DECLARATION=1)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
+    mutated_dependencies = source_root / "mutated-dependencies"
+    write_negative_project(
+        mutated_dependencies,
+        cmake_body="""
+forge_add_contract_library(
+   negative_protocol ID negative.mutated_dependencies
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+target_link_libraries(negative_protocol PRIVATE Forge::forge_raw)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
+    directory_profile = source_root / "directory-profile"
+    write_negative_project(
+        directory_profile,
+        cmake_body="""
+add_compile_definitions(UNDECLARED_GUEST_PROFILE=1)
+forge_add_contract_library(
+   negative_protocol ID negative.directory_profile
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
+    changed_source_root = source_root / "changed-source-root"
+    write_negative_project(
+        changed_source_root,
+        cmake_body="""
+set(FORGE_CONTRACT_SOURCE_ROOT "${CMAKE_CURRENT_BINARY_DIR}")
+forge_add_contract_library(
+   negative_protocol ID negative.changed_source_root
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
+    changed_dialect = source_root / "changed-dialect"
+    write_negative_project(
+        changed_dialect,
+        cmake_body="""
+set(CMAKE_CXX_EXTENSIONS ON)
+forge_add_contract_library(
+   negative_protocol ID negative.changed_dialect
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
+    late_profile = source_root / "late-profile"
+    write_negative_project(
+        late_profile,
+        cmake_body="""
+forge_add_contract_library(
+   negative_protocol ID negative.late_profile
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+set(CMAKE_CXX_FLAGS_RELEASE "-O0")
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
+    nested_late_profile = source_root / "nested-late-profile"
+    (nested_late_profile / "library" / "include").mkdir(parents=True)
+    (nested_late_profile / "CMakeLists.txt").write_text(
+        """cmake_minimum_required(VERSION 3.31)
+project(ForgeContractNestedLateProfile LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+find_package(ForgeContract CONFIG REQUIRED)
+add_subdirectory(library)
+set(CMAKE_CXX_FLAGS_RELEASE "-O0" CACHE STRING "" FORCE)
+""",
+        encoding="utf-8",
+    )
+    (nested_late_profile / "library" / "CMakeLists.txt").write_text(
+        """forge_add_contract_library(
+   negative_protocol ID negative.nested_late_profile
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+""",
+        encoding="utf-8",
+    )
+    (
+        nested_late_profile / "library" / "include" / "protocol.cppm"
+    ).write_text(
+        "export module negative.protocol;\n",
+        encoding="utf-8",
+    )
+
     table_mismatch = source_root / "table-name-mismatch"
     write_negative_project(
         table_mismatch,
@@ -320,6 +539,19 @@ class [[forge::contract("mismatch")]] mismatch final
         (duplicate, "duplicate Forge Contract owner ID"),
         (host_only, "contract dependency is not guest-compatible"),
         (forward_edge, "unknown Contract SDK dependency target"),
+        (mutated_target, "post-declaration target mutation is unsupported"),
+        (
+            mutated_dependencies,
+            "changed property: LINK_LIBRARIES",
+        ),
+        (directory_profile, "directory COMPILE_DEFINITIONS are unsupported"),
+        (
+            changed_source_root,
+            "FORGE_CONTRACT_SOURCE_ROOT changed after the guest SDK fixed",
+        ),
+        (changed_dialect, "require strict C++23"),
+        (late_profile, "CMAKE_CXX_FLAGS_RELEASE must remain"),
+        (nested_late_profile, "CMAKE_CXX_FLAGS_RELEASE must remain"),
     )
     for source, expected in cases:
         run_failure(
@@ -334,6 +566,19 @@ class [[forge::contract("mismatch")]] mismatch final
             f"-DForgeContract_DIR={contract_package}",
             contains=expected,
         )
+    run_failure(
+        cmake,
+        "-S",
+        str(mutated_target),
+        "-B",
+        str(build_root / "command-line-profile"),
+        "-G",
+        "Ninja",
+        f"-DCMAKE_TOOLCHAIN_FILE={toolchain}",
+        f"-DForgeContract_DIR={contract_package}",
+        "-DCMAKE_CXX_FLAGS=-DUNDECLARED_GUEST_PROFILE=1",
+        contains="CMAKE_CXX_FLAGS is owned by the Forge Contract guest toolchain",
+    )
 
     mismatch_build = build_root / table_mismatch.name
     run(
@@ -464,6 +709,7 @@ def validate(
     )
     validate_negative_projects(
         cmake=cmake,
+        cxx_compiler=cxx_compiler,
         contract_package=contract_package,
         output=output,
     )

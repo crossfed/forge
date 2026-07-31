@@ -24,8 +24,20 @@ archives, BMI and PCM files are never reused by the guest.
 
 The ordinary CMake target graph is the only build graph. Do not create,
 serialize, fingerprint, install or reconstruct a second dependency graph.
-In particular, do not inspect `LINK_LIBRARIES`, `INTERFACE_LINK_LIBRARIES`,
-`LINK_ONLY` or CMake directory wrappers.
+In particular, do not traverse or interpret `LINK_LIBRARIES`,
+`INTERFACE_LINK_LIBRARIES`, `LINK_ONLY` or CMake directory wrappers. Forge may
+compare raw target-property snapshots only to reject post-declaration mutation;
+that comparison must not become dependency discovery.
+
+The guest declaration is complete. Do not mutate a target with
+`target_sources`, `target_compile_options`, `target_compile_definitions` or
+`target_include_directories` after `forge_add_contract_library()` or
+`forge_add_contract()`. Forge rejects such mutation because CMake compilation
+and Abigen must use the same semantic profile.
+Do not set directory-wide compile options, definitions, include paths or
+`CMAKE_CXX_FLAGS*` in the guest project. The Forge Contract toolchain owns one
+C++ profile per standard CMake configuration and passes the selected profile to
+Abigen.
 
 ## Declaration
 
@@ -99,6 +111,10 @@ forge_add_contract(
 `forge_add_contract()` is called only in the standalone guest project.
 `forge_add_contract_project()` may be used by a native project as an optional
 launcher; it configures the guest project but never reads its target graph.
+When shared sources live above the guest directory, pass the product root to
+the launcher with `SOURCE_ROOT` and to a direct guest configure with
+`-DFORGE_CONTRACT_SOURCE_ROOT=<root>`. One common root must cover every shared
+and guest-only contract library.
 
 ## Packaging
 

@@ -30,6 +30,9 @@ function(forge_add_contract target)
    else()
       _forge_contract_normalize_root("${CMAKE_CURRENT_SOURCE_DIR}" "contract SOURCE_ROOT" _source_root)
    endif()
+   _forge_contract_require_product_source(
+      "${_source_root}" "contract source root"
+   )
 
    set(_all_inputs)
    set(_sources)
@@ -181,6 +184,17 @@ function(forge_add_contract target)
    )
    list(
       APPEND _abigen_command
+      "$<$<CONFIG:Debug>:--compiler-argument=-g>"
+      "$<$<CONFIG:Release>:--compiler-argument=-O3>"
+      "$<$<CONFIG:Release>:--compiler-argument=-DNDEBUG>"
+      "$<$<CONFIG:MinSizeRel>:--compiler-argument=-Os>"
+      "$<$<CONFIG:MinSizeRel>:--compiler-argument=-DNDEBUG>"
+      "$<$<CONFIG:RelWithDebInfo>:--compiler-argument=-O2>"
+      "$<$<CONFIG:RelWithDebInfo>:--compiler-argument=-g>"
+      "$<$<CONFIG:RelWithDebInfo>:--compiler-argument=-DNDEBUG>"
+   )
+   list(
+      APPEND _abigen_command
       "$<LIST:TRANSFORM,${_compilation_records},PREPEND,--library-compilation=>"
       "$<LIST:TRANSFORM,${_module_bases},PREPEND,--include=>"
       "$<LIST:TRANSFORM,${_module_paths},PREPEND,--module-path=>"
@@ -240,9 +254,6 @@ function(forge_add_contract target)
       "${target}"
       PRIVATE
          -Werror=return-type
-         "-ffile-prefix-map=${CMAKE_CURRENT_SOURCE_DIR}=."
-         "-ffile-prefix-map=${CMAKE_CURRENT_BINARY_DIR}=."
-         "-ffile-prefix-map=${_source_root}=./source"
    )
    if(_compile_checks)
       add_library("${target}_compile_checks" OBJECT ${_compile_checks})
@@ -264,6 +275,9 @@ function(forge_add_contract target)
             "${_source_root}"
       )
       _forge_contract_configure_guest_target("${target}_compile_checks")
+      _forge_contract_freeze_guest_target(
+         "${target}_compile_checks" "forge_add_contract(${target})"
+      )
       add_dependencies("${target}" "${target}_compile_checks")
    endif()
 
@@ -398,5 +412,8 @@ function(forge_add_contract target)
          FORGE_CONTRACT_WASM_FILE "${_output_dir}/${target}.wasm"
          FORGE_CONTRACT_ABI_FILE "${_abi}"
          FORGE_CONTRACT_MANIFEST_FILE "${_manifest}"
+   )
+   _forge_contract_freeze_guest_target(
+      "${target}" "forge_add_contract(${target})"
    )
 endfunction()

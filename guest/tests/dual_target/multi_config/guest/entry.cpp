@@ -1,3 +1,7 @@
+#ifndef NDEBUG
+#error "host Release must run Abigen with Release flags"
+#endif
+
 import forge.contract;
 import product.contract.configuration;
 

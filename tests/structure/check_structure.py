@@ -367,6 +367,34 @@ def check_contract_sdk_components(root: Path, errors: list[str]) -> None:
             f"{path.relative_to(root)}: release SDK sub-builds must preserve path mapping: {required}"
          )
 
+   libraries_cmake = (
+      root / "guest" / "cmake" / "ForgeContractLibraries.cmake"
+   ).read_text(errors="ignore")
+   for required in (
+      '"-ffile-prefix-map=${_product_source_root}=./source"',
+      '"-fdebug-prefix-map=${_product_source_root}=./source"',
+      '"-ffile-prefix-map=${CMAKE_BINARY_DIR}=./build"',
+      '"-fdebug-prefix-map=${CMAKE_BINARY_DIR}=./build"',
+      "_forge_contract_freeze_guest_target(",
+      "FORGE_CONTRACT_SOURCE_ROOT",
+   ):
+      if required not in libraries_cmake:
+         errors.append(
+            "guest/cmake/ForgeContractLibraries.cmake: guest targets must share "
+            f"project-wide path mapping: {required}"
+         )
+   for forbidden in (
+      '"-ffile-prefix-map=${_source_dir}=./source"',
+      '"-fdebug-prefix-map=${_source_dir}=./source"',
+      '"-ffile-prefix-map=${_binary_dir}=./build"',
+      '"-fdebug-prefix-map=${_binary_dir}=./build"',
+   ):
+      if forbidden in libraries_cmake:
+         errors.append(
+            "guest/cmake/ForgeContractLibraries.cmake: target-local path mapping "
+            f"creates incompatible CMake 4.4 module variants: {forbidden}"
+         )
+
    root_cmake = (root / "CMakeLists.txt").read_text(errors="ignore")
    for required in (
       '"$<BUILD_INTERFACE:-ffile-prefix-map=${_forge_contract_host_source_root}=.>"',
@@ -470,8 +498,6 @@ def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
          )
 
    reverse_graph_tokens = (
-      re.compile(r"\bINTERFACE_LINK_LIBRARIES\b"),
-      re.compile(r"\bLINK_LIBRARIES\b"),
       re.compile(r"\$<LINK_ONLY:"),
       re.compile(r"::@\("),
       re.compile(r"_forge_contract_guest_dependency"),
@@ -493,6 +519,29 @@ def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
             errors.append(
                f"{path.relative_to(root)}: Contract SDK must not reverse-parse the native CMake graph ({token.pattern})"
             )
+
+   libraries_source = architecture_sources[0].read_text(errors="ignore")
+   for property_name in ("LINK_LIBRARIES", "INTERFACE_LINK_LIBRARIES"):
+      if property_name not in libraries_source:
+         errors.append(
+            "guest/cmake/ForgeContractLibraries.cmake: guest target immutability "
+            f"must include {property_name}"
+         )
+      for path in architecture_sources[1:]:
+         if re.search(rf"\b{property_name}\b", path.read_text(errors="ignore")):
+            errors.append(
+               f"{path.relative_to(root)}: Contract SDK must not inspect "
+               f"{property_name}"
+            )
+   if re.search(
+      r"get_target_property\s*\([^)]*\b(?:INTERFACE_)?LINK_LIBRARIES\b",
+      libraries_source,
+      re.DOTALL,
+   ):
+      errors.append(
+         "guest/cmake/ForgeContractLibraries.cmake: dependency properties may "
+         "only participate in generic immutable-state comparison"
+      )
 
    root_cmake = (root / "CMakeLists.txt").read_text(errors="ignore")
    if re.search(r"(?m)^(?!function\()\s*forge_target_contract_guest_component\(", root_cmake):

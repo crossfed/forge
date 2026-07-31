@@ -237,10 +237,22 @@ class service_node {
 - A product guest directory is a standalone CMake project and the source of
   truth for its WASM target graph. A host helper may launch that project, but it
   must not serialize or reconstruct downstream targets.
+- A guest `forge_add_contract_library` or `forge_add_contract` declaration is
+  complete. Post-declaration source, compile-option, definition and include
+  mutation is forbidden because CMake compilation and Abigen must use one
+  semantic profile.
+- Guest projects must not add directory-wide compile options, definitions,
+  includes or `CMAKE_CXX_FLAGS*`; the Forge Contract toolchain owns one
+  semantic compile profile per standard CMake configuration and gives the same
+  selected profile to Abigen.
+- A product with shared sources outside its guest directory declares one
+  `FORGE_CONTRACT_SOURCE_ROOT`; every guest target uses that same root for
+  reproducible path mapping.
 - The normal CMake target graph is the only contract build graph. Do not
-  serialize or reconstruct it through JSON descriptors, fingerprints,
+  serialize, traverse or reconstruct it through JSON descriptors, fingerprints,
   `LINK_LIBRARIES`, `INTERFACE_LINK_LIBRARIES`, `$<LINK_ONLY:...>` or CMake
-  directory wrappers.
+  directory wrappers. A raw before/after property snapshot may enforce guest
+  target immutability, but it must not interpret dependency edges.
 - Do not reuse native archives, BMI or PCM files in the guest configuration.
 - Cross-toolchain source packages are not part of the Contract SDK. Products
   share source-tree libraries with `add_subdirectory`; ordinary native

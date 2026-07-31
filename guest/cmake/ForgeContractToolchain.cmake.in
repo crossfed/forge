@@ -32,4 +32,33 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_SCAN_FOR_MODULES ON)
 
+function(_forge_contract_set_profile variable value description)
+   if(DEFINED "${variable}" AND NOT "${${variable}}" STREQUAL "${value}")
+      message(
+         FATAL_ERROR
+         "${variable} is owned by the Forge Contract guest toolchain; "
+         "expected '${value}', received '${${variable}}'"
+      )
+   endif()
+   set("${variable}" "${value}" CACHE STRING "${description}" FORCE)
+endfunction()
+
+_forge_contract_set_profile(
+   CMAKE_CXX_FLAGS "" "Forge Contract common guest C++ flags"
+)
+_forge_contract_set_profile(
+   CMAKE_CXX_FLAGS_DEBUG "-g" "Forge Contract Debug C++ flags"
+)
+_forge_contract_set_profile(
+   CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG" "Forge Contract Release C++ flags"
+)
+_forge_contract_set_profile(
+   CMAKE_CXX_FLAGS_MINSIZEREL "-Os -DNDEBUG"
+   "Forge Contract MinSizeRel C++ flags"
+)
+_forge_contract_set_profile(
+   CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g -DNDEBUG"
+   "Forge Contract RelWithDebInfo C++ flags"
+)
+
 set(CMAKE_EXECUTABLE_SUFFIX ".wasm")

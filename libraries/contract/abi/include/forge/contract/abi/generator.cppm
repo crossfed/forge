@@ -35,6 +35,7 @@ struct request {
    std::vector<library_compilation> library_compilations;
    std::vector<known_module> known_modules;
    std::vector<std::filesystem::path> source_wrappers;
+   std::vector<std::string> compiler_arguments;
 };
 
 struct artifacts {
