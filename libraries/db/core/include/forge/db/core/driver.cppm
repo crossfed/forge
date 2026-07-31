@@ -55,6 +55,7 @@ class session {
 
 class transaction {
  public:
+   using before_commit_fn = std::function<boost::asio::awaitable<void>()>;
    using after_commit_fn = std::function<boost::asio::awaitable<void>()>;
    using after_rollback_fn = std::function<boost::asio::awaitable<void>()>;
 
@@ -87,6 +88,7 @@ class transaction {
    boost::asio::awaitable<void> rollback_to_savepoint(savepoint_id_t savepoint);
    boost::asio::awaitable<void> release_savepoint(savepoint_id_t savepoint);
 
+   void before_commit(before_commit_fn hook);
    void after_commit(after_commit_fn hook);
    void after_rollback(after_rollback_fn hook);
 

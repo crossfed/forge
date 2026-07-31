@@ -31,6 +31,7 @@ struct packed_transaction {
       none = 0,
       zlib = 1,
    };
+   BOOST_DESCRIBE_NESTED_ENUM(compression, none, zlib)
 
    packed_transaction() = default;
    explicit packed_transaction(const signed_transaction& value, compression compression = compression::none);

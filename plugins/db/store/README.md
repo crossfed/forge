@@ -154,6 +154,35 @@ readable through the configured Object store, but application Object mutation
 APIs cannot modify them. Object, Blob and Revision operations joined to one
 plugin transaction commit or roll back through the same Core driver.
 
+## Authenticated State
+
+`store_handle::authenticated(config)` creates a typed
+`forge.db.authenticated` view over the same physical named store. The
+application owns the authenticated family/domain policy, while DB Store keeps
+the physical driver private:
+
+```cpp
+auto authenticated = state.authenticated({
+   .family = forge::db::core::family{"state.authenticated"},
+   .domain = "spine.consensus.state",
+});
+
+auto tx = co_await state.begin_transaction();
+auto revision = co_await state.revisions().join(tx);
+auto tree = co_await authenticated.join(tx, revision.id());
+auto objects = co_await state.objects().join(tx);
+
+// Apply ObjectDB mutations, project the final change set, then stage one root.
+co_await tree.stage(projected_mutations, expected_root);
+co_await tx.commit();
+```
+
+The authenticated handle provides versioned reads, point/range proofs and
+bounded pruning. `join` and `prune_through` reject a transaction created by a
+different named store. Attach Revision and authenticated participants before
+the first application mutation; DB Store remains the only owner of commit and
+rollback.
+
 ## Shared Reads
 
 `store_handle::begin_read()` opens one Core snapshot and eagerly binds every

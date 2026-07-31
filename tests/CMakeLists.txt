@@ -193,6 +193,26 @@ target_link_libraries(
 add_test(NAME test_forge_chain_protocol COMMAND test_forge_chain_protocol WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
+   test_forge_chain_api
+   unit/main.cpp
+   chain_api/abi_tests.cpp
+   chain_api/chain_api_tests.cpp
+)
+target_link_libraries(
+   test_forge_chain_api
+   forge_chain_api
+   forge_api_http
+   forge_codec_xml
+   Boost::included_unit_test_framework
+)
+add_test(NAME test_forge_chain_api COMMAND test_forge_chain_api WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+add_test(
+   NAME test_forge_chain_api_spring_manifest
+   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/chain_api/check_spring_api_manifest.py ${CMAKE_SOURCE_DIR}
+   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+
+add_executable(
    test_forge_chain_quorum
    unit/main.cpp
    chain_quorum/quorum_tests.cpp
@@ -294,6 +314,44 @@ if(FORGE_HAS_MDBX)
       Boost::included_unit_test_framework
    )
    add_test(NAME test_forge_db_mdbx COMMAND test_forge_db_mdbx WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+   add_executable(
+      test_forge_db_authenticated
+      unit/main.cpp
+      db_authenticated/db_authenticated_tests.cpp
+   )
+   target_link_libraries(
+      test_forge_db_authenticated
+      forge_asio
+      forge_db_authenticated
+      forge_db_mdbx
+      forge_db_object
+      forge_db_revision
+      Boost::included_unit_test_framework
+   )
+   add_test(NAME test_forge_db_authenticated COMMAND test_forge_db_authenticated WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+   add_executable(
+      benchmark_forge_db_authenticated
+      db_authenticated/authenticated_benchmark.cpp
+   )
+   target_link_libraries(
+      benchmark_forge_db_authenticated
+      forge_asio
+      forge_db_authenticated
+      forge_db_mdbx
+   )
+
+   option(FORGE_DB_AUTHENTICATED_ENABLE_FUZZ_TESTS "Build authenticated proof libFuzzer target" OFF)
+   if(FORGE_DB_AUTHENTICATED_ENABLE_FUZZ_TESTS)
+      add_executable(forge_db_authenticated_fuzz db_authenticated/fuzz_driver.cpp)
+      target_link_libraries(forge_db_authenticated_fuzz PRIVATE forge_db_authenticated)
+      target_compile_options(
+         forge_db_authenticated_fuzz
+         PRIVATE -fsanitize=fuzzer,address,undefined -fno-omit-frame-pointer
+      )
+      target_link_options(forge_db_authenticated_fuzz PRIVATE -fsanitize=fuzzer,address,undefined)
+   endif()
 
    if(FORGE_HAS_ROCKSDB)
       add_executable(
@@ -1133,6 +1191,17 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
+   test_forge_package_chain_api_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_chain_api_component
+      ${CMAKE_BINARY_DIR}/forge-package-chain-api-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_chain_api_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
    test_forge_package_chain_quorum_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
@@ -1190,6 +1259,17 @@ add_custom_target(
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
       --test-command forge_package_db_core_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_db_authenticated_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_db_authenticated_component
+      ${CMAKE_BINARY_DIR}/forge-package-db-authenticated-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_db_authenticated_component
    DEPENDS test_forge_package_install
 )
 add_custom_target(
@@ -1916,6 +1996,17 @@ add_test(
 )
 set_tests_properties(test_forge_package_chain_protocol_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
+   NAME test_forge_package_chain_api_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_chain_api_component
+      ${CMAKE_BINARY_DIR}/forge-package-chain-api-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_chain_api_component
+)
+set_tests_properties(test_forge_package_chain_api_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
    NAME test_forge_package_chain_quorum_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
@@ -2028,6 +2119,17 @@ add_test(
       --test-command forge_package_db_core_component
 )
 set_tests_properties(test_forge_package_db_core_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_db_authenticated_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_db_authenticated_component
+      ${CMAKE_BINARY_DIR}/forge-package-db-authenticated-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_db_authenticated_component
+)
+set_tests_properties(test_forge_package_db_authenticated_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_db_object_component
    COMMAND ${CMAKE_CTEST_COMMAND}

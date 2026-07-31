@@ -1,0 +1,63 @@
+# Forge Chain API
+
+Target and package component: `forge_chain_api` / `chain_api`.
+
+All public modules live directly in `include/forge/chain/api`. Public symbols
+live in `forge::chain::api`; `info`, `block`, `state`, `transaction` and
+`admin` are API contract names, not nested namespaces. There is no aggregate
+`forge.chain.api` module.
+
+The library owns transport-neutral chain contracts, HTTP/P2P-capable clients
+and proof-verification policy. Wire DTOs live in the flat
+`forge.chain.protocol.{audit,info,block_query,state_query,transaction_query,admin}`
+modules and `forge::chain::protocol` namespace.
+API methods use existing protocol records and standard containers directly
+when they already express the complete request or result.
+`forge.chain.api.json_schema` tells the shared OpenAPI generator that canonical
+protocol public keys and signatures are JSON strings; it owns no routes or DTOs.
+
+HTTP bindings are resource-oriented rather than RPC-shaped. Safe reads with
+scalar path/query parameters use `GET`; structured proof ranges, simulations
+and mutations use `POST`. Dynamic reads return `Cache-Control: no-store`.
+Requests select an optional finalized anchor by block ID, while the complete
+chain/root commitment is returned in the audited response context.
+
+Concrete controllers, state schemas, persistence, protocol publication and
+network policy remain in downstream products.
+
+## Verified state synchronization
+
+`state_changes_request::from_block` is exclusive and `to_block` is inclusive.
+Its cursor identifies the next block, requested range and key within that
+range. A verified page must start exactly at that position, cover blocks and
+ranges in canonical order, and either return that exact continuation or end at
+the finalized `to_block` anchor. Every returned range has its own authenticated
+change-tree proof.
+
+Change proofs establish the complete mutation set for each requested range;
+they do not by themselves prove a state transition. A partial-state consumer
+keeps the authenticated frontier obtained from its snapshot, applies verified
+changes in order and accepts the update only when the resulting root equals the
+finalized target `state_root`. This is the intended `mountd`-class client path
+and prevents a server from omitting an intermediate mutation or inventing an
+unbound intermediate root.
+
+## Local ABI conversion
+
+`forge.chain.api.abi` owns local `forge::variant` JSON-value conversion for
+`forge::chain::protocol::abi_def`. `abi_json_to_bin` and `abi_bin_to_json`
+perform no network calls and require an explicit ABI and root type on every
+invocation. The decoder rejects trailing bytes.
+
+The traversal and wire rules are adapted from Spring commit `e6a99f68`,
+`libraries/chain/abi_serializer.cpp` and
+`libraries/chain/include/eosio/chain/abi_serializer.hpp`. Supported ABI shapes
+include built-in Spring types, typedefs, struct inheritance, dynamic and fixed
+arrays, optional fields, trailing binary extensions and tagged variants.
+Public Forge names and error contracts are native; there are no EOSIO namespace
+aliases or compatibility modes.
+
+`abi_serialization_limits` bounds recursion depth, elapsed serialization time,
+binary bytes, string/byte payloads and container elements. Failures throw
+`abi_serialization_error` with a structured `abi_diagnostic` containing a
+stable code, message, resolved type, logical JSON path and binary offset.

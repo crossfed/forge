@@ -251,6 +251,7 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/object/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/blob/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/revision/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/authenticated/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec/base32/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec/base64/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/codec/base58/include"
@@ -604,6 +605,7 @@ set(
 if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
    add_subdirectory(libraries/db/blob)
    add_subdirectory(libraries/db/revision)
+   add_subdirectory(libraries/db/authenticated)
    add_subdirectory(libraries/config/env)
    add_subdirectory(libraries/config/program_options)
    add_subdirectory(libraries/codec/yaml)
@@ -630,6 +632,8 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       APPEND FORGE_LEAF_TARGETS
       forge_db_blob
       forge_db_revision
+      forge_db_authenticated
+      forge_chain_api
       forge_codec_yaml
       forge_codec_xml
       forge_config_program_options
@@ -738,6 +742,8 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       APPEND FORGE_BUILT_COMPONENTS
       db_blob
       db_revision
+      db_authenticated
+      chain_api
       codec_yaml
       codec_xml
       config_program_options
@@ -874,6 +880,8 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       APPEND FORGE_INSTALL_INCLUDE_DIRS
       libraries/db/blob/include/forge
       libraries/db/revision/include/forge
+      libraries/db/authenticated/include/forge
+      libraries/chain/api/include/forge
       libraries/codec/yaml/include/forge
       libraries/codec/xml/include/forge
       libraries/config/program_options/include/forge

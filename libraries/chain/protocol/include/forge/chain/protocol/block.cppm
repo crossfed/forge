@@ -53,6 +53,7 @@ struct transaction_receipt_header {
       delayed = 3,
       expired = 4,
    };
+   BOOST_DESCRIBE_NESTED_ENUM(status, executed, soft_fail, hard_fail, delayed, expired)
 
    status status = status::hard_fail;
    std::uint32_t cpu_usage_us = 0;

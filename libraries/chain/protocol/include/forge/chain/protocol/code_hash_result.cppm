@@ -1,5 +1,9 @@
 module;
 
+#if !defined(FORGE_CONTRACT_GUEST)
+#include <boost/describe.hpp>
+#endif
+
 #include <cstdint>
 
 export module forge.chain.protocol.code_hash_result;
@@ -36,3 +40,11 @@ template <typename Stream> void raw_unpack(Stream& stream, code_hash_result& val
 }
 
 } // namespace forge::chain::protocol
+
+#if !defined(FORGE_CONTRACT_GUEST)
+export namespace forge::chain::protocol {
+BOOST_DESCRIBE_STRUCT(
+   code_hash_result, (),
+   (struct_version, code_sequence, code_hash, vm_type, vm_version))
+} // namespace forge::chain::protocol
+#endif

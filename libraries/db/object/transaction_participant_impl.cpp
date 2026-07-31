@@ -1,5 +1,7 @@
 module;
 
+#include <forge/exceptions/macros.hpp>
+
 #include <algorithm>
 #include <boost/asio/awaitable.hpp>
 #include <cstddef>
@@ -33,19 +35,14 @@ std::string participant_name(const forge::db::core::family& family) {
 
 } // namespace
 
-transaction_participant_impl::transaction_participant_impl(
-   forge::db::core::family family,
-   transaction::seal_allocations_fn seal,
-   std::vector<std::shared_ptr<observer>> observers,
-   transaction::release_fn release)
-    : name_{participant_name(family)},
-      family_{std::move(family)},
-      prewrite_locks_{forge::db::core::record_lock_claim{
-         .column_family = family_,
-         .key = record_key::ranked_coordinator()}},
-      seal_allocations_{std::move(seal)},
-      observers_{std::move(observers)},
-      release_{std::move(release)} {}
+transaction_participant_impl::transaction_participant_impl(forge::db::core::family family,
+                                                           transaction::seal_allocations_fn seal,
+                                                           std::vector<std::shared_ptr<observer>> observers,
+                                                           transaction::release_fn release)
+    : name_{participant_name(family)}, family_{std::move(family)},
+      prewrite_locks_{
+          forge::db::core::record_lock_claim{.column_family = family_, .key = record_key::ranked_coordinator()}},
+      seal_allocations_{std::move(seal)}, observers_{std::move(observers)}, release_{std::move(release)} {}
 
 transaction_participant_impl::~transaction_participant_impl() {
    release_writer();
@@ -55,23 +52,20 @@ std::string_view transaction_participant_impl::name() const noexcept {
    return name_;
 }
 
-std::span<const forge::db::core::family>
-transaction_participant_impl::exclusive_families() const noexcept {
+std::span<const forge::db::core::family> transaction_participant_impl::exclusive_families() const noexcept {
    return {std::addressof(family_), 1};
 }
 
-std::span<const forge::db::core::record_lock_claim>
-transaction_participant_impl::prewrite_locks() const noexcept {
+std::span<const forge::db::core::record_lock_claim> transaction_participant_impl::prewrite_locks() const noexcept {
    if (!backend_writes_) {
       return {};
    }
    return prewrite_locks_;
 }
 
-forge::db::core::mutation_policy
-transaction_participant_impl::classify(const forge::db::core::family& family,
-                                       const forge::db::core::record_key& key,
-                                       forge::db::core::mutation_kind) const noexcept {
+forge::db::core::mutation_policy transaction_participant_impl::classify(const forge::db::core::family& family,
+                                                                        const forge::db::core::record_key& key,
+                                                                        forge::db::core::mutation_kind) const noexcept {
    if (family.name != family_.name || key.empty()) {
       return forge::db::core::mutation_policy::inherit;
    }
@@ -84,8 +78,7 @@ transaction_participant_impl::classify(const forge::db::core::family& family,
    return forge::db::core::mutation_policy::reversible;
 }
 
-boost::asio::awaitable<void>
-transaction_participant_impl::prepare_savepoint(forge::db::core::savepoint_id_t id) {
+boost::asio::awaitable<void> transaction_participant_impl::prepare_savepoint(forge::db::core::savepoint_id_t id) {
    pending_savepoint_ = savepoint_frame{.id = id, .mutation_count = changes_.mutations.size()};
    co_return;
 }
@@ -123,17 +116,15 @@ transaction_participant_impl::rollback_to_savepoint(forge::db::core::savepoint_i
    }
 }
 
-boost::asio::awaitable<void>
-transaction_participant_impl::release_savepoint(forge::db::core::savepoint_id_t id,
-                                                forge::db::core::participant_access&) {
+boost::asio::awaitable<void> transaction_participant_impl::release_savepoint(forge::db::core::savepoint_id_t id,
+                                                                             forge::db::core::participant_access&) {
    if (!savepoints_.empty() && savepoints_.back().id == id) {
       savepoints_.pop_back();
    }
    co_return;
 }
 
-void transaction_participant_impl::remember_allocation(forge::db::ids::object_id type,
-                                                       std::uint64_t next_instance) {
+void transaction_participant_impl::remember_allocation(forge::db::ids::object_id type, std::uint64_t next_instance) {
    type.instance = 0;
    auto& existing = allocation_seals_[type];
    existing = std::max(existing, next_instance);
@@ -147,8 +138,32 @@ change_set& transaction_participant_impl::changes() noexcept {
    return changes_;
 }
 
+const change_set& transaction_participant_impl::changes() const noexcept {
+   return changes_;
+}
+
 bool transaction_participant_impl::finalized() const noexcept {
    return finalized_;
+}
+
+bool transaction_participant_impl::add_precommit_observer(std::shared_ptr<precommit_observer> value) {
+   if (finalized_ || preparing_commit_) {
+      FORGE_THROW_EXCEPTION(exceptions::transaction_closed, "db object transaction is closed");
+   }
+   if (!value) {
+      return false;
+   }
+   const auto install_hook = precommit_observers_.empty();
+   precommit_observers_.push_back(std::move(value));
+   return install_hook;
+}
+
+boost::asio::awaitable<void> transaction_participant_impl::run_precommit_observers() {
+   preparing_commit_ = true;
+   const auto observers = precommit_observers_;
+   for (const auto& hook : observers) {
+      co_await hook->before_commit(changes_);
+   }
 }
 
 void transaction_participant_impl::release_writer() noexcept {

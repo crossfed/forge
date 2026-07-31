@@ -99,6 +99,21 @@ implementer-facing; savepoints themselves do not create durable revisions.
 Higher-level operation guards can use `transaction::captures_mutations()`
 without depending on a participant name or concrete revision implementation.
 
+`transaction::before_commit()` registers an awaited one-shot projection hook.
+Hooks run while the Core transaction is still active, after the caller has
+finished its savepoint work and before participant prepare begins. They may use
+the normal transaction read/write API, which lets a higher-level participant
+materialize derived records inside the same physical commit. Hooks may not
+commit, roll back, attach another participant or register another pre-commit
+hook reentrantly. A hook failure makes the transaction rollback-only; a backend
+commit failure after successful prepare still permits an explicit rollback or
+a retry of the prepared backend commit.
+
+Before-, after-commit and after-rollback hooks must all be registered while the
+transaction is active and before the before-commit phase starts. Registration
+on a default, closed or already-finalizing transaction is rejected rather than
+silently retaining a callback that can no longer run.
+
 Participants that own a physical record layout declare their
 `exclusive_families()`. Core rejects overlapping claims before the first
 mutation or savepoint, while observer participants can keep the default empty

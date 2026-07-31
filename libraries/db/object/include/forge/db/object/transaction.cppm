@@ -114,6 +114,8 @@ class transaction {
    template <object_model Object, typename Tag> [[nodiscard]] index_view<Object, Tag> index() const;
 
    [[nodiscard]] forge::db::core::transaction& db_transaction() const;
+   [[nodiscard]] change_set projected_changes() const;
+   void add_precommit_observer(std::shared_ptr<precommit_observer> value);
 
    boost::asio::awaitable<void> commit();
    boost::asio::awaitable<void> rollback();

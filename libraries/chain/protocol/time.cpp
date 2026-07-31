@@ -162,4 +162,30 @@ block_timestamp& block_timestamp::operator=(time_point value) noexcept {
    return *this;
 }
 
+#if !defined(FORGE_CONTRACT_GUEST)
+void to_variant(const time_point& value, forge::variant& output) {
+   output = value.to_string();
+}
+
+void from_variant(const forge::variant& value, time_point& output) {
+   output = time_point::from_iso_string(value.as_string());
+}
+
+void to_variant(const time_point_sec& value, forge::variant& output) {
+   output = value.to_string();
+}
+
+void from_variant(const forge::variant& value, time_point_sec& output) {
+   output = time_point_sec::from_iso_string(value.as_string());
+}
+
+void to_variant(const block_timestamp& value, forge::variant& output) {
+   output = value.to_string();
+}
+
+void from_variant(const forge::variant& value, block_timestamp& output) {
+   output = block_timestamp::from_iso_string(value.as_string());
+}
+#endif
+
 } // namespace forge::chain::protocol

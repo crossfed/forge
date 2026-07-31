@@ -221,6 +221,21 @@ on the Object writer lane. Store instances over the same driver and family share
 the same neutral gate, so dropped-transaction cleanup and a reopened store cannot
 overlap backend writes.
 
+## Pre-commit Projection
+
+`transaction::projected_changes()` returns the current logical ObjectDB change
+set, including only mutations that survived savepoint rollback.
+`transaction::add_precommit_observer()` installs a transaction-scoped observer
+that runs through DB Core's active before-commit phase. The observer receives
+the final change set and may perform ordinary reads or writes through already
+joined transaction layers. Writes made by an observer become part of the same
+ObjectDB participant and physical commit; later observers see those additions.
+
+Observers must be installed before commit starts. Reentrant registration,
+commit, rollback or participant attachment is rejected. An observer failure
+leaves the outer transaction rollback-only, so callers can perform one explicit
+rollback and preserve all joined-layer atomicity.
+
 ## Reads And Indexes
 
 Direct reads use `begin_read()` and stable backend snapshots:
