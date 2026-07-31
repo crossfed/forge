@@ -2,6 +2,7 @@ foreach(
    _required
    FORGE_CONTRACT_STAGE_SYSROOT
    FORGE_CONTRACT_SDK_CMAKE
+   FORGE_CONTRACT_LIBRARIES_CMAKE
    FORGE_CONTRACT_BUILD_CMAKE
    FORGE_CONTRACT_FOUNDATION_CMAKE
    FORGE_CONTRACT_CONFIG_TEMPLATE
@@ -103,21 +104,15 @@ foreach(_archive IN ITEMS
 )
    _require_text("${FORGE_CONTRACT_FOUNDATION_CMAKE}" "${_archive}")
 endforeach()
-_require_text("${FORGE_CONTRACT_BUILD_CMAKE}" "add_library(forge_guest_runtime STATIC IMPORTED GLOBAL)")
-_require_text("${FORGE_CONTRACT_BUILD_CMAKE}" "set(_target \"forge_contract_component_\${_key}\")")
-_require_text("${FORGE_CONTRACT_BUILD_CMAKE}" "add_library(\"\${_target}\" STATIC)")
-_require_text("${FORGE_CONTRACT_BUILD_CMAKE}" "add_library(\"\${_target}_archive\" STATIC IMPORTED GLOBAL)")
-_require_text("${FORGE_CONTRACT_BUILD_CMAKE}" "include(\"\${FORGE_CONTRACT_COMPONENTS}\")")
-_require_text(
-   "${FORGE_CONTRACT_BUILD_CMAKE}"
-   "_forge_contract_guest_component_target(forge.contract.runtime _contract_runtime_target)"
-)
-_require_text("${FORGE_CONTRACT_BUILD_CMAKE}" "FORGE_CONTRACT_GUEST_FOUNDATION_IDS")
+_require_text("${FORGE_CONTRACT_LIBRARIES_CMAKE}" "function(forge_add_contract_library target)")
+_require_text("${FORGE_CONTRACT_LIBRARIES_CMAKE}" "FILE_SET forge_contract_modules TYPE CXX_MODULES")
+_require_text("${FORGE_CONTRACT_LIBRARIES_CMAKE}" "add_library(\"\${_target}_archive\" STATIC IMPORTED GLOBAL)")
+_require_text("${FORGE_CONTRACT_LIBRARIES_CMAKE}" "FORGE_CONTRACT_FOUNDATION_COMPONENT_IDS")
 _require_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "ID forge.contract.runtime")
 _require_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "ARCHIVE libforge_guest_contract.a")
-_reject_text("${FORGE_CONTRACT_BUILD_CMAKE}" "add_library(forge_guest_contract STATIC)")
-_reject_text("${FORGE_CONTRACT_BUILD_CMAKE}" "forge_guest_contract_implementation")
-_require_text("${FORGE_CONTRACT_BUILD_CMAKE}" "set(_guest_libraries forge_guest_runtime")
+_reject_text("${FORGE_CONTRACT_LIBRARIES_CMAKE}" "INTERFACE_LINK_LIBRARIES")
+_reject_text("${FORGE_CONTRACT_LIBRARIES_CMAKE}" "LINK_ONLY")
+_reject_text("${FORGE_CONTRACT_LIBRARIES_CMAKE}" "contract-graph.json")
 _reject_text("${FORGE_CONTRACT_BUILD_CMAKE}" "forge_guest_codec_base64_runtime")
 _reject_text("${FORGE_CONTRACT_BUILD_CMAKE}" "forge_guest_raw_implementation")
 _reject_text("${FORGE_CONTRACT_BUILD_CMAKE}" "forge_guest_chain_protocol_implementation")

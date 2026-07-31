@@ -78,6 +78,47 @@ concept table_row = requires(const Row& value) { requires primary_key<decltype(v
 
 namespace detail {
 
+template <class Row, name::raw TableName>
+consteval bool table_name_matches() {
+   if constexpr (requires { &Row::get_table_name; }) {
+      static_assert(
+         requires {
+            { Row::get_table_name() } -> std::same_as<chain::protocol::table_name>;
+         },
+         "get_table_name() must be a public static zero-argument function returning table_name");
+      return Row::get_table_name().value == static_cast<std::uint64_t>(TableName);
+   }
+   return true;
+}
+
+void* allocate_multi_index_storage(std::size_t size, std::size_t alignment);
+void deallocate_multi_index_storage(void* storage, std::size_t alignment) noexcept;
+[[noreturn]] void fail_multi_index_allocation();
+
+template <class T> class multi_index_allocator {
+ public:
+   using value_type = T;
+
+   multi_index_allocator() = default;
+
+   template <class U> multi_index_allocator(const multi_index_allocator<U>&) noexcept {}
+
+   [[nodiscard]] T* allocate(std::size_t count) {
+      if (count > std::numeric_limits<std::size_t>::max() / sizeof(T)) {
+         fail_multi_index_allocation();
+      }
+      return static_cast<T*>(allocate_multi_index_storage(count * sizeof(T), alignof(T)));
+   }
+
+   void deallocate(T* storage, std::size_t) noexcept {
+      deallocate_multi_index_storage(storage, alignof(T));
+   }
+
+   template <class U> friend bool operator==(const multi_index_allocator&, const multi_index_allocator<U>&) noexcept {
+      return true;
+   }
+};
+
 template <class Key>
 concept primary_key_argument =
     (std::integral<std::remove_cvref_t<Key>> && !std::same_as<std::remove_cvref_t<Key>, bool>) ||
@@ -330,7 +371,9 @@ template <class Stream, class Value> void unpack_row(Stream& stream, Value& valu
 }
 
 template <class Value, class Function> decltype(auto) with_packed(const Value& value, Function&& function) {
-   auto bytes = forge::raw::pack(value);
+   auto stream = forge::datastream<std::vector<std::uint8_t, multi_index_allocator<std::uint8_t>>>{};
+   forge::raw::pack(stream, value);
+   auto& bytes = stream.storage();
    check(bytes.size() <= std::numeric_limits<std::uint32_t>::max(), "serialized table row is too large");
    return std::forward<Function>(function)(bytes.data(), static_cast<std::uint32_t>(bytes.size()));
 }
@@ -342,7 +385,7 @@ template <class Function> decltype(auto) with_buffer(std::size_t size, Function&
       return std::forward<Function>(function)(storage.data());
    }
 
-   auto storage = std::vector<std::uint8_t>(size);
+   auto storage = std::vector<std::uint8_t, multi_index_allocator<std::uint8_t>>(size);
    return std::forward<Function>(function)(storage.data());
 }
 
@@ -357,6 +400,8 @@ template <name::raw TableName, table_row T, class... Indices> class multi_index 
    static_assert(index_count <= 16U, "multi_index only supports a maximum of 16 secondary indices");
    static_assert(name{TableName}.length() < 13U,
                  "multi_index does not support table names with a length greater than 12");
+   static_assert(detail::table_name_matches<T, TableName>(),
+                 "multi_index table name does not match row get_table_name()");
    static_assert((detail::secondary_index_spec<Indices, T> && ...),
                  "multi_index secondary indices require a supported const extractor");
    static_assert(detail::valid_index_names<Indices...>(), "invalid index name used in multi_index");
@@ -396,6 +441,8 @@ template <name::raw TableName, table_row T, class... Indices> class multi_index 
       std::int32_t primary_iterator = -1;
       std::array<std::int32_t, index_count> secondary_iterators{};
    };
+
+   using item_list = std::list<item, detail::multi_index_allocator<item>>;
 
    template <std::size_t Number, bool IsConst> class secondary_index;
 
@@ -939,7 +986,7 @@ template <name::raw TableName, table_row T, class... Indices> class multi_index 
       return nullptr;
    }
 
-   typename std::list<item>::iterator find_cached_position(const T& value) const noexcept {
+   typename item_list::iterator find_cached_position(const T& value) const noexcept {
       for (auto position = items_.begin(); position != items_.end(); ++position) {
          if (static_cast<const T*>(std::addressof(*position)) == std::addressof(value)) {
             return position;
@@ -1003,7 +1050,7 @@ template <name::raw TableName, table_row T, class... Indices> class multi_index 
    name code_{};
    std::uint64_t scope_ = 0U;
    mutable std::uint64_t next_primary_key_ = unset_next_primary_key;
-   mutable std::list<item> items_;
+   mutable item_list items_;
 };
 
 } // namespace forge::contract

@@ -230,13 +230,33 @@ class service_node {
 - `guest/libraries/contract/intrinsics.hpp` is the only intrinsic signature
   registry. Generated guest C declarations, EOSIO headers, host skeletons and
   import manifests must derive from it.
-- Dual-target contract libraries declare their complete source and dependency
-  graph through `forge_add_contract_library`. The immutable Forge descriptor is
-  the only host/guest graph source; native CMake target properties are not a
-  serializable cross-toolchain protocol.
-- Do not recover contract dependencies from `LINK_LIBRARIES`,
-  `INTERFACE_LINK_LIBRARIES`, `$<LINK_ONLY:...>` or CMake directory wrappers.
-  Add files and scoped dependencies to the Forge declaration instead.
+- Dual-target contract libraries use ordinary CMake targets declared through
+  `forge_add_contract_library` in every configuration that builds them. Host
+  and guest configurations compile the same physical sources independently
+  with their selected toolchains.
+- A product guest directory is a standalone CMake project and the source of
+  truth for its WASM target graph. A host helper may launch that project, but it
+  must not serialize or reconstruct downstream targets.
+- A guest `forge_add_contract_library` or `forge_add_contract` declaration is
+  complete. Post-declaration source, compile-option, definition and include
+  mutation is forbidden because CMake compilation and Abigen must use one
+  semantic profile.
+- Guest projects must not add directory-wide compile options, definitions,
+  includes or `CMAKE_CXX_FLAGS*`; the Forge Contract toolchain owns one
+  semantic compile profile per standard CMake configuration and gives the same
+  selected profile to Abigen.
+- A product with shared sources outside its guest directory declares one
+  `FORGE_CONTRACT_SOURCE_ROOT`; every guest target uses that same root for
+  reproducible path mapping.
+- The normal CMake target graph is the only contract build graph. Do not
+  serialize, traverse or reconstruct it through JSON descriptors, fingerprints,
+  `LINK_LIBRARIES`, `INTERFACE_LINK_LIBRARIES`, `$<LINK_ONLY:...>` or CMake
+  directory wrappers. A raw before/after property snapshot may enforce guest
+  target immutability, but it must not interpret dependency edges.
+- Do not reuse native archives, BMI or PCM files in the guest configuration.
+- Cross-toolchain source packages are not part of the Contract SDK. Products
+  share source-tree libraries with `add_subdirectory`; ordinary native
+  `install(EXPORT ...)` remains the library owner's responsibility.
 - Contract SDK C ABI support records are generated from templates under
   `guest/cmake/`; generated `.h` files never live in a guest library's source
   `include/forge` tree.

@@ -1,0 +1,3 @@
+#pragma once
+
+#define PRODUCT_CHAIN_DEFAULT_BLOCK_SIZE 4096

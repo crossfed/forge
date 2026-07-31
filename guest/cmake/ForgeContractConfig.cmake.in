@@ -21,6 +21,7 @@ set(ForgeContract_ATTR_PLUGIN "${ForgeContract_PREFIX}/@CMAKE_INSTALL_LIBDIR@/fo
 set(ForgeContract_CHECK "${ForgeContract_PREFIX}/bin/contract-check")
 set(ForgeContract_MANIFEST "${ForgeContract_PREFIX}/bin/contract-manifest")
 set(ForgeContract_COMPONENTS "${CMAKE_CURRENT_LIST_DIR}/ForgeContractGuestComponents.cmake")
+set(ForgeContract_BUILD "${CMAKE_CURRENT_LIST_DIR}/ForgeContractBuild.cmake")
 
 include("${CMAKE_CURRENT_LIST_DIR}/ForgeContractFunctions.cmake")
 
@@ -34,6 +35,7 @@ foreach(_required
    ForgeContract_CHECK
    ForgeContract_MANIFEST
    ForgeContract_COMPONENTS
+   ForgeContract_BUILD
 )
    if(NOT EXISTS "${${_required}}")
       set(ForgeContract_FOUND FALSE)
@@ -58,6 +60,7 @@ if(_forge_contract_registered_components_file)
    endif()
 else()
    include("${_forge_contract_components_file}")
+   _forge_contract_finalize_guest_components()
    set_property(
       GLOBAL PROPERTY FORGE_CONTRACT_REGISTERED_COMPONENTS_FILE
       "${_forge_contract_components_file}"

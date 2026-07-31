@@ -1,6 +1,7 @@
 set(CMAKE_SYSTEM_NAME Generic)
 set(CMAKE_SYSTEM_PROCESSOR wasm32)
 set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+set(FORGE_CONTRACT_GUEST TRUE CACHE BOOL "Forge Contract wasm32 configuration" FORCE)
 
 if(DEFINED FORGE_CONTRACT_SDK_PREFIX AND NOT "${FORGE_CONTRACT_SDK_PREFIX}" STREQUAL "")
    get_filename_component(_forge_contract_prefix "${FORGE_CONTRACT_SDK_PREFIX}" ABSOLUTE)
@@ -19,6 +20,10 @@ set(CMAKE_AR "${_forge_contract_prefix}/bin/llvm-ar")
 set(CMAKE_RANLIB "${_forge_contract_prefix}/bin/llvm-ranlib")
 set(CMAKE_SYSROOT "${_forge_contract_prefix}/sysroot")
 set(CMAKE_EXE_LINKER_FLAGS_INIT "-fuse-ld=${CMAKE_LINKER}")
+set(
+   CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES
+   "${CMAKE_SYSROOT}/include/c++/v1"
+)
 
 set(CMAKE_C_COMPILER_TARGET wasm32)
 set(CMAKE_CXX_COMPILER_TARGET wasm32)
@@ -26,5 +31,34 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_SCAN_FOR_MODULES ON)
+
+function(_forge_contract_set_profile variable value description)
+   if(DEFINED "${variable}" AND NOT "${${variable}}" STREQUAL "${value}")
+      message(
+         FATAL_ERROR
+         "${variable} is owned by the Forge Contract guest toolchain; "
+         "expected '${value}', received '${${variable}}'"
+      )
+   endif()
+   set("${variable}" "${value}" CACHE STRING "${description}" FORCE)
+endfunction()
+
+_forge_contract_set_profile(
+   CMAKE_CXX_FLAGS "" "Forge Contract common guest C++ flags"
+)
+_forge_contract_set_profile(
+   CMAKE_CXX_FLAGS_DEBUG "-g" "Forge Contract Debug C++ flags"
+)
+_forge_contract_set_profile(
+   CMAKE_CXX_FLAGS_RELEASE "-O3 -DNDEBUG" "Forge Contract Release C++ flags"
+)
+_forge_contract_set_profile(
+   CMAKE_CXX_FLAGS_MINSIZEREL "-Os -DNDEBUG"
+   "Forge Contract MinSizeRel C++ flags"
+)
+_forge_contract_set_profile(
+   CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g -DNDEBUG"
+   "Forge Contract RelWithDebInfo C++ flags"
+)
 
 set(CMAKE_EXECUTABLE_SUFFIX ".wasm")

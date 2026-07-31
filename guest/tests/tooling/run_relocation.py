@@ -146,6 +146,7 @@ def main() -> None:
     args = parser.parse_args()
 
     output = args.output.resolve()
+    forge_package = args.forge_package.resolve()
     shutil.rmtree(output, ignore_errors=True)
     unpacked = output / "sdk"
     unpacked.mkdir(parents=True)
@@ -180,20 +181,22 @@ def main() -> None:
         str(build),
         "-G",
         "Ninja Multi-Config",
+        f"-DCMAKE_TOOLCHAIN_FILE={package / 'ForgeContractToolchain.cmake'}",
         f"-DForgeContract_DIR={package}",
     )
     build_project(args.cmake, build)
 
+    artifacts = build / "artifacts"
     for suffix in ("wasm", "abi", "contract.json"):
-        artifact = build / f"hello.{suffix}"
+        artifact = artifacts / f"hello.{suffix}"
         if not artifact.is_file() or artifact.stat().st_size == 0:
             raise RuntimeError(f"missing relocated SDK artifact: {artifact}")
 
-    manifest = json.loads((build / "hello.contract.json").read_text(encoding="utf-8"))
-    if manifest["schema_version"] != 2:
-        raise RuntimeError("contract manifest schema is not version 2")
-    if not manifest["source_graph"]["files"] or len(manifest["source_graph"]["sha256"]) != 64:
-        raise RuntimeError("contract manifest has no attested source graph")
+    manifest = json.loads((artifacts / "hello.contract.json").read_text(encoding="utf-8"))
+    if manifest["schema_version"] != 3:
+        raise RuntimeError("contract manifest schema is not version 3")
+    if "source_graph" in manifest:
+        raise RuntimeError("runtime contract manifest contains source attestation")
     if manifest["sdk"]["profile"] == "release":
         expected_llvm = {
             "version": "llvmorg-22.1.8",
@@ -210,7 +213,7 @@ def main() -> None:
     ):
         raise RuntimeError("contract manifest intrinsic interface version is not the numeric version 1")
 
-    abi_path = build / "hello.abi"
+    abi_path = artifacts / "hello.abi"
     initial_abi = read_abi(abi_path)
     if type_target(initial_abi, "counter") != "uint32":
         raise RuntimeError("initial header ABI type was not generated")
@@ -247,7 +250,7 @@ def main() -> None:
     if clause_body(read_abi(abi_path), "positive-counter") != "The updated counter value must be greater than zero.":
         raise RuntimeError("Ricardian clauses change did not regenerate the contract ABI")
 
-    wasm = build / "hello.wasm"
+    wasm = artifacts / "hello.wasm"
     first_mtime = wasm.stat().st_mtime_ns
     time.sleep(0.01)
     with (source / "hello.cpp").open("a", encoding="utf-8") as stream:
@@ -256,10 +259,63 @@ def main() -> None:
     if wasm.stat().st_mtime_ns <= first_mtime:
         raise RuntimeError("contract source change did not rebuild the WebAssembly artifact")
 
+    aligned_source = output / "aligned-consumer"
+    shutil.copytree(
+        args.source_root / "guest" / "tests" / "relocation" / "aligned_multi_index",
+        aligned_source,
+    )
+    aligned_build = output / "aligned-build"
+    run(
+        args.cmake,
+        "-S",
+        str(aligned_source),
+        "-B",
+        str(aligned_build),
+        "-G",
+        "Ninja Multi-Config",
+        f"-DCMAKE_TOOLCHAIN_FILE={package / 'ForgeContractToolchain.cmake'}",
+        f"-DForgeContract_DIR={package}",
+    )
+    build_project(args.cmake, aligned_build)
+    for suffix in ("wasm", "abi", "contract.json"):
+        artifact = aligned_build / "artifacts" / f"alignedidx.{suffix}"
+        if not artifact.is_file() or artifact.stat().st_size == 0:
+            raise RuntimeError(f"missing aligned multi-index artifact: {artifact}")
+
+    aligned_host_build = output / "aligned-host-build"
+    aligned_host_command = [
+        args.cmake,
+        "-S",
+        str(aligned_source / "host"),
+        "-B",
+        str(aligned_host_build),
+        "-G",
+        "Ninja",
+        "-DCMAKE_BUILD_TYPE=Debug",
+        f"-DCMAKE_CXX_COMPILER={args.cxx_compiler}",
+        f"-DForge_DIR={forge_package}",
+        f"-DALIGNED_MULTI_INDEX_WASM={aligned_build / 'artifacts' / 'alignedidx.wasm'}",
+    ]
+    if platform.system() == "Darwin":
+        aligned_host_command.append(
+            f"-DCMAKE_OSX_SYSROOT={command_output('xcrun', '--sdk', 'macosx', '--show-sdk-path').strip()}"
+        )
+    run(*aligned_host_command)
+    run(
+        args.cmake,
+        "--build",
+        str(aligned_host_build),
+        "--target",
+        "aligned_multi_index_vm_tests",
+        "-j",
+        "4",
+    )
+    run(str(aligned_host_build / "aligned_multi_index_vm_tests"))
+
     validate_dual_target(
         cmake=args.cmake,
         cxx_compiler=args.cxx_compiler,
-        forge_package=args.forge_package,
+        forge_package=forge_package,
         contract_package=package,
         source=args.dual_target_source.resolve(),
         output=output / "dual-target",

@@ -12,6 +12,7 @@ add_library(
    dispatcher.cpp
    instant_finality.cpp
    intrinsics.cpp
+   multi_index.cpp
    print.cpp
    privileged.cpp
    producer_schedule.cpp
