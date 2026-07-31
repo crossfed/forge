@@ -251,6 +251,125 @@ find_package(ForgeContract CONFIG REQUIRED)
         (root / "contract.cpp").write_text(contract, encoding="utf-8")
 
 
+def validate_generated_project(
+    *,
+    cmake: str,
+    contract_package: Path,
+    output: Path,
+) -> None:
+    source = output / "generated-source"
+    build_directory = output / "generated-build"
+    source.mkdir(parents=True)
+    (source / "CMakeLists.txt").write_text(
+        """cmake_minimum_required(VERSION 3.31)
+project(ForgeContractGeneratedInputs LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+find_package(ForgeContract CONFIG REQUIRED)
+
+set(generated_directory "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(MAKE_DIRECTORY "${generated_directory}")
+add_custom_command(
+   OUTPUT "${generated_directory}/request.cppm"
+   COMMAND
+      "${CMAKE_COMMAND}" -E copy_if_different
+      "${CMAKE_CURRENT_SOURCE_DIR}/request.cppm.in"
+      "${generated_directory}/request.cppm"
+   DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/request.cppm.in"
+   VERBATIM
+)
+add_custom_command(
+   OUTPUT "${generated_directory}/entry.cpp"
+   COMMAND
+      "${CMAKE_COMMAND}" -E copy_if_different
+      "${CMAKE_CURRENT_SOURCE_DIR}/entry.cpp.in"
+      "${generated_directory}/entry.cpp"
+   DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/entry.cpp.in"
+   VERBATIM
+)
+
+forge_add_contract_library(
+   generated_protocol
+   ID fixture.generated.protocol
+   MODULE_BASE_DIRS "${generated_directory}"
+   MODULE_SOURCES "${generated_directory}/request.cppm"
+   PUBLIC_LIBRARIES Forge::forge_chain_protocol
+)
+forge_add_contract(
+   generated
+   SOURCES "${generated_directory}/entry.cpp"
+   LIBRARIES generated_protocol
+)
+""",
+        encoding="utf-8",
+    )
+    (source / "request.cppm.in").write_text(
+        """module;
+#include <cstdint>
+export module fixture.generated.protocol;
+export import forge.chain.protocol.action;
+
+export namespace fixture::generated {
+
+struct request {
+   std::uint64_t value = 0;
+
+   static constexpr forge::chain::protocol::action_name get_name() {
+      return forge::chain::protocol::make_name("generate");
+   }
+};
+
+} // namespace fixture::generated
+""",
+        encoding="utf-8",
+    )
+    (source / "entry.cpp.in").write_text(
+        """import fixture.generated.protocol;
+import forge.contract;
+
+class [[forge::contract("generated")]] generated final
+   : public forge::contract::context {
+ public:
+   using context::context;
+
+   [[forge::action]] void apply(fixture::generated::request) {}
+};
+""",
+        encoding="utf-8",
+    )
+
+    run(
+        cmake,
+        "-S",
+        str(source),
+        "-B",
+        str(build_directory),
+        "-G",
+        "Ninja",
+        f"-DCMAKE_TOOLCHAIN_FILE={contract_package / 'ForgeContractToolchain.cmake'}",
+        f"-DForgeContract_DIR={contract_package}",
+        f"-DFORGE_CONTRACT_SOURCE_ROOT={source}",
+    )
+    run(
+        cmake,
+        "--build",
+        str(build_directory),
+        "--target",
+        "generated_artifacts",
+        "-j",
+        "4",
+    )
+    abi = json.loads(
+        (build_directory / "artifacts" / "generated.abi").read_text(
+            encoding="utf-8"
+        )
+    )
+    action = next(item for item in abi["actions"] if item["name"] == "generate")
+    if action["type"] != "request":
+        raise RuntimeError("generated named action did not preserve direct ABI layout")
+
+
 def validate_negative_projects(
     *,
     cmake: str,
@@ -706,6 +825,18 @@ forge_add_contract(
         encoding="utf-8",
     )
 
+    missing_input = source_root / "missing-input"
+    write_negative_project(
+        missing_input,
+        cmake_body="""
+forge_add_contract(
+   missing
+   SOURCES missing.cpp
+)
+""",
+        modules={},
+    )
+
     table_mismatch = source_root / "table-name-mismatch"
     write_negative_project(
         table_mismatch,
@@ -809,6 +940,10 @@ class [[forge::contract("mismatch")]] mismatch final
         (late_profile, "CMAKE_CXX_FLAGS_RELEASE must remain"),
         (nested_late_profile, "CMAKE_CXX_FLAGS_RELEASE must remain"),
         (external_input, "contract source is outside its declared root"),
+        (
+            missing_input,
+            "does not exist and is not a declared generated output",
+        ),
     )
     for source, expected in cases:
         run_failure(
@@ -977,6 +1112,11 @@ def validate(
         source=source,
         output=output,
         contract_package=contract_package,
+    )
+    validate_generated_project(
+        cmake=cmake,
+        contract_package=contract_package,
+        output=output,
     )
     validate_negative_projects(
         cmake=cmake,
