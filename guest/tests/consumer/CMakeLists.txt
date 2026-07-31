@@ -252,7 +252,7 @@ add_custom_target(
       --imports "${ForgeContract_DATA_DIR}/registry/intrinsics.json"
       --manifest "${CMAKE_CURRENT_BINARY_DIR}/artifacts/hello.contract.json"
       --output "${CMAKE_CURRENT_BINARY_DIR}/checker"
-   DEPENDS hello
+   DEPENDS hello_artifacts
    VERBATIM
 )
 

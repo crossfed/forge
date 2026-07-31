@@ -135,6 +135,10 @@ set(
    eosio_bios
    eosio_boot
 )
+set(_contract_artifacts)
+foreach(_contract IN LISTS _contracts)
+   list(APPEND _contract_artifacts "${_contract}_artifacts")
+endforeach()
 
 add_custom_target(
    forge_contract_corpus_integrity ALL
@@ -166,7 +170,7 @@ add_custom_target(
       --root "${CMAKE_CURRENT_SOURCE_DIR}"
       --build-dir "${CMAKE_CURRENT_BINARY_DIR}/artifacts"
       --intrinsics "${ForgeContract_DATA_DIR}/registry/intrinsics.json"
-   DEPENDS ${_contracts} forge_contract_corpus_integrity
+   DEPENDS ${_contract_artifacts} forge_contract_corpus_integrity
    VERBATIM
 )
 

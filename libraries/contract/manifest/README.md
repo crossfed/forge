@@ -32,5 +32,5 @@ deterministic JSON, SHA-256 and WASM inspection. The library does not require
 Clang and does not validate policy; use `contract_validation` first.
 
 The generator request and manifest schema are Experimental. Schema v2 sidecars
-are generated artifacts and must be regenerated; no compatibility output mode
-is provided.
+with `source_graph` are generated artifacts and must be regenerated as schema
+v3; no compatibility output mode is provided.
