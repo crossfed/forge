@@ -16,6 +16,15 @@ module forge.chain.api.verified_client;
 import forge.chain.api.exceptions;
 
 namespace forge::chain::api {
+namespace {
+
+template <typename Response> boost::asio::awaitable<Response> unsupported_audit(const char* method) {
+   FORGE_THROW_EXCEPTION(exceptions::audit_not_supported, "verified chain API method has no content proof verifier",
+                         forge::exceptions::ctx("method", method));
+   co_return Response{};
+}
+
+} // namespace
 
 verified_client::verified_client(raw_client client, std::shared_ptr<audit_verifier> verifier)
     : client_{std::move(client)}, verifier_{std::move(verifier)} {
@@ -180,6 +189,12 @@ void verified_client::verify_changes(const protocol::state_changes_request& requ
 void verified_client::verify_transaction_status(const forge::chain::protocol::transaction_id& expected,
                                                 const protocol::transaction_status_response& response) {
    const auto& audit = verify_envelope(response);
+   if (response.head != response.context.head || response.finalized != response.context.finalized ||
+       response.head_num != protocol::calculate_block_num_from_id(response.head) ||
+       response.finalized_num != protocol::calculate_block_num_from_id(response.finalized)) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_finality,
+                            "chain API transaction payload is inconsistent with its audited context");
+   }
    if (response.id != expected) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof,
                             "chain API transaction response has the wrong transaction id");
@@ -197,8 +212,15 @@ void verified_client::verify_transaction_status(const forge::chain::protocol::tr
 }
 
 boost::asio::awaitable<protocol::info_response> verified_client::get_info() {
-   auto response = co_await client_.info().get({.audit = protocol::audit_mode::required});
+   return get_info(protocol::anchored_request{});
+}
+
+boost::asio::awaitable<protocol::info_response> verified_client::get_info(protocol::anchored_request request) {
+   request.audit = protocol::audit_mode::required;
+   const auto requested_anchor = request.anchor;
+   auto response = co_await client_.info().get(std::move(request));
    static_cast<void>(verify_envelope(response));
+   verify_requested_anchor(requested_anchor, response);
    if (response.chain != response.context.chain) {
       FORGE_THROW_EXCEPTION(exceptions::wrong_chain, "chain API info payload belongs to another chain");
    }
@@ -211,6 +233,72 @@ boost::asio::awaitable<protocol::info_response> verified_client::get_info() {
                             "chain API info payload is inconsistent with its audited context");
    }
    co_return response;
+}
+
+boost::asio::awaitable<protocol::block_response> verified_client::get_block(protocol::block_request request) {
+   request.audit = protocol::audit_mode::required;
+   const auto requested_id = request.id;
+   const auto requested_num = request.num;
+   auto response = co_await client_.blocks().get_block(std::move(request));
+   static_cast<void>(verify_envelope(response));
+   if ((requested_id && response.id != *requested_id) || (requested_num && response.num != *requested_num) ||
+       response.id != response.context.anchor->block || response.num != response.context.anchor->block_num ||
+       response.block.calculate_id() != response.id || response.block.calculate_block_num() != response.num ||
+       protocol::calculate_transaction_mroot(response.block.transactions) != response.block.transaction_mroot ||
+       response.block.transaction_mroot != response.context.anchor->transaction_root || !response.canonical) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_finality,
+                            "chain API block response does not match its request and audited anchor");
+   }
+   co_return response;
+}
+
+boost::asio::awaitable<protocol::block_header_response> verified_client::get_header(protocol::block_request request) {
+   request.audit = protocol::audit_mode::required;
+   const auto requested_id = request.id;
+   const auto requested_num = request.num;
+   auto response = co_await client_.blocks().get_header(std::move(request));
+   static_cast<void>(verify_envelope(response));
+   if ((requested_id && response.id != *requested_id) || (requested_num && response.num != *requested_num) ||
+       response.id != response.context.anchor->block || response.num != response.context.anchor->block_num ||
+       response.header.calculate_id() != response.id || response.header.calculate_block_num() != response.num ||
+       response.header.transaction_mroot != response.context.anchor->transaction_root || !response.canonical) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_finality,
+                            "chain API block header does not match its request and audited anchor");
+   }
+   co_return response;
+}
+
+boost::asio::awaitable<protocol::block_state_response> verified_client::get_block_state(protocol::block_request) {
+   return unsupported_audit<protocol::block_state_response>("block.get_block_state");
+}
+
+boost::asio::awaitable<protocol::block_range_response>
+verified_client::get_canonical_range(protocol::block_range_request) {
+   return unsupported_audit<protocol::block_range_response>("block.get_canonical_range");
+}
+
+boost::asio::awaitable<protocol::protocol_features_response>
+verified_client::get_activated_protocol_features(protocol::protocol_features_request) {
+   return unsupported_audit<protocol::protocol_features_response>("block.get_activated_protocol_features");
+}
+
+boost::asio::awaitable<protocol::consensus_parameters_response>
+verified_client::get_consensus_parameters(protocol::anchored_request) {
+   return unsupported_audit<protocol::consensus_parameters_response>("block.get_consensus_parameters");
+}
+
+boost::asio::awaitable<protocol::producers_response> verified_client::get_producers(protocol::producers_request) {
+   return unsupported_audit<protocol::producers_response>("block.get_producers");
+}
+
+boost::asio::awaitable<protocol::producer_schedule_response>
+verified_client::get_producer_schedule(protocol::anchored_request) {
+   return unsupported_audit<protocol::producer_schedule_response>("block.get_producer_schedule");
+}
+
+boost::asio::awaitable<protocol::finalizer_info_response>
+verified_client::get_finalizer_info(protocol::anchored_request) {
+   return unsupported_audit<protocol::finalizer_info_response>("block.get_finalizer_info");
 }
 
 boost::asio::awaitable<protocol::state_point_response>
@@ -237,21 +325,40 @@ verified_client::get_changes(protocol::state_changes_request request) {
    co_return response;
 }
 
-boost::asio::awaitable<protocol::block_response> verified_client::get_block(protocol::block_request request) {
-   request.audit = protocol::audit_mode::required;
-   const auto requested_id = request.id;
-   const auto requested_num = request.num;
-   auto response = co_await client_.blocks().get_block(std::move(request));
-   static_cast<void>(verify_envelope(response));
-   if ((requested_id && response.id != *requested_id) || (requested_num && response.num != *requested_num) ||
-       response.id != response.context.anchor->block || response.num != response.context.anchor->block_num ||
-       response.block.calculate_id() != response.id || response.block.calculate_block_num() != response.num ||
-       protocol::calculate_transaction_mroot(response.block.transactions) != response.block.transaction_mroot ||
-       response.block.transaction_mroot != response.context.anchor->transaction_root) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_finality,
-                            "chain API block response does not match its request and audited anchor");
-   }
-   co_return response;
+boost::asio::awaitable<protocol::account_response> verified_client::get_account(protocol::account_request) {
+   return unsupported_audit<protocol::account_response>("state.get_account");
+}
+
+boost::asio::awaitable<protocol::code_response> verified_client::get_code(protocol::code_request) {
+   return unsupported_audit<protocol::code_response>("state.get_code");
+}
+
+boost::asio::awaitable<protocol::table_rows_response> verified_client::get_table_rows(protocol::table_rows_request) {
+   return unsupported_audit<protocol::table_rows_response>("state.get_table_rows");
+}
+
+boost::asio::awaitable<protocol::table_scope_response> verified_client::get_table_scope(protocol::table_scope_request) {
+   return unsupported_audit<protocol::table_scope_response>("state.get_table_scope");
+}
+
+boost::asio::awaitable<protocol::currency_balance_response>
+verified_client::get_currency_balance(protocol::currency_balance_request) {
+   return unsupported_audit<protocol::currency_balance_response>("state.get_currency_balance");
+}
+
+boost::asio::awaitable<protocol::currency_stats_response>
+verified_client::get_currency_stats(protocol::currency_stats_request) {
+   return unsupported_audit<protocol::currency_stats_response>("state.get_currency_stats");
+}
+
+boost::asio::awaitable<protocol::scheduled_response>
+verified_client::get_scheduled_transactions(protocol::scheduled_request) {
+   return unsupported_audit<protocol::scheduled_response>("state.get_scheduled_transactions");
+}
+
+boost::asio::awaitable<protocol::authorizers_response>
+verified_client::get_accounts_by_authorizers(protocol::authorizers_request) {
+   return unsupported_audit<protocol::authorizers_response>("state.get_accounts_by_authorizers");
 }
 
 boost::asio::awaitable<protocol::transaction_status_response>
@@ -278,6 +385,16 @@ verified_client::await_transaction(protocol::transaction_await_request request) 
                             "chain API transaction response does not satisfy the requested verified lifecycle");
    }
    co_return response;
+}
+
+boost::asio::awaitable<protocol::transaction_read_only_response>
+verified_client::compute_transaction(protocol::transaction_read_only_request) {
+   return unsupported_audit<protocol::transaction_read_only_response>("transaction.compute_transaction");
+}
+
+boost::asio::awaitable<protocol::transaction_read_only_response>
+verified_client::send_read_only_transaction(protocol::transaction_read_only_request) {
+   return unsupported_audit<protocol::transaction_read_only_response>("transaction.send_read_only_transaction");
 }
 
 raw_client& verified_client::raw() noexcept {

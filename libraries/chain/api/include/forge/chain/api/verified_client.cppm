@@ -40,14 +40,44 @@ class verified_client {
    verified_client(raw_client client, std::shared_ptr<audit_verifier> verifier);
 
    boost::asio::awaitable<protocol::info_response> get_info();
+   boost::asio::awaitable<protocol::info_response> get_info(protocol::anchored_request request);
+
+   boost::asio::awaitable<protocol::block_response> get_block(protocol::block_request request);
+   boost::asio::awaitable<protocol::block_header_response> get_header(protocol::block_request request);
+   boost::asio::awaitable<protocol::block_state_response> get_block_state(protocol::block_request request);
+   boost::asio::awaitable<protocol::block_range_response> get_canonical_range(protocol::block_range_request request);
+   boost::asio::awaitable<protocol::protocol_features_response>
+   get_activated_protocol_features(protocol::protocol_features_request request);
+   boost::asio::awaitable<protocol::consensus_parameters_response>
+   get_consensus_parameters(protocol::anchored_request request);
+   boost::asio::awaitable<protocol::producers_response> get_producers(protocol::producers_request request);
+   boost::asio::awaitable<protocol::producer_schedule_response>
+   get_producer_schedule(protocol::anchored_request request);
+   boost::asio::awaitable<protocol::finalizer_info_response> get_finalizer_info(protocol::anchored_request request);
+
    boost::asio::awaitable<protocol::state_point_response> get_point(protocol::state_point_request request);
    boost::asio::awaitable<protocol::state_range_response> get_range(protocol::state_range_request request);
    boost::asio::awaitable<protocol::state_changes_response> get_changes(protocol::state_changes_request request);
-   boost::asio::awaitable<protocol::block_response> get_block(protocol::block_request request);
+   boost::asio::awaitable<protocol::account_response> get_account(protocol::account_request request);
+   boost::asio::awaitable<protocol::code_response> get_code(protocol::code_request request);
+   boost::asio::awaitable<protocol::table_rows_response> get_table_rows(protocol::table_rows_request request);
+   boost::asio::awaitable<protocol::table_scope_response> get_table_scope(protocol::table_scope_request request);
+   boost::asio::awaitable<protocol::currency_balance_response>
+   get_currency_balance(protocol::currency_balance_request request);
+   boost::asio::awaitable<protocol::currency_stats_response>
+   get_currency_stats(protocol::currency_stats_request request);
+   boost::asio::awaitable<protocol::scheduled_response> get_scheduled_transactions(protocol::scheduled_request request);
+   boost::asio::awaitable<protocol::authorizers_response>
+   get_accounts_by_authorizers(protocol::authorizers_request request);
+
    boost::asio::awaitable<protocol::transaction_status_response>
    get_transaction_status(protocol::transaction_status_request request);
    boost::asio::awaitable<protocol::transaction_status_response>
    await_transaction(protocol::transaction_await_request request);
+   boost::asio::awaitable<protocol::transaction_read_only_response>
+   compute_transaction(protocol::transaction_read_only_request request);
+   boost::asio::awaitable<protocol::transaction_read_only_response>
+   send_read_only_transaction(protocol::transaction_read_only_request request);
 
    [[nodiscard]] raw_client& raw() noexcept;
 
