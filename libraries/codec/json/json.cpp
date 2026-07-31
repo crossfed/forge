@@ -4,6 +4,7 @@ module;
 #include <algorithm>
 #include <chrono>
 #include <cstddef>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -431,6 +432,32 @@ template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 }
 
 } // namespace
+
+namespace detail {
+
+write_result encoding_failure(const schema::encoding_error& error) {
+   return write_result{
+       .diagnostics = {schema::diagnostic{
+           .path = error.path(),
+           .code = "json.type",
+           .level = schema::severity::error,
+           .message = error.what(),
+       }},
+   };
+}
+
+write_result encoding_failure(const std::exception& error) {
+   return write_result{
+       .diagnostics = {schema::diagnostic{
+           .path = {},
+           .code = "json.type",
+           .level = schema::severity::error,
+           .message = error.what(),
+       }},
+   };
+}
+
+} // namespace detail
 
 read_result<variant> read_value(std::string_view input, read_options options) {
    auto parsed = read_codec_value(input, options);

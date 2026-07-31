@@ -160,6 +160,15 @@ template <> struct forge::schema::rules<forge_json_tests::exact_long_double_reco
    }
 };
 
+template <> struct forge::schema::rules<forge_json_tests::exact_schema_plain_parent> {
+   [[nodiscard]] static forge::schema::object_schema<forge_json_tests::exact_schema_plain_parent> define() {
+      auto schema = forge::schema::object<forge_json_tests::exact_schema_plain_parent>();
+      static_cast<void>(schema.field<&forge_json_tests::exact_schema_plain_parent::child>("child"));
+      static_cast<void>(schema.field<&forge_json_tests::exact_schema_plain_parent::children>("children"));
+      return schema;
+   }
+};
+
 template <> struct forge::schema::rules<forge_json_tests::exact_dotted_schema_parent> {
    [[nodiscard]] static forge::schema::object_schema<forge_json_tests::exact_dotted_schema_parent> define() {
       auto schema = forge::schema::object<forge_json_tests::exact_dotted_schema_parent>();
@@ -200,6 +209,24 @@ BOOST_AUTO_TEST_CASE(json_schema_writer_reports_nested_encoding_path) {
    BOOST_TEST(saved.diagnostics.front().path == "nested.value");
    BOOST_TEST(saved.diagnostics.front().code == "json.type");
    BOOST_TEST(saved.diagnostics.front().message == "long double schema fields are not supported by config codecs");
+}
+
+BOOST_AUTO_TEST_CASE(json_schema_roundtrip_preserves_described_children_without_rules) {
+   const auto input = forge_json_tests::exact_schema_plain_parent{
+       .child = {.value = 7},
+       .children = {{.value = 11}, {.value = 13}},
+   };
+
+   const auto encoded = forge::config::core::encode(input);
+   const auto decoded = forge::config::core::decode<forge_json_tests::exact_schema_plain_parent>(encoded);
+   BOOST_REQUIRE(decoded.ok());
+   BOOST_CHECK(decoded.value == input);
+
+   const auto written = forge::codec::json::write(input);
+   BOOST_REQUIRE(written.ok());
+   const auto parsed = forge::codec::json::read<forge_json_tests::exact_schema_plain_parent>(written.text);
+   BOOST_REQUIRE(parsed.ok());
+   BOOST_CHECK(parsed.value == input);
 }
 
 BOOST_AUTO_TEST_CASE(json_value_roundtrip_preserves_generic_shapes) {

@@ -60,6 +60,13 @@ struct exact_long_double_parent {
    exact_long_double_record nested;
 };
 
+struct exact_schema_plain_parent {
+   exact_leaf child;
+   std::vector<exact_leaf> children;
+
+   bool operator==(const exact_schema_plain_parent&) const = default;
+};
+
 struct exact_dotted_leaf {
    std::uint32_t deadline_ms = 0;
 
@@ -167,6 +174,7 @@ BOOST_DESCRIBE_STRUCT(exact_scalar_record, (), (enabled, signed_value, unsigned_
 BOOST_DESCRIBE_STRUCT(exact_double_record, (), (value))
 BOOST_DESCRIBE_STRUCT(exact_long_double_record, (), (value))
 BOOST_DESCRIBE_STRUCT(exact_long_double_parent, (), (nested))
+BOOST_DESCRIBE_STRUCT(exact_schema_plain_parent, (), (child, children))
 BOOST_DESCRIBE_STRUCT(exact_dotted_leaf, (), (deadline_ms))
 BOOST_DESCRIBE_STRUCT(exact_dotted_parent, (), (config))
 BOOST_DESCRIBE_STRUCT(exact_dotted_schema_parent, (), (config))

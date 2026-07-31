@@ -1094,9 +1094,28 @@ template <typename T>
       if (const auto* object = input.as_object()) {
          auto output = clean_type{};
          const auto nested_rules = rules<clean_type>::define();
-         nested_rules.apply_defaults(output);
-         auto nested = nested_rules.decode_object(*object, path, output);
-         diagnostics.insert(diagnostics.end(), nested.begin(), nested.end());
+         if (!nested_rules.fields().empty()) {
+            nested_rules.apply_defaults(output);
+            auto nested = nested_rules.decode_object(*object, path, output);
+            diagnostics.insert(diagnostics.end(), nested.begin(), nested.end());
+            return output;
+         }
+
+         using members = boost::describe::describe_members<clean_type, boost::describe::mod_any_access |
+                                                                           boost::describe::mod_inherited>;
+         boost::mp11::mp_for_each<members>([&](auto descriptor) {
+            const auto found = object->find(descriptor.name);
+            if (found == object->end()) {
+               return;
+            }
+            const auto member_path = append_path(path, descriptor.name);
+            using member_type = std::remove_cvref_t<decltype(output.*descriptor.pointer)>;
+            try {
+               output.*descriptor.pointer = cast_input_to<member_type>(found->second, member_path, diagnostics);
+            } catch (const std::exception& error) {
+               diagnostics.push_back(make_path_error(member_path, "config.type", error.what()));
+            }
+         });
          return output;
       }
    }
@@ -1137,11 +1156,19 @@ template <typename T>
          diagnostics.push_back(make_path_error(item_path, "config.type", "list entry is not an object"));
          continue;
       }
-      auto item = T{};
-      nested_rules.apply_defaults(item);
-      auto nested = nested_rules.decode_object(*object, item_path, item);
-      diagnostics.insert(diagnostics.end(), nested.begin(), nested.end());
-      output.push_back(std::move(item));
+      if (!nested_rules.fields().empty()) {
+         auto item = T{};
+         nested_rules.apply_defaults(item);
+         auto nested = nested_rules.decode_object(*object, item_path, item);
+         diagnostics.insert(diagnostics.end(), nested.begin(), nested.end());
+         output.push_back(std::move(item));
+         continue;
+      }
+      try {
+         output.push_back(cast_input_to<T>((*values)[i], item_path, diagnostics));
+      } catch (const std::exception& error) {
+         diagnostics.push_back(make_path_error(item_path, "config.type", error.what()));
+      }
    }
    return output;
 }

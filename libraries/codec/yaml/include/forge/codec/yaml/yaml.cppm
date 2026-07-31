@@ -75,27 +75,8 @@ struct write_result {
 
 namespace detail {
 
-[[nodiscard]] inline write_result encoding_failure(const schema::encoding_error& error) {
-   return write_result{
-       .diagnostics = {schema::diagnostic{
-           .path = error.path(),
-           .code = "yaml.type",
-           .level = schema::severity::error,
-           .message = error.what(),
-       }},
-   };
-}
-
-[[nodiscard]] inline write_result encoding_failure(const std::exception& error) {
-   return write_result{
-       .diagnostics = {schema::diagnostic{
-           .path = {},
-           .code = "yaml.type",
-           .level = schema::severity::error,
-           .message = error.what(),
-       }},
-   };
-}
+[[nodiscard]] write_result encoding_failure(const schema::encoding_error& error);
+[[nodiscard]] write_result encoding_failure(const std::exception& error);
 
 } // namespace detail
 

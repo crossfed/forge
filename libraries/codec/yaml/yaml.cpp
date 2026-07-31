@@ -5,6 +5,7 @@ module;
 #include <glaze/yaml/write.hpp>
 #include <chrono>
 #include <cstddef>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -314,6 +315,32 @@ template <class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
 } // namespace
 
+namespace detail {
+
+write_result encoding_failure(const schema::encoding_error& error) {
+   return write_result{
+       .diagnostics = {schema::diagnostic{
+           .path = error.path(),
+           .code = "yaml.type",
+           .level = schema::severity::error,
+           .message = error.what(),
+       }},
+   };
+}
+
+write_result encoding_failure(const std::exception& error) {
+   return write_result{
+       .diagnostics = {schema::diagnostic{
+           .path = {},
+           .code = "yaml.type",
+           .level = schema::severity::error,
+           .message = error.what(),
+       }},
+   };
+}
+
+} // namespace detail
+
 read_result<variant> read_value(std::string_view input, read_options options) {
    auto parsed = read_codec_value(input, options);
    auto result = read_result<variant>{};
@@ -396,7 +423,8 @@ read_result<config::core::document> load_document(const std::filesystem::path& p
    return read_document(text, std::move(options));
 }
 
-write_result save_document(const std::filesystem::path& path, const config::core::document& input, write_options options) {
+write_result save_document(const std::filesystem::path& path, const config::core::document& input,
+                           write_options options) {
    auto result = write_document(input, std::move(options));
    if (!result.ok()) {
       return result;
