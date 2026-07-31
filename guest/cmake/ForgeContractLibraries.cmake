@@ -344,14 +344,48 @@ function(_forge_contract_validate_guest_targets)
 endfunction()
 
 function(_forge_contract_defer_guest_environment_validation)
-   cmake_language(DEFER CALL _forge_contract_validate_guest_environment)
+   cmake_language(
+      DEFER ID forge_contract_environment_validation
+      CALL _forge_contract_validate_guest_environment_final
+   )
 endfunction()
 
 function(_forge_contract_defer_guest_target_validation)
    cmake_language(
       DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
-      CALL _forge_contract_validate_guest_targets
+      ID forge_contract_target_validation
+      CALL _forge_contract_validate_guest_targets_final
    )
+endfunction()
+
+function(_forge_contract_downstream_deferred_calls output)
+   cmake_language(DEFER GET_CALL_IDS _pending_calls)
+   list(FILTER _pending_calls EXCLUDE REGEX "^forge_contract_")
+   set(${output} "${_pending_calls}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_validate_guest_environment_final)
+   _forge_contract_downstream_deferred_calls(_pending_calls)
+   if(_pending_calls)
+      cmake_language(
+         DEFER ID forge_contract_environment_validation
+         CALL _forge_contract_validate_guest_environment_final
+      )
+      return()
+   endif()
+   _forge_contract_validate_guest_environment()
+endfunction()
+
+function(_forge_contract_validate_guest_targets_final)
+   _forge_contract_downstream_deferred_calls(_pending_calls)
+   if(_pending_calls)
+      cmake_language(
+         DEFER ID forge_contract_target_validation
+         CALL _forge_contract_validate_guest_targets_final
+      )
+      return()
+   endif()
+   _forge_contract_validate_guest_targets()
 endfunction()
 
 function(_forge_contract_freeze_guest_target target declaration)
@@ -410,6 +444,7 @@ function(_forge_contract_freeze_guest_target target declaration)
       )
       cmake_language(
          DEFER DIRECTORY "${_source_directory}"
+         ID forge_contract_environment_scheduler
          CALL _forge_contract_defer_guest_environment_validation
       )
    endif()
@@ -423,6 +458,7 @@ function(_forge_contract_freeze_guest_target target declaration)
       )
       cmake_language(
          DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
+         ID forge_contract_target_scheduler
          CALL _forge_contract_defer_guest_target_validation
       )
    endif()
