@@ -242,23 +242,23 @@ template <typename T> inline constexpr bool is_variant_v = variant_traits<clean_
        source.storage);
 }
 
-template <typename T> void apply_encoding(const T& input, variant& output);
+template <typename T> void apply_encoding(const T& input, variant& output, std::string_view path);
 
-template <typename T> void apply_encoding(const T& input, variant& output) {
+template <typename T> void apply_encoding(const T& input, variant& output, std::string_view path) {
    using value_type = clean_type<T>;
 
    if constexpr (is_optional_v<value_type>) {
       if (input) {
-         apply_encoding(*input, output);
+         apply_encoding(*input, output, path);
       }
    } else if constexpr (is_pointer_v<value_type>) {
       if (input) {
-         apply_encoding(*input, output);
+         apply_encoding(*input, output, path);
       }
    } else if constexpr (reflect::is_described_object_v<value_type>) {
       const auto rules = schema::rules<value_type>::define();
       if (!rules.fields().empty()) {
-         output = from_schema_input(schema::input_value{rules.encode_object(input)});
+         output = from_schema_input(schema::input_value{rules.encode_object(input, path)});
          return;
       }
       if (output.is_string()) {
@@ -269,13 +269,14 @@ template <typename T> void apply_encoding(const T& input, variant& output) {
       reflect::for_each_member<value_type>([&](const char* name, auto member) {
          const auto found = object.find(name);
          if (found != object.end()) {
-            apply_encoding(input.*member, found->value());
+            apply_encoding(input.*member, found->value(), field_path(path, name));
          }
       });
       output = variant{std::move(object)};
    } else if constexpr (is_variant_v<value_type>) {
       if (!output.is_string() && output.is_array() && output.get_array().size() == 2U) {
-         std::visit([&](const auto& value) { apply_encoding(value, output.get_array()[1]); }, input);
+         std::visit([&](const auto& value) { apply_encoding(value, output.get_array()[1], element_path(path, 1U)); },
+                    input);
       }
    } else if constexpr (is_multi_index_v<value_type> || is_sequence_v<value_type>) {
       if (!output.is_array()) {
@@ -284,7 +285,7 @@ template <typename T> void apply_encoding(const T& input, variant& output) {
       auto& encoded = output.get_array();
       auto current = input.begin();
       for (std::size_t index = 0; index < encoded.size() && current != input.end(); ++index, ++current) {
-         apply_encoding(*current, encoded[index]);
+         apply_encoding(*current, encoded[index], element_path(path, index));
       }
    } else if constexpr (is_associative_v<value_type>) {
       if (!output.is_array()) {
@@ -296,13 +297,13 @@ template <typename T> void apply_encoding(const T& input, variant& output) {
          if (!encoded[index].is_array() || encoded[index].get_array().size() != 2U) {
             continue;
          }
-         apply_encoding(current->first, encoded[index].get_array()[0]);
-         apply_encoding(current->second, encoded[index].get_array()[1]);
+         apply_encoding(current->first, encoded[index].get_array()[0], element_path(element_path(path, index), 0U));
+         apply_encoding(current->second, encoded[index].get_array()[1], element_path(element_path(path, index), 1U));
       }
    } else if constexpr (is_pair_v<value_type>) {
       if (output.is_array() && output.get_array().size() == 2U) {
-         apply_encoding(input.first, output.get_array()[0]);
-         apply_encoding(input.second, output.get_array()[1]);
+         apply_encoding(input.first, output.get_array()[0], element_path(path, 0U));
+         apply_encoding(input.second, output.get_array()[1], element_path(path, 1U));
       }
    }
 }
@@ -450,7 +451,7 @@ export namespace forge::variant_schema {
 template <typename T> [[nodiscard]] variant encode(const T& input) {
    auto output = variant{};
    to_variant(input, output);
-   detail::apply_encoding(input, output);
+   detail::apply_encoding(input, output, {});
    return output;
 }
 

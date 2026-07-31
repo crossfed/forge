@@ -40,12 +40,54 @@ function(_forge_contract_require_descendant root path description)
 endfunction()
 
 function(_forge_contract_normalize_file root input description output)
-   get_filename_component(_absolute "${input}" REALPATH BASE_DIR "${root}")
-   if(NOT EXISTS "${_absolute}" OR IS_DIRECTORY "${_absolute}")
-      message(FATAL_ERROR "${description} does not exist or is not a file: ${_absolute}")
+   get_filename_component(_absolute "${input}" ABSOLUTE BASE_DIR "${root}")
+   if(IS_DIRECTORY "${_absolute}")
+      message(FATAL_ERROR "${description} is a directory: ${_absolute}")
    endif()
-   _forge_contract_require_descendant("${root}" "${_absolute}" "${description}")
+   get_property(_generated SOURCE "${_absolute}" PROPERTY GENERATED)
+   if(_generated)
+      _forge_contract_require_descendant(
+         "${CMAKE_BINARY_DIR}" "${_absolute}" "${description} generated output"
+      )
+   else()
+      if(NOT EXISTS "${_absolute}")
+         message(
+            FATAL_ERROR
+            "${description} does not exist and is not a declared generated "
+            "output: ${_absolute}"
+         )
+      endif()
+      _forge_contract_require_descendant(
+         "${root}" "${_absolute}" "${description}"
+      )
+   endif()
    set(${output} "${_absolute}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_require_source_or_binary root path description)
+   get_filename_component(_root "${root}" REALPATH)
+   get_filename_component(_binary_root "${CMAKE_BINARY_DIR}" REALPATH)
+   get_filename_component(_absolute "${path}" REALPATH)
+   file(RELATIVE_PATH _source_relative "${_root}" "${_absolute}")
+   if(
+      NOT IS_ABSOLUTE "${_source_relative}"
+      AND NOT _source_relative MATCHES "^\\.\\.(/|$)"
+   )
+      return()
+   endif()
+   file(RELATIVE_PATH _binary_relative "${_binary_root}" "${_absolute}")
+   if(
+      NOT IS_ABSOLUTE "${_binary_relative}"
+      AND NOT _binary_relative MATCHES "^\\.\\.(/|$)"
+   )
+      return()
+   endif()
+   message(
+      FATAL_ERROR
+      "${description} is outside its source and binary roots: ${_absolute}\n"
+      "source root: ${_root}\n"
+      "binary root: ${_binary_root}"
+   )
 endfunction()
 
 function(_forge_contract_product_source_root output)
@@ -115,6 +157,7 @@ function(_forge_contract_semantic_properties output)
       INTERFACE_SOURCES
       COMPILE_OPTIONS
       INTERFACE_COMPILE_OPTIONS
+      COMPILE_FLAGS
       COMPILE_DEFINITIONS
       INTERFACE_COMPILE_DEFINITIONS
       INCLUDE_DIRECTORIES
@@ -123,6 +166,13 @@ function(_forge_contract_semantic_properties output)
       INTERFACE_COMPILE_FEATURES
       LINK_OPTIONS
       INTERFACE_LINK_OPTIONS
+      LINK_FLAGS
+      LINKER_TYPE
+      LINK_DIRECTORIES
+      INTERFACE_LINK_DIRECTORIES
+      LINK_DEPENDS
+      LINK_DEPENDS_NO_SHARED
+      STATIC_LIBRARY_OPTIONS
       # These values are compared verbatim only. Forge never interprets them as
       # a second dependency graph.
       LINK_LIBRARIES
@@ -132,8 +182,137 @@ function(_forge_contract_semantic_properties output)
       CXX_EXTENSIONS
       CXX_MODULE_STD
       CXX_SCAN_FOR_MODULES
+      CXX_COMPILER_LAUNCHER
+      CXX_LINKER_LAUNCHER
+      PRECOMPILE_HEADERS
+      INTERFACE_PRECOMPILE_HEADERS
+      PRECOMPILE_HEADERS_REUSE_FROM
+      RULE_LAUNCH_COMPILE
+      RULE_LAUNCH_LINK
+      CXX_CLANG_TIDY
+      CXX_CPPCHECK
+      CXX_INCLUDE_WHAT_YOU_USE
+      UNITY_BUILD
+      UNITY_BUILD_MODE
+      UNITY_BUILD_BATCH_SIZE
+      UNITY_BUILD_CODE_BEFORE_INCLUDE
+      UNITY_BUILD_CODE_AFTER_INCLUDE
+      UNITY_BUILD_UNIQUE_ID
+      POSITION_INDEPENDENT_CODE
+      INTERPROCEDURAL_OPTIMIZATION
+      CXX_VISIBILITY_PRESET
+      VISIBILITY_INLINES_HIDDEN
+      CXX_MODULE_SETS
+      INTERFACE_CXX_MODULE_SETS
       PARENT_SCOPE
    )
+endfunction()
+
+function(_forge_contract_target_semantic_properties target output)
+   _forge_contract_semantic_properties(_properties)
+   get_target_property(_module_sets "${target}" CXX_MODULE_SETS)
+   if(_module_sets AND NOT _module_sets MATCHES "-NOTFOUND$")
+      foreach(_module_set IN LISTS _module_sets)
+         list(
+            APPEND _properties
+            "CXX_MODULE_SET_${_module_set}"
+            "CXX_MODULE_DIRS_${_module_set}"
+         )
+      endforeach()
+   endif()
+   set(_configurations DEBUG RELEASE MINSIZEREL RELWITHDEBINFO)
+   if(CMAKE_CONFIGURATION_TYPES)
+      list(APPEND _configurations ${CMAKE_CONFIGURATION_TYPES})
+   endif()
+   list(REMOVE_DUPLICATES _configurations)
+   foreach(_configuration IN LISTS _configurations)
+      string(TOUPPER "${_configuration}" _configuration)
+      list(
+         APPEND _properties
+         "COMPILE_DEFINITIONS_${_configuration}"
+         "LINK_FLAGS_${_configuration}"
+         "INTERPROCEDURAL_OPTIMIZATION_${_configuration}"
+      )
+   endforeach()
+   set(${output} "${_properties}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_source_semantic_properties output)
+   set(
+      _properties
+      COMPILE_OPTIONS
+      COMPILE_DEFINITIONS
+      INCLUDE_DIRECTORIES
+      COMPILE_FLAGS
+      LANGUAGE
+      CXX_SCAN_FOR_MODULES
+      GENERATED
+      HEADER_FILE_ONLY
+      EXTERNAL_OBJECT
+      OBJECT_DEPENDS
+      OBJECT_OUTPUTS
+   )
+   set(_configurations DEBUG RELEASE MINSIZEREL RELWITHDEBINFO)
+   if(CMAKE_CONFIGURATION_TYPES)
+      list(APPEND _configurations ${CMAKE_CONFIGURATION_TYPES})
+   endif()
+   list(REMOVE_DUPLICATES _configurations)
+   foreach(_configuration IN LISTS _configurations)
+      string(TOUPPER "${_configuration}" _configuration)
+      list(APPEND _properties "COMPILE_DEFINITIONS_${_configuration}")
+   endforeach()
+   set(${output} "${_properties}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_source_property target source property output)
+   get_property(
+      _is_set SOURCE "${source}" TARGET_DIRECTORY "${target}"
+      PROPERTY "${property}" SET
+   )
+   if(_is_set)
+      get_property(
+         _value SOURCE "${source}" TARGET_DIRECTORY "${target}"
+         PROPERTY "${property}"
+      )
+   else()
+      set(_value "<FORGE_UNSET>")
+   endif()
+   set(${output} "${_value}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_target_source_files target output)
+   get_target_property(_sources "${target}" SOURCES)
+   if(NOT _sources OR _sources MATCHES "-NOTFOUND$")
+      set(_sources)
+   endif()
+   get_target_property(_module_sets "${target}" CXX_MODULE_SETS)
+   if(NOT _module_sets OR _module_sets MATCHES "-NOTFOUND$")
+      set(_module_sets)
+   endif()
+   foreach(_module_set IN LISTS _module_sets)
+      get_target_property(
+         _module_sources "${target}" "CXX_MODULE_SET_${_module_set}"
+      )
+      if(_module_sources AND NOT _module_sources MATCHES "-NOTFOUND$")
+         list(APPEND _sources ${_module_sources})
+      endif()
+   endforeach()
+   list(REMOVE_DUPLICATES _sources)
+   set(${output} "${_sources}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_source_lookup_paths target source output)
+   get_target_property(_source_directory "${target}" SOURCE_DIR)
+   get_filename_component(
+      _absolute "${source}" ABSOLUTE BASE_DIR "${_source_directory}"
+   )
+   set(_paths "${source}" "${_absolute}")
+   file(RELATIVE_PATH _relative "${_source_directory}" "${_absolute}")
+   if(NOT IS_ABSOLUTE "${_relative}" AND NOT _relative MATCHES "^\\.\\.(/|$)")
+      list(APPEND _paths "${_relative}")
+   endif()
+   list(REMOVE_DUPLICATES _paths)
+   set(${output} "${_paths}" PARENT_SCOPE)
 endfunction()
 
 function(_forge_contract_validate_guest_targets)
@@ -146,7 +325,7 @@ function(_forge_contract_validate_guest_targets)
       get_target_property(
          _declaration "${target}" FORGE_CONTRACT_FROZEN_DECLARATION
       )
-      _forge_contract_semantic_properties(_properties)
+      _forge_contract_target_semantic_properties("${target}" _properties)
       foreach(_property IN LISTS _properties)
          get_property(_is_set TARGET "${target}" PROPERTY "${_property}" SET)
          if(_is_set)
@@ -167,14 +346,141 @@ function(_forge_contract_validate_guest_targets)
             )
          endif()
       endforeach()
+      get_target_property(
+         _sources "${target}" FORGE_CONTRACT_FROZEN_SOURCE_FILES
+      )
+      if(NOT _sources OR _sources MATCHES "-NOTFOUND$")
+         set(_sources)
+      endif()
+      _forge_contract_source_semantic_properties(_source_properties)
+      foreach(_source IN LISTS _sources)
+         _forge_contract_source_lookup_paths(
+            "${target}" "${_source}" _source_lookups
+         )
+         foreach(_source_lookup IN LISTS _source_lookups)
+            foreach(_property IN LISTS _source_properties)
+               _forge_contract_source_property(
+                  "${target}" "${_source_lookup}" "${_property}" _current
+               )
+               string(
+                  SHA256 _source_key "${_source_lookup}\n${_property}"
+               )
+               get_target_property(
+                  _expected "${target}"
+                  "FORGE_CONTRACT_FROZEN_SOURCE_${_source_key}"
+               )
+               if(NOT "${_current}" STREQUAL "${_expected}")
+                  message(
+                     FATAL_ERROR
+                     "Forge Contract guest target '${target}' source '${_source}' "
+                     "was modified after ${_declaration}; post-declaration source "
+                     "mutation is unsupported because CMake compilation and "
+                     "Abigen must use one semantic profile (changed source "
+                     "property: ${_property})"
+                  )
+               endif()
+            endforeach()
+         endforeach()
+      endforeach()
    endforeach()
+endfunction()
+
+function(_forge_contract_register_internal_deferred id command)
+   string(SHA256 _id_key "${id}")
+   set_property(
+      GLOBAL PROPERTY "FORGE_CONTRACT_INTERNAL_DEFERRED_${_id_key}"
+      "${command}"
+   )
+   set_property(
+      GLOBAL APPEND PROPERTY FORGE_CONTRACT_INTERNAL_DEFERRED_IDS "${id}"
+   )
+endfunction()
+
+function(_forge_contract_defer_guest_environment_validation)
+   cmake_language(
+      DEFER ID_VAR _validation_id
+      CALL _forge_contract_validate_guest_environment_final
+   )
+   _forge_contract_register_internal_deferred(
+      "${_validation_id}" "_forge_contract_validate_guest_environment_final"
+   )
+endfunction()
+
+function(_forge_contract_defer_guest_target_validation)
+   cmake_language(
+      DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
+      ID_VAR _validation_id
+      CALL _forge_contract_validate_guest_targets_final
+   )
+   _forge_contract_register_internal_deferred(
+      "${_validation_id}" "_forge_contract_validate_guest_targets_final"
+   )
+endfunction()
+
+function(_forge_contract_downstream_deferred_calls output)
+   cmake_language(DEFER GET_CALL_IDS _pending_calls)
+   get_property(
+      _internal_ids GLOBAL PROPERTY FORGE_CONTRACT_INTERNAL_DEFERRED_IDS
+   )
+   set(_downstream_calls ${_pending_calls})
+   foreach(_internal_id IN LISTS _internal_ids)
+      set(_occurrences 0)
+      foreach(_pending_id IN LISTS _pending_calls)
+         if("${_pending_id}" STREQUAL "${_internal_id}")
+            math(EXPR _occurrences "${_occurrences} + 1")
+         endif()
+      endforeach()
+      if(NOT _occurrences EQUAL 1)
+         continue()
+      endif()
+      string(SHA256 _id_key "${_internal_id}")
+      get_property(
+         _expected GLOBAL
+         PROPERTY "FORGE_CONTRACT_INTERNAL_DEFERRED_${_id_key}"
+      )
+      cmake_language(DEFER GET_CALL "${_internal_id}" _actual)
+      if("${_actual}" STREQUAL "${_expected}")
+         list(REMOVE_ITEM _downstream_calls "${_internal_id}")
+      endif()
+   endforeach()
+   set(${output} "${_downstream_calls}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_validate_guest_environment_final)
+   _forge_contract_downstream_deferred_calls(_pending_calls)
+   if(_pending_calls)
+      cmake_language(
+         DEFER ID_VAR _validation_id
+         CALL _forge_contract_validate_guest_environment_final
+      )
+      _forge_contract_register_internal_deferred(
+         "${_validation_id}" "_forge_contract_validate_guest_environment_final"
+      )
+      return()
+   endif()
+   _forge_contract_validate_guest_environment()
+endfunction()
+
+function(_forge_contract_validate_guest_targets_final)
+   _forge_contract_downstream_deferred_calls(_pending_calls)
+   if(_pending_calls)
+      cmake_language(
+         DEFER ID_VAR _validation_id
+         CALL _forge_contract_validate_guest_targets_final
+      )
+      _forge_contract_register_internal_deferred(
+         "${_validation_id}" "_forge_contract_validate_guest_targets_final"
+      )
+      return()
+   endif()
+   _forge_contract_validate_guest_targets()
 endfunction()
 
 function(_forge_contract_freeze_guest_target target declaration)
    if(NOT FORGE_CONTRACT_GUEST)
       return()
    endif()
-   _forge_contract_semantic_properties(_properties)
+   _forge_contract_target_semantic_properties("${target}" _properties)
    foreach(_property IN LISTS _properties)
       get_property(_is_set TARGET "${target}" PROPERTY "${_property}" SET)
       if(_is_set)
@@ -186,6 +492,28 @@ function(_forge_contract_freeze_guest_target target declaration)
          TARGET "${target}" PROPERTY
          "FORGE_CONTRACT_FROZEN_${_property}" "${_current}"
       )
+   endforeach()
+   _forge_contract_target_source_files("${target}" _sources)
+   set_property(
+      TARGET "${target}" PROPERTY FORGE_CONTRACT_FROZEN_SOURCE_FILES "${_sources}"
+   )
+   _forge_contract_source_semantic_properties(_source_properties)
+   foreach(_source IN LISTS _sources)
+      _forge_contract_source_lookup_paths(
+         "${target}" "${_source}" _source_lookups
+      )
+      foreach(_source_lookup IN LISTS _source_lookups)
+         foreach(_property IN LISTS _source_properties)
+            _forge_contract_source_property(
+               "${target}" "${_source_lookup}" "${_property}" _current
+            )
+            string(SHA256 _source_key "${_source_lookup}\n${_property}")
+            set_property(
+               TARGET "${target}" PROPERTY
+               "FORGE_CONTRACT_FROZEN_SOURCE_${_source_key}" "${_current}"
+            )
+         endforeach()
+      endforeach()
    endforeach()
    set_property(
       TARGET "${target}" PROPERTY
@@ -204,7 +532,12 @@ function(_forge_contract_freeze_guest_target target declaration)
       )
       cmake_language(
          DEFER DIRECTORY "${_source_directory}"
-         CALL _forge_contract_validate_guest_environment
+         ID_VAR _scheduler_id
+         CALL _forge_contract_defer_guest_environment_validation
+      )
+      _forge_contract_register_internal_deferred(
+         "${_scheduler_id}"
+         "_forge_contract_defer_guest_environment_validation"
       )
    endif()
    set_property(GLOBAL APPEND PROPERTY FORGE_CONTRACT_FROZEN_TARGETS "${target}")
@@ -217,7 +550,11 @@ function(_forge_contract_freeze_guest_target target declaration)
       )
       cmake_language(
          DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
-         CALL _forge_contract_validate_guest_targets
+         ID_VAR _scheduler_id
+         CALL _forge_contract_defer_guest_target_validation
+      )
+      _forge_contract_register_internal_deferred(
+         "${_scheduler_id}" "_forge_contract_defer_guest_target_validation"
       )
    endif()
 endfunction()
@@ -233,6 +570,26 @@ function(_forge_contract_validate_guest_environment)
          "the SDK owns the compile profile shared by CMake and Abigen"
       )
    endif()
+   set(_supported_configurations DEBUG RELEASE MINSIZEREL RELWITHDEBINFO)
+   if(CMAKE_CONFIGURATION_TYPES)
+      set(_active_configurations ${CMAKE_CONFIGURATION_TYPES})
+   else()
+      set(_active_configurations "${CMAKE_BUILD_TYPE}")
+   endif()
+   foreach(_configuration IN LISTS _active_configurations)
+      if("${_configuration}" STREQUAL "")
+         continue()
+      endif()
+      string(TOUPPER "${_configuration}" _configuration_upper)
+      if(NOT _configuration_upper IN_LIST _supported_configurations)
+         message(
+            FATAL_ERROR
+            "unsupported Forge Contract guest configuration: ${_configuration}; "
+            "supported configurations are Debug, Release, MinSizeRel and "
+            "RelWithDebInfo"
+         )
+      endif()
+   endforeach()
    if(
       NOT CMAKE_CXX_STANDARD EQUAL 23
       OR NOT CMAKE_CXX_STANDARD_REQUIRED
@@ -243,6 +600,31 @@ function(_forge_contract_validate_guest_environment)
          FATAL_ERROR
          "Forge Contract guest projects require strict C++23 with required "
          "standard, extensions disabled, and CMake module scanning enabled"
+      )
+   endif()
+   if(CMAKE_INCLUDE_CURRENT_DIR OR CMAKE_INCLUDE_CURRENT_DIR_IN_INTERFACE)
+      message(
+         FATAL_ERROR
+         "CMAKE_INCLUDE_CURRENT_DIR and CMAKE_INCLUDE_CURRENT_DIR_IN_INTERFACE "
+         "must remain disabled in a Forge Contract guest project; implicit "
+         "include paths are not part of the semantic profile shared by CMake "
+         "and Abigen"
+      )
+   endif()
+   set(
+      _expected_standard_include_directories
+      "${ForgeContract_SYSROOT}/include/c++/v1"
+   )
+   if(
+      NOT "${CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES}"
+      STREQUAL "${_expected_standard_include_directories}"
+   )
+      message(
+         FATAL_ERROR
+         "CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES must remain "
+         "'${_expected_standard_include_directories}' in a Forge Contract guest "
+         "project; the SDK owns the standard include profile shared by CMake "
+         "and Abigen"
       )
    endif()
    foreach(_entry
@@ -262,7 +644,30 @@ function(_forge_contract_validate_guest_environment)
          )
       endif()
    endforeach()
-   foreach(_property COMPILE_OPTIONS COMPILE_DEFINITIONS INCLUDE_DIRECTORIES)
+   foreach(_property
+      RULE_LAUNCH_COMPILE
+      RULE_LAUNCH_LINK
+      RULE_LAUNCH_CUSTOM
+   )
+      get_property(_value GLOBAL PROPERTY "${_property}")
+      if(_value)
+         message(
+            FATAL_ERROR
+            "global ${_property} is unsupported in a Forge Contract guest "
+            "project; the SDK owns the compile and link launchers"
+         )
+      endif()
+   endforeach()
+   foreach(_property
+      COMPILE_OPTIONS
+      COMPILE_DEFINITIONS
+      INCLUDE_DIRECTORIES
+      LINK_OPTIONS
+      LINK_DIRECTORIES
+      RULE_LAUNCH_COMPILE
+      RULE_LAUNCH_LINK
+      RULE_LAUNCH_CUSTOM
+   )
       get_directory_property(_value "${_property}")
       if(_value)
          message(
@@ -647,7 +1052,7 @@ function(forge_add_contract_library target)
             "contract module base is not a directory: ${_absolute}"
          )
       endif()
-      _forge_contract_require_descendant(
+      _forge_contract_require_source_or_binary(
          "${_source_root}" "${_absolute}" "contract module base"
       )
       list(APPEND _module_bases "${_absolute}")

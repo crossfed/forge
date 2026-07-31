@@ -169,17 +169,69 @@ def validate_multi_config(
         "--build",
         str(build_directory),
         "--config",
+        "Debug",
+        "--target",
+        "configuration_guest",
+        "-j",
+        "4",
+    )
+    artifact_root = build_directory / "configuration.guest" / "artifacts"
+    debug_artifacts = artifact_root / "Debug"
+    debug_abi_path = debug_artifacts / "configuration.abi"
+    debug_abi_before_release = debug_abi_path.read_bytes()
+    debug_actions = {
+        item["name"] for item in json.loads(debug_abi_before_release)["actions"]
+    }
+    if "debugmode" not in debug_actions or "releasemode" in debug_actions:
+        raise RuntimeError("Debug build did not produce its configuration-specific ABI")
+
+    run(
+        cmake,
+        "--build",
+        str(build_directory),
+        "--config",
         "Release",
         "--target",
         "configuration_guest",
         "-j",
         "4",
     )
-    artifacts = build_directory / "configuration.guest" / "artifacts"
-    if not (artifacts / "built-Release.txt").is_file():
-        raise RuntimeError("launcher did not forward the Release configuration")
-    if (artifacts / "built-Debug.txt").exists():
-        raise RuntimeError("launcher built an unexpected Debug guest configuration")
+    release_artifacts = artifact_root / "Release"
+    release_abi_path = release_artifacts / "configuration.abi"
+    release_actions = {
+        item["name"]
+        for item in json.loads(release_abi_path.read_bytes())["actions"]
+    }
+    if "releasemode" not in release_actions or "debugmode" in release_actions:
+        raise RuntimeError("Release build reused the Debug ABI output")
+    if debug_abi_path.read_bytes() != debug_abi_before_release:
+        raise RuntimeError("Release build overwrote the Debug ABI output")
+
+    for configuration, directory in (
+        ("Debug", debug_artifacts),
+        ("Release", release_artifacts),
+    ):
+        if not (artifact_root / f"built-{configuration}.txt").is_file():
+            raise RuntimeError(
+                f"launcher did not forward the {configuration} configuration"
+            )
+        for suffix in ("wasm", "abi", "contract.json"):
+            if not (directory / f"configuration.{suffix}").is_file():
+                raise RuntimeError(
+                    f"{configuration} contract artifact is missing: {suffix}"
+                )
+        properties = (
+            build_directory / f"artifact-properties-{configuration}.txt"
+        ).read_text(encoding="utf-8").splitlines()
+        expected = [
+            str(directory / "configuration.wasm"),
+            str(directory / "configuration.abi"),
+            str(directory / "configuration.contract.json"),
+        ]
+        if properties != expected:
+            raise RuntimeError(
+                f"{configuration} launcher properties are not configuration-specific"
+            )
 
     commands = subprocess.run(
         (
@@ -249,6 +301,125 @@ find_package(ForgeContract CONFIG REQUIRED)
         path.write_text(source, encoding="utf-8")
     if contract is not None:
         (root / "contract.cpp").write_text(contract, encoding="utf-8")
+
+
+def validate_generated_project(
+    *,
+    cmake: str,
+    contract_package: Path,
+    output: Path,
+) -> None:
+    source = output / "generated-source"
+    build_directory = output / "generated-build"
+    source.mkdir(parents=True)
+    (source / "CMakeLists.txt").write_text(
+        """cmake_minimum_required(VERSION 3.31)
+project(ForgeContractGeneratedInputs LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+find_package(ForgeContract CONFIG REQUIRED)
+
+set(generated_directory "${CMAKE_CURRENT_BINARY_DIR}/generated")
+file(MAKE_DIRECTORY "${generated_directory}")
+add_custom_command(
+   OUTPUT "${generated_directory}/request.cppm"
+   COMMAND
+      "${CMAKE_COMMAND}" -E copy_if_different
+      "${CMAKE_CURRENT_SOURCE_DIR}/request.cppm.in"
+      "${generated_directory}/request.cppm"
+   DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/request.cppm.in"
+   VERBATIM
+)
+add_custom_command(
+   OUTPUT "${generated_directory}/entry.cpp"
+   COMMAND
+      "${CMAKE_COMMAND}" -E copy_if_different
+      "${CMAKE_CURRENT_SOURCE_DIR}/entry.cpp.in"
+      "${generated_directory}/entry.cpp"
+   DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/entry.cpp.in"
+   VERBATIM
+)
+
+forge_add_contract_library(
+   generated_protocol
+   ID fixture.generated.protocol
+   MODULE_BASE_DIRS "${generated_directory}"
+   MODULE_SOURCES "${generated_directory}/request.cppm"
+   PUBLIC_LIBRARIES Forge::forge_chain_protocol
+)
+forge_add_contract(
+   generated
+   SOURCES "${generated_directory}/entry.cpp"
+   LIBRARIES generated_protocol
+)
+""",
+        encoding="utf-8",
+    )
+    (source / "request.cppm.in").write_text(
+        """module;
+#include <cstdint>
+export module fixture.generated.protocol;
+export import forge.chain.protocol.action;
+
+export namespace fixture::generated {
+
+struct request {
+   std::uint64_t value = 0;
+
+   static constexpr forge::chain::protocol::action_name get_name() {
+      return forge::chain::protocol::make_name("generate");
+   }
+};
+
+} // namespace fixture::generated
+""",
+        encoding="utf-8",
+    )
+    (source / "entry.cpp.in").write_text(
+        """import fixture.generated.protocol;
+import forge.contract;
+
+class [[forge::contract("generated")]] generated final
+   : public forge::contract::context {
+ public:
+   using context::context;
+
+   [[forge::action]] void apply(fixture::generated::request) {}
+};
+""",
+        encoding="utf-8",
+    )
+
+    run(
+        cmake,
+        "-S",
+        str(source),
+        "-B",
+        str(build_directory),
+        "-G",
+        "Ninja",
+        f"-DCMAKE_TOOLCHAIN_FILE={contract_package / 'ForgeContractToolchain.cmake'}",
+        f"-DForgeContract_DIR={contract_package}",
+        f"-DFORGE_CONTRACT_SOURCE_ROOT={source}",
+    )
+    run(
+        cmake,
+        "--build",
+        str(build_directory),
+        "--target",
+        "generated_artifacts",
+        "-j",
+        "4",
+    )
+    abi = json.loads(
+        (build_directory / "artifacts" / "generated.abi").read_text(
+            encoding="utf-8"
+        )
+    )
+    action = next(item for item in abi["actions"] if item["name"] == "generate")
+    if action["type"] != "request":
+        raise RuntimeError("generated named action did not preserve direct ABI layout")
 
 
 def validate_negative_projects(
@@ -393,6 +564,221 @@ target_link_libraries(negative_protocol PRIVATE Forge::forge_raw)
         },
     )
 
+    mutated_source = source_root / "mutated-source"
+    write_negative_project(
+        mutated_source,
+        cmake_body="""
+forge_add_contract_library(
+   negative_protocol ID negative.mutated_source
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+set_source_files_properties(
+   include/protocol.cppm
+   TARGET_DIRECTORY negative_protocol
+   PROPERTIES COMPILE_DEFINITIONS MUTATED_SOURCE_AFTER_DECLARATION=1
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
+    mutated_module_set = source_root / "mutated-module-set"
+    write_negative_project(
+        mutated_module_set,
+        cmake_body="""
+forge_add_contract_library(
+   negative_protocol ID negative.mutated_module_set
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+target_sources(
+   negative_protocol
+   PUBLIC
+      FILE_SET forge_contract_modules TYPE CXX_MODULES
+      BASE_DIRS include
+      FILES include/extra.cppm
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n",
+            "include/extra.cppm": "export module negative.extra;\n",
+        },
+    )
+
+    mutated_precompiled_header = source_root / "mutated-precompiled-header"
+    write_negative_project(
+        mutated_precompiled_header,
+        cmake_body="""
+forge_add_contract_library(
+   negative_protocol ID negative.mutated_precompiled_header
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+target_precompile_headers(
+   negative_protocol PRIVATE include/profile.hxx
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n",
+            "include/profile.hxx": "#define MUTATED_PCH_PROFILE 1\n",
+        },
+    )
+
+    mutated_launcher = source_root / "mutated-launcher"
+    write_negative_project(
+        mutated_launcher,
+        cmake_body="""
+forge_add_contract_library(
+   negative_protocol ID negative.mutated_launcher
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+set_property(
+   TARGET negative_protocol
+   PROPERTY CXX_COMPILER_LAUNCHER "${CMAKE_COMMAND};-E;env"
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
+    custom_configuration = source_root / "custom-configuration"
+    write_negative_project(
+        custom_configuration,
+        cmake_body="""
+forge_add_contract_library(
+   negative_protocol ID negative.custom_configuration
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
+    directory_launcher = source_root / "directory-launcher"
+    write_negative_project(
+        directory_launcher,
+        cmake_body="""
+forge_add_contract_library(
+   negative_protocol ID negative.directory_launcher
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+set_property(
+   DIRECTORY PROPERTY RULE_LAUNCH_COMPILE "${CMAKE_COMMAND};-E;env"
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
+    global_launcher = source_root / "global-launcher"
+    write_negative_project(
+        global_launcher,
+        cmake_body="""
+forge_add_contract_library(
+   negative_protocol ID negative.global_launcher
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+set_property(
+   GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CMAKE_COMMAND};-E;env"
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
+    deferred_mutation = source_root / "deferred-mutation"
+    write_negative_project(
+        deferred_mutation,
+        cmake_body="""
+forge_add_contract_library(
+   negative_protocol ID negative.deferred_mutation
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+cmake_language(
+   DEFER CALL set_property
+   TARGET negative_protocol APPEND
+   PROPERTY COMPILE_DEFINITIONS DEFERRED_MUTATION=1
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
+    nested_deferred_mutation = source_root / "nested-deferred-mutation"
+    write_negative_project(
+        nested_deferred_mutation,
+        cmake_body="""
+function(schedule_nested_mutation)
+   cmake_language(
+      DEFER CALL set_property
+      TARGET negative_protocol APPEND
+      PROPERTY COMPILE_DEFINITIONS NESTED_DEFERRED_MUTATION=1
+   )
+endfunction()
+
+forge_add_contract_library(
+   negative_protocol ID negative.nested_deferred_mutation
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+cmake_language(DEFER CALL schedule_nested_mutation)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
+    named_nested_deferred_mutation = (
+        source_root / "named-nested-deferred-mutation"
+    )
+    write_negative_project(
+        named_nested_deferred_mutation,
+        cmake_body="""
+function(schedule_named_nested_mutation)
+   cmake_language(DEFER GET_CALL_IDS pending_calls)
+   foreach(call_id IN LISTS pending_calls)
+      cmake_language(DEFER GET_CALL "${call_id}" deferred_call)
+      list(GET deferred_call 0 command)
+      if(command STREQUAL "_forge_contract_validate_guest_targets_final")
+         set(target_validation_id "${call_id}")
+         break()
+      endif()
+   endforeach()
+   if(NOT target_validation_id)
+      message(FATAL_ERROR "Forge target validator was not scheduled")
+   endif()
+   cmake_language(
+      DEFER ID "${target_validation_id}"
+      CALL set_property
+      TARGET negative_protocol APPEND
+      PROPERTY COMPILE_DEFINITIONS NAMED_NESTED_DEFERRED_MUTATION=1
+   )
+endfunction()
+
+forge_add_contract_library(
+   negative_protocol ID negative.named_nested_deferred_mutation
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+cmake_language(DEFER CALL schedule_named_nested_mutation)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
     directory_profile = source_root / "directory-profile"
     write_negative_project(
         directory_profile,
@@ -400,6 +786,38 @@ target_link_libraries(negative_protocol PRIVATE Forge::forge_raw)
 add_compile_definitions(UNDECLARED_GUEST_PROFILE=1)
 forge_add_contract_library(
    negative_protocol ID negative.directory_profile
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
+    implicit_current_directory = source_root / "implicit-current-directory"
+    write_negative_project(
+        implicit_current_directory,
+        cmake_body="""
+set(CMAKE_INCLUDE_CURRENT_DIR ON)
+forge_add_contract_library(
+   negative_protocol ID negative.implicit_current_directory
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
+    changed_standard_includes = source_root / "changed-standard-includes"
+    write_negative_project(
+        changed_standard_includes,
+        cmake_body="""
+list(APPEND CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_BINARY_DIR}")
+forge_add_contract_library(
+   negative_protocol ID negative.changed_standard_includes
    MODULE_BASE_DIRS include
    MODULE_SOURCES include/protocol.cppm
 )
@@ -503,6 +921,18 @@ forge_add_contract(
         encoding="utf-8",
     )
 
+    missing_input = source_root / "missing-input"
+    write_negative_project(
+        missing_input,
+        cmake_body="""
+forge_add_contract(
+   missing
+   SOURCES missing.cpp
+)
+""",
+        modules={},
+    )
+
     table_mismatch = source_root / "table-name-mismatch"
     write_negative_project(
         table_mismatch,
@@ -561,7 +991,52 @@ class [[forge::contract("mismatch")]] mismatch final
             mutated_dependencies,
             "changed property: LINK_LIBRARIES",
         ),
+        (
+            mutated_source,
+            "changed source property: COMPILE_DEFINITIONS",
+        ),
+        (
+            mutated_module_set,
+            "changed property: CXX_MODULE_SET_forge_contract_modules",
+        ),
+        (
+            mutated_precompiled_header,
+            "changed property: PRECOMPILE_HEADERS",
+        ),
+        (
+            mutated_launcher,
+            "changed property: CXX_COMPILER_LAUNCHER",
+        ),
+        (
+            directory_launcher,
+            "directory RULE_LAUNCH_COMPILE are unsupported",
+        ),
+        (
+            global_launcher,
+            "global RULE_LAUNCH_COMPILE is unsupported",
+        ),
+        (
+            deferred_mutation,
+            "changed property: COMPILE_DEFINITIONS",
+        ),
+        (
+            nested_deferred_mutation,
+            "changed property: COMPILE_DEFINITIONS",
+        ),
+        (
+            named_nested_deferred_mutation,
+            "changed property: COMPILE_DEFINITIONS",
+        ),
         (directory_profile, "directory COMPILE_DEFINITIONS are unsupported"),
+        (
+            implicit_current_directory,
+            "CMAKE_INCLUDE_CURRENT_DIR and "
+            "CMAKE_INCLUDE_CURRENT_DIR_IN_INTERFACE must remain disabled",
+        ),
+        (
+            changed_standard_includes,
+            "CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES must remain",
+        ),
         (
             changed_source_root,
             "FORGE_CONTRACT_SOURCE_ROOT changed after the guest SDK fixed",
@@ -570,6 +1045,10 @@ class [[forge::contract("mismatch")]] mismatch final
         (late_profile, "CMAKE_CXX_FLAGS_RELEASE must remain"),
         (nested_late_profile, "CMAKE_CXX_FLAGS_RELEASE must remain"),
         (external_input, "contract source is outside its declared root"),
+        (
+            missing_input,
+            "does not exist and is not a declared generated output",
+        ),
     )
     for source, expected in cases:
         run_failure(
@@ -584,6 +1063,20 @@ class [[forge::contract("mismatch")]] mismatch final
             f"-DForgeContract_DIR={contract_package}",
             contains=expected,
         )
+    run_failure(
+        cmake,
+        "-S",
+        str(custom_configuration),
+        "-B",
+        str(build_root / custom_configuration.name),
+        "-G",
+        "Ninja",
+        f"-DCMAKE_TOOLCHAIN_FILE={toolchain}",
+        f"-DForgeContract_DIR={contract_package}",
+        "-DCMAKE_BUILD_TYPE=ASan",
+        "-DCMAKE_CXX_FLAGS_ASAN=-DFEATURE=1",
+        contains="unsupported Forge Contract guest configuration: ASan",
+    )
     run_failure(
         cmake,
         "-S",
@@ -724,6 +1217,11 @@ def validate(
         source=source,
         output=output,
         contract_package=contract_package,
+    )
+    validate_generated_project(
+        cmake=cmake,
+        contract_package=contract_package,
+        output=output,
     )
     validate_negative_projects(
         cmake=cmake,

@@ -1,7 +1,3 @@
-#ifndef NDEBUG
-#error "host Release must run Abigen with Release flags"
-#endif
-
 import forge.contract;
 import product.contract.configuration;
 
@@ -12,4 +8,10 @@ class [[forge::contract("configuration")]] configuration_contract final : public
    [[forge::action]] void verify(product::contract::configuration::request value) {
       product::contract::configuration::verify(*this, value);
    }
+
+#ifndef NDEBUG
+   [[forge::action]] void debugmode() {}
+#else
+   [[forge::action]] void releasemode() {}
+#endif
 };

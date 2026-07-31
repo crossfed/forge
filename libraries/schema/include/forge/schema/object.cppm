@@ -221,6 +221,19 @@ template <typename T> [[nodiscard]] T cast_any_to(const std::any& value) {
    return output;
 }
 
+class encoding_error : public std::invalid_argument {
+ public:
+   encoding_error(std::string path, std::string message)
+       : std::invalid_argument{std::move(message)}, path_{std::move(path)} {}
+
+   [[nodiscard]] const std::string& path() const noexcept {
+      return path_;
+   }
+
+ private:
+   std::string path_;
+};
+
 [[nodiscard]] inline diagnostic make_path_error(std::string path, std::string code, std::string message) {
    return diagnostic{
        .path = std::move(path),
@@ -242,7 +255,7 @@ template <typename T> [[nodiscard]] T cast_any_to(const std::any& value) {
 template <typename T>
 [[nodiscard]] T cast_input_to(const input_value& input, std::string_view path, std::vector<diagnostic>& diagnostics);
 
-template <typename T> [[nodiscard]] input_value to_input_value(const T& input);
+template <typename T> [[nodiscard]] input_value to_input_value(const T& input, std::string_view path = {});
 
 template <typename T> [[nodiscard]] std::any to_default_any(const T& input) {
    using clean_type = std::remove_cvref_t<T>;
@@ -280,6 +293,86 @@ template <typename T> [[nodiscard]] std::any to_default_any(const T& input) {
 }
 
 template <typename T>
+concept numeric_value = integral_value<std::remove_cvref_t<T>> || std::floating_point<std::remove_cvref_t<T>>;
+
+template <numeric_value Left, numeric_value Right> [[nodiscard]] constexpr int compare_numeric(Left left, Right right) {
+   if constexpr (integral_value<Left> && integral_value<Right>) {
+      if constexpr (signed_integral_value<Left> && signed_integral_value<Right>) {
+         const auto lhs = static_cast<__int128>(left);
+         const auto rhs = static_cast<__int128>(right);
+         return lhs < rhs ? -1 : lhs > rhs ? 1 : 0;
+      } else if constexpr (unsigned_integral_value<Left> && unsigned_integral_value<Right>) {
+         const auto lhs = static_cast<unsigned __int128>(left);
+         const auto rhs = static_cast<unsigned __int128>(right);
+         return lhs < rhs ? -1 : lhs > rhs ? 1 : 0;
+      } else if constexpr (signed_integral_value<Left>) {
+         if (left < 0) {
+            return -1;
+         }
+         const auto lhs = static_cast<unsigned __int128>(left);
+         const auto rhs = static_cast<unsigned __int128>(right);
+         return lhs < rhs ? -1 : lhs > rhs ? 1 : 0;
+      } else {
+         if (right < 0) {
+            return 1;
+         }
+         const auto lhs = static_cast<unsigned __int128>(left);
+         const auto rhs = static_cast<unsigned __int128>(right);
+         return lhs < rhs ? -1 : lhs > rhs ? 1 : 0;
+      }
+   } else {
+      const auto lhs = static_cast<long double>(left);
+      const auto rhs = static_cast<long double>(right);
+      return lhs < rhs ? -1 : lhs > rhs ? 1 : 0;
+   }
+}
+
+template <numeric_value Value, numeric_value Min, numeric_value Max>
+[[nodiscard]] constexpr int compare_range(Value value, Min minimum, Max maximum) {
+   if (compare_numeric(value, minimum) < 0) {
+      return -1;
+   }
+   if (compare_numeric(value, maximum) > 0) {
+      return 1;
+   }
+   return 0;
+}
+
+template <numeric_value Value, numeric_value Min, numeric_value Max>
+[[nodiscard]] std::optional<int> compare_any_as(const std::any& value, Min minimum, Max maximum) {
+   if (value.type() != typeid(Value)) {
+      return std::nullopt;
+   }
+   return compare_range(std::any_cast<Value>(value), minimum, maximum);
+}
+
+template <typename... T> struct type_list {};
+
+template <numeric_value Min, numeric_value Max, numeric_value... Value>
+[[nodiscard]] int compare_any_range_as(const std::any& value, Min minimum, Max maximum, type_list<Value...>) {
+   auto result = std::optional<int>{};
+   (
+       [&] {
+          if (!result) {
+             result = compare_any_as<Value>(value, minimum, maximum);
+          }
+       }(),
+       ...);
+   if (!result) {
+      throw std::invalid_argument{"value cannot be inspected for range validation"};
+   }
+   return *result;
+}
+
+template <numeric_value Min, numeric_value Max>
+[[nodiscard]] int compare_any_range(const std::any& value, Min minimum, Max maximum) {
+   using types = type_list<bool, char, signed char, unsigned char, wchar_t, char8_t, char16_t, char32_t, short,
+                           unsigned short, int, unsigned int, long, unsigned long, long long, unsigned long long,
+                           __int128, unsigned __int128, float, double, long double>;
+   return compare_any_range_as(value, minimum, maximum, types{});
+}
+
+template <typename T>
 [[nodiscard]] std::vector<T> decode_object_list(const input_value& input, std::string_view path,
                                                 std::vector<diagnostic>& diagnostics);
 
@@ -299,6 +392,7 @@ template <typename T> struct field_rule {
    std::any default_value;
    std::optional<long double> minimum;
    std::optional<long double> maximum;
+   std::function<int(const std::any&)> compare_range;
    bool nested_object_list = false;
    std::type_index item_type = std::type_index{typeid(void)};
    std::function<void(T&)> apply_default;
@@ -309,7 +403,7 @@ template <typename T> struct field_rule {
    std::function<void(const input_value&, std::string_view, std::vector<diagnostic>&)> validate_exact_input;
    std::function<std::any(const T&)> read_any;
    std::function<std::optional<std::any>(const T&)> read_validation_any;
-   std::function<input_value(const T&)> read_input;
+   std::function<input_value(const T&, std::string_view)> read_input;
    std::function<std::optional<std::size_t>(const T&)> read_size;
    std::vector<std::function<void(const T&, std::string_view, std::vector<diagnostic>&)>> validators;
 };
@@ -404,7 +498,9 @@ template <typename T> class object_schema {
             return std::any{value};
          }
       };
-      rule.read_input = [](const T& object) -> input_value { return to_input_value(object.*Member); };
+      rule.read_input = [](const T& object, std::string_view path) -> input_value {
+         return to_input_value(object.*Member, path);
+      };
       if constexpr (is_vector<member_type>::value) {
          rule.read_size = [](const T& object) -> std::optional<std::size_t> { return (object.*Member).size(); };
       } else if constexpr (is_optional<member_type>::value &&
@@ -480,10 +576,10 @@ template <typename T> class object_schema {
       return result;
    }
 
-   [[nodiscard]] input_value::object_type encode_object(const T& input) const {
+   [[nodiscard]] input_value::object_type encode_object(const T& input, std::string_view base_path = {}) const {
       auto output = input_value::object_type{};
       for (const auto& field : *fields_) {
-         auto value = field.read_input(input);
+         auto value = field.read_input(input, append_path(base_path, field.name));
          if (!std::holds_alternative<std::monostate>(value.storage)) {
             set_input_path(output, field.name, std::move(value));
          }
@@ -494,39 +590,24 @@ template <typename T> class object_schema {
    [[nodiscard]] std::vector<diagnostic> validate(const T& object, std::string_view base_path = {}) const {
       auto result = std::vector<diagnostic>{};
       for (const auto& field : *fields_) {
-         if (field.minimum || field.maximum) {
-            auto numeric = std::optional<long double>{};
+         if (field.compare_range) {
             try {
                const auto any_value = field.read_validation_any ? field.read_validation_any(object)
                                                                 : std::optional<std::any>{field.read_any(object)};
                if (!any_value) {
                   continue;
                }
-               switch (field.kind) {
-               case value_kind::signed_integer:
-                  numeric = static_cast<long double>(std::any_cast<std::int64_t>(coerce_signed(*any_value)));
-                  break;
-               case value_kind::unsigned_integer:
-                  numeric = static_cast<long double>(std::any_cast<std::uint64_t>(coerce_unsigned(*any_value)));
-                  break;
-               case value_kind::floating:
-                  numeric = std::any_cast<long double>(coerce_floating(*any_value));
-                  break;
-               default:
-                  break;
+               const auto comparison = field.compare_range(*any_value);
+               if (comparison < 0) {
+                  result.push_back(
+                      make_error(base_path, field.name, "schema.range", "value is below the allowed minimum"));
+               } else if (comparison > 0) {
+                  result.push_back(
+                      make_error(base_path, field.name, "schema.range", "value is above the allowed maximum"));
                }
             } catch (...) {
                result.push_back(
                    make_error(base_path, field.name, "schema.type", "value cannot be inspected for range validation"));
-            }
-
-            if (numeric && field.minimum && *numeric < *field.minimum) {
-               result.push_back(
-                   make_error(base_path, field.name, "schema.range", "value is below the allowed minimum"));
-            }
-            if (numeric && field.maximum && *numeric > *field.maximum) {
-               result.push_back(
-                   make_error(base_path, field.name, "schema.range", "value is above the allowed maximum"));
             }
          }
          for (const auto& validator : field.validators) {
@@ -704,57 +785,6 @@ template <typename T> class object_schema {
       return (*fields_)[index];
    }
 
-   static std::any coerce_signed(const std::any& value) {
-      if (value.type() == typeid(std::int64_t)) {
-         return value;
-      }
-      if (value.type() == typeid(int)) {
-         return static_cast<std::int64_t>(std::any_cast<int>(value));
-      }
-      if (value.type() == typeid(short)) {
-         return static_cast<std::int64_t>(std::any_cast<short>(value));
-      }
-      if (value.type() == typeid(long)) {
-         return static_cast<std::int64_t>(std::any_cast<long>(value));
-      }
-      if (value.type() == typeid(long long)) {
-         return static_cast<std::int64_t>(std::any_cast<long long>(value));
-      }
-      return value;
-   }
-
-   static std::any coerce_unsigned(const std::any& value) {
-      if (value.type() == typeid(std::uint64_t)) {
-         return value;
-      }
-      if (value.type() == typeid(unsigned int)) {
-         return static_cast<std::uint64_t>(std::any_cast<unsigned int>(value));
-      }
-      if (value.type() == typeid(unsigned short)) {
-         return static_cast<std::uint64_t>(std::any_cast<unsigned short>(value));
-      }
-      if (value.type() == typeid(unsigned long)) {
-         return static_cast<std::uint64_t>(std::any_cast<unsigned long>(value));
-      }
-      if (value.type() == typeid(unsigned long long)) {
-         return static_cast<std::uint64_t>(std::any_cast<unsigned long long>(value));
-      }
-      return value;
-   }
-
-   static std::any coerce_floating(const std::any& value) {
-      if (value.type() == typeid(long double)) {
-         return value;
-      }
-      if (value.type() == typeid(double)) {
-         return static_cast<long double>(std::any_cast<double>(value));
-      }
-      if (value.type() == typeid(float)) {
-         return static_cast<long double>(std::any_cast<float>(value));
-      }
-      return value;
-   }
-
    static diagnostic make_error(std::string_view base_path, const std::string& field, std::string code,
                                 std::string message) {
       auto path = std::string{base_path};
@@ -785,9 +815,10 @@ template <typename T> class field_builder {
       return *this;
    }
 
-   template <typename Min, typename Max> field_builder& range(Min min, Max max) {
+   template <numeric_value Min, numeric_value Max> field_builder& range(Min min, Max max) {
       current().minimum = static_cast<long double>(min);
       current().maximum = static_cast<long double>(max);
+      current().compare_range = [min, max](const std::any& value) { return compare_any_range(value, min, max); };
       return *this;
    }
 
@@ -1016,6 +1047,10 @@ template <typename T>
       if (const auto* value = std::get_if<std::string>(&input.storage)) {
          return *value;
       }
+   } else if constexpr (canonical_string_scalar<clean_type>) {
+      if (const auto* text = std::get_if<std::string>(&input.storage)) {
+         return parse_scalar_text<clean_type>(*text);
+      }
    } else if constexpr (std::same_as<clean_type, std::vector<std::string>>) {
       if (const auto* values = input.as_array()) {
          auto output = std::vector<std::string>{};
@@ -1063,9 +1098,28 @@ template <typename T>
       if (const auto* object = input.as_object()) {
          auto output = clean_type{};
          const auto nested_rules = rules<clean_type>::define();
-         nested_rules.apply_defaults(output);
-         auto nested = nested_rules.decode_object(*object, path, output);
-         diagnostics.insert(diagnostics.end(), nested.begin(), nested.end());
+         if (!nested_rules.fields().empty()) {
+            nested_rules.apply_defaults(output);
+            auto nested = nested_rules.decode_object(*object, path, output);
+            diagnostics.insert(diagnostics.end(), nested.begin(), nested.end());
+            return output;
+         }
+
+         using members = boost::describe::describe_members<clean_type, boost::describe::mod_any_access |
+                                                                           boost::describe::mod_inherited>;
+         boost::mp11::mp_for_each<members>([&](auto descriptor) {
+            const auto found = object->find(descriptor.name);
+            if (found == object->end()) {
+               return;
+            }
+            const auto member_path = append_path(path, descriptor.name);
+            using member_type = std::remove_cvref_t<decltype(output.*descriptor.pointer)>;
+            try {
+               output.*descriptor.pointer = cast_input_to<member_type>(found->second, member_path, diagnostics);
+            } catch (const std::exception& error) {
+               diagnostics.push_back(make_path_error(member_path, "config.type", error.what()));
+            }
+         });
          return output;
       }
    }
@@ -1106,11 +1160,19 @@ template <typename T>
          diagnostics.push_back(make_path_error(item_path, "config.type", "list entry is not an object"));
          continue;
       }
-      auto item = T{};
-      nested_rules.apply_defaults(item);
-      auto nested = nested_rules.decode_object(*object, item_path, item);
-      diagnostics.insert(diagnostics.end(), nested.begin(), nested.end());
-      output.push_back(std::move(item));
+      if (!nested_rules.fields().empty()) {
+         auto item = T{};
+         nested_rules.apply_defaults(item);
+         auto nested = nested_rules.decode_object(*object, item_path, item);
+         diagnostics.insert(diagnostics.end(), nested.begin(), nested.end());
+         output.push_back(std::move(item));
+         continue;
+      }
+      try {
+         output.push_back(cast_input_to<T>((*values)[i], item_path, diagnostics));
+      } catch (const std::exception& error) {
+         diagnostics.push_back(make_path_error(item_path, "config.type", error.what()));
+      }
    }
    return output;
 }
@@ -1230,6 +1292,23 @@ void validate_exact_input_value(const input_value& input, std::string_view path,
          diagnostics.push_back(
              make_path_error(std::string{path}, "config.type", "string field must be a string value"));
       }
+   } else if constexpr (canonical_string_scalar<clean_type>) {
+      if (!std::holds_alternative<std::string>(input.storage)) {
+         diagnostics.push_back(make_path_error(std::string{path}, "config.type",
+                                               "scalar field must contain its canonical config spelling"));
+         return;
+      }
+      const auto& text = std::get<std::string>(input.storage);
+      try {
+         const auto value = parse_scalar_text<clean_type>(text);
+         const auto canonical = format_scalar_text(value);
+         if (!canonical || *canonical != text) {
+            diagnostics.push_back(make_path_error(std::string{path}, "config.type",
+                                                  "scalar field must contain its canonical config spelling"));
+         }
+      } catch (const std::exception& error) {
+         diagnostics.push_back(make_path_error(std::string{path}, "config.type", error.what()));
+      }
    } else if constexpr (std::is_enum_v<clean_type>) {
       if (!std::holds_alternative<std::string>(input.storage)) {
          diagnostics.push_back(
@@ -1314,13 +1393,13 @@ void validate_exact_input_value(const input_value& input, std::string_view path,
    }
 }
 
-template <typename T> [[nodiscard]] input_value to_input_value(const T& input) {
+template <typename T> [[nodiscard]] input_value to_input_value(const T& input, std::string_view path) {
    using clean_type = std::remove_cvref_t<T>;
    if constexpr (is_optional<clean_type>::value) {
       if (!input.has_value()) {
          return input_value{};
       }
-      return to_input_value(*input);
+      return to_input_value(*input, path);
    } else if constexpr (std::same_as<clean_type, bool>) {
       return input_value{input};
    } else if constexpr (signed_integral_value<clean_type> && !std::same_as<clean_type, bool>) {
@@ -1335,6 +1414,8 @@ template <typename T> [[nodiscard]] input_value to_input_value(const T& input) {
       } else {
          return input_value{format_integral_text(input)};
       }
+   } else if constexpr (std::same_as<clean_type, long double>) {
+      throw encoding_error{std::string{path}, "long double schema fields are not supported by config codecs"};
    } else if constexpr (std::floating_point<clean_type>) {
       return input_value{static_cast<double>(input)};
    } else if constexpr (std::same_as<clean_type, std::string>) {
@@ -1350,9 +1431,14 @@ template <typename T> [[nodiscard]] input_value to_input_value(const T& input) {
          return input_value{static_cast<std::uint64_t>(input)};
       }
    } else if constexpr (canonical_string_scalar<clean_type>) {
-      const auto text = format_scalar_text(input);
+      auto text = std::optional<std::string>{};
+      try {
+         text = format_scalar_text(input);
+      } catch (const std::exception& error) {
+         throw encoding_error{std::string{path}, error.what()};
+      }
       if (!text) {
-         throw std::invalid_argument{"scalar adapter has no canonical config spelling"};
+         throw encoding_error{std::string{path}, "scalar adapter has no canonical config spelling"};
       }
       return input_value{*text};
    } else if constexpr (std::same_as<clean_type, std::vector<std::string>>) {
@@ -1365,28 +1451,28 @@ template <typename T> [[nodiscard]] input_value to_input_value(const T& input) {
    } else if constexpr (is_vector_enum<clean_type>::value) {
       auto array = input_value::array_type{};
       array.reserve(input.size());
-      for (const auto& item : input) {
-         array.push_back(to_input_value(item));
+      for (std::size_t index = 0; index < input.size(); ++index) {
+         array.push_back(to_input_value(input[index], append_index(path, index)));
       }
       return input_value{std::move(array)};
    } else if constexpr (is_vector<clean_type>::value) {
       auto array = input_value::array_type{};
       array.reserve(input.size());
-      for (const auto& item : input) {
-         array.push_back(to_input_value(item));
+      for (std::size_t index = 0; index < input.size(); ++index) {
+         array.push_back(to_input_value(input[index], append_index(path, index)));
       }
       return input_value{std::move(array)};
    } else {
       const auto nested_rules = rules<clean_type>::define();
       if (!nested_rules.fields().empty()) {
-         return input_value{nested_rules.encode_object(input)};
+         return input_value{nested_rules.encode_object(input, path)};
       }
       if constexpr (boost::describe::has_describe_members<clean_type>::value) {
          auto object = input_value::object_type{};
          using members = boost::describe::describe_members<clean_type, boost::describe::mod_any_access |
                                                                            boost::describe::mod_inherited>;
          boost::mp11::mp_for_each<members>([&](auto descriptor) {
-            auto value = to_input_value(input.*descriptor.pointer);
+            auto value = to_input_value(input.*descriptor.pointer, append_path(path, descriptor.name));
             if (!std::holds_alternative<std::monostate>(value.storage)) {
                object.emplace(descriptor.name, std::move(value));
             }
