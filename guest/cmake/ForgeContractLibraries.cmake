@@ -115,6 +115,7 @@ function(_forge_contract_semantic_properties output)
       INTERFACE_SOURCES
       COMPILE_OPTIONS
       INTERFACE_COMPILE_OPTIONS
+      COMPILE_FLAGS
       COMPILE_DEFINITIONS
       INTERFACE_COMPILE_DEFINITIONS
       INCLUDE_DIRECTORIES
@@ -123,6 +124,13 @@ function(_forge_contract_semantic_properties output)
       INTERFACE_COMPILE_FEATURES
       LINK_OPTIONS
       INTERFACE_LINK_OPTIONS
+      LINK_FLAGS
+      LINKER_TYPE
+      LINK_DIRECTORIES
+      INTERFACE_LINK_DIRECTORIES
+      LINK_DEPENDS
+      LINK_DEPENDS_NO_SHARED
+      STATIC_LIBRARY_OPTIONS
       # These values are compared verbatim only. Forge never interprets them as
       # a second dependency graph.
       LINK_LIBRARIES
@@ -132,6 +140,26 @@ function(_forge_contract_semantic_properties output)
       CXX_EXTENSIONS
       CXX_MODULE_STD
       CXX_SCAN_FOR_MODULES
+      CXX_COMPILER_LAUNCHER
+      CXX_LINKER_LAUNCHER
+      PRECOMPILE_HEADERS
+      INTERFACE_PRECOMPILE_HEADERS
+      PRECOMPILE_HEADERS_REUSE_FROM
+      RULE_LAUNCH_COMPILE
+      RULE_LAUNCH_LINK
+      CXX_CLANG_TIDY
+      CXX_CPPCHECK
+      CXX_INCLUDE_WHAT_YOU_USE
+      UNITY_BUILD
+      UNITY_BUILD_MODE
+      UNITY_BUILD_BATCH_SIZE
+      UNITY_BUILD_CODE_BEFORE_INCLUDE
+      UNITY_BUILD_CODE_AFTER_INCLUDE
+      UNITY_BUILD_UNIQUE_ID
+      POSITION_INDEPENDENT_CODE
+      INTERPROCEDURAL_OPTIMIZATION
+      CXX_VISIBILITY_PRESET
+      VISIBILITY_INLINES_HIDDEN
       CXX_MODULE_SETS
       INTERFACE_CXX_MODULE_SETS
       PARENT_SCOPE
@@ -150,6 +178,20 @@ function(_forge_contract_target_semantic_properties target output)
          )
       endforeach()
    endif()
+   set(_configurations DEBUG RELEASE MINSIZEREL RELWITHDEBINFO)
+   if(CMAKE_CONFIGURATION_TYPES)
+      list(APPEND _configurations ${CMAKE_CONFIGURATION_TYPES})
+   endif()
+   list(REMOVE_DUPLICATES _configurations)
+   foreach(_configuration IN LISTS _configurations)
+      string(TOUPPER "${_configuration}" _configuration)
+      list(
+         APPEND _properties
+         "COMPILE_DEFINITIONS_${_configuration}"
+         "LINK_FLAGS_${_configuration}"
+         "INTERPROCEDURAL_OPTIMIZATION_${_configuration}"
+      )
+   endforeach()
    set(${output} "${_properties}" PARENT_SCOPE)
 endfunction()
 
@@ -386,6 +428,26 @@ function(_forge_contract_validate_guest_environment)
          "the SDK owns the compile profile shared by CMake and Abigen"
       )
    endif()
+   set(_supported_configurations DEBUG RELEASE MINSIZEREL RELWITHDEBINFO)
+   if(CMAKE_CONFIGURATION_TYPES)
+      set(_active_configurations ${CMAKE_CONFIGURATION_TYPES})
+   else()
+      set(_active_configurations "${CMAKE_BUILD_TYPE}")
+   endif()
+   foreach(_configuration IN LISTS _active_configurations)
+      if("${_configuration}" STREQUAL "")
+         continue()
+      endif()
+      string(TOUPPER "${_configuration}" _configuration_upper)
+      if(NOT _configuration_upper IN_LIST _supported_configurations)
+         message(
+            FATAL_ERROR
+            "unsupported Forge Contract guest configuration: ${_configuration}; "
+            "supported configurations are Debug, Release, MinSizeRel and "
+            "RelWithDebInfo"
+         )
+      endif()
+   endforeach()
    if(
       NOT CMAKE_CXX_STANDARD EQUAL 23
       OR NOT CMAKE_CXX_STANDARD_REQUIRED

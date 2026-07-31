@@ -436,6 +436,59 @@ target_sources(
         },
     )
 
+    mutated_precompiled_header = source_root / "mutated-precompiled-header"
+    write_negative_project(
+        mutated_precompiled_header,
+        cmake_body="""
+forge_add_contract_library(
+   negative_protocol ID negative.mutated_precompiled_header
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+target_precompile_headers(
+   negative_protocol PRIVATE include/profile.hxx
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n",
+            "include/profile.hxx": "#define MUTATED_PCH_PROFILE 1\n",
+        },
+    )
+
+    mutated_launcher = source_root / "mutated-launcher"
+    write_negative_project(
+        mutated_launcher,
+        cmake_body="""
+forge_add_contract_library(
+   negative_protocol ID negative.mutated_launcher
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+set_property(
+   TARGET negative_protocol
+   PROPERTY CXX_COMPILER_LAUNCHER "${CMAKE_COMMAND};-E;env"
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
+    custom_configuration = source_root / "custom-configuration"
+    write_negative_project(
+        custom_configuration,
+        cmake_body="""
+forge_add_contract_library(
+   negative_protocol ID negative.custom_configuration
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
     directory_profile = source_root / "directory-profile"
     write_negative_project(
         directory_profile,
@@ -612,6 +665,14 @@ class [[forge::contract("mismatch")]] mismatch final
             mutated_module_set,
             "changed property: CXX_MODULE_SET_forge_contract_modules",
         ),
+        (
+            mutated_precompiled_header,
+            "changed property: PRECOMPILE_HEADERS",
+        ),
+        (
+            mutated_launcher,
+            "changed property: CXX_COMPILER_LAUNCHER",
+        ),
         (directory_profile, "directory COMPILE_DEFINITIONS are unsupported"),
         (
             changed_source_root,
@@ -635,6 +696,20 @@ class [[forge::contract("mismatch")]] mismatch final
             f"-DForgeContract_DIR={contract_package}",
             contains=expected,
         )
+    run_failure(
+        cmake,
+        "-S",
+        str(custom_configuration),
+        "-B",
+        str(build_root / custom_configuration.name),
+        "-G",
+        "Ninja",
+        f"-DCMAKE_TOOLCHAIN_FILE={toolchain}",
+        f"-DForgeContract_DIR={contract_package}",
+        "-DCMAKE_BUILD_TYPE=ASan",
+        "-DCMAKE_CXX_FLAGS_ASAN=-DFEATURE=1",
+        contains="unsupported Forge Contract guest configuration: ASan",
+    )
     run_failure(
         cmake,
         "-S",
