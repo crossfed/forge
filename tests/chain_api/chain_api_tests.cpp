@@ -7,6 +7,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <concepts>
 #include <future>
 #include <initializer_list>
 #include <memory>
@@ -40,6 +41,9 @@ namespace {
 using forge::api::http::cache_policy;
 using forge::api::http::route;
 using forge::net::http::method;
+
+static_assert(std::same_as<decltype(forge::chain::protocol::transaction_read_only_request{}.transaction),
+                           forge::chain::protocol::packed_transaction>);
 
 template <typename T> T run(boost::asio::awaitable<T> operation) {
    auto context = boost::asio::io_context{};

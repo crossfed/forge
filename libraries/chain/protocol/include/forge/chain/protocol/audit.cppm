@@ -12,6 +12,7 @@ export module forge.chain.protocol.audit;
 export import forge.chain.protocol.types;
 
 import forge.crypto.digest.sha256;
+import forge.chain.core.merkle;
 import forge.variant.containers;
 import forge.variant.conversion;
 import forge.variant.described;
@@ -66,12 +67,7 @@ struct proof_blob {
    bool operator==(const proof_blob&) const = default;
 };
 
-struct merkle_step {
-   digest sibling;
-   bool sibling_on_left = false;
-
-   bool operator==(const merkle_step&) const = default;
-};
+using merkle_step = forge::chain::core::merkle_step;
 
 struct transaction_inclusion_proof {
    digest leaf;
@@ -141,7 +137,6 @@ BOOST_DESCRIBE_STRUCT(state_anchor, (),
                       (chain, block, block_num, transaction_root, state_root, state_size, change_root, change_count))
 BOOST_DESCRIBE_STRUCT(anchored_request, (), (anchor, audit))
 BOOST_DESCRIBE_STRUCT(proof_blob, (), (scheme, version, payload))
-BOOST_DESCRIBE_STRUCT(merkle_step, (), (sibling, sibling_on_left))
 BOOST_DESCRIBE_STRUCT(transaction_inclusion_proof, (), (leaf, index, leaf_count, path))
 BOOST_DESCRIBE_STRUCT(audit_bundle, (), (finality, ancestry, state, transaction))
 BOOST_DESCRIBE_STRUCT(response_context, (), (chain, head, finalized, anchor))

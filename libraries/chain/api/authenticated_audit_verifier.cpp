@@ -3,7 +3,6 @@ module;
 #include <forge/exceptions/macros.hpp>
 
 #include <algorithm>
-#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -18,6 +17,7 @@ module;
 module forge.chain.api.authenticated_audit_verifier;
 
 import forge.chain.api.exceptions;
+import forge.chain.core.merkle;
 import forge.db.authenticated.codec;
 import forge.db.authenticated.hash;
 import forge.db.authenticated.proof;
@@ -90,37 +90,6 @@ template <typename Function> decltype(auto) translate_state_error(Function&& fun
       FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof, "chain API authenticated proof is invalid",
                             forge::exceptions::ctx("reason", error.what()));
    }
-}
-
-forge::chain::core::digest hash_pair(const forge::chain::core::digest& left, const forge::chain::core::digest& right) {
-   auto encoder = forge::chain::core::digest::encoder{};
-   forge::raw::pack(encoder, left);
-   forge::raw::pack(encoder, right);
-   return encoder.result();
-}
-
-std::vector<bool> path_sides(std::uint64_t index, std::uint64_t count) {
-   if (count == 0 || index >= count) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof,
-                            "transaction inclusion proof has an invalid leaf position");
-   }
-
-   auto root_to_leaf = std::vector<bool>{};
-   while (count > 1U) {
-      auto midpoint = std::bit_floor(count);
-      if (midpoint == count) {
-         midpoint /= 2U;
-      }
-      if (index < midpoint) {
-         root_to_leaf.push_back(false);
-         count = midpoint;
-      } else {
-         root_to_leaf.push_back(true);
-         index -= midpoint;
-         count -= midpoint;
-      }
-   }
-   return {root_to_leaf.rbegin(), root_to_leaf.rend()};
 }
 
 protocol::digest receipt_transaction_id(const protocol::transaction_receipt& receipt) {
@@ -239,21 +208,8 @@ void authenticated_audit_verifier::verify_transaction(const protocol::state_anch
                             "transaction result does not match its finalized block or receipt");
    }
 
-   const auto sides = path_sides(proof.index, proof.leaf_count);
-   if (sides.size() != proof.path.size()) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof,
-                            "transaction inclusion proof has an invalid path length");
-   }
-   auto current = proof.leaf;
-   for (auto index = std::size_t{0}; index < proof.path.size(); ++index) {
-      if (proof.path[index].sibling_on_left != sides[index]) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof,
-                               "transaction inclusion proof follows the wrong branch");
-      }
-      current = proof.path[index].sibling_on_left ? hash_pair(proof.path[index].sibling, current)
-                                                  : hash_pair(current, proof.path[index].sibling);
-   }
-   if (current != anchor.transaction_root) {
+   if (!forge::chain::core::verify_merkle_path(proof.leaf, proof.index, proof.leaf_count, proof.path,
+                                               anchor.transaction_root)) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof,
                             "transaction inclusion proof does not reconstruct the finalized root");
    }

@@ -85,7 +85,7 @@ struct transaction_required_keys_request {
 };
 
 struct transaction_read_only_request {
-   forge::chain::protocol::transaction transaction;
+   forge::chain::protocol::packed_transaction transaction;
    bool return_failure_trace = true;
    std::optional<block_id> anchor;
    audit_mode audit = audit_mode::none;
