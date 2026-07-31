@@ -393,6 +393,26 @@ target_link_libraries(negative_protocol PRIVATE Forge::forge_raw)
         },
     )
 
+    mutated_source = source_root / "mutated-source"
+    write_negative_project(
+        mutated_source,
+        cmake_body="""
+forge_add_contract_library(
+   negative_protocol ID negative.mutated_source
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+set_source_files_properties(
+   include/protocol.cppm
+   TARGET_DIRECTORY negative_protocol
+   PROPERTIES COMPILE_DEFINITIONS MUTATED_SOURCE_AFTER_DECLARATION=1
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
     directory_profile = source_root / "directory-profile"
     write_negative_project(
         directory_profile,
@@ -560,6 +580,10 @@ class [[forge::contract("mismatch")]] mismatch final
         (
             mutated_dependencies,
             "changed property: LINK_LIBRARIES",
+        ),
+        (
+            mutated_source,
+            "changed source property: COMPILE_DEFINITIONS",
         ),
         (directory_profile, "directory COMPILE_DEFINITIONS are unsupported"),
         (

@@ -136,6 +136,84 @@ function(_forge_contract_semantic_properties output)
    )
 endfunction()
 
+function(_forge_contract_source_semantic_properties output)
+   set(
+      _properties
+      COMPILE_OPTIONS
+      COMPILE_DEFINITIONS
+      INCLUDE_DIRECTORIES
+      COMPILE_FLAGS
+      LANGUAGE
+      CXX_SCAN_FOR_MODULES
+      GENERATED
+      HEADER_FILE_ONLY
+      EXTERNAL_OBJECT
+      OBJECT_DEPENDS
+      OBJECT_OUTPUTS
+   )
+   set(_configurations DEBUG RELEASE MINSIZEREL RELWITHDEBINFO)
+   if(CMAKE_CONFIGURATION_TYPES)
+      list(APPEND _configurations ${CMAKE_CONFIGURATION_TYPES})
+   endif()
+   list(REMOVE_DUPLICATES _configurations)
+   foreach(_configuration IN LISTS _configurations)
+      string(TOUPPER "${_configuration}" _configuration)
+      list(APPEND _properties "COMPILE_DEFINITIONS_${_configuration}")
+   endforeach()
+   set(${output} "${_properties}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_source_property target source property output)
+   get_property(
+      _is_set SOURCE "${source}" TARGET_DIRECTORY "${target}"
+      PROPERTY "${property}" SET
+   )
+   if(_is_set)
+      get_property(
+         _value SOURCE "${source}" TARGET_DIRECTORY "${target}"
+         PROPERTY "${property}"
+      )
+   else()
+      set(_value "<FORGE_UNSET>")
+   endif()
+   set(${output} "${_value}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_target_source_files target output)
+   get_target_property(_sources "${target}" SOURCES)
+   if(NOT _sources OR _sources MATCHES "-NOTFOUND$")
+      set(_sources)
+   endif()
+   get_target_property(_module_sets "${target}" CXX_MODULE_SETS)
+   if(NOT _module_sets OR _module_sets MATCHES "-NOTFOUND$")
+      set(_module_sets)
+   endif()
+   foreach(_module_set IN LISTS _module_sets)
+      get_target_property(
+         _module_sources "${target}" "CXX_MODULE_SET_${_module_set}"
+      )
+      if(_module_sources AND NOT _module_sources MATCHES "-NOTFOUND$")
+         list(APPEND _sources ${_module_sources})
+      endif()
+   endforeach()
+   list(REMOVE_DUPLICATES _sources)
+   set(${output} "${_sources}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_source_lookup_paths target source output)
+   get_target_property(_source_directory "${target}" SOURCE_DIR)
+   get_filename_component(
+      _absolute "${source}" ABSOLUTE BASE_DIR "${_source_directory}"
+   )
+   set(_paths "${source}" "${_absolute}")
+   file(RELATIVE_PATH _relative "${_source_directory}" "${_absolute}")
+   if(NOT IS_ABSOLUTE "${_relative}" AND NOT _relative MATCHES "^\\.\\.(/|$)")
+      list(APPEND _paths "${_relative}")
+   endif()
+   list(REMOVE_DUPLICATES _paths)
+   set(${output} "${_paths}" PARENT_SCOPE)
+endfunction()
+
 function(_forge_contract_validate_guest_targets)
    _forge_contract_validate_guest_environment()
    get_property(_targets GLOBAL PROPERTY FORGE_CONTRACT_FROZEN_TARGETS)
@@ -167,6 +245,42 @@ function(_forge_contract_validate_guest_targets)
             )
          endif()
       endforeach()
+      get_target_property(
+         _sources "${target}" FORGE_CONTRACT_FROZEN_SOURCE_FILES
+      )
+      if(NOT _sources OR _sources MATCHES "-NOTFOUND$")
+         set(_sources)
+      endif()
+      _forge_contract_source_semantic_properties(_source_properties)
+      foreach(_source IN LISTS _sources)
+         _forge_contract_source_lookup_paths(
+            "${target}" "${_source}" _source_lookups
+         )
+         foreach(_source_lookup IN LISTS _source_lookups)
+            foreach(_property IN LISTS _source_properties)
+               _forge_contract_source_property(
+                  "${target}" "${_source_lookup}" "${_property}" _current
+               )
+               string(
+                  SHA256 _source_key "${_source_lookup}\n${_property}"
+               )
+               get_target_property(
+                  _expected "${target}"
+                  "FORGE_CONTRACT_FROZEN_SOURCE_${_source_key}"
+               )
+               if(NOT "${_current}" STREQUAL "${_expected}")
+                  message(
+                     FATAL_ERROR
+                     "Forge Contract guest target '${target}' source '${_source}' "
+                     "was modified after ${_declaration}; post-declaration source "
+                     "mutation is unsupported because CMake compilation and "
+                     "Abigen must use one semantic profile (changed source "
+                     "property: ${_property})"
+                  )
+               endif()
+            endforeach()
+         endforeach()
+      endforeach()
    endforeach()
 endfunction()
 
@@ -186,6 +300,28 @@ function(_forge_contract_freeze_guest_target target declaration)
          TARGET "${target}" PROPERTY
          "FORGE_CONTRACT_FROZEN_${_property}" "${_current}"
       )
+   endforeach()
+   _forge_contract_target_source_files("${target}" _sources)
+   set_property(
+      TARGET "${target}" PROPERTY FORGE_CONTRACT_FROZEN_SOURCE_FILES "${_sources}"
+   )
+   _forge_contract_source_semantic_properties(_source_properties)
+   foreach(_source IN LISTS _sources)
+      _forge_contract_source_lookup_paths(
+         "${target}" "${_source}" _source_lookups
+      )
+      foreach(_source_lookup IN LISTS _source_lookups)
+         foreach(_property IN LISTS _source_properties)
+            _forge_contract_source_property(
+               "${target}" "${_source_lookup}" "${_property}" _current
+            )
+            string(SHA256 _source_key "${_source_lookup}\n${_property}")
+            set_property(
+               TARGET "${target}" PROPERTY
+               "FORGE_CONTRACT_FROZEN_SOURCE_${_source_key}" "${_current}"
+            )
+         endforeach()
+      endforeach()
    endforeach()
    set_property(
       TARGET "${target}" PROPERTY
