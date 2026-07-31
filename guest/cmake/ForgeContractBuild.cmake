@@ -1,31 +1,3 @@
-function(_forge_contract_object_list target identity output)
-   string(
-      SHA256 _property_key
-      "${CMAKE_CURRENT_BINARY_DIR}\n${target}\n${identity}"
-   )
-   get_property(
-      _existing GLOBAL PROPERTY "FORGE_CONTRACT_OBJECT_LIST_${_property_key}"
-   )
-   if(_existing)
-      set(${output} "${_existing}" PARENT_SCOPE)
-      return()
-   endif()
-
-   set(
-      _path
-      "${CMAKE_CURRENT_BINARY_DIR}/contract-compilations/${identity}-$<CONFIG>.objects"
-   )
-   file(
-      GENERATE
-      OUTPUT "${_path}"
-      CONTENT "$<JOIN:$<TARGET_OBJECTS:${target}>,\n>\n"
-   )
-   set_property(
-      GLOBAL PROPERTY "FORGE_CONTRACT_OBJECT_LIST_${_property_key}" "${_path}"
-   )
-   set(${output} "${_path}" PARENT_SCOPE)
-endfunction()
-
 function(forge_add_contract target)
    if(NOT FORGE_CONTRACT_GUEST)
       message(
@@ -116,16 +88,6 @@ function(forge_add_contract target)
       )
    endif()
 
-   string(SHA256 _dependency_key "${CMAKE_CURRENT_BINARY_DIR}/${target}")
-   set(_dependency_key "FORGE_CONTRACT_BUILD_${_dependency_key}")
-   _forge_contract_collect_dependencies(
-      KEY "${_dependency_key}"
-      LIBRARIES ${ARG_LIBRARIES}
-      OWNER_IDS _owner_ids
-      TARGETS _owner_targets
-      MODULE_BASES _module_bases
-   )
-
    _forge_contract_owner_target("forge.contract.runtime" _runtime_target)
    get_property(
       _eosio_target GLOBAL PROPERTY FORGE_CONTRACT_GUEST_EOSIO_TARGET
@@ -133,6 +95,32 @@ function(forge_add_contract target)
    if(NOT _eosio_target)
       message(FATAL_ERROR "Forge Contract SDK guest compatibility target is unavailable")
    endif()
+   set(_metadata_target "${target}_contract_metadata")
+   add_library("${_metadata_target}" INTERFACE)
+   _forge_contract_enable_metadata_closure("${_metadata_target}")
+   target_link_libraries(
+      "${_metadata_target}"
+      INTERFACE
+         "${_runtime_target}"
+         "${_eosio_target}"
+         ${ARG_LIBRARIES}
+   )
+   set(
+      _compilation_records
+      "$<TARGET_PROPERTY:${_metadata_target},INTERFACE_FORGE_CONTRACT_COMPILATIONS>"
+   )
+   set(
+      _module_bases
+      "$<TARGET_PROPERTY:${_metadata_target},INTERFACE_FORGE_CONTRACT_MODULE_BASES>"
+   )
+   set(
+      _module_paths
+      "$<TARGET_PROPERTY:${_metadata_target},INTERFACE_FORGE_CONTRACT_MODULE_PATHS>"
+   )
+   set(
+      _owner_targets
+      "$<TARGET_PROPERTY:${_metadata_target},INTERFACE_FORGE_CONTRACT_OWNER_TARGETS>"
+   )
 
    if(FORGE_CONTRACT_ARTIFACT_DIR)
       get_filename_component(
@@ -161,73 +149,6 @@ function(forge_add_contract target)
       math(EXPR _wrapper_index "${_wrapper_index} + 1")
    endforeach()
 
-   set(_module_configuration_directory)
-   if(CMAKE_CONFIGURATION_TYPES)
-      set(_module_configuration_directory "$<CONFIG>/")
-   endif()
-   set(_module_search_paths)
-   foreach(_module_target IN LISTS _owner_targets)
-      get_target_property(_module_binary_dir "${_module_target}" BINARY_DIR)
-      if(NOT _module_binary_dir)
-         message(FATAL_ERROR "cannot determine module build directory for ${_module_target}")
-      endif()
-      list(
-         APPEND _module_search_paths
-         "${_module_binary_dir}/CMakeFiles/${_module_target}.dir/${_module_configuration_directory}"
-      )
-   endforeach()
-
-   file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/contract-compilations")
-   set(_contract_compilation_arguments)
-   set(_contract_compilation_object_lists)
-   foreach(_library_target IN LISTS _owner_targets)
-      get_target_property(
-         _owner "${_library_target}" FORGE_CONTRACT_OWNER_ID
-      )
-      if(NOT _owner)
-         message(FATAL_ERROR "contract library has no owner: ${_library_target}")
-      endif()
-      _forge_contract_id_key("${_owner}" _owner_key)
-      _forge_contract_object_list(
-         "${_library_target}" "library-${_owner_key}" _object_list
-      )
-      list(
-         APPEND _contract_compilation_arguments
-         --library-compilation "${_owner}" "${_object_list}"
-      )
-      list(APPEND _contract_compilation_object_lists "${_object_list}")
-      foreach(_scope PUBLIC PRIVATE)
-         get_target_property(
-            _dependencies
-            "${_library_target}"
-            "FORGE_CONTRACT_${_scope}_OWNER_IDS"
-         )
-         if(_dependencies STREQUAL "_dependencies-NOTFOUND")
-            set(_dependencies)
-         endif()
-         string(TOLOWER "${_scope}" _scope_name)
-         foreach(_dependency IN LISTS _dependencies)
-            list(
-               APPEND _contract_compilation_arguments
-               --library-dependency "${_owner}" "${_scope_name}" "${_dependency}"
-            )
-         endforeach()
-      endforeach()
-   endforeach()
-
-   get_property(
-      _root_owner_ids GLOBAL PROPERTY FORGE_CONTRACT_FOUNDATION_COMPONENT_IDS
-   )
-   foreach(_dependency IN LISTS ARG_LIBRARIES)
-      _forge_contract_dependency(
-         "${_dependency}" "root" _unused_target _root_owner
-      )
-      list(APPEND _root_owner_ids "${_root_owner}")
-   endforeach()
-   list(REMOVE_DUPLICATES _root_owner_ids)
-   foreach(_root_owner IN LISTS _root_owner_ids)
-      list(APPEND _contract_compilation_arguments --root-library "${_root_owner}")
-   endforeach()
    get_property(
       _known_component_ids GLOBAL PROPERTY FORGE_CONTRACT_GUEST_COMPONENT_IDS
    )
@@ -239,7 +160,7 @@ function(forge_add_contract target)
       )
       foreach(_known_module IN LISTS _known_modules)
          list(
-            APPEND _contract_compilation_arguments
+            APPEND _known_module_arguments
             --known-module "${_known_module}" "${_component_id}"
          )
       endforeach()
@@ -257,16 +178,16 @@ function(forge_add_contract target)
       --sdk-include "${ForgeContract_DATA_DIR}/include"
       --sdk-include "${ForgeContract_DATA_DIR}/modules"
       --include "${_source_root}"
+      ${_known_module_arguments}
    )
-   list(APPEND _abigen_command ${_contract_compilation_arguments})
+   list(
+      APPEND _abigen_command
+      "$<LIST:TRANSFORM,${_compilation_records},PREPEND,--library-compilation=>"
+      "$<LIST:TRANSFORM,${_module_bases},PREPEND,--include=>"
+      "$<LIST:TRANSFORM,${_module_paths},PREPEND,--module-path=>"
+   )
    foreach(_source IN LISTS _compile_checks)
       list(APPEND _abigen_command --dependency-source "${_source}")
-   endforeach()
-   foreach(_include_directory IN LISTS _module_bases)
-      list(APPEND _abigen_command --include "${_include_directory}")
-   endforeach()
-   foreach(_module_path IN LISTS _module_search_paths)
-      list(APPEND _abigen_command --module-path "${_module_path}")
    endforeach()
    foreach(_wrapper IN LISTS _implementation_wrappers)
       list(APPEND _abigen_command --source-wrapper "${_wrapper}")
@@ -291,8 +212,7 @@ function(forge_add_contract target)
          ${_compile_checks}
          ${_ricardian_contracts}
          ${_ricardian_clauses}
-         ${_owner_targets}
-         ${_contract_compilation_object_lists}
+         "${_owner_targets}"
       DEPFILE "${_depfile}"
       COMMAND_EXPAND_LISTS
       VERBATIM
@@ -315,7 +235,6 @@ function(forge_add_contract target)
       PRIVATE
          "${ForgeContract_DATA_DIR}/include"
          "${_source_root}"
-         ${_module_bases}
    )
    _forge_contract_configure_guest_target("${target}")
    target_compile_options(
@@ -326,12 +245,6 @@ function(forge_add_contract target)
          "-ffile-prefix-map=${CMAKE_CURRENT_BINARY_DIR}=."
          "-ffile-prefix-map=${_source_root}=./source"
    )
-   foreach(_module_path IN LISTS _module_search_paths)
-      target_compile_options(
-         "${target}" PRIVATE "-fprebuilt-module-path=${_module_path}"
-      )
-   endforeach()
-
    if(_compile_checks)
       add_library("${target}_compile_checks" OBJECT ${_compile_checks})
       set_source_files_properties(
@@ -350,15 +263,8 @@ function(forge_add_contract target)
          PRIVATE
             "${ForgeContract_DATA_DIR}/include"
             "${_source_root}"
-            ${_module_bases}
       )
       _forge_contract_configure_guest_target("${target}_compile_checks")
-      foreach(_module_path IN LISTS _module_search_paths)
-         target_compile_options(
-            "${target}_compile_checks"
-            PRIVATE "-fprebuilt-module-path=${_module_path}"
-         )
-      endforeach()
       add_dependencies("${target}" "${target}_compile_checks")
    endif()
 

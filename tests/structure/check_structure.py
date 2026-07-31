@@ -475,6 +475,8 @@ def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
       re.compile(r"\$<LINK_ONLY:"),
       re.compile(r"::@\("),
       re.compile(r"_forge_contract_guest_dependency"),
+      re.compile(r"_forge_contract_collect_registry"),
+      re.compile(r"\bFORGE_CONTRACT_OWNER_IDS\b"),
       re.compile(r"contract-graph\.json"),
       re.compile(r"forge_install_contract_(?:library|package)"),
       re.compile(r"forge_register_contract_library_targets"),

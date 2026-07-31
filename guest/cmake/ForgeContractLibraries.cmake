@@ -67,6 +67,94 @@ function(_forge_contract_register_owner id target)
    set_property(GLOBAL PROPERTY "FORGE_CONTRACT_OWNER_${_key}" "${target}")
 endfunction()
 
+function(_forge_contract_object_list target identity output)
+   string(
+      SHA256 _property_key
+      "${CMAKE_CURRENT_BINARY_DIR}\n${target}\n${identity}"
+   )
+   get_property(
+      _existing GLOBAL PROPERTY "FORGE_CONTRACT_OBJECT_LIST_${_property_key}"
+   )
+   if(_existing)
+      set(${output} "${_existing}" PARENT_SCOPE)
+      return()
+   endif()
+
+   set(
+      _path
+      "${CMAKE_CURRENT_BINARY_DIR}/contract-compilations/${identity}-$<CONFIG>.objects"
+   )
+   file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/contract-compilations")
+   file(
+      GENERATE
+      OUTPUT "${_path}"
+      CONTENT "$<JOIN:$<TARGET_OBJECTS:${target}>,\n>\n"
+   )
+   set_property(
+      GLOBAL PROPERTY "FORGE_CONTRACT_OBJECT_LIST_${_property_key}" "${_path}"
+   )
+   set(${output} "${_path}" PARENT_SCOPE)
+endfunction()
+
+function(_forge_contract_module_path target output)
+   get_target_property(_binary_dir "${target}" BINARY_DIR)
+   if(NOT _binary_dir)
+      message(FATAL_ERROR "cannot determine module build directory for ${target}")
+   endif()
+   set(_configuration_directory)
+   if(CMAKE_CONFIGURATION_TYPES)
+      set(_configuration_directory "$<CONFIG>/")
+   endif()
+   set(
+      ${output}
+      "${_binary_dir}/CMakeFiles/${target}.dir/${_configuration_directory}"
+      PARENT_SCOPE
+   )
+endfunction()
+
+function(_forge_contract_enable_metadata_closure target)
+   set_property(
+      TARGET "${target}" APPEND PROPERTY TRANSITIVE_LINK_PROPERTIES
+      FORGE_CONTRACT_COMPILATIONS
+      FORGE_CONTRACT_MODULE_BASES
+      FORGE_CONTRACT_MODULE_PATHS
+      FORGE_CONTRACT_OWNER_TARGETS
+   )
+endfunction()
+
+function(_forge_contract_publish_metadata target)
+   cmake_parse_arguments(
+      ARG
+      ""
+      "COMPILATION;MODULE_PATH"
+      "MODULE_BASES"
+      ${ARGN}
+   )
+   _forge_contract_enable_metadata_closure("${target}")
+   if(ARG_COMPILATION)
+      set_property(
+         TARGET "${target}" APPEND PROPERTY
+         INTERFACE_FORGE_CONTRACT_COMPILATIONS "${ARG_COMPILATION}"
+      )
+   endif()
+   if(ARG_MODULE_BASES)
+      set_property(
+         TARGET "${target}" APPEND PROPERTY
+         INTERFACE_FORGE_CONTRACT_MODULE_BASES "${ARG_MODULE_BASES}"
+      )
+   endif()
+   if(ARG_MODULE_PATH)
+      set_property(
+         TARGET "${target}" APPEND PROPERTY
+         INTERFACE_FORGE_CONTRACT_MODULE_PATHS "${ARG_MODULE_PATH}"
+      )
+   endif()
+   set_property(
+      TARGET "${target}" APPEND PROPERTY
+      INTERFACE_FORGE_CONTRACT_OWNER_TARGETS "${target}"
+   )
+endfunction()
+
 function(_forge_contract_owner_target id output)
    _forge_contract_id_key("${id}" _key)
    get_property(_target GLOBAL PROPERTY "FORGE_CONTRACT_OWNER_${_key}")
@@ -192,11 +280,15 @@ if(NOT COMMAND forge_contract_register_guest_component)
             FORGE_CONTRACT_OWNER_ID "${ARG_ID}"
             FORGE_CONTRACT_COMPONENT TRUE
             FORGE_CONTRACT_MODULE_NAMES "${ARG_MODULE_NAMES}"
-            FORGE_CONTRACT_PUBLIC_OWNER_IDS "${ARG_PUBLIC_LIBRARIES}"
-            FORGE_CONTRACT_PRIVATE_OWNER_IDS ""
             FORGE_CONTRACT_MODULE_BASES "${ForgeContract_DATA_DIR}/modules"
       )
       _forge_contract_configure_guest_target("${_target}")
+      _forge_contract_module_path("${_target}" _module_path)
+      _forge_contract_publish_metadata(
+         "${_target}"
+         MODULE_BASES "${ForgeContract_DATA_DIR}/modules"
+         MODULE_PATH "${_module_path}"
+      )
       _forge_contract_register_owner("${ARG_ID}" "${_target}")
       set_property(
          GLOBAL PROPERTY "FORGE_CONTRACT_COMPONENT_${_key}_TARGET" "${_target}"
@@ -354,120 +446,50 @@ function(forge_add_contract_library target)
       list(APPEND _private_ids "${_dependency_id}")
    endforeach()
 
-   string(MAKE_C_IDENTIFIER "${target}" _target_identifier)
-   string(
-      SHA256 _target_key
-      "${CMAKE_CURRENT_BINARY_DIR}\n${target}\n${ARG_ID}"
-   )
-   string(SUBSTRING "${_target_key}" 0 12 _target_key)
-   set(_concrete_target "_forge_contract_library_${_target_identifier}_${_target_key}")
-   add_library("${_concrete_target}" STATIC)
-   add_library("${target}" ALIAS "${_concrete_target}")
+   add_library("${target}" STATIC)
    target_sources(
-      "${_concrete_target}"
+      "${target}"
       PUBLIC
          FILE_SET forge_contract_modules TYPE CXX_MODULES
          BASE_DIRS ${_module_bases}
          FILES ${_MODULE_SOURCES}
    )
    if(_SOURCES)
-      target_sources("${_concrete_target}" PRIVATE ${_SOURCES})
+      target_sources("${target}" PRIVATE ${_SOURCES})
    endif()
    target_include_directories(
-      "${_concrete_target}"
-      PUBLIC ${_module_bases}
-      PRIVATE "${_source_root}"
+      "${target}" PRIVATE "$<BUILD_INTERFACE:${_source_root}>"
    )
    if(_public_targets)
-      target_link_libraries("${_concrete_target}" PUBLIC ${_public_targets})
+      target_link_libraries("${target}" PUBLIC ${_public_targets})
    endif()
    if(_private_targets)
-      target_link_libraries("${_concrete_target}" PRIVATE ${_private_targets})
+      target_link_libraries("${target}" PRIVATE ${_private_targets})
    endif()
-   target_compile_features("${_concrete_target}" PUBLIC cxx_std_23)
+   target_compile_features("${target}" PUBLIC cxx_std_23)
    set_target_properties(
-      "${_concrete_target}"
+      "${target}"
       PROPERTIES
          CXX_MODULE_STD OFF
          CXX_SCAN_FOR_MODULES ON
          FORGE_CONTRACT_OWNER_ID "${ARG_ID}"
          FORGE_CONTRACT_LIBRARY TRUE
-         FORGE_CONTRACT_PUBLIC_OWNER_IDS "${_public_ids}"
-         FORGE_CONTRACT_PRIVATE_OWNER_IDS "${_private_ids}"
          FORGE_CONTRACT_MODULE_BASES "${_module_bases}"
          FORGE_CONTRACT_MODULE_NAMES ""
    )
-   _forge_contract_configure_guest_target("${_concrete_target}")
-   _forge_contract_register_owner("${ARG_ID}" "${_concrete_target}")
-endfunction()
-
-function(_forge_contract_collect_owner id state_key)
-   _forge_contract_id_key("${id}" _key)
-   get_property(_state GLOBAL PROPERTY "${state_key}_${_key}_STATE")
-   if(_state STREQUAL "done")
-      return()
-   endif()
-   if(_state STREQUAL "visiting")
-      message(FATAL_ERROR "cycle in Forge Contract dependencies at ${id}")
-   endif()
-   set_property(GLOBAL PROPERTY "${state_key}_${_key}_STATE" visiting)
-   _forge_contract_owner_target("${id}" _target)
-   foreach(_property FORGE_CONTRACT_PUBLIC_OWNER_IDS FORGE_CONTRACT_PRIVATE_OWNER_IDS)
-      get_target_property(_dependencies "${_target}" "${_property}")
-      if(_dependencies STREQUAL "_dependencies-NOTFOUND")
-         set(_dependencies)
-      endif()
-      foreach(_dependency IN LISTS _dependencies)
-         _forge_contract_collect_owner("${_dependency}" "${state_key}")
-      endforeach()
-   endforeach()
-   set_property(GLOBAL APPEND PROPERTY "${state_key}_IDS" "${id}")
-   set_property(GLOBAL PROPERTY "${state_key}_${_key}_STATE" done)
-endfunction()
-
-function(_forge_contract_collect_dependencies)
-   cmake_parse_arguments(
-      ARG
-      ""
-      "KEY;OWNER_IDS;TARGETS;MODULE_BASES"
-      "LIBRARIES"
-      ${ARGN}
-   )
-   foreach(_required KEY OWNER_IDS TARGETS MODULE_BASES)
-      if(NOT ARG_${_required})
-         message(FATAL_ERROR "_forge_contract_collect_dependencies requires ${_required}")
-      endif()
-   endforeach()
-   set_property(GLOBAL PROPERTY "${ARG_KEY}_IDS" "")
-
-   get_property(
-      _foundation GLOBAL PROPERTY FORGE_CONTRACT_FOUNDATION_COMPONENT_IDS
-   )
-   foreach(_owner IN LISTS _foundation)
-      _forge_contract_collect_owner("${_owner}" "${ARG_KEY}")
-   endforeach()
-   foreach(_dependency IN LISTS ARG_LIBRARIES)
-      _forge_contract_dependency(
-         "${_dependency}" "root" _dependency_target _owner
+   _forge_contract_configure_guest_target("${target}")
+   if(FORGE_CONTRACT_GUEST)
+      _forge_contract_id_key("${ARG_ID}" _owner_key)
+      _forge_contract_object_list(
+         "${target}" "library-${_owner_key}" _object_list
       )
-      _forge_contract_collect_owner("${_owner}" "${ARG_KEY}")
-   endforeach()
-
-   get_property(_ids GLOBAL PROPERTY "${ARG_KEY}_IDS")
-   list(REMOVE_DUPLICATES _ids)
-   set(_targets)
-   set(_module_bases)
-   foreach(_id IN LISTS _ids)
-      _forge_contract_owner_target("${_id}" _target)
-      list(APPEND _targets "${_target}")
-      get_target_property(_bases "${_target}" FORGE_CONTRACT_MODULE_BASES)
-      if(_bases AND NOT _bases STREQUAL "_bases-NOTFOUND")
-         list(APPEND _module_bases ${_bases})
-      endif()
-   endforeach()
-   list(REMOVE_DUPLICATES _targets)
-   list(REMOVE_DUPLICATES _module_bases)
-   set(${ARG_OWNER_IDS} "${_ids}" PARENT_SCOPE)
-   set(${ARG_TARGETS} "${_targets}" PARENT_SCOPE)
-   set(${ARG_MODULE_BASES} "${_module_bases}" PARENT_SCOPE)
+      _forge_contract_module_path("${target}" _module_path)
+      _forge_contract_publish_metadata(
+         "${target}"
+         COMPILATION "${ARG_ID}|${_object_list}"
+         MODULE_BASES ${_module_bases}
+         MODULE_PATH "${_module_path}"
+      )
+   endif()
+   _forge_contract_register_owner("${ARG_ID}" "${target}")
 endfunction()

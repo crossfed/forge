@@ -1787,91 +1787,17 @@ std::vector<compilation_metadata> read_compilation_list(const std::filesystem::p
    return result;
 }
 
-using dependency_edges =
-    std::map<std::string, std::vector<forge::contract::abi::library_dependency>>;
-
-std::set<std::string> public_closure(const dependency_edges& edges,
-                                     std::set<std::string> visible) {
-   auto pending = std::vector<std::string>{visible.begin(), visible.end()};
-   while (!pending.empty()) {
-      auto owner = std::move(pending.back());
-      pending.pop_back();
-      const auto found = edges.find(owner);
-      if (found == edges.end()) {
-         continue;
-      }
-      for (const auto& edge : found->second) {
-         if (edge.scope == forge::contract::abi::dependency_scope::public_ &&
-             visible.insert(edge.dependency).second) {
-            pending.push_back(edge.dependency);
-         }
-      }
-   }
-   return visible;
-}
-
-std::set<std::string> visible_owners(const dependency_edges& edges,
-                                     std::string_view owner,
-                                     bool public_surface) {
-   auto visible = std::set<std::string>{std::string{owner}};
-   const auto found = edges.find(std::string{owner});
-   if (found != edges.end()) {
-      for (const auto& edge : found->second) {
-         if (!public_surface ||
-             edge.scope == forge::contract::abi::dependency_scope::public_) {
-         visible.insert(edge.dependency);
-         }
-      }
-   }
-   return public_closure(edges, std::move(visible));
-}
-
 struct validated_contract_libraries {
-   dependency_edges edges;
    std::map<std::string, std::string> module_owners;
 };
 
-validated_contract_libraries
-validate_contract_libraries(const forge::contract::abi::request& options) {
-   auto edges = dependency_edges{};
-   for (const auto& edge : options.library_dependencies) {
-      if (edge.owner.empty() || edge.dependency.empty()) {
-         throw std::runtime_error{"contract library dependency has an empty owner"};
-      }
-      auto& owner_edges = edges[edge.owner];
-      if (std::ranges::any_of(owner_edges, [&](const auto& existing) {
-             return existing.dependency == edge.dependency;
-          })) {
-         throw std::runtime_error{"contract library dependency is specified more than once: " +
-                                  edge.owner + " -> " + edge.dependency};
-      }
-      owner_edges.push_back(edge);
-   }
-
+validated_contract_libraries validate_contract_libraries(const forge::contract::abi::request& options) {
    auto metadata_by_owner = std::map<std::string, std::vector<compilation_metadata>>{};
    for (const auto& compilation : options.library_compilations) {
-      if (compilation.owner.empty() ||
-          metadata_by_owner.contains(compilation.owner)) {
+      if (compilation.owner.empty() || metadata_by_owner.contains(compilation.owner)) {
          throw std::runtime_error{"contract compilation owner is specified more than once: " + compilation.owner};
       }
       metadata_by_owner.emplace(compilation.owner, read_compilation_list(compilation.object_list));
-   }
-
-   for (const auto& [owner, owner_edges] : edges) {
-      if (!metadata_by_owner.contains(owner)) {
-         throw std::runtime_error{"contract dependency owner has no compilation: " + owner};
-      }
-      for (const auto& edge : owner_edges) {
-         if (!metadata_by_owner.contains(edge.dependency)) {
-            throw std::runtime_error{"contract dependency has no compilation: " +
-                                     edge.dependency};
-         }
-      }
-   }
-   for (const auto& owner : options.root_libraries) {
-      if (!metadata_by_owner.contains(owner)) {
-         throw std::runtime_error{"root contract library has no compilation: " + owner};
-      }
    }
 
    auto module_owners = std::map<std::string, std::string>{};
@@ -1897,16 +1823,10 @@ validate_contract_libraries(const forge::contract::abi::request& options) {
 
    for (const auto& [owner, metadata_values] : metadata_by_owner) {
       for (const auto& metadata : metadata_values) {
-         const auto visible = visible_owners(edges, owner, false);
-         const auto public_visible = visible_owners(edges, owner, true);
          for (const auto& module : metadata.exported_modules) {
             const auto found = module_owners.find(module);
             if (found == module_owners.end()) {
                throw std::runtime_error{"contract library " + owner + " exports an unknown module: " + module};
-            }
-            if (!public_visible.contains(found->second)) {
-               throw std::runtime_error{"contract library " + owner +
-                                        " exports a module through a private dependency: " + module};
             }
          }
          for (const auto& module : metadata.imported_modules) {
@@ -1914,32 +1834,21 @@ validate_contract_libraries(const forge::contract::abi::request& options) {
             if (found == module_owners.end()) {
                throw std::runtime_error{"contract library " + owner + " imports an unknown module: " + module};
             }
-            if (!visible.contains(found->second)) {
-               throw std::runtime_error{"contract library " + owner +
-                                        " imports a module through an undeclared dependency: " + module};
-            }
          }
       }
    }
 
    return {
-       .edges = std::move(edges),
        .module_owners = std::move(module_owners),
    };
 }
 
 void validate_contract_root(const validated_contract_libraries& validated,
-                            const std::vector<std::string>& roots,
                             const module_dependencies& contract_modules) {
-   const auto root_visible = public_closure(
-       validated.edges, std::set<std::string>{roots.begin(), roots.end()});
    for (const auto& module : contract_modules) {
       const auto found = validated.module_owners.find(module);
       if (found == validated.module_owners.end()) {
          throw std::runtime_error{"contract imports an unknown module: " + module};
-      }
-      if (!root_visible.contains(found->second)) {
-         throw std::runtime_error{"contract imports a module through an undeclared library: " + module};
       }
    }
 }
@@ -2449,10 +2358,8 @@ artifacts generate(const request& options) {
       }
    }
 
-   if (!options.library_compilations.empty() || !options.root_libraries.empty() ||
-       !options.known_modules.empty()) {
-      validate_contract_root(
-          validated_libraries, options.root_libraries, imported_modules);
+   if (!options.library_compilations.empty() || !options.known_modules.empty()) {
+      validate_contract_root(validated_libraries, imported_modules);
    }
    load_ricardian(output, options);
    canonicalize(output);

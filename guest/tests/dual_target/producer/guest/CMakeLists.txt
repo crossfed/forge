@@ -11,6 +11,7 @@ find_package(ForgeContract CONFIG REQUIRED)
 add_subdirectory(../libraries/chain product-chain)
 add_subdirectory(libraries/storage)
 add_subdirectory(libraries/revision)
+add_subdirectory(libraries/unrelated)
 
 forge_add_contract(
    product

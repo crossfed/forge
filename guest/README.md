@@ -116,17 +116,19 @@ forge_add_contract(
 ```
 
 `ID` identifies the library in ABI module-owner diagnostics.
-`PUBLIC_LIBRARIES` and `PRIVATE_LIBRARIES` are standard CMake dependency scopes.
-Clang dependency metadata validates module imports in the active guest build;
-textual includes are tracked by the generated depfile.
-
-The declaration is complete: its public target is an immutable CMake alias.
-Declare sources and dependencies in `forge_add_contract_library()` instead of
-mutating the target later, so CMake links and ABI ownership cannot diverge.
+`PUBLIC_LIBRARIES` and `PRIVATE_LIBRARIES` create ordinary CMake dependency
+scopes. The returned target is a normal static-library target: products may
+extend or install it with standard CMake commands. CMake and Clang remain
+responsible for module visibility. ABI tooling reads compilation metadata only
+to require that every imported module has exactly one owner in the active guest
+configuration; it does not reconstruct dependency scopes. Textual includes are
+tracked by the generated depfile.
 
 The Contract SDK does not install downstream dual-target source packages.
 Products use `add_subdirectory()` for shared source-tree libraries. An ordinary
-native `install(EXPORT ...)` remains the product library owner's responsibility.
+native `install(EXPORT ...)`, including a destination for the
+`forge_contract_modules` file set, remains the product library owner's
+responsibility.
 
 ## Named Action Payloads
 

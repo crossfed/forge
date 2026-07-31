@@ -13,17 +13,6 @@ struct library_compilation {
    std::filesystem::path object_list;
 };
 
-enum class dependency_scope {
-   public_,
-   private_,
-};
-
-struct library_dependency {
-   std::string owner;
-   dependency_scope scope = dependency_scope::private_;
-   std::string dependency;
-};
-
 struct known_module {
    std::string name;
    std::string owner;
@@ -44,9 +33,7 @@ struct request {
    std::vector<std::filesystem::path> sources;
    std::vector<std::filesystem::path> dependency_sources;
    std::vector<library_compilation> library_compilations;
-   std::vector<library_dependency> library_dependencies;
    std::vector<known_module> known_modules;
-   std::vector<std::string> root_libraries;
    std::vector<std::filesystem::path> source_wrappers;
 };
 

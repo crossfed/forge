@@ -244,23 +244,6 @@ forge_add_contract_library(
         },
     )
 
-    mutated_target = source_root / "mutated-target"
-    write_negative_project(
-        mutated_target,
-        cmake_body="""
-add_library(undeclared_dependency INTERFACE)
-forge_add_contract_library(
-   negative_protocol ID negative.mutated
-   MODULE_BASE_DIRS include
-   MODULE_SOURCES include/protocol.cppm
-)
-target_link_libraries(negative_protocol PRIVATE undeclared_dependency)
-""",
-        modules={
-            "include/protocol.cppm": "export module negative.protocol;\n"
-        },
-    )
-
     forward_edge = source_root / "forward-edge"
     write_negative_project(
         forward_edge,
@@ -277,62 +260,10 @@ forge_add_contract_library(
         },
     )
 
-    private_leak = source_root / "private-leak"
-    write_negative_project(
-        private_leak,
-        cmake_body="""
-forge_add_contract_library(
-   negative_private ID negative.private
-   MODULE_BASE_DIRS private
-   MODULE_SOURCES private/detail.cppm
-)
-forge_add_contract_library(
-   negative_protocol ID negative.protocol
-   MODULE_BASE_DIRS include
-   MODULE_SOURCES include/protocol.cppm
-   PRIVATE_LIBRARIES negative_private
-)
-forge_add_contract(
-   negative
-   SOURCES contract.cpp
-   LIBRARIES negative_protocol
-)
-""",
-        modules={
-            "private/detail.cppm": (
-                "export module negative.detail;\n"
-                "export inline constexpr int private_value = 42;\n"
-            ),
-            "include/protocol.cppm": (
-                "export module negative.protocol;\n"
-                "export inline constexpr int protocol_value = 42;\n"
-            ),
-        },
-        contract="""import forge.contract;
-import negative.detail;
-import negative.protocol;
-
-class [[forge::contract("negative")]] entry final
-   : public forge::contract::context {
-public:
-   using forge::contract::context::context;
-
-   [[forge::action]]
-   void run() {
-      forge::contract::check(
-         private_value == protocol_value,
-         "unexpected value"
-      );
-   }
-};
-""",
-    )
-
     toolchain = contract_package / "ForgeContractToolchain.cmake"
     cases = (
         (duplicate, "duplicate Forge Contract owner ID"),
         (host_only, "contract dependency is not guest-compatible"),
-        (mutated_target, "ALIAS target"),
         (forward_edge, "unknown Contract SDK dependency target"),
     )
     for source, expected in cases:
@@ -348,29 +279,6 @@ public:
             f"-DForgeContract_DIR={contract_package}",
             contains=expected,
         )
-
-    private_build = build_root / private_leak.name
-    run(
-        cmake,
-        "-S",
-        str(private_leak),
-        "-B",
-        str(private_build),
-        "-G",
-        "Ninja",
-        f"-DCMAKE_TOOLCHAIN_FILE={toolchain}",
-        f"-DForgeContract_DIR={contract_package}",
-    )
-    run_failure(
-        cmake,
-        "--build",
-        str(private_build),
-        "--target",
-        "negative_artifacts",
-        "-j",
-        "4",
-        contains="imports a module through an undeclared library",
-    )
 
 
 def validate(
@@ -406,6 +314,51 @@ def validate(
     )
     run(str(host_build / "product_protocol_host_tests"))
     run(str(host_build / "product_protocol_vm_tests"))
+    install_prefix = output / "native-install"
+    run(
+        cmake,
+        "--install",
+        str(host_build),
+        "--prefix",
+        str(install_prefix),
+    )
+    exported_targets = (
+        install_prefix
+        / "lib"
+        / "cmake"
+        / "ProductProtocol"
+        / "ProductProtocolTargets.cmake"
+    )
+    if not exported_targets.is_file():
+        raise RuntimeError("native contract library export is missing")
+    exported_text = exported_targets.read_text(encoding="utf-8")
+    if str(producer) in exported_text or str(host_build) in exported_text:
+        raise RuntimeError("native contract library export contains build paths")
+    relocated_prefix = output / "native-relocated"
+    shutil.move(install_prefix, relocated_prefix)
+    consumer_build = output / "native-consumer"
+    consumer_command = [
+        cmake,
+        "-S",
+        str(source / "native_consumer"),
+        "-B",
+        str(consumer_build),
+        "-G",
+        "Ninja",
+        "-DCMAKE_BUILD_TYPE=Debug",
+        f"-DCMAKE_CXX_COMPILER={cxx_compiler}",
+        f"-DForge_DIR={forge_package}",
+        (
+            "-DPRODUCT_PROTOCOL_TARGETS="
+            f"{relocated_prefix / 'lib' / 'cmake' / 'ProductProtocol' / 'ProductProtocolTargets.cmake'}"
+        ),
+    ]
+    if sys.platform == "darwin":
+        sdk = run("xcrun", "--sdk", "macosx", "--show-sdk-path").strip()
+        consumer_command.append(f"-DCMAKE_OSX_SYSROOT={sdk}")
+    run(*consumer_command)
+    build(cmake, consumer_build, "product_protocol_installed_consumer")
+    run(str(consumer_build / "product_protocol_installed_consumer"))
 
     configure(
         cmake=cmake,

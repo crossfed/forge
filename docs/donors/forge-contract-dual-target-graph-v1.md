@@ -40,9 +40,9 @@ compilations. Forge does not import either build system or their metadata.
 `forge_add_contract_library` is a thin declaration helper for an ordinary
 static CMake library. It adds module sources, implementation sources,
 PUBLIC/PRIVATE dependencies and guest compile settings when the active
-configuration targets wasm32. The concrete target is private and the declared
-name is an immutable alias, so later CMake calls cannot bypass ABI ownership
-metadata.
+configuration targets wasm32. The declared name is the concrete, installable
+CMake target; standard later CMake operations remain part of the authoritative
+target graph.
 
 `forge_add_contract` runs only inside the guest project. It generates the ABI
 and dispatcher, links and validates WASM, and writes the runtime manifest.
@@ -54,14 +54,16 @@ native VM tests.
 ## ABI Metadata
 
 Abigen consumes compiler metadata from object files built in the current guest
-configuration. Forge passes stable owner IDs and dependency scopes from the
-same helper calls that create the CMake links. This metadata is used only to
-diagnose invalid public/private module imports; it is not a build graph and is
+configuration. Stable owner IDs identify the compilations. The metadata proves
+that each imported module has exactly one owner in that configuration. CMake
+and Clang enforce PUBLIC and PRIVATE visibility while compiling the actual
+targets; Abigen does not infer a second visibility graph from C++ import
+syntax. This metadata is diagnostic state of the current compilation and is
 not transported to another configuration.
 
-The SDK module registry is complete and fail-closed: an imported known SDK
-module must belong to a visible owner. Standalone Abigen calls without contract
-library metadata retain the existing source-analysis behavior.
+The SDK module registry is complete and fail-closed: every imported known SDK
+module must belong to a registered owner. Standalone Abigen calls without
+contract library metadata retain the existing source-analysis behavior.
 
 ## Runtime Manifest
 
@@ -93,8 +95,8 @@ based on a hermetic build and actual compiler dependencies.
 Focused validation must cover:
 
 - native and wasm32 compilation of the same module sources;
-- transitive PUBLIC and PRIVATE module visibility;
-- rejection of private re-exports and host-only guest dependencies;
+- transitive PUBLIC and PRIVATE module visibility enforced by CMake/Clang;
+- rejection of host-only guest dependencies;
 - direct and launcher artifact identity;
 - multi-config Release forwarding;
 - named action direct ABI layout and Raw byte parity;

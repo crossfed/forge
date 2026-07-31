@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.31)
 
 project(ProductProtocol LANGUAGES CXX)
 
+include(GNUInstallDirs)
+
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -47,3 +49,19 @@ target_link_libraries(
       Forge::forge_raw
 )
 add_dependencies(product_protocol_vm_tests product_guest)
+
+install(
+   TARGETS
+      product_chain_values
+      product_chain_limits
+      product_chain_protocol
+   EXPORT ProductProtocolTargets
+   FILE_SET forge_contract_modules
+      DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/modules"
+)
+install(
+   EXPORT ProductProtocolTargets
+   FILE ProductProtocolTargets.cmake
+   NAMESPACE Product::
+   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ProductProtocol"
+)

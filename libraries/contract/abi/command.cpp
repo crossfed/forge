@@ -14,6 +14,9 @@ namespace {
 
 request parse(int argc, const char* const* argv) {
    auto result = request{};
+   constexpr auto library_compilation_prefix = std::string_view{"--library-compilation="};
+   constexpr auto module_path_prefix = std::string_view{"--module-path="};
+   constexpr auto include_prefix = std::string_view{"--include="};
    for (auto index = 1; index < argc; ++index) {
       const auto option = std::string_view{argv[index]};
       const auto next = [&]() -> std::string_view {
@@ -51,21 +54,20 @@ request parse(int argc, const char* const* argv) {
              .owner = std::string{next()},
              .object_list = next(),
          });
-      } else if (option == "--library-dependency") {
-         const auto owner = std::string{next()};
-         const auto scope = next();
-         const auto dependency = std::string{next()};
-         if (scope != "public" && scope != "private") {
-            throw std::runtime_error{"library dependency scope must be public or private"};
+      } else if (option.starts_with(library_compilation_prefix)) {
+         const auto record = option.substr(library_compilation_prefix.size());
+         const auto separator = record.find('|');
+         if (separator == std::string_view::npos) {
+            throw std::runtime_error{"invalid library compilation record"};
          }
-         result.library_dependencies.push_back(library_dependency{
-             .owner = owner,
-             .scope = scope == "public" ? dependency_scope::public_
-                                        : dependency_scope::private_,
-             .dependency = dependency,
+         result.library_compilations.push_back(library_compilation{
+             .owner = std::string{record.substr(0, separator)},
+             .object_list = record.substr(separator + 1),
          });
-      } else if (option == "--root-library") {
-         result.root_libraries.emplace_back(next());
+      } else if (option.starts_with(module_path_prefix)) {
+         result.module_paths.emplace_back(option.substr(module_path_prefix.size()));
+      } else if (option.starts_with(include_prefix)) {
+         result.include_paths.emplace_back(option.substr(include_prefix.size()));
       } else if (option == "--known-module") {
          result.known_modules.push_back(known_module{
              .name = std::string{next()},
@@ -79,8 +81,8 @@ request parse(int argc, const char* const* argv) {
          result.sources.emplace_back(option);
       }
    }
-   if (result.contract.empty() || result.abi.empty() || result.dispatcher.empty() ||
-       result.attribute_plugin.empty() || result.sysroot.empty() || result.sources.empty()) {
+   if (result.contract.empty() || result.abi.empty() || result.dispatcher.empty() || result.attribute_plugin.empty() ||
+       result.sysroot.empty() || result.sources.empty()) {
       throw std::runtime_error{"--contract, --abi, --dispatch, --attribute-plugin, "
                                "--sysroot and contract sources are required"};
    }

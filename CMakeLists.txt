@@ -523,10 +523,6 @@ function(forge_target_contract_guest_component target)
       _module_names GLOBAL PROPERTY
       "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_MODULE_NAMES"
    )
-   get_property(
-      _dependencies GLOBAL PROPERTY
-      "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_DEPENDENCIES"
-   )
    if(
       NOT _descriptor_id STREQUAL ARG_ID
       OR NOT _descriptor_target STREQUAL target
@@ -537,16 +533,12 @@ function(forge_target_contract_guest_component target)
    list(
       APPEND _exported
       FORGE_CONTRACT_GUEST_COMPONENT_ID
-      FORGE_CONTRACT_GUEST_MODULE_NAMES
-      FORGE_CONTRACT_GUEST_PUBLIC_COMPONENT_IDS
    )
    list(REMOVE_DUPLICATES _exported)
    set_target_properties(
       "${target}"
       PROPERTIES
          FORGE_CONTRACT_GUEST_COMPONENT_ID "${ARG_ID}"
-         FORGE_CONTRACT_GUEST_MODULE_NAMES "${_module_names}"
-         FORGE_CONTRACT_GUEST_PUBLIC_COMPONENT_IDS "${_dependencies}"
          EXPORT_PROPERTIES "${_exported}"
    )
 endfunction()
@@ -923,8 +915,7 @@ install(
 
 if(FORGE_ENABLE_CONTRACT_TOOLING)
    install(
-      DIRECTORY libraries/contract/graph/include/forge
-                libraries/contract/abi/include/forge
+      DIRECTORY libraries/contract/abi/include/forge
                 libraries/contract/attributes/include/forge
                 libraries/contract/validation/include/forge
                 libraries/contract/manifest/include/forge

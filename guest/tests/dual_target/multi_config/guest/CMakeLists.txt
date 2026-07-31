@@ -4,12 +4,13 @@ project(MultiConfigGuestContract LANGUAGES CXX)
 
 find_package(ForgeContract CONFIG REQUIRED)
 
+add_subdirectory(libraries/configuration)
+
 forge_add_contract(
    configuration
    SOURCES entry.cpp
+   LIBRARIES product_contract_configuration
 )
-
-add_library(configuration_compile_probe OBJECT release_probe.cpp)
 
 set(_artifact_directory "${CMAKE_CURRENT_BINARY_DIR}/artifacts")
 set(_configuration_marker "${_artifact_directory}/built-$<CONFIG>.txt")
@@ -29,6 +30,5 @@ add_custom_target(
 )
 add_dependencies(
    configuration_artifacts
-   configuration_compile_probe
    configuration_marker
 )

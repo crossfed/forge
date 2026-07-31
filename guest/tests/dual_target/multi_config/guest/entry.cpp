@@ -1,9 +1,11 @@
 import forge.contract;
+import product.contract.configuration;
 
-class [[forge::contract("configuration")]] configuration_contract final
-   : public forge::contract::context {
+class [[forge::contract("configuration")]] configuration_contract final : public forge::contract::context {
  public:
    using context::context;
 
-   [[forge::action]] void verify() {}
+   [[forge::action]] void verify(product::contract::configuration::request value) {
+      product::contract::configuration::verify(*this, value);
+   }
 };
