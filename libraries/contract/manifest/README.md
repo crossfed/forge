@@ -13,7 +13,7 @@ forge::contract::manifest::generate({
    .abi = "token.abi",
    .imports = "intrinsics.json",
    .output = "token.contract.json",
-   .sdk_version = "8.19.0",
+   .sdk_version = "8.20.0",
    .profile = "release",
    .reproducible = true,
 });
