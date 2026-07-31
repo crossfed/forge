@@ -31,10 +31,12 @@ struct revision {
    }
 
    [[nodiscard]] forge::chain::protocol::uint128_t by_workspace_inode() const {
-      return (static_cast<forge::chain::protocol::uint128_t>(workspace.value) << 64U) | inode.value;
+      return (static_cast<forge::chain::protocol::uint128_t>(workspace.value) << 64U) |
+             inode.value;
    }
 };
 
-[[nodiscard]] std::optional<std::uint64_t> checked_add(std::uint64_t left, std::uint64_t right);
+[[nodiscard]] std::optional<std::uint64_t>
+checked_add(std::uint64_t left, std::uint64_t right);
 
 } // namespace product::chain

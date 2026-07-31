@@ -5,7 +5,8 @@ foreach(
    FORGE_CONTRACT_CONFIG_TEMPLATE
    FORGE_CONTRACT_TOOLCHAIN_TEMPLATE
    FORGE_CONTRACT_FUNCTIONS
-   FORGE_CONTRACT_GRAPH
+   FORGE_CONTRACT_LIBRARIES
+   FORGE_CONTRACT_BUILD
    FORGE_CONTRACT_GUEST_COMPONENTS
    FORGE_CONTRACT_TEST_ROOT
 )
@@ -51,7 +52,8 @@ configure_file(
    @ONLY
 )
 configure_file("${FORGE_CONTRACT_FUNCTIONS}" "${_config_dir}/ForgeContractFunctions.cmake" COPYONLY)
-configure_file("${FORGE_CONTRACT_GRAPH}" "${_config_dir}/ForgeContractGraph.cmake" COPYONLY)
+configure_file("${FORGE_CONTRACT_LIBRARIES}" "${_config_dir}/ForgeContractLibraries.cmake" COPYONLY)
+configure_file("${FORGE_CONTRACT_BUILD}" "${_config_dir}/ForgeContractBuild.cmake" COPYONLY)
 configure_file(
    "${FORGE_CONTRACT_GUEST_COMPONENTS}"
    "${_config_dir}/ForgeContractGuestComponents.cmake"
@@ -77,6 +79,25 @@ foreach(_archive IN ITEMS
 endforeach()
 file(MAKE_DIRECTORY "${_prefix}/${CMAKE_INSTALL_DATADIR}/forge-contract")
 file(WRITE "${_prefix}/${CMAKE_INSTALL_DATADIR}/forge-contract/sysroot.sha256" "test\n")
+file(READ "${FORGE_CONTRACT_GUEST_COMPONENTS}" _guest_components)
+string(
+   REGEX MATCHALL
+   "[A-Za-z0-9_./-]+\\.cppm"
+   _guest_component_modules
+   "${_guest_components}"
+)
+foreach(_module IN LISTS _guest_component_modules)
+   get_filename_component(_module_directory "${_module}" DIRECTORY)
+   file(
+      MAKE_DIRECTORY
+      "${_prefix}/${CMAKE_INSTALL_DATADIR}/forge-contract/modules/${_module_directory}"
+   )
+   file(
+      WRITE
+      "${_prefix}/${CMAKE_INSTALL_DATADIR}/forge-contract/modules/${_module}"
+      "export module fixture;\n"
+   )
+endforeach()
 set(_foundation_manifest "{\n  \"version\": 1,\n  \"archives\": [")
 set(_separator "")
 foreach(_archive IN ITEMS
@@ -117,6 +138,7 @@ file(
    [=[
 cmake_minimum_required(VERSION 3.31)
 project(ForgeContractPackagePrefixTest NONE)
+set(FORGE_CONTRACT_GUEST OFF)
 find_package(ForgeContract CONFIG REQUIRED)
 find_package(RepeatedDependency CONFIG REQUIRED)
 

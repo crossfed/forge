@@ -72,15 +72,13 @@ def main():
     parser.add_argument("--abi", required=True, type=pathlib.Path)
     parser.add_argument("--imports", required=True, type=pathlib.Path)
     parser.add_argument("--manifest", required=True, type=pathlib.Path)
-    parser.add_argument("--source-graph", required=True, type=pathlib.Path)
     parser.add_argument("--output", required=True, type=pathlib.Path)
     args = parser.parse_args()
     args.output.mkdir(parents=True, exist_ok=True)
 
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
-    assert manifest["schema_version"] == 2
-    assert manifest["source_graph"]["files"]
-    assert len(manifest["source_graph"]["sha256"]) == 64
+    assert manifest["schema_version"] == 3
+    assert "source_graph" not in manifest
     assert manifest["sdk"]["profile"] in {"developer", "release"}
     assert manifest["sdk"]["reproducible"] == (manifest["sdk"]["profile"] == "release")
     if manifest["sdk"]["profile"] == "release":
@@ -109,8 +107,6 @@ def main():
             str(args.abi),
             "--imports",
             str(args.imports),
-            "--source-graph",
-            str(args.source_graph),
             "--output",
             "bare.contract.json",
             "--sdk-version",
