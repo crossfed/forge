@@ -280,6 +280,86 @@ template <typename T> [[nodiscard]] std::any to_default_any(const T& input) {
 }
 
 template <typename T>
+concept numeric_value = integral_value<std::remove_cvref_t<T>> || std::floating_point<std::remove_cvref_t<T>>;
+
+template <numeric_value Left, numeric_value Right> [[nodiscard]] constexpr int compare_numeric(Left left, Right right) {
+   if constexpr (integral_value<Left> && integral_value<Right>) {
+      if constexpr (signed_integral_value<Left> && signed_integral_value<Right>) {
+         const auto lhs = static_cast<__int128>(left);
+         const auto rhs = static_cast<__int128>(right);
+         return lhs < rhs ? -1 : lhs > rhs ? 1 : 0;
+      } else if constexpr (unsigned_integral_value<Left> && unsigned_integral_value<Right>) {
+         const auto lhs = static_cast<unsigned __int128>(left);
+         const auto rhs = static_cast<unsigned __int128>(right);
+         return lhs < rhs ? -1 : lhs > rhs ? 1 : 0;
+      } else if constexpr (signed_integral_value<Left>) {
+         if (left < 0) {
+            return -1;
+         }
+         const auto lhs = static_cast<unsigned __int128>(left);
+         const auto rhs = static_cast<unsigned __int128>(right);
+         return lhs < rhs ? -1 : lhs > rhs ? 1 : 0;
+      } else {
+         if (right < 0) {
+            return 1;
+         }
+         const auto lhs = static_cast<unsigned __int128>(left);
+         const auto rhs = static_cast<unsigned __int128>(right);
+         return lhs < rhs ? -1 : lhs > rhs ? 1 : 0;
+      }
+   } else {
+      const auto lhs = static_cast<long double>(left);
+      const auto rhs = static_cast<long double>(right);
+      return lhs < rhs ? -1 : lhs > rhs ? 1 : 0;
+   }
+}
+
+template <numeric_value Value, numeric_value Min, numeric_value Max>
+[[nodiscard]] constexpr int compare_range(Value value, Min minimum, Max maximum) {
+   if (compare_numeric(value, minimum) < 0) {
+      return -1;
+   }
+   if (compare_numeric(value, maximum) > 0) {
+      return 1;
+   }
+   return 0;
+}
+
+template <numeric_value Value, numeric_value Min, numeric_value Max>
+[[nodiscard]] std::optional<int> compare_any_as(const std::any& value, Min minimum, Max maximum) {
+   if (value.type() != typeid(Value)) {
+      return std::nullopt;
+   }
+   return compare_range(std::any_cast<Value>(value), minimum, maximum);
+}
+
+template <typename... T> struct type_list {};
+
+template <numeric_value Min, numeric_value Max, numeric_value... Value>
+[[nodiscard]] int compare_any_range_as(const std::any& value, Min minimum, Max maximum, type_list<Value...>) {
+   auto result = std::optional<int>{};
+   (
+       [&] {
+          if (!result) {
+             result = compare_any_as<Value>(value, minimum, maximum);
+          }
+       }(),
+       ...);
+   if (!result) {
+      throw std::invalid_argument{"value cannot be inspected for range validation"};
+   }
+   return *result;
+}
+
+template <numeric_value Min, numeric_value Max>
+[[nodiscard]] int compare_any_range(const std::any& value, Min minimum, Max maximum) {
+   using types = type_list<bool, char, signed char, unsigned char, wchar_t, char8_t, char16_t, char32_t, short,
+                           unsigned short, int, unsigned int, long, unsigned long, long long, unsigned long long,
+                           __int128, unsigned __int128, float, double, long double>;
+   return compare_any_range_as(value, minimum, maximum, types{});
+}
+
+template <typename T>
 [[nodiscard]] std::vector<T> decode_object_list(const input_value& input, std::string_view path,
                                                 std::vector<diagnostic>& diagnostics);
 
@@ -299,6 +379,7 @@ template <typename T> struct field_rule {
    std::any default_value;
    std::optional<long double> minimum;
    std::optional<long double> maximum;
+   std::function<int(const std::any&)> compare_range;
    bool nested_object_list = false;
    std::type_index item_type = std::type_index{typeid(void)};
    std::function<void(T&)> apply_default;
@@ -494,39 +575,24 @@ template <typename T> class object_schema {
    [[nodiscard]] std::vector<diagnostic> validate(const T& object, std::string_view base_path = {}) const {
       auto result = std::vector<diagnostic>{};
       for (const auto& field : *fields_) {
-         if (field.minimum || field.maximum) {
-            auto numeric = std::optional<long double>{};
+         if (field.compare_range) {
             try {
                const auto any_value = field.read_validation_any ? field.read_validation_any(object)
                                                                 : std::optional<std::any>{field.read_any(object)};
                if (!any_value) {
                   continue;
                }
-               switch (field.kind) {
-               case value_kind::signed_integer:
-                  numeric = static_cast<long double>(std::any_cast<std::int64_t>(coerce_signed(*any_value)));
-                  break;
-               case value_kind::unsigned_integer:
-                  numeric = static_cast<long double>(std::any_cast<std::uint64_t>(coerce_unsigned(*any_value)));
-                  break;
-               case value_kind::floating:
-                  numeric = std::any_cast<long double>(coerce_floating(*any_value));
-                  break;
-               default:
-                  break;
+               const auto comparison = field.compare_range(*any_value);
+               if (comparison < 0) {
+                  result.push_back(
+                      make_error(base_path, field.name, "schema.range", "value is below the allowed minimum"));
+               } else if (comparison > 0) {
+                  result.push_back(
+                      make_error(base_path, field.name, "schema.range", "value is above the allowed maximum"));
                }
             } catch (...) {
                result.push_back(
                    make_error(base_path, field.name, "schema.type", "value cannot be inspected for range validation"));
-            }
-
-            if (numeric && field.minimum && *numeric < *field.minimum) {
-               result.push_back(
-                   make_error(base_path, field.name, "schema.range", "value is below the allowed minimum"));
-            }
-            if (numeric && field.maximum && *numeric > *field.maximum) {
-               result.push_back(
-                   make_error(base_path, field.name, "schema.range", "value is above the allowed maximum"));
             }
          }
          for (const auto& validator : field.validators) {
@@ -704,57 +770,6 @@ template <typename T> class object_schema {
       return (*fields_)[index];
    }
 
-   static std::any coerce_signed(const std::any& value) {
-      if (value.type() == typeid(std::int64_t)) {
-         return value;
-      }
-      if (value.type() == typeid(int)) {
-         return static_cast<std::int64_t>(std::any_cast<int>(value));
-      }
-      if (value.type() == typeid(short)) {
-         return static_cast<std::int64_t>(std::any_cast<short>(value));
-      }
-      if (value.type() == typeid(long)) {
-         return static_cast<std::int64_t>(std::any_cast<long>(value));
-      }
-      if (value.type() == typeid(long long)) {
-         return static_cast<std::int64_t>(std::any_cast<long long>(value));
-      }
-      return value;
-   }
-
-   static std::any coerce_unsigned(const std::any& value) {
-      if (value.type() == typeid(std::uint64_t)) {
-         return value;
-      }
-      if (value.type() == typeid(unsigned int)) {
-         return static_cast<std::uint64_t>(std::any_cast<unsigned int>(value));
-      }
-      if (value.type() == typeid(unsigned short)) {
-         return static_cast<std::uint64_t>(std::any_cast<unsigned short>(value));
-      }
-      if (value.type() == typeid(unsigned long)) {
-         return static_cast<std::uint64_t>(std::any_cast<unsigned long>(value));
-      }
-      if (value.type() == typeid(unsigned long long)) {
-         return static_cast<std::uint64_t>(std::any_cast<unsigned long long>(value));
-      }
-      return value;
-   }
-
-   static std::any coerce_floating(const std::any& value) {
-      if (value.type() == typeid(long double)) {
-         return value;
-      }
-      if (value.type() == typeid(double)) {
-         return static_cast<long double>(std::any_cast<double>(value));
-      }
-      if (value.type() == typeid(float)) {
-         return static_cast<long double>(std::any_cast<float>(value));
-      }
-      return value;
-   }
-
    static diagnostic make_error(std::string_view base_path, const std::string& field, std::string code,
                                 std::string message) {
       auto path = std::string{base_path};
@@ -785,9 +800,10 @@ template <typename T> class field_builder {
       return *this;
    }
 
-   template <typename Min, typename Max> field_builder& range(Min min, Max max) {
+   template <numeric_value Min, numeric_value Max> field_builder& range(Min min, Max max) {
       current().minimum = static_cast<long double>(min);
       current().maximum = static_cast<long double>(max);
+      current().compare_range = [min, max](const std::any& value) { return compare_any_range(value, min, max); };
       return *this;
    }
 
