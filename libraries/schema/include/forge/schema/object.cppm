@@ -1047,6 +1047,10 @@ template <typename T>
       if (const auto* value = std::get_if<std::string>(&input.storage)) {
          return *value;
       }
+   } else if constexpr (canonical_string_scalar<clean_type>) {
+      if (const auto* text = std::get_if<std::string>(&input.storage)) {
+         return parse_scalar_text<clean_type>(*text);
+      }
    } else if constexpr (std::same_as<clean_type, std::vector<std::string>>) {
       if (const auto* values = input.as_array()) {
          auto output = std::vector<std::string>{};

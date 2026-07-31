@@ -165,6 +165,7 @@ template <> struct forge::schema::rules<forge_json_tests::exact_schema_plain_par
       auto schema = forge::schema::object<forge_json_tests::exact_schema_plain_parent>();
       static_cast<void>(schema.field<&forge_json_tests::exact_schema_plain_parent::child>("child"));
       static_cast<void>(schema.field<&forge_json_tests::exact_schema_plain_parent::children>("children"));
+      static_cast<void>(schema.field<&forge_json_tests::exact_schema_plain_parent::canonical>("canonical"));
       return schema;
    }
 };
@@ -215,6 +216,9 @@ BOOST_AUTO_TEST_CASE(json_schema_roundtrip_preserves_described_children_without_
    const auto input = forge_json_tests::exact_schema_plain_parent{
        .child = {.value = 7},
        .children = {{.value = 11}, {.value = 13}},
+       .canonical = {.digest =
+                         forge::crypto::digest::sha256{
+                             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}},
    };
 
    const auto encoded = forge::config::core::encode(input);
