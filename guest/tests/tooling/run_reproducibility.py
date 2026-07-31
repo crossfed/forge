@@ -21,14 +21,7 @@ def digest(path):
 def build(args, root):
     source = root / "source"
     binary = root / "build"
-    shutil.copytree(args.source.parent, source)
-    (source / "CMakeLists.txt").write_text(
-        "cmake_minimum_required(VERSION 3.31)\n"
-        "project(reproducible_contract LANGUAGES CXX)\n"
-        "find_package(ForgeContract CONFIG REQUIRED)\n"
-        "forge_add_contract(hello SOURCES hello.cpp)\n",
-        encoding="utf-8",
-    )
+    shutil.copytree(args.source, source)
     run(
         [
             str(args.cmake),

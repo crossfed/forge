@@ -38,6 +38,11 @@ function(_forge_contract_configure_guest_target target)
    if(NOT FORGE_CONTRACT_GUEST)
       return()
    endif()
+   get_target_property(_source_dir "${target}" SOURCE_DIR)
+   get_target_property(_binary_dir "${target}" BINARY_DIR)
+   if(NOT _source_dir OR NOT _binary_dir)
+      message(FATAL_ERROR "cannot determine guest target paths: ${target}")
+   endif()
    target_include_directories(
       "${target}" PRIVATE "${ForgeContract_DATA_DIR}/include"
    )
@@ -54,6 +59,10 @@ function(_forge_contract_configure_guest_target target)
          -fno-ident
          -mcpu=mvp
          -O3
+         "-ffile-prefix-map=${_source_dir}=./source"
+         "-fdebug-prefix-map=${_source_dir}=./source"
+         "-ffile-prefix-map=${_binary_dir}=./build"
+         "-fdebug-prefix-map=${_binary_dir}=./build"
    )
    set_property(TARGET "${target}" PROPERTY CXX_COMPILER_LAUNCHER "")
 endfunction()

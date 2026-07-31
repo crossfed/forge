@@ -277,7 +277,7 @@ add_custom_target(
       "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/run_reproducibility.py"
       --cmake "${CMAKE_COMMAND}"
       --package "${ForgeContract_DIR}"
-      --source "${CMAKE_CURRENT_SOURCE_DIR}/hello.cpp"
+      --source "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/reproducibility"
       --output "${CMAKE_CURRENT_BINARY_DIR}/reproducibility"
    DEPENDS hello
    VERBATIM
