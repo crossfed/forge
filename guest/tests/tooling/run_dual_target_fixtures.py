@@ -795,6 +795,38 @@ forge_add_contract_library(
         },
     )
 
+    implicit_current_directory = source_root / "implicit-current-directory"
+    write_negative_project(
+        implicit_current_directory,
+        cmake_body="""
+set(CMAKE_INCLUDE_CURRENT_DIR ON)
+forge_add_contract_library(
+   negative_protocol ID negative.implicit_current_directory
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
+    changed_standard_includes = source_root / "changed-standard-includes"
+    write_negative_project(
+        changed_standard_includes,
+        cmake_body="""
+list(APPEND CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES "${CMAKE_CURRENT_BINARY_DIR}")
+forge_add_contract_library(
+   negative_protocol ID negative.changed_standard_includes
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
     changed_source_root = source_root / "changed-source-root"
     write_negative_project(
         changed_source_root,
@@ -996,6 +1028,15 @@ class [[forge::contract("mismatch")]] mismatch final
             "changed property: COMPILE_DEFINITIONS",
         ),
         (directory_profile, "directory COMPILE_DEFINITIONS are unsupported"),
+        (
+            implicit_current_directory,
+            "CMAKE_INCLUDE_CURRENT_DIR and "
+            "CMAKE_INCLUDE_CURRENT_DIR_IN_INTERFACE must remain disabled",
+        ),
+        (
+            changed_standard_includes,
+            "CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES must remain",
+        ),
         (
             changed_source_root,
             "FORGE_CONTRACT_SOURCE_ROOT changed after the guest SDK fixed",

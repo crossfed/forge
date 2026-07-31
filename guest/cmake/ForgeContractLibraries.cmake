@@ -602,6 +602,31 @@ function(_forge_contract_validate_guest_environment)
          "standard, extensions disabled, and CMake module scanning enabled"
       )
    endif()
+   if(CMAKE_INCLUDE_CURRENT_DIR OR CMAKE_INCLUDE_CURRENT_DIR_IN_INTERFACE)
+      message(
+         FATAL_ERROR
+         "CMAKE_INCLUDE_CURRENT_DIR and CMAKE_INCLUDE_CURRENT_DIR_IN_INTERFACE "
+         "must remain disabled in a Forge Contract guest project; implicit "
+         "include paths are not part of the semantic profile shared by CMake "
+         "and Abigen"
+      )
+   endif()
+   set(
+      _expected_standard_include_directories
+      "${ForgeContract_SYSROOT}/include/c++/v1"
+   )
+   if(
+      NOT "${CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES}"
+      STREQUAL "${_expected_standard_include_directories}"
+   )
+      message(
+         FATAL_ERROR
+         "CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES must remain "
+         "'${_expected_standard_include_directories}' in a Forge Contract guest "
+         "project; the SDK owns the standard include profile shared by CMake "
+         "and Abigen"
+      )
+   endif()
    foreach(_entry
       "CMAKE_CXX_FLAGS_DEBUG|-g"
       "CMAKE_CXX_FLAGS_RELEASE|-O3 -DNDEBUG"
