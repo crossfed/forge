@@ -176,6 +176,7 @@ jobs:
         shell: bash
         run: |
           cmake -S guest/tests/consumer -B build/contract-consumer -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/build/contract-sdk-prefix/lib/cmake/ForgeContract/ForgeContractToolchain.cmake" \
             -DForgeContract_DIR="$GITHUB_WORKSPACE/build/contract-sdk-prefix/lib/cmake/ForgeContract"
           cmake --build build/contract-consumer -j 4
@@ -211,6 +212,7 @@ jobs:
         shell: bash
         run: |
           cmake -S guest/tests/corpus -B build/contract-corpus -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/build/contract-sdk-prefix/lib/cmake/ForgeContract/ForgeContractToolchain.cmake" \
             -DForgeContract_DIR="$GITHUB_WORKSPACE/build/contract-sdk-prefix/lib/cmake/ForgeContract"
           cmake --build build/contract-corpus -j 4
@@ -332,6 +334,7 @@ jobs:
           mkdir -p build/contract-sdk-release-prefix
           tar -xzf "$archive" -C build/contract-sdk-release-prefix --strip-components=1
           cmake -S guest/tests/consumer -B build/contract-release-consumer -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/build/contract-sdk-release-prefix/lib/cmake/ForgeContract/ForgeContractToolchain.cmake" \
             -DForgeContract_DIR="$GITHUB_WORKSPACE/build/contract-sdk-release-prefix/lib/cmake/ForgeContract"
           cmake --build build/contract-release-consumer \
@@ -368,6 +371,7 @@ jobs:
         shell: bash
         run: |
           cmake -S guest/tests/corpus -B build/contract-release-corpus -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/build/contract-sdk-release-prefix/lib/cmake/ForgeContract/ForgeContractToolchain.cmake" \
             -DForgeContract_DIR="$GITHUB_WORKSPACE/build/contract-sdk-release-prefix/lib/cmake/ForgeContract"
           cmake --build build/contract-release-corpus -j 4

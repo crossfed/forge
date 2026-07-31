@@ -26,11 +26,25 @@ function(_forge_contract_normalize_root input description output)
    set(${output} "${_absolute}" PARENT_SCOPE)
 endfunction()
 
+function(_forge_contract_require_descendant root path description)
+   get_filename_component(_root "${root}" REALPATH)
+   get_filename_component(_absolute "${path}" REALPATH)
+   file(RELATIVE_PATH _relative "${_root}" "${_absolute}")
+   if(IS_ABSOLUTE "${_relative}" OR _relative MATCHES "^\\.\\.(/|$)")
+      message(
+         FATAL_ERROR
+         "${description} is outside its declared root: ${_absolute}\n"
+         "declared root: ${_root}"
+      )
+   endif()
+endfunction()
+
 function(_forge_contract_normalize_file root input description output)
    get_filename_component(_absolute "${input}" REALPATH BASE_DIR "${root}")
    if(NOT EXISTS "${_absolute}" OR IS_DIRECTORY "${_absolute}")
       message(FATAL_ERROR "${description} does not exist or is not a file: ${_absolute}")
    endif()
+   _forge_contract_require_descendant("${root}" "${_absolute}" "${description}")
    set(${output} "${_absolute}" PARENT_SCOPE)
 endfunction()
 
@@ -78,13 +92,20 @@ function(_forge_contract_require_product_source path description)
    _forge_contract_product_source_root(_product_root)
    get_filename_component(_absolute "${path}" REALPATH)
    file(RELATIVE_PATH _relative "${_product_root}" "${_absolute}")
-   if(IS_ABSOLUTE "${_relative}" OR _relative MATCHES "^\\.\\.(/|$)")
-      message(
-         FATAL_ERROR
-         "${description} is outside FORGE_CONTRACT_SOURCE_ROOT: ${_absolute}\n"
-         "product source root: ${_product_root}"
-      )
+   if(NOT IS_ABSOLUTE "${_relative}" AND NOT _relative MATCHES "^\\.\\.(/|$)")
+      return()
    endif()
+   get_filename_component(_binary_root "${CMAKE_BINARY_DIR}" REALPATH)
+   file(RELATIVE_PATH _binary_relative "${_binary_root}" "${_absolute}")
+   if(NOT IS_ABSOLUTE "${_binary_relative}" AND NOT _binary_relative MATCHES "^\\.\\.(/|$)")
+      return()
+   endif()
+   message(
+      FATAL_ERROR
+      "${description} is outside the Forge Contract product roots: ${_absolute}\n"
+      "product source root: ${_product_root}\n"
+      "product binary root: ${_binary_root}"
+   )
 endfunction()
 
 function(_forge_contract_semantic_properties output)
@@ -626,6 +647,9 @@ function(forge_add_contract_library target)
             "contract module base is not a directory: ${_absolute}"
          )
       endif()
+      _forge_contract_require_descendant(
+         "${_source_root}" "${_absolute}" "contract module base"
+      )
       list(APPEND _module_bases "${_absolute}")
    endforeach()
    list(REMOVE_DUPLICATES _module_bases)

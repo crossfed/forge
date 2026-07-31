@@ -179,6 +179,7 @@ Configure a standalone guest project with the SDK toolchain:
 
 ```bash
 cmake -S guest -B build/guest -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_TOOLCHAIN_FILE="$ForgeContract_DIR/ForgeContractToolchain.cmake"
 cmake --build build/guest --target hello_artifacts -j 4
 ```
@@ -199,7 +200,9 @@ forge_add_contract_project(
 
 The launcher forwards that root as `FORGE_CONTRACT_SOURCE_ROOT`. A direct guest
 configure sets the same cache variable. Every guest target uses it for one
-project-wide reproducible path mapping.
+project-wide reproducible path mapping. Checked-in inputs must remain below that
+root; generated contract inputs may live below the guest project's
+`CMAKE_BINARY_DIR`, which has its own deterministic build-path mapping.
 
 The target always produces:
 

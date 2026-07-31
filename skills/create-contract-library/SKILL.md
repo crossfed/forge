@@ -114,7 +114,9 @@ launcher; it configures the guest project but never reads its target graph.
 When shared sources live above the guest directory, pass the product root to
 the launcher with `SOURCE_ROOT` and to a direct guest configure with
 `-DFORGE_CONTRACT_SOURCE_ROOT=<root>`. One common root must cover every shared
-and guest-only contract library.
+and guest-only contract library. Generated contract inputs may instead live
+below the guest project's `CMAKE_BINARY_DIR`; arbitrary external source roots
+remain unsupported.
 
 ## Packaging
 

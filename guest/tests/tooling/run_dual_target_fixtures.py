@@ -486,6 +486,23 @@ set(CMAKE_CXX_FLAGS_RELEASE "-O0" CACHE STRING "" FORCE)
         encoding="utf-8",
     )
 
+    external_input = source_root / "external-input"
+    write_negative_project(
+        external_input,
+        cmake_body="""
+forge_add_contract(
+   negative
+   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+   SOURCES ../external.cpp
+)
+""",
+        modules={},
+    )
+    (source_root / "external.cpp").write_text(
+        "class external_input {};\n",
+        encoding="utf-8",
+    )
+
     table_mismatch = source_root / "table-name-mismatch"
     write_negative_project(
         table_mismatch,
@@ -552,6 +569,7 @@ class [[forge::contract("mismatch")]] mismatch final
         (changed_dialect, "require strict C++23"),
         (late_profile, "CMAKE_CXX_FLAGS_RELEASE must remain"),
         (nested_late_profile, "CMAKE_CXX_FLAGS_RELEASE must remain"),
+        (external_input, "contract source is outside its declared root"),
     )
     for source, expected in cases:
         run_failure(
