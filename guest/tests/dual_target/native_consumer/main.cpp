@@ -1,5 +1,6 @@
 #include <cassert>
 #include <cstdint>
+#include <product/chain/constants.hpp>
 
 import forge.raw.codec;
 import product.chain.protocol;
@@ -12,4 +13,5 @@ int main() {
    };
    const auto encoded = forge::raw::pack(payload);
    assert(encoded.size() == 24);
+   static_assert(PRODUCT_CHAIN_DEFAULT_BLOCK_SIZE == 4096);
 }

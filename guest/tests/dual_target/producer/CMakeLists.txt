@@ -59,6 +59,8 @@ install(
    EXPORT ProductProtocolTargets
    FILE_SET forge_contract_modules
       DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/modules"
+   FILE_SET forge_contract_headers
+      DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
 )
 install(
    EXPORT ProductProtocolTargets

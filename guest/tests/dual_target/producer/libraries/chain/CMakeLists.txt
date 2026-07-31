@@ -21,6 +21,7 @@ forge_add_contract_library(
    MODULE_BASE_DIRS include
    MODULE_SOURCES include/product/chain/protocol.cppm
    SOURCES protocol.cpp
+   PUBLIC_HEADERS include/product/chain/constants.hpp
    PUBLIC_LIBRARIES
       Forge::forge_chain_protocol
       Forge::forge_raw

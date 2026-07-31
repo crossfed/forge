@@ -2,6 +2,7 @@ module;
 
 #include <cstdint>
 #include <optional>
+#include <product/chain/constants.hpp>
 
 export module product.chain.protocol;
 
@@ -55,7 +56,7 @@ struct unused_audit_record {
 checked_add(std::uint64_t left, std::uint64_t right);
 
 [[nodiscard]] inline bool supports_nonzero_sizes() {
-   return is_supported_size(1);
+   return is_supported_size(PRODUCT_CHAIN_DEFAULT_BLOCK_SIZE);
 }
 
 } // namespace product::chain

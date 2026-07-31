@@ -50,6 +50,8 @@ forge_add_contract_library(
       include/product/chain/protocol/value.cppm
    SOURCES
       value.cpp
+   PUBLIC_HEADERS
+      include/product/chain/protocol/macros.hpp
    PUBLIC_LIBRARIES
       Forge::forge_chain_protocol
       Forge::forge_raw
@@ -65,13 +67,16 @@ compile settings when called from a guest configuration.
 - `ID` is the stable ABI metadata owner used by Abigen diagnostics.
 - `MODULE_SOURCES` are public module interface units.
 - `SOURCES` are ordinary implementation units.
+- `PUBLIC_HEADERS` are rare macro-only public headers exported as a standard
+  CMake `FILE_SET HEADERS`.
 - `PUBLIC_LIBRARIES` are available to downstream consumers.
 - `PRIVATE_LIBRARIES` are available only to the owning target.
 - Dependencies must be guest-compatible Forge components or other contract
   libraries when the target is built for WASM.
 
-Use only paths owned by the current library. Textual includes are discovered by
-the compiler and depfiles; they are not duplicated in a Forge inventory.
+Use only paths owned by the current library. Private textual includes are
+discovered by the compiler and depfiles; they are not duplicated in a Forge
+inventory.
 
 ## Protocol Surface
 
@@ -123,7 +128,8 @@ remain unsupported.
 The Contract SDK does not install or materialize downstream dual-target source
 packages. Products consume shared source trees with `add_subdirectory`.
 If a native library needs installation, use ordinary CMake
-`install(TARGETS ... EXPORT ...)`; do not install BMI or PCM files.
+`install(TARGETS ... EXPORT ...)` and install its declared module/header file
+sets; do not install BMI or PCM files.
 
 ## Required Validation
 

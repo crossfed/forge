@@ -102,6 +102,7 @@ forge_add_contract_library(
       include/product/chain/ids.cppm
       include/product/chain/actions.cppm
    SOURCES protocol.cpp
+   PUBLIC_HEADERS include/product/chain/macros.hpp
    PUBLIC_LIBRARIES
       Forge::forge_chain_protocol
       Forge::forge_raw
@@ -116,6 +117,8 @@ forge_add_contract(
 ```
 
 `ID` identifies the library in ABI module-owner diagnostics.
+`PUBLIC_HEADERS` declares rare macro-only public headers as a standard CMake
+header file set; private textual dependencies remain compiler-discovered.
 `PUBLIC_LIBRARIES` and `PRIVATE_LIBRARIES` create ordinary CMake dependency
 scopes. In a native configuration, the returned target is a normal static
 library that products may extend or install with standard CMake commands. In a

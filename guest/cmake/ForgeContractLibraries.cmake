@@ -602,7 +602,7 @@ function(forge_add_contract_library target)
       ARG
       ""
       "ID"
-      "MODULE_BASE_DIRS;MODULE_SOURCES;SOURCES;PUBLIC_LIBRARIES;PRIVATE_LIBRARIES"
+      "MODULE_BASE_DIRS;MODULE_SOURCES;SOURCES;PUBLIC_HEADERS;PUBLIC_LIBRARIES;PRIVATE_LIBRARIES"
       ${ARGN}
    )
    if(ARG_UNPARSED_ARGUMENTS)
@@ -654,7 +654,7 @@ function(forge_add_contract_library target)
    endforeach()
    list(REMOVE_DUPLICATES _module_bases)
 
-   foreach(_role MODULE_SOURCES SOURCES)
+   foreach(_role MODULE_SOURCES SOURCES PUBLIC_HEADERS)
       set(_files)
       foreach(_file IN LISTS ARG_${_role})
          _forge_contract_normalize_file(
@@ -707,6 +707,15 @@ function(forge_add_contract_library target)
    )
    if(_SOURCES)
       target_sources("${target}" PRIVATE ${_SOURCES})
+   endif()
+   if(_PUBLIC_HEADERS)
+      target_sources(
+         "${target}"
+         PUBLIC
+            FILE_SET forge_contract_headers TYPE HEADERS
+            BASE_DIRS ${_module_bases}
+            FILES ${_PUBLIC_HEADERS}
+      )
    endif()
    target_include_directories(
       "${target}" PRIVATE "$<BUILD_INTERFACE:${_source_root}>"
