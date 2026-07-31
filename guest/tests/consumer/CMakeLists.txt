@@ -6,6 +6,13 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(
+   FORGE_CONTRACT_SOURCE_ROOT
+   "${CMAKE_CURRENT_SOURCE_DIR}/.."
+   CACHE PATH
+   "Canonical source root for the installed Contract SDK consumer fixtures"
+)
+
 find_package(ForgeContract CONFIG REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
