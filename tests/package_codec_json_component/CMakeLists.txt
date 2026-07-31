@@ -9,4 +9,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 find_package(Forge CONFIG REQUIRED COMPONENTS codec_json)
 
 add_executable(forge_package_codec_json_component main.cpp)
+target_sources(
+   forge_package_codec_json_component
+   PRIVATE
+      FILE_SET CXX_MODULES
+      FILES exact_types.cppm
+)
 target_link_libraries(forge_package_codec_json_component PRIVATE Forge::forge_codec_json)

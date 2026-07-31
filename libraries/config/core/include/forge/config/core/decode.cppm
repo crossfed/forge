@@ -5,10 +5,10 @@ module;
 #include <cstdint>
 #include <exception>
 #include <ranges>
-#include <set>
 #include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 export module forge.config.core.decode;
@@ -76,80 +76,25 @@ template <typename T> [[nodiscard]] decode_result<T> decode(const document& sour
    const auto rules = schema::rules<T>::define();
    rules.apply_defaults(result.value);
 
-   auto known_fields = std::set<std::string>{};
-   for (const auto& field : rules.fields()) {
-      known_fields.insert(field.name);
-      known_fields.insert(field.aliases.begin(), field.aliases.end());
-   }
-
+   auto input = schema::input_value::object_type{};
    if (const auto* object = source.object_at(section)) {
-      for (const auto& [name, ignored] : *object) {
-         if (!known_fields.contains(name)) {
-            auto full_path = std::string{section};
-            if (!full_path.empty()) {
-               full_path += ".";
-            }
-            full_path += name;
-            result.diagnostics.entries.push_back(schema::diagnostic{
-                .path = std::move(full_path),
-                .code = "config.unknown",
-                .level = schema::severity::warning,
-                .message = "unknown config field",
-            });
-         }
-      }
+      const auto converted = to_schema_value(value{*object});
+      input = *converted.as_object();
    }
-
-   for (const auto& field : rules.fields()) {
-      auto field_path = std::string{section};
-      if (!field_path.empty()) {
-         field_path += ".";
-      }
-      field_path += field.name;
-
-      const auto* found = source.try_get(field_path);
-      if (!found) {
-         for (const auto& alias : field.aliases) {
-            auto alias_path = std::string{section};
-            if (!alias_path.empty()) {
-               alias_path += ".";
-            }
-            alias_path += alias;
-            found = source.try_get(alias_path);
-            if (found) {
-               field_path = std::move(alias_path);
-               break;
-            }
-         }
-      }
-
-      if (!found) {
-         if (field.required) {
-            result.diagnostics.entries.push_back(schema::diagnostic{
-                .path = std::move(field_path),
-                .code = "config.required",
-                .level = schema::severity::error,
-                .message = "required config field is missing",
-            });
-         }
-         continue;
-      }
-
-      if (field.deprecated) {
-         result.diagnostics.entries.push_back(schema::diagnostic{
-             .path = field_path,
-             .code = "config.deprecated",
-             .level = schema::severity::warning,
-             .message = field.deprecated_message.empty() ? "deprecated config field" : field.deprecated_message,
-         });
-      }
-
-      field.assign_input(result.value, to_schema_value(*found), field_path, result.diagnostics.entries);
-   }
-
-   auto validation = rules.validate(result.value, section);
-   result.diagnostics.entries.insert(result.diagnostics.entries.end(), validation.begin(), validation.end());
+   result.diagnostics.entries = rules.decode_object(input, section, result.value);
    return result;
+}
+
+template <typename T> [[nodiscard]] document encode(const T& source, std::string_view section = {}) {
+   auto output = document{};
+   const auto rules = schema::rules<T>::define();
+   auto value = from_schema_value(schema::input_value{rules.encode_object(source)});
+   if (section.empty()) {
+      output.root = std::move(*value.as_object());
+   } else {
+      output.set(std::string{section}, std::move(value));
+   }
+   return output;
 }
 
 template <typename T> [[nodiscard]] document defaults_for(std::string_view section) {

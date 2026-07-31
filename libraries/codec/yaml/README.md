@@ -9,6 +9,7 @@ parser backend is an implementation detail.
 - Load human-authored config files into `forge::config::core::document`.
 - Read/write YAML as `forge::variant` for diagnostics or tooling.
 - Decode typed Boost.Describe objects through `forge_schema`.
+- Preserve nested schema field mappings inside schema-less described records.
 
 ## When Not To Use
 
@@ -125,4 +126,4 @@ for (const auto& diagnostic : parsed.diagnostics) {
 ## Tests
 
 `test_forge_codec_yaml` covers scalar/list/map roundtrip, config document behavior,
-typed schema reads and malformed YAML diagnostics.
+typed schema reads, nested schema-aware roundtrip and malformed YAML diagnostics.

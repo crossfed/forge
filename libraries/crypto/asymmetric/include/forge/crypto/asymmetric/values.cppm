@@ -228,6 +228,22 @@ struct rsa_signature {
 using public_key = std::variant<k1_public_key, r1_public_key, webauthn_public_key, ed25519_public_key, rsa_public_key>;
 using signature = std::variant<k1_signature, r1_signature, webauthn_signature, ed25519_signature, rsa_signature>;
 
+[[nodiscard]] constexpr bool operator==(const public_key& left, const public_key& right) noexcept {
+   if (left.index() != right.index()) {
+      return false;
+   }
+
+   return std::visit([&right]<typename Value>(const Value& value) { return value == std::get<Value>(right); }, left);
+}
+
+[[nodiscard]] constexpr bool operator==(const signature& left, const signature& right) noexcept {
+   if (left.index() != right.index()) {
+      return false;
+   }
+
+   return std::visit([&right]<typename Value>(const Value& value) { return value == std::get<Value>(right); }, left);
+}
+
 [[nodiscard]] constexpr algorithm type(const public_key& value) noexcept {
    return std::visit(
        []<typename Value>(const Value&) {

@@ -15,6 +15,8 @@ struct producer_key {
    account_name producer_name;
    public_key block_signing_key;
 
+   bool operator==(const producer_key&) const = default;
+
    friend constexpr bool operator<(const producer_key& left, const producer_key& right) {
       return left.producer_name < right.producer_name;
    }
@@ -23,6 +25,8 @@ struct producer_key {
 struct producer_schedule {
    std::uint32_t version = 0;
    std::vector<producer_key> producers;
+
+   bool operator==(const producer_schedule&) const = default;
 };
 
 template <typename Stream> void raw_pack(Stream& stream, const producer_key& value) {

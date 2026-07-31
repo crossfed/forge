@@ -25,12 +25,13 @@ It is the bridge between typed C++ values and generic codec/config/log shapes.
 - `forge.variant.chrono` — std chrono ISO conversion.
 - `forge.variant.multiprecision` — Boost multiprecision conversions.
 - `forge.variant.format` — display helpers.
+- `forge.variant.schema` — recursive schema-aware conversion for format codecs.
 - `forge.variant.static_variant` — FC-style static variant.
 - `forge.variant.dynamic_bitset`, `forge.variant.variant_dynamic_bitset`.
 
 Target: `forge_variant`.
 
-Dependencies: `forge_core`, `forge_reflect`, Boost headers, Boost.MultiIndex and
+Dependencies: `forge_core`, `forge_reflect`, `forge_schema`, Boost headers, Boost.MultiIndex and
 Boost.Multiprecision.
 
 ## Examples
@@ -111,6 +112,15 @@ layers before rendering or serialization.
 
 ## Tests
 
-`tests/variant` covers described roundtrip, missing/unknown field behavior,
-bad enum values, chrono ISO conversion, `static_variant`, blob compatibility and
-dynamic bitsets.
+`tests/variant` and the JSON/YAML codec suites cover described roundtrip,
+schema-aware mapping, missing/unknown field behavior, bad enum values, chrono ISO
+conversion, `static_variant`, blob compatibility and dynamic bitsets.
+
+## Schema-Aware Values
+
+Import `forge.variant.schema` when a format codec must preserve canonical
+`forge_schema` field names inside an otherwise schema-less described value.
+`forge::variant_schema::encode` recursively applies schema field mappings, and
+`forge::variant_schema::materialize` converts those nested mappings back before
+ordinary `from_variant` decoding. JSON and YAML share this mechanism so their
+typed write/read paths cannot drift.

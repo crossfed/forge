@@ -4,9 +4,8 @@ module;
 
 #include <new>
 
-module forge.chain.protocol.producer_schedule;
+module forge.chain.protocol.finalizer_authority;
 
-import forge.crypto.asymmetric;
 import forge.crypto.digest.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
@@ -16,5 +15,4 @@ import forge.variant.containers;
 import forge.variant.format;
 import forge.variant.described;
 
-FORGE_IMPLEMENT_SERIALIZATION(forge::chain::protocol::producer_key)
-FORGE_IMPLEMENT_SERIALIZATION(forge::chain::protocol::producer_schedule)
+FORGE_IMPLEMENT_SERIALIZATION(forge::chain::protocol::finalizer_authority)

@@ -1,15 +1,27 @@
 module;
 
+#include <boost/multi_index_container.hpp>
+
 #include <algorithm>
+#include <array>
 #include <chrono>
+#include <concepts>
 #include <cstddef>
+#include <deque>
 #include <filesystem>
+#include <flat_map>
 #include <limits>
+#include <map>
+#include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 export module forge.codec.json;
@@ -24,6 +36,7 @@ import forge.schema.diagnostic;
 import forge.schema.value_kind;
 import forge.schema.object;
 import forge.schema.enums;
+import forge.reflect.reflect;
 import forge.variant.exceptions;
 import forge.variant.value;
 import forge.variant.conversion;
@@ -32,6 +45,9 @@ import forge.variant.chrono;
 import forge.variant.multiprecision;
 import forge.variant.format;
 import forge.variant.described;
+import forge.variant.static_variant;
+
+import :exact;
 
 export namespace forge::codec::json {
 
@@ -41,10 +57,16 @@ enum class unknown_field_policy {
    error,
 };
 
+enum class described_record_policy {
+   permissive,
+   exact,
+};
+
 struct read_options {
    std::string source_name;
    std::size_t max_depth = 128;
    unknown_field_policy unknown_fields = unknown_field_policy::warn;
+   described_record_policy described_records = described_record_policy::permissive;
 };
 
 struct write_options {
@@ -73,6 +95,13 @@ struct write_result {
    }
 };
 
+namespace detail {
+
+[[nodiscard]] write_result encoding_failure(const schema::encoding_error& error);
+[[nodiscard]] write_result encoding_failure(const std::exception& error);
+
+} // namespace detail
+
 [[nodiscard]] read_result<variant> read_value(std::string_view input, read_options options = {});
 [[nodiscard]] write_result write_value(const variant& input, write_options options = {});
 [[nodiscard]] read_result<config::core::document> read_document(std::string_view input, read_options options = {});
@@ -81,7 +110,8 @@ struct write_result {
 [[nodiscard]] read_result<variant> load_value(const std::filesystem::path& path, read_options options = {});
 [[nodiscard]] write_result save_value(const std::filesystem::path& path, const variant& input,
                                       write_options options = {});
-[[nodiscard]] read_result<config::core::document> load_document(const std::filesystem::path& path, read_options options = {});
+[[nodiscard]] read_result<config::core::document> load_document(const std::filesystem::path& path,
+                                                                read_options options = {});
 [[nodiscard]] write_result save_document(const std::filesystem::path& path, const config::core::document& input,
                                          write_options options = {});
 
@@ -93,6 +123,27 @@ template <typename T> [[nodiscard]] read_result<T> read(std::string_view input, 
       output.diagnostics = std::move(parsed_document.diagnostics);
       if (!parsed_document.ok()) {
          return output;
+      }
+      if (options.described_records == described_record_policy::exact) {
+         const auto input = config::core::to_schema_value(config::core::value{parsed_document.value.root});
+         auto exact = rules.validate_exact_input(*input.as_object());
+         for (auto& entry : exact) {
+            if (entry.code == "config.unknown") {
+               entry.code = "json.unknown";
+            } else if (entry.code == "config.missing") {
+               entry.code = "json.missing";
+            } else if (entry.code == "config.duplicate") {
+               entry.code = "json.duplicate";
+            } else if (entry.code == "config.type") {
+               entry.code = "json.type";
+            } else if (entry.code == "config.range") {
+               entry.code = "json.range";
+            }
+            output.diagnostics.push_back(std::move(entry));
+         }
+         if (!output.ok()) {
+            return output;
+         }
       }
       auto decoded = config::core::decode<T>(parsed_document.value);
       output.value = std::move(decoded.value);
@@ -118,6 +169,34 @@ template <typename T> [[nodiscard]] read_result<T> read(std::string_view input, 
    }
 
    rules.apply_defaults(output.value);
+
+   if (options.described_records == described_record_policy::exact) {
+      detail::validate_exact<T>(parsed.value, {}, output.diagnostics);
+      if (!output.ok()) {
+         return output;
+      }
+   }
+
+   const auto schema_diagnostic_offset = output.diagnostics.size();
+   detail::materialize_schema_records<T>(parsed.value, {}, output.diagnostics);
+   if (options.described_records == described_record_policy::permissive) {
+      auto first = output.diagnostics.begin() + static_cast<std::ptrdiff_t>(schema_diagnostic_offset);
+      if (options.unknown_fields == unknown_field_policy::ignore) {
+         output.diagnostics.erase(
+             std::remove_if(first, output.diagnostics.end(),
+                            [](const schema::diagnostic& entry) { return entry.code == "json.unknown"; }),
+             output.diagnostics.end());
+      } else if (options.unknown_fields == unknown_field_policy::error) {
+         for (auto iterator = first; iterator != output.diagnostics.end(); ++iterator) {
+            if (iterator->code == "json.unknown") {
+               iterator->level = schema::severity::error;
+            }
+         }
+      }
+   }
+   if (!output.ok()) {
+      return output;
+   }
 
    if constexpr (requires(const variant& source, T& target) { from_variant(source, target); }) {
       try {
@@ -182,6 +261,27 @@ template <typename T> [[nodiscard]] read_result<T> load(const std::filesystem::p
       if (!parsed_document.ok()) {
          return output;
       }
+      if (options.described_records == described_record_policy::exact) {
+         const auto input = config::core::to_schema_value(config::core::value{parsed_document.value.root});
+         auto exact = rules.validate_exact_input(*input.as_object());
+         for (auto& entry : exact) {
+            if (entry.code == "config.unknown") {
+               entry.code = "json.unknown";
+            } else if (entry.code == "config.missing") {
+               entry.code = "json.missing";
+            } else if (entry.code == "config.duplicate") {
+               entry.code = "json.duplicate";
+            } else if (entry.code == "config.type") {
+               entry.code = "json.type";
+            } else if (entry.code == "config.range") {
+               entry.code = "json.range";
+            }
+            output.diagnostics.push_back(std::move(entry));
+         }
+         if (!output.ok()) {
+            return output;
+         }
+      }
       auto decoded = config::core::decode<T>(parsed_document.value);
       output.value = std::move(decoded.value);
       for (auto entry : std::move(decoded.diagnostics.entries)) {
@@ -200,6 +300,34 @@ template <typename T> [[nodiscard]] read_result<T> load(const std::filesystem::p
    }
 
    rules.apply_defaults(output.value);
+   if (options.described_records == described_record_policy::exact) {
+      detail::validate_exact<T>(parsed.value, {}, output.diagnostics);
+      if (!output.ok()) {
+         return output;
+      }
+   }
+
+   const auto schema_diagnostic_offset = output.diagnostics.size();
+   detail::materialize_schema_records<T>(parsed.value, {}, output.diagnostics);
+   if (options.described_records == described_record_policy::permissive) {
+      auto first = output.diagnostics.begin() + static_cast<std::ptrdiff_t>(schema_diagnostic_offset);
+      if (options.unknown_fields == unknown_field_policy::ignore) {
+         output.diagnostics.erase(
+             std::remove_if(first, output.diagnostics.end(),
+                            [](const schema::diagnostic& entry) { return entry.code == "json.unknown"; }),
+             output.diagnostics.end());
+      } else if (options.unknown_fields == unknown_field_policy::error) {
+         for (auto iterator = first; iterator != output.diagnostics.end(); ++iterator) {
+            if (iterator->code == "json.unknown") {
+               iterator->level = schema::severity::error;
+            }
+         }
+      }
+   }
+   if (!output.ok()) {
+      return output;
+   }
+
    if constexpr (requires(const variant& source, T& target) { from_variant(source, target); }) {
       try {
          from_variant(parsed.value, output.value);
@@ -228,12 +356,66 @@ template <typename T> [[nodiscard]] read_result<T> load(const std::filesystem::p
 }
 
 template <typename T> [[nodiscard]] write_result write(const T& input, write_options options = {}) {
-   return write_value(variant{input}, std::move(options));
+   const auto rules = schema::rules<T>::define();
+   if (!rules.fields().empty()) {
+      try {
+         return write_document(config::core::encode(input), std::move(options));
+      } catch (const schema::encoding_error& error) {
+         return detail::encoding_failure(error);
+      } catch (const std::exception& error) {
+         return detail::encoding_failure(error);
+      }
+   }
+   if constexpr (requires(const T& source, variant& output) { to_variant(source, output); }) {
+      try {
+         return write_value(detail::to_schema_aware_variant(input), std::move(options));
+      } catch (const schema::encoding_error& error) {
+         return detail::encoding_failure(error);
+      } catch (const std::exception& error) {
+         return detail::encoding_failure(error);
+      }
+   } else {
+      return write_result{
+          .diagnostics = {schema::diagnostic{
+              .path = {},
+              .code = "json.type",
+              .level = schema::severity::error,
+              .message = "type is not writable to JSON without schema rules or forge::to_variant",
+          }},
+      };
+   }
 }
 
 template <typename T>
 [[nodiscard]] write_result save(const std::filesystem::path& path, const T& input, write_options options = {}) {
-   return save_value(path, variant{input}, std::move(options));
+   const auto rules = schema::rules<T>::define();
+   if (!rules.fields().empty()) {
+      try {
+         return save_document(path, config::core::encode(input), std::move(options));
+      } catch (const schema::encoding_error& error) {
+         return detail::encoding_failure(error);
+      } catch (const std::exception& error) {
+         return detail::encoding_failure(error);
+      }
+   }
+   if constexpr (requires(const T& source, variant& output) { to_variant(source, output); }) {
+      try {
+         return save_value(path, detail::to_schema_aware_variant(input), std::move(options));
+      } catch (const schema::encoding_error& error) {
+         return detail::encoding_failure(error);
+      } catch (const std::exception& error) {
+         return detail::encoding_failure(error);
+      }
+   } else {
+      return write_result{
+          .diagnostics = {schema::diagnostic{
+              .path = {},
+              .code = "json.type",
+              .level = schema::severity::error,
+              .message = "type is not writable to JSON without schema rules or forge::to_variant",
+          }},
+      };
+   }
 }
 
 } // namespace forge::codec::json

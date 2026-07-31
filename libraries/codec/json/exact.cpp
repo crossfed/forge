@@ -1,0 +1,144 @@
+module;
+
+#include <cstddef>
+#include <cstdint>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+module forge.codec.json;
+
+import :exact;
+
+namespace forge::codec::json::detail {
+
+std::string field_path(std::string_view path, std::string_view field) {
+   if (path.empty()) {
+      return std::string{field};
+   }
+   return std::string{path} + "." + std::string{field};
+}
+
+std::string element_path(std::string_view path, std::size_t index) {
+   return std::string{path} + "[" + std::to_string(index) + "]";
+}
+
+void add_exact_error(std::vector<schema::diagnostic>& diagnostics, std::string path, std::string code,
+                     std::string message) {
+   diagnostics.push_back(schema::diagnostic{
+       .path = path.empty() ? "$" : std::move(path),
+       .code = std::move(code),
+       .level = schema::severity::error,
+       .message = std::move(message),
+   });
+}
+
+bool matches_canonical_json_value(const variant& source, const variant& canonical) {
+   switch (canonical.get_type()) {
+   case variant::null_type:
+      return source.is_null();
+   case variant::int64_type: {
+      const auto expected = canonical.as_int64();
+      if (source.is_int64()) {
+         return source.as_int64() == expected;
+      }
+      return expected >= 0 && source.is_uint64() && source.as_uint64() == static_cast<std::uint64_t>(expected);
+   }
+   case variant::uint64_type: {
+      const auto expected = canonical.as_uint64();
+      if (source.is_uint64()) {
+         return source.as_uint64() == expected;
+      }
+      return source.is_int64() && source.as_int64() >= 0 && static_cast<std::uint64_t>(source.as_int64()) == expected;
+   }
+   case variant::double_type:
+      return source.is_double() && source.as_double() == canonical.as_double();
+   case variant::bool_type:
+      return source.is_bool() && source.as_bool() == canonical.as_bool();
+   case variant::string_type:
+      return source.is_string() && source.get_string() == canonical.get_string();
+   case variant::array_type: {
+      if (!source.is_array() || source.get_array().size() != canonical.get_array().size()) {
+         return false;
+      }
+      for (std::size_t index = 0; index < canonical.get_array().size(); ++index) {
+         if (!matches_canonical_json_value(source.get_array()[index], canonical.get_array()[index])) {
+            return false;
+         }
+      }
+      return true;
+   }
+   case variant::object_type: {
+      if (!source.is_object() || source.get_object().size() != canonical.get_object().size()) {
+         return false;
+      }
+      for (const auto& entry : canonical.get_object()) {
+         const auto source_entry = source.get_object().find(entry.key());
+         if (source_entry == source.get_object().end() ||
+             !matches_canonical_json_value(source_entry->value(), entry.value())) {
+            return false;
+         }
+      }
+      return true;
+   }
+   case variant::blob_type:
+      return source.is_blob() && source.get_blob().data == canonical.get_blob().data;
+   }
+   return false;
+}
+
+schema::input_value to_schema_input(const variant& source) {
+   switch (source.get_type()) {
+   case variant::null_type:
+      return {};
+   case variant::int64_type:
+      return schema::input_value{source.as_int64()};
+   case variant::uint64_type:
+      return schema::input_value{source.as_uint64()};
+   case variant::double_type:
+      return schema::input_value{source.as_double()};
+   case variant::bool_type:
+      return schema::input_value{source.as_bool()};
+   case variant::string_type:
+      return schema::input_value{source.get_string()};
+   case variant::array_type: {
+      auto output = schema::input_value::array_type{};
+      output.reserve(source.get_array().size());
+      for (const auto& entry : source.get_array()) {
+         output.push_back(to_schema_input(entry));
+      }
+      return schema::input_value{std::move(output)};
+   }
+   case variant::object_type: {
+      auto output = schema::input_value::object_type{};
+      for (const auto& entry : source.get_object()) {
+         output.emplace(entry.key(), to_schema_input(entry.value()));
+      }
+      return schema::input_value{std::move(output)};
+   }
+   case variant::blob_type:
+      throw std::invalid_argument{"JSON schema records cannot contain blob values"};
+   }
+   throw std::invalid_argument{"unsupported JSON schema value"};
+}
+
+void append_schema_diagnostics(std::vector<schema::diagnostic>& output, std::vector<schema::diagnostic> diagnostics) {
+   for (auto& entry : diagnostics) {
+      if (entry.code == "config.unknown") {
+         entry.code = "json.unknown";
+      } else if (entry.code == "config.missing") {
+         entry.code = "json.missing";
+      } else if (entry.code == "config.duplicate") {
+         entry.code = "json.duplicate";
+      } else if (entry.code == "config.type") {
+         entry.code = "json.type";
+      } else if (entry.code == "config.range") {
+         entry.code = "json.range";
+      }
+      output.push_back(std::move(entry));
+   }
+}
+
+} // namespace forge::codec::json::detail

@@ -13,12 +13,14 @@ export import :value;
 import forge.crypto.digest.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
+import forge.variant.described;
+import forge.variant.value;
 
 export namespace forge::chain::protocol {
 BOOST_DESCRIBE_STRUCT(producer_key, (), (producer_name, block_signing_key))
 BOOST_DESCRIBE_STRUCT(producer_schedule, (), (version, producers))
 } // namespace forge::chain::protocol
 
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::producer_key)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::producer_schedule)
+FORGE_DECLARE_SERIALIZATION(forge::chain::protocol::producer_key)
+FORGE_DECLARE_SERIALIZATION(forge::chain::protocol::producer_schedule)
 #endif
