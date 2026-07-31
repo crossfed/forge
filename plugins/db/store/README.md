@@ -32,6 +32,8 @@ plugins:
         - name: "witness"
           driver: "rocksdb"
           path: "./data/rocksdb/witness"
+          families:
+            - "authenticated-state"
           object:
             family: "objectdb"
             write-policy: "single-writer"
@@ -47,6 +49,10 @@ plugins:
 `revision: {}` explicitly enables durable revisions. It requires `object:`,
 uses the same Object family for its system rows and does not create another
 RocksDB column family. Omitting `revision:` leaves the layer disabled.
+
+`families` declares additional physical DB Core families used by transaction
+participants that share this store but are not ObjectDB or BlobDB layers. Names
+must be non-empty and distinct from every configured ObjectDB and BlobDB family.
 
 MDBX is configured on the same named-store surface:
 

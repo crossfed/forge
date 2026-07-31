@@ -532,11 +532,21 @@ require_field(const forge::config::core::component_descriptor& descriptor, const
 
 [[nodiscard]] forge::config::core::value configured_mdbx_store(std::string name, std::filesystem::path path,
                                                                bool blob = false, bool revision = true,
-                                                               std::optional<std::string> durability = "durable-sync") {
+                                                               std::optional<std::string> durability = "durable-sync",
+                                                               std::vector<std::string> families = {}) {
    auto object = forge::config::core::value::object_type{};
    object.emplace("name", forge::config::core::value{std::move(name)});
    object.emplace("driver", forge::config::core::value{std::string{"mdbx"}});
    object.emplace("path", forge::config::core::value{path.string()});
+
+   if (!families.empty()) {
+      auto configured_families = forge::config::core::value::array_type{};
+      configured_families.reserve(families.size());
+      for (auto& family : families) {
+         configured_families.emplace_back(std::move(family));
+      }
+      object.emplace("families", forge::config::core::value{std::move(configured_families)});
+   }
 
    if (durability) {
       auto lane = forge::config::core::value::object_type{};
@@ -853,6 +863,28 @@ BOOST_AUTO_TEST_CASE(store_plugin_rejects_configured_overlapping_layer_families)
    expect_invalid("shared", "shared", "blob.refs");
    expect_invalid("shared", "blob.data", "shared");
    expect_invalid("objectdb", "blob.shared", "blob.shared");
+}
+
+BOOST_AUTO_TEST_CASE(store_plugin_rejects_invalid_configured_extra_families) {
+   auto runtime = forge::asio::runtime{};
+
+   const auto expect_invalid = [&](std::vector<std::string> families) {
+      auto plugin = store_plugin::plugin{};
+      auto document = forge::config::core::document{};
+      document.set("plugins.db.store.stores", forge::config::core::value::array_type{configured_mdbx_store(
+                                                  "files", "/tmp/forge-db-store-plugin-extra-families", true, true,
+                                                  "durable-sync", std::move(families))});
+
+      BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{
+                                                                document, "plugins.db.store"})),
+                        store_plugin::exceptions::invalid_config);
+   };
+
+   expect_invalid({""});
+   expect_invalid({"spine-chain-state", "spine-chain-state"});
+   expect_invalid({"objectdb"});
+   expect_invalid({"blobdb.data"});
+   expect_invalid({"blobdb.refs"});
 }
 
 BOOST_AUTO_TEST_CASE(store_plugin_rejects_invalid_mdbx_configuration) {
@@ -1585,11 +1617,8 @@ BOOST_AUTO_TEST_CASE(store_plugin_authenticated_handle_shares_named_store_transa
    BOOST_REQUIRE(latest.has_value());
    BOOST_TEST(latest->version == 0U);
    const auto proof = forge::asio::blocking::run(runtime, authenticated.prove(0U, mutations.front().key));
-   const auto verified = forge::db::authenticated::verify_point(
-      "forge.tests.store.first",
-      proof.anchor,
-      mutations.front().key,
-      proof);
+   const auto verified =
+       forge::db::authenticated::verify_point("forge.tests.store.first", proof.anchor, mutations.front().key, proof);
    BOOST_TEST(verified.exists);
    BOOST_REQUIRE(verified.value.has_value());
    BOOST_TEST(*verified.value == *mutations.front().value);
@@ -1907,6 +1936,42 @@ BOOST_AUTO_TEST_CASE(store_plugin_unknown_store_fails_typed) {
 }
 
 #if FORGE_HAS_MDBX
+BOOST_AUTO_TEST_CASE(store_plugin_configured_mdbx_exposes_extra_family_through_driver) {
+   auto root = root_guard{};
+   auto document = forge::config::core::document{};
+   document.set("plugins.db.store.stores",
+                forge::config::core::value::array_type{configured_mdbx_store(
+                    "files", root.root / "configured-extra-family", true, true, "safe-nosync", {"spine-chain-state"})});
+
+   auto app = make_app(std::move(document));
+   auto api = app->apis().get<store_plugin::api>(store_plugin::api::ref());
+   auto handle = forge::asio::blocking::run(app->runtime(), api->store("files"));
+   (void)handle.objects();
+   (void)handle.blobs();
+   (void)handle.revisions();
+
+   auto authenticated = handle.authenticated({
+       .family = forge::db::core::family{"spine-chain-state"},
+       .domain = "forge.tests.store.configured-family",
+   });
+   auto transaction = forge::asio::blocking::run(app->runtime(), handle.begin_transaction());
+   auto participant = forge::asio::blocking::run(app->runtime(), authenticated.join(transaction, 1U));
+   const auto mutations = std::vector<forge::db::authenticated::mutation>{
+       {
+           .key = {std::byte{0x01}},
+           .value = forge::db::authenticated::bytes{std::byte{0x02}},
+       },
+   };
+   const auto staged = forge::asio::blocking::run(app->runtime(), participant.stage(mutations));
+   BOOST_TEST(staged.commitment.version == 1U);
+   forge::asio::blocking::run(app->runtime(), transaction.commit());
+
+   const auto latest = forge::asio::blocking::run(app->runtime(), authenticated.latest());
+   BOOST_REQUIRE(latest.has_value());
+   BOOST_TEST(latest->version == 1U);
+   forge::asio::blocking::run(app->runtime(), app->shutdown());
+}
+
 BOOST_AUTO_TEST_CASE(store_plugin_programmatic_mdbx_store_shares_all_db_layers) {
    auto root = root_guard{};
    auto runtime = forge::asio::runtime{};
