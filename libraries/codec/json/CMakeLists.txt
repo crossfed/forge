@@ -1,4 +1,4 @@
-add_library(forge_codec_json STATIC json.cpp)
+add_library(forge_codec_json STATIC exact.cpp json.cpp)
 forge_target_modules_at(forge_codec_json codec/json)
 
 target_include_directories(forge_codec_json PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})

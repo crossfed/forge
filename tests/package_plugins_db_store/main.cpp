@@ -60,6 +60,7 @@ int main() {
       objects.index<usage_index, by_id>().rank(value);
    });
 
+   const auto plugin = forge::plugins::db::store::plugin{};
    const auto descriptor = forge::plugins::db::store::descriptor();
    const auto api = forge::plugins::db::store::api::describe();
    const auto options = forge::db::revision::prune_options{
@@ -73,8 +74,8 @@ int main() {
       .lane = {.max_pending_operations = 32U,
                .max_waiting_submissions = 32U},
    };
-   return descriptor.id.value == "forge.plugins.db.store" && api.version.major == 1U && api.version.revision == 3U &&
-                  options.max_revisions == 1U && mdbx.max_readers == 64U
+   return plugin.version() == "2.0.0" && descriptor.id.value == "forge.plugins.db.store" && api.version.major == 2U &&
+                  api.version.revision == 0U && options.max_revisions == 1U && mdbx.max_readers == 64U
               ? 0
               : 1;
 }

@@ -73,6 +73,13 @@ struct write_result {
    }
 };
 
+namespace detail {
+
+[[nodiscard]] write_result encoding_failure(const schema::encoding_error& error);
+[[nodiscard]] write_result encoding_failure(const std::exception& error);
+
+} // namespace detail
+
 [[nodiscard]] read_result<variant> read_value(std::string_view input, read_options options = {});
 [[nodiscard]] write_result write_value(const variant& input, write_options options = {});
 [[nodiscard]] read_result<config::core::document> read_document(std::string_view input, read_options options = {});
@@ -278,10 +285,22 @@ template <typename T> [[nodiscard]] read_result<T> load(const std::filesystem::p
 template <typename T> [[nodiscard]] write_result write(const T& input, write_options options = {}) {
    const auto rules = schema::rules<T>::define();
    if (!rules.fields().empty()) {
-      return write_document(config::core::encode(input), std::move(options));
+      try {
+         return write_document(config::core::encode(input), std::move(options));
+      } catch (const schema::encoding_error& error) {
+         return detail::encoding_failure(error);
+      } catch (const std::exception& error) {
+         return detail::encoding_failure(error);
+      }
    }
    if constexpr (requires(const T& source, variant& output) { to_variant(source, output); }) {
-      return write_value(variant_schema::encode(input), std::move(options));
+      try {
+         return write_value(variant_schema::encode(input), std::move(options));
+      } catch (const schema::encoding_error& error) {
+         return detail::encoding_failure(error);
+      } catch (const std::exception& error) {
+         return detail::encoding_failure(error);
+      }
    } else {
       return write_result{
           .diagnostics = {schema::diagnostic{
@@ -298,10 +317,22 @@ template <typename T>
 [[nodiscard]] write_result save(const std::filesystem::path& path, const T& input, write_options options = {}) {
    const auto rules = schema::rules<T>::define();
    if (!rules.fields().empty()) {
-      return save_document(path, config::core::encode(input), std::move(options));
+      try {
+         return save_document(path, config::core::encode(input), std::move(options));
+      } catch (const schema::encoding_error& error) {
+         return detail::encoding_failure(error);
+      } catch (const std::exception& error) {
+         return detail::encoding_failure(error);
+      }
    }
    if constexpr (requires(const T& source, variant& output) { to_variant(source, output); }) {
-      return save_value(path, variant_schema::encode(input), std::move(options));
+      try {
+         return save_value(path, variant_schema::encode(input), std::move(options));
+      } catch (const schema::encoding_error& error) {
+         return detail::encoding_failure(error);
+      } catch (const std::exception& error) {
+         return detail::encoding_failure(error);
+      }
    } else {
       return write_result{
           .diagnostics = {schema::diagnostic{

@@ -152,6 +152,24 @@ template <> struct forge::schema::rules<forge_json_tests::exact_dotted_leaf> {
    }
 };
 
+template <> struct forge::schema::rules<forge_json_tests::exact_long_double_record> {
+   [[nodiscard]] static forge::schema::object_schema<forge_json_tests::exact_long_double_record> define() {
+      auto schema = forge::schema::object<forge_json_tests::exact_long_double_record>();
+      static_cast<void>(schema.field<&forge_json_tests::exact_long_double_record::value>("value"));
+      return schema;
+   }
+};
+
+template <> struct forge::schema::rules<forge_json_tests::exact_schema_plain_parent> {
+   [[nodiscard]] static forge::schema::object_schema<forge_json_tests::exact_schema_plain_parent> define() {
+      auto schema = forge::schema::object<forge_json_tests::exact_schema_plain_parent>();
+      static_cast<void>(schema.field<&forge_json_tests::exact_schema_plain_parent::child>("child"));
+      static_cast<void>(schema.field<&forge_json_tests::exact_schema_plain_parent::children>("children"));
+      static_cast<void>(schema.field<&forge_json_tests::exact_schema_plain_parent::canonical>("canonical"));
+      return schema;
+   }
+};
+
 template <> struct forge::schema::rules<forge_json_tests::exact_dotted_schema_parent> {
    [[nodiscard]] static forge::schema::object_schema<forge_json_tests::exact_dotted_schema_parent> define() {
       auto schema = forge::schema::object<forge_json_tests::exact_dotted_schema_parent>();
@@ -161,6 +179,69 @@ template <> struct forge::schema::rules<forge_json_tests::exact_dotted_schema_pa
 };
 
 BOOST_AUTO_TEST_SUITE(json_codec_tests)
+
+BOOST_AUTO_TEST_CASE(json_schema_writer_rejects_long_double_without_narrowing) {
+   const auto input = forge_json_tests::exact_long_double_record{.value = 1.0L};
+   const auto written = forge::codec::json::write(input);
+
+   BOOST_REQUIRE(!written.ok());
+   BOOST_TEST(written.text.empty());
+   BOOST_REQUIRE_EQUAL(written.diagnostics.size(), 1U);
+   BOOST_TEST(written.diagnostics.front().path == "value");
+   BOOST_TEST(written.diagnostics.front().code == "json.type");
+   BOOST_TEST(written.diagnostics.front().message == "long double schema fields are not supported by config codecs");
+   BOOST_CHECK_THROW(static_cast<void>(forge::config::core::encode(input)), std::invalid_argument);
+}
+
+BOOST_AUTO_TEST_CASE(json_schema_writer_reports_nested_encoding_path) {
+   const auto input = forge_json_tests::exact_long_double_parent{.nested = {.value = 1.0L}};
+   const auto written = forge::codec::json::write(input);
+
+   BOOST_REQUIRE(!written.ok());
+   BOOST_TEST(written.text.empty());
+   BOOST_REQUIRE_EQUAL(written.diagnostics.size(), 1U);
+   BOOST_TEST(written.diagnostics.front().path == "nested.value");
+   BOOST_TEST(written.diagnostics.front().code == "json.type");
+   BOOST_TEST(written.diagnostics.front().message == "long double schema fields are not supported by config codecs");
+
+   const auto saved = forge::codec::json::save({}, input);
+   BOOST_REQUIRE(!saved.ok());
+   BOOST_REQUIRE_EQUAL(saved.diagnostics.size(), 1U);
+   BOOST_TEST(saved.diagnostics.front().path == "nested.value");
+   BOOST_TEST(saved.diagnostics.front().code == "json.type");
+   BOOST_TEST(saved.diagnostics.front().message == "long double schema fields are not supported by config codecs");
+}
+
+BOOST_AUTO_TEST_CASE(json_schema_roundtrip_preserves_described_children_without_rules) {
+   const auto input = forge_json_tests::exact_schema_plain_parent{
+       .child = {.value = 7},
+       .children = {{.value = 11}, {.value = 13}},
+       .canonical = {.digest =
+                         forge::crypto::digest::sha256{
+                             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"}},
+   };
+
+   const auto encoded = forge::config::core::encode(input);
+   const auto decoded = forge::config::core::decode<forge_json_tests::exact_schema_plain_parent>(encoded);
+   BOOST_REQUIRE(decoded.ok());
+   BOOST_CHECK(decoded.value == input);
+
+   const auto written = forge::codec::json::write(input);
+   BOOST_REQUIRE(written.ok());
+   const auto parsed = forge::codec::json::read<forge_json_tests::exact_schema_plain_parent>(written.text);
+   BOOST_REQUIRE(parsed.ok());
+   BOOST_CHECK(parsed.value == input);
+
+   const auto options = forge::codec::json::read_options{
+       .described_records = forge::codec::json::described_record_policy::exact,
+   };
+   const auto noncanonical = forge::codec::json::read<forge_json_tests::exact_schema_plain_parent>(
+       R"({"child":{"value":7},"children":[],"canonical":{"digest":"00"}})", options);
+   BOOST_REQUIRE(!noncanonical.ok());
+   BOOST_REQUIRE_EQUAL(noncanonical.diagnostics.size(), 1U);
+   BOOST_TEST(noncanonical.diagnostics.front().path == "canonical.digest");
+   BOOST_TEST(noncanonical.diagnostics.front().code == "json.type");
+}
 
 BOOST_AUTO_TEST_CASE(json_value_roundtrip_preserves_generic_shapes) {
    const auto parsed =

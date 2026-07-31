@@ -10,6 +10,8 @@ import forge.chain.protocol.block;
 import forge.chain.protocol.fixed_key;
 import forge.chain.protocol.transaction;
 
+bool producer_authority_json_roundtrip();
+
 int main() {
    static_assert(std::same_as<forge::chain::protocol::bytes, std::vector<std::uint8_t>>);
    const auto digest = forge::chain::protocol::digest::hash(std::string{"package-chain-protocol"});
@@ -27,5 +29,5 @@ int main() {
    (void)savanna_digest;
    (void)block;
    (void)key;
-   return 0;
+   return producer_authority_json_roundtrip() ? 0 : 1;
 }

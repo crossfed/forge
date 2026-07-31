@@ -645,7 +645,7 @@ BOOST_AUTO_TEST_SUITE(store_plugin_test_suite)
 BOOST_AUTO_TEST_CASE(store_plugin_descriptor_api_and_config_are_nested) {
    auto plugin = store_plugin::plugin{};
    BOOST_TEST(plugin.id().value == "forge.plugins.db.store");
-   BOOST_TEST(plugin.version() == "1.3.0");
+   BOOST_TEST(plugin.version() == "2.0.0");
    BOOST_TEST(store_plugin::api::ref().id.value == "forge.plugins.db.store");
 
    const auto descriptor = plugin.describe_config();
@@ -657,8 +657,8 @@ BOOST_AUTO_TEST_CASE(store_plugin_descriptor_api_and_config_are_nested) {
 
    const auto api_descriptor = store_plugin::api::describe();
    BOOST_TEST(api_descriptor.id.value == "forge.plugins.db.store");
-   BOOST_TEST(api_descriptor.version.major == 1U);
-   BOOST_TEST(api_descriptor.version.revision == 3U);
+   BOOST_TEST(api_descriptor.version.major == 2U);
+   BOOST_TEST(api_descriptor.version.revision == 0U);
    BOOST_TEST(api_descriptor.methods.empty());
 }
 

@@ -10,7 +10,6 @@ import forge.chain.protocol.producer_authority;
 import forge.chain.protocol.producer_schedule;
 import forge.codec.hex;
 import forge.codec.json;
-import forge.crypto.asymmetric;
 import forge.raw.raw;
 import forge.variant.described;
 import forge.variant.static_variant;
