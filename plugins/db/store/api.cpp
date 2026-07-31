@@ -346,6 +346,13 @@ authenticated_handle::prove_range(forge::db::authenticated::version_id_t version
    co_return co_await require_store().prove_range(version, std::move(request), tree);
 }
 
+boost::asio::awaitable<forge::db::authenticated::verified_range>
+authenticated_handle::scan_range(forge::db::authenticated::version_id_t version,
+                                  forge::db::authenticated::range_request request,
+                                  forge::db::authenticated::proof_tree tree) const {
+   co_return co_await require_store().scan_range(version, std::move(request), tree);
+}
+
 boost::asio::awaitable<forge::db::authenticated::transaction>
 authenticated_handle::join(transaction& active, forge::db::authenticated::version_id_t version) const {
    active.require_named_store(name());

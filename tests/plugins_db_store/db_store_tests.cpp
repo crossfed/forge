@@ -1622,6 +1622,12 @@ BOOST_AUTO_TEST_CASE(store_plugin_authenticated_handle_shares_named_store_transa
    BOOST_TEST(verified.exists);
    BOOST_REQUIRE(verified.value.has_value());
    BOOST_TEST(*verified.value == *mutations.front().value);
+   const auto page = forge::asio::blocking::run(
+       runtime, authenticated.scan_range(0U, forge::db::authenticated::range_request{.include_values = true}));
+   BOOST_REQUIRE(page.items.size() == 1U);
+   BOOST_TEST(page.items.front().key == mutations.front().key);
+   BOOST_REQUIRE(page.items.front().value.has_value());
+   BOOST_TEST(*page.items.front().value == *mutations.front().value);
 
    forge::asio::blocking::run(runtime, plugin.shutdown());
    BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, authenticated.latest()), store_plugin::exceptions::stopped);

@@ -340,6 +340,9 @@ class authenticated_handle {
    boost::asio::awaitable<forge::db::authenticated::range_proof>
    prove_range(forge::db::authenticated::version_id_t version, forge::db::authenticated::range_request request,
                forge::db::authenticated::proof_tree tree = forge::db::authenticated::proof_tree::state) const;
+   boost::asio::awaitable<forge::db::authenticated::verified_range>
+   scan_range(forge::db::authenticated::version_id_t version, forge::db::authenticated::range_request request,
+              forge::db::authenticated::proof_tree tree = forge::db::authenticated::proof_tree::state) const;
 
    boost::asio::awaitable<forge::db::authenticated::transaction>
    join(transaction& active, forge::db::authenticated::version_id_t version) const;
