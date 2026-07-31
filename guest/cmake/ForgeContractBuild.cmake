@@ -128,14 +128,20 @@ function(forge_add_contract target)
    )
    if(FORGE_CONTRACT_ARTIFACT_DIR)
       get_filename_component(
-         _output_dir "${FORGE_CONTRACT_ARTIFACT_DIR}" ABSOLUTE
+         _artifact_root "${FORGE_CONTRACT_ARTIFACT_DIR}" ABSOLUTE
          BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}"
       )
    else()
-      set(_output_dir "${CMAKE_CURRENT_BINARY_DIR}/artifacts")
+      set(_artifact_root "${CMAKE_CURRENT_BINARY_DIR}/artifacts")
    endif()
-   file(MAKE_DIRECTORY "${_output_dir}")
-   set(_generated "${CMAKE_CURRENT_BINARY_DIR}/${target}.generated")
+   if(CMAKE_CONFIGURATION_TYPES)
+      set(_output_dir "${_artifact_root}/$<CONFIG>")
+      set(_generated "${CMAKE_CURRENT_BINARY_DIR}/${target}.generated/$<CONFIG>")
+   else()
+      set(_output_dir "${_artifact_root}")
+      set(_generated "${CMAKE_CURRENT_BINARY_DIR}/${target}.generated")
+   endif()
+   file(MAKE_DIRECTORY "${_artifact_root}")
    set(_abi "${_output_dir}/${target}.abi")
    set(_dispatcher "${_generated}/${target}.dispatcher.cpp")
    set(_manifest "${_output_dir}/${target}.contract.json")
@@ -217,7 +223,8 @@ function(forge_add_contract target)
 
    add_custom_command(
       OUTPUT "${_abi}" "${_dispatcher}" ${_implementation_wrappers}
-      COMMAND ${CMAKE_COMMAND} -E make_directory "${_generated}"
+      COMMAND
+         ${CMAKE_COMMAND} -E make_directory "${_output_dir}" "${_generated}"
       COMMAND ${_abigen_command}
       DEPENDS
          "${_runtime_target}"
@@ -368,7 +375,14 @@ function(forge_add_contract target)
       set_target_properties(
          "${target}"
          PROPERTIES
-            "RUNTIME_OUTPUT_DIRECTORY_${_configuration_upper}" "${_output_dir}"
+            "RUNTIME_OUTPUT_DIRECTORY_${_configuration_upper}"
+               "${_artifact_root}/${_configuration}"
+            "FORGE_CONTRACT_WASM_FILE_${_configuration_upper}"
+               "${_artifact_root}/${_configuration}/${target}.wasm"
+            "FORGE_CONTRACT_ABI_FILE_${_configuration_upper}"
+               "${_artifact_root}/${_configuration}/${target}.abi"
+            "FORGE_CONTRACT_MANIFEST_FILE_${_configuration_upper}"
+               "${_artifact_root}/${_configuration}/${target}.contract.json"
       )
    endforeach()
 
@@ -415,6 +429,19 @@ function(forge_add_contract target)
          FORGE_CONTRACT_ABI_FILE "${_abi}"
          FORGE_CONTRACT_MANIFEST_FILE "${_manifest}"
    )
+   foreach(_configuration IN LISTS CMAKE_CONFIGURATION_TYPES)
+      string(TOUPPER "${_configuration}" _configuration_upper)
+      set_target_properties(
+         "${target}_artifacts"
+         PROPERTIES
+            "FORGE_CONTRACT_WASM_FILE_${_configuration_upper}"
+               "${_artifact_root}/${_configuration}/${target}.wasm"
+            "FORGE_CONTRACT_ABI_FILE_${_configuration_upper}"
+               "${_artifact_root}/${_configuration}/${target}.abi"
+            "FORGE_CONTRACT_MANIFEST_FILE_${_configuration_upper}"
+               "${_artifact_root}/${_configuration}/${target}.contract.json"
+      )
+   endforeach()
    _forge_contract_freeze_guest_target(
       "${target}" "forge_add_contract(${target})"
    )

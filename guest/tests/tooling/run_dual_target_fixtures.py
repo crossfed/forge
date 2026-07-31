@@ -169,17 +169,69 @@ def validate_multi_config(
         "--build",
         str(build_directory),
         "--config",
+        "Debug",
+        "--target",
+        "configuration_guest",
+        "-j",
+        "4",
+    )
+    artifact_root = build_directory / "configuration.guest" / "artifacts"
+    debug_artifacts = artifact_root / "Debug"
+    debug_abi_path = debug_artifacts / "configuration.abi"
+    debug_abi_before_release = debug_abi_path.read_bytes()
+    debug_actions = {
+        item["name"] for item in json.loads(debug_abi_before_release)["actions"]
+    }
+    if "debugmode" not in debug_actions or "releasemode" in debug_actions:
+        raise RuntimeError("Debug build did not produce its configuration-specific ABI")
+
+    run(
+        cmake,
+        "--build",
+        str(build_directory),
+        "--config",
         "Release",
         "--target",
         "configuration_guest",
         "-j",
         "4",
     )
-    artifacts = build_directory / "configuration.guest" / "artifacts"
-    if not (artifacts / "built-Release.txt").is_file():
-        raise RuntimeError("launcher did not forward the Release configuration")
-    if (artifacts / "built-Debug.txt").exists():
-        raise RuntimeError("launcher built an unexpected Debug guest configuration")
+    release_artifacts = artifact_root / "Release"
+    release_abi_path = release_artifacts / "configuration.abi"
+    release_actions = {
+        item["name"]
+        for item in json.loads(release_abi_path.read_bytes())["actions"]
+    }
+    if "releasemode" not in release_actions or "debugmode" in release_actions:
+        raise RuntimeError("Release build reused the Debug ABI output")
+    if debug_abi_path.read_bytes() != debug_abi_before_release:
+        raise RuntimeError("Release build overwrote the Debug ABI output")
+
+    for configuration, directory in (
+        ("Debug", debug_artifacts),
+        ("Release", release_artifacts),
+    ):
+        if not (artifact_root / f"built-{configuration}.txt").is_file():
+            raise RuntimeError(
+                f"launcher did not forward the {configuration} configuration"
+            )
+        for suffix in ("wasm", "abi", "contract.json"):
+            if not (directory / f"configuration.{suffix}").is_file():
+                raise RuntimeError(
+                    f"{configuration} contract artifact is missing: {suffix}"
+                )
+        properties = (
+            build_directory / f"artifact-properties-{configuration}.txt"
+        ).read_text(encoding="utf-8").splitlines()
+        expected = [
+            str(directory / "configuration.wasm"),
+            str(directory / "configuration.abi"),
+            str(directory / "configuration.contract.json"),
+        ]
+        if properties != expected:
+            raise RuntimeError(
+                f"{configuration} launcher properties are not configuration-specific"
+            )
 
     commands = subprocess.run(
         (

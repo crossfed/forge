@@ -131,6 +131,13 @@ same reason. The guest toolchain rejects external configuration-specific C++
 customization and owns the standard Debug, Release, MinSizeRel and
 RelWithDebInfo flags. Abigen receives that same selected configuration profile,
 so `NDEBUG` and other configuration semantics match the compiled guest modules.
+Single-configuration builds publish artifacts directly under `artifacts/`.
+Multi-configuration builds isolate WASM, ABI, manifest, dispatcher and wrapper
+outputs under configuration-specific directories such as
+`artifacts/Release/` and `<contract>.generated/Release/`. The
+`FORGE_CONTRACT_WASM_FILE`, `FORGE_CONTRACT_ABI_FILE` and
+`FORGE_CONTRACT_MANIFEST_FILE` target properties contain the matching
+`$<CONFIG>` path; exact `_<CONFIG>` properties are also available.
 
 CMake and Clang remain responsible for module visibility. ABI tooling reads
 compilation metadata only to require that every imported module has exactly one
