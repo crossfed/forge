@@ -1064,7 +1064,23 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
          const auto owner = owning_contract(*declaration);
          const auto selected = owner.has_value() && *owner == contract_name_;
          if (selected || (!owner.has_value() && !table->empty())) {
-            encoder_.add_table(*declaration, *table, table->empty());
+            auto table_name = *table;
+            if (!table->empty()) {
+               const auto typed_name =
+                  typed_table_name(*declaration, declaration->getLocation());
+               if (typed_name.has_value() &&
+                   protocol::make_name(*table).value != *typed_name) {
+                  report(
+                     declaration->getLocation(),
+                     "table attribute name does not match row get_table_name()");
+                  return true;
+               }
+               if (typed_name.has_value()) {
+                  table_name =
+                     protocol::to_string(protocol::table_name{*typed_name});
+               }
+            }
+            encoder_.add_table(*declaration, table_name, table->empty());
          }
          return true;
       }
@@ -1390,7 +1406,8 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
           named_parameter == nullptr ? std::optional<std::uint64_t>{} : named_action_value(*named_parameter);
       if (named_value.has_value()) {
          const auto canonical_name = protocol::to_string(protocol::action_name{*named_value});
-         if (!annotated_name.empty() && annotated_name != canonical_name) {
+         if (!annotated_name.empty() &&
+             protocol::make_name(annotated_name).value != *named_value) {
             report(method.getLocation(), "action attribute name does not match payload get_name()");
             return;
          }

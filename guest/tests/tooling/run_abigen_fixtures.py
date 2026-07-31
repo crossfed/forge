@@ -605,6 +605,22 @@ def main():
         succeeds=False,
         error_contains="get_table_name() must be a public static constexpr",
     )
+    invoke(
+        args,
+        "attrtable",
+        args.fixtures / "attribute_table_name_mismatch.cpp",
+        args.output / "attribute-table-name-mismatch",
+        succeeds=False,
+        error_contains="table attribute name does not match row get_table_name()",
+    )
+    equivalent_names = invoke(
+        args,
+        "equivalent",
+        args.fixtures / "attribute_name_equivalent.cpp",
+        args.output / "attribute-name-equivalent",
+    )
+    if [table["name"] for table in equivalent_names["tables"]] != ["records"]:
+        raise RuntimeError("equivalent typed table names did not produce one canonical ABI table")
 
     bare_output = args.output / "bare-output"
     invoke(
