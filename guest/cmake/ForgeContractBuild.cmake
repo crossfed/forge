@@ -63,6 +63,8 @@ function(forge_add_contract target)
          message(FATAL_ERROR "forge_add_contract(${target}) DISPATCH_SOURCE must also be listed in SOURCES")
       endif()
    endif()
+   list(REMOVE_ITEM _sources "${_dispatch_source}")
+   list(PREPEND _sources "${_dispatch_source}")
 
    set(_compile_checks)
    foreach(_source IN LISTS ARG_COMPILE_CHECKS)
