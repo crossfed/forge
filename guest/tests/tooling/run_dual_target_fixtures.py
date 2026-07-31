@@ -413,6 +413,29 @@ set_source_files_properties(
         },
     )
 
+    mutated_module_set = source_root / "mutated-module-set"
+    write_negative_project(
+        mutated_module_set,
+        cmake_body="""
+forge_add_contract_library(
+   negative_protocol ID negative.mutated_module_set
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+target_sources(
+   negative_protocol
+   PUBLIC
+      FILE_SET forge_contract_modules TYPE CXX_MODULES
+      BASE_DIRS include
+      FILES include/extra.cppm
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n",
+            "include/extra.cppm": "export module negative.extra;\n",
+        },
+    )
+
     directory_profile = source_root / "directory-profile"
     write_negative_project(
         directory_profile,
@@ -584,6 +607,10 @@ class [[forge::contract("mismatch")]] mismatch final
         (
             mutated_source,
             "changed source property: COMPILE_DEFINITIONS",
+        ),
+        (
+            mutated_module_set,
+            "changed property: CXX_MODULE_SET_forge_contract_modules",
         ),
         (directory_profile, "directory COMPILE_DEFINITIONS are unsupported"),
         (

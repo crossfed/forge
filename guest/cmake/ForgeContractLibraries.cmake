@@ -132,8 +132,25 @@ function(_forge_contract_semantic_properties output)
       CXX_EXTENSIONS
       CXX_MODULE_STD
       CXX_SCAN_FOR_MODULES
+      CXX_MODULE_SETS
+      INTERFACE_CXX_MODULE_SETS
       PARENT_SCOPE
    )
+endfunction()
+
+function(_forge_contract_target_semantic_properties target output)
+   _forge_contract_semantic_properties(_properties)
+   get_target_property(_module_sets "${target}" CXX_MODULE_SETS)
+   if(_module_sets AND NOT _module_sets MATCHES "-NOTFOUND$")
+      foreach(_module_set IN LISTS _module_sets)
+         list(
+            APPEND _properties
+            "CXX_MODULE_SET_${_module_set}"
+            "CXX_MODULE_DIRS_${_module_set}"
+         )
+      endforeach()
+   endif()
+   set(${output} "${_properties}" PARENT_SCOPE)
 endfunction()
 
 function(_forge_contract_source_semantic_properties output)
@@ -224,7 +241,7 @@ function(_forge_contract_validate_guest_targets)
       get_target_property(
          _declaration "${target}" FORGE_CONTRACT_FROZEN_DECLARATION
       )
-      _forge_contract_semantic_properties(_properties)
+      _forge_contract_target_semantic_properties("${target}" _properties)
       foreach(_property IN LISTS _properties)
          get_property(_is_set TARGET "${target}" PROPERTY "${_property}" SET)
          if(_is_set)
@@ -288,7 +305,7 @@ function(_forge_contract_freeze_guest_target target declaration)
    if(NOT FORGE_CONTRACT_GUEST)
       return()
    endif()
-   _forge_contract_semantic_properties(_properties)
+   _forge_contract_target_semantic_properties("${target}" _properties)
    foreach(_property IN LISTS _properties)
       get_property(_is_set TARGET "${target}" PROPERTY "${_property}" SET)
       if(_is_set)
