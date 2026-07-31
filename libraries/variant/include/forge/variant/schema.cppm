@@ -256,13 +256,12 @@ template <typename T> void apply_encoding(const T& input, variant& output) {
          apply_encoding(*input, output);
       }
    } else if constexpr (reflect::is_described_object_v<value_type>) {
-      if (output.is_string()) {
-         return;
-      }
-
       const auto rules = schema::rules<value_type>::define();
       if (!rules.fields().empty()) {
          output = from_schema_input(schema::input_value{rules.encode_object(input)});
+         return;
+      }
+      if (output.is_string()) {
          return;
       }
 
@@ -336,10 +335,6 @@ void materialize(variant& source, std::string_view path, std::vector<schema::dia
          materialize<typename pointer_traits<value_type>::value_type>(source, path, diagnostics);
       }
    } else if constexpr (reflect::is_described_object_v<value_type>) {
-      if (source.is_string()) {
-         return;
-      }
-
       const auto rules = schema::rules<value_type>::define();
       if (!rules.fields().empty()) {
          try {
@@ -363,6 +358,9 @@ void materialize(variant& source, std::string_view path, std::vector<schema::dia
          } catch (const std::exception& error) {
             diagnostics.push_back(schema::make_path_error(std::string{path}, "config.type", std::string{error.what()}));
          }
+         return;
+      }
+      if (source.is_string()) {
          return;
       }
 

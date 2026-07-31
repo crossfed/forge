@@ -195,6 +195,15 @@ BOOST_AUTO_TEST_CASE(yaml_nested_schema_records_apply_unknown_field_policy) {
    BOOST_TEST(ignored.value.limits.deadline_ms == 2500U);
 }
 
+BOOST_AUTO_TEST_CASE(yaml_nested_schema_records_report_non_object_at_child_path) {
+   const auto rejected = forge::codec::yaml::read<forge_yaml_tests::nested_config>("limits: bad\n");
+
+   BOOST_REQUIRE(!rejected.ok());
+   BOOST_REQUIRE_EQUAL(rejected.diagnostics.size(), 1U);
+   BOOST_TEST(rejected.diagnostics.front().code == "yaml.type");
+   BOOST_TEST(rejected.diagnostics.front().path == "limits");
+}
+
 BOOST_AUTO_TEST_CASE(yaml_typed_load_uses_same_unknown_policy_as_read) {
    const auto path = std::filesystem::temp_directory_path() /
                      ("forge_yaml_unknown_policy_" +
