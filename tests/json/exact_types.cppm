@@ -56,6 +56,10 @@ struct exact_long_double_record {
    long double value = 0.0L;
 };
 
+struct exact_long_double_parent {
+   exact_long_double_record nested;
+};
+
 struct exact_dotted_leaf {
    std::uint32_t deadline_ms = 0;
 
@@ -161,6 +165,8 @@ BOOST_DESCRIBE_STRUCT(exact_leaf, (), (value))
 BOOST_DESCRIBE_STRUCT(exact_alias_leaf, (), (bind_port))
 BOOST_DESCRIBE_STRUCT(exact_scalar_record, (), (enabled, signed_value, unsigned_value, ratio, label))
 BOOST_DESCRIBE_STRUCT(exact_double_record, (), (value))
+BOOST_DESCRIBE_STRUCT(exact_long_double_record, (), (value))
+BOOST_DESCRIBE_STRUCT(exact_long_double_parent, (), (nested))
 BOOST_DESCRIBE_STRUCT(exact_dotted_leaf, (), (deadline_ms))
 BOOST_DESCRIBE_STRUCT(exact_dotted_parent, (), (config))
 BOOST_DESCRIBE_STRUCT(exact_dotted_schema_parent, (), (config))
@@ -184,3 +190,11 @@ BOOST_DESCRIBE_STRUCT(exact_set_record, (), (ordered, unordered))
 BOOST_DESCRIBE_STRUCT(exact_multi_index_record, (), (values))
 
 } // namespace forge_json_tests
+
+export namespace forge {
+
+inline void to_variant(const forge_json_tests::exact_long_double_record&, variant& output) {
+   output = mutable_variant_object{};
+}
+
+} // namespace forge

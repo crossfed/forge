@@ -95,6 +95,32 @@ struct write_result {
    }
 };
 
+namespace detail {
+
+[[nodiscard]] inline write_result encoding_failure(const schema::encoding_error& error) {
+   return write_result{
+       .diagnostics = {schema::diagnostic{
+           .path = error.path(),
+           .code = "json.type",
+           .level = schema::severity::error,
+           .message = error.what(),
+       }},
+   };
+}
+
+[[nodiscard]] inline write_result encoding_failure(const std::exception& error) {
+   return write_result{
+       .diagnostics = {schema::diagnostic{
+           .path = {},
+           .code = "json.type",
+           .level = schema::severity::error,
+           .message = error.what(),
+       }},
+   };
+}
+
+} // namespace detail
+
 [[nodiscard]] read_result<variant> read_value(std::string_view input, read_options options = {});
 [[nodiscard]] write_result write_value(const variant& input, write_options options = {});
 [[nodiscard]] read_result<config::core::document> read_document(std::string_view input, read_options options = {});
@@ -353,19 +379,20 @@ template <typename T> [[nodiscard]] write_result write(const T& input, write_opt
    if (!rules.fields().empty()) {
       try {
          return write_document(config::core::encode(input), std::move(options));
+      } catch (const schema::encoding_error& error) {
+         return detail::encoding_failure(error);
       } catch (const std::exception& error) {
-         return write_result{
-             .diagnostics = {schema::diagnostic{
-                 .path = {},
-                 .code = "json.type",
-                 .level = schema::severity::error,
-                 .message = error.what(),
-             }},
-         };
+         return detail::encoding_failure(error);
       }
    }
    if constexpr (requires(const T& source, variant& output) { to_variant(source, output); }) {
-      return write_value(detail::to_schema_aware_variant(input), std::move(options));
+      try {
+         return write_value(detail::to_schema_aware_variant(input), std::move(options));
+      } catch (const schema::encoding_error& error) {
+         return detail::encoding_failure(error);
+      } catch (const std::exception& error) {
+         return detail::encoding_failure(error);
+      }
    } else {
       return write_result{
           .diagnostics = {schema::diagnostic{
@@ -384,19 +411,20 @@ template <typename T>
    if (!rules.fields().empty()) {
       try {
          return save_document(path, config::core::encode(input), std::move(options));
+      } catch (const schema::encoding_error& error) {
+         return detail::encoding_failure(error);
       } catch (const std::exception& error) {
-         return write_result{
-             .diagnostics = {schema::diagnostic{
-                 .path = {},
-                 .code = "json.type",
-                 .level = schema::severity::error,
-                 .message = error.what(),
-             }},
-         };
+         return detail::encoding_failure(error);
       }
    }
    if constexpr (requires(const T& source, variant& output) { to_variant(source, output); }) {
-      return save_value(path, detail::to_schema_aware_variant(input), std::move(options));
+      try {
+         return save_value(path, detail::to_schema_aware_variant(input), std::move(options));
+      } catch (const schema::encoding_error& error) {
+         return detail::encoding_failure(error);
+      } catch (const std::exception& error) {
+         return detail::encoding_failure(error);
+      }
    } else {
       return write_result{
           .diagnostics = {schema::diagnostic{

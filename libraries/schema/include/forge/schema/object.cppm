@@ -221,6 +221,19 @@ template <typename T> [[nodiscard]] T cast_any_to(const std::any& value) {
    return output;
 }
 
+class encoding_error : public std::invalid_argument {
+ public:
+   encoding_error(std::string path, std::string message)
+       : std::invalid_argument{std::move(message)}, path_{std::move(path)} {}
+
+   [[nodiscard]] const std::string& path() const noexcept {
+      return path_;
+   }
+
+ private:
+   std::string path_;
+};
+
 [[nodiscard]] inline diagnostic make_path_error(std::string path, std::string code, std::string message) {
    return diagnostic{
        .path = std::move(path),
@@ -242,7 +255,7 @@ template <typename T> [[nodiscard]] T cast_any_to(const std::any& value) {
 template <typename T>
 [[nodiscard]] T cast_input_to(const input_value& input, std::string_view path, std::vector<diagnostic>& diagnostics);
 
-template <typename T> [[nodiscard]] input_value to_input_value(const T& input);
+template <typename T> [[nodiscard]] input_value to_input_value(const T& input, std::string_view path = {});
 
 template <typename T> [[nodiscard]] std::any to_default_any(const T& input) {
    using clean_type = std::remove_cvref_t<T>;
@@ -390,7 +403,7 @@ template <typename T> struct field_rule {
    std::function<void(const input_value&, std::string_view, std::vector<diagnostic>&)> validate_exact_input;
    std::function<std::any(const T&)> read_any;
    std::function<std::optional<std::any>(const T&)> read_validation_any;
-   std::function<input_value(const T&)> read_input;
+   std::function<input_value(const T&, std::string_view)> read_input;
    std::function<std::optional<std::size_t>(const T&)> read_size;
    std::vector<std::function<void(const T&, std::string_view, std::vector<diagnostic>&)>> validators;
 };
@@ -485,7 +498,9 @@ template <typename T> class object_schema {
             return std::any{value};
          }
       };
-      rule.read_input = [](const T& object) -> input_value { return to_input_value(object.*Member); };
+      rule.read_input = [](const T& object, std::string_view path) -> input_value {
+         return to_input_value(object.*Member, path);
+      };
       if constexpr (is_vector<member_type>::value) {
          rule.read_size = [](const T& object) -> std::optional<std::size_t> { return (object.*Member).size(); };
       } else if constexpr (is_optional<member_type>::value &&
@@ -561,10 +576,10 @@ template <typename T> class object_schema {
       return result;
    }
 
-   [[nodiscard]] input_value::object_type encode_object(const T& input) const {
+   [[nodiscard]] input_value::object_type encode_object(const T& input, std::string_view base_path = {}) const {
       auto output = input_value::object_type{};
       for (const auto& field : *fields_) {
-         auto value = field.read_input(input);
+         auto value = field.read_input(input, append_path(base_path, field.name));
          if (!std::holds_alternative<std::monostate>(value.storage)) {
             set_input_path(output, field.name, std::move(value));
          }
@@ -1330,13 +1345,13 @@ void validate_exact_input_value(const input_value& input, std::string_view path,
    }
 }
 
-template <typename T> [[nodiscard]] input_value to_input_value(const T& input) {
+template <typename T> [[nodiscard]] input_value to_input_value(const T& input, std::string_view path) {
    using clean_type = std::remove_cvref_t<T>;
    if constexpr (is_optional<clean_type>::value) {
       if (!input.has_value()) {
          return input_value{};
       }
-      return to_input_value(*input);
+      return to_input_value(*input, path);
    } else if constexpr (std::same_as<clean_type, bool>) {
       return input_value{input};
    } else if constexpr (signed_integral_value<clean_type> && !std::same_as<clean_type, bool>) {
@@ -1352,7 +1367,7 @@ template <typename T> [[nodiscard]] input_value to_input_value(const T& input) {
          return input_value{format_integral_text(input)};
       }
    } else if constexpr (std::same_as<clean_type, long double>) {
-      throw std::invalid_argument{"long double schema fields are not supported by config codecs"};
+      throw encoding_error{std::string{path}, "long double schema fields are not supported by config codecs"};
    } else if constexpr (std::floating_point<clean_type>) {
       return input_value{static_cast<double>(input)};
    } else if constexpr (std::same_as<clean_type, std::string>) {
@@ -1368,9 +1383,14 @@ template <typename T> [[nodiscard]] input_value to_input_value(const T& input) {
          return input_value{static_cast<std::uint64_t>(input)};
       }
    } else if constexpr (canonical_string_scalar<clean_type>) {
-      const auto text = format_scalar_text(input);
+      auto text = std::optional<std::string>{};
+      try {
+         text = format_scalar_text(input);
+      } catch (const std::exception& error) {
+         throw encoding_error{std::string{path}, error.what()};
+      }
       if (!text) {
-         throw std::invalid_argument{"scalar adapter has no canonical config spelling"};
+         throw encoding_error{std::string{path}, "scalar adapter has no canonical config spelling"};
       }
       return input_value{*text};
    } else if constexpr (std::same_as<clean_type, std::vector<std::string>>) {
@@ -1383,28 +1403,28 @@ template <typename T> [[nodiscard]] input_value to_input_value(const T& input) {
    } else if constexpr (is_vector_enum<clean_type>::value) {
       auto array = input_value::array_type{};
       array.reserve(input.size());
-      for (const auto& item : input) {
-         array.push_back(to_input_value(item));
+      for (std::size_t index = 0; index < input.size(); ++index) {
+         array.push_back(to_input_value(input[index], append_index(path, index)));
       }
       return input_value{std::move(array)};
    } else if constexpr (is_vector<clean_type>::value) {
       auto array = input_value::array_type{};
       array.reserve(input.size());
-      for (const auto& item : input) {
-         array.push_back(to_input_value(item));
+      for (std::size_t index = 0; index < input.size(); ++index) {
+         array.push_back(to_input_value(input[index], append_index(path, index)));
       }
       return input_value{std::move(array)};
    } else {
       const auto nested_rules = rules<clean_type>::define();
       if (!nested_rules.fields().empty()) {
-         return input_value{nested_rules.encode_object(input)};
+         return input_value{nested_rules.encode_object(input, path)};
       }
       if constexpr (boost::describe::has_describe_members<clean_type>::value) {
          auto object = input_value::object_type{};
          using members = boost::describe::describe_members<clean_type, boost::describe::mod_any_access |
                                                                            boost::describe::mod_inherited>;
          boost::mp11::mp_for_each<members>([&](auto descriptor) {
-            auto value = to_input_value(input.*descriptor.pointer);
+            auto value = to_input_value(input.*descriptor.pointer, append_path(path, descriptor.name));
             if (!std::holds_alternative<std::monostate>(value.storage)) {
                object.emplace(descriptor.name, std::move(value));
             }

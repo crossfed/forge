@@ -17,10 +17,6 @@ struct http_config {
    std::vector<std::string> tags;
 };
 
-struct long_double_config {
-   long double value = 0.0L;
-};
-
 } // namespace forge_yaml_tests
 
 BOOST_DESCRIBE_STRUCT(forge_yaml_tests::http_config, (), (bind_port, bind_host, tls_enabled, tags))
@@ -84,8 +80,28 @@ BOOST_AUTO_TEST_CASE(yaml_schema_writer_rejects_long_double_without_narrowing) {
    BOOST_REQUIRE(!written.ok());
    BOOST_TEST(written.text.empty());
    BOOST_REQUIRE_EQUAL(written.diagnostics.size(), 1U);
+   BOOST_TEST(written.diagnostics.front().path == "value");
    BOOST_TEST(written.diagnostics.front().code == "yaml.type");
    BOOST_TEST(written.diagnostics.front().message == "long double schema fields are not supported by config codecs");
+}
+
+BOOST_AUTO_TEST_CASE(yaml_schema_writer_reports_nested_encoding_path) {
+   const auto input = forge_yaml_tests::long_double_parent{.nested = {.value = 1.0L}};
+   const auto written = forge::codec::yaml::write(input);
+
+   BOOST_REQUIRE(!written.ok());
+   BOOST_TEST(written.text.empty());
+   BOOST_REQUIRE_EQUAL(written.diagnostics.size(), 1U);
+   BOOST_TEST(written.diagnostics.front().path == "nested.value");
+   BOOST_TEST(written.diagnostics.front().code == "yaml.type");
+   BOOST_TEST(written.diagnostics.front().message == "long double schema fields are not supported by config codecs");
+
+   const auto saved = forge::codec::yaml::save({}, input);
+   BOOST_REQUIRE(!saved.ok());
+   BOOST_REQUIRE_EQUAL(saved.diagnostics.size(), 1U);
+   BOOST_TEST(saved.diagnostics.front().path == "nested.value");
+   BOOST_TEST(saved.diagnostics.front().code == "yaml.type");
+   BOOST_TEST(saved.diagnostics.front().message == "long double schema fields are not supported by config codecs");
 }
 
 BOOST_AUTO_TEST_CASE(yaml_value_roundtrip_preserves_scalars_lists_and_maps) {

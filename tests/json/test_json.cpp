@@ -177,9 +177,29 @@ BOOST_AUTO_TEST_CASE(json_schema_writer_rejects_long_double_without_narrowing) {
    BOOST_REQUIRE(!written.ok());
    BOOST_TEST(written.text.empty());
    BOOST_REQUIRE_EQUAL(written.diagnostics.size(), 1U);
+   BOOST_TEST(written.diagnostics.front().path == "value");
    BOOST_TEST(written.diagnostics.front().code == "json.type");
    BOOST_TEST(written.diagnostics.front().message == "long double schema fields are not supported by config codecs");
    BOOST_CHECK_THROW(static_cast<void>(forge::config::core::encode(input)), std::invalid_argument);
+}
+
+BOOST_AUTO_TEST_CASE(json_schema_writer_reports_nested_encoding_path) {
+   const auto input = forge_json_tests::exact_long_double_parent{.nested = {.value = 1.0L}};
+   const auto written = forge::codec::json::write(input);
+
+   BOOST_REQUIRE(!written.ok());
+   BOOST_TEST(written.text.empty());
+   BOOST_REQUIRE_EQUAL(written.diagnostics.size(), 1U);
+   BOOST_TEST(written.diagnostics.front().path == "nested.value");
+   BOOST_TEST(written.diagnostics.front().code == "json.type");
+   BOOST_TEST(written.diagnostics.front().message == "long double schema fields are not supported by config codecs");
+
+   const auto saved = forge::codec::json::save({}, input);
+   BOOST_REQUIRE(!saved.ok());
+   BOOST_REQUIRE_EQUAL(saved.diagnostics.size(), 1U);
+   BOOST_TEST(saved.diagnostics.front().path == "nested.value");
+   BOOST_TEST(saved.diagnostics.front().code == "json.type");
+   BOOST_TEST(saved.diagnostics.front().message == "long double schema fields are not supported by config codecs");
 }
 
 BOOST_AUTO_TEST_CASE(json_value_roundtrip_preserves_generic_shapes) {
