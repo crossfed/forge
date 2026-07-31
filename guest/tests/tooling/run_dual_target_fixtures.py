@@ -569,6 +569,33 @@ cmake_language(DEFER CALL schedule_nested_mutation)
         },
     )
 
+    named_nested_deferred_mutation = (
+        source_root / "named-nested-deferred-mutation"
+    )
+    write_negative_project(
+        named_nested_deferred_mutation,
+        cmake_body="""
+function(schedule_named_nested_mutation)
+   cmake_language(
+      DEFER ID forge_contract_product_mutation
+      CALL set_property
+      TARGET negative_protocol APPEND
+      PROPERTY COMPILE_DEFINITIONS NAMED_NESTED_DEFERRED_MUTATION=1
+   )
+endfunction()
+
+forge_add_contract_library(
+   negative_protocol ID negative.named_nested_deferred_mutation
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+cmake_language(DEFER CALL schedule_named_nested_mutation)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
     directory_profile = source_root / "directory-profile"
     write_negative_project(
         directory_profile,
@@ -767,6 +794,10 @@ class [[forge::contract("mismatch")]] mismatch final
         ),
         (
             nested_deferred_mutation,
+            "changed property: COMPILE_DEFINITIONS",
+        ),
+        (
+            named_nested_deferred_mutation,
             "changed property: COMPILE_DEFINITIONS",
         ),
         (directory_profile, "directory COMPILE_DEFINITIONS are unsupported"),

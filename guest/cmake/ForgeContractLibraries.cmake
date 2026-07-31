@@ -360,7 +360,13 @@ endfunction()
 
 function(_forge_contract_downstream_deferred_calls output)
    cmake_language(DEFER GET_CALL_IDS _pending_calls)
-   list(FILTER _pending_calls EXCLUDE REGEX "^forge_contract_")
+   list(
+      REMOVE_ITEM _pending_calls
+      forge_contract_environment_scheduler
+      forge_contract_environment_validation
+      forge_contract_target_scheduler
+      forge_contract_target_validation
+   )
    set(${output} "${_pending_calls}" PARENT_SCOPE)
 endfunction()
 
