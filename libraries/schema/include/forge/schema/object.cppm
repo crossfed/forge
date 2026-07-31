@@ -1351,6 +1351,8 @@ template <typename T> [[nodiscard]] input_value to_input_value(const T& input) {
       } else {
          return input_value{format_integral_text(input)};
       }
+   } else if constexpr (std::same_as<clean_type, long double>) {
+      throw std::invalid_argument{"long double schema fields are not supported by config codecs"};
    } else if constexpr (std::floating_point<clean_type>) {
       return input_value{static_cast<double>(input)};
    } else if constexpr (std::same_as<clean_type, std::string>) {

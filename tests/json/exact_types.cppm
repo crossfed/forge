@@ -52,6 +52,10 @@ struct exact_double_record {
    double value = 0.0;
 };
 
+struct exact_long_double_record {
+   long double value = 0.0L;
+};
+
 struct exact_dotted_leaf {
    std::uint32_t deadline_ms = 0;
 
