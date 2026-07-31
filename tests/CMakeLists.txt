@@ -213,6 +213,22 @@ add_test(
 )
 
 add_executable(
+   test_forge_plugins_http_server
+   unit/main.cpp
+   http_server_auth/bearer_auth_tests.cpp
+)
+target_link_libraries(
+   test_forge_plugins_http_server
+   forge_plugins_http_server
+   Boost::included_unit_test_framework
+)
+add_test(
+   NAME test_forge_plugins_http_server
+   COMMAND test_forge_plugins_http_server
+   WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+add_executable(
    test_forge_chain_quorum
    unit/main.cpp
    chain_quorum/quorum_tests.cpp
