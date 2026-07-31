@@ -11,6 +11,9 @@ add_library(
    authority.cpp
    system.cpp
    producer_schedule.cpp
+   producer_authority.cpp
+   finalizer_authority.cpp
+   finalizer_policy.cpp
 )
 forge_target_modules_at(forge_chain_protocol chain/protocol)
 
@@ -24,6 +27,7 @@ target_link_libraries(
       forge_raw
       forge_variant
       forge_crypto_asymmetric_values
+      forge_crypto_asymmetric
       forge_crypto_digest
 )
 forge_target_contract_guest_component(forge_chain_protocol ID forge.chain.protocol)

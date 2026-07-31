@@ -14,16 +14,22 @@ export namespace forge::chain::protocol {
 struct permission_level_weight {
    permission_level permission;
    weight weight = 0;
+
+   bool operator==(const permission_level_weight&) const = default;
 };
 
 struct key_weight {
    public_key key;
    weight weight = 0;
+
+   bool operator==(const key_weight&) const = default;
 };
 
 struct wait_weight {
    std::uint32_t wait_sec = 0;
    weight weight = 0;
+
+   bool operator==(const wait_weight&) const = default;
 };
 
 struct authority {
@@ -31,6 +37,8 @@ struct authority {
    std::vector<key_weight> keys;
    std::vector<permission_level_weight> accounts;
    std::vector<wait_weight> waits;
+
+   bool operator==(const authority&) const = default;
 };
 
 template <typename Stream> void raw_pack(Stream& stream, const permission_level_weight& value) {

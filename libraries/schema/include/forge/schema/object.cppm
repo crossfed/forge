@@ -2,9 +2,11 @@ module;
 
 #include <any>
 #include <algorithm>
+#include <bit>
 #include <boost/describe.hpp>
 #include <boost/mp11.hpp>
 #include <charconv>
+#include <cmath>
 #include <concepts>
 #include <cstdint>
 #include <cctype>
@@ -31,6 +33,37 @@ import forge.schema.value_kind;
 import forge.schema.enums;
 import forge.schema.scalar;
 
+namespace forge::schema::detail {
+
+template <std::floating_point Float, std::integral Integer>
+[[nodiscard]] constexpr bool integer_exactly_representable(Integer value) {
+   using unsigned_type = std::make_unsigned_t<Integer>;
+
+   const auto encoded = static_cast<unsigned_type>(value);
+   const auto magnitude = [&] {
+      if constexpr (std::signed_integral<Integer>) {
+         return value < 0 ? unsigned_type{} - encoded : encoded;
+      } else {
+         return encoded;
+      }
+   }();
+   if (magnitude == 0) {
+      return true;
+   }
+
+   const auto width = std::bit_width(magnitude);
+   constexpr auto precision = std::numeric_limits<Float>::digits;
+   if (width <= precision) {
+      return true;
+   }
+
+   const auto discarded = width - precision;
+   const auto discarded_mask = (unsigned_type{1} << discarded) - 1;
+   return (magnitude & discarded_mask) == 0;
+}
+
+} // namespace forge::schema::detail
+
 export namespace forge::schema {
 
 template <typename T> struct rules;
@@ -44,7 +77,8 @@ template <typename Object, typename Member> struct member_pointer_traits<Member 
 template <typename T, auto Member> [[nodiscard]] std::string described_member_name() {
    auto output = std::string{};
    if constexpr (boost::describe::has_describe_members<T>::value) {
-      using members = boost::describe::describe_members<T, boost::describe::mod_any_access | boost::describe::mod_inherited>;
+      using members =
+          boost::describe::describe_members<T, boost::describe::mod_any_access | boost::describe::mod_inherited>;
       boost::mp11::mp_for_each<members>([&](auto descriptor) {
          if (!output.empty()) {
             return;
@@ -63,7 +97,7 @@ struct input_value {
    using array_type = std::vector<input_value>;
    using object_type = std::map<std::string, input_value>;
    using storage_type =
-      std::variant<std::monostate, bool, std::int64_t, std::uint64_t, double, std::string, array_type, object_type>;
+       std::variant<std::monostate, bool, std::int64_t, std::uint64_t, double, std::string, array_type, object_type>;
 
    storage_type storage;
 
@@ -85,6 +119,9 @@ struct input_value {
    }
 };
 
+template <typename T>
+void validate_exact_input_value(const input_value& input, std::string_view path, std::vector<diagnostic>& diagnostics);
+
 template <typename T> [[nodiscard]] T cast_any_to(const std::any& value) {
    using clean_type = std::remove_cvref_t<T>;
    if (value.type() == typeid(clean_type)) {
@@ -97,7 +134,7 @@ template <typename T> [[nodiscard]] T cast_any_to(const std::any& value) {
       if (value.type() == typeid(char*)) {
          return std::string{std::any_cast<char*>(value)};
       }
-   } else if constexpr (std::integral<clean_type> && !std::same_as<clean_type, bool>) {
+   } else if constexpr (integral_value<clean_type> && !std::same_as<clean_type, bool>) {
       if (value.type() == typeid(int)) {
          return checked_integral_cast<clean_type>(std::any_cast<int>(value));
       }
@@ -186,36 +223,43 @@ template <typename T> [[nodiscard]] T cast_any_to(const std::any& value) {
 
 [[nodiscard]] inline diagnostic make_path_error(std::string path, std::string code, std::string message) {
    return diagnostic{
-      .path = std::move(path),
-      .code = std::move(code),
-      .level = severity::error,
-      .message = std::move(message),
+       .path = std::move(path),
+       .code = std::move(code),
+       .level = severity::error,
+       .message = std::move(message),
    };
 }
 
 [[nodiscard]] inline diagnostic make_path_warning(std::string path, std::string code, std::string message) {
    return diagnostic{
-      .path = std::move(path),
-      .code = std::move(code),
-      .level = severity::warning,
-      .message = std::move(message),
+       .path = std::move(path),
+       .code = std::move(code),
+       .level = severity::warning,
+       .message = std::move(message),
    };
 }
 
 template <typename T>
 [[nodiscard]] T cast_input_to(const input_value& input, std::string_view path, std::vector<diagnostic>& diagnostics);
 
-template <typename T>
-[[nodiscard]] input_value to_input_value(const T& input);
+template <typename T> [[nodiscard]] input_value to_input_value(const T& input);
 
 template <typename T> [[nodiscard]] std::any to_default_any(const T& input) {
    using clean_type = std::remove_cvref_t<T>;
    if constexpr (std::same_as<clean_type, bool>) {
       return std::any{input};
-   } else if constexpr (std::signed_integral<clean_type> && !std::same_as<clean_type, bool>) {
-      return std::any{static_cast<std::int64_t>(input)};
-   } else if constexpr (std::unsigned_integral<clean_type> && !std::same_as<clean_type, bool>) {
-      return std::any{static_cast<std::uint64_t>(input)};
+   } else if constexpr (signed_integral_value<clean_type> && !std::same_as<clean_type, bool>) {
+      if constexpr (sizeof(clean_type) <= sizeof(std::int64_t)) {
+         return std::any{static_cast<std::int64_t>(input)};
+      } else {
+         return std::any{input};
+      }
+   } else if constexpr (unsigned_integral_value<clean_type> && !std::same_as<clean_type, bool>) {
+      if constexpr (sizeof(clean_type) <= sizeof(std::uint64_t)) {
+         return std::any{static_cast<std::uint64_t>(input)};
+      } else {
+         return std::any{input};
+      }
    } else if constexpr (std::floating_point<clean_type>) {
       return std::any{static_cast<double>(input)};
    } else if constexpr (std::same_as<clean_type, std::string>) {
@@ -225,7 +269,7 @@ template <typename T> [[nodiscard]] std::any to_default_any(const T& input) {
          return std::any{std::move(*text)};
       }
       using underlying_type = std::underlying_type_t<clean_type>;
-      if constexpr (std::signed_integral<underlying_type>) {
+      if constexpr (signed_integral_value<underlying_type>) {
          return std::any{static_cast<std::int64_t>(input)};
       } else {
          return std::any{static_cast<std::uint64_t>(input)};
@@ -236,8 +280,7 @@ template <typename T> [[nodiscard]] std::any to_default_any(const T& input) {
 }
 
 template <typename T>
-[[nodiscard]] std::vector<T> decode_object_list(const input_value& input,
-                                                std::string_view path,
+[[nodiscard]] std::vector<T> decode_object_list(const input_value& input, std::string_view path,
                                                 std::vector<diagnostic>& diagnostics);
 
 template <typename T> struct field_rule {
@@ -247,6 +290,7 @@ template <typename T> struct field_rule {
    value_kind kind = value_kind::string;
    std::type_index type = std::type_index{typeid(void)};
    bool required = false;
+   bool optional = false;
    bool secret = false;
    bool deprecated = false;
    std::string deprecated_message;
@@ -262,6 +306,7 @@ template <typename T> struct field_rule {
    std::function<std::any(const std::any&)> normalize_default;
    std::function<input_value(const std::any&)> default_input;
    std::function<void(T&, const input_value&, std::string_view, std::vector<diagnostic>&)> assign_input;
+   std::function<void(const input_value&, std::string_view, std::vector<diagnostic>&)> validate_exact_input;
    std::function<std::any(const T&)> read_any;
    std::function<std::optional<std::any>(const T&)> read_validation_any;
    std::function<input_value(const T&)> read_input;
@@ -286,6 +331,7 @@ template <typename T> class object_schema {
       rule.member_name = described_member_name<T, Member>();
       rule.kind = member_kind<member_type>::value;
       rule.type = std::type_index{typeid(member_type)};
+      rule.optional = is_optional<member_type>::value;
       rule.assign_any = [](T& object, const std::any& value) {
          if constexpr (is_optional<member_type>::value) {
             using item_type = typename is_optional<member_type>::value_type;
@@ -342,6 +388,10 @@ template <typename T> class object_schema {
             diagnostics.push_back(make_path_error(std::string{path}, "config.type", error.what()));
          }
       };
+      rule.validate_exact_input = [](const input_value& value, std::string_view path,
+                                     std::vector<diagnostic>& diagnostics) {
+         validate_exact_input_value<member_type>(value, path, diagnostics);
+      };
       rule.read_any = [](const T& object) -> std::any { return object.*Member; };
       rule.read_validation_any = [](const T& object) -> std::optional<std::any> {
          const auto& value = object.*Member;
@@ -358,7 +408,7 @@ template <typename T> class object_schema {
       if constexpr (is_vector<member_type>::value) {
          rule.read_size = [](const T& object) -> std::optional<std::size_t> { return (object.*Member).size(); };
       } else if constexpr (is_optional<member_type>::value &&
-                            is_vector<typename is_optional<member_type>::value_type>::value) {
+                           is_vector<typename is_optional<member_type>::value_type>::value) {
          rule.read_size = [](const T& object) -> std::optional<std::size_t> {
             const auto& value = object.*Member;
             if (!value) {
@@ -389,57 +439,56 @@ template <typename T> class object_schema {
    }
 
    [[nodiscard]] std::vector<diagnostic> decode_object(const input_value::object_type& input,
-                                                       std::string_view base_path,
-                                                       T& output) const {
+                                                       std::string_view base_path, T& output) const {
       auto result = std::vector<diagnostic>{};
-      auto known_fields = std::set<std::string>{};
-      for (const auto& field : *fields_) {
-         known_fields.insert(field.name);
-         known_fields.insert(field.aliases.begin(), field.aliases.end());
-      }
-
-      for (const auto& [name, ignored] : input) {
-         if (!known_fields.contains(name)) {
-            result.push_back(make_path_warning(append_path(base_path, name), "config.unknown", "unknown config field"));
-         }
-      }
+      inspect_input_paths(input, base_path, false, result);
 
       for (const auto& field : *fields_) {
          auto field_path = append_path(base_path, field.name);
-         const auto* found = [&]() -> const input_value* {
-            if (const auto exact = input.find(field.name); exact != input.end()) {
-               return &exact->second;
-            }
+         auto lookup = find_input_path(input, field.name);
+         if (!lookup.value) {
             for (const auto& alias : field.aliases) {
-               if (const auto alias_entry = input.find(alias); alias_entry != input.end()) {
+               auto alias_lookup = find_input_path(input, alias);
+               lookup.blocked = lookup.blocked || alias_lookup.blocked;
+               if (alias_lookup.value) {
                   field_path = append_path(base_path, alias);
-                  return &alias_entry->second;
+                  lookup.value = alias_lookup.value;
+                  break;
                }
             }
-            return nullptr;
-         }();
+         }
 
-         if (!found) {
-            if (field.required) {
+         if (!lookup.value) {
+            if (field.required && !lookup.blocked) {
                result.push_back(
-                  make_path_error(std::move(field_path), "config.required", "required config field is missing"));
+                   make_path_error(std::move(field_path), "config.required", "required config field is missing"));
             }
             continue;
          }
 
          if (field.deprecated) {
-            result.push_back(make_path_warning(
-               field_path,
-               "config.deprecated",
-               field.deprecated_message.empty() ? "deprecated config field" : field.deprecated_message));
+            result.push_back(make_path_warning(field_path, "config.deprecated",
+                                               field.deprecated_message.empty() ? "deprecated config field"
+                                                                                : field.deprecated_message));
          }
 
-         field.assign_input(output, *found, field_path, result);
+         field.assign_input(output, *lookup.value, field_path, result);
       }
 
       auto validation = validate(output, base_path);
       result.insert(result.end(), validation.begin(), validation.end());
       return result;
+   }
+
+   [[nodiscard]] input_value::object_type encode_object(const T& input) const {
+      auto output = input_value::object_type{};
+      for (const auto& field : *fields_) {
+         auto value = field.read_input(input);
+         if (!std::holds_alternative<std::monostate>(value.storage)) {
+            set_input_path(output, field.name, std::move(value));
+         }
+      }
+      return output;
    }
 
    [[nodiscard]] std::vector<diagnostic> validate(const T& object, std::string_view base_path = {}) const {
@@ -448,9 +497,8 @@ template <typename T> class object_schema {
          if (field.minimum || field.maximum) {
             auto numeric = std::optional<long double>{};
             try {
-               const auto any_value = field.read_validation_any
-                                         ? field.read_validation_any(object)
-                                         : std::optional<std::any>{field.read_any(object)};
+               const auto any_value = field.read_validation_any ? field.read_validation_any(object)
+                                                                : std::optional<std::any>{field.read_any(object)};
                if (!any_value) {
                   continue;
                }
@@ -473,10 +521,12 @@ template <typename T> class object_schema {
             }
 
             if (numeric && field.minimum && *numeric < *field.minimum) {
-               result.push_back(make_error(base_path, field.name, "schema.range", "value is below the allowed minimum"));
+               result.push_back(
+                   make_error(base_path, field.name, "schema.range", "value is below the allowed minimum"));
             }
             if (numeric && field.maximum && *numeric > *field.maximum) {
-               result.push_back(make_error(base_path, field.name, "schema.range", "value is above the allowed maximum"));
+               result.push_back(
+                   make_error(base_path, field.name, "schema.range", "value is above the allowed maximum"));
             }
          }
          for (const auto& validator : field.validators) {
@@ -486,8 +536,169 @@ template <typename T> class object_schema {
       return result;
    }
 
+   [[nodiscard]] std::vector<diagnostic> validate_exact_input(const input_value::object_type& input,
+                                                              std::string_view base_path = {}) const {
+      auto result = std::vector<diagnostic>{};
+      inspect_input_paths(input, base_path, true, result);
+
+      for (const auto& field : *fields_) {
+         auto field_path = append_path(base_path, field.name);
+         const input_value* found = nullptr;
+         auto blocked = false;
+         const auto find_name = [&](const std::string& name) {
+            const auto lookup = find_input_path(input, name);
+            blocked = blocked || lookup.blocked;
+            if (lookup.value) {
+               if (found) {
+                  result.push_back(make_path_error(append_path(base_path, name), "config.duplicate",
+                                                   "multiple names supplied for the same config field"));
+               } else {
+                  found = lookup.value;
+                  field_path = append_path(base_path, name);
+               }
+            }
+         };
+         find_name(field.name);
+         for (const auto& alias : field.aliases) {
+            find_name(alias);
+         }
+
+         if (!found) {
+            if (!field.optional && !blocked) {
+               result.push_back(
+                   make_path_error(std::move(field_path), "config.missing", "exact config field is missing"));
+            }
+            continue;
+         }
+
+         field.validate_exact_input(*found, field_path, result);
+      }
+      return result;
+   }
+
  private:
    friend class field_builder<T>;
+
+   struct path_catalog {
+      std::set<std::string> fields;
+      std::set<std::string> prefixes;
+   };
+
+   struct path_lookup {
+      const input_value* value = nullptr;
+      bool blocked = false;
+   };
+
+   static void set_input_path(input_value::object_type& output, std::string_view name, input_value value) {
+      auto* object = &output;
+      auto begin = std::size_t{0};
+      while (begin <= name.size()) {
+         const auto end = name.find('.', begin);
+         const auto segment = name.substr(begin, end == std::string_view::npos ? name.size() - begin : end - begin);
+         if (segment.empty()) {
+            if (end == std::string_view::npos) {
+               break;
+            }
+            begin = end + 1;
+            continue;
+         }
+         if (end == std::string_view::npos) {
+            object->insert_or_assign(std::string{segment}, std::move(value));
+            return;
+         }
+
+         auto& child = (*object)[std::string{segment}];
+         if (!child.as_object()) {
+            child = input_value::object_type{};
+         }
+         object = std::get_if<input_value::object_type>(&child.storage);
+         begin = end + 1;
+      }
+   }
+
+   [[nodiscard]] path_catalog known_paths() const {
+      auto output = path_catalog{};
+      const auto register_name = [&](std::string_view name) {
+         output.fields.emplace(name);
+         auto separator = name.find('.');
+         while (separator != std::string_view::npos) {
+            output.prefixes.emplace(name.substr(0, separator));
+            separator = name.find('.', separator + 1);
+         }
+      };
+      for (const auto& field : *fields_) {
+         register_name(field.name);
+         for (const auto& alias : field.aliases) {
+            register_name(alias);
+         }
+      }
+      return output;
+   }
+
+   [[nodiscard]] static path_lookup find_input_path(const input_value::object_type& input, std::string_view name) {
+      auto lookup = path_lookup{};
+      auto* object = &input;
+      auto begin = std::size_t{0};
+      while (begin <= name.size()) {
+         const auto end = name.find('.', begin);
+         const auto segment = name.substr(begin, end == std::string_view::npos ? name.size() - begin : end - begin);
+         if (segment.empty()) {
+            if (end == std::string_view::npos) {
+               break;
+            }
+            begin = end + 1;
+            continue;
+         }
+
+         const auto entry = object->find(std::string{segment});
+         if (entry == object->end()) {
+            return lookup;
+         }
+         if (end == std::string_view::npos) {
+            lookup.value = &entry->second;
+            return lookup;
+         }
+         object = entry->second.as_object();
+         if (!object) {
+            lookup.blocked = true;
+            return lookup;
+         }
+         begin = end + 1;
+      }
+      return lookup;
+   }
+
+   void inspect_input_paths(const input_value::object_type& input, std::string_view base_path, bool exact,
+                            std::vector<diagnostic>& diagnostics) const {
+      const auto paths = known_paths();
+      const auto inspect = [&](auto& self, const input_value::object_type& object,
+                               std::string_view relative_path) -> void {
+         for (const auto& [name, value] : object) {
+            auto path = std::string{relative_path};
+            if (!path.empty()) {
+               path += ".";
+            }
+            path += name;
+
+            const auto is_field = paths.fields.contains(path);
+            const auto is_prefix = paths.prefixes.contains(path);
+            if (!is_field && !is_prefix) {
+               auto entry =
+                   exact ? make_path_error(append_path(base_path, path), "config.unknown", "unknown config field")
+                         : make_path_warning(append_path(base_path, path), "config.unknown", "unknown config field");
+               diagnostics.push_back(std::move(entry));
+            } else if (!is_field && is_prefix) {
+               if (const auto* child = value.as_object()) {
+                  self(self, *child, path);
+               } else {
+                  diagnostics.push_back(make_path_error(append_path(base_path, path), "config.type",
+                                                        "config path segment must be an object"));
+               }
+            }
+         }
+      };
+      inspect(inspect, input, std::string_view{});
+   }
 
    field_rule<T>& field_at(std::size_t index) {
       return (*fields_)[index];
@@ -608,9 +819,9 @@ template <typename T> class field_builder {
    }
 
    field_builder& non_empty() {
-      current().validators.push_back([state = schema_.fields_, index = index_](
-                                        const T& object, std::string_view base_path,
-                                        std::vector<diagnostic>& diagnostics) {
+      current().validators.push_back([state = schema_.fields_, index = index_](const T& object,
+                                                                               std::string_view base_path,
+                                                                               std::vector<diagnostic>& diagnostics) {
          const auto& field = (*state)[index];
          if (field.kind != value_kind::string) {
             return;
@@ -623,52 +834,50 @@ template <typename T> class field_builder {
          const auto& value = std::any_cast<const std::string&>(*any_value);
          if (value.empty()) {
             diagnostics.push_back(
-               make_path_error(append_path(base_path, field.name), "schema.non_empty", "value must not be empty"));
+                make_path_error(append_path(base_path, field.name), "schema.non_empty", "value must not be empty"));
          }
       });
       return *this;
    }
 
    field_builder& min_items(std::size_t count) {
-      current().validators.push_back([state = schema_.fields_, index = index_, count](
-                                        const T& object, std::string_view base_path,
-                                        std::vector<diagnostic>& diagnostics) {
-         const auto& field = (*state)[index];
-         if (!field.read_size) {
-            return;
-         }
-         const auto size = field.read_size(object);
-         if (size && *size < count) {
-            diagnostics.push_back(make_path_error(append_path(base_path, field.name),
-                                                 "schema.min_items",
-                                                 "list has fewer items than allowed"));
-         }
-      });
+      current().validators.push_back(
+          [state = schema_.fields_, index = index_, count](const T& object, std::string_view base_path,
+                                                           std::vector<diagnostic>& diagnostics) {
+             const auto& field = (*state)[index];
+             if (!field.read_size) {
+                return;
+             }
+             const auto size = field.read_size(object);
+             if (size && *size < count) {
+                diagnostics.push_back(make_path_error(append_path(base_path, field.name), "schema.min_items",
+                                                      "list has fewer items than allowed"));
+             }
+          });
       return *this;
    }
 
    field_builder& max_items(std::size_t count) {
-      current().validators.push_back([state = schema_.fields_, index = index_, count](
-                                        const T& object, std::string_view base_path,
-                                        std::vector<diagnostic>& diagnostics) {
-         const auto& field = (*state)[index];
-         if (!field.read_size) {
-            return;
-         }
-         const auto size = field.read_size(object);
-         if (size && *size > count) {
-            diagnostics.push_back(make_path_error(append_path(base_path, field.name),
-                                                 "schema.max_items",
-                                                 "list has more items than allowed"));
-         }
-      });
+      current().validators.push_back(
+          [state = schema_.fields_, index = index_, count](const T& object, std::string_view base_path,
+                                                           std::vector<diagnostic>& diagnostics) {
+             const auto& field = (*state)[index];
+             if (!field.read_size) {
+                return;
+             }
+             const auto size = field.read_size(object);
+             if (size && *size > count) {
+                diagnostics.push_back(make_path_error(append_path(base_path, field.name), "schema.max_items",
+                                                      "list has more items than allowed"));
+             }
+          });
       return *this;
    }
 
    field_builder& each_non_empty() {
-      current().validators.push_back([state = schema_.fields_, index = index_](
-                                        const T& object, std::string_view base_path,
-                                        std::vector<diagnostic>& diagnostics) {
+      current().validators.push_back([state = schema_.fields_, index = index_](const T& object,
+                                                                               std::string_view base_path,
+                                                                               std::vector<diagnostic>& diagnostics) {
          const auto& field = (*state)[index];
          if (field.kind != value_kind::string_list) {
             return;
@@ -682,8 +891,7 @@ template <typename T> class field_builder {
          for (std::size_t i = 0; i < values.size(); ++i) {
             if (values[i].empty()) {
                diagnostics.push_back(make_path_error(append_index(append_path(base_path, field.name), i),
-                                                    "schema.non_empty",
-                                                    "list item must not be empty"));
+                                                     "schema.non_empty", "list item must not be empty"));
             }
          }
       });
@@ -693,9 +901,9 @@ template <typename T> class field_builder {
    template <auto Member> field_builder& unique_by() {
       using item_type = typename member_pointer_traits<decltype(Member)>::object_type;
       using member_type = std::remove_cvref_t<typename member_pointer_traits<decltype(Member)>::member_type>;
-      current().validators.push_back([state = schema_.fields_, index = index_](
-                                        const T& object, std::string_view base_path,
-                                        std::vector<diagnostic>& diagnostics) {
+      current().validators.push_back([state = schema_.fields_, index = index_](const T& object,
+                                                                               std::string_view base_path,
+                                                                               std::vector<diagnostic>& diagnostics) {
          const auto& field = (*state)[index];
          const auto any_value = field.read_validation_any ? field.read_validation_any(object)
                                                           : std::optional<std::any>{field.read_any(object)};
@@ -706,9 +914,8 @@ template <typename T> class field_builder {
          auto seen = std::set<member_type>{};
          for (const auto& item : values) {
             if (!seen.insert(item.*Member).second) {
-               diagnostics.push_back(make_path_error(append_path(base_path, field.name),
-                                                    "schema.unique",
-                                                    "list items must be unique"));
+               diagnostics.push_back(
+                   make_path_error(append_path(base_path, field.name), "schema.unique", "list items must be unique"));
                return;
             }
          }
@@ -752,7 +959,7 @@ template <typename T>
             return parsed;
          }
       }
-   } else if constexpr (std::signed_integral<clean_type> && !std::same_as<clean_type, bool>) {
+   } else if constexpr (signed_integral_value<clean_type> && !std::same_as<clean_type, bool>) {
       if (const auto* value = std::get_if<std::int64_t>(&input.storage)) {
          return checked_integral_cast<clean_type>(*value);
       }
@@ -762,7 +969,7 @@ template <typename T>
       if (const auto* text = std::get_if<std::string>(&input.storage)) {
          return parse_scalar_text<clean_type>(*text);
       }
-   } else if constexpr (std::unsigned_integral<clean_type> && !std::same_as<clean_type, bool>) {
+   } else if constexpr (unsigned_integral_value<clean_type> && !std::same_as<clean_type, bool>) {
       if (const auto* value = std::get_if<std::uint64_t>(&input.storage)) {
          return checked_integral_cast<clean_type>(*value);
       }
@@ -809,23 +1016,6 @@ template <typename T>
       if (const auto* value = std::get_if<std::string>(&input.storage)) {
          return *value;
       }
-   } else if constexpr (std::is_enum_v<clean_type>) {
-      if (const auto* text = std::get_if<std::string>(&input.storage)) {
-         auto parsed = clean_type{};
-         if (enum_from_string(*text, parsed)) {
-            return parsed;
-         }
-         diagnostics.push_back(make_path_error(std::string{path}, "config.enum", "unknown enum value"));
-         return {};
-      }
-      if (const auto* value = std::get_if<std::int64_t>(&input.storage)) {
-         auto parsed = clean_type{};
-         if (enum_from_int(*value, parsed)) {
-            return parsed;
-         }
-         diagnostics.push_back(make_path_error(std::string{path}, "config.enum", "unknown enum value"));
-         return {};
-      }
    } else if constexpr (std::same_as<clean_type, std::vector<std::string>>) {
       if (const auto* values = input.as_array()) {
          auto output = std::vector<std::string>{};
@@ -847,7 +1037,7 @@ template <typename T>
          for (std::size_t i = 0; i < values->size(); ++i) {
             auto parsed = enum_type{};
             if (const auto* text = std::get_if<std::string>(&(*values)[i].storage)) {
-               if (enum_from_string(*text, parsed)) {
+               if (enum_from_config_string(*text, parsed)) {
                   output.push_back(parsed);
                   continue;
                }
@@ -884,8 +1074,7 @@ template <typename T>
 }
 
 template <typename T>
-[[nodiscard]] std::vector<T> decode_object_list(const input_value& input,
-                                                std::string_view path,
+[[nodiscard]] std::vector<T> decode_object_list(const input_value& input, std::string_view path,
                                                 std::vector<diagnostic>& diagnostics) {
    const auto* values = input.as_array();
    if (!values) {
@@ -899,7 +1088,13 @@ template <typename T>
       const auto item_path = append_index(path, i);
       if constexpr (std::constructible_from<T, std::string>) {
          if (const auto* text = std::get_if<std::string>(&(*values)[i].storage)) {
-            auto item = T{*text};
+            auto item = [&] {
+               if constexpr (canonical_string_scalar<T>) {
+                  return parse_scalar_text<T>(*text);
+               } else {
+                  return T{*text};
+               }
+            }();
             auto nested = nested_rules.validate(item, item_path);
             diagnostics.insert(diagnostics.end(), nested.begin(), nested.end());
             output.push_back(std::move(item));
@@ -921,7 +1116,205 @@ template <typename T>
 }
 
 template <typename T>
-[[nodiscard]] input_value to_input_value(const T& input) {
+void validate_exact_input_value(const input_value& input, std::string_view path, std::vector<diagnostic>& diagnostics) {
+   using clean_type = std::remove_cvref_t<T>;
+   if constexpr (is_optional<clean_type>::value) {
+      if (!std::holds_alternative<std::monostate>(input.storage)) {
+         validate_exact_input_value<typename is_optional<clean_type>::value_type>(input, path, diagnostics);
+      }
+   } else if constexpr (std::same_as<clean_type, bool>) {
+      if (!std::holds_alternative<bool>(input.storage)) {
+         diagnostics.push_back(
+             make_path_error(std::string{path}, "config.type", "boolean field must be a boolean value"));
+      }
+   } else if constexpr (signed_integral_value<clean_type>) {
+      if constexpr (sizeof(clean_type) <= sizeof(std::int64_t)) {
+         const auto in_range = std::holds_alternative<std::int64_t>(input.storage)
+                                   ? std::in_range<clean_type>(std::get<std::int64_t>(input.storage))
+                               : std::holds_alternative<std::uint64_t>(input.storage)
+                                   ? std::in_range<clean_type>(std::get<std::uint64_t>(input.storage))
+                                   : false;
+         if (!std::holds_alternative<std::int64_t>(input.storage) &&
+             !std::holds_alternative<std::uint64_t>(input.storage)) {
+            diagnostics.push_back(
+                make_path_error(std::string{path}, "config.type", "signed integer field must be an integer value"));
+         } else if (!in_range) {
+            diagnostics.push_back(
+                make_path_error(std::string{path}, "config.range", "signed integer field is out of range"));
+         }
+      } else if (!std::holds_alternative<std::string>(input.storage)) {
+         diagnostics.push_back(
+             make_path_error(std::string{path}, "config.type", "wide signed integer field must be a decimal string"));
+      } else if (const auto* text = std::get_if<std::string>(&input.storage)) {
+         try {
+            const auto value = parse_scalar_text<clean_type>(*text);
+            if (format_integral_text(value) != *text) {
+               diagnostics.push_back(make_path_error(std::string{path}, "config.type",
+                                                     "wide signed integer must use canonical decimal spelling"));
+            }
+         } catch (const std::exception& error) {
+            diagnostics.push_back(make_path_error(std::string{path}, "config.range", error.what()));
+         }
+      }
+   } else if constexpr (unsigned_integral_value<clean_type>) {
+      if constexpr (sizeof(clean_type) <= sizeof(std::uint64_t)) {
+         const auto in_range = std::holds_alternative<std::int64_t>(input.storage)
+                                   ? std::in_range<clean_type>(std::get<std::int64_t>(input.storage))
+                               : std::holds_alternative<std::uint64_t>(input.storage)
+                                   ? std::in_range<clean_type>(std::get<std::uint64_t>(input.storage))
+                                   : false;
+         if (!std::holds_alternative<std::int64_t>(input.storage) &&
+             !std::holds_alternative<std::uint64_t>(input.storage)) {
+            diagnostics.push_back(
+                make_path_error(std::string{path}, "config.type", "unsigned integer field must be an integer value"));
+         } else if (!in_range) {
+            diagnostics.push_back(
+                make_path_error(std::string{path}, "config.range", "unsigned integer field is out of range"));
+         }
+      } else if (!std::holds_alternative<std::string>(input.storage)) {
+         diagnostics.push_back(
+             make_path_error(std::string{path}, "config.type", "wide unsigned integer field must be a decimal string"));
+      } else if (const auto* text = std::get_if<std::string>(&input.storage)) {
+         try {
+            const auto value = parse_scalar_text<clean_type>(*text);
+            if (format_integral_text(value) != *text) {
+               diagnostics.push_back(make_path_error(std::string{path}, "config.type",
+                                                     "wide unsigned integer must use canonical decimal spelling"));
+            }
+         } catch (const std::exception& error) {
+            diagnostics.push_back(make_path_error(std::string{path}, "config.range", error.what()));
+         }
+      }
+   } else if constexpr (std::floating_point<clean_type>) {
+      if (!std::holds_alternative<double>(input.storage) && !std::holds_alternative<std::int64_t>(input.storage) &&
+          !std::holds_alternative<std::uint64_t>(input.storage)) {
+         diagnostics.push_back(
+             make_path_error(std::string{path}, "config.type", "floating-point field must be a numeric value"));
+         return;
+      }
+
+      const auto integer_is_exact =
+          std::holds_alternative<std::int64_t>(input.storage)
+              ? detail::integer_exactly_representable<clean_type>(std::get<std::int64_t>(input.storage))
+          : std::holds_alternative<std::uint64_t>(input.storage)
+              ? detail::integer_exactly_representable<clean_type>(std::get<std::uint64_t>(input.storage))
+              : true;
+      if (!integer_is_exact) {
+         diagnostics.push_back(make_path_error(std::string{path}, "config.range",
+                                               "value is not exactly representable by the floating-point field"));
+         return;
+      }
+
+      const auto numeric = std::holds_alternative<double>(input.storage)
+                               ? static_cast<long double>(std::get<double>(input.storage))
+                           : std::holds_alternative<std::int64_t>(input.storage)
+                               ? static_cast<long double>(std::get<std::int64_t>(input.storage))
+                               : static_cast<long double>(std::get<std::uint64_t>(input.storage));
+      if (!std::isfinite(numeric) || numeric < static_cast<long double>(std::numeric_limits<clean_type>::lowest()) ||
+          numeric > static_cast<long double>((std::numeric_limits<clean_type>::max)())) {
+         diagnostics.push_back(
+             make_path_error(std::string{path}, "config.range", "floating-point field is out of range"));
+         return;
+      }
+
+      const auto converted = static_cast<clean_type>(numeric);
+      if (numeric != 0.0L && converted == static_cast<clean_type>(0)) {
+         diagnostics.push_back(
+             make_path_error(std::string{path}, "config.range", "floating-point field underflows to zero"));
+      } else if (static_cast<long double>(converted) != numeric) {
+         diagnostics.push_back(make_path_error(std::string{path}, "config.range",
+                                               "value is not exactly representable by the floating-point field"));
+      }
+   } else if constexpr (std::same_as<clean_type, std::string>) {
+      if (!std::holds_alternative<std::string>(input.storage)) {
+         diagnostics.push_back(
+             make_path_error(std::string{path}, "config.type", "string field must be a string value"));
+      }
+   } else if constexpr (std::is_enum_v<clean_type>) {
+      if (!std::holds_alternative<std::string>(input.storage)) {
+         diagnostics.push_back(
+             make_path_error(std::string{path}, "config.type", "enum field must contain its canonical config name"));
+         return;
+      }
+
+      auto parsed = clean_type{};
+      const auto& text = std::get<std::string>(input.storage);
+      const auto valid = enum_from_config_string(text, parsed);
+      const auto canonical = valid ? enum_to_config_string(parsed) : std::nullopt;
+      if (!canonical || *canonical != text) {
+         diagnostics.push_back(
+             make_path_error(std::string{path}, "config.type", "enum field must contain its canonical config name"));
+      }
+   } else if constexpr (is_vector<clean_type>::value) {
+      const auto* values = input.as_array();
+      if (!values) {
+         diagnostics.push_back(make_path_error(std::string{path}, "config.type", "exact list must be an array"));
+         return;
+      }
+      using item_type = typename vector_item<clean_type>::type;
+      for (std::size_t index = 0; index < values->size(); ++index) {
+         if constexpr (canonical_string_scalar<item_type>) {
+            if (std::holds_alternative<std::string>((*values)[index].storage)) {
+               const auto& text = std::get<std::string>((*values)[index].storage);
+               try {
+                  const auto value = parse_scalar_text<item_type>(text);
+                  const auto canonical = format_scalar_text(value);
+                  if (!canonical || *canonical != text) {
+                     diagnostics.push_back(make_path_error(append_index(path, index), "config.type",
+                                                           "scalar adapter must use its canonical config spelling"));
+                  }
+               } catch (const std::exception& error) {
+                  diagnostics.push_back(make_path_error(append_index(path, index), "config.type", error.what()));
+               }
+               continue;
+            }
+         } else if constexpr (std::constructible_from<item_type, std::string>) {
+            if (std::holds_alternative<std::string>((*values)[index].storage)) {
+               continue;
+            }
+         }
+         validate_exact_input_value<item_type>((*values)[index], append_index(path, index), diagnostics);
+      }
+   } else if constexpr (boost::describe::has_describe_members<clean_type>::value) {
+      const auto* object = input.as_object();
+      if (!object) {
+         diagnostics.push_back(make_path_error(std::string{path}, "config.type", "exact record must be an object"));
+         return;
+      }
+
+      const auto nested_rules = rules<clean_type>::define();
+      if (!nested_rules.fields().empty()) {
+         auto nested = nested_rules.validate_exact_input(*object, path);
+         diagnostics.insert(diagnostics.end(), nested.begin(), nested.end());
+         return;
+      }
+
+      auto known_fields = std::set<std::string>{};
+      using members = boost::describe::describe_members<clean_type, boost::describe::mod_any_access |
+                                                                        boost::describe::mod_inherited>;
+      boost::mp11::mp_for_each<members>([&](auto descriptor) {
+         known_fields.emplace(descriptor.name);
+         const auto found = object->find(descriptor.name);
+         using member_type = std::remove_cvref_t<decltype(std::declval<clean_type>().*descriptor.pointer)>;
+         if (found == object->end()) {
+            if constexpr (!is_optional<member_type>::value) {
+               diagnostics.push_back(make_path_error(append_path(path, descriptor.name), "config.missing",
+                                                     "exact config field is missing"));
+            }
+            return;
+         }
+         validate_exact_input_value<member_type>(found->second, append_path(path, descriptor.name), diagnostics);
+      });
+
+      for (const auto& [name, ignored] : *object) {
+         if (!known_fields.contains(name)) {
+            diagnostics.push_back(make_path_error(append_path(path, name), "config.unknown", "unknown config field"));
+         }
+      }
+   }
+}
+
+template <typename T> [[nodiscard]] input_value to_input_value(const T& input) {
    using clean_type = std::remove_cvref_t<T>;
    if constexpr (is_optional<clean_type>::value) {
       if (!input.has_value()) {
@@ -930,10 +1323,18 @@ template <typename T>
       return to_input_value(*input);
    } else if constexpr (std::same_as<clean_type, bool>) {
       return input_value{input};
-   } else if constexpr (std::signed_integral<clean_type> && !std::same_as<clean_type, bool>) {
-      return input_value{static_cast<std::int64_t>(input)};
-   } else if constexpr (std::unsigned_integral<clean_type> && !std::same_as<clean_type, bool>) {
-      return input_value{static_cast<std::uint64_t>(input)};
+   } else if constexpr (signed_integral_value<clean_type> && !std::same_as<clean_type, bool>) {
+      if constexpr (sizeof(clean_type) <= sizeof(std::int64_t)) {
+         return input_value{static_cast<std::int64_t>(input)};
+      } else {
+         return input_value{format_integral_text(input)};
+      }
+   } else if constexpr (unsigned_integral_value<clean_type> && !std::same_as<clean_type, bool>) {
+      if constexpr (sizeof(clean_type) <= sizeof(std::uint64_t)) {
+         return input_value{static_cast<std::uint64_t>(input)};
+      } else {
+         return input_value{format_integral_text(input)};
+      }
    } else if constexpr (std::floating_point<clean_type>) {
       return input_value{static_cast<double>(input)};
    } else if constexpr (std::same_as<clean_type, std::string>) {
@@ -943,11 +1344,17 @@ template <typename T>
          return input_value{std::move(*text)};
       }
       using underlying_type = std::underlying_type_t<clean_type>;
-      if constexpr (std::signed_integral<underlying_type>) {
+      if constexpr (signed_integral_value<underlying_type>) {
          return input_value{static_cast<std::int64_t>(input)};
       } else {
          return input_value{static_cast<std::uint64_t>(input)};
       }
+   } else if constexpr (canonical_string_scalar<clean_type>) {
+      const auto text = format_scalar_text(input);
+      if (!text) {
+         throw std::invalid_argument{"scalar adapter has no canonical config spelling"};
+      }
+      return input_value{*text};
    } else if constexpr (std::same_as<clean_type, std::vector<std::string>>) {
       auto array = input_value::array_type{};
       array.reserve(input.size());
@@ -970,18 +1377,20 @@ template <typename T>
       }
       return input_value{std::move(array)};
    } else {
-      auto object = input_value::object_type{};
       const auto nested_rules = rules<clean_type>::define();
       if (!nested_rules.fields().empty()) {
-         for (const auto& field : nested_rules.fields()) {
-            auto value = field.read_input(input);
-            if (!std::holds_alternative<std::monostate>(value.storage)) {
-               object.emplace(field.name, std::move(value));
-            }
-         }
-         return input_value{std::move(object)};
+         return input_value{nested_rules.encode_object(input)};
       }
       if constexpr (boost::describe::has_describe_members<clean_type>::value) {
+         auto object = input_value::object_type{};
+         using members = boost::describe::describe_members<clean_type, boost::describe::mod_any_access |
+                                                                           boost::describe::mod_inherited>;
+         boost::mp11::mp_for_each<members>([&](auto descriptor) {
+            auto value = to_input_value(input.*descriptor.pointer);
+            if (!std::holds_alternative<std::monostate>(value.storage)) {
+               object.emplace(descriptor.name, std::move(value));
+            }
+         });
          return input_value{std::move(object)};
       } else {
          return input_value{};

@@ -13,6 +13,8 @@ export import :value;
 import forge.crypto.digest.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;
+import forge.variant.described;
+import forge.variant.value;
 
 export namespace forge::chain::protocol {
 BOOST_DESCRIBE_STRUCT(permission_level_weight, (), (permission, weight))
@@ -21,8 +23,8 @@ BOOST_DESCRIBE_STRUCT(wait_weight, (), (wait_sec, weight))
 BOOST_DESCRIBE_STRUCT(authority, (), (threshold, keys, accounts, waits))
 } // namespace forge::chain::protocol
 
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::permission_level_weight)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::key_weight)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::wait_weight)
-FORGE_DECLARE_SERIALIZATION_PACK(forge::chain::protocol::authority)
+FORGE_DECLARE_SERIALIZATION(forge::chain::protocol::permission_level_weight)
+FORGE_DECLARE_SERIALIZATION(forge::chain::protocol::key_weight)
+FORGE_DECLARE_SERIALIZATION(forge::chain::protocol::wait_weight)
+FORGE_DECLARE_SERIALIZATION(forge::chain::protocol::authority)
 #endif

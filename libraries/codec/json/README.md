@@ -9,6 +9,7 @@ module interfaces.
 - Read/write generic `forge::variant` JSON values.
 - Read/write `forge::config::core::document` for configuration.
 - Decode typed Boost.Describe objects through `forge_schema` and get diagnostics.
+- Strictly decode protocol and persisted records with recursive field and variant checks.
 
 ## When Not To Use
 
@@ -92,6 +93,37 @@ if (!parsed.ok()) {
 }
 ```
 
+### Exact Described Records
+
+Use `described_record_policy::exact` at protocol and persisted-data boundaries. Every
+non-optional Boost.Describe member must be present, unknown members are rejected, and
+nested sequences and `std::variant` values are validated before conversion. Ordinary
+variants use the canonical `[index, payload]` representation; types with an owning
+canonical scalar adapter, such as encoded public keys and signatures, retain that
+adapter's JSON form. Schema-bound records use their declared field names and aliases.
+Associative containers use arrays of exact `[key, value]` entries.
+Typed `write<T>` and `save<T>` emit the schema's canonical field names, so their output
+round-trips through exact reads even when C++ member names differ. Dotted schema names
+use nested JSON objects consistently on both paths.
+
+```cpp
+import forge.codec.json;
+import forge.chain.protocol.producer_authority;
+
+auto options = forge::codec::json::read_options{
+   .described_records = forge::codec::json::described_record_policy::exact,
+};
+
+auto loaded = forge::codec::json::load<forge::chain::protocol::producer_authority_schedule>(
+   "producer-schedule.json", options);
+if (!loaded.ok()) {
+   report_diagnostics(loaded.diagnostics);
+}
+```
+
+Diagnostics preserve the recursive path, for example `policies[1].authority[1].threshold`.
+Missing `std::optional` members remain valid and decode as empty optionals.
+
 ### File Helpers
 
 ```cpp
@@ -146,4 +178,5 @@ for (const auto& diagnostic : parsed.diagnostics) {
 ## Tests
 
 `test_forge_codec_json` covers generic values, large integers, config documents, typed
-schema reads, malformed input diagnostics and no public backend leakage.
+schema reads, exact described-record read/write/load/save roundtrips, recursive
+diagnostics, malformed input diagnostics and no public backend leakage.

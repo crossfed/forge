@@ -89,6 +89,12 @@ add_executable(
    crypto/test_symmetric.cpp
    crypto/test_webauthn.cpp
 )
+target_sources(
+   test_forge
+   PRIVATE
+      FILE_SET CXX_MODULES
+      FILES json/exact_types.cppm
+)
 
 target_link_libraries(test_forge forge Boost::included_unit_test_framework)
 add_test(NAME test_forge COMMAND test_forge WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
@@ -125,6 +131,12 @@ add_executable(
    test_forge_codec_json
    unit/main.cpp
    json/test_json.cpp
+)
+target_sources(
+   test_forge_codec_json
+   PRIVATE
+      FILE_SET CXX_MODULES
+      FILES json/exact_types.cppm
 )
 target_link_libraries(test_forge_codec_json forge Boost::included_unit_test_framework)
 add_test(NAME test_forge_codec_json COMMAND test_forge_codec_json WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
@@ -169,7 +181,13 @@ add_executable(
    chain_protocol/producer_schedule_tests.cpp
    chain_protocol/protocol_tests.cpp
 )
-target_link_libraries(test_forge_chain_protocol forge_chain_protocol forge Boost::included_unit_test_framework)
+target_link_libraries(
+   test_forge_chain_protocol
+   forge_chain_protocol
+   forge_codec_json
+   forge
+   Boost::included_unit_test_framework
+)
 add_test(NAME test_forge_chain_protocol COMMAND test_forge_chain_protocol WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
@@ -499,6 +517,12 @@ add_executable(
    test_forge_codec_yaml
    unit/main.cpp
    yaml/yaml_tests.cpp
+)
+target_sources(
+   test_forge_codec_yaml
+   PRIVATE
+      FILE_SET CXX_MODULES
+      FILES yaml/schema_types.cppm
 )
 target_link_libraries(test_forge_codec_yaml forge Boost::included_unit_test_framework)
 add_test(NAME test_forge_codec_yaml COMMAND test_forge_codec_yaml WORKING_DIRECTORY ${CMAKE_BINARY_DIR})

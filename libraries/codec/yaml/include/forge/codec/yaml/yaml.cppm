@@ -31,6 +31,7 @@ import forge.variant.chrono;
 import forge.variant.multiprecision;
 import forge.variant.format;
 import forge.variant.described;
+import forge.variant.schema;
 
 export namespace forge::codec::yaml {
 
@@ -80,9 +81,51 @@ struct write_result {
 [[nodiscard]] read_result<variant> load_value(const std::filesystem::path& path, read_options options = {});
 [[nodiscard]] write_result save_value(const std::filesystem::path& path, const variant& input,
                                       write_options options = {});
-[[nodiscard]] read_result<config::core::document> load_document(const std::filesystem::path& path, read_options options = {});
+[[nodiscard]] read_result<config::core::document> load_document(const std::filesystem::path& path,
+                                                                read_options options = {});
 [[nodiscard]] write_result save_document(const std::filesystem::path& path, const config::core::document& input,
                                          write_options options = {});
+
+} // namespace forge::codec::yaml
+
+namespace forge::codec::yaml::detail {
+
+inline void append_schema_diagnostics(std::vector<schema::diagnostic>& output,
+                                      std::vector<schema::diagnostic> diagnostics,
+                                      unknown_field_policy unknown_fields) {
+   for (auto& entry : diagnostics) {
+      if (entry.code == "config.unknown") {
+         if (unknown_fields == unknown_field_policy::ignore) {
+            continue;
+         }
+         entry.code = "yaml.unknown";
+         if (unknown_fields == unknown_field_policy::error) {
+            entry.level = schema::severity::error;
+         }
+      } else if (entry.code == "config.missing") {
+         entry.code = "yaml.missing";
+      } else if (entry.code == "config.duplicate") {
+         entry.code = "yaml.duplicate";
+      } else if (entry.code == "config.type") {
+         entry.code = "yaml.type";
+      } else if (entry.code == "config.range") {
+         entry.code = "yaml.range";
+      }
+      output.push_back(std::move(entry));
+   }
+}
+
+template <typename T>
+[[nodiscard]] bool materialize_schema_records(variant& source, const read_options& options,
+                                              std::vector<schema::diagnostic>& diagnostics) {
+   append_schema_diagnostics(diagnostics, variant_schema::materialize<T>(source), options.unknown_fields);
+   return std::ranges::none_of(diagnostics,
+                               [](const schema::diagnostic& entry) { return entry.level == schema::severity::error; });
+}
+
+} // namespace forge::codec::yaml::detail
+
+export namespace forge::codec::yaml {
 
 template <typename T> [[nodiscard]] read_result<T> read(std::string_view input, read_options options = {}) {
    auto output = read_result<T>{};
@@ -117,6 +160,9 @@ template <typename T> [[nodiscard]] read_result<T> read(std::string_view input, 
    }
 
    rules.apply_defaults(output.value);
+   if (!detail::materialize_schema_records<T>(parsed.value, options, output.diagnostics)) {
+      return output;
+   }
 
    if constexpr (requires(const variant& source, T& target) { from_variant(source, target); }) {
       try {
@@ -199,6 +245,9 @@ template <typename T> [[nodiscard]] read_result<T> load(const std::filesystem::p
    }
 
    rules.apply_defaults(output.value);
+   if (!detail::materialize_schema_records<T>(parsed.value, options, output.diagnostics)) {
+      return output;
+   }
    if constexpr (requires(const variant& source, T& target) { from_variant(source, target); }) {
       try {
          from_variant(parsed.value, output.value);
@@ -227,12 +276,42 @@ template <typename T> [[nodiscard]] read_result<T> load(const std::filesystem::p
 }
 
 template <typename T> [[nodiscard]] write_result write(const T& input, write_options options = {}) {
-   return write_value(variant{input}, std::move(options));
+   const auto rules = schema::rules<T>::define();
+   if (!rules.fields().empty()) {
+      return write_document(config::core::encode(input), std::move(options));
+   }
+   if constexpr (requires(const T& source, variant& output) { to_variant(source, output); }) {
+      return write_value(variant_schema::encode(input), std::move(options));
+   } else {
+      return write_result{
+          .diagnostics = {schema::diagnostic{
+              .path = {},
+              .code = "yaml.type",
+              .level = schema::severity::error,
+              .message = "type is not writable to YAML without schema rules or forge::to_variant",
+          }},
+      };
+   }
 }
 
 template <typename T>
 [[nodiscard]] write_result save(const std::filesystem::path& path, const T& input, write_options options = {}) {
-   return save_value(path, variant{input}, std::move(options));
+   const auto rules = schema::rules<T>::define();
+   if (!rules.fields().empty()) {
+      return save_document(path, config::core::encode(input), std::move(options));
+   }
+   if constexpr (requires(const T& source, variant& output) { to_variant(source, output); }) {
+      return save_value(path, variant_schema::encode(input), std::move(options));
+   } else {
+      return write_result{
+          .diagnostics = {schema::diagnostic{
+              .path = {},
+              .code = "yaml.type",
+              .level = schema::severity::error,
+              .message = "type is not writable to YAML without schema rules or forge::to_variant",
+          }},
+      };
+   }
 }
 
 } // namespace forge::codec::yaml

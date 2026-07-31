@@ -109,13 +109,16 @@ forge_contract_register_guest_component(
       forge/chain/protocol/authority.cppm
       forge/chain/protocol/producer_schedule_value.cppm
       forge/chain/protocol/producer_schedule.cppm
+      forge/chain/protocol/producer_authority_value.cppm
       forge/chain/protocol/producer_authority.cppm
       forge/chain/protocol/system_value.cppm
       forge/chain/protocol/system.cppm
       forge/chain/protocol/code_hash_result.cppm
       forge/chain/protocol/blockchain_parameters.cppm
       forge/chain/protocol/kv_parameters.cppm
+      forge/chain/protocol/finalizer_authority_value.cppm
       forge/chain/protocol/finalizer_authority.cppm
+      forge/chain/protocol/finalizer_policy_value.cppm
       forge/chain/protocol/finalizer_policy.cppm
       forge/chain/protocol/hash_id.cppm
       forge/chain/protocol/call_access_mode.cppm
@@ -135,13 +138,16 @@ forge_contract_register_guest_component(
       forge.chain.protocol.authority
       forge.chain.protocol.producer_schedule:value
       forge.chain.protocol.producer_schedule
+      forge.chain.protocol.producer_authority:value
       forge.chain.protocol.producer_authority
       forge.chain.protocol.system:value
       forge.chain.protocol.system
       forge.chain.protocol.code_hash_result
       forge.chain.protocol.blockchain_parameters
       forge.chain.protocol.kv_parameters
+      forge.chain.protocol.finalizer_authority:value
       forge.chain.protocol.finalizer_authority
+      forge.chain.protocol.finalizer_policy:value
       forge.chain.protocol.finalizer_policy
       forge.chain.protocol.hash_id
       forge.chain.protocol.call_access_mode

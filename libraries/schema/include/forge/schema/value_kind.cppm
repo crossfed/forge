@@ -25,6 +25,32 @@ enum class value_kind {
 
 template <typename T> struct dependent_false : std::false_type {};
 
+template <typename T>
+concept integral_value = std::integral<std::remove_cvref_t<T>> || std::same_as<std::remove_cvref_t<T>, __int128> ||
+                         std::same_as<std::remove_cvref_t<T>, unsigned __int128>;
+
+template <typename T>
+concept signed_integral_value = integral_value<T> && (std::signed_integral<std::remove_cvref_t<T>> ||
+                                                      std::same_as<std::remove_cvref_t<T>, __int128>);
+
+template <typename T>
+concept unsigned_integral_value = integral_value<T> && (std::unsigned_integral<std::remove_cvref_t<T>> ||
+                                                        std::same_as<std::remove_cvref_t<T>, unsigned __int128>);
+
+template <typename T> struct unsigned_integral_type {
+   using type = std::make_unsigned_t<std::remove_cvref_t<T>>;
+};
+
+template <> struct unsigned_integral_type<__int128> {
+   using type = unsigned __int128;
+};
+
+template <> struct unsigned_integral_type<unsigned __int128> {
+   using type = unsigned __int128;
+};
+
+template <integral_value T> using unsigned_integral_t = typename unsigned_integral_type<std::remove_cvref_t<T>>::type;
+
 template <typename T> struct is_vector : std::false_type {};
 
 template <typename T, typename Allocator> struct is_vector<std::vector<T, Allocator>> : std::true_type {};
@@ -53,9 +79,9 @@ template <typename T> struct member_kind {
          return member_kind<typename is_optional<clean_type>::value_type>::value;
       } else if constexpr (std::same_as<clean_type, bool>) {
          return value_kind::boolean;
-      } else if constexpr (std::signed_integral<clean_type>) {
+      } else if constexpr (signed_integral_value<clean_type>) {
          return value_kind::signed_integer;
-      } else if constexpr (std::unsigned_integral<clean_type>) {
+      } else if constexpr (unsigned_integral_value<clean_type>) {
          return value_kind::unsigned_integer;
       } else if constexpr (std::floating_point<clean_type>) {
          return value_kind::floating;

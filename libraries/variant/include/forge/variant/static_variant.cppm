@@ -72,7 +72,11 @@ template <typename... T> void from_variant(const forge::variant& v, std::variant
       s = std::variant<T...>();
       return;
    }
-   from_index(s, ar[0].as_uint64());
+   const auto selected = ar[0].as_uint64();
+   if (selected >= sizeof...(T)) {
+      throw std::out_of_range("Provided index out of range for variant.");
+   }
+   from_index(s, static_cast<int>(selected));
    std::visit(to_static_variant(ar[1]), s);
 }
 
