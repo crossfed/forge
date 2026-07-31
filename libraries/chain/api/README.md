@@ -35,7 +35,9 @@ the finalized `to_block` anchor. Every returned range has its own authenticated
 change-tree proof.
 
 Change proofs establish the complete mutation set for each requested range;
-they do not by themselves prove a state transition. A partial-state consumer
+the finality verifier also proves that every returned intermediate anchor is a
+canonical ancestor of the finalized target. They do not by themselves prove a
+state transition. A partial-state consumer
 keeps the authenticated frontier obtained from its snapshot, applies verified
 changes in order and accepts the update only when the resulting root equals the
 finalized target `state_root`. This is the intended `mountd`-class client path

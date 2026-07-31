@@ -444,12 +444,14 @@ add_test(
 add_executable(
    test_forge_crypto_asymmetric
    unit/main.cpp
+   crypto/test_asymmetric_serialization.cpp
    crypto/test_cypher_suites.cpp
    crypto/test_secp256k1_recover.cpp
    crypto/test_webauthn.cpp
 )
 target_link_libraries(
    test_forge_crypto_asymmetric
+   forge_codec_json
    forge_crypto_asymmetric
    forge_crypto_symmetric
    Boost::included_unit_test_framework

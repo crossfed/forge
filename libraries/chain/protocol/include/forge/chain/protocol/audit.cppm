@@ -84,6 +84,7 @@ struct transaction_inclusion_proof {
 
 struct audit_bundle {
    std::optional<proof_blob> finality;
+   std::optional<proof_blob> ancestry;
    std::vector<proof_blob> state;
    std::optional<transaction_inclusion_proof> transaction;
 
@@ -142,7 +143,7 @@ BOOST_DESCRIBE_STRUCT(anchored_request, (), (anchor, audit))
 BOOST_DESCRIBE_STRUCT(proof_blob, (), (scheme, version, payload))
 BOOST_DESCRIBE_STRUCT(merkle_step, (), (sibling, sibling_on_left))
 BOOST_DESCRIBE_STRUCT(transaction_inclusion_proof, (), (leaf, index, leaf_count, path))
-BOOST_DESCRIBE_STRUCT(audit_bundle, (), (finality, state, transaction))
+BOOST_DESCRIBE_STRUCT(audit_bundle, (), (finality, ancestry, state, transaction))
 BOOST_DESCRIBE_STRUCT(response_context, (), (chain, head, finalized, anchor))
 BOOST_DESCRIBE_STRUCT(audited_response, (), (context, audit))
 BOOST_DESCRIBE_STRUCT(method_capability, (), (api, method, audit, enabled))

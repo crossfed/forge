@@ -2,6 +2,7 @@ add_library(
    forge_chain_api STATIC
    abi.cpp
    authenticated_audit_verifier.cpp
+   finality.cpp
    raw_client.cpp
    verified_client.cpp
 )

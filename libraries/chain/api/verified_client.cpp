@@ -111,6 +111,20 @@ void verified_client::verify_changes(const protocol::state_changes_request& requ
       FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof,
                             "chain API changes response requires one proof per block range");
    }
+   auto ancestry = std::vector<protocol::state_anchor>{};
+   ancestry.reserve(response.blocks.size());
+   for (const auto& batch : response.blocks) {
+      if (batch.anchor != *response.context.anchor) {
+         ancestry.push_back(batch.anchor);
+      }
+   }
+   if (!ancestry.empty()) {
+      if (!audit.ancestry) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_finality,
+                               "chain API changes response omits its canonical ancestry proof");
+      }
+      verifier_->verify_ancestry(*response.context.anchor, ancestry, *audit.ancestry);
+   }
    auto proof_index = std::size_t{};
    auto stopped_within_range = false;
    auto complete = false;
@@ -185,6 +199,17 @@ void verified_client::verify_transaction_status(const forge::chain::protocol::tr
 boost::asio::awaitable<protocol::info_response> verified_client::get_info() {
    auto response = co_await client_.info().get({.audit = protocol::audit_mode::required});
    static_cast<void>(verify_envelope(response));
+   if (response.chain != response.context.chain) {
+      FORGE_THROW_EXCEPTION(exceptions::wrong_chain, "chain API info payload belongs to another chain");
+   }
+   if (response.head != response.context.head || response.finalized != response.context.finalized ||
+       response.head_num != protocol::calculate_block_num_from_id(response.head) ||
+       response.finalized_num != protocol::calculate_block_num_from_id(response.finalized) ||
+       response.context.anchor->block != response.finalized ||
+       response.context.anchor->block_num != response.finalized_num) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_finality,
+                            "chain API info payload is inconsistent with its audited context");
+   }
    co_return response;
 }
 
@@ -220,7 +245,9 @@ boost::asio::awaitable<protocol::block_response> verified_client::get_block(prot
    static_cast<void>(verify_envelope(response));
    if ((requested_id && response.id != *requested_id) || (requested_num && response.num != *requested_num) ||
        response.id != response.context.anchor->block || response.num != response.context.anchor->block_num ||
-       response.block.calculate_id() != response.id || response.block.calculate_block_num() != response.num) {
+       response.block.calculate_id() != response.id || response.block.calculate_block_num() != response.num ||
+       protocol::calculate_transaction_mroot(response.block.transactions) != response.block.transaction_mroot ||
+       response.block.transaction_mroot != response.context.anchor->transaction_root) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_finality,
                             "chain API block response does not match its request and audited anchor");
    }
@@ -240,8 +267,16 @@ boost::asio::awaitable<protocol::transaction_status_response>
 verified_client::await_transaction(protocol::transaction_await_request request) {
    request.audit = protocol::audit_mode::required;
    const auto expected = request.id;
+   const auto desired = request.desired;
    auto response = co_await client_.transactions().await_transaction(std::move(request));
    verify_transaction_status(expected, response);
+   if ((desired == protocol::transaction_lifecycle::finalized &&
+        response.state != protocol::transaction_lifecycle::finalized) ||
+       (desired != protocol::transaction_lifecycle::included &&
+        desired != protocol::transaction_lifecycle::finalized)) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof,
+                            "chain API transaction response does not satisfy the requested verified lifecycle");
+   }
    co_return response;
 }
 

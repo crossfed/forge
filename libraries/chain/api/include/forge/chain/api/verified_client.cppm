@@ -4,6 +4,7 @@ module;
 
 #include <memory>
 #include <optional>
+#include <span>
 
 export module forge.chain.api.verified_client;
 
@@ -25,6 +26,9 @@ class audit_verifier {
    virtual void verify_state_changes(const protocol::state_anchor& anchor, const protocol::key_range& range,
                                      std::uint32_t limit, const protocol::state_change_range& result,
                                      const protocol::proof_blob& proof) = 0;
+   virtual void verify_ancestry(const protocol::state_anchor& finalized,
+                                std::span<const protocol::state_anchor> intermediate,
+                                const protocol::proof_blob& proof) = 0;
    virtual void verify_transaction(const protocol::state_anchor& anchor,
                                    const forge::chain::protocol::transaction_id& expected,
                                    const protocol::transaction_status_response& response,
