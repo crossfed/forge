@@ -477,7 +477,30 @@ function(_forge_contract_validate_guest_environment)
          )
       endif()
    endforeach()
-   foreach(_property COMPILE_OPTIONS COMPILE_DEFINITIONS INCLUDE_DIRECTORIES)
+   foreach(_property
+      RULE_LAUNCH_COMPILE
+      RULE_LAUNCH_LINK
+      RULE_LAUNCH_CUSTOM
+   )
+      get_property(_value GLOBAL PROPERTY "${_property}")
+      if(_value)
+         message(
+            FATAL_ERROR
+            "global ${_property} is unsupported in a Forge Contract guest "
+            "project; the SDK owns the compile and link launchers"
+         )
+      endif()
+   endforeach()
+   foreach(_property
+      COMPILE_OPTIONS
+      COMPILE_DEFINITIONS
+      INCLUDE_DIRECTORIES
+      LINK_OPTIONS
+      LINK_DIRECTORIES
+      RULE_LAUNCH_COMPILE
+      RULE_LAUNCH_LINK
+      RULE_LAUNCH_CUSTOM
+   )
       get_directory_property(_value "${_property}")
       if(_value)
          message(

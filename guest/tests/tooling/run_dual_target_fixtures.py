@@ -489,6 +489,42 @@ forge_add_contract_library(
         },
     )
 
+    directory_launcher = source_root / "directory-launcher"
+    write_negative_project(
+        directory_launcher,
+        cmake_body="""
+forge_add_contract_library(
+   negative_protocol ID negative.directory_launcher
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+set_property(
+   DIRECTORY PROPERTY RULE_LAUNCH_COMPILE "${CMAKE_COMMAND};-E;env"
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
+    global_launcher = source_root / "global-launcher"
+    write_negative_project(
+        global_launcher,
+        cmake_body="""
+forge_add_contract_library(
+   negative_protocol ID negative.global_launcher
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+set_property(
+   GLOBAL PROPERTY RULE_LAUNCH_COMPILE "${CMAKE_COMMAND};-E;env"
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
     directory_profile = source_root / "directory-profile"
     write_negative_project(
         directory_profile,
@@ -672,6 +708,14 @@ class [[forge::contract("mismatch")]] mismatch final
         (
             mutated_launcher,
             "changed property: CXX_COMPILER_LAUNCHER",
+        ),
+        (
+            directory_launcher,
+            "directory RULE_LAUNCH_COMPILE are unsupported",
+        ),
+        (
+            global_launcher,
+            "global RULE_LAUNCH_COMPILE is unsupported",
         ),
         (directory_profile, "directory COMPILE_DEFINITIONS are unsupported"),
         (
