@@ -244,6 +244,23 @@ forge_add_contract_library(
         },
     )
 
+    mutated_target = source_root / "mutated-target"
+    write_negative_project(
+        mutated_target,
+        cmake_body="""
+add_library(undeclared_dependency INTERFACE)
+forge_add_contract_library(
+   negative_protocol ID negative.mutated
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+target_link_libraries(negative_protocol PRIVATE undeclared_dependency)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
     forward_edge = source_root / "forward-edge"
     write_negative_project(
         forward_edge,
@@ -315,6 +332,7 @@ public:
     cases = (
         (duplicate, "duplicate Forge Contract owner ID"),
         (host_only, "contract dependency is not guest-compatible"),
+        (mutated_target, "ALIAS target"),
         (forward_edge, "unknown Contract SDK dependency target"),
     )
     for source, expected in cases:

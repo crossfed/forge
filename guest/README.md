@@ -120,6 +120,10 @@ forge_add_contract(
 Clang dependency metadata validates module imports in the active guest build;
 textual includes are tracked by the generated depfile.
 
+The declaration is complete: its public target is an immutable CMake alias.
+Declare sources and dependencies in `forge_add_contract_library()` instead of
+mutating the target later, so CMake links and ABI ownership cannot diverge.
+
 The Contract SDK does not install downstream dual-target source packages.
 Products use `add_subdirectory()` for shared source-tree libraries. An ordinary
 native `install(EXPORT ...)` remains the product library owner's responsibility.

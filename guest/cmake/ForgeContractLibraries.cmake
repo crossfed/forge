@@ -354,31 +354,39 @@ function(forge_add_contract_library target)
       list(APPEND _private_ids "${_dependency_id}")
    endforeach()
 
-   add_library("${target}" STATIC)
+   string(MAKE_C_IDENTIFIER "${target}" _target_identifier)
+   string(
+      SHA256 _target_key
+      "${CMAKE_CURRENT_BINARY_DIR}\n${target}\n${ARG_ID}"
+   )
+   string(SUBSTRING "${_target_key}" 0 12 _target_key)
+   set(_concrete_target "_forge_contract_library_${_target_identifier}_${_target_key}")
+   add_library("${_concrete_target}" STATIC)
+   add_library("${target}" ALIAS "${_concrete_target}")
    target_sources(
-      "${target}"
+      "${_concrete_target}"
       PUBLIC
          FILE_SET forge_contract_modules TYPE CXX_MODULES
          BASE_DIRS ${_module_bases}
          FILES ${_MODULE_SOURCES}
    )
    if(_SOURCES)
-      target_sources("${target}" PRIVATE ${_SOURCES})
+      target_sources("${_concrete_target}" PRIVATE ${_SOURCES})
    endif()
    target_include_directories(
-      "${target}"
+      "${_concrete_target}"
       PUBLIC ${_module_bases}
       PRIVATE "${_source_root}"
    )
    if(_public_targets)
-      target_link_libraries("${target}" PUBLIC ${_public_targets})
+      target_link_libraries("${_concrete_target}" PUBLIC ${_public_targets})
    endif()
    if(_private_targets)
-      target_link_libraries("${target}" PRIVATE ${_private_targets})
+      target_link_libraries("${_concrete_target}" PRIVATE ${_private_targets})
    endif()
-   target_compile_features("${target}" PUBLIC cxx_std_23)
+   target_compile_features("${_concrete_target}" PUBLIC cxx_std_23)
    set_target_properties(
-      "${target}"
+      "${_concrete_target}"
       PROPERTIES
          CXX_MODULE_STD OFF
          CXX_SCAN_FOR_MODULES ON
@@ -389,8 +397,8 @@ function(forge_add_contract_library target)
          FORGE_CONTRACT_MODULE_BASES "${_module_bases}"
          FORGE_CONTRACT_MODULE_NAMES ""
    )
-   _forge_contract_configure_guest_target("${target}")
-   _forge_contract_register_owner("${ARG_ID}" "${target}")
+   _forge_contract_configure_guest_target("${_concrete_target}")
+   _forge_contract_register_owner("${ARG_ID}" "${_concrete_target}")
 endfunction()
 
 function(_forge_contract_collect_owner id state_key)

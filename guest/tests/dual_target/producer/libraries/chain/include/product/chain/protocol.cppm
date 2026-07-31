@@ -5,6 +5,8 @@ module;
 
 export module product.chain.protocol;
 
+import product.chain.limits;
+
 export import product.chain.values;
 
 export namespace product::chain {
@@ -38,5 +40,9 @@ struct revision {
 
 [[nodiscard]] std::optional<std::uint64_t>
 checked_add(std::uint64_t left, std::uint64_t right);
+
+[[nodiscard]] inline bool supports_nonzero_sizes() {
+   return is_supported_size(1);
+}
 
 } // namespace product::chain

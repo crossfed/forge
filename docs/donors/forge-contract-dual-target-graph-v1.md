@@ -40,7 +40,9 @@ compilations. Forge does not import either build system or their metadata.
 `forge_add_contract_library` is a thin declaration helper for an ordinary
 static CMake library. It adds module sources, implementation sources,
 PUBLIC/PRIVATE dependencies and guest compile settings when the active
-configuration targets wasm32.
+configuration targets wasm32. The concrete target is private and the declared
+name is an immutable alias, so later CMake calls cannot bypass ABI ownership
+metadata.
 
 `forge_add_contract` runs only inside the guest project. It generates the ABI
 and dispatcher, links and validates WASM, and writes the runtime manifest.

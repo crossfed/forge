@@ -32,6 +32,7 @@ int main() {
 
    const auto sum = product::chain::checked_add(7, 11);
    assert(sum && *sum == 18);
+   assert(product::chain::supports_nonzero_sizes());
    assert(!product::chain::checked_add(
       std::numeric_limits<std::uint64_t>::max(), 1
    ));
