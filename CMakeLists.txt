@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.31)
 
-project(forge VERSION 8.19.0 LANGUAGES C CXX ASM)
+project(forge VERSION 8.20.0 LANGUAGES C CXX ASM)
 
 include(GNUInstallDirs)
 include(CheckCXXSourceCompiles)
@@ -296,7 +296,6 @@ if(FORGE_ENABLE_CONTRACT_TOOLING)
    find_package(Clang 22.1 CONFIG REQUIRED)
    list(APPEND
       FORGE_SOURCE_INCLUDE_DIRS
-      "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/graph/include"
       "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/abi/include"
       "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/attributes/include"
       "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/validation/include"
@@ -452,7 +451,7 @@ function(forge_contract_register_guest_component)
    cmake_parse_arguments(
       ARG
       "FOUNDATION"
-      "ID;ARCHIVE"
+      "ID;TARGET;ARCHIVE"
       "MODULES;MODULE_NAMES;PUBLIC_LIBRARIES"
       ${ARGN}
    )
@@ -475,6 +474,10 @@ function(forge_contract_register_guest_component)
       message(FATAL_ERROR "duplicate Forge Contract guest component ID: ${ARG_ID}")
    endif()
    set_property(GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_ID" "${ARG_ID}")
+   set_property(
+      GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_TARGET"
+      "${ARG_TARGET}"
+   )
    set_property(
       GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_MODULE_NAMES"
       "${ARG_MODULE_NAMES}"
@@ -513,29 +516,29 @@ function(forge_target_contract_guest_component target)
    string(SHA256 _key "${ARG_ID}")
    get_property(_descriptor_id GLOBAL PROPERTY "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_ID")
    get_property(
+      _descriptor_target GLOBAL PROPERTY
+      "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_TARGET"
+   )
+   get_property(
       _module_names GLOBAL PROPERTY
       "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_MODULE_NAMES"
    )
-   get_property(
-      _dependencies GLOBAL PROPERTY
-      "FORGE_CONTRACT_GUEST_DESCRIPTOR_${_key}_DEPENDENCIES"
+   if(
+      NOT _descriptor_id STREQUAL ARG_ID
+      OR NOT _descriptor_target STREQUAL target
+      OR NOT _module_names
    )
-   if(NOT _descriptor_id STREQUAL ARG_ID OR NOT _module_names)
       message(FATAL_ERROR "Forge target ${target} has no guest component descriptor for ${ARG_ID}")
    endif()
    list(
       APPEND _exported
       FORGE_CONTRACT_GUEST_COMPONENT_ID
-      FORGE_CONTRACT_GUEST_MODULE_NAMES
-      FORGE_CONTRACT_GUEST_PUBLIC_COMPONENT_IDS
    )
    list(REMOVE_DUPLICATES _exported)
    set_target_properties(
       "${target}"
       PROPERTIES
          FORGE_CONTRACT_GUEST_COMPONENT_ID "${ARG_ID}"
-         FORGE_CONTRACT_GUEST_MODULE_NAMES "${_module_names}"
-         FORGE_CONTRACT_GUEST_PUBLIC_COMPONENT_IDS "${_dependencies}"
          EXPORT_PROPERTIES "${_exported}"
    )
 endfunction()
@@ -686,7 +689,6 @@ endif()
 if(FORGE_ENABLE_CONTRACT_TOOLING)
    list(
       APPEND FORGE_LEAF_TARGETS
-      forge_contract_graph
       forge_contract_abi
       forge_contract_attributes
       forge_contract_validation
@@ -789,7 +791,6 @@ endif()
 if(FORGE_ENABLE_CONTRACT_TOOLING)
    list(
       APPEND FORGE_BUILT_COMPONENTS
-      contract_graph
       contract_abi
       contract_attributes
       contract_validation
@@ -914,8 +915,7 @@ install(
 
 if(FORGE_ENABLE_CONTRACT_TOOLING)
    install(
-      DIRECTORY libraries/contract/graph/include/forge
-                libraries/contract/abi/include/forge
+      DIRECTORY libraries/contract/abi/include/forge
                 libraries/contract/attributes/include/forge
                 libraries/contract/validation/include/forge
                 libraries/contract/manifest/include/forge

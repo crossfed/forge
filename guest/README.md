@@ -37,10 +37,9 @@ changing C++ source compatibility.
 
 ## Stability
 
-The `forge_add_contract_library()` declaration/materialization API and its
-matching install/register functions are Experimental in Forge 8.16.0. Stable
-library IDs, emitted contract-graph descriptors, source identities, dependency
-scope and artifact wire formats are versioned compatibility contracts.
+The `forge_add_contract_library()` and `forge_add_contract_project()` helpers
+are Experimental. They create and launch ordinary CMake targets; they do not
+define a second package or build-graph format.
 `forge_add_contract()` and the existing guest C/C++ compatibility surface retain
 the stability stated by their owning SDK libraries and headers.
 
@@ -87,8 +86,9 @@ forge_add_contract(
 
 ## Shared Host And Guest Protocol
 
-Declare reusable protocol code once. Forge materializes the declaration as a
-normal host library and as an isolated wasm32 build graph:
+Declare reusable protocol code once and add the same physical directory to the
+native and standalone guest projects. Each configuration compiles it for its
+own toolchain:
 
 ```cmake
 find_package(Forge CONFIG REQUIRED COMPONENTS chain_protocol raw)
@@ -97,14 +97,12 @@ find_package(ForgeContract CONFIG REQUIRED)
 forge_add_contract_library(
    product_protocol
    ID product.chain.protocol
-   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
-   MODULE_BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
+   MODULE_BASE_DIRS include
    MODULE_SOURCES
       include/product/chain/ids.cppm
       include/product/chain/actions.cppm
    SOURCES protocol.cpp
-   PUBLIC_HEADERS include/product/chain/limits.hpp
-   PRIVATE_HEADERS details/validation.hpp
+   PUBLIC_HEADERS include/product/chain/macros.hpp
    PUBLIC_LIBRARIES
       Forge::forge_chain_protocol
       Forge::forge_raw
@@ -112,65 +110,49 @@ forge_add_contract_library(
 
 forge_add_contract(
    product
-   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
    SOURCES contract.cpp
-   HEADERS contract.hpp
    COMPILE_CHECKS protocol_checks.cpp
    LIBRARIES product_protocol
 )
 ```
 
-`ID` is the stable package and guest-graph identity. `PUBLIC_LIBRARIES` are
-visible to consumers; `PRIVATE_LIBRARIES` are available only while compiling
-the owning library. Files, dependency scope and source roots are immutable
-after declaration. Source-file build properties are rejected because the
-descriptor does not model them. Native CMake target state is never serialized
-into the guest graph; Forge only verifies that the materialized target still
-matches the state produced by the declaration.
+`ID` identifies the library in ABI module-owner diagnostics.
+`PUBLIC_HEADERS` declares rare macro-only public headers as a standard CMake
+header file set; private textual dependencies remain compiler-discovered.
+`PUBLIC_LIBRARIES` and `PRIVATE_LIBRARIES` create ordinary CMake dependency
+scopes. In a native configuration, the returned target is a normal static
+library that products may extend or install with standard CMake commands. In a
+guest configuration, the declaration is complete: sources, compile settings
+and include paths must not be mutated after `forge_add_contract_library()` or
+`forge_add_contract()`. This keeps CMake compilation and Abigen on one semantic
+profile instead of creating consumer-specific module variants.
+Directory-wide compile options, definitions and includes are rejected for the
+same reason. The guest toolchain rejects external configuration-specific C++
+customization and owns the standard Debug, Release, MinSizeRel and
+RelWithDebInfo flags. Abigen receives that same selected configuration profile,
+so `NDEBUG` and other configuration semantics match the compiled guest modules.
+Single-configuration builds publish artifacts directly under `artifacts/`.
+Multi-configuration builds isolate WASM, ABI, manifest, dispatcher and wrapper
+outputs under configuration-specific directories such as
+`artifacts/Release/` and `<contract>.generated/Release/`. The
+`FORGE_CONTRACT_WASM_FILE`, `FORGE_CONTRACT_ABI_FILE` and
+`FORGE_CONTRACT_MANIFEST_FILE` target properties contain the matching
+`$<CONFIG>` path; exact `_<CONFIG>` properties are also available.
 
-Install the source package and standard CMake module metadata together:
+CMake and Clang remain responsible for module visibility. ABI tooling reads
+compilation metadata only to require that every imported module has exactly one
+owner in the active guest configuration; it does not reconstruct dependency
+scopes. Textual includes are tracked by the generated depfile.
 
-```cmake
-forge_install_contract_library(
-   TARGET product_protocol
-   EXPORT ProductProtocolTargets
-   MODULE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/modules"
-   SOURCE_DESTINATION "${CMAKE_INSTALL_DATADIR}/product-protocol/sources"
-)
-install(
-   EXPORT ProductProtocolTargets
-   NAMESPACE Product::
-   FILE ProductProtocolTargets.cmake
-   CXX_MODULES_DIRECTORY cxx-modules
-   DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ProductProtocol"
-)
-```
+ABI-visible `multi_index` and `singleton` aliases belong in an imported guest
+module interface. Library implementation units are compiled only by CMake and
+are never reparsed by Abigen with an approximated command line.
 
-The package config must use `find_dependency(Forge)` for the declared host
-dependencies and `find_dependency(ForgeContract)` before loading the targets
-file. Immediately after loading it, register every exported protocol target so
-Forge seals the imported host materialization before returning control to the
-consumer:
-
-```cmake
-include("${CMAKE_CURRENT_LIST_DIR}/ProductProtocolTargets.cmake")
-forge_register_contract_library_targets(Product::product_protocol)
-```
-
-Installed packages contain module sources, implementation inputs, headers and
-relocatable descriptor metadata. Compiler-specific BMI or PCM artifacts are
-never transported. An imported contract-library target that was not registered
-by its package config is rejected instead of being accepted with a late,
-consumer-controlled baseline.
-
-Seal checks run at the end of every CMake directory where a registered target
-is visible. This preserves normal non-`GLOBAL` imported-target scope when a
-package is loaded from a nested `CMakeLists.txt`. The check remains at the tail
-of that directory's deferred-call queue, so a later deferred target or source
-mutation cannot run after validation. For installed targets, source paths are
-derived from the exported prefix-relative module and source roots; relocated
-packages therefore receive the same source-property checks as build-tree
-targets.
+The Contract SDK does not install downstream dual-target source packages.
+Products use `add_subdirectory()` for shared source-tree libraries. An ordinary
+native `install(EXPORT ...)`, including a destination for the
+`forge_contract_modules` file set, remains the product library owner's
+responsibility.
 
 ## Named Action Payloads
 
@@ -203,13 +185,34 @@ auto action = forge::chain::protocol::action{
 Host packing and guest dispatch both use `forge.raw`, so the binary action
 payload has one type definition.
 
-Configure the host project normally. `forge_add_contract` creates an isolated
-wasm32 sub-build, so the parent project does not use the SDK toolchain file:
+Configure a standalone guest project with the SDK toolchain:
 
 ```bash
-cmake -S . -B build -G Ninja -DForgeContract_DIR="$ForgeContract_DIR"
-cmake --build build -j 4
+cmake -S guest -B build/guest -G Ninja \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_TOOLCHAIN_FILE="$ForgeContract_DIR/ForgeContractToolchain.cmake"
+cmake --build build/guest --target hello_artifacts -j 4
 ```
+
+A native project may call `forge_add_contract_project()` as a convenience
+launcher for that same guest project. Products that add shared directories
+outside the guest directory pass their common root once:
+
+```cmake
+forge_add_contract_project(
+   product_guest
+   SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/guest"
+   BINARY_DIR "${CMAKE_CURRENT_BINARY_DIR}/guest"
+   CONTRACT product
+   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
+)
+```
+
+The launcher forwards that root as `FORGE_CONTRACT_SOURCE_ROOT`. A direct guest
+configure sets the same cache variable. Every guest target uses it for one
+project-wide reproducible path mapping. Checked-in inputs must remain below that
+root; generated contract inputs may live below the guest project's
+`CMAKE_BINARY_DIR`, which has its own deterministic build-path mapping.
 
 The target always produces:
 

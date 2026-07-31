@@ -517,6 +517,7 @@ write_basic_package_version_file(
    "${CMAKE_CURRENT_BINARY_DIR}/ForgeContractConfigVersion.cmake"
    VERSION ${PROJECT_VERSION}
    COMPATIBILITY SameMajorVersion
+   ARCH_INDEPENDENT
 )
 
 install(
@@ -525,11 +526,11 @@ install(
       "${CMAKE_CURRENT_BINARY_DIR}/ForgeContractConfigVersion.cmake"
       "${CMAKE_CURRENT_BINARY_DIR}/ForgeContractToolchain.cmake"
       cmake/ForgeContractFunctions.cmake
-      cmake/ForgeContractGraph.cmake
+      cmake/ForgeContractLibraries.cmake
+      cmake/ForgeContractBuild.cmake
       cmake/ForgeContractGuestComponents.cmake
    DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/ForgeContract"
 )
-install(DIRECTORY build DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract")
 install(DIRECTORY libraries/contract/include/ DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/modules")
 install(
    FILES
@@ -612,6 +613,7 @@ install(
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/time.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/types_value.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/types.cppm"
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/typed_id.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/fixed_key.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/fixed_key_value.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/action_value.cppm"

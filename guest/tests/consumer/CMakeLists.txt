@@ -6,6 +6,13 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+set(
+   FORGE_CONTRACT_SOURCE_ROOT
+   "${CMAKE_CURRENT_SOURCE_DIR}/.."
+   CACHE PATH
+   "Canonical source root for the installed Contract SDK consumer fixtures"
+)
+
 find_package(ForgeContract CONFIG REQUIRED)
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 
@@ -23,7 +30,6 @@ target_include_directories(
 forge_add_contract(
    hello
    SOURCES hello.cpp
-   HEADERS local_value.hpp
 )
 
 forge_add_contract(
@@ -50,7 +56,6 @@ forge_add_contract(
 forge_add_contract(
    multisource
    SOURCES multi_source_helper.cpp multi_source.cpp
-   HEADERS multi_source.hpp
    DISPATCH_SOURCE multi_source.cpp
 )
 
@@ -150,37 +155,31 @@ forge_add_contract(
 forge_add_contract(
    multiidx
    SOURCES multi_index_contract.cpp
-   HEADERS multi_index_cases.hpp
 )
 
 forge_add_contract(
    legacymidx
    SOURCES legacy_multi_index_contract.cpp
-   HEADERS multi_index_cases.hpp
 )
 
 forge_add_contract(
    midxerrors
    SOURCES multi_index_errors_contract.cpp
-   HEADERS multi_index_cases.hpp
 )
 
 forge_add_contract(
    legmidxerr
    SOURCES legacy_multi_index_errors_contract.cpp
-   HEADERS multi_index_cases.hpp
 )
 
 forge_add_contract(
    midxextend
    SOURCES multi_index_extended_contract.cpp
-   HEADERS multi_index_cases.hpp
 )
 
 forge_add_contract(
    legmidxext
    SOURCES legacy_multi_index_extended_contract.cpp
-   HEADERS multi_index_cases.hpp
 )
 
 add_custom_target(
@@ -189,9 +188,9 @@ add_custom_target(
       "${Python3_EXECUTABLE}"
       "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/run_multi_index_fixtures.py"
       --mapping "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/multi_index_donor_mapping.json"
-      --abi-pair "${CMAKE_CURRENT_BINARY_DIR}/multiidx.abi" "${CMAKE_CURRENT_BINARY_DIR}/legacymidx.abi"
-      --abi-pair "${CMAKE_CURRENT_BINARY_DIR}/midxerrors.abi" "${CMAKE_CURRENT_BINARY_DIR}/legmidxerr.abi"
-      --abi-pair "${CMAKE_CURRENT_BINARY_DIR}/midxextend.abi" "${CMAKE_CURRENT_BINARY_DIR}/legmidxext.abi"
+      --abi-pair "$<TARGET_GENEX_EVAL:multiidx,$<TARGET_PROPERTY:multiidx,FORGE_CONTRACT_ABI_FILE>>" "$<TARGET_GENEX_EVAL:legacymidx,$<TARGET_PROPERTY:legacymidx,FORGE_CONTRACT_ABI_FILE>>"
+      --abi-pair "$<TARGET_GENEX_EVAL:midxerrors,$<TARGET_PROPERTY:midxerrors,FORGE_CONTRACT_ABI_FILE>>" "$<TARGET_GENEX_EVAL:legmidxerr,$<TARGET_PROPERTY:legmidxerr,FORGE_CONTRACT_ABI_FILE>>"
+      --abi-pair "$<TARGET_GENEX_EVAL:midxextend,$<TARGET_PROPERTY:midxextend,FORGE_CONTRACT_ABI_FILE>>" "$<TARGET_GENEX_EVAL:legmidxext,$<TARGET_PROPERTY:legmidxext,FORGE_CONTRACT_ABI_FILE>>"
    DEPENDS multiidx legacymidx midxerrors legmidxerr midxextend legmidxext
    VERBATIM
 )
@@ -229,7 +228,7 @@ add_custom_target(
 )
 
 set(_tooling_output "${CMAKE_CURRENT_BINARY_DIR}/tooling")
-set(_tooling_build_dir "${CMAKE_CURRENT_BINARY_DIR}/hello.contract")
+set(_tooling_build_dir "${CMAKE_CURRENT_BINARY_DIR}")
 add_custom_target(
    forge_contract_tooling_fixtures ALL
    COMMAND
@@ -241,7 +240,6 @@ add_custom_target(
       --include "${ForgeContract_DATA_DIR}/include"
       --modules "${ForgeContract_DATA_DIR}/modules"
       --build-dir "${_tooling_build_dir}"
-      --contract-graph "${CMAKE_CURRENT_BINARY_DIR}/hello.contract-graph.json"
       --fixtures "${CMAKE_CURRENT_SOURCE_DIR}/../tooling"
       --output "${_tooling_output}"
    DEPENDS hello
@@ -256,13 +254,12 @@ add_custom_target(
       --checker "${ForgeContract_CHECK}"
       --manifest-tool "${ForgeContract_MANIFEST}"
       --clang "${ForgeContract_CLANG}"
-      --wasm "${CMAKE_CURRENT_BINARY_DIR}/hello.wasm"
-      --abi "${CMAKE_CURRENT_BINARY_DIR}/hello.abi"
+      --wasm "$<TARGET_GENEX_EVAL:hello,$<TARGET_PROPERTY:hello,FORGE_CONTRACT_WASM_FILE>>"
+      --abi "$<TARGET_GENEX_EVAL:hello,$<TARGET_PROPERTY:hello,FORGE_CONTRACT_ABI_FILE>>"
       --imports "${ForgeContract_DATA_DIR}/registry/intrinsics.json"
-      --manifest "${CMAKE_CURRENT_BINARY_DIR}/hello.contract.json"
-      --source-graph "${CMAKE_CURRENT_BINARY_DIR}/hello.contract-graph.json"
-      --output "${CMAKE_CURRENT_BINARY_DIR}/checker"
-   DEPENDS hello
+      --manifest "$<TARGET_GENEX_EVAL:hello,$<TARGET_PROPERTY:hello,FORGE_CONTRACT_MANIFEST_FILE>>"
+      --output "${CMAKE_CURRENT_BINARY_DIR}/checker/$<CONFIG>"
+   DEPENDS hello_artifacts
    VERBATIM
 )
 
@@ -287,7 +284,7 @@ add_custom_target(
       "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/run_reproducibility.py"
       --cmake "${CMAKE_COMMAND}"
       --package "${ForgeContract_DIR}"
-      --source "${CMAKE_CURRENT_SOURCE_DIR}/hello.cpp"
+      --source "${CMAKE_CURRENT_SOURCE_DIR}/../tooling/reproducibility"
       --output "${CMAKE_CURRENT_BINARY_DIR}/reproducibility"
    DEPENDS hello
    VERBATIM

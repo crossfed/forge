@@ -1,143 +1,105 @@
-# Forge Contract Dual-Target Graph Donor Baseline v1
+# Forge Native Guest Project Donor Baseline v2
 
-This note defines the build-graph model for Forge contract protocol libraries.
-A contract protocol library is one logical package with two configured
-materializations: a native host library and a wasm32 guest library. The Forge
-descriptor, not CMake target internals, is the protocol exchanged between those
-materializations.
+This note replaces the earlier cross-config descriptor design. A product owns
+one native CMake configuration and one standalone guest CMake configuration.
+The ordinary target graph inside each configuration is authoritative.
 
 ## Accepted Donors
 
 ### CDT
 
-Pinned CDT commit `69599db279b7b93d0688502720c15c6962a1401b`
-defines the accepted guest compilation, ABI generation and dispatcher
-semantics. In particular, an action is compiled for wasm32, decoded from the
-incoming action payload and dispatched to contract code.
+Pinned CDT commit `69599db279b7b93d0688502720c15c6962a1401b` is the donor for
+direct wasm32 project configuration, contract compilation, ABI generation and
+dispatcher semantics. Contract sources and their libraries are configured
+together under the guest toolchain.
 
-CDT is not a dual-target package-graph donor. Its `add_contract` and
-`add_native_library` entry points create separate targets and do not preserve
-one installable host/guest dependency graph.
+Forge extends that model only by allowing selected protocol source directories
+to be added to a separate native project. The native and guest builds compile
+the same physical `.cppm` and `.cpp` files independently.
 
-### Bazel
+### CMake And Clang
 
-Bazel configured targets and providers supply the graph-model donor:
+Standard CMake cross-compilation provides the implementation:
 
-- a logical target is distinct from one configured target;
-- dependencies are typed edges rather than strings recovered from linker state;
-- analysis produces immutable metadata before execution;
-- consumers receive only declared public providers.
+- a toolchain file selects wasm32 before `project()`;
+- `add_subdirectory()` adds shared and guest-only libraries;
+- `FILE_SET CXX_MODULES` and Clang scanning build the module dependency graph;
+- ordinary PUBLIC and PRIVATE links define target visibility;
+- compiler depfiles track textual includes;
+- an optional `ExternalProject` launches the standalone guest project without
+  inspecting its targets.
 
-Forge adopts those invariants without importing Bazel, Starlark or Bazel
-providers. A Forge contract-library descriptor is the typed analysis result.
+No host archive, BMI or PCM file crosses into the guest build.
 
-### Cargo
+Cargo host/target units and Bazel configured targets support the conceptual
+point that one logical source package may have independent configured
+compilations. Forge does not import either build system or their metadata.
 
-Cargo host and target build units supply the materialization donor. One package
-can be compiled independently for the host and target triples while preserving
-the same package identity and explicit dependency graph.
+## Forge Helpers
 
-Forge adopts the separation between logical identity and configured build unit.
-It does not import Cargo metadata or Rust build logic.
+`forge_add_contract_library` is a thin declaration helper for an ordinary
+static CMake library. It adds module sources, implementation sources,
+PUBLIC/PRIVATE dependencies and guest compile settings when the active
+configuration targets wasm32. The declared name is the concrete, installable
+CMake target; standard later CMake operations remain part of the authoritative
+target graph.
 
-### CMake
+`forge_add_contract` runs only inside the guest project. It generates the ABI
+and dispatcher, links and validates WASM, and writes the runtime manifest.
 
-CMake remains the implementation substrate:
+`forge_add_contract_project` is an optional host launcher. It configures and
+builds the same standalone guest directory and exposes artifact paths for
+native VM tests.
 
-- `ExternalProject` isolates the wasm32 build;
-- `FILE_SET CXX_MODULES` owns module inputs;
-- `install(EXPORT ... CXX_MODULES_DIRECTORY ...)` exports host module metadata;
-- package configuration supports relocated downstream consumers.
+## ABI Metadata
 
-CMake continues to own each native C++ graph. Forge does not read
-`LINK_LIBRARIES`, `INTERFACE_LINK_LIBRARIES`, generator-expression wrappers or
-directory-internal target encodings to construct a second graph.
+Abigen consumes compiler metadata from object files built in the current guest
+configuration. Stable owner IDs identify the compilations. The metadata proves
+that each imported module has exactly one owner in that configuration. CMake
+and Clang enforce PUBLIC and PRIVATE visibility while compiling the actual
+targets; Abigen does not infer a second visibility graph from C++ import
+syntax. This metadata is diagnostic state of the current compilation and is
+not transported to another configuration.
 
-## Canonical Descriptor
+The SDK module registry is complete and fail-closed: every imported known SDK
+module must belong to a registered owner. Standalone Abigen calls without
+contract library metadata retain the existing source-analysis behavior.
 
-`forge_add_contract_library` creates one immutable descriptor containing:
+## Runtime Manifest
 
-- descriptor schema version and stable library ID;
-- source root and module base directories;
-- files with explicit roles and logical paths;
-- public and private dependency IDs;
-- the concrete native target and immutable public alias.
+Manifest schema v3 records:
 
-`forge_add_contract` creates the contract-root descriptor with explicit
-sources, headers, compile checks and contract-library dependencies.
+- Forge SDK and LLVM identity;
+- sysroot and intrinsic interface identity;
+- reproducibility profile;
+- WASM imports and features;
+- WASM and ABI SHA-256 values.
 
-The descriptor is normalized once. Forge derives five views from that value:
-
-1. native host compilation;
-2. isolated wasm32 compilation;
-3. installed source package;
-4. ABI generator input;
-5. source-graph attestation.
-
-These views may filter the descriptor by role or edge scope. They must not
-rediscover dependencies from generated build state.
-
-## Graph Invariants
-
-- IDs are globally unique inside one configure.
-- File logical paths are unique inside one descriptor.
-- Every file is inside its declared source root.
-- Contract-library dependencies name Forge descriptors or guest-compatible
-  Forge components with stable IDs.
-- Public edges are visible to downstream libraries and contracts.
-- Private edges are visible only while compiling the owner implementation.
-- Every non-system compiler dependency is declared by the descriptor, even when
-  it is outside the owner's source root.
-- A public module may depend only on public files, including files owned by the
-  same library.
-- The descriptor graph is acyclic.
-- An installed descriptor contains prefix-relative paths only.
-- Installed packages contain source and module inputs, never BMI or PCM files.
-- The guest build receives versioned JSON plus its SHA-256 and rejects any
-  schema or digest mismatch.
-
-Native CMake mutation is intentionally unavailable through the public alias.
-Because CMake exposes an alias's concrete target through `ALIASED_TARGET`,
-Forge also seals the materialized target properties and verifies them at the
-end of each CMake directory where that target is visible. Source-file build
-properties are rejected rather than captured because the descriptor has no
-source-property channel. All files, dependencies and supported options must be
-declared in the Forge call. This consistency check does not derive a second
-graph from CMake; it only rejects native state that differs from the canonical
-descriptor materialization. Incomplete descriptors therefore remain configure
-errors instead of platform-dependent build failures.
-Installed package configs register and seal their exported protocol targets
-immediately after loading the CMake targets file. Lazy registration is rejected
-because it would let consumer mutations define the initial baseline. Installed
-source identities are reconstructed only from exported prefix-relative roots,
-and the directory seal follows later deferred calls before asserting the final
-materialization.
+It intentionally contains no source graph and makes no source-verification
+claim. Etherscan-like verification is deferred to a separate attestation layer
+based on a hermetic build and actual compiler dependencies.
 
 ## Rejected Mechanisms
 
-- reverse parsing of native CMake target properties;
-- parsing `$<LINK_ONLY:...>` or CMake `::@(...)` directory wrappers;
-- central host-target-to-guest-target name switches;
-- CMake File API as a cross-toolchain protocol;
-- custom C++ module-name parsers or installed BMI transport;
-- importing Bazel, Cargo or CDT build systems into Forge;
-- dependency ownership in the Clang attribute plugin.
+- host-to-guest JSON graph transport;
+- target fingerprints or reconciliation;
+- reverse parsing of `LINK_LIBRARIES`, `INTERFACE_LINK_LIBRARIES`,
+  `$<LINK_ONLY:...>` or directory wrappers;
+- central host-target to guest-target mappings;
+- downstream dual-target source-package materialization;
+- installed BMI or PCM transport;
+- source attestation derived from a manual file inventory.
 
-## Validation Consequences
+## Validation
 
-The local ARM64 gate exercises the normalized graph, not individual fixes. Its
-table includes direct and transitive public/private edges, distinct Forge crypto
-leaves, invalid IDs, cycles, undeclared inputs, build-tree consumption and
-relocated install-tree consumption. The same descriptor drives ABI, VM and
-attestation fixtures.
+Focused validation must cover:
 
-Ubuntu and macOS CI are portability confirmation after a clean review, not the
-primary graph debugger.
-
-## Manifest Migration
-
-The dual-target graph moves the experimental contract manifest from schema v1
-to schema v2 for Forge 8.16. Schema-v1 sidecars are regenerated rather than
-translated. Consumers must accept schema v2 and its required `source_graph`
-before upgrading. Forge does not emit both schemas or retain a graph-free v1
-mode.
+- native and wasm32 compilation of the same module sources;
+- transitive PUBLIC and PRIVATE module visibility enforced by CMake/Clang;
+- rejection of host-only guest dependencies;
+- direct and launcher artifact identity;
+- multi-config Release forwarding;
+- named action direct ABI layout and Raw byte parity;
+- VM persisted-state roundtrip;
+- relocated Contract SDK consumption;
+- Spring/EOSIO compatibility corpus.

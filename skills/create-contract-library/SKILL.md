@@ -1,104 +1,143 @@
 ---
 name: create-contract-library
-description: Use when creating, extending, refactoring, or reviewing a dual-target contract protocol library built for both the Forge host SDK and a WASM guest contract.
+description: Use when creating, extending, refactoring, or reviewing a contract library compiled independently for a native host and a WASM guest.
 ---
 
-# Skill: Dual-Target Contract Library
+# Skill: Contract Library
 
 ## Prerequisite
 
-Apply `skills/create-library/SKILL.md` first. A contract library follows the
-same `.cppm`, `.cpp`, `.hxx`, naming, pairing, and include-path rules as every
-other Forge library. This skill adds the cross-toolchain contract constraints;
-it does not replace the library layout skill.
+Apply `skills/create-library/SKILL.md` first. Contract libraries use the same
+`.cppm`, `.cpp`, `.hxx`, naming, pairing and include-path rules as every other
+Forge library.
 
-This skill applies only to dual-target protocol libraries declared with
-`forge_add_contract_library`. It does not apply to host-only libraries such as
-`libraries/contract/testing`.
+## Build Model
+
+A product owns two independent CMake configurations:
+
+- the native host project;
+- the standalone guest project configured with `ForgeContractToolchain`.
+
+Both projects add the same shared source directory with `add_subdirectory`.
+The sources are compiled separately for the selected toolchain. Native
+archives, BMI and PCM files are never reused by the guest.
+
+The ordinary CMake target graph is the only build graph. Do not create,
+serialize, fingerprint, install or reconstruct a second dependency graph.
+In particular, do not traverse or interpret `LINK_LIBRARIES`,
+`INTERFACE_LINK_LIBRARIES`, `LINK_ONLY` or CMake directory wrappers. Forge may
+compare raw target-property snapshots only to reject post-declaration mutation;
+that comparison must not become dependency discovery.
+
+The guest declaration is complete. Do not mutate a target with
+`target_sources`, `target_compile_options`, `target_compile_definitions` or
+`target_include_directories` after `forge_add_contract_library()` or
+`forge_add_contract()`. Forge rejects such mutation because CMake compilation
+and Abigen must use the same semantic profile.
+Do not set directory-wide compile options, definitions, include paths or
+`CMAKE_CXX_FLAGS*` in the guest project. The Forge Contract toolchain owns one
+C++ profile per standard CMake configuration and passes the selected profile to
+Abigen.
 
 ## Declaration
-
-Declare the complete source and dependency graph once:
 
 ```cmake
 forge_add_contract_library(
    product_protocol
    ID product.chain.protocol
-   SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}"
-   MODULE_BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
+   MODULE_BASE_DIRS include
    MODULE_SOURCES
       include/product/chain/protocol/value.cppm
    SOURCES
       value.cpp
-      value_impl.cpp
    PUBLIC_HEADERS
       include/product/chain/protocol/macros.hpp
-   PRIVATE_HEADERS
-      details/value_impl.hxx
    PUBLIC_LIBRARIES
       Forge::forge_chain_protocol
       Forge::forge_raw
    PRIVATE_LIBRARIES
-      other_contract_library
+      product_validation
 )
 ```
 
-The corresponding private implementation is `value_impl.cpp`, paired with
-`details/value_impl.hxx`; `value.cpp` is paired only with `value.cppm`.
+The helper creates an ordinary static CMake library with a
+`FILE_SET CXX_MODULES`, standard PUBLIC/PRIVATE dependencies and the guest
+compile settings when called from a guest configuration.
 
-- `ID` is the stable package and guest-component identity.
-- Every file belongs to `SOURCE_ROOT`, has one logical path, and has one role.
-- Every dependency is declared as `PUBLIC_LIBRARIES` or `PRIVATE_LIBRARIES`.
-- Public dependencies are available to downstream protocol consumers.
-- Private dependencies are available only to implementation units owned by the
-  declaring library.
-- Dependencies must expose a guest-compatible Forge component ID or be another
-  contract library.
-- Host-only dependencies, dependency cycles, duplicate IDs, duplicate logical
-  paths, and undeclared inputs are errors.
+- `ID` is the stable ABI metadata owner used by Abigen diagnostics.
+- `MODULE_SOURCES` are public module interface units.
+- `SOURCES` are ordinary implementation units.
+- `PUBLIC_HEADERS` are rare macro-only public headers exported as a standard
+  CMake `FILE_SET HEADERS`.
+- `PUBLIC_LIBRARIES` are available to downstream consumers.
+- `PRIVATE_LIBRARIES` are available only to the owning target.
+- Dependencies must be guest-compatible Forge components or other contract
+  libraries when the target is built for WASM.
 
-Do not mutate the target later with native `target_sources`,
-`target_link_libraries`, or compile/link option commands. Do not inspect
-`LINK_LIBRARIES`, `INTERFACE_LINK_LIBRARIES`, `LINK_ONLY`, generated directory
-wrappers, or target-name conventions to reconstruct a guest graph.
+Use only paths owned by the current library. Private textual includes are
+discovered by the compiler and depfiles; they are not duplicated in a Forge
+inventory.
 
 ## Protocol Surface
 
-- Shared strong IDs, enums, action payloads, table values, index keys, and pure
-  checked calculations live in the contract library.
-- An action payload owns its external name through a public
+- Shared strong IDs, enums, action payloads, persisted values, index keys and
+  pure checked calculations live in a dual-target contract library.
+- A named action payload provides a public
   `static constexpr get_name()` returning
   `forge::chain::protocol::action_name`.
-- A named payload is packed by the host with `forge::raw` and unpacked directly
-  by guest dispatch. Do not add a wrapper object such as `{ value: payload }`.
-- Table/action names and persisted values have one host/guest definition.
-- Authorization, `multi_index` or `singleton` declarations, state mutations,
-  and dispatch remain guest-only.
-- RPC, signing orchestration, caches, retries, and external JSON boundaries
-  remain host-only.
+- Host code packs the payload with `forge::raw`; guest dispatch unpacks that
+  same payload directly.
+- Authorization, `multi_index`, `singleton`, mutations and dispatch are
+  guest-only.
+- Guest table aliases that belong in the ABI are declared in an imported
+  guest module interface. Abigen does not reparse library implementation
+  units; their compile definitions and options remain owned by CMake.
+- RPC, signing orchestration, caches, retries and external JSON boundaries are
+  host-only.
+
+## Guest Project
+
+```cmake
+cmake_minimum_required(VERSION 3.31)
+project(product_guest LANGUAGES CXX)
+
+find_package(ForgeContract CONFIG REQUIRED)
+
+add_subdirectory(../libraries/chain/protocol chain/protocol)
+add_subdirectory(libraries/product)
+
+forge_add_contract(
+   product
+   SOURCES entry.cpp
+   LIBRARIES product_contract
+)
+```
+
+`forge_add_contract()` is called only in the standalone guest project.
+`forge_add_contract_project()` may be used by a native project as an optional
+launcher; it configures the guest project but never reads its target graph.
+When shared sources live above the guest directory, pass the product root to
+the launcher with `SOURCE_ROOT` and to a direct guest configure with
+`-DFORGE_CONTRACT_SOURCE_ROOT=<root>`. One common root must cover every shared
+and guest-only contract library. Generated contract inputs may instead live
+below the guest project's `CMAKE_BINARY_DIR`; arbitrary external source roots
+remain unsupported.
 
 ## Packaging
 
-- Install sources, module interfaces, public headers, and versioned graph
-  metadata required to rebuild the library for another toolchain.
-- Export an installable protocol target through
-  `forge_install_contract_library`.
-- Never install BMI or PCM files.
-- Installed metadata must be relocatable and contain no source/build absolute
-  paths.
-- Consumers pass the installed target directly to `forge_add_contract`.
+The Contract SDK does not install or materialize downstream dual-target source
+packages. Products consume shared source trees with `add_subdirectory`.
+If a native library needs installation, use ordinary CMake
+`install(TARGETS ... EXPORT ...)` and install its declared module/header file
+sets; do not install BMI or PCM files.
 
 ## Required Validation
 
-1. Build and import the protocol library on the host.
-2. Build the same declared graph for the WASM guest.
-3. Prove identical `forge::raw` bytes for representative shared values.
-4. Prove named-action ABI fields are direct and dispatch receives the same DTO.
+1. Build and import representative shared types on the native host.
+2. Build the same physical sources in the standalone WASM guest project.
+3. Prove identical `forge::raw` bytes for representative values.
+4. Prove named-action ABI fields are direct and guest dispatch receives the
+   same DTO.
 5. Exercise persisted state through `Forge::forge_contract_testing`.
-6. Install, relocate, and consume the package from an independent CMake project.
-7. Verify the contract manifest contains the deterministic declared source
-   graph and no absolute paths.
-
-The SDK is the owner of graph materialization. Product projects must not create
-compatibility modules, copy guest runtimes, invent a second serializer, or
-reimplement the contract test host.
+6. Verify direct guest and optional launcher builds produce identical WASM,
+   ABI and runtime manifest artifacts.

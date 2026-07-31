@@ -176,6 +176,8 @@ jobs:
         shell: bash
         run: |
           cmake -S guest/tests/consumer -B build/contract-consumer -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/build/contract-sdk-prefix/lib/cmake/ForgeContract/ForgeContractToolchain.cmake" \
             -DForgeContract_DIR="$GITHUB_WORKSPACE/build/contract-sdk-prefix/lib/cmake/ForgeContract"
           cmake --build build/contract-consumer -j 4
 
@@ -187,22 +189,22 @@ jobs:
             -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
             -DForge_DIR="$GITHUB_WORKSPACE/build/forge-prefix/lib/cmake/Forge" \
-            -DFORGE_CONTRACT_TEST_WASM="$GITHUB_WORKSPACE/build/contract-consumer/hello.wasm" \
-            -DFORGE_CONTRACT_TEST_RECORD_WASM="$GITHUB_WORKSPACE/build/contract-consumer/recordtest.wasm" \
-            -DFORGE_CONTRACT_TEST_ALLOCATOR_WASM="$GITHUB_WORKSPACE/build/contract-consumer/allocatortst.wasm" \
-            -DFORGE_CONTRACT_TEST_LEGACY_WASM="$GITHUB_WORKSPACE/build/contract-consumer/legacyhello.wasm" \
-            -DFORGE_CONTRACT_TEST_LEGACY_NOTIFICATION_WASM="$GITHUB_WORKSPACE/build/contract-consumer/legacynotify.wasm" \
+            -DFORGE_CONTRACT_TEST_WASM="$GITHUB_WORKSPACE/build/contract-consumer/artifacts/hello.wasm" \
+            -DFORGE_CONTRACT_TEST_RECORD_WASM="$GITHUB_WORKSPACE/build/contract-consumer/artifacts/recordtest.wasm" \
+            -DFORGE_CONTRACT_TEST_ALLOCATOR_WASM="$GITHUB_WORKSPACE/build/contract-consumer/artifacts/allocatortst.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_WASM="$GITHUB_WORKSPACE/build/contract-consumer/artifacts/legacyhello.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_NOTIFICATION_WASM="$GITHUB_WORKSPACE/build/contract-consumer/artifacts/legacynotify.wasm" \
             -DFORGE_CONTRACT_TEST_DB_WASM="$GITHUB_WORKSPACE/build/contract-consumer/dbintrinsics.wasm" \
-            -DFORGE_CONTRACT_TEST_DB_HOST_WASM="$GITHUB_WORKSPACE/build/contract-consumer/dbhost.wasm" \
-            -DFORGE_CONTRACT_TEST_MULTI_INDEX_WASM="$GITHUB_WORKSPACE/build/contract-consumer/multiidx.wasm" \
-            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_WASM="$GITHUB_WORKSPACE/build/contract-consumer/legacymidx.wasm" \
-            -DFORGE_CONTRACT_TEST_MULTI_INDEX_ERRORS_WASM="$GITHUB_WORKSPACE/build/contract-consumer/midxerrors.wasm" \
-            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_ERRORS_WASM="$GITHUB_WORKSPACE/build/contract-consumer/legmidxerr.wasm" \
-            -DFORGE_CONTRACT_TEST_MULTI_INDEX_EXTENDED_WASM="$GITHUB_WORKSPACE/build/contract-consumer/midxextend.wasm" \
-            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_EXTENDED_WASM="$GITHUB_WORKSPACE/build/contract-consumer/legmidxext.wasm" \
-            -DFORGE_CONTRACT_TEST_ORACLE_WASM="$GITHUB_WORKSPACE/build/contract-consumer/oracle.wasm" \
-            -DFORGE_CONTRACT_TEST_RECOVERY_WASM="$GITHUB_WORKSPACE/build/contract-consumer/recovery.wasm" \
-            -DFORGE_CONTRACT_TEST_LOOPING_WASM="$GITHUB_WORKSPACE/build/contract-consumer/looping.wasm"
+            -DFORGE_CONTRACT_TEST_DB_HOST_WASM="$GITHUB_WORKSPACE/build/contract-consumer/artifacts/dbhost.wasm" \
+            -DFORGE_CONTRACT_TEST_MULTI_INDEX_WASM="$GITHUB_WORKSPACE/build/contract-consumer/artifacts/multiidx.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_WASM="$GITHUB_WORKSPACE/build/contract-consumer/artifacts/legacymidx.wasm" \
+            -DFORGE_CONTRACT_TEST_MULTI_INDEX_ERRORS_WASM="$GITHUB_WORKSPACE/build/contract-consumer/artifacts/midxerrors.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_ERRORS_WASM="$GITHUB_WORKSPACE/build/contract-consumer/artifacts/legmidxerr.wasm" \
+            -DFORGE_CONTRACT_TEST_MULTI_INDEX_EXTENDED_WASM="$GITHUB_WORKSPACE/build/contract-consumer/artifacts/midxextend.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_EXTENDED_WASM="$GITHUB_WORKSPACE/build/contract-consumer/artifacts/legmidxext.wasm" \
+            -DFORGE_CONTRACT_TEST_ORACLE_WASM="$GITHUB_WORKSPACE/build/contract-consumer/artifacts/oracle.wasm" \
+            -DFORGE_CONTRACT_TEST_RECOVERY_WASM="$GITHUB_WORKSPACE/build/contract-consumer/artifacts/recovery.wasm" \
+            -DFORGE_CONTRACT_TEST_LOOPING_WASM="$GITHUB_WORKSPACE/build/contract-consumer/artifacts/looping.wasm"
           cmake --build build/contract-e2e -j 4
           ctest --test-dir build/contract-e2e --output-on-failure
 
@@ -210,13 +212,18 @@ jobs:
         shell: bash
         run: |
           cmake -S guest/tests/corpus -B build/contract-corpus -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/build/contract-sdk-prefix/lib/cmake/ForgeContract/ForgeContractToolchain.cmake" \
+            -DForgeContract_DIR="$GITHUB_WORKSPACE/build/contract-sdk-prefix/lib/cmake/ForgeContract"
+          cmake --build build/contract-corpus -j 4
+          cmake -S guest/tests/corpus/e2e -B build/contract-corpus-e2e -G Ninja \
             -DCMAKE_C_COMPILER="$CC" \
             -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
             -DForge_DIR="$GITHUB_WORKSPACE/build/forge-prefix/lib/cmake/Forge" \
-            -DForgeContract_DIR="$GITHUB_WORKSPACE/build/contract-sdk-prefix/lib/cmake/ForgeContract"
-          cmake --build build/contract-corpus -j 4
-          ctest --test-dir build/contract-corpus --output-on-failure
+            -DFORGE_CONTRACT_CORPUS_ARTIFACT_DIR="$GITHUB_WORKSPACE/build/contract-corpus/artifacts"
+          cmake --build build/contract-corpus-e2e -j 4
+          ctest --test-dir build/contract-corpus-e2e --output-on-failure
 
       - name: Verify source tree
         run: git diff --check
@@ -327,6 +334,8 @@ jobs:
           mkdir -p build/contract-sdk-release-prefix
           tar -xzf "$archive" -C build/contract-sdk-release-prefix --strip-components=1
           cmake -S guest/tests/consumer -B build/contract-release-consumer -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/build/contract-sdk-release-prefix/lib/cmake/ForgeContract/ForgeContractToolchain.cmake" \
             -DForgeContract_DIR="$GITHUB_WORKSPACE/build/contract-sdk-release-prefix/lib/cmake/ForgeContract"
           cmake --build build/contract-release-consumer \
             --target hello recordtest allocatortst legacyhello legacynotify multisource dbhost \
@@ -339,22 +348,22 @@ jobs:
             -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
             -DForge_DIR="$GITHUB_WORKSPACE/build/forge-prefix/lib/cmake/Forge" \
-            -DFORGE_CONTRACT_TEST_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/hello.wasm" \
-            -DFORGE_CONTRACT_TEST_RECORD_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/recordtest.wasm" \
-            -DFORGE_CONTRACT_TEST_ALLOCATOR_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/allocatortst.wasm" \
-            -DFORGE_CONTRACT_TEST_LEGACY_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/legacyhello.wasm" \
-            -DFORGE_CONTRACT_TEST_LEGACY_NOTIFICATION_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/legacynotify.wasm" \
+            -DFORGE_CONTRACT_TEST_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/artifacts/hello.wasm" \
+            -DFORGE_CONTRACT_TEST_RECORD_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/artifacts/recordtest.wasm" \
+            -DFORGE_CONTRACT_TEST_ALLOCATOR_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/artifacts/allocatortst.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/artifacts/legacyhello.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_NOTIFICATION_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/artifacts/legacynotify.wasm" \
             -DFORGE_CONTRACT_TEST_DB_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/dbintrinsics.wasm" \
-            -DFORGE_CONTRACT_TEST_DB_HOST_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/dbhost.wasm" \
-            -DFORGE_CONTRACT_TEST_MULTI_INDEX_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/multiidx.wasm" \
-            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/legacymidx.wasm" \
-            -DFORGE_CONTRACT_TEST_MULTI_INDEX_ERRORS_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/midxerrors.wasm" \
-            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_ERRORS_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/legmidxerr.wasm" \
-            -DFORGE_CONTRACT_TEST_MULTI_INDEX_EXTENDED_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/midxextend.wasm" \
-            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_EXTENDED_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/legmidxext.wasm" \
-            -DFORGE_CONTRACT_TEST_ORACLE_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/oracle.wasm" \
-            -DFORGE_CONTRACT_TEST_RECOVERY_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/recovery.wasm" \
-            -DFORGE_CONTRACT_TEST_LOOPING_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/looping.wasm"
+            -DFORGE_CONTRACT_TEST_DB_HOST_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/artifacts/dbhost.wasm" \
+            -DFORGE_CONTRACT_TEST_MULTI_INDEX_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/artifacts/multiidx.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/artifacts/legacymidx.wasm" \
+            -DFORGE_CONTRACT_TEST_MULTI_INDEX_ERRORS_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/artifacts/midxerrors.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_ERRORS_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/artifacts/legmidxerr.wasm" \
+            -DFORGE_CONTRACT_TEST_MULTI_INDEX_EXTENDED_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/artifacts/midxextend.wasm" \
+            -DFORGE_CONTRACT_TEST_LEGACY_MULTI_INDEX_EXTENDED_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/artifacts/legmidxext.wasm" \
+            -DFORGE_CONTRACT_TEST_ORACLE_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/artifacts/oracle.wasm" \
+            -DFORGE_CONTRACT_TEST_RECOVERY_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/artifacts/recovery.wasm" \
+            -DFORGE_CONTRACT_TEST_LOOPING_WASM="$GITHUB_WORKSPACE/build/contract-release-consumer/artifacts/looping.wasm"
           cmake --build build/contract-release-e2e -j 4
           ctest --test-dir build/contract-release-e2e --output-on-failure
 
@@ -362,13 +371,18 @@ jobs:
         shell: bash
         run: |
           cmake -S guest/tests/corpus -B build/contract-release-corpus -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/build/contract-sdk-release-prefix/lib/cmake/ForgeContract/ForgeContractToolchain.cmake" \
+            -DForgeContract_DIR="$GITHUB_WORKSPACE/build/contract-sdk-release-prefix/lib/cmake/ForgeContract"
+          cmake --build build/contract-release-corpus -j 4
+          cmake -S guest/tests/corpus/e2e -B build/contract-release-corpus-e2e -G Ninja \
             -DCMAKE_C_COMPILER="$CC" \
             -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
             -DForge_DIR="$GITHUB_WORKSPACE/build/forge-prefix/lib/cmake/Forge" \
-            -DForgeContract_DIR="$GITHUB_WORKSPACE/build/contract-sdk-release-prefix/lib/cmake/ForgeContract"
-          cmake --build build/contract-release-corpus -j 4
-          ctest --test-dir build/contract-release-corpus --output-on-failure
+            -DFORGE_CONTRACT_CORPUS_ARTIFACT_DIR="$GITHUB_WORKSPACE/build/contract-release-corpus/artifacts"
+          cmake --build build/contract-release-corpus-e2e -j 4
+          ctest --test-dir build/contract-release-corpus-e2e --output-on-failure
 
       - name: Upload SDK archive and checksum
         uses: actions/upload-artifact@v4

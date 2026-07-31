@@ -367,6 +367,34 @@ def check_contract_sdk_components(root: Path, errors: list[str]) -> None:
             f"{path.relative_to(root)}: release SDK sub-builds must preserve path mapping: {required}"
          )
 
+   libraries_cmake = (
+      root / "guest" / "cmake" / "ForgeContractLibraries.cmake"
+   ).read_text(errors="ignore")
+   for required in (
+      '"-ffile-prefix-map=${_product_source_root}=./source"',
+      '"-fdebug-prefix-map=${_product_source_root}=./source"',
+      '"-ffile-prefix-map=${CMAKE_BINARY_DIR}=./build"',
+      '"-fdebug-prefix-map=${CMAKE_BINARY_DIR}=./build"',
+      "_forge_contract_freeze_guest_target(",
+      "FORGE_CONTRACT_SOURCE_ROOT",
+   ):
+      if required not in libraries_cmake:
+         errors.append(
+            "guest/cmake/ForgeContractLibraries.cmake: guest targets must share "
+            f"project-wide path mapping: {required}"
+         )
+   for forbidden in (
+      '"-ffile-prefix-map=${_source_dir}=./source"',
+      '"-fdebug-prefix-map=${_source_dir}=./source"',
+      '"-ffile-prefix-map=${_binary_dir}=./build"',
+      '"-fdebug-prefix-map=${_binary_dir}=./build"',
+   ):
+      if forbidden in libraries_cmake:
+         errors.append(
+            "guest/cmake/ForgeContractLibraries.cmake: target-local path mapping "
+            f"creates incompatible CMake 4.4 module variants: {forbidden}"
+         )
+
    root_cmake = (root / "CMakeLists.txt").read_text(errors="ignore")
    for required in (
       '"$<BUILD_INTERFACE:-ffile-prefix-map=${_forge_contract_host_source_root}=.>"',
@@ -457,105 +485,69 @@ def check_eosio_veneer(root: Path, errors: list[str]) -> None:
 
 
 def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
-   graph_sources = (
+   forbidden_paths = (
       root / "guest" / "cmake" / "ForgeContractGraph.cmake",
       root / "guest" / "build" / "CMakeLists.txt",
-      root / "libraries" / "contract" / "graph" / "graph.cpp",
+      root / "libraries" / "contract" / "graph",
+      root / "tests" / "package_contract_graph_component",
    )
+   for path in forbidden_paths:
+      if path.exists():
+         errors.append(
+            f"{path.relative_to(root)}: reconstructed contract graph surface is forbidden"
+         )
+
    reverse_graph_tokens = (
-      re.compile(r"\bINTERFACE_LINK_LIBRARIES\b"),
-      re.compile(r"\bLINK_LIBRARIES\b"),
       re.compile(r"\$<LINK_ONLY:"),
       re.compile(r"::@\("),
       re.compile(r"_forge_contract_guest_dependency"),
+      re.compile(r"_forge_contract_collect_registry"),
+      re.compile(r"\bFORGE_CONTRACT_OWNER_IDS\b"),
+      re.compile(r"contract-graph\.json"),
+      re.compile(r"forge_install_contract_(?:library|package)"),
+      re.compile(r"forge_register_contract_library_targets"),
    )
-   for path in graph_sources:
+   architecture_sources = (
+      root / "guest" / "cmake" / "ForgeContractLibraries.cmake",
+      root / "guest" / "cmake" / "ForgeContractBuild.cmake",
+      root / "guest" / "cmake" / "ForgeContractFunctions.cmake",
+   )
+   for path in architecture_sources:
       source = path.read_text(errors="ignore")
-      if path.name == "ForgeContractGraph.cmake":
-         seal = re.search(
-            r"function\(_forge_contract_sealed_target_properties target output\).*?endfunction\(\)",
-            source,
-            flags=re.DOTALL,
-         )
-         if seal is None:
-            errors.append(
-               f"{path.relative_to(root)}: Contract SDK concrete targets must have a sealed property set"
-            )
-         else:
-            for required in (
-               "SOURCES",
-               "LINK_LIBRARIES",
-               "INTERFACE_LINK_LIBRARIES",
-               "INTERFACE_LINK_LIBRARIES_DIRECT",
-               "INTERFACE_LINK_LIBRARIES_DIRECT_EXCLUDE",
-               "CXX_MODULE_STD",
-               "CXX_SCAN_FOR_MODULES",
-            ):
-               if not re.search(rf"(?m)^\s+{required}\s*$", seal.group()):
-                  errors.append(
-                     f"{path.relative_to(root)}: Contract SDK sealed property set omits {required}"
-                  )
-            source = source[: seal.start()] + source[seal.end() :]
-         source_seal = re.search(
-            r"function\(_forge_contract_sealed_source_properties output\).*?endfunction\(\)",
-            source,
-            flags=re.DOTALL,
-         )
-         if source_seal is None:
-            errors.append(
-               f"{path.relative_to(root)}: Contract SDK declared sources require a sealed property set"
-            )
-         else:
-            for required in ("COMPILE_DEFINITIONS", "COMPILE_OPTIONS", "CXX_SCAN_FOR_MODULES", "INCLUDE_DIRECTORIES"):
-               if not re.search(rf"(?m)^\s+{required}\s*$", source_seal.group()):
-                  errors.append(
-                     f"{path.relative_to(root)}: Contract SDK source property set omits {required}"
-                  )
-            source = source[: source_seal.start()] + source[source_seal.end() :]
-         if 'DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"' in source:
-            errors.append(
-               f"{path.relative_to(root)}: imported-target checks must stay in their visible directory"
-            )
-         if "function(_forge_contract_assert_directory_sealed_targets)" not in source:
-            errors.append(
-               f"{path.relative_to(root)}: Contract SDK requires directory-scoped deferred seal checks"
-            )
-         if "cmake_language(DEFER GET_CALL_IDS _remaining_calls)" not in source:
-            errors.append(
-               f"{path.relative_to(root)}: Contract SDK seal checks must remain after later deferred calls"
-            )
-         for required in (
-            "FORGE_CONTRACT_INSTALL_MODULE_ROOT_RELATIVE",
-            "FORGE_CONTRACT_INSTALL_SOURCE_ROOT_RELATIVE",
-         ):
-            if required not in source:
-               errors.append(
-                  f"{path.relative_to(root)}: installed Contract source sealing requires {required}"
-               )
-         if "function(forge_register_contract_library_targets)" not in source:
-            errors.append(
-               f"{path.relative_to(root)}: installed Contract libraries require an explicit package registration API"
-            )
       for token in reverse_graph_tokens:
          if token.search(source):
             errors.append(
                f"{path.relative_to(root)}: Contract SDK must not reverse-parse the native CMake graph ({token.pattern})"
             )
 
+   libraries_source = architecture_sources[0].read_text(errors="ignore")
+   for property_name in ("LINK_LIBRARIES", "INTERFACE_LINK_LIBRARIES"):
+      if property_name not in libraries_source:
+         errors.append(
+            "guest/cmake/ForgeContractLibraries.cmake: guest target immutability "
+            f"must include {property_name}"
+         )
+      for path in architecture_sources[1:]:
+         if re.search(rf"\b{property_name}\b", path.read_text(errors="ignore")):
+            errors.append(
+               f"{path.relative_to(root)}: Contract SDK must not inspect "
+               f"{property_name}"
+            )
+   if re.search(
+      r"get_target_property\s*\([^)]*\b(?:INTERFACE_)?LINK_LIBRARIES\b",
+      libraries_source,
+      re.DOTALL,
+   ):
+      errors.append(
+         "guest/cmake/ForgeContractLibraries.cmake: dependency properties may "
+         "only participate in generic immutable-state comparison"
+      )
+
    root_cmake = (root / "CMakeLists.txt").read_text(errors="ignore")
    if re.search(r"(?m)^(?!function\()\s*forge_target_contract_guest_component\(", root_cmake):
       errors.append("CMakeLists.txt: host targets must declare guest identities beside their own definitions")
    if "forge_register_contract_guest_component" in root_cmake:
       errors.append("CMakeLists.txt: legacy central guest-component mapping is forbidden")
-
-   package_config = (
-      root / "guest" / "tests" / "dual_target" / "producer" / "ProductProtocolConfig.cmake.in"
-   ).read_text(errors="ignore")
-   if "forge_register_contract_library_targets(" not in package_config:
-      errors.append(
-         "guest/tests/dual_target/producer/ProductProtocolConfig.cmake.in: "
-         "installed contract targets must be registered immediately"
-      )
 
    attribute_plugin = root / "tools" / "attr-plugin" / "plugin.cpp"
    attribute_source = attribute_plugin.read_text(errors="ignore")
@@ -607,13 +599,6 @@ def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
          if duplicate_value.search(path.read_text(errors="ignore")):
             errors.append(f"{path.relative_to(root)}: asymmetric values belong to forge.crypto.asymmetric.values")
 
-   consumer_build = (root / "guest" / "build" / "CMakeLists.txt").read_text(errors="ignore")
-   implementation_source = re.compile(
-      r'"\$\{_(?:runtime|raw|codec|crypto|protocol|contract)[^}]*\}/[^"\n]+\.(?:cpp|hxx)"'
-   )
-   if implementation_source.search(consumer_build):
-      errors.append("guest/build/CMakeLists.txt: contract consumers must not compile Forge implementation sources")
-
    contract = root / "guest" / "libraries" / "contract"
    include = contract / "include" / "forge" / "contract"
    implementation_units = {
@@ -629,6 +614,7 @@ def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
       "dispatcher",
       "instant_finality",
       "intrinsics",
+      "multi_index",
       "print",
       "privileged",
       "producer_schedule",
@@ -648,7 +634,6 @@ def check_contract_sdk_architecture(root: Path, errors: list[str]) -> None:
       "fixed_bytes",
       "ignore",
       "key",
-      "multi_index",
       "powers",
       "singleton",
       "string",

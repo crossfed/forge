@@ -13,12 +13,16 @@ struct library_compilation {
    std::filesystem::path object_list;
 };
 
+struct known_module {
+   std::string name;
+   std::string owner;
+};
+
 struct request {
    std::string contract;
    std::filesystem::path abi;
    std::filesystem::path dispatcher;
    std::filesystem::path depfile;
-   std::filesystem::path contract_graph;
    std::filesystem::path attribute_plugin;
    std::filesystem::path sysroot;
    std::filesystem::path ricardian_contracts;
@@ -29,7 +33,9 @@ struct request {
    std::vector<std::filesystem::path> sources;
    std::vector<std::filesystem::path> dependency_sources;
    std::vector<library_compilation> library_compilations;
+   std::vector<known_module> known_modules;
    std::vector<std::filesystem::path> source_wrappers;
+   std::vector<std::string> compiler_arguments;
 };
 
 struct artifacts {

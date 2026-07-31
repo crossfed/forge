@@ -39,7 +39,8 @@ add_test(
       ${CMAKE_COMMAND}
       -DFORGE_CONTRACT_STAGE_SYSROOT=${CMAKE_SOURCE_DIR}/guest/cmake/stage_sysroot.cmake
       -DFORGE_CONTRACT_SDK_CMAKE=${CMAKE_SOURCE_DIR}/guest/CMakeLists.txt
-      -DFORGE_CONTRACT_BUILD_CMAKE=${CMAKE_SOURCE_DIR}/guest/build/CMakeLists.txt
+      -DFORGE_CONTRACT_LIBRARIES_CMAKE=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractLibraries.cmake
+      -DFORGE_CONTRACT_BUILD_CMAKE=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractBuild.cmake
       -DFORGE_CONTRACT_FOUNDATION_CMAKE=${CMAKE_SOURCE_DIR}/guest/cmake/foundation-build/CMakeLists.txt
       -DFORGE_CONTRACT_CONFIG_TEMPLATE=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractConfig.cmake.in
       -DFORGE_CONTRACT_GUEST_COMPONENTS=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractGuestComponents.cmake
@@ -52,7 +53,8 @@ add_test(
       -DFORGE_CONTRACT_CONFIG_TEMPLATE=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractConfig.cmake.in
       -DFORGE_CONTRACT_TOOLCHAIN_TEMPLATE=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractToolchain.cmake.in
       -DFORGE_CONTRACT_FUNCTIONS=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractFunctions.cmake
-      -DFORGE_CONTRACT_GRAPH=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractGraph.cmake
+      -DFORGE_CONTRACT_LIBRARIES=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractLibraries.cmake
+      -DFORGE_CONTRACT_BUILD=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractBuild.cmake
       -DFORGE_CONTRACT_GUEST_COMPONENTS=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractGuestComponents.cmake
       -DFORGE_CONTRACT_TEST_ROOT=${CMAKE_BINARY_DIR}/tests/contract-package-prefix
       -P ${CMAKE_SOURCE_DIR}/guest/tests/tooling/check_package_prefix.cmake
@@ -230,7 +232,6 @@ if(FORGE_ENABLE_CONTRACT_TOOLING)
       test_forge_contract
       forge_contract_abi
       forge_contract_attributes
-      forge_contract_graph
       forge_contract_validation
       forge_contract_manifest
       Boost::included_unit_test_framework
@@ -1948,17 +1949,6 @@ add_test(
 )
 set_tests_properties(test_forge_package_chain_savanna_component PROPERTIES DEPENDS test_forge_package_install)
 if(FORGE_ENABLE_CONTRACT_TOOLING)
-   add_test(
-      NAME test_forge_package_contract_graph_component
-      COMMAND ${CMAKE_CTEST_COMMAND}
-         --build-and-test
-         ${CMAKE_CURRENT_SOURCE_DIR}/package_contract_graph_component
-         ${CMAKE_BINARY_DIR}/forge-package-contract-graph-component
-         --build-generator ${CMAKE_GENERATOR}
-         --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
-         --test-command forge_package_contract_graph_component
-   )
-   set_tests_properties(test_forge_package_contract_graph_component PROPERTIES DEPENDS test_forge_package_install)
    add_test(
       NAME test_forge_package_contract_abi_component
       COMMAND ${CMAKE_CTEST_COMMAND}

@@ -34,11 +34,9 @@ pass/fail fixtures plus local-include and wasm32-width regressions.
 
 `sdk_include_paths` and the matching `abigen --sdk-include` option are reserved
 for roots shipped by the selected Contract SDK. They remain ordinary C++
-include roots so SDK-owned compatibility aliases retain their ABI meaning, but
-are separately trusted by dependency validation. Files reached through other
-include paths must be declared by the contract graph even when they are outside
-a descriptor's source root. This keeps SDK implementation headers out of
-product attestation without treating them as compiler system headers.
+include roots so SDK-owned compatibility aliases retain their ABI meaning.
+Compiler depfiles track textual includes; module-owner metadata from the active
+guest CMake configuration validates public and private module visibility.
 
 For a multi-source build, `request::source_wrappers` contains one generated
 output path for each source after the dispatch source. Each wrapper includes

@@ -231,8 +231,8 @@ def check_artifacts(build_dir: Path, intrinsics_path: Path) -> None:
             if not path.is_file():
                 raise SystemExit(f"missing contract artifact: {path}")
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if manifest["schema_version"] != 2 or not manifest["source_graph"]["files"]:
-            raise SystemExit(f"source graph is missing from manifest: {target}")
+        if manifest["schema_version"] != 3 or "source_graph" in manifest:
+            raise SystemExit(f"runtime manifest schema is invalid: {target}")
         if manifest["wasm"]["sha256"] != digest(wasm):
             raise SystemExit(f"WASM hash mismatch in manifest: {target}")
         if manifest["abi"]["sha256"] != digest(abi):

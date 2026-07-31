@@ -14,6 +14,10 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_SCAN_FOR_MODULES ON)
+set(
+   CMAKE_CXX_STANDARD_INCLUDE_DIRECTORIES
+   "${CMAKE_SYSROOT}/include/c++/v1"
+)
 
 set(_forge_guest_compile_options
     -fno-exceptions
@@ -120,6 +124,7 @@ forge_guest_add_implementation_archive(
       "${_protocol}/include/forge/chain/protocol/time.cppm"
       "${_protocol}/include/forge/chain/protocol/types_value.cppm"
       "${_protocol}/include/forge/chain/protocol/types.cppm"
+      "${_protocol}/include/forge/chain/protocol/typed_id.cppm"
       "${_protocol}/include/forge/chain/protocol/fixed_key_value.cppm"
       "${_protocol}/include/forge/chain/protocol/fixed_key.cppm"
       "${_protocol}/include/forge/chain/protocol/action_value.cppm"
@@ -201,6 +206,7 @@ forge_guest_add_implementation_archive(
       "${_contract}/dispatcher.cpp"
       "${_contract}/instant_finality.cpp"
       "${_contract}/intrinsics.cpp"
+      "${_contract}/multi_index.cpp"
       "${_contract}/print.cpp"
       "${_contract}/privileged.cpp"
       "${_contract}/producer_schedule.cpp"

@@ -40,42 +40,10 @@ def invoke(
     ricardian_clauses=None,
     bare_outputs=False,
     error_contains=None,
-    headers=(),
 ):
     output.mkdir(parents=True, exist_ok=True)
     abi = output / f"{source.stem}.abi"
     dispatch = output / f"{source.stem}.dispatcher.cpp"
-    graph = output / f"{source.stem}.contract-graph.json"
-    source_root = args.fixtures.parent.resolve()
-    graph_files = []
-    for role, paths in (
-        ("source", (source, *additional_sources)),
-        ("header", headers),
-        ("ricardian_contracts", (() if ricardian_contracts is None else (ricardian_contracts,))),
-        ("ricardian_clauses", (() if ricardian_clauses is None else (ricardian_clauses,))),
-    ):
-        for path in paths:
-            physical = path.resolve()
-            try:
-                relative = physical.relative_to(source_root)
-            except ValueError as error:
-                raise RuntimeError(f"fixture input is outside its source root: {physical}") from error
-            graph_files.append(
-                {
-                    "role": role,
-                    "logical_path": f"contract/{role}/{relative.as_posix()}",
-                    "physical_path": str(physical),
-                }
-            )
-    graph_descriptor = json.loads(args.contract_graph.read_text(encoding="utf-8"))
-    graph_descriptor["root"] = {
-        "owner": f"contract:{contract}",
-        "source_root": str(source_root),
-        "files": graph_files,
-        "libraries": graph_descriptor["root"]["libraries"],
-        "components": graph_descriptor["root"]["components"],
-    }
-    graph.write_text(json.dumps(graph_descriptor, sort_keys=True) + "\n", encoding="utf-8")
     abi_argument = abi.name if bare_outputs else abi
     dispatch_argument = dispatch.name if bare_outputs else dispatch
     command = [
@@ -86,8 +54,6 @@ def invoke(
         str(abi_argument),
         "--dispatch",
         str(dispatch_argument),
-        "--contract-graph",
-        str(graph),
         "--attribute-plugin",
         str(args.plugin),
         "--sysroot",
@@ -236,14 +202,12 @@ def run_donor_fixtures(args, manifest):
 
     for name, contract in PASS_FIXTURES.items():
         source = local_root / "abigen-pass" / f"{name}.cpp"
-        kwargs = {"headers": (local_root / "cdt_support.hpp",)}
+        kwargs = {}
         if name == "ricardian_contract_test":
             kwargs |= {
                 "ricardian_contracts": source.with_suffix(".contracts.md"),
                 "ricardian_clauses": source.with_suffix(".clauses.md"),
             }
-        if name == "singleton_contract":
-            kwargs["headers"] += (source.with_name("singleton_contract_support.hpp"),)
         abi = invoke(args, contract, source, args.output / "cdt", **kwargs)
         check_fixture_semantics(name, abi)
         if donor_root is not None:
@@ -260,7 +224,6 @@ def run_donor_fixtures(args, manifest):
             source,
             args.output / "cdt",
             succeeds=False,
-            headers=(local_root / "cdt_support.hpp",),
         )
 
     mapped = {fixture["forge_case"] for fixture in manifest["fixtures"]}
@@ -300,7 +263,6 @@ def main():
     parser.add_argument("--include", required=True, type=pathlib.Path)
     parser.add_argument("--modules", required=True, type=pathlib.Path)
     parser.add_argument("--build-dir", required=True, type=pathlib.Path)
-    parser.add_argument("--contract-graph", required=True, type=pathlib.Path)
     parser.add_argument("--fixtures", required=True, type=pathlib.Path)
     parser.add_argument("--output", required=True, type=pathlib.Path)
     args = parser.parse_args()
@@ -416,11 +378,10 @@ def main():
     multi_source = invoke(
         args,
         "multisource",
-        multi_source_contract,
-        args.output / "multi-source-valid",
-        additional_sources=(multi_source_helper,),
-        headers=(args.fixtures / "multi_source_contract.hpp",),
-    )
+      multi_source_contract,
+      args.output / "multi-source-valid",
+      additional_sources=(multi_source_helper,),
+   )
     if [action["name"] for action in multi_source["actions"]] != ["next", "previous"]:
         raise RuntimeError("shared multi-source action was not de-duplicated")
     helper_wrapper = args.output / "multi-source-valid/multi_source_contract.source-1.cpp"
@@ -504,6 +465,28 @@ def main():
     authority_fields = by_name(by_name(sdk_alias["structs"])["producer_authority"]["fields"])
     if authority_fields["authority"]["type"] != "block_signing_authority":
         raise RuntimeError("SDK-owned type alias was desugared at its use site")
+
+    typed_ids = invoke(
+        args,
+        "typedids",
+        args.fixtures / "namespaced_typed_id.cpp",
+        args.output / "namespaced-typed-id",
+    )
+    typed_id_types = {item["new_type_name"]: item["type"] for item in typed_ids["types"]}
+    if "id" in typed_id_types:
+        raise RuntimeError("namespaced typed IDs leaked a globally ambiguous ABI alias")
+    if typed_id_types.get("coding_scheme") != "uint8":
+        raise RuntimeError("named protocol enum did not preserve its ABI alias")
+    typed_id_fields = by_name(by_name(typed_ids["structs"])["submit"]["fields"])
+    if {name: field["type"] for name, field in typed_id_fields.items()} != {
+        "application_id": "uint64",
+        "workspace_id": "uint64",
+        "repair_id": "uint64",
+        "coding": "coding_scheme",
+    }:
+        raise RuntimeError("namespaced typed IDs or enum changed their canonical ABI")
+    if any(item["name"].startswith("typed_id") for item in typed_ids["structs"]):
+        raise RuntimeError("typed ID implementation records leaked into the contract ABI")
 
     equivalent_struct = invoke(
         args,
@@ -606,6 +589,38 @@ def main():
         args.output,
         succeeds=False,
     )
+    invoke(
+        args,
+        "enumconflict",
+        args.fixtures / "conflicting_enum_names.cpp",
+        args.output / "conflicting-enum-names",
+        succeeds=False,
+        error_contains="conflicting contract ABI type alias 'status'",
+    )
+    invoke(
+        args,
+        "invalidtable",
+        args.fixtures / "invalid_table_name.cpp",
+        args.output / "invalid-table-name",
+        succeeds=False,
+        error_contains="get_table_name() must be a public static constexpr",
+    )
+    invoke(
+        args,
+        "attrtable",
+        args.fixtures / "attribute_table_name_mismatch.cpp",
+        args.output / "attribute-table-name-mismatch",
+        succeeds=False,
+        error_contains="table attribute name does not match row get_table_name()",
+    )
+    equivalent_names = invoke(
+        args,
+        "equivalent",
+        args.fixtures / "attribute_name_equivalent.cpp",
+        args.output / "attribute-name-equivalent",
+    )
+    if [table["name"] for table in equivalent_names["tables"]] != ["records"]:
+        raise RuntimeError("equivalent typed table names did not produce one canonical ABI table")
 
     bare_output = args.output / "bare-output"
     invoke(

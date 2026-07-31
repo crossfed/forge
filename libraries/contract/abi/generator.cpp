@@ -42,7 +42,6 @@ module forge.contract.abi.generator;
 import forge.chain.protocol.abi;
 import forge.chain.protocol.types;
 import forge.codec.json;
-import forge.contract.graph;
 import forge.variant.value;
 
 namespace {
@@ -94,6 +93,11 @@ struct type_shape {
    std::string type;
 };
 
+struct type_declaration {
+   std::string type;
+   std::string identity;
+};
+
 struct variant_shape {
    std::string name;
    std::vector<std::string> types;
@@ -124,7 +128,7 @@ struct schema {
    std::vector<table_shape> tables;
    std::vector<protocol::clause_pair> clauses;
    std::vector<call_shape> calls;
-   std::map<std::string, std::string> type_declarations;
+   std::map<std::string, type_declaration> type_declarations;
    std::map<std::string, std::string> struct_declarations;
    std::set<std::string> variant_names;
    std::map<std::string, std::string> table_declarations;
@@ -310,6 +314,9 @@ class type_encoder {
 
    std::string encode(clang::QualType input) {
       auto type = input.getNonReferenceType().getUnqualifiedType();
+      if (is_typed_id(type)) {
+         return "uint64";
+      }
       if (const auto* alias = llvm::dyn_cast_or_null<clang::TypedefType>(type.getTypePtrOrNull())) {
          const auto* declaration = alias->getDecl();
          const auto qualified = declaration->getQualifiedNameAsString();
@@ -317,7 +324,7 @@ class type_encoder {
          if (!canonical && !context_.getSourceManager().isInSystemHeader(declaration->getLocation())) {
             const auto name = declaration->getNameAsString();
             const auto target = encode(declaration->getUnderlyingType());
-            add_alias(name, target, declaration->getLocation());
+            add_alias(name, target, declaration->getLocation(), declaration_identity(*declaration));
             return name.empty() ? target : name;
          }
       }
@@ -329,7 +336,7 @@ class type_encoder {
          if (!context_.getSourceManager().isInSystemHeader(declaration->getLocation())) {
             const auto name = declaration->getNameAsString();
             const auto target = encode(declaration->getUnderlyingType());
-            add_alias(name, target, declaration->getLocation());
+            add_alias(name, target, declaration->getLocation(), declaration_identity(*declaration));
             return name.empty() ? target : name;
          }
          type = alias->desugar().getUnqualifiedType();
@@ -339,7 +346,15 @@ class type_encoder {
          return encode_builtin(*builtin);
       }
       if (const auto* enumeration = type->getAs<clang::EnumType>()) {
-         return encode(enumeration->getDecl()->getIntegerType());
+         const auto* declaration = enumeration->getDecl();
+         const auto target = encode(declaration->getIntegerType());
+         if (declaration->getIdentifier() == nullptr ||
+             context_.getSourceManager().isInSystemHeader(declaration->getLocation())) {
+            return target;
+         }
+         const auto name = declaration->getNameAsString();
+         add_alias(name, target, declaration->getLocation(), declaration_identity(*declaration));
+         return name;
       }
       if (const auto* array = context_.getAsConstantArrayType(type)) {
          return encode(array->getElementType()) + '[' + llvm::toString(array->getSize(), 10, false) + ']';
@@ -705,6 +720,9 @@ class type_encoder {
              !arguments.empty() && arguments[0].getKind() == clang::TemplateArgument::Type) {
             return encode(arguments[0].getAsType());
          }
+         if (template_qualified == "forge::chain::protocol::typed_id") {
+            return "uint64";
+         }
          if (template_qualified == "forge::contract::binary_extension" && !arguments.empty() &&
              arguments[0].getKind() == clang::TemplateArgument::Type) {
             return encode(arguments[0].getAsType()) + '$';
@@ -833,19 +851,21 @@ class type_encoder {
       return result;
    }
 
-   void add_alias(const std::string& name, const std::string& target, clang::SourceLocation location = {}) {
+   void add_alias(const std::string& name, const std::string& target, clang::SourceLocation location = {},
+                  std::string identity = {}) {
       if (name.empty() || name == target) {
          return;
       }
-      const auto [existing, inserted] = output_.type_declarations.try_emplace(name, target);
+      const auto [existing, inserted] = output_.type_declarations.try_emplace(name, type_declaration{target, identity});
       if (inserted) {
          output_.types.push_back(type_shape{name, target});
          return;
       }
-      if (existing->second != target) {
-         const auto id = context_.getDiagnostics().getCustomDiagID(
-             clang::DiagnosticsEngine::Error, "conflicting contract ABI type alias '%0' maps to both '%1' and '%2'");
-         context_.getDiagnostics().Report(location, id) << name << existing->second << target;
+      if (existing->second.type != target ||
+          (!existing->second.identity.empty() && !identity.empty() && existing->second.identity != identity)) {
+         const auto id = context_.getDiagnostics().getCustomDiagID(clang::DiagnosticsEngine::Error,
+                                                                   "conflicting contract ABI type alias '%0'");
+         context_.getDiagnostics().Report(location, id) << name;
          output_.failed = true;
       }
    }
@@ -1005,6 +1025,15 @@ class type_encoder {
       }
    }
 
+   bool is_typed_id(clang::QualType type) const {
+      const auto desugared = type.getDesugaredType(context_).getUnqualifiedType();
+      const auto* record = desugared->getAs<clang::RecordType>();
+      const auto* specialization =
+          record == nullptr ? nullptr : llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record->getDecl());
+      return specialization != nullptr &&
+             specialization->getSpecializedTemplate()->getQualifiedNameAsString() == "forge::chain::protocol::typed_id";
+   }
+
    void fail(std::string_view type, clang::SourceLocation location) const {
       auto& diagnostics = context_.getDiagnostics();
       const auto id =
@@ -1033,7 +1062,18 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
          const auto owner = owning_contract(*declaration);
          const auto selected = owner.has_value() && *owner == contract_name_;
          if (selected || (!owner.has_value() && !table->empty())) {
-            encoder_.add_table(*declaration, *table, table->empty());
+            auto table_name = *table;
+            if (!table->empty()) {
+               const auto typed_name = typed_table_name(*declaration, declaration->getLocation());
+               if (typed_name.has_value() && protocol::make_name(*table).value != *typed_name) {
+                  report(declaration->getLocation(), "table attribute name does not match row get_table_name()");
+                  return true;
+               }
+               if (typed_name.has_value()) {
+                  table_name = protocol::to_string(protocol::table_name{*typed_name});
+               }
+            }
+            encoder_.add_table(*declaration, table_name, table->empty());
          }
          return true;
       }
@@ -1115,10 +1155,13 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
 
    bool VisitClassTemplateSpecializationDecl(clang::ClassTemplateSpecializationDecl* declaration) {
       const auto* record = specialization_record(*declaration);
-      if (record == nullptr || !belongs_to_selected_contract(*record)) {
+      if (record == nullptr) {
          return true;
       }
-      add_table(*declaration);
+      const auto typed_name = typed_table_name(*record, declaration->getLocation());
+      if (belongs_to_selected_contract(*record) || typed_name.has_value()) {
+         add_table(*declaration, typed_name);
+      }
       return true;
    }
 
@@ -1126,8 +1169,11 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       const auto* specialization = specialization_type(declaration->getUnderlyingType());
       const auto* record = specialization == nullptr ? nullptr : specialization_record(*specialization);
       const auto owned_record = record != nullptr && belongs_to_selected_contract(*record);
-      if (specialization != nullptr && (belongs_to_selected_contract(*declaration) || owned_record)) {
-         add_table(*specialization);
+      const auto typed_name =
+          record == nullptr ? std::optional<std::uint64_t>{} : typed_table_name(*record, declaration->getLocation());
+      if (specialization != nullptr &&
+          (belongs_to_selected_contract(*declaration) || owned_record || typed_name.has_value())) {
+         add_table(*specialization, typed_name);
       }
       return true;
    }
@@ -1183,12 +1229,24 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       return owner.has_value() && *owner == contract_name_;
    }
 
-   void add_table(const clang::ClassTemplateSpecializationDecl& declaration) {
+   std::optional<std::uint64_t> typed_table_name(const clang::CXXRecordDecl& record,
+                                                 clang::SourceLocation use_location) {
+      return named_protocol_value(
+          record, "get_table_name", use_location, "typed table get_table_name() must have a constant table name",
+          "typed table get_table_name() must be a public static constexpr zero-argument function returning table_name");
+   }
+
+   void add_table(const clang::ClassTemplateSpecializationDecl& declaration,
+                  std::optional<std::uint64_t> typed_name = std::nullopt) {
       const auto* record = specialization_record(declaration);
       if (record == nullptr) {
          return;
       }
       const auto value = declaration.getTemplateArgs()[0].getAsIntegral().getZExtValue();
+      if (typed_name.has_value() && *typed_name != value) {
+         report(declaration.getLocation(), "multi_index or singleton name does not match row get_table_name()");
+         return;
+      }
       encoder_.add_table(*record, protocol::to_string(protocol::name{value}));
    }
 
@@ -1198,21 +1256,23 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       std::string result;
    };
 
-   std::optional<std::uint64_t> named_action_value(const clang::ParmVarDecl& parameter) {
-      const auto* record = parameter.getType().getNonReferenceType()->getAsCXXRecordDecl();
-      record = record == nullptr ? nullptr : record->getDefinition();
-      if (record == nullptr) {
-         return std::nullopt;
-      }
-
+   std::optional<std::uint64_t> named_protocol_value(const clang::CXXRecordDecl& record, const char* method_name,
+                                                     clang::SourceLocation use_location, const char* constant_error,
+                                                     const char* declaration_error = nullptr) {
       auto lookup = clang::LookupResult{
           sema_,
-          context_.DeclarationNames.getIdentifier(&context_.Idents.get("get_name")),
-          parameter.getLocation(),
+          context_.DeclarationNames.getIdentifier(&context_.Idents.get(method_name)),
+          use_location,
           clang::Sema::LookupOrdinaryName,
       };
       lookup.suppressDiagnostics();
-      if (!sema_.LookupQualifiedName(lookup, const_cast<clang::CXXRecordDecl*>(record)) || lookup.isAmbiguous()) {
+      if (!sema_.LookupQualifiedName(lookup, const_cast<clang::CXXRecordDecl*>(&record))) {
+         return std::nullopt;
+      }
+      if (lookup.isAmbiguous()) {
+         if (declaration_error != nullptr) {
+            report(use_location, declaration_error);
+         }
          return std::nullopt;
       }
 
@@ -1229,11 +1289,17 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
             continue;
          }
          if (named_method != nullptr) {
+            if (declaration_error != nullptr) {
+               report(use_location, declaration_error);
+            }
             return std::nullopt;
          }
          named_method = method;
       }
       if (named_method == nullptr) {
+         if (declaration_error != nullptr) {
+            report(use_location, declaration_error);
+         }
          return std::nullopt;
       }
 
@@ -1244,10 +1310,20 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       auto result = clang::Expr::EvalResult{};
       if (call.isInvalid() || !call.get()->EvaluateAsConstantExpr(result, context_) || !result.Val.isStruct() ||
           result.Val.getStructNumFields() != 1U || !result.Val.getStructField(0).isInt()) {
-         report(location, "typed action get_name() must have a constant action name");
+         report(location, constant_error);
          return std::nullopt;
       }
       return result.Val.getStructField(0).getInt().getZExtValue();
+   }
+
+   std::optional<std::uint64_t> named_action_value(const clang::ParmVarDecl& parameter) {
+      const auto* record = parameter.getType().getNonReferenceType()->getAsCXXRecordDecl();
+      record = record == nullptr ? nullptr : record->getDefinition();
+      if (record == nullptr) {
+         return std::nullopt;
+      }
+      return named_protocol_value(*record, "get_name", parameter.getLocation(),
+                                  "typed action get_name() must have a constant action name");
    }
 
    void register_method_types(const clang::CXXMethodDecl& method) {
@@ -1303,7 +1379,7 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
           named_parameter == nullptr ? std::optional<std::uint64_t>{} : named_action_value(*named_parameter);
       if (named_value.has_value()) {
          const auto canonical_name = protocol::to_string(protocol::action_name{*named_value});
-         if (!annotated_name.empty() && annotated_name != canonical_name) {
+         if (!annotated_name.empty() && protocol::make_name(annotated_name).value != *named_value) {
             report(method.getLocation(), "action attribute name does not match payload get_name()");
             return;
          }
@@ -1692,73 +1768,26 @@ void write_depfile(const forge::contract::abi::request& options, const source_de
    write_text(options.depfile, output.str());
 }
 
-struct graph_file {
-   std::string owner;
-   forge::contract::graph::file_role role;
-   std::filesystem::path physical_path;
-};
-
-struct graph_edge {
-   std::string owner;
-   std::string dependency;
-   forge::contract::graph::dependency_scope scope;
-};
-
-struct contract_graph {
-   std::string root_owner;
-   std::map<std::filesystem::path, graph_file> files;
-   std::map<std::string, std::set<std::filesystem::path>> files_by_owner;
-   std::map<std::string, std::vector<graph_edge>> edges_by_owner;
-   std::map<std::string, std::string> module_owners;
-};
-
-const forge::variant_object& graph_object(const forge::variant& value, std::string_view description) {
+const forge::variant_object& metadata_object(const forge::variant& value, std::string_view description) {
    if (!value.is_object()) {
       throw std::runtime_error{std::string{description} + " must be an object"};
    }
    return value.get_object();
 }
 
-const forge::variants& graph_array(const forge::variant_object& object, const char* name,
-                                   std::string_view description) {
+const forge::variants& metadata_array(const forge::variant_object& object, const char* name,
+                                      std::string_view description) {
    if (!object.contains(name) || !object[name].is_array()) {
       throw std::runtime_error{std::string{description} + " has no " + name + " array"};
    }
    return object[name].get_array();
 }
 
-std::string graph_string(const forge::variant_object& object, const char* name, std::string_view description) {
+std::string metadata_string(const forge::variant_object& object, const char* name, std::string_view description) {
    if (!object.contains(name) || !object[name].is_string() || object[name].get_string().empty()) {
       throw std::runtime_error{std::string{description} + " has no " + name};
    }
    return object[name].get_string();
-}
-
-contract_graph make_contract_graph(const forge::contract::graph::descriptor& descriptor) {
-   auto graph = contract_graph{};
-   graph.root_owner = descriptor.root_owner;
-   for (const auto& file : descriptor.files) {
-      auto indexed = graph_file{
-          .owner = file.owner,
-          .role = file.role,
-          .physical_path = file.physical_path,
-      };
-      graph.files.emplace(indexed.physical_path, indexed);
-      graph.files_by_owner[indexed.owner].insert(indexed.physical_path);
-   }
-   for (const auto& edge : descriptor.dependencies) {
-      graph.edges_by_owner[edge.owner].push_back(graph_edge{
-          .owner = edge.owner,
-          .dependency = edge.target,
-          .scope = edge.scope,
-      });
-   }
-   for (const auto& component : descriptor.components) {
-      for (const auto& module : component.modules) {
-         graph.module_owners.emplace(module, component.id);
-      }
-   }
-   return graph;
 }
 
 struct compilation_metadata {
@@ -1771,7 +1800,7 @@ struct compilation_metadata {
 
 module_dependencies metadata_modules(const forge::variant_object& object, const char* name,
                                      const std::filesystem::path& path) {
-   const auto& values = graph_array(object, name, "contract compilation metadata");
+   const auto& values = metadata_array(object, name, "contract compilation metadata");
    auto result = module_dependencies{};
    for (const auto& value : values) {
       if (!value.is_string() || value.get_string().empty() || !result.insert(value.get_string()).second) {
@@ -1797,18 +1826,18 @@ compilation_metadata read_compilation_metadata(const std::filesystem::path& obje
       throw std::runtime_error{"contract compilation metadata has an unsupported schema: " + path.string()};
    }
    auto result = compilation_metadata{
-       .source = std::filesystem::weakly_canonical(graph_string(object, "source", "contract compilation metadata")),
+       .source = std::filesystem::weakly_canonical(metadata_string(object, "source", "contract compilation metadata")),
        .imported_modules = metadata_modules(object, "imports", path),
        .exported_modules = metadata_modules(object, "exports", path),
        .provided_modules = metadata_modules(object, "provides", path),
    };
-   for (const auto& value : graph_array(object, "dependencies", "contract compilation metadata")) {
-      const auto& dependency = graph_object(value, "contract compilation dependency");
+   for (const auto& value : metadata_array(object, "dependencies", "contract compilation metadata")) {
+      const auto& dependency = metadata_object(value, "contract compilation dependency");
       if (!dependency.contains("system") || !dependency["system"].is_bool()) {
          throw std::runtime_error{"contract compilation dependency has no system flag: " + path.string()};
       }
       const auto dependency_path =
-          std::filesystem::weakly_canonical(graph_string(dependency, "path", "contract compilation dependency"));
+          std::filesystem::weakly_canonical(metadata_string(dependency, "path", "contract compilation dependency"));
       const auto [entry, inserted] = result.dependencies.emplace(dependency_path, dependency["system"].as_bool());
       if (!inserted) {
          entry->second = entry->second && dependency["system"].as_bool();
@@ -1835,156 +1864,46 @@ std::vector<compilation_metadata> read_compilation_list(const std::filesystem::p
    return result;
 }
 
-std::set<std::string> public_closure(const contract_graph& graph, std::set<std::string> visible) {
-   auto pending = std::vector<std::string>{visible.begin(), visible.end()};
-   while (!pending.empty()) {
-      auto owner = std::move(pending.back());
-      pending.pop_back();
-      const auto found = graph.edges_by_owner.find(owner);
-      if (found == graph.edges_by_owner.end()) {
-         continue;
-      }
-      for (const auto& edge : found->second) {
-         if (edge.scope == forge::contract::graph::dependency_scope::public_ &&
-             visible.insert(edge.dependency).second) {
-            pending.push_back(edge.dependency);
-         }
-      }
-   }
-   return visible;
-}
-
-std::set<std::string> visible_owners(const contract_graph& graph, std::string_view owner, bool public_surface) {
-   auto visible = std::set<std::string>{std::string{owner}};
-   const auto found = graph.edges_by_owner.find(std::string{owner});
-   if (found != graph.edges_by_owner.end()) {
-      for (const auto& edge : found->second) {
-         if (!public_surface || edge.scope == forge::contract::graph::dependency_scope::public_) {
-            visible.insert(edge.dependency);
-         }
-      }
-   }
-   return public_closure(graph, std::move(visible));
-}
-
-bool path_is_under(const std::filesystem::path& path, const std::filesystem::path& root) {
-   const auto relative = path.lexically_relative(root);
-   return !relative.empty() && !relative.is_absolute() &&
-          std::ranges::none_of(relative, [](const auto& component) { return component == ".."; });
-}
-
-bool is_sdk_dependency(const std::vector<std::filesystem::path>& roots, const std::filesystem::path& path) {
-   return std::ranges::any_of(roots, [&](const auto& root) { return path_is_under(path, root); });
-}
-
-void validate_source_dependency(const contract_graph& graph, std::string_view owner,
-                                forge::contract::graph::file_role source_role, const std::set<std::string>& visible,
-                                const std::vector<std::filesystem::path>& sdk_roots,
-                                const std::filesystem::path& dependency, bool system) {
-   const auto declared = graph.files.find(dependency);
-   if (declared == graph.files.end()) {
-      if (!system && !is_sdk_dependency(sdk_roots, dependency)) {
-         throw std::runtime_error{"contract source dependency is not declared: " + dependency.string()};
-      }
-      return;
-   }
-
-   const auto& file = declared->second;
-   if (!visible.contains(file.owner)) {
-      throw std::runtime_error{"contract source dependency owner is not visible: " + dependency.string()};
-   }
-   if (source_role == forge::contract::graph::file_role::module && !forge::contract::graph::is_public(file.role)) {
-      throw std::runtime_error{"contract public module uses a private source: " + dependency.string()};
-   }
-   if (file.owner != owner && !forge::contract::graph::is_public(file.role)) {
-      throw std::runtime_error{"contract source uses a private dependency file: " + dependency.string()};
-   }
-}
-
-struct validated_contract_graph {
-   contract_graph graph;
+struct validated_contract_libraries {
    std::map<std::string, std::string> module_owners;
-   std::vector<std::filesystem::path> sdk_roots;
 };
 
-validated_contract_graph validate_contract_libraries(const forge::contract::abi::request& options) {
-   auto graph = make_contract_graph(forge::contract::graph::read(options.contract_graph));
-   auto sdk_roots = std::vector<std::filesystem::path>{};
-   sdk_roots.reserve(options.sdk_include_paths.size());
-   std::ranges::transform(options.sdk_include_paths, std::back_inserter(sdk_roots),
-                          [](const auto& path) { return std::filesystem::weakly_canonical(path); });
-   if (graph.root_owner != "contract:" + options.contract) {
-      throw std::runtime_error{"contract graph root owner does not match requested contract"};
-   }
-
+validated_contract_libraries validate_contract_libraries(const forge::contract::abi::request& options) {
    auto metadata_by_owner = std::map<std::string, std::vector<compilation_metadata>>{};
    for (const auto& compilation : options.library_compilations) {
-      if (!graph.files_by_owner.contains(compilation.owner)) {
-         throw std::runtime_error{"contract compilation has an unknown owner: " + compilation.owner};
-      }
-      if (metadata_by_owner.contains(compilation.owner)) {
+      if (compilation.owner.empty() || metadata_by_owner.contains(compilation.owner)) {
          throw std::runtime_error{"contract compilation owner is specified more than once: " + compilation.owner};
       }
       metadata_by_owner.emplace(compilation.owner, read_compilation_list(compilation.object_list));
    }
 
-   auto module_owners = graph.module_owners;
-   auto compiled_sources = std::map<std::string, std::set<std::filesystem::path>>{};
+   auto module_owners = std::map<std::string, std::string>{};
+   for (const auto& module : options.known_modules) {
+      if (module.name.empty() || module.owner.empty()) {
+         throw std::runtime_error{"known contract module has an empty name or owner"};
+      }
+      const auto [existing, inserted] = module_owners.emplace(module.name, module.owner);
+      if (!inserted && existing->second != module.owner) {
+         throw std::runtime_error{"contract module has multiple registered owners: " + module.name};
+      }
+   }
    for (const auto& [owner, metadata_values] : metadata_by_owner) {
       for (const auto& metadata : metadata_values) {
-         const auto file = graph.files.find(metadata.source);
-         if (file == graph.files.end() || file->second.owner != owner ||
-             (file->second.role != forge::contract::graph::file_role::module &&
-              file->second.role != forge::contract::graph::file_role::implementation)) {
-            throw std::runtime_error{"contract compilation source is not owned by descriptor " + owner + ": " +
-                                     metadata.source.string()};
-         }
-         if (!compiled_sources[owner].insert(metadata.source).second) {
-            throw std::runtime_error{"contract compilation source appears more than once: " + metadata.source.string()};
-         }
          for (const auto& module : metadata.provided_modules) {
             const auto [existing, inserted] = module_owners.emplace(module, owner);
             if (!inserted && existing->second != owner) {
-               throw std::runtime_error{"contract module has multiple owners: " + module};
+               throw std::runtime_error{"contract module owner does not match its compilation: " + module};
             }
          }
       }
    }
 
-   for (const auto& [owner, files] : graph.files_by_owner) {
-      if (owner == graph.root_owner) {
-         continue;
-      }
-      auto expected = std::set<std::filesystem::path>{};
-      for (const auto& path : files) {
-         const auto& role = graph.files.at(path).role;
-         if (role == forge::contract::graph::file_role::module ||
-             role == forge::contract::graph::file_role::implementation) {
-            expected.insert(path);
-         }
-      }
-      const auto found = compiled_sources.find(owner);
-      if (found == compiled_sources.end() || found->second != expected) {
-         throw std::runtime_error{"contract compilation metadata does not match descriptor owner: " + owner};
-      }
-   }
-
    for (const auto& [owner, metadata_values] : metadata_by_owner) {
       for (const auto& metadata : metadata_values) {
-         const auto role = graph.files.at(metadata.source).role;
-         const auto visible = visible_owners(graph, owner, role == forge::contract::graph::file_role::module);
-         for (const auto& [dependency, system] : metadata.dependencies) {
-            validate_source_dependency(graph, owner, role, visible, sdk_roots, dependency, system);
-         }
-         const auto public_visible = visible_owners(graph, owner, true);
          for (const auto& module : metadata.exported_modules) {
             const auto found = module_owners.find(module);
             if (found == module_owners.end()) {
                throw std::runtime_error{"contract library " + owner + " exports an unknown module: " + module};
-            }
-            if (!public_visible.contains(found->second)) {
-               throw std::runtime_error{"contract library " + owner +
-                                        " exports a module through a private dependency: " + module};
             }
          }
          for (const auto& module : metadata.imported_modules) {
@@ -1992,36 +1911,21 @@ validated_contract_graph validate_contract_libraries(const forge::contract::abi:
             if (found == module_owners.end()) {
                throw std::runtime_error{"contract library " + owner + " imports an unknown module: " + module};
             }
-            if (!visible.contains(found->second)) {
-               throw std::runtime_error{"contract library " + owner +
-                                        " imports a module through an undeclared dependency: " + module};
-            }
          }
       }
    }
 
    return {
-       .graph = std::move(graph),
        .module_owners = std::move(module_owners),
-       .sdk_roots = std::move(sdk_roots),
    };
 }
 
-void validate_contract_root(const validated_contract_graph& validated, const source_dependencies& contract_dependencies,
+void validate_contract_root(const validated_contract_libraries& validated,
                             const module_dependencies& contract_modules) {
-   const auto& graph = validated.graph;
-   const auto root_visible = visible_owners(graph, graph.root_owner, false);
-   for (const auto& [dependency, system] : contract_dependencies) {
-      validate_source_dependency(graph, graph.root_owner, forge::contract::graph::file_role::source, root_visible,
-                                 validated.sdk_roots, dependency, system);
-   }
    for (const auto& module : contract_modules) {
       const auto found = validated.module_owners.find(module);
       if (found == validated.module_owners.end()) {
          throw std::runtime_error{"contract imports an unknown module: " + module};
-      }
-      if (!root_visible.contains(found->second)) {
-         throw std::runtime_error{"contract imports a module through an undeclared library: " + module};
       }
    }
 }
@@ -2434,20 +2338,26 @@ artifacts generate(const request& options) {
    if (llvm::sys::DynamicLibrary::LoadLibraryPermanently(options.attribute_plugin.c_str(), &load_error)) {
       throw std::runtime_error{"failed to load contract attribute plugin: " + load_error};
    }
-   const auto validated_graph = validate_contract_libraries(options);
+   const auto validated_libraries = validate_contract_libraries(options);
 
    auto arguments = std::vector<std::string>{
        "-std=c++23",
        "--target=wasm32",
        "-fsyntax-only",
-       "-fno-exceptions",
-       "-fno-rtti",
-       "-ffreestanding",
-       "--sysroot=" + options.sysroot.string(),
-       "-mcpu=mvp",
-       "-DFORGE_CONTRACT_GUEST=1",
-       "-DFORGE_CONTRACT_DEFER_EOSIO_DISPATCH=1",
    };
+   arguments.insert(arguments.end(), options.compiler_arguments.begin(), options.compiler_arguments.end());
+   arguments.insert(arguments.end(), {
+                                         "-fno-exceptions",
+                                         "-fno-rtti",
+                                         "-fno-threadsafe-statics",
+                                         "-ffreestanding",
+                                         "-fvisibility=hidden",
+                                         "-fno-ident",
+                                         "--sysroot=" + options.sysroot.string(),
+                                         "-mcpu=mvp",
+                                         "-DFORGE_CONTRACT_GUEST=1",
+                                         "-DFORGE_CONTRACT_DEFER_EOSIO_DISPATCH=1",
+                                     });
    for (const auto& path : options.include_paths) {
       arguments.push_back("-I" + path.string());
    }
@@ -2531,7 +2441,9 @@ artifacts generate(const request& options) {
       }
    }
 
-   validate_contract_root(validated_graph, dependencies, imported_modules);
+   if (!options.library_compilations.empty() || !options.known_modules.empty()) {
+      validate_contract_root(validated_libraries, imported_modules);
+   }
    load_ricardian(output, options);
    canonicalize(output);
    write_abi(output, options);
