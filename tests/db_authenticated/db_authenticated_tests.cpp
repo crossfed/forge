@@ -761,6 +761,23 @@ BOOST_AUTO_TEST_CASE(authenticated_versions_are_deterministic_and_restart_safe) 
       BOOST_REQUIRE(first_page.next_key.has_value());
       BOOST_TEST(text(*first_page.next_key) == "delta");
 
+      const auto scanned_first_page = co_await authenticated.scan_range(1, forge::db::authenticated::range_request{
+                                                                               .lower = bytes("b"),
+                                                                               .upper = bytes("z"),
+                                                                               .limit = 1,
+                                                                           });
+      BOOST_CHECK(scanned_first_page == first_page);
+
+      const auto hash_only_page = co_await authenticated.scan_range(1, forge::db::authenticated::range_request{
+                                                                           .lower = bytes("b"),
+                                                                           .upper = bytes("z"),
+                                                                           .limit = 2,
+                                                                           .include_values = false,
+                                                                       });
+      BOOST_REQUIRE_EQUAL(hash_only_page.items.size(), 2U);
+      BOOST_TEST(!hash_only_page.items.front().value.has_value());
+      BOOST_TEST(hash_only_page.items.front().value_hash == first_page.items.front().value_hash);
+
       const auto second_page_proof = co_await authenticated.prove_range(1, forge::db::authenticated::range_request{
                                                                                .lower = first_page.next_key,
                                                                                .upper = bytes("z"),
@@ -792,6 +809,9 @@ BOOST_AUTO_TEST_CASE(authenticated_versions_are_deterministic_and_restart_safe) 
       BOOST_REQUIRE_EQUAL(verified_changes.items.size(), 3U);
       BOOST_REQUIRE(verified_changes.items.front().value.has_value());
       BOOST_CHECK(verified_changes.items.front().value->front() == std::byte{0});
+      const auto scanned_changes = co_await authenticated.scan_range(1, forge::db::authenticated::range_request{},
+                                                                     forge::db::authenticated::proof_tree::changes);
+      BOOST_CHECK(scanned_changes == verified_changes);
 
       auto rolled_back_db = co_await driver->begin_transaction();
       auto rolled_back = co_await authenticated.join(rolled_back_db, 2);

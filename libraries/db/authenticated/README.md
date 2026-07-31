@@ -46,6 +46,20 @@ change set after savepoint rollback and must verify that it matches the staged
 authenticated mutation digest. Projection policy remains downstream because
 Forge does not know product table or index semantics.
 
+## Reads And Proofs
+
+`get()` and `scan_range()` read a retained immutable version while validating
+content-addressed nodes and values locally. `scan_range()` returns the same
+ordered ranks, continuation key and optional values as a verified range proof,
+but does not construct or serialize witness nodes. It is the normal trusted
+server path when an API caller did not request an audit proof.
+
+`prove()` and `prove_range()` additionally construct transferable witnesses.
+For range proofs, `proof_tree::state` covers the complete version state and
+`proof_tree::changes` covers that version's canonical last-write-wins mutation
+set, including tombstones. Callers should not generate either proof unless a
+consumer explicitly requests audit material.
+
 ## Hash Schema
 
 Schema v3 uses SHA-256 with explicit domain and length framing. Inner nodes

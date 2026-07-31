@@ -32,6 +32,8 @@ class store {
    boost::asio::awaitable<std::optional<root>> latest() const;
    boost::asio::awaitable<std::optional<root>> find_root(version_id_t version) const;
    boost::asio::awaitable<std::optional<bytes>> get(version_id_t version, std::span<const std::byte> key) const;
+   boost::asio::awaitable<verified_range> scan_range(version_id_t version, range_request request,
+                                                     proof_tree tree = proof_tree::state) const;
    boost::asio::awaitable<point_proof> prove(version_id_t version, std::span<const std::byte> key,
                                              bool include_value = true) const;
    boost::asio::awaitable<range_proof> prove_range(version_id_t version, range_request request,

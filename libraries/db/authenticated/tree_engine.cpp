@@ -726,6 +726,86 @@ boost::asio::awaitable<std::uint64_t> tree_engine::lower_bound_rank(const bytes&
    co_return rank;
 }
 
+boost::asio::awaitable<void> tree_engine::emit_items(const digest& current, std::uint64_t offset, std::uint64_t begin,
+                                                     std::uint64_t end, bool include_values,
+                                                     std::vector<verified_range_item>& output, std::uint32_t depth) {
+   check_depth(depth);
+   const auto value = co_await load(current);
+   if (offset > std::numeric_limits<std::uint64_t>::max() - value.size) {
+      FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated range offset overflows");
+   }
+   const auto subtree_end = offset + value.size;
+   if (subtree_end <= begin || offset >= end) {
+      co_return;
+   }
+   if (value.type == node::kind::leaf) {
+      auto item = verified_range_item{
+          .key = value.key,
+          .value_hash = value.value_hash,
+          .rank = offset,
+      };
+      if (include_values) {
+         item.value = co_await load_value(value.value_hash);
+      }
+      output.push_back(std::move(item));
+      co_return;
+   }
+
+   const auto left = co_await load(value.left);
+   co_await emit_items(value.left, offset, begin, end, include_values, output, depth + 1U);
+   co_await emit_items(value.right, offset + left.size, begin, end, include_values, output, depth + 1U);
+}
+
+boost::asio::awaitable<verified_range> tree_engine::scan_range(const root& anchor, range_request request,
+                                                               proof_tree tree) {
+   if (tree != proof_tree::state && tree != proof_tree::changes) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_range, "authenticated range tree is invalid");
+   }
+   if (request.limit == 0 || request.limit > limits_.max_range_items) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_range, "authenticated range limit is invalid",
+                            forge::exceptions::ctx("limit", request.limit),
+                            forge::exceptions::ctx("maximum", limits_.max_range_items));
+   }
+   if ((request.lower && request.lower->size() > limits_.max_key_bytes) ||
+       (request.upper && request.upper->size() > limits_.max_key_bytes)) {
+      FORGE_THROW_EXCEPTION(exceptions::proof_limit_exceeded, "authenticated range boundary exceeds key limit");
+   }
+   if (request.lower && request.upper && !key_less(*request.lower, *request.upper)) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_range, "authenticated range must be non-empty");
+   }
+
+   const auto total = tree == proof_tree::state ? anchor.state_size : anchor.change_count;
+   const auto expected = tree == proof_tree::state ? anchor.state_root : anchor.change_root;
+   if ((total == 0 && root_hash_) || (total != 0 && (!root_hash_ || *root_hash_ != expected))) {
+      FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated range tree does not match its anchor");
+   }
+
+   auto result = verified_range{.total_size = total};
+   if (total == 0) {
+      co_return result;
+   }
+   const auto first = request.lower ? co_await lower_bound_rank(*request.lower) : std::uint64_t{0};
+   const auto upper = request.upper ? co_await lower_bound_rank(*request.upper) : total;
+   if (first > upper || upper > total) {
+      FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated range ranks are inconsistent");
+   }
+   const auto count = std::min<std::uint64_t>(upper - first, request.limit);
+   co_await emit_items(*root_hash_, 0U, first, first + count, request.include_values, result.items, 0U);
+   if (result.items.size() != count) {
+      FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated range scan has a gap");
+   }
+   if (first + count < upper) {
+      auto successor = std::vector<verified_range_item>{};
+      co_await emit_items(*root_hash_, 0U, first + count, first + count + 1U, false, successor, 0U);
+      if (successor.size() != 1U) {
+         FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated range scan omits its continuation");
+      }
+      result.more = true;
+      result.next_key = std::move(successor.front().key);
+   }
+   co_return result;
+}
+
 boost::asio::awaitable<void> tree_engine::emit_range(const digest& current, std::uint64_t offset,
                                                      std::uint64_t witness_begin, std::uint64_t witness_end,
                                                      std::uint64_t result_begin, std::uint64_t result_end,

@@ -101,6 +101,33 @@ boost::asio::awaitable<std::optional<bytes>> store::get(version_id_t version, st
    co_return co_await engine.get(key);
 }
 
+boost::asio::awaitable<verified_range> store::scan_range(version_id_t version, range_request request,
+                                                         proof_tree tree) const {
+   if (!impl_) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_store, "authenticated store is not initialized");
+   }
+   auto owned = co_await impl_->driver->begin_read();
+   auto active = std::make_shared<forge::db::core::snapshot>(std::move(owned));
+   const auto anchor = co_await read_root(*active, impl_->settings.family, impl_->namespace_hash, version);
+   if (!anchor) {
+      FORGE_THROW_EXCEPTION(exceptions::version_unavailable, "authenticated state version is unavailable",
+                            forge::exceptions::ctx("version", version));
+   }
+
+   if (tree != proof_tree::state && tree != proof_tree::changes) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_range, "authenticated range tree is invalid");
+   }
+   const auto size = tree == proof_tree::state ? anchor->state_size : anchor->change_count;
+   const auto tree_root = tree == proof_tree::state ? anchor->state_root : anchor->change_root;
+   auto engine = detail::tree_engine{
+       canonical_tree_domain(impl_->settings.domain, tree),
+       size == 0 ? std::nullopt : std::optional<digest>{tree_root},
+       snapshot_reader(active, impl_->settings.family, impl_->settings.read_observer),
+       impl_->settings.bounds,
+   };
+   co_return co_await engine.scan_range(*anchor, std::move(request), tree);
+}
+
 boost::asio::awaitable<point_proof> store::prove(version_id_t version, std::span<const std::byte> key,
                                                  bool include_value) const {
    if (!impl_) {

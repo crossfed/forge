@@ -53,6 +53,7 @@ class tree_engine {
 
    boost::asio::awaitable<tree_result> apply(std::span<const mutation> mutations);
    boost::asio::awaitable<std::optional<bytes>> get(std::span<const std::byte> key);
+   boost::asio::awaitable<verified_range> scan_range(const root& anchor, range_request request, proof_tree tree);
    boost::asio::awaitable<point_proof> prove(const root& anchor, std::span<const std::byte> key, bool include_value);
    boost::asio::awaitable<range_proof> prove_range(const root& anchor, range_request request, proof_tree tree);
    boost::asio::awaitable<void> persist(get_record_fn get, put_record_fn put, erase_record_fn erase);
@@ -72,6 +73,9 @@ class tree_engine {
    boost::asio::awaitable<std::optional<digest>> erase(std::optional<digest> current, const bytes& key,
                                                        std::uint32_t depth);
    boost::asio::awaitable<std::uint64_t> lower_bound_rank(const bytes& key);
+   boost::asio::awaitable<void> emit_items(const digest& current, std::uint64_t offset, std::uint64_t begin,
+                                           std::uint64_t end, bool include_values,
+                                           std::vector<verified_range_item>& output, std::uint32_t depth);
    boost::asio::awaitable<void> emit_range(const digest& current, std::uint64_t offset, std::uint64_t witness_begin,
                                            std::uint64_t witness_end, std::uint64_t result_begin,
                                            std::uint64_t result_end, bool include_values,
