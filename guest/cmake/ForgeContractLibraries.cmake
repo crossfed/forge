@@ -343,6 +343,17 @@ function(_forge_contract_validate_guest_targets)
    endforeach()
 endfunction()
 
+function(_forge_contract_defer_guest_environment_validation)
+   cmake_language(DEFER CALL _forge_contract_validate_guest_environment)
+endfunction()
+
+function(_forge_contract_defer_guest_target_validation)
+   cmake_language(
+      DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
+      CALL _forge_contract_validate_guest_targets
+   )
+endfunction()
+
 function(_forge_contract_freeze_guest_target target declaration)
    if(NOT FORGE_CONTRACT_GUEST)
       return()
@@ -399,7 +410,7 @@ function(_forge_contract_freeze_guest_target target declaration)
       )
       cmake_language(
          DEFER DIRECTORY "${_source_directory}"
-         CALL _forge_contract_validate_guest_environment
+         CALL _forge_contract_defer_guest_environment_validation
       )
    endif()
    set_property(GLOBAL APPEND PROPERTY FORGE_CONTRACT_FROZEN_TARGETS "${target}")
@@ -412,7 +423,7 @@ function(_forge_contract_freeze_guest_target target declaration)
       )
       cmake_language(
          DEFER DIRECTORY "${CMAKE_SOURCE_DIR}"
-         CALL _forge_contract_validate_guest_targets
+         CALL _forge_contract_defer_guest_target_validation
       )
    endif()
 endfunction()

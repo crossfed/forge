@@ -525,6 +525,26 @@ set_property(
         },
     )
 
+    deferred_mutation = source_root / "deferred-mutation"
+    write_negative_project(
+        deferred_mutation,
+        cmake_body="""
+forge_add_contract_library(
+   negative_protocol ID negative.deferred_mutation
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/protocol.cppm
+)
+cmake_language(
+   DEFER CALL set_property
+   TARGET negative_protocol APPEND
+   PROPERTY COMPILE_DEFINITIONS DEFERRED_MUTATION=1
+)
+""",
+        modules={
+            "include/protocol.cppm": "export module negative.protocol;\n"
+        },
+    )
+
     directory_profile = source_root / "directory-profile"
     write_negative_project(
         directory_profile,
@@ -716,6 +736,10 @@ class [[forge::contract("mismatch")]] mismatch final
         (
             global_launcher,
             "global RULE_LAUNCH_COMPILE is unsupported",
+        ),
+        (
+            deferred_mutation,
+            "changed property: COMPILE_DEFINITIONS",
         ),
         (directory_profile, "directory COMPILE_DEFINITIONS are unsupported"),
         (
