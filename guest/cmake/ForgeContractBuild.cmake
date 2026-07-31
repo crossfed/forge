@@ -121,7 +121,6 @@ function(forge_add_contract target)
       _owner_targets
       "$<TARGET_PROPERTY:${_metadata_target},INTERFACE_FORGE_CONTRACT_OWNER_TARGETS>"
    )
-
    if(FORGE_CONTRACT_ARTIFACT_DIR)
       get_filename_component(
          _output_dir "${FORGE_CONTRACT_ARTIFACT_DIR}" ABSOLUTE

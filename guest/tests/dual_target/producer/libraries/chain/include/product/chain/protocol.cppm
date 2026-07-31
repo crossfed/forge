@@ -7,6 +7,7 @@ export module product.chain.protocol;
 
 import product.chain.limits;
 
+export import forge.chain.protocol.action;
 export import product.chain.values;
 
 export namespace product::chain {
@@ -28,6 +29,10 @@ struct revision {
    std::uint64_t size = 0;
    revision_state state = revision_state::preparing;
 
+   static constexpr forge::chain::protocol::table_name get_table_name() {
+      return forge::chain::protocol::make_name("revisions");
+   }
+
    [[nodiscard]] std::uint64_t primary_key() const {
       return id;
    }
@@ -35,6 +40,14 @@ struct revision {
    [[nodiscard]] forge::chain::protocol::uint128_t by_workspace_inode() const {
       return (static_cast<forge::chain::protocol::uint128_t>(workspace.value) << 64U) |
              inode.value;
+   }
+};
+
+struct unused_audit_record {
+   std::uint64_t id = 0;
+
+   static constexpr forge::chain::protocol::table_name get_table_name() {
+      return forge::chain::protocol::make_name("unusedaudit");
    }
 };
 

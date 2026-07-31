@@ -121,6 +121,13 @@ def verify_abi(data: bytes) -> None:
         {"name": "size", "type": "uint64"},
     ]:
         raise RuntimeError("named action ABI fields are not direct")
+    table = next(
+        item for item in abi["tables"] if item["name"] == "revisions"
+    )
+    if table["type"] != "revision":
+        raise RuntimeError("typed table did not use its persisted value directly")
+    if any(item["name"] == "unusedaudit" for item in abi["tables"]):
+        raise RuntimeError("unused imported typed row leaked into the contract ABI")
 
 
 def verify_manifest(data: bytes) -> None:
@@ -260,6 +267,54 @@ forge_add_contract_library(
         },
     )
 
+    table_mismatch = source_root / "table-name-mismatch"
+    write_negative_project(
+        table_mismatch,
+        cmake_body="""
+forge_add_contract_library(
+   mismatched_state ID negative.table_mismatch
+   MODULE_BASE_DIRS include
+   MODULE_SOURCES include/state.cppm
+   PUBLIC_LIBRARIES Forge::forge_contract_runtime
+)
+forge_add_contract(
+   mismatch
+   SOURCES contract.cpp
+   LIBRARIES mismatched_state
+)
+""",
+        modules={
+            "include/state.cppm": """module;
+#include <cstdint>
+export module negative.table_mismatch;
+export import forge.contract;
+export import forge.contract.multi_index;
+export namespace negative {
+using forge::chain::protocol::literals::operator""_n;
+struct row {
+   std::uint64_t id = 0;
+   static constexpr forge::chain::protocol::table_name get_table_name() {
+      return forge::chain::protocol::make_name("expected");
+   }
+   std::uint64_t primary_key() const { return id; }
+};
+using rows = forge::contract::multi_index<"actual"_n, row>;
+}
+""",
+        },
+        contract="""import negative.table_mismatch;
+class [[forge::contract("mismatch")]] mismatch final
+   : public forge::contract::context {
+ public:
+   using context::context;
+   [[forge::action]] void create() {
+      negative::rows rows{get_self(), get_self().value};
+      rows.emplace(get_self(), [](auto& row) { row.id = 1; });
+   }
+};
+""",
+    )
+
     toolchain = contract_package / "ForgeContractToolchain.cmake"
     cases = (
         (duplicate, "duplicate Forge Contract owner ID"),
@@ -279,6 +334,27 @@ forge_add_contract_library(
             f"-DForgeContract_DIR={contract_package}",
             contains=expected,
         )
+
+    mismatch_build = build_root / table_mismatch.name
+    run(
+        cmake,
+        "-S",
+        str(table_mismatch),
+        "-B",
+        str(mismatch_build),
+        "-G",
+        "Ninja",
+        f"-DCMAKE_TOOLCHAIN_FILE={toolchain}",
+        f"-DForgeContract_DIR={contract_package}",
+    )
+    run_failure(
+        cmake,
+        "--build",
+        str(mismatch_build),
+        "-j",
+        "4",
+        contains="table name does not match",
+    )
 
 
 def validate(

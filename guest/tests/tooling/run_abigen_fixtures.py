@@ -466,6 +466,28 @@ def main():
     if authority_fields["authority"]["type"] != "block_signing_authority":
         raise RuntimeError("SDK-owned type alias was desugared at its use site")
 
+    typed_ids = invoke(
+        args,
+        "typedids",
+        args.fixtures / "namespaced_typed_id.cpp",
+        args.output / "namespaced-typed-id",
+    )
+    typed_id_types = {item["new_type_name"]: item["type"] for item in typed_ids["types"]}
+    if "id" in typed_id_types:
+        raise RuntimeError("namespaced typed IDs leaked a globally ambiguous ABI alias")
+    if typed_id_types.get("coding_scheme") != "uint8":
+        raise RuntimeError("named protocol enum did not preserve its ABI alias")
+    typed_id_fields = by_name(by_name(typed_ids["structs"])["submit"]["fields"])
+    if {name: field["type"] for name, field in typed_id_fields.items()} != {
+        "application_id": "uint64",
+        "workspace_id": "uint64",
+        "repair_id": "uint64",
+        "coding": "coding_scheme",
+    }:
+        raise RuntimeError("namespaced typed IDs or enum changed their canonical ABI")
+    if any(item["name"].startswith("typed_id") for item in typed_ids["structs"]):
+        raise RuntimeError("typed ID implementation records leaked into the contract ABI")
+
     equivalent_struct = invoke(
         args,
         "equivalent",
@@ -566,6 +588,22 @@ def main():
         args.fixtures / "invalid_exported_apply.cpp",
         args.output,
         succeeds=False,
+    )
+    invoke(
+        args,
+        "enumconflict",
+        args.fixtures / "conflicting_enum_names.cpp",
+        args.output / "conflicting-enum-names",
+        succeeds=False,
+        error_contains="conflicting contract ABI type alias 'status'",
+    )
+    invoke(
+        args,
+        "invalidtable",
+        args.fixtures / "invalid_table_name.cpp",
+        args.output / "invalid-table-name",
+        succeeds=False,
+        error_contains="get_table_name() must be a public static constexpr",
     )
 
     bare_output = args.output / "bare-output"

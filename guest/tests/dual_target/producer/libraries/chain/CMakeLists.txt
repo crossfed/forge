@@ -22,6 +22,7 @@ forge_add_contract_library(
    MODULE_SOURCES include/product/chain/protocol.cppm
    SOURCES protocol.cpp
    PUBLIC_LIBRARIES
+      Forge::forge_chain_protocol
       Forge::forge_raw
       product_chain_values
    PRIVATE_LIBRARIES product_chain_limits

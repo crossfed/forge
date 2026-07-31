@@ -146,6 +146,7 @@ def main() -> None:
     args = parser.parse_args()
 
     output = args.output.resolve()
+    forge_package = args.forge_package.resolve()
     shutil.rmtree(output, ignore_errors=True)
     unpacked = output / "sdk"
     unpacked.mkdir(parents=True)
@@ -258,10 +259,63 @@ def main() -> None:
     if wasm.stat().st_mtime_ns <= first_mtime:
         raise RuntimeError("contract source change did not rebuild the WebAssembly artifact")
 
+    aligned_source = output / "aligned-consumer"
+    shutil.copytree(
+        args.source_root / "guest" / "tests" / "relocation" / "aligned_multi_index",
+        aligned_source,
+    )
+    aligned_build = output / "aligned-build"
+    run(
+        args.cmake,
+        "-S",
+        str(aligned_source),
+        "-B",
+        str(aligned_build),
+        "-G",
+        "Ninja Multi-Config",
+        f"-DCMAKE_TOOLCHAIN_FILE={package / 'ForgeContractToolchain.cmake'}",
+        f"-DForgeContract_DIR={package}",
+    )
+    build_project(args.cmake, aligned_build)
+    for suffix in ("wasm", "abi", "contract.json"):
+        artifact = aligned_build / "artifacts" / f"alignedidx.{suffix}"
+        if not artifact.is_file() or artifact.stat().st_size == 0:
+            raise RuntimeError(f"missing aligned multi-index artifact: {artifact}")
+
+    aligned_host_build = output / "aligned-host-build"
+    aligned_host_command = [
+        args.cmake,
+        "-S",
+        str(aligned_source / "host"),
+        "-B",
+        str(aligned_host_build),
+        "-G",
+        "Ninja",
+        "-DCMAKE_BUILD_TYPE=Debug",
+        f"-DCMAKE_CXX_COMPILER={args.cxx_compiler}",
+        f"-DForge_DIR={forge_package}",
+        f"-DALIGNED_MULTI_INDEX_WASM={aligned_build / 'artifacts' / 'alignedidx.wasm'}",
+    ]
+    if platform.system() == "Darwin":
+        aligned_host_command.append(
+            f"-DCMAKE_OSX_SYSROOT={command_output('xcrun', '--sdk', 'macosx', '--show-sdk-path').strip()}"
+        )
+    run(*aligned_host_command)
+    run(
+        args.cmake,
+        "--build",
+        str(aligned_host_build),
+        "--target",
+        "aligned_multi_index_vm_tests",
+        "-j",
+        "4",
+    )
+    run(str(aligned_host_build / "aligned_multi_index_vm_tests"))
+
     validate_dual_target(
         cmake=args.cmake,
         cxx_compiler=args.cxx_compiler,
-        forge_package=args.forge_package,
+        forge_package=forge_package,
         contract_package=package,
         source=args.dual_target_source.resolve(),
         output=output / "dual-target",

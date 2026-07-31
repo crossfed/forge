@@ -124,6 +124,10 @@ to require that every imported module has exactly one owner in the active guest
 configuration; it does not reconstruct dependency scopes. Textual includes are
 tracked by the generated depfile.
 
+ABI-visible `multi_index` and `singleton` aliases belong in an imported guest
+module interface. Library implementation units are compiled only by CMake and
+are never reparsed by Abigen with an approximated command line.
+
 The Contract SDK does not install downstream dual-target source packages.
 Products use `add_subdirectory()` for shared source-tree libraries. An ordinary
 native `install(EXPORT ...)`, including a destination for the

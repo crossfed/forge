@@ -93,6 +93,11 @@ struct type_shape {
    std::string type;
 };
 
+struct type_declaration {
+   std::string type;
+   std::string identity;
+};
+
 struct variant_shape {
    std::string name;
    std::vector<std::string> types;
@@ -123,7 +128,7 @@ struct schema {
    std::vector<table_shape> tables;
    std::vector<protocol::clause_pair> clauses;
    std::vector<call_shape> calls;
-   std::map<std::string, std::string> type_declarations;
+   std::map<std::string, type_declaration> type_declarations;
    std::map<std::string, std::string> struct_declarations;
    std::set<std::string> variant_names;
    std::map<std::string, std::string> table_declarations;
@@ -309,6 +314,9 @@ class type_encoder {
 
    std::string encode(clang::QualType input) {
       auto type = input.getNonReferenceType().getUnqualifiedType();
+      if (is_typed_id(type)) {
+         return "uint64";
+      }
       if (const auto* alias = llvm::dyn_cast_or_null<clang::TypedefType>(type.getTypePtrOrNull())) {
          const auto* declaration = alias->getDecl();
          const auto qualified = declaration->getQualifiedNameAsString();
@@ -316,7 +324,7 @@ class type_encoder {
          if (!canonical && !context_.getSourceManager().isInSystemHeader(declaration->getLocation())) {
             const auto name = declaration->getNameAsString();
             const auto target = encode(declaration->getUnderlyingType());
-            add_alias(name, target, declaration->getLocation());
+            add_alias(name, target, declaration->getLocation(), declaration_identity(*declaration));
             return name.empty() ? target : name;
          }
       }
@@ -328,7 +336,7 @@ class type_encoder {
          if (!context_.getSourceManager().isInSystemHeader(declaration->getLocation())) {
             const auto name = declaration->getNameAsString();
             const auto target = encode(declaration->getUnderlyingType());
-            add_alias(name, target, declaration->getLocation());
+            add_alias(name, target, declaration->getLocation(), declaration_identity(*declaration));
             return name.empty() ? target : name;
          }
          type = alias->desugar().getUnqualifiedType();
@@ -338,7 +346,15 @@ class type_encoder {
          return encode_builtin(*builtin);
       }
       if (const auto* enumeration = type->getAs<clang::EnumType>()) {
-         return encode(enumeration->getDecl()->getIntegerType());
+         const auto* declaration = enumeration->getDecl();
+         const auto target = encode(declaration->getIntegerType());
+         if (declaration->getIdentifier() == nullptr ||
+             context_.getSourceManager().isInSystemHeader(declaration->getLocation())) {
+            return target;
+         }
+         const auto name = declaration->getNameAsString();
+         add_alias(name, target, declaration->getLocation(), declaration_identity(*declaration));
+         return name;
       }
       if (const auto* array = context_.getAsConstantArrayType(type)) {
          return encode(array->getElementType()) + '[' + llvm::toString(array->getSize(), 10, false) + ']';
@@ -704,6 +720,9 @@ class type_encoder {
              !arguments.empty() && arguments[0].getKind() == clang::TemplateArgument::Type) {
             return encode(arguments[0].getAsType());
          }
+         if (template_qualified == "forge::chain::protocol::typed_id") {
+            return "uint64";
+         }
          if (template_qualified == "forge::contract::binary_extension" && !arguments.empty() &&
              arguments[0].getKind() == clang::TemplateArgument::Type) {
             return encode(arguments[0].getAsType()) + '$';
@@ -832,19 +851,22 @@ class type_encoder {
       return result;
    }
 
-   void add_alias(const std::string& name, const std::string& target, clang::SourceLocation location = {}) {
+   void add_alias(const std::string& name, const std::string& target, clang::SourceLocation location = {},
+                  std::string identity = {}) {
       if (name.empty() || name == target) {
          return;
       }
-      const auto [existing, inserted] = output_.type_declarations.try_emplace(name, target);
+      const auto [existing, inserted] =
+          output_.type_declarations.try_emplace(name, type_declaration{target, identity});
       if (inserted) {
          output_.types.push_back(type_shape{name, target});
          return;
       }
-      if (existing->second != target) {
+      if (existing->second.type != target ||
+          (!existing->second.identity.empty() && !identity.empty() && existing->second.identity != identity)) {
          const auto id = context_.getDiagnostics().getCustomDiagID(
-             clang::DiagnosticsEngine::Error, "conflicting contract ABI type alias '%0' maps to both '%1' and '%2'");
-         context_.getDiagnostics().Report(location, id) << name << existing->second << target;
+             clang::DiagnosticsEngine::Error, "conflicting contract ABI type alias '%0'");
+         context_.getDiagnostics().Report(location, id) << name;
          output_.failed = true;
       }
    }
@@ -1004,6 +1026,16 @@ class type_encoder {
       }
    }
 
+   bool is_typed_id(clang::QualType type) const {
+      const auto desugared = type.getDesugaredType(context_).getUnqualifiedType();
+      const auto* record = desugared->getAs<clang::RecordType>();
+      const auto* specialization =
+          record == nullptr ? nullptr : llvm::dyn_cast<clang::ClassTemplateSpecializationDecl>(record->getDecl());
+      return specialization != nullptr &&
+             specialization->getSpecializedTemplate()->getQualifiedNameAsString() ==
+                "forge::chain::protocol::typed_id";
+   }
+
    void fail(std::string_view type, clang::SourceLocation location) const {
       auto& diagnostics = context_.getDiagnostics();
       const auto id =
@@ -1114,10 +1146,13 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
 
    bool VisitClassTemplateSpecializationDecl(clang::ClassTemplateSpecializationDecl* declaration) {
       const auto* record = specialization_record(*declaration);
-      if (record == nullptr || !belongs_to_selected_contract(*record)) {
+      if (record == nullptr) {
          return true;
       }
-      add_table(*declaration);
+      const auto typed_name = typed_table_name(*record, declaration->getLocation());
+      if (belongs_to_selected_contract(*record) || typed_name.has_value()) {
+         add_table(*declaration, typed_name);
+      }
       return true;
    }
 
@@ -1125,8 +1160,12 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       const auto* specialization = specialization_type(declaration->getUnderlyingType());
       const auto* record = specialization == nullptr ? nullptr : specialization_record(*specialization);
       const auto owned_record = record != nullptr && belongs_to_selected_contract(*record);
-      if (specialization != nullptr && (belongs_to_selected_contract(*declaration) || owned_record)) {
-         add_table(*specialization);
+      const auto typed_name =
+          record == nullptr ? std::optional<std::uint64_t>{}
+                            : typed_table_name(*record, declaration->getLocation());
+      if (specialization != nullptr &&
+          (belongs_to_selected_contract(*declaration) || owned_record || typed_name.has_value())) {
+         add_table(*specialization, typed_name);
       }
       return true;
    }
@@ -1182,12 +1221,31 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       return owner.has_value() && *owner == contract_name_;
    }
 
-   void add_table(const clang::ClassTemplateSpecializationDecl& declaration) {
+   std::optional<std::uint64_t> typed_table_name(
+      const clang::CXXRecordDecl& record,
+      clang::SourceLocation use_location) {
+      return named_protocol_value(
+         record,
+         "get_table_name",
+         use_location,
+         "typed table get_table_name() must have a constant table name",
+         "typed table get_table_name() must be a public static constexpr zero-argument function returning table_name");
+   }
+
+   void add_table(
+      const clang::ClassTemplateSpecializationDecl& declaration,
+      std::optional<std::uint64_t> typed_name = std::nullopt) {
       const auto* record = specialization_record(declaration);
       if (record == nullptr) {
          return;
       }
       const auto value = declaration.getTemplateArgs()[0].getAsIntegral().getZExtValue();
+      if (typed_name.has_value() && *typed_name != value) {
+         report(
+            declaration.getLocation(),
+            "multi_index or singleton name does not match row get_table_name()");
+         return;
+      }
       encoder_.add_table(*record, protocol::to_string(protocol::name{value}));
    }
 
@@ -1197,21 +1255,27 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
       std::string result;
    };
 
-   std::optional<std::uint64_t> named_action_value(const clang::ParmVarDecl& parameter) {
-      const auto* record = parameter.getType().getNonReferenceType()->getAsCXXRecordDecl();
-      record = record == nullptr ? nullptr : record->getDefinition();
-      if (record == nullptr) {
-         return std::nullopt;
-      }
-
+   std::optional<std::uint64_t> named_protocol_value(
+      const clang::CXXRecordDecl& record,
+      const char* method_name,
+      clang::SourceLocation use_location,
+      const char* constant_error,
+      const char* declaration_error = nullptr) {
       auto lookup = clang::LookupResult{
           sema_,
-          context_.DeclarationNames.getIdentifier(&context_.Idents.get("get_name")),
-          parameter.getLocation(),
+          context_.DeclarationNames.getIdentifier(
+             &context_.Idents.get(method_name)),
+          use_location,
           clang::Sema::LookupOrdinaryName,
       };
       lookup.suppressDiagnostics();
-      if (!sema_.LookupQualifiedName(lookup, const_cast<clang::CXXRecordDecl*>(record)) || lookup.isAmbiguous()) {
+      if (!sema_.LookupQualifiedName(lookup, const_cast<clang::CXXRecordDecl*>(&record))) {
+         return std::nullopt;
+      }
+      if (lookup.isAmbiguous()) {
+         if (declaration_error != nullptr) {
+            report(use_location, declaration_error);
+         }
          return std::nullopt;
       }
 
@@ -1228,25 +1292,49 @@ class visitor final : public clang::RecursiveASTVisitor<visitor> {
             continue;
          }
          if (named_method != nullptr) {
+            if (declaration_error != nullptr) {
+               report(use_location, declaration_error);
+            }
             return std::nullopt;
          }
          named_method = method;
       }
       if (named_method == nullptr) {
+         if (declaration_error != nullptr) {
+            report(use_location, declaration_error);
+         }
          return std::nullopt;
       }
 
       const auto location = named_method->getLocation();
-      auto* callee = sema_.BuildDeclRefExpr(const_cast<clang::CXXMethodDecl*>(named_method), named_method->getType(),
-                                            clang::VK_LValue, location);
+      auto* callee = sema_.BuildDeclRefExpr(
+         const_cast<clang::CXXMethodDecl*>(named_method),
+         named_method->getType(),
+         clang::VK_LValue,
+         location);
       auto call = sema_.BuildCallExpr(nullptr, callee, location, {}, location);
       auto result = clang::Expr::EvalResult{};
       if (call.isInvalid() || !call.get()->EvaluateAsConstantExpr(result, context_) || !result.Val.isStruct() ||
           result.Val.getStructNumFields() != 1U || !result.Val.getStructField(0).isInt()) {
-         report(location, "typed action get_name() must have a constant action name");
+         report(location, constant_error);
          return std::nullopt;
       }
       return result.Val.getStructField(0).getInt().getZExtValue();
+   }
+
+   std::optional<std::uint64_t> named_action_value(
+      const clang::ParmVarDecl& parameter) {
+      const auto* record =
+         parameter.getType().getNonReferenceType()->getAsCXXRecordDecl();
+      record = record == nullptr ? nullptr : record->getDefinition();
+      if (record == nullptr) {
+         return std::nullopt;
+      }
+      return named_protocol_value(
+         *record,
+         "get_name",
+         parameter.getLocation(),
+         "typed action get_name() must have a constant action name");
    }
 
    void register_method_types(const clang::CXXMethodDecl& method) {

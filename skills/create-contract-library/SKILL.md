@@ -72,6 +72,9 @@ the compiler and depfiles; they are not duplicated in a Forge inventory.
   same payload directly.
 - Authorization, `multi_index`, `singleton`, mutations and dispatch are
   guest-only.
+- Guest table aliases that belong in the ABI are declared in an imported
+  guest module interface. Abigen does not reparse library implementation
+  units; their compile definitions and options remain owned by CMake.
 - RPC, signing orchestration, caches, retries and external JSON boundaries are
   host-only.
 

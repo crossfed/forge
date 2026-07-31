@@ -40,6 +40,8 @@ export namespace forge::contract {
 
 template <chain::protocol::name::raw SingletonName, class T> class singleton {
    static constexpr auto primary = static_cast<std::uint64_t>(SingletonName);
+   static_assert(detail::table_name_matches<T, SingletonName>(),
+                 "singleton table name does not match value get_table_name()");
    using row = detail::singleton_row<primary, T>;
    using table = multi_index<SingletonName, row>;
 
