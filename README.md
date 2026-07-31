@@ -215,11 +215,12 @@ it.
 Contract development is distributed separately from the ordinary host package.
 The standalone [guest SDK](guest/README.md) builds the pinned wasm32 sysroot,
 guest runtime, modern contract API, EOSIO compatibility veneer and thin tools.
-Experimental dual-target contract libraries declare one immutable source and
-dependency graph for host compilation, wasm32 compilation, ABI generation,
-relocatable source packaging and manifest attestation. Host applications may
-request the six optional `contract_*` components above
-without installing the guest sysroot; only `contract_abi` and
+Experimental dual-target contract libraries use ordinary CMake targets in
+independent native and wasm32 configurations. Products share physical sources
+with `add_subdirectory()`; Forge adds guest compile settings, ABI generation and
+the runtime artifact manifest without defining a second build graph or source
+package format. Host applications may request the optional `contract_*`
+components above without installing the guest sysroot; only `contract_abi` and
 `contract_attributes` require a compatible Clang package.
 
 ## Архитектурные Документы
