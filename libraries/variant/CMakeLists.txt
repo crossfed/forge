@@ -15,6 +15,7 @@ target_link_libraries(
       forge_core
       forge_exceptions
       forge_reflect
+      forge_schema
       Boost::headers
       Boost::multi_index
       Boost::multiprecision

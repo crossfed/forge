@@ -46,6 +46,7 @@ import forge.variant.chrono;
 import forge.variant.multiprecision;
 import forge.variant.format;
 import forge.variant.described;
+import forge.variant.schema;
 import forge.variant.static_variant;
 
 namespace forge::codec::json::detail {
@@ -362,103 +363,8 @@ void materialize_schema_records(variant& source, std::string_view path, std::vec
    throw std::invalid_argument{"unsupported JSON schema value"};
 }
 
-[[nodiscard]] inline variant from_schema_input(const schema::input_value& source) {
-   return std::visit(
-       []<typename Value>(const Value& value) -> variant {
-          using value_type = clean_type<Value>;
-          if constexpr (std::same_as<value_type, std::monostate>) {
-             return {};
-          } else if constexpr (std::same_as<value_type, schema::input_value::array_type>) {
-             auto output = variants{};
-             output.reserve(value.size());
-             for (const auto& entry : value) {
-                output.push_back(from_schema_input(entry));
-             }
-             return variant{std::move(output)};
-          } else if constexpr (std::same_as<value_type, schema::input_value::object_type>) {
-             auto output = mutable_variant_object{};
-             for (const auto& [name, entry] : value) {
-                output.set(name, from_schema_input(entry));
-             }
-             return variant{std::move(output)};
-          } else {
-             return variant{value};
-          }
-       },
-       source.storage);
-}
-
-template <typename T> void apply_schema_encoding(const T& input, variant& output);
-
-template <typename T> void apply_schema_encoding(const T& input, variant& output) {
-   using value_type = clean_type<T>;
-
-   if constexpr (is_optional_v<value_type>) {
-      if (input) {
-         apply_schema_encoding(*input, output);
-      }
-   } else if constexpr (is_pointer_v<value_type>) {
-      if (input) {
-         apply_schema_encoding(*input, output);
-      }
-   } else if constexpr (reflect::is_described_object_v<value_type>) {
-      if (output.is_string()) {
-         return;
-      }
-
-      const auto rules = schema::rules<value_type>::define();
-      if (!rules.fields().empty()) {
-         output = from_schema_input(schema::input_value{rules.encode_object(input)});
-         return;
-      }
-
-      auto object = mutable_variant_object{output.get_object()};
-      reflect::for_each_member<value_type>([&](const char* name, auto member) {
-         const auto found = object.find(name);
-         if (found != object.end()) {
-            apply_schema_encoding(input.*member, found->value());
-         }
-      });
-      output = variant{std::move(object)};
-   } else if constexpr (is_variant_v<value_type>) {
-      if (!output.is_string() && output.is_array() && output.get_array().size() == 2U) {
-         std::visit([&](const auto& value) { apply_schema_encoding(value, output.get_array()[1]); }, input);
-      }
-   } else if constexpr (is_multi_index_v<value_type> || is_sequence_v<value_type>) {
-      if (!output.is_array()) {
-         return;
-      }
-      auto& encoded = output.get_array();
-      auto current = input.begin();
-      for (std::size_t index = 0; index < encoded.size() && current != input.end(); ++index, ++current) {
-         apply_schema_encoding(*current, encoded[index]);
-      }
-   } else if constexpr (is_associative_v<value_type>) {
-      if (!output.is_array()) {
-         return;
-      }
-      auto& encoded = output.get_array();
-      auto current = input.begin();
-      for (std::size_t index = 0; index < encoded.size() && current != input.end(); ++index, ++current) {
-         if (!encoded[index].is_array() || encoded[index].get_array().size() != 2U) {
-            continue;
-         }
-         apply_schema_encoding(current->first, encoded[index].get_array()[0]);
-         apply_schema_encoding(current->second, encoded[index].get_array()[1]);
-      }
-   } else if constexpr (is_pair_v<value_type>) {
-      if (output.is_array() && output.get_array().size() == 2U) {
-         apply_schema_encoding(input.first, output.get_array()[0]);
-         apply_schema_encoding(input.second, output.get_array()[1]);
-      }
-   }
-}
-
 template <typename T> [[nodiscard]] variant to_schema_aware_variant(const T& input) {
-   auto output = variant{};
-   to_variant(input, output);
-   apply_schema_encoding(input, output);
-   return output;
+   return variant_schema::encode(input);
 }
 
 inline void append_schema_diagnostics(std::vector<schema::diagnostic>& output,
@@ -488,18 +394,6 @@ void validate_variant_payload(std::size_t selected, const variant& payload, std:
          return;
       }
       validate_variant_payload<Variant, Index + 1>(selected, payload, path, diagnostics);
-   }
-}
-
-template <typename Variant, std::size_t Index = 0>
-void materialize_variant_payload(std::size_t selected, variant& payload, std::string_view path,
-                                 std::vector<schema::diagnostic>& diagnostics) {
-   if constexpr (Index < std::variant_size_v<Variant>) {
-      if (selected == Index) {
-         materialize_schema_records<std::variant_alternative_t<Index, Variant>>(payload, path, diagnostics);
-         return;
-      }
-      materialize_variant_payload<Variant, Index + 1>(selected, payload, path, diagnostics);
    }
 }
 
@@ -769,128 +663,7 @@ void validate_exact(const variant& source, std::string_view path, std::vector<sc
 
 template <typename T>
 void materialize_schema_records(variant& source, std::string_view path, std::vector<schema::diagnostic>& diagnostics) {
-   using value_type = clean_type<T>;
-
-   if constexpr (is_optional_v<value_type>) {
-      if (!source.is_null()) {
-         materialize_schema_records<typename optional_traits<value_type>::value_type>(source, path, diagnostics);
-      }
-   } else if constexpr (is_pointer_v<value_type>) {
-      if (!source.is_null()) {
-         materialize_schema_records<typename pointer_traits<value_type>::value_type>(source, path, diagnostics);
-      }
-   } else if constexpr (reflect::is_described_object_v<value_type>) {
-      if (source.is_string()) {
-         return;
-      }
-
-      const auto rules = schema::rules<value_type>::define();
-      if (!rules.fields().empty()) {
-         try {
-            const auto input = to_schema_input(source);
-            const auto* object = input.as_object();
-            if (!object) {
-               add_exact_error(diagnostics, std::string{path}, "json.type",
-                               "schema-bound record must be a JSON object");
-               return;
-            }
-            auto output = value_type{};
-            rules.apply_defaults(output);
-            auto nested = rules.decode_object(*object, path, output);
-            const auto has_errors = std::ranges::any_of(
-                nested, [](const schema::diagnostic& entry) { return entry.level == schema::severity::error; });
-            append_schema_diagnostics(diagnostics, std::move(nested));
-            if (!has_errors) {
-               source = variant{output};
-            }
-         } catch (const std::exception& error) {
-            add_exact_error(diagnostics, std::string{path}, "json.type", error.what());
-         }
-         return;
-      }
-
-      if (!source.is_object()) {
-         return;
-      }
-      auto object = mutable_variant_object{source.get_object()};
-      reflect::for_each_member<value_type>([&](const char* name, auto member) {
-         const auto found = object.find(name);
-         if (found == object.end()) {
-            return;
-         }
-         using member_type = clean_type<decltype(std::declval<value_type>().*member)>;
-         materialize_schema_records<member_type>(found->value(), field_path(path, name), diagnostics);
-      });
-      source = variant{std::move(object)};
-   } else if constexpr (is_variant_v<value_type>) {
-      if (source.is_string()) {
-         return;
-      }
-      if (!source.is_array() || source.get_array().size() < 2U) {
-         return;
-      }
-      auto& elements = source.get_array();
-      auto selected = std::uint64_t{};
-      try {
-         selected = elements[0].as_uint64();
-      } catch (const std::exception&) {
-         return;
-      }
-      if (selected >= variant_traits<value_type>::size) {
-         return;
-      }
-      materialize_variant_payload<value_type>(selected, elements[1], element_path(path, 1U), diagnostics);
-   } else if constexpr (is_multi_index_v<value_type>) {
-      if (!source.is_array()) {
-         return;
-      }
-      auto& elements = source.get_array();
-      for (std::size_t index = 0; index < elements.size(); ++index) {
-         materialize_schema_records<typename multi_index_traits<value_type>::value_type>(
-             elements[index], element_path(path, index), diagnostics);
-      }
-   } else if constexpr (is_sequence_v<value_type>) {
-      if (!source.is_array()) {
-         return;
-      }
-      auto& elements = source.get_array();
-      for (std::size_t index = 0; index < elements.size(); ++index) {
-         materialize_schema_records<typename sequence_traits<value_type>::value_type>(
-             elements[index], element_path(path, index), diagnostics);
-      }
-   } else if constexpr (is_associative_v<value_type>) {
-      if (!source.is_array()) {
-         return;
-      }
-      auto& elements = source.get_array();
-      for (std::size_t index = 0; index < elements.size(); ++index) {
-         if (!elements[index].is_array()) {
-            continue;
-         }
-         auto& pair = elements[index].get_array();
-         if (!pair.empty()) {
-            materialize_schema_records<typename associative_traits<value_type>::key_type>(
-                pair[0], element_path(element_path(path, index), 0U), diagnostics);
-         }
-         if (pair.size() > 1U) {
-            materialize_schema_records<typename associative_traits<value_type>::mapped_type>(
-                pair[1], element_path(element_path(path, index), 1U), diagnostics);
-         }
-      }
-   } else if constexpr (is_pair_v<value_type>) {
-      if (!source.is_array()) {
-         return;
-      }
-      auto& elements = source.get_array();
-      if (!elements.empty()) {
-         materialize_schema_records<typename pair_traits<value_type>::first_type>(elements[0], element_path(path, 0U),
-                                                                                  diagnostics);
-      }
-      if (elements.size() > 1U) {
-         materialize_schema_records<typename pair_traits<value_type>::second_type>(elements[1], element_path(path, 1U),
-                                                                                   diagnostics);
-      }
-   }
+   append_schema_diagnostics(diagnostics, variant_schema::materialize<T>(source, path));
 }
 
 } // namespace forge::codec::json::detail
