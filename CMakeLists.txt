@@ -296,7 +296,6 @@ if(FORGE_ENABLE_CONTRACT_TOOLING)
    find_package(Clang 22.1 CONFIG REQUIRED)
    list(APPEND
       FORGE_SOURCE_INCLUDE_DIRS
-      "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/graph/include"
       "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/abi/include"
       "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/attributes/include"
       "${CMAKE_CURRENT_SOURCE_DIR}/libraries/contract/validation/include"
@@ -698,7 +697,6 @@ endif()
 if(FORGE_ENABLE_CONTRACT_TOOLING)
    list(
       APPEND FORGE_LEAF_TARGETS
-      forge_contract_graph
       forge_contract_abi
       forge_contract_attributes
       forge_contract_validation
@@ -801,7 +799,6 @@ endif()
 if(FORGE_ENABLE_CONTRACT_TOOLING)
    list(
       APPEND FORGE_BUILT_COMPONENTS
-      contract_graph
       contract_abi
       contract_attributes
       contract_validation

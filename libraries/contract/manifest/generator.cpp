@@ -1,7 +1,6 @@
 module;
 
 #include <algorithm>
-#include <array>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -9,13 +8,11 @@ module;
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <tuple>
 #include <vector>
 
 module forge.contract.manifest.generator;
 
 import forge.codec.json;
-import forge.contract.graph;
 import forge.crypto.digest.sha256;
 import forge.variant.value;
 import forge.vm.wasm.backend;
@@ -63,147 +60,6 @@ forge::variants imported_functions(const std::vector<std::uint8_t>& bytes) {
    return result;
 }
 
-struct source_file {
-   std::string owner;
-   std::string role;
-   std::string logical_path;
-   std::string sha256;
-};
-
-struct dependency_edge {
-   std::string owner;
-   std::string kind;
-   std::string dependency;
-   std::string scope;
-};
-
-struct source_component {
-   std::string id;
-   std::vector<std::string> modules;
-};
-
-struct source_graph {
-   std::string root_owner;
-   std::vector<source_file> files;
-   std::vector<dependency_edge> dependencies;
-   std::vector<source_component> components;
-   std::string sha256;
-};
-
-void write_length(forge::crypto::digest::sha256::encoder& encoder, std::uint64_t value) {
-   auto encoded = std::array<char, 8>{};
-   for (auto index = std::size_t{}; index < encoded.size(); ++index) {
-      encoded[encoded.size() - index - 1U] = static_cast<char>(value & 0xffU);
-      value >>= 8U;
-   }
-   encoder.write(encoded.data(), static_cast<std::uint32_t>(encoded.size()));
-}
-
-void write_field(forge::crypto::digest::sha256::encoder& encoder, std::string_view value) {
-   write_length(encoder, value.size());
-   if (!value.empty()) {
-      encoder.write(value.data(), static_cast<std::uint32_t>(value.size()));
-   }
-}
-
-source_graph build_source_graph(const forge::contract::graph::descriptor& descriptor) {
-   auto graph = source_graph{.root_owner = descriptor.root_owner};
-   graph.files.reserve(descriptor.files.size());
-   for (const auto& file : descriptor.files) {
-      graph.files.push_back(source_file{
-          .owner = file.owner,
-          .role = forge::contract::graph::to_string(file.role),
-          .logical_path = file.logical_path.generic_string(),
-          .sha256 = sha256(read_bytes(file.physical_path)),
-      });
-   }
-   graph.dependencies.reserve(descriptor.dependencies.size());
-   for (const auto& edge : descriptor.dependencies) {
-      graph.dependencies.push_back(dependency_edge{
-          .owner = edge.owner,
-          .kind = forge::contract::graph::to_string(edge.kind),
-          .dependency = edge.target,
-          .scope = forge::contract::graph::to_string(edge.scope),
-      });
-   }
-   graph.components.reserve(descriptor.components.size());
-   for (const auto& component : descriptor.components) {
-      auto modules = component.modules;
-      std::ranges::sort(modules);
-      graph.components.push_back(source_component{
-          .id = component.id,
-          .modules = std::move(modules),
-      });
-   }
-
-   std::ranges::sort(graph.files, {}, [](const auto& value) {
-      return std::tie(value.owner, value.role, value.logical_path, value.sha256);
-   });
-   std::ranges::sort(graph.dependencies, {}, [](const auto& value) {
-      return std::tie(value.owner, value.kind, value.dependency, value.scope);
-   });
-   std::ranges::sort(graph.components, {}, [](const auto& value) { return std::tie(value.id, value.modules); });
-
-   auto encoder = forge::crypto::digest::sha256::encoder{};
-   write_field(encoder, "forge.contract.source-graph.v2");
-   write_field(encoder, "root");
-   write_field(encoder, graph.root_owner);
-   write_length(encoder, graph.files.size());
-   for (const auto& file : graph.files) {
-      write_field(encoder, "file");
-      write_field(encoder, file.owner);
-      write_field(encoder, file.role);
-      write_field(encoder, file.logical_path);
-      write_field(encoder, file.sha256);
-   }
-   write_length(encoder, graph.dependencies.size());
-   for (const auto& edge : graph.dependencies) {
-      write_field(encoder, "dependency");
-      write_field(encoder, edge.owner);
-      write_field(encoder, edge.kind);
-      write_field(encoder, edge.dependency);
-      write_field(encoder, edge.scope);
-   }
-   write_length(encoder, graph.components.size());
-   for (const auto& component : graph.components) {
-      write_field(encoder, "component");
-      write_field(encoder, component.id);
-      write_length(encoder, component.modules.size());
-      for (const auto& module : component.modules) {
-         write_field(encoder, module);
-      }
-   }
-   graph.sha256 = encoder.result().str();
-   return graph;
-}
-
-forge::variant source_graph_value(const source_graph& graph) {
-   auto files = forge::variants{};
-   files.reserve(graph.files.size());
-   for (const auto& file : graph.files) {
-      files.emplace_back(forge::mutable_variant_object{}("owner", file.owner)("role", file.role)(
-          "logical_path", file.logical_path)("sha256", file.sha256));
-   }
-   auto dependencies = forge::variants{};
-   dependencies.reserve(graph.dependencies.size());
-   for (const auto& edge : graph.dependencies) {
-      dependencies.emplace_back(forge::mutable_variant_object{}("owner", edge.owner)("kind", edge.kind)(
-          "dependency", edge.dependency)("scope", edge.scope));
-   }
-   auto components = forge::variants{};
-   components.reserve(graph.components.size());
-   for (const auto& component : graph.components) {
-      auto modules = forge::variants{};
-      modules.reserve(component.modules.size());
-      for (const auto& module : component.modules) {
-         modules.emplace_back(module);
-      }
-      components.emplace_back(forge::mutable_variant_object{}("id", component.id)("modules", std::move(modules)));
-   }
-   return forge::mutable_variant_object{}("root_owner", graph.root_owner)("files", std::move(files))(
-       "dependencies", std::move(dependencies))("components", std::move(components))("sha256", graph.sha256);
-}
-
 void write_text(const std::filesystem::path& path, std::string_view value) {
    if (const auto parent = path.parent_path(); !parent.empty()) {
       std::filesystem::create_directories(parent);
@@ -222,10 +78,8 @@ void generate(const request& options) {
    const auto wasm_bytes = read_bytes(options.wasm);
    const auto abi_bytes = read_bytes(options.abi);
    const auto registry_bytes = read_bytes(options.imports);
-   const auto graph = build_source_graph(forge::contract::graph::read(options.source_graph));
-
    auto root = forge::mutable_variant_object{};
-   root("schema_version", std::uint64_t{2});
+   root("schema_version", std::uint64_t{3});
    root("sdk", forge::mutable_variant_object{}("version", options.sdk_version)("profile", options.profile)(
                    "reproducible", options.reproducible));
    auto llvm = forge::mutable_variant_object{}("version", options.llvm_version);
@@ -240,7 +94,6 @@ void generate(const request& options) {
    root("wasm", forge::mutable_variant_object{}("sha256", sha256(wasm_bytes))(
                     "features", forge::variants{forge::variant{"mvp"}})("imports", imported_functions(wasm_bytes)));
    root("abi", forge::mutable_variant_object{}("sha256", sha256(abi_bytes)));
-   root("source_graph", source_graph_value(graph));
 
    const auto encoded = forge::codec::json::write_value(forge::variant{std::move(root)}, {.pretty = true});
    if (!encoded.ok()) {

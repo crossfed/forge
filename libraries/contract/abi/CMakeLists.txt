@@ -16,7 +16,6 @@ target_link_libraries(
    PUBLIC
       forge_chain_protocol
       forge_codec_json
-      forge_contract_graph
    PRIVATE
       clang-cpp
       LLVM

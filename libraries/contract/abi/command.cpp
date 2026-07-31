@@ -30,8 +30,6 @@ request parse(int argc, const char* const* argv) {
          result.dispatcher = next();
       } else if (option == "--depfile") {
          result.depfile = next();
-      } else if (option == "--contract-graph") {
-         result.contract_graph = next();
       } else if (option == "--attribute-plugin") {
          result.attribute_plugin = next();
       } else if (option == "--sysroot") {
@@ -53,6 +51,26 @@ request parse(int argc, const char* const* argv) {
              .owner = std::string{next()},
              .object_list = next(),
          });
+      } else if (option == "--library-dependency") {
+         const auto owner = std::string{next()};
+         const auto scope = next();
+         const auto dependency = std::string{next()};
+         if (scope != "public" && scope != "private") {
+            throw std::runtime_error{"library dependency scope must be public or private"};
+         }
+         result.library_dependencies.push_back(library_dependency{
+             .owner = owner,
+             .scope = scope == "public" ? dependency_scope::public_
+                                        : dependency_scope::private_,
+             .dependency = dependency,
+         });
+      } else if (option == "--root-library") {
+         result.root_libraries.emplace_back(next());
+      } else if (option == "--known-module") {
+         result.known_modules.push_back(known_module{
+             .name = std::string{next()},
+             .owner = std::string{next()},
+         });
       } else if (option == "--source-wrapper") {
          result.source_wrappers.emplace_back(next());
       } else if (option.starts_with("--")) {
@@ -61,9 +79,9 @@ request parse(int argc, const char* const* argv) {
          result.sources.emplace_back(option);
       }
    }
-   if (result.contract.empty() || result.abi.empty() || result.dispatcher.empty() || result.contract_graph.empty() ||
+   if (result.contract.empty() || result.abi.empty() || result.dispatcher.empty() ||
        result.attribute_plugin.empty() || result.sysroot.empty() || result.sources.empty()) {
-      throw std::runtime_error{"--contract, --abi, --dispatch, --contract-graph, --attribute-plugin, "
+      throw std::runtime_error{"--contract, --abi, --dispatch, --attribute-plugin, "
                                "--sysroot and contract sources are required"};
    }
    if (!result.source_wrappers.empty() && result.source_wrappers.size() + 1U != result.sources.size()) {

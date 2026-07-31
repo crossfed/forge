@@ -42,7 +42,6 @@ module forge.contract.abi.generator;
 import forge.chain.protocol.abi;
 import forge.chain.protocol.types;
 import forge.codec.json;
-import forge.contract.graph;
 import forge.variant.value;
 
 namespace {
@@ -1692,73 +1691,26 @@ void write_depfile(const forge::contract::abi::request& options, const source_de
    write_text(options.depfile, output.str());
 }
 
-struct graph_file {
-   std::string owner;
-   forge::contract::graph::file_role role;
-   std::filesystem::path physical_path;
-};
-
-struct graph_edge {
-   std::string owner;
-   std::string dependency;
-   forge::contract::graph::dependency_scope scope;
-};
-
-struct contract_graph {
-   std::string root_owner;
-   std::map<std::filesystem::path, graph_file> files;
-   std::map<std::string, std::set<std::filesystem::path>> files_by_owner;
-   std::map<std::string, std::vector<graph_edge>> edges_by_owner;
-   std::map<std::string, std::string> module_owners;
-};
-
-const forge::variant_object& graph_object(const forge::variant& value, std::string_view description) {
+const forge::variant_object& metadata_object(const forge::variant& value, std::string_view description) {
    if (!value.is_object()) {
       throw std::runtime_error{std::string{description} + " must be an object"};
    }
    return value.get_object();
 }
 
-const forge::variants& graph_array(const forge::variant_object& object, const char* name,
-                                   std::string_view description) {
+const forge::variants& metadata_array(const forge::variant_object& object, const char* name,
+                                      std::string_view description) {
    if (!object.contains(name) || !object[name].is_array()) {
       throw std::runtime_error{std::string{description} + " has no " + name + " array"};
    }
    return object[name].get_array();
 }
 
-std::string graph_string(const forge::variant_object& object, const char* name, std::string_view description) {
+std::string metadata_string(const forge::variant_object& object, const char* name, std::string_view description) {
    if (!object.contains(name) || !object[name].is_string() || object[name].get_string().empty()) {
       throw std::runtime_error{std::string{description} + " has no " + name};
    }
    return object[name].get_string();
-}
-
-contract_graph make_contract_graph(const forge::contract::graph::descriptor& descriptor) {
-   auto graph = contract_graph{};
-   graph.root_owner = descriptor.root_owner;
-   for (const auto& file : descriptor.files) {
-      auto indexed = graph_file{
-          .owner = file.owner,
-          .role = file.role,
-          .physical_path = file.physical_path,
-      };
-      graph.files.emplace(indexed.physical_path, indexed);
-      graph.files_by_owner[indexed.owner].insert(indexed.physical_path);
-   }
-   for (const auto& edge : descriptor.dependencies) {
-      graph.edges_by_owner[edge.owner].push_back(graph_edge{
-          .owner = edge.owner,
-          .dependency = edge.target,
-          .scope = edge.scope,
-      });
-   }
-   for (const auto& component : descriptor.components) {
-      for (const auto& module : component.modules) {
-         graph.module_owners.emplace(module, component.id);
-      }
-   }
-   return graph;
 }
 
 struct compilation_metadata {
@@ -1771,7 +1723,7 @@ struct compilation_metadata {
 
 module_dependencies metadata_modules(const forge::variant_object& object, const char* name,
                                      const std::filesystem::path& path) {
-   const auto& values = graph_array(object, name, "contract compilation metadata");
+   const auto& values = metadata_array(object, name, "contract compilation metadata");
    auto result = module_dependencies{};
    for (const auto& value : values) {
       if (!value.is_string() || value.get_string().empty() || !result.insert(value.get_string()).second) {
@@ -1797,18 +1749,18 @@ compilation_metadata read_compilation_metadata(const std::filesystem::path& obje
       throw std::runtime_error{"contract compilation metadata has an unsupported schema: " + path.string()};
    }
    auto result = compilation_metadata{
-       .source = std::filesystem::weakly_canonical(graph_string(object, "source", "contract compilation metadata")),
+       .source = std::filesystem::weakly_canonical(metadata_string(object, "source", "contract compilation metadata")),
        .imported_modules = metadata_modules(object, "imports", path),
        .exported_modules = metadata_modules(object, "exports", path),
        .provided_modules = metadata_modules(object, "provides", path),
    };
-   for (const auto& value : graph_array(object, "dependencies", "contract compilation metadata")) {
-      const auto& dependency = graph_object(value, "contract compilation dependency");
+   for (const auto& value : metadata_array(object, "dependencies", "contract compilation metadata")) {
+      const auto& dependency = metadata_object(value, "contract compilation dependency");
       if (!dependency.contains("system") || !dependency["system"].is_bool()) {
          throw std::runtime_error{"contract compilation dependency has no system flag: " + path.string()};
       }
       const auto dependency_path =
-          std::filesystem::weakly_canonical(graph_string(dependency, "path", "contract compilation dependency"));
+          std::filesystem::weakly_canonical(metadata_string(dependency, "path", "contract compilation dependency"));
       const auto [entry, inserted] = result.dependencies.emplace(dependency_path, dependency["system"].as_bool());
       if (!inserted) {
          entry->second = entry->second && dependency["system"].as_bool();
@@ -1835,17 +1787,21 @@ std::vector<compilation_metadata> read_compilation_list(const std::filesystem::p
    return result;
 }
 
-std::set<std::string> public_closure(const contract_graph& graph, std::set<std::string> visible) {
+using dependency_edges =
+    std::map<std::string, std::vector<forge::contract::abi::library_dependency>>;
+
+std::set<std::string> public_closure(const dependency_edges& edges,
+                                     std::set<std::string> visible) {
    auto pending = std::vector<std::string>{visible.begin(), visible.end()};
    while (!pending.empty()) {
       auto owner = std::move(pending.back());
       pending.pop_back();
-      const auto found = graph.edges_by_owner.find(owner);
-      if (found == graph.edges_by_owner.end()) {
+      const auto found = edges.find(owner);
+      if (found == edges.end()) {
          continue;
       }
       for (const auto& edge : found->second) {
-         if (edge.scope == forge::contract::graph::dependency_scope::public_ &&
+         if (edge.scope == forge::contract::abi::dependency_scope::public_ &&
              visible.insert(edge.dependency).second) {
             pending.push_back(edge.dependency);
          }
@@ -1854,129 +1810,95 @@ std::set<std::string> public_closure(const contract_graph& graph, std::set<std::
    return visible;
 }
 
-std::set<std::string> visible_owners(const contract_graph& graph, std::string_view owner, bool public_surface) {
+std::set<std::string> visible_owners(const dependency_edges& edges,
+                                     std::string_view owner,
+                                     bool public_surface) {
    auto visible = std::set<std::string>{std::string{owner}};
-   const auto found = graph.edges_by_owner.find(std::string{owner});
-   if (found != graph.edges_by_owner.end()) {
+   const auto found = edges.find(std::string{owner});
+   if (found != edges.end()) {
       for (const auto& edge : found->second) {
-         if (!public_surface || edge.scope == forge::contract::graph::dependency_scope::public_) {
-            visible.insert(edge.dependency);
+         if (!public_surface ||
+             edge.scope == forge::contract::abi::dependency_scope::public_) {
+         visible.insert(edge.dependency);
          }
       }
    }
-   return public_closure(graph, std::move(visible));
+   return public_closure(edges, std::move(visible));
 }
 
-bool path_is_under(const std::filesystem::path& path, const std::filesystem::path& root) {
-   const auto relative = path.lexically_relative(root);
-   return !relative.empty() && !relative.is_absolute() &&
-          std::ranges::none_of(relative, [](const auto& component) { return component == ".."; });
-}
-
-bool is_sdk_dependency(const std::vector<std::filesystem::path>& roots, const std::filesystem::path& path) {
-   return std::ranges::any_of(roots, [&](const auto& root) { return path_is_under(path, root); });
-}
-
-void validate_source_dependency(const contract_graph& graph, std::string_view owner,
-                                forge::contract::graph::file_role source_role, const std::set<std::string>& visible,
-                                const std::vector<std::filesystem::path>& sdk_roots,
-                                const std::filesystem::path& dependency, bool system) {
-   const auto declared = graph.files.find(dependency);
-   if (declared == graph.files.end()) {
-      if (!system && !is_sdk_dependency(sdk_roots, dependency)) {
-         throw std::runtime_error{"contract source dependency is not declared: " + dependency.string()};
-      }
-      return;
-   }
-
-   const auto& file = declared->second;
-   if (!visible.contains(file.owner)) {
-      throw std::runtime_error{"contract source dependency owner is not visible: " + dependency.string()};
-   }
-   if (source_role == forge::contract::graph::file_role::module && !forge::contract::graph::is_public(file.role)) {
-      throw std::runtime_error{"contract public module uses a private source: " + dependency.string()};
-   }
-   if (file.owner != owner && !forge::contract::graph::is_public(file.role)) {
-      throw std::runtime_error{"contract source uses a private dependency file: " + dependency.string()};
-   }
-}
-
-struct validated_contract_graph {
-   contract_graph graph;
+struct validated_contract_libraries {
+   dependency_edges edges;
    std::map<std::string, std::string> module_owners;
-   std::vector<std::filesystem::path> sdk_roots;
 };
 
-validated_contract_graph validate_contract_libraries(const forge::contract::abi::request& options) {
-   auto graph = make_contract_graph(forge::contract::graph::read(options.contract_graph));
-   auto sdk_roots = std::vector<std::filesystem::path>{};
-   sdk_roots.reserve(options.sdk_include_paths.size());
-   std::ranges::transform(options.sdk_include_paths, std::back_inserter(sdk_roots),
-                          [](const auto& path) { return std::filesystem::weakly_canonical(path); });
-   if (graph.root_owner != "contract:" + options.contract) {
-      throw std::runtime_error{"contract graph root owner does not match requested contract"};
+validated_contract_libraries
+validate_contract_libraries(const forge::contract::abi::request& options) {
+   auto edges = dependency_edges{};
+   for (const auto& edge : options.library_dependencies) {
+      if (edge.owner.empty() || edge.dependency.empty()) {
+         throw std::runtime_error{"contract library dependency has an empty owner"};
+      }
+      auto& owner_edges = edges[edge.owner];
+      if (std::ranges::any_of(owner_edges, [&](const auto& existing) {
+             return existing.dependency == edge.dependency;
+          })) {
+         throw std::runtime_error{"contract library dependency is specified more than once: " +
+                                  edge.owner + " -> " + edge.dependency};
+      }
+      owner_edges.push_back(edge);
    }
 
    auto metadata_by_owner = std::map<std::string, std::vector<compilation_metadata>>{};
    for (const auto& compilation : options.library_compilations) {
-      if (!graph.files_by_owner.contains(compilation.owner)) {
-         throw std::runtime_error{"contract compilation has an unknown owner: " + compilation.owner};
-      }
-      if (metadata_by_owner.contains(compilation.owner)) {
+      if (compilation.owner.empty() ||
+          metadata_by_owner.contains(compilation.owner)) {
          throw std::runtime_error{"contract compilation owner is specified more than once: " + compilation.owner};
       }
       metadata_by_owner.emplace(compilation.owner, read_compilation_list(compilation.object_list));
    }
 
-   auto module_owners = graph.module_owners;
-   auto compiled_sources = std::map<std::string, std::set<std::filesystem::path>>{};
+   for (const auto& [owner, owner_edges] : edges) {
+      if (!metadata_by_owner.contains(owner)) {
+         throw std::runtime_error{"contract dependency owner has no compilation: " + owner};
+      }
+      for (const auto& edge : owner_edges) {
+         if (!metadata_by_owner.contains(edge.dependency)) {
+            throw std::runtime_error{"contract dependency has no compilation: " +
+                                     edge.dependency};
+         }
+      }
+   }
+   for (const auto& owner : options.root_libraries) {
+      if (!metadata_by_owner.contains(owner)) {
+         throw std::runtime_error{"root contract library has no compilation: " + owner};
+      }
+   }
+
+   auto module_owners = std::map<std::string, std::string>{};
+   for (const auto& module : options.known_modules) {
+      if (module.name.empty() || module.owner.empty()) {
+         throw std::runtime_error{"known contract module has an empty name or owner"};
+      }
+      const auto [existing, inserted] = module_owners.emplace(module.name, module.owner);
+      if (!inserted && existing->second != module.owner) {
+         throw std::runtime_error{"contract module has multiple registered owners: " + module.name};
+      }
+   }
    for (const auto& [owner, metadata_values] : metadata_by_owner) {
       for (const auto& metadata : metadata_values) {
-         const auto file = graph.files.find(metadata.source);
-         if (file == graph.files.end() || file->second.owner != owner ||
-             (file->second.role != forge::contract::graph::file_role::module &&
-              file->second.role != forge::contract::graph::file_role::implementation)) {
-            throw std::runtime_error{"contract compilation source is not owned by descriptor " + owner + ": " +
-                                     metadata.source.string()};
-         }
-         if (!compiled_sources[owner].insert(metadata.source).second) {
-            throw std::runtime_error{"contract compilation source appears more than once: " + metadata.source.string()};
-         }
          for (const auto& module : metadata.provided_modules) {
             const auto [existing, inserted] = module_owners.emplace(module, owner);
             if (!inserted && existing->second != owner) {
-               throw std::runtime_error{"contract module has multiple owners: " + module};
+               throw std::runtime_error{"contract module owner does not match its compilation: " + module};
             }
          }
       }
    }
 
-   for (const auto& [owner, files] : graph.files_by_owner) {
-      if (owner == graph.root_owner) {
-         continue;
-      }
-      auto expected = std::set<std::filesystem::path>{};
-      for (const auto& path : files) {
-         const auto& role = graph.files.at(path).role;
-         if (role == forge::contract::graph::file_role::module ||
-             role == forge::contract::graph::file_role::implementation) {
-            expected.insert(path);
-         }
-      }
-      const auto found = compiled_sources.find(owner);
-      if (found == compiled_sources.end() || found->second != expected) {
-         throw std::runtime_error{"contract compilation metadata does not match descriptor owner: " + owner};
-      }
-   }
-
    for (const auto& [owner, metadata_values] : metadata_by_owner) {
       for (const auto& metadata : metadata_values) {
-         const auto role = graph.files.at(metadata.source).role;
-         const auto visible = visible_owners(graph, owner, role == forge::contract::graph::file_role::module);
-         for (const auto& [dependency, system] : metadata.dependencies) {
-            validate_source_dependency(graph, owner, role, visible, sdk_roots, dependency, system);
-         }
-         const auto public_visible = visible_owners(graph, owner, true);
+         const auto visible = visible_owners(edges, owner, false);
+         const auto public_visible = visible_owners(edges, owner, true);
          for (const auto& module : metadata.exported_modules) {
             const auto found = module_owners.find(module);
             if (found == module_owners.end()) {
@@ -2001,20 +1923,16 @@ validated_contract_graph validate_contract_libraries(const forge::contract::abi:
    }
 
    return {
-       .graph = std::move(graph),
+       .edges = std::move(edges),
        .module_owners = std::move(module_owners),
-       .sdk_roots = std::move(sdk_roots),
    };
 }
 
-void validate_contract_root(const validated_contract_graph& validated, const source_dependencies& contract_dependencies,
+void validate_contract_root(const validated_contract_libraries& validated,
+                            const std::vector<std::string>& roots,
                             const module_dependencies& contract_modules) {
-   const auto& graph = validated.graph;
-   const auto root_visible = visible_owners(graph, graph.root_owner, false);
-   for (const auto& [dependency, system] : contract_dependencies) {
-      validate_source_dependency(graph, graph.root_owner, forge::contract::graph::file_role::source, root_visible,
-                                 validated.sdk_roots, dependency, system);
-   }
+   const auto root_visible = public_closure(
+       validated.edges, std::set<std::string>{roots.begin(), roots.end()});
    for (const auto& module : contract_modules) {
       const auto found = validated.module_owners.find(module);
       if (found == validated.module_owners.end()) {
@@ -2434,7 +2352,7 @@ artifacts generate(const request& options) {
    if (llvm::sys::DynamicLibrary::LoadLibraryPermanently(options.attribute_plugin.c_str(), &load_error)) {
       throw std::runtime_error{"failed to load contract attribute plugin: " + load_error};
    }
-   const auto validated_graph = validate_contract_libraries(options);
+   const auto validated_libraries = validate_contract_libraries(options);
 
    auto arguments = std::vector<std::string>{
        "-std=c++23",
@@ -2531,7 +2449,11 @@ artifacts generate(const request& options) {
       }
    }
 
-   validate_contract_root(validated_graph, dependencies, imported_modules);
+   if (!options.library_compilations.empty() || !options.root_libraries.empty() ||
+       !options.known_modules.empty()) {
+      validate_contract_root(
+          validated_libraries, options.root_libraries, imported_modules);
+   }
    load_ricardian(output, options);
    canonicalize(output);
    write_abi(output, options);

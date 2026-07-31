@@ -230,19 +230,21 @@ class service_node {
 - `guest/libraries/contract/intrinsics.hpp` is the only intrinsic signature
   registry. Generated guest C declarations, EOSIO headers, host skeletons and
   import manifests must derive from it.
-- Dual-target contract libraries declare their complete source and dependency
-  graph through `forge_add_contract_library` in every configuration that builds
-  them. Host and guest configurations compile the same physical sources
-  independently with their selected toolchains.
+- Dual-target contract libraries use ordinary CMake targets declared through
+  `forge_add_contract_library` in every configuration that builds them. Host
+  and guest configurations compile the same physical sources independently
+  with their selected toolchains.
 - A product guest directory is a standalone CMake project and the source of
   truth for its WASM target graph. A host helper may launch that project, but it
   must not serialize or reconstruct downstream targets.
-- Do not recover contract dependencies from `LINK_LIBRARIES`,
-  `INTERFACE_LINK_LIBRARIES`, `$<LINK_ONLY:...>` or CMake directory wrappers.
-  Add files and scoped dependencies to the Forge declaration instead.
+- The normal CMake target graph is the only contract build graph. Do not
+  serialize or reconstruct it through JSON descriptors, fingerprints,
+  `LINK_LIBRARIES`, `INTERFACE_LINK_LIBRARIES`, `$<LINK_ONLY:...>` or CMake
+  directory wrappers.
 - Do not reuse native archives, BMI or PCM files in the guest configuration.
-  Installed protocol packages expose source materialization for wasm32 and
-  native imported targets for host consumers.
+- Cross-toolchain source packages are not part of the Contract SDK. Products
+  share source-tree libraries with `add_subdirectory`; ordinary native
+  `install(EXPORT ...)` remains the library owner's responsibility.
 - Contract SDK C ABI support records are generated from templates under
   `guest/cmake/`; generated `.h` files never live in a guest library's source
   `include/forge` tree.

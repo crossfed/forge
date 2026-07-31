@@ -1,4 +1,16 @@
 function(_forge_contract_object_list target identity output)
+   string(
+      SHA256 _property_key
+      "${CMAKE_CURRENT_BINARY_DIR}\n${target}\n${identity}"
+   )
+   get_property(
+      _existing GLOBAL PROPERTY "FORGE_CONTRACT_OBJECT_LIST_${_property_key}"
+   )
+   if(_existing)
+      set(${output} "${_existing}" PARENT_SCOPE)
+      return()
+   endif()
+
    set(
       _path
       "${CMAKE_CURRENT_BINARY_DIR}/contract-compilations/${identity}-$<CONFIG>.objects"
@@ -7,6 +19,9 @@ function(_forge_contract_object_list target identity output)
       GENERATE
       OUTPUT "${_path}"
       CONTENT "$<JOIN:$<TARGET_OBJECTS:${target}>,\n>\n"
+   )
+   set_property(
+      GLOBAL PROPERTY "FORGE_CONTRACT_OBJECT_LIST_${_property_key}" "${_path}"
    )
    set(${output} "${_path}" PARENT_SCOPE)
 endfunction()
@@ -23,7 +38,7 @@ function(forge_add_contract target)
       ARG
       ""
       "CONTRACT;SOURCE_ROOT;DISPATCH_SOURCE;RICARDIAN_CONTRACTS;RICARDIAN_CLAUSES"
-      "SOURCES;HEADERS;COMPILE_CHECKS;LIBRARIES"
+      "SOURCES;COMPILE_CHECKS;LIBRARIES"
       ${ARGN}
    )
    if(ARG_UNPARSED_ARGUMENTS)
@@ -44,19 +59,17 @@ function(forge_add_contract target)
       _forge_contract_normalize_root("${CMAKE_CURRENT_SOURCE_DIR}" "contract SOURCE_ROOT" _source_root)
    endif()
 
-   set(_all_logical)
+   set(_all_inputs)
    set(_sources)
-   set(_source_logical)
    foreach(_source IN LISTS ARG_SOURCES)
       _forge_contract_normalize_file(
-         "${_source_root}" "${_source}" "contract source" _absolute _logical
+         "${_source_root}" "${_source}" "contract source" _absolute
       )
-      if(_logical IN_LIST _all_logical)
-         message(FATAL_ERROR "contract input is declared more than once: ${_logical}")
+      if(_absolute IN_LIST _all_inputs)
+         message(FATAL_ERROR "contract input is declared more than once: ${_absolute}")
       endif()
-      list(APPEND _all_logical "${_logical}")
+      list(APPEND _all_inputs "${_absolute}")
       list(APPEND _sources "${_absolute}")
-      list(APPEND _source_logical "contract/source/${_logical}")
    endforeach()
 
    list(LENGTH _sources _source_count)
@@ -68,7 +81,7 @@ function(forge_add_contract target)
    else()
       _forge_contract_normalize_file(
          "${_source_root}" "${ARG_DISPATCH_SOURCE}" "contract dispatch source"
-         _dispatch_source _unused_logical
+         _dispatch_source
       )
       list(FIND _sources "${_dispatch_source}" _dispatch_source_index)
       if(_dispatch_source_index EQUAL -1)
@@ -76,77 +89,44 @@ function(forge_add_contract target)
       endif()
    endif()
 
-   set(_headers)
-   set(_header_logical)
-   foreach(_header IN LISTS ARG_HEADERS)
-      _forge_contract_normalize_file(
-         "${_source_root}" "${_header}" "contract header" _absolute _logical
-      )
-      if(_logical IN_LIST _all_logical)
-         message(FATAL_ERROR "contract input is declared more than once: ${_logical}")
-      endif()
-      list(APPEND _all_logical "${_logical}")
-      list(APPEND _headers "${_absolute}")
-      list(APPEND _header_logical "contract/header/${_logical}")
-   endforeach()
-
    set(_compile_checks)
-   set(_compile_check_logical)
    foreach(_source IN LISTS ARG_COMPILE_CHECKS)
       _forge_contract_normalize_file(
-         "${_source_root}" "${_source}" "contract compile-check source" _absolute _logical
+         "${_source_root}" "${_source}" "contract compile-check source" _absolute
       )
-      if(_logical IN_LIST _all_logical)
-         message(FATAL_ERROR "contract input is declared more than once: ${_logical}")
+      if(_absolute IN_LIST _all_inputs)
+         message(FATAL_ERROR "contract input is declared more than once: ${_absolute}")
       endif()
-      list(APPEND _all_logical "${_logical}")
+      list(APPEND _all_inputs "${_absolute}")
       list(APPEND _compile_checks "${_absolute}")
-      list(APPEND _compile_check_logical "contract/compile-check/${_logical}")
    endforeach()
 
    set(_ricardian_contracts)
-   set(_ricardian_contracts_logical)
    if(ARG_RICARDIAN_CONTRACTS)
       _forge_contract_normalize_file(
          "${_source_root}" "${ARG_RICARDIAN_CONTRACTS}" "Ricardian contracts file"
-         _ricardian_contracts _ricardian_contracts_logical
+         _ricardian_contracts
       )
    endif()
    set(_ricardian_clauses)
-   set(_ricardian_clauses_logical)
    if(ARG_RICARDIAN_CLAUSES)
       _forge_contract_normalize_file(
          "${_source_root}" "${ARG_RICARDIAN_CLAUSES}" "Ricardian clauses file"
-         _ricardian_clauses _ricardian_clauses_logical
+         _ricardian_clauses
       )
    endif()
 
-   _forge_contract_write_graph(
-      TARGET "${target}"
-      CONTRACT "${ARG_CONTRACT}"
-      SOURCE_ROOT "${_source_root}"
-      DISPATCH_SOURCE "${_dispatch_source}"
-      SOURCES ${_sources}
-      SOURCE_LOGICAL ${_source_logical}
-      HEADERS ${_headers}
-      HEADER_LOGICAL ${_header_logical}
-      COMPILE_CHECKS ${_compile_checks}
-      COMPILE_CHECK_LOGICAL ${_compile_check_logical}
-      RICARDIAN_CONTRACTS "${_ricardian_contracts}"
-      RICARDIAN_CONTRACTS_LOGICAL "${_ricardian_contracts_logical}"
-      RICARDIAN_CLAUSES "${_ricardian_clauses}"
-      RICARDIAN_CLAUSES_LOGICAL "${_ricardian_clauses_logical}"
+   string(SHA256 _dependency_key "${CMAKE_CURRENT_BINARY_DIR}/${target}")
+   set(_dependency_key "FORGE_CONTRACT_BUILD_${_dependency_key}")
+   _forge_contract_collect_dependencies(
+      KEY "${_dependency_key}"
       LIBRARIES ${ARG_LIBRARIES}
-      OUTPUT_FILE _graph_file
-      OUTPUT_HASH _graph_hash
-      BUILD_DEPENDENCIES _root_targets
-      LIBRARY_TARGETS _library_targets
-      COMPONENT_TARGETS _component_targets
+      OWNER_IDS _owner_ids
+      TARGETS _owner_targets
       MODULE_BASES _module_bases
-      SOURCE_INPUTS _library_inputs
    )
 
-   _forge_contract_find_component_target("forge.contract.runtime" _runtime_target)
+   _forge_contract_owner_target("forge.contract.runtime" _runtime_target)
    get_property(
       _eosio_target GLOBAL PROPERTY FORGE_CONTRACT_GUEST_EOSIO_TARGET
    )
@@ -185,10 +165,8 @@ function(forge_add_contract target)
    if(CMAKE_CONFIGURATION_TYPES)
       set(_module_configuration_directory "$<CONFIG>/")
    endif()
-   set(_module_targets ${_component_targets} ${_library_targets})
-   list(REMOVE_DUPLICATES _module_targets)
    set(_module_search_paths)
-   foreach(_module_target IN LISTS _module_targets)
+   foreach(_module_target IN LISTS _owner_targets)
       get_target_property(_module_binary_dir "${_module_target}" BINARY_DIR)
       if(NOT _module_binary_dir)
          message(FATAL_ERROR "cannot determine module build directory for ${_module_target}")
@@ -202,12 +180,12 @@ function(forge_add_contract target)
    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/contract-compilations")
    set(_contract_compilation_arguments)
    set(_contract_compilation_object_lists)
-   foreach(_library_target IN LISTS _library_targets)
+   foreach(_library_target IN LISTS _owner_targets)
       get_target_property(
-         _owner "${_library_target}" FORGE_CONTRACT_LIBRARY_ID
+         _owner "${_library_target}" FORGE_CONTRACT_OWNER_ID
       )
       if(NOT _owner)
-         message(FATAL_ERROR "contract library has no descriptor owner: ${_library_target}")
+         message(FATAL_ERROR "contract library has no owner: ${_library_target}")
       endif()
       _forge_contract_id_key("${_owner}" _owner_key)
       _forge_contract_object_list(
@@ -218,6 +196,53 @@ function(forge_add_contract target)
          --library-compilation "${_owner}" "${_object_list}"
       )
       list(APPEND _contract_compilation_object_lists "${_object_list}")
+      foreach(_scope PUBLIC PRIVATE)
+         get_target_property(
+            _dependencies
+            "${_library_target}"
+            "FORGE_CONTRACT_${_scope}_OWNER_IDS"
+         )
+         if(_dependencies STREQUAL "_dependencies-NOTFOUND")
+            set(_dependencies)
+         endif()
+         string(TOLOWER "${_scope}" _scope_name)
+         foreach(_dependency IN LISTS _dependencies)
+            list(
+               APPEND _contract_compilation_arguments
+               --library-dependency "${_owner}" "${_scope_name}" "${_dependency}"
+            )
+         endforeach()
+      endforeach()
+   endforeach()
+
+   get_property(
+      _root_owner_ids GLOBAL PROPERTY FORGE_CONTRACT_FOUNDATION_COMPONENT_IDS
+   )
+   foreach(_dependency IN LISTS ARG_LIBRARIES)
+      _forge_contract_dependency(
+         "${_dependency}" "root" _unused_target _root_owner
+      )
+      list(APPEND _root_owner_ids "${_root_owner}")
+   endforeach()
+   list(REMOVE_DUPLICATES _root_owner_ids)
+   foreach(_root_owner IN LISTS _root_owner_ids)
+      list(APPEND _contract_compilation_arguments --root-library "${_root_owner}")
+   endforeach()
+   get_property(
+      _known_component_ids GLOBAL PROPERTY FORGE_CONTRACT_GUEST_COMPONENT_IDS
+   )
+   foreach(_component_id IN LISTS _known_component_ids)
+      _forge_contract_id_key("${_component_id}" _component_key)
+      get_property(
+         _known_modules GLOBAL
+         PROPERTY "FORGE_CONTRACT_COMPONENT_${_component_key}_MODULE_NAMES"
+      )
+      foreach(_known_module IN LISTS _known_modules)
+         list(
+            APPEND _contract_compilation_arguments
+            --known-module "${_known_module}" "${_component_id}"
+         )
+      endforeach()
    endforeach()
 
    set(
@@ -227,7 +252,6 @@ function(forge_add_contract target)
       --abi "${_abi}"
       --dispatch "${_dispatcher}"
       --depfile "${_depfile}"
-      --contract-graph "${_graph_file}"
       --attribute-plugin "${ForgeContract_ATTR_PLUGIN}"
       --sysroot "${CMAKE_SYSROOT}"
       --sdk-include "${ForgeContract_DATA_DIR}/include"
@@ -263,12 +287,11 @@ function(forge_add_contract target)
          "${_runtime_target}"
          "${ForgeContract_ABIGEN}"
          "${ForgeContract_ATTR_PLUGIN}"
-         "${_graph_file}"
          ${_sources}
-         ${_headers}
          ${_compile_checks}
-         ${_library_targets}
-         ${_library_inputs}
+         ${_ricardian_contracts}
+         ${_ricardian_clauses}
+         ${_owner_targets}
          ${_contract_compilation_object_lists}
       DEPFILE "${_depfile}"
       COMMAND_EXPAND_LISTS
@@ -418,7 +441,6 @@ function(forge_add_contract target)
          FORGE_CONTRACT_WASM_FILE "${_output_dir}/${target}.wasm"
          FORGE_CONTRACT_ABI_FILE "${_abi}"
          FORGE_CONTRACT_MANIFEST_FILE "${_manifest}"
-         FORGE_CONTRACT_GRAPH_FILE "${_graph_file}"
    )
    foreach(_configuration IN LISTS CMAKE_CONFIGURATION_TYPES)
       string(TOUPPER "${_configuration}" _configuration_upper)
@@ -447,7 +469,6 @@ function(forge_add_contract target)
          --wasm "$<TARGET_FILE:${target}>"
          --abi "${_abi}"
          --imports "${_intrinsics}"
-         --source-graph "${_graph_file}"
          --output "${_manifest}"
          --sdk-version "${ForgeContract_VERSION}"
          --llvm-version "${ForgeContract_LLVM_VERSION}"
@@ -461,7 +482,6 @@ function(forge_add_contract target)
          "$<TARGET_FILE:${target}>"
          "${_abi}"
          "${_intrinsics}"
-         "${_graph_file}"
          "${ForgeContract_CHECK}"
          "${ForgeContract_MANIFEST}"
       VERBATIM
@@ -473,6 +493,5 @@ function(forge_add_contract target)
          FORGE_CONTRACT_WASM_FILE "${_output_dir}/${target}.wasm"
          FORGE_CONTRACT_ABI_FILE "${_abi}"
          FORGE_CONTRACT_MANIFEST_FILE "${_manifest}"
-         FORGE_CONTRACT_GRAPH_FILE "${_graph_file}"
    )
 endfunction()
