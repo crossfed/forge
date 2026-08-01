@@ -50,6 +50,24 @@ BOOST_AUTO_TEST_CASE(boost_describe_struct_variant_roundtrip) {
    BOOST_CHECK(original == roundtrip);
 }
 
+BOOST_AUTO_TEST_CASE(variant_equality_covers_all_value_kinds) {
+   const auto object = forge::variant{forge::mutable_variant_object{}(
+       "enabled", true)("payload", forge::blob{{0x01U, 0x02U}})("nested", forge::variants{forge::variant{nullptr}})};
+   const auto equal = forge::variant{forge::mutable_variant_object{}(
+       "enabled", true)("payload", forge::blob{{0x01U, 0x02U}})("nested", forge::variants{forge::variant{nullptr}})};
+   const auto different = forge::variant{forge::mutable_variant_object{}(
+       "enabled", false)("payload", forge::blob{{0x01U, 0x02U}})("nested", forge::variants{forge::variant{nullptr}})};
+
+   BOOST_CHECK(object == equal);
+   BOOST_CHECK(object != different);
+   BOOST_CHECK(forge::variant{true} == forge::variant{true});
+   BOOST_CHECK(forge::variant{true} != forge::variant{false});
+   BOOST_CHECK(forge::variant{nullptr} == forge::variant{nullptr});
+   BOOST_CHECK(forge::variant{forge::blob{{0x01U}}} == forge::variant{forge::blob{{0x01U}}});
+   BOOST_CHECK(forge::variant{forge::blob{{0x01U}}} != forge::variant{forge::blob{{0x02U}}});
+   BOOST_CHECK(forge::variant{forge::variants{forge::variant{1}}} != forge::variant{true});
+}
+
 BOOST_AUTO_TEST_CASE(boost_describe_variant_missing_fields_keep_defaults_and_unknown_fields_are_ignored) {
    const forge::variant input = forge::mutable_variant_object()("name", "override")("unknown", "ignored");
 

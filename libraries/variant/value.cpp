@@ -782,8 +782,19 @@ bool operator==(const variant& a, const variant& b) {
    if (a.is_uint64() || b.is_uint64())
       return a.as_uint64() == b.as_uint64();
    if (a.is_array() || b.is_array())
-      return a.get_array() == b.get_array();
-   return false;
+      return a.is_array() && b.is_array() && a.get_array() == b.get_array();
+   if (a.is_object() || b.is_object()) {
+      if (!a.is_object() || !b.is_object())
+         return false;
+      const auto& left = a.get_object();
+      const auto& right = b.get_object();
+      return left.size() == right.size() && std::equal(left.begin(), left.end(), right.begin());
+   }
+   if (a.is_blob() || b.is_blob())
+      return a.is_blob() && b.is_blob() && a.get_blob().data == b.get_blob().data;
+   if (a.is_bool() || b.is_bool())
+      return a.is_bool() && b.is_bool() && a.as_bool() == b.as_bool();
+   return a.is_null() && b.is_null();
 }
 
 bool operator!=(const variant& a, const variant& b) {
