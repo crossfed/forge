@@ -773,14 +773,6 @@ void to_variant(unsigned long long int s, variant& v) {
 #endif
 
 bool operator==(const variant& a, const variant& b) {
-   if (a.is_string() || b.is_string())
-      return a.as_string() == b.as_string();
-   if (a.is_double() || b.is_double())
-      return a.as_double() == b.as_double();
-   if (a.is_int64() || b.is_int64())
-      return a.as_int64() == b.as_int64();
-   if (a.is_uint64() || b.is_uint64())
-      return a.as_uint64() == b.as_uint64();
    if (a.is_array() || b.is_array())
       return a.is_array() && b.is_array() && a.get_array() == b.get_array();
    if (a.is_object() || b.is_object()) {
@@ -792,6 +784,14 @@ bool operator==(const variant& a, const variant& b) {
    }
    if (a.is_blob() || b.is_blob())
       return a.is_blob() && b.is_blob() && a.get_blob().data == b.get_blob().data;
+   if (a.is_string() || b.is_string())
+      return a.as_string() == b.as_string();
+   if (a.is_double() || b.is_double())
+      return a.as_double() == b.as_double();
+   if (a.is_int64() || b.is_int64())
+      return a.as_int64() == b.as_int64();
+   if (a.is_uint64() || b.is_uint64())
+      return a.as_uint64() == b.as_uint64();
    if (a.is_bool() || b.is_bool())
       return a.is_bool() && b.is_bool() && a.as_bool() == b.as_bool();
    return a.is_null() && b.is_null();

@@ -51,12 +51,12 @@ BOOST_AUTO_TEST_CASE(boost_describe_struct_variant_roundtrip) {
 }
 
 BOOST_AUTO_TEST_CASE(variant_equality_covers_all_value_kinds) {
-   const auto object = forge::variant{forge::mutable_variant_object{}(
-       "enabled", true)("payload", forge::blob{{0x01U, 0x02U}})("nested", forge::variants{forge::variant{nullptr}})};
-   const auto equal = forge::variant{forge::mutable_variant_object{}(
-       "enabled", true)("payload", forge::blob{{0x01U, 0x02U}})("nested", forge::variants{forge::variant{nullptr}})};
-   const auto different = forge::variant{forge::mutable_variant_object{}(
-       "enabled", false)("payload", forge::blob{{0x01U, 0x02U}})("nested", forge::variants{forge::variant{nullptr}})};
+   const auto object = forge::variant{forge::mutable_variant_object{}("enabled", true)(
+       "payload", forge::blob{{0x01U, 0x02U}})("nested", forge::variants{forge::variant{nullptr}})};
+   const auto equal = forge::variant{forge::mutable_variant_object{}("enabled", true)(
+       "payload", forge::blob{{0x01U, 0x02U}})("nested", forge::variants{forge::variant{nullptr}})};
+   const auto different = forge::variant{forge::mutable_variant_object{}("enabled", false)(
+       "payload", forge::blob{{0x01U, 0x02U}})("nested", forge::variants{forge::variant{nullptr}})};
 
    BOOST_CHECK(object == equal);
    BOOST_CHECK(object != different);
@@ -66,6 +66,27 @@ BOOST_AUTO_TEST_CASE(variant_equality_covers_all_value_kinds) {
    BOOST_CHECK(forge::variant{forge::blob{{0x01U}}} == forge::variant{forge::blob{{0x01U}}});
    BOOST_CHECK(forge::variant{forge::blob{{0x01U}}} != forge::variant{forge::blob{{0x02U}}});
    BOOST_CHECK(forge::variant{forge::variants{forge::variant{1}}} != forge::variant{true});
+}
+
+BOOST_AUTO_TEST_CASE(variant_equality_rejects_structural_scalar_mismatches_without_conversion) {
+   const auto object = forge::variant{forge::mutable_variant_object{}("value", 1)};
+   const auto array = forge::variant{forge::variants{forge::variant{1}}};
+   const auto blob_value = forge::variant{forge::blob{{0x01U}}};
+   const auto text = forge::variant{"value"};
+   const auto number = forge::variant{1};
+
+   BOOST_CHECK_NO_THROW(static_cast<void>(object == text));
+   BOOST_CHECK_NO_THROW(static_cast<void>(text == object));
+   BOOST_CHECK_NO_THROW(static_cast<void>(array == number));
+   BOOST_CHECK_NO_THROW(static_cast<void>(number == array));
+   BOOST_CHECK_NO_THROW(static_cast<void>(blob_value == text));
+   BOOST_CHECK_NO_THROW(static_cast<void>(text == blob_value));
+   BOOST_CHECK(object != text);
+   BOOST_CHECK(text != object);
+   BOOST_CHECK(array != number);
+   BOOST_CHECK(number != array);
+   BOOST_CHECK(blob_value != text);
+   BOOST_CHECK(text != blob_value);
 }
 
 BOOST_AUTO_TEST_CASE(boost_describe_variant_missing_fields_keep_defaults_and_unknown_fields_are_ignored) {
