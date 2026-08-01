@@ -21,6 +21,9 @@ scalar path/query parameters use `GET`; structured proof ranges, simulations
 and mutations use `POST`. Dynamic reads return `Cache-Control: no-store`.
 Requests select an optional finalized anchor by block ID, while the complete
 chain/root commitment is returned in the audited response context.
+Table-scope continuation uses the transport-neutral protocol `bytes` value;
+the HTTP GET binding carries it through the shared JSON query codec and other
+transports carry the same bytes without a transport-specific cursor DTO.
 
 Concrete controllers, state schemas, persistence, protocol publication and
 network policy remain in downstream products.

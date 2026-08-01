@@ -398,6 +398,8 @@ int main() {
    static_assert(std::is_abstract_v<forge::chain::api::state>);
    static_assert(std::is_abstract_v<forge::chain::api::transaction>);
    static_assert(std::is_abstract_v<forge::chain::api::admin>);
+   static_assert(std::is_same_v<decltype(protocol::table_scope_request{}.cursor), std::optional<protocol::bytes>>);
+   static_assert(std::is_same_v<decltype(protocol::table_scope_response{}.next), std::optional<protocol::bytes>>);
 
    auto request = protocol::state_point_request{};
    auto block = protocol::block_request{};

@@ -80,6 +80,14 @@ template <typename Stream> void raw_unpack(Stream& stream, packed_transaction& v
 
 } // namespace forge::chain::protocol
 
+export namespace forge::raw {
+
+template <> struct enum_wire_type<decltype(std::declval<forge::chain::protocol::packed_transaction>().compression)> {
+   using type = std::uint8_t;
+};
+
+} // namespace forge::raw
+
 export namespace forge::chain::protocol {
 BOOST_DESCRIBE_STRUCT(deferred_transaction_generation_context, (), (sender_trx_id, sender_id, sender))
 BOOST_DESCRIBE_STRUCT(transaction_header, (),

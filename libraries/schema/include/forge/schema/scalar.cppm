@@ -36,6 +36,8 @@ concept canonical_string_scalar =
     std::constructible_from<std::remove_cvref_t<T>, std::string> &&
     (std::convertible_to<const std::remove_cvref_t<T>&, std::string> || requires(const std::remove_cvref_t<T>& value) {
        { value.str() } -> std::convertible_to<std::string>;
+    } || requires(const std::remove_cvref_t<T>& value) {
+       { value.to_string() } -> std::convertible_to<std::string>;
     });
 
 [[nodiscard]] inline bool parse_bool_text(std::string text, bool& output) {
@@ -207,8 +209,10 @@ template <typename T> [[nodiscard]] std::optional<std::string> format_scalar_tex
    } else if constexpr (canonical_string_scalar<clean>) {
       if constexpr (std::convertible_to<const clean&, std::string>) {
          return static_cast<std::string>(value);
-      } else {
+      } else if constexpr (requires { value.str(); }) {
          return value.str();
+      } else {
+         return value.to_string();
       }
    } else {
       return std::nullopt;

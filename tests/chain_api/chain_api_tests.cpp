@@ -34,7 +34,9 @@ import forge.chain.api.state;
 import forge.chain.api.transaction;
 import forge.chain.api.verified_client;
 import forge.chain.protocol.audit;
+import forge.crypto.digest.sha256;
 import forge.net.http.types;
+import forge.raw.raw;
 
 namespace {
 
@@ -451,6 +453,20 @@ BOOST_AUTO_TEST_CASE(chain_http_omits_an_unspecified_anchor) {
    BOOST_TEST(target == "/v1/chain/blocks/consensus-parameters?audit=required");
 }
 
+BOOST_AUTO_TEST_CASE(chain_table_scope_http_carries_the_opaque_cursor) {
+   const auto routes = forge::api::http::traits<forge::chain::api::state>::routes();
+   const auto& route = find_route(routes, "get_table_scope");
+   const auto target = forge::api::http::detail::render_route_target(
+       route, forge::chain::protocol::table_scope_request{
+                  .code = forge::chain::protocol::account_name{"eosio.token"},
+                  .table = forge::chain::protocol::name{"accounts"},
+                  .cursor = forge::chain::protocol::bytes{0x00U, 0x2fU, 0xffU},
+              });
+
+   BOOST_TEST(route.target.find("&cursor={cursor}&") != std::string::npos);
+   BOOST_TEST(target.find("cursor=%5B0%2C47%2C255%5D") != std::string::npos);
+}
+
 BOOST_AUTO_TEST_CASE(chain_openapi_uses_canonical_public_key_json_shape) {
    const auto document = forge::api::http::openapi<forge::chain::api::transaction>();
    const auto& schema = document["paths"]["/v1/chain/transactions/required-keys"]["post"]["responses"]["200"]["content"]
@@ -458,6 +474,25 @@ BOOST_AUTO_TEST_CASE(chain_openapi_uses_canonical_public_key_json_shape) {
 
    BOOST_TEST(schema["type"].as_string() == "string");
    BOOST_TEST(schema["format"].as_string() == "forge-public-key");
+}
+
+BOOST_AUTO_TEST_CASE(chain_table_scope_openapi_exposes_bytes_cursor_and_next) {
+   const auto document = forge::api::http::openapi<forge::chain::api::state>();
+   const auto& operation = document["paths"]["/v1/chain/state/tables/{code}/scopes"]["get"];
+   const auto& parameters = operation["parameters"].get_array();
+   const auto cursor = std::ranges::find_if(
+       parameters, [](const forge::variant& value) { return value["name"].as_string() == "cursor"; });
+   BOOST_REQUIRE(cursor != parameters.end());
+   BOOST_TEST((*cursor)["required"].as_bool() == false);
+   BOOST_TEST((*cursor)["schema"]["anyOf"][std::size_t{0}]["type"].as_string() == "array");
+   BOOST_TEST((*cursor)["schema"]["anyOf"][std::size_t{0}]["items"]["type"].as_string() == "integer");
+
+   const auto& properties =
+       operation["responses"]["200"]["content"]["application/json"]["schema"]["properties"].get_object();
+   BOOST_TEST(properties.contains("next"));
+   BOOST_TEST(!properties.contains("more"));
+   BOOST_TEST(!properties.contains("next_key"));
+   BOOST_TEST(properties["next"]["anyOf"][std::size_t{0}]["type"].as_string() == "array");
 }
 
 BOOST_AUTO_TEST_CASE(verified_block_response_is_bound_to_the_requested_identity) {
@@ -918,6 +953,56 @@ BOOST_AUTO_TEST_CASE(verified_changes_cover_the_requested_interval_and_terminal_
    forged_terminal.blocks.back().anchor.state_root._hash[0] = 99U;
    BOOST_CHECK_THROW(static_cast<void>(verify(std::move(forged_terminal))),
                      forge::chain::api::exceptions::invalid_state_proof);
+}
+
+BOOST_AUTO_TEST_CASE(content_witness_roundtrips_and_returns_the_authenticated_value) {
+   const auto value = forge::chain::protocol::bytes{0x10U, 0x20U, 0x30U};
+   const auto other = forge::chain::protocol::bytes{0x40U};
+   const auto expected = forge::crypto::digest::sha256::hash(std::span<const std::uint8_t>{value});
+   const auto other_hash = forge::crypto::digest::sha256::hash(std::span<const std::uint8_t>{other});
+   const auto audit = forge::chain::protocol::audit_bundle{
+       .content =
+           {
+               {.hash = other_hash, .value = other},
+               {.hash = expected, .value = value},
+           },
+   };
+
+   const auto wire = forge::raw::pack(audit);
+   const auto decoded =
+       forge::raw::unpack_exact<forge::chain::protocol::audit_bundle>(std::span<const std::uint8_t>{wire});
+   BOOST_CHECK(decoded == audit);
+
+   const auto& authenticated_without_size = forge::chain::api::require_content_witness(decoded, expected);
+   const auto& authenticated = forge::chain::api::require_content_witness(decoded, expected, value.size());
+   BOOST_CHECK(authenticated == value);
+   BOOST_CHECK(&authenticated_without_size == &decoded.content[1].value);
+   BOOST_CHECK(&authenticated == &decoded.content[1].value);
+}
+
+BOOST_AUTO_TEST_CASE(content_witness_rejects_missing_duplicate_digest_and_size_mismatch) {
+   const auto value = forge::chain::protocol::bytes{0x10U, 0x20U, 0x30U};
+   const auto expected = forge::crypto::digest::sha256::hash(std::span<const std::uint8_t>{value});
+   const auto valid = forge::chain::protocol::content_witness{.hash = expected, .value = value};
+
+   BOOST_CHECK_THROW(
+       static_cast<void>(forge::chain::api::require_content_witness(forge::chain::protocol::audit_bundle{}, expected)),
+       forge::chain::api::exceptions::invalid_state_proof);
+
+   const auto duplicate = forge::chain::protocol::audit_bundle{.content = {valid, valid}};
+   BOOST_CHECK_THROW(static_cast<void>(forge::chain::api::require_content_witness(duplicate, expected)),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   const auto malformed = forge::chain::protocol::audit_bundle{
+       .content = {{.hash = expected, .value = {0xffU}}},
+   };
+   BOOST_CHECK_THROW(static_cast<void>(forge::chain::api::require_content_witness(malformed, expected)),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   const auto wrong_size = forge::chain::protocol::audit_bundle{.content = {valid}};
+   BOOST_CHECK_THROW(
+       static_cast<void>(forge::chain::api::require_content_witness(wrong_size, expected, value.size() + 1U)),
+       forge::chain::api::exceptions::invalid_state_proof);
 }
 
 BOOST_AUTO_TEST_CASE(cached_finality_verifier_reuses_an_exact_anchor) {

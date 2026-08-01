@@ -67,6 +67,13 @@ struct proof_blob {
    bool operator==(const proof_blob&) const = default;
 };
 
+struct content_witness {
+   digest hash;
+   bytes value;
+
+   bool operator==(const content_witness&) const = default;
+};
+
 using merkle_step = forge::chain::core::merkle_step;
 
 struct transaction_inclusion_proof {
@@ -82,6 +89,7 @@ struct audit_bundle {
    std::optional<proof_blob> finality;
    std::optional<proof_blob> ancestry;
    std::vector<proof_blob> state;
+   std::vector<content_witness> content;
    std::optional<transaction_inclusion_proof> transaction;
 
    bool operator==(const audit_bundle&) const = default;
@@ -137,8 +145,9 @@ BOOST_DESCRIBE_STRUCT(state_anchor, (),
                       (chain, block, block_num, transaction_root, state_root, state_size, change_root, change_count))
 BOOST_DESCRIBE_STRUCT(anchored_request, (), (anchor, audit))
 BOOST_DESCRIBE_STRUCT(proof_blob, (), (scheme, version, payload))
+BOOST_DESCRIBE_STRUCT(content_witness, (), (hash, value))
 BOOST_DESCRIBE_STRUCT(transaction_inclusion_proof, (), (leaf, index, leaf_count, path))
-BOOST_DESCRIBE_STRUCT(audit_bundle, (), (finality, ancestry, state, transaction))
+BOOST_DESCRIBE_STRUCT(audit_bundle, (), (finality, ancestry, state, content, transaction))
 BOOST_DESCRIBE_STRUCT(response_context, (), (chain, head, finalized, anchor))
 BOOST_DESCRIBE_STRUCT(audited_response, (), (context, audit))
 BOOST_DESCRIBE_STRUCT(method_capability, (), (api, method, audit, enabled))

@@ -98,7 +98,8 @@ FORGE_HTTP_API(
                    FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_GET(get_table_scope,
                    "/v1/chain/state/tables/{code}/scopes?table={table}&lower_bound={lower_bound}"
-                   "&upper_bound={upper_bound}&limit={limit}&reverse={reverse}&anchor={anchor}&audit={audit}",
+                   "&upper_bound={upper_bound}&limit={limit}&reverse={reverse}&cursor={cursor}&anchor={anchor}"
+                   "&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_GET(get_currency_balance,
                    "/v1/chain/state/currencies/{code}/balances/{account}?symbol={symbol}&anchor={anchor}&audit={audit}",

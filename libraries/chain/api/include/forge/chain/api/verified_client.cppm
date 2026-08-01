@@ -2,6 +2,7 @@ module;
 
 #include <boost/asio/awaitable.hpp>
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <span>
@@ -11,6 +12,10 @@ export module forge.chain.api.verified_client;
 export import forge.chain.api.raw_client;
 
 export namespace forge::chain::api {
+
+[[nodiscard]] const protocol::bytes& require_content_witness(const protocol::audit_bundle& audit,
+                                                             protocol::digest expected,
+                                                             std::optional<std::uint64_t> expected_size = std::nullopt);
 
 class audit_verifier {
  public:

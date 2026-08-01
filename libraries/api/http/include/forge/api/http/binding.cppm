@@ -462,6 +462,14 @@ class binding_builder {
          typename is_optional<clean>::value_type parsed{};
          parse_http_field(parsed, value, field);
          target = std::move(parsed);
+      } else if constexpr (detail::byte_vector_field<clean>::value) {
+         auto parsed = forge::codec::json::read<clean>(
+             value, {.described_records = forge::codec::json::described_record_policy::exact});
+         if (!parsed.ok()) {
+            FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request, "HTTP API field value is invalid",
+                                  forge::exceptions::ctx("field", std::string{field}));
+         }
+         target = std::move(parsed.value);
       } else if constexpr (std::is_same_v<clean, std::string> || std::is_same_v<clean, bool> ||
                            (std::is_integral_v<clean> && !std::is_same_v<clean, bool>) ||
                            std::is_floating_point_v<clean> || std::is_enum_v<clean> ||

@@ -182,6 +182,7 @@ struct table_scope_request {
    std::string upper_bound;
    std::uint32_t limit = 10;
    bool reverse = false;
+   std::optional<bytes> cursor;
    std::optional<block_id> anchor;
    audit_mode audit = audit_mode::none;
 
@@ -200,8 +201,7 @@ struct table_scope_row {
 
 struct table_scope_response : audited_response {
    std::vector<table_scope_row> rows;
-   bool more = false;
-   std::string next_key;
+   std::optional<bytes> next;
 
    bool operator==(const table_scope_response&) const = default;
 };
@@ -290,9 +290,10 @@ BOOST_DESCRIBE_STRUCT(table_rows_request, (),
                       (json, code, scope, table, table_key, lower_bound, upper_bound, index_position, key_type,
                        encode_type, limit, reverse, show_payer, anchor, audit))
 BOOST_DESCRIBE_STRUCT(table_rows_response, (audited_response), (rows, more, next_key))
-BOOST_DESCRIBE_STRUCT(table_scope_request, (), (code, table, lower_bound, upper_bound, limit, reverse, anchor, audit))
+BOOST_DESCRIBE_STRUCT(table_scope_request, (),
+                      (code, table, lower_bound, upper_bound, limit, reverse, cursor, anchor, audit))
 BOOST_DESCRIBE_STRUCT(table_scope_row, (), (code, scope, table, payer, count))
-BOOST_DESCRIBE_STRUCT(table_scope_response, (audited_response), (rows, more, next_key))
+BOOST_DESCRIBE_STRUCT(table_scope_response, (audited_response), (rows, next))
 BOOST_DESCRIBE_STRUCT(currency_balance_request, (), (code, account, symbol, anchor, audit))
 BOOST_DESCRIBE_STRUCT(currency_stats_request, (), (code, symbol, anchor, audit))
 BOOST_DESCRIBE_STRUCT(currency_balance_response, (audited_response), (balances))

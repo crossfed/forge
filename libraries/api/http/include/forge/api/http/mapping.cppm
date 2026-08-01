@@ -19,6 +19,7 @@ export module forge.api.http.mapping;
 import forge.api.core.connection;
 import forge.api.core.descriptor;
 import forge.api.core.types;
+import forge.codec.json;
 import forge.api.http.parameters;
 import forge.net.http.exceptions;
 import forge.net.http.negotiation;
@@ -237,6 +238,9 @@ template <typename T> struct optional_field<std::optional<T>> : std::true_type {
    using value_type = T;
 };
 
+template <typename T> struct byte_vector_field : std::false_type {};
+template <typename Allocator> struct byte_vector_field<std::vector<std::uint8_t, Allocator>> : std::true_type {};
+
 [[nodiscard]] inline bool unreserved(char value) noexcept {
    const auto ch = static_cast<unsigned char>(value);
    return std::isalnum(ch) != 0 || value == '-' || value == '.' || value == '_' || value == '~';
@@ -304,6 +308,9 @@ template <typename T> [[nodiscard]] std::optional<std::string> format_http_field
          return std::nullopt;
       }
       return format_http_field(value.value);
+   } else if constexpr (byte_vector_field<clean>::value) {
+      auto encoded = forge::codec::json::write(value);
+      return encoded.ok() ? std::optional<std::string>{std::move(encoded.text)} : std::nullopt;
    } else {
       return forge::schema::format_scalar_text(value);
    }

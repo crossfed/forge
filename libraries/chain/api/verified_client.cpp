@@ -8,12 +8,14 @@ module;
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <span>
 #include <utility>
 #include <vector>
 
 module forge.chain.api.verified_client;
 
 import forge.chain.api.exceptions;
+import forge.crypto.digest.sha256;
 
 namespace forge::chain::api {
 namespace {
@@ -38,6 +40,31 @@ projection_verifier& require_projection(const std::shared_ptr<projection_verifie
 }
 
 } // namespace
+
+const protocol::bytes& require_content_witness(const protocol::audit_bundle& audit, protocol::digest expected,
+                                               std::optional<std::uint64_t> expected_size) {
+   const protocol::content_witness* match = nullptr;
+   for (const auto& witness : audit.content) {
+      if (witness.hash != expected) {
+         continue;
+      }
+      if (match) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof, "chain API audit contains duplicate content witnesses");
+      }
+      match = &witness;
+   }
+
+   if (!match) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof, "chain API audit omits the required content witness");
+   }
+   if (expected_size && *expected_size != match->value.size()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof, "chain API content witness has an unexpected size");
+   }
+   if (forge::crypto::digest::sha256::hash(std::span<const std::uint8_t>{match->value}) != expected) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof, "chain API content witness does not match its digest");
+   }
+   return match->value;
+}
 
 projection_verifier::~projection_verifier() = default;
 

@@ -193,6 +193,23 @@ target_link_libraries(
 add_test(NAME test_forge_chain_protocol COMMAND test_forge_chain_protocol WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
+   test_forge_chain_protocol_query
+   unit/main.cpp
+   chain_protocol/query_tests.cpp
+)
+target_link_libraries(
+   test_forge_chain_protocol_query
+   forge_chain_protocol
+   forge_codec_json
+   Boost::included_unit_test_framework
+)
+add_test(
+   NAME test_forge_chain_protocol_query
+   COMMAND test_forge_chain_protocol_query
+   WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+add_executable(
    test_forge_chain_api
    unit/main.cpp
    chain_api/abi_tests.cpp

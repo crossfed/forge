@@ -91,7 +91,7 @@ struct consensus_parameters_response : audited_response {
 };
 
 struct producers_request {
-   bool json = true;
+   bool json = false;
    std::string lower_bound;
    std::uint32_t limit = 50;
    std::optional<block_id> anchor;
