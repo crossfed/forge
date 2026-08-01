@@ -25,6 +25,14 @@ chain/root commitment is returned in the audited response context.
 Concrete controllers, state schemas, persistence, protocol publication and
 network policy remain in downstream products.
 
+`verified_client` verifies transport envelopes, chain identity, finality and
+generic authenticated point/range/change proofs itself. Typed composite reads
+also require a product `projection_verifier`: it receives the public request,
+response and authenticated source proofs, then recomputes the product-specific
+projection. This keeps DB schema knowledge out of Forge without trusting a
+server-side DTO conversion. Missing projection support fails closed with
+`audit_not_supported`; it never falls back to an envelope-only check.
+
 ## Verified state synchronization
 
 `state_changes_request::from_block` is exclusive and `to_block` is inclusive.

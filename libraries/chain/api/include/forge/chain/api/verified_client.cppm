@@ -35,9 +35,50 @@ class audit_verifier {
                                    const protocol::transaction_inclusion_proof& proof) = 0;
 };
 
+class projection_verifier {
+ public:
+   virtual ~projection_verifier();
+
+   virtual void verify(const protocol::block_request& request, const protocol::block_state_response& response,
+                       const protocol::audit_bundle& audit, audit_verifier& verifier);
+   virtual void verify(const protocol::block_range_request& request, const protocol::block_range_response& response,
+                       const protocol::audit_bundle& audit, audit_verifier& verifier);
+   virtual void verify(const protocol::protocol_features_request& request,
+                       const protocol::protocol_features_response& response, const protocol::audit_bundle& audit,
+                       audit_verifier& verifier);
+   virtual void verify(const protocol::anchored_request& request,
+                       const protocol::consensus_parameters_response& response, const protocol::audit_bundle& audit,
+                       audit_verifier& verifier);
+   virtual void verify(const protocol::producers_request& request, const protocol::producers_response& response,
+                       const protocol::audit_bundle& audit, audit_verifier& verifier);
+   virtual void verify(const protocol::anchored_request& request, const protocol::producer_schedule_response& response,
+                       const protocol::audit_bundle& audit, audit_verifier& verifier);
+   virtual void verify(const protocol::anchored_request& request, const protocol::finalizer_info_response& response,
+                       const protocol::audit_bundle& audit, audit_verifier& verifier);
+   virtual void verify(const protocol::account_request& request, const protocol::account_response& response,
+                       const protocol::audit_bundle& audit, audit_verifier& verifier);
+   virtual void verify(const protocol::code_request& request, const protocol::code_response& response,
+                       const protocol::audit_bundle& audit, audit_verifier& verifier);
+   virtual void verify(const protocol::table_rows_request& request, const protocol::table_rows_response& response,
+                       const protocol::audit_bundle& audit, audit_verifier& verifier);
+   virtual void verify(const protocol::table_scope_request& request, const protocol::table_scope_response& response,
+                       const protocol::audit_bundle& audit, audit_verifier& verifier);
+   virtual void verify(const protocol::currency_balance_request& request,
+                       const protocol::currency_balance_response& response, const protocol::audit_bundle& audit,
+                       audit_verifier& verifier);
+   virtual void verify(const protocol::currency_stats_request& request,
+                       const protocol::currency_stats_response& response, const protocol::audit_bundle& audit,
+                       audit_verifier& verifier);
+   virtual void verify(const protocol::scheduled_request& request, const protocol::scheduled_response& response,
+                       const protocol::audit_bundle& audit, audit_verifier& verifier);
+   virtual void verify(const protocol::authorizers_request& request, const protocol::authorizers_response& response,
+                       const protocol::audit_bundle& audit, audit_verifier& verifier);
+};
+
 class verified_client {
  public:
-   verified_client(raw_client client, std::shared_ptr<audit_verifier> verifier);
+   verified_client(raw_client client, std::shared_ptr<audit_verifier> verifier,
+                   std::shared_ptr<projection_verifier> projections = {});
 
    boost::asio::awaitable<protocol::info_response> get_info();
    boost::asio::awaitable<protocol::info_response> get_info(protocol::anchored_request request);
@@ -94,6 +135,7 @@ class verified_client {
 
    raw_client client_;
    std::shared_ptr<audit_verifier> verifier_;
+   std::shared_ptr<projection_verifier> projections_;
 };
 
 } // namespace forge::chain::api

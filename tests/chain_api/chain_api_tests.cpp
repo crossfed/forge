@@ -128,6 +128,7 @@ class state_service final : public forge::chain::api::state {
        : point_response_{std::move(response)} {}
    explicit state_service(forge::chain::protocol::state_range_response response)
        : range_response_{std::move(response)} {}
+   explicit state_service(forge::chain::protocol::account_response response) : account_response_{std::move(response)} {}
 
    boost::asio::awaitable<forge::chain::protocol::state_point_response>
    get_point(forge::chain::protocol::state_point_request) override {
@@ -146,7 +147,7 @@ class state_service final : public forge::chain::api::state {
 
    boost::asio::awaitable<forge::chain::protocol::account_response>
    get_account(forge::chain::protocol::account_request) override {
-      co_return forge::chain::protocol::account_response{};
+      co_return account_response_;
    }
 
    boost::asio::awaitable<forge::chain::protocol::code_response>
@@ -188,6 +189,7 @@ class state_service final : public forge::chain::api::state {
    forge::chain::protocol::state_point_response point_response_;
    forge::chain::protocol::state_range_response range_response_;
    forge::chain::protocol::state_changes_response response_;
+   forge::chain::protocol::account_response account_response_;
 };
 
 class transaction_service final : public forge::chain::api::transaction {
@@ -278,6 +280,29 @@ class accepting_audit_verifier final : public forge::chain::api::audit_verifier 
    std::optional<forge::chain::protocol::state_anchor> ancestry_finalized;
    std::vector<forge::chain::protocol::state_anchor> ancestry_intermediate;
    std::optional<forge::chain::protocol::proof_blob> ancestry_proof;
+};
+
+class account_projection_verifier final : public forge::chain::api::projection_verifier {
+ public:
+   void verify(const forge::chain::protocol::account_request& request,
+               const forge::chain::protocol::account_response& response,
+               const forge::chain::protocol::audit_bundle& audit,
+               forge::chain::api::audit_verifier& verifier) override {
+      if (!response.context.anchor || audit.state.size() != 1U) {
+         FORGE_THROW_EXCEPTION(forge::chain::api::exceptions::invalid_state_proof,
+                               "test account projection requires one authenticated source");
+      }
+      ++verifications;
+      verifier.verify_state_point(*response.context.anchor,
+                                  forge::chain::protocol::state_point_request{
+                                      .key = {9U},
+                                      .anchor = request.anchor,
+                                      .audit = forge::chain::protocol::audit_mode::required,
+                                  },
+                                  forge::chain::protocol::bytes{1U, 2U}, audit.state.front());
+   }
+
+   std::size_t verifications = 0;
 };
 
 class recording_finality_verifier final : public forge::chain::api::finality_verifier {
@@ -739,6 +764,41 @@ BOOST_AUTO_TEST_CASE(verified_transaction_status_delegates_the_inclusion_proof) 
 
    static_cast<void>(run(client.get_transaction_status({.id = id})));
    BOOST_TEST(verifier->transaction_verifications == 1U);
+}
+
+BOOST_AUTO_TEST_CASE(verified_composite_response_delegates_product_projection_and_authenticated_sources) {
+   auto anchor = make_finality_anchor();
+   auto response = forge::chain::protocol::account_response{};
+   response.account = forge::chain::protocol::account_name{"alice"};
+   response.context = forge::chain::protocol::response_context{
+       .chain = anchor.chain,
+       .head = anchor.block,
+       .finalized = anchor.block,
+       .anchor = anchor,
+   };
+   response.audit = forge::chain::protocol::audit_bundle{
+       .finality = forge::chain::protocol::proof_blob{.scheme = "test.finality"},
+       .state = {forge::chain::protocol::proof_blob{.scheme = "test.state"}},
+   };
+
+   auto services = forge::api::core::registry{};
+   services.install<forge::chain::api::state>(std::make_shared<state_service>(std::move(response)));
+   auto audit = std::make_shared<accepting_audit_verifier>();
+   auto projections = std::make_shared<account_projection_verifier>();
+   auto client = forge::chain::api::verified_client{
+       forge::chain::api::raw_client{forge::chain::api::service_handles{
+           .state_queries = services.get<forge::chain::api::state>(forge::chain::api::state::ref()),
+       }},
+       audit,
+       projections,
+   };
+
+   const auto result =
+       run(client.get_account({.account = forge::chain::protocol::account_name{"alice"}, .anchor = anchor.block}));
+
+   BOOST_CHECK(result.account == forge::chain::protocol::account_name{"alice"});
+   BOOST_TEST(projections->verifications == 1U);
+   BOOST_TEST(audit->state_point_verifications == 1U);
 }
 
 BOOST_AUTO_TEST_CASE(verified_client_fails_closed_for_methods_without_content_witnesses) {
