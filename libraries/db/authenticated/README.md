@@ -54,6 +54,12 @@ ordered ranks, continuation key and optional values as a verified range proof,
 but does not construct or serialize witness nodes. It is the normal trusted
 server path when an API caller did not request an audit proof.
 
+`range_request::reverse` selects the same half-open `[lower, upper)` key range
+from its upper boundary. Results are returned in descending key order and the
+continuation is the first omitted key in that traversal order. The direction is
+part of the serialized request embedded in the proof, so a verifier cannot be
+tricked into accepting a forward witness as a reverse page.
+
 `prove()` and `prove_range()` additionally construct transferable witnesses.
 For range proofs, `proof_tree::state` covers the complete version state and
 `proof_tree::changes` covers that version's canonical last-write-wins mutation

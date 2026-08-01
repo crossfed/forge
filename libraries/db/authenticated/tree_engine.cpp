@@ -790,13 +790,26 @@ boost::asio::awaitable<verified_range> tree_engine::scan_range(const root& ancho
       FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated range ranks are inconsistent");
    }
    const auto count = std::min<std::uint64_t>(upper - first, request.limit);
-   co_await emit_items(*root_hash_, 0U, first, first + count, request.include_values, result.items, 0U);
+   const auto result_begin = request.reverse ? upper - count : first;
+   const auto result_end = request.reverse ? upper : first + count;
+   co_await emit_items(*root_hash_, 0U, result_begin, result_end, request.include_values, result.items, 0U);
    if (result.items.size() != count) {
       FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated range scan has a gap");
    }
-   if (first + count < upper) {
+   if (request.reverse) {
+      std::ranges::reverse(result.items);
+      if (result_begin > first) {
+         auto predecessor = std::vector<verified_range_item>{};
+         co_await emit_items(*root_hash_, 0U, result_begin - 1U, result_begin, false, predecessor, 0U);
+         if (predecessor.size() != 1U) {
+            FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated reverse range scan omits its continuation");
+         }
+         result.more = true;
+         result.next_key = std::move(predecessor.front().key);
+      }
+   } else if (result_end < upper) {
       auto successor = std::vector<verified_range_item>{};
-      co_await emit_items(*root_hash_, 0U, first + count, first + count + 1U, false, successor, 0U);
+      co_await emit_items(*root_hash_, 0U, result_end, result_end + 1U, false, successor, 0U);
       if (successor.size() != 1U) {
          FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated range scan omits its continuation");
       }
@@ -915,11 +928,12 @@ boost::asio::awaitable<range_proof> tree_engine::prove_range(const root& anchor,
    }
    const auto available = upper - first;
    const auto count = std::min<std::uint64_t>(available, result.request.limit);
-   const auto result_end = first + count;
-   const auto witness_begin = first == 0 ? 0 : first - 1U;
+   const auto result_begin = result.request.reverse ? upper - count : first;
+   const auto result_end = result.request.reverse ? upper : first + count;
+   const auto witness_begin = result_begin == 0 ? 0 : result_begin - 1U;
    const auto witness_end = result_end < total ? result_end + 1U : total;
-   co_await emit_range(*root_hash_, 0, witness_begin, witness_end, first, result_end, result.request.include_values,
-                       result.nodes, wire_bytes, 0);
+   co_await emit_range(*root_hash_, 0, witness_begin, witness_end, result_begin, result_end,
+                       result.request.include_values, result.nodes, wire_bytes, 0);
    if (wire_size(result) != wire_bytes) {
       FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated range proof wire accounting is inconsistent");
    }

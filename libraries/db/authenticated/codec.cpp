@@ -255,7 +255,7 @@ std::size_t wire_size(const range_proof& value) {
    auto result = root_wire_bytes + 1U;
    result = checked_add(result, optional_byte_array_wire_size(value.request.lower));
    result = checked_add(result, optional_byte_array_wire_size(value.request.upper));
-   result = checked_add(result, sizeof(value.request.limit) + 1U);
+   result = checked_add(result, sizeof(value.request.limit) + 2U);
    result = checked_add(result, varuint32_wire_size(value.nodes.size()));
    for (const auto& node : value.nodes) {
       result = checked_add(result, wire_size(node));
@@ -338,6 +338,7 @@ range_proof decode_range(std::span<const std::byte> value, const limits& setting
                                     "authenticated range upper key exceeds configured limit"),
        .limit = read_scalar<std::uint32_t>(stream),
        .include_values = read_bool(stream),
+       .reverse = read_bool(stream),
    };
    const auto node_count = read_count(stream);
    if (node_count > settings.max_proof_nodes) {

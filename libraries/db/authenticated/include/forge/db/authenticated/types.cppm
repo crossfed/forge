@@ -131,6 +131,7 @@ struct range_request {
    std::optional<bytes> upper;
    std::uint32_t limit = 256;
    bool include_values = true;
+   bool reverse = false;
 
    bool operator==(const range_request&) const = default;
 };
@@ -201,7 +202,7 @@ BOOST_DESCRIBE_STRUCT(proof_leaf, (), (key, value_hash, value))
 BOOST_DESCRIBE_STRUCT(proof_branch, (), (height, size, min_key, max_key, separator, left_hash, right_hash))
 BOOST_DESCRIBE_STRUCT(proof_step, (), (child, height, subtree_size, min_key, max_key, separator, sibling))
 BOOST_DESCRIBE_STRUCT(point_proof, (), (anchor, key, terminal, path))
-BOOST_DESCRIBE_STRUCT(range_request, (), (lower, upper, limit, include_values))
+BOOST_DESCRIBE_STRUCT(range_request, (), (lower, upper, limit, include_values, reverse))
 BOOST_DESCRIBE_STRUCT(range_inner, (), (height, size, min_key, max_key, separator))
 BOOST_DESCRIBE_STRUCT(range_proof, (), (anchor, tree, request, nodes))
 
