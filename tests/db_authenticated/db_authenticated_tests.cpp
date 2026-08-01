@@ -761,6 +761,17 @@ BOOST_AUTO_TEST_CASE(authenticated_versions_are_deterministic_and_restart_safe) 
       BOOST_REQUIRE(first_page.next_key.has_value());
       BOOST_TEST(text(*first_page.next_key) == "delta");
 
+      const auto bounded_forward_proof = co_await authenticated.prove_range(
+          1, forge::db::authenticated::range_request{.lower = bytes("b"), .upper = bytes("gamma"), .limit = 1});
+      const auto bounded_forward = forge::db::authenticated::verify_range(
+          "forge.test.authenticated.state.v1", bounded_forward_proof.anchor, bounded_forward_proof.request,
+          bounded_forward_proof.tree, bounded_forward_proof);
+      BOOST_REQUIRE_EQUAL(bounded_forward.items.size(), 1U);
+      BOOST_TEST(text(bounded_forward.items.front().key) == "beta");
+      BOOST_TEST(bounded_forward.more);
+      BOOST_REQUIRE(bounded_forward.next_key.has_value());
+      BOOST_TEST(text(*bounded_forward.next_key) == "delta");
+
       const auto reverse_page_proof = co_await authenticated.prove_range(1, forge::db::authenticated::range_request{
                                                                                 .lower = bytes("b"),
                                                                                 .upper = bytes("z"),

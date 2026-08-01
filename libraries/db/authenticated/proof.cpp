@@ -389,29 +389,31 @@ verified_range verify_range(std::string_view domain, const root& expected_anchor
    }
 
    auto upper_rank = total;
-   if (proof.request.upper) {
-      const auto candidate = std::find_if(leaves.begin(), leaves.end(), [&](const ranked_leaf& value) {
-         return !key_less(value.leaf.key, *proof.request.upper);
-      });
-      if (candidate == leaves.end()) {
-         const auto& last = leaves.back();
-         if (last.rank != total - 1U || !key_less(last.leaf.key, *proof.request.upper)) {
-            reject("authenticated range proof omits its upper boundary");
-         }
-      } else {
-         upper_rank = candidate->rank;
-         if (upper_rank != 0U) {
-            const auto* predecessor = find_rank(leaves, upper_rank - 1U);
-            if (!predecessor || !key_less(predecessor->leaf.key, *proof.request.upper)) {
-               reject("authenticated range upper predecessor is invalid");
+   if (proof.request.reverse) {
+      if (proof.request.upper) {
+         const auto candidate = std::find_if(leaves.begin(), leaves.end(), [&](const ranked_leaf& value) {
+            return !key_less(value.leaf.key, *proof.request.upper);
+         });
+         if (candidate == leaves.end()) {
+            const auto& last = leaves.back();
+            if (last.rank != total - 1U || !key_less(last.leaf.key, *proof.request.upper)) {
+               reject("authenticated range proof omits its upper boundary");
+            }
+         } else {
+            upper_rank = candidate->rank;
+            if (upper_rank != 0U) {
+               const auto* predecessor = find_rank(leaves, upper_rank - 1U);
+               if (!predecessor || !key_less(predecessor->leaf.key, *proof.request.upper)) {
+                  reject("authenticated range upper predecessor is invalid");
+               }
             }
          }
+      } else if (!find_rank(leaves, total - 1U)) {
+         reject("authenticated unbounded range omits the last leaf");
       }
-   } else if (!find_rank(leaves, total - 1U)) {
-      reject("authenticated unbounded range omits the last leaf");
-   }
-   if (lower_rank > upper_rank) {
-      reject("authenticated range bounds select inconsistent ranks");
+      if (lower_rank > upper_rank) {
+         reject("authenticated range bounds select inconsistent ranks");
+      }
    }
 
    auto result = verified_range{.total_size = total};
@@ -446,10 +448,13 @@ verified_range verify_range(std::string_view domain, const root& expected_anchor
       }
    } else {
       auto rank = lower_rank;
-      while (rank < upper_rank && result.items.size() < proof.request.limit) {
+      while (rank < total && result.items.size() < proof.request.limit) {
          const auto* current = find_rank(leaves, rank);
          if (!current) {
             reject("authenticated range proof has a gap");
+         }
+         if (proof.request.upper && !key_less(current->leaf.key, *proof.request.upper)) {
+            break;
          }
          if (proof.request.include_values && !current->leaf.value) {
             reject("authenticated range proof omits a requested value");
@@ -463,16 +468,18 @@ verified_range verify_range(std::string_view domain, const root& expected_anchor
          ++rank;
       }
 
-      if (rank < upper_rank) {
+      if (rank < total) {
          const auto* successor = find_rank(leaves, rank);
          if (!successor) {
-            reject("authenticated range proof omits its continuation");
+            reject("authenticated range proof omits its upper boundary");
          }
-         if (result.items.size() != proof.request.limit) {
-            reject("authenticated range proof omits a matching item");
+         result.more = !proof.request.upper || key_less(successor->leaf.key, *proof.request.upper);
+         if (result.more) {
+            if (result.items.size() != proof.request.limit) {
+               reject("authenticated range proof omits a matching item");
+            }
+            result.next_key = successor->leaf.key;
          }
-         result.more = true;
-         result.next_key = successor->leaf.key;
       }
    }
    return result;
