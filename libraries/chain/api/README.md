@@ -26,11 +26,11 @@ Concrete controllers, state schemas, persistence, protocol publication and
 network policy remain in downstream products.
 
 `verified_client` verifies transport envelopes, chain identity, finality and
-generic authenticated point/range/change proofs itself. Typed composite reads
-also require a product `projection_verifier`: it receives the public request,
-response and authenticated source proofs, then recomputes the product-specific
-projection. This keeps DB schema knowledge out of Forge without trusting a
-server-side DTO conversion. Missing projection support fails closed with
+generic authenticated point/range/change proofs itself. Verification returns
+the authenticated source bytes, so typed composite reads can use a product
+`projection_verifier` to recompute the public response from those exact bytes.
+This keeps DB schema knowledge out of Forge without exposing proof internals or
+trusting a server-side DTO conversion. Missing projection support fails closed with
 `audit_not_supported`; it never falls back to an envelope-only check.
 
 ## Verified state synchronization

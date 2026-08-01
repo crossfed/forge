@@ -134,66 +134,65 @@ void authenticated_audit_verifier::verify_ancestry(const protocol::state_anchor&
    finality_->verify_ancestry(finalized, intermediate, proof);
 }
 
-void authenticated_audit_verifier::verify_state_point(const protocol::state_anchor& anchor,
-                                                      const protocol::state_point_request& request,
-                                                      const std::optional<protocol::bytes>& value,
-                                                      const protocol::proof_blob& proof) {
-   translate_state_error([&] {
+std::optional<protocol::bytes>
+authenticated_audit_verifier::verify_state_point(const protocol::state_anchor& anchor,
+                                                 const protocol::state_point_request& request,
+                                                 const protocol::proof_blob& proof) {
+   return translate_state_error([&] {
       const auto decoded = forge::db::authenticated::decode_point(payload(proof, point_scheme), options_.proof_limits);
       const auto key = db_bytes(request.key);
       const auto verified = forge::db::authenticated::verify_point(options_.state_domain, root(anchor), key, decoded,
                                                                    options_.proof_limits);
-      if (verified.exists != value.has_value() || protocol_bytes(verified.value) != value) {
-         reject_state("chain API point value does not match its authenticated proof");
-      }
+      return protocol_bytes(verified.value);
    });
 }
 
-void authenticated_audit_verifier::verify_state_range(const protocol::state_anchor& anchor,
-                                                      const protocol::state_range_request& request,
-                                                      const protocol::state_range_response& response,
-                                                      const protocol::proof_blob& proof) {
-   translate_state_error([&] {
+protocol::state_range_response
+authenticated_audit_verifier::verify_state_range(const protocol::state_anchor& anchor,
+                                                 const protocol::state_range_request& request,
+                                                 const protocol::proof_blob& proof) {
+   return translate_state_error([&] {
       const auto decoded = forge::db::authenticated::decode_range(payload(proof, range_scheme), options_.proof_limits);
       const auto expected = range_request(request.range, request.limit);
       const auto verified = forge::db::authenticated::verify_range(options_.state_domain, root(anchor), expected,
                                                                    forge::db::authenticated::proof_tree::state, decoded,
                                                                    options_.proof_limits);
-      if (verified.items.size() != response.rows.size() || protocol_bytes(verified.next_key) != response.next_key) {
-         reject_state("chain API range result does not match its authenticated proof");
-      }
-      for (auto index = std::size_t{0}; index < verified.items.size(); ++index) {
-         if (!verified.items[index].value || protocol_bytes(verified.items[index].key) != response.rows[index].key ||
-             protocol_bytes(*verified.items[index].value) != response.rows[index].value) {
-            reject_state("chain API range row does not match its authenticated proof");
+      auto result = protocol::state_range_response{};
+      result.next_key = protocol_bytes(verified.next_key);
+      result.rows.reserve(verified.items.size());
+      for (const auto& item : verified.items) {
+         if (!item.value) {
+            reject_state("chain API range proof omitted a row value");
          }
+         result.rows.push_back({.key = protocol_bytes(item.key), .value = protocol_bytes(*item.value)});
       }
+      return result;
    });
 }
 
-void authenticated_audit_verifier::verify_state_changes(const protocol::state_anchor& anchor,
-                                                        const protocol::key_range& range, std::uint32_t limit,
-                                                        const protocol::state_change_range& result,
-                                                        const protocol::proof_blob& proof) {
-   translate_state_error([&] {
+protocol::state_change_range authenticated_audit_verifier::verify_state_changes(const protocol::state_anchor& anchor,
+                                                                                const protocol::key_range& range,
+                                                                                std::uint32_t limit,
+                                                                                const protocol::proof_blob& proof) {
+   return translate_state_error([&] {
       const auto decoded =
           forge::db::authenticated::decode_range(payload(proof, changes_scheme), options_.proof_limits);
       const auto expected = range_request(range, limit);
       const auto verified = forge::db::authenticated::verify_range(options_.state_domain, root(anchor), expected,
                                                                    forge::db::authenticated::proof_tree::changes,
                                                                    decoded, options_.proof_limits);
-      if (verified.items.size() != result.mutations.size() || protocol_bytes(verified.next_key) != result.next_key) {
-         reject_state("chain API change range does not match its authenticated proof");
-      }
-      for (auto index = std::size_t{0}; index < verified.items.size(); ++index) {
-         if (!verified.items[index].value || protocol_bytes(verified.items[index].key) != result.mutations[index].key) {
-            reject_state("chain API change key does not match its authenticated proof");
+      auto result = protocol::state_change_range{.range = range, .next_key = protocol_bytes(verified.next_key)};
+      result.mutations.reserve(verified.items.size());
+      for (const auto& item : verified.items) {
+         if (!item.value) {
+            reject_state("chain API change proof omitted a mutation value");
          }
-         const auto decoded_value = forge::db::authenticated::decode_change_value(*verified.items[index].value);
-         if (protocol_bytes(decoded_value) != result.mutations[index].value) {
-            reject_state("chain API change value does not match its authenticated proof");
-         }
+         result.mutations.push_back({
+             .key = protocol_bytes(item.key),
+             .value = protocol_bytes(forge::db::authenticated::decode_change_value(*item.value)),
+         });
       }
+      return result;
    });
 }
 

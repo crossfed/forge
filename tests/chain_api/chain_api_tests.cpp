@@ -241,22 +241,24 @@ class accepting_audit_verifier final : public forge::chain::api::audit_verifier 
    void verify_context(const forge::chain::protocol::response_context&) override {}
    void verify_finality(const forge::chain::protocol::state_anchor&,
                         const forge::chain::protocol::proof_blob&) override {}
-   void verify_state_point(const forge::chain::protocol::state_anchor&,
-                           const forge::chain::protocol::state_point_request&,
-                           const std::optional<forge::chain::protocol::bytes>&,
-                           const forge::chain::protocol::proof_blob&) override {
+   std::optional<forge::chain::protocol::bytes> verify_state_point(const forge::chain::protocol::state_anchor&,
+                                                                   const forge::chain::protocol::state_point_request&,
+                                                                   const forge::chain::protocol::proof_blob&) override {
       ++state_point_verifications;
+      return point_value;
    }
-   void verify_state_range(const forge::chain::protocol::state_anchor&,
-                           const forge::chain::protocol::state_range_request&,
-                           const forge::chain::protocol::state_range_response&,
-                           const forge::chain::protocol::proof_blob&) override {
+   forge::chain::protocol::state_range_response verify_state_range(const forge::chain::protocol::state_anchor&,
+                                                                   const forge::chain::protocol::state_range_request&,
+                                                                   const forge::chain::protocol::proof_blob&) override {
       ++state_range_verifications;
+      return range_result;
    }
-   void verify_state_changes(const forge::chain::protocol::state_anchor&, const forge::chain::protocol::key_range&,
-                             std::uint32_t, const forge::chain::protocol::state_change_range&,
-                             const forge::chain::protocol::proof_blob&) override {
+   forge::chain::protocol::state_change_range verify_state_changes(const forge::chain::protocol::state_anchor&,
+                                                                   const forge::chain::protocol::key_range& range,
+                                                                   std::uint32_t,
+                                                                   const forge::chain::protocol::proof_blob&) override {
       ++state_change_verifications;
+      return forge::chain::protocol::state_change_range{.range = range};
    }
    void verify_ancestry(const forge::chain::protocol::state_anchor& finalized,
                         std::span<const forge::chain::protocol::state_anchor> intermediate,
@@ -277,6 +279,8 @@ class accepting_audit_verifier final : public forge::chain::api::audit_verifier 
    std::size_t state_change_verifications = 0;
    std::size_t transaction_verifications = 0;
    std::size_t ancestry_verifications = 0;
+   std::optional<forge::chain::protocol::bytes> point_value;
+   forge::chain::protocol::state_range_response range_result;
    std::optional<forge::chain::protocol::state_anchor> ancestry_finalized;
    std::vector<forge::chain::protocol::state_anchor> ancestry_intermediate;
    std::optional<forge::chain::protocol::proof_blob> ancestry_proof;
@@ -293,13 +297,17 @@ class account_projection_verifier final : public forge::chain::api::projection_v
                                "test account projection requires one authenticated source");
       }
       ++verifications;
-      verifier.verify_state_point(*response.context.anchor,
-                                  forge::chain::protocol::state_point_request{
-                                      .key = {9U},
-                                      .anchor = request.anchor,
-                                      .audit = forge::chain::protocol::audit_mode::required,
-                                  },
-                                  forge::chain::protocol::bytes{1U, 2U}, audit.state.front());
+      const auto value = verifier.verify_state_point(*response.context.anchor,
+                                                     forge::chain::protocol::state_point_request{
+                                                         .key = {9U},
+                                                         .anchor = request.anchor,
+                                                         .audit = forge::chain::protocol::audit_mode::required,
+                                                     },
+                                                     audit.state.front());
+      if (value != forge::chain::protocol::bytes{1U, 2U}) {
+         FORGE_THROW_EXCEPTION(forge::chain::api::exceptions::invalid_state_proof,
+                               "test account projection rejected its authenticated source");
+      }
    }
 
    std::size_t verifications = 0;
@@ -784,6 +792,7 @@ BOOST_AUTO_TEST_CASE(verified_composite_response_delegates_product_projection_an
    auto services = forge::api::core::registry{};
    services.install<forge::chain::api::state>(std::make_shared<state_service>(std::move(response)));
    auto audit = std::make_shared<accepting_audit_verifier>();
+   audit->point_value = forge::chain::protocol::bytes{1U, 2U};
    auto projections = std::make_shared<account_projection_verifier>();
    auto client = forge::chain::api::verified_client{
        forge::chain::api::raw_client{forge::chain::api::service_handles{

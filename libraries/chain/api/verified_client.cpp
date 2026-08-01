@@ -153,7 +153,10 @@ void verified_client::verify_point(const protocol::state_point_request& request,
       FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof,
                             "chain API point response requires exactly one state proof");
    }
-   verifier_->verify_state_point(*response.context.anchor, request, response.value, audit.state.front());
+   if (verifier_->verify_state_point(*response.context.anchor, request, audit.state.front()) != response.value) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof,
+                            "chain API point value does not match its authenticated proof");
+   }
 }
 
 void verified_client::verify_range(const protocol::state_range_request& request,
@@ -164,7 +167,11 @@ void verified_client::verify_range(const protocol::state_range_request& request,
       FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof,
                             "chain API range response requires exactly one state proof");
    }
-   verifier_->verify_state_range(*response.context.anchor, request, response, audit.state.front());
+   const auto verified = verifier_->verify_state_range(*response.context.anchor, request, audit.state.front());
+   if (verified.rows != response.rows || verified.next_key != response.next_key) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof,
+                            "chain API range result does not match its authenticated proof");
+   }
 }
 
 void verified_client::verify_changes(const protocol::state_changes_request& request,
@@ -245,7 +252,11 @@ void verified_client::verify_changes(const protocol::state_changes_request& requ
          if (position.key) {
             proof_range.lower = position.key;
          }
-         verifier_->verify_state_changes(batch.anchor, proof_range, request.limit, result, audit.state[proof_index++]);
+         const auto verified =
+             verifier_->verify_state_changes(batch.anchor, proof_range, request.limit, audit.state[proof_index++]);
+         if (verified != result) {
+            reject("chain API change range does not match its authenticated proof");
+         }
          if (result.next_key) {
             if (!valid_cursor_key(expected, result.next_key) ||
                 (proof_range.lower && !key_less(*proof_range.lower, *result.next_key))) {
