@@ -8,6 +8,11 @@ import forge.crypto.digest.sha256;
 
 namespace protocol = forge::chain::protocol;
 
+BOOST_AUTO_TEST_CASE(table_rows_defaults_to_spring_binary_output) {
+   const auto request = protocol::table_rows_request{};
+   BOOST_TEST(!request.json);
+}
+
 BOOST_AUTO_TEST_CASE(table_scope_pagination_roundtrips_opaque_bytes_in_exact_json) {
    auto request = protocol::table_scope_request{
        .code = protocol::account_name{"eosio.token"},

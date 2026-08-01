@@ -148,7 +148,7 @@ struct code_response : audited_response {
 };
 
 struct table_rows_request {
-   bool json = true;
+   bool json = false;
    forge::chain::protocol::account_name code;
    forge::chain::protocol::name scope;
    forge::chain::protocol::name table;
