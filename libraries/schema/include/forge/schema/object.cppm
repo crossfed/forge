@@ -5,6 +5,7 @@ module;
 #include <bit>
 #include <boost/describe.hpp>
 #include <boost/mp11.hpp>
+#include <forge/exceptions/macros.hpp>
 #include <charconv>
 #include <cmath>
 #include <concepts>
@@ -29,6 +30,7 @@ module;
 export module forge.schema.object;
 
 import forge.schema.diagnostic;
+import forge.schema.exceptions;
 import forge.schema.value_kind;
 import forge.schema.enums;
 import forge.schema.scalar;
@@ -1124,7 +1126,7 @@ template <typename T>
       }
    }
 
-   throw std::invalid_argument{"config value has incompatible type"};
+   FORGE_THROW_EXCEPTION(exceptions::invalid_value, "config value has incompatible type");
 }
 
 template <typename T>
@@ -1132,7 +1134,7 @@ template <typename T>
                                                 std::vector<diagnostic>& diagnostics) {
    const auto* values = input.as_array();
    if (!values) {
-      throw std::invalid_argument{"config value has incompatible type"};
+      FORGE_THROW_EXCEPTION(exceptions::invalid_value, "config value has incompatible type");
    }
 
    auto output = std::vector<T>{};
@@ -1438,7 +1440,10 @@ template <typename T> [[nodiscard]] input_value to_input_value(const T& input, s
          throw encoding_error{std::string{path}, error.what()};
       }
       if (!text) {
-         throw encoding_error{std::string{path}, "scalar adapter has no canonical config spelling"};
+         FORGE_THROW_EXCEPTION(
+            exceptions::invalid_value,
+            "scalar adapter has no canonical config spelling",
+            forge::exceptions::ctx("path", std::string{path}));
       }
       return input_value{*text};
    } else if constexpr (std::same_as<clean_type, std::vector<std::string>>) {
