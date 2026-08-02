@@ -3,6 +3,8 @@ module;
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <optional>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -11,6 +13,7 @@ module;
 export module forge.chain.api.abi;
 
 export import forge.chain.protocol.abi;
+export import forge.chain.protocol.transaction;
 export import forge.variant.value;
 
 export namespace forge::chain::api {
@@ -59,11 +62,19 @@ struct abi_serialization_limits {
    std::size_t max_container_elements = 1U << 20U;
 };
 
+using abi_resolver = std::function<std::optional<protocol::abi_def>(protocol::account_name)>;
+
 [[nodiscard]] protocol::bytes abi_json_to_bin(const protocol::abi_def& abi, std::string_view type,
                                               const forge::variant& value, abi_serialization_limits limits = {});
 
 [[nodiscard]] forge::variant abi_bin_to_json(const protocol::abi_def& abi, std::string_view type,
                                              std::span<const std::uint8_t> binary,
                                              abi_serialization_limits limits = {});
+
+[[nodiscard]] forge::variant action_to_variant(const protocol::action& action, const abi_resolver& resolve,
+                                               abi_serialization_limits limits = {});
+
+[[nodiscard]] forge::variant transaction_to_variant(const protocol::transaction& transaction,
+                                                    const abi_resolver& resolve, abi_serialization_limits limits = {});
 
 } // namespace forge::chain::api

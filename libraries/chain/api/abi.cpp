@@ -1177,4 +1177,64 @@ forge::variant abi_bin_to_json(const protocol::abi_def& abi, std::string_view ty
    }
 }
 
+forge::variant action_to_variant(const protocol::action& action, const abi_resolver& resolve,
+                                 abi_serialization_limits limits) {
+   const auto hex_data = forge::codec::hex::encode(action.data);
+   auto data = forge::variant{hex_data};
+
+   if (const auto abi = resolve(action.account)) {
+      const auto definition = std::ranges::find(abi->actions, action.name, &protocol::action_def::name);
+      if (definition != abi->actions.end() && !definition->type.empty()) {
+         try {
+            data = abi_bin_to_json(*abi, definition->type, action.data, limits);
+         } catch (const abi_serialization_error&) {
+            data = forge::variant{hex_data};
+         }
+      }
+   }
+
+   return forge::mutable_variant_object{}("account", action.account)("name", action.name)(
+       "authorization", action.authorization)("data", std::move(data))("hex_data", hex_data);
+}
+
+forge::variant transaction_to_variant(const protocol::transaction& transaction, const abi_resolver& resolve,
+                                      abi_serialization_limits limits) {
+   auto context_free_actions = forge::variants{};
+   context_free_actions.reserve(transaction.context_free_actions.size());
+   for (const auto& action : transaction.context_free_actions) {
+      context_free_actions.push_back(action_to_variant(action, resolve, limits));
+   }
+
+   auto actions = forge::variants{};
+   actions.reserve(transaction.actions.size());
+   for (const auto& action : transaction.actions) {
+      actions.push_back(action_to_variant(action, resolve, limits));
+   }
+
+   auto result = forge::mutable_variant_object{}("expiration", transaction.expiration)(
+       "ref_block_num", transaction.ref_block_num)("ref_block_prefix", transaction.ref_block_prefix)(
+       "max_net_usage_words", transaction.max_net_usage_words)("max_cpu_usage_ms", transaction.max_cpu_usage_ms)(
+       "delay_sec", transaction.delay_sec)("context_free_actions", std::move(context_free_actions))("actions",
+                                                                                                    std::move(actions));
+
+   auto found_deferred_context = false;
+   for (const auto& [id, encoded] : transaction.transaction_extensions) {
+      if (id != protocol::deferred_transaction_generation_context::extension_id() || found_deferred_context) {
+         fail(abi_error_code::invalid_binary, "Transaction contains an unsupported or duplicate extension",
+              "transaction", "transaction_extensions", 0U);
+      }
+      try {
+         result("deferred_transaction_generation",
+                forge::raw::unpack_exact<protocol::deferred_transaction_generation_context>(encoded));
+      } catch (const std::exception& error) {
+         fail(abi_error_code::invalid_binary,
+              "Transaction extension contains invalid canonical bytes: " + std::string{error.what()}, "transaction",
+              "transaction_extensions", 0U);
+      }
+      found_deferred_context = true;
+   }
+
+   return forge::variant{std::move(result)};
+}
+
 } // namespace forge::chain::api

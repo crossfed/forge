@@ -238,34 +238,74 @@ struct currency_stats_response : audited_response {
 };
 
 struct scheduled_request {
+   bool json = false;
    std::string lower_bound;
    std::uint32_t limit = 50;
-   bool json = true;
+   std::optional<std::uint32_t> time_limit_ms;
    std::optional<block_id> anchor;
    audit_mode audit = audit_mode::none;
 
    bool operator==(const scheduled_request&) const = default;
 };
 
+struct scheduled_transaction {
+   transaction_id trx_id;
+   account_name sender;
+   uint128_t sender_id = 0;
+   account_name payer;
+   time_point delay_until{microseconds{}};
+   time_point expiration{microseconds{}};
+   time_point published{microseconds{}};
+   forge::variant transaction;
+
+   bool operator==(const scheduled_transaction&) const = default;
+};
+
 struct scheduled_response : audited_response {
-   std::vector<forge::variant> transactions;
-   bool more = false;
-   std::string next;
+   std::vector<scheduled_transaction> transactions;
+   std::string more;
 
    bool operator==(const scheduled_response&) const = default;
 };
 
+enum class authorizer_source : std::uint8_t {
+   account = 0,
+   key = 1,
+};
+
+struct authorizers_cursor {
+   authorizer_source source = authorizer_source::account;
+   std::uint32_t input = 0;
+   std::optional<bytes> lower;
+
+   bool operator==(const authorizers_cursor&) const = default;
+};
+
 struct authorizers_request {
-   std::vector<forge::chain::protocol::account_name> accounts;
+   std::vector<forge::chain::protocol::permission_level> accounts;
    std::vector<forge::chain::protocol::public_key> keys;
+   std::uint32_t limit = 256;
+   std::optional<authorizers_cursor> cursor;
    std::optional<block_id> anchor;
    audit_mode audit = audit_mode::none;
 
    bool operator==(const authorizers_request&) const = default;
 };
 
+struct authorizer_match {
+   forge::chain::protocol::account_name account_name;
+   forge::chain::protocol::permission_name permission_name;
+   std::optional<forge::chain::protocol::permission_level> authorizing_account;
+   std::optional<forge::chain::protocol::public_key> authorizing_key;
+   forge::chain::protocol::weight weight = 0;
+   std::uint32_t threshold = 0;
+
+   bool operator==(const authorizer_match&) const = default;
+};
+
 struct authorizers_response : audited_response {
-   std::vector<permission_level> authorizers;
+   std::vector<authorizer_match> accounts;
+   std::optional<authorizers_cursor> next;
 
    bool operator==(const authorizers_response&) const = default;
 };
@@ -298,9 +338,15 @@ BOOST_DESCRIBE_STRUCT(currency_balance_request, (), (code, account, symbol, anch
 BOOST_DESCRIBE_STRUCT(currency_stats_request, (), (code, symbol, anchor, audit))
 BOOST_DESCRIBE_STRUCT(currency_balance_response, (audited_response), (balances))
 BOOST_DESCRIBE_STRUCT(currency_stats_response, (audited_response), (stats))
-BOOST_DESCRIBE_STRUCT(scheduled_request, (), (lower_bound, limit, json, anchor, audit))
-BOOST_DESCRIBE_STRUCT(scheduled_response, (audited_response), (transactions, more, next))
-BOOST_DESCRIBE_STRUCT(authorizers_request, (), (accounts, keys, anchor, audit))
-BOOST_DESCRIBE_STRUCT(authorizers_response, (audited_response), (authorizers))
+BOOST_DESCRIBE_STRUCT(scheduled_request, (), (json, lower_bound, limit, time_limit_ms, anchor, audit))
+BOOST_DESCRIBE_STRUCT(scheduled_transaction, (),
+                      (trx_id, sender, sender_id, payer, delay_until, expiration, published, transaction))
+BOOST_DESCRIBE_STRUCT(scheduled_response, (audited_response), (transactions, more))
+BOOST_DESCRIBE_ENUM(authorizer_source, account, key)
+BOOST_DESCRIBE_STRUCT(authorizers_cursor, (), (source, input, lower))
+BOOST_DESCRIBE_STRUCT(authorizers_request, (), (accounts, keys, limit, cursor, anchor, audit))
+BOOST_DESCRIBE_STRUCT(authorizer_match, (),
+                      (account_name, permission_name, authorizing_account, authorizing_key, weight, threshold))
+BOOST_DESCRIBE_STRUCT(authorizers_response, (audited_response), (accounts, next))
 
 } // namespace forge::chain::protocol

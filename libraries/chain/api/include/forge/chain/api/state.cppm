@@ -107,7 +107,8 @@ FORGE_HTTP_API(
     FORGE_HTTP_GET(get_currency_stats, "/v1/chain/state/currencies/{code}/stats/{symbol}?anchor={anchor}&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_GET(get_scheduled_transactions,
-                   "/v1/chain/state/scheduled-transactions?lower_bound={lower_bound}&limit={limit}&json={json}"
+                   "/v1/chain/state/scheduled-transactions?json={json}&lower_bound={lower_bound}&limit={limit}"
+                   "&time_limit_ms={time_limit_ms}"
                    "&anchor={anchor}&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_POST(get_accounts_by_authorizers, "/v1/chain/state/accounts-by-authorizers", ok,

@@ -9,6 +9,7 @@
 #include <vector>
 
 import forge.chain.api.abi;
+import forge.raw.raw;
 
 namespace {
 
@@ -115,6 +116,51 @@ BOOST_AUTO_TEST_CASE(chain_abi_spring_variant_goldens) {
 
    const auto int16_binary = chain_api::abi_json_to_bin(abi, "v1", array("int16", 3));
    BOOST_TEST(int16_binary == protocol::bytes({0x02, 0x03, 0x00}));
+}
+
+BOOST_AUTO_TEST_CASE(chain_abi_renders_spring_transaction_actions_with_data_and_hex_fallback) {
+   auto abi = empty_abi();
+   abi.structs = {
+       protocol::struct_def{
+           .name = "ping",
+           .fields = {protocol::field_def{.name = "value", .type = "uint32"}},
+       },
+   };
+   abi.actions = {
+       protocol::action_def{.name = protocol::action_name{"ping"}, .type = "ping"},
+   };
+
+   auto action = protocol::action{};
+   action.account = protocol::account_name{"tester"};
+   action.name = protocol::action_name{"ping"};
+   action.authorization = {
+       protocol::permission_level{.actor = protocol::account_name{"tester"},
+                                  .permission = protocol::permission_name{"active"}},
+   };
+   action.data = chain_api::abi_json_to_bin(abi, "ping", object({{"value", 7}}));
+
+   auto transaction = protocol::transaction{};
+   transaction.actions.push_back(action);
+   const auto resolver = [abi](protocol::account_name account) -> std::optional<protocol::abi_def> {
+      return account == protocol::account_name{"tester"} ? std::optional{abi} : std::nullopt;
+   };
+
+   const auto rendered = chain_api::transaction_to_variant(transaction, resolver);
+   const auto& rendered_action = rendered["actions"][std::size_t{0U}];
+   BOOST_CHECK(rendered_action["data"] == object({{"value", 7}}));
+   BOOST_TEST(rendered_action["hex_data"].as_string() == "07000000");
+
+   const auto raw =
+       chain_api::action_to_variant(action, [](protocol::account_name) { return std::optional<protocol::abi_def>{}; });
+   BOOST_TEST(raw["data"].as_string() == "07000000");
+   BOOST_TEST(raw["hex_data"].as_string() == "07000000");
+
+   transaction.transaction_extensions.emplace_back(9U, protocol::bytes{});
+   BOOST_CHECK_EXCEPTION(static_cast<void>(chain_api::transaction_to_variant(transaction, resolver)),
+                         chain_api::abi_serialization_error, [](const auto& error) {
+                            return error.diagnostic().code == chain_api::abi_error_code::invalid_binary &&
+                                   error.diagnostic().path == "transaction_extensions";
+                         });
 }
 
 BOOST_AUTO_TEST_CASE(chain_abi_spring_binary_extension_goldens) {
