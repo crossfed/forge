@@ -6,6 +6,7 @@ module;
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <string_view>
@@ -37,14 +38,12 @@ class session {
    virtual ~session() = default;
 
    [[nodiscard]] virtual capabilities capabilities() const noexcept = 0;
-   virtual boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(family column_family,
-                                                                             record_key key) = 0;
-   virtual boost::asio::awaitable<std::optional<std::vector<std::byte>>>
-   get_for_update(family column_family, record_key key);
+   virtual boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(family column_family, record_key key) = 0;
+   virtual boost::asio::awaitable<std::optional<std::vector<std::byte>>> get_for_update(family column_family,
+                                                                                        record_key key);
    virtual boost::asio::awaitable<void> put(family column_family, record_key key, std::vector<std::byte> value) = 0;
    virtual boost::asio::awaitable<void> erase(family column_family, record_key key) = 0;
-   virtual boost::asio::awaitable<record_page> scan_page(family column_family,
-                                                         record_range range,
+   virtual boost::asio::awaitable<record_page> scan_page(family column_family, record_range range,
                                                          page_request request) = 0;
    virtual boost::asio::awaitable<void> create_savepoint();
    virtual boost::asio::awaitable<void> rollback_to_savepoint();
@@ -73,8 +72,7 @@ class transaction {
    [[nodiscard]] capabilities capabilities() const noexcept;
 
    boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(family column_family, record_key key);
-   boost::asio::awaitable<std::optional<std::vector<std::byte>>>
-   get_for_update(family column_family, record_key key);
+   boost::asio::awaitable<std::optional<std::vector<std::byte>>> get_for_update(family column_family, record_key key);
    boost::asio::awaitable<void> put(family column_family, record_key key, std::vector<std::byte> value);
    boost::asio::awaitable<void> erase(family column_family, record_key key);
    boost::asio::awaitable<record_page> scan_page(family column_family, record_range range, page_request request);
@@ -97,8 +95,8 @@ class transaction {
 
  private:
    boost::asio::awaitable<void> prepare_prewrite_locks();
-   boost::asio::awaitable<void>
-   mutate(family column_family, record_key key, std::optional<std::vector<std::byte>> after);
+   boost::asio::awaitable<void> mutate(family column_family, record_key key,
+                                       std::optional<std::vector<std::byte>> after);
 
    struct impl;
    std::shared_ptr<impl> impl_;
@@ -136,6 +134,7 @@ class driver {
 
    boost::asio::awaitable<transaction> begin_transaction();
    boost::asio::awaitable<snapshot> begin_read();
+   boost::asio::awaitable<void> create_checkpoint(std::filesystem::path destination);
    boost::asio::awaitable<void> async_close();
    virtual boost::asio::awaitable<void> async_flush(bool sync) = 0;
 
@@ -163,6 +162,7 @@ class driver {
  private:
    virtual boost::asio::awaitable<std::unique_ptr<session>> open_transaction() = 0;
    virtual boost::asio::awaitable<std::unique_ptr<session>> open_snapshot() = 0;
+   virtual boost::asio::awaitable<void> create_checkpoint_impl(std::filesystem::path destination);
    virtual boost::asio::awaitable<void> close_driver();
 
    std::shared_ptr<const void> snapshot_origin_ = std::make_shared<std::byte>();

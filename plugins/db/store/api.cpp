@@ -4,6 +4,7 @@ module;
 #include <forge/exceptions/macros.hpp>
 
 #include <cstddef>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <span>
@@ -396,6 +397,10 @@ boost::asio::awaitable<snapshot> store_handle::begin_read() const {
       FORGE_THROW_EXCEPTION(exceptions::stopped, "db store handle is empty");
    }
    co_return co_await state_->begin_read();
+}
+
+boost::asio::awaitable<void> store_handle::create_checkpoint(std::filesystem::path destination) const {
+   co_await require_driver()->create_checkpoint(std::move(destination));
 }
 
 object_handle store_handle::objects() const {

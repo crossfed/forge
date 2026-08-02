@@ -7,6 +7,7 @@ module;
 
 #include <memory>
 #include <mutex>
+#include <filesystem>
 #include <utility>
 
 module forge.db.core.driver;
@@ -21,8 +22,7 @@ namespace forge::db::core {
 driver::driver() : state_{std::make_shared<detail::driver_state>()} {}
 driver::~driver() = default;
 
-driver::operation_admission::operation_admission(
-   std::shared_ptr<detail::driver_state> state) noexcept
+driver::operation_admission::operation_admission(std::shared_ptr<detail::driver_state> state) noexcept
     : state_{std::move(state)} {}
 
 driver::operation_admission::~operation_admission() {
@@ -32,8 +32,7 @@ driver::operation_admission::~operation_admission() {
 driver::operation_admission::operation_admission(operation_admission&& other) noexcept
     : state_{std::move(other.state_)} {}
 
-driver::operation_admission&
-driver::operation_admission::operator=(operation_admission&& other) noexcept {
+driver::operation_admission& driver::operation_admission::operator=(operation_admission&& other) noexcept {
    if (this != &other) {
       release();
       state_ = std::move(other.state_);
@@ -48,8 +47,7 @@ void driver::operation_admission::release() noexcept {
    }
 }
 
-boost::asio::awaitable<std::optional<std::vector<std::byte>>>
-session::get_for_update(family, record_key) {
+boost::asio::awaitable<std::optional<std::vector<std::byte>>> session::get_for_update(family, record_key) {
    FORGE_THROW_EXCEPTION(exceptions::unsupported_operation, "db session does not support record locks");
 }
 
@@ -72,9 +70,7 @@ boost::asio::awaitable<transaction> driver::begin_transaction() {
    if (!active) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db transaction session is null");
    }
-   co_return transaction{
-      std::make_unique<detail::tracked_session>(std::move(active), std::move(admission)),
-      executor};
+   co_return transaction{std::make_unique<detail::tracked_session>(std::move(active), std::move(admission)), executor};
 }
 
 boost::asio::awaitable<snapshot> driver::begin_read() {
@@ -83,9 +79,20 @@ boost::asio::awaitable<snapshot> driver::begin_read() {
    if (!active) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db snapshot session is null");
    }
-   co_return snapshot{
-      std::make_unique<detail::tracked_session>(std::move(active), std::move(admission)),
-      snapshot_origin_};
+   co_return snapshot{std::make_unique<detail::tracked_session>(std::move(active), std::move(admission)),
+                      snapshot_origin_};
+}
+
+boost::asio::awaitable<void> driver::create_checkpoint(std::filesystem::path destination) {
+   if (destination.empty()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_descriptor, "db checkpoint destination must not be empty");
+   }
+   auto admission = admit_operation();
+   co_await create_checkpoint_impl(std::move(destination));
+}
+
+boost::asio::awaitable<void> driver::create_checkpoint_impl(std::filesystem::path) {
+   FORGE_THROW_EXCEPTION(exceptions::unsupported_operation, "db driver does not support durable checkpoints");
 }
 
 boost::asio::awaitable<void> driver::async_close() {

@@ -189,6 +189,11 @@ different named store. Attach Revision and authenticated participants before
 the first application mutation; DB Store remains the only owner of commit and
 rollback.
 
+`store_handle::create_checkpoint(path)` forwards the neutral Core checkpoint
+boundary to the physical driver. It creates one backend-owned durable copy and
+does not reconstruct a database through Object or Blob iteration. Drivers that
+do not support checkpoints fail with the Core typed error.
+
 ## Shared Reads
 
 `store_handle::begin_read()` opens one Core snapshot and eagerly binds every

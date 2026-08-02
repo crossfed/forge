@@ -15,7 +15,8 @@ release. This status does not relax backend data or transaction correctness.
 - `forge::db::core::record_key`, `record_range`, `record_entry`, `record_page`,
   `cursor`, `page_request` and `family`.
 - `forge::db::core::session`: backend-owned async record session.
-- `forge::db::core::driver`: opens write transactions and read snapshots.
+- `forge::db::core::driver`: opens write transactions and read snapshots and
+  exposes an optional durable checkpoint boundary.
 - `forge::db::core::transaction`: move-only commit/rollback boundary with
   savepoints, optional record locks and participant hooks.
 - `forge::db::core::snapshot`: stable read-only view.
@@ -49,6 +50,10 @@ or `begin_read()`, such as a driver's flush operation, must hold the protected
 `driver::admit_operation()` result until backend access finishes. Once a close
 request starts, new admissions report `driver_closed`; an admitted operation makes
 close report `driver_busy` until its admission is released.
+
+`create_checkpoint(path)` asks the backend for a self-contained durable copy at
+one committed point. Unsupported drivers report typed `unsupported_operation`;
+Core does not emulate a checkpoint by scanning records or expose backend files.
 
 ## Snapshot Ownership
 

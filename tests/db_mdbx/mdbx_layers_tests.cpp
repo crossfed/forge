@@ -41,16 +41,12 @@ struct account : forge::db::object::object<account, 71, 1> {
    bool operator==(const account&) const = default;
 };
 
-BOOST_DESCRIBE_STRUCT(account,
-                      (forge::db::object::object<account, 71, 1>),
-                      (name))
+BOOST_DESCRIBE_STRUCT(account, (forge::db::object::object<account, 71, 1>), (name))
 
 using account_index = forge::db::object::object_index<
-   account,
-   forge::db::object::indexed_by<
-      forge::db::object::primary_unique<by_id>,
-      forge::db::object::ordered_unique<
-         by_name, forge::db::object::member<&account::name>>>>;
+    account, forge::db::object::indexed_by<
+                 forge::db::object::primary_unique<by_id>,
+                 forge::db::object::ordered_unique<by_name, forge::db::object::member<&account::name>>>>;
 
 struct usage : forge::db::object::object<usage, 71, 2> {
    std::uint32_t state = 0;
@@ -59,24 +55,16 @@ struct usage : forge::db::object::object<usage, 71, 2> {
    bool operator==(const usage&) const = default;
 };
 
-BOOST_DESCRIBE_STRUCT(usage,
-                      (forge::db::object::object<usage, 71, 2>),
-                      (state, bytes))
+BOOST_DESCRIBE_STRUCT(usage, (forge::db::object::object<usage, 71, 2>), (state, bytes))
 
 using usage_index = forge::db::object::object_index<
-   usage,
-   forge::db::object::indexed_by<
-      forge::db::object::ranked_primary_unique<
-         by_id,
-         forge::db::object::ranked_schema<1>,
-         forge::db::object::sum<
-            by_bytes, forge::db::object::member<&usage::bytes>>>,
-      forge::db::object::ranked_non_unique<
-         by_state,
-         forge::db::object::member<&usage::state>,
-         forge::db::object::ranked_schema<1>,
-         forge::db::object::sum<
-            by_bytes, forge::db::object::member<&usage::bytes>>>>>;
+    usage, forge::db::object::indexed_by<
+               forge::db::object::ranked_primary_unique<
+                   by_id, forge::db::object::ranked_schema<1>,
+                   forge::db::object::sum<by_bytes, forge::db::object::member<&usage::bytes>>>,
+               forge::db::object::ranked_non_unique<
+                   by_state, forge::db::object::member<&usage::state>, forge::db::object::ranked_schema<1>,
+                   forge::db::object::sum<by_bytes, forge::db::object::member<&usage::bytes>>>>>;
 
 struct file : forge::db::object::object<file, 71, 3> {
    forge::db::blob::ref<> content;
@@ -84,14 +72,10 @@ struct file : forge::db::object::object<file, 71, 3> {
    bool operator==(const file&) const = default;
 };
 
-BOOST_DESCRIBE_STRUCT(file,
-                      (forge::db::object::object<file, 71, 3>),
-                      (content))
+BOOST_DESCRIBE_STRUCT(file, (forge::db::object::object<file, 71, 3>), (content))
 
-using file_index = forge::db::object::object_index<
-   file,
-   forge::db::object::indexed_by<
-      forge::db::object::primary_unique<file_by_id>>>;
+using file_index =
+    forge::db::object::object_index<file, forge::db::object::indexed_by<forge::db::object::primary_unique<file_by_id>>>;
 
 } // namespace mdbx_layer_tests
 
@@ -104,16 +88,15 @@ namespace {
 std::filesystem::path make_layer_root(std::string name) {
    static auto sequence = std::atomic_uint64_t{0};
    const auto nonce = sequence.fetch_add(1, std::memory_order_relaxed);
-   auto root = std::filesystem::temp_directory_path() /
-               (std::move(name) + "_" + std::to_string(nonce));
+   auto root = std::filesystem::temp_directory_path() / (std::move(name) + "_" + std::to_string(nonce));
    std::filesystem::remove_all(root);
    return root;
 }
 
 std::vector<std::byte> layer_bytes(std::string value) {
    return {
-      reinterpret_cast<const std::byte*>(value.data()),
-      reinterpret_cast<const std::byte*>(value.data() + value.size()),
+       reinterpret_cast<const std::byte*>(value.data()),
+       reinterpret_cast<const std::byte*>(value.data() + value.size()),
    };
 }
 
@@ -123,16 +106,14 @@ forge::db::core::record_key layer_key(std::string value) {
 
 forge::db::mdbx::config layer_config(const std::filesystem::path& path) {
    return forge::db::mdbx::config{
-      .path = path.string(),
-      .families = {"objectdb", "blobdb.data", "blobdb.refs", "records"},
+       .path = path.string(),
+       .families = {"objectdb", "blobdb.data", "blobdb.refs", "records"},
    };
 }
 
 boost::asio::awaitable<std::shared_ptr<forge::db::mdbx::driver>>
-open_layer_driver(const std::filesystem::path& path,
-                  const forge::asio::affine::lane& lane) {
-   co_return co_await forge::db::mdbx::driver::open(
-      layer_config(path), lane.get_executor());
+open_layer_driver(const std::filesystem::path& path, const forge::asio::affine::lane& lane) {
+   co_return co_await forge::db::mdbx::driver::open(layer_config(path), lane.get_executor());
 }
 
 } // namespace
@@ -148,9 +129,7 @@ BOOST_AUTO_TEST_CASE(db_mdbx_object_ranked_state_persists_and_reopens) {
       auto driver = co_await open_layer_driver(root / "store", lane);
       {
          auto objects = co_await forge::db::object::store::open(
-            driver,
-            forge::db::object::store::options{
-               .writes = forge::db::object::write_policy::backend});
+             driver, forge::db::object::store::options{.writes = forge::db::object::write_policy::backend});
          objects.register_object<mdbx_layer_tests::account_index>();
          objects.register_object<mdbx_layer_tests::usage_index>();
 
@@ -174,12 +153,9 @@ BOOST_AUTO_TEST_CASE(db_mdbx_object_ranked_state_persists_and_reopens) {
          co_await transaction.db_transaction().rollback_to_savepoint(point);
          co_await transaction.commit();
 
-         auto ranked = objects.index<mdbx_layer_tests::usage_index,
-                                     mdbx_layer_tests::by_state>();
+         auto ranked = objects.index<mdbx_layer_tests::usage_index, mdbx_layer_tests::by_state>();
          BOOST_CHECK_EQUAL(co_await ranked.equal_range(3U).count(), 1U);
-         BOOST_CHECK_EQUAL(
-            co_await ranked.equal_range(3U).sum<mdbx_layer_tests::by_bytes>(),
-            4096U);
+         BOOST_CHECK_EQUAL(co_await ranked.equal_range(3U).sum<mdbx_layer_tests::by_bytes>(), 4096U);
 
          auto snapshot = co_await objects.begin_read();
          auto changed = alice;
@@ -196,19 +172,13 @@ BOOST_AUTO_TEST_CASE(db_mdbx_object_ranked_state_persists_and_reopens) {
       auto reopened = co_await open_layer_driver(root / "store", lane);
       {
          auto objects = co_await forge::db::object::store::open(
-            reopened,
-            forge::db::object::store::options{
-               .writes = forge::db::object::write_policy::backend});
+             reopened, forge::db::object::store::options{.writes = forge::db::object::write_policy::backend});
          objects.register_object<mdbx_layer_tests::account_index>();
          objects.register_object<mdbx_layer_tests::usage_index>();
-         BOOST_CHECK_EQUAL(
-            (co_await objects.get(mdbx_layer_tests::account::id_t{1})).name,
-            "alice-new");
-         auto ranked = objects.index<mdbx_layer_tests::usage_index,
-                                     mdbx_layer_tests::by_state>();
+         BOOST_CHECK_EQUAL((co_await objects.get(mdbx_layer_tests::account::id_t{1})).name, "alice-new");
+         auto ranked = objects.index<mdbx_layer_tests::usage_index, mdbx_layer_tests::by_state>();
          BOOST_CHECK_EQUAL(co_await ranked.count(), 1U);
-         BOOST_CHECK_EQUAL(co_await ranked.sum<mdbx_layer_tests::by_bytes>(),
-                           4096U);
+         BOOST_CHECK_EQUAL(co_await ranked.sum<mdbx_layer_tests::by_bytes>(), 4096U);
          BOOST_REQUIRE((co_await ranked.nth(0)).has_value());
       }
       co_await reopened->async_close();
@@ -258,14 +228,61 @@ BOOST_AUTO_TEST_CASE(db_mdbx_shared_snapshot_keeps_object_and_blob_visible) {
 
       BOOST_CHECK(!(co_await objects.find(record.id)).has_value());
       BOOST_CHECK(!(co_await blobs.has(content)));
-      BOOST_CHECK_EQUAL((co_await old_objects.get(record.id)).content.size,
-                        content.size);
+      BOOST_CHECK_EQUAL((co_await old_objects.get(record.id)).content.size, content.size);
       BOOST_CHECK_EQUAL(co_await old_blobs.ref_count(content), 1U);
       BOOST_CHECK(co_await old_blobs.get(content) == payload);
 
       old_objects = {};
       old_blobs = {};
       shared = {};
+      co_await driver->async_close();
+      driver.reset();
+      co_await lane.shutdown();
+   }());
+
+   std::filesystem::remove_all(root);
+}
+
+BOOST_AUTO_TEST_CASE(db_mdbx_checkpoint_is_a_durable_point_in_time_copy) {
+   const auto root = make_layer_root("forge_db_mdbx_checkpoint");
+   auto runtime = forge::asio::runtime{};
+   auto lane = forge::asio::affine::lane{};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto driver = co_await open_layer_driver(root / "store", lane);
+      {
+         auto active = co_await driver->begin_transaction();
+         co_await active.put(forge::db::core::family{"records"}, layer_key("state"), layer_bytes("before"));
+         co_await active.commit();
+      }
+      {
+         auto view = co_await driver->begin_read();
+         const auto stored = co_await view.get(forge::db::core::family{"records"}, layer_key("state"));
+         BOOST_REQUIRE(stored.has_value());
+         BOOST_CHECK(*stored == layer_bytes("before"));
+      }
+
+      const auto checkpoint_path = root / "checkpoints" / "state.mdbx";
+      co_await driver->create_checkpoint(checkpoint_path);
+
+      {
+         auto active = co_await driver->begin_transaction();
+         co_await active.put(forge::db::core::family{"records"}, layer_key("state"), layer_bytes("after"));
+         co_await active.commit();
+      }
+
+      auto checkpoint_config = layer_config(checkpoint_path);
+      checkpoint_config.create_if_missing = false;
+      checkpoint_config.create_missing_families = false;
+      auto checkpoint = co_await forge::db::mdbx::driver::open(checkpoint_config, lane.get_executor());
+      auto view = co_await checkpoint->begin_read();
+      const auto stored = co_await view.get(forge::db::core::family{"records"}, layer_key("state"));
+      BOOST_REQUIRE(stored.has_value());
+      BOOST_CHECK(*stored == layer_bytes("before"));
+
+      view = {};
+      co_await checkpoint->async_close();
+      checkpoint.reset();
       co_await driver->async_close();
       driver.reset();
       co_await lane.shutdown();
@@ -282,9 +299,7 @@ BOOST_AUTO_TEST_CASE(db_mdbx_revision_revert_prune_and_blob_barrier_are_atomic) 
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       auto driver = co_await open_layer_driver(root / "store", lane);
       auto objects = co_await forge::db::object::store::open(
-         driver,
-         forge::db::object::store::options{
-            .writes = forge::db::object::write_policy::backend});
+          driver, forge::db::object::store::options{.writes = forge::db::object::write_policy::backend});
       objects.register_object<mdbx_layer_tests::account_index>();
       auto revisions = co_await forge::db::revision::store::open(driver, objects);
       auto blobs = forge::db::blob::store{driver};
@@ -306,8 +321,7 @@ BOOST_AUTO_TEST_CASE(db_mdbx_revision_revert_prune_and_blob_barrier_are_atomic) 
       BOOST_CHECK_EQUAL(revision.id(), 1U);
 
       BOOST_CHECK_EQUAL(co_await blobs.ref_count(content), 0U);
-      BOOST_CHECK_EQUAL(
-         (co_await blobs.collect_unreferenced({.limit = 10})).removed, 0U);
+      BOOST_CHECK_EQUAL((co_await blobs.collect_unreferenced({.limit = 10})).removed, 0U);
       BOOST_CHECK(co_await blobs.has(content));
 
       auto revert = co_await driver->begin_transaction();
@@ -318,14 +332,11 @@ BOOST_AUTO_TEST_CASE(db_mdbx_revision_revert_prune_and_blob_barrier_are_atomic) 
 
       for (const auto* value : {"v1", "v2"}) {
          auto next = co_await revisions.begin_transaction();
-         co_await next.db_transaction().put(
-            forge::db::core::family{"records"}, layer_key("state"),
-            layer_bytes(value));
+         co_await next.db_transaction().put(forge::db::core::family{"records"}, layer_key("state"), layer_bytes(value));
          co_await next.commit();
       }
       auto prune = co_await driver->begin_transaction();
-      const auto result = co_await revisions.prune_through(
-         prune, 2U, {.max_revisions = 1U, .max_deltas = 10U});
+      const auto result = co_await revisions.prune_through(prune, 2U, {.max_revisions = 1U, .max_deltas = 10U});
       BOOST_CHECK_EQUAL(result.revisions_pruned, 1U);
       BOOST_CHECK(result.complete);
       co_await prune.commit();

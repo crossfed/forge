@@ -4,6 +4,7 @@
 #include <concepts>
 #include <coroutine>
 #include <cstdint>
+#include <filesystem>
 #include <vector>
 
 import forge.plugins.db.store.plugin;
@@ -45,6 +46,11 @@ boost::asio::awaitable<void> use_shared_read(forge::plugins::db::store::store_ha
       static_cast<void>(read.objects());
       static_cast<void>(read.blobs());
    }
+}
+
+boost::asio::awaitable<void> use_checkpoint(forge::plugins::db::store::store_handle store,
+                                            const std::filesystem::path& destination) {
+   co_await store.create_checkpoint(destination);
 }
 
 boost::asio::awaitable<void> use_authenticated_layer(forge::plugins::db::store::store_handle store) {

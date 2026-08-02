@@ -6,6 +6,7 @@ module;
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <optional>
 #include <span>
@@ -376,6 +377,7 @@ class store_handle {
 
    boost::asio::awaitable<transaction> begin_transaction() const;
    boost::asio::awaitable<snapshot> begin_read() const;
+   boost::asio::awaitable<void> create_checkpoint(std::filesystem::path destination) const;
 
    [[nodiscard]] object_handle objects() const;
    [[nodiscard]] blob_handle blobs() const;
