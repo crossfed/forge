@@ -163,7 +163,14 @@ template <typename T> [[nodiscard]] T parse_scalar_text(std::string_view text) {
       }
       FORGE_THROW_EXCEPTION(exceptions::invalid_value, "enum value is invalid");
    } else if constexpr (canonical_string_scalar<clean>) {
-      return clean{std::string{text}};
+      try {
+         return clean{std::string{text}};
+      } catch (const forge::exceptions::base&) {
+         throw;
+      } catch (const std::exception& error) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_value, "canonical scalar value is invalid",
+                               forge::exceptions::ctx("reason", error.what()));
+      }
    } else {
       static_assert(sizeof(clean) == 0, "parse_scalar_text requires a scalar text type");
    }
@@ -209,12 +216,19 @@ template <typename T> [[nodiscard]] std::optional<std::string> format_scalar_tex
    } else if constexpr (std::is_enum_v<clean>) {
       return enum_to_config_string(value);
    } else if constexpr (canonical_string_scalar<clean>) {
-      if constexpr (std::convertible_to<const clean&, std::string>) {
-         return static_cast<std::string>(value);
-      } else if constexpr (requires { value.str(); }) {
-         return value.str();
-      } else {
-         return value.to_string();
+      try {
+         if constexpr (std::convertible_to<const clean&, std::string>) {
+            return static_cast<std::string>(value);
+         } else if constexpr (requires { value.str(); }) {
+            return value.str();
+         } else {
+            return value.to_string();
+         }
+      } catch (const forge::exceptions::base&) {
+         throw;
+      } catch (const std::exception& error) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_value, "canonical scalar value cannot be formatted",
+                               forge::exceptions::ctx("reason", error.what()));
       }
    } else {
       return std::nullopt;

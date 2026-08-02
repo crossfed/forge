@@ -20,6 +20,7 @@
 #include <ranges>
 #include <set>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -38,6 +39,7 @@ import forge.chain.api.block;
 import forge.chain.api.exceptions;
 import forge.chain.api.finality;
 import forge.chain.api.info;
+import forge.chain.api.limits;
 import forge.chain.api.raw_client;
 import forge.chain.api.state;
 import forge.chain.api.table_key;
@@ -52,6 +54,11 @@ import forge.net.http.types;
 import forge.raw.raw;
 
 namespace {
+
+template <typename Client>
+concept exposes_raw_client = requires(Client& client) { client.raw(); };
+
+static_assert(!exposes_raw_client<forge::chain::api::verified_client>);
 
 using forge::api::http::cache_policy;
 using forge::api::http::route;
@@ -212,15 +219,20 @@ class transaction_service final : public forge::chain::api::transaction {
  public:
    explicit transaction_service(forge::chain::protocol::transaction_status_response response)
        : response_{std::move(response)} {}
+   explicit transaction_service(std::vector<forge::chain::protocol::transaction_submit_response> responses)
+       : submit_responses_{std::move(responses)} {}
 
    boost::asio::awaitable<forge::chain::protocol::transaction_submit_response>
    submit(forge::chain::protocol::transaction_submit_request) override {
-      co_return forge::chain::protocol::transaction_submit_response{};
+      if (submit_responses_.empty()) {
+         co_return forge::chain::protocol::transaction_submit_response{};
+      }
+      co_return submit_responses_.front();
    }
 
    boost::asio::awaitable<std::vector<forge::chain::protocol::transaction_submit_response>>
    submit_batch(std::vector<forge::chain::protocol::transaction_submit_request>) override {
-      co_return std::vector<forge::chain::protocol::transaction_submit_response>{};
+      co_return submit_responses_;
    }
 
    boost::asio::awaitable<forge::chain::protocol::transaction_status_response>
@@ -250,6 +262,7 @@ class transaction_service final : public forge::chain::api::transaction {
 
  private:
    forge::chain::protocol::transaction_status_response response_;
+   std::vector<forge::chain::protocol::transaction_submit_response> submit_responses_;
 };
 
 class deadline_remote_invoker final : public forge::api::core::remote_invoker {
@@ -417,6 +430,19 @@ class blocking_finality_verifier final : public forge::chain::api::finality_veri
    std::condition_variable release_condition_;
    bool entered_ = false;
    bool released_ = false;
+};
+
+class standard_throwing_finality_verifier final : public forge::chain::api::finality_verifier {
+ public:
+   void verify(const forge::chain::protocol::state_anchor&, const forge::chain::protocol::proof_blob&) override {
+      throw std::runtime_error{"test finality implementation failure"};
+   }
+
+   void verify_ancestry(const forge::chain::protocol::state_anchor&,
+                        std::span<const forge::chain::protocol::state_anchor>,
+                        const forge::chain::protocol::proof_blob&) override {
+      throw std::runtime_error{"test ancestry implementation failure"};
+   }
 };
 
 forge::chain::protocol::state_anchor make_finality_anchor() {
@@ -828,6 +854,23 @@ BOOST_AUTO_TEST_CASE(chain_http_uses_resource_verbs) {
    require_routes(admin, method::delete_, {"unschedule_snapshot"});
 }
 
+BOOST_AUTO_TEST_CASE(chain_api_limits_bound_canonical_request_and_response_bytes) {
+   auto limits = forge::chain::protocol::service_limits{};
+   auto request = forge::chain::protocol::state_point_request{.key = {1U, 2U, 3U}};
+   limits.max_request_bytes = static_cast<std::uint32_t>(forge::raw::pack_size(request));
+   BOOST_CHECK_NO_THROW(forge::chain::api::require_request_within_limits(request, limits));
+   --limits.max_request_bytes;
+   BOOST_CHECK_THROW(forge::chain::api::require_request_within_limits(request, limits),
+                     forge::chain::api::exceptions::resource_exhausted);
+
+   auto response = forge::chain::protocol::state_point_response{.value = forge::chain::protocol::bytes{4U, 5U}};
+   limits.max_response_bytes = static_cast<std::uint32_t>(forge::raw::pack_size(response));
+   BOOST_CHECK_NO_THROW(forge::chain::api::require_response_within_limits(response, limits));
+   --limits.max_response_bytes;
+   BOOST_CHECK_THROW(forge::chain::api::require_response_within_limits(response, limits),
+                     forge::chain::api::exceptions::resource_exhausted);
+}
+
 BOOST_AUTO_TEST_CASE(chain_openapi_covers_every_owner_contract_route_and_schema) {
    const auto owners = std::array{
        owner_openapi_contract{"info", &owner_routes<forge::chain::api::info>, &owner_openapi<forge::chain::api::info>,
@@ -859,6 +902,12 @@ BOOST_AUTO_TEST_CASE(chain_openapi_covers_every_owner_contract_route_and_schema)
                                owner.name << "." << mapping.method_name << " has a method descriptor");
          BOOST_REQUIRE_MESSAGE(!method_descriptor->errors.empty(),
                                owner.name << "." << mapping.method_name << " declares typed errors");
+         const auto resource_identity =
+             forge::api::core::exception_identity<forge::chain::api::exceptions::resource_exhausted>();
+         BOOST_REQUIRE_MESSAGE(std::ranges::find(method_descriptor->errors, resource_identity,
+                                                 &forge::api::core::error_descriptor::identity) !=
+                                   method_descriptor->errors.end(),
+                               owner.name << "." << mapping.method_name << " declares resource exhaustion");
          const auto path = openapi_path(mapping);
          const auto verb = openapi_verb(mapping.verb);
          BOOST_REQUIRE_MESSAGE(!verb.empty(), owner.name << "." << mapping.method_name << " has an HTTP verb");
@@ -960,12 +1009,32 @@ BOOST_AUTO_TEST_CASE(chain_transaction_remote_deadline_restores_the_declared_exc
    BOOST_REQUIRE(submit != nullptr);
    BOOST_CHECK(std::ranges::find(submit->errors, identity, &forge::api::core::error_descriptor::identity) ==
                submit->errors.end());
+   const auto mutation_identities =
+       std::array{forge::api::core::exception_identity<forge::chain::api::exceptions::conflict>(),
+                  forge::api::core::exception_identity<forge::chain::api::exceptions::admission_rejected>()};
+   for (const auto& mutation_identity : mutation_identities) {
+      BOOST_CHECK(std::ranges::find(submit->errors, mutation_identity, &forge::api::core::error_descriptor::identity) !=
+                  submit->errors.end());
+   }
 
    auto invoker = std::make_shared<deadline_remote_invoker>();
    auto remote = forge::api::core::proxy<forge::chain::api::transaction>{invoker};
    BOOST_CHECK_THROW(run(remote.await_transaction({.timeout_ms = 1U})),
                      forge::chain::api::exceptions::deadline_exceeded);
    BOOST_TEST(invoker->calls == 1U);
+}
+
+BOOST_AUTO_TEST_CASE(chain_admin_declares_mutation_errors_only_for_mutating_methods) {
+   const auto descriptor = forge::chain::api::admin::describe();
+   const auto identity = forge::api::core::exception_identity<forge::chain::api::exceptions::conflict>();
+   const auto* push = forge::api::core::find_method(descriptor, "push_block");
+   const auto* status = forge::api::core::find_method(descriptor, "producer_status");
+   BOOST_REQUIRE(push != nullptr);
+   BOOST_REQUIRE(status != nullptr);
+   BOOST_CHECK(std::ranges::find(push->errors, identity, &forge::api::core::error_descriptor::identity) !=
+               push->errors.end());
+   BOOST_CHECK(std::ranges::find(status->errors, identity, &forge::api::core::error_descriptor::identity) ==
+               status->errors.end());
 }
 
 BOOST_AUTO_TEST_CASE(chain_http_omits_an_unspecified_anchor) {
@@ -1332,6 +1401,74 @@ BOOST_AUTO_TEST_CASE(verified_transaction_status_delegates_the_inclusion_proof) 
 
    static_cast<void>(run(client.get_transaction_status({.id = id})));
    BOOST_TEST(verifier->transaction_verifications == 1U);
+}
+
+BOOST_AUTO_TEST_CASE(verified_submit_binds_server_results_to_local_transaction_ids) {
+   auto first = forge::chain::protocol::transaction_submit_request{};
+   auto first_transaction = forge::chain::protocol::signed_transaction{};
+   first_transaction.expiration = forge::chain::protocol::time_point_sec{1U};
+   first.transaction = forge::chain::protocol::packed_transaction{std::move(first_transaction)};
+   auto second = forge::chain::protocol::transaction_submit_request{};
+   auto second_transaction = forge::chain::protocol::signed_transaction{};
+   second_transaction.expiration = forge::chain::protocol::time_point_sec{2U};
+   second.transaction = forge::chain::protocol::packed_transaction{std::move(second_transaction)};
+   const auto first_id = first.transaction.id();
+   const auto second_id = second.transaction.id();
+
+   const auto make_client = [&](std::vector<forge::chain::protocol::transaction_submit_response> responses) {
+      auto services = forge::api::core::registry{};
+      services.install<forge::chain::api::transaction>(std::make_shared<transaction_service>(std::move(responses)));
+      return forge::chain::api::verified_client{
+          forge::chain::api::raw_client{forge::chain::api::service_handles{
+              .transactions = services.get<forge::chain::api::transaction>(forge::chain::api::transaction::ref()),
+          }},
+          std::make_shared<accepting_audit_verifier>(),
+      };
+   };
+
+   {
+      auto client = make_client({forge::chain::protocol::transaction_submit_response{.id = first_id}});
+      BOOST_TEST(run(client.submit(first)).id == first_id);
+   }
+   {
+      auto client = make_client({forge::chain::protocol::transaction_submit_response{.id = second_id}});
+      BOOST_CHECK_THROW(static_cast<void>(run(client.submit(first))),
+                        forge::chain::api::exceptions::invalid_transaction_proof);
+   }
+   {
+      auto response = forge::chain::protocol::transaction_submit_response{.id = first_id};
+      response.trace = forge::chain::protocol::transaction_trace{.id = second_id};
+      auto client = make_client({std::move(response)});
+      BOOST_CHECK_THROW(static_cast<void>(run(client.submit(first))),
+                        forge::chain::api::exceptions::invalid_transaction_proof);
+   }
+   {
+      auto client = make_client({forge::chain::protocol::transaction_submit_response{.id = first_id},
+                                 forge::chain::protocol::transaction_submit_response{.id = second_id}});
+      const auto responses = run(client.submit_batch({first, second}));
+      BOOST_TEST(responses.size() == 2U);
+      BOOST_TEST(responses[0].id == first_id);
+      BOOST_TEST(responses[1].id == second_id);
+   }
+   {
+      auto client = make_client({forge::chain::protocol::transaction_submit_response{.id = second_id},
+                                 forge::chain::protocol::transaction_submit_response{.id = first_id}});
+      BOOST_CHECK_THROW(static_cast<void>(run(client.submit_batch({first, second}))),
+                        forge::chain::api::exceptions::invalid_transaction_proof);
+   }
+   {
+      auto first_response = forge::chain::protocol::transaction_submit_response{.id = first_id};
+      auto second_response = forge::chain::protocol::transaction_submit_response{.id = second_id};
+      second_response.trace = forge::chain::protocol::transaction_trace{.id = first_id};
+      auto client = make_client({std::move(first_response), std::move(second_response)});
+      BOOST_CHECK_THROW(static_cast<void>(run(client.submit_batch({first, second}))),
+                        forge::chain::api::exceptions::invalid_transaction_proof);
+   }
+   {
+      auto client = make_client({forge::chain::protocol::transaction_submit_response{.id = first_id}});
+      BOOST_CHECK_THROW(static_cast<void>(run(client.submit_batch({first, second}))),
+                        forge::chain::api::exceptions::invalid_transaction_proof);
+   }
 }
 
 BOOST_AUTO_TEST_CASE(verified_transaction_status_rejects_an_unauthenticated_execution_trace) {
@@ -1930,6 +2067,26 @@ BOOST_AUTO_TEST_CASE(cached_finality_verifier_does_not_cache_a_failed_verificati
    BOOST_CHECK_NO_THROW(verifier.verify(anchor, proof));
    BOOST_CHECK_NO_THROW(verifier.verify(anchor, proof));
    BOOST_TEST(delegate->verify_calls == 2U);
+}
+
+BOOST_AUTO_TEST_CASE(chain_audit_translates_standard_finality_delegate_failures) {
+   const auto anchor = make_finality_anchor();
+   const auto proof = forge::chain::protocol::proof_blob{.scheme = "test.finality"};
+   auto delegate = std::make_shared<standard_throwing_finality_verifier>();
+   auto cached = forge::chain::api::cached_finality_verifier{delegate, 4U};
+
+   BOOST_CHECK_THROW(cached.verify(anchor, proof), forge::chain::api::exceptions::invalid_finality);
+   BOOST_CHECK_THROW(cached.verify_ancestry(anchor, {}, proof), forge::chain::api::exceptions::invalid_finality);
+
+   auto authenticated = forge::chain::api::authenticated_audit_verifier{
+       {
+           .chain = anchor.chain,
+           .state_domain = "test.state",
+       },
+       std::move(delegate),
+   };
+   BOOST_CHECK_THROW(authenticated.verify_finality(anchor, proof), forge::chain::api::exceptions::invalid_finality);
+   BOOST_CHECK_THROW(authenticated.verify_ancestry(anchor, {}, proof), forge::chain::api::exceptions::invalid_finality);
 }
 
 BOOST_AUTO_TEST_CASE(cached_finality_verifier_delegates_ancestry_and_caches_the_finalized_anchor) {

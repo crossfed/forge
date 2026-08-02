@@ -116,14 +116,14 @@ struct method_capability {
    std::string method;
    audit_class audit = audit_class::none;
    bool enabled = false;
+   bool http = false;
+   bool p2p = false;
 
    bool operator==(const method_capability&) const = default;
 };
 
 struct capabilities {
    std::vector<method_capability> methods;
-   bool http = false;
-   bool p2p = false;
    bool archive = false;
 
    bool operator==(const capabilities&) const = default;
@@ -131,9 +131,14 @@ struct capabilities {
 
 struct service_limits {
    std::uint32_t max_page_size = 1'024;
-   std::uint32_t max_batch_size = 128;
+   std::uint32_t max_state_batch_size = 128;
+   std::uint32_t max_transaction_batch_size = 128;
+   std::uint32_t max_transaction_status_candidates = 4'096;
+   std::uint32_t max_request_bytes = 16U << 20U;
+   std::uint32_t max_response_bytes = 16U << 20U;
    std::uint32_t max_proof_bytes = 8U << 20U;
-   std::uint32_t retained_blocks = 4'096;
+   std::uint64_t max_await_ms = 300'000;
+   std::uint32_t state_retention_blocks = 4'096;
 
    bool operator==(const service_limits&) const = default;
 };
@@ -150,8 +155,11 @@ BOOST_DESCRIBE_STRUCT(transaction_inclusion_proof, (), (leaf, index, leaf_count,
 BOOST_DESCRIBE_STRUCT(audit_bundle, (), (finality, ancestry, state, content, transaction))
 BOOST_DESCRIBE_STRUCT(response_context, (), (chain, head, finalized, anchor))
 BOOST_DESCRIBE_STRUCT(audited_response, (), (context, audit))
-BOOST_DESCRIBE_STRUCT(method_capability, (), (api, method, audit, enabled))
-BOOST_DESCRIBE_STRUCT(capabilities, (), (methods, http, p2p, archive))
-BOOST_DESCRIBE_STRUCT(service_limits, (), (max_page_size, max_batch_size, max_proof_bytes, retained_blocks))
+BOOST_DESCRIBE_STRUCT(method_capability, (), (api, method, audit, enabled, http, p2p))
+BOOST_DESCRIBE_STRUCT(capabilities, (), (methods, archive))
+BOOST_DESCRIBE_STRUCT(service_limits, (),
+                      (max_page_size, max_state_batch_size, max_transaction_batch_size,
+                       max_transaction_status_candidates, max_request_bytes, max_response_bytes, max_proof_bytes,
+                       max_await_ms, state_retention_blocks))
 
 } // namespace forge::chain::protocol

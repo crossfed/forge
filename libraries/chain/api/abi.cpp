@@ -1183,7 +1183,17 @@ forge::variant action_to_variant(const protocol::action& action, const abi_resol
    const auto hex_data = forge::codec::hex::encode(action.data);
    auto data = forge::variant{hex_data};
 
-   if (const auto abi = resolve(action.account)) {
+   auto abi = std::optional<protocol::abi_def>{};
+   try {
+      abi = resolve(action.account);
+   } catch (const abi_serialization_error&) {
+      throw;
+   } catch (const std::exception& error) {
+      fail(abi_error_code::invalid_abi, "Unable to resolve action ABI: " + std::string{error.what()}, "abi_def",
+           action.account.to_string(), 0U);
+   }
+
+   if (abi) {
       const auto definition = std::ranges::find(abi->actions, action.name, &protocol::action_def::name);
       if (definition != abi->actions.end() && !definition->type.empty()) {
          try {

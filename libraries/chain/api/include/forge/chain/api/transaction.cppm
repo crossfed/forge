@@ -62,6 +62,11 @@ template <> struct method_descriptor_customization<::forge::chain::api::transact
    template <auto Method, bool EnableRaw>
    static void apply(method_builder<::forge::chain::api::transaction, EnableRaw>& method) {
       ::forge::chain::api::exceptions::descriptor::declare_historical_query(method);
+      if constexpr (std::is_same_v<method_request_t<Method>, ::forge::chain::protocol::transaction_submit_request> ||
+                    std::is_same_v<method_request_t<Method>,
+                                   ::std::vector<::forge::chain::protocol::transaction_submit_request>>) {
+         ::forge::chain::api::exceptions::descriptor::declare_mutation(method);
+      }
       if constexpr (std::is_same_v<method_request_t<Method>, ::forge::chain::protocol::transaction_await_request>) {
          ::forge::chain::api::exceptions::descriptor::declare_deadline(method);
       }

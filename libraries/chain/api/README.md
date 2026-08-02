@@ -28,6 +28,16 @@ transports carry the same bytes without a transport-specific cursor DTO.
 Concrete controllers, state schemas, persistence, protocol publication and
 network policy remain in downstream products.
 
+Each `method_capability` advertises its own HTTP and P2P publication state;
+the service never implies that every enabled method is available on every
+transport. `service_limits` separately advertises page, state-batch,
+transaction-batch, transaction-status scan, await deadline, request, response,
+proof and authenticated-state retention bounds. Transports reject oversized
+frames or HTTP bodies before decoding;
+service implementations use `forge.chain.api.limits` to enforce canonical raw
+request and response sizes at the typed boundary. Resource failures use
+`forge.chain.api::exceptions::resource_exhausted` across every transport.
+
 `verified_client` verifies transport envelopes, chain identity, finality and
 generic authenticated point/range/change proofs itself. Verification returns
 the authenticated source bytes, so typed composite reads can use a product

@@ -122,14 +122,15 @@ class verified_client {
    get_transaction_status(protocol::transaction_status_request request);
    boost::asio::awaitable<protocol::transaction_status_response>
    await_transaction(protocol::transaction_await_request request);
+   boost::asio::awaitable<protocol::transaction_submit_response> submit(protocol::transaction_submit_request request);
+   boost::asio::awaitable<std::vector<protocol::transaction_submit_response>>
+   submit_batch(std::vector<protocol::transaction_submit_request> requests);
    boost::asio::awaitable<std::vector<protocol::public_key>>
    get_required_keys(protocol::transaction_required_keys_request request);
    boost::asio::awaitable<protocol::transaction_read_only_response>
    compute_transaction(protocol::transaction_read_only_request request);
    boost::asio::awaitable<protocol::transaction_read_only_response>
    send_read_only_transaction(protocol::transaction_read_only_request request);
-
-   [[nodiscard]] raw_client& raw() noexcept;
 
  private:
    const protocol::audit_bundle& verify_envelope(const protocol::audited_response& response);

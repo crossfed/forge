@@ -27,6 +27,17 @@ namespace {
                          forge::exceptions::ctx("block", anchor.block.str()));
 }
 
+template <typename Function> void verify_delegate(Function&& function) {
+   try {
+      std::forward<Function>(function)();
+   } catch (const forge::exceptions::base&) {
+      throw;
+   } catch (const std::exception& error) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_finality, "finality verifier failed",
+                            forge::exceptions::ctx("reason", error.what()));
+   }
+}
+
 } // namespace
 
 struct cached_finality_verifier::impl {
@@ -144,7 +155,7 @@ void cached_finality_verifier::verify(const protocol::state_anchor& anchor, cons
    }
 
    try {
-      impl_->delegate->verify(anchor, proof);
+      verify_delegate([&] { impl_->delegate->verify(anchor, proof); });
       {
          const auto lock = std::lock_guard{impl_->mutex};
          impl_->store_locked(anchor, key);
@@ -182,7 +193,7 @@ void cached_finality_verifier::verify_ancestry(const protocol::state_anchor& fin
       impl_->validate_pending_locked(finalized, key);
    }
 
-   impl_->delegate->verify_ancestry(finalized, intermediate, proof);
+   verify_delegate([&] { impl_->delegate->verify_ancestry(finalized, intermediate, proof); });
 
    {
       const auto lock = std::lock_guard{impl_->mutex};

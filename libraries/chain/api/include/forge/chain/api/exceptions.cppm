@@ -23,6 +23,9 @@ enum class code : std::uint16_t {
    history_lost = 9,
    deadline_exceeded = 10,
    unavailable = 11,
+   resource_exhausted = 12,
+   conflict = 13,
+   admission_rejected = 14,
 };
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(code, "forge.chain.api")
@@ -38,6 +41,9 @@ using trust_required = forge::exceptions::coded_exception<code, code::trust_requ
 using history_lost = forge::exceptions::coded_exception<code, code::history_lost>;
 using deadline_exceeded = forge::exceptions::coded_exception<code, code::deadline_exceeded>;
 using unavailable = forge::exceptions::coded_exception<code, code::unavailable>;
+using resource_exhausted = forge::exceptions::coded_exception<code, code::resource_exhausted>;
+using conflict = forge::exceptions::coded_exception<code, code::conflict>;
+using admission_rejected = forge::exceptions::coded_exception<code, code::admission_rejected>;
 
 namespace descriptor {
 
@@ -46,6 +52,8 @@ template <typename Builder> void declare_common(Builder& method) {
        "invalid_request", {.status_code = forge::api::core::status::invalid_argument, .retryable = false});
    method.template error<unavailable>("unavailable",
                                       {.status_code = forge::api::core::status::unavailable, .retryable = true});
+   method.template error<resource_exhausted>(
+       "resource_exhausted", {.status_code = forge::api::core::status::resource_exhausted, .retryable = false});
 }
 
 template <typename Builder> void declare_audited_query(Builder& method) {
@@ -65,6 +73,12 @@ template <typename Builder> void declare_historical_query(Builder& method) {
 template <typename Builder> void declare_deadline(Builder& method) {
    method.template error<deadline_exceeded>(
        "deadline_exceeded", {.status_code = forge::api::core::status::deadline_exceeded, .retryable = true});
+}
+
+template <typename Builder> void declare_mutation(Builder& method) {
+   method.template error<conflict>("conflict", {.status_code = forge::api::core::status::conflict, .retryable = true});
+   method.template error<admission_rejected>(
+       "admission_rejected", {.status_code = forge::api::core::status::failed_precondition, .retryable = false});
 }
 
 } // namespace descriptor

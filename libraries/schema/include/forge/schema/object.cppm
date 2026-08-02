@@ -203,7 +203,7 @@ template <typename T> [[nodiscard]] T cast_any_to(const std::any& value) {
          }
       }
    }
-   return std::any_cast<clean_type>(value);
+   FORGE_THROW_EXCEPTION(exceptions::invalid_value, "schema value has incompatible type");
 }
 
 [[nodiscard]] inline std::string append_path(std::string_view base_path, std::string_view field) {
@@ -1023,7 +1023,7 @@ template <typename T>
          return static_cast<T>(*value);
       }
       if (const auto* text = std::get_if<std::string>(&input.storage)) {
-         return static_cast<T>(std::stod(*text));
+         return parse_scalar_text<clean_type>(*text);
       }
    } else if constexpr (std::is_enum_v<clean_type>) {
       if (const auto* text = std::get_if<std::string>(&input.storage)) {

@@ -39,6 +39,13 @@ projection_verifier& require_projection(const std::shared_ptr<projection_verifie
    return *value;
 }
 
+void verify_submit_identity(const protocol::transaction_submit_response& response,
+                            const protocol::transaction_id& expected, const char* message) {
+   if (response.id != expected || (response.trace && response.trace->id != expected)) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof, message);
+   }
+}
+
 } // namespace
 
 const protocol::bytes& require_content_witness(const protocol::audit_bundle& audit, protocol::digest expected,
@@ -626,6 +633,34 @@ verified_client::await_transaction(protocol::transaction_await_request request) 
    co_return response;
 }
 
+boost::asio::awaitable<protocol::transaction_submit_response>
+verified_client::submit(protocol::transaction_submit_request request) {
+   const auto expected = request.transaction.id();
+   auto response = co_await client_.transactions().submit(std::move(request));
+   verify_submit_identity(response, expected, "chain API submit response does not match the submitted transaction");
+   co_return response;
+}
+
+boost::asio::awaitable<std::vector<protocol::transaction_submit_response>>
+verified_client::submit_batch(std::vector<protocol::transaction_submit_request> requests) {
+   auto expected = std::vector<protocol::transaction_id>{};
+   expected.reserve(requests.size());
+   for (const auto& request : requests) {
+      expected.push_back(request.transaction.id());
+   }
+
+   auto responses = co_await client_.transactions().submit_batch(std::move(requests));
+   if (responses.size() != expected.size()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof,
+                            "chain API batch submit response count does not match the request");
+   }
+   for (auto index = std::size_t{}; index < responses.size(); ++index) {
+      verify_submit_identity(responses[index], expected[index],
+                             "chain API batch submit response does not match the submitted transaction order");
+   }
+   co_return responses;
+}
+
 boost::asio::awaitable<std::vector<protocol::public_key>>
 verified_client::get_required_keys(protocol::transaction_required_keys_request) {
    return unsupported_audit<std::vector<protocol::public_key>>("transaction.get_required_keys");
@@ -639,10 +674,6 @@ verified_client::compute_transaction(protocol::transaction_read_only_request) {
 boost::asio::awaitable<protocol::transaction_read_only_response>
 verified_client::send_read_only_transaction(protocol::transaction_read_only_request) {
    return unsupported_audit<protocol::transaction_read_only_response>("transaction.send_read_only_transaction");
-}
-
-raw_client& verified_client::raw() noexcept {
-   return client_;
 }
 
 } // namespace forge::chain::api

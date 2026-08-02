@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <initializer_list>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -161,6 +162,23 @@ BOOST_AUTO_TEST_CASE(chain_abi_renders_spring_transaction_actions_with_data_and_
                             return error.diagnostic().code == chain_api::abi_error_code::invalid_binary &&
                                    error.diagnostic().path == "transaction_extensions";
                          });
+}
+
+BOOST_AUTO_TEST_CASE(chain_abi_translates_resolver_failures_to_typed_diagnostics) {
+   auto action = protocol::action{};
+   action.account = protocol::account_name{"tester"};
+   action.name = protocol::action_name{"ping"};
+
+   BOOST_CHECK_EXCEPTION(
+       static_cast<void>(chain_api::action_to_variant(action,
+                                                      [](protocol::account_name) -> std::optional<protocol::abi_def> {
+                                                         throw std::runtime_error{"resolver unavailable"};
+                                                      })),
+       chain_api::abi_serialization_error, [](const auto& error) {
+          return error.diagnostic().code == chain_api::abi_error_code::invalid_abi &&
+                 error.diagnostic().path == "tester" &&
+                 error.diagnostic().message.find("resolver unavailable") != std::string::npos;
+       });
 }
 
 BOOST_AUTO_TEST_CASE(chain_abi_spring_binary_extension_goldens) {

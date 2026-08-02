@@ -5,6 +5,7 @@ module;
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <span>
@@ -25,6 +26,17 @@ import forge.raw.raw;
 
 namespace forge::chain::api {
 namespace {
+
+template <typename Function> void verify_finality_delegate(Function&& function) {
+   try {
+      std::forward<Function>(function)();
+   } catch (const forge::exceptions::base&) {
+      throw;
+   } catch (const std::exception& error) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_finality, "finality verifier failed",
+                            forge::exceptions::ctx("reason", error.what()));
+   }
+}
 
 constexpr auto point_scheme = std::string_view{"forge.db.authenticated.point"};
 constexpr auto range_scheme = std::string_view{"forge.db.authenticated.range"};
@@ -127,7 +139,7 @@ void authenticated_audit_verifier::verify_finality(const protocol::state_anchor&
    if (anchor.chain != options_.chain) {
       FORGE_THROW_EXCEPTION(exceptions::wrong_chain, "chain API anchor belongs to another chain");
    }
-   finality_->verify(anchor, proof);
+   verify_finality_delegate([&] { finality_->verify(anchor, proof); });
 }
 
 void authenticated_audit_verifier::verify_ancestry(const protocol::state_anchor& finalized,
@@ -137,7 +149,7 @@ void authenticated_audit_verifier::verify_ancestry(const protocol::state_anchor&
        std::ranges::any_of(intermediate, [&](const auto& anchor) { return anchor.chain != options_.chain; })) {
       FORGE_THROW_EXCEPTION(exceptions::wrong_chain, "chain API ancestry belongs to another chain");
    }
-   finality_->verify_ancestry(finalized, intermediate, proof);
+   verify_finality_delegate([&] { finality_->verify_ancestry(finalized, intermediate, proof); });
 }
 
 std::optional<protocol::bytes>

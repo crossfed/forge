@@ -5,6 +5,7 @@ module;
 #include <forge/api/http/macros.hpp>
 
 #include <string>
+#include <type_traits>
 #include <vector>
 
 export module forge.chain.api.admin;
@@ -71,6 +72,19 @@ template <> struct method_descriptor_customization<::forge::chain::api::admin> {
    static void apply(method_builder<::forge::chain::api::admin, EnableRaw>& method) {
       static_cast<void>(Method);
       ::forge::chain::api::exceptions::descriptor::declare_common(method);
+      using request_type = method_request_t<Method>;
+      if constexpr (std::is_same_v<request_type, ::forge::chain::protocol::signed_block> ||
+                    std::is_same_v<request_type, ::std::string> ||
+                    std::is_same_v<request_type, ::forge::chain::protocol::prune_request> ||
+                    std::is_same_v<request_type, ::forge::chain::protocol::producer_pause_request> ||
+                    std::is_same_v<request_type, ::forge::chain::protocol::producer_runtime_options> ||
+                    std::is_same_v<request_type, ::forge::chain::protocol::greylist_update_request> ||
+                    std::is_same_v<request_type, ::forge::chain::protocol::producer_access_policy> ||
+                    std::is_same_v<request_type, ::forge::chain::protocol::snapshot_schedule_request> ||
+                    std::is_same_v<request_type, ::forge::chain::protocol::snapshot_schedule_id> ||
+                    std::is_same_v<request_type, ::std::vector<::forge::chain::protocol::digest>>) {
+         ::forge::chain::api::exceptions::descriptor::declare_mutation(method);
+      }
    }
 };
 

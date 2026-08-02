@@ -44,6 +44,7 @@ import forge.chain.api.authenticated_audit_verifier;
 import forge.chain.api.block;
 import forge.chain.api.finality;
 import forge.chain.api.info;
+import forge.chain.api.limits;
 import forge.chain.api.raw_client;
 import forge.chain.api.state;
 import forge.chain.api.table_key;
@@ -168,18 +169,24 @@ protocol::info_response make_info_response() {
                    .method = "get",
                    .audit = protocol::audit_class::deterministic_composite,
                    .enabled = true,
+                   .http = true,
+                   .p2p = true,
                },
            },
-       .http = true,
-       .p2p = true,
        .archive = true,
    };
    response.limits = protocol::service_limits{
        .max_page_size = 256,
-       .max_batch_size = 32,
+       .max_state_batch_size = 32,
+       .max_transaction_batch_size = 16,
+       .max_transaction_status_candidates = 512,
+       .max_request_bytes = chain_api_max_frame_size,
+       .max_response_bytes = chain_api_max_frame_size,
        .max_proof_bytes = 1U << 20U,
-       .retained_blocks = 512,
+       .max_await_ms = 30'000,
+       .state_retention_blocks = 512,
    };
+   chain_api::require_response_within_limits(response, response.limits);
    return response;
 }
 
