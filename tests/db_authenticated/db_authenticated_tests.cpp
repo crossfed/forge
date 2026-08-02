@@ -1378,6 +1378,7 @@ BOOST_AUTO_TEST_CASE(authenticated_pruning_is_bounded_and_preserves_retained_roo
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
       auto driver = co_await open_driver(root_path / "store", lane);
       auto authenticated = make_store(driver);
+      BOOST_TEST(!(co_await authenticated.earliest()).has_value());
 
       for (auto version = std::uint64_t{}; version < 3U; ++version) {
          auto active = co_await driver->begin_transaction();
@@ -1413,6 +1414,8 @@ BOOST_AUTO_TEST_CASE(authenticated_pruning_is_bounded_and_preserves_retained_roo
       BOOST_TEST(!(co_await authenticated.find_root(0)).has_value());
       BOOST_TEST(!(co_await authenticated.find_root(1)).has_value());
       BOOST_REQUIRE((co_await authenticated.find_root(2)).has_value());
+      BOOST_REQUIRE((co_await authenticated.earliest()).has_value());
+      BOOST_TEST((co_await authenticated.earliest())->version == 2U);
       BOOST_TEST(text(*(co_await authenticated.get(2, bytes("version")))) == "2");
       const auto retained = co_await authenticated.prove(2, bytes("stable"));
       BOOST_TEST(forge::db::authenticated::verify_point("forge.test.authenticated.state.v1", retained.anchor,

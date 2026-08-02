@@ -329,6 +329,7 @@ class authenticated_handle {
 
    [[nodiscard]] std::string name() const;
 
+   boost::asio::awaitable<std::optional<forge::db::authenticated::root>> earliest() const;
    boost::asio::awaitable<std::optional<forge::db::authenticated::root>> latest() const;
    boost::asio::awaitable<std::optional<forge::db::authenticated::root>>
    find_root(forge::db::authenticated::version_id_t version) const;

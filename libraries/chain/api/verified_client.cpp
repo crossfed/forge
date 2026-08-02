@@ -622,6 +622,11 @@ verified_client::await_transaction(protocol::transaction_await_request request) 
    co_return response;
 }
 
+boost::asio::awaitable<std::vector<protocol::public_key>>
+verified_client::get_required_keys(protocol::transaction_required_keys_request) {
+   return unsupported_audit<std::vector<protocol::public_key>>("transaction.get_required_keys");
+}
+
 boost::asio::awaitable<protocol::transaction_read_only_response>
 verified_client::compute_transaction(protocol::transaction_read_only_request) {
    return unsupported_audit<protocol::transaction_read_only_response>("transaction.compute_transaction");

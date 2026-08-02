@@ -6,6 +6,7 @@ module;
 #include <memory>
 #include <optional>
 #include <span>
+#include <vector>
 
 export module forge.chain.api.verified_client;
 
@@ -121,6 +122,8 @@ class verified_client {
    get_transaction_status(protocol::transaction_status_request request);
    boost::asio::awaitable<protocol::transaction_status_response>
    await_transaction(protocol::transaction_await_request request);
+   boost::asio::awaitable<std::vector<protocol::public_key>>
+   get_required_keys(protocol::transaction_required_keys_request request);
    boost::asio::awaitable<protocol::transaction_read_only_response>
    compute_transaction(protocol::transaction_read_only_request request);
    boost::asio::awaitable<protocol::transaction_read_only_response>

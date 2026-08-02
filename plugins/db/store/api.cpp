@@ -319,6 +319,10 @@ const forge::db::authenticated::store& authenticated_handle::require_store() con
    return store_;
 }
 
+boost::asio::awaitable<std::optional<forge::db::authenticated::root>> authenticated_handle::earliest() const {
+   co_return co_await require_store().earliest();
+}
+
 boost::asio::awaitable<std::optional<forge::db::authenticated::root>> authenticated_handle::latest() const {
    co_return co_await require_store().latest();
 }
@@ -348,8 +352,8 @@ authenticated_handle::prove_range(forge::db::authenticated::version_id_t version
 
 boost::asio::awaitable<forge::db::authenticated::verified_range>
 authenticated_handle::scan_range(forge::db::authenticated::version_id_t version,
-                                  forge::db::authenticated::range_request request,
-                                  forge::db::authenticated::proof_tree tree) const {
+                                 forge::db::authenticated::range_request request,
+                                 forge::db::authenticated::proof_tree tree) const {
    co_return co_await require_store().scan_range(version, std::move(request), tree);
 }
 

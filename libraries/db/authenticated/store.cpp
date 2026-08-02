@@ -63,6 +63,31 @@ store::store(std::shared_ptr<forge::db::core::driver> driver, config settings)
 
 store::store(std::shared_ptr<impl> implementation) : impl_{std::move(implementation)} {}
 
+boost::asio::awaitable<std::optional<root>> store::earliest() const {
+   if (!impl_) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_store, "authenticated store is not initialized");
+   }
+   auto active = co_await impl_->driver->begin_read();
+   const auto prefix = detail::version_prefix(impl_->namespace_hash);
+   const auto page = co_await active.scan_page(impl_->settings.family,
+                                               forge::db::core::record_range{
+                                                   .begin = prefix,
+                                                   .prefix = prefix,
+                                                   .has_end = false,
+                                               },
+                                               {.limit = 1U});
+   if (page.entries.empty()) {
+      co_return std::nullopt;
+   }
+
+   const auto version = detail::decode_version_key(page.entries.front().key, impl_->namespace_hash);
+   auto result = detail::decode_root(page.entries.front().value);
+   if (result.version != version) {
+      FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated earliest version record is inconsistent");
+   }
+   co_return result;
+}
+
 boost::asio::awaitable<std::optional<root>> store::latest() const {
    if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_store, "authenticated store is not initialized");

@@ -29,6 +29,7 @@ class store {
    store() = default;
    explicit store(std::shared_ptr<forge::db::core::driver> driver, config settings);
 
+   boost::asio::awaitable<std::optional<root>> earliest() const;
    boost::asio::awaitable<std::optional<root>> latest() const;
    boost::asio::awaitable<std::optional<root>> find_root(version_id_t version) const;
    boost::asio::awaitable<std::optional<bytes>> get(version_id_t version, std::span<const std::byte> key) const;

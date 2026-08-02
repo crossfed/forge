@@ -16,6 +16,7 @@
 #include "p2p_identity.hpp"
 
 import forge.api.core.binding;
+import forge.api.core.exceptions;
 import forge.api.core.registry;
 import forge.api.core.types;
 import forge.api.http.binding;
@@ -184,30 +185,330 @@ class info_implementation final : public chain_api::info {
    protocol::info_response response_;
 };
 
-protocol::info_response run_http_e2e(const std::shared_ptr<info_implementation>& implementation) {
+protocol::block_state_response make_block_state_response(const protocol::info_response& source) {
+   auto response = protocol::block_state_response{};
+   response.context = source.context;
+   response.audit = source.audit;
+   response.id = hash("chain-api-e2e-block-state");
+   response.num = 40;
+   response.state = {0x31, 0x32, 0x33};
+   return response;
+}
+
+protocol::state_point_response make_state_point_response(const protocol::info_response& source) {
+   auto response = protocol::state_point_response{};
+   response.context = source.context;
+   response.audit = source.audit;
+   response.value = protocol::bytes{0x41, 0x42, 0x43};
+   return response;
+}
+
+protocol::transaction_read_only_response make_transaction_response(const protocol::info_response& source) {
+   auto response = protocol::transaction_read_only_response{};
+   response.context = source.context;
+   response.audit = source.audit;
+   response.id = hash("chain-api-e2e-read-only-transaction");
+   return response;
+}
+
+protocol::producer_status_response make_admin_response() {
+   auto response = protocol::producer_status_response{};
+   response.paused = true;
+   response.scheduled_protocol_features = {hash("chain-api-e2e-protocol-feature")};
+   return response;
+}
+
+class block_implementation final : public chain_api::block {
+ public:
+   explicit block_implementation(protocol::block_state_response response) : response_{std::move(response)} {}
+
+   boost::asio::awaitable<protocol::block_response> get_block(protocol::block_request) override {
+      co_return protocol::block_response{};
+   }
+
+   boost::asio::awaitable<protocol::block_header_response> get_header(protocol::block_request) override {
+      co_return protocol::block_header_response{};
+   }
+
+   boost::asio::awaitable<protocol::block_state_response> get_block_state(protocol::block_request request) override {
+      last_audit.store(request.audit, std::memory_order_relaxed);
+      calls.fetch_add(1, std::memory_order_relaxed);
+      co_return response_;
+   }
+
+   boost::asio::awaitable<protocol::block_range_response> get_canonical_range(protocol::block_range_request) override {
+      co_return protocol::block_range_response{};
+   }
+
+   boost::asio::awaitable<protocol::protocol_features_response>
+   get_activated_protocol_features(protocol::protocol_features_request) override {
+      co_return protocol::protocol_features_response{};
+   }
+
+   boost::asio::awaitable<protocol::consensus_parameters_response>
+   get_consensus_parameters(protocol::anchored_request) override {
+      co_return protocol::consensus_parameters_response{};
+   }
+
+   boost::asio::awaitable<protocol::producers_response> get_producers(protocol::producers_request) override {
+      co_return protocol::producers_response{};
+   }
+
+   boost::asio::awaitable<protocol::producer_schedule_response>
+   get_producer_schedule(protocol::anchored_request) override {
+      co_return protocol::producer_schedule_response{};
+   }
+
+   boost::asio::awaitable<protocol::finalizer_info_response> get_finalizer_info(protocol::anchored_request) override {
+      co_return protocol::finalizer_info_response{};
+   }
+
+   std::atomic<std::uint32_t> calls{0};
+   std::atomic<protocol::audit_mode> last_audit{protocol::audit_mode::none};
+
+ private:
+   protocol::block_state_response response_;
+};
+
+class state_implementation final : public chain_api::state {
+ public:
+   explicit state_implementation(protocol::state_point_response response) : response_{std::move(response)} {}
+
+   boost::asio::awaitable<protocol::state_point_response> get_point(protocol::state_point_request request) override {
+      last_audit.store(request.audit, std::memory_order_relaxed);
+      calls.fetch_add(1, std::memory_order_relaxed);
+      co_return response_;
+   }
+
+   boost::asio::awaitable<protocol::state_range_response> get_range(protocol::state_range_request) override {
+      co_return protocol::state_range_response{};
+   }
+
+   boost::asio::awaitable<protocol::state_changes_response> get_changes(protocol::state_changes_request) override {
+      co_return protocol::state_changes_response{};
+   }
+
+   boost::asio::awaitable<protocol::account_response> get_account(protocol::account_request) override {
+      co_return protocol::account_response{};
+   }
+
+   boost::asio::awaitable<protocol::code_response> get_code(protocol::code_request) override {
+      co_return protocol::code_response{};
+   }
+
+   boost::asio::awaitable<protocol::table_rows_response> get_table_rows(protocol::table_rows_request) override {
+      co_return protocol::table_rows_response{};
+   }
+
+   boost::asio::awaitable<protocol::table_scope_response> get_table_scope(protocol::table_scope_request) override {
+      co_return protocol::table_scope_response{};
+   }
+
+   boost::asio::awaitable<protocol::currency_balance_response>
+   get_currency_balance(protocol::currency_balance_request) override {
+      co_return protocol::currency_balance_response{};
+   }
+
+   boost::asio::awaitable<protocol::currency_stats_response>
+   get_currency_stats(protocol::currency_stats_request) override {
+      co_return protocol::currency_stats_response{};
+   }
+
+   boost::asio::awaitable<protocol::scheduled_response>
+   get_scheduled_transactions(protocol::scheduled_request) override {
+      co_return protocol::scheduled_response{};
+   }
+
+   boost::asio::awaitable<protocol::authorizers_response>
+   get_accounts_by_authorizers(protocol::authorizers_request) override {
+      co_return protocol::authorizers_response{};
+   }
+
+   std::atomic<std::uint32_t> calls{0};
+   std::atomic<protocol::audit_mode> last_audit{protocol::audit_mode::none};
+
+ private:
+   protocol::state_point_response response_;
+};
+
+class transaction_implementation final : public chain_api::transaction {
+ public:
+   explicit transaction_implementation(protocol::transaction_read_only_response response)
+       : response_{std::move(response)} {}
+
+   boost::asio::awaitable<protocol::transaction_submit_response> submit(protocol::transaction_submit_request) override {
+      co_return protocol::transaction_submit_response{};
+   }
+
+   boost::asio::awaitable<std::vector<protocol::transaction_submit_response>>
+   submit_batch(std::vector<protocol::transaction_submit_request>) override {
+      co_return std::vector<protocol::transaction_submit_response>{};
+   }
+
+   boost::asio::awaitable<protocol::transaction_status_response>
+   get_status(protocol::transaction_status_request) override {
+      co_return protocol::transaction_status_response{};
+   }
+
+   boost::asio::awaitable<protocol::transaction_status_response>
+   await_transaction(protocol::transaction_await_request) override {
+      co_return protocol::transaction_status_response{};
+   }
+
+   boost::asio::awaitable<std::vector<protocol::public_key>>
+   get_required_keys(protocol::transaction_required_keys_request) override {
+      co_return std::vector<protocol::public_key>{};
+   }
+
+   boost::asio::awaitable<protocol::transaction_read_only_response>
+   compute_transaction(protocol::transaction_read_only_request request) override {
+      last_audit.store(request.audit, std::memory_order_relaxed);
+      calls.fetch_add(1, std::memory_order_relaxed);
+      co_return response_;
+   }
+
+   boost::asio::awaitable<protocol::transaction_read_only_response>
+   send_read_only_transaction(protocol::transaction_read_only_request) override {
+      co_return protocol::transaction_read_only_response{};
+   }
+
+   std::atomic<std::uint32_t> calls{0};
+   std::atomic<protocol::audit_mode> last_audit{protocol::audit_mode::none};
+
+ private:
+   protocol::transaction_read_only_response response_;
+};
+
+class admin_implementation final : public chain_api::admin {
+ public:
+   explicit admin_implementation(protocol::producer_status_response response) : response_{std::move(response)} {}
+
+   boost::asio::awaitable<protocol::push_block_response> push_block(protocol::signed_block) override {
+      co_return protocol::push_block_response{};
+   }
+
+   boost::asio::awaitable<protocol::snapshot_response> create_snapshot(std::string) override {
+      co_return protocol::snapshot_response{};
+   }
+
+   boost::asio::awaitable<protocol::prune_response> prune(protocol::prune_request request) override {
+      error_calls.fetch_add(1, std::memory_order_relaxed);
+      if (request.max_records == 0) {
+         throw std::runtime_error{"chain API package test failure"};
+      }
+      co_return protocol::prune_response{};
+   }
+
+   boost::asio::awaitable<protocol::producer_status_response> producer_status(protocol::admin_query) override {
+      calls.fetch_add(1, std::memory_order_relaxed);
+      co_return response_;
+   }
+
+   boost::asio::awaitable<protocol::supported_protocol_features_response>
+   supported_protocol_features(protocol::supported_protocol_features_request) override {
+      co_return protocol::supported_protocol_features_response{};
+   }
+
+   boost::asio::awaitable<protocol::ram_corrections_response>
+   account_ram_corrections(protocol::ram_corrections_request) override {
+      co_return protocol::ram_corrections_response{};
+   }
+
+   boost::asio::awaitable<protocol::unapplied_transactions_response>
+   unapplied_transactions(protocol::unapplied_transactions_request) override {
+      co_return protocol::unapplied_transactions_response{};
+   }
+
+   boost::asio::awaitable<protocol::snapshot_requests_response> snapshot_requests(protocol::admin_query) override {
+      co_return protocol::snapshot_requests_response{};
+   }
+
+   boost::asio::awaitable<bool> configure_pause(protocol::producer_pause_request) override {
+      co_return false;
+   }
+
+   boost::asio::awaitable<bool> update_runtime_options(protocol::producer_runtime_options) override {
+      co_return false;
+   }
+
+   boost::asio::awaitable<bool> update_greylist(protocol::greylist_update_request) override {
+      co_return false;
+   }
+
+   boost::asio::awaitable<bool> set_access_policy(protocol::producer_access_policy) override {
+      co_return false;
+   }
+
+   boost::asio::awaitable<protocol::snapshot_schedule> schedule_snapshot(protocol::snapshot_schedule_request) override {
+      co_return protocol::snapshot_schedule{};
+   }
+
+   boost::asio::awaitable<protocol::snapshot_schedule> unschedule_snapshot(protocol::snapshot_schedule_id) override {
+      co_return protocol::snapshot_schedule{};
+   }
+
+   boost::asio::awaitable<protocol::integrity_hash_response> integrity_hash(protocol::admin_query) override {
+      co_return protocol::integrity_hash_response{};
+   }
+
+   boost::asio::awaitable<bool> schedule_protocol_features(std::vector<protocol::digest>) override {
+      co_return false;
+   }
+
+   std::atomic<std::uint32_t> calls{0};
+   std::atomic<std::uint32_t> error_calls{0};
+
+ private:
+   protocol::producer_status_response response_;
+};
+
+struct chain_api_services {
+   std::shared_ptr<info_implementation> information;
+   std::shared_ptr<block_implementation> blocks;
+   std::shared_ptr<state_implementation> state;
+   std::shared_ptr<transaction_implementation> transactions;
+   std::shared_ptr<admin_implementation> administration;
+};
+
+struct http_responses {
+   protocol::info_response information;
+   protocol::state_point_response state;
+};
+
+http_responses run_http_e2e(const chain_api_services& services) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto apis = forge::api::core::registry{};
-   apis.install<chain_api::info>(chain_api::info::describe(), implementation);
+   apis.install<chain_api::info>(chain_api::info::describe(), services.information);
+   apis.install<chain_api::state>(chain_api::state::describe(), services.state);
 
    auto router = forge::net::http::router{};
    router.mount(forge::api::http::binding()
                     .use(forge::api::core::binding().serve(apis).build())
                     .bind<chain_api::info>()
                     .build());
+   router.mount(forge::api::http::binding()
+                    .use(forge::api::core::binding().serve(apis).build())
+                    .bind<chain_api::state>()
+                    .build());
 
    auto server = forge::net::http::server{runtime, forge::net::http::server_config{}, std::move(router)};
    forge::asio::blocking::run(runtime, server.async_start());
    require(server.port() != 0, "HTTP chain API server did not bind");
 
-   auto response = protocol::info_response{};
+   auto responses = http_responses{};
    try {
       auto client = forge::net::http::client{
           runtime,
           forge::net::http::parse_base_url("http://127.0.0.1:" + std::to_string(server.port())),
       };
-      auto remote = forge::asio::blocking::run(runtime, forge::api::http::remote<chain_api::info>(client));
-      response = forge::asio::blocking::run(
-          runtime, remote->get(protocol::anchored_request{.audit = protocol::audit_mode::required}));
+      auto info_remote = forge::asio::blocking::run(runtime, forge::api::http::remote<chain_api::info>(client));
+      auto state_remote = forge::asio::blocking::run(runtime, forge::api::http::remote<chain_api::state>(client));
+      responses.information = forge::asio::blocking::run(
+          runtime, info_remote->get(protocol::anchored_request{.audit = protocol::audit_mode::required}));
+      responses.state = forge::asio::blocking::run(runtime, state_remote->get_point(protocol::state_point_request{
+                                                                .key = {0x01, 0x02, 0x03},
+                                                                .audit = protocol::audit_mode::required,
+                                                            }));
    } catch (...) {
       forge::asio::blocking::run(runtime, server.async_stop());
       throw;
@@ -215,7 +516,7 @@ protocol::info_response run_http_e2e(const std::shared_ptr<info_implementation>&
 
    forge::asio::blocking::run(runtime, server.async_stop());
    require(server.port() == 0, "HTTP chain API server remained bound after async_stop");
-   return response;
+   return responses;
 }
 
 class chain_api_publisher final : public forge::app::plugin {
@@ -234,6 +535,11 @@ class chain_api_publisher final : public forge::app::plugin {
       auto plan = forge::api::core::binding()
                       .serve(context.apis())
                       .export_api<chain_api::info>({.id = {"forge.chain.api.info"}, .major = 1, .min_revision = 0})
+                      .export_api<chain_api::block>({.id = {"forge.chain.api.block"}, .major = 1, .min_revision = 0})
+                      .export_api<chain_api::state>({.id = {"forge.chain.api.state"}, .major = 1, .min_revision = 0})
+                      .export_api<chain_api::transaction>(
+                          {.id = {"forge.chain.api.transaction"}, .major = 1, .min_revision = 0})
+                      .export_api<chain_api::admin>({.id = {"forge.chain.api.admin"}, .major = 1, .min_revision = 0})
                       .build();
       resolver->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = std::string{chain_api_protocol}});
       co_return;
@@ -250,8 +556,7 @@ class chain_api_publisher final : public forge::app::plugin {
 
 class p2p_server_application final : public forge::app::application_shell {
  public:
-   explicit p2p_server_application(std::shared_ptr<info_implementation> implementation)
-       : implementation_{std::move(implementation)} {}
+   explicit p2p_server_application(chain_api_services services) : services_{std::move(services)} {}
 
  protected:
    void on_register_plugins(forge::app::plugin_registry& registry) override {
@@ -265,12 +570,16 @@ class p2p_server_application final : public forge::app::application_shell {
    }
 
    boost::asio::awaitable<void> on_provide(forge::app::application_context& context) override {
-      context.apis().install<chain_api::info>(chain_api::info::describe(), implementation_);
+      context.apis().install<chain_api::info>(chain_api::info::describe(), services_.information);
+      context.apis().install<chain_api::block>(chain_api::block::describe(), services_.blocks);
+      context.apis().install<chain_api::state>(chain_api::state::describe(), services_.state);
+      context.apis().install<chain_api::transaction>(chain_api::transaction::describe(), services_.transactions);
+      context.apis().install<chain_api::admin>(chain_api::admin::describe(), services_.administration);
       co_return;
    }
 
  private:
-   std::shared_ptr<info_implementation> implementation_;
+   chain_api_services services_;
 };
 
 class p2p_client_application final : public forge::app::application_shell {
@@ -306,7 +615,26 @@ void shutdown_after_failure(forge::app::application_shell& application, bool sta
    }
 }
 
-protocol::info_response run_p2p_e2e(const std::shared_ptr<info_implementation>& implementation) {
+void require_advertised_api(const auto& apis, std::string_view id) {
+   for (const auto& api : apis) {
+      if (api.id.value == id) {
+         require(api.protocol == chain_api_protocol, "P2P resolver advertised a chain API on the wrong protocol");
+         return;
+      }
+   }
+   throw std::runtime_error{"P2P resolver omitted " + std::string{id}};
+}
+
+struct p2p_responses {
+   protocol::info_response information;
+   protocol::block_state_response block;
+   protocol::state_point_response state;
+   protocol::transaction_read_only_response transaction;
+   protocol::producer_status_response administration;
+   bool internal_error_preserved = false;
+};
+
+p2p_responses run_p2p_e2e(const chain_api_services& services) {
    const auto server_peer = test_peer(0x41);
    auto server_config = p2p_config(server_peer);
    server_config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{
@@ -315,7 +643,7 @@ protocol::info_response run_p2p_e2e(const std::shared_ptr<info_implementation>& 
                                                     },
                                                 });
 
-   auto server = p2p_server_application{implementation};
+   auto server = p2p_server_application{services};
    auto client = p2p_client_application{};
    auto server_started = false;
    auto client_started = false;
@@ -341,18 +669,51 @@ protocol::info_response run_p2p_e2e(const std::shared_ptr<info_implementation>& 
       auto resolver = client.apis().get<forge::plugins::p2p::resolver::api>(
           {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
       const auto remote_apis = forge::asio::blocking::run(client.runtime(), resolver->peer_apis(server_peer));
-      require(remote_apis.size() == 1, "P2P resolver did not advertise exactly one chain API");
-      require(remote_apis.front().id.value == "forge.chain.api.info", "P2P resolver advertised the wrong API");
-      require(remote_apis.front().protocol == chain_api_protocol, "P2P resolver advertised the wrong protocol");
+      require(remote_apis.size() == 5, "P2P resolver did not advertise all five chain APIs");
+      require_advertised_api(remote_apis, "forge.chain.api.info");
+      require_advertised_api(remote_apis, "forge.chain.api.block");
+      require_advertised_api(remote_apis, "forge.chain.api.state");
+      require_advertised_api(remote_apis, "forge.chain.api.transaction");
+      require_advertised_api(remote_apis, "forge.chain.api.admin");
 
       const auto resolution = forge::asio::blocking::run(
           client.runtime(),
           resolver->resolve(server_peer, {.id = {"forge.chain.api.info"}, .major = 1, .min_revision = 0}));
       require(resolution.api.protocol == chain_api_protocol, "P2P resolver selected the wrong chain API protocol");
 
-      auto remote = forge::asio::blocking::run(client.runtime(), resolver->remote<chain_api::info>(server_peer));
-      auto response = forge::asio::blocking::run(
-          client.runtime(), remote->get(protocol::anchored_request{.audit = protocol::audit_mode::required}));
+      auto info_remote = forge::asio::blocking::run(client.runtime(), resolver->remote<chain_api::info>(server_peer));
+      auto block_remote = forge::asio::blocking::run(client.runtime(), resolver->remote<chain_api::block>(server_peer));
+      auto state_remote = forge::asio::blocking::run(client.runtime(), resolver->remote<chain_api::state>(server_peer));
+      auto transaction_remote =
+          forge::asio::blocking::run(client.runtime(), resolver->remote<chain_api::transaction>(server_peer));
+      auto admin_remote = forge::asio::blocking::run(client.runtime(), resolver->remote<chain_api::admin>(server_peer));
+
+      auto responses = p2p_responses{};
+      responses.information = forge::asio::blocking::run(
+          client.runtime(), info_remote->get(protocol::anchored_request{.audit = protocol::audit_mode::required}));
+      responses.block =
+          forge::asio::blocking::run(client.runtime(), block_remote->get_block_state(protocol::block_request{
+                                                           .num = 40,
+                                                           .audit = protocol::audit_mode::required,
+                                                       }));
+      responses.state =
+          forge::asio::blocking::run(client.runtime(), state_remote->get_point(protocol::state_point_request{
+                                                           .key = {0x01, 0x02, 0x03},
+                                                           .audit = protocol::audit_mode::required,
+                                                       }));
+      responses.transaction = forge::asio::blocking::run(
+          client.runtime(), transaction_remote->compute_transaction(protocol::transaction_read_only_request{
+                                .audit = protocol::audit_mode::required,
+                            }));
+      responses.administration =
+          forge::asio::blocking::run(client.runtime(), admin_remote->producer_status(protocol::admin_query{}));
+      try {
+         static_cast<void>(forge::asio::blocking::run(
+             client.runtime(), admin_remote->prune(protocol::prune_request{.through_block = 40, .max_records = 0})));
+      } catch (const forge::api::core::exceptions::remote_internal&) {
+         responses.internal_error_preserved = true;
+      }
+      require(responses.internal_error_preserved, "P2P chain API did not preserve remote error semantics");
 
       auto stop_thread = std::thread{[&client] { client.request_stop(); }};
       stop_thread.join();
@@ -369,7 +730,7 @@ protocol::info_response run_p2p_e2e(const std::shared_ptr<info_implementation>& 
       server_started = false;
       require(server.state() == forge::app::application_state::stopped,
               "P2P chain API server did not reach stopped state");
-      return response;
+      return responses;
    } catch (...) {
       shutdown_after_failure(client, client_started);
       shutdown_after_failure(server, server_started);
@@ -377,7 +738,7 @@ protocol::info_response run_p2p_e2e(const std::shared_ptr<info_implementation>& 
    }
 }
 
-void require_audit_semantics(const protocol::info_response& response) {
+void require_audit_semantics(const protocol::audited_response& response) {
    require(response.context.anchor.has_value(), "transport dropped the audit anchor");
    require(response.audit.has_value(), "transport dropped the audit bundle");
    require(response.audit->finality.has_value(), "transport dropped the finality proof");
@@ -408,19 +769,56 @@ int main() {
    (void)block;
    (void)transaction;
 
-   const auto expected = make_info_response();
-   auto implementation = std::make_shared<info_implementation>(expected);
-   const auto http_response = run_http_e2e(implementation);
-   const auto p2p_response = run_p2p_e2e(implementation);
+   const auto expected_info = make_info_response();
+   const auto expected_block = make_block_state_response(expected_info);
+   const auto expected_state = make_state_point_response(expected_info);
+   const auto expected_transaction = make_transaction_response(expected_info);
+   const auto expected_admin = make_admin_response();
+   const auto services = chain_api_services{
+       .information = std::make_shared<info_implementation>(expected_info),
+       .blocks = std::make_shared<block_implementation>(expected_block),
+       .state = std::make_shared<state_implementation>(expected_state),
+       .transactions = std::make_shared<transaction_implementation>(expected_transaction),
+       .administration = std::make_shared<admin_implementation>(expected_admin),
+   };
 
-   require(http_response == expected, "HTTP binding changed chain audit DTO semantics");
-   require(p2p_response == expected, "P2P remote changed chain audit DTO semantics");
-   require(http_response == p2p_response, "HTTP and P2P chain API responses diverged");
-   require_audit_semantics(http_response);
-   require_audit_semantics(p2p_response);
-   require(implementation->calls.load(std::memory_order_relaxed) == 2,
-           "transport E2E did not dispatch both typed calls");
-   require(implementation->last_audit.load(std::memory_order_relaxed) == protocol::audit_mode::required,
-           "transport E2E changed the requested audit mode");
+   const auto http_response = run_http_e2e(services);
+   const auto p2p_response = run_p2p_e2e(services);
+
+   require(http_response.information == expected_info, "HTTP info API changed chain audit DTO semantics");
+   require(http_response.state == expected_state, "HTTP state API changed chain audit DTO semantics");
+   require(p2p_response.information == expected_info, "P2P info API changed chain audit DTO semantics");
+   require(p2p_response.block == expected_block, "P2P block API changed typed DTO semantics");
+   require(p2p_response.state == expected_state, "P2P state API changed typed DTO semantics");
+   require(p2p_response.transaction == expected_transaction, "P2P transaction API changed typed DTO semantics");
+   require(p2p_response.administration == expected_admin, "P2P admin API changed typed DTO semantics");
+   require(http_response.information == p2p_response.information, "HTTP and P2P info API responses diverged");
+   require(http_response.state == p2p_response.state, "HTTP and P2P state API responses diverged");
+   require_audit_semantics(http_response.information);
+   require_audit_semantics(http_response.state);
+   require_audit_semantics(p2p_response.information);
+   require_audit_semantics(p2p_response.block);
+   require_audit_semantics(p2p_response.state);
+   require_audit_semantics(p2p_response.transaction);
+   require(services.information->calls.load(std::memory_order_relaxed) == 2,
+           "info transport E2E did not dispatch both typed calls");
+   require(services.blocks->calls.load(std::memory_order_relaxed) == 1,
+           "P2P block API did not dispatch its typed call");
+   require(services.state->calls.load(std::memory_order_relaxed) == 2,
+           "state transport E2E did not dispatch both typed calls");
+   require(services.transactions->calls.load(std::memory_order_relaxed) == 1,
+           "P2P transaction API did not dispatch its typed call");
+   require(services.administration->calls.load(std::memory_order_relaxed) == 1,
+           "P2P admin API did not dispatch its typed call");
+   require(services.administration->error_calls.load(std::memory_order_relaxed) == 1,
+           "P2P admin API did not dispatch its typed error call");
+   require(services.information->last_audit.load(std::memory_order_relaxed) == protocol::audit_mode::required,
+           "info transport E2E changed the requested audit mode");
+   require(services.blocks->last_audit.load(std::memory_order_relaxed) == protocol::audit_mode::required,
+           "P2P block API changed the requested audit mode");
+   require(services.state->last_audit.load(std::memory_order_relaxed) == protocol::audit_mode::required,
+           "P2P state API changed the requested audit mode");
+   require(services.transactions->last_audit.load(std::memory_order_relaxed) == protocol::audit_mode::required,
+           "P2P transaction API changed the requested audit mode");
    return 0;
 }

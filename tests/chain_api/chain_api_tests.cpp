@@ -883,6 +883,8 @@ BOOST_AUTO_TEST_CASE(verified_client_fails_closed_for_methods_without_content_wi
    BOOST_CHECK_THROW(run(client.get_accounts_by_authorizers(forge::chain::protocol::authorizers_request{})),
                      forge::chain::api::exceptions::audit_not_supported);
 
+   BOOST_CHECK_THROW(run(client.get_required_keys(forge::chain::protocol::transaction_required_keys_request{})),
+                     forge::chain::api::exceptions::audit_not_supported);
    BOOST_CHECK_THROW(run(client.compute_transaction(forge::chain::protocol::transaction_read_only_request{})),
                      forge::chain::api::exceptions::audit_not_supported);
    BOOST_CHECK_THROW(run(client.send_read_only_transaction(forge::chain::protocol::transaction_read_only_request{})),
