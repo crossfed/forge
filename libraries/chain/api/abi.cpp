@@ -1135,7 +1135,8 @@ class serializer {
 } // namespace
 
 abi_serialization_error::abi_serialization_error(abi_diagnostic diagnostic)
-    : std::runtime_error{format_diagnostic(diagnostic)}, diagnostic_{std::move(diagnostic)} {}
+    : forge::exceptions::runtime_coded_exception<abi_error_code>{diagnostic.code, format_diagnostic(diagnostic)},
+      diagnostic_{std::move(diagnostic)} {}
 
 const abi_diagnostic& abi_serialization_error::diagnostic() const noexcept {
    return diagnostic_;

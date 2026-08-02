@@ -4,37 +4,50 @@
 #include <boost/asio/use_future.hpp>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
 #include <concepts>
+#include <cstddef>
+#include <cstdint>
 #include <future>
 #include <initializer_list>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <ranges>
+#include <set>
 #include <span>
+#include <string>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include <forge/exceptions/macros.hpp>
 
+import forge.api.core.connection;
 import forge.api.core.registry;
 import forge.api.http.mapping;
 import forge.api.http.openapi;
 import forge.chain.api.admin;
+import forge.chain.api.authenticated_audit_verifier;
 import forge.chain.api.block;
 import forge.chain.api.exceptions;
 import forge.chain.api.finality;
 import forge.chain.api.info;
 import forge.chain.api.raw_client;
 import forge.chain.api.state;
+import forge.chain.api.table_key;
 import forge.chain.api.transaction;
 import forge.chain.api.verified_client;
+import forge.chain.core.merkle;
 import forge.chain.protocol.audit;
 import forge.crypto.digest.sha256;
+import forge.db.authenticated.codec;
+import forge.db.authenticated.hash;
 import forge.net.http.types;
 import forge.raw.raw;
 
@@ -43,6 +56,7 @@ namespace {
 using forge::api::http::cache_policy;
 using forge::api::http::route;
 using forge::net::http::method;
+namespace authenticated = forge::db::authenticated;
 
 static_assert(std::same_as<decltype(forge::chain::protocol::transaction_read_only_request{}.transaction),
                            forge::chain::protocol::packed_transaction>);
@@ -238,6 +252,27 @@ class transaction_service final : public forge::chain::api::transaction {
    forge::chain::protocol::transaction_status_response response_;
 };
 
+class deadline_remote_invoker final : public forge::api::core::remote_invoker {
+ public:
+   boost::asio::awaitable<forge::api::core::response> async_call(forge::api::core::request value) override {
+      ++calls;
+      const auto descriptor = forge::chain::api::transaction::describe();
+      const auto* method = forge::api::core::find_method(descriptor, value.method);
+      if (method == nullptr) {
+         throw forge::api::core::exceptions::protocol_error{"remote test method descriptor is missing"};
+      }
+      const auto error =
+          forge::chain::api::exceptions::deadline_exceeded{"remote transaction wait reached its deadline"};
+      co_return forge::api::core::response{
+          .api = std::move(value.api),
+          .method = std::move(value.method),
+          .error = forge::api::core::project_error(*method, error),
+      };
+   }
+
+   std::size_t calls = 0;
+};
+
 class accepting_audit_verifier final : public forge::chain::api::audit_verifier {
  public:
    void verify_context(const forge::chain::protocol::response_context&) override {}
@@ -397,6 +432,274 @@ forge::chain::protocol::state_anchor make_finality_anchor() {
    return anchor;
 }
 
+authenticated::bytes authenticated_bytes(std::string_view value) {
+   auto result = authenticated::bytes{};
+   result.reserve(value.size());
+   for (const auto character : value) {
+      result.push_back(static_cast<std::byte>(static_cast<unsigned char>(character)));
+   }
+   return result;
+}
+
+forge::chain::protocol::bytes protocol_bytes(std::span<const std::byte> value) {
+   auto result = forge::chain::protocol::bytes{};
+   result.reserve(value.size());
+   for (const auto byte : value) {
+      result.push_back(std::to_integer<std::uint8_t>(byte));
+   }
+   return result;
+}
+
+forge::chain::protocol::bytes protocol_bytes(std::string_view value) {
+   const auto encoded = authenticated_bytes(value);
+   return protocol_bytes(encoded);
+}
+
+authenticated::proof_leaf authenticated_leaf(std::string_view key, std::string_view value) {
+   auto encoded = authenticated_bytes(value);
+   return {
+       .key = authenticated_bytes(key),
+       .value_hash = authenticated::hash_value(encoded),
+       .value = std::move(encoded),
+   };
+}
+
+authenticated::proof_leaf authenticated_change_leaf(const authenticated::mutation& mutation) {
+   auto encoded = authenticated::encode_change_value(mutation);
+   return {
+       .key = mutation.key,
+       .value_hash = authenticated::hash_value(encoded),
+       .value = std::move(encoded),
+   };
+}
+
+authenticated::digest authenticated_leaf_hash(std::string_view tree_domain, const authenticated::proof_leaf& value) {
+   return authenticated::hash_leaf(tree_domain, value.key, value.value_hash);
+}
+
+authenticated::digest authenticated_branch_hash(std::string_view tree_domain,
+                                                const authenticated::proof_branch& value) {
+   return authenticated::hash_inner(tree_domain, value.height, value.size, value.min_key, value.max_key,
+                                    value.separator, value.left_hash, value.right_hash);
+}
+
+forge::chain::protocol::chain_id authenticated_chain() {
+   auto chain = forge::chain::protocol::chain_id{};
+   chain._hash[0] = 0x41U;
+   return chain;
+}
+
+forge::chain::protocol::state_anchor authenticated_anchor(const authenticated::root& value) {
+   auto result = forge::chain::protocol::state_anchor{
+       .chain = authenticated_chain(),
+       .block_num = static_cast<std::uint32_t>(value.version),
+       .state_root = value.state_root,
+       .state_size = value.state_size,
+       .change_root = value.change_root,
+       .change_count = value.change_count,
+   };
+   result.block._hash[0] = 0x42U;
+   return result;
+}
+
+template <typename Proof>
+forge::chain::protocol::proof_blob authenticated_proof_blob(std::string scheme, const Proof& proof) {
+   const auto encoded = authenticated::encode(proof);
+   return {
+       .scheme = std::move(scheme),
+       .version = 1U,
+       .payload = protocol_bytes(encoded),
+   };
+}
+
+struct authenticated_point_fixture {
+   std::string domain;
+   authenticated::proof_leaf alpha;
+   authenticated::proof_leaf gamma;
+   authenticated::root root;
+   std::vector<authenticated::proof_step> path;
+};
+
+authenticated_point_fixture make_authenticated_point_fixture() {
+   auto fixture = authenticated_point_fixture{
+       .domain = "forge.test.chain-api.authenticated-point.v3",
+       .alpha = authenticated_leaf("alpha", "one"),
+       .gamma = authenticated_leaf("gamma", "three"),
+   };
+   const auto state_domain = authenticated::canonical_tree_domain(fixture.domain, authenticated::proof_tree::state);
+   const auto change_domain = authenticated::canonical_tree_domain(fixture.domain, authenticated::proof_tree::changes);
+   fixture.root = {
+       .version = 41U,
+       .state_root = authenticated::hash_inner(state_domain, 1U, 2U, fixture.alpha.key, fixture.gamma.key,
+                                               fixture.gamma.key, authenticated_leaf_hash(state_domain, fixture.alpha),
+                                               authenticated_leaf_hash(state_domain, fixture.gamma)),
+       .state_size = 2U,
+       .change_root = authenticated::hash_empty(change_domain),
+   };
+   fixture.path = {{
+       .child = authenticated::branch_side::left,
+       .height = 1U,
+       .subtree_size = 2U,
+       .min_key = fixture.alpha.key,
+       .max_key = fixture.gamma.key,
+       .separator = fixture.gamma.key,
+       .sibling = fixture.gamma,
+   }};
+   return fixture;
+}
+
+authenticated::point_proof authenticated_point_proof(const authenticated_point_fixture& fixture, std::string_view key) {
+   return {
+       .anchor = fixture.root,
+       .key = authenticated_bytes(key),
+       .terminal = fixture.alpha,
+       .path = fixture.path,
+   };
+}
+
+struct authenticated_ranked_fixture {
+   std::string domain;
+   std::string tree_domain;
+   authenticated::proof_leaf a;
+   authenticated::proof_leaf b;
+   authenticated::proof_leaf c;
+   authenticated::proof_leaf d;
+   authenticated::proof_branch left;
+   authenticated::proof_branch right;
+   authenticated::root root;
+};
+
+authenticated_ranked_fixture make_authenticated_ranked_fixture() {
+   auto fixture = authenticated_ranked_fixture{
+       .domain = "forge.test.chain-api.authenticated-range.v3",
+       .a = authenticated_leaf("a", "one"),
+       .b = authenticated_leaf("b", "two"),
+       .c = authenticated_leaf("c", "three"),
+       .d = authenticated_leaf("d", "four"),
+   };
+   fixture.tree_domain = authenticated::canonical_tree_domain(fixture.domain, authenticated::proof_tree::state);
+   fixture.left = {
+       .height = 1U,
+       .size = 2U,
+       .min_key = fixture.a.key,
+       .max_key = fixture.b.key,
+       .separator = fixture.b.key,
+       .left_hash = authenticated_leaf_hash(fixture.tree_domain, fixture.a),
+       .right_hash = authenticated_leaf_hash(fixture.tree_domain, fixture.b),
+   };
+   fixture.right = {
+       .height = 1U,
+       .size = 2U,
+       .min_key = fixture.c.key,
+       .max_key = fixture.d.key,
+       .separator = fixture.d.key,
+       .left_hash = authenticated_leaf_hash(fixture.tree_domain, fixture.c),
+       .right_hash = authenticated_leaf_hash(fixture.tree_domain, fixture.d),
+   };
+   fixture.root = {
+       .version = 42U,
+       .state_root = authenticated::hash_inner(fixture.tree_domain, 2U, 4U, fixture.a.key, fixture.d.key, fixture.c.key,
+                                               authenticated_branch_hash(fixture.tree_domain, fixture.left),
+                                               authenticated_branch_hash(fixture.tree_domain, fixture.right)),
+       .state_size = 4U,
+       .change_root = authenticated::hash_empty(
+           authenticated::canonical_tree_domain(fixture.domain, authenticated::proof_tree::changes)),
+   };
+   return fixture;
+}
+
+authenticated::range_proof authenticated_ranked_proof(const authenticated_ranked_fixture& fixture,
+                                                      authenticated::range_request request) {
+   return {
+       .anchor = fixture.root,
+       .request = std::move(request),
+       .nodes =
+           {
+               authenticated::range_inner{
+                   .height = 2U,
+                   .size = 4U,
+                   .min_key = fixture.a.key,
+                   .max_key = fixture.d.key,
+                   .separator = fixture.c.key,
+               },
+               authenticated::range_inner{
+                   .height = fixture.left.height,
+                   .size = fixture.left.size,
+                   .min_key = fixture.left.min_key,
+                   .max_key = fixture.left.max_key,
+                   .separator = fixture.left.separator,
+               },
+               fixture.a,
+               fixture.b,
+               authenticated::range_inner{
+                   .height = fixture.right.height,
+                   .size = fixture.right.size,
+                   .min_key = fixture.right.min_key,
+                   .max_key = fixture.right.max_key,
+                   .separator = fixture.right.separator,
+               },
+               fixture.c,
+               fixture.d,
+           },
+   };
+}
+
+struct authenticated_changes_fixture {
+   std::string domain;
+   authenticated::mutation erased;
+   authenticated::mutation updated;
+   authenticated::proof_leaf erased_leaf;
+   authenticated::proof_leaf updated_leaf;
+   authenticated::root root;
+};
+
+authenticated_changes_fixture make_authenticated_changes_fixture() {
+   auto fixture = authenticated_changes_fixture{
+       .domain = "forge.test.chain-api.authenticated-changes.v3",
+       .erased = authenticated::mutation{.key = authenticated_bytes("alpha")},
+       .updated =
+           authenticated::mutation{
+               .key = authenticated_bytes("beta"),
+               .value = authenticated_bytes("updated"),
+           },
+   };
+   fixture.erased_leaf = authenticated_change_leaf(fixture.erased);
+   fixture.updated_leaf = authenticated_change_leaf(fixture.updated);
+   const auto state_domain = authenticated::canonical_tree_domain(fixture.domain, authenticated::proof_tree::state);
+   const auto change_domain = authenticated::canonical_tree_domain(fixture.domain, authenticated::proof_tree::changes);
+   fixture.root = {
+       .version = 43U,
+       .state_root = authenticated::hash_empty(state_domain),
+       .change_root = authenticated::hash_inner(change_domain, 1U, 2U, fixture.erased_leaf.key,
+                                                fixture.updated_leaf.key, fixture.updated_leaf.key,
+                                                authenticated_leaf_hash(change_domain, fixture.erased_leaf),
+                                                authenticated_leaf_hash(change_domain, fixture.updated_leaf)),
+       .change_count = 2U,
+   };
+   return fixture;
+}
+
+authenticated::range_proof authenticated_changes_proof(const authenticated_changes_fixture& fixture,
+                                                       authenticated::range_request request) {
+   return {
+       .anchor = fixture.root,
+       .tree = authenticated::proof_tree::changes,
+       .request = std::move(request),
+       .nodes =
+           {
+               authenticated::range_inner{
+                   .height = 1U,
+                   .size = 2U,
+                   .min_key = fixture.erased_leaf.key,
+                   .max_key = fixture.updated_leaf.key,
+                   .separator = fixture.updated_leaf.key,
+               },
+               fixture.erased_leaf,
+               fixture.updated_leaf,
+           },
+   };
+}
+
 const route& find_route(const std::vector<route>& routes, std::string_view name) {
    const auto result = std::ranges::find(routes, name, &route::method_name);
    BOOST_REQUIRE(result != routes.end());
@@ -413,7 +716,89 @@ void require_routes(const std::vector<route>& routes, method verb, std::initiali
    }
 }
 
+std::string openapi_verb(method value) {
+   switch (value) {
+   case method::delete_:
+      return "delete";
+   case method::get:
+      return "get";
+   case method::head:
+      return "head";
+   case method::options:
+      return "options";
+   case method::patch:
+      return "patch";
+   case method::post:
+      return "post";
+   case method::put:
+      return "put";
+   case method::unknown:
+      return {};
+   }
+   return {};
+}
+
+std::string openapi_path(const route& value) {
+   const auto query = value.target.find('?');
+   return value.target.substr(0U, query);
+}
+
+template <typename Owner> std::vector<route> owner_routes() {
+   return forge::api::http::traits<Owner>::routes();
+}
+
+template <typename Owner> forge::variant owner_openapi() {
+   return forge::api::http::openapi<Owner>();
+}
+
+template <typename Owner> forge::api::core::descriptor owner_descriptor() {
+   return Owner::describe();
+}
+
+struct owner_openapi_contract {
+   std::string_view name;
+   std::vector<route> (*routes)();
+   forge::variant (*document)();
+   forge::api::core::descriptor (*describe)();
+};
+
 } // namespace
+
+BOOST_AUTO_TEST_CASE(table_key_codec_is_canonical_and_validates_index_contract) {
+   using forge::chain::api::encode_table_key;
+   using forge::chain::api::validate_table_index;
+   using forge::chain::api::validate_table_key;
+   using forge::chain::api::exceptions::invalid_request;
+   namespace protocol = forge::chain::protocol;
+
+   BOOST_TEST(encode_table_key(std::uint64_t{0x0102030405060708ULL}) ==
+              (protocol::bytes{0x01U, 0x02U, 0x03U, 0x04U, 0x05U, 0x06U, 0x07U, 0x08U}));
+   BOOST_TEST(encode_table_key(-0.0) == encode_table_key(0.0));
+   BOOST_TEST(encode_table_key(-1.0) < encode_table_key(0.0));
+   BOOST_TEST(encode_table_key(0.0) < encode_table_key(1.0));
+   BOOST_CHECK_THROW((void)encode_table_key(std::numeric_limits<double>::quiet_NaN()), invalid_request);
+
+   auto negative_zero128 = std::array<std::uint8_t, 16>{};
+   negative_zero128.front() = 0x80U;
+   const auto positive_zero128 = std::array<std::uint8_t, 16>{};
+   BOOST_TEST(encode_table_key(std::span<const std::uint8_t, 16>{negative_zero128}) ==
+              encode_table_key(std::span<const std::uint8_t, 16>{positive_zero128}));
+   auto nan128 = std::array<std::uint8_t, 16>{};
+   nan128[0] = 0x7fU;
+   nan128[1] = 0xffU;
+   nan128.back() = 0x01U;
+   BOOST_CHECK_THROW((void)encode_table_key(std::span<const std::uint8_t, 16>{nan128}), invalid_request);
+
+   BOOST_CHECK_NO_THROW(validate_table_index({.kind = protocol::table_index_kind::primary, .position = 0U}));
+   BOOST_CHECK_THROW(validate_table_index({.kind = protocol::table_index_kind::primary, .position = 1U}),
+                     invalid_request);
+   BOOST_CHECK_NO_THROW(validate_table_index({.kind = protocol::table_index_kind::secondary_u64, .position = 15U}));
+   BOOST_CHECK_THROW(validate_table_index({.kind = protocol::table_index_kind::secondary_u64, .position = 16U}),
+                     invalid_request);
+   BOOST_CHECK_NO_THROW(validate_table_key(protocol::table_index_kind::secondary_u128, std::array<std::uint8_t, 16>{}));
+   BOOST_CHECK_THROW(validate_table_key(protocol::table_index_kind::secondary_u128, std::array<std::uint8_t, 8>{}),
+                     invalid_request);
+}
 
 BOOST_AUTO_TEST_CASE(chain_http_uses_resource_verbs) {
    const auto info = forge::api::http::traits<forge::chain::api::info>::routes();
@@ -441,6 +826,146 @@ BOOST_AUTO_TEST_CASE(chain_http_uses_resource_verbs) {
    require_routes(admin, method::put, {"configure_pause", "set_access_policy", "schedule_protocol_features"});
    require_routes(admin, method::patch, {"update_runtime_options", "update_greylist"});
    require_routes(admin, method::delete_, {"unschedule_snapshot"});
+}
+
+BOOST_AUTO_TEST_CASE(chain_openapi_covers_every_owner_contract_route_and_schema) {
+   const auto owners = std::array{
+       owner_openapi_contract{"info", &owner_routes<forge::chain::api::info>, &owner_openapi<forge::chain::api::info>,
+                              &owner_descriptor<forge::chain::api::info>},
+       owner_openapi_contract{"block", &owner_routes<forge::chain::api::block>,
+                              &owner_openapi<forge::chain::api::block>, &owner_descriptor<forge::chain::api::block>},
+       owner_openapi_contract{"state", &owner_routes<forge::chain::api::state>,
+                              &owner_openapi<forge::chain::api::state>, &owner_descriptor<forge::chain::api::state>},
+       owner_openapi_contract{"transaction", &owner_routes<forge::chain::api::transaction>,
+                              &owner_openapi<forge::chain::api::transaction>,
+                              &owner_descriptor<forge::chain::api::transaction>},
+       owner_openapi_contract{"admin", &owner_routes<forge::chain::api::admin>,
+                              &owner_openapi<forge::chain::api::admin>, &owner_descriptor<forge::chain::api::admin>},
+   };
+   auto operation_ids = std::set<std::string>{};
+
+   for (const auto& owner : owners) {
+      const auto routes = owner.routes();
+      const auto document = owner.document();
+      const auto descriptor = owner.describe();
+      BOOST_TEST(document["openapi"].as_string() == "3.1.0");
+
+      const auto& paths = document["paths"].get_object();
+      auto expected_paths = std::set<std::string>{};
+      auto expected_operations = std::set<std::pair<std::string, std::string>>{};
+      for (const auto& mapping : routes) {
+         const auto* method_descriptor = forge::api::core::find_method(descriptor, mapping.method_name);
+         BOOST_REQUIRE_MESSAGE(method_descriptor != nullptr,
+                               owner.name << "." << mapping.method_name << " has a method descriptor");
+         BOOST_REQUIRE_MESSAGE(!method_descriptor->errors.empty(),
+                               owner.name << "." << mapping.method_name << " declares typed errors");
+         const auto path = openapi_path(mapping);
+         const auto verb = openapi_verb(mapping.verb);
+         BOOST_REQUIRE_MESSAGE(!verb.empty(), owner.name << "." << mapping.method_name << " has an HTTP verb");
+         expected_paths.insert(path);
+         BOOST_REQUIRE_MESSAGE(expected_operations.emplace(path, verb).second,
+                               owner.name << "." << mapping.method_name << " has a unique path and verb");
+      }
+
+      BOOST_TEST(paths.size() == expected_paths.size());
+      auto documented_operations = std::size_t{};
+      for (const auto& path : paths) {
+         documented_operations += path.value().get_object().size();
+      }
+      BOOST_TEST(documented_operations == expected_operations.size());
+
+      for (const auto& mapping : routes) {
+         const auto* method_descriptor = forge::api::core::find_method(descriptor, mapping.method_name);
+         BOOST_REQUIRE_MESSAGE(method_descriptor != nullptr,
+                               owner.name << "." << mapping.method_name << " has a method descriptor");
+         const auto path = openapi_path(mapping);
+         const auto verb = openapi_verb(mapping.verb);
+         const auto path_entry = paths.find(path);
+         BOOST_REQUIRE_MESSAGE(path_entry != paths.end(), owner.name << "." << mapping.method_name << " path exists");
+         const auto& methods = path_entry->value().get_object();
+         const auto method_entry = methods.find(verb);
+         BOOST_REQUIRE_MESSAGE(method_entry != methods.end(),
+                               owner.name << "." << mapping.method_name << " verb exists");
+         const auto& operation = method_entry->value().get_object();
+
+         const auto operation_id = operation["operationId"].as_string();
+         BOOST_REQUIRE_MESSAGE(!operation_id.empty(), owner.name << "." << mapping.method_name << " has operationId");
+         BOOST_CHECK_MESSAGE(operation_ids.insert(operation_id).second,
+                             owner.name << "." << mapping.method_name << " operationId is unique");
+
+         const auto& responses = operation["responses"].get_object();
+         const auto success_status = std::to_string(static_cast<unsigned>(mapping.success_status));
+         const auto success_entry = responses.find(success_status);
+         BOOST_REQUIRE_MESSAGE(success_entry != responses.end(),
+                               owner.name << "." << mapping.method_name << " has its success response");
+         const auto& success = success_entry->value().get_object();
+         BOOST_REQUIRE_MESSAGE(success.contains("content"),
+                               owner.name << "." << mapping.method_name << " has success content");
+         const auto& success_schema = success["content"]["application/json"]["schema"].get_object();
+         BOOST_CHECK_MESSAGE(success_schema.size() != 0U,
+                             owner.name << "." << mapping.method_name << " has a nonempty success schema");
+
+         const auto error_entry = responses.find("default");
+         BOOST_REQUIRE_MESSAGE(error_entry != responses.end(),
+                               owner.name << "." << mapping.method_name << " has an error response");
+         const auto& error = error_entry->value().get_object();
+         BOOST_REQUIRE_MESSAGE(error.contains("content"),
+                               owner.name << "." << mapping.method_name << " has error content");
+         const auto& error_schema = error["content"]["application/json"]["schema"].get_object();
+         BOOST_CHECK_MESSAGE(error_schema.size() != 0U,
+                             owner.name << "." << mapping.method_name << " has a nonempty error schema");
+         BOOST_TEST(error_schema["type"].as_string() == "object");
+         const auto& error_properties = error_schema["properties"].get_object();
+         for (const auto field :
+              {"error", "message", "retryable", "status_code", "identity", "details_codec", "details"}) {
+            BOOST_CHECK_MESSAGE(error_properties.contains(field),
+                                owner.name << "." << mapping.method_name << " error envelope has " << field);
+         }
+
+         const auto& documented_errors = error_schema["x-forge-declared-errors"].get_array();
+         BOOST_TEST(documented_errors.size() == method_descriptor->errors.size());
+         for (const auto& declared : method_descriptor->errors) {
+            const auto documented = std::ranges::find_if(documented_errors, [&](const forge::variant& candidate) {
+               return candidate["name"].as_string() == declared.name;
+            });
+            BOOST_REQUIRE_MESSAGE(documented != documented_errors.end(),
+                                  owner.name << "." << mapping.method_name << " documents " << declared.name);
+            BOOST_TEST((*documented)["status_code"].as_uint64() == static_cast<std::uint64_t>(declared.status_code));
+            BOOST_TEST((*documented)["retryable"].as_bool() == declared.retryable);
+            BOOST_TEST((*documented)["identity"]["category"].as_string() == declared.identity.category);
+            BOOST_TEST((*documented)["identity"]["code"].as_uint64() == declared.identity.code);
+         }
+
+         if (forge::api::http::detail::uses_request_body(mapping.verb)) {
+            BOOST_REQUIRE_MESSAGE(operation.contains("requestBody"),
+                                  owner.name << "." << mapping.method_name << " has a request body");
+            const auto& request_schema = operation["requestBody"]["content"]["application/json"]["schema"].get_object();
+            BOOST_CHECK_MESSAGE(request_schema.size() != 0U,
+                                owner.name << "." << mapping.method_name << " has a nonempty request schema");
+         }
+      }
+   }
+}
+
+BOOST_AUTO_TEST_CASE(chain_transaction_remote_deadline_restores_the_declared_exception) {
+   const auto descriptor = forge::chain::api::transaction::describe();
+   const auto* method = forge::api::core::find_method(descriptor, "await_transaction");
+   BOOST_REQUIRE(method != nullptr);
+   const auto identity = forge::api::core::exception_identity<forge::chain::api::exceptions::deadline_exceeded>();
+   const auto declared = std::ranges::find(method->errors, identity, &forge::api::core::error_descriptor::identity);
+   BOOST_REQUIRE(declared != method->errors.end());
+   BOOST_CHECK(declared->status_code == forge::api::core::status::deadline_exceeded);
+   BOOST_TEST(declared->retryable);
+   const auto* submit = forge::api::core::find_method(descriptor, "submit");
+   BOOST_REQUIRE(submit != nullptr);
+   BOOST_CHECK(std::ranges::find(submit->errors, identity, &forge::api::core::error_descriptor::identity) ==
+               submit->errors.end());
+
+   auto invoker = std::make_shared<deadline_remote_invoker>();
+   auto remote = forge::api::core::proxy<forge::chain::api::transaction>{invoker};
+   BOOST_CHECK_THROW(run(remote.await_transaction({.timeout_ms = 1U})),
+                     forge::chain::api::exceptions::deadline_exceeded);
+   BOOST_TEST(invoker->calls == 1U);
 }
 
 BOOST_AUTO_TEST_CASE(chain_http_omits_an_unspecified_anchor) {
@@ -809,6 +1334,34 @@ BOOST_AUTO_TEST_CASE(verified_transaction_status_delegates_the_inclusion_proof) 
    BOOST_TEST(verifier->transaction_verifications == 1U);
 }
 
+BOOST_AUTO_TEST_CASE(verified_transaction_status_rejects_an_unauthenticated_execution_trace) {
+   auto id = forge::chain::protocol::transaction_id{};
+   id._hash[0] = 32U;
+   auto response = forge::chain::protocol::transaction_status_response{};
+   response.id = id;
+   response.state = forge::chain::protocol::transaction_lifecycle::finalized;
+   response.trace = forge::chain::protocol::transaction_trace{.id = id};
+   response.context.anchor = forge::chain::protocol::state_anchor{.block_num = 7U};
+   response.audit = forge::chain::protocol::audit_bundle{
+       .finality = forge::chain::protocol::proof_blob{.scheme = "test.finality"},
+       .transaction = forge::chain::protocol::transaction_inclusion_proof{},
+   };
+
+   auto services = forge::api::core::registry{};
+   services.install<forge::chain::api::transaction>(std::make_shared<transaction_service>(std::move(response)));
+   auto verifier = std::make_shared<accepting_audit_verifier>();
+   auto client = forge::chain::api::verified_client{
+       forge::chain::api::raw_client{forge::chain::api::service_handles{
+           .transactions = services.get<forge::chain::api::transaction>(forge::chain::api::transaction::ref()),
+       }},
+       verifier,
+   };
+
+   BOOST_CHECK_THROW(static_cast<void>(run(client.get_transaction_status({.id = id}))),
+                     forge::chain::api::exceptions::invalid_transaction_proof);
+   BOOST_TEST(verifier->transaction_verifications == 0U);
+}
+
 BOOST_AUTO_TEST_CASE(verified_composite_response_delegates_product_projection_and_authenticated_sources) {
    auto anchor = make_finality_anchor();
    auto response = forge::chain::protocol::account_response{};
@@ -998,6 +1551,249 @@ BOOST_AUTO_TEST_CASE(verified_changes_accept_paginated_proof_ranges_without_rewr
    BOOST_REQUIRE_EQUAL(result.blocks.front().ranges.size(), 1U);
    BOOST_CHECK(result.blocks.front().ranges.front().range == requested);
    BOOST_TEST(verifier->state_change_verifications == 1U);
+}
+
+BOOST_AUTO_TEST_CASE(authenticated_audit_verifier_accepts_real_point_membership_and_nonmembership) {
+   const auto fixture = make_authenticated_point_fixture();
+   const auto anchor = authenticated_anchor(fixture.root);
+   auto finality = std::make_shared<recording_finality_verifier>();
+   auto verifier = forge::chain::api::authenticated_audit_verifier{
+       {
+           .chain = authenticated_chain(),
+           .state_domain = fixture.domain,
+           .proof_limits = {},
+       },
+       finality,
+   };
+
+   const auto membership = authenticated_point_proof(fixture, "alpha");
+   const auto membership_value =
+       verifier.verify_state_point(anchor, forge::chain::protocol::state_point_request{.key = protocol_bytes("alpha")},
+                                   authenticated_proof_blob("forge.db.authenticated.point", membership));
+   BOOST_REQUIRE(membership_value.has_value());
+   BOOST_CHECK(*membership_value == protocol_bytes("one"));
+
+   const auto nonmembership = authenticated_point_proof(fixture, "beta");
+   const auto absent =
+       verifier.verify_state_point(anchor, forge::chain::protocol::state_point_request{.key = protocol_bytes("beta")},
+                                   authenticated_proof_blob("forge.db.authenticated.point", nonmembership));
+   BOOST_TEST(!absent.has_value());
+}
+
+BOOST_AUTO_TEST_CASE(authenticated_audit_verifier_rejects_wrong_scheme_version_limits_chain_and_root) {
+   const auto fixture = make_authenticated_point_fixture();
+   const auto anchor = authenticated_anchor(fixture.root);
+   const auto request = forge::chain::protocol::state_point_request{.key = protocol_bytes("alpha")};
+   const auto proof = authenticated_point_proof(fixture, "alpha");
+   const auto valid = authenticated_proof_blob("forge.db.authenticated.point", proof);
+   auto finality = std::make_shared<recording_finality_verifier>();
+   auto verifier = forge::chain::api::authenticated_audit_verifier{
+       {
+           .chain = authenticated_chain(),
+           .state_domain = fixture.domain,
+           .proof_limits = {},
+       },
+       finality,
+   };
+
+   auto wrong_scheme = valid;
+   wrong_scheme.scheme = "forge.db.authenticated.range";
+   BOOST_CHECK_THROW(static_cast<void>(verifier.verify_state_point(anchor, request, wrong_scheme)),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   auto wrong_version = valid;
+   ++wrong_version.version;
+   BOOST_CHECK_THROW(static_cast<void>(verifier.verify_state_point(anchor, request, wrong_version)),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   BOOST_REQUIRE(valid.payload.size() > 1U);
+   auto tight_limits = authenticated::limits{};
+   tight_limits.max_proof_bytes = valid.payload.size() - 1U;
+   auto limited = forge::chain::api::authenticated_audit_verifier{
+       {
+           .chain = authenticated_chain(),
+           .state_domain = fixture.domain,
+           .proof_limits = tight_limits,
+       },
+       std::make_shared<recording_finality_verifier>(),
+   };
+   BOOST_CHECK_THROW(static_cast<void>(limited.verify_state_point(anchor, request, valid)),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   auto wrong_root = anchor;
+   ++wrong_root.state_root._hash[0];
+   BOOST_CHECK_THROW(static_cast<void>(verifier.verify_state_point(wrong_root, request, valid)),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   const auto context = forge::chain::protocol::response_context{.chain = authenticated_chain(), .anchor = anchor};
+   BOOST_CHECK_NO_THROW(verifier.verify_context(context));
+   auto wrong_context = context;
+   ++wrong_context.chain._hash[0];
+   BOOST_CHECK_THROW(verifier.verify_context(wrong_context), forge::chain::api::exceptions::wrong_chain);
+
+   const auto finality_proof = forge::chain::protocol::proof_blob{.scheme = "test.finality"};
+   BOOST_CHECK_NO_THROW(verifier.verify_finality(anchor, finality_proof));
+   BOOST_TEST(finality->verify_calls == 1U);
+   auto wrong_chain_anchor = anchor;
+   ++wrong_chain_anchor.chain._hash[0];
+   BOOST_CHECK_THROW(verifier.verify_finality(wrong_chain_anchor, finality_proof),
+                     forge::chain::api::exceptions::wrong_chain);
+   BOOST_TEST(finality->verify_calls == 1U);
+}
+
+BOOST_AUTO_TEST_CASE(authenticated_audit_verifier_verifies_ranked_range_and_change_tombstone_proofs) {
+   const auto ranked = make_authenticated_ranked_fixture();
+   auto ranked_verifier = forge::chain::api::authenticated_audit_verifier{
+       {
+           .chain = authenticated_chain(),
+           .state_domain = ranked.domain,
+           .proof_limits = {},
+       },
+       std::make_shared<recording_finality_verifier>(),
+   };
+   const auto range = forge::chain::protocol::key_range{.lower = protocol_bytes("b")};
+   const auto request = forge::chain::protocol::state_range_request{.range = range, .limit = 2U};
+   const auto proof = authenticated_ranked_proof(ranked, authenticated::range_request{
+                                                             .lower = authenticated_bytes("b"),
+                                                             .limit = 2U,
+                                                             .include_values = true,
+                                                         });
+   const auto result = ranked_verifier.verify_state_range(
+       authenticated_anchor(ranked.root), request, authenticated_proof_blob("forge.db.authenticated.range", proof));
+   BOOST_REQUIRE_EQUAL(result.rows.size(), 2U);
+   BOOST_CHECK(result.rows[0].key == protocol_bytes("b"));
+   BOOST_CHECK(result.rows[0].value == protocol_bytes("two"));
+   BOOST_CHECK(result.rows[1].key == protocol_bytes("c"));
+   BOOST_CHECK(result.rows[1].value == protocol_bytes("three"));
+   BOOST_REQUIRE(result.next_key.has_value());
+   BOOST_CHECK(*result.next_key == protocol_bytes("d"));
+
+   const auto changes = make_authenticated_changes_fixture();
+   auto changes_verifier = forge::chain::api::authenticated_audit_verifier{
+       {
+           .chain = authenticated_chain(),
+           .state_domain = changes.domain,
+           .proof_limits = {},
+       },
+       std::make_shared<recording_finality_verifier>(),
+   };
+   const auto change_range = forge::chain::protocol::key_range{};
+   const auto change_proof =
+       authenticated_changes_proof(changes, authenticated::range_request{.limit = 2U, .include_values = true});
+   const auto change_result =
+       changes_verifier.verify_state_changes(authenticated_anchor(changes.root), change_range, 2U,
+                                             authenticated_proof_blob("forge.db.authenticated.changes", change_proof));
+   BOOST_CHECK(change_result.range == change_range);
+   BOOST_REQUIRE_EQUAL(change_result.mutations.size(), 2U);
+   BOOST_CHECK(change_result.mutations[0].key == protocol_bytes("alpha"));
+   BOOST_TEST(!change_result.mutations[0].value.has_value());
+   BOOST_CHECK(change_result.mutations[1].key == protocol_bytes("beta"));
+   BOOST_REQUIRE(change_result.mutations[1].value.has_value());
+   BOOST_CHECK(*change_result.mutations[1].value == protocol_bytes("updated"));
+   BOOST_TEST(!change_result.next_key.has_value());
+}
+
+BOOST_AUTO_TEST_CASE(authenticated_audit_verifier_rejects_reordered_and_forged_ranked_inputs) {
+   const auto fixture = make_authenticated_ranked_fixture();
+   const auto request = forge::chain::protocol::state_range_request{
+       .range = {.lower = protocol_bytes("b"), .upper = protocol_bytes("d")},
+       .limit = 2U,
+   };
+   const auto valid = authenticated_ranked_proof(fixture, authenticated::range_request{
+                                                              .lower = authenticated_bytes("b"),
+                                                              .upper = authenticated_bytes("d"),
+                                                              .limit = 2U,
+                                                              .include_values = true,
+                                                          });
+   auto verifier = forge::chain::api::authenticated_audit_verifier{
+       {
+           .chain = authenticated_chain(),
+           .state_domain = fixture.domain,
+           .proof_limits = {},
+       },
+       std::make_shared<recording_finality_verifier>(),
+   };
+   const auto reject = [&](const authenticated::range_proof& proof) {
+      BOOST_CHECK_THROW(static_cast<void>(verifier.verify_state_range(
+                            authenticated_anchor(fixture.root), request,
+                            authenticated_proof_blob("forge.db.authenticated.range", proof))),
+                        forge::chain::api::exceptions::invalid_state_proof);
+   };
+
+   auto reordered = valid;
+   std::swap(reordered.nodes[2], reordered.nodes[3]);
+   reject(reordered);
+
+   auto forged_rank = valid;
+   ++std::get<authenticated::range_inner>(forged_rank.nodes.front()).size;
+   reject(forged_rank);
+
+   auto forged_value = valid;
+   std::get<authenticated::proof_leaf>(forged_value.nodes[2]).value = authenticated_bytes("forged");
+   reject(forged_value);
+}
+
+BOOST_AUTO_TEST_CASE(authenticated_audit_verifier_verifies_transaction_merkle_proof_and_rejects_forgery) {
+   auto first_id = forge::chain::protocol::transaction_id{};
+   first_id._hash[0] = 0x51U;
+   auto second_id = forge::chain::protocol::transaction_id{};
+   second_id._hash[0] = 0x52U;
+
+   auto first_receipt = forge::chain::protocol::transaction_receipt{};
+   first_receipt.status = forge::chain::protocol::transaction_receipt::status::executed;
+   first_receipt.cpu_usage_us = 7U;
+   first_receipt.trx = first_id;
+   auto second_receipt = forge::chain::protocol::transaction_receipt{};
+   second_receipt.status = forge::chain::protocol::transaction_receipt::status::executed;
+   second_receipt.cpu_usage_us = 8U;
+   second_receipt.trx = second_id;
+
+   const auto leaves = std::array{first_receipt.digest(), second_receipt.digest()};
+   auto anchor = authenticated_anchor(make_authenticated_point_fixture().root);
+   anchor.transaction_root = forge::chain::core::calculate_merkle_root(leaves);
+   auto response = forge::chain::protocol::transaction_status_response{};
+   response.id = first_id;
+   response.state = forge::chain::protocol::transaction_lifecycle::finalized;
+   response.block = anchor.block;
+   response.block_num = anchor.block_num;
+   response.receipt = first_receipt;
+   const auto proof = forge::chain::protocol::transaction_inclusion_proof{
+       .leaf = leaves[0],
+       .index = 0U,
+       .leaf_count = leaves.size(),
+       .path = forge::chain::core::calculate_merkle_path(leaves, 0U),
+   };
+   auto verifier = forge::chain::api::authenticated_audit_verifier{
+       {
+           .chain = authenticated_chain(),
+           .state_domain = "forge.test.chain-api.transaction-proof.v3",
+           .proof_limits = {},
+       },
+       std::make_shared<recording_finality_verifier>(),
+   };
+
+   BOOST_CHECK_NO_THROW(verifier.verify_transaction(anchor, first_id, response, proof));
+
+   auto traced = response;
+   traced.trace = forge::chain::protocol::transaction_trace{.id = first_id};
+   BOOST_CHECK_THROW(verifier.verify_transaction(anchor, first_id, traced, proof),
+                     forge::chain::api::exceptions::invalid_transaction_proof);
+
+   auto reordered = proof;
+   reordered.index = 1U;
+   BOOST_CHECK_THROW(verifier.verify_transaction(anchor, first_id, response, reordered),
+                     forge::chain::api::exceptions::invalid_transaction_proof);
+
+   auto forged_path = proof;
+   BOOST_REQUIRE_EQUAL(forged_path.path.size(), 1U);
+   ++forged_path.path.front().sibling._hash[0];
+   BOOST_CHECK_THROW(verifier.verify_transaction(anchor, first_id, response, forged_path),
+                     forge::chain::api::exceptions::invalid_transaction_proof);
+
+   auto forged_receipt = response;
+   ++forged_receipt.receipt->cpu_usage_us;
+   BOOST_CHECK_THROW(verifier.verify_transaction(anchor, first_id, forged_receipt, proof),
+                     forge::chain::api::exceptions::invalid_transaction_proof);
 }
 
 BOOST_AUTO_TEST_CASE(content_witness_roundtrips_and_returns_the_authenticated_value) {

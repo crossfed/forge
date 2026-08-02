@@ -28,6 +28,7 @@ import forge.crypto.digest.sha256;
 import forge.net.http.types;
 import forge.variant.variant_dynamic_bitset;
 
+export import forge.chain.api.exceptions;
 export import forge.chain.protocol.admin;
 
 export namespace forge::chain::api {
@@ -63,11 +64,23 @@ class admin
 
 } // namespace forge::chain::api
 
+export namespace forge::api::core {
+
+template <> struct method_descriptor_customization<::forge::chain::api::admin> {
+   template <auto Method, bool EnableRaw>
+   static void apply(method_builder<::forge::chain::api::admin, EnableRaw>& method) {
+      static_cast<void>(Method);
+      ::forge::chain::api::exceptions::descriptor::declare_common(method);
+   }
+};
+
+} // namespace forge::api::core
+
 FORGE_EXPORT_API(
     ::forge::chain::api::admin, FORGE_API_CONTRACT("forge.chain.api.admin", 1, 0),
     FORGE_API_METHOD_TYPED(push_block, ::forge::chain::protocol::signed_block,
                            ::forge::chain::protocol::push_block_response),
-    FORGE_API_METHOD_TYPED(create_snapshot, ::std::string, ::forge::chain::protocol::snapshot_response),
+    FORGE_API_METHOD(create_snapshot, name),
     FORGE_API_METHOD_TYPED(prune, ::forge::chain::protocol::prune_request, ::forge::chain::protocol::prune_response),
     FORGE_API_METHOD_TYPED(producer_status, ::forge::chain::protocol::admin_query,
                            ::forge::chain::protocol::producer_status_response),
@@ -89,11 +102,11 @@ FORGE_EXPORT_API(
                            ::forge::chain::protocol::snapshot_schedule),
     FORGE_API_METHOD_TYPED(integrity_hash, ::forge::chain::protocol::admin_query,
                            ::forge::chain::protocol::integrity_hash_response),
-    FORGE_API_METHOD_TYPED(schedule_protocol_features, ::std::vector<::forge::chain::protocol::digest>, bool))
+    FORGE_API_METHOD(schedule_protocol_features, features))
 
 FORGE_HTTP_API(
     ::forge::chain::api::admin, FORGE_HTTP_POST(push_block, "/v1/chain/admin/blocks", accepted),
-    FORGE_HTTP_POST(create_snapshot, "/v1/chain/admin/snapshots", accepted),
+    FORGE_HTTP_POST(create_snapshot, "/v1/chain/admin/snapshots?name={name}", accepted),
     FORGE_HTTP_POST(prune, "/v1/chain/admin/pruning", ok),
     FORGE_HTTP_GET(producer_status, "/v1/chain/admin/producer", FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_GET(supported_protocol_features,

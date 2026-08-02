@@ -329,6 +329,10 @@ void verified_client::verify_transaction_status(const forge::chain::protocol::tr
       FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof,
                             "chain API transaction response has the wrong transaction id");
    }
+   if (response.trace) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof,
+                            "chain API audited transaction response contains an unauthenticated execution trace");
+   }
    if (response.state != protocol::transaction_lifecycle::included &&
        response.state != protocol::transaction_lifecycle::finalized) {
       FORGE_THROW_EXCEPTION(exceptions::audit_not_supported,

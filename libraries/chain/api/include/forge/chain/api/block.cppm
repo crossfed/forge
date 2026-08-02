@@ -25,6 +25,7 @@ import forge.crypto.digest.sha256;
 import forge.net.http.types;
 import forge.variant.variant_dynamic_bitset;
 
+export import forge.chain.api.exceptions;
 export import forge.chain.protocol.block_query;
 
 export namespace forge::chain::api {
@@ -51,6 +52,18 @@ class block
 };
 
 } // namespace forge::chain::api
+
+export namespace forge::api::core {
+
+template <> struct method_descriptor_customization<::forge::chain::api::block> {
+   template <auto Method, bool EnableRaw>
+   static void apply(method_builder<::forge::chain::api::block, EnableRaw>& method) {
+      static_cast<void>(Method);
+      ::forge::chain::api::exceptions::descriptor::declare_historical_query(method);
+   }
+};
+
+} // namespace forge::api::core
 
 FORGE_EXPORT_API(::forge::chain::api::block, FORGE_API_CONTRACT("forge.chain.api.block", 1, 0),
                  FORGE_API_METHOD_TYPED(get_block, ::forge::chain::protocol::block_request,

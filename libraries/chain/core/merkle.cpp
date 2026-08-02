@@ -1,11 +1,12 @@
 module;
 
+#include <forge/exceptions/macros.hpp>
+
 #include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <span>
-#include <stdexcept>
 #include <utility>
 #include <vector>
 
@@ -93,7 +94,9 @@ digest calculate_merkle_root(std::span<const digest> leaves) {
 
 std::vector<merkle_step> calculate_merkle_path(std::span<const digest> leaves, std::uint64_t index) {
    if (leaves.empty() || index >= leaves.size()) {
-      throw std::out_of_range{"merkle leaf index is outside the tree"};
+      FORGE_THROW_EXCEPTION(exceptions::invalid_leaf_index, "merkle leaf index is outside the tree",
+                            forge::exceptions::ctx("index", index),
+                            forge::exceptions::ctx("leaf_count", leaves.size()));
    }
 
    auto result = std::vector<merkle_step>{};
@@ -126,7 +129,7 @@ bool verify_merkle_path(const digest& leaf, std::uint64_t index, std::uint64_t l
 
 void incremental_merkle_tree::append(const digest& leaf) {
    if (mask_ == std::numeric_limits<std::uint64_t>::max()) {
-      throw std::overflow_error{"incremental merkle tree leaf count overflow"};
+      FORGE_THROW_EXCEPTION(exceptions::leaf_count_overflow, "incremental merkle tree leaf count overflow");
    }
 
    auto trees = trees_;

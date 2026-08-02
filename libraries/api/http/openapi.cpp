@@ -122,6 +122,26 @@ struct target_description {
        forge::mutable_variant_object{}("application/json", forge::mutable_variant_object{}("schema", schema))};
 }
 
+[[nodiscard]] forge::variant declared_error_document(const forge::api::core::error_descriptor& error) {
+   return forge::variant{forge::mutable_variant_object{}("name", error.name)(
+       "status_code", static_cast<std::uint64_t>(error.status_code))("retryable", error.retryable)(
+       "identity", forge::mutable_variant_object{}("category", error.identity.category)(
+                       "code", static_cast<std::uint64_t>(error.identity.code)))};
+}
+
+[[nodiscard]] forge::variant error_response_schema(const forge::api::core::method_descriptor* method) {
+   auto schema = forge::mutable_variant_object{make_json_schema<forge::api::core::error_payload>()};
+   if (method != nullptr && !method->errors.empty()) {
+      auto errors = forge::variants{};
+      errors.reserve(method->errors.size());
+      for (const auto& error : method->errors) {
+         errors.push_back(declared_error_document(error));
+      }
+      schema("x-forge-declared-errors", std::move(errors));
+   }
+   return forge::variant{std::move(schema)};
+}
+
 [[nodiscard]] forge::variant operation_document(const forge::api::core::descriptor& api,
                                                 const openapi_operation& operation) {
    auto value = forge::mutable_variant_object{}("operationId", api.id.value + "." + operation.mapping.method_name);
@@ -152,7 +172,9 @@ struct target_description {
    }
    auto responses = forge::mutable_variant_object{};
    responses.set(status_name(operation.mapping.success_status), forge::variant{std::move(response)});
-   responses.set("default", forge::variant{forge::mutable_variant_object{}("description", "Forge API error")});
+   const auto* method = forge::api::core::find_method(api, operation.mapping.method_name);
+   responses.set("default", forge::variant{forge::mutable_variant_object{}("description", "Forge API error")(
+                                "content", media_schema(error_response_schema(method)))});
    value("responses", std::move(responses));
    if (operation.mapping.cache == cache_policy::no_store) {
       value("x-forge-cache-policy", "no-store");

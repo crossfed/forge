@@ -9,14 +9,11 @@ module;
 
 export module forge.chain.protocol.transaction_query;
 
-import forge.variant.containers;
-import forge.variant.described;
-
 export import forge.chain.protocol.audit;
 export import forge.chain.protocol.block;
 export import forge.chain.protocol.time;
 export import forge.chain.protocol.transaction;
-export import forge.variant.value;
+export import forge.chain.protocol.transaction_trace;
 
 export namespace forge::chain::protocol {
 
@@ -30,6 +27,11 @@ enum class transaction_lifecycle : std::uint8_t {
    unknown = 6,
 };
 
+enum class transaction_execution_status : std::uint8_t {
+   executed = 0,
+   rejected = 1,
+};
+
 struct transaction_submit_request {
    forge::chain::protocol::packed_transaction transaction;
    bool return_failure_trace = true;
@@ -40,7 +42,7 @@ struct transaction_submit_request {
 struct transaction_submit_response {
    forge::chain::protocol::transaction_id id;
    transaction_lifecycle state = transaction_lifecycle::accepted;
-   std::optional<forge::variant> trace;
+   std::optional<transaction_trace> trace;
 
    bool operator==(const transaction_submit_response&) const = default;
 };
@@ -68,6 +70,7 @@ struct transaction_status_response : audited_response {
    block_id earliest_tracked;
    std::uint32_t earliest_tracked_num = 0;
    std::optional<forge::chain::protocol::transaction_receipt> receipt;
+   std::optional<transaction_trace> trace;
 };
 
 struct transaction_await_request {
@@ -93,21 +96,23 @@ struct transaction_read_only_request {
 
 struct transaction_read_only_response : audited_response {
    forge::chain::protocol::transaction_id id;
-   forge::variant trace;
+   transaction_execution_status status = transaction_execution_status::executed;
+   transaction_trace trace;
 
    bool operator==(const transaction_read_only_response&) const = default;
 };
 
 BOOST_DESCRIBE_ENUM(transaction_lifecycle, accepted, included, finalized, forked_out, rejected, expired, unknown)
+BOOST_DESCRIBE_ENUM(transaction_execution_status, executed, rejected)
 BOOST_DESCRIBE_STRUCT(transaction_submit_request, (), (transaction, return_failure_trace, retry, retry_blocks))
 BOOST_DESCRIBE_STRUCT(transaction_submit_response, (), (id, state, trace))
 BOOST_DESCRIBE_STRUCT(transaction_status_request, (), (id, audit))
 BOOST_DESCRIBE_STRUCT(transaction_status_response, (audited_response),
                       (id, state, block, block_num, block_time, expiration, head, head_num, head_time, finalized,
-                       finalized_num, finalized_time, earliest_tracked, earliest_tracked_num, receipt))
+                       finalized_num, finalized_time, earliest_tracked, earliest_tracked_num, receipt, trace))
 BOOST_DESCRIBE_STRUCT(transaction_await_request, (), (id, desired, timeout_ms, audit))
 BOOST_DESCRIBE_STRUCT(transaction_required_keys_request, (), (transaction, available))
 BOOST_DESCRIBE_STRUCT(transaction_read_only_request, (), (transaction, return_failure_trace, anchor, audit))
-BOOST_DESCRIBE_STRUCT(transaction_read_only_response, (audited_response), (id, trace))
+BOOST_DESCRIBE_STRUCT(transaction_read_only_response, (audited_response), (id, status, trace))
 
 } // namespace forge::chain::protocol

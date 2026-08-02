@@ -5,6 +5,8 @@ module;
 
 export module forge.chain.api.exceptions;
 
+import forge.api.core.descriptor;
+
 export import forge.exceptions;
 
 export namespace forge::chain::api::exceptions {
@@ -25,27 +27,46 @@ enum class code : std::uint16_t {
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(code, "forge.chain.api")
 
-using invalid_request =
-   forge::exceptions::coded_exception<code, code::invalid_request>;
-using audit_not_supported =
-   forge::exceptions::coded_exception<code, code::audit_not_supported>;
-using anchor_unavailable =
-   forge::exceptions::coded_exception<code, code::anchor_unavailable>;
-using wrong_chain =
-   forge::exceptions::coded_exception<code, code::wrong_chain>;
-using invalid_finality =
-   forge::exceptions::coded_exception<code, code::invalid_finality>;
-using invalid_state_proof =
-   forge::exceptions::coded_exception<code, code::invalid_state_proof>;
-using invalid_transaction_proof =
-   forge::exceptions::coded_exception<code, code::invalid_transaction_proof>;
-using trust_required =
-   forge::exceptions::coded_exception<code, code::trust_required>;
-using history_lost =
-   forge::exceptions::coded_exception<code, code::history_lost>;
-using deadline_exceeded =
-   forge::exceptions::coded_exception<code, code::deadline_exceeded>;
-using unavailable =
-   forge::exceptions::coded_exception<code, code::unavailable>;
+using invalid_request = forge::exceptions::coded_exception<code, code::invalid_request>;
+using audit_not_supported = forge::exceptions::coded_exception<code, code::audit_not_supported>;
+using anchor_unavailable = forge::exceptions::coded_exception<code, code::anchor_unavailable>;
+using wrong_chain = forge::exceptions::coded_exception<code, code::wrong_chain>;
+using invalid_finality = forge::exceptions::coded_exception<code, code::invalid_finality>;
+using invalid_state_proof = forge::exceptions::coded_exception<code, code::invalid_state_proof>;
+using invalid_transaction_proof = forge::exceptions::coded_exception<code, code::invalid_transaction_proof>;
+using trust_required = forge::exceptions::coded_exception<code, code::trust_required>;
+using history_lost = forge::exceptions::coded_exception<code, code::history_lost>;
+using deadline_exceeded = forge::exceptions::coded_exception<code, code::deadline_exceeded>;
+using unavailable = forge::exceptions::coded_exception<code, code::unavailable>;
+
+namespace descriptor {
+
+template <typename Builder> void declare_common(Builder& method) {
+   method.template error<invalid_request>(
+       "invalid_request", {.status_code = forge::api::core::status::invalid_argument, .retryable = false});
+   method.template error<unavailable>("unavailable",
+                                      {.status_code = forge::api::core::status::unavailable, .retryable = true});
+}
+
+template <typename Builder> void declare_audited_query(Builder& method) {
+   declare_common(method);
+   method.template error<audit_not_supported>(
+       "audit_not_supported", {.status_code = forge::api::core::status::failed_precondition, .retryable = false});
+   method.template error<anchor_unavailable>("anchor_unavailable",
+                                             {.status_code = forge::api::core::status::not_found, .retryable = false});
+}
+
+template <typename Builder> void declare_historical_query(Builder& method) {
+   declare_audited_query(method);
+   method.template error<history_lost>(
+       "history_lost", {.status_code = forge::api::core::status::failed_precondition, .retryable = false});
+}
+
+template <typename Builder> void declare_deadline(Builder& method) {
+   method.template error<deadline_exceeded>(
+       "deadline_exceeded", {.status_code = forge::api::core::status::deadline_exceeded, .retryable = true});
+}
+
+} // namespace descriptor
 
 } // namespace forge::chain::api::exceptions

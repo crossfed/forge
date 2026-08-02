@@ -109,11 +109,13 @@ is presently representable by the IAVL `ProofSpec`.
 ## Boundaries
 
 Range/change multiproofs, pruning and garbage collection are part of the same
-library but are not yet declared production-ready. Legacy IAVL `RangeProof` is
-not a supported format. Proof parsing is bounded by explicit key, value, depth,
-node and exact serialized-byte limits. Proof depth has an implementation hard
-cap of 256, independent of caller settings; this is comfortably above the
-maximum valid AVL height for a tree whose rank and size are `uint64_t`.
+library and have native, adversarial and process-crash regression coverage.
+They remain Experimental until the external cryptographic review named in the
+production activation gate is complete. Legacy IAVL `RangeProof` is not a
+supported format. Proof parsing is bounded by explicit key, value, depth, node
+and exact serialized-byte limits. Proof depth has an implementation hard cap of
+256, independent of caller settings; this is comfortably above the maximum
+valid AVL height for a tree whose rank and size are `uint64_t`.
 
 Range generation tracks the exact encoded size as each node is appended,
 including varuint count-prefix growth. Before loading another value it first
@@ -124,16 +126,19 @@ element size before any reserve or growth.
 
 ## Benchmark
 
-`benchmark_forge_db_authenticated` is an MDBX-backed executable and is not
-registered with CTest. Its production baselines use one million and ten million
-ordered keys with 32-byte values:
+`benchmark_forge_db_authenticated` is an MDBX-backed executable. The one-million
+and ten-million profiles can be registered as opt-in CTest gates with
+`FORGE_DB_AUTHENTICATED_ENABLE_1M_PERFORMANCE_TEST` and
+`FORGE_DB_AUTHENTICATED_ENABLE_10M_PERFORMANCE_TEST`. They are deliberately not
+part of the default unit lane. Both profiles use ordered keys with 32-byte
+values:
 
 ```sh
 cmake --build build/release --target benchmark_forge_db_authenticated -j4
 build/release/tests/benchmark_forge_db_authenticated \
-   --keys 1000000 --value-bytes 32 --path /tmp/forge-authenticated-1m
+   --keys 1000000 --value-bytes 32 --chunk-keys 4096 --path /tmp/forge-authenticated-1m
 build/release/tests/benchmark_forge_db_authenticated \
-   --keys 10000000 --value-bytes 32 --path /tmp/forge-authenticated-10m
+   --keys 10000000 --value-bytes 32 --chunk-keys 4096 --path /tmp/forge-authenticated-10m
 ```
 
 A short disposable smoke invocation is:
@@ -144,10 +149,13 @@ build/release/tests/benchmark_forge_db_authenticated --keys 10000 --value-bytes 
 
 `--path` must not exist before the run and is preserved afterward. Omitting it
 uses and removes a temporary directory. The initial-batch timer covers MDBX
-transaction creation, authenticated staging and durable commit, but excludes
-client-side mutation construction. Point and range timings cover public proof
-generation, including snapshot acquisition; proofs omit values so value size
-does not make the fixed 256-item range exceed the proof byte limit.
+transaction creation, authenticated staging and durable commit for every
+bounded chunk, but excludes client-side mutation construction. The default
+chunk contains 4,096 ordered keys, preventing the benchmark itself from holding
+the complete mutation set and staged tree in memory. Point and range timings
+cover public proof generation, including snapshot acquisition; proofs omit
+values so value size does not make the fixed 256-item range exceed the proof
+byte limit.
 
 The executable writes one JSON document to stdout. It reports the committed
 state/change roots and sizes, initial-batch milliseconds and keys/second, 1,000

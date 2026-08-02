@@ -12,6 +12,7 @@ module;
 export module forge.chain.core.merkle;
 
 export import forge.chain.core.types;
+export import forge.chain.core.exceptions;
 import forge.raw.exceptions;
 import forge.raw.raw;
 

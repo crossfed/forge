@@ -23,6 +23,7 @@ import forge.chain.api.json_schema;
 import forge.crypto.digest.sha256;
 import forge.net.http.types;
 
+export import forge.chain.api.exceptions;
 export import forge.chain.protocol.info;
 
 export namespace forge::chain::api {
@@ -36,6 +37,18 @@ class info
 };
 
 } // namespace forge::chain::api
+
+export namespace forge::api::core {
+
+template <> struct method_descriptor_customization<::forge::chain::api::info> {
+   template <auto Method, bool EnableRaw>
+   static void apply(method_builder<::forge::chain::api::info, EnableRaw>& method) {
+      static_cast<void>(Method);
+      ::forge::chain::api::exceptions::descriptor::declare_audited_query(method);
+   }
+};
+
+} // namespace forge::api::core
 
 FORGE_EXPORT_API(::forge::chain::api::info, FORGE_API_CONTRACT("forge.chain.api.info", 1, 0),
                  FORGE_API_METHOD_TYPED(get, ::forge::chain::protocol::anchored_request,

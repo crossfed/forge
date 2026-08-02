@@ -56,6 +56,7 @@ struct provisional_gate_thresholds {
 struct options {
    std::size_t keys = 10'000;
    std::size_t value_bytes = 32;
+   std::size_t load_chunk_keys = 4'096;
    std::filesystem::path path;
    std::string machine_label = "unspecified";
    baseline_profile baseline = baseline_profile::custom;
@@ -96,7 +97,7 @@ class temporary_path_guard {
 [[noreturn]] void usage_error(std::string_view message) {
    throw std::invalid_argument{std::string{message} + "\nusage: benchmark_forge_db_authenticated "
                                                       "[--baseline 1m|10m | --keys N] [--value-bytes N] "
-                                                      "[--machine-label LABEL] [--path PATH]"};
+                                                      "[--chunk-keys N] [--machine-label LABEL] [--path PATH]"};
 }
 
 std::uint64_t parse_unsigned(std::string_view option, std::string_view value) {
@@ -132,7 +133,7 @@ options parse_options(int argc, char** argv) {
       if (argument == "--help") {
          std::cout << "usage: benchmark_forge_db_authenticated "
                       "[--baseline 1m|10m | --keys N] [--value-bytes N] "
-                      "[--machine-label LABEL] [--path PATH]\n";
+                      "[--chunk-keys N] [--machine-label LABEL] [--path PATH]\n";
          std::exit(0);
       }
       if (const auto value = option_value(index, argc, argv, "--baseline")) {
@@ -169,6 +170,14 @@ options parse_options(int argc, char** argv) {
             usage_error("--value-bytes exceeds the authenticated-store limit");
          }
          result.value_bytes = static_cast<std::size_t>(parsed);
+         continue;
+      }
+      if (const auto value = option_value(index, argc, argv, "--chunk-keys")) {
+         const auto parsed = parse_unsigned("--chunk-keys", *value);
+         if (parsed == 0U || parsed > std::numeric_limits<std::size_t>::max()) {
+            usage_error("--chunk-keys is outside the supported size_t range");
+         }
+         result.load_chunk_keys = static_cast<std::size_t>(parsed);
          continue;
       }
       if (const auto value = option_value(index, argc, argv, "--machine-label")) {
@@ -242,10 +251,12 @@ bytes make_value(std::uint64_t index, std::size_t size) {
    return result;
 }
 
-std::vector<forge::db::authenticated::mutation> make_mutations(const options& settings) {
+std::vector<forge::db::authenticated::mutation> make_mutations(const options& settings, std::size_t first,
+                                                               std::size_t count) {
    auto result = std::vector<forge::db::authenticated::mutation>{};
-   result.reserve(settings.keys);
-   for (auto index = std::size_t{}; index < settings.keys; ++index) {
+   result.reserve(count);
+   for (auto offset = std::size_t{}; offset < count; ++offset) {
+      const auto index = first + offset;
       result.push_back({
           .key = make_key(index),
           .value = make_value(index, settings.value_bytes),
@@ -289,19 +300,24 @@ boost::asio::awaitable<benchmark_result> run_benchmark(const options& settings,
            .domain = "forge.benchmark.db.authenticated.v1",
        },
    };
-   auto mutations = make_mutations(settings);
    auto result = benchmark_result{};
 
    const auto initial_started = clock_type::now();
-   auto db_transaction = co_await driver->begin_transaction();
-   auto authenticated_transaction = co_await authenticated.join(db_transaction, 1);
-   const auto staged = co_await authenticated_transaction.stage(mutations);
-   co_await db_transaction.commit();
+   auto first = std::size_t{};
+   auto version = forge::db::authenticated::version_id_t{};
+   while (first < settings.keys) {
+      const auto count = std::min(settings.load_chunk_keys, settings.keys - first);
+      const auto mutations = make_mutations(settings, first, count);
+      auto db_transaction = co_await driver->begin_transaction();
+      auto authenticated_transaction = co_await authenticated.join(db_transaction, version);
+      const auto staged = co_await authenticated_transaction.stage(mutations);
+      co_await db_transaction.commit();
+      result.root = staged.commitment;
+      first += count;
+      ++version;
+   }
    result.initial_batch = clock_type::now() - initial_started;
-   result.root = staged.commitment;
-
-   mutations.clear();
-   mutations.shrink_to_fit();
+   require(result.root.state_size == settings.keys, "chunked load did not commit every key");
 
    for (auto sample = std::size_t{}; sample < point_proof_count; ++sample) {
       const auto key = make_key(sample_position(sample, point_proof_count, settings.keys));
@@ -394,13 +410,14 @@ bool print_result(const options& settings, const std::filesystem::path& path, co
    const auto gate_passed = initial_batch_passed && point_proofs_passed && range_proofs_passed;
 
    std::cout << std::fixed << std::setprecision(3) << "{\n"
-             << "  \"format\": \"forge.db.authenticated.benchmark.v1\",\n"
+             << "  \"format\": \"forge.db.authenticated.benchmark.v2\",\n"
              << "  \"benchmark\": \"forge_db_authenticated\",\n"
              << "  \"config\": {\n"
              << "    \"baseline\": \"" << baseline_name(settings.baseline) << "\",\n"
              << "    \"machine_label\": \"" << json_escape(settings.machine_label) << "\",\n"
              << "    \"keys\": " << settings.keys << ",\n"
              << "    \"value_bytes\": " << settings.value_bytes << ",\n"
+             << "    \"load_chunk_keys\": " << settings.load_chunk_keys << ",\n"
              << "    \"path\": \"" << json_escape(path.string()) << "\",\n"
              << "    \"mdbx_upper_bytes\": " << tebibyte << ",\n"
              << "    \"mdbx_growth_bytes\": " << mdbx_growth_step(settings.keys) << ",\n"

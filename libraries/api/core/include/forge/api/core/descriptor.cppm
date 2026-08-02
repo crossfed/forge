@@ -180,6 +180,15 @@ template <typename Exception> error_identity exception_identity() {
 
 template <typename Interface, bool EnableRaw> class method_builder;
 
+template <typename Interface> struct method_descriptor_customization {
+   template <auto Method, bool EnableRaw> static void apply(method_builder<Interface, EnableRaw>&) {}
+};
+
+template <typename Interface, auto Method, bool EnableRaw>
+void customize_method_descriptor(method_builder<Interface, EnableRaw>& method) {
+   method_descriptor_customization<Interface>::template apply<Method>(method);
+}
+
 template <typename Interface, bool EnableRaw> class contract_builder {
  public:
    explicit contract_builder(descriptor value) : descriptor_(std::move(value)) {}

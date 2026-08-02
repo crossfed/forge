@@ -200,7 +200,7 @@ void authenticated_audit_verifier::verify_transaction(const protocol::state_anch
                                                       const protocol::transaction_id& expected,
                                                       const protocol::transaction_status_response& response,
                                                       const protocol::transaction_inclusion_proof& proof) {
-   if (!response.block || !response.block_num || *response.block != anchor.block ||
+   if (response.trace || !response.block || !response.block_num || *response.block != anchor.block ||
        *response.block_num != anchor.block_num || !response.receipt || response.id != expected ||
        receipt_transaction_id(*response.receipt) != expected || response.receipt->digest() != proof.leaf) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof,

@@ -1,8 +1,18 @@
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/cancellation_signal.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <boost/asio/use_future.hpp>
+#include <forge/exceptions/macros.hpp>
 
 #include <atomic>
 #include <chrono>
+#include <concepts>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <stdexcept>
@@ -21,6 +31,7 @@ import forge.api.core.registry;
 import forge.api.core.types;
 import forge.api.http.binding;
 import forge.api.http.proxy;
+import forge.api.transport.options;
 import forge.app.application;
 import forge.app.application_shell;
 import forge.app.plugin;
@@ -29,10 +40,13 @@ import forge.app.plugin_registry;
 import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.chain.api.admin;
+import forge.chain.api.authenticated_audit_verifier;
 import forge.chain.api.block;
+import forge.chain.api.finality;
 import forge.chain.api.info;
 import forge.chain.api.raw_client;
 import forge.chain.api.state;
+import forge.chain.api.table_key;
 import forge.chain.api.transaction;
 import forge.chain.api.verified_client;
 import forge.chain.protocol.admin;
@@ -63,6 +77,7 @@ namespace chain_api = forge::chain::api;
 namespace protocol = forge::chain::protocol;
 
 constexpr auto chain_api_protocol = std::string_view{"/spine/chain/api/1"};
+constexpr auto chain_api_max_frame_size = std::uint32_t{64U * 1024U};
 
 void require(bool condition, std::string_view message) {
    if (!condition) {
@@ -351,8 +366,14 @@ class transaction_implementation final : public chain_api::transaction {
    }
 
    boost::asio::awaitable<protocol::transaction_status_response>
-   await_transaction(protocol::transaction_await_request) override {
-      co_return protocol::transaction_status_response{};
+   await_transaction(protocol::transaction_await_request request) override {
+      await_started.fetch_add(1, std::memory_order_release);
+      auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+      timer.expires_after(std::chrono::milliseconds{request.timeout_ms});
+      co_await timer.async_wait(boost::asio::use_awaitable);
+      await_deadlines.fetch_add(1, std::memory_order_release);
+      FORGE_THROW_EXCEPTION(forge::chain::api::exceptions::deadline_exceeded,
+                            "fixture transaction wait reached its request deadline");
    }
 
    boost::asio::awaitable<std::vector<protocol::public_key>>
@@ -374,10 +395,52 @@ class transaction_implementation final : public chain_api::transaction {
 
    std::atomic<std::uint32_t> calls{0};
    std::atomic<protocol::audit_mode> last_audit{protocol::audit_mode::none};
+   std::atomic<std::uint32_t> await_started{0};
+   std::atomic<std::uint32_t> await_deadlines{0};
 
  private:
    protocol::transaction_read_only_response response_;
 };
+
+void wait_until(std::function<bool()> predicate, std::string_view failure) {
+   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+   while (!predicate() && std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds{1});
+   }
+   require(predicate(), failure);
+}
+
+void require_long_poll_transport(forge::asio::runtime& runtime,
+                                 const forge::api::core::handle<chain_api::transaction>& remote,
+                                 const std::shared_ptr<transaction_implementation>& owner, std::string_view transport) {
+   const auto deadlines_before = owner->await_deadlines.load(std::memory_order_acquire);
+   auto deadline_observed = false;
+   try {
+      static_cast<void>(forge::asio::blocking::run(
+          runtime, remote->await_transaction(protocol::transaction_await_request{.timeout_ms = 10})));
+   } catch (const forge::chain::api::exceptions::deadline_exceeded&) {
+      deadline_observed = true;
+   }
+   require(deadline_observed, std::string{transport} + " long-poll ignored its request deadline");
+   require(owner->await_deadlines.load(std::memory_order_acquire) == deadlines_before + 1U,
+           std::string{transport} + " deadline did not originate at the owner");
+
+   const auto started_before = owner->await_started.load(std::memory_order_acquire);
+   auto cancellation = boost::asio::cancellation_signal{};
+   auto pending = boost::asio::co_spawn(
+       runtime.context(), remote->await_transaction(protocol::transaction_await_request{.timeout_ms = 300'000}),
+       boost::asio::bind_cancellation_slot(cancellation.slot(), boost::asio::use_future));
+   wait_until([&] { return owner->await_started.load(std::memory_order_acquire) > started_before; },
+              std::string{transport} + " long-poll did not reach the owner");
+   cancellation.emit(boost::asio::cancellation_type::all);
+   auto caller_cancelled = false;
+   try {
+      static_cast<void>(pending.get());
+   } catch (const std::exception&) {
+      caller_cancelled = true;
+   }
+   require(caller_cancelled, std::string{transport} + " long-poll ignored caller cancellation");
+}
 
 class admin_implementation final : public chain_api::admin {
  public:
@@ -472,14 +535,21 @@ struct chain_api_services {
 
 struct http_responses {
    protocol::info_response information;
+   protocol::block_state_response block;
    protocol::state_point_response state;
+   protocol::transaction_read_only_response transaction;
+   protocol::producer_status_response administration;
+   bool oversized_request_rejected = false;
 };
 
 http_responses run_http_e2e(const chain_api_services& services) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto apis = forge::api::core::registry{};
    apis.install<chain_api::info>(chain_api::info::describe(), services.information);
+   apis.install<chain_api::block>(chain_api::block::describe(), services.blocks);
    apis.install<chain_api::state>(chain_api::state::describe(), services.state);
+   apis.install<chain_api::transaction>(chain_api::transaction::describe(), services.transactions);
+   apis.install<chain_api::admin>(chain_api::admin::describe(), services.administration);
 
    auto router = forge::net::http::router{};
    router.mount(forge::api::http::binding()
@@ -488,10 +558,26 @@ http_responses run_http_e2e(const chain_api_services& services) {
                     .build());
    router.mount(forge::api::http::binding()
                     .use(forge::api::core::binding().serve(apis).build())
+                    .bind<chain_api::block>()
+                    .build());
+   router.mount(forge::api::http::binding()
+                    .use(forge::api::core::binding().serve(apis).build())
                     .bind<chain_api::state>()
                     .build());
+   router.mount(forge::api::http::binding()
+                    .use(forge::api::core::binding().serve(apis).build())
+                    .bind<chain_api::transaction>()
+                    .build());
+   router.mount(forge::api::http::binding()
+                    .use(forge::api::core::binding().serve(apis).build())
+                    .bind<chain_api::admin>()
+                    .build());
 
-   auto server = forge::net::http::server{runtime, forge::net::http::server_config{}, std::move(router)};
+   auto server = forge::net::http::server{
+       runtime,
+       forge::net::http::server_config{.max_request_body_bytes = 64U * 1024U},
+       std::move(router),
+   };
    forge::asio::blocking::run(runtime, server.async_start());
    require(server.port() != 0, "HTTP chain API server did not bind");
 
@@ -502,13 +588,39 @@ http_responses run_http_e2e(const chain_api_services& services) {
           forge::net::http::parse_base_url("http://127.0.0.1:" + std::to_string(server.port())),
       };
       auto info_remote = forge::asio::blocking::run(runtime, forge::api::http::remote<chain_api::info>(client));
+      auto block_remote = forge::asio::blocking::run(runtime, forge::api::http::remote<chain_api::block>(client));
       auto state_remote = forge::asio::blocking::run(runtime, forge::api::http::remote<chain_api::state>(client));
+      auto transaction_remote =
+          forge::asio::blocking::run(runtime, forge::api::http::remote<chain_api::transaction>(client));
+      auto admin_remote = forge::asio::blocking::run(runtime, forge::api::http::remote<chain_api::admin>(client));
       responses.information = forge::asio::blocking::run(
           runtime, info_remote->get(protocol::anchored_request{.audit = protocol::audit_mode::required}));
+      responses.block = forge::asio::blocking::run(runtime, block_remote->get_block_state(protocol::block_request{
+                                                                .num = 40,
+                                                                .audit = protocol::audit_mode::required,
+                                                            }));
       responses.state = forge::asio::blocking::run(runtime, state_remote->get_point(protocol::state_point_request{
                                                                 .key = {0x01, 0x02, 0x03},
                                                                 .audit = protocol::audit_mode::required,
                                                             }));
+      responses.transaction = forge::asio::blocking::run(
+          runtime, transaction_remote->compute_transaction(protocol::transaction_read_only_request{
+                       .audit = protocol::audit_mode::required,
+                   }));
+      responses.administration =
+          forge::asio::blocking::run(runtime, admin_remote->producer_status(protocol::admin_query{}));
+      require_long_poll_transport(runtime, transaction_remote, services.transactions, "HTTP");
+      const auto calls_before_oversized = services.state->calls.load(std::memory_order_relaxed);
+      try {
+         static_cast<void>(forge::asio::blocking::run(runtime, state_remote->get_point(protocol::state_point_request{
+                                                                   .key = protocol::bytes(70U * 1024U, 0x5aU),
+                                                               })));
+      } catch (const std::exception&) {
+         responses.oversized_request_rejected = true;
+      }
+      require(responses.oversized_request_rejected, "HTTP chain API accepted an oversized request body");
+      require(services.state->calls.load(std::memory_order_relaxed) == calls_before_oversized,
+              "HTTP oversized request reached the owner service");
    } catch (...) {
       forge::asio::blocking::run(runtime, server.async_stop());
       throw;
@@ -541,7 +653,10 @@ class chain_api_publisher final : public forge::app::plugin {
                           {.id = {"forge.chain.api.transaction"}, .major = 1, .min_revision = 0})
                       .export_api<chain_api::admin>({.id = {"forge.chain.api.admin"}, .major = 1, .min_revision = 0})
                       .build();
-      resolver->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = std::string{chain_api_protocol}});
+      resolver->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = std::string{chain_api_protocol}},
+                            forge::plugins::p2p::resolver::publish_options{
+                                .transport = forge::api::transport::options{.max_frame_size = chain_api_max_frame_size},
+                            });
       co_return;
    }
 
@@ -619,6 +734,8 @@ void require_advertised_api(const auto& apis, std::string_view id) {
    for (const auto& api : apis) {
       if (api.id.value == id) {
          require(api.protocol == chain_api_protocol, "P2P resolver advertised a chain API on the wrong protocol");
+         require(api.max_frame_size == chain_api_max_frame_size,
+                 "P2P resolver advertised the wrong chain API frame limit");
          return;
       }
    }
@@ -632,6 +749,7 @@ struct p2p_responses {
    protocol::transaction_read_only_response transaction;
    protocol::producer_status_response administration;
    bool internal_error_preserved = false;
+   bool oversized_request_rejected = false;
 };
 
 p2p_responses run_p2p_e2e(const chain_api_services& services) {
@@ -707,6 +825,19 @@ p2p_responses run_p2p_e2e(const chain_api_services& services) {
                             }));
       responses.administration =
           forge::asio::blocking::run(client.runtime(), admin_remote->producer_status(protocol::admin_query{}));
+      require_long_poll_transport(client.runtime(), transaction_remote, services.transactions, "P2P");
+      const auto calls_before_oversized = services.state->calls.load(std::memory_order_relaxed);
+      try {
+         static_cast<void>(
+             forge::asio::blocking::run(client.runtime(), state_remote->get_point(protocol::state_point_request{
+                                                              .key = protocol::bytes(70U * 1024U, 0x5aU),
+                                                          })));
+      } catch (const std::exception&) {
+         responses.oversized_request_rejected = true;
+      }
+      require(responses.oversized_request_rejected, "P2P chain API accepted an oversized request frame");
+      require(services.state->calls.load(std::memory_order_relaxed) == calls_before_oversized,
+              "P2P oversized request reached the owner service");
       try {
          static_cast<void>(forge::asio::blocking::run(
              client.runtime(), admin_remote->prune(protocol::prune_request{.through_block = 40, .max_records = 0})));
@@ -759,15 +890,21 @@ int main() {
    static_assert(std::is_abstract_v<forge::chain::api::state>);
    static_assert(std::is_abstract_v<forge::chain::api::transaction>);
    static_assert(std::is_abstract_v<forge::chain::api::admin>);
+   static_assert(std::derived_from<forge::chain::api::authenticated_audit_verifier, forge::chain::api::audit_verifier>);
+   static_assert(std::is_abstract_v<forge::chain::api::finality_verifier>);
+   static_assert(std::is_same_v<decltype(protocol::table_rows_response{}.rows), std::vector<protocol::table_row>>);
+   static_assert(std::is_same_v<decltype(protocol::table_rows_response{}.next), std::optional<protocol::bytes>>);
    static_assert(std::is_same_v<decltype(protocol::table_scope_request{}.cursor), std::optional<protocol::bytes>>);
    static_assert(std::is_same_v<decltype(protocol::table_scope_response{}.next), std::optional<protocol::bytes>>);
 
    auto request = protocol::state_point_request{};
    auto block = protocol::block_request{};
    auto transaction = protocol::transaction_status_request{};
+   const auto table_key = forge::chain::api::encode_table_key(std::uint64_t{42U});
    (void)request;
    (void)block;
    (void)transaction;
+   require(table_key.size() == sizeof(std::uint64_t), "installed table key codec returned the wrong width");
 
    const auto expected_info = make_info_response();
    const auto expected_block = make_block_state_response(expected_info);
@@ -786,30 +923,50 @@ int main() {
    const auto p2p_response = run_p2p_e2e(services);
 
    require(http_response.information == expected_info, "HTTP info API changed chain audit DTO semantics");
+   require(http_response.block == expected_block, "HTTP block API changed typed DTO semantics");
    require(http_response.state == expected_state, "HTTP state API changed chain audit DTO semantics");
+   require(http_response.transaction == expected_transaction, "HTTP transaction API changed typed DTO semantics");
+   require(http_response.administration == expected_admin, "HTTP admin API changed typed DTO semantics");
+   require(http_response.oversized_request_rejected, "HTTP transport limit was not exercised");
    require(p2p_response.information == expected_info, "P2P info API changed chain audit DTO semantics");
    require(p2p_response.block == expected_block, "P2P block API changed typed DTO semantics");
    require(p2p_response.state == expected_state, "P2P state API changed typed DTO semantics");
    require(p2p_response.transaction == expected_transaction, "P2P transaction API changed typed DTO semantics");
    require(p2p_response.administration == expected_admin, "P2P admin API changed typed DTO semantics");
+   require(p2p_response.oversized_request_rejected, "P2P transport limit was not exercised");
    require(http_response.information == p2p_response.information, "HTTP and P2P info API responses diverged");
+   require(http_response.block == p2p_response.block, "HTTP and P2P block API responses diverged");
    require(http_response.state == p2p_response.state, "HTTP and P2P state API responses diverged");
+   require(http_response.transaction == p2p_response.transaction, "HTTP and P2P transaction API responses diverged");
+   require(http_response.administration == p2p_response.administration, "HTTP and P2P admin API responses diverged");
+   require(forge::raw::pack(http_response.information) == forge::raw::pack(p2p_response.information),
+           "HTTP and P2P info canonical bytes diverged");
+   require(forge::raw::pack(http_response.block) == forge::raw::pack(p2p_response.block),
+           "HTTP and P2P block canonical bytes diverged");
+   require(forge::raw::pack(http_response.state) == forge::raw::pack(p2p_response.state),
+           "HTTP and P2P state canonical bytes diverged");
+   require(forge::raw::pack(http_response.transaction) == forge::raw::pack(p2p_response.transaction),
+           "HTTP and P2P transaction canonical bytes diverged");
+   require(forge::raw::pack(http_response.administration) == forge::raw::pack(p2p_response.administration),
+           "HTTP and P2P admin canonical bytes diverged");
    require_audit_semantics(http_response.information);
+   require_audit_semantics(http_response.block);
    require_audit_semantics(http_response.state);
+   require_audit_semantics(http_response.transaction);
    require_audit_semantics(p2p_response.information);
    require_audit_semantics(p2p_response.block);
    require_audit_semantics(p2p_response.state);
    require_audit_semantics(p2p_response.transaction);
    require(services.information->calls.load(std::memory_order_relaxed) == 2,
            "info transport E2E did not dispatch both typed calls");
-   require(services.blocks->calls.load(std::memory_order_relaxed) == 1,
-           "P2P block API did not dispatch its typed call");
+   require(services.blocks->calls.load(std::memory_order_relaxed) == 2,
+           "transport E2E did not dispatch both block typed calls");
    require(services.state->calls.load(std::memory_order_relaxed) == 2,
            "state transport E2E did not dispatch both typed calls");
-   require(services.transactions->calls.load(std::memory_order_relaxed) == 1,
-           "P2P transaction API did not dispatch its typed call");
-   require(services.administration->calls.load(std::memory_order_relaxed) == 1,
-           "P2P admin API did not dispatch its typed call");
+   require(services.transactions->calls.load(std::memory_order_relaxed) == 2,
+           "transport E2E did not dispatch both transaction typed calls");
+   require(services.administration->calls.load(std::memory_order_relaxed) == 2,
+           "transport E2E did not dispatch both admin typed calls");
    require(services.administration->error_calls.load(std::memory_order_relaxed) == 1,
            "P2P admin API did not dispatch its typed error call");
    require(services.information->last_audit.load(std::memory_order_relaxed) == protocol::audit_mode::required,

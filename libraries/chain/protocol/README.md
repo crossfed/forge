@@ -36,6 +36,8 @@ Package component: `chain_protocol`. Public namespace:
   hashes and Savanna receipt digests.
 - `forge.chain.protocol.transaction`: transactions, packed transactions,
   compression, IDs and signing digests. It re-exports the action module.
+- `forge.chain.protocol.transaction_trace`: typed transaction and action
+  execution traces shared by runtimes, block metadata and Chain API clients.
 - `forge.chain.protocol.block`: block headers, receipts, signed blocks, block
   IDs and transaction receipt Merkle roots.
 - `forge.chain.protocol.abi`: ABI records and optional tail-field decoding.

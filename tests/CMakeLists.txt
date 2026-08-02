@@ -351,8 +351,26 @@ if(FORGE_HAS_MDBX)
    add_executable(
       test_forge_db_authenticated
       unit/main.cpp
+      db_authenticated/authenticated_crash_tests.cpp
       db_authenticated/db_authenticated_tests.cpp
       db_authenticated/ranked_range_proof_adversarial_tests.cpp
+   )
+   add_executable(
+      forge_db_authenticated_crash_helper
+      db_authenticated/authenticated_crash_helper.cpp
+   )
+   target_link_libraries(
+      forge_db_authenticated_crash_helper
+      forge_asio
+      forge_db_authenticated
+      forge_db_mdbx
+      forge_db_object
+      forge_db_revision
+   )
+   add_dependencies(test_forge_db_authenticated forge_db_authenticated_crash_helper)
+   target_compile_definitions(
+      test_forge_db_authenticated PRIVATE
+      FORGE_DB_AUTHENTICATED_CRASH_HELPER="$<TARGET_FILE:forge_db_authenticated_crash_helper>"
    )
    target_link_libraries(
       test_forge_db_authenticated

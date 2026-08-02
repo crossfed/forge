@@ -16,6 +16,7 @@ import forge.variant.containers;
 import forge.variant.described;
 
 export import forge.chain.protocol.audit;
+export import forge.chain.protocol.authority;
 export import forge.variant.value;
 
 export namespace forge::chain::protocol {
@@ -120,9 +121,18 @@ struct account_request {
    bool operator==(const account_request&) const = default;
 };
 
+struct account_permission {
+   forge::chain::protocol::permission_name name;
+   forge::chain::protocol::permission_name parent;
+   forge::chain::protocol::authority auth;
+
+   bool operator==(const account_permission&) const = default;
+};
+
 struct account_response : audited_response {
    forge::chain::protocol::account_name account;
-   forge::variant data;
+   forge::chain::protocol::block_timestamp creation_date;
+   std::vector<account_permission> permissions;
 
    bool operator==(const account_response&) const = default;
 };
@@ -144,23 +154,43 @@ struct code_response : audited_response {
    digest abi_hash;
    std::optional<bytes> wasm;
    std::optional<bytes> raw_abi;
-   std::optional<forge::variant> abi;
+
+   bool operator==(const code_response&) const = default;
+};
+
+enum class table_index_kind : std::uint8_t {
+   primary = 0,
+   secondary_u64 = 1,
+   secondary_u128 = 2,
+   secondary_u256 = 3,
+   secondary_f64 = 4,
+   secondary_f128 = 5,
+};
+
+struct table_index {
+   table_index_kind kind = table_index_kind::primary;
+   std::uint8_t position = 0;
+
+   bool operator==(const table_index&) const = default;
+};
+
+struct table_row {
+   bytes value;
+   std::optional<forge::chain::protocol::account_name> payer;
+
+   bool operator==(const table_row&) const = default;
 };
 
 struct table_rows_request {
-   bool json = false;
    forge::chain::protocol::account_name code;
    forge::chain::protocol::name scope;
    forge::chain::protocol::name table;
-   std::string table_key;
-   std::string lower_bound;
-   std::string upper_bound;
-   std::string index_position;
-   std::string key_type;
-   std::string encode_type;
+   table_index index;
+   std::optional<bytes> lower_bound;
+   std::optional<bytes> upper_bound;
+   std::optional<bytes> cursor;
    std::uint32_t limit = 10;
    bool reverse = false;
-   bool show_payer = false;
    std::optional<block_id> anchor;
    audit_mode audit = audit_mode::none;
 
@@ -168,9 +198,8 @@ struct table_rows_request {
 };
 
 struct table_rows_response : audited_response {
-   std::vector<forge::variant> rows;
-   bool more = false;
-   std::string next_key;
+   std::vector<table_row> rows;
+   std::optional<bytes> next;
 
    bool operator==(const table_rows_response&) const = default;
 };
@@ -323,13 +352,17 @@ BOOST_DESCRIBE_STRUCT(state_changes_cursor, (), (block, range, key))
 BOOST_DESCRIBE_STRUCT(state_changes_request, (), (from_block, to_block, ranges, limit, cursor, audit))
 BOOST_DESCRIBE_STRUCT(state_changes_response, (audited_response), (blocks, next))
 BOOST_DESCRIBE_STRUCT(account_request, (), (account, anchor, audit))
-BOOST_DESCRIBE_STRUCT(account_response, (audited_response), (account, data))
+BOOST_DESCRIBE_STRUCT(account_permission, (), (name, parent, auth))
+BOOST_DESCRIBE_STRUCT(account_response, (audited_response), (account, creation_date, permissions))
 BOOST_DESCRIBE_STRUCT(code_request, (), (account, include_code, include_abi, known_abi_hash, anchor, audit))
-BOOST_DESCRIBE_STRUCT(code_response, (audited_response), (account, hash, abi_hash, wasm, raw_abi, abi))
+BOOST_DESCRIBE_STRUCT(code_response, (audited_response), (account, hash, abi_hash, wasm, raw_abi))
+BOOST_DESCRIBE_ENUM(table_index_kind, primary, secondary_u64, secondary_u128, secondary_u256, secondary_f64,
+                    secondary_f128)
+BOOST_DESCRIBE_STRUCT(table_index, (), (kind, position))
+BOOST_DESCRIBE_STRUCT(table_row, (), (value, payer))
 BOOST_DESCRIBE_STRUCT(table_rows_request, (),
-                      (json, code, scope, table, table_key, lower_bound, upper_bound, index_position, key_type,
-                       encode_type, limit, reverse, show_payer, anchor, audit))
-BOOST_DESCRIBE_STRUCT(table_rows_response, (audited_response), (rows, more, next_key))
+                      (code, scope, table, index, lower_bound, upper_bound, cursor, limit, reverse, anchor, audit))
+BOOST_DESCRIBE_STRUCT(table_rows_response, (audited_response), (rows, next))
 BOOST_DESCRIBE_STRUCT(table_scope_request, (),
                       (code, table, lower_bound, upper_bound, limit, reverse, cursor, anchor, audit))
 BOOST_DESCRIBE_STRUCT(table_scope_row, (), (code, scope, table, payer, count))

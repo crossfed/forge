@@ -4,6 +4,7 @@ module;
 #include <forge/api/core/macros.hpp>
 #include <forge/api/http/macros.hpp>
 
+#include <type_traits>
 #include <vector>
 
 export module forge.chain.api.transaction;
@@ -27,6 +28,7 @@ import forge.crypto.digest.sha256;
 import forge.net.http.types;
 import forge.variant.variant_dynamic_bitset;
 
+export import forge.chain.api.exceptions;
 export import forge.chain.protocol.transaction_query;
 
 export namespace forge::chain::api {
@@ -54,12 +56,24 @@ class transaction : public forge::api::core::contract<transaction, forge::api::c
 
 } // namespace forge::chain::api
 
+export namespace forge::api::core {
+
+template <> struct method_descriptor_customization<::forge::chain::api::transaction> {
+   template <auto Method, bool EnableRaw>
+   static void apply(method_builder<::forge::chain::api::transaction, EnableRaw>& method) {
+      ::forge::chain::api::exceptions::descriptor::declare_historical_query(method);
+      if constexpr (std::is_same_v<method_request_t<Method>, ::forge::chain::protocol::transaction_await_request>) {
+         ::forge::chain::api::exceptions::descriptor::declare_deadline(method);
+      }
+   }
+};
+
+} // namespace forge::api::core
+
 FORGE_EXPORT_API(::forge::chain::api::transaction, FORGE_API_CONTRACT("forge.chain.api.transaction", 1, 0),
                  FORGE_API_METHOD_TYPED(submit, ::forge::chain::protocol::transaction_submit_request,
                                         ::forge::chain::protocol::transaction_submit_response),
-                 FORGE_API_METHOD_TYPED(submit_batch,
-                                        ::std::vector<::forge::chain::protocol::transaction_submit_request>,
-                                        ::std::vector<::forge::chain::protocol::transaction_submit_response>),
+                 FORGE_API_METHOD(submit_batch, transactions),
                  FORGE_API_METHOD_TYPED(get_status, ::forge::chain::protocol::transaction_status_request,
                                         ::forge::chain::protocol::transaction_status_response),
                  FORGE_API_METHOD_TYPED(await_transaction, ::forge::chain::protocol::transaction_await_request,

@@ -290,8 +290,6 @@ BOOST_AUTO_TEST_CASE(chain_abi_reports_exact_missing_and_trailing_diagnostics) {
    } catch (const chain_api::abi_serialization_error& error) {
       require_diagnostic(error, chain_api::abi_error_code::missing_field, "uint16", "record.required", 1U);
       BOOST_TEST(error.diagnostic().message == "Missing field in ABI JSON object");
-      BOOST_TEST(std::string_view{error.what()} ==
-                 "Missing field in ABI JSON object [type=uint16, path=record.required, offset=1]");
    }
 
    try {

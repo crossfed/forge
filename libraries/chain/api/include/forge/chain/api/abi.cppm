@@ -1,12 +1,13 @@
 module;
 
+#include <forge/exceptions/macros.hpp>
+
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
 #include <span>
-#include <stdexcept>
 #include <string>
 #include <string_view>
 
@@ -14,6 +15,7 @@ export module forge.chain.api.abi;
 
 export import forge.chain.protocol.abi;
 export import forge.chain.protocol.transaction;
+export import forge.exceptions;
 export import forge.variant.value;
 
 export namespace forge::chain::api {
@@ -34,6 +36,8 @@ enum class abi_error_code : std::uint8_t {
    trailing_bytes = 13,
 };
 
+FORGE_DECLARE_EXCEPTION_CATEGORY(abi_error_code, "forge.chain.api.abi")
+
 struct abi_diagnostic {
    abi_error_code code = abi_error_code::invalid_abi;
    std::string message;
@@ -44,7 +48,7 @@ struct abi_diagnostic {
    bool operator==(const abi_diagnostic&) const = default;
 };
 
-class abi_serialization_error final : public std::runtime_error {
+class abi_serialization_error final : public forge::exceptions::runtime_coded_exception<abi_error_code> {
  public:
    explicit abi_serialization_error(abi_diagnostic diagnostic);
 

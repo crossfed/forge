@@ -1392,6 +1392,12 @@ BOOST_AUTO_TEST_CASE(authenticated_pruning_is_bounded_and_preserves_retained_roo
          co_await active.commit();
       }
 
+      const auto pruned_version_proof = co_await authenticated.prove(0, bytes("stable"));
+      BOOST_TEST(forge::db::authenticated::verify_point("forge.test.authenticated.state.v1",
+                                                        pruned_version_proof.anchor, pruned_version_proof.key,
+                                                        pruned_version_proof)
+                     .exists);
+
       auto complete = false;
       auto calls = std::uint32_t{};
       auto versions_pruned = std::uint64_t{};
@@ -1420,6 +1426,10 @@ BOOST_AUTO_TEST_CASE(authenticated_pruning_is_bounded_and_preserves_retained_roo
       const auto retained = co_await authenticated.prove(2, bytes("stable"));
       BOOST_TEST(forge::db::authenticated::verify_point("forge.test.authenticated.state.v1", retained.anchor,
                                                         retained.key, retained)
+                     .exists);
+      BOOST_TEST(forge::db::authenticated::verify_point("forge.test.authenticated.state.v1",
+                                                        pruned_version_proof.anchor, pruned_version_proof.key,
+                                                        pruned_version_proof)
                      .exists);
 
       auto invalid = co_await driver->begin_transaction();

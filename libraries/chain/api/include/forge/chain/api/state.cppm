@@ -26,6 +26,7 @@ import forge.net.http.types;
 import forge.raw.varint;
 import forge.variant.variant_dynamic_bitset;
 
+export import forge.chain.api.exceptions;
 export import forge.chain.protocol.state_query;
 
 export namespace forge::chain::api {
@@ -55,6 +56,18 @@ class state
 };
 
 } // namespace forge::chain::api
+
+export namespace forge::api::core {
+
+template <> struct method_descriptor_customization<::forge::chain::api::state> {
+   template <auto Method, bool EnableRaw>
+   static void apply(method_builder<::forge::chain::api::state, EnableRaw>& method) {
+      static_cast<void>(Method);
+      ::forge::chain::api::exceptions::descriptor::declare_historical_query(method);
+   }
+};
+
+} // namespace forge::api::core
 
 FORGE_EXPORT_API(::forge::chain::api::state, FORGE_API_CONTRACT("forge.chain.api.state", 1, 0),
                  FORGE_API_METHOD_TYPED(get_point, ::forge::chain::protocol::state_point_request,
@@ -91,10 +104,9 @@ FORGE_HTTP_API(
                    "&known_abi_hash={known_abi_hash}&anchor={anchor}&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_GET(get_table_rows,
-                   "/v1/chain/state/tables/{code}/{scope}/{table}/rows?json={json}&table_key={table_key}"
-                   "&lower_bound={lower_bound}&upper_bound={upper_bound}&index_position={index_position}"
-                   "&key_type={key_type}&encode_type={encode_type}&limit={limit}&reverse={reverse}"
-                   "&show_payer={show_payer}&anchor={anchor}&audit={audit}",
+                   "/v1/chain/state/tables/{code}/{scope}/{table}/rows?index={index}&lower_bound={lower_bound}"
+                   "&upper_bound={upper_bound}&cursor={cursor}&limit={limit}&reverse={reverse}&anchor={anchor}"
+                   "&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_GET(get_table_scope,
                    "/v1/chain/state/tables/{code}/scopes?table={table}&lower_bound={lower_bound}"

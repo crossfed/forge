@@ -1,0 +1,238 @@
+name: Chain Audited API
+
+on:
+  workflow_dispatch:
+    inputs:
+      run_10m:
+        description: Run the ten-million-key authenticated DB baseline
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+env:
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+  HOMEBREW_NO_INSTALL_CLEANUP: "1"
+
+jobs:
+  style:
+    name: ubuntu-26.04 / structure and format
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format 22
+        run: sudo apt-get update && sudo apt-get install -y clang-format-22
+
+      - name: Check Forge-owned sources
+        shell: bash
+        run: |
+          find libraries/api libraries/chain/api libraries/chain/protocol libraries/db/authenticated \
+            tests/chain_api tests/db_authenticated tests/package_chain_api_component \
+            -type f \( -name '*.cppm' -o -name '*.cpp' -o -name '*.hpp' -o -name '*.hxx' \) \
+            -print0 | xargs -0 clang-format-22 --dry-run --Werror
+          python3 tests/chain_api/check_spring_api_manifest.py .
+          git diff --check
+
+  native:
+    name: ${{ matrix.os }} / Release
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, macos-15]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install toolchain and dependencies
+        shell: bash
+        run: |
+          if ! command -v brew >/dev/null 2>&1; then
+            NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+            echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+          fi
+          brew install boost cmake glaze gmp libngtcp2 ninja openssl@3
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y clang-22 clang-tools-22 libc++-22-dev libc++abi-22-dev
+            echo "CC=/usr/bin/clang-22" >> "$GITHUB_ENV"
+            echo "CXX=/usr/bin/clang++-22" >> "$GITHUB_ENV"
+            echo "CXXFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
+            echo "LDFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
+          else
+            brew install llvm
+            llvm_prefix="$(brew --prefix llvm)"
+            echo "$llvm_prefix/bin" >> "$GITHUB_PATH"
+            echo "CC=$llvm_prefix/bin/clang" >> "$GITHUB_ENV"
+            echo "CXX=$llvm_prefix/bin/clang++" >> "$GITHUB_ENV"
+          fi
+
+      - name: Configure
+        shell: bash
+        run: |
+          cmake -S . -B build/chain-audited-api -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
+            -DFORGE_ENABLE_MODULES=ON \
+            -DFORGE_ENABLE_ROCKSDB=OFF \
+            -DFORGE_ENABLE_TUI=OFF \
+            -DBUILD_TESTING=ON
+
+      - name: Build acceptance targets
+        run: >-
+          cmake --build build/chain-audited-api --target
+          test_forge_chain_protocol_query
+          test_forge_chain_api
+          test_forge_db_authenticated
+          test_forge_package_chain_api_component
+          -j 4
+
+      - name: Run acceptance
+        run: >-
+          ctest --test-dir build/chain-audited-api
+          -R '^(test_forge_chain_protocol_query|test_forge_chain_api|test_forge_db_authenticated|test_forge_package_chain_api_component)$'
+          --output-on-failure -j 1
+
+  sanitizer:
+    name: ubuntu-26.04 / ASan+UBSan+fuzz
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          if ! command -v brew >/dev/null 2>&1; then
+            NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+            echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+          fi
+          brew install boost cmake glaze gmp libngtcp2 ninja openssl@3
+          sudo apt-get update
+          sudo apt-get install -y clang-22 clang-tools-22 libc++-22-dev libc++abi-22-dev
+          echo "CC=/usr/bin/clang-22" >> "$GITHUB_ENV"
+          echo "CXX=/usr/bin/clang++-22" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+
+      - name: Configure
+        shell: bash
+        run: |
+          sanitizer_flags="-fsanitize=address,undefined -fno-omit-frame-pointer"
+          cmake -S . -B build/chain-audited-api-sanitizer -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
+            -DCMAKE_C_FLAGS="$sanitizer_flags" \
+            -DCMAKE_CXX_FLAGS="$sanitizer_flags -stdlib=libc++" \
+            -DCMAKE_EXE_LINKER_FLAGS="$sanitizer_flags -stdlib=libc++" \
+            -DFORGE_ENABLE_MODULES=ON \
+            -DFORGE_ENABLE_ROCKSDB=OFF \
+            -DFORGE_ENABLE_TUI=OFF \
+            -DFORGE_DB_AUTHENTICATED_ENABLE_FUZZ_TESTS=ON \
+            -DBUILD_TESTING=ON
+
+      - name: Build sanitizer and fuzz targets
+        run: >-
+          cmake --build build/chain-audited-api-sanitizer --target
+          test_forge_chain_api
+          test_forge_db_authenticated
+          forge_db_authenticated_fuzz
+          -j 4
+
+      - name: Run sanitizer tests
+        env:
+          ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: >-
+          ctest --test-dir build/chain-audited-api-sanitizer
+          -R '^(test_forge_chain_api|test_forge_db_authenticated)$'
+          --output-on-failure -j 1
+
+      - name: Run hostile-input fuzz smoke
+        env:
+          ASAN_OPTIONS: detect_leaks=1:strict_string_checks=1
+          UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
+        run: build/chain-audited-api-sanitizer/tests/forge_db_authenticated_fuzz -max_total_time=60
+
+  performance:
+    name: ${{ matrix.os }} / authenticated DB baselines
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-26.04, macos-15]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install toolchain and dependencies
+        shell: bash
+        run: |
+          if ! command -v brew >/dev/null 2>&1; then
+            NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+            eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
+            echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
+          fi
+          brew install boost cmake glaze gmp libngtcp2 ninja openssl@3
+          echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            sudo apt-get update
+            sudo apt-get install -y clang-22 libc++-22-dev libc++abi-22-dev
+            echo "CC=/usr/bin/clang-22" >> "$GITHUB_ENV"
+            echo "CXX=/usr/bin/clang++-22" >> "$GITHUB_ENV"
+            echo "CXXFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
+            echo "LDFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
+          else
+            brew install llvm
+            llvm_prefix="$(brew --prefix llvm)"
+            echo "$llvm_prefix/bin" >> "$GITHUB_PATH"
+            echo "CC=$llvm_prefix/bin/clang" >> "$GITHUB_ENV"
+            echo "CXX=$llvm_prefix/bin/clang++" >> "$GITHUB_ENV"
+          fi
+
+      - name: Configure benchmark
+        shell: bash
+        run: |
+          cmake -S . -B build/chain-audited-api-performance -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
+            -DFORGE_ENABLE_MODULES=ON \
+            -DFORGE_ENABLE_ROCKSDB=OFF \
+            -DFORGE_ENABLE_TUI=OFF \
+            -DBUILD_TESTING=ON
+          cmake --build build/chain-audited-api-performance --target benchmark_forge_db_authenticated -j 4
+
+      - name: Run one-million-key baseline
+        shell: bash
+        run: |
+          mkdir -p build/chain-audited-api-performance/results
+          build/chain-audited-api-performance/tests/benchmark_forge_db_authenticated \
+            --baseline 1m --machine-label "${{ matrix.os }}-Release" \
+            | tee build/chain-audited-api-performance/results/authenticated-1m.json
+
+      - name: Run ten-million-key baseline
+        if: ${{ inputs.run_10m }}
+        shell: bash
+        run: |
+          build/chain-audited-api-performance/tests/benchmark_forge_db_authenticated \
+            --baseline 10m --machine-label "${{ matrix.os }}-Release" \
+            | tee build/chain-audited-api-performance/results/authenticated-10m.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: authenticated-db-${{ matrix.os }}
+          path: build/chain-audited-api-performance/results/*.json

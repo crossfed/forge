@@ -58,6 +58,10 @@ export namespace forge::api::http {
 
 using namespace forge::net::http;
 
+template <typename T> struct is_http_body_sequence : std::false_type {};
+
+template <typename T, typename Allocator> struct is_http_body_sequence<std::vector<T, Allocator>> : std::true_type {};
+
 struct route_options {
    std::vector<field_binding> query;
    std::vector<field_binding> headers;
@@ -710,7 +714,8 @@ class binding_builder {
 
    template <typename T>
    static constexpr auto is_plain_codec_body_argument_v =
-       forge::reflect::is_described_object_v<std::remove_cvref_t<T>> &&
+       (forge::reflect::is_described_object_v<std::remove_cvref_t<T>> ||
+        is_http_body_sequence<std::remove_cvref_t<T>>::value) &&
        !detail::request_needs_stream_v<std::remove_cvref_t<T>> && !detail::is_header<std::remove_cvref_t<T>>::value &&
        !detail::is_query<std::remove_cvref_t<T>>::value && !detail::is_cookie<std::remove_cvref_t<T>>::value &&
        !detail::is_body<std::remove_cvref_t<T>>::value && !detail::is_form<std::remove_cvref_t<T>>::value &&
