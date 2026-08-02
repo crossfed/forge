@@ -38,12 +38,14 @@ class session {
    virtual ~session() = default;
 
    [[nodiscard]] virtual capabilities capabilities() const noexcept = 0;
-   virtual boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(family column_family, record_key key) = 0;
-   virtual boost::asio::awaitable<std::optional<std::vector<std::byte>>> get_for_update(family column_family,
-                                                                                        record_key key);
+   virtual boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(family column_family,
+                                                                             record_key key) = 0;
+   virtual boost::asio::awaitable<std::optional<std::vector<std::byte>>>
+   get_for_update(family column_family, record_key key);
    virtual boost::asio::awaitable<void> put(family column_family, record_key key, std::vector<std::byte> value) = 0;
    virtual boost::asio::awaitable<void> erase(family column_family, record_key key) = 0;
-   virtual boost::asio::awaitable<record_page> scan_page(family column_family, record_range range,
+   virtual boost::asio::awaitable<record_page> scan_page(family column_family,
+                                                         record_range range,
                                                          page_request request) = 0;
    virtual boost::asio::awaitable<void> create_savepoint();
    virtual boost::asio::awaitable<void> rollback_to_savepoint();
@@ -72,7 +74,8 @@ class transaction {
    [[nodiscard]] capabilities capabilities() const noexcept;
 
    boost::asio::awaitable<std::optional<std::vector<std::byte>>> get(family column_family, record_key key);
-   boost::asio::awaitable<std::optional<std::vector<std::byte>>> get_for_update(family column_family, record_key key);
+   boost::asio::awaitable<std::optional<std::vector<std::byte>>>
+   get_for_update(family column_family, record_key key);
    boost::asio::awaitable<void> put(family column_family, record_key key, std::vector<std::byte> value);
    boost::asio::awaitable<void> erase(family column_family, record_key key);
    boost::asio::awaitable<record_page> scan_page(family column_family, record_range range, page_request request);
@@ -95,8 +98,8 @@ class transaction {
 
  private:
    boost::asio::awaitable<void> prepare_prewrite_locks();
-   boost::asio::awaitable<void> mutate(family column_family, record_key key,
-                                       std::optional<std::vector<std::byte>> after);
+   boost::asio::awaitable<void>
+   mutate(family column_family, record_key key, std::optional<std::vector<std::byte>> after);
 
    struct impl;
    std::shared_ptr<impl> impl_;
