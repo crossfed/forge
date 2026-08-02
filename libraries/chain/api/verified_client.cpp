@@ -281,7 +281,7 @@ void verified_client::verify_changes(const protocol::state_changes_request& requ
          }
          const auto verified =
              verifier_->verify_state_changes(batch.anchor, proof_range, request.limit, audit.state[proof_index++]);
-         if (verified != result) {
+         if (verified.mutations != result.mutations || verified.next_key != result.next_key) {
             reject("chain API change range does not match its authenticated proof");
          }
          if (result.next_key) {

@@ -352,6 +352,7 @@ if(FORGE_HAS_MDBX)
       test_forge_db_authenticated
       unit/main.cpp
       db_authenticated/db_authenticated_tests.cpp
+      db_authenticated/ranked_range_proof_adversarial_tests.cpp
    )
    target_link_libraries(
       test_forge_db_authenticated
@@ -374,6 +375,51 @@ if(FORGE_HAS_MDBX)
       forge_db_authenticated
       forge_db_mdbx
    )
+
+   option(
+      FORGE_DB_AUTHENTICATED_ENABLE_1M_PERFORMANCE_TEST
+      "Register the provisional authenticated DB 1M-key performance gate"
+      OFF
+   )
+   option(
+      FORGE_DB_AUTHENTICATED_ENABLE_10M_PERFORMANCE_TEST
+      "Register the provisional authenticated DB 10M-key performance gate"
+      OFF
+   )
+   if(FORGE_DB_AUTHENTICATED_ENABLE_1M_PERFORMANCE_TEST)
+      add_test(
+         NAME test_forge_db_authenticated_performance_1m
+         COMMAND
+            $<TARGET_FILE:benchmark_forge_db_authenticated>
+            --baseline 1m
+            --machine-label ${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}-$<CONFIG>
+      )
+      set_tests_properties(
+         test_forge_db_authenticated_performance_1m
+         PROPERTIES
+            LABELS "db_authenticated;performance;provisional"
+            RESOURCE_LOCK forge_db_authenticated_performance
+            RUN_SERIAL TRUE
+            TIMEOUT 5400
+      )
+   endif()
+   if(FORGE_DB_AUTHENTICATED_ENABLE_10M_PERFORMANCE_TEST)
+      add_test(
+         NAME test_forge_db_authenticated_performance_10m
+         COMMAND
+            $<TARGET_FILE:benchmark_forge_db_authenticated>
+            --baseline 10m
+            --machine-label ${CMAKE_SYSTEM_NAME}-${CMAKE_SYSTEM_PROCESSOR}-$<CONFIG>
+      )
+      set_tests_properties(
+         test_forge_db_authenticated_performance_10m
+         PROPERTIES
+            LABELS "db_authenticated;performance;provisional"
+            RESOURCE_LOCK forge_db_authenticated_performance
+            RUN_SERIAL TRUE
+            TIMEOUT 43200
+      )
+   endif()
 
    option(FORGE_DB_AUTHENTICATED_ENABLE_FUZZ_TESTS "Build authenticated proof libFuzzer target" OFF)
    if(FORGE_DB_AUTHENTICATED_ENABLE_FUZZ_TESTS)
@@ -399,6 +445,23 @@ if(FORGE_HAS_MDBX)
       )
    endif()
 endif()
+
+option(FORGE_DB_AUTHENTICATED_ENABLE_GO_VECTOR_TESTS "Run authenticated proof cross-language Go vectors" OFF)
+if(FORGE_DB_AUTHENTICATED_ENABLE_GO_VECTOR_TESTS)
+   find_program(FORGE_GO_EXECUTABLE NAMES go REQUIRED)
+   add_test(
+      NAME test_forge_db_authenticated_go_vectors
+      COMMAND
+         ${CMAKE_COMMAND} -E env GOWORK=off
+         ${FORGE_GO_EXECUTABLE} test -mod=readonly ./...
+      WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/db_authenticated/ics23_harness
+   )
+   set_tests_properties(
+      test_forge_db_authenticated_go_vectors
+      PROPERTIES LABELS "db_authenticated;cross_language"
+   )
+endif()
+
 add_test(NAME test_forge_db_object COMMAND test_forge_db_object WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(

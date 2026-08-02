@@ -957,6 +957,49 @@ BOOST_AUTO_TEST_CASE(verified_changes_cover_the_requested_interval_and_terminal_
                      forge::chain::api::exceptions::invalid_state_proof);
 }
 
+BOOST_AUTO_TEST_CASE(verified_changes_accept_paginated_proof_ranges_without_rewriting_the_requested_range) {
+   auto anchor = forge::chain::protocol::state_anchor{.block_num = 11U};
+   anchor.block._hash[0] = 11U;
+   const auto requested = forge::chain::protocol::key_range{
+       .lower = forge::chain::protocol::bytes{0x10U},
+       .upper = forge::chain::protocol::bytes{0x40U},
+   };
+   const auto continuation = forge::chain::protocol::bytes{0x20U};
+
+   auto response = forge::chain::protocol::state_changes_response{};
+   response.context.anchor = anchor;
+   response.blocks = {{.anchor = anchor, .ranges = {{.range = requested}}}};
+   response.audit = forge::chain::protocol::audit_bundle{};
+   response.audit->finality = forge::chain::protocol::proof_blob{.scheme = "test.finality"};
+   response.audit->state = {forge::chain::protocol::proof_blob{.scheme = "test.changes"}};
+
+   auto services = forge::api::core::registry{};
+   services.install<forge::chain::api::state>(std::make_shared<state_service>(std::move(response)));
+   auto verifier = std::make_shared<accepting_audit_verifier>();
+   auto client = forge::chain::api::verified_client{
+       forge::chain::api::raw_client{forge::chain::api::service_handles{
+           .state_queries = services.get<forge::chain::api::state>(forge::chain::api::state::ref()),
+       }},
+       verifier,
+   };
+
+   const auto result = run(client.get_changes({
+       .from_block = 10U,
+       .to_block = 11U,
+       .ranges = {requested},
+       .cursor =
+           forge::chain::protocol::state_changes_cursor{
+               .block = 11U,
+               .key = continuation,
+           },
+   }));
+
+   BOOST_REQUIRE_EQUAL(result.blocks.size(), 1U);
+   BOOST_REQUIRE_EQUAL(result.blocks.front().ranges.size(), 1U);
+   BOOST_CHECK(result.blocks.front().ranges.front().range == requested);
+   BOOST_TEST(verifier->state_change_verifications == 1U);
+}
+
 BOOST_AUTO_TEST_CASE(content_witness_roundtrips_and_returns_the_authenticated_value) {
    const auto value = forge::chain::protocol::bytes{0x10U, 0x20U, 0x30U};
    const auto other = forge::chain::protocol::bytes{0x40U};

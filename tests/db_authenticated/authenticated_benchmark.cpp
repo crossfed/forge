@@ -41,10 +41,24 @@ constexpr auto mebibyte = std::uint64_t{1} << 20U;
 constexpr auto gibibyte = std::uint64_t{1} << 30U;
 constexpr auto tebibyte = std::uint64_t{1} << 40U;
 
+enum class baseline_profile {
+   custom,
+   one_million,
+   ten_million,
+};
+
+struct provisional_gate_thresholds {
+   double initial_batch_min_keys_per_second = 0.0;
+   double point_proofs_min_per_second = 0.0;
+   double range_proofs_min_per_second = 0.0;
+};
+
 struct options {
-   std::size_t keys = 1'000'000;
+   std::size_t keys = 10'000;
    std::size_t value_bytes = 32;
    std::filesystem::path path;
+   std::string machine_label = "unspecified";
+   baseline_profile baseline = baseline_profile::custom;
 };
 
 struct proof_measurement {
@@ -81,7 +95,8 @@ class temporary_path_guard {
 
 [[noreturn]] void usage_error(std::string_view message) {
    throw std::invalid_argument{std::string{message} + "\nusage: benchmark_forge_db_authenticated "
-                                                      "[--keys N] [--value-bytes N] [--path PATH]"};
+                                                      "[--baseline 1m|10m | --keys N] [--value-bytes N] "
+                                                      "[--machine-label LABEL] [--path PATH]"};
 }
 
 std::uint64_t parse_unsigned(std::string_view option, std::string_view value) {
@@ -110,19 +125,42 @@ std::optional<std::string_view> option_value(int& index, int argc, char** argv, 
 
 options parse_options(int argc, char** argv) {
    auto result = options{};
+   auto has_baseline = false;
+   auto has_explicit_keys = false;
    for (auto index = 1; index < argc; ++index) {
       const auto argument = std::string_view{argv[index]};
       if (argument == "--help") {
          std::cout << "usage: benchmark_forge_db_authenticated "
-                      "[--keys N] [--value-bytes N] [--path PATH]\n";
+                      "[--baseline 1m|10m | --keys N] [--value-bytes N] "
+                      "[--machine-label LABEL] [--path PATH]\n";
          std::exit(0);
       }
+      if (const auto value = option_value(index, argc, argv, "--baseline")) {
+         if (has_baseline) {
+            usage_error("--baseline may only be specified once");
+         }
+         if (*value == "1m") {
+            result.baseline = baseline_profile::one_million;
+            result.keys = 1'000'000;
+         } else if (*value == "10m") {
+            result.baseline = baseline_profile::ten_million;
+            result.keys = 10'000'000;
+         } else {
+            usage_error("--baseline expects 1m or 10m");
+         }
+         has_baseline = true;
+         continue;
+      }
       if (const auto value = option_value(index, argc, argv, "--keys")) {
+         if (has_explicit_keys) {
+            usage_error("--keys may only be specified once");
+         }
          const auto parsed = parse_unsigned("--keys", *value);
          if (parsed == 0U || parsed > std::numeric_limits<std::size_t>::max()) {
             usage_error("--keys is outside the supported size_t range");
          }
          result.keys = static_cast<std::size_t>(parsed);
+         has_explicit_keys = true;
          continue;
       }
       if (const auto value = option_value(index, argc, argv, "--value-bytes")) {
@@ -131,6 +169,13 @@ options parse_options(int argc, char** argv) {
             usage_error("--value-bytes exceeds the authenticated-store limit");
          }
          result.value_bytes = static_cast<std::size_t>(parsed);
+         continue;
+      }
+      if (const auto value = option_value(index, argc, argv, "--machine-label")) {
+         if (value->empty()) {
+            usage_error("--machine-label requires a non-empty value");
+         }
+         result.machine_label = *value;
          continue;
       }
       if (const auto value = option_value(index, argc, argv, "--path")) {
@@ -142,7 +187,38 @@ options parse_options(int argc, char** argv) {
       }
       usage_error(std::string{"unknown option: "} + std::string{argument});
    }
+   if (has_baseline && has_explicit_keys) {
+      usage_error("--baseline and --keys are mutually exclusive");
+   }
    return result;
+}
+
+std::string_view baseline_name(baseline_profile baseline) {
+   switch (baseline) {
+   case baseline_profile::custom:
+      return "custom";
+   case baseline_profile::one_million:
+      return "1m";
+   case baseline_profile::ten_million:
+      return "10m";
+   }
+   throw std::logic_error{"unknown authenticated benchmark baseline"};
+}
+
+std::optional<provisional_gate_thresholds> provisional_thresholds(baseline_profile baseline) {
+   switch (baseline) {
+   case baseline_profile::custom:
+      return std::nullopt;
+   case baseline_profile::one_million:
+   case baseline_profile::ten_million:
+      // These intentionally broad floors detect stalled or grossly regressed runs. They are not product SLOs.
+      return provisional_gate_thresholds{
+          .initial_batch_min_keys_per_second = 250.0,
+          .point_proofs_min_per_second = 2.0,
+          .range_proofs_min_per_second = 0.2,
+      };
+   }
+   throw std::logic_error{"unknown authenticated benchmark baseline"};
 }
 
 bytes make_key(std::uint64_t index) {
@@ -307,10 +383,22 @@ std::string json_escape(std::string_view value) {
    return result;
 }
 
-void print_result(const options& settings, const std::filesystem::path& path, const benchmark_result& result) {
+bool print_result(const options& settings, const std::filesystem::path& path, const benchmark_result& result) {
+   const auto initial_batch_rate = operations_per_second(settings.keys, result.initial_batch);
+   const auto point_proof_rate = operations_per_second(point_proof_count, result.point_proofs.elapsed);
+   const auto range_proof_rate = operations_per_second(range_proof_count, result.range_proofs.elapsed);
+   const auto thresholds = provisional_thresholds(settings.baseline);
+   const auto initial_batch_passed = !thresholds || initial_batch_rate >= thresholds->initial_batch_min_keys_per_second;
+   const auto point_proofs_passed = !thresholds || point_proof_rate >= thresholds->point_proofs_min_per_second;
+   const auto range_proofs_passed = !thresholds || range_proof_rate >= thresholds->range_proofs_min_per_second;
+   const auto gate_passed = initial_batch_passed && point_proofs_passed && range_proofs_passed;
+
    std::cout << std::fixed << std::setprecision(3) << "{\n"
+             << "  \"format\": \"forge.db.authenticated.benchmark.v1\",\n"
              << "  \"benchmark\": \"forge_db_authenticated\",\n"
              << "  \"config\": {\n"
+             << "    \"baseline\": \"" << baseline_name(settings.baseline) << "\",\n"
+             << "    \"machine_label\": \"" << json_escape(settings.machine_label) << "\",\n"
              << "    \"keys\": " << settings.keys << ",\n"
              << "    \"value_bytes\": " << settings.value_bytes << ",\n"
              << "    \"path\": \"" << json_escape(path.string()) << "\",\n"
@@ -330,26 +418,46 @@ void print_result(const options& settings, const std::filesystem::path& path, co
              << "  \"metrics\": {\n"
              << "    \"initial_batch\": {\n"
              << "      \"elapsed_ms\": " << milliseconds(result.initial_batch) << ",\n"
-             << "      \"keys_per_second\": " << operations_per_second(settings.keys, result.initial_batch) << "\n"
+             << "      \"keys_per_second\": " << initial_batch_rate << "\n"
              << "    },\n"
              << "    \"point_proofs\": {\n"
              << "      \"elapsed_ms\": " << milliseconds(result.point_proofs.elapsed) << ",\n"
-             << "      \"proofs_per_second\": " << operations_per_second(point_proof_count, result.point_proofs.elapsed)
-             << ",\n"
+             << "      \"proofs_per_second\": " << point_proof_rate << ",\n"
              << "      \"average_wire_bytes\": "
              << static_cast<double>(result.point_proofs.wire_bytes) / point_proof_count << "\n"
              << "    },\n"
              << "    \"range_proofs\": {\n"
              << "      \"elapsed_ms\": " << milliseconds(result.range_proofs.elapsed) << ",\n"
-             << "      \"proofs_per_second\": " << operations_per_second(range_proof_count, result.range_proofs.elapsed)
-             << ",\n"
+             << "      \"proofs_per_second\": " << range_proof_rate << ",\n"
              << "      \"average_wire_bytes\": "
              << static_cast<double>(result.range_proofs.wire_bytes) / range_proof_count << ",\n"
              << "      \"average_nodes\": " << static_cast<double>(result.range_proofs.nodes) / range_proof_count
              << "\n"
              << "    }\n"
-             << "  }\n"
+             << "  },\n"
+             << "  \"acceptance\": {\n"
+             << "    \"classification\": \"provisional_measurement_gate\",\n"
+             << "    \"latency_slo\": false,\n"
+             << "    \"status\": \"" << (thresholds ? (gate_passed ? "pass" : "fail") : "not_evaluated") << "\",\n";
+   if (thresholds) {
+      std::cout << "    \"thresholds\": {\n"
+                << "      \"initial_batch_min_keys_per_second\": " << thresholds->initial_batch_min_keys_per_second
+                << ",\n"
+                << "      \"point_proofs_min_per_second\": " << thresholds->point_proofs_min_per_second << ",\n"
+                << "      \"range_proofs_min_per_second\": " << thresholds->range_proofs_min_per_second << "\n"
+                << "    },\n"
+                << "    \"checks\": {\n"
+                << "      \"initial_batch\": " << (initial_batch_passed ? "true" : "false") << ",\n"
+                << "      \"point_proofs\": " << (point_proofs_passed ? "true" : "false") << ",\n"
+                << "      \"range_proofs\": " << (range_proofs_passed ? "true" : "false") << "\n"
+                << "    }\n";
+   } else {
+      std::cout << "    \"thresholds\": null,\n"
+                << "    \"checks\": null\n";
+   }
+   std::cout << "  }\n"
              << "}\n";
+   return gate_passed;
 }
 
 } // namespace
@@ -391,8 +499,8 @@ int main(int argc, char** argv) try {
       co_await lane.shutdown();
    }());
 
-   print_result(settings, path, result);
-   return 0;
+   const auto gate_passed = print_result(settings, path, result);
+   return gate_passed ? 0 : 2;
 } catch (const std::exception& error) {
    std::cerr << "benchmark failed: " << error.what() << '\n';
    return 1;
