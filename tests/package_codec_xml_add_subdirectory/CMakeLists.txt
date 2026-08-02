@@ -16,5 +16,14 @@ set(FORGE_ENABLE_VENDOR_TESTS OFF CACHE BOOL "" FORCE)
 
 add_subdirectory("${FORGE_SOURCE_DIR}" forge)
 
+if(NOT TARGET Forge::forge_raw)
+   message(FATAL_ERROR "Forge build-tree package must expose Forge::forge_raw")
+endif()
+
 add_executable(forge_codec_xml_add_subdirectory main.cpp)
-target_link_libraries(forge_codec_xml_add_subdirectory PRIVATE forge_codec_xml)
+target_link_libraries(
+   forge_codec_xml_add_subdirectory
+   PRIVATE
+      forge_codec_xml
+      Forge::forge_raw
+)
