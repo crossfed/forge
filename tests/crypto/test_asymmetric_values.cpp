@@ -1,9 +1,12 @@
 #include <boost/test/unit_test.hpp>
 
+#include <algorithm>
 #include <array>
 #include <compare>
 #include <cstdint>
+#include <ranges>
 #include <variant>
+#include <vector>
 
 import forge.crypto.asymmetric.values;
 import forge.raw.raw;
@@ -55,6 +58,10 @@ BOOST_AUTO_TEST_CASE(canonical_values_order_by_algorithm_then_payload) {
 
    BOOST_CHECK((first_signature <=> second_signature) == std::strong_ordering::less);
    BOOST_CHECK((second_signature <=> r1_signature_value) == std::strong_ordering::less);
+
+   auto keys = std::vector<public_key>{r1, second, first};
+   std::ranges::sort(keys);
+   BOOST_CHECK(keys == (std::vector<public_key>{first, second, r1}));
 }
 
 BOOST_AUTO_TEST_SUITE_END()

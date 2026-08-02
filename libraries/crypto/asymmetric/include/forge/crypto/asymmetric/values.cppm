@@ -228,6 +228,14 @@ struct rsa_signature {
 using public_key = std::variant<k1_public_key, r1_public_key, webauthn_public_key, ed25519_public_key, rsa_public_key>;
 using signature = std::variant<k1_signature, r1_signature, webauthn_signature, ed25519_signature, rsa_signature>;
 
+constexpr void swap(public_key& left, public_key& right) noexcept(noexcept(left.swap(right))) {
+   left.swap(right);
+}
+
+constexpr void swap(signature& left, signature& right) noexcept(noexcept(left.swap(right))) {
+   left.swap(right);
+}
+
 [[nodiscard]] constexpr bool operator==(const public_key& left, const public_key& right) noexcept {
    if (left.index() != right.index()) {
       return false;
