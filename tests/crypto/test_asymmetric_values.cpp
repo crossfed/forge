@@ -1,6 +1,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include <array>
+#include <compare>
 #include <cstdint>
 #include <variant>
 
@@ -26,6 +27,34 @@ BOOST_AUTO_TEST_CASE(binary_values_keep_algorithm_and_raw_contracts) {
 
    BOOST_CHECK(type(key) == algorithm::secp256k1);
    BOOST_CHECK(std::get<k1_public_key>(unpacked).data == data);
+}
+
+BOOST_AUTO_TEST_CASE(canonical_values_order_by_algorithm_then_payload) {
+   using namespace forge::crypto::asymmetric;
+
+   auto first_data = ecc_public_key{};
+   first_data.front() = 2;
+   auto second_data = first_data;
+   second_data.back() = 1;
+
+   const auto first = public_key{k1_public_key{first_data}};
+   const auto second = public_key{k1_public_key{second_data}};
+   const auto r1 = public_key{r1_public_key{first_data}};
+
+   BOOST_CHECK((first <=> second) == std::strong_ordering::less);
+   BOOST_CHECK((second <=> first) == std::strong_ordering::greater);
+   BOOST_CHECK((first <=> first) == std::strong_ordering::equal);
+   BOOST_CHECK((second <=> r1) == std::strong_ordering::less);
+
+   auto first_signature_data = ecc_signature{};
+   auto second_signature_data = first_signature_data;
+   second_signature_data.back() = 1;
+   const auto first_signature = signature{k1_signature{first_signature_data}};
+   const auto second_signature = signature{k1_signature{second_signature_data}};
+   const auto r1_signature_value = signature{r1_signature{first_signature_data}};
+
+   BOOST_CHECK((first_signature <=> second_signature) == std::strong_ordering::less);
+   BOOST_CHECK((second_signature <=> r1_signature_value) == std::strong_ordering::less);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

@@ -236,12 +236,32 @@ using signature = std::variant<k1_signature, r1_signature, webauthn_signature, e
    return std::visit([&right]<typename Value>(const Value& value) { return value == std::get<Value>(right); }, left);
 }
 
+[[nodiscard]] constexpr std::strong_ordering operator<=>(const public_key& left, const public_key& right) noexcept {
+   if (const auto order = left.index() <=> right.index(); order != 0) {
+      return order;
+   }
+
+   return std::visit([&right]<typename Value>(
+                         const Value& value) -> std::strong_ordering { return value <=> std::get<Value>(right); },
+                     left);
+}
+
 [[nodiscard]] constexpr bool operator==(const signature& left, const signature& right) noexcept {
    if (left.index() != right.index()) {
       return false;
    }
 
    return std::visit([&right]<typename Value>(const Value& value) { return value == std::get<Value>(right); }, left);
+}
+
+[[nodiscard]] constexpr std::strong_ordering operator<=>(const signature& left, const signature& right) noexcept {
+   if (const auto order = left.index() <=> right.index(); order != 0) {
+      return order;
+   }
+
+   return std::visit([&right]<typename Value>(
+                         const Value& value) -> std::strong_ordering { return value <=> std::get<Value>(right); },
+                     left);
 }
 
 [[nodiscard]] constexpr algorithm type(const public_key& value) noexcept {
