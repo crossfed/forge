@@ -28,6 +28,7 @@ import forge.chain.core.merkle;
 import forge.chain.protocol.abi;
 import forge.chain.protocol.action;
 import forge.chain.protocol.action_receipt;
+import forge.chain.protocol.admin;
 import forge.chain.protocol.block;
 import forge.chain.protocol.blockchain_parameters;
 import forge.chain.protocol.call_access_mode;
@@ -843,6 +844,35 @@ BOOST_AUTO_TEST_CASE(named_action_payload_owns_name_and_raw_bytes) {
    BOOST_TEST(action.authorization.front().actor.value == permission.actor.value);
    BOOST_TEST(action.authorization.front().permission.value == permission.permission.value);
    BOOST_TEST(action.data == forge::raw::pack(payload));
+}
+
+BOOST_AUTO_TEST_CASE(supported_protocol_features_have_a_typed_variant_contract) {
+   const auto value = protocol::supported_protocol_features_response{
+       .features =
+           {
+               {
+                   .feature_digest =
+                       protocol::digest{"0ec7e080177b2c02b278d5088611686b49d739925a92d9bfcacd7fc6b74053bd"},
+                   .subjective_restrictions =
+                       {
+                           .enabled = true,
+                           .preactivation_required = false,
+                           .earliest_allowed_activation_time = protocol::time_point{},
+                       },
+                   .description_digest =
+                       protocol::digest{"64fe7df32e9b86be2b296b3f81dfd527f84e82b98e363bc97e40bc7a83733310"},
+                   .protocol_feature_type = "builtin",
+                   .specification = {{.name = "builtin_feature_codename", .value = "PREACTIVATE_FEATURE"}},
+               },
+           },
+   };
+
+   auto encoded = forge::variant{};
+   forge::to_variant(value, encoded);
+   auto decoded = protocol::supported_protocol_features_response{};
+   forge::from_variant(encoded, decoded);
+
+   BOOST_CHECK(decoded == value);
 }
 
 BOOST_AUTO_TEST_CASE(forge_secp256k1_is_the_crypto_surface_for_runtime_signatures) {

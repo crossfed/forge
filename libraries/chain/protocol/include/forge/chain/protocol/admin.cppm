@@ -73,8 +73,34 @@ struct supported_protocol_features_request {
    bool operator==(const supported_protocol_features_request&) const = default;
 };
 
+struct protocol_feature_subjective_restrictions {
+   bool enabled = false;
+   bool preactivation_required = false;
+   time_point earliest_allowed_activation_time = time_point{};
+
+   bool operator==(const protocol_feature_subjective_restrictions&) const = default;
+};
+
+struct protocol_feature_specification {
+   std::string name;
+   std::string value;
+
+   bool operator==(const protocol_feature_specification&) const = default;
+};
+
+struct supported_protocol_feature {
+   digest feature_digest;
+   protocol_feature_subjective_restrictions subjective_restrictions = protocol_feature_subjective_restrictions{};
+   digest description_digest;
+   std::vector<digest> dependencies;
+   std::string protocol_feature_type;
+   std::vector<protocol_feature_specification> specification;
+
+   bool operator==(const supported_protocol_feature&) const = default;
+};
+
 struct supported_protocol_features_response {
-   std::vector<forge::variant> features;
+   std::vector<supported_protocol_feature> features;
 
    bool operator==(const supported_protocol_features_response&) const = default;
 };
@@ -218,6 +244,12 @@ BOOST_DESCRIBE_STRUCT(producer_access_policy, (),
                        key_blacklist))
 BOOST_DESCRIBE_STRUCT(producer_status_response, (), (paused, options, greylist, access, scheduled_protocol_features))
 BOOST_DESCRIBE_STRUCT(supported_protocol_features_request, (), (exclude_disabled, exclude_unactivatable))
+BOOST_DESCRIBE_STRUCT(protocol_feature_subjective_restrictions, (),
+                      (enabled, preactivation_required, earliest_allowed_activation_time))
+BOOST_DESCRIBE_STRUCT(protocol_feature_specification, (), (name, value))
+BOOST_DESCRIBE_STRUCT(supported_protocol_feature, (),
+                      (feature_digest, subjective_restrictions, description_digest, dependencies, protocol_feature_type,
+                       specification))
 BOOST_DESCRIBE_STRUCT(supported_protocol_features_response, (), (features))
 BOOST_DESCRIBE_STRUCT(ram_corrections_request, (), (lower_bound, upper_bound, limit, reverse))
 BOOST_DESCRIBE_STRUCT(ram_corrections_response, (), (rows, next))
