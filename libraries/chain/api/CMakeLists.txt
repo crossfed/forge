@@ -4,6 +4,7 @@ add_library(
    authenticated_audit_verifier.cpp
    finality.cpp
    raw_client.cpp
+   submission_client.cpp
    table_key.cpp
    verified_client.cpp
 )

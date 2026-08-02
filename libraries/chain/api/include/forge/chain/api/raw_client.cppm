@@ -4,7 +4,6 @@ module;
 
 export module forge.chain.api.raw_client;
 
-export import forge.chain.api.admin;
 export import forge.chain.api.block;
 export import forge.chain.api.info;
 export import forge.chain.api.state;
@@ -19,7 +18,6 @@ struct service_handles {
    forge::api::core::handle<block> blocks;
    forge::api::core::handle<state> state_queries;
    forge::api::core::handle<transaction> transactions;
-   forge::api::core::handle<admin> administration;
 };
 
 class raw_client {
@@ -31,7 +29,6 @@ class raw_client {
    [[nodiscard]] forge::chain::api::block& blocks() const;
    [[nodiscard]] forge::chain::api::state& state() const;
    [[nodiscard]] forge::chain::api::transaction& transactions() const;
-   [[nodiscard]] forge::chain::api::admin& admin() const;
 
  private:
    service_handles services_;

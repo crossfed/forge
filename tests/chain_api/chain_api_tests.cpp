@@ -42,6 +42,7 @@ import forge.chain.api.info;
 import forge.chain.api.limits;
 import forge.chain.api.raw_client;
 import forge.chain.api.state;
+import forge.chain.api.submission_client;
 import forge.chain.api.table_key;
 import forge.chain.api.transaction;
 import forge.chain.api.verified_client;
@@ -58,7 +59,20 @@ namespace {
 template <typename Client>
 concept exposes_raw_client = requires(Client& client) { client.raw(); };
 
+template <typename Client>
+concept exposes_submission = requires(
+   Client& client,
+   forge::chain::protocol::transaction_submit_request request) {
+   client.submit(std::move(request));
+};
+
+template <typename Client>
+concept exposes_administration = requires(Client& client) { client.admin(); };
+
 static_assert(!exposes_raw_client<forge::chain::api::verified_client>);
+static_assert(!exposes_administration<forge::chain::api::raw_client>);
+static_assert(!exposes_submission<forge::chain::api::verified_client>);
+static_assert(exposes_submission<forge::chain::api::submission_client>);
 
 using forge::api::http::cache_policy;
 using forge::api::http::route;
@@ -1403,7 +1417,7 @@ BOOST_AUTO_TEST_CASE(verified_transaction_status_delegates_the_inclusion_proof) 
    BOOST_TEST(verifier->transaction_verifications == 1U);
 }
 
-BOOST_AUTO_TEST_CASE(verified_submit_binds_server_results_to_local_transaction_ids) {
+BOOST_AUTO_TEST_CASE(submission_client_binds_acknowledgements_to_local_transaction_ids) {
    auto first = forge::chain::protocol::transaction_submit_request{};
    auto first_transaction = forge::chain::protocol::signed_transaction{};
    first_transaction.expiration = forge::chain::protocol::time_point_sec{1U};
@@ -1418,11 +1432,9 @@ BOOST_AUTO_TEST_CASE(verified_submit_binds_server_results_to_local_transaction_i
    const auto make_client = [&](std::vector<forge::chain::protocol::transaction_submit_response> responses) {
       auto services = forge::api::core::registry{};
       services.install<forge::chain::api::transaction>(std::make_shared<transaction_service>(std::move(responses)));
-      return forge::chain::api::verified_client{
-          forge::chain::api::raw_client{forge::chain::api::service_handles{
-              .transactions = services.get<forge::chain::api::transaction>(forge::chain::api::transaction::ref()),
-          }},
-          std::make_shared<accepting_audit_verifier>(),
+      return forge::chain::api::submission_client{
+          services.get<forge::chain::api::transaction>(
+             forge::chain::api::transaction::ref()),
       };
    };
 
@@ -1469,6 +1481,13 @@ BOOST_AUTO_TEST_CASE(verified_submit_binds_server_results_to_local_transaction_i
       BOOST_CHECK_THROW(static_cast<void>(run(client.submit_batch({first, second}))),
                         forge::chain::api::exceptions::invalid_transaction_proof);
    }
+}
+
+BOOST_AUTO_TEST_CASE(submission_client_fails_typed_without_a_transport) {
+   auto client = forge::chain::api::submission_client{{}};
+   BOOST_CHECK_THROW(
+      static_cast<void>(run(client.submit({}))),
+      forge::chain::api::exceptions::unavailable);
 }
 
 BOOST_AUTO_TEST_CASE(verified_transaction_status_rejects_an_unauthenticated_execution_trace) {

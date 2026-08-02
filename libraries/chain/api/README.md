@@ -16,6 +16,14 @@ when they already express the complete request or result.
 `forge.chain.api.json_schema` tells the shared OpenAPI generator that canonical
 protocol public keys and signatures are JSON strings; it owns no routes or DTOs.
 
+`raw_client` groups ordinary info, block, state and transaction handles. It does
+not carry the producer-administration contract; products resolve `admin`
+separately only in trusted operational processes. `submission_client` owns the
+explicit transaction-submission authority and validates only that the remote
+acknowledgement names the submitted transaction. That acknowledgement is not a
+finality claim. Consumers establish inclusion or finality through
+`verified_client::get_transaction_status` or `await_transaction`.
+
 HTTP bindings are resource-oriented rather than RPC-shaped. Safe reads with
 scalar path/query parameters use `GET`; structured proof ranges, simulations
 and mutations use `POST`. Dynamic reads return `Cache-Control: no-store`.

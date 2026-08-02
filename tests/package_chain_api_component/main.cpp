@@ -47,6 +47,7 @@ import forge.chain.api.info;
 import forge.chain.api.limits;
 import forge.chain.api.raw_client;
 import forge.chain.api.state;
+import forge.chain.api.submission_client;
 import forge.chain.api.table_key;
 import forge.chain.api.transaction;
 import forge.chain.api.verified_client;
@@ -897,6 +898,7 @@ int main() {
    static_assert(std::is_abstract_v<forge::chain::api::state>);
    static_assert(std::is_abstract_v<forge::chain::api::transaction>);
    static_assert(std::is_abstract_v<forge::chain::api::admin>);
+   static_assert(!std::is_abstract_v<forge::chain::api::submission_client>);
    static_assert(std::derived_from<forge::chain::api::authenticated_audit_verifier, forge::chain::api::audit_verifier>);
    static_assert(std::is_abstract_v<forge::chain::api::finality_verifier>);
    static_assert(std::is_same_v<decltype(protocol::table_rows_response{}.rows), std::vector<protocol::table_row>>);

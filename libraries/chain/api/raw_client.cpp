@@ -49,8 +49,4 @@ forge::chain::api::transaction& raw_client::transactions() const {
    return require(services_.transactions, "transaction");
 }
 
-forge::chain::api::admin& raw_client::admin() const {
-   return require(services_.administration, "admin");
-}
-
 } // namespace forge::chain::api
