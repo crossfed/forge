@@ -1668,6 +1668,28 @@ BOOST_AUTO_TEST_CASE(authenticated_audit_verifier_verifies_ranked_range_and_chan
    BOOST_REQUIRE(result.next_key.has_value());
    BOOST_CHECK(*result.next_key == protocol_bytes("d"));
 
+   const auto reverse_request = forge::chain::protocol::state_range_request{
+       .range = range,
+       .limit = 2U,
+       .reverse = true,
+   };
+   const auto reverse_proof = authenticated_ranked_proof(ranked, authenticated::range_request{
+                                                                     .lower = authenticated_bytes("b"),
+                                                                     .limit = 2U,
+                                                                     .include_values = true,
+                                                                     .reverse = true,
+                                                                 });
+   const auto reverse_result =
+       ranked_verifier.verify_state_range(authenticated_anchor(ranked.root), reverse_request,
+                                          authenticated_proof_blob("forge.db.authenticated.range", reverse_proof));
+   BOOST_REQUIRE_EQUAL(reverse_result.rows.size(), 2U);
+   BOOST_CHECK(reverse_result.rows[0].key == protocol_bytes("d"));
+   BOOST_CHECK(reverse_result.rows[0].value == protocol_bytes("four"));
+   BOOST_CHECK(reverse_result.rows[1].key == protocol_bytes("c"));
+   BOOST_CHECK(reverse_result.rows[1].value == protocol_bytes("three"));
+   BOOST_REQUIRE(reverse_result.next_key.has_value());
+   BOOST_CHECK(*reverse_result.next_key == protocol_bytes("b"));
+
    const auto changes = make_authenticated_changes_fixture();
    auto changes_verifier = forge::chain::api::authenticated_audit_verifier{
        {

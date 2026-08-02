@@ -40,6 +40,7 @@ struct state_range_request {
    key_range range;
    std::optional<block_id> anchor;
    std::uint32_t limit = 256;
+   bool reverse = false;
    audit_mode audit = audit_mode::none;
 
    bool operator==(const state_range_request&) const = default;
@@ -341,7 +342,7 @@ struct authorizers_response : audited_response {
 
 BOOST_DESCRIBE_STRUCT(key_range, (), (lower, upper))
 BOOST_DESCRIBE_STRUCT(state_point_request, (), (key, anchor, audit))
-BOOST_DESCRIBE_STRUCT(state_range_request, (), (range, anchor, limit, audit))
+BOOST_DESCRIBE_STRUCT(state_range_request, (), (range, anchor, limit, reverse, audit))
 BOOST_DESCRIBE_STRUCT(state_range_item, (), (key, value))
 BOOST_DESCRIBE_STRUCT(state_point_response, (audited_response), (value))
 BOOST_DESCRIBE_STRUCT(state_range_response, (audited_response), (rows, next_key))

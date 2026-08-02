@@ -189,11 +189,17 @@ class range_parser {
          };
       }
 
-      const auto& inner = std::get<range_inner>(encoded);
-      require_key_bound(inner.min_key, settings_, "authenticated expanded branch minimum key exceeds configured limit");
-      require_key_bound(inner.max_key, settings_, "authenticated expanded branch maximum key exceeds configured limit");
-      require_key_bound(inner.separator, settings_, "authenticated expanded branch separator exceeds configured limit");
-      if (inner.height == 0 || inner.size < 2) {
+      const auto* inner = std::get_if<range_inner>(&encoded);
+      if (!inner) {
+         reject("authenticated range proof contains an invalid node alternative");
+      }
+      require_key_bound(inner->min_key, settings_,
+                        "authenticated expanded branch minimum key exceeds configured limit");
+      require_key_bound(inner->max_key, settings_,
+                        "authenticated expanded branch maximum key exceeds configured limit");
+      require_key_bound(inner->separator, settings_,
+                        "authenticated expanded branch separator exceeds configured limit");
+      if (inner->height == 0 || inner->size < 2) {
          reject("authenticated expanded branch metadata is invalid");
       }
       const auto left = parse_node(offset, depth + 1U);
@@ -201,7 +207,8 @@ class range_parser {
          reject("authenticated range rank overflows");
       }
       const auto right = parse_node(offset + left.size, depth + 1U);
-      return combine(domain_, inner.height, inner.size, inner.min_key, inner.max_key, inner.separator, left, right);
+      return combine(domain_, inner->height, inner->size, inner->min_key, inner->max_key, inner->separator, left,
+                     right);
    }
 
    std::string_view domain_;

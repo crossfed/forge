@@ -864,7 +864,11 @@ boost::asio::awaitable<void> tree_engine::emit_range(const digest& current, std:
       if (include_values && offset >= result_begin && offset < result_end) {
          auto loaded = co_await load_value_for_proof(value.value_hash, limits_.max_proof_bytes - wire_bytes);
          const auto added = value_wire_size(loaded.size());
-         std::get<proof_leaf>(output.back()).value = std::move(loaded);
+         auto* appended = std::get_if<proof_leaf>(&output.back());
+         if (!appended) {
+            FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated range proof builder lost its appended leaf");
+         }
+         appended->value = std::move(loaded);
          wire_bytes += added;
       }
       co_return;

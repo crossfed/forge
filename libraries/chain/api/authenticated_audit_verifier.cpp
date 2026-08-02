@@ -68,12 +68,14 @@ forge::db::authenticated::root root(const protocol::state_anchor& value) {
    };
 }
 
-forge::db::authenticated::range_request range_request(const protocol::key_range& range, std::uint32_t limit) {
+forge::db::authenticated::range_request range_request(const protocol::key_range& range, std::uint32_t limit,
+                                                      bool reverse = false) {
    return {
        .lower = db_bytes(range.lower),
        .upper = db_bytes(range.upper),
        .limit = limit,
        .include_values = true,
+       .reverse = reverse,
    };
 }
 
@@ -96,7 +98,11 @@ protocol::digest receipt_transaction_id(const protocol::transaction_receipt& rec
    if (const auto* id = std::get_if<protocol::transaction_id>(&receipt.trx)) {
       return *id;
    }
-   return std::get<protocol::packed_transaction>(receipt.trx).id();
+   if (const auto* transaction = std::get_if<protocol::packed_transaction>(&receipt.trx)) {
+      return transaction->id();
+   }
+   FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof,
+                         "transaction receipt contains no canonical transaction identity");
 }
 
 } // namespace
@@ -153,7 +159,7 @@ authenticated_audit_verifier::verify_state_range(const protocol::state_anchor& a
                                                  const protocol::proof_blob& proof) {
    return translate_state_error([&] {
       const auto decoded = forge::db::authenticated::decode_range(payload(proof, range_scheme), options_.proof_limits);
-      const auto expected = range_request(request.range, request.limit);
+      const auto expected = range_request(request.range, request.limit, request.reverse);
       const auto verified = forge::db::authenticated::verify_range(options_.state_domain, root(anchor), expected,
                                                                    forge::db::authenticated::proof_tree::state, decoded,
                                                                    options_.proof_limits);
