@@ -40,7 +40,7 @@ plugin::plugin() : impl_{std::make_shared<impl>()} {}
 plugin::~plugin() = default;
 
 forge::net::p2p::protocol_id default_protocol() {
-   return forge::net::p2p::protocol_id{.value = "/forge/api/resolver/1"};
+   return forge::net::p2p::protocol_id{.value = "/forge/api/resolver/2"};
 }
 
 forge::app::plugin_id plugin::id() const {
@@ -69,14 +69,16 @@ boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provide
 }
 
 boost::asio::awaitable<void> plugin::initialize(forge::app::plugin_context& context) {
-   impl_->p2p = context.apis().get<forge::plugins::p2p::node::api>(
-      {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0}).operator->();
+   impl_->p2p =
+       context.apis()
+           .get<forge::plugins::p2p::node::api>({.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0})
+           .operator->();
    try {
       impl_->install_protocol();
    } catch (const forge::plugins::p2p::node::exceptions::route_conflict& error) {
       FORGE_THROW_EXCEPTION(exceptions::duplicate_api, "P2P API resolver protocol conflicts with an existing route",
-                          forge::exceptions::ctx("protocol", impl_->protocol.value),
-                          forge::exceptions::ctx("error", error.message()));
+                            forge::exceptions::ctx("protocol", impl_->protocol.value),
+                            forge::exceptions::ctx("error", error.message()));
    }
    impl_->initialized = true;
    impl_->stopping = false;
@@ -102,11 +104,9 @@ boost::asio::awaitable<void> plugin::shutdown() {
 
 forge::app::plugin_descriptor descriptor() {
    return forge::app::plugin_descriptor{
-      .id = forge::app::plugin_id{.value = "forge.plugins.p2p.resolver"},
-      .dependencies = {forge::app::plugin_id{.value = "forge.plugins.p2p.node"}},
-      .factory = [] {
-         return std::make_unique<plugin>();
-      },
+       .id = forge::app::plugin_id{.value = "forge.plugins.p2p.resolver"},
+       .dependencies = {forge::app::plugin_id{.value = "forge.plugins.p2p.node"}},
+       .factory = [] { return std::make_unique<plugin>(); },
    };
 }
 

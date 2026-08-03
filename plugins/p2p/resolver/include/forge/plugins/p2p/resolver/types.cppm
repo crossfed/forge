@@ -30,7 +30,7 @@ import forge.schema.enums;
 export namespace forge::plugins::p2p::resolver {
 
 struct config {
-   std::string protocol_id = "/forge/api/resolver/1";
+   std::string protocol_id = "/forge/api/resolver/2";
    std::uint64_t cache_ttl_ms = 60'000;
    std::uint64_t query_deadline_ms = 5'000;
    std::uint64_t open_deadline_ms = 10'000;
@@ -119,33 +119,33 @@ export template <> struct forge::schema::rules<forge::plugins::p2p::resolver::co
    [[nodiscard]] static forge::schema::object_schema<forge::plugins::p2p::resolver::config> define() {
       auto schema = forge::schema::object<forge::plugins::p2p::resolver::config>();
       schema.field<&forge::plugins::p2p::resolver::config::protocol_id>("protocol-id")
-         .default_value("/forge/api/resolver/1")
-         .description("P2P protocol id used for FORGE API metadata resolution");
+          .default_value("/forge/api/resolver/2")
+          .description("P2P protocol id used for FORGE API metadata resolution");
       schema.field<&forge::plugins::p2p::resolver::config::cache_ttl_ms>("cache-ttl-ms")
-         .default_value(std::uint64_t{60'000})
-         .range(1, 86'400'000);
+          .default_value(std::uint64_t{60'000})
+          .range(1, 86'400'000);
       schema.field<&forge::plugins::p2p::resolver::config::query_deadline_ms>("query-deadline-ms")
-         .default_value(std::uint64_t{5'000})
-         .range(1, 86'400'000);
+          .default_value(std::uint64_t{5'000})
+          .range(1, 86'400'000);
       schema.field<&forge::plugins::p2p::resolver::config::open_deadline_ms>("open-deadline-ms")
-         .default_value(std::uint64_t{10'000})
-         .range(1, 86'400'000);
+          .default_value(std::uint64_t{10'000})
+          .range(1, 86'400'000);
       schema.field<&forge::plugins::p2p::resolver::config::request_deadline_ms>("request-deadline-ms")
-         .default_value(std::uint64_t{0})
-         .range(0, 86'400'000)
-         .description("optional connection-wide request deadline; zero preserves method-owned deadlines");
+          .default_value(std::uint64_t{0})
+          .range(0, 86'400'000)
+          .description("optional connection-wide request deadline; zero preserves method-owned deadlines");
       schema.field<&forge::plugins::p2p::resolver::config::max_cached_peers>("max-cached-peers")
-         .default_value(std::uint64_t{4'096})
-         .range(1, 1'000'000);
+          .default_value(std::uint64_t{4'096})
+          .range(1, 1'000'000);
       schema.field<&forge::plugins::p2p::resolver::config::max_apis_per_peer>("max-apis-per-peer")
-         .default_value(std::uint64_t{1'024})
-         .range(1, 1'000'000);
+          .default_value(std::uint64_t{1'024})
+          .range(1, 1'000'000);
       schema.field<&forge::plugins::p2p::resolver::config::max_methods_per_api>("max-methods-per-api")
-         .default_value(std::uint64_t{256})
-         .range(1, 1'000'000);
+          .default_value(std::uint64_t{256})
+          .range(1, 1'000'000);
       schema.field<&forge::plugins::p2p::resolver::config::max_errors_per_method>("max-errors-per-method")
-         .default_value(std::uint64_t{64})
-         .range(0, 1'000'000);
+          .default_value(std::uint64_t{64})
+          .range(0, 1'000'000);
       return schema;
    }
 };
