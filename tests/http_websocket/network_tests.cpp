@@ -1580,6 +1580,9 @@ class endpoint_api_impl final : public endpoint_api {
    boost::asio::awaitable<endpoint_control_response> current(endpoint_control_request request) override {
       request.response().set("X-Endpoint-Id", request.id);
       request.response().set_cookie("endpoint", request.id);
+      if (request.id == "status-mismatch") {
+         request.response().result(status::accepted);
+      }
       const auto trace = request.request().header("X-Trace").value_or("missing-trace");
       co_return endpoint_control_response{
           .summary = request.id + ":" + std::string{request.request().target()} + ":" + std::string{trace},
@@ -1614,6 +1617,7 @@ class endpoint_api_impl final : public endpoint_api {
 
    boost::asio::awaitable<forge::api::http::empty_response> accepted(endpoint_control_request request) override {
       request.response().set("X-Endpoint-Empty", request.id);
+      request.response().result(status::accepted);
       co_return forge::api::http::empty_response{.status_code = status::accepted};
    }
 
@@ -2872,6 +2876,10 @@ BOOST_AUTO_TEST_CASE(http_endpoint_request_injects_request_and_response_state) {
        runtime, connection.async_request(make_request(method::get, "/endpoint/abc/accepted")));
    BOOST_TEST(accepted.result() == status::accepted);
    BOOST_TEST(accepted["X-Endpoint-Empty"] == "abc");
+
+   auto mismatch = forge::asio::blocking::run(
+       runtime, connection.async_request(make_request(method::get, "/endpoint/status-mismatch")));
+   BOOST_TEST(mismatch.result() == status::internal_server_error);
 
    server.stop();
 }

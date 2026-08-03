@@ -1401,13 +1401,14 @@ class binding_builder {
    [[nodiscard]] static response make_success_response(const request& request_value, status success_status,
                                                        const Response& value, const route_options& options,
                                                        const std::shared_ptr<endpoint_state>& endpoint = {}) {
+      require_endpoint_success_status(success_status, endpoint);
       auto output = response{};
       if constexpr (detail::is_bytes_response_v<Response>) {
-         require_declared_success_status(success_status, value.status_code);
+         require_route_success_status(success_status, value.status_code);
          auto body = std::string{reinterpret_cast<const char*>(value.bytes.data()), value.bytes.size()};
          output = make_text_response(request_value, success_status, std::move(body), value.content_type);
       } else if constexpr (detail::is_empty_response_v<Response>) {
-         require_declared_success_status(success_status, value.status_code);
+         require_route_success_status(success_status, value.status_code);
          output = response{success_status, request_value.version()};
          output.prepare_payload();
          output.keep_alive(request_value.keep_alive());
@@ -1416,21 +1417,24 @@ class binding_builder {
          auto encoded = encode_response_body(value, options.response_body_codec);
          output = make_text_response(request_value, success_status, std::move(encoded),
                                      std::string{detail::content_type(options.response_body_codec)});
-         if (endpoint) {
-            output.result(endpoint_state_access::response(endpoint).result());
-         }
       }
       merge_endpoint_headers(output, endpoint);
       apply_cache_policy(output, options);
       return output;
    }
 
-   static void require_declared_success_status(status declared, status actual) {
+   static void require_route_success_status(status declared, status actual) {
       if (actual != declared) {
          FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error,
-                               "HTTP native response status does not match declared route",
+                               "HTTP response status does not match declared route",
                                forge::exceptions::ctx("declared", static_cast<std::uint16_t>(declared)),
                                forge::exceptions::ctx("actual", static_cast<std::uint16_t>(actual)));
+      }
+   }
+
+   static void require_endpoint_success_status(status declared, const std::shared_ptr<endpoint_state>& endpoint) {
+      if (endpoint) {
+         require_route_success_status(declared, endpoint_state_access::response(endpoint).result());
       }
    }
 
@@ -1439,6 +1443,7 @@ class binding_builder {
    make_success_stream_response(const request& request_value, status success_status, Response value,
                                 const route_options& options, const std::shared_ptr<endpoint_state>& endpoint = {},
                                 const stream_request* stream_request_value = nullptr) {
+      require_endpoint_success_status(success_status, endpoint);
       auto output = stream_response{};
       auto endpoint_headers_merged = false;
       if constexpr (std::is_same_v<std::remove_cvref_t<Response>, file_response>) {
