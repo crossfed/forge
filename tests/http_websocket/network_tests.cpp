@@ -1485,6 +1485,11 @@ class object_api_impl final : public object_api {
    }
 
    boost::asio::awaitable<forge::net::http::file_response> get_object(object_get_request request) override {
+      if (request.key == "body.bin" || request.key == "wrong-status.bin") {
+         auto reply = response{request.key == "body.bin" ? status::ok : status::accepted, 11};
+         reply.set(field::content_type, "application/octet-stream");
+         co_return forge::net::http::file_response::from_body(std::move(reply), make_body_reader({"body-payload"}));
+      }
       co_return forge::net::http::file_response::from_path(
           object_path(request.collection, request.key),
           forge::net::http::file_options{.content_type = "application/octet-stream"});
@@ -2579,10 +2584,14 @@ BOOST_AUTO_TEST_CASE(http_api_openapi_describes_native_http_bodies) {
    BOOST_TEST(file_responses["206"]["content"]["*/*"]["schema"]["format"].as_string() == "binary");
    BOOST_TEST(file_responses.get_object().contains("304"));
    BOOST_TEST(!file_responses["304"].get_object().contains("content"));
+   BOOST_TEST(file_responses.get_object().contains("404"));
+   BOOST_TEST(file_responses["404"]["content"]["text/plain"]["schema"]["type"].as_string() == "string");
    BOOST_TEST(file_responses.get_object().contains("416"));
    BOOST_TEST(!file_responses["416"].get_object().contains("content"));
    BOOST_TEST(
        !objects["paths"]["/objects/{collection}/{key}"]["head"]["responses"]["200"].get_object().contains("content"));
+   BOOST_TEST(
+       !objects["paths"]["/objects/{collection}/{key}"]["head"]["responses"]["404"].get_object().contains("content"));
 
    const auto control = forge::api::http::openapi<control_api>();
    const auto& response =
@@ -3842,6 +3851,20 @@ BOOST_AUTO_TEST_CASE(http_api_native_responses_bypass_xml_codec_options) {
    BOOST_TEST(file[field::content_type] == "application/octet-stream");
    BOOST_TEST(file.body() == "file-payload");
 
+   const auto body_file = forge::asio::blocking::run(runtime, client.async_get("/xml/native/cache/body.bin/file"));
+   BOOST_TEST(body_file.result_int() == static_cast<unsigned>(status::ok));
+   BOOST_TEST(body_file.body() == "body-payload");
+
+   const auto mismatched_body =
+       forge::asio::blocking::run(runtime, client.async_get("/xml/native/cache/wrong-status.bin/file"));
+   BOOST_TEST(mismatched_body.result_int() == static_cast<unsigned>(status::internal_server_error));
+
+   const auto missing_file =
+       forge::asio::blocking::run(runtime, client.async_get("/xml/native/cache/missing.bin/file"));
+   BOOST_TEST(missing_file.result_int() == static_cast<unsigned>(status::not_found));
+   BOOST_TEST(missing_file[field::content_type].starts_with("text/plain"));
+   BOOST_TEST(missing_file.body() == "not found");
+
    const auto stream = forge::asio::blocking::run(runtime, client.async_get("/xml/native/cache/chunk.bin/stream"));
    BOOST_TEST(stream.result_int() == static_cast<unsigned>(status::ok));
    BOOST_TEST(stream[field::content_type] == "application/octet-stream");
@@ -4037,6 +4060,37 @@ BOOST_AUTO_TEST_CASE(http_api_special_types_support_streaming_put_and_file_get) 
    BOOST_TEST(head_response.body().empty());
    BOOST_TEST(head_response[field::content_length] == std::to_string(96U * 1024U));
    BOOST_TEST(head_response[field::accept_ranges] == "bytes");
+
+   auto ranged_request = make_request(method::get, "/objects/cache/chunk.bin");
+   ranged_request.set(field::range, "bytes=2-5");
+   const auto ranged_response =
+       forge::asio::blocking::run(runtime, connection.async_request(std::move(ranged_request)));
+   BOOST_TEST(ranged_response.result_int() == static_cast<unsigned>(status::partial_content));
+   BOOST_TEST(ranged_response.body() == payload.substr(2, 4));
+
+   auto invalid_range = make_request(method::get, "/objects/cache/chunk.bin");
+   invalid_range.set(field::range, "bytes=999999-1000000");
+   const auto invalid_range_response =
+       forge::asio::blocking::run(runtime, connection.async_request(std::move(invalid_range)));
+   BOOST_TEST(invalid_range_response.result_int() == static_cast<unsigned>(status::range_not_satisfiable));
+   BOOST_TEST(invalid_range_response.body().empty());
+
+   const auto etag_response = forge::asio::blocking::run(
+       runtime, connection.async_request(make_request(method::get, "/objects/cache/chunk.bin")));
+   auto conditional = make_request(method::get, "/objects/cache/chunk.bin");
+   conditional.set(field::if_none_match, etag_response[field::etag]);
+   const auto not_modified = forge::asio::blocking::run(runtime, connection.async_request(std::move(conditional)));
+   BOOST_TEST(not_modified.result_int() == static_cast<unsigned>(status::not_modified));
+   BOOST_TEST(not_modified.body().empty());
+
+   const auto missing_head = forge::asio::blocking::run(
+       runtime, connection.async_request(make_request(method::head, "/objects/cache/missing.bin")));
+   BOOST_TEST(missing_head.result_int() == static_cast<unsigned>(status::not_found));
+   BOOST_TEST(missing_head.body().empty());
+   const auto after_missing_head = forge::asio::blocking::run(
+       runtime, connection.async_request(make_request(method::get, "/objects/cache/chunk.bin")));
+   BOOST_TEST(after_missing_head.result_int() == static_cast<unsigned>(status::ok));
+   BOOST_TEST(after_missing_head.body() == payload);
 
    server.stop();
 }
@@ -4297,6 +4351,19 @@ BOOST_AUTO_TEST_CASE(http_api_response_file_option_rejects_non_file_responses) {
                       .use(forge::api::core::binding().serve(apis).build())
                       .get<&api_cache::read, api_read_chunk, api_chunk>(
                           "/cache/chunks/:ref", forge::api::http::route_options{.response_file = true})
+                      .build();
+
+   BOOST_CHECK_THROW(router.mount(binding), forge::net::http::exceptions::bad_request);
+}
+
+BOOST_AUTO_TEST_CASE(http_api_response_file_option_rejects_non_ok_routes) {
+   auto apis = forge::api::core::registry{};
+   auto router = forge::net::http::router{};
+   auto binding = forge::api::http::binding()
+                      .use(forge::api::core::binding().serve(apis).build())
+                      .get<&test_api::file_only_api::download, object_get_request, forge::net::http::file_response>(
+                          "/objects/:collection/:key",
+                          forge::api::http::route_options{.response_file = true, .success_status = status::accepted})
                       .build();
 
    BOOST_CHECK_THROW(router.mount(binding), forge::net::http::exceptions::bad_request);

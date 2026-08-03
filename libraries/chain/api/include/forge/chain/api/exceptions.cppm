@@ -2,12 +2,14 @@ module;
 
 #include <cstdint>
 #include <forge/exceptions/macros.hpp>
+#include <type_traits>
 
 export module forge.chain.api.exceptions;
 
 import forge.api.core.descriptor;
 
 export import forge.exceptions;
+export import forge.chain.protocol.audit;
 
 export namespace forge::chain::api::exceptions {
 
@@ -56,7 +58,10 @@ template <typename Builder> void declare_common(Builder& method) {
        "resource_exhausted", {.status_code = forge::api::core::status::resource_exhausted, .retryable = false});
 }
 
-template <typename Builder> void declare_audited_query(Builder& method) {
+template <auto Method, typename Builder> void declare_audited_query(Builder& method) {
+   using response_type = forge::api::core::method_response_t<Method>;
+   static_assert(std::is_base_of_v<forge::chain::protocol::audited_response, response_type>);
+   method.template response_trait<forge::chain::protocol::audited_response>();
    declare_common(method);
    method.template error<audit_not_supported>(
        "audit_not_supported", {.status_code = forge::api::core::status::failed_precondition, .retryable = false});
@@ -64,8 +69,8 @@ template <typename Builder> void declare_audited_query(Builder& method) {
                                              {.status_code = forge::api::core::status::not_found, .retryable = false});
 }
 
-template <typename Builder> void declare_historical_query(Builder& method) {
-   declare_audited_query(method);
+template <auto Method, typename Builder> void declare_historical_query(Builder& method) {
+   declare_audited_query<Method>(method);
    method.template error<history_lost>(
        "history_lost", {.status_code = forge::api::core::status::failed_precondition, .retryable = false});
 }

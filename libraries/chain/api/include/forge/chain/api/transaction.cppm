@@ -57,9 +57,14 @@ export namespace forge::api::core {
 template <> struct method_descriptor_customization<::forge::chain::api::transaction> {
    template <auto Method, bool EnableRaw>
    static void apply(method_builder<::forge::chain::api::transaction, EnableRaw>& method) {
-      ::forge::chain::api::exceptions::descriptor::declare_historical_query(method);
-      if constexpr (std::is_same_v<method_request_t<Method>, ::forge::chain::protocol::transaction_await_request>) {
-         ::forge::chain::api::exceptions::descriptor::declare_deadline(method);
+      using response_type = method_response_t<Method>;
+      if constexpr (std::is_base_of_v<::forge::chain::protocol::audited_response, response_type>) {
+         ::forge::chain::api::exceptions::descriptor::declare_historical_query<Method>(method);
+         if constexpr (std::is_same_v<method_request_t<Method>, ::forge::chain::protocol::transaction_await_request>) {
+            ::forge::chain::api::exceptions::descriptor::declare_deadline(method);
+         }
+      } else {
+         ::forge::chain::api::exceptions::descriptor::declare_common(method);
       }
    }
 };

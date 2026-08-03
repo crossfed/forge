@@ -1438,6 +1438,21 @@ class binding_builder {
       }
    }
 
+   static void require_file_response_status(status declared, status actual, bool path_backed) {
+      if (!path_backed) {
+         require_route_success_status(declared, actual);
+         return;
+      }
+
+      require_route_success_status(declared, status::ok);
+      if (actual != status::ok && actual != status::partial_content && actual != status::not_modified &&
+          actual != status::not_found && actual != status::range_not_satisfiable) {
+         FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error,
+                               "HTTP path-backed file response produced an unsupported status",
+                               forge::exceptions::ctx("actual", static_cast<std::uint16_t>(actual)));
+      }
+   }
+
    template <typename Response>
    static boost::asio::awaitable<stream_response>
    make_success_stream_response(const request& request_value, status success_status, Response value,
@@ -1447,7 +1462,9 @@ class binding_builder {
       auto output = stream_response{};
       auto endpoint_headers_merged = false;
       if constexpr (std::is_same_v<std::remove_cvref_t<Response>, file_response>) {
+         const auto path_backed = value.path_backed();
          output = co_await std::move(value).materialize(request_value);
+         require_file_response_status(success_status, output.head.result(), path_backed);
       } else if constexpr (detail::is_streaming_response_v<Response>) {
          output = stream_request_value != nullptr ? std::move(value).materialize(*stream_request_value, success_status)
                                                   : std::move(value).materialize(request_value, success_status);
@@ -1541,6 +1558,10 @@ class binding_builder {
          if (!options.response_file) {
             FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
                                   "HTTP API file response route requires FORGE_HTTP_RESPONSE_FILE");
+         }
+         if (options.success_status != status::ok) {
+            FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request,
+                                  "HTTP API file response route requires a 200 success status");
          }
       } else {
          if (options.response_file) {

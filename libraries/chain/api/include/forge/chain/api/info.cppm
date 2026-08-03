@@ -43,8 +43,7 @@ export namespace forge::api::core {
 template <> struct method_descriptor_customization<::forge::chain::api::info> {
    template <auto Method, bool EnableRaw>
    static void apply(method_builder<::forge::chain::api::info, EnableRaw>& method) {
-      static_cast<void>(Method);
-      ::forge::chain::api::exceptions::descriptor::declare_audited_query(method);
+      ::forge::chain::api::exceptions::descriptor::declare_audited_query<Method>(method);
    }
 };
 

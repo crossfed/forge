@@ -82,11 +82,6 @@ protocol::audited_response unpack_audited_prefix(const forge::api::core::bytes& 
    }
 }
 
-bool audited_api(std::string_view api) {
-   return api == "forge.chain.api.info" || api == "forge.chain.api.block" || api == "forge.chain.api.state" ||
-          api == "forge.chain.api.transaction";
-}
-
 std::optional<std::uint32_t> require_method_request(std::string_view api, std::string_view method,
                                                     const forge::api::core::bytes& payload,
                                                     const protocol::service_limits& limits) {
@@ -153,7 +148,8 @@ std::optional<std::uint32_t> require_method_request(std::string_view api, std::s
    return std::nullopt;
 }
 
-void require_method_response(std::string_view api, std::string_view method, const forge::api::core::bytes& payload,
+void require_method_response(std::string_view api, std::string_view method, bool audited_response,
+                             const forge::api::core::bytes& payload,
                              const std::optional<std::uint32_t>& requested_items,
                              const protocol::service_limits& limits) {
    if (payload.size() > limits.max_response_bytes) {
@@ -161,7 +157,7 @@ void require_method_response(std::string_view api, std::string_view method, cons
                             forge::exceptions::ctx("bytes", payload.size()),
                             forge::exceptions::ctx("limit", limits.max_response_bytes));
    }
-   if (audited_api(api)) {
+   if (audited_response) {
       require_response_within_limits(unpack_audited_prefix(payload), limits);
    }
    if (!requested_items) {
@@ -393,12 +389,14 @@ forge::api::core::descriptor with_service_limits(forge::api::core::descriptor va
    const auto api = value.id.value;
    for (auto& method : value.methods) {
       auto name = method.name;
+      const auto audited_response = method.has_response_trait<protocol::audited_response>();
       method.request_validator = [api, name, limits](const forge::api::core::bytes& payload) {
          static_cast<void>(require_method_request(api, name, payload, limits));
       };
-      method.response_validator = [api, name, limits](const forge::api::core::bytes& request,
-                                                      const forge::api::core::bytes& response) {
-         require_method_response(api, name, response, require_method_request(api, name, request, limits), limits);
+      method.response_validator = [api, name, audited_response, limits](const forge::api::core::bytes& request,
+                                                                        const forge::api::core::bytes& response) {
+         require_method_response(api, name, audited_response, response,
+                                 require_method_request(api, name, request, limits), limits);
       };
    }
    return value;

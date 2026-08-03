@@ -1081,6 +1081,23 @@ BOOST_AUTO_TEST_CASE(chain_api_limited_descriptor_enforces_owner_request_and_res
                      forge::chain::api::exceptions::resource_exhausted);
 }
 
+BOOST_AUTO_TEST_CASE(chain_api_limited_descriptor_only_decodes_audited_response_types) {
+   const auto descriptor = forge::chain::api::limited_descriptor<forge::chain::api::transaction>({});
+   const auto* required_keys = forge::api::core::find_method(descriptor, "get_required_keys");
+   const auto* status = forge::api::core::find_method(descriptor, "get_status");
+   BOOST_REQUIRE(required_keys != nullptr);
+   BOOST_REQUIRE(status != nullptr);
+   BOOST_TEST(!required_keys->has_response_trait<forge::chain::protocol::audited_response>());
+   BOOST_TEST(status->has_response_trait<forge::chain::protocol::audited_response>());
+
+   const auto plain_response = forge::raw::pack(std::vector<forge::chain::protocol::public_key>{});
+   BOOST_CHECK_NO_THROW(required_keys->response_validator(
+       forge::raw::pack(forge::chain::protocol::transaction_required_keys_request{}), plain_response));
+   BOOST_CHECK_THROW(status->response_validator(forge::raw::pack(forge::chain::protocol::transaction_status_request{}),
+                                                plain_response),
+                     forge::chain::api::exceptions::unavailable);
+}
+
 BOOST_AUTO_TEST_CASE(chain_openapi_covers_every_owner_contract_route_and_schema) {
    const auto owners = std::array{
        owner_openapi_contract{"info", &owner_routes<forge::chain::api::info>, &owner_openapi<forge::chain::api::info>,

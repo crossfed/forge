@@ -131,6 +131,10 @@ struct target_description {
    return forge::variant{forge::mutable_variant_object{}("type", "string")("format", "binary")};
 }
 
+[[nodiscard]] forge::variant string_schema() {
+   return forge::variant{forge::mutable_variant_object{}("type", "string")};
+}
+
 struct request_body_description {
    bool present = false;
    bool required = false;
@@ -445,6 +449,11 @@ struct request_body_description {
       responses.set(status_name(forge::net::http::status::partial_content), forge::variant{std::move(partial)});
       responses.set(status_name(forge::net::http::status::not_modified),
                     forge::variant{forge::mutable_variant_object{}("description", "File not modified")});
+      auto missing = forge::mutable_variant_object{}("description", "File not found");
+      if (operation.mapping.verb != forge::net::http::method::head) {
+         missing("content", media_schema(string_schema(), "text/plain"));
+      }
+      responses.set(status_name(forge::net::http::status::not_found), forge::variant{std::move(missing)});
       responses.set(status_name(forge::net::http::status::range_not_satisfiable),
                     forge::variant{forge::mutable_variant_object{}("description", "File range not satisfiable")});
    }

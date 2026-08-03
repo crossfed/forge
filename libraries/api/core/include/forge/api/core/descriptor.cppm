@@ -150,6 +150,7 @@ struct method_descriptor {
    std::string deprecation_reason;
    std::type_index request_type = typeid(void);
    std::type_index response_type = typeid(void);
+   std::vector<std::type_index> response_traits;
    std::vector<std::string> argument_names;
    std::vector<error_descriptor> errors;
    std::function<bytes(const void*)> request_encoder;
@@ -161,6 +162,15 @@ struct method_descriptor {
    std::function<boost::asio::awaitable<bytes>(std::shared_ptr<void>, std::vector<bytes>)> raw_client_stream_invoker;
    std::function<boost::asio::awaitable<std::vector<bytes>>(std::shared_ptr<void>, std::vector<bytes>)>
        raw_bidirectional_stream_invoker;
+
+   template <typename Trait> [[nodiscard]] bool has_response_trait() const noexcept {
+      for (const auto& value : response_traits) {
+         if (value == typeid(Trait)) {
+            return true;
+         }
+      }
+      return false;
+   }
 };
 
 struct descriptor {
@@ -439,6 +449,13 @@ template <typename Interface, bool EnableRaw> class method_builder {
    method_builder& deprecated(std::string reason) {
       method_->deprecated = true;
       method_->deprecation_reason = std::move(reason);
+      return *this;
+   }
+
+   template <typename Trait> method_builder& response_trait() {
+      if (!method_->template has_response_trait<Trait>()) {
+         method_->response_traits.emplace_back(typeid(Trait));
+      }
       return *this;
    }
 

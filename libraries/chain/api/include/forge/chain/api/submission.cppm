@@ -50,7 +50,8 @@ export namespace forge::api::core {
 template <> struct method_descriptor_customization<::forge::chain::api::submission> {
    template <auto Method, bool EnableRaw>
    static void apply(method_builder<::forge::chain::api::submission, EnableRaw>& method) {
-      ::forge::chain::api::exceptions::descriptor::declare_historical_query(method);
+      static_cast<void>(Method);
+      ::forge::chain::api::exceptions::descriptor::declare_common(method);
       ::forge::chain::api::exceptions::descriptor::declare_mutation(method);
    }
 };
