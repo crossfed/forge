@@ -3,6 +3,7 @@ module;
 #include <algorithm>
 #include <cctype>
 #include <cstdint>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -126,10 +127,15 @@ struct target_description {
    return forge::variant{std::move(content)};
 }
 
+[[nodiscard]] forge::variant binary_schema() {
+   return forge::variant{forge::mutable_variant_object{}("type", "string")("format", "binary")};
+}
+
 struct request_body_description {
    bool present = false;
    bool required = false;
    forge::variant schema;
+   std::string content_type;
 };
 
 [[nodiscard]] bool mapped_request_field(const target_description& target, const route& mapping,
@@ -189,13 +195,84 @@ struct request_body_description {
    return output;
 }
 
+[[nodiscard]] std::string mapped_name(const std::vector<field_binding>& bindings, std::string_view field) {
+   const auto found = std::ranges::find(bindings, field, &field_binding::field);
+   return found == bindings.end() ? std::string{field} : found->name;
+}
+
+[[nodiscard]] request_body_description multipart_request_body(const openapi_operation& operation,
+                                                              const std::vector<openapi_field>& fields) {
+   auto properties = forge::mutable_variant_object{};
+   auto required = forge::variants{};
+   for (const auto& field : fields) {
+      if (field.source != openapi_field_source::form && field.source != openapi_field_source::upload) {
+         continue;
+      }
+      auto name = mapped_name(operation.mapping.forms, field.name);
+      if (properties.find(name) != properties.end()) {
+         throw forge::api::core::exceptions::protocol_error{"OpenAPI multipart field name is ambiguous"};
+      }
+      properties.set(name, field.source == openapi_field_source::upload ? binary_schema() : field.schema);
+      if (field.required) {
+         required.emplace_back(std::move(name));
+      }
+   }
+   if (properties.size() == 0U) {
+      throw forge::api::core::exceptions::protocol_error{"OpenAPI multipart request has no form fields"};
+   }
+   auto schema = forge::mutable_variant_object{}("type", "object")("properties", std::move(properties))(
+       "additionalProperties", false);
+   if (!required.empty()) {
+      schema("required", std::move(required));
+   }
+   return {.present = true,
+           .required = true,
+           .schema = forge::variant{std::move(schema)},
+           .content_type = "multipart/form-data"};
+}
+
 [[nodiscard]] request_body_description describe_request_body(const openapi_operation& operation,
                                                              const target_description& target,
                                                              const forge::api::core::method_descriptor* method,
                                                              const std::vector<openapi_field>& fields) {
-   if (!uses_request_body(operation.mapping.verb) || operation.mapping.body_stream_field.has_value() ||
-       !operation.mapping.forms.empty()) {
+   if (!uses_request_body(operation.mapping.verb)) {
       return {};
+   }
+   const auto has_multipart =
+       !operation.mapping.forms.empty() || std::ranges::any_of(fields, [](const openapi_field& field) {
+          return field.source == openapi_field_source::form || field.source == openapi_field_source::upload;
+       });
+   const auto has_raw =
+       operation.mapping.body_stream_field.has_value() || std::ranges::any_of(fields, [](const openapi_field& field) {
+          return field.source == openapi_field_source::body_stream || field.source == openapi_field_source::body_bytes;
+       });
+   const auto has_typed_body = std::ranges::any_of(
+       fields, [](const openapi_field& field) { return field.source == openapi_field_source::body; });
+   if (static_cast<unsigned>(has_multipart) + static_cast<unsigned>(has_raw) + static_cast<unsigned>(has_typed_body) >
+       1U) {
+      throw forge::api::core::exceptions::protocol_error{"OpenAPI request mixes incompatible body sources"};
+   }
+   if (has_multipart) {
+      return multipart_request_body(operation, fields);
+   }
+   const auto raw = std::ranges::find_if(fields, [](const openapi_field& field) {
+      return field.source == openapi_field_source::body_stream || field.source == openapi_field_source::body_bytes;
+   });
+   if (has_raw) {
+      if (raw == fields.end()) {
+         throw forge::api::core::exceptions::protocol_error{"OpenAPI raw request body field is missing"};
+      }
+      const auto another = std::ranges::find_if(std::next(raw), fields.end(), [](const openapi_field& field) {
+         return field.source == openapi_field_source::body_stream || field.source == openapi_field_source::body_bytes;
+      });
+      if (another != fields.end()) {
+         throw forge::api::core::exceptions::protocol_error{"OpenAPI request has multiple raw body fields"};
+      }
+      if (operation.mapping.body_stream_field.has_value() &&
+          (raw->source != openapi_field_source::body_stream || raw->name != *operation.mapping.body_stream_field)) {
+         throw forge::api::core::exceptions::protocol_error{"OpenAPI body stream field does not match the route"};
+      }
+      return {.present = true, .required = true, .schema = binary_schema(), .content_type = "*/*"};
    }
    if (fields.empty()) {
       if (empty_object_schema(operation.request_schema)) {
@@ -213,30 +290,37 @@ struct request_body_description {
             return {};
          }
       }
-      return {.present = true, .required = true, .schema = operation.request_schema};
+      return {.present = true,
+              .required = true,
+              .schema = operation.request_schema,
+              .content_type = std::string{content_type(operation.mapping.request_body_codec)}};
    }
 
-   auto result = request_body_description{};
+   auto candidates = std::vector<const openapi_field*>{};
    for (const auto& field : fields) {
       if (!mapped_request_field(target, operation.mapping, field)) {
-         if (operation.positional_request) {
-            if (result.present) {
-               throw forge::api::core::exceptions::protocol_error{
-                   "OpenAPI positional request has multiple body candidates"};
-            }
-            result.schema = field.schema;
-         } else if (field.source == openapi_field_source::body) {
-            if (result.present) {
-               throw forge::api::core::exceptions::protocol_error{"OpenAPI request has multiple body candidates"};
-            }
-            result.schema = field.schema;
-         } else if (!result.present) {
-            result.schema = operation.request_schema;
-         }
-         result.present = true;
-         result.required = result.required || field.required;
+         candidates.push_back(&field);
       }
    }
+   if (candidates.empty()) {
+      return {};
+   }
+   if (operation.positional_request && candidates.size() > 1U) {
+      throw forge::api::core::exceptions::protocol_error{"OpenAPI positional request has multiple body candidates"};
+   }
+   const auto explicit_body = std::ranges::find_if(
+       candidates, [](const openapi_field* field) { return field->source == openapi_field_source::body; });
+   if (explicit_body != candidates.end() && candidates.size() > 1U) {
+      throw forge::api::core::exceptions::protocol_error{"OpenAPI request has multiple body candidates"};
+   }
+   const auto schema = operation.positional_request || explicit_body != candidates.end() ? candidates.front()->schema
+                                                                                         : operation.request_schema;
+   const auto required = std::ranges::any_of(candidates, &openapi_field::required);
+   auto result =
+       request_body_description{.present = true,
+                                .required = required,
+                                .schema = schema,
+                                .content_type = std::string{content_type(operation.mapping.request_body_codec)}};
    return result;
 }
 
@@ -339,13 +423,16 @@ struct request_body_description {
 
    const auto request_body = describe_request_body(operation, target, method, request_fields);
    if (request_body.present) {
-      value("requestBody",
-            forge::mutable_variant_object{}("required", request_body.required)(
-                "content", media_schema(request_body.schema, content_type(operation.mapping.request_body_codec))));
+      value("requestBody", forge::mutable_variant_object{}("required", request_body.required)(
+                               "content", media_schema(request_body.schema, request_body.content_type)));
    }
 
    auto response = forge::mutable_variant_object{}("description", "Successful response");
-   if (operation.response_has_content && !operation.mapping.response_file && !operation.mapping.response_stream) {
+   if (operation.mapping.verb != forge::net::http::method::head &&
+       operation.response_body == openapi_response_body::binary) {
+      response("content", media_schema(binary_schema(), "*/*"));
+   } else if (operation.mapping.verb != forge::net::http::method::head &&
+              operation.response_body == openapi_response_body::codec) {
       response("content", media_schema(operation.response_schema, content_type(operation.mapping.response_body_codec)));
    }
    auto responses = forge::mutable_variant_object{};

@@ -60,13 +60,19 @@ struct openapi_field {
    openapi_field_source source = openapi_field_source::value;
 };
 
+enum class openapi_response_body {
+   codec,
+   binary,
+   none,
+};
+
 struct openapi_operation {
    route mapping;
    forge::variant request_schema;
    forge::variant response_schema;
    std::vector<openapi_field> request_fields;
    bool positional_request = false;
-   bool response_has_content = true;
+   openapi_response_body response_body = openapi_response_body::codec;
 };
 
 template <typename T> struct json_schema_traits;
@@ -334,12 +340,21 @@ template <auto Method, typename Request, typename Response>
    static_assert(std::same_as<clean_type<Request>, clean_type<forge::api::core::method_request_t<Method>>>);
    static_assert(std::same_as<clean_type<Response>, clean_type<forge::api::core::method_response_t<Method>>>);
    constexpr auto positional = is_positional_http_method_v<Method, Request>;
+   constexpr auto response_body = [] {
+      if constexpr (is_empty_response_v<Response>) {
+         return openapi_response_body::none;
+      } else if constexpr (is_bytes_response_v<Response> || response_needs_stream_v<Response>) {
+         return openapi_response_body::binary;
+      } else {
+         return openapi_response_body::codec;
+      }
+   }();
    return openapi_operation{.mapping = std::move(mapping),
                             .request_schema = make_json_schema<Request>(),
                             .response_schema = make_json_schema<Response>(),
                             .request_fields = positional ? positional_fields<Method>() : request_fields<Request>(),
                             .positional_request = positional,
-                            .response_has_content = !is_empty_response_v<Response>};
+                            .response_body = response_body};
 }
 
 [[nodiscard]] forge::variant build_openapi_document(const forge::api::core::descriptor& api,

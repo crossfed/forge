@@ -2520,6 +2520,8 @@ BOOST_AUTO_TEST_CASE(http_api_openapi_rejects_positional_wrappers) {
                      forge::api::core::exceptions::protocol_error);
    BOOST_CHECK_THROW(static_cast<void>(forge::api::http::openapi<positional_body_api>()),
                      forge::api::core::exceptions::protocol_error);
+   BOOST_CHECK_THROW(static_cast<void>(forge::api::http::openapi<dto_ambiguous_body_api>()),
+                     forge::api::core::exceptions::protocol_error);
 }
 
 BOOST_AUTO_TEST_CASE(http_api_openapi_preserves_custom_open_object_body) {
@@ -2545,6 +2547,34 @@ BOOST_AUTO_TEST_CASE(http_api_openapi_uses_configured_body_codecs) {
    const auto& read = document["paths"]["/xml/cache/chunks/{ref}"]["get"];
    BOOST_TEST(read["responses"]["200"]["content"].get_object().contains("application/xml"));
    BOOST_TEST(read["responses"]["default"]["content"].get_object().contains("application/xml"));
+}
+
+BOOST_AUTO_TEST_CASE(http_api_openapi_describes_native_http_bodies) {
+   const auto dto = forge::api::http::openapi<dto_api_http>();
+   const auto& bytes = dto["paths"]["/dto-bytes/{ref}"]["put"]["requestBody"]["content"]["*/*"]["schema"];
+   BOOST_TEST(bytes["type"].as_string() == "string");
+   BOOST_TEST(bytes["format"].as_string() == "binary");
+
+   const auto& multipart =
+       dto["paths"]["/dto-upload"]["post"]["requestBody"]["content"]["multipart/form-data"]["schema"];
+   BOOST_TEST(multipart["properties"]["category"]["type"].as_string() == "string");
+   BOOST_TEST(multipart["properties"]["count"]["type"].as_string() == "integer");
+   BOOST_TEST(multipart["properties"]["file"]["format"].as_string() == "binary");
+
+   const auto objects = forge::api::http::openapi<object_api>();
+   const auto& stream =
+       objects["paths"]["/objects/{collection}/{key}"]["put"]["requestBody"]["content"]["*/*"]["schema"];
+   BOOST_TEST(stream["format"].as_string() == "binary");
+   BOOST_TEST(
+       objects["paths"]["/objects/{collection}/{key}"]["get"]["responses"]["200"]["content"]["*/*"]["schema"]["format"]
+           .as_string() == "binary");
+   BOOST_TEST(
+       !objects["paths"]["/objects/{collection}/{key}"]["head"]["responses"]["200"].get_object().contains("content"));
+
+   const auto control = forge::api::http::openapi<control_api>();
+   const auto& response =
+       control["paths"]["/controls/{id}/bytes"]["get"]["responses"]["200"]["content"]["*/*"]["schema"];
+   BOOST_TEST(response["format"].as_string() == "binary");
 }
 
 BOOST_AUTO_TEST_CASE(http_api_macro_get_maps_route_and_query) {
