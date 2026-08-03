@@ -19,6 +19,10 @@ add_subdirectory("${FORGE_SOURCE_DIR}" forge)
 if(NOT TARGET Forge::forge_raw)
    message(FATAL_ERROR "Forge build-tree package must expose Forge::forge_raw")
 endif()
+get_target_property(forge_raw_alias Forge::forge_raw ALIASED_TARGET)
+if(NOT "${forge_raw_alias}" STREQUAL "forge_raw")
+   message(FATAL_ERROR "Forge::forge_raw must alias the build-tree forge_raw target")
+endif()
 
 add_executable(forge_codec_xml_add_subdirectory main.cpp)
 target_link_libraries(
