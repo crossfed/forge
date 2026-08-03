@@ -442,12 +442,6 @@ void require_request_within_limits(const protocol::transaction_submit_batch_requ
    require_packed_request(value, limits);
    for (const auto& transaction : value.transactions) {
       require_request_within_limits(transaction, limits);
-      if (transaction.timeout_ms > value.timeout_ms) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_request,
-                               "transaction submit item timeout exceeds the batch deadline",
-                               forge::exceptions::ctx("timeout_ms", transaction.timeout_ms),
-                               forge::exceptions::ctx("batch_timeout_ms", value.timeout_ms));
-      }
    }
 }
 

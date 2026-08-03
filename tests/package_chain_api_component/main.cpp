@@ -728,19 +728,20 @@ http_responses run_http_e2e(const chain_api_services& services) {
          }
          require(zero_submit_rejected, "HTTP owner boundary accepted a zero submit deadline");
 
-         auto batch_rejected = false;
-         try {
-            static_cast<void>(forge::asio::blocking::run(
-                runtime, submission_limits_remote->submit_batch(protocol::transaction_submit_batch_request{
-                             .transactions = {protocol::transaction_submit_request{.timeout_ms = 2'000U}},
-                             .timeout_ms = 1'000U,
-                         })));
-         } catch (const forge::chain::api::exceptions::invalid_request&) {
-            batch_rejected = true;
-         }
-         require(batch_rejected, "HTTP owner boundary accepted an item deadline beyond the batch budget");
-         require(services.submissions->calls.load(std::memory_order_acquire) == submission_calls_before,
-                 "HTTP invalid submission deadline reached the owner");
+         auto bounded_item = protocol::transaction_submit_request{.timeout_ms = 2'000U};
+         auto bounded_transaction = protocol::signed_transaction{};
+         bounded_transaction.expiration = protocol::time_point_sec{1U};
+         bounded_item.transaction = protocol::packed_transaction{std::move(bounded_transaction)};
+         const auto bounded_batch = forge::asio::blocking::run(
+             runtime, submission_limits_remote->submit_batch(protocol::transaction_submit_batch_request{
+                          .transactions = {std::move(bounded_item)},
+                          .timeout_ms = 1'000U,
+                      }));
+         require(bounded_batch.size() == 1U, "HTTP batch deadline cap changed response cardinality");
+         require(services.submissions->calls.load(std::memory_order_acquire) == submission_calls_before + 1U,
+                 "HTTP batch deadline cap did not reach the owner");
+         require(services.submissions->last_batch_timeout_ms.load(std::memory_order_relaxed) == 1'000U,
+                 "HTTP batch deadline cap was not propagated to the owner");
       }
       auto client = forge::net::http::client{
           runtime,

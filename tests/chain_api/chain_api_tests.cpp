@@ -1091,9 +1091,7 @@ BOOST_AUTO_TEST_CASE(chain_api_limits_bound_canonical_request_and_response_bytes
        .transactions = {forge::chain::protocol::transaction_submit_request{.timeout_ms = 2'000U}},
        .timeout_ms = 1'000U,
    };
-   BOOST_CHECK_THROW(forge::chain::api::require_request_within_limits(batch, limits),
-                     forge::chain::api::exceptions::invalid_request);
-   batch.transactions.front().timeout_ms = 1'000U;
+   BOOST_CHECK_NO_THROW(forge::chain::api::require_request_within_limits(batch, limits));
    batch.timeout_ms = limits.max_await_ms + 1U;
    BOOST_CHECK_THROW(forge::chain::api::require_request_within_limits(batch, limits),
                      forge::chain::api::exceptions::resource_exhausted);
@@ -1150,11 +1148,11 @@ BOOST_AUTO_TEST_CASE(chain_api_limited_descriptor_rejects_malformed_and_unbounde
    const auto over_limit = forge::raw::pack(forge::chain::protocol::transaction_submit_request{.timeout_ms = 2'001U});
    BOOST_CHECK_THROW(submit->request_validator(over_limit), forge::chain::api::exceptions::resource_exhausted);
 
-   const auto invalid_batch = forge::raw::pack(forge::chain::protocol::transaction_submit_batch_request{
+   const auto bounded_batch = forge::raw::pack(forge::chain::protocol::transaction_submit_batch_request{
        .transactions = {forge::chain::protocol::transaction_submit_request{.timeout_ms = 1'500U}},
        .timeout_ms = 1'000U,
    });
-   BOOST_CHECK_THROW(submit_batch->request_validator(invalid_batch), forge::chain::api::exceptions::invalid_request);
+   BOOST_CHECK_NO_THROW(submit_batch->request_validator(bounded_batch));
 }
 
 BOOST_AUTO_TEST_CASE(chain_api_producer_zero_limit_preserves_donor_continuation_semantics) {
