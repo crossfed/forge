@@ -40,7 +40,7 @@ class submission : public forge::api::core::contract<submission, forge::api::cor
    virtual boost::asio::awaitable<protocol::transaction_submit_response>
    submit(protocol::transaction_submit_request value) = 0;
    virtual boost::asio::awaitable<std::vector<protocol::transaction_submit_response>>
-   submit_batch(std::vector<protocol::transaction_submit_request> value) = 0;
+   submit_batch(protocol::transaction_submit_batch_request value) = 0;
 };
 
 } // namespace forge::chain::api
@@ -52,6 +52,7 @@ template <> struct method_descriptor_customization<::forge::chain::api::submissi
    static void apply(method_builder<::forge::chain::api::submission, EnableRaw>& method) {
       static_cast<void>(Method);
       ::forge::chain::api::exceptions::descriptor::declare_common(method);
+      ::forge::chain::api::exceptions::descriptor::declare_deadline(method);
       ::forge::chain::api::exceptions::descriptor::declare_mutation(method);
    }
 };
@@ -61,7 +62,10 @@ template <> struct method_descriptor_customization<::forge::chain::api::submissi
 FORGE_EXPORT_API(::forge::chain::api::submission, FORGE_API_CONTRACT("forge.chain.api.submission", 1, 0),
                  FORGE_API_METHOD_TYPED(submit, ::forge::chain::protocol::transaction_submit_request,
                                         ::forge::chain::protocol::transaction_submit_response),
-                 FORGE_API_METHOD(submit_batch, transactions))
+                 FORGE_API_METHOD_TYPED(submit_batch, ::forge::chain::protocol::transaction_submit_batch_request,
+                                        std::vector<::forge::chain::protocol::transaction_submit_response>))
 
-FORGE_HTTP_API(::forge::chain::api::submission, FORGE_HTTP_POST(submit, "/v1/chain/transactions/submit", accepted),
-               FORGE_HTTP_POST(submit_batch, "/v1/chain/transactions/submit-batch", accepted))
+FORGE_HTTP_API(::forge::chain::api::submission,
+               FORGE_HTTP_POST(submit, "/v1/chain/transactions/submit", accepted, FORGE_HTTP_TIMEOUT(timeout_ms)),
+               FORGE_HTTP_POST(submit_batch, "/v1/chain/transactions/submit-batch", accepted,
+                               FORGE_HTTP_TIMEOUT(timeout_ms)))

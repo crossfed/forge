@@ -1,13 +1,52 @@
 #include <boost/test/unit_test.hpp>
 
+#include <cstddef>
 #include <cstdint>
 
 import forge.chain.protocol.state_query;
 import forge.chain.protocol.transaction_query;
 import forge.codec.json;
 import forge.crypto.digest.sha256;
+import forge.raw.exceptions;
+import forge.raw.raw;
 
 namespace protocol = forge::chain::protocol;
+
+BOOST_AUTO_TEST_CASE(transaction_submission_deadlines_are_canonical_raw_fields) {
+   auto request = protocol::transaction_submit_request{.retry = true, .retry_blocks = 7U, .timeout_ms = 12'345U};
+   const auto encoded = forge::raw::pack(request);
+   const auto timeout = forge::raw::pack(request.timeout_ms);
+   BOOST_REQUIRE(encoded.size() >= timeout.size());
+   BOOST_TEST((protocol::bytes{encoded.end() - static_cast<std::ptrdiff_t>(timeout.size()), encoded.end()} == timeout));
+
+   const auto decoded = forge::raw::unpack_exact<protocol::transaction_submit_request>(encoded);
+   BOOST_TEST(decoded.retry);
+   BOOST_REQUIRE(decoded.retry_blocks.has_value());
+   BOOST_TEST(*decoded.retry_blocks == 7U);
+   BOOST_TEST(decoded.timeout_ms == 12'345U);
+
+   auto legacy = encoded;
+   legacy.resize(legacy.size() - timeout.size());
+   BOOST_CHECK_THROW((void)forge::raw::unpack_exact<protocol::transaction_submit_request>(legacy),
+                     forge::raw::exceptions::range_error);
+
+   const auto batch = protocol::transaction_submit_batch_request{
+       .transactions = {request},
+       .timeout_ms = 20'000U,
+   };
+   const auto batch_decoded =
+       forge::raw::unpack_exact<protocol::transaction_submit_batch_request>(forge::raw::pack(batch));
+   BOOST_REQUIRE(batch_decoded.transactions.size() == 1U);
+   BOOST_TEST(batch_decoded.transactions.front().timeout_ms == request.timeout_ms);
+   BOOST_TEST(batch_decoded.timeout_ms == batch.timeout_ms);
+
+   const auto json = forge::codec::json::write(batch);
+   BOOST_REQUIRE(json.ok());
+   const auto json_value = forge::codec::json::read_value(json.text);
+   BOOST_REQUIRE(json_value.ok());
+   BOOST_TEST(json_value.value["timeout_ms"].as_uint64() == batch.timeout_ms);
+   BOOST_TEST(json_value.value["transactions"][std::size_t{0}]["timeout_ms"].as_uint64() == request.timeout_ms);
+}
 
 BOOST_AUTO_TEST_CASE(table_rows_roundtrip_canonical_binary_contract) {
    const auto request = protocol::table_rows_request{

@@ -252,11 +252,15 @@ std::optional<std::uint32_t> require_method_request(std::string_view api, std::s
       }
    } else if (api == "forge.chain.api.transaction" && method == "await_transaction") {
       require_request_within_limits(unpack_request<protocol::transaction_await_request>(payload, limits), limits);
-   } else if (api == "forge.chain.api.submission" && method == "submit_batch") {
-      const auto requests = unpack_request<std::vector<protocol::transaction_submit_request>>(
-          payload, limits, limits.max_transaction_batch_size);
-      require_transaction_batch_within_limits(requests, limits);
-      return static_cast<std::uint32_t>(requests.size());
+   } else if (api == "forge.chain.api.submission") {
+      if (method == "submit") {
+         require_request_within_limits(unpack_request<protocol::transaction_submit_request>(payload, limits), limits);
+      } else if (method == "submit_batch") {
+         const auto request = unpack_request<protocol::transaction_submit_batch_request>(
+             payload, limits, limits.max_transaction_batch_size);
+         require_request_within_limits(request, limits);
+         return static_cast<std::uint32_t>(request.transactions.size());
+      }
    }
    return std::nullopt;
 }
@@ -404,6 +408,49 @@ void require_request_within_limits(const protocol::authorizers_request& value, c
    }
 }
 
+void require_request_within_limits(const protocol::transaction_submit_request& value,
+                                   const protocol::service_limits& limits) {
+   require_packed_request(value, limits);
+   if (value.timeout_ms == 0U) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "transaction submit timeout must be positive");
+   }
+   if (value.timeout_ms > limits.max_await_ms) {
+      FORGE_THROW_EXCEPTION(exceptions::resource_exhausted, "transaction submit timeout exceeds the configured maximum",
+                            forge::exceptions::ctx("timeout_ms", value.timeout_ms),
+                            forge::exceptions::ctx("limit", limits.max_await_ms));
+   }
+}
+
+void require_request_within_limits(const protocol::transaction_submit_batch_request& value,
+                                   const protocol::service_limits& limits) {
+   if (value.transactions.empty()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "transaction batch must not be empty");
+   }
+   if (value.transactions.size() > limits.max_transaction_batch_size) {
+      FORGE_THROW_EXCEPTION(exceptions::resource_exhausted, "transaction batch count exceeds the configured maximum",
+                            forge::exceptions::ctx("count", value.transactions.size()),
+                            forge::exceptions::ctx("limit", limits.max_transaction_batch_size));
+   }
+   if (value.timeout_ms == 0U) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "transaction submit batch timeout must be positive");
+   }
+   if (value.timeout_ms > limits.max_await_ms) {
+      FORGE_THROW_EXCEPTION(
+          exceptions::resource_exhausted, "transaction submit batch timeout exceeds the configured maximum",
+          forge::exceptions::ctx("timeout_ms", value.timeout_ms), forge::exceptions::ctx("limit", limits.max_await_ms));
+   }
+   require_packed_request(value, limits);
+   for (const auto& transaction : value.transactions) {
+      require_request_within_limits(transaction, limits);
+      if (transaction.timeout_ms > value.timeout_ms) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_request,
+                               "transaction submit item timeout exceeds the batch deadline",
+                               forge::exceptions::ctx("timeout_ms", transaction.timeout_ms),
+                               forge::exceptions::ctx("batch_timeout_ms", value.timeout_ms));
+      }
+   }
+}
+
 void require_request_within_limits(const protocol::transaction_await_request& value,
                                    const protocol::service_limits& limits) {
    require_packed_request(value, limits);
@@ -504,22 +551,6 @@ void require_response_within_limits(const protocol::unapplied_transactions_respo
                                     const protocol::service_limits& limits) {
    require_response_within_limits(response, limits);
    require_items(response.transactions.size(), request.limit, limits, "transactions");
-}
-
-void require_transaction_batch_within_limits(const std::vector<protocol::transaction_submit_request>& values,
-                                             const protocol::service_limits& limits) {
-   if (values.empty()) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "transaction batch must not be empty");
-   }
-   if (values.size() > limits.max_transaction_batch_size) {
-      FORGE_THROW_EXCEPTION(exceptions::resource_exhausted, "transaction batch count exceeds the configured maximum",
-                            forge::exceptions::ctx("count", values.size()),
-                            forge::exceptions::ctx("limit", limits.max_transaction_batch_size));
-   }
-   require_packed_request(values, limits);
-   for (const auto& value : values) {
-      require_packed_request(value, limits);
-   }
 }
 
 void require_transaction_batch_response_within_limits(

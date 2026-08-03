@@ -91,17 +91,17 @@ submission_client::submit(protocol::transaction_submit_request request) {
 }
 
 boost::asio::awaitable<std::vector<protocol::transaction_submit_response>>
-submission_client::submit_batch(std::vector<protocol::transaction_submit_request> requests) {
+submission_client::submit_batch(protocol::transaction_submit_batch_request request) {
    auto& service = require_service(service_);
-   require_transaction_batch_within_limits(requests, limits_);
+   require_request_within_limits(request, limits_);
    auto expected = std::vector<protocol::transaction_id>{};
-   expected.reserve(requests.size());
-   for (const auto& request : requests) {
-      expected.push_back(request.transaction.id());
+   expected.reserve(request.transactions.size());
+   for (const auto& transaction : request.transactions) {
+      expected.push_back(transaction.transaction.id());
    }
 
    auto responses = co_await invoke_service<std::vector<protocol::transaction_submit_response>>(
-       "submission.submit_batch", [&] { return service.submit_batch(std::move(requests)); });
+       "submission.submit_batch", [&] { return service.submit_batch(std::move(request)); });
    require_transaction_batch_response_within_limits(responses, expected.size(), limits_);
    if (responses.size() != expected.size()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof,

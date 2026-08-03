@@ -26,6 +26,15 @@ names the submitted transaction. That acknowledgement is not a finality claim.
 Consumers establish inclusion or finality through
 `verified_client::get_transaction_status` or `await_transaction`.
 
+Every transaction submission has a positive bounded `timeout_ms`. Batch
+submission uses `transaction_submit_batch_request`, whose `timeout_ms` is the
+total deadline for the whole call rather than a per-item multiplier. An owner
+captures that deadline once, rejects or stops when it expires, and bounds each
+item by the lesser of its own timeout and the remaining batch budget. Sequential
+owners must not sum item timeouts or silently continue without a deadline. HTTP
+proxies allow a five-second transport grace beyond the declared application
+deadline; cancellation remains typed and reaches the active request owner.
+
 HTTP bindings are resource-oriented rather than RPC-shaped. Safe reads with
 scalar path/query parameters use `GET`; structured proof ranges, simulations
 and mutations use `POST`. Dynamic reads return `Cache-Control: no-store`.
