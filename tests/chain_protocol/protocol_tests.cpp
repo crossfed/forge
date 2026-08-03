@@ -28,6 +28,7 @@ import forge.chain.core.merkle;
 import forge.chain.protocol.abi;
 import forge.chain.protocol.action;
 import forge.chain.protocol.action_receipt;
+import forge.chain.protocol.admin;
 import forge.chain.protocol.block;
 import forge.chain.protocol.blockchain_parameters;
 import forge.chain.protocol.call_access_mode;
@@ -564,6 +565,17 @@ BOOST_AUTO_TEST_CASE(time_and_extended_asset_match_cdt_wire_layout) {
    BOOST_TEST(parsed.time_since_epoch().count() == 946'684'800'000'000LL);
    BOOST_TEST(parsed.to_string() == "2000-01-01T00:00:00");
    BOOST_TEST(protocol::block_timestamp{parsed}.slot == 0U);
+   const auto half_second = protocol::block_timestamp{1U};
+   BOOST_TEST(half_second.to_string() == "2000-01-01T00:00:00.500");
+   BOOST_TEST(protocol::block_timestamp::from_iso_string(half_second.to_string()).slot == half_second.slot);
+   auto half_second_variant = forge::variant{};
+   protocol::to_variant(half_second, half_second_variant);
+   auto half_second_roundtrip = protocol::block_timestamp{};
+   protocol::from_variant(half_second_variant, half_second_roundtrip);
+   BOOST_TEST(half_second_roundtrip.slot == half_second.slot);
+   BOOST_CHECK_EXCEPTION((void)protocol::block_timestamp::from_iso_string("2000-01-01T00:00:00.250"),
+                         std::invalid_argument,
+                         [](const auto& error) { return has_message(error, "date parsing failed"); });
    BOOST_TEST(protocol::block_timestamp::maximum().slot == 0xffffU);
    BOOST_TEST(protocol::block_timestamp::maximum().next().slot == 0x10000U);
    BOOST_TEST(protocol::block_timestamp{parsed}.next().slot == 1U);
@@ -843,6 +855,35 @@ BOOST_AUTO_TEST_CASE(named_action_payload_owns_name_and_raw_bytes) {
    BOOST_TEST(action.authorization.front().actor.value == permission.actor.value);
    BOOST_TEST(action.authorization.front().permission.value == permission.permission.value);
    BOOST_TEST(action.data == forge::raw::pack(payload));
+}
+
+BOOST_AUTO_TEST_CASE(supported_protocol_features_have_a_typed_variant_contract) {
+   const auto value = protocol::supported_protocol_features_response{
+       .features =
+           {
+               {
+                   .feature_digest =
+                       protocol::digest{"0ec7e080177b2c02b278d5088611686b49d739925a92d9bfcacd7fc6b74053bd"},
+                   .subjective_restrictions =
+                       {
+                           .enabled = true,
+                           .preactivation_required = false,
+                           .earliest_allowed_activation_time = protocol::time_point{},
+                       },
+                   .description_digest =
+                       protocol::digest{"64fe7df32e9b86be2b296b3f81dfd527f84e82b98e363bc97e40bc7a83733310"},
+                   .protocol_feature_type = "builtin",
+                   .specification = {{.name = "builtin_feature_codename", .value = "PREACTIVATE_FEATURE"}},
+               },
+           },
+   };
+
+   auto encoded = forge::variant{};
+   forge::to_variant(value, encoded);
+   auto decoded = protocol::supported_protocol_features_response{};
+   forge::from_variant(encoded, decoded);
+
+   BOOST_CHECK(decoded == value);
 }
 
 BOOST_AUTO_TEST_CASE(forge_secp256k1_is_the_crypto_surface_for_runtime_signatures) {

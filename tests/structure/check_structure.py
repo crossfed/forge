@@ -229,6 +229,70 @@ def check_chain_savanna_boundaries(root: Path, errors: list[str]) -> None:
             errors.append(f"{relative}: Savanna kernel must not depend on {owner} ({token})")
 
 
+def check_chain_api_shape(root: Path, errors: list[str]) -> None:
+   component = root / "libraries" / "chain" / "api"
+   if not component.exists():
+      return
+
+   include = component / "include" / "forge" / "chain" / "api"
+   nested_modules = sorted(path for path in include.rglob("*.cppm") if path.parent != include)
+   if nested_modules:
+      rendered = ", ".join(str(path.relative_to(root)) for path in nested_modules)
+      errors.append("chain API modules must use a flat public include layout: " + rendered)
+
+   forbidden_directories = {
+      "types",
+      "info",
+      "block",
+      "state",
+      "transaction",
+      "admin",
+      "client",
+   }
+   nested_components = sorted(
+      path.name
+      for path in component.iterdir()
+      if path.is_dir() and path.name in forbidden_directories
+   )
+   if nested_components:
+      errors.append("chain API must be one flat library, found nested components: " + ", ".join(nested_components))
+
+   cmake = (component / "CMakeLists.txt").read_text()
+   if not re.search(r"add_library\s*\(\s*forge_chain_api\s+STATIC\b", cmake):
+      errors.append("libraries/chain/api/CMakeLists.txt: expected one compiled forge_chain_api target")
+   if re.search(r"\bforge_chain_api_(?:types|info|block|state|transaction|admin|client)\b", cmake):
+      errors.append("libraries/chain/api/CMakeLists.txt: split chain API targets are forbidden")
+
+   nested_api_namespace = re.compile(r"\bnamespace\s+forge::chain::api::(?:info|block|state|transaction|admin)\b")
+   wire_record = re.compile(
+      r"^\s*(?:export\s+)?(?:struct|enum\s+class)\s+\w*(?:request|result|response)\b",
+      re.MULTILINE,
+   )
+   for path in sorted(include.glob("*.cppm")):
+      source = path.read_text(errors="ignore")
+      if nested_api_namespace.search(source):
+         errors.append(f"{path.relative_to(root)}: API names must be classes in forge::chain::api")
+      if "BOOST_DESCRIBE" in source or wire_record.search(source):
+         errors.append(f"{path.relative_to(root)}: chain API wire records belong to forge.chain.protocol")
+
+   protocol_include = root / "libraries" / "chain" / "protocol" / "include" / "forge" / "chain" / "protocol"
+   get_dto = re.compile(r"^\s*(?:export\s+)?(?:struct|class|using)\s+get_\w+", re.MULTILINE)
+   query_modules = ("audit.cppm", "info.cppm", "block_query.cppm", "state_query.cppm",
+                    "transaction_query.cppm", "admin.cppm")
+   for name in query_modules:
+      path = protocol_include / name
+      if not path.exists():
+         errors.append(f"{path.relative_to(root)}: missing chain protocol query module")
+         continue
+      source = path.read_text(errors="ignore")
+      if get_dto.search(source):
+         errors.append(f"{path.relative_to(root)}: DTO names must not repeat the get operation")
+      if re.search(r"\busing\s+\w+_response\s*=", source):
+         errors.append(f"{path.relative_to(root)}: response DTOs must be concrete records, not aliases")
+   if sorted(protocol_include.glob("api_*.cppm")):
+      errors.append("chain protocol query modules must not use the api_* filename prefix")
+
+
 def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
    path = root / ".github" / "workflows" / "contract-sdk.yml"
    if not path.exists():
@@ -840,6 +904,7 @@ def main() -> int:
    check_vm_wasm_boundaries(root, errors)
    check_plugin_impl_ownership(root, errors)
    check_chain_savanna_boundaries(root, errors)
+   check_chain_api_shape(root, errors)
    check_contract_sdk_workflow(root, errors)
    check_contract_sdk_components(root, errors)
    check_eosio_veneer(root, errors)
