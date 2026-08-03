@@ -155,6 +155,8 @@ struct method_descriptor {
    std::vector<error_descriptor> errors;
    std::function<bytes(const void*)> request_encoder;
    std::function<bytes(const void*)> response_encoder;
+   std::function<void(const bytes&, forge::raw::unpack_limits)> request_decoder;
+   std::function<void(const bytes&, forge::raw::unpack_limits)> response_decoder;
    std::function<void(const bytes&)> request_validator;
    std::function<void(const bytes&, const bytes&)> response_validator;
    std::function<boost::asio::awaitable<bytes>(std::shared_ptr<void>, bytes)> raw_invoker;
@@ -348,6 +350,12 @@ template <typename Interface, bool EnableRaw> class contract_builder {
          value.response_encoder = [](const void* response) {
             return pack_body(*static_cast<const Response*>(response));
          };
+         value.request_decoder = [](const bytes& payload, forge::raw::unpack_limits limits) {
+            static_cast<void>(forge::raw::unpack_exact<Request>(payload, limits));
+         };
+         value.response_decoder = [](const bytes& payload, forge::raw::unpack_limits limits) {
+            static_cast<void>(forge::raw::unpack_exact<Response>(payload, limits));
+         };
          value.raw_invoker = [](std::shared_ptr<void> implementation, bytes payload) -> boost::asio::awaitable<bytes> {
             auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
             if constexpr (argument_count == 1U) {
@@ -385,6 +393,12 @@ template <typename Interface, bool EnableRaw> class contract_builder {
          value.request_encoder = [](const void* request) { return pack_body(*static_cast<const Request*>(request)); };
          value.response_encoder = [](const void* response) {
             return pack_body(*static_cast<const Response*>(response));
+         };
+         value.request_decoder = [](const bytes& payload, forge::raw::unpack_limits limits) {
+            static_cast<void>(forge::raw::unpack_exact<Request>(payload, limits));
+         };
+         value.response_decoder = [](const bytes& payload, forge::raw::unpack_limits limits) {
+            static_cast<void>(forge::raw::unpack_exact<Response>(payload, limits));
          };
          value.raw_invoker = [](std::shared_ptr<void> implementation, bytes payload) -> boost::asio::awaitable<bytes> {
             auto typed = std::static_pointer_cast<Interface>(std::move(implementation));

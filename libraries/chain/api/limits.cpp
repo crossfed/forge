@@ -64,6 +64,71 @@ forge::raw::unpack_limits allocation_limits(const forge::api::core::bytes& paylo
    };
 }
 
+forge::raw::unpack_limits request_allocation_limits(std::string_view api, std::string_view method,
+                                                    const forge::api::core::bytes& payload,
+                                                    const protocol::service_limits& limits) {
+   if (api == "forge.chain.api.submission" && method == "submit_batch") {
+      return allocation_limits(payload, limits, limits.max_request_bytes, limits.max_transaction_batch_size);
+   }
+   if (api == "forge.chain.api.state" && method == "get_changes") {
+      return allocation_limits(payload, limits, limits.max_request_bytes, limits.max_state_batch_size);
+   }
+   if (api == "forge.chain.api.state" && method == "get_accounts_by_authorizers") {
+      return allocation_limits(payload, limits, limits.max_request_bytes, forge::raw::max_array_elements,
+                               std::optional<std::uint32_t>{limits.max_state_batch_size});
+   }
+   return allocation_limits(payload, limits, limits.max_request_bytes);
+}
+
+forge::raw::unpack_limits response_allocation_limits(std::string_view api, std::string_view method,
+                                                     const forge::api::core::bytes& payload,
+                                                     const protocol::service_limits& limits) {
+   if (api == "forge.chain.api.submission" && method == "submit_batch") {
+      return allocation_limits(payload, limits, limits.max_response_bytes, limits.max_transaction_batch_size);
+   }
+   return allocation_limits(payload, limits, limits.max_response_bytes);
+}
+
+template <typename Decoder>
+void decode_request(const Decoder& decoder, std::string_view api, std::string_view method,
+                    const forge::api::core::bytes& payload, const protocol::service_limits& limits) {
+   if (!decoder) {
+      FORGE_THROW_EXCEPTION(exceptions::unavailable, "chain API method has no canonical request decoder",
+                            forge::exceptions::ctx("api", api), forge::exceptions::ctx("method", method));
+   }
+   try {
+      decoder(payload, request_allocation_limits(api, method, payload, limits));
+   } catch (const forge::raw::exceptions::allocation_limit& error) {
+      FORGE_THROW_EXCEPTION(exceptions::resource_exhausted, "chain API request exceeds allocation limits",
+                            forge::exceptions::ctx("reason", error.what()));
+   } catch (const std::exception& error) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "chain API request payload is malformed",
+                            forge::exceptions::ctx("reason", error.what()));
+   } catch (...) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_request, "chain API request payload is malformed");
+   }
+}
+
+template <typename Decoder>
+void decode_response(const Decoder& decoder, std::string_view api, std::string_view method,
+                     const forge::api::core::bytes& payload, const protocol::service_limits& limits) {
+   if (!decoder) {
+      FORGE_THROW_EXCEPTION(exceptions::unavailable, "chain API method has no canonical response decoder",
+                            forge::exceptions::ctx("api", api), forge::exceptions::ctx("method", method));
+   }
+   try {
+      decoder(payload, response_allocation_limits(api, method, payload, limits));
+   } catch (const forge::raw::exceptions::allocation_limit& error) {
+      FORGE_THROW_EXCEPTION(exceptions::resource_exhausted, "chain API response exceeds allocation limits",
+                            forge::exceptions::ctx("reason", error.what()));
+   } catch (const std::exception& error) {
+      FORGE_THROW_EXCEPTION(exceptions::unavailable, "chain API owner produced a malformed response payload",
+                            forge::exceptions::ctx("reason", error.what()));
+   } catch (...) {
+      FORGE_THROW_EXCEPTION(exceptions::unavailable, "chain API owner produced a malformed response payload");
+   }
+}
+
 template <typename Value>
 Value unpack_request(const forge::api::core::bytes& payload, const protocol::service_limits& limits,
                      std::uint32_t first_container_limit = forge::raw::max_array_elements,
@@ -479,11 +544,16 @@ forge::api::core::descriptor with_service_limits(forge::api::core::descriptor va
    for (auto& method : value.methods) {
       auto name = method.name;
       const auto audited_response = method.has_response_trait<protocol::audited_response>();
-      method.request_validator = [api, name, limits](const forge::api::core::bytes& payload) {
+      auto request_decoder = method.request_decoder;
+      auto response_decoder = method.response_decoder;
+      method.request_validator = [api, name, limits, request_decoder](const forge::api::core::bytes& payload) {
+         decode_request(request_decoder, api, name, payload, limits);
          static_cast<void>(require_method_request(api, name, payload, limits));
       };
-      method.response_validator = [api, name, audited_response, limits](const forge::api::core::bytes& request,
-                                                                        const forge::api::core::bytes& response) {
+      method.response_validator = [api, name, audited_response, limits, request_decoder, response_decoder](
+                                      const forge::api::core::bytes& request, const forge::api::core::bytes& response) {
+         decode_request(request_decoder, api, name, request, limits);
+         decode_response(response_decoder, api, name, response, limits);
          require_method_response(api, name, audited_response, response,
                                  require_method_request(api, name, request, limits), limits);
       };

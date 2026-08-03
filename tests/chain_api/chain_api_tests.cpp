@@ -1109,7 +1109,9 @@ BOOST_AUTO_TEST_CASE(chain_api_limited_descriptor_enforces_owner_request_and_res
 }
 
 BOOST_AUTO_TEST_CASE(chain_api_limited_descriptor_only_decodes_audited_response_types) {
-   const auto descriptor = forge::chain::api::limited_descriptor<forge::chain::api::transaction>({});
+   auto limits = forge::chain::protocol::service_limits{};
+   limits.max_container_elements = 2U;
+   const auto descriptor = forge::chain::api::limited_descriptor<forge::chain::api::transaction>(limits);
    const auto* required_keys = forge::api::core::find_method(descriptor, "get_required_keys");
    const auto* status = forge::api::core::find_method(descriptor, "get_status");
    BOOST_REQUIRE(required_keys != nullptr);
@@ -1123,6 +1125,18 @@ BOOST_AUTO_TEST_CASE(chain_api_limited_descriptor_only_decodes_audited_response_
    BOOST_CHECK_THROW(status->response_validator(forge::raw::pack(forge::chain::protocol::transaction_status_request{}),
                                                 plain_response),
                      forge::chain::api::exceptions::unavailable);
+
+   const auto oversized_keys = forge::raw::pack(std::vector<forge::chain::protocol::public_key>(3U));
+   BOOST_CHECK_THROW(required_keys->response_validator(
+                         forge::raw::pack(forge::chain::protocol::transaction_required_keys_request{}), oversized_keys),
+                     forge::chain::api::exceptions::resource_exhausted);
+
+   auto status_with_oversized_tail = forge::chain::protocol::transaction_status_response{};
+   status_with_oversized_tail.trace = forge::chain::protocol::transaction_trace{};
+   status_with_oversized_tail.trace->actions.resize(3U);
+   BOOST_CHECK_THROW(status->response_validator(forge::raw::pack(forge::chain::protocol::transaction_status_request{}),
+                                                forge::raw::pack(status_with_oversized_tail)),
+                     forge::chain::api::exceptions::resource_exhausted);
 }
 
 BOOST_AUTO_TEST_CASE(chain_api_limited_descriptor_rejects_declared_collections_before_allocation) {
