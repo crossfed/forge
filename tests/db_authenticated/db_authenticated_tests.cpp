@@ -198,6 +198,50 @@ forge::db::core::record_range prefix_range(std::byte prefix) {
 
 BOOST_AUTO_TEST_SUITE(db_authenticated_test_suite)
 
+BOOST_AUTO_TEST_CASE(authenticated_read_observer_failures_are_typed) {
+   const auto root_path = make_test_root("forge_db_authenticated_observer_failure");
+   auto runtime = forge::asio::runtime{};
+   auto lane = forge::asio::affine::lane{};
+
+   forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
+      auto driver = co_await open_driver(root_path / "store", lane);
+      constexpr auto domain = "forge.test.authenticated.observer.v1";
+      auto authenticated = make_store(driver, domain);
+      auto active = co_await driver->begin_transaction();
+      auto transaction = co_await authenticated.join(active, 0);
+      static_cast<void>(co_await transaction.stage(std::vector{put("key", "value")}));
+      co_await active.commit();
+
+      const auto require_typed = [&](auto observer) -> boost::asio::awaitable<void> {
+         auto observed = forge::db::authenticated::store{
+             driver,
+             {
+                 .family = forge::db::core::family{"authenticated"},
+                 .domain = domain,
+                 .read_observer = std::move(observer),
+             },
+         };
+         auto typed = false;
+         try {
+            static_cast<void>(co_await observed.get(0, bytes("key")));
+         } catch (const forge::db::authenticated::exceptions::backend_failure&) {
+            typed = true;
+         }
+         BOOST_TEST(typed);
+      };
+
+      co_await require_typed(
+          [](const forge::db::core::record_key&) { throw std::runtime_error{"test authenticated observer failure"}; });
+      co_await require_typed([](const forge::db::core::record_key&) { throw 7; });
+
+      co_await driver->async_close();
+      driver.reset();
+      co_await lane.shutdown();
+   }());
+
+   std::filesystem::remove_all(root_path);
+}
+
 BOOST_AUTO_TEST_CASE(authenticated_codec_rejects_unbounded_and_invalid_inputs) {
    constexpr auto forge_support =
        forge::db::authenticated::support_for(forge::db::authenticated::proof_standard::forge_v3);

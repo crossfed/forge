@@ -8,6 +8,7 @@ module;
 #include <concepts>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <functional>
 #include <limits>
 #include <map>
@@ -43,6 +44,45 @@ constexpr auto node_gc_record = std::byte{7};
 constexpr auto value_gc_record = std::byte{8};
 constexpr auto retention_guard_record = std::byte{9};
 constexpr auto format_version = std::byte{4};
+
+boost::asio::awaitable<std::optional<bytes>> read_record(const get_record_fn& get, forge::db::core::record_key key) {
+   try {
+      co_return co_await get(std::move(key));
+   } catch (const forge::exceptions::base&) {
+      throw;
+   } catch (const std::exception& error) {
+      FORGE_THROW_EXCEPTION(exceptions::backend_failure, "authenticated record reader failed",
+                            forge::exceptions::ctx("reason", error.what()));
+   } catch (...) {
+      FORGE_THROW_EXCEPTION(exceptions::backend_failure, "authenticated record reader failed");
+   }
+}
+
+boost::asio::awaitable<void> write_record(const put_record_fn& put, forge::db::core::record_key key, bytes value) {
+   try {
+      co_await put(std::move(key), std::move(value));
+   } catch (const forge::exceptions::base&) {
+      throw;
+   } catch (const std::exception& error) {
+      FORGE_THROW_EXCEPTION(exceptions::backend_failure, "authenticated record writer failed",
+                            forge::exceptions::ctx("reason", error.what()));
+   } catch (...) {
+      FORGE_THROW_EXCEPTION(exceptions::backend_failure, "authenticated record writer failed");
+   }
+}
+
+boost::asio::awaitable<void> erase_record(const erase_record_fn& erase, forge::db::core::record_key key) {
+   try {
+      co_await erase(std::move(key));
+   } catch (const forge::exceptions::base&) {
+      throw;
+   } catch (const std::exception& error) {
+      FORGE_THROW_EXCEPTION(exceptions::backend_failure, "authenticated record eraser failed",
+                            forge::exceptions::ctx("reason", error.what()));
+   } catch (...) {
+      FORGE_THROW_EXCEPTION(exceptions::backend_failure, "authenticated record eraser failed");
+   }
+}
 
 void append_u16(bytes& output, std::uint16_t value) {
    output.push_back(static_cast<std::byte>((value >> 8U) & 0xffU));
@@ -311,7 +351,7 @@ digest decode_hash_key(const forge::db::core::record_key& key, std::byte expecte
 boost::asio::awaitable<void> increment_reference(get_record_fn get, put_record_fn put, erase_record_fn erase,
                                                  const forge::db::core::record_key& reference_key,
                                                  const forge::db::core::record_key& garbage_key) {
-   const auto encoded = co_await get(reference_key);
+   const auto encoded = co_await read_record(get, reference_key);
    if (!encoded) {
       FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated reference record is missing");
    }
@@ -320,15 +360,15 @@ boost::asio::awaitable<void> increment_reference(get_record_fn get, put_record_f
       FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated reference count overflows");
    }
    if (count == 0) {
-      co_await erase(garbage_key);
+      co_await erase_record(erase, garbage_key);
    }
-   co_await put(reference_key, encode_reference_count(count + 1U));
+   co_await write_record(put, reference_key, encode_reference_count(count + 1U));
 }
 
 boost::asio::awaitable<void> decrement_reference(get_record_fn get, put_record_fn put,
                                                  const forge::db::core::record_key& reference_key,
                                                  const forge::db::core::record_key& garbage_key) {
-   const auto encoded = co_await get(reference_key);
+   const auto encoded = co_await read_record(get, reference_key);
    if (!encoded) {
       FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated reference record is missing");
    }
@@ -336,9 +376,9 @@ boost::asio::awaitable<void> decrement_reference(get_record_fn get, put_record_f
    if (count == 0) {
       FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated reference count underflows");
    }
-   co_await put(reference_key, encode_reference_count(count - 1U));
+   co_await write_record(put, reference_key, encode_reference_count(count - 1U));
    if (count == 1U) {
-      co_await put(garbage_key, {});
+      co_await write_record(put, garbage_key, {});
    }
 }
 
@@ -370,7 +410,7 @@ boost::asio::awaitable<node> tree_engine::load(const digest& hash) {
       co_return cached->second;
    }
 
-   const auto encoded = co_await get_(node_key(hash));
+   const auto encoded = co_await read_record(get_, node_key(hash));
    if (!encoded) {
       FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated node is missing",
                             forge::exceptions::ctx("hash", hash.str()));
@@ -391,7 +431,7 @@ boost::asio::awaitable<bytes> tree_engine::load_value(const digest& hash) {
    if (const auto cached = values_.find(hash); cached != values_.end()) {
       co_return cached->second;
    }
-   const auto encoded = co_await get_(value_key(hash));
+   const auto encoded = co_await read_record(get_, value_key(hash));
    if (!encoded || encoded->size() > limits_.max_value_bytes || hash_value(*encoded) != hash) {
       FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated value is missing or corrupt",
                             forge::exceptions::ctx("hash", hash.str()));
@@ -425,7 +465,7 @@ boost::asio::awaitable<bytes> tree_engine::load_value_for_proof(const digest& ha
       co_return cached->second;
    }
 
-   auto encoded = co_await get_(value_key(hash));
+   auto encoded = co_await read_record(get_, value_key(hash));
    if (!encoded) {
       FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated value is missing or corrupt",
                             forge::exceptions::ctx("hash", hash.str()));
@@ -941,6 +981,10 @@ boost::asio::awaitable<range_proof> tree_engine::prove_range(const root& anchor,
 }
 
 boost::asio::awaitable<void> tree_engine::persist(get_record_fn get, put_record_fn put, erase_record_fn erase) {
+   if (!get || !put || !erase) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_store,
+                            "authenticated tree persistence requires record reader, writer, and eraser callbacks");
+   }
    auto reachable_nodes = std::set<digest>{};
    auto reachable_values = std::set<digest>{};
    auto visit = std::function<void(const digest&)>{};
@@ -967,18 +1011,18 @@ boost::asio::awaitable<void> tree_engine::persist(get_record_fn get, put_record_
       }
       const auto content_key = value_key(hash);
       const auto reference_key = value_reference_key(hash);
-      const auto existing = co_await get(content_key);
+      const auto existing = co_await read_record(get, content_key);
       if (existing) {
-         if (*existing != value || !(co_await get(reference_key))) {
+         if (*existing != value || !(co_await read_record(get, reference_key))) {
             FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated value record is inconsistent");
          }
          continue;
       }
-      if (co_await get(reference_key)) {
+      if (co_await read_record(get, reference_key)) {
          FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated value reference exists without content");
       }
-      co_await put(content_key, value);
-      co_await put(reference_key, encode_reference_count(0));
+      co_await write_record(put, content_key, value);
+      co_await write_record(put, reference_key, encode_reference_count(0));
    }
    for (const auto& [hash, value] : pending_nodes_) {
       if (!reachable_nodes.contains(hash)) {
@@ -987,18 +1031,18 @@ boost::asio::awaitable<void> tree_engine::persist(get_record_fn get, put_record_
       const auto content_key = node_key(hash);
       const auto reference_key = node_reference_key(hash);
       const auto encoded = encode_node(value);
-      const auto existing = co_await get(content_key);
+      const auto existing = co_await read_record(get, content_key);
       if (existing) {
-         if (*existing != encoded || !(co_await get(reference_key))) {
+         if (*existing != encoded || !(co_await read_record(get, reference_key))) {
             FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated node record is inconsistent");
          }
          continue;
       }
-      if (co_await get(reference_key)) {
+      if (co_await read_record(get, reference_key)) {
          FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated node reference exists without content");
       }
-      co_await put(content_key, encoded);
-      co_await put(reference_key, encode_reference_count(0));
+      co_await write_record(put, content_key, encoded);
+      co_await write_record(put, reference_key, encode_reference_count(0));
       inserted_nodes.emplace_back(hash, value);
    }
 
@@ -1215,19 +1259,19 @@ boost::asio::awaitable<garbage_result> collect_garbage(forge::db::core::transact
       for (const auto& entry : page.entries) {
          const auto hash = decode_hash_key(entry.key, node_gc_record);
          const auto reference_key = node_reference_key(hash);
-         const auto reference = co_await get(reference_key);
+         const auto reference = co_await read_record(get, reference_key);
          if (!reference) {
             FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated garbage node reference is missing");
          }
          if (decode_reference_count(*reference) != 0) {
-            co_await erase(entry.key);
+            co_await erase_record(erase, entry.key);
             if (++processed == limit) {
                break;
             }
             continue;
          }
          const auto content_key = node_key(hash);
-         const auto encoded = co_await get(content_key);
+         const auto encoded = co_await read_record(get, content_key);
          if (!encoded) {
             FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated garbage node is missing");
          }
@@ -1243,9 +1287,9 @@ boost::asio::awaitable<garbage_result> collect_garbage(forge::db::core::transact
             co_await decrement_reference(get, put, node_reference_key(value.left), node_gc_key(value.left));
             co_await decrement_reference(get, put, node_reference_key(value.right), node_gc_key(value.right));
          }
-         co_await erase(content_key);
-         co_await erase(reference_key);
-         co_await erase(entry.key);
+         co_await erase_record(erase, content_key);
+         co_await erase_record(erase, reference_key);
+         co_await erase_record(erase, entry.key);
          ++result.nodes;
          if (++processed == limit) {
             break;
@@ -1263,25 +1307,25 @@ boost::asio::awaitable<garbage_result> collect_garbage(forge::db::core::transact
       for (const auto& entry : page.entries) {
          const auto hash = decode_hash_key(entry.key, value_gc_record);
          const auto reference_key = value_reference_key(hash);
-         const auto reference = co_await get(reference_key);
+         const auto reference = co_await read_record(get, reference_key);
          if (!reference) {
             FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated garbage value reference is missing");
          }
          if (decode_reference_count(*reference) != 0) {
-            co_await erase(entry.key);
+            co_await erase_record(erase, entry.key);
             if (++processed == limit) {
                break;
             }
             continue;
          }
          const auto content_key = value_key(hash);
-         const auto encoded = co_await get(content_key);
+         const auto encoded = co_await read_record(get, content_key);
          if (!encoded || hash_value(*encoded) != hash) {
             FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated garbage value is missing or corrupt");
          }
-         co_await erase(content_key);
-         co_await erase(reference_key);
-         co_await erase(entry.key);
+         co_await erase_record(erase, content_key);
+         co_await erase_record(erase, reference_key);
+         co_await erase_record(erase, entry.key);
          ++result.values;
          if (++processed == limit) {
             break;

@@ -6,6 +6,7 @@ module;
 #include <coroutine>
 #include <algorithm>
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <span>
@@ -19,6 +20,33 @@ import forge.crypto.digest.sha256;
 
 namespace forge::chain::api {
 namespace {
+
+template <typename Exception, typename Function>
+decltype(auto) invoke_verifier(const char* message, Function&& function) {
+   try {
+      return std::forward<Function>(function)();
+   } catch (const forge::exceptions::base&) {
+      throw;
+   } catch (const std::exception& error) {
+      FORGE_THROW_EXCEPTION(Exception, message, forge::exceptions::ctx("reason", error.what()));
+   } catch (...) {
+      FORGE_THROW_EXCEPTION(Exception, message);
+   }
+}
+
+template <typename Function> void verify_projection(const char* method, Function&& function) {
+   try {
+      std::forward<Function>(function)();
+   } catch (const forge::exceptions::base&) {
+      throw;
+   } catch (const std::exception& error) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof, "chain API projection verifier failed",
+                            forge::exceptions::ctx("method", method), forge::exceptions::ctx("reason", error.what()));
+   } catch (...) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof, "chain API projection verifier failed",
+                            forge::exceptions::ctx("method", method));
+   }
+}
 
 template <typename Response> boost::asio::awaitable<Response> unsupported_audit(const char* method) {
    FORGE_THROW_EXCEPTION(exceptions::audit_not_supported, "verified chain API method has no content proof verifier",
@@ -153,14 +181,17 @@ verified_client::verified_client(raw_client client, std::shared_ptr<audit_verifi
 }
 
 const protocol::audit_bundle& verified_client::verify_envelope(const protocol::audited_response& response) {
-   verifier_->verify_context(response.context);
+   invoke_verifier<exceptions::invalid_state_proof>("chain API context verifier failed",
+                                                    [&] { verifier_->verify_context(response.context); });
    if (!response.context.anchor || !response.audit) {
       FORGE_THROW_EXCEPTION(exceptions::audit_not_supported, "chain API response omits required audit data");
    }
    if (!response.audit->finality) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_finality, "chain API response omits its finality proof");
    }
-   verifier_->verify_finality(*response.context.anchor, *response.audit->finality);
+   invoke_verifier<exceptions::invalid_finality>("chain API finality verifier failed", [&] {
+      verifier_->verify_finality(*response.context.anchor, *response.audit->finality);
+   });
    return *response.audit;
 }
 
@@ -180,7 +211,10 @@ void verified_client::verify_point(const protocol::state_point_request& request,
       FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof,
                             "chain API point response requires exactly one state proof");
    }
-   if (verifier_->verify_state_point(*response.context.anchor, request, audit.state.front()) != response.value) {
+   const auto verified = invoke_verifier<exceptions::invalid_state_proof>("chain API point verifier failed", [&] {
+      return verifier_->verify_state_point(*response.context.anchor, request, audit.state.front());
+   });
+   if (verified != response.value) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof,
                             "chain API point value does not match its authenticated proof");
    }
@@ -194,7 +228,9 @@ void verified_client::verify_range(const protocol::state_range_request& request,
       FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof,
                             "chain API range response requires exactly one state proof");
    }
-   const auto verified = verifier_->verify_state_range(*response.context.anchor, request, audit.state.front());
+   const auto verified = invoke_verifier<exceptions::invalid_state_proof>("chain API range verifier failed", [&] {
+      return verifier_->verify_state_range(*response.context.anchor, request, audit.state.front());
+   });
    if (verified.rows != response.rows || verified.next_key != response.next_key) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof,
                             "chain API range result does not match its authenticated proof");
@@ -258,7 +294,9 @@ void verified_client::verify_changes(const protocol::state_changes_request& requ
          FORGE_THROW_EXCEPTION(exceptions::invalid_finality,
                                "chain API changes response omits its canonical ancestry proof");
       }
-      verifier_->verify_ancestry(*response.context.anchor, ancestry, *audit.ancestry);
+      invoke_verifier<exceptions::invalid_finality>("chain API ancestry verifier failed", [&] {
+         verifier_->verify_ancestry(*response.context.anchor, ancestry, *audit.ancestry);
+      });
    }
    auto proof_index = std::size_t{};
    auto stopped_within_range = false;
@@ -283,7 +321,10 @@ void verified_client::verify_changes(const protocol::state_changes_request& requ
             proof_range.lower = position.key;
          }
          const auto verified =
-             verifier_->verify_state_changes(batch.anchor, proof_range, request.limit, audit.state[proof_index++]);
+             invoke_verifier<exceptions::invalid_state_proof>("chain API state change verifier failed", [&] {
+                return verifier_->verify_state_changes(batch.anchor, proof_range, request.limit,
+                                                       audit.state[proof_index++]);
+             });
          if (verified.mutations != result.mutations || verified.next_key != result.next_key) {
             reject("chain API change range does not match its authenticated proof");
          }
@@ -349,7 +390,9 @@ void verified_client::verify_transaction_status(const forge::chain::protocol::tr
       FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof,
                             "chain API response omits its transaction inclusion proof");
    }
-   verifier_->verify_transaction(*response.context.anchor, expected, response, *audit.transaction);
+   invoke_verifier<exceptions::invalid_transaction_proof>("chain API transaction verifier failed", [&] {
+      verifier_->verify_transaction(*response.context.anchor, expected, response, *audit.transaction);
+   });
 }
 
 boost::asio::awaitable<protocol::info_response> verified_client::get_info() {
@@ -415,7 +458,7 @@ verified_client::get_block_state(protocol::block_request request) {
    request.audit = protocol::audit_mode::required;
    auto response = co_await client_.blocks().get_block_state(request);
    const auto& audit = verify_envelope(response);
-   projections.verify(request, response, audit, *verifier_);
+   verify_projection("block.get_block_state", [&] { projections.verify(request, response, audit, *verifier_); });
    co_return response;
 }
 
@@ -425,7 +468,7 @@ verified_client::get_canonical_range(protocol::block_range_request request) {
    request.audit = protocol::audit_mode::required;
    auto response = co_await client_.blocks().get_canonical_range(request);
    const auto& audit = verify_envelope(response);
-   projections.verify(request, response, audit, *verifier_);
+   verify_projection("block.get_canonical_range", [&] { projections.verify(request, response, audit, *verifier_); });
    co_return response;
 }
 
@@ -437,7 +480,8 @@ verified_client::get_activated_protocol_features(protocol::protocol_features_req
    auto response = co_await client_.blocks().get_activated_protocol_features(request);
    const auto& audit = verify_envelope(response);
    verify_requested_anchor(requested_anchor, response);
-   projections.verify(request, response, audit, *verifier_);
+   verify_projection("block.get_activated_protocol_features",
+                     [&] { projections.verify(request, response, audit, *verifier_); });
    co_return response;
 }
 
@@ -449,7 +493,8 @@ verified_client::get_consensus_parameters(protocol::anchored_request request) {
    auto response = co_await client_.blocks().get_consensus_parameters(request);
    const auto& audit = verify_envelope(response);
    verify_requested_anchor(requested_anchor, response);
-   projections.verify(request, response, audit, *verifier_);
+   verify_projection("block.get_consensus_parameters",
+                     [&] { projections.verify(request, response, audit, *verifier_); });
    co_return response;
 }
 
@@ -461,7 +506,7 @@ verified_client::get_producers(protocol::producers_request request) {
    auto response = co_await client_.blocks().get_producers(request);
    const auto& audit = verify_envelope(response);
    verify_requested_anchor(requested_anchor, response);
-   projections.verify(request, response, audit, *verifier_);
+   verify_projection("block.get_producers", [&] { projections.verify(request, response, audit, *verifier_); });
    co_return response;
 }
 
@@ -473,7 +518,7 @@ verified_client::get_producer_schedule(protocol::anchored_request request) {
    auto response = co_await client_.blocks().get_producer_schedule(request);
    const auto& audit = verify_envelope(response);
    verify_requested_anchor(requested_anchor, response);
-   projections.verify(request, response, audit, *verifier_);
+   verify_projection("block.get_producer_schedule", [&] { projections.verify(request, response, audit, *verifier_); });
    co_return response;
 }
 
@@ -485,7 +530,7 @@ verified_client::get_finalizer_info(protocol::anchored_request request) {
    auto response = co_await client_.blocks().get_finalizer_info(request);
    const auto& audit = verify_envelope(response);
    verify_requested_anchor(requested_anchor, response);
-   projections.verify(request, response, audit, *verifier_);
+   verify_projection("block.get_finalizer_info", [&] { projections.verify(request, response, audit, *verifier_); });
    co_return response;
 }
 
@@ -520,7 +565,7 @@ boost::asio::awaitable<protocol::account_response> verified_client::get_account(
    auto response = co_await client_.state().get_account(request);
    const auto& audit = verify_envelope(response);
    verify_requested_anchor(requested_anchor, response);
-   projections.verify(request, response, audit, *verifier_);
+   verify_projection("state.get_account", [&] { projections.verify(request, response, audit, *verifier_); });
    co_return response;
 }
 
@@ -531,7 +576,7 @@ boost::asio::awaitable<protocol::code_response> verified_client::get_code(protoc
    auto response = co_await client_.state().get_code(request);
    const auto& audit = verify_envelope(response);
    verify_requested_anchor(requested_anchor, response);
-   projections.verify(request, response, audit, *verifier_);
+   verify_projection("state.get_code", [&] { projections.verify(request, response, audit, *verifier_); });
    co_return response;
 }
 
@@ -543,7 +588,7 @@ verified_client::get_table_rows(protocol::table_rows_request request) {
    auto response = co_await client_.state().get_table_rows(request);
    const auto& audit = verify_envelope(response);
    verify_requested_anchor(requested_anchor, response);
-   projections.verify(request, response, audit, *verifier_);
+   verify_projection("state.get_table_rows", [&] { projections.verify(request, response, audit, *verifier_); });
    co_return response;
 }
 
@@ -555,7 +600,7 @@ verified_client::get_table_scope(protocol::table_scope_request request) {
    auto response = co_await client_.state().get_table_scope(request);
    const auto& audit = verify_envelope(response);
    verify_requested_anchor(requested_anchor, response);
-   projections.verify(request, response, audit, *verifier_);
+   verify_projection("state.get_table_scope", [&] { projections.verify(request, response, audit, *verifier_); });
    co_return response;
 }
 
@@ -567,7 +612,7 @@ verified_client::get_currency_balance(protocol::currency_balance_request request
    auto response = co_await client_.state().get_currency_balance(request);
    const auto& audit = verify_envelope(response);
    verify_requested_anchor(requested_anchor, response);
-   projections.verify(request, response, audit, *verifier_);
+   verify_projection("state.get_currency_balance", [&] { projections.verify(request, response, audit, *verifier_); });
    co_return response;
 }
 
@@ -579,7 +624,7 @@ verified_client::get_currency_stats(protocol::currency_stats_request request) {
    auto response = co_await client_.state().get_currency_stats(request);
    const auto& audit = verify_envelope(response);
    verify_requested_anchor(requested_anchor, response);
-   projections.verify(request, response, audit, *verifier_);
+   verify_projection("state.get_currency_stats", [&] { projections.verify(request, response, audit, *verifier_); });
    co_return response;
 }
 
@@ -591,7 +636,8 @@ verified_client::get_scheduled_transactions(protocol::scheduled_request request)
    auto response = co_await client_.state().get_scheduled_transactions(request);
    const auto& audit = verify_envelope(response);
    verify_requested_anchor(requested_anchor, response);
-   projections.verify(request, response, audit, *verifier_);
+   verify_projection("state.get_scheduled_transactions",
+                     [&] { projections.verify(request, response, audit, *verifier_); });
    co_return response;
 }
 
@@ -603,7 +649,8 @@ verified_client::get_accounts_by_authorizers(protocol::authorizers_request reque
    auto response = co_await client_.state().get_accounts_by_authorizers(request);
    const auto& audit = verify_envelope(response);
    verify_requested_anchor(requested_anchor, response);
-   projections.verify(request, response, audit, *verifier_);
+   verify_projection("state.get_accounts_by_authorizers",
+                     [&] { projections.verify(request, response, audit, *verifier_); });
    co_return response;
 }
 

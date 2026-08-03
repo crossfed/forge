@@ -35,6 +35,8 @@ template <typename Function> void verify_delegate(Function&& function) {
    } catch (const std::exception& error) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_finality, "finality verifier failed",
                             forge::exceptions::ctx("reason", error.what()));
+   } catch (...) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_finality, "finality verifier failed");
    }
 }
 

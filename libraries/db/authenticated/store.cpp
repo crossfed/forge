@@ -6,6 +6,7 @@ module;
 #include <boost/asio/awaitable.hpp>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <functional>
 #include <map>
 #include <memory>
@@ -50,7 +51,16 @@ detail::get_record_fn snapshot_reader(const std::shared_ptr<forge::db::core::sna
    return [active, family = std::move(family), observer = std::move(observer)](
               forge::db::core::record_key key) -> boost::asio::awaitable<std::optional<bytes>> {
       if (observer) {
-         observer(key);
+         try {
+            observer(key);
+         } catch (const forge::exceptions::base&) {
+            throw;
+         } catch (const std::exception& error) {
+            FORGE_THROW_EXCEPTION(exceptions::backend_failure, "authenticated read observer failed",
+                                  forge::exceptions::ctx("reason", error.what()));
+         } catch (...) {
+            FORGE_THROW_EXCEPTION(exceptions::backend_failure, "authenticated read observer failed");
+         }
       }
       co_return co_await active->get(family, std::move(key));
    };

@@ -23,6 +23,7 @@ enum class code : std::uint16_t {
    prune_limit_too_small = 11,
    invalid_range = 12,
    invalid_prune = 13,
+   backend_failure = 14,
 };
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(code, "forge.db.authenticated")
@@ -40,5 +41,6 @@ using transaction_not_staged = forge::exceptions::coded_exception<code, code::tr
 using prune_limit_too_small = forge::exceptions::coded_exception<code, code::prune_limit_too_small>;
 using invalid_range = forge::exceptions::coded_exception<code, code::invalid_range>;
 using invalid_prune = forge::exceptions::coded_exception<code, code::invalid_prune>;
+using backend_failure = forge::exceptions::coded_exception<code, code::backend_failure>;
 
 } // namespace forge::db::authenticated::exceptions
