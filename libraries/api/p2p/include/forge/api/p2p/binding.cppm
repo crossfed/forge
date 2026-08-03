@@ -39,9 +39,9 @@ class api_binding {
       std::string value;
    };
 
-   api_binding(forge::net::p2p::node* owner, forge::api::core::binding_plan plan, forge::net::p2p::protocol_id protocol,
-               forge::api::stream::options options, peer_policy peer_policy_value,
-               discovery_scope discovery_scope_value)
+   api_binding(forge::net::p2p::node* owner, forge::api::core::binding_plan plan,
+               forge::net::p2p::protocol_id protocol, forge::api::stream::options options,
+               peer_policy peer_policy_value, discovery_scope discovery_scope_value)
        : owner_{owner}, plan_{std::move(plan)}, protocol_{std::move(protocol)}, options_{std::move(options)},
          peer_policy_{std::move(peer_policy_value)}, discovery_scope_{std::move(discovery_scope_value)} {}
 
@@ -50,8 +50,7 @@ class api_binding {
    }
 
    [[nodiscard]] forge::net::p2p::node::protocol_handler handler() const {
-      return [binding = *this](
-                 forge::net::p2p::node::incoming_protocol_stream stream) mutable -> boost::asio::awaitable<void> {
+      return [binding = *this](forge::net::p2p::node::incoming_protocol_stream stream) mutable -> boost::asio::awaitable<void> {
          co_await binding.accept(std::move(stream));
       };
    }
@@ -59,13 +58,13 @@ class api_binding {
    boost::asio::awaitable<void> accept(forge::net::p2p::node::incoming_protocol_stream stream) const {
       validate_stream(stream);
       auto trusted = forge::api::core::metadata{
-          forge::api::core::metadata_entry{
-              .key = std::string{forge::api::core::p2p_remote_peer_metadata_key},
-              .value = stream.session.remote_peer.to_string(),
-          },
+         forge::api::core::metadata_entry{
+            .key = std::string{forge::api::core::p2p_remote_peer_metadata_key},
+            .value = stream.session.remote_peer.to_string(),
+         },
       };
       co_await forge::api::stream::serve_stream(std::move(stream.stream).into_transport_stream(), plan_, options_,
-                                                std::move(trusted));
+                                               std::move(trusted));
    }
 
    boost::asio::awaitable<void> serve(forge::net::p2p::node::incoming_protocol_stream stream) const {
@@ -95,14 +94,13 @@ class api_binding {
  private:
    void validate_stream(const forge::net::p2p::node::incoming_protocol_stream& stream) const {
       if (stream.protocol != protocol_) {
-         FORGE_THROW_EXCEPTION(forge::net::p2p::exceptions::unsupported_protocol,
-                               "P2P API binding received wrong protocol",
-                               forge::exceptions::ctx("protocol", stream.protocol.value));
+         FORGE_THROW_EXCEPTION(forge::net::p2p::exceptions::unsupported_protocol, "P2P API binding received wrong protocol",
+                             forge::exceptions::ctx("protocol", stream.protocol.value));
       }
       if (peer_policy_.require_known_peer) {
          if (owner_ == nullptr || !owner_->peers().find(stream.session.remote_peer).has_value()) {
             FORGE_THROW_EXCEPTION(forge::net::p2p::exceptions::peer_not_found, "P2P API peer is not known",
-                                  forge::exceptions::ctx("peer", stream.session.remote_peer.value));
+                                forge::exceptions::ctx("peer", stream.session.remote_peer.value));
          }
       }
    }
@@ -166,8 +164,8 @@ class api_builder {
    }
 
    [[nodiscard]] api_binding build() {
-      return api_binding{owner_,   std::move(plan_), std::move(protocol_),
-                         options_, peer_policy_,     std::move(discovery_scope_)};
+      return api_binding{owner_, std::move(plan_), std::move(protocol_), options_, peer_policy_,
+                         std::move(discovery_scope_)};
    }
 
  private:
