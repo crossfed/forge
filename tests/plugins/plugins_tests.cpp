@@ -3837,6 +3837,10 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_plugin_config_is_described_from_public_sch
    BOOST_TEST(cache_ttl.has_default);
    BOOST_TEST(std::get<std::uint64_t>(cache_ttl.default_value.storage) > 0U);
 
+   const auto& request_deadline = require_field(*descriptor, "request-deadline-ms");
+   BOOST_TEST(request_deadline.has_default);
+   BOOST_TEST(std::get<std::uint64_t>(request_deadline.default_value.storage) == 0U);
+
    const auto& max_peers = require_field(*descriptor, "max-cached-peers");
    BOOST_TEST(max_peers.has_default);
    BOOST_TEST(std::get<std::uint64_t>(max_peers.default_value.storage) > 0U);
