@@ -1109,6 +1109,26 @@ BOOST_AUTO_TEST_CASE(chain_api_limited_descriptor_enforces_owner_request_and_res
                      forge::chain::api::exceptions::resource_exhausted);
 }
 
+BOOST_AUTO_TEST_CASE(chain_api_producer_zero_limit_preserves_donor_continuation_semantics) {
+   const auto limits = forge::chain::protocol::service_limits{};
+   const auto request = forge::chain::protocol::producers_request{.limit = 0U};
+   const auto response = forge::chain::protocol::producers_response{.next = "producer"};
+
+   BOOST_CHECK_NO_THROW(forge::chain::api::require_request_within_limits(request, limits));
+   BOOST_CHECK_NO_THROW(forge::chain::api::require_response_within_limits(response, request, limits));
+
+   auto invalid = response;
+   invalid.rows.emplace_back();
+   BOOST_CHECK_THROW(forge::chain::api::require_response_within_limits(invalid, request, limits),
+                     forge::chain::api::exceptions::resource_exhausted);
+
+   const auto descriptor = forge::chain::api::limited_descriptor<forge::chain::api::block>(limits);
+   const auto* method = forge::api::core::find_method(descriptor, "get_producers");
+   BOOST_REQUIRE(method != nullptr);
+   BOOST_CHECK_NO_THROW(method->request_validator(forge::raw::pack(request)));
+   BOOST_CHECK_NO_THROW(method->response_validator(forge::raw::pack(request), forge::raw::pack(response)));
+}
+
 BOOST_AUTO_TEST_CASE(chain_api_limited_descriptor_only_decodes_audited_response_types) {
    auto limits = forge::chain::protocol::service_limits{};
    limits.max_container_elements = 2U;

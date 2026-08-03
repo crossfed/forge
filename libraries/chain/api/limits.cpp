@@ -342,7 +342,7 @@ void require_request_within_limits(const protocol::protocol_features_request& va
 
 void require_request_within_limits(const protocol::producers_request& value, const protocol::service_limits& limits) {
    require_packed_request(value, limits);
-   require_page(value.limit, limits.max_page_size, "limit");
+   require_page(value.limit, limits.max_page_size, "limit", true);
 }
 
 void require_request_within_limits(const protocol::state_range_request& value, const protocol::service_limits& limits) {
