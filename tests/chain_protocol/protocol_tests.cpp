@@ -565,6 +565,17 @@ BOOST_AUTO_TEST_CASE(time_and_extended_asset_match_cdt_wire_layout) {
    BOOST_TEST(parsed.time_since_epoch().count() == 946'684'800'000'000LL);
    BOOST_TEST(parsed.to_string() == "2000-01-01T00:00:00");
    BOOST_TEST(protocol::block_timestamp{parsed}.slot == 0U);
+   const auto half_second = protocol::block_timestamp{1U};
+   BOOST_TEST(half_second.to_string() == "2000-01-01T00:00:00.500");
+   BOOST_TEST(protocol::block_timestamp::from_iso_string(half_second.to_string()).slot == half_second.slot);
+   auto half_second_variant = forge::variant{};
+   protocol::to_variant(half_second, half_second_variant);
+   auto half_second_roundtrip = protocol::block_timestamp{};
+   protocol::from_variant(half_second_variant, half_second_roundtrip);
+   BOOST_TEST(half_second_roundtrip.slot == half_second.slot);
+   BOOST_CHECK_EXCEPTION((void)protocol::block_timestamp::from_iso_string("2000-01-01T00:00:00.250"),
+                         std::invalid_argument,
+                         [](const auto& error) { return has_message(error, "date parsing failed"); });
    BOOST_TEST(protocol::block_timestamp::maximum().slot == 0xffffU);
    BOOST_TEST(protocol::block_timestamp::maximum().next().slot == 0x10000U);
    BOOST_TEST(protocol::block_timestamp{parsed}.next().slot == 1U);
