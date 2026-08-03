@@ -1,6 +1,10 @@
 name: Chain Audited API
+run-name: Chain Audited API / ${{ github.ref_name }}
 
 on:
+  push:
+    tags:
+      - "ci/chain-audited-api/**"
   workflow_dispatch:
     inputs:
       run_10m:
@@ -9,7 +13,7 @@ on:
         default: true
         type: boolean
       spine_commit:
-        description: Full committed vbytemaster/blockchain SHA containing the Spine acceptance corpus
+        description: Full committed vbytemaster/spine SHA containing the Spine acceptance corpus
         required: true
         type: string
 
@@ -21,11 +25,66 @@ env:
   HOMEBREW_NO_INSTALL_CLEANUP: "1"
 
 jobs:
+  gate:
+    name: Validate reviewed Forge and Spine revisions
+    runs-on: ubuntu-26.04
+    outputs:
+      forge_commit: ${{ steps.revisions.outputs.forge_commit }}
+      spine_commit: ${{ steps.revisions.outputs.spine_commit }}
+      run_10m: ${{ steps.revisions.outputs.run_10m }}
+    steps:
+      - id: revisions
+        name: Resolve immutable acceptance revisions
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_SHA: ${{ github.sha }}
+          EVENT_REF: ${{ github.ref }}
+          INPUT_RUN_10M: ${{ inputs.run_10m }}
+          INPUT_SPINE_COMMIT: ${{ inputs.spine_commit }}
+        run: |
+          set -euo pipefail
+
+          forge_commit="$EVENT_SHA"
+          if [[ "$EVENT_NAME" == "push" ]]; then
+            pattern='^refs/tags/ci/chain-audited-api/([0-9a-f]{40})/spine-([0-9a-f]{40})/(1m|10m)$'
+            if [[ ! "$EVENT_REF" =~ $pattern ]]; then
+              echo "invalid Chain Audited API acceptance tag: $EVENT_REF" >&2
+              exit 1
+            fi
+            if [[ "${BASH_REMATCH[1]}" != "$forge_commit" ]]; then
+              echo "acceptance tag does not point to its declared Forge revision" >&2
+              exit 1
+            fi
+            spine_commit="${BASH_REMATCH[2]}"
+            [[ "${BASH_REMATCH[3]}" == "10m" ]] && run_10m=true || run_10m=false
+          else
+            spine_commit="$INPUT_SPINE_COMMIT"
+            run_10m="$INPUT_RUN_10M"
+          fi
+
+          if [[ ! "$forge_commit" =~ ^[0-9a-f]{40}$ || ! "$spine_commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Forge and Spine revisions must be full lowercase 40-character Git SHAs" >&2
+            exit 1
+          fi
+          if [[ "$run_10m" != "true" && "$run_10m" != "false" ]]; then
+            echo "run_10m must resolve to true or false" >&2
+            exit 1
+          fi
+
+          echo "forge_commit=$forge_commit" >> "$GITHUB_OUTPUT"
+          echo "spine_commit=$spine_commit" >> "$GITHUB_OUTPUT"
+          echo "run_10m=$run_10m" >> "$GITHUB_OUTPUT"
+
   style:
     name: ubuntu-26.04 / structure, format, and pinned Spine evidence
+    needs: gate
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.gate.outputs.forge_commit }}
+          persist-credentials: false
 
       - name: Install clang-format 22
         run: sudo apt-get update && sudo apt-get install -y clang-format-22
@@ -42,7 +101,7 @@ jobs:
       - name: Validate pinned Spine revision
         shell: bash
         env:
-          SPINE_COMMIT: ${{ inputs.spine_commit }}
+          SPINE_COMMIT: ${{ needs.gate.outputs.spine_commit }}
         run: |
           if [[ ! "$SPINE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
             echo "spine_commit must be a full lowercase 40-character Git SHA" >&2
@@ -52,8 +111,8 @@ jobs:
       - name: Checkout pinned Spine acceptance corpus
         uses: actions/checkout@v4
         with:
-          repository: vbytemaster/blockchain
-          ref: ${{ inputs.spine_commit }}
+          repository: vbytemaster/spine
+          ref: ${{ needs.gate.outputs.spine_commit }}
           path: spine-acceptance
           persist-credentials: false
           submodules: false
@@ -61,7 +120,7 @@ jobs:
       - name: Check Spring manifest against pinned Spine corpus
         shell: bash
         env:
-          SPINE_COMMIT: ${{ inputs.spine_commit }}
+          SPINE_COMMIT: ${{ needs.gate.outputs.spine_commit }}
         run: |
           actual_spine_commit="$(git -C "$GITHUB_WORKSPACE/spine-acceptance" rev-parse HEAD)"
           if [[ "$actual_spine_commit" != "$SPINE_COMMIT" ]]; then
@@ -73,6 +132,7 @@ jobs:
 
   native:
     name: ${{ matrix.os }} / Release
+    needs: gate
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -81,6 +141,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.gate.outputs.forge_commit }}
+          persist-credentials: false
           submodules: recursive
 
       - name: Install toolchain and dependencies
@@ -138,10 +200,13 @@ jobs:
 
   sanitizer:
     name: ubuntu-26.04 / ASan+UBSan+fuzz
+    needs: gate
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.gate.outputs.forge_commit }}
+          persist-credentials: false
           submodules: recursive
 
       - name: Install dependencies
@@ -202,6 +267,7 @@ jobs:
 
   performance:
     name: ${{ matrix.os }} / authenticated DB baselines
+    needs: gate
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -210,6 +276,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.gate.outputs.forge_commit }}
+          persist-credentials: false
           submodules: recursive
 
       - name: Install toolchain and dependencies
@@ -260,7 +328,7 @@ jobs:
             | tee build/chain-audited-api-performance/results/authenticated-1m.json
 
       - name: Run ten-million-key baseline
-        if: ${{ inputs.run_10m }}
+        if: needs.gate.outputs.run_10m == 'true'
         shell: bash
         run: |
           build/chain-audited-api-performance/tests/benchmark_forge_db_authenticated \

@@ -55,9 +55,20 @@ each exact Boost.Test case:
 python3 tests/chain_api/check_spring_api_manifest.py FORGE_ROOT SPINE_ROOT
 ```
 
-The manual workflow requires `spine_commit` as a full 40-character commit SHA,
-checks out that exact revision, and passes its root to the checker. Omitting the
-Spine root is an error rather than a silent downstream skip.
+The pre-merge workflow is started manually by pushing a lightweight acceptance
+tag with both reviewed revisions and the performance mode:
+
+```text
+ci/chain-audited-api/<forge-sha>/spine-<spine-sha>/<1m|10m>
+```
+
+The workflow rejects a tag that does not point to its declared full Forge SHA,
+checks out both exact revisions, and passes the Spine root to the checker. This
+tag trigger works before the workflow has reached the default branch and leaves
+a content-addressed audit trail for the reviewed pair. Once the workflow is
+available on the default branch, `workflow_dispatch` remains available with the
+same full `spine_commit` and performance inputs. Omitting either revision is an
+error rather than a silent downstream skip.
 
 Forge-local CTest uses the explicit manifest-only mode. It validates the
 manifest and Forge-local transaction-id fixture, reports Spine acceptance as
