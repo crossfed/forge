@@ -4147,6 +4147,7 @@ BOOST_AUTO_TEST_CASE(http_api_special_types_support_streaming_put_and_file_get) 
        runtime, connection.async_request(make_request(method::head, "/objects/cache/missing.bin")));
    BOOST_TEST(missing_head.result_int() == static_cast<unsigned>(status::not_found));
    BOOST_TEST(missing_head.body().empty());
+   BOOST_TEST(missing_head[field::content_length] == "9");
    const auto after_missing_head = forge::asio::blocking::run(
        runtime, connection.async_request(make_request(method::get, "/objects/cache/chunk.bin")));
    BOOST_TEST(after_missing_head.result_int() == static_cast<unsigned>(status::ok));

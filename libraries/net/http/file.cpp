@@ -248,7 +248,6 @@ boost::asio::awaitable<stream_response> file_response::materialize(const request
       auto reply = make_text_response(request_value, status::not_found, "not found");
       if (request_value.method() == method::head) {
          reply.body().clear();
-         reply.prepare_payload();
       }
       co_return stream_response::buffered(std::move(reply));
    }
