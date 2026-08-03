@@ -4970,6 +4970,26 @@ BOOST_AUTO_TEST_CASE(middleware_runs_in_order_and_can_short_circuit) {
    BOOST_TEST(handle(short_router, secure_context).result_int() == static_cast<unsigned>(status::unauthorized));
 }
 
+BOOST_AUTO_TEST_CASE(middleware_prefix_matches_the_decoded_route_path) {
+   auto router = forge::net::http::router{};
+   router.use(forge::net::http::middleware_descriptor{
+       .id = "admin-auth",
+       .phase = forge::net::http::middleware_phase::security,
+       .path_prefix = "/v1/chain/admin",
+       .handler = [](route_context& context, next_handler next) -> boost::asio::awaitable<response> {
+          static_cast<void>(next);
+          co_return make_text_response(context.request, status::unauthorized, "auth required");
+       },
+   });
+   router.get("/v1/chain/admin", [](route_context& context) -> boost::asio::awaitable<response> {
+      co_return make_text_response(context.request, status::ok, "unreachable");
+   });
+
+   auto request = make_request(method::get, "/v1/chain/%61dmin");
+   auto context = make_route_context(request);
+   BOOST_TEST(handle(router, context).result_int() == static_cast<unsigned>(status::unauthorized));
+}
+
 BOOST_AUTO_TEST_CASE(http_api_plan_mounts_ordered_middleware_contributions) {
    auto runtime = forge::asio::runtime{};
    auto apis = forge::api::core::registry{};

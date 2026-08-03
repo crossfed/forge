@@ -211,23 +211,23 @@ bool method_path_exists(const std::vector<Entry>& entries, method verb, const ta
    return false;
 }
 
-bool path_prefix_matches(const std::string& prefix, const target& parsed_target) {
-   if (prefix.empty() || prefix == "/") {
+bool path_prefix_matches(const std::vector<std::string>& prefix, bool trailing_slash, const target& parsed_target) {
+   if (prefix.empty()) {
       return true;
    }
-   if (!parsed_target.path.starts_with(prefix)) {
+   if (parsed_target.segments.size() < prefix.size() ||
+       !std::equal(prefix.begin(), prefix.end(), parsed_target.segments.begin())) {
       return false;
    }
-   return parsed_target.path.size() == prefix.size() || prefix.back() == '/' ||
-          parsed_target.path[prefix.size()] == '/';
+   return !trailing_slash || parsed_target.segments.size() > prefix.size() || parsed_target.path.ends_with('/');
 }
 
-middleware_list matching_middlewares(const std::vector<middleware_descriptor>& middlewares,
-                                     const target& parsed_target) {
+template <typename Entry>
+middleware_list matching_middlewares(const std::vector<Entry>& middlewares, const target& parsed_target) {
    auto result = middleware_list{};
-   for (const auto& descriptor : middlewares) {
-      if (path_prefix_matches(descriptor.path_prefix, parsed_target)) {
-         result.push_back(descriptor.handler);
+   for (const auto& entry : middlewares) {
+      if (path_prefix_matches(entry.path_segments, entry.trailing_slash, parsed_target)) {
+         result.push_back(entry.descriptor.handler);
       }
    }
    return result;
@@ -255,20 +255,28 @@ void router::use(middleware_descriptor descriptor) {
    if (descriptor.path_prefix.empty()) {
       descriptor.path_prefix = "/";
    }
+   const auto prefix = parse_target(descriptor.path_prefix);
+   if (!prefix.query.empty()) {
+      throw exceptions::bad_request{"HTTP middleware path prefix must not contain a query"};
+   }
    for (const auto& existing : middlewares_) {
-      if (existing.id == descriptor.id) {
+      if (existing.descriptor.id == descriptor.id) {
          throw exceptions::conflict{"duplicate HTTP middleware id"};
       }
    }
-   middlewares_.push_back(std::move(descriptor));
+   middlewares_.push_back(middleware_entry{
+       .descriptor = std::move(descriptor),
+       .path_segments = prefix.segments,
+       .trailing_slash = prefix.path.size() > 1U && prefix.path.ends_with('/'),
+   });
    std::sort(middlewares_.begin(), middlewares_.end(), [](const auto& left, const auto& right) {
-      if (left.phase != right.phase) {
-         return static_cast<int>(left.phase) < static_cast<int>(right.phase);
+      if (left.descriptor.phase != right.descriptor.phase) {
+         return static_cast<int>(left.descriptor.phase) < static_cast<int>(right.descriptor.phase);
       }
-      if (left.order != right.order) {
-         return left.order < right.order;
+      if (left.descriptor.order != right.descriptor.order) {
+         return left.descriptor.order < right.descriptor.order;
       }
-      return left.id < right.id;
+      return left.descriptor.id < right.descriptor.id;
    });
 }
 
