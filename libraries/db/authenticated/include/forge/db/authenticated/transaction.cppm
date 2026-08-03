@@ -33,11 +33,9 @@ class transaction {
    [[nodiscard]] std::optional<root> base() const;
    [[nodiscard]] std::optional<staged_version> staged() const;
 
-   boost::asio::awaitable<staged_version>
-   preview(std::span<const mutation> mutations);
-   boost::asio::awaitable<staged_version>
-   stage(std::span<const mutation> mutations,
-         std::optional<digest> expected_state_root = std::nullopt);
+   boost::asio::awaitable<staged_version> preview(std::span<const mutation> mutations);
+   boost::asio::awaitable<staged_version> stage(std::span<const mutation> mutations,
+                                                std::optional<digest> expected_state_root = std::nullopt);
 
  private:
    struct impl;
@@ -52,14 +50,9 @@ namespace detail {
 
 class transaction_access {
  public:
-   [[nodiscard]] static transaction make(
-      forge::db::core::transaction& active,
-      forge::db::core::family family,
-      std::string domain,
-      digest namespace_hash,
-      limits bounds,
-      version_id_t candidate,
-      std::optional<root> base);
+   [[nodiscard]] static transaction make(forge::db::core::transaction& active, forge::db::core::family family,
+                                         std::string domain, digest namespace_hash, limits bounds,
+                                         version_id_t candidate, std::optional<root> base);
 };
 
 } // namespace detail

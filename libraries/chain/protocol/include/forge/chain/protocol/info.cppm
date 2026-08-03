@@ -8,7 +8,6 @@ module;
 
 export module forge.chain.protocol.info;
 
-
 export import forge.chain.protocol.audit;
 export import forge.chain.protocol.time;
 

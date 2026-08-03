@@ -10,13 +10,8 @@ class transaction_participant_impl;
 namespace forge::db::authenticated {
 
 struct transaction::impl {
-   impl(forge::db::core::transaction& active_value,
-        forge::db::core::family family_value,
-        std::string domain_value,
-        digest namespace_hash_value,
-        limits bounds_value,
-        version_id_t candidate_value,
-        std::optional<root> base_value);
+   impl(forge::db::core::transaction& active_value, forge::db::core::family family_value, std::string domain_value,
+        digest namespace_hash_value, limits bounds_value, version_id_t candidate_value, std::optional<root> base_value);
 
    forge::db::core::transaction* active = nullptr;
    forge::db::core::family family;

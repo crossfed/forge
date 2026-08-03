@@ -12,22 +12,17 @@ namespace forge::chain::api {
 
 namespace {
 
-template <typename Interface>
-Interface& require(const forge::api::core::handle<Interface>& value,
-                   const char* name) {
+template <typename Interface> Interface& require(const forge::api::core::handle<Interface>& value, const char* name) {
    if (!value) {
-      FORGE_THROW_EXCEPTION(
-         exceptions::unavailable,
-         "chain API service is unavailable",
-         forge::exceptions::ctx("service", name));
+      FORGE_THROW_EXCEPTION(exceptions::unavailable, "chain API service is unavailable",
+                            forge::exceptions::ctx("service", name));
    }
    return *value.shared();
 }
 
 } // namespace
 
-raw_client::raw_client(service_handles services)
-    : services_{std::move(services)} {}
+raw_client::raw_client(service_handles services) : services_{std::move(services)} {}
 
 const service_handles& raw_client::services() const noexcept {
    return services_;
