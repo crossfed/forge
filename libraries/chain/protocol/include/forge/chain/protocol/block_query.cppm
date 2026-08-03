@@ -24,6 +24,7 @@ export namespace forge::chain::protocol {
 struct block_request {
    std::optional<block_id> id;
    std::optional<std::uint32_t> num;
+   std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
 
    bool operator==(const block_request&) const = default;
@@ -56,6 +57,7 @@ struct block_state_response : audited_response {
 struct block_range_request {
    std::uint32_t first = 0;
    std::uint32_t limit = 256;
+   std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
 
    bool operator==(const block_range_request&) const = default;
@@ -73,6 +75,7 @@ struct protocol_features_request {
    bool search_by_block_num = false;
    bool reverse = false;
    std::optional<block_id> anchor;
+   std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
 
    bool operator==(const protocol_features_request&) const = default;
@@ -95,6 +98,7 @@ struct producers_request {
    std::string lower_bound;
    std::uint32_t limit = 50;
    std::optional<block_id> anchor;
+   std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
 
    bool operator==(const producers_request&) const = default;
@@ -124,18 +128,18 @@ struct finalizer_info_response : audited_response {
    bool operator==(const finalizer_info_response&) const = default;
 };
 
-BOOST_DESCRIBE_STRUCT(block_request, (), (id, num, audit))
+BOOST_DESCRIBE_STRUCT(block_request, (), (id, num, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(block_record, (), (block, id, num, canonical))
 BOOST_DESCRIBE_STRUCT(block_response, (audited_response, block_record), ())
 BOOST_DESCRIBE_STRUCT(block_header_response, (audited_response), (header, id, num, canonical))
 BOOST_DESCRIBE_STRUCT(block_state_response, (audited_response), (id, num, state))
-BOOST_DESCRIBE_STRUCT(block_range_request, (), (first, limit, audit))
+BOOST_DESCRIBE_STRUCT(block_range_request, (), (first, limit, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(block_range_response, (audited_response), (blocks, next))
 BOOST_DESCRIBE_STRUCT(protocol_features_request, (),
-                      (lower_bound, upper_bound, limit, search_by_block_num, reverse, anchor, audit))
+                      (lower_bound, upper_bound, limit, search_by_block_num, reverse, anchor, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(protocol_features_response, (audited_response), (features, next))
 BOOST_DESCRIBE_STRUCT(consensus_parameters_response, (audited_response), (parameters, wasm))
-BOOST_DESCRIBE_STRUCT(producers_request, (), (json, lower_bound, limit, anchor, audit))
+BOOST_DESCRIBE_STRUCT(producers_request, (), (json, lower_bound, limit, anchor, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(producers_response, (audited_response), (rows, total_vote_weight, next))
 BOOST_DESCRIBE_STRUCT(producer_schedule_response, (audited_response), (active, pending, proposed))
 BOOST_DESCRIBE_STRUCT(finalizer_info_response, (audited_response), (active, pending, last_votes))

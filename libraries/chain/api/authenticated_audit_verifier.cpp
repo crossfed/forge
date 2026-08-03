@@ -128,6 +128,10 @@ authenticated_audit_verifier::authenticated_audit_verifier(authenticated_audit_o
    }
 }
 
+std::optional<protocol::block_id> authenticated_audit_verifier::preferred_finality_anchor() const {
+   return finality_->preferred_trust_anchor();
+}
+
 void authenticated_audit_verifier::verify_context(const protocol::response_context& context) {
    if (context.chain != options_.chain || (context.anchor && context.anchor->chain != options_.chain)) {
       FORGE_THROW_EXCEPTION(exceptions::wrong_chain, "chain API response belongs to another chain");

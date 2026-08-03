@@ -31,6 +31,11 @@ scalar path/query parameters use `GET`; structured proof ranges, simulations
 and mutations use `POST`. Dynamic reads return `Cache-Control: no-store`.
 Requests select an optional finalized anchor by block ID, while the complete
 chain/root commitment is returned in the audited response context.
+Audited requests may also provide `finality_from`, the caller's already trusted
+genesis or checkpoint block. It is a proof-construction hint, not server-provided
+trust: `verified_client` fills it from the installed verifier and still verifies
+the returned witness locally. Recent trusted checkpoints therefore keep finality
+witnesses bounded without weakening the trust bootstrap.
 Table-scope continuation uses the transport-neutral protocol `bytes` value;
 the HTTP GET binding carries it through the shared JSON query codec and other
 transports carry the same bytes without a transport-specific cursor DTO.

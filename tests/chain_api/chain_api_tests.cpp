@@ -175,7 +175,8 @@ class state_service final : public forge::chain::api::state {
    explicit state_service(forge::chain::protocol::account_response response) : account_response_{std::move(response)} {}
 
    boost::asio::awaitable<forge::chain::protocol::state_point_response>
-   get_point(forge::chain::protocol::state_point_request) override {
+   get_point(forge::chain::protocol::state_point_request request) override {
+      last_point_request = std::move(request);
       co_return point_response_;
    }
 
@@ -228,6 +229,8 @@ class state_service final : public forge::chain::api::state {
    get_accounts_by_authorizers(forge::chain::protocol::authorizers_request) override {
       co_return forge::chain::protocol::authorizers_response{};
    }
+
+   std::optional<forge::chain::protocol::state_point_request> last_point_request;
 
  private:
    forge::chain::protocol::state_point_response point_response_;
@@ -315,6 +318,10 @@ class deadline_remote_invoker final : public forge::api::core::remote_invoker {
 
 class accepting_audit_verifier final : public forge::chain::api::audit_verifier {
  public:
+   [[nodiscard]] std::optional<forge::chain::protocol::block_id> preferred_finality_anchor() const override {
+      return preferred_anchor;
+   }
+
    void verify_context(const forge::chain::protocol::response_context&) override {
       if (throw_standard_context) {
          throw std::runtime_error{"test context verifier failure"};
@@ -380,6 +387,7 @@ class accepting_audit_verifier final : public forge::chain::api::audit_verifier 
    bool throw_standard_context = false;
    bool throw_nonstandard_state_point = false;
    bool throw_standard_transaction = false;
+   std::optional<forge::chain::protocol::block_id> preferred_anchor;
 };
 
 class account_projection_verifier final : public forge::chain::api::projection_verifier {
@@ -1325,6 +1333,48 @@ BOOST_AUTO_TEST_CASE(verified_raw_state_queries_delegate_content_proofs) {
       static_cast<void>(run(client.get_range({.anchor = anchor.block})));
       BOOST_TEST(verifier->state_range_verifications == 1U);
    }
+}
+
+BOOST_AUTO_TEST_CASE(verified_client_uses_preferred_finality_anchor_without_overwriting_an_explicit_anchor) {
+   auto anchor = forge::chain::protocol::state_anchor{};
+   anchor.block._hash[0] = 21U;
+   anchor.block_num = 21U;
+   auto response = forge::chain::protocol::state_point_response{};
+   response.context.anchor = anchor;
+   response.audit = forge::chain::protocol::audit_bundle{
+       .finality = forge::chain::protocol::proof_blob{.scheme = "test.finality"},
+       .state = {forge::chain::protocol::proof_blob{.scheme = "test.state"}},
+   };
+
+   auto services = forge::api::core::registry{};
+   auto service = std::make_shared<state_service>(response);
+   services.install<forge::chain::api::state>(service);
+   auto verifier = std::make_shared<accepting_audit_verifier>();
+   auto preferred = forge::chain::protocol::block_id{};
+   preferred._hash[0] = 8U;
+   verifier->preferred_anchor = preferred;
+   auto client = forge::chain::api::verified_client{
+       forge::chain::api::raw_client{forge::chain::api::service_handles{
+           .state_queries = services.get<forge::chain::api::state>(forge::chain::api::state::ref()),
+       }},
+       verifier,
+   };
+
+   static_cast<void>(run(client.get_point({.key = {1U}, .anchor = anchor.block})));
+   BOOST_REQUIRE(service->last_point_request.has_value());
+   BOOST_REQUIRE(service->last_point_request->finality_from.has_value());
+   BOOST_TEST(*service->last_point_request->finality_from == preferred);
+
+   auto explicit_anchor = forge::chain::protocol::block_id{};
+   explicit_anchor._hash[0] = 13U;
+   static_cast<void>(run(client.get_point({
+       .key = {1U},
+       .anchor = anchor.block,
+       .finality_from = explicit_anchor,
+   })));
+   BOOST_REQUIRE(service->last_point_request.has_value());
+   BOOST_REQUIRE(service->last_point_request->finality_from.has_value());
+   BOOST_TEST(*service->last_point_request->finality_from == explicit_anchor);
 }
 
 BOOST_AUTO_TEST_CASE(verified_client_translates_extension_failures_to_typed_errors) {

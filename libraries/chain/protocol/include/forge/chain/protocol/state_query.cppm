@@ -31,6 +31,7 @@ struct key_range {
 struct state_point_request {
    bytes key;
    std::optional<block_id> anchor;
+   std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
 
    bool operator==(const state_point_request&) const = default;
@@ -41,6 +42,7 @@ struct state_range_request {
    std::optional<block_id> anchor;
    std::uint32_t limit = 256;
    bool reverse = false;
+   std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
 
    bool operator==(const state_range_request&) const = default;
@@ -102,6 +104,7 @@ struct state_changes_request {
    std::vector<key_range> ranges;
    std::uint32_t limit = 256;
    std::optional<state_changes_cursor> cursor;
+   std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
 
    bool operator==(const state_changes_request&) const = default;
@@ -117,6 +120,7 @@ struct state_changes_response : audited_response {
 struct account_request {
    forge::chain::protocol::account_name account;
    std::optional<block_id> anchor;
+   std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
 
    bool operator==(const account_request&) const = default;
@@ -144,6 +148,7 @@ struct code_request {
    bool include_abi = true;
    std::optional<digest> known_abi_hash;
    std::optional<block_id> anchor;
+   std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
 
    bool operator==(const code_request&) const = default;
@@ -193,6 +198,7 @@ struct table_rows_request {
    std::uint32_t limit = 10;
    bool reverse = false;
    std::optional<block_id> anchor;
+   std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
 
    bool operator==(const table_rows_request&) const = default;
@@ -214,6 +220,7 @@ struct table_scope_request {
    bool reverse = false;
    std::optional<bytes> cursor;
    std::optional<block_id> anchor;
+   std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
 
    bool operator==(const table_scope_request&) const = default;
@@ -241,6 +248,7 @@ struct currency_balance_request {
    forge::chain::protocol::account_name account;
    std::optional<forge::chain::protocol::symbol_code> symbol;
    std::optional<block_id> anchor;
+   std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
 
    bool operator==(const currency_balance_request&) const = default;
@@ -250,6 +258,7 @@ struct currency_stats_request {
    forge::chain::protocol::account_name code;
    forge::chain::protocol::symbol_code symbol{};
    std::optional<block_id> anchor;
+   std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
 
    bool operator==(const currency_stats_request&) const = default;
@@ -273,6 +282,7 @@ struct scheduled_request {
    std::uint32_t limit = 50;
    std::optional<std::uint32_t> time_limit_ms;
    std::optional<block_id> anchor;
+   std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
 
    bool operator==(const scheduled_request&) const = default;
@@ -317,6 +327,7 @@ struct authorizers_request {
    std::uint32_t limit = 256;
    std::optional<authorizers_cursor> cursor;
    std::optional<block_id> anchor;
+   std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
 
    bool operator==(const authorizers_request&) const = default;
@@ -341,8 +352,8 @@ struct authorizers_response : audited_response {
 };
 
 BOOST_DESCRIBE_STRUCT(key_range, (), (lower, upper))
-BOOST_DESCRIBE_STRUCT(state_point_request, (), (key, anchor, audit))
-BOOST_DESCRIBE_STRUCT(state_range_request, (), (range, anchor, limit, reverse, audit))
+BOOST_DESCRIBE_STRUCT(state_point_request, (), (key, anchor, finality_from, audit))
+BOOST_DESCRIBE_STRUCT(state_range_request, (), (range, anchor, limit, reverse, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(state_range_item, (), (key, value))
 BOOST_DESCRIBE_STRUCT(state_point_response, (audited_response), (value))
 BOOST_DESCRIBE_STRUCT(state_range_response, (audited_response), (rows, next_key))
@@ -350,35 +361,37 @@ BOOST_DESCRIBE_STRUCT(state_mutation, (), (key, value))
 BOOST_DESCRIBE_STRUCT(state_change_range, (), (range, mutations, next_key))
 BOOST_DESCRIBE_STRUCT(state_change_batch, (), (anchor, ranges))
 BOOST_DESCRIBE_STRUCT(state_changes_cursor, (), (block, range, key))
-BOOST_DESCRIBE_STRUCT(state_changes_request, (), (from_block, to_block, ranges, limit, cursor, audit))
+BOOST_DESCRIBE_STRUCT(state_changes_request, (), (from_block, to_block, ranges, limit, cursor, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(state_changes_response, (audited_response), (blocks, next))
-BOOST_DESCRIBE_STRUCT(account_request, (), (account, anchor, audit))
+BOOST_DESCRIBE_STRUCT(account_request, (), (account, anchor, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(account_permission, (), (name, parent, auth))
 BOOST_DESCRIBE_STRUCT(account_response, (audited_response), (account, creation_date, permissions))
-BOOST_DESCRIBE_STRUCT(code_request, (), (account, include_code, include_abi, known_abi_hash, anchor, audit))
+BOOST_DESCRIBE_STRUCT(code_request, (),
+                      (account, include_code, include_abi, known_abi_hash, anchor, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(code_response, (audited_response), (account, hash, abi_hash, wasm, raw_abi))
 BOOST_DESCRIBE_ENUM(table_index_kind, primary, secondary_u64, secondary_u128, secondary_u256, secondary_f64,
                     secondary_f128)
 BOOST_DESCRIBE_STRUCT(table_index, (), (kind, position))
 BOOST_DESCRIBE_STRUCT(table_row, (), (value, payer))
 BOOST_DESCRIBE_STRUCT(table_rows_request, (),
-                      (code, scope, table, index, lower_bound, upper_bound, cursor, limit, reverse, anchor, audit))
+                      (code, scope, table, index, lower_bound, upper_bound, cursor, limit, reverse, anchor,
+                       finality_from, audit))
 BOOST_DESCRIBE_STRUCT(table_rows_response, (audited_response), (rows, next))
 BOOST_DESCRIBE_STRUCT(table_scope_request, (),
-                      (code, table, lower_bound, upper_bound, limit, reverse, cursor, anchor, audit))
+                      (code, table, lower_bound, upper_bound, limit, reverse, cursor, anchor, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(table_scope_row, (), (code, scope, table, payer, count))
 BOOST_DESCRIBE_STRUCT(table_scope_response, (audited_response), (rows, next))
-BOOST_DESCRIBE_STRUCT(currency_balance_request, (), (code, account, symbol, anchor, audit))
-BOOST_DESCRIBE_STRUCT(currency_stats_request, (), (code, symbol, anchor, audit))
+BOOST_DESCRIBE_STRUCT(currency_balance_request, (), (code, account, symbol, anchor, finality_from, audit))
+BOOST_DESCRIBE_STRUCT(currency_stats_request, (), (code, symbol, anchor, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(currency_balance_response, (audited_response), (balances))
 BOOST_DESCRIBE_STRUCT(currency_stats_response, (audited_response), (stats))
-BOOST_DESCRIBE_STRUCT(scheduled_request, (), (json, lower_bound, limit, time_limit_ms, anchor, audit))
+BOOST_DESCRIBE_STRUCT(scheduled_request, (), (json, lower_bound, limit, time_limit_ms, anchor, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(scheduled_transaction, (),
                       (trx_id, sender, sender_id, payer, delay_until, expiration, published, transaction))
 BOOST_DESCRIBE_STRUCT(scheduled_response, (audited_response), (transactions, more))
 BOOST_DESCRIBE_ENUM(authorizer_source, account, key)
 BOOST_DESCRIBE_STRUCT(authorizers_cursor, (), (source, input, lower))
-BOOST_DESCRIBE_STRUCT(authorizers_request, (), (accounts, keys, limit, cursor, anchor, audit))
+BOOST_DESCRIBE_STRUCT(authorizers_request, (), (accounts, keys, limit, cursor, anchor, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(authorizer_match, (),
                       (account_name, permission_name, authorizing_account, authorizing_key, weight, threshold))
 BOOST_DESCRIBE_STRUCT(authorizers_response, (audited_response), (accounts, next))

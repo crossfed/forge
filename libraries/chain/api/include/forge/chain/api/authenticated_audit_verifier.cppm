@@ -24,6 +24,8 @@ class authenticated_audit_verifier final : public audit_verifier {
  public:
    authenticated_audit_verifier(authenticated_audit_options options, std::shared_ptr<finality_verifier> finality);
 
+   [[nodiscard]] std::optional<protocol::block_id> preferred_finality_anchor() const override;
+
    void verify_context(const protocol::response_context& context) override;
    void verify_finality(const protocol::state_anchor& anchor, const protocol::proof_blob& proof) override;
    std::optional<protocol::bytes> verify_state_point(const protocol::state_anchor& anchor,

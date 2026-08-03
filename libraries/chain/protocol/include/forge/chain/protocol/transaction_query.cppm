@@ -49,6 +49,7 @@ struct transaction_submit_response {
 
 struct transaction_status_request {
    forge::chain::protocol::transaction_id id;
+   std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
 
    bool operator==(const transaction_status_request&) const = default;
@@ -77,6 +78,7 @@ struct transaction_await_request {
    forge::chain::protocol::transaction_id id;
    transaction_lifecycle desired = transaction_lifecycle::finalized;
    std::uint64_t timeout_ms = 30'000;
+   std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
 
    bool operator==(const transaction_await_request&) const = default;
@@ -91,6 +93,7 @@ struct transaction_read_only_request {
    forge::chain::protocol::packed_transaction transaction;
    bool return_failure_trace = true;
    std::optional<block_id> anchor;
+   std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
 };
 
@@ -106,13 +109,14 @@ BOOST_DESCRIBE_ENUM(transaction_lifecycle, accepted, included, finalized, forked
 BOOST_DESCRIBE_ENUM(transaction_execution_status, executed, rejected)
 BOOST_DESCRIBE_STRUCT(transaction_submit_request, (), (transaction, return_failure_trace, retry, retry_blocks))
 BOOST_DESCRIBE_STRUCT(transaction_submit_response, (), (id, state, trace))
-BOOST_DESCRIBE_STRUCT(transaction_status_request, (), (id, audit))
+BOOST_DESCRIBE_STRUCT(transaction_status_request, (), (id, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(transaction_status_response, (audited_response),
                       (id, state, block, block_num, block_time, expiration, head, head_num, head_time, finalized,
                        finalized_num, finalized_time, earliest_tracked, earliest_tracked_num, receipt, trace))
-BOOST_DESCRIBE_STRUCT(transaction_await_request, (), (id, desired, timeout_ms, audit))
+BOOST_DESCRIBE_STRUCT(transaction_await_request, (), (id, desired, timeout_ms, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(transaction_required_keys_request, (), (transaction, available))
-BOOST_DESCRIBE_STRUCT(transaction_read_only_request, (), (transaction, return_failure_trace, anchor, audit))
+BOOST_DESCRIBE_STRUCT(transaction_read_only_request, (),
+                      (transaction, return_failure_trace, anchor, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(transaction_read_only_response, (audited_response), (id, status, trace))
 
 } // namespace forge::chain::protocol

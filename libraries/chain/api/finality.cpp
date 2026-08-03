@@ -19,6 +19,10 @@ import forge.chain.api.exceptions;
 
 namespace forge::chain::api {
 
+std::optional<protocol::block_id> finality_verifier::preferred_trust_anchor() const {
+   return std::nullopt;
+}
+
 namespace {
 
 [[noreturn]] void throw_anchor_collision(const protocol::state_anchor& anchor) {
@@ -122,6 +126,13 @@ cached_finality_verifier::~cached_finality_verifier() = default;
 cached_finality_verifier::cached_finality_verifier(cached_finality_verifier&&) noexcept = default;
 
 cached_finality_verifier& cached_finality_verifier::operator=(cached_finality_verifier&&) noexcept = default;
+
+std::optional<protocol::block_id> cached_finality_verifier::preferred_trust_anchor() const {
+   if (!impl_) {
+      FORGE_THROW_EXCEPTION(exceptions::trust_required, "cached finality verifier is not initialized");
+   }
+   return impl_->delegate->preferred_trust_anchor();
+}
 
 void cached_finality_verifier::verify(const protocol::state_anchor& anchor, const protocol::proof_blob& proof) {
    if (!impl_) {

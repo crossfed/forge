@@ -54,6 +54,7 @@ struct state_anchor {
 
 struct anchored_request {
    std::optional<block_id> anchor;
+   std::optional<block_id> finality_from;
    audit_mode audit = audit_mode::none;
 
    bool operator==(const anchored_request&) const = default;
@@ -148,7 +149,7 @@ BOOST_DESCRIBE_ENUM(audit_class, none, finality, state_point, state_range, state
                     deterministic_composite, unsupported)
 BOOST_DESCRIBE_STRUCT(state_anchor, (),
                       (chain, block, block_num, transaction_root, state_root, state_size, change_root, change_count))
-BOOST_DESCRIBE_STRUCT(anchored_request, (), (anchor, audit))
+BOOST_DESCRIBE_STRUCT(anchored_request, (), (anchor, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(proof_blob, (), (scheme, version, payload))
 BOOST_DESCRIBE_STRUCT(content_witness, (), (hash, value))
 BOOST_DESCRIBE_STRUCT(transaction_inclusion_proof, (), (leaf, index, leaf_count, path))
