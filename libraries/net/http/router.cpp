@@ -259,6 +259,11 @@ void router::use(middleware_descriptor descriptor) {
    if (!prefix.query.empty()) {
       throw exceptions::bad_request{"HTTP middleware path prefix must not contain a query"};
    }
+   auto prefix_segments = prefix.segments;
+   const auto trailing_slash = prefix.path.size() > 1U && prefix.path.ends_with('/');
+   if (trailing_slash && !prefix_segments.empty() && prefix_segments.back().empty()) {
+      prefix_segments.pop_back();
+   }
    for (const auto& existing : middlewares_) {
       if (existing.descriptor.id == descriptor.id) {
          throw exceptions::conflict{"duplicate HTTP middleware id"};
@@ -266,8 +271,8 @@ void router::use(middleware_descriptor descriptor) {
    }
    middlewares_.push_back(middleware_entry{
        .descriptor = std::move(descriptor),
-       .path_segments = prefix.segments,
-       .trailing_slash = prefix.path.size() > 1U && prefix.path.ends_with('/'),
+       .path_segments = std::move(prefix_segments),
+       .trailing_slash = trailing_slash,
    });
    std::sort(middlewares_.begin(), middlewares_.end(), [](const auto& left, const auto& right) {
       if (left.descriptor.phase != right.descriptor.phase) {

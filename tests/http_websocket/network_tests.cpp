@@ -4971,23 +4971,36 @@ BOOST_AUTO_TEST_CASE(middleware_runs_in_order_and_can_short_circuit) {
 }
 
 BOOST_AUTO_TEST_CASE(middleware_prefix_matches_the_decoded_route_path) {
-   auto router = forge::net::http::router{};
-   router.use(forge::net::http::middleware_descriptor{
-       .id = "admin-auth",
-       .phase = forge::net::http::middleware_phase::security,
-       .path_prefix = "/v1/chain/admin",
-       .handler = [](route_context& context, next_handler next) -> boost::asio::awaitable<response> {
-          static_cast<void>(next);
-          co_return make_text_response(context.request, status::unauthorized, "auth required");
-       },
-   });
-   router.get("/v1/chain/admin", [](route_context& context) -> boost::asio::awaitable<response> {
-      co_return make_text_response(context.request, status::ok, "unreachable");
-   });
+   const auto add_auth = [](forge::net::http::router& router, std::string path_prefix) {
+      router.use(forge::net::http::middleware_descriptor{
+          .id = "admin-auth",
+          .phase = forge::net::http::middleware_phase::security,
+          .path_prefix = std::move(path_prefix),
+          .handler = [](route_context& context, next_handler next) -> boost::asio::awaitable<response> {
+             static_cast<void>(next);
+             co_return make_text_response(context.request, status::unauthorized, "auth required");
+          },
+      });
+   };
+   const auto add_route = [](forge::net::http::router& router, std::string path) {
+      router.get(std::move(path), [](route_context& context) -> boost::asio::awaitable<response> {
+         co_return make_text_response(context.request, status::ok, "unreachable");
+      });
+   };
 
-   auto request = make_request(method::get, "/v1/chain/%61dmin");
-   auto context = make_route_context(request);
-   BOOST_TEST(handle(router, context).result_int() == static_cast<unsigned>(status::unauthorized));
+   auto exact = forge::net::http::router{};
+   add_auth(exact, "/v1/chain/admin");
+   add_route(exact, "/v1/chain/admin");
+   auto exact_request = make_request(method::get, "/v1/chain/%61dmin");
+   auto exact_context = make_route_context(exact_request);
+   BOOST_TEST(handle(exact, exact_context).result_int() == static_cast<unsigned>(status::unauthorized));
+
+   auto descendant = forge::net::http::router{};
+   add_auth(descendant, "/v1/chain/admin/");
+   add_route(descendant, "/v1/chain/admin/users");
+   auto descendant_request = make_request(method::get, "/v1/chain/%61dmin/users");
+   auto descendant_context = make_route_context(descendant_request);
+   BOOST_TEST(handle(descendant, descendant_context).result_int() == static_cast<unsigned>(status::unauthorized));
 }
 
 BOOST_AUTO_TEST_CASE(http_api_plan_mounts_ordered_middleware_contributions) {
