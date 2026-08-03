@@ -2399,6 +2399,25 @@ BOOST_AUTO_TEST_CASE(http_api_macro_get_maps_route_and_query) {
    BOOST_TEST(unpacked.value.bytes == "abc:7:4096");
 }
 
+BOOST_AUTO_TEST_CASE(http_api_rejects_invalid_scalar_query_as_bad_request) {
+   auto runtime = forge::asio::runtime{};
+   auto apis = forge::api::core::registry{};
+   apis.install<macro_cache>(macro_cache::describe(), std::make_shared<macro_cache_impl>());
+
+   auto router = forge::net::http::router{};
+   auto binding =
+       forge::api::http::binding().use(forge::api::core::binding().serve(apis).build()).bind<macro_cache>().build();
+   router.mount(binding);
+
+   auto request = make_request(method::get, "/cache/chunks/abc?offset=invalid&limit=4096");
+   auto context = make_route_context(request);
+   context.runtime = &runtime;
+
+   const auto response = handle(router, context);
+   BOOST_TEST(response.result_int() == 422U);
+   BOOST_TEST(response.body().find("validation_error") != std::string::npos);
+}
+
 BOOST_AUTO_TEST_CASE(http_api_optional_query_is_omitted_from_remote_target) {
    const auto route = forge::api::http::route{
        .verb = method::get,

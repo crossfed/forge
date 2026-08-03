@@ -50,6 +50,7 @@ import forge.net.http.upload;
 import forge.codec.json;
 import forge.reflect.reflect;
 import forge.schema.diagnostic;
+import forge.schema.exceptions;
 import forge.schema.object;
 import forge.schema.scalar;
 import forge.codec.xml;
@@ -480,7 +481,7 @@ class binding_builder {
                            forge::schema::canonical_string_scalar<clean>) {
          try {
             target = forge::schema::parse_scalar_text<clean>(value);
-         } catch (const std::invalid_argument&) {
+         } catch (const forge::schema::exceptions::invalid_value&) {
             FORGE_THROW_EXCEPTION(forge::net::http::exceptions::bad_request, "HTTP API field value is invalid",
                                   forge::exceptions::ctx("field", std::string{field}));
          }
