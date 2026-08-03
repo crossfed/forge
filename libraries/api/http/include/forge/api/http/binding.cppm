@@ -1418,6 +1418,9 @@ class binding_builder {
          output = make_text_response(request_value, success_status, std::move(encoded),
                                      std::string{detail::content_type(options.response_body_codec)});
       }
+      if (request_value.method() == method::head) {
+         output.body().clear();
+      }
       merge_endpoint_headers(output, endpoint);
       apply_cache_policy(output, options);
       return output;
