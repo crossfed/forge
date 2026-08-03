@@ -352,6 +352,8 @@ BOOST_AUTO_TEST_CASE(schema_public_scalar_and_default_failures_are_typed) {
        forge::schema::exceptions::invalid_value);
    BOOST_CHECK_THROW(static_cast<void>(forge::schema::parse_scalar_text<forge_schema_tests::throwing_scalar>("x")),
                      forge::schema::exceptions::invalid_value);
+   BOOST_CHECK_THROW(static_cast<void>(forge::schema::parse_scalar_text<forge::crypto::digest::sha256>("invalid")),
+                     forge::schema::exceptions::invalid_value);
    BOOST_CHECK_THROW(static_cast<void>(forge::schema::format_scalar_text(forge_schema_tests::throwing_scalar{})),
                      forge::schema::exceptions::invalid_value);
 

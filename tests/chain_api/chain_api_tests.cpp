@@ -1061,9 +1061,7 @@ BOOST_AUTO_TEST_CASE(chain_openapi_covers_every_owner_contract_route_and_schema)
             BOOST_TEST((*documented)["identity"]["code"].as_uint64() == declared.identity.code);
          }
 
-         if (forge::api::http::detail::uses_request_body(mapping.verb)) {
-            BOOST_REQUIRE_MESSAGE(operation.contains("requestBody"),
-                                  owner.name << "." << mapping.method_name << " has a request body");
+         if (operation.contains("requestBody")) {
             const auto& request_schema = operation["requestBody"]["content"]["application/json"]["schema"].get_object();
             BOOST_CHECK_MESSAGE(request_schema.size() != 0U,
                                 owner.name << "." << mapping.method_name << " has a nonempty request schema");
@@ -1145,6 +1143,18 @@ BOOST_AUTO_TEST_CASE(chain_openapi_uses_canonical_public_key_json_shape) {
 
    BOOST_TEST(schema["type"].as_string() == "string");
    BOOST_TEST(schema["format"].as_string() == "forge-public-key");
+}
+
+BOOST_AUTO_TEST_CASE(chain_openapi_omits_body_for_query_only_admin_action) {
+   const auto document = forge::api::http::openapi<forge::chain::api::admin>();
+   const auto& operation = document["paths"]["/v1/chain/admin/snapshots"]["post"];
+
+   BOOST_TEST(!operation.get_object().contains("requestBody"));
+   const auto& parameters = operation["parameters"].get_array();
+   const auto name = std::ranges::find_if(
+       parameters, [](const forge::variant& value) { return value["name"].as_string() == "name"; });
+   BOOST_REQUIRE(name != parameters.end());
+   BOOST_TEST((*name)["in"].as_string() == "query");
 }
 
 BOOST_AUTO_TEST_CASE(chain_table_scope_openapi_exposes_bytes_cursor_and_next) {

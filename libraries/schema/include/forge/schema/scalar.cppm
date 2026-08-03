@@ -165,8 +165,9 @@ template <typename T> [[nodiscard]] T parse_scalar_text(std::string_view text) {
    } else if constexpr (canonical_string_scalar<clean>) {
       try {
          return clean{std::string{text}};
-      } catch (const forge::exceptions::base&) {
-         throw;
+      } catch (const forge::exceptions::base& error) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_value, "canonical scalar value is invalid",
+                               forge::exceptions::ctx("reason", error.message()));
       } catch (const std::exception& error) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_value, "canonical scalar value is invalid",
                                forge::exceptions::ctx("reason", error.what()));

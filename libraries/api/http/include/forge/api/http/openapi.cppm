@@ -26,6 +26,7 @@ export module forge.api.http.openapi;
 import forge.api.core.descriptor;
 import forge.api.core.connection;
 import forge.api.http.mapping;
+import forge.api.http.parameters;
 import forge.core.type_name;
 import forge.reflect.reflect;
 import forge.schema.scalar;
@@ -40,10 +41,23 @@ struct openapi_info {
    std::vector<std::string> servers;
 };
 
+enum class openapi_field_source {
+   value,
+   query,
+   header,
+   cookie,
+   body,
+   form,
+   body_stream,
+   body_bytes,
+   upload,
+};
+
 struct openapi_field {
    std::string name;
    forge::variant schema;
    bool required = true;
+   openapi_field_source source = openapi_field_source::value;
 };
 
 struct openapi_operation {
@@ -172,6 +186,7 @@ template <typename T> [[nodiscard]] forge::variant make_json_schema() {
    } else if constexpr (std::is_enum_v<value_type> && forge::reflect::is_described_enum_v<value_type>) {
       auto values = forge::variants{};
       using enumerators = boost::describe::describe_enumerators<value_type>;
+      values.reserve(boost::mp11::mp_size<enumerators>::value);
       boost::mp11::mp_for_each<enumerators>([&](auto descriptor) { values.emplace_back(descriptor.name); });
       return forge::variant{forge::mutable_variant_object{}("type", "string")("enum", std::move(values))};
    } else if constexpr (sequence_traits<value_type>::value) {
@@ -239,9 +254,57 @@ template <typename Request> [[nodiscard]] std::vector<openapi_field> request_fie
    if constexpr (forge::reflect::is_described_object_v<request_type>) {
       forge::reflect::for_each_member<request_type>([&](const char* name, auto member) {
          using member_type = clean_type<decltype(std::declval<request_type>().*member)>;
-         output.push_back(openapi_field{.name = name,
-                                        .schema = make_json_schema<member_type>(),
-                                        .required = !optional_traits<member_type>::value});
+         if constexpr (is_query<member_type>::value) {
+            output.push_back(openapi_field{.name = name,
+                                           .schema = make_json_schema<typename is_query<member_type>::value_type>(),
+                                           .required = false,
+                                           .source = openapi_field_source::query});
+         } else if constexpr (is_header<member_type>::value) {
+            output.push_back(openapi_field{.name = name,
+                                           .schema = make_json_schema<typename is_header<member_type>::value_type>(),
+                                           .required = false,
+                                           .source = openapi_field_source::header});
+         } else if constexpr (is_cookie<member_type>::value) {
+            output.push_back(openapi_field{.name = name,
+                                           .schema = make_json_schema<typename is_cookie<member_type>::value_type>(),
+                                           .required = false,
+                                           .source = openapi_field_source::cookie});
+         } else if constexpr (is_body<member_type>::value) {
+            output.push_back(openapi_field{.name = name,
+                                           .schema = make_json_schema<typename is_body<member_type>::value_type>(),
+                                           .required = false,
+                                           .source = openapi_field_source::body});
+         } else if constexpr (is_form<member_type>::value) {
+            output.push_back(openapi_field{.name = name,
+                                           .schema = make_json_schema<typename is_form<member_type>::value_type>(),
+                                           .required = false,
+                                           .source = openapi_field_source::form});
+         } else if constexpr (is_form_field<member_type>::value) {
+            output.push_back(
+                openapi_field{.name = name,
+                              .schema = make_json_schema<typename is_form_field<member_type>::value_type>(),
+                              .required = false,
+                              .source = openapi_field_source::form});
+         } else if constexpr (is_body_stream_v<member_type>) {
+            output.push_back(openapi_field{.name = name,
+                                           .schema = unconstrained_schema(forge::type_name<member_type>()),
+                                           .required = false,
+                                           .source = openapi_field_source::body_stream});
+         } else if constexpr (is_body_bytes_v<member_type>) {
+            output.push_back(openapi_field{.name = name,
+                                           .schema = unconstrained_schema(forge::type_name<member_type>()),
+                                           .required = false,
+                                           .source = openapi_field_source::body_bytes});
+         } else if constexpr (is_upload_file_v<member_type>) {
+            output.push_back(openapi_field{.name = name,
+                                           .schema = unconstrained_schema(forge::type_name<member_type>()),
+                                           .required = false,
+                                           .source = openapi_field_source::upload});
+         } else {
+            output.push_back(openapi_field{.name = name,
+                                           .schema = make_json_schema<member_type>(),
+                                           .required = !optional_traits<member_type>::value});
+         }
       });
    }
    return output;

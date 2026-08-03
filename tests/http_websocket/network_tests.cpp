@@ -73,6 +73,7 @@ import forge.net.http.target;
 import forge.net.http.types;
 import forge.net.http.upload;
 import forge.codec.json;
+import forge.variant.value;
 import forge.raw.raw;
 import forge.schema.object;
 import forge.codec.xml;
@@ -239,12 +240,28 @@ struct search_response {
    std::string value;
 };
 
+struct empty_post_request {};
+
+struct open_post_request {};
+
 struct positional_http_response {
    std::string value;
 };
 
 struct positional_body_payload {
    std::string value;
+};
+
+struct colliding_parameters_request {
+   forge::api::http::query<std::uint32_t> explicit_value;
+   forge::api::http::query<std::uint32_t> page_size;
+   forge::api::http::body<positional_body_payload> payload;
+};
+
+struct colliding_headers_request {
+   forge::api::http::header<std::string> explicit_header;
+   forge::api::http::header<std::string> x_request_id;
+   forge::api::http::body<positional_body_payload> payload;
 };
 
 struct positional_ref_payload {
@@ -385,6 +402,10 @@ BOOST_DESCRIBE_STRUCT(optional_query_request, (), (ref, limit))
 BOOST_DESCRIBE_STRUCT(macro_chunk, (), (bytes))
 BOOST_DESCRIBE_STRUCT(search_request, (), (term, limit))
 BOOST_DESCRIBE_STRUCT(search_response, (), (value))
+BOOST_DESCRIBE_STRUCT(empty_post_request, (), ())
+BOOST_DESCRIBE_STRUCT(open_post_request, (), ())
+BOOST_DESCRIBE_STRUCT(colliding_parameters_request, (), (explicit_value, page_size, payload))
+BOOST_DESCRIBE_STRUCT(colliding_headers_request, (), (explicit_header, x_request_id, payload))
 BOOST_DESCRIBE_STRUCT(positional_http_response, (), (value))
 BOOST_DESCRIBE_STRUCT(positional_body_payload, (), (value))
 BOOST_DESCRIBE_STRUCT(positional_ref_payload, (), (ref, value))
@@ -459,6 +480,34 @@ class search_api : public http_contract<search_api> {
    virtual ~search_api() = default;
 
    virtual boost::asio::awaitable<search_response> search(search_request request) = 0;
+};
+
+class empty_post_api : public http_contract<empty_post_api> {
+ public:
+   virtual ~empty_post_api() = default;
+
+   virtual boost::asio::awaitable<forge::api::http::empty_response> invoke(empty_post_request request) = 0;
+};
+
+class open_post_api : public http_contract<open_post_api> {
+ public:
+   virtual ~open_post_api() = default;
+
+   virtual boost::asio::awaitable<forge::api::http::empty_response> invoke(open_post_request request) = 0;
+};
+
+class colliding_parameters_api : public http_contract<colliding_parameters_api> {
+ public:
+   virtual ~colliding_parameters_api() = default;
+
+   virtual boost::asio::awaitable<forge::api::http::empty_response> invoke(colliding_parameters_request request) = 0;
+};
+
+class colliding_headers_api : public http_contract<colliding_headers_api> {
+ public:
+   virtual ~colliding_headers_api() = default;
+
+   virtual boost::asio::awaitable<forge::api::http::empty_response> invoke(colliding_headers_request request) = 0;
 };
 
 class positional_api_http : public http_contract<positional_api_http> {
@@ -689,6 +738,22 @@ FORGE_API(::forge::net::http::test_api::search_api, FORGE_API_CONTRACT("search",
           FORGE_API_METHOD_TYPED(search, ::forge::net::http::test_api::search_request,
                                  ::forge::net::http::test_api::search_response))
 
+FORGE_API(::forge::net::http::test_api::empty_post_api, FORGE_API_CONTRACT("empty-post", 1, 0),
+          FORGE_API_METHOD_TYPED(invoke, ::forge::net::http::test_api::empty_post_request,
+                                 ::forge::api::http::empty_response))
+
+FORGE_API(::forge::net::http::test_api::open_post_api, FORGE_API_CONTRACT("open-post", 1, 0),
+          FORGE_API_METHOD_TYPED(invoke, ::forge::net::http::test_api::open_post_request,
+                                 ::forge::api::http::empty_response))
+
+FORGE_API(::forge::net::http::test_api::colliding_parameters_api, FORGE_API_CONTRACT("colliding-parameters", 1, 0),
+          FORGE_API_METHOD_TYPED(invoke, ::forge::net::http::test_api::colliding_parameters_request,
+                                 ::forge::api::http::empty_response))
+
+FORGE_API(::forge::net::http::test_api::colliding_headers_api, FORGE_API_CONTRACT("colliding-headers", 1, 0),
+          FORGE_API_METHOD_TYPED(invoke, ::forge::net::http::test_api::colliding_headers_request,
+                                 ::forge::api::http::empty_response))
+
 FORGE_API(::forge::net::http::test_api::positional_api_http, FORGE_API_CONTRACT("http.positional", 1, 0),
           FORGE_API_METHOD(read, ref, limit, request_id, session))
 
@@ -847,6 +912,12 @@ template <> struct forge::schema::rules<::forge::net::http::test_api::json_strea
    }
 };
 
+template <> struct forge::api::http::json_schema_traits<::forge::net::http::test_api::open_post_request> {
+   [[nodiscard]] static forge::variant make() {
+      return forge::variant{forge::mutable_variant_object{}("type", "string")("maxProperties", std::uint64_t{0})};
+   }
+};
+
 FORGE_HTTP_API(::forge::net::http::test_api::macro_cache,
                FORGE_HTTP_GET(read, "/cache/chunks/:ref?offset={offset}&limit={limit}", FORGE_HTTP_CACHE(no_store)),
                FORGE_HTTP_PUT(write, "/cache/chunks/:ref", created))
@@ -858,6 +929,17 @@ FORGE_HTTP_API(::forge::net::http::test_api::xml_cache_api,
                               FORGE_HTTP_RESPONSE_BODY(xml), FORGE_HTTP_ERROR_BODY(xml)))
 
 FORGE_HTTP_API(::forge::net::http::test_api::search_api, FORGE_HTTP_GET(search, "/search/{term}?page_size={limit}"))
+
+FORGE_HTTP_API(::forge::net::http::test_api::empty_post_api, FORGE_HTTP_POST(invoke, "/empty-post", no_content))
+
+FORGE_HTTP_API(::forge::net::http::test_api::open_post_api, FORGE_HTTP_POST(invoke, "/open-post", no_content))
+
+FORGE_HTTP_API(::forge::net::http::test_api::colliding_parameters_api,
+               FORGE_HTTP_POST(invoke, "/colliding?page_size={explicit_value}", no_content))
+
+FORGE_HTTP_API(::forge::net::http::test_api::colliding_headers_api,
+               FORGE_HTTP_POST(invoke, "/colliding-headers", no_content,
+                               FORGE_HTTP_HEADER(explicit_header, "X-Request-Id")))
 
 FORGE_HTTP_API(::forge::net::http::test_api::positional_api_http, FORGE_HTTP_GET(read, "/objects/:ref?limit={limit}"))
 
@@ -991,6 +1073,8 @@ using test_api::api_cache;
 using test_api::api_chunk;
 using test_api::api_read_chunk;
 using test_api::api_routed_read_chunk;
+using test_api::colliding_headers_api;
+using test_api::colliding_parameters_api;
 using test_api::control_api;
 using test_api::control_patch_request;
 using test_api::control_request;
@@ -1010,6 +1094,7 @@ using test_api::dto_api_http;
 using test_api::dto_bytes_request;
 using test_api::dto_http_request;
 using test_api::dto_multipart_request;
+using test_api::empty_post_api;
 using test_api::endpoint_api;
 using test_api::endpoint_control_request;
 using test_api::endpoint_control_response;
@@ -1028,6 +1113,7 @@ using test_api::object_api;
 using test_api::object_get_request;
 using test_api::object_put_request;
 using test_api::object_put_response;
+using test_api::open_post_api;
 using test_api::optional_query_request;
 using test_api::patch_api;
 using test_api::positional_ambiguous_body_api;
@@ -2374,6 +2460,71 @@ BOOST_AUTO_TEST_CASE(http_api_openapi_uses_typed_contract_and_route_descriptors)
        write["requestBody"]["content"]["application/json"]["schema"]["properties"]["bytes"]["type"].as_string() ==
        "string");
    BOOST_TEST(write["responses"]["201"]["description"].as_string() == "Successful response");
+}
+
+BOOST_AUTO_TEST_CASE(http_api_openapi_uses_wire_parameter_names) {
+   const auto search_document = forge::api::http::openapi<search_api>();
+   const auto& search_parameters = search_document["paths"]["/search/{term}"]["get"]["parameters"].get_array();
+   BOOST_REQUIRE_EQUAL(search_parameters.size(), 2U);
+   BOOST_TEST(search_parameters[1]["name"].as_string() == "page_size");
+   BOOST_TEST(search_parameters[1]["schema"]["format"].as_string() == "uint32");
+
+   const auto dto_document = forge::api::http::openapi<dto_api_http>();
+   const auto& dto_parameters = dto_document["paths"]["/dto/{ref}"]["post"]["parameters"].get_array();
+   const auto request_id = std::ranges::find_if(
+       dto_parameters, [](const forge::variant& value) { return value["name"].as_string() == "X-Request-Id"; });
+   BOOST_REQUIRE(request_id != dto_parameters.end());
+   BOOST_TEST((*request_id)["in"].as_string() == "header");
+   BOOST_TEST(!(*request_id)["required"].as_bool());
+
+   const auto session = std::ranges::find_if(
+       dto_parameters, [](const forge::variant& value) { return value["name"].as_string() == "session"; });
+   BOOST_REQUIRE(session != dto_parameters.end());
+   BOOST_TEST((*session)["in"].as_string() == "cookie");
+   BOOST_TEST(!(*session)["required"].as_bool());
+
+   const auto& request_body = dto_document["paths"]["/dto/{ref}"]["post"]["requestBody"];
+   BOOST_TEST(!request_body["required"].as_bool());
+
+   const auto default_header_document = forge::api::http::openapi<default_header_api>();
+   const auto& default_parameters =
+       default_header_document["paths"]["/headers/default"]["put"]["parameters"].get_array();
+   const auto default_request_id = std::ranges::find_if(
+       default_parameters, [](const forge::variant& value) { return value["name"].as_string() == "request-id"; });
+   BOOST_REQUIRE(default_request_id != default_parameters.end());
+   BOOST_TEST((*default_request_id)["in"].as_string() == "header");
+   BOOST_TEST(!(*default_request_id)["required"].as_bool());
+}
+
+BOOST_AUTO_TEST_CASE(http_api_openapi_omits_body_for_empty_typed_request) {
+   const auto document = forge::api::http::openapi<empty_post_api>();
+   const auto& operation = document["paths"]["/empty-post"]["post"];
+   BOOST_TEST(!operation.get_object().contains("requestBody"));
+}
+
+BOOST_AUTO_TEST_CASE(http_api_openapi_preserves_custom_open_object_body) {
+   const auto document = forge::api::http::openapi<open_post_api>();
+   const auto& operation = document["paths"]["/open-post"]["post"];
+   BOOST_TEST(operation.get_object().contains("requestBody"));
+}
+
+BOOST_AUTO_TEST_CASE(http_api_openapi_rejects_parameter_wire_collisions) {
+   BOOST_CHECK_THROW(static_cast<void>(forge::api::http::openapi<colliding_parameters_api>()),
+                     forge::api::core::exceptions::protocol_error);
+   BOOST_CHECK_THROW(static_cast<void>(forge::api::http::openapi<colliding_headers_api>()),
+                     forge::api::core::exceptions::protocol_error);
+}
+
+BOOST_AUTO_TEST_CASE(http_api_openapi_uses_configured_body_codecs) {
+   const auto document = forge::api::http::openapi<xml_cache_api>();
+   const auto& write = document["paths"]["/xml/cache/chunks/{ref}"]["put"];
+   BOOST_TEST(write["requestBody"]["content"].get_object().contains("application/xml"));
+   BOOST_TEST(write["responses"]["201"]["content"].get_object().contains("application/xml"));
+   BOOST_TEST(write["responses"]["default"]["content"].get_object().contains("application/xml"));
+
+   const auto& read = document["paths"]["/xml/cache/chunks/{ref}"]["get"];
+   BOOST_TEST(read["responses"]["200"]["content"].get_object().contains("application/xml"));
+   BOOST_TEST(read["responses"]["default"]["content"].get_object().contains("application/xml"));
 }
 
 BOOST_AUTO_TEST_CASE(http_api_macro_get_maps_route_and_query) {

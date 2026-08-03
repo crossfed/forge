@@ -6,10 +6,13 @@ module;
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
+#include <typeinfo>
 #include <utility>
 
 module forge.api.http.openapi;
 
+import forge.api.core.exceptions;
 import forge.net.http.types;
 
 namespace forge::api::http::detail {
@@ -108,18 +111,117 @@ struct target_description {
    return iterator == operation.request_fields.end() ? nullptr : &*iterator;
 }
 
-[[nodiscard]] forge::variant parameter(const openapi_operation& operation, std::string name, std::string location,
-                                       bool force_required) {
-   const auto* field = find_field(operation, name);
-   auto value = forge::mutable_variant_object{}("name", name)("in", std::move(location))(
+[[nodiscard]] forge::variant parameter(const openapi_operation& operation, std::string_view field_name,
+                                       std::string wire_name, std::string location, bool force_required) {
+   const auto* field = find_field(operation, field_name);
+   auto value = forge::mutable_variant_object{}("name", std::move(wire_name))("in", std::move(location))(
        "required", force_required || (field != nullptr && field->required));
    value("schema", field == nullptr ? unconstrained_schema("unknown request field") : field->schema);
    return forge::variant{std::move(value)};
 }
 
-[[nodiscard]] forge::variant media_schema(const forge::variant& schema) {
-   return forge::variant{
-       forge::mutable_variant_object{}("application/json", forge::mutable_variant_object{}("schema", schema))};
+[[nodiscard]] forge::variant media_schema(const forge::variant& schema, std::string_view content_type) {
+   auto content = forge::mutable_variant_object{};
+   content.set(std::string{content_type}, forge::variant{forge::mutable_variant_object{}("schema", schema)});
+   return forge::variant{std::move(content)};
+}
+
+struct request_body_description {
+   bool present = false;
+   bool required = false;
+};
+
+[[nodiscard]] bool mapped_request_field(const target_description& target, const route& mapping,
+                                        const openapi_field& field) {
+   switch (field.source) {
+   case openapi_field_source::query:
+   case openapi_field_source::header:
+   case openapi_field_source::cookie:
+   case openapi_field_source::form:
+   case openapi_field_source::upload:
+      return true;
+   case openapi_field_source::body:
+   case openapi_field_source::body_stream:
+   case openapi_field_source::body_bytes:
+      return false;
+   case openapi_field_source::value:
+      break;
+   }
+   const auto matches_field = [&field](const field_binding& entry) { return entry.field == field.name; };
+   return std::ranges::find(target.path_fields, field.name) != target.path_fields.end() ||
+          std::ranges::find_if(target.query, matches_field) != target.query.end() ||
+          std::ranges::find_if(mapping.headers, matches_field) != mapping.headers.end() ||
+          std::ranges::find_if(mapping.forms, matches_field) != mapping.forms.end() ||
+          (mapping.body_stream_field.has_value() && *mapping.body_stream_field == field.name);
+}
+
+[[nodiscard]] bool empty_object_schema(const forge::variant& schema) {
+   if (!schema.is_object()) {
+      return false;
+   }
+   const auto& object = schema.get_object();
+   const auto type = object.find("type");
+   if (type == object.end() || !type->value().is_string() || type->value().as_string() != "object") {
+      return false;
+   }
+   const auto maximum = object.find("maxProperties");
+   if (maximum != object.end() && maximum->value().is_uint64() && maximum->value().as_uint64() == 0U) {
+      return true;
+   }
+   const auto properties = object.find("properties");
+   const auto additional = object.find("additionalProperties");
+   return properties != object.end() && properties->value().is_object() &&
+          properties->value().get_object().size() == 0U && additional != object.end() &&
+          additional->value().is_bool() && !additional->value().as_bool();
+}
+
+[[nodiscard]] bool has_binding(const std::vector<field_binding>& bindings, std::string_view field) {
+   return std::ranges::find(bindings, field, &field_binding::field) != bindings.end();
+}
+
+[[nodiscard]] std::string header_name_from_field(std::string_view name) {
+   auto output = std::string{};
+   output.reserve(name.size());
+   for (const auto character : name) {
+      output.push_back(character == '_' ? '-' : character);
+   }
+   return output;
+}
+
+[[nodiscard]] request_body_description describe_request_body(const openapi_operation& operation,
+                                                             const target_description& target,
+                                                             const forge::api::core::method_descriptor* method) {
+   if (!uses_request_body(operation.mapping.verb) || operation.mapping.body_stream_field.has_value() ||
+       !operation.mapping.forms.empty()) {
+      return {};
+   }
+   if (operation.request_fields.empty()) {
+      if (empty_object_schema(operation.request_schema)) {
+         return {};
+      }
+      if (method != nullptr && (method->request_type == typeid(void) || method->request_type == typeid(std::tuple<>))) {
+         return {};
+      }
+      if (method != nullptr && !method->argument_names.empty()) {
+         const auto unmapped = std::ranges::find_if(method->argument_names, [&](std::string_view name) {
+            const auto field = openapi_field{.name = std::string{name}};
+            return !mapped_request_field(target, operation.mapping, field);
+         });
+         if (unmapped == method->argument_names.end()) {
+            return {};
+         }
+      }
+      return {.present = true, .required = true};
+   }
+
+   auto result = request_body_description{};
+   for (const auto& field : operation.request_fields) {
+      if (!mapped_request_field(target, operation.mapping, field)) {
+         result.present = true;
+         result.required = result.required || field.required;
+      }
+   }
+   return result;
 }
 
 [[nodiscard]] forge::variant declared_error_document(const forge::api::core::error_descriptor& error) {
@@ -146,35 +248,82 @@ struct target_description {
                                                 const openapi_operation& operation) {
    auto value = forge::mutable_variant_object{}("operationId", api.id.value + "." + operation.mapping.method_name);
    auto parameters = forge::variants{};
+   struct parameter_identity {
+      std::string field;
+      std::string wire_name;
+      std::string location;
+   };
+   auto parameter_identities = std::vector<parameter_identity>{};
+   const auto append_parameter = [&](std::string_view field, std::string wire_name, std::string location,
+                                     bool force_required) {
+      auto comparison_name = wire_name;
+      if (location == "header") {
+         std::ranges::transform(comparison_name, comparison_name.begin(),
+                                [](unsigned char character) { return static_cast<char>(std::tolower(character)); });
+      }
+      const auto existing = std::ranges::find_if(parameter_identities, [&](const parameter_identity& value) {
+         return value.wire_name == comparison_name && value.location == location;
+      });
+      if (existing != parameter_identities.end()) {
+         if (existing->field == field) {
+            return;
+         }
+         throw forge::api::core::exceptions::protocol_error{"OpenAPI parameter wire name is ambiguous"};
+      }
+      parameter_identities.push_back(
+          parameter_identity{.field = std::string{field}, .wire_name = comparison_name, .location = location});
+      parameters.push_back(parameter(operation, field, std::move(wire_name), std::move(location), force_required));
+   };
    const auto target = describe_target(operation.mapping.target);
    for (const auto& name : target.path_fields) {
-      parameters.push_back(parameter(operation, name, "path", true));
+      append_parameter(name, name, "path", true);
    }
    for (const auto& entry : target.query) {
-      parameters.push_back(parameter(operation, entry.field, "query", false));
+      append_parameter(entry.field, entry.name, "query", false);
    }
    for (const auto& entry : operation.mapping.headers) {
-      parameters.push_back(parameter(operation, entry.field, "header", false));
+      append_parameter(entry.field, entry.name, "header", false);
+   }
+   for (const auto& field : operation.request_fields) {
+      switch (field.source) {
+      case openapi_field_source::query:
+         if (!has_binding(target.query, field.name)) {
+            append_parameter(field.name, field.name, "query", false);
+         }
+         break;
+      case openapi_field_source::header:
+         if (!has_binding(operation.mapping.headers, field.name)) {
+            append_parameter(field.name, header_name_from_field(field.name), "header", false);
+         }
+         break;
+      case openapi_field_source::cookie:
+         append_parameter(field.name, field.name, "cookie", false);
+         break;
+      default:
+         break;
+      }
    }
    if (!parameters.empty()) {
       value("parameters", std::move(parameters));
    }
 
-   if (uses_request_body(operation.mapping.verb) && !operation.mapping.body_stream_field.has_value() &&
-       operation.mapping.forms.empty()) {
+   const auto* method = forge::api::core::find_method(api, operation.mapping.method_name);
+   const auto request_body = describe_request_body(operation, target, method);
+   if (request_body.present) {
       value("requestBody",
-            forge::mutable_variant_object{}("required", true)("content", media_schema(operation.request_schema)));
+            forge::mutable_variant_object{}("required", request_body.required)(
+                "content", media_schema(operation.request_schema, content_type(operation.mapping.request_body_codec))));
    }
 
    auto response = forge::mutable_variant_object{}("description", "Successful response");
    if (!operation.mapping.response_file && !operation.mapping.response_stream) {
-      response("content", media_schema(operation.response_schema));
+      response("content", media_schema(operation.response_schema, content_type(operation.mapping.response_body_codec)));
    }
    auto responses = forge::mutable_variant_object{};
    responses.set(status_name(operation.mapping.success_status), forge::variant{std::move(response)});
-   const auto* method = forge::api::core::find_method(api, operation.mapping.method_name);
    responses.set("default", forge::variant{forge::mutable_variant_object{}("description", "Forge API error")(
-                                "content", media_schema(error_response_schema(method)))});
+                                "content", media_schema(error_response_schema(method),
+                                                        content_type(operation.mapping.error_body_codec)))});
    value("responses", std::move(responses));
    if (operation.mapping.cache == cache_policy::no_store) {
       value("x-forge-cache-policy", "no-store");
