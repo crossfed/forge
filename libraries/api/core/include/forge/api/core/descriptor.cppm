@@ -370,6 +370,7 @@ struct method_descriptor {
    std::type_index output_type = typeid(void);
    std::type_index result_type = typeid(void);
    std::vector<std::string> argument_names;
+   std::vector<std::type_index> response_traits;
    std::vector<error_descriptor> errors;
    std::function<bytes(const void*)> request_encoder;
    std::function<bytes(const void*)> response_encoder;
@@ -379,6 +380,15 @@ struct method_descriptor {
    std::function<void(const bytes&, const bytes&)> response_validator;
    std::function<boost::asio::awaitable<bytes>(std::shared_ptr<void>, bytes)> raw_invoker;
    raw_stream_invoker stream_invoker;
+
+   template <typename Trait> [[nodiscard]] bool has_response_trait() const noexcept {
+      for (const auto& value : response_traits) {
+         if (value == typeid(Trait)) {
+            return true;
+         }
+      }
+      return false;
+   }
 };
 
 struct descriptor {

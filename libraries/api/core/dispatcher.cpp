@@ -91,31 +91,6 @@ frame_dispatcher::dispatch_stream(
       std::move(value), std::move(input), std::move(output));
 }
 
-bool frame_dispatcher::cancel(frame value) {
-   if (!impl_) {
-      FORGE_THROW_EXCEPTION(exceptions::protocol_error, "invalid API frame dispatcher");
-   }
-   if (value.kind != frame_kind::cancel) {
-      FORGE_THROW_EXCEPTION(exceptions::protocol_error, "API dispatcher cancel requires a cancel frame",
-                            forge::exceptions::ctx("call_id", value.id.value));
-   }
-   apply_remote_metadata_boundary(value, impl_->options.trusted_metadata);
-   if (value.codec != impl_->options.codec) {
-      FORGE_THROW_EXCEPTION(exceptions::codec_failed, "API frame codec is not accepted",
-                            forge::exceptions::ctx("codec", value.codec.value));
-   }
-   if (value.id.value == 0) {
-      FORGE_THROW_EXCEPTION(exceptions::protocol_error, "API frame call_id must not be zero");
-   }
-
-   const auto grouped = impl_->grouped.erase(value.id.value) != 0;
-   const auto active = impl_->calls.active(value.id);
-   if (active) {
-      impl_->calls.observe(value);
-   }
-   return grouped || active;
-}
-
 const dispatch_options& frame_dispatcher::options() const noexcept {
    return impl_->options;
 }
