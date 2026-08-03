@@ -1474,6 +1474,20 @@ BOOST_AUTO_TEST_CASE(chain_table_rows_http_carries_the_secondary_index) {
        forge::schema::exceptions::invalid_value);
 }
 
+BOOST_AUTO_TEST_CASE(chain_currency_stats_http_formats_the_symbol_code_path) {
+   const auto routes = forge::api::http::traits<forge::chain::api::state>::routes();
+   const auto& route = find_route(routes, "get_currency_stats");
+   const auto target = forge::api::http::detail::render_route_target(
+       route, forge::chain::protocol::currency_stats_request{
+                  .code = forge::chain::protocol::account_name{"eosio.token"},
+                  .symbol = forge::chain::protocol::symbol_code{"SYS"},
+              });
+
+   BOOST_TEST(target.starts_with("/v1/chain/state/currencies/eosio.token/stats/SYS?"));
+   BOOST_CHECK(forge::schema::parse_scalar_text<forge::chain::protocol::symbol_code>("SYS") ==
+               forge::chain::protocol::symbol_code{"SYS"});
+}
+
 BOOST_AUTO_TEST_CASE(chain_openapi_uses_canonical_public_key_json_shape) {
    const auto document = forge::api::http::openapi<forge::chain::api::transaction>();
    const auto& schema = document["paths"]["/v1/chain/transactions/required-keys"]["post"]["responses"]["200"]["content"]
