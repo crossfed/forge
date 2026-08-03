@@ -31,6 +31,7 @@
    .error_body_codec(::forge::api::http::error_codec::BOOST_PP_TUPLE_ELEM(3, 1, OPTION))
 #define FORGE_HTTP_DETAIL_OPTION_APPLY_cache(OPTION)                                                                   \
    .cache(::forge::api::http::cache_policy::BOOST_PP_TUPLE_ELEM(3, 1, OPTION))
+#define FORGE_HTTP_DETAIL_OPTION_APPLY_timeout(OPTION) .timeout(BOOST_PP_STRINGIZE(BOOST_PP_TUPLE_ELEM(3, 1, OPTION)))
 #define FORGE_HTTP_DETAIL_OPTION_APPLY(r, DATA, OPTION)                                                                \
    BOOST_PP_CAT(FORGE_HTTP_DETAIL_OPTION_APPLY_, FORGE_HTTP_DETAIL_OPTION_KIND(OPTION))(OPTION)
 #define FORGE_HTTP_DETAIL_OPTIONS(...)                                                                                 \
@@ -83,6 +84,7 @@
 #define FORGE_HTTP_RESPONSE_BODY(CODEC) (response_body, CODEC, _)
 #define FORGE_HTTP_ERROR_BODY(CODEC) (error_body, CODEC, _)
 #define FORGE_HTTP_CACHE(POLICY) (cache, POLICY, _)
+#define FORGE_HTTP_TIMEOUT(FIELD) (timeout, FIELD, _)
 
 #define FORGE_HTTP_DETAIL_METHOD(ROUTE) BOOST_PP_TUPLE_ELEM(2, 0, ROUTE)
 #define FORGE_HTTP_DETAIL_ROUTE_VALUE(ROUTE) BOOST_PP_TUPLE_ELEM(2, 1, ROUTE)

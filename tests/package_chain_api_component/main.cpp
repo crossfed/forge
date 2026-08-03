@@ -6,6 +6,7 @@
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/asio/use_future.hpp>
+#include <boost/system/system_error.hpp>
 #include <forge/exceptions/macros.hpp>
 
 #include <atomic>
@@ -39,6 +40,7 @@ import forge.app.plugin;
 import forge.app.plugin_context;
 import forge.app.plugin_registry;
 import forge.asio.blocking;
+import forge.asio.exceptions;
 import forge.asio.runtime;
 import forge.chain.api.admin;
 import forge.chain.api.authenticated_audit_verifier;
@@ -414,7 +416,14 @@ class transaction_implementation final : public chain_api::transaction {
       await_started.fetch_add(1, std::memory_order_release);
       auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
       timer.expires_after(std::chrono::milliseconds{request.timeout_ms});
-      co_await timer.async_wait(boost::asio::use_awaitable);
+      try {
+         co_await timer.async_wait(boost::asio::use_awaitable);
+      } catch (const boost::system::system_error& error) {
+         if (error.code() == boost::asio::error::operation_aborted) {
+            await_cancellations.fetch_add(1, std::memory_order_release);
+         }
+         throw;
+      }
       await_deadlines.fetch_add(1, std::memory_order_release);
       FORGE_THROW_EXCEPTION(forge::chain::api::exceptions::deadline_exceeded,
                             "fixture transaction wait reached its request deadline");
@@ -441,6 +450,7 @@ class transaction_implementation final : public chain_api::transaction {
    std::atomic<protocol::audit_mode> last_audit{protocol::audit_mode::none};
    std::atomic<std::uint32_t> await_started{0};
    std::atomic<std::uint32_t> await_deadlines{0};
+   std::atomic<std::uint32_t> await_cancellations{0};
 
  private:
    protocol::transaction_read_only_response response_;
@@ -474,7 +484,8 @@ void wait_until(std::function<bool()> predicate, std::string_view failure) {
 
 void require_long_poll_transport(forge::asio::runtime& runtime,
                                  const forge::api::core::handle<chain_api::transaction>& remote,
-                                 const std::shared_ptr<transaction_implementation>& owner, std::string_view transport) {
+                                 const std::shared_ptr<transaction_implementation>& owner, std::string_view transport,
+                                 bool require_remote_cancellation) {
    const auto deadlines_before = owner->await_deadlines.load(std::memory_order_acquire);
    auto deadline_observed = false;
    try {
@@ -488,6 +499,7 @@ void require_long_poll_transport(forge::asio::runtime& runtime,
            std::string{transport} + " deadline did not originate at the owner");
 
    const auto started_before = owner->await_started.load(std::memory_order_acquire);
+   const auto cancellations_before = owner->await_cancellations.load(std::memory_order_acquire);
    auto cancellation = boost::asio::cancellation_signal{};
    auto pending = boost::asio::co_spawn(
        runtime.context(), remote->await_transaction(protocol::transaction_await_request{.timeout_ms = 300'000}),
@@ -498,10 +510,21 @@ void require_long_poll_transport(forge::asio::runtime& runtime,
    auto caller_cancelled = false;
    try {
       static_cast<void>(pending.get());
-   } catch (const std::exception&) {
+   } catch (const forge::api::core::exceptions::cancelled&) {
       caller_cancelled = true;
+   } catch (const forge::asio::exceptions::canceled&) {
+      caller_cancelled = true;
+   } catch (const std::exception& error) {
+      require(false, std::string{transport} + " long-poll leaked a standard exception: " + error.what());
    }
-   require(caller_cancelled, std::string{transport} + " long-poll ignored caller cancellation");
+   require(caller_cancelled, std::string{transport} + " long-poll did not return typed cancellation");
+   if (require_remote_cancellation) {
+      wait_until([&] { return owner->await_cancellations.load(std::memory_order_acquire) > cancellations_before; },
+                 std::string{transport} + " long-poll cancellation did not reach the owner");
+   }
+
+   static_cast<void>(
+       forge::asio::blocking::run(runtime, remote->get_status(forge::chain::protocol::transaction_status_request{})));
 }
 
 class admin_implementation final : public chain_api::admin {
@@ -700,7 +723,7 @@ http_responses run_http_e2e(const chain_api_services& services) {
                    }));
       responses.administration =
           forge::asio::blocking::run(runtime, admin_remote->producer_status(protocol::admin_query{}));
-      require_long_poll_transport(runtime, transaction_remote, services.transactions, "HTTP");
+      require_long_poll_transport(runtime, transaction_remote, services.transactions, "HTTP", true);
       const auto calls_before_oversized = services.state->calls.load(std::memory_order_relaxed);
       try {
          static_cast<void>(forge::asio::blocking::run(runtime, state_remote->get_point(protocol::state_point_request{
@@ -949,7 +972,7 @@ p2p_responses run_p2p_e2e(const chain_api_services& services) {
               "P2P submission acknowledgement did not bind the submitted transaction");
       responses.administration =
           forge::asio::blocking::run(client.runtime(), admin_remote->producer_status(protocol::admin_query{}));
-      require_long_poll_transport(client.runtime(), transaction_remote, services.transactions, "P2P");
+      require_long_poll_transport(client.runtime(), transaction_remote, services.transactions, "P2P", true);
       const auto calls_before_oversized = services.state->calls.load(std::memory_order_relaxed);
       try {
          static_cast<void>(

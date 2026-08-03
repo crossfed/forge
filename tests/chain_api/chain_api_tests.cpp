@@ -34,6 +34,7 @@
 import forge.api.core.connection;
 import forge.api.core.exceptions;
 import forge.api.core.registry;
+import forge.api.http.client_response;
 import forge.api.http.mapping;
 import forge.api.http.openapi;
 import forge.asio.exceptions;
@@ -1336,6 +1337,18 @@ BOOST_AUTO_TEST_CASE(chain_openapi_covers_every_owner_contract_route_and_schema)
          }
       }
    }
+}
+
+BOOST_AUTO_TEST_CASE(chain_http_transaction_wait_uses_request_deadline) {
+   const auto routes = forge::api::http::traits<forge::chain::api::transaction>::routes();
+   const auto found = std::ranges::find(routes, std::string_view{"await_transaction"}, &route::method_name);
+   BOOST_REQUIRE(found != routes.end());
+   BOOST_REQUIRE(found->timeout_field.has_value());
+   BOOST_TEST(*found->timeout_field == "timeout_ms");
+
+   const auto options = forge::api::http::detail::request_options_for(
+       *found, forge::chain::protocol::transaction_await_request{.timeout_ms = 300'000U});
+   BOOST_TEST(options.timeout == std::chrono::milliseconds{305'000});
 }
 
 BOOST_AUTO_TEST_CASE(chain_transaction_remote_deadline_restores_the_declared_exception) {

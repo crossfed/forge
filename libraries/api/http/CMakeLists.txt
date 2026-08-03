@@ -6,6 +6,7 @@ target_include_directories(forge_api_http PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
 target_link_libraries(
    forge_api_http PUBLIC
       forge_api_core
+      forge_asio
       forge_net_http
       forge_codec_json
       forge_codec_xml

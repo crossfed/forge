@@ -65,6 +65,7 @@ struct route {
    body_codec response_body_codec = body_codec::json;
    error_codec error_body_codec = error_codec::json;
    cache_policy cache = cache_policy::unspecified;
+   std::optional<std::string> timeout_field;
 };
 
 class route_builder {
@@ -122,6 +123,11 @@ class route_builder {
 
    route_builder&& cache(cache_policy value) && {
       route_.cache = value;
+      return std::move(*this);
+   }
+
+   route_builder&& timeout(std::string field) && {
+      route_.timeout_field = std::move(field);
       return std::move(*this);
    }
 

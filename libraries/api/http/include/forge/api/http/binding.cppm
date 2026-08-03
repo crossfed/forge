@@ -1428,7 +1428,7 @@ class binding_builder {
 
    static void require_route_success_status(status declared, status actual) {
       if (actual != declared) {
-         FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error,
+         FORGE_THROW_EXCEPTION(forge::net::http::exceptions::internal,
                                "HTTP response status does not match declared route",
                                forge::exceptions::ctx("declared", static_cast<std::uint16_t>(declared)),
                                forge::exceptions::ctx("actual", static_cast<std::uint16_t>(actual)));
@@ -1450,7 +1450,7 @@ class binding_builder {
       require_route_success_status(declared, status::ok);
       if (actual != status::ok && actual != status::partial_content && actual != status::not_modified &&
           actual != status::not_found && actual != status::range_not_satisfiable) {
-         FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error,
+         FORGE_THROW_EXCEPTION(forge::net::http::exceptions::internal,
                                "HTTP path-backed file response produced an unsupported status",
                                forge::exceptions::ctx("actual", static_cast<std::uint16_t>(actual)));
       }
