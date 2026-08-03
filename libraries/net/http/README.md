@@ -473,6 +473,15 @@ auto server = forge::net::http::server{
 co_await server.async_start();
 ```
 
+`read_timeout` bounds request socket reads. `idle_timeout` bounds socket
+read/write operations and the gap between keep-alive requests; it does not bound
+time spent awaiting a route handler or response body producer. Long-poll,
+streaming and Server-Sent Events (SSE) owners may therefore wait longer than
+`idle_timeout`, but they must apply their own method or application deadline
+and remain cancellable when the peer disconnects. Applications must also
+provide appropriate concurrency, backpressure and resource limits for those
+waits.
+
 ### Use The Client
 
 ```cpp

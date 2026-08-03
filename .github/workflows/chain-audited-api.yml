@@ -105,7 +105,8 @@ jobs:
           done < <(
             git diff --name-only --diff-filter=ACMR -z "$base_tag"...HEAD -- \
               libraries/api libraries/chain/api libraries/chain/protocol libraries/db/authenticated \
-              tests/chain_api tests/db_authenticated tests/package_chain_api_component
+              libraries/net/http tests/chain_api tests/db_authenticated tests/http_websocket \
+              tests/package_chain_api_component
           )
 
           if (( ${#sources[@]} != 0 )); then
@@ -212,13 +213,14 @@ jobs:
           test_forge_chain_protocol_query
           test_forge_chain_api
           test_forge_db_authenticated
+          test_forge_http_websocket
           test_forge_package_chain_api_component
           -j 4
 
       - name: Run acceptance
         run: >-
           ctest --test-dir build/chain-audited-api
-          -R '^(test_forge_chain_protocol_query|test_forge_chain_api|test_forge_db_authenticated|test_forge_package_chain_api_component)$'
+          -R '^(test_forge_chain_protocol_query|test_forge_chain_api|test_forge_db_authenticated|test_forge_http_websocket|test_forge_package_chain_api_component)$'
           --output-on-failure -j 1
 
   sanitizer:

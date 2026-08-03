@@ -5683,7 +5683,7 @@ BOOST_AUTO_TEST_CASE(http_server_full_request_buffer_applies_backpressure_withou
    forge::asio::blocking::run(runtime, server.async_stop());
 }
 
-BOOST_AUTO_TEST_CASE(http_server_resets_write_deadline_after_long_handler) {
+BOOST_AUTO_TEST_CASE(http_server_allows_response_generation_beyond_idle_timeout) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto server = forge::net::http::server{
        runtime,
@@ -5709,7 +5709,7 @@ BOOST_AUTO_TEST_CASE(http_server_resets_write_deadline_after_long_handler) {
    forge::asio::blocking::run(runtime, server.async_stop());
 }
 
-BOOST_AUTO_TEST_CASE(http_server_resets_write_deadline_for_stream_chunks) {
+BOOST_AUTO_TEST_CASE(http_server_allows_stream_body_generation_beyond_idle_timeout) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto router = forge::net::http::router{};
    router.get_stream("/wait", [](stream_request& request_value) -> boost::asio::awaitable<stream_response> {
