@@ -97,31 +97,35 @@ FORGE_HTTP_API(
     ::forge::chain::api::state, FORGE_HTTP_POST(get_point, "/v1/chain/state/point", ok, FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_POST(get_range, "/v1/chain/state/range", ok, FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_POST(get_changes, "/v1/chain/state/changes", ok, FORGE_HTTP_CACHE(no_store)),
-    FORGE_HTTP_GET(get_account, "/v1/chain/state/accounts/{account}?anchor={anchor}&audit={audit}",
+    FORGE_HTTP_GET(get_account,
+                   "/v1/chain/state/accounts/{account}?anchor={anchor}&finality_from={finality_from}&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_GET(get_code,
                    "/v1/chain/state/accounts/{account}/code?include_code={include_code}&include_abi={include_abi}"
-                   "&known_abi_hash={known_abi_hash}&anchor={anchor}&audit={audit}",
+                   "&known_abi_hash={known_abi_hash}&anchor={anchor}&finality_from={finality_from}&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_GET(get_table_rows,
                    "/v1/chain/state/tables/{code}/{scope}/{table}/rows?index={index}&lower_bound={lower_bound}"
                    "&upper_bound={upper_bound}&cursor={cursor}&limit={limit}&reverse={reverse}&anchor={anchor}"
-                   "&audit={audit}",
+                   "&finality_from={finality_from}&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_GET(get_table_scope,
                    "/v1/chain/state/tables/{code}/scopes?table={table}&lower_bound={lower_bound}"
                    "&upper_bound={upper_bound}&limit={limit}&reverse={reverse}&cursor={cursor}&anchor={anchor}"
-                   "&audit={audit}",
+                   "&finality_from={finality_from}&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_GET(get_currency_balance,
-                   "/v1/chain/state/currencies/{code}/balances/{account}?symbol={symbol}&anchor={anchor}&audit={audit}",
+                   "/v1/chain/state/currencies/{code}/balances/{account}?symbol={symbol}&anchor={anchor}"
+                   "&finality_from={finality_from}&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
-    FORGE_HTTP_GET(get_currency_stats, "/v1/chain/state/currencies/{code}/stats/{symbol}?anchor={anchor}&audit={audit}",
+    FORGE_HTTP_GET(get_currency_stats,
+                   "/v1/chain/state/currencies/{code}/stats/{symbol}?anchor={anchor}&finality_from={finality_from}"
+                   "&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_GET(get_scheduled_transactions,
                    "/v1/chain/state/scheduled-transactions?json={json}&lower_bound={lower_bound}&limit={limit}"
                    "&time_limit_ms={time_limit_ms}"
-                   "&anchor={anchor}&audit={audit}",
+                   "&anchor={anchor}&finality_from={finality_from}&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_POST(get_accounts_by_authorizers, "/v1/chain/state/accounts-by-authorizers", ok,
                     FORGE_HTTP_CACHE(no_store)))

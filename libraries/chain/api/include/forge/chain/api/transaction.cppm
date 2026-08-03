@@ -79,12 +79,15 @@ FORGE_EXPORT_API(::forge::chain::api::transaction, FORGE_API_CONTRACT("forge.cha
                                         ::forge::chain::protocol::transaction_read_only_request,
                                         ::forge::chain::protocol::transaction_read_only_response))
 
-FORGE_HTTP_API(
-    ::forge::chain::api::transaction,
-    FORGE_HTTP_GET(get_status, "/v1/chain/transactions/{id}?audit={audit}", FORGE_HTTP_CACHE(no_store)),
-    FORGE_HTTP_GET(await_transaction,
-                   "/v1/chain/transactions/{id}/wait?desired={desired}&timeout_ms={timeout_ms}&audit={audit}",
-                   FORGE_HTTP_CACHE(no_store)),
-    FORGE_HTTP_POST(get_required_keys, "/v1/chain/transactions/required-keys", ok, FORGE_HTTP_CACHE(no_store)),
-    FORGE_HTTP_POST(compute_transaction, "/v1/chain/transactions/compute", ok, FORGE_HTTP_CACHE(no_store)),
-    FORGE_HTTP_POST(send_read_only_transaction, "/v1/chain/transactions/read-only", ok, FORGE_HTTP_CACHE(no_store)))
+FORGE_HTTP_API(::forge::chain::api::transaction,
+               FORGE_HTTP_GET(get_status, "/v1/chain/transactions/{id}?finality_from={finality_from}&audit={audit}",
+                              FORGE_HTTP_CACHE(no_store)),
+               FORGE_HTTP_GET(await_transaction,
+                              "/v1/chain/transactions/{id}/wait?desired={desired}&timeout_ms={timeout_ms}"
+                              "&finality_from={finality_from}&audit={audit}",
+                              FORGE_HTTP_CACHE(no_store)),
+               FORGE_HTTP_POST(get_required_keys, "/v1/chain/transactions/required-keys", ok,
+                               FORGE_HTTP_CACHE(no_store)),
+               FORGE_HTTP_POST(compute_transaction, "/v1/chain/transactions/compute", ok, FORGE_HTTP_CACHE(no_store)),
+               FORGE_HTTP_POST(send_read_only_transaction, "/v1/chain/transactions/read-only", ok,
+                               FORGE_HTTP_CACHE(no_store)))

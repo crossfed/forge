@@ -88,24 +88,32 @@ FORGE_EXPORT_API(::forge::chain::api::block, FORGE_API_CONTRACT("forge.chain.api
 
 FORGE_HTTP_API(
     ::forge::chain::api::block,
-    FORGE_HTTP_GET(get_block, "/v1/chain/blocks?id={id}&num={num}&audit={audit}", FORGE_HTTP_CACHE(no_store)),
-    FORGE_HTTP_GET(get_header, "/v1/chain/blocks/header?id={id}&num={num}&audit={audit}", FORGE_HTTP_CACHE(no_store)),
-    FORGE_HTTP_GET(get_block_state, "/v1/chain/blocks/state?id={id}&num={num}&audit={audit}",
+    FORGE_HTTP_GET(get_block, "/v1/chain/blocks?id={id}&num={num}&finality_from={finality_from}&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
-    FORGE_HTTP_GET(get_canonical_range, "/v1/chain/blocks/canonical-range?first={first}&limit={limit}&audit={audit}",
+    FORGE_HTTP_GET(get_header, "/v1/chain/blocks/header?id={id}&num={num}&finality_from={finality_from}&audit={audit}",
+                   FORGE_HTTP_CACHE(no_store)),
+    FORGE_HTTP_GET(get_block_state,
+                   "/v1/chain/blocks/state?id={id}&num={num}&finality_from={finality_from}&audit={audit}",
+                   FORGE_HTTP_CACHE(no_store)),
+    FORGE_HTTP_GET(get_canonical_range,
+                   "/v1/chain/blocks/canonical-range?first={first}&limit={limit}&finality_from={finality_from}"
+                   "&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_GET(get_activated_protocol_features,
                    "/v1/chain/blocks/activated-protocol-features?lower_bound={lower_bound}&upper_bound={upper_bound}"
                    "&limit={limit}&search_by_block_num={search_by_block_num}&reverse={reverse}&anchor={anchor}"
-                   "&audit={audit}",
+                   "&finality_from={finality_from}&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
-    FORGE_HTTP_GET(get_consensus_parameters, "/v1/chain/blocks/consensus-parameters?anchor={anchor}&audit={audit}",
+    FORGE_HTTP_GET(get_consensus_parameters,
+                   "/v1/chain/blocks/consensus-parameters?anchor={anchor}&finality_from={finality_from}&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_GET(get_producers,
                    "/v1/chain/blocks/producers?json={json}&lower_bound={lower_bound}&limit={limit}&anchor={anchor}"
-                   "&audit={audit}",
+                   "&finality_from={finality_from}&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
-    FORGE_HTTP_GET(get_producer_schedule, "/v1/chain/blocks/producer-schedule?anchor={anchor}&audit={audit}",
+    FORGE_HTTP_GET(get_producer_schedule,
+                   "/v1/chain/blocks/producer-schedule?anchor={anchor}&finality_from={finality_from}&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
-    FORGE_HTTP_GET(get_finalizer_info, "/v1/chain/blocks/finalizers?anchor={anchor}&audit={audit}",
+    FORGE_HTTP_GET(get_finalizer_info,
+                   "/v1/chain/blocks/finalizers?anchor={anchor}&finality_from={finality_from}&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)))

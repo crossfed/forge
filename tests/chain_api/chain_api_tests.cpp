@@ -840,6 +840,14 @@ void require_routes(const std::vector<route>& routes, method verb, std::initiali
    }
 }
 
+void require_audited_get_finality_anchor(const std::vector<route>& routes) {
+   for (const auto& value : routes) {
+      if (value.verb == method::get && value.target.find("audit={audit}") != std::string::npos) {
+         BOOST_TEST(value.target.find("finality_from={finality_from}") != std::string::npos);
+      }
+   }
+}
+
 std::string openapi_verb(method value) {
    switch (value) {
    case method::delete_:
@@ -952,6 +960,11 @@ BOOST_AUTO_TEST_CASE(chain_http_uses_resource_verbs) {
    require_routes(admin, method::put, {"configure_pause", "set_access_policy", "schedule_protocol_features"});
    require_routes(admin, method::patch, {"update_runtime_options", "update_greylist"});
    require_routes(admin, method::delete_, {"unschedule_snapshot"});
+
+   require_audited_get_finality_anchor(info);
+   require_audited_get_finality_anchor(blocks);
+   require_audited_get_finality_anchor(state);
+   require_audited_get_finality_anchor(transactions);
 }
 
 BOOST_AUTO_TEST_CASE(chain_api_limits_bound_canonical_request_and_response_bytes) {
@@ -1179,6 +1192,21 @@ BOOST_AUTO_TEST_CASE(chain_http_omits_an_unspecified_anchor) {
                                                        .audit = forge::chain::protocol::audit_mode::required});
 
    BOOST_TEST(target == "/v1/chain/blocks/consensus-parameters?audit=required");
+}
+
+BOOST_AUTO_TEST_CASE(chain_http_carries_the_verified_finality_checkpoint) {
+   const auto routes = forge::api::http::traits<forge::chain::api::info>::routes();
+   const auto& route = find_route(routes, "get");
+   auto checkpoint = forge::chain::protocol::block_id{};
+   checkpoint._hash[0] = 0x42U;
+   const auto target =
+       forge::api::http::detail::render_route_target(route, forge::chain::protocol::anchored_request{
+                                                                .finality_from = checkpoint,
+                                                                .audit = forge::chain::protocol::audit_mode::required,
+                                                            });
+
+   BOOST_TEST(target.find("finality_from=") != std::string::npos);
+   BOOST_TEST(target.find("audit=required") != std::string::npos);
 }
 
 BOOST_AUTO_TEST_CASE(chain_table_scope_http_carries_the_opaque_cursor) {

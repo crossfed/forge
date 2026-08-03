@@ -55,4 +55,5 @@ FORGE_EXPORT_API(::forge::chain::api::info, FORGE_API_CONTRACT("forge.chain.api.
                                         ::forge::chain::protocol::info_response))
 
 FORGE_HTTP_API(::forge::chain::api::info,
-               FORGE_HTTP_GET(get, "/v1/chain/info?anchor={anchor}&audit={audit}", FORGE_HTTP_CACHE(no_store)))
+               FORGE_HTTP_GET(get, "/v1/chain/info?anchor={anchor}&finality_from={finality_from}&audit={audit}",
+                              FORGE_HTTP_CACHE(no_store)))
