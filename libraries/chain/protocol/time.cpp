@@ -141,6 +141,9 @@ std::string time_point::to_string() const {
    }
 
    auto result = format_seconds(seconds);
+   if (fraction == 0) {
+      return result;
+   }
    result.push_back('.');
    if (fraction % 1'000 == 0) {
       append_decimal(result, static_cast<std::uint64_t>(fraction / 1'000), 3U);

@@ -564,7 +564,7 @@ BOOST_AUTO_TEST_CASE(time_and_extended_asset_match_cdt_wire_layout) {
 
    const auto parsed = protocol::time_point::from_iso_string("2000-01-01T00:00:00");
    BOOST_TEST(parsed.time_since_epoch().count() == 946'684'800'000'000LL);
-   BOOST_TEST(parsed.to_string() == "2000-01-01T00:00:00.000");
+   BOOST_TEST(parsed.to_string() == "2000-01-01T00:00:00");
    BOOST_TEST(protocol::time_point_sec::from_iso_string("2000-01-01T00:00:00").to_string() == "2000-01-01T00:00:00");
    BOOST_TEST(protocol::block_timestamp{parsed}.slot == 0U);
    const auto half_second = protocol::block_timestamp{1U};
@@ -587,6 +587,11 @@ BOOST_AUTO_TEST_CASE(time_and_extended_asset_match_cdt_wire_layout) {
 }
 
 BOOST_AUTO_TEST_CASE(time_point_host_json_preserves_fractional_microseconds) {
+   const auto whole_second = protocol::time_point{protocol::microseconds{946'684'800'000'000LL}};
+   const auto whole_second_encoded = forge::codec::json::write(whole_second);
+   BOOST_REQUIRE(whole_second_encoded.ok());
+   BOOST_TEST(whole_second_encoded.text == R"("2000-01-01T00:00:00")");
+
    const auto point = protocol::time_point{protocol::microseconds{946'684'800'123'456LL}};
    const auto encoded = forge::codec::json::write(point);
    BOOST_REQUIRE(encoded.ok());
