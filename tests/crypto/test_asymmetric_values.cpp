@@ -77,6 +77,12 @@ BOOST_AUTO_TEST_CASE(canonical_ecc_payload_order_treats_char_storage_as_unsigned
    BOOST_CHECK((webauthn_public_key{lower_key, webauthn_public_key::user_presence_t::USER_PRESENCE_PRESENT, "rp"} <=>
                 webauthn_public_key{higher_key, webauthn_public_key::user_presence_t::USER_PRESENCE_PRESENT, "rp"}) ==
                std::strong_ordering::less);
+   BOOST_CHECK((webauthn_public_key{lower_key, webauthn_public_key::user_presence_t::USER_PRESENCE_NONE, "rp"} <=>
+                webauthn_public_key{lower_key, webauthn_public_key::user_presence_t::USER_PRESENCE_PRESENT, "rp"}) ==
+               std::strong_ordering::less);
+   BOOST_CHECK((webauthn_public_key{lower_key, webauthn_public_key::user_presence_t::USER_PRESENCE_PRESENT, "a"} <=>
+                webauthn_public_key{lower_key, webauthn_public_key::user_presence_t::USER_PRESENCE_PRESENT, "b"}) ==
+               std::strong_ordering::less);
 
    auto lower_signature = ecc_signature{};
    auto higher_signature = ecc_signature{};
@@ -87,6 +93,10 @@ BOOST_AUTO_TEST_CASE(canonical_ecc_payload_order_treats_char_storage_as_unsigned
    BOOST_CHECK((r1_signature{lower_signature} <=> r1_signature{higher_signature}) == std::strong_ordering::less);
    BOOST_CHECK((webauthn_signature{lower_signature, {}, "client"} <=>
                 webauthn_signature{higher_signature, {}, "client"}) == std::strong_ordering::less);
+   BOOST_CHECK((webauthn_signature{lower_signature, {0x7fU}, "client"} <=>
+                webauthn_signature{lower_signature, {0x80U}, "client"}) == std::strong_ordering::less);
+   BOOST_CHECK((webauthn_signature{lower_signature, {0x7fU}, "a"} <=>
+                webauthn_signature{lower_signature, {0x7fU}, "b"}) == std::strong_ordering::less);
 }
 
 BOOST_AUTO_TEST_SUITE_END()
