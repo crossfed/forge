@@ -223,11 +223,15 @@ class request_read_ownership {
 
    void mark_peer_read_closed() {
       peer_read_closed_ = true;
-      mark_connection_closed();
+      notify();
    }
 
    [[nodiscard]] bool peer_read_closed() const noexcept {
       return peer_read_closed_;
+   }
+
+   [[nodiscard]] bool can_read_next_request(bool has_buffered_input) const noexcept {
+      return !peer_read_closed_ || has_buffered_input;
    }
 
    [[nodiscard]] bool body_read_requested() const noexcept {
@@ -579,7 +583,8 @@ class server_session : public std::enable_shared_from_this<server_session> {
             co_return;
          }
          response_value->version(request_value.version());
-         response_value->keep_alive(request_value.keep_alive() && !read_ownership->peer_read_closed());
+         response_value->keep_alive(request_value.keep_alive() &&
+                                    read_ownership->can_read_next_request(buffer_.size() != 0U));
 
          co_await write_response(*response_value);
          if (!response_value->keep_alive()) {
@@ -765,12 +770,13 @@ class server_session : public std::enable_shared_from_this<server_session> {
           detail::stream_server_access::response_body_uses_request(response_value, request_body_marker) &&
           !body_source->done();
       response_value.head.version(version);
-      response_value.head.keep_alive(request_keep_alive && body_source->done() && !read_ownership->peer_read_closed());
+      response_value.head.keep_alive(request_keep_alive && body_source->done() &&
+                                     read_ownership->can_read_next_request(buffer_.size() != 0U));
       if (request_body_deferred_to_response) {
          co_await body_source->send_continue_if_needed();
       }
       co_await write_stream_response(response_value);
-      co_return response_value.head.keep_alive() && !read_ownership->peer_read_closed();
+      co_return response_value.head.keep_alive();
    }
 
    awaitable<void> write_response(response& response_value) {

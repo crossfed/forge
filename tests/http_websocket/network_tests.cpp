@@ -5225,6 +5225,48 @@ BOOST_AUTO_TEST_CASE(http_server_half_close_preserves_response_and_closes_keep_a
    forge::asio::blocking::run(runtime, server.async_stop());
 }
 
+BOOST_AUTO_TEST_CASE(http_server_half_close_preserves_buffered_stream_body) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto router = forge::net::http::router{};
+   router.post_stream("/upload", [](stream_request& request_value) -> boost::asio::awaitable<stream_response> {
+      auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+      timer.expires_after(std::chrono::milliseconds{50});
+      co_await timer.async_wait(boost::asio::use_awaitable);
+      const auto body = co_await request_value.body.async_read_all();
+      co_return stream_response::buffered(make_text_response(request_value.context.request, status::ok, body));
+   });
+
+   auto server = forge::net::http::server{
+       runtime,
+       server_config{.read_timeout = std::chrono::seconds{2}, .idle_timeout = std::chrono::seconds{2}},
+       std::move(router),
+   };
+   forge::asio::blocking::run(runtime, server.async_start());
+
+   const auto body = std::string{"buffered-after-fin"};
+   auto io_context = asio::io_context{};
+   auto stream = beast::tcp_stream{io_context};
+   stream.expires_after(std::chrono::seconds{2});
+   stream.connect(tcp::endpoint{asio::ip::make_address("127.0.0.1"), server.port()});
+   asio::write(stream.socket(), asio::buffer(std::string{"POST /upload HTTP/1.1\r\n"
+                                                         "Host: 127.0.0.1\r\n"
+                                                         "Connection: keep-alive\r\n"
+                                                         "Content-Length: "} +
+                                             std::to_string(body.size()) + "\r\n\r\n" + body));
+   stream.socket().shutdown(tcp::socket::shutdown_send);
+
+   auto buffer = beast::flat_buffer{};
+   auto message = beast_http::response<beast_http::string_body>{};
+   beast_http::read(stream, buffer, message);
+   const auto response = to_http_response(message);
+
+   BOOST_TEST(response.result() == status::ok);
+   BOOST_TEST(response.body() == body);
+   BOOST_TEST(!response.keep_alive());
+
+   forge::asio::blocking::run(runtime, server.async_stop());
+}
+
 BOOST_AUTO_TEST_CASE(http_server_disconnect_cancels_owner_and_accepts_next_connection) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto owner_started = std::make_shared<std::atomic_bool>(false);
@@ -5505,6 +5547,7 @@ BOOST_AUTO_TEST_CASE(http_server_owner_disconnect_watch_preserves_pipelined_keep
                                                          "Host: 127.0.0.1\r\n"
                                                          "Connection: close\r\n"
                                                          "\r\n"}));
+   stream.socket().shutdown(tcp::socket::shutdown_send);
 
    auto buffer = beast::flat_buffer{};
    auto first_message = beast_http::response<beast_http::string_body>{};
