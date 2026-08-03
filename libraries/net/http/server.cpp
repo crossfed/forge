@@ -246,6 +246,14 @@ class request_read_ownership {
       return monitor_operation_cancellation_.slot();
    }
 
+   awaitable<bool> wait_for_monitor_retry() {
+      if (monitor_stopping_) {
+         co_return false;
+      }
+      co_await wait_for_change();
+      co_return !monitor_stopping_;
+   }
+
  private:
    awaitable<void> wait_for_change() {
       auto [error] = co_await changed_.async_wait(asio::as_tuple(use_awaitable));
@@ -691,8 +699,12 @@ class server_session : public std::enable_shared_from_this<server_session> {
          }
 
          if (buffer_exhausted) {
-            state->mark_disconnected();
-            co_return;
+            while (buffer_.size() == buffer_.max_size()) {
+               if (!(co_await state->read_ownership->wait_for_monitor_retry())) {
+                  co_return;
+               }
+            }
+            continue;
          }
          if (read_error == asio::error::operation_aborted) {
             if (state->owner_done || state->read_ownership->monitor_stopping()) {

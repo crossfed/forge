@@ -5569,6 +5569,67 @@ BOOST_AUTO_TEST_CASE(http_server_owner_disconnect_watch_preserves_pipelined_keep
    forge::asio::blocking::run(runtime, server.async_stop());
 }
 
+BOOST_AUTO_TEST_CASE(http_server_full_request_buffer_applies_backpressure_without_canceling_owner) {
+   constexpr auto request_buffer_bytes = std::size_t{128U};
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto owner_canceled = std::make_shared<std::atomic_bool>(false);
+   auto requests = std::make_shared<std::atomic<unsigned>>(0);
+   auto server = forge::net::http::server{
+       runtime,
+       server_config{
+           .max_request_body_bytes = 0,
+           .max_header_bytes = request_buffer_bytes,
+           .read_timeout = std::chrono::seconds{2},
+           .idle_timeout = std::chrono::seconds{2},
+       },
+       [owner_canceled, requests](route_context& context) -> boost::asio::awaitable<response> {
+          requests->fetch_add(1);
+          if (context.request.target() == "/first") {
+             auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+             timer.expires_after(std::chrono::milliseconds{100});
+             auto error = boost::system::error_code{};
+             co_await timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
+             if (error == boost::asio::error::operation_aborted) {
+                owner_canceled->store(true);
+             }
+             co_return make_text_response(context.request, status::ok, "first");
+          }
+          co_return make_text_response(context.request, status::ok, "second");
+       },
+   };
+   forge::asio::blocking::run(runtime, server.async_start());
+
+   auto second_request = std::string{"GET /second HTTP/1.1\r\nHost: x\r\nConnection: close\r\nX-Pad: "};
+   BOOST_REQUIRE_LT(second_request.size() + 4U, request_buffer_bytes);
+   second_request.append(request_buffer_bytes - second_request.size() - 4U, 'a');
+   second_request += "\r\n\r\n";
+   BOOST_REQUIRE_EQUAL(second_request.size(), request_buffer_bytes);
+
+   auto io_context = asio::io_context{};
+   auto stream = beast::tcp_stream{io_context};
+   stream.expires_after(std::chrono::seconds{2});
+   stream.connect(tcp::endpoint{asio::ip::make_address("127.0.0.1"), server.port()});
+   asio::write(stream.socket(), asio::buffer(std::string{"GET /first HTTP/1.1\r\n"
+                                                         "Host: x\r\n"
+                                                         "Connection: keep-alive\r\n"
+                                                         "\r\n"} +
+                                             second_request));
+   stream.socket().shutdown(tcp::socket::shutdown_send);
+
+   auto buffer = beast::flat_buffer{};
+   auto first_message = beast_http::response<beast_http::string_body>{};
+   beast_http::read(stream, buffer, first_message);
+   auto second_message = beast_http::response<beast_http::string_body>{};
+   beast_http::read(stream, buffer, second_message);
+
+   BOOST_TEST(to_http_response(first_message).body() == "first");
+   BOOST_TEST(to_http_response(second_message).body() == "second");
+   BOOST_TEST(!owner_canceled->load());
+   BOOST_TEST(requests->load() == 2U);
+
+   forge::asio::blocking::run(runtime, server.async_stop());
+}
+
 BOOST_AUTO_TEST_CASE(server_keep_alive_gap_uses_idle_timeout) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto requests = std::make_shared<std::atomic<unsigned>>(0);
