@@ -76,6 +76,19 @@ std::int64_t parse_seconds(const std::string& text) {
    return days_from_civil(year, month, day) * 86'400 + static_cast<std::int64_t>(hour * 3'600U + minute * 60U + second);
 }
 
+std::uint32_t parse_fractional_microseconds(const std::string& text) {
+   if (text.size() < 21U || text.size() > 26U || text[19] != '.') {
+      detail::fail_value("date parsing failed");
+   }
+
+   const auto digits = text.size() - 20U;
+   auto fraction = parse_digits(text, 20U, digits);
+   for (auto index = digits; index < 6U; ++index) {
+      fraction *= 10U;
+   }
+   return fraction;
+}
+
 void append_decimal(std::string& result, std::uint64_t value, std::size_t width) {
    const auto offset = result.size();
    result.append(width, '0');
@@ -112,11 +125,29 @@ std::string format_seconds(std::int64_t seconds) {
 } // namespace
 
 time_point time_point::from_iso_string(const std::string& text) {
-   return time_point{protocol::seconds(parse_seconds(text))};
+   if (text.size() == 19U) {
+      return time_point{protocol::seconds(parse_seconds(text))};
+   }
+   const auto seconds = parse_seconds(text.substr(0U, 19U));
+   return time_point{protocol::seconds(seconds) + microseconds{parse_fractional_microseconds(text)}};
 }
 
 std::string time_point::to_string() const {
-   return format_seconds(time_since_epoch().to_seconds());
+   auto seconds = time_since_epoch().count() / 1'000'000;
+   auto fraction = time_since_epoch().count() % 1'000'000;
+   if (fraction < 0) {
+      fraction += 1'000'000;
+      --seconds;
+   }
+
+   auto result = format_seconds(seconds);
+   result.push_back('.');
+   if (fraction % 1'000 == 0) {
+      append_decimal(result, static_cast<std::uint64_t>(fraction / 1'000), 3U);
+   } else {
+      append_decimal(result, static_cast<std::uint64_t>(fraction), 6U);
+   }
+   return result;
 }
 
 time_point_sec time_point_sec::from_iso_string(const std::string& text) {

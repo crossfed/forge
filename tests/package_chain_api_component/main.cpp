@@ -215,8 +215,10 @@ protocol::info_response make_info_response() {
    response.server_full_version_string = "forge-chain-api-e2e+transport";
    response.head = head;
    response.head_num = 42;
+   response.head_time = protocol::time_point{protocol::microseconds{1'700'000'000'123'456LL}};
    response.finalized = finalized;
    response.finalized_num = 40;
+   response.finalized_time = protocol::time_point{protocol::microseconds{1'699'999'999'654'321LL}};
    response.best_candidate = hash("chain-api-e2e-candidate");
    response.best_candidate_num = 43;
    response.earliest_available_block_num = 7;
@@ -1181,6 +1183,9 @@ int main() {
    const auto p2p_response = run_p2p_e2e(services);
 
    require(http_response.information == expected_info, "HTTP info API changed chain audit DTO semantics");
+   require(http_response.information.head_time == expected_info.head_time, "HTTP info API lost head time microseconds");
+   require(http_response.information.finalized_time == expected_info.finalized_time,
+           "HTTP info API lost finalized time microseconds");
    require(http_response.block == expected_block, "HTTP block API changed typed DTO semantics");
    require(http_response.state == expected_state, "HTTP state API changed chain audit DTO semantics");
    require(http_response.transaction == expected_transaction, "HTTP transaction API changed typed DTO semantics");
