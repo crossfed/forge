@@ -12,6 +12,7 @@ module;
 #include <memory>
 #include <optional>
 #include <span>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -52,11 +53,21 @@ boost::asio::awaitable<Response> invoke_service(const char* method, const protoc
       auto response = co_await std::forward<Operation>(operation)();
       require_response_within_limits(response, limits);
       co_return response;
-   } catch (const forge::exceptions::base&) {
+   } catch (const forge::asio::exceptions::canceled&) {
       throw;
+   } catch (const forge::exceptions::base& error) {
+      if (std::string_view{error.code().category().name()} == "forge.chain.api") {
+         throw;
+      }
+      FORGE_THROW_EXCEPTION(exceptions::unavailable, "chain API service failed",
+                            forge::exceptions::ctx("method", method), forge::exceptions::ctx("reason", error.what()));
    } catch (const boost::system::system_error& error) {
       if (error.code() == boost::asio::error::operation_aborted) {
          FORGE_THROW_EXCEPTION(forge::asio::exceptions::canceled, "chain API request was canceled",
+                               forge::exceptions::ctx("method", method));
+      }
+      if (error.code() == boost::asio::error::timed_out) {
+         FORGE_THROW_EXCEPTION(exceptions::deadline_exceeded, "chain API request deadline expired",
                                forge::exceptions::ctx("method", method));
       }
       FORGE_THROW_EXCEPTION(exceptions::unavailable, "chain API service failed",
@@ -74,7 +85,9 @@ template <typename Response, typename Request, typename Operation>
 boost::asio::awaitable<Response> invoke_service(const char* method, const Request& request,
                                                 const protocol::service_limits& limits, Operation&& operation) {
    require_request_within_limits(request, limits);
-   co_return co_await invoke_service<Response>(method, limits, std::forward<Operation>(operation));
+   auto response = co_await invoke_service<Response>(method, limits, std::forward<Operation>(operation));
+   require_response_within_limits(response, request, limits);
+   co_return response;
 }
 
 template <typename Function> void verify_projection(const char* method, Function&& function) {

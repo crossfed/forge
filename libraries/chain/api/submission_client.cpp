@@ -7,6 +7,7 @@ module;
 
 #include <cstddef>
 #include <exception>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -36,11 +37,21 @@ template <typename Response, typename Operation>
 boost::asio::awaitable<Response> invoke_service(const char* method, Operation&& operation) {
    try {
       co_return co_await std::forward<Operation>(operation)();
-   } catch (const forge::exceptions::base&) {
+   } catch (const forge::asio::exceptions::canceled&) {
       throw;
+   } catch (const forge::exceptions::base& error) {
+      if (std::string_view{error.code().category().name()} == "forge.chain.api") {
+         throw;
+      }
+      FORGE_THROW_EXCEPTION(exceptions::unavailable, "chain API service failed",
+                            forge::exceptions::ctx("method", method), forge::exceptions::ctx("reason", error.what()));
    } catch (const boost::system::system_error& error) {
       if (error.code() == boost::asio::error::operation_aborted) {
          FORGE_THROW_EXCEPTION(forge::asio::exceptions::canceled, "chain API request was canceled",
+                               forge::exceptions::ctx("method", method));
+      }
+      if (error.code() == boost::asio::error::timed_out) {
+         FORGE_THROW_EXCEPTION(exceptions::deadline_exceeded, "chain API request deadline expired",
                                forge::exceptions::ctx("method", method));
       }
       FORGE_THROW_EXCEPTION(exceptions::unavailable, "chain API service failed",
@@ -84,7 +95,7 @@ submission_client::submit_batch(std::vector<protocol::transaction_submit_request
 
    auto responses = co_await invoke_service<std::vector<protocol::transaction_submit_response>>(
        "submission.submit_batch", [&] { return service.submit_batch(std::move(requests)); });
-   require_response_within_limits(responses, limits_);
+   require_transaction_batch_response_within_limits(responses, expected.size(), limits_);
    if (responses.size() != expected.size()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof,
                             "chain API submit acknowledgement count does not match the request");

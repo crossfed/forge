@@ -1460,21 +1460,66 @@ class binding_builder {
       co_return output;
    }
 
+   template <typename Interface, typename Request>
+   [[nodiscard]] static forge::api::core::bytes validate_local_request(const forge::api::core::binding_plan& plan,
+                                                                       std::string_view name, const Request& request) {
+      const auto* descriptor = plan.local->describe(Interface::ref());
+      const auto* method = descriptor == nullptr ? nullptr : forge::api::core::find_method(*descriptor, name);
+      if (method == nullptr) {
+         FORGE_THROW_EXCEPTION(forge::api::core::exceptions::method_not_found,
+                               "HTTP API method is not installed in the local registry");
+      }
+      if (!method->request_validator && !method->response_validator) {
+         return {};
+      }
+      if (method->request_type != typeid(Request) || !method->request_encoder) {
+         FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error,
+                               "HTTP API method request validator has no compatible encoder");
+      }
+      auto payload = method->request_encoder(&request);
+      if (method->request_validator) {
+         method->request_validator(payload);
+      }
+      return payload;
+   }
+
+   template <typename Interface, typename Response>
+   static void validate_local_response(const forge::api::core::binding_plan& plan, std::string_view name,
+                                       const forge::api::core::bytes& request, const Response& response) {
+      const auto* descriptor = plan.local->describe(Interface::ref());
+      const auto* method = descriptor == nullptr ? nullptr : forge::api::core::find_method(*descriptor, name);
+      if (method == nullptr || !method->response_validator) {
+         return;
+      }
+      if (method->response_type != typeid(Response) || !method->response_encoder) {
+         FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error,
+                               "HTTP API method response validator has no compatible encoder");
+      }
+      method->response_validator(request, method->response_encoder(&response));
+   }
+
    template <auto Method, typename Interface, typename Request, typename Response>
-   static boost::asio::awaitable<Response> invoke_local(const forge::api::core::binding_plan& plan, Request request) {
+   static boost::asio::awaitable<Response> invoke_local(const forge::api::core::binding_plan& plan,
+                                                        std::string_view name, Request request) {
+      auto request_payload = validate_local_request<Interface>(plan, name, request);
       auto implementation = plan.local->get<Interface>(Interface::ref());
-      co_return co_await std::invoke(Method, *implementation.shared(), std::move(request));
+      auto response = co_await std::invoke(Method, *implementation.shared(), std::move(request));
+      validate_local_response<Interface>(plan, name, request_payload, response);
+      co_return response;
    }
 
    template <auto Method, typename Interface, typename Tuple, typename Response>
    static boost::asio::awaitable<Response> invoke_local_arguments(const forge::api::core::binding_plan& plan,
-                                                                  Tuple arguments) {
+                                                                  std::string_view name, Tuple arguments) {
+      auto request_payload = validate_local_request<Interface>(plan, name, arguments);
       auto implementation = plan.local->get<Interface>(Interface::ref());
-      co_return co_await std::apply(
+      auto response = co_await std::apply(
           [&](auto&&... args) {
              return std::invoke(Method, *implementation.shared(), std::forward<decltype(args)>(args)...);
           },
           std::move(arguments));
+      validate_local_response<Interface>(plan, name, request_payload, response);
+      co_return response;
    }
 
    static stream_response buffered(response value) {
@@ -1548,7 +1593,7 @@ class binding_builder {
                      auto arguments = co_await make_positional_arguments_from_stream<argument_tuple>(
                          request_value, options, *method_descriptor);
                      auto value = co_await invoke_local_arguments<Method, interface_type, argument_tuple, Response>(
-                         plan, std::move(arguments));
+                         plan, name, std::move(arguments));
                      co_return co_await make_success_stream_response(request_value.context.request,
                                                                      options.success_status, std::move(value), options,
                                                                      {}, &request_value);
@@ -1557,8 +1602,8 @@ class binding_builder {
                      auto endpoint =
                          make_endpoint_state<Request>(request_value.context.request, options.success_status);
                      attach_endpoint_state(request, endpoint);
-                     auto value =
-                         co_await invoke_local<Method, interface_type, Request, Response>(plan, std::move(request));
+                     auto value = co_await invoke_local<Method, interface_type, Request, Response>(plan, name,
+                                                                                                   std::move(request));
                      co_return co_await make_success_stream_response(request_value.context.request,
                                                                      options.success_status, std::move(value), options,
                                                                      endpoint, &request_value);
@@ -1622,14 +1667,14 @@ class binding_builder {
                      auto arguments =
                          make_positional_arguments_from_http<argument_tuple>(context, options, *method_descriptor);
                      auto value = co_await invoke_local_arguments<Method, interface_type, argument_tuple, Response>(
-                         plan, std::move(arguments));
+                         plan, name, std::move(arguments));
                      co_return make_success_response(context.request, options.success_status, value, options);
                   } else {
                      auto request = make_request_from_http<Request>(context, options);
                      auto endpoint = make_endpoint_state<Request>(context.request, options.success_status);
                      attach_endpoint_state(request, endpoint);
-                     auto value =
-                         co_await invoke_local<Method, interface_type, Request, Response>(plan, std::move(request));
+                     auto value = co_await invoke_local<Method, interface_type, Request, Response>(plan, name,
+                                                                                                   std::move(request));
                      co_return make_success_response(context.request, options.success_status, value, options, endpoint);
                   }
                } catch (const forge::net::http::exceptions::unsupported_media_type& error) {

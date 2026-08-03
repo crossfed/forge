@@ -98,11 +98,8 @@ protocol::audit_class audit_class_for(std::string_view api, std::string_view met
       return finality;
    }
    if (api == "forge.chain.api.block") {
-      if (method == "get_block" || method == "get_header") {
+      if (method == "get_block_state") {
          return finality;
-      }
-      if (method == "get_producers") {
-         return deterministic_composite;
       }
       return unsupported;
    }
@@ -110,18 +107,9 @@ protocol::audit_class audit_class_for(std::string_view api, std::string_view met
       if (method == "get_point") {
          return state_point;
       }
-      if (method == "get_range") {
-         return state_range;
-      }
-      if (method == "get_changes") {
-         return state_changes;
-      }
-      return deterministic_composite;
+      return unsupported;
    }
    if (api == "forge.chain.api.transaction") {
-      if (method == "get_status" || method == "await_transaction") {
-         return transaction_inclusion;
-      }
       return unsupported;
    }
    return none;
@@ -139,6 +127,20 @@ template <typename Interface> void append_capabilities(protocol::capabilities& r
           .p2p = true,
       });
    }
+}
+
+protocol::service_limits package_limits() {
+   return {
+       .max_page_size = 256,
+       .max_state_batch_size = 32,
+       .max_transaction_batch_size = 16,
+       .max_transaction_status_candidates = 512,
+       .max_request_bytes = chain_api_max_frame_size,
+       .max_response_bytes = chain_api_max_frame_size,
+       .max_proof_bytes = 1U << 20U,
+       .max_await_ms = 300'000,
+       .state_retention_blocks = 512,
+   };
 }
 
 protocol::info_response make_info_response() {
@@ -219,17 +221,7 @@ protocol::info_response make_info_response() {
    append_capabilities<chain_api::transaction>(response.available);
    append_capabilities<chain_api::submission>(response.available);
    append_capabilities<chain_api::admin>(response.available);
-   response.limits = protocol::service_limits{
-       .max_page_size = 256,
-       .max_state_batch_size = 32,
-       .max_transaction_batch_size = 16,
-       .max_transaction_status_candidates = 512,
-       .max_request_bytes = chain_api_max_frame_size,
-       .max_response_bytes = chain_api_max_frame_size,
-       .max_proof_bytes = 1U << 20U,
-       .max_await_ms = 30'000,
-       .state_retention_blocks = 512,
-   };
+   response.limits = package_limits();
    chain_api::require_response_within_limits(response, response.limits);
    return response;
 }
@@ -606,12 +598,16 @@ struct http_responses {
 http_responses run_http_e2e(const chain_api_services& services) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto apis = forge::api::core::registry{};
-   apis.install<chain_api::info>(chain_api::info::describe(), services.information);
-   apis.install<chain_api::block>(chain_api::block::describe(), services.blocks);
-   apis.install<chain_api::state>(chain_api::state::describe(), services.state);
-   apis.install<chain_api::transaction>(chain_api::transaction::describe(), services.transactions);
-   apis.install<chain_api::submission>(chain_api::submission::describe(), services.submissions);
-   apis.install<chain_api::admin>(chain_api::admin::describe(), services.administration);
+   apis.install<chain_api::info>(chain_api::limited_descriptor<chain_api::info>(package_limits()),
+                                 services.information);
+   apis.install<chain_api::block>(chain_api::limited_descriptor<chain_api::block>(package_limits()), services.blocks);
+   apis.install<chain_api::state>(chain_api::limited_descriptor<chain_api::state>(package_limits()), services.state);
+   apis.install<chain_api::transaction>(chain_api::limited_descriptor<chain_api::transaction>(package_limits()),
+                                        services.transactions);
+   apis.install<chain_api::submission>(chain_api::limited_descriptor<chain_api::submission>(package_limits()),
+                                       services.submissions);
+   apis.install<chain_api::admin>(chain_api::limited_descriptor<chain_api::admin>(package_limits()),
+                                  services.administration);
 
    auto router = forge::net::http::router{};
    router.mount(forge::api::http::binding()
@@ -649,6 +645,25 @@ http_responses run_http_e2e(const chain_api_services& services) {
 
    auto responses = http_responses{};
    try {
+      {
+         auto limits_client = forge::net::http::client{
+             runtime,
+             forge::net::http::parse_base_url("http://127.0.0.1:" + std::to_string(server.port())),
+         };
+         auto limits_remote =
+             forge::asio::blocking::run(runtime, forge::api::http::remote<chain_api::transaction>(limits_client));
+         const auto started_before = services.transactions->await_started.load(std::memory_order_acquire);
+         auto rejected = false;
+         try {
+            static_cast<void>(forge::asio::blocking::run(
+                runtime, limits_remote->await_transaction(protocol::transaction_await_request{.timeout_ms = 300'001})));
+         } catch (const forge::chain::api::exceptions::resource_exhausted&) {
+            rejected = true;
+         }
+         require(rejected, "HTTP owner boundary accepted an oversized await deadline");
+         require(services.transactions->await_started.load(std::memory_order_acquire) == started_before,
+                 "HTTP oversized await deadline reached the owner");
+      }
       auto client = forge::net::http::client{
           runtime,
           forge::net::http::parse_base_url("http://127.0.0.1:" + std::to_string(server.port())),
@@ -753,12 +768,18 @@ class p2p_server_application final : public forge::app::application_shell {
    }
 
    boost::asio::awaitable<void> on_provide(forge::app::application_context& context) override {
-      context.apis().install<chain_api::info>(chain_api::info::describe(), services_.information);
-      context.apis().install<chain_api::block>(chain_api::block::describe(), services_.blocks);
-      context.apis().install<chain_api::state>(chain_api::state::describe(), services_.state);
-      context.apis().install<chain_api::transaction>(chain_api::transaction::describe(), services_.transactions);
-      context.apis().install<chain_api::submission>(chain_api::submission::describe(), services_.submissions);
-      context.apis().install<chain_api::admin>(chain_api::admin::describe(), services_.administration);
+      context.apis().install<chain_api::info>(chain_api::limited_descriptor<chain_api::info>(package_limits()),
+                                              services_.information);
+      context.apis().install<chain_api::block>(chain_api::limited_descriptor<chain_api::block>(package_limits()),
+                                               services_.blocks);
+      context.apis().install<chain_api::state>(chain_api::limited_descriptor<chain_api::state>(package_limits()),
+                                               services_.state);
+      context.apis().install<chain_api::transaction>(
+          chain_api::limited_descriptor<chain_api::transaction>(package_limits()), services_.transactions);
+      context.apis().install<chain_api::submission>(
+          chain_api::limited_descriptor<chain_api::submission>(package_limits()), services_.submissions);
+      context.apis().install<chain_api::admin>(chain_api::limited_descriptor<chain_api::admin>(package_limits()),
+                                               services_.administration);
       co_return;
    }
 
@@ -868,6 +889,21 @@ p2p_responses run_p2p_e2e(const chain_api_services& services) {
           client.runtime(),
           resolver->resolve(server_peer, {.id = {"forge.chain.api.info"}, .major = 1, .min_revision = 0}));
       require(resolution.api.protocol == chain_api_protocol, "P2P resolver selected the wrong chain API protocol");
+
+      auto limits_remote =
+          forge::asio::blocking::run(client.runtime(), resolver->remote<chain_api::transaction>(server_peer));
+      const auto started_before = services.transactions->await_started.load(std::memory_order_acquire);
+      auto limit_rejected = false;
+      try {
+         static_cast<void>(forge::asio::blocking::run(
+             client.runtime(),
+             limits_remote->await_transaction(protocol::transaction_await_request{.timeout_ms = 300'001})));
+      } catch (const forge::chain::api::exceptions::resource_exhausted&) {
+         limit_rejected = true;
+      }
+      require(limit_rejected, "P2P owner boundary accepted an oversized await deadline");
+      require(services.transactions->await_started.load(std::memory_order_acquire) == started_before,
+              "P2P oversized await deadline reached the owner");
 
       auto info_remote = forge::asio::blocking::run(client.runtime(), resolver->remote<chain_api::info>(server_peer));
       auto block_remote = forge::asio::blocking::run(client.runtime(), resolver->remote<chain_api::block>(server_peer));

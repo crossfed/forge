@@ -77,11 +77,20 @@ protocol::bytes encode_table_key(std::span<const std::uint8_t, 16> value) {
 }
 
 void validate_table_index(protocol::table_index index) {
-   if (index.kind == protocol::table_index_kind::primary) {
+   switch (index.kind) {
+   case protocol::table_index_kind::primary:
       if (index.position != 0U) {
          invalid_key("primary table index position must be zero");
       }
       return;
+   case protocol::table_index_kind::secondary_u64:
+   case protocol::table_index_kind::secondary_u128:
+   case protocol::table_index_kind::secondary_u256:
+   case protocol::table_index_kind::secondary_f64:
+   case protocol::table_index_kind::secondary_f128:
+      break;
+   default:
+      invalid_key("table index kind is invalid");
    }
    if (index.position >= 16U) {
       invalid_key("secondary table index position must be less than 16");
@@ -103,6 +112,8 @@ void validate_table_key(protocol::table_index_kind kind, std::span<const std::ui
    case protocol::table_index_kind::secondary_u256:
       expected = 32U;
       break;
+   default:
+      invalid_key("table index kind is invalid");
    }
    if (value.size() != expected) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_request, "table key has the wrong canonical width",

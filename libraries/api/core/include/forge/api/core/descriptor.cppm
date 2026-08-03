@@ -152,6 +152,10 @@ struct method_descriptor {
    std::type_index response_type = typeid(void);
    std::vector<std::string> argument_names;
    std::vector<error_descriptor> errors;
+   std::function<bytes(const void*)> request_encoder;
+   std::function<bytes(const void*)> response_encoder;
+   std::function<void(const bytes&)> request_validator;
+   std::function<void(const bytes&, const bytes&)> response_validator;
    std::function<boost::asio::awaitable<bytes>(std::shared_ptr<void>, bytes)> raw_invoker;
    std::function<boost::asio::awaitable<std::vector<bytes>>(std::shared_ptr<void>, bytes)> raw_stream_invoker;
    std::function<boost::asio::awaitable<bytes>(std::shared_ptr<void>, std::vector<bytes>)> raw_client_stream_invoker;
@@ -330,6 +334,10 @@ template <typename Interface, bool EnableRaw> class contract_builder {
           .argument_names = std::move(argument_names),
       };
       if constexpr (EnableRaw) {
+         value.request_encoder = [](const void* request) { return pack_body(*static_cast<const Request*>(request)); };
+         value.response_encoder = [](const void* response) {
+            return pack_body(*static_cast<const Response*>(response));
+         };
          value.raw_invoker = [](std::shared_ptr<void> implementation, bytes payload) -> boost::asio::awaitable<bytes> {
             auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
             if constexpr (argument_count == 1U) {
@@ -364,6 +372,10 @@ template <typename Interface, bool EnableRaw> class contract_builder {
           .response_type = typeid(Response),
       };
       if constexpr (EnableRaw) {
+         value.request_encoder = [](const void* request) { return pack_body(*static_cast<const Request*>(request)); };
+         value.response_encoder = [](const void* response) {
+            return pack_body(*static_cast<const Response*>(response));
+         };
          value.raw_invoker = [](std::shared_ptr<void> implementation, bytes payload) -> boost::asio::awaitable<bytes> {
             auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
             auto request = unpack_body<Request>(payload);

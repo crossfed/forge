@@ -240,14 +240,25 @@ void require_finished(const bounded_stream& stream) {
 } // namespace
 
 bytes encode(const point_proof& value) {
+   for (const auto& step : value.path) {
+      if (step.sibling.valueless_by_exception()) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_proof, "authenticated point proof sibling has no value");
+      }
+   }
    return as_bytes(forge::raw::pack(value));
 }
 
 bytes encode(const range_proof& value) {
+   static_cast<void>(wire_size(value));
    return as_bytes(forge::raw::pack(value));
 }
 
 std::size_t wire_size(const point_proof& value) {
+   for (const auto& step : value.path) {
+      if (step.sibling.valueless_by_exception()) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_proof, "authenticated point proof sibling has no value");
+      }
+   }
    return forge::raw::pack_size(value);
 }
 

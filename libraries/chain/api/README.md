@@ -48,9 +48,12 @@ the service never implies that every enabled method is available on every
 transport. `service_limits` separately advertises page, state-batch,
 transaction-batch, transaction-status scan, await deadline, request, response,
 proof and authenticated-state retention bounds. Transports reject oversized
-frames or HTTP bodies before decoding;
-service implementations use `forge.chain.api.limits` to enforce canonical raw
-request and response sizes at the typed boundary. Resource failures use
+frames or HTTP bodies before decoding. Service owners install
+`limited_descriptor<Interface>(limits)` with the implementation; API Core
+dispatch and the typed HTTP binding then enforce the same canonical request,
+response, proof and item-count limits before and after the implementation call.
+Direct in-process calls may use the typed helpers from `forge.chain.api.limits`
+when they cross an untrusted boundary. Resource failures use
 `forge.chain.api::exceptions::resource_exhausted` across every transport.
 Capabilities and limits are operational claims made by the selected peer; they
 are not consensus state and are not authenticated by a state proof. Clients use
