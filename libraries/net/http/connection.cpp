@@ -91,11 +91,6 @@ bool cancellation_error(const boost::system::error_code& error) {
    return error == asio::error::operation_aborted;
 }
 
-bool idempotent_method(method method_value) {
-   return method_value == method::get || method_value == method::head || method_value == method::put ||
-          method_value == method::delete_ || method_value == method::options;
-}
-
 [[noreturn]] void raise_transport_error(const boost::system::system_error& error) {
    if (timeout_error(error.code())) {
       throw exceptions::gateway_timeout{"HTTP request exceeded its transport deadline"};
@@ -692,7 +687,7 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
          const auto original = operation->request_value;
          const auto options = operation->options;
          const auto deadline = operation->deadline;
-         const auto may_retry = options.retry_idempotent && idempotent_method(original.method());
+         const auto may_retry = options.retry_idempotent && is_idempotent(original.method());
          auto attempt = std::uint32_t{0};
 
          for (;;) {

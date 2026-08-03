@@ -1415,6 +1415,22 @@ BOOST_AUTO_TEST_CASE(chain_http_transaction_wait_uses_request_deadline) {
    const auto options = forge::api::http::detail::request_options_for(
        *found, forge::chain::protocol::transaction_await_request{.timeout_ms = 300'000U});
    BOOST_TEST(options.timeout == std::chrono::milliseconds{305'000});
+   BOOST_TEST(options.retry_idempotent);
+   BOOST_TEST(options.max_retries == 1U);
+}
+
+BOOST_AUTO_TEST_CASE(chain_http_retry_policy_matches_idempotent_verbs) {
+   for (const auto verb : {method::get, method::head, method::put, method::delete_, method::options}) {
+      const auto options = forge::api::http::detail::request_options_for(route{.verb = verb}, 0);
+      BOOST_TEST(options.retry_idempotent);
+      BOOST_TEST(options.max_retries == 1U);
+   }
+
+   for (const auto verb : {method::post, method::patch}) {
+      const auto options = forge::api::http::detail::request_options_for(route{.verb = verb}, 0);
+      BOOST_TEST(!options.retry_idempotent);
+      BOOST_TEST(options.max_retries == 0U);
+   }
 }
 
 BOOST_AUTO_TEST_CASE(chain_http_submission_uses_request_and_batch_deadlines) {
@@ -1431,6 +1447,8 @@ BOOST_AUTO_TEST_CASE(chain_http_submission_uses_request_and_batch_deadlines) {
    const auto submit_options = forge::api::http::detail::request_options_for(
        *submit, forge::chain::protocol::transaction_submit_request{.timeout_ms = 12'000U});
    BOOST_TEST(submit_options.timeout == std::chrono::milliseconds{17'000});
+   BOOST_TEST(!submit_options.retry_idempotent);
+   BOOST_TEST(submit_options.max_retries == 0U);
 
    const auto batch_options = forge::api::http::detail::request_options_for(
        *submit_batch, forge::chain::protocol::transaction_submit_batch_request{
@@ -1438,6 +1456,8 @@ BOOST_AUTO_TEST_CASE(chain_http_submission_uses_request_and_batch_deadlines) {
                           .timeout_ms = 20'000U,
                       });
    BOOST_TEST(batch_options.timeout == std::chrono::milliseconds{25'000});
+   BOOST_TEST(!batch_options.retry_idempotent);
+   BOOST_TEST(batch_options.max_retries == 0U);
 }
 
 BOOST_AUTO_TEST_CASE(chain_transaction_remote_deadline_restores_the_declared_exception) {

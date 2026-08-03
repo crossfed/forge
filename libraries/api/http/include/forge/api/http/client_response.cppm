@@ -90,7 +90,11 @@ inline constexpr auto request_timeout_grace = std::chrono::seconds{5};
 
 template <typename Request>
 [[nodiscard]] forge::net::http::request_options request_options_for(const route& route, const Request& value) {
-   auto options = forge::net::http::request_options{};
+   const auto retry_idempotent = forge::net::http::is_idempotent(route.verb);
+   auto options = forge::net::http::request_options{
+       .retry_idempotent = retry_idempotent,
+       .max_retries = retry_idempotent ? 1U : 0U,
+   };
    if (!route.timeout_field) {
       return options;
    }

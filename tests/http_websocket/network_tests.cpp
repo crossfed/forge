@@ -2164,6 +2164,64 @@ class flaky_server {
    std::uint16_t port_ = 0;
 };
 
+class stale_keep_alive_server {
+ public:
+   stale_keep_alive_server() : acceptor_(io_context_) {
+      acceptor_.open(tcp::v4());
+      acceptor_.set_option(asio::socket_base::reuse_address(true));
+      acceptor_.bind(tcp::endpoint{asio::ip::make_address("127.0.0.1"), 0});
+      acceptor_.listen(asio::socket_base::max_listen_connections);
+      port_ = acceptor_.local_endpoint().port();
+      worker_ = std::thread([this] { run(); });
+   }
+
+   ~stale_keep_alive_server() {
+      auto ignored = boost::system::error_code{};
+      acceptor_.close(ignored);
+      io_context_.stop();
+      if (worker_.joinable()) {
+         worker_.join();
+      }
+   }
+
+   [[nodiscard]] std::uint16_t port() const noexcept {
+      return port_;
+   }
+
+ private:
+   void serve_once(std::string body, bool keep_alive) {
+      auto socket = tcp::socket{io_context_};
+      acceptor_.accept(socket);
+      auto stream = beast::tcp_stream{std::move(socket)};
+      auto buffer = beast::flat_buffer{};
+      auto request = beast_http::request<beast_http::string_body>{};
+      beast_http::read(stream, buffer, request);
+
+      auto response = beast_http::response<beast_http::string_body>{beast_http::status::ok, request.version()};
+      response.set(beast_http::field::content_type, "application/json");
+      response.body() = std::move(body);
+      response.keep_alive(keep_alive);
+      response.prepare_payload();
+      beast_http::write(stream, response);
+
+      auto ignored = boost::system::error_code{};
+      stream.socket().close(ignored);
+   }
+
+   void run() {
+      try {
+         serve_once(R"({"value":"first"})", true);
+         serve_once(R"({"value":"second"})", false);
+      } catch (...) {
+      }
+   }
+
+   asio::io_context io_context_;
+   tcp::acceptor acceptor_;
+   std::thread worker_;
+   std::uint16_t port_ = 0;
+};
+
 BOOST_AUTO_TEST_CASE(http_request_response_copy_has_value_semantics) {
    auto original_request = make_request(method::post, "/items");
    original_request.set(field::content_type, "application/json");
@@ -7652,6 +7710,20 @@ BOOST_AUTO_TEST_CASE(connection_retries_only_idempotent_requests_after_remote_cl
                                                                       .retry_backoff = std::chrono::milliseconds{1}})),
        std::exception);
    BOOST_CHECK_EQUAL(no_retry_connection.metrics().retry_attempts, 0U);
+}
+
+BOOST_AUTO_TEST_CASE(http_api_proxy_retries_get_after_stale_keep_alive) {
+   auto server = stale_keep_alive_server{};
+   auto runtime = forge::asio::runtime{};
+   auto client = forge::net::http::client{runtime, parse_base_url("http://127.0.0.1:" + std::to_string(server.port()))};
+   auto search = forge::asio::blocking::run(runtime, forge::api::http::remote<search_api>(client));
+
+   const auto first = forge::asio::blocking::run(runtime, search->search(search_request{.term = "first", .limit = 1}));
+   const auto second =
+       forge::asio::blocking::run(runtime, search->search(search_request{.term = "second", .limit = 1}));
+
+   BOOST_TEST(first.value == "first");
+   BOOST_TEST(second.value == "second");
 }
 
 BOOST_AUTO_TEST_CASE(connection_serializes_concurrent_requests) {
