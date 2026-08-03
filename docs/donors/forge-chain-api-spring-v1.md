@@ -42,16 +42,30 @@ producer endpoints. Counts alone are not acceptance evidence.
 ## Fail-closed status
 
 All 54 endpoint entries currently have `spine_acceptance.status=present`; no
-pending acceptance evidence remains. The checker still validates the complete
-manifest first and fails if a pending entry is introduced.
+pending acceptance evidence remains. That declaration is not itself a passing
+gate. A pass requires a clean Spine Git checkout from the repository recorded in
+the manifest, and the checker reports the exact validated commit. Dirty
+worktrees are rejected because uncommitted acceptance evidence is not
+reproducible.
 
-With only the Forge root, the checker validates the manifest and the local
-transaction-id fixture. Passing the current Spine root as the optional second
-argument additionally verifies that every referenced source file exists and
-contains each exact Boost.Test case:
+The full gate verifies that every referenced source file exists and contains
+each exact Boost.Test case:
 
 ```sh
 python3 tests/chain_api/check_spring_api_manifest.py FORGE_ROOT SPINE_ROOT
+```
+
+The manual workflow requires `spine_commit` as a full 40-character commit SHA,
+checks out that exact revision, and passes its root to the checker. Omitting the
+Spine root is an error rather than a silent downstream skip.
+
+Forge-local CTest uses the explicit manifest-only mode. It validates the
+manifest and Forge-local transaction-id fixture, reports Spine acceptance as
+`NOT_RUN`, and exits with code 125 so CTest records the gate as skipped rather
+than passed:
+
+```sh
+python3 tests/chain_api/check_spring_api_manifest.py FORGE_ROOT --manifest-only
 ```
 
 Scheduled protocol-feature admission is evidenced at the producer owner in

@@ -47,6 +47,7 @@ import forge.chain.api.info;
 import forge.chain.api.limits;
 import forge.chain.api.raw_client;
 import forge.chain.api.state;
+import forge.chain.api.submission;
 import forge.chain.api.submission_client;
 import forge.chain.api.table_key;
 import forge.chain.api.transaction;
@@ -359,15 +360,6 @@ class transaction_implementation final : public chain_api::transaction {
    explicit transaction_implementation(protocol::transaction_read_only_response response)
        : response_{std::move(response)} {}
 
-   boost::asio::awaitable<protocol::transaction_submit_response> submit(protocol::transaction_submit_request) override {
-      co_return protocol::transaction_submit_response{};
-   }
-
-   boost::asio::awaitable<std::vector<protocol::transaction_submit_response>>
-   submit_batch(std::vector<protocol::transaction_submit_request>) override {
-      co_return std::vector<protocol::transaction_submit_response>{};
-   }
-
    boost::asio::awaitable<protocol::transaction_status_response>
    get_status(protocol::transaction_status_request) override {
       co_return protocol::transaction_status_response{};
@@ -408,6 +400,24 @@ class transaction_implementation final : public chain_api::transaction {
 
  private:
    protocol::transaction_read_only_response response_;
+};
+
+class submission_implementation final : public chain_api::submission {
+ public:
+   boost::asio::awaitable<protocol::transaction_submit_response>
+   submit(protocol::transaction_submit_request request) override {
+      co_return protocol::transaction_submit_response{.id = request.transaction.id()};
+   }
+
+   boost::asio::awaitable<std::vector<protocol::transaction_submit_response>>
+   submit_batch(std::vector<protocol::transaction_submit_request> requests) override {
+      auto responses = std::vector<protocol::transaction_submit_response>{};
+      responses.reserve(requests.size());
+      for (const auto& request : requests) {
+         responses.push_back(protocol::transaction_submit_response{.id = request.transaction.id()});
+      }
+      co_return responses;
+   }
 };
 
 void wait_until(std::function<bool()> predicate, std::string_view failure) {
@@ -538,6 +548,7 @@ struct chain_api_services {
    std::shared_ptr<block_implementation> blocks;
    std::shared_ptr<state_implementation> state;
    std::shared_ptr<transaction_implementation> transactions;
+   std::shared_ptr<submission_implementation> submissions;
    std::shared_ptr<admin_implementation> administration;
 };
 
@@ -557,6 +568,7 @@ http_responses run_http_e2e(const chain_api_services& services) {
    apis.install<chain_api::block>(chain_api::block::describe(), services.blocks);
    apis.install<chain_api::state>(chain_api::state::describe(), services.state);
    apis.install<chain_api::transaction>(chain_api::transaction::describe(), services.transactions);
+   apis.install<chain_api::submission>(chain_api::submission::describe(), services.submissions);
    apis.install<chain_api::admin>(chain_api::admin::describe(), services.administration);
 
    auto router = forge::net::http::router{};
@@ -575,6 +587,10 @@ http_responses run_http_e2e(const chain_api_services& services) {
    router.mount(forge::api::http::binding()
                     .use(forge::api::core::binding().serve(apis).build())
                     .bind<chain_api::transaction>()
+                    .build());
+   router.mount(forge::api::http::binding()
+                    .use(forge::api::core::binding().serve(apis).build())
+                    .bind<chain_api::submission>()
                     .build());
    router.mount(forge::api::http::binding()
                     .use(forge::api::core::binding().serve(apis).build())
@@ -652,15 +668,17 @@ class chain_api_publisher final : public forge::app::plugin {
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
       auto resolver = context.apis().get<forge::plugins::p2p::resolver::api>(
           {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
-      auto plan = forge::api::core::binding()
-                      .serve(context.apis())
-                      .export_api<chain_api::info>({.id = {"forge.chain.api.info"}, .major = 1, .min_revision = 0})
-                      .export_api<chain_api::block>({.id = {"forge.chain.api.block"}, .major = 1, .min_revision = 0})
-                      .export_api<chain_api::state>({.id = {"forge.chain.api.state"}, .major = 1, .min_revision = 0})
-                      .export_api<chain_api::transaction>(
-                          {.id = {"forge.chain.api.transaction"}, .major = 1, .min_revision = 0})
-                      .export_api<chain_api::admin>({.id = {"forge.chain.api.admin"}, .major = 1, .min_revision = 0})
-                      .build();
+      auto plan =
+          forge::api::core::binding()
+              .serve(context.apis())
+              .export_api<chain_api::info>({.id = {"forge.chain.api.info"}, .major = 1, .min_revision = 0})
+              .export_api<chain_api::block>({.id = {"forge.chain.api.block"}, .major = 1, .min_revision = 0})
+              .export_api<chain_api::state>({.id = {"forge.chain.api.state"}, .major = 1, .min_revision = 0})
+              .export_api<chain_api::transaction>(
+                  {.id = {"forge.chain.api.transaction"}, .major = 1, .min_revision = 0})
+              .export_api<chain_api::submission>({.id = {"forge.chain.api.submission"}, .major = 1, .min_revision = 0})
+              .export_api<chain_api::admin>({.id = {"forge.chain.api.admin"}, .major = 1, .min_revision = 0})
+              .build();
       resolver->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = std::string{chain_api_protocol}},
                             forge::plugins::p2p::resolver::publish_options{
                                 .transport = forge::api::transport::options{.max_frame_size = chain_api_max_frame_size},
@@ -697,6 +715,7 @@ class p2p_server_application final : public forge::app::application_shell {
       context.apis().install<chain_api::block>(chain_api::block::describe(), services_.blocks);
       context.apis().install<chain_api::state>(chain_api::state::describe(), services_.state);
       context.apis().install<chain_api::transaction>(chain_api::transaction::describe(), services_.transactions);
+      context.apis().install<chain_api::submission>(chain_api::submission::describe(), services_.submissions);
       context.apis().install<chain_api::admin>(chain_api::admin::describe(), services_.administration);
       co_return;
    }
@@ -795,11 +814,12 @@ p2p_responses run_p2p_e2e(const chain_api_services& services) {
       auto resolver = client.apis().get<forge::plugins::p2p::resolver::api>(
           {.id = {"forge.plugins.p2p.resolver"}, .major = 1, .min_revision = 0});
       const auto remote_apis = forge::asio::blocking::run(client.runtime(), resolver->peer_apis(server_peer));
-      require(remote_apis.size() == 5, "P2P resolver did not advertise all five chain APIs");
+      require(remote_apis.size() == 6, "P2P resolver did not advertise all six chain APIs");
       require_advertised_api(remote_apis, "forge.chain.api.info");
       require_advertised_api(remote_apis, "forge.chain.api.block");
       require_advertised_api(remote_apis, "forge.chain.api.state");
       require_advertised_api(remote_apis, "forge.chain.api.transaction");
+      require_advertised_api(remote_apis, "forge.chain.api.submission");
       require_advertised_api(remote_apis, "forge.chain.api.admin");
 
       const auto resolution = forge::asio::blocking::run(
@@ -812,6 +832,8 @@ p2p_responses run_p2p_e2e(const chain_api_services& services) {
       auto state_remote = forge::asio::blocking::run(client.runtime(), resolver->remote<chain_api::state>(server_peer));
       auto transaction_remote =
           forge::asio::blocking::run(client.runtime(), resolver->remote<chain_api::transaction>(server_peer));
+      auto submission_remote =
+          forge::asio::blocking::run(client.runtime(), resolver->remote<chain_api::submission>(server_peer));
       auto admin_remote = forge::asio::blocking::run(client.runtime(), resolver->remote<chain_api::admin>(server_peer));
 
       auto responses = p2p_responses{};
@@ -831,6 +853,12 @@ p2p_responses run_p2p_e2e(const chain_api_services& services) {
           client.runtime(), transaction_remote->compute_transaction(protocol::transaction_read_only_request{
                                 .audit = protocol::audit_mode::required,
                             }));
+      auto submission = chain_api::submission_client{std::move(submission_remote)};
+      auto submitted = protocol::transaction_submit_request{};
+      submitted.transaction = protocol::packed_transaction{protocol::signed_transaction{}};
+      const auto submitted_id = submitted.transaction.id();
+      require(forge::asio::blocking::run(client.runtime(), submission.submit(std::move(submitted))).id == submitted_id,
+              "P2P submission acknowledgement did not bind the submitted transaction");
       responses.administration =
           forge::asio::blocking::run(client.runtime(), admin_remote->producer_status(protocol::admin_query{}));
       require_long_poll_transport(client.runtime(), transaction_remote, services.transactions, "P2P");
@@ -897,6 +925,7 @@ int main() {
    static_assert(std::is_abstract_v<forge::chain::api::block>);
    static_assert(std::is_abstract_v<forge::chain::api::state>);
    static_assert(std::is_abstract_v<forge::chain::api::transaction>);
+   static_assert(std::is_abstract_v<forge::chain::api::submission>);
    static_assert(std::is_abstract_v<forge::chain::api::admin>);
    static_assert(!std::is_abstract_v<forge::chain::api::submission_client>);
    static_assert(std::derived_from<forge::chain::api::authenticated_audit_verifier, forge::chain::api::audit_verifier>);
@@ -925,6 +954,7 @@ int main() {
        .blocks = std::make_shared<block_implementation>(expected_block),
        .state = std::make_shared<state_implementation>(expected_state),
        .transactions = std::make_shared<transaction_implementation>(expected_transaction),
+       .submissions = std::make_shared<submission_implementation>(),
        .administration = std::make_shared<admin_implementation>(expected_admin),
    };
 

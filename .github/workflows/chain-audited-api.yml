@@ -8,6 +8,10 @@ on:
         required: true
         default: true
         type: boolean
+      spine_commit:
+        description: Full committed vbytemaster/blockchain SHA containing the Spine acceptance corpus
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -18,7 +22,7 @@ env:
 
 jobs:
   style:
-    name: ubuntu-26.04 / structure and format
+    name: ubuntu-26.04 / structure, format, and pinned Spine evidence
     runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v4
@@ -33,8 +37,39 @@ jobs:
             tests/chain_api tests/db_authenticated tests/package_chain_api_component \
             -type f \( -name '*.cppm' -o -name '*.cpp' -o -name '*.hpp' -o -name '*.hxx' \) \
             -print0 | xargs -0 clang-format-22 --dry-run --Werror
-          python3 tests/chain_api/check_spring_api_manifest.py .
           git diff --check
+
+      - name: Validate pinned Spine revision
+        shell: bash
+        env:
+          SPINE_COMMIT: ${{ inputs.spine_commit }}
+        run: |
+          if [[ ! "$SPINE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "spine_commit must be a full lowercase 40-character Git SHA" >&2
+            exit 1
+          fi
+
+      - name: Checkout pinned Spine acceptance corpus
+        uses: actions/checkout@v4
+        with:
+          repository: vbytemaster/blockchain
+          ref: ${{ inputs.spine_commit }}
+          path: spine-acceptance
+          persist-credentials: false
+          submodules: false
+
+      - name: Check Spring manifest against pinned Spine corpus
+        shell: bash
+        env:
+          SPINE_COMMIT: ${{ inputs.spine_commit }}
+        run: |
+          actual_spine_commit="$(git -C "$GITHUB_WORKSPACE/spine-acceptance" rev-parse HEAD)"
+          if [[ "$actual_spine_commit" != "$SPINE_COMMIT" ]]; then
+            echo "checked out Spine commit $actual_spine_commit, expected $SPINE_COMMIT" >&2
+            exit 1
+          fi
+          python3 tests/chain_api/check_spring_api_manifest.py \
+            . "$GITHUB_WORKSPACE/spine-acceptance"
 
   native:
     name: ${{ matrix.os }} / Release

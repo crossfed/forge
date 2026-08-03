@@ -38,10 +38,6 @@ class transaction : public forge::api::core::contract<transaction, forge::api::c
  public:
    virtual ~transaction() = default;
 
-   virtual boost::asio::awaitable<protocol::transaction_submit_response>
-   submit(protocol::transaction_submit_request value) = 0;
-   virtual boost::asio::awaitable<std::vector<protocol::transaction_submit_response>>
-   submit_batch(std::vector<protocol::transaction_submit_request> value) = 0;
    virtual boost::asio::awaitable<protocol::transaction_status_response>
    get_status(protocol::transaction_status_request value) = 0;
    virtual boost::asio::awaitable<protocol::transaction_status_response>
@@ -62,11 +58,6 @@ template <> struct method_descriptor_customization<::forge::chain::api::transact
    template <auto Method, bool EnableRaw>
    static void apply(method_builder<::forge::chain::api::transaction, EnableRaw>& method) {
       ::forge::chain::api::exceptions::descriptor::declare_historical_query(method);
-      if constexpr (std::is_same_v<method_request_t<Method>, ::forge::chain::protocol::transaction_submit_request> ||
-                    std::is_same_v<method_request_t<Method>,
-                                   ::std::vector<::forge::chain::protocol::transaction_submit_request>>) {
-         ::forge::chain::api::exceptions::descriptor::declare_mutation(method);
-      }
       if constexpr (std::is_same_v<method_request_t<Method>, ::forge::chain::protocol::transaction_await_request>) {
          ::forge::chain::api::exceptions::descriptor::declare_deadline(method);
       }
@@ -76,9 +67,6 @@ template <> struct method_descriptor_customization<::forge::chain::api::transact
 } // namespace forge::api::core
 
 FORGE_EXPORT_API(::forge::chain::api::transaction, FORGE_API_CONTRACT("forge.chain.api.transaction", 1, 0),
-                 FORGE_API_METHOD_TYPED(submit, ::forge::chain::protocol::transaction_submit_request,
-                                        ::forge::chain::protocol::transaction_submit_response),
-                 FORGE_API_METHOD(submit_batch, transactions),
                  FORGE_API_METHOD_TYPED(get_status, ::forge::chain::protocol::transaction_status_request,
                                         ::forge::chain::protocol::transaction_status_response),
                  FORGE_API_METHOD_TYPED(await_transaction, ::forge::chain::protocol::transaction_await_request,
@@ -92,8 +80,7 @@ FORGE_EXPORT_API(::forge::chain::api::transaction, FORGE_API_CONTRACT("forge.cha
                                         ::forge::chain::protocol::transaction_read_only_response))
 
 FORGE_HTTP_API(
-    ::forge::chain::api::transaction, FORGE_HTTP_POST(submit, "/v1/chain/transactions/submit", accepted),
-    FORGE_HTTP_POST(submit_batch, "/v1/chain/transactions/submit-batch", accepted),
+    ::forge::chain::api::transaction,
     FORGE_HTTP_GET(get_status, "/v1/chain/transactions/{id}?audit={audit}", FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_GET(await_transaction,
                    "/v1/chain/transactions/{id}/wait?desired={desired}&timeout_ms={timeout_ms}&audit={audit}",

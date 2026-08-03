@@ -307,7 +307,7 @@ void verified_client::verify_changes(const protocol::state_changes_request& requ
    }
 
    if (response.next) {
-      if (complete || *response.next != position) {
+      if (response.blocks.empty() || complete || *response.next != position) {
          reject("chain API changes response cursor does not match the verified continuation");
       }
    } else if (!complete || position.range != 0U || position.key || response.blocks.empty() ||

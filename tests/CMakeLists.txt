@@ -225,9 +225,14 @@ target_link_libraries(
 add_test(NAME test_forge_chain_api COMMAND test_forge_chain_api WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 add_test(
    NAME test_forge_chain_api_spring_manifest
-   COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/chain_api/check_spring_api_manifest.py ${CMAKE_SOURCE_DIR}
+   COMMAND
+      ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/chain_api/check_spring_api_manifest.py
+      ${CMAKE_SOURCE_DIR}
+      --manifest-only
    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
+set_tests_properties(test_forge_chain_api_spring_manifest PROPERTIES SKIP_RETURN_CODE 125)
 
 add_executable(
    test_forge_plugins_http_server
@@ -1308,7 +1313,9 @@ add_custom_target(
 )
 add_custom_target(
    test_forge_package_chain_api_component
-   COMMAND ${CMAKE_CTEST_COMMAND}
+   COMMAND
+      ${CMAKE_COMMAND} -E env CMAKE_BUILD_PARALLEL_LEVEL=4
+      ${CMAKE_CTEST_COMMAND}
       --build-and-test
       ${CMAKE_CURRENT_SOURCE_DIR}/package_chain_api_component
       ${CMAKE_BINARY_DIR}/forge-package-chain-api-component
@@ -2113,7 +2120,9 @@ add_test(
 set_tests_properties(test_forge_package_chain_protocol_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_chain_api_component
-   COMMAND ${CMAKE_CTEST_COMMAND}
+   COMMAND
+      ${CMAKE_COMMAND} -E env CMAKE_BUILD_PARALLEL_LEVEL=4
+      ${CMAKE_CTEST_COMMAND}
       --build-and-test
       ${CMAKE_CURRENT_SOURCE_DIR}/package_chain_api_component
       ${CMAKE_BINARY_DIR}/forge-package-chain-api-component

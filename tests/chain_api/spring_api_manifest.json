@@ -1,9 +1,12 @@
 {
-  "schema": 2,
+  "schema": 3,
   "donor": {
     "repository": "https://github.com/AntelopeIO/spring",
     "commit": "e6a99f68b67abc4d89fe716755b2e1394a4991f7",
     "license": "MIT"
+  },
+  "spine": {
+    "repository": "https://github.com/vbytemaster/blockchain"
   },
   "sources": {
     "chain_registration": {"path": "plugins/chain_api_plugin/chain_api_plugin.cpp", "sha256": "913f705ccea61c6fc9f5926c00dee2e14c03e4fdc7fa543f0db89544da0d8ab5"},
@@ -156,7 +159,7 @@
       "donor_evidence": {"status": "present", "path": "tests/get_table_seckey_tests.cpp", "id": "get_table_rows secondary-key fixture"},
       "condition": {"kind": "plugin", "expression": "chain_api_plugin is enabled"},
       "forge": {"api": "state", "method": "get_table_rows", "mapping": "direct"},
-      "spine_acceptance": {"status": "present", "id": "SPINE-CHAIN-GET-TABLE-ROWS", "path": "tests/unit/plugins/chain/controller/state_service_tests.cpp", "test": "verified_secondary_get_table_rows_accepts_all_families_reverse_and_zero_limit"}
+      "spine_acceptance": {"status": "present", "id": "SPINE-CHAIN-GET-TABLE-ROWS", "path": "tests/unit/plugins/chain/controller/state_service_tests.cpp", "test": "verified_binary_table_rows_accepts_all_families_reverse_and_zero_limit"}
     },
     {
       "group": "chain", "donor": "get_table_by_scope",
@@ -255,7 +258,7 @@
       "behavior": [{"source": "chain_behavior", "symbol": "chain_apis::read_write::push_transaction"}],
       "donor_evidence": {"status": "present", "path": "tests/plugin_http_api_test.py", "id": "PluginHttpTest.test_ChainApi:push_transaction"},
       "condition": {"kind": "plugin", "expression": "chain_api_plugin is enabled"},
-      "forge": {"api": "transaction", "method": "submit", "mapping": "projection"},
+      "forge": {"api": "submission", "method": "submit", "mapping": "projection"},
       "spine_acceptance": {"status": "present", "id": "SPINE-CHAIN-PUSH-TRANSACTION", "path": "tests/unit/plugins/chain/producer/producer_plugin_tests.cpp", "test": "chain_transaction_submission_announces_only_new_mempool_entries"}
     },
     {
@@ -265,7 +268,7 @@
       "behavior": [{"source": "chain_behavior", "symbol": "chain_apis::read_write::push_transactions"}],
       "donor_evidence": {"status": "present", "path": "tests/plugin_http_api_test.py", "id": "PluginHttpTest.test_ChainApi:push_transactions"},
       "condition": {"kind": "plugin", "expression": "chain_api_plugin is enabled"},
-      "forge": {"api": "transaction", "method": "submit_batch", "mapping": "projection"},
+      "forge": {"api": "submission", "method": "submit_batch", "mapping": "projection"},
       "spine_acceptance": {"status": "present", "id": "SPINE-CHAIN-PUSH-TRANSACTIONS", "path": "tests/unit/plugins/chain/producer/producer_plugin_tests.cpp", "test": "chain_transaction_batch_admits_and_announces_each_transaction"}
     },
     {
@@ -275,7 +278,7 @@
       "behavior": [{"source": "chain_behavior", "symbol": "chain_apis::read_write::send_transaction"}],
       "donor_evidence": {"status": "present", "path": "tests/plugin_http_api_test.py", "id": "PluginHttpTest.test_ChainApi:send_transaction"},
       "condition": {"kind": "plugin", "expression": "chain_api_plugin is enabled"},
-      "forge": {"api": "transaction", "method": "submit", "mapping": "projection"},
+      "forge": {"api": "submission", "method": "submit", "mapping": "projection"},
       "spine_acceptance": {"status": "present", "id": "SPINE-CHAIN-SEND-TRANSACTION", "path": "tests/unit/plugins/chain/producer/producer_plugin_tests.cpp", "test": "producer_owns_the_canonical_chain_transaction_api_without_network"}
     },
     {
@@ -285,7 +288,7 @@
       "behavior": [{"source": "chain_behavior", "symbol": "chain_apis::read_write::send_transaction2"}],
       "donor_evidence": {"status": "none", "reason": "No endpoint-specific donor test or fixture was found at the pinned baseline; registration and behavior remain source-defined."},
       "condition": {"kind": "plugin", "expression": "chain_api_plugin is enabled"},
-      "forge": {"api": "transaction", "method": "submit", "mapping": "projection"},
+      "forge": {"api": "submission", "method": "submit", "mapping": "projection"},
       "spine_acceptance": {"status": "present", "id": "SPINE-CHAIN-SEND-TRANSACTION2", "path": "tests/unit/plugins/chain/producer/producer_plugin_tests.cpp", "test": ["chain_transaction_retry_waits_for_finality_without_a_second_retry_queue", "chain_transaction_retry_blocks_survives_a_canonical_fork_out"]}
     },
     {

@@ -42,6 +42,7 @@ import forge.chain.api.info;
 import forge.chain.api.limits;
 import forge.chain.api.raw_client;
 import forge.chain.api.state;
+import forge.chain.api.submission;
 import forge.chain.api.submission_client;
 import forge.chain.api.table_key;
 import forge.chain.api.transaction;
@@ -60,11 +61,15 @@ template <typename Client>
 concept exposes_raw_client = requires(Client& client) { client.raw(); };
 
 template <typename Client>
-concept exposes_submission = requires(
-   Client& client,
-   forge::chain::protocol::transaction_submit_request request) {
+concept exposes_submission = requires(Client& client, forge::chain::protocol::transaction_submit_request request) {
    client.submit(std::move(request));
 };
+
+template <typename Client>
+concept exposes_indirect_submission =
+    requires(Client& client, forge::chain::protocol::transaction_submit_request request) {
+       client.transactions().submit(std::move(request));
+    };
 
 template <typename Client>
 concept exposes_administration = requires(Client& client) { client.admin(); };
@@ -73,6 +78,8 @@ static_assert(!exposes_raw_client<forge::chain::api::verified_client>);
 static_assert(!exposes_administration<forge::chain::api::raw_client>);
 static_assert(!exposes_submission<forge::chain::api::verified_client>);
 static_assert(exposes_submission<forge::chain::api::submission_client>);
+static_assert(!exposes_submission<forge::chain::api::transaction>);
+static_assert(!exposes_indirect_submission<forge::chain::api::raw_client>);
 
 using forge::api::http::cache_policy;
 using forge::api::http::route;
@@ -233,21 +240,6 @@ class transaction_service final : public forge::chain::api::transaction {
  public:
    explicit transaction_service(forge::chain::protocol::transaction_status_response response)
        : response_{std::move(response)} {}
-   explicit transaction_service(std::vector<forge::chain::protocol::transaction_submit_response> responses)
-       : submit_responses_{std::move(responses)} {}
-
-   boost::asio::awaitable<forge::chain::protocol::transaction_submit_response>
-   submit(forge::chain::protocol::transaction_submit_request) override {
-      if (submit_responses_.empty()) {
-         co_return forge::chain::protocol::transaction_submit_response{};
-      }
-      co_return submit_responses_.front();
-   }
-
-   boost::asio::awaitable<std::vector<forge::chain::protocol::transaction_submit_response>>
-   submit_batch(std::vector<forge::chain::protocol::transaction_submit_request>) override {
-      co_return submit_responses_;
-   }
 
    boost::asio::awaitable<forge::chain::protocol::transaction_status_response>
    get_status(forge::chain::protocol::transaction_status_request) override {
@@ -276,7 +268,28 @@ class transaction_service final : public forge::chain::api::transaction {
 
  private:
    forge::chain::protocol::transaction_status_response response_;
-   std::vector<forge::chain::protocol::transaction_submit_response> submit_responses_;
+};
+
+class submission_service final : public forge::chain::api::submission {
+ public:
+   explicit submission_service(std::vector<forge::chain::protocol::transaction_submit_response> responses)
+       : responses_{std::move(responses)} {}
+
+   boost::asio::awaitable<forge::chain::protocol::transaction_submit_response>
+   submit(forge::chain::protocol::transaction_submit_request) override {
+      if (responses_.empty()) {
+         co_return forge::chain::protocol::transaction_submit_response{};
+      }
+      co_return responses_.front();
+   }
+
+   boost::asio::awaitable<std::vector<forge::chain::protocol::transaction_submit_response>>
+   submit_batch(std::vector<forge::chain::protocol::transaction_submit_request>) override {
+      co_return responses_;
+   }
+
+ private:
+   std::vector<forge::chain::protocol::transaction_submit_response> responses_;
 };
 
 class deadline_remote_invoker final : public forge::api::core::remote_invoker {
@@ -845,6 +858,7 @@ BOOST_AUTO_TEST_CASE(chain_http_uses_resource_verbs) {
    const auto blocks = forge::api::http::traits<forge::chain::api::block>::routes();
    const auto state = forge::api::http::traits<forge::chain::api::state>::routes();
    const auto transactions = forge::api::http::traits<forge::chain::api::transaction>::routes();
+   const auto submissions = forge::api::http::traits<forge::chain::api::submission>::routes();
    const auto admin = forge::api::http::traits<forge::chain::api::admin>::routes();
 
    require_routes(info, method::get, {"get"});
@@ -858,7 +872,8 @@ BOOST_AUTO_TEST_CASE(chain_http_uses_resource_verbs) {
    require_routes(state, method::post, {"get_point", "get_range", "get_changes", "get_accounts_by_authorizers"});
    require_routes(transactions, method::get, {"get_status", "await_transaction"});
    require_routes(transactions, method::post,
-                  {"submit", "submit_batch", "get_required_keys", "compute_transaction", "send_read_only_transaction"});
+                  {"get_required_keys", "compute_transaction", "send_read_only_transaction"});
+   require_routes(submissions, method::post, {"submit", "submit_batch"});
    require_routes(admin, method::get,
                   {"producer_status", "supported_protocol_features", "account_ram_corrections",
                    "unapplied_transactions", "snapshot_requests", "integrity_hash"});
@@ -1019,7 +1034,8 @@ BOOST_AUTO_TEST_CASE(chain_transaction_remote_deadline_restores_the_declared_exc
    BOOST_REQUIRE(declared != method->errors.end());
    BOOST_CHECK(declared->status_code == forge::api::core::status::deadline_exceeded);
    BOOST_TEST(declared->retryable);
-   const auto* submit = forge::api::core::find_method(descriptor, "submit");
+   const auto submission_descriptor = forge::chain::api::submission::describe();
+   const auto* submit = forge::api::core::find_method(submission_descriptor, "submit");
    BOOST_REQUIRE(submit != nullptr);
    BOOST_CHECK(std::ranges::find(submit->errors, identity, &forge::api::core::error_descriptor::identity) ==
                submit->errors.end());
@@ -1431,10 +1447,9 @@ BOOST_AUTO_TEST_CASE(submission_client_binds_acknowledgements_to_local_transacti
 
    const auto make_client = [&](std::vector<forge::chain::protocol::transaction_submit_response> responses) {
       auto services = forge::api::core::registry{};
-      services.install<forge::chain::api::transaction>(std::make_shared<transaction_service>(std::move(responses)));
+      services.install<forge::chain::api::submission>(std::make_shared<submission_service>(std::move(responses)));
       return forge::chain::api::submission_client{
-          services.get<forge::chain::api::transaction>(
-             forge::chain::api::transaction::ref()),
+          services.get<forge::chain::api::submission>(forge::chain::api::submission::ref()),
       };
    };
 
@@ -1485,9 +1500,7 @@ BOOST_AUTO_TEST_CASE(submission_client_binds_acknowledgements_to_local_transacti
 
 BOOST_AUTO_TEST_CASE(submission_client_fails_typed_without_a_transport) {
    auto client = forge::chain::api::submission_client{{}};
-   BOOST_CHECK_THROW(
-      static_cast<void>(run(client.submit({}))),
-      forge::chain::api::exceptions::unavailable);
+   BOOST_CHECK_THROW(static_cast<void>(run(client.submit({}))), forge::chain::api::exceptions::unavailable);
 }
 
 BOOST_AUTO_TEST_CASE(verified_transaction_status_rejects_an_unauthenticated_execution_trace) {
@@ -1659,6 +1672,14 @@ BOOST_AUTO_TEST_CASE(verified_changes_cover_the_requested_interval_and_terminal_
    omitted.blocks.erase(omitted.blocks.begin());
    omitted.audit->state.erase(omitted.audit->state.begin());
    BOOST_CHECK_THROW(static_cast<void>(verify(std::move(omitted))), forge::chain::api::exceptions::invalid_state_proof);
+
+   auto stalled = forge::chain::protocol::state_changes_response{};
+   stalled.context.anchor = second;
+   stalled.next = forge::chain::protocol::state_changes_cursor{.block = 11U};
+   stalled.audit = forge::chain::protocol::audit_bundle{
+       .finality = forge::chain::protocol::proof_blob{.scheme = "test.finality"},
+   };
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(stalled))), forge::chain::api::exceptions::invalid_state_proof);
 
    auto forged_terminal = make_response();
    forged_terminal.blocks.back().anchor.state_root._hash[0] = 99U;

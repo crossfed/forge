@@ -709,6 +709,19 @@ if(FORGE_ENABLE_CONTRACT_TOOLING)
    )
 endif()
 
+foreach(_forge_leaf_target IN LISTS FORGE_LEAF_TARGETS)
+   if(TARGET "Forge::${_forge_leaf_target}")
+      get_target_property(_forge_alias_target "Forge::${_forge_leaf_target}" ALIASED_TARGET)
+      if(NOT "${_forge_alias_target}" STREQUAL "${_forge_leaf_target}")
+         message(FATAL_ERROR
+            "Forge build-tree target Forge::${_forge_leaf_target} is already owned by ${_forge_alias_target}"
+         )
+      endif()
+   else()
+      add_library("Forge::${_forge_leaf_target}" ALIAS "${_forge_leaf_target}")
+   endif()
+endforeach()
+
 set(
    FORGE_BUILT_COMPONENTS
    core

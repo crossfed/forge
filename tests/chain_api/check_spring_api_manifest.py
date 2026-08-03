@@ -3,14 +3,16 @@
 import json
 import pathlib
 import re
+import subprocess
 import sys
 
 
-if len(sys.argv) not in (2, 3):
-    raise SystemExit("usage: check_spring_api_manifest.py FORGE_ROOT [SPINE_ROOT]")
+if len(sys.argv) != 3:
+    raise SystemExit("usage: check_spring_api_manifest.py FORGE_ROOT (SPINE_ROOT | --manifest-only)")
 
 root = pathlib.Path(sys.argv[1]).resolve()
-spine_root = pathlib.Path(sys.argv[2]).resolve() if len(sys.argv) == 3 else None
+manifest_only = sys.argv[2] == "--manifest-only"
+spine_root = None if manifest_only else pathlib.Path(sys.argv[2]).resolve()
 manifest_path = root / "tests/chain_api/spring_api_manifest.json"
 manifest = json.loads(manifest_path.read_text())
 
@@ -19,8 +21,46 @@ expected_donor = {
     "commit": "e6a99f68b67abc4d89fe716755b2e1394a4991f7",
     "license": "MIT",
 }
-if manifest.get("schema") != 2 or manifest.get("donor") != expected_donor:
+expected_spine = {"repository": "https://github.com/vbytemaster/blockchain"}
+if (
+    manifest.get("schema") != 3
+    or manifest.get("donor") != expected_donor
+    or manifest.get("spine") != expected_spine
+):
     raise SystemExit("Spring API manifest donor baseline changed")
+
+
+def git_output(repository_root, *arguments):
+    result = subprocess.run(
+        ["git", "-C", str(repository_root), *arguments],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise SystemExit(f"Spine root is not a readable Git checkout: {repository_root}")
+    return result.stdout.strip()
+
+
+def canonical_repository_url(value):
+    canonical = value.strip().rstrip("/")
+    if canonical.startswith("git@github.com:"):
+        canonical = f"https://github.com/{canonical.removeprefix('git@github.com:')}"
+    return canonical.removesuffix(".git")
+
+
+spine_commit = None
+if spine_root is not None:
+    if spine_root == root:
+        raise SystemExit("Spine root must be a separate checkout")
+    spine_commit = git_output(spine_root, "rev-parse", "HEAD")
+    if re.fullmatch(r"[0-9a-f]{40}", spine_commit) is None:
+        raise SystemExit("Spine root HEAD is not a full Git commit")
+    spine_repository = git_output(spine_root, "config", "--get", "remote.origin.url")
+    if canonical_repository_url(spine_repository) != canonical_repository_url(expected_spine["repository"]):
+        raise SystemExit("Spine root origin does not match the manifest repository")
+    if git_output(spine_root, "status", "--porcelain=v1", "--untracked-files=all"):
+        raise SystemExit("Spine root must be clean; uncommitted acceptance evidence is not reproducible")
 
 expected_sources = {
     "chain_registration": (
@@ -158,7 +198,7 @@ for group, expected in expected_endpoints.items():
 
 allowed_mappings = {"direct", "projection", "client_projection", "local_utility"}
 api_sources = {}
-for api in ("info", "block", "state", "transaction", "admin"):
+for api in ("info", "block", "state", "transaction", "submission", "admin"):
     path = root / f"libraries/chain/api/include/forge/chain/api/{api}.cppm"
     api_sources[api] = path.read_text()
 
@@ -318,8 +358,15 @@ if pending:
     details = "\n".join(f"  {identity} [{evidence_id}]: {reason}" for identity, evidence_id, reason in pending)
     raise SystemExit(f"Spring API acceptance evidence is pending:\n{details}")
 
+if manifest_only:
+    print(
+        "Spring API manifest structure verified; "
+        "Spine acceptance NOT_RUN: --manifest-only does not validate downstream evidence"
+    )
+    raise SystemExit(125)
+
 print(
     "Spring API donor manifest verified: "
     f"{len(expected_endpoints['chain'])} chain + {len(expected_endpoints['producer'])} producer; "
-    f"{validated_evidence} acceptance test case references validated"
+    f"{validated_evidence} acceptance test case references validated at Spine {spine_commit}"
 )

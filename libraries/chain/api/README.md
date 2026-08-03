@@ -3,8 +3,8 @@
 Target and package component: `forge_chain_api` / `chain_api`.
 
 All public modules live directly in `include/forge/chain/api`. Public symbols
-live in `forge::chain::api`; `info`, `block`, `state`, `transaction` and
-`admin` are API contract names, not nested namespaces. There is no aggregate
+live in `forge::chain::api`; `info`, `block`, `state`, `transaction`,
+`submission` and `admin` are API contract names, not nested namespaces. There is no aggregate
 `forge.chain.api` module.
 
 The library owns transport-neutral chain contracts, HTTP/P2P-capable clients
@@ -16,12 +16,14 @@ when they already express the complete request or result.
 `forge.chain.api.json_schema` tells the shared OpenAPI generator that canonical
 protocol public keys and signatures are JSON strings; it owns no routes or DTOs.
 
-`raw_client` groups ordinary info, block, state and transaction handles. It does
+`raw_client` groups ordinary info, block, state and transaction-query handles. It does
 not carry the producer-administration contract; products resolve `admin`
-separately only in trusted operational processes. `submission_client` owns the
-explicit transaction-submission authority and validates only that the remote
-acknowledgement names the submitted transaction. That acknowledgement is not a
-finality claim. Consumers establish inclusion or finality through
+separately only in trusted operational processes. Products also resolve the
+independent `submission` contract only where transaction admission is required;
+neither `raw_client` nor `transaction` can reach it. `submission_client` owns
+that explicit authority and validates only that the remote acknowledgement
+names the submitted transaction. That acknowledgement is not a finality claim.
+Consumers establish inclusion or finality through
 `verified_client::get_transaction_status` or `await_transaction`.
 
 HTTP bindings are resource-oriented rather than RPC-shaped. Safe reads with
