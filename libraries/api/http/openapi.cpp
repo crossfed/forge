@@ -106,14 +106,14 @@ struct target_description {
    return output;
 }
 
-[[nodiscard]] const openapi_field* find_field(const openapi_operation& operation, std::string_view name) {
-   const auto iterator = std::ranges::find(operation.request_fields, name, &openapi_field::name);
-   return iterator == operation.request_fields.end() ? nullptr : &*iterator;
+[[nodiscard]] const openapi_field* find_field(const std::vector<openapi_field>& fields, std::string_view name) {
+   const auto iterator = std::ranges::find(fields, name, &openapi_field::name);
+   return iterator == fields.end() ? nullptr : &*iterator;
 }
 
-[[nodiscard]] forge::variant parameter(const openapi_operation& operation, std::string_view field_name,
+[[nodiscard]] forge::variant parameter(const std::vector<openapi_field>& fields, std::string_view field_name,
                                        std::string wire_name, std::string location, bool force_required) {
-   const auto* field = find_field(operation, field_name);
+   const auto* field = find_field(fields, field_name);
    auto value = forge::mutable_variant_object{}("name", std::move(wire_name))("in", std::move(location))(
        "required", force_required || (field != nullptr && field->required));
    value("schema", field == nullptr ? unconstrained_schema("unknown request field") : field->schema);
@@ -129,6 +129,7 @@ struct target_description {
 struct request_body_description {
    bool present = false;
    bool required = false;
+   forge::variant schema;
 };
 
 [[nodiscard]] bool mapped_request_field(const target_description& target, const route& mapping,
@@ -190,12 +191,13 @@ struct request_body_description {
 
 [[nodiscard]] request_body_description describe_request_body(const openapi_operation& operation,
                                                              const target_description& target,
-                                                             const forge::api::core::method_descriptor* method) {
+                                                             const forge::api::core::method_descriptor* method,
+                                                             const std::vector<openapi_field>& fields) {
    if (!uses_request_body(operation.mapping.verb) || operation.mapping.body_stream_field.has_value() ||
        !operation.mapping.forms.empty()) {
       return {};
    }
-   if (operation.request_fields.empty()) {
+   if (fields.empty()) {
       if (empty_object_schema(operation.request_schema)) {
          return {};
       }
@@ -211,12 +213,26 @@ struct request_body_description {
             return {};
          }
       }
-      return {.present = true, .required = true};
+      return {.present = true, .required = true, .schema = operation.request_schema};
    }
 
    auto result = request_body_description{};
-   for (const auto& field : operation.request_fields) {
+   for (const auto& field : fields) {
       if (!mapped_request_field(target, operation.mapping, field)) {
+         if (operation.positional_request) {
+            if (result.present) {
+               throw forge::api::core::exceptions::protocol_error{
+                   "OpenAPI positional request has multiple body candidates"};
+            }
+            result.schema = field.schema;
+         } else if (field.source == openapi_field_source::body) {
+            if (result.present) {
+               throw forge::api::core::exceptions::protocol_error{"OpenAPI request has multiple body candidates"};
+            }
+            result.schema = field.schema;
+         } else if (!result.present) {
+            result.schema = operation.request_schema;
+         }
          result.present = true;
          result.required = result.required || field.required;
       }
@@ -247,6 +263,20 @@ struct request_body_description {
 [[nodiscard]] forge::variant operation_document(const forge::api::core::descriptor& api,
                                                 const openapi_operation& operation) {
    auto value = forge::mutable_variant_object{}("operationId", api.id.value + "." + operation.mapping.method_name);
+   const auto* method = forge::api::core::find_method(api, operation.mapping.method_name);
+   auto request_fields = operation.request_fields;
+   if (operation.positional_request) {
+      if (method == nullptr || method->argument_names.size() != request_fields.size()) {
+         throw forge::api::core::exceptions::protocol_error{"OpenAPI positional argument metadata is incomplete"};
+      }
+      for (auto index = std::size_t{}; index < request_fields.size(); ++index) {
+         request_fields[index].name = method->argument_names[index];
+         if (request_fields[index].source != openapi_field_source::value) {
+            throw forge::api::core::exceptions::protocol_error{
+                "OpenAPI positional methods cannot use HTTP parameter wrappers"};
+         }
+      }
+   }
    auto parameters = forge::variants{};
    struct parameter_identity {
       std::string field;
@@ -272,7 +302,7 @@ struct request_body_description {
       }
       parameter_identities.push_back(
           parameter_identity{.field = std::string{field}, .wire_name = comparison_name, .location = location});
-      parameters.push_back(parameter(operation, field, std::move(wire_name), std::move(location), force_required));
+      parameters.push_back(parameter(request_fields, field, std::move(wire_name), std::move(location), force_required));
    };
    const auto target = describe_target(operation.mapping.target);
    for (const auto& name : target.path_fields) {
@@ -284,7 +314,7 @@ struct request_body_description {
    for (const auto& entry : operation.mapping.headers) {
       append_parameter(entry.field, entry.name, "header", false);
    }
-   for (const auto& field : operation.request_fields) {
+   for (const auto& field : request_fields) {
       switch (field.source) {
       case openapi_field_source::query:
          if (!has_binding(target.query, field.name)) {
@@ -307,16 +337,15 @@ struct request_body_description {
       value("parameters", std::move(parameters));
    }
 
-   const auto* method = forge::api::core::find_method(api, operation.mapping.method_name);
-   const auto request_body = describe_request_body(operation, target, method);
+   const auto request_body = describe_request_body(operation, target, method, request_fields);
    if (request_body.present) {
       value("requestBody",
             forge::mutable_variant_object{}("required", request_body.required)(
-                "content", media_schema(operation.request_schema, content_type(operation.mapping.request_body_codec))));
+                "content", media_schema(request_body.schema, content_type(operation.mapping.request_body_codec))));
    }
 
    auto response = forge::mutable_variant_object{}("description", "Successful response");
-   if (!operation.mapping.response_file && !operation.mapping.response_stream) {
+   if (operation.response_has_content && !operation.mapping.response_file && !operation.mapping.response_stream) {
       response("content", media_schema(operation.response_schema, content_type(operation.mapping.response_body_codec)));
    }
    auto responses = forge::mutable_variant_object{};

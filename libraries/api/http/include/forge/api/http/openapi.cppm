@@ -65,6 +65,8 @@ struct openapi_operation {
    forge::variant request_schema;
    forge::variant response_schema;
    std::vector<openapi_field> request_fields;
+   bool positional_request = false;
+   bool response_has_content = true;
 };
 
 template <typename T> struct json_schema_traits;
@@ -248,76 +250,96 @@ template <typename T> [[nodiscard]] forge::variant make_json_schema() {
    }
 }
 
+template <typename T> [[nodiscard]] openapi_field request_field(std::string name = {}) {
+   using field_type = clean_type<T>;
+   if constexpr (is_query<field_type>::value) {
+      return openapi_field{.name = std::move(name),
+                           .schema = make_json_schema<typename is_query<field_type>::value_type>(),
+                           .required = false,
+                           .source = openapi_field_source::query};
+   } else if constexpr (is_header<field_type>::value) {
+      return openapi_field{.name = std::move(name),
+                           .schema = make_json_schema<typename is_header<field_type>::value_type>(),
+                           .required = false,
+                           .source = openapi_field_source::header};
+   } else if constexpr (is_cookie<field_type>::value) {
+      return openapi_field{.name = std::move(name),
+                           .schema = make_json_schema<typename is_cookie<field_type>::value_type>(),
+                           .required = false,
+                           .source = openapi_field_source::cookie};
+   } else if constexpr (is_body<field_type>::value) {
+      return openapi_field{.name = std::move(name),
+                           .schema = make_json_schema<typename is_body<field_type>::value_type>(),
+                           .required = false,
+                           .source = openapi_field_source::body};
+   } else if constexpr (is_form<field_type>::value) {
+      return openapi_field{.name = std::move(name),
+                           .schema = make_json_schema<typename is_form<field_type>::value_type>(),
+                           .required = false,
+                           .source = openapi_field_source::form};
+   } else if constexpr (is_form_field<field_type>::value) {
+      return openapi_field{.name = std::move(name),
+                           .schema = make_json_schema<typename is_form_field<field_type>::value_type>(),
+                           .required = false,
+                           .source = openapi_field_source::form};
+   } else if constexpr (is_body_stream_v<field_type>) {
+      return openapi_field{.name = std::move(name),
+                           .schema = unconstrained_schema(forge::type_name<field_type>()),
+                           .required = false,
+                           .source = openapi_field_source::body_stream};
+   } else if constexpr (is_body_bytes_v<field_type>) {
+      return openapi_field{.name = std::move(name),
+                           .schema = unconstrained_schema(forge::type_name<field_type>()),
+                           .required = false,
+                           .source = openapi_field_source::body_bytes};
+   } else if constexpr (is_upload_file_v<field_type>) {
+      return openapi_field{.name = std::move(name),
+                           .schema = unconstrained_schema(forge::type_name<field_type>()),
+                           .required = false,
+                           .source = openapi_field_source::upload};
+   } else {
+      return openapi_field{.name = std::move(name),
+                           .schema = make_json_schema<field_type>(),
+                           .required = !optional_traits<field_type>::value};
+   }
+}
+
 template <typename Request> [[nodiscard]] std::vector<openapi_field> request_fields() {
    auto output = std::vector<openapi_field>{};
    using request_type = clean_type<Request>;
    if constexpr (forge::reflect::is_described_object_v<request_type>) {
       forge::reflect::for_each_member<request_type>([&](const char* name, auto member) {
          using member_type = clean_type<decltype(std::declval<request_type>().*member)>;
-         if constexpr (is_query<member_type>::value) {
-            output.push_back(openapi_field{.name = name,
-                                           .schema = make_json_schema<typename is_query<member_type>::value_type>(),
-                                           .required = false,
-                                           .source = openapi_field_source::query});
-         } else if constexpr (is_header<member_type>::value) {
-            output.push_back(openapi_field{.name = name,
-                                           .schema = make_json_schema<typename is_header<member_type>::value_type>(),
-                                           .required = false,
-                                           .source = openapi_field_source::header});
-         } else if constexpr (is_cookie<member_type>::value) {
-            output.push_back(openapi_field{.name = name,
-                                           .schema = make_json_schema<typename is_cookie<member_type>::value_type>(),
-                                           .required = false,
-                                           .source = openapi_field_source::cookie});
-         } else if constexpr (is_body<member_type>::value) {
-            output.push_back(openapi_field{.name = name,
-                                           .schema = make_json_schema<typename is_body<member_type>::value_type>(),
-                                           .required = false,
-                                           .source = openapi_field_source::body});
-         } else if constexpr (is_form<member_type>::value) {
-            output.push_back(openapi_field{.name = name,
-                                           .schema = make_json_schema<typename is_form<member_type>::value_type>(),
-                                           .required = false,
-                                           .source = openapi_field_source::form});
-         } else if constexpr (is_form_field<member_type>::value) {
-            output.push_back(
-                openapi_field{.name = name,
-                              .schema = make_json_schema<typename is_form_field<member_type>::value_type>(),
-                              .required = false,
-                              .source = openapi_field_source::form});
-         } else if constexpr (is_body_stream_v<member_type>) {
-            output.push_back(openapi_field{.name = name,
-                                           .schema = unconstrained_schema(forge::type_name<member_type>()),
-                                           .required = false,
-                                           .source = openapi_field_source::body_stream});
-         } else if constexpr (is_body_bytes_v<member_type>) {
-            output.push_back(openapi_field{.name = name,
-                                           .schema = unconstrained_schema(forge::type_name<member_type>()),
-                                           .required = false,
-                                           .source = openapi_field_source::body_bytes});
-         } else if constexpr (is_upload_file_v<member_type>) {
-            output.push_back(openapi_field{.name = name,
-                                           .schema = unconstrained_schema(forge::type_name<member_type>()),
-                                           .required = false,
-                                           .source = openapi_field_source::upload});
-         } else {
-            output.push_back(openapi_field{.name = name,
-                                           .schema = make_json_schema<member_type>(),
-                                           .required = !optional_traits<member_type>::value});
-         }
+         output.push_back(request_field<member_type>(name));
       });
    }
    return output;
+}
+
+template <typename Tuple, std::size_t... Index>
+[[nodiscard]] std::vector<openapi_field> positional_fields(std::index_sequence<Index...>) {
+   auto output = std::vector<openapi_field>{};
+   output.reserve(sizeof...(Index));
+   (output.push_back(request_field<std::tuple_element_t<Index, Tuple>>()), ...);
+   return output;
+}
+
+template <auto Method> [[nodiscard]] std::vector<openapi_field> positional_fields() {
+   using tuple_type = forge::api::core::method_argument_tuple_t<Method>;
+   return positional_fields<tuple_type>(std::make_index_sequence<std::tuple_size_v<tuple_type>>{});
 }
 
 template <auto Method, typename Request, typename Response>
 [[nodiscard]] openapi_operation make_openapi_operation(route mapping) {
    static_assert(std::same_as<clean_type<Request>, clean_type<forge::api::core::method_request_t<Method>>>);
    static_assert(std::same_as<clean_type<Response>, clean_type<forge::api::core::method_response_t<Method>>>);
+   constexpr auto positional = is_positional_http_method_v<Method, Request>;
    return openapi_operation{.mapping = std::move(mapping),
                             .request_schema = make_json_schema<Request>(),
                             .response_schema = make_json_schema<Response>(),
-                            .request_fields = request_fields<Request>()};
+                            .request_fields = positional ? positional_fields<Method>() : request_fields<Request>(),
+                            .positional_request = positional,
+                            .response_has_content = !is_empty_response_v<Response>};
 }
 
 [[nodiscard]] forge::variant build_openapi_document(const forge::api::core::descriptor& api,

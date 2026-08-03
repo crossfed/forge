@@ -2485,6 +2485,9 @@ BOOST_AUTO_TEST_CASE(http_api_openapi_uses_wire_parameter_names) {
 
    const auto& request_body = dto_document["paths"]["/dto/{ref}"]["post"]["requestBody"];
    BOOST_TEST(!request_body["required"].as_bool());
+   const auto& body_schema = request_body["content"]["application/json"]["schema"];
+   BOOST_TEST(body_schema["properties"]["value"]["type"].as_string() == "string");
+   BOOST_TEST(!body_schema["properties"].get_object().contains("ref"));
 
    const auto default_header_document = forge::api::http::openapi<default_header_api>();
    const auto& default_parameters =
@@ -2500,6 +2503,23 @@ BOOST_AUTO_TEST_CASE(http_api_openapi_omits_body_for_empty_typed_request) {
    const auto document = forge::api::http::openapi<empty_post_api>();
    const auto& operation = document["paths"]["/empty-post"]["post"];
    BOOST_TEST(!operation.get_object().contains("requestBody"));
+   BOOST_TEST(!operation["responses"]["204"].get_object().contains("content"));
+}
+
+BOOST_AUTO_TEST_CASE(http_api_openapi_describes_valid_positional_fields) {
+   const auto document = forge::api::http::openapi<positional_plain_body_api>();
+   const auto& operation = document["paths"]["/plain/{ref}"]["post"];
+   BOOST_TEST(operation["parameters"][std::size_t{0}]["schema"]["type"].as_string() == "string");
+   BOOST_TEST(
+       operation["requestBody"]["content"]["application/json"]["schema"]["properties"]["value"]["type"].as_string() ==
+       "string");
+}
+
+BOOST_AUTO_TEST_CASE(http_api_openapi_rejects_positional_wrappers) {
+   BOOST_CHECK_THROW(static_cast<void>(forge::api::http::openapi<positional_api_http>()),
+                     forge::api::core::exceptions::protocol_error);
+   BOOST_CHECK_THROW(static_cast<void>(forge::api::http::openapi<positional_body_api>()),
+                     forge::api::core::exceptions::protocol_error);
 }
 
 BOOST_AUTO_TEST_CASE(http_api_openapi_preserves_custom_open_object_body) {
