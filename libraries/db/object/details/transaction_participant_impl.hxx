@@ -16,7 +16,8 @@ namespace forge::db::object::detail {
 class transaction_participant_impl final : public forge::db::core::transaction_participant {
  public:
    transaction_participant_impl(forge::db::core::family family, transaction::seal_allocations_fn seal,
-                                std::vector<std::shared_ptr<observer>> observers, transaction::release_fn release);
+                                std::vector<std::shared_ptr<observer>> observers, transaction::release_fn release,
+                                bool reuse_rolled_back_ids);
    ~transaction_participant_impl() override;
 
    [[nodiscard]] std::string_view name() const noexcept override;
@@ -69,6 +70,7 @@ class transaction_participant_impl final : public forge::db::core::transaction_p
    bool finalized_ = false;
    bool preparing_commit_ = false;
    bool backend_writes_ = false;
+   bool reuse_rolled_back_ids_ = false;
 };
 
 } // namespace forge::db::object::detail

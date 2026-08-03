@@ -30,21 +30,24 @@ transaction::impl::impl(forge::db::core::transaction&& active_value, forge::db::
                         transaction::ensure_registered_fn ensure, transaction::allocate_id_fn allocate,
                         transaction::seal_allocations_fn seal,
                         std::vector<std::shared_ptr<interceptor>> interceptors_value,
-                        std::vector<std::shared_ptr<observer>> observers_value, transaction::release_fn release)
+                        std::vector<std::shared_ptr<observer>> observers_value, transaction::release_fn release,
+                        bool reuse_rolled_back_ids)
     : owned{std::move(active_value)}, active{&*owned}, family{std::move(family_value)},
       ensure_registered{std::move(ensure)}, allocate_id{std::move(allocate)},
       participant{std::make_shared<detail::transaction_participant_impl>(
-          family, std::move(seal), std::move(observers_value), std::move(release))},
+          family, std::move(seal), std::move(observers_value), std::move(release), reuse_rolled_back_ids)},
       interceptors{std::move(interceptors_value)} {}
 
 transaction::impl::impl(forge::db::core::transaction& active_value, forge::db::core::family family_value,
                         transaction::ensure_registered_fn ensure, transaction::allocate_id_fn allocate,
                         transaction::seal_allocations_fn seal,
                         std::vector<std::shared_ptr<interceptor>> interceptors_value,
-                        std::vector<std::shared_ptr<observer>> observers_value, transaction::release_fn release)
+                        std::vector<std::shared_ptr<observer>> observers_value, transaction::release_fn release,
+                        bool reuse_rolled_back_ids)
     : active{&active_value}, family{std::move(family_value)}, ensure_registered{std::move(ensure)},
-      allocate_id{std::move(allocate)}, participant{std::make_shared<detail::transaction_participant_impl>(
-                                            family, std::move(seal), std::move(observers_value), std::move(release))},
+      allocate_id{std::move(allocate)},
+      participant{std::make_shared<detail::transaction_participant_impl>(
+          family, std::move(seal), std::move(observers_value), std::move(release), reuse_rolled_back_ids)},
       interceptors{std::move(interceptors_value)} {}
 
 void transaction::impl::remember_allocation(forge::db::ids::object_id type, std::uint64_t next_instance) {
@@ -70,17 +73,17 @@ transaction::transaction(forge::db::core::transaction&& active, forge::db::core:
                          std::vector<std::shared_ptr<observer>> observers, release_fn release,
                          boost::asio::any_io_executor cleanup_executor)
     : transaction(std::move(active), std::move(family), std::move(ensure), std::move(allocate), std::move(seal),
-                  std::move(interceptors), std::move(observers), std::move(release), std::move(cleanup_executor),
+                  std::move(interceptors), std::move(observers), std::move(release), std::move(cleanup_executor), false,
                   false) {}
 
 transaction::transaction(forge::db::core::transaction&& active, forge::db::core::family family,
                          ensure_registered_fn ensure, allocate_id_fn allocate, seal_allocations_fn seal,
                          std::vector<std::shared_ptr<interceptor>> interceptors,
                          std::vector<std::shared_ptr<observer>> observers, release_fn release,
-                         boost::asio::any_io_executor, bool backend_writes)
+                         boost::asio::any_io_executor, bool backend_writes, bool reuse_rolled_back_ids)
     : impl_{std::make_shared<impl>(std::move(active), std::move(family), std::move(ensure), std::move(allocate),
-                                   std::move(seal), std::move(interceptors), std::move(observers),
-                                   std::move(release))} {
+                                   std::move(seal), std::move(interceptors), std::move(observers), std::move(release),
+                                   reuse_rolled_back_ids)} {
    owns_commit_ = true;
    impl_->backend_writes = backend_writes;
    impl_->participant->use_backend_writes(backend_writes);
@@ -116,20 +119,22 @@ transaction detail::transaction_access::make_owned(
     forge::db::core::transaction&& active, forge::db::core::family family, transaction::ensure_registered_fn ensure,
     transaction::allocate_id_fn allocate, transaction::seal_allocations_fn seal,
     std::vector<std::shared_ptr<interceptor>> interceptors, std::vector<std::shared_ptr<observer>> observers,
-    transaction::release_fn release, boost::asio::any_io_executor cleanup_executor, bool backend_writes) {
-   return transaction{
-       std::move(active),       std::move(family),    std::move(ensure),  std::move(allocate),         std::move(seal),
-       std::move(interceptors), std::move(observers), std::move(release), std::move(cleanup_executor), backend_writes};
+    transaction::release_fn release, boost::asio::any_io_executor cleanup_executor, bool backend_writes,
+    bool reuse_rolled_back_ids) {
+   return transaction{std::move(active),    std::move(family),    std::move(ensure),
+                      std::move(allocate),  std::move(seal),      std::move(interceptors),
+                      std::move(observers), std::move(release),   std::move(cleanup_executor),
+                      backend_writes,       reuse_rolled_back_ids};
 }
 
 transaction detail::transaction_access::make_joined(
     forge::db::core::transaction& active, forge::db::core::family family, transaction::ensure_registered_fn ensure,
     transaction::allocate_id_fn allocate, transaction::seal_allocations_fn seal,
     std::vector<std::shared_ptr<interceptor>> interceptors, std::vector<std::shared_ptr<observer>> observers,
-    transaction::release_fn release, bool backend_writes) {
+    transaction::release_fn release, bool backend_writes, bool reuse_rolled_back_ids) {
    return transaction{active,          std::move(family),       std::move(ensure),    std::move(allocate),
                       std::move(seal), std::move(interceptors), std::move(observers), std::move(release),
-                      backend_writes};
+                      backend_writes,  reuse_rolled_back_ids};
 }
 
 void detail::transaction_access::bind_store(transaction& active, std::shared_ptr<const void> identity) {
@@ -152,14 +157,16 @@ transaction::transaction(forge::db::core::transaction& active, forge::db::core::
                          std::vector<std::shared_ptr<interceptor>> interceptors,
                          std::vector<std::shared_ptr<observer>> observers, release_fn release)
     : transaction(active, std::move(family), std::move(ensure), std::move(allocate), std::move(seal),
-                  std::move(interceptors), std::move(observers), std::move(release), false) {}
+                  std::move(interceptors), std::move(observers), std::move(release), false, false) {}
 
 transaction::transaction(forge::db::core::transaction& active, forge::db::core::family family,
                          ensure_registered_fn ensure, allocate_id_fn allocate, seal_allocations_fn seal,
                          std::vector<std::shared_ptr<interceptor>> interceptors,
-                         std::vector<std::shared_ptr<observer>> observers, release_fn release, bool backend_writes)
+                         std::vector<std::shared_ptr<observer>> observers, release_fn release, bool backend_writes,
+                         bool reuse_rolled_back_ids)
     : impl_{std::make_shared<impl>(active, std::move(family), std::move(ensure), std::move(allocate), std::move(seal),
-                                   std::move(interceptors), std::move(observers), std::move(release))} {
+                                   std::move(interceptors), std::move(observers), std::move(release),
+                                   reuse_rolled_back_ids)} {
    impl_->backend_writes = backend_writes;
    impl_->participant->use_backend_writes(backend_writes);
    db_transaction().attach_participant(impl_->participant);

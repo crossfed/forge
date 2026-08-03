@@ -23,6 +23,7 @@ inline constexpr std::uint64_t default_blob_file_size = 256ULL * 1024ULL * 1024U
 struct object_layer_config {
    std::string family = "objectdb";
    std::string write_policy = "single-writer";
+   std::string id_allocation = "monotonic";
 };
 
 struct blob_data_options {
@@ -115,7 +116,7 @@ struct status {
    std::vector<store_status> stores;
 };
 
-BOOST_DESCRIBE_STRUCT(object_layer_config, (), (family, write_policy))
+BOOST_DESCRIBE_STRUCT(object_layer_config, (), (family, write_policy, id_allocation))
 BOOST_DESCRIBE_STRUCT(blob_data_options, (),
                       (enable_blob_files, min_blob_size, blob_file_size, blob_compression_type,
                        enable_blob_garbage_collection, blob_garbage_collection_age_cutoff))
@@ -142,6 +143,9 @@ export template <> struct forge::schema::rules<forge::plugins::db::store::object
           .non_empty();
       schema.field<&forge::plugins::db::store::object_layer_config::write_policy>("write-policy")
           .default_value("single-writer")
+          .non_empty();
+      schema.field<&forge::plugins::db::store::object_layer_config::id_allocation>("id-allocation")
+          .default_value("monotonic")
           .non_empty();
       return schema;
    }

@@ -46,11 +46,12 @@ bool same_changes(const change_set& left, const change_set& right) {
 transaction_participant_impl::transaction_participant_impl(forge::db::core::family family,
                                                            transaction::seal_allocations_fn seal,
                                                            std::vector<std::shared_ptr<observer>> observers,
-                                                           transaction::release_fn release)
+                                                           transaction::release_fn release, bool reuse_rolled_back_ids)
     : name_{participant_name(family)}, family_{std::move(family)},
       prewrite_locks_{
           forge::db::core::record_lock_claim{.column_family = family_, .key = record_key::ranked_coordinator()}},
-      seal_allocations_{std::move(seal)}, observers_{std::move(observers)}, release_{std::move(release)} {}
+      seal_allocations_{std::move(seal)}, observers_{std::move(observers)}, release_{std::move(release)},
+      reuse_rolled_back_ids_{reuse_rolled_back_ids} {}
 
 transaction_participant_impl::~transaction_participant_impl() {
    release_writer();
@@ -79,9 +80,12 @@ forge::db::core::mutation_policy transaction_participant_impl::classify(const fo
    }
 
    const auto kind = std::to_integer<std::uint8_t>(key.bytes().front());
-   if (kind == static_cast<std::uint8_t>(record_key::entry_kind::system_record) ||
-       kind == static_cast<std::uint8_t>(record_key::entry_kind::sequence_record)) {
+   if (kind == static_cast<std::uint8_t>(record_key::entry_kind::system_record)) {
       return forge::db::core::mutation_policy::excluded;
+   }
+   if (kind == static_cast<std::uint8_t>(record_key::entry_kind::sequence_record)) {
+      return reuse_rolled_back_ids_ ? forge::db::core::mutation_policy::reversible
+                                    : forge::db::core::mutation_policy::excluded;
    }
    return forge::db::core::mutation_policy::reversible;
 }
@@ -114,13 +118,15 @@ transaction_participant_impl::rollback_to_savepoint(forge::db::core::savepoint_i
    changes_.mutations.resize(savepoints_.back().mutation_count);
    savepoints_.pop_back();
 
-   // Native rollback also restores sequence records. Re-publish every consumed
-   // high-watermark so generated IDs are never reusable inside the outer transaction.
-   for (const auto& [type, next_instance] : allocation_seals_) {
-      auto bytes = std::vector<std::byte>{};
-      bytes.reserve(sizeof(next_instance));
-      record_key::append_be64(bytes, next_instance);
-      co_await access.put(family_, record_key::sequence(type), std::move(bytes));
+   if (!reuse_rolled_back_ids_) {
+      // Native rollback also restores sequence records. Re-publish every consumed
+      // high-watermark so generated IDs are never reusable inside the outer transaction.
+      for (const auto& [type, next_instance] : allocation_seals_) {
+         auto bytes = std::vector<std::byte>{};
+         bytes.reserve(sizeof(next_instance));
+         record_key::append_be64(bytes, next_instance);
+         co_await access.put(family_, record_key::sequence(type), std::move(bytes));
+      }
    }
 }
 
@@ -141,6 +147,9 @@ boost::asio::awaitable<void> transaction_participant_impl::prepare_commit(forge:
 }
 
 void transaction_participant_impl::remember_allocation(forge::db::ids::object_id type, std::uint64_t next_instance) {
+   if (reuse_rolled_back_ids_) {
+      return;
+   }
    type.instance = 0;
    auto& existing = allocation_seals_[type];
    existing = std::max(existing, next_instance);

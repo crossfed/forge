@@ -45,6 +45,21 @@ forge::db::object::store::options parse_object_options(const object_layer_config
                             forge::exceptions::ctx("store", store_name),
                             forge::exceptions::ctx("write-policy", value.write_policy));
    }
+   if (value.id_allocation == "monotonic") {
+      options.id_allocation = forge::db::object::id_allocation_policy::monotonic;
+   } else if (value.id_allocation == "transactional") {
+      options.id_allocation = forge::db::object::id_allocation_policy::transactional;
+   } else {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_config, "db store object id-allocation is unsupported",
+                            forge::exceptions::ctx("store", store_name),
+                            forge::exceptions::ctx("id-allocation", value.id_allocation));
+   }
+   if (options.id_allocation == forge::db::object::id_allocation_policy::transactional &&
+       options.writes != forge::db::object::write_policy::single_writer) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_config,
+                            "transactional db object id allocation requires single-writer policy",
+                            forge::exceptions::ctx("store", store_name));
+   }
    return options;
 }
 

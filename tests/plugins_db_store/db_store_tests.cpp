@@ -810,6 +810,28 @@ BOOST_AUTO_TEST_CASE(store_plugin_rejects_configured_store_without_layers) {
                      store_plugin::exceptions::invalid_config);
 }
 
+BOOST_AUTO_TEST_CASE(store_plugin_rejects_invalid_object_id_allocation_configuration) {
+   auto runtime = forge::asio::runtime{};
+
+   const auto expect_invalid = [&](std::string allocation, std::string writes) {
+      auto plugin = store_plugin::plugin{};
+      auto configured = configured_store("accounts", "/tmp/forge-db-store-plugin-id-allocation");
+      auto& store = std::get<forge::config::core::value::object_type>(configured.storage);
+      auto& object = std::get<forge::config::core::value::object_type>(store.at("object").storage);
+      object["id-allocation"] = forge::config::core::value{std::move(allocation)};
+      object["write-policy"] = forge::config::core::value{std::move(writes)};
+
+      auto document = forge::config::core::document{};
+      document.set("plugins.db.store.stores", forge::config::core::value::array_type{std::move(configured)});
+      BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, plugin.configure(forge::config::core::component_view{
+                                                                document, "plugins.db.store"})),
+                        store_plugin::exceptions::invalid_config);
+   };
+
+   expect_invalid("unknown", "single-writer");
+   expect_invalid("transactional", "backend");
+}
+
 BOOST_AUTO_TEST_CASE(store_plugin_rejects_configured_revision_without_object_layer) {
    auto runtime = forge::asio::runtime{};
    auto plugin = store_plugin::plugin{};

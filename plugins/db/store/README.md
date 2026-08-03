@@ -37,6 +37,7 @@ plugins:
           object:
             family: "objectdb"
             write-policy: "single-writer"
+            id-allocation: "monotonic"
           blob:
             data-family: "blobdb.data"
             refs-family: "blobdb.refs"

@@ -1132,8 +1132,8 @@ std::string hex(const std::vector<std::byte>& bytes) {
 }
 
 [[nodiscard]] boost::asio::awaitable<forge::db::object::store>
-make_store(const std::shared_ptr<memory_driver>& driver) {
-   auto store = co_await forge::db::object::store::open(driver);
+make_store(const std::shared_ptr<memory_driver>& driver, forge::db::object::store::options options = {}) {
+   auto store = co_await forge::db::object::store::open(driver, options);
    store.register_object<account_object>();
    co_return store;
 }
@@ -1495,6 +1495,20 @@ BOOST_AUTO_TEST_CASE(db_object_ranked_backend_policy_requires_record_locks_befor
       const auto value = make_ranked_upload(1, 1, 1, 1, 10);
       BOOST_CHECK_THROW(co_await store.insert(value), forge::db::object::exceptions::unsupported_operation);
       BOOST_CHECK(!(co_await store.find(value.id)).has_value());
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_transactional_id_allocation_requires_single_writer_policy) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      const auto options = forge::db::object::store::options{
+          .writes = forge::db::object::write_policy::backend,
+          .id_allocation = forge::db::object::id_allocation_policy::transactional,
+      };
+      BOOST_CHECK_THROW((void)(co_await forge::db::object::store::open(driver, options)),
+                        forge::db::object::exceptions::invalid_descriptor);
       co_return;
    }());
 }
@@ -2129,6 +2143,29 @@ BOOST_AUTO_TEST_CASE(db_object_create_transaction_rollback_consumes_id) {
    }());
 }
 
+BOOST_AUTO_TEST_CASE(db_object_transactional_id_allocation_reuses_rolled_back_id) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      const auto options = forge::db::object::store::options{
+          .writes = forge::db::object::write_policy::single_writer,
+          .id_allocation = forge::db::object::id_allocation_policy::transactional,
+      };
+      auto store = co_await make_store(driver, options);
+
+      auto tx = co_await store.begin_transaction();
+      auto draft = co_await tx.create<account>([](account& value) { value.name = "draft"; });
+      BOOST_CHECK_EQUAL(draft.id.instance, 0U);
+      co_await tx.rollback();
+
+      auto reopened = co_await make_store(driver, options);
+      auto committed = co_await reopened.create<account>([](account& value) { value.name = "committed"; });
+      BOOST_CHECK_EQUAL(committed.id.instance, 0U);
+      BOOST_CHECK_EQUAL((co_await reopened.get(committed.id)).name, "committed");
+      co_return;
+   }());
+}
+
 BOOST_AUTO_TEST_CASE(db_object_savepoint_rollback_restores_records_indexes_and_observer_input) {
    auto runtime = forge::asio::runtime{};
    auto driver = std::make_shared<memory_driver>();
@@ -2562,6 +2599,34 @@ BOOST_AUTO_TEST_CASE(db_object_savepoint_rollback_consumes_generated_ids_across_
       auto next = co_await reopened.create<account>([](account& value) { value.name = "next"; });
       BOOST_CHECK_EQUAL(next.id.instance, 2U);
       BOOST_CHECK(!(co_await reopened.find(account::id_t{1})).has_value());
+      co_return;
+   }());
+}
+
+BOOST_AUTO_TEST_CASE(db_object_transactional_id_allocation_reuses_savepoint_id_across_reopen) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      const auto options = forge::db::object::store::options{
+          .writes = forge::db::object::write_policy::single_writer,
+          .id_allocation = forge::db::object::id_allocation_policy::transactional,
+      };
+      {
+         auto store = co_await make_store(driver, options);
+         auto tx = co_await store.begin_transaction();
+         auto kept = co_await tx.create<account>([](account& value) { value.name = "kept"; });
+         const auto point = co_await tx.db_transaction().create_savepoint();
+         auto discarded = co_await tx.create<account>([](account& value) { value.name = "discarded"; });
+         BOOST_CHECK_EQUAL(kept.id.instance, 0U);
+         BOOST_CHECK_EQUAL(discarded.id.instance, 1U);
+         co_await tx.db_transaction().rollback_to_savepoint(point);
+         co_await tx.commit();
+      }
+
+      auto reopened = co_await make_store(driver, options);
+      auto next = co_await reopened.create<account>([](account& value) { value.name = "next"; });
+      BOOST_CHECK_EQUAL(next.id.instance, 1U);
+      BOOST_CHECK_EQUAL((co_await reopened.get(next.id)).name, "next");
       co_return;
    }());
 }

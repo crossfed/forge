@@ -152,6 +152,14 @@ that intentionally own write concurrency. The writer and allocator lanes use
 the neutral FIFO `forge::asio::gate`; cancellation while waiting is reported as
 `forge::asio::exceptions::canceled` and never transfers ownership of a ticket.
 
+Generated IDs use `id_allocation_policy::monotonic` by default: rollback and
+savepoint rollback leave intentional gaps. Consensus stores that require the
+same logical transition to produce the same object IDs can opt into
+`id_allocation_policy::transactional`. That policy requires `single_writer`;
+its sequence records participate in the active transaction and DB Revision, so
+rollback, savepoint rollback and revision revert restore both objects and their
+next IDs.
+
 ## Transactions And Direct Calls
 
 All mutations use transaction semantics. Direct `store` calls open a short
