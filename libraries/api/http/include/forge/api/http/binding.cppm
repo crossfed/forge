@@ -1485,6 +1485,9 @@ class binding_builder {
          merge_endpoint_headers(output.head, endpoint);
       }
       apply_cache_policy(output.head, options);
+      if (request_value.method() == forge::net::http::method::head) {
+         output.body = {};
+      }
       co_return output;
    }
 

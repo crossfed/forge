@@ -117,7 +117,13 @@ struct target_description {
    const auto* field = find_field(fields, field_name);
    auto value = forge::mutable_variant_object{}("name", std::move(wire_name))("in", std::move(location))(
        "required", force_required || (field != nullptr && field->required));
-   value("schema", field == nullptr ? unconstrained_schema("unknown request field") : field->schema);
+   if (field != nullptr && field->json_parameter) {
+      auto content = forge::mutable_variant_object{};
+      content.set("application/json", forge::variant{forge::mutable_variant_object{}("schema", field->schema)});
+      value("content", std::move(content));
+   } else {
+      value("schema", field == nullptr ? unconstrained_schema("unknown request field") : field->schema);
+   }
    return forge::variant{std::move(value)};
 }
 

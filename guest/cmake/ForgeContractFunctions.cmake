@@ -44,9 +44,15 @@ function(forge_add_contract_project target)
          BASE_DIR "${CMAKE_CURRENT_BINARY_DIR}"
       )
       if(NOT _contract_prefix)
-         get_filename_component(
-            _contract_prefix "${_contract_package_dir}/../../.." REALPATH
-         )
+         if(NOT EXISTS "${_contract_package_dir}/ForgeContractPaths.cmake")
+            message(
+               FATAL_ERROR
+               "ForgeContract package does not expose relocatable SDK paths: "
+               "${_contract_package_dir}/ForgeContractPaths.cmake"
+            )
+         endif()
+         include("${_contract_package_dir}/ForgeContractPaths.cmake")
+         set(_contract_prefix "${ForgeContract_PREFIX}")
       endif()
       if(NOT _contract_toolchain)
          set(
@@ -144,6 +150,7 @@ function(forge_add_contract_project target)
          FORGE_CONTRACT_WASM_FILE "${_artifact_dir}/${ARG_CONTRACT}.wasm"
          FORGE_CONTRACT_ABI_FILE "${_artifact_dir}/${ARG_CONTRACT}.abi"
          FORGE_CONTRACT_MANIFEST_FILE "${_artifact_dir}/${ARG_CONTRACT}.contract.json"
+         FORGE_CONTRACT_SDK_PREFIX "${_contract_prefix}"
    )
    foreach(_configuration IN LISTS CMAKE_CONFIGURATION_TYPES)
       string(TOUPPER "${_configuration}" _configuration_upper)

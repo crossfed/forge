@@ -637,6 +637,7 @@ class control_api : public http_contract<control_api> {
    virtual boost::asio::awaitable<forge::api::http::empty_response> accepted(control_request request) = 0;
    virtual boost::asio::awaitable<forge::api::http::empty_response> head(control_request request) = 0;
    virtual boost::asio::awaitable<control_response> head_dto(control_request request) = 0;
+   virtual boost::asio::awaitable<forge::net::http::streaming_response> head_stream(control_request request) = 0;
 };
 
 class alias_api : public http_contract<alias_api> {
@@ -823,7 +824,9 @@ FORGE_API(
     FORGE_API_METHOD_TYPED(accepted, ::forge::net::http::test_api::control_request, ::forge::api::http::empty_response),
     FORGE_API_METHOD_TYPED(head, ::forge::net::http::test_api::control_request, ::forge::api::http::empty_response),
     FORGE_API_METHOD_TYPED(head_dto, ::forge::net::http::test_api::control_request,
-                           ::forge::net::http::test_api::control_response))
+                           ::forge::net::http::test_api::control_response),
+    FORGE_API_METHOD_TYPED(head_stream, ::forge::net::http::test_api::control_request,
+                           ::forge::net::http::streaming_response))
 
 FORGE_API(::forge::net::http::test_api::alias_api, FORGE_API_CONTRACT("alias", 1, 0),
           FORGE_API_METHOD_TYPED(current, ::forge::net::http::test_api::control_request,
@@ -993,7 +996,8 @@ FORGE_HTTP_API(::forge::net::http::test_api::form_api,
 FORGE_HTTP_API(::forge::net::http::test_api::control_api, FORGE_HTTP_GET(bytes, "/controls/:id/bytes"),
                FORGE_HTTP_GET(accepted, "/controls/:id/accepted", FORGE_HTTP_SUCCESS_STATUS(accepted)),
                FORGE_HTTP_HEAD(head, "/controls/:id", FORGE_HTTP_SUCCESS_STATUS(no_content)),
-               FORGE_HTTP_HEAD(head_dto, "/controls/:id/dto"))
+               FORGE_HTTP_HEAD(head_dto, "/controls/:id/dto"),
+               FORGE_HTTP_HEAD(head_stream, "/controls/:id/stream", FORGE_HTTP_RESPONSE_STREAM))
 
 FORGE_HTTP_API(::forge::net::http::test_api::alias_api, FORGE_HTTP_GET(current, "/aliases/:id/current"),
                FORGE_HTTP_GET(legacy, "/aliases/:id"))
@@ -1710,6 +1714,23 @@ class control_api_impl final : public control_api {
 
    boost::asio::awaitable<control_response> head_dto(control_request request) override {
       co_return control_response{.value = "head:" + request.id};
+   }
+
+   boost::asio::awaitable<forge::net::http::streaming_response> head_stream(control_request request) override {
+      auto text = std::make_shared<std::string>("head-stream:" + request.id);
+      co_return forge::net::http::streaming_response::from_source(forge::net::http::streaming_response_options{
+          .content_type = "text/plain",
+          .body = [text,
+                   sent = false]() mutable -> boost::asio::awaitable<std::optional<forge::api::http::body_chunk>> {
+             if (sent) {
+                co_return std::nullopt;
+             }
+             sent = true;
+             auto bytes = std::vector<std::byte>(text->size());
+             std::memcpy(bytes.data(), text->data(), text->size());
+             co_return forge::api::http::body_chunk{.bytes = std::move(bytes)};
+          },
+      });
    }
 };
 
@@ -4030,6 +4051,56 @@ BOOST_AUTO_TEST_CASE(http_head_dto_suppresses_body_and_preserves_keep_alive) {
    BOOST_TEST(first.keep_alive());
    BOOST_TEST(first["Content-Type"] == "application/json");
    BOOST_TEST(first["Content-Length"] == std::to_string(expected.text.size()));
+
+   asio::write(stream.socket(), asio::buffer(std::string{"GET /controls/abc/bytes HTTP/1.1\r\n"
+                                                         "Host: 127.0.0.1\r\n"
+                                                         "Connection: close\r\n"
+                                                         "\r\n"}));
+
+   auto beast_second = beast_http::response<beast_http::string_body>{};
+   stream.expires_after(std::chrono::seconds{2});
+   beast_http::read(stream, buffer, beast_second);
+   auto second = to_http_response(beast_second);
+   BOOST_TEST(second.result_int() == static_cast<unsigned>(status::ok));
+   BOOST_TEST(second.body() == "bytes:abc");
+
+   server.stop();
+}
+
+BOOST_AUTO_TEST_CASE(http_head_stream_suppresses_body_and_preserves_keep_alive) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto apis = forge::api::core::registry{};
+   apis.install<control_api>(control_api::describe(), std::make_shared<control_api_impl>());
+
+   auto router = forge::net::http::router{};
+   auto binding =
+       forge::api::http::binding().use(forge::api::core::binding().serve(apis).build()).bind<control_api>().build();
+   router.mount(binding);
+
+   auto server = forge::net::http::server{runtime, server_config{}, std::move(router)};
+   server.start();
+
+   auto io_context = asio::io_context{};
+   auto stream = beast::tcp_stream{io_context};
+   stream.expires_after(std::chrono::seconds{2});
+   stream.connect(tcp::endpoint{asio::ip::make_address("127.0.0.1"), server.port()});
+
+   asio::write(stream.socket(), asio::buffer(std::string{"HEAD /controls/abc/stream HTTP/1.1\r\n"
+                                                         "Host: 127.0.0.1\r\n"
+                                                         "Connection: keep-alive\r\n"
+                                                         "\r\n"}));
+
+   auto buffer = beast::flat_buffer{};
+   auto first_parser = beast_http::response_parser<beast_http::string_body>{};
+   first_parser.skip(true);
+   stream.expires_after(std::chrono::seconds{2});
+   beast_http::read_header(stream, buffer, first_parser);
+
+   const auto& first = first_parser.get();
+   BOOST_TEST(first.result_int() == static_cast<unsigned>(status::ok));
+   BOOST_TEST(first.keep_alive());
+   BOOST_TEST(first["Content-Type"] == "text/plain");
+   BOOST_TEST(first["Transfer-Encoding"].empty());
 
    asio::write(stream.socket(), asio::buffer(std::string{"GET /controls/abc/bytes HTTP/1.1\r\n"
                                                          "Host: 127.0.0.1\r\n"

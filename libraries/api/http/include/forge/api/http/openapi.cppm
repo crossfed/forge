@@ -58,6 +58,7 @@ struct openapi_field {
    forge::variant schema;
    bool required = true;
    openapi_field_source source = openapi_field_source::value;
+   bool json_parameter = false;
 };
 
 enum class openapi_response_body {
@@ -256,23 +257,35 @@ template <typename T> [[nodiscard]] forge::variant make_json_schema() {
    }
 }
 
+template <typename T> [[nodiscard]] consteval bool json_parameter_field() {
+   using field_type = clean_type<T>;
+   if constexpr (optional_traits<field_type>::value) {
+      return json_parameter_field<typename optional_traits<field_type>::value_type>();
+   } else {
+      return detail::byte_vector_field<field_type>::value;
+   }
+}
+
 template <typename T> [[nodiscard]] openapi_field request_field(std::string name = {}) {
    using field_type = clean_type<T>;
    if constexpr (is_query<field_type>::value) {
       return openapi_field{.name = std::move(name),
                            .schema = make_json_schema<typename is_query<field_type>::value_type>(),
                            .required = false,
-                           .source = openapi_field_source::query};
+                           .source = openapi_field_source::query,
+                           .json_parameter = json_parameter_field<typename is_query<field_type>::value_type>()};
    } else if constexpr (is_header<field_type>::value) {
       return openapi_field{.name = std::move(name),
                            .schema = make_json_schema<typename is_header<field_type>::value_type>(),
                            .required = false,
-                           .source = openapi_field_source::header};
+                           .source = openapi_field_source::header,
+                           .json_parameter = json_parameter_field<typename is_header<field_type>::value_type>()};
    } else if constexpr (is_cookie<field_type>::value) {
       return openapi_field{.name = std::move(name),
                            .schema = make_json_schema<typename is_cookie<field_type>::value_type>(),
                            .required = false,
-                           .source = openapi_field_source::cookie};
+                           .source = openapi_field_source::cookie,
+                           .json_parameter = json_parameter_field<typename is_cookie<field_type>::value_type>()};
    } else if constexpr (is_body<field_type>::value) {
       return openapi_field{.name = std::move(name),
                            .schema = make_json_schema<typename is_body<field_type>::value_type>(),
@@ -306,7 +319,8 @@ template <typename T> [[nodiscard]] openapi_field request_field(std::string name
    } else {
       return openapi_field{.name = std::move(name),
                            .schema = make_json_schema<field_type>(),
-                           .required = !optional_traits<field_type>::value};
+                           .required = !optional_traits<field_type>::value,
+                           .json_parameter = json_parameter_field<field_type>()};
    }
 }
 

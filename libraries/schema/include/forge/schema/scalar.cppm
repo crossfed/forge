@@ -35,7 +35,10 @@ template <typename T> struct scalar_optional<std::optional<T>> : std::true_type 
 
 template <typename T>
 concept canonical_string_scalar =
-    std::constructible_from<std::remove_cvref_t<T>, std::string> &&
+    (std::constructible_from<std::remove_cvref_t<T>, std::string> ||
+     requires(std::string_view text) {
+        { std::remove_cvref_t<T>::from_string(text) } -> std::same_as<std::remove_cvref_t<T>>;
+     }) &&
     (std::convertible_to<const std::remove_cvref_t<T>&, std::string> || requires(const std::remove_cvref_t<T>& value) {
        { value.str() } -> std::convertible_to<std::string>;
     } || requires(const std::remove_cvref_t<T>& value) {
@@ -164,7 +167,11 @@ template <typename T> [[nodiscard]] T parse_scalar_text(std::string_view text) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_value, "enum value is invalid");
    } else if constexpr (canonical_string_scalar<clean>) {
       try {
-         return clean{std::string{text}};
+         if constexpr (requires { clean::from_string(text); }) {
+            return clean::from_string(text);
+         } else {
+            return clean{std::string{text}};
+         }
       } catch (const forge::exceptions::base& error) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_value, "canonical scalar value is invalid",
                                forge::exceptions::ctx("reason", error.message()));

@@ -57,6 +57,8 @@ import forge.db.authenticated.codec;
 import forge.db.authenticated.hash;
 import forge.net.http.types;
 import forge.raw.raw;
+import forge.schema.exceptions;
+import forge.schema.scalar;
 
 namespace {
 
@@ -1302,6 +1304,28 @@ BOOST_AUTO_TEST_CASE(chain_table_scope_http_carries_the_opaque_cursor) {
    BOOST_TEST(target.find("cursor=%5B0%2C47%2C255%5D") != std::string::npos);
 }
 
+BOOST_AUTO_TEST_CASE(chain_table_rows_http_carries_the_secondary_index) {
+   const auto routes = forge::api::http::traits<forge::chain::api::state>::routes();
+   const auto& route = find_route(routes, "get_table_rows");
+   const auto index = forge::chain::protocol::table_index{
+       .kind = forge::chain::protocol::table_index_kind::secondary_u128,
+       .position = 2U,
+   };
+   const auto target = forge::api::http::detail::render_route_target(
+       route, forge::chain::protocol::table_rows_request{
+                  .code = forge::chain::protocol::account_name{"storlane"},
+                  .scope = forge::chain::protocol::name{"storlane"},
+                  .table = forge::chain::protocol::name{"revgeometry"},
+                  .index = index,
+              });
+
+   BOOST_TEST(target.find("index=secondary-u128%3A2") != std::string::npos);
+   BOOST_CHECK(forge::schema::parse_scalar_text<forge::chain::protocol::table_index>("secondary-u128:2") == index);
+   BOOST_CHECK_THROW(
+       static_cast<void>(forge::schema::parse_scalar_text<forge::chain::protocol::table_index>("secondary-u128")),
+       forge::schema::exceptions::invalid_value);
+}
+
 BOOST_AUTO_TEST_CASE(chain_openapi_uses_canonical_public_key_json_shape) {
    const auto document = forge::api::http::openapi<forge::chain::api::transaction>();
    const auto& schema = document["paths"]["/v1/chain/transactions/required-keys"]["post"]["responses"]["200"]["content"]
@@ -1323,7 +1347,7 @@ BOOST_AUTO_TEST_CASE(chain_openapi_omits_body_for_query_only_admin_action) {
    BOOST_TEST((*name)["in"].as_string() == "query");
 }
 
-BOOST_AUTO_TEST_CASE(chain_table_scope_openapi_exposes_bytes_cursor_and_next) {
+BOOST_AUTO_TEST_CASE(chain_table_scope_openapi_exposes_json_bytes_cursor_and_next) {
    const auto document = forge::api::http::openapi<forge::chain::api::state>();
    const auto& operation = document["paths"]["/v1/chain/state/tables/{code}/scopes"]["get"];
    const auto& parameters = operation["parameters"].get_array();
@@ -1331,8 +1355,10 @@ BOOST_AUTO_TEST_CASE(chain_table_scope_openapi_exposes_bytes_cursor_and_next) {
        parameters, [](const forge::variant& value) { return value["name"].as_string() == "cursor"; });
    BOOST_REQUIRE(cursor != parameters.end());
    BOOST_TEST((*cursor)["required"].as_bool() == false);
-   BOOST_TEST((*cursor)["schema"]["anyOf"][std::size_t{0}]["type"].as_string() == "array");
-   BOOST_TEST((*cursor)["schema"]["anyOf"][std::size_t{0}]["items"]["type"].as_string() == "integer");
+   BOOST_TEST(!cursor->get_object().contains("schema"));
+   const auto& cursor_schema = (*cursor)["content"]["application/json"]["schema"];
+   BOOST_TEST(cursor_schema["anyOf"][std::size_t{0}]["type"].as_string() == "array");
+   BOOST_TEST(cursor_schema["anyOf"][std::size_t{0}]["items"]["type"].as_string() == "integer");
 
    const auto& properties =
        operation["responses"]["200"]["content"]["application/json"]["schema"]["properties"].get_object();

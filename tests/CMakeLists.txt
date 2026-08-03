@@ -51,6 +51,7 @@ add_test(
    COMMAND
       ${CMAKE_COMMAND}
       -DFORGE_CONTRACT_CONFIG_TEMPLATE=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractConfig.cmake.in
+      -DFORGE_CONTRACT_PATHS_TEMPLATE=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractPaths.cmake.in
       -DFORGE_CONTRACT_TOOLCHAIN_TEMPLATE=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractToolchain.cmake.in
       -DFORGE_CONTRACT_FUNCTIONS=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractFunctions.cmake
       -DFORGE_CONTRACT_LIBRARIES=${CMAKE_SOURCE_DIR}/guest/cmake/ForgeContractLibraries.cmake
