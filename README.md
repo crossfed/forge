@@ -148,6 +148,7 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [compression](libraries/compression/README.md) | `forge_compression` | Bounded zlib compression/decompression helpers. | Boost.Iostreams, ZLIB, `forge_exceptions`. |
 | [chain/core](libraries/chain/core/README.md) | `forge_chain_core` | Fundamental chain digest and Merkle primitives. | `forge_crypto_digest`, `forge_exceptions`, `forge_raw`. |
 | [chain/protocol](libraries/chain/protocol/README.md) | `forge_chain_protocol` | Canonical protocol values, ordered keys, transactions, blocks, ABI and signing rules. | `forge_chain_core`, `forge_compression`, `forge_raw`, `forge_variant`, `forge_crypto_asymmetric_values`, `forge_crypto_digest`. |
+| [chain/api](libraries/chain/api/README.md) | `forge_chain_api` | Transport-neutral chain contracts, HTTP/P2P clients and verified audited reads. | `forge_api_core`, `forge_api_http`, `forge_chain_protocol`, `forge_db_authenticated`, `forge_net_http`. |
 | [vm/wasm](libraries/vm/wasm/README.md) | `forge_vm_wasm` | Native WebAssembly parser, validator, interpreter, host-function runtime and x86_64 JIT. | `forge_exceptions`, threads, internal SoftFloat. |
 | [contract/abi](libraries/contract/abi/README.md) | `forge_contract_abi` | Optional Clang AST based contract ABI and dispatcher generation. | Clang/LLVM privately, `forge_chain_protocol`, `forge_codec_json`. |
 | [contract/attributes](libraries/contract/attributes/README.md) | `forge_contract_attributes` | Optional Forge/EOSIO Clang attribute registrations. | Clang/LLVM privately. |
@@ -195,6 +196,7 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [db/object](libraries/db/object/README.md) | `forge_db_object` | Typed object/index store over the shared DB driver. | Boost.Asio, `forge_db_core`, `forge_db_ids`, `forge_raw`, `forge_exceptions`. |
 | [db/blob](libraries/db/blob/README.md) | `forge_db_blob` | Content-addressed blob store with typed refs and explicit retention primitives. | Boost.Asio, `forge_db_core`, `forge_crypto_digest`, `forge_raw`, `forge_variant`, `forge_exceptions`. |
 | [db/revision](libraries/db/revision/README.md) | `forge_db_revision` | Durable before-image revisions with strict-head revert and bounded whole-revision prune. | Boost.Asio, `forge_db_core`, `forge_db_object`, `forge_raw`, `forge_exceptions`. |
+| [db/authenticated](libraries/db/authenticated/README.md) | `forge_db_authenticated` | Experimental persistent authenticated ordered state and transferable proofs. | Boost.Asio, `forge_crypto_digest`, `forge_db_core`, `forge_exceptions`. |
 | [db/mdbx](libraries/db/mdbx/README.md) | `forge_db_mdbx` | Vendored libmdbx implementation of the shared DB driver contract. | `forge_asio`, `forge_db_core`, `forge_exceptions`; libmdbx privately. |
 | [rocksdb](libraries/rocksdb/README.md) | `forge_rocksdb` | Optional RocksDB TransactionDB wrapper. | RocksDB privately, `forge_exceptions`, `forge_schema`. |
 | [db/rocksdb](libraries/db/rocksdb/README.md) | `forge_db_rocksdb` | RocksDB implementation of the shared DB driver contract. | `forge_db_core`, `forge_rocksdb`. |
@@ -258,7 +260,7 @@ FORGE использует версию `MAJOR.MINOR.PATCH` вместе с яв
 описано в release notes вместе с migration path.
 
 Текущие изменения и переходы описаны в
-[Forge 8.20.0 release notes](docs/releases/8.20.0.md).
+[Forge 8.21.0 release notes](docs/releases/8.21.0.md).
 
 ## Совместимость
 
