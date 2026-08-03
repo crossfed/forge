@@ -118,7 +118,7 @@ is opt-in per route for typed DTO bodies.
 
 ```cpp
 FORGE_HTTP_API(catalog_api,
-   FORGE_HTTP_GET(read_item, "/items/:id", ok),
+   FORGE_HTTP_GET(read_item, "/items/:id"),
    FORGE_HTTP_PUT(update_item, "/items/:id", ok,
       FORGE_HTTP_REQUEST_BODY(xml),
       FORGE_HTTP_RESPONSE_BODY(xml)))

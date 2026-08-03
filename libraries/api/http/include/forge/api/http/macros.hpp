@@ -21,6 +21,8 @@
    .body_stream(BOOST_PP_STRINGIZE(BOOST_PP_TUPLE_ELEM(3, 1, OPTION)))
 #define FORGE_HTTP_DETAIL_OPTION_APPLY_response_file(OPTION) .response_file()
 #define FORGE_HTTP_DETAIL_OPTION_APPLY_response_stream(OPTION) .response_stream()
+#define FORGE_HTTP_DETAIL_OPTION_APPLY_success_status(OPTION)                                                          \
+   .success_status(::forge::net::http::status::BOOST_PP_TUPLE_ELEM(3, 1, OPTION))
 #define FORGE_HTTP_DETAIL_OPTION_APPLY_request_body(OPTION)                                                            \
    .request_body_codec(::forge::api::http::body_codec::BOOST_PP_TUPLE_ELEM(3, 1, OPTION))
 #define FORGE_HTTP_DETAIL_OPTION_APPLY_response_body(OPTION)                                                           \
@@ -76,6 +78,7 @@
 #define FORGE_HTTP_BODY_STREAM(FIELD) (body_stream, FIELD, _)
 #define FORGE_HTTP_RESPONSE_FILE (response_file, _, _)
 #define FORGE_HTTP_RESPONSE_STREAM (response_stream, _, _)
+#define FORGE_HTTP_SUCCESS_STATUS(STATUS) (success_status, STATUS, _)
 #define FORGE_HTTP_REQUEST_BODY(CODEC) (request_body, CODEC, _)
 #define FORGE_HTTP_RESPONSE_BODY(CODEC) (response_body, CODEC, _)
 #define FORGE_HTTP_ERROR_BODY(CODEC) (error_body, CODEC, _)

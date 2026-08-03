@@ -100,6 +100,11 @@ class route_builder {
       return std::move(*this);
    }
 
+   route_builder&& success_status(status value) && {
+      route_.success_status = value;
+      return std::move(*this);
+   }
+
    route_builder&& request_body_codec(body_codec value) && {
       route_.request_body_codec = value;
       return std::move(*this);

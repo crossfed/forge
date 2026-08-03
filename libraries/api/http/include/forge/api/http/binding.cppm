@@ -1403,10 +1403,12 @@ class binding_builder {
                                                        const std::shared_ptr<endpoint_state>& endpoint = {}) {
       auto output = response{};
       if constexpr (detail::is_bytes_response_v<Response>) {
+         require_declared_success_status(success_status, value.status_code);
          auto body = std::string{reinterpret_cast<const char*>(value.bytes.data()), value.bytes.size()};
-         output = make_text_response(request_value, value.status_code, std::move(body), value.content_type);
+         output = make_text_response(request_value, success_status, std::move(body), value.content_type);
       } else if constexpr (detail::is_empty_response_v<Response>) {
-         output = response{value.status_code, request_value.version()};
+         require_declared_success_status(success_status, value.status_code);
+         output = response{success_status, request_value.version()};
          output.prepare_payload();
          output.keep_alive(request_value.keep_alive());
       } else {
@@ -1421,6 +1423,15 @@ class binding_builder {
       merge_endpoint_headers(output, endpoint);
       apply_cache_policy(output, options);
       return output;
+   }
+
+   static void require_declared_success_status(status declared, status actual) {
+      if (actual != declared) {
+         FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error,
+                               "HTTP native response status does not match declared route",
+                               forge::exceptions::ctx("declared", static_cast<std::uint16_t>(declared)),
+                               forge::exceptions::ctx("actual", static_cast<std::uint16_t>(actual)));
+      }
    }
 
    template <typename Response>

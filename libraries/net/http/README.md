@@ -371,7 +371,8 @@ Server binding fills `collection` and `item` from path placeholders, `ttl` from
 the query string, `request_id` from `X-Request-Id`, and `body` from a JSON
 request body. If a wire header or form name must differ from the DTO field name,
 use the existing route options such as `FORGE_HTTP_HEADER(field, "Wire-Name")`
-or `FORGE_HTTP_FORM(field, "wire-name")`.
+or `FORGE_HTTP_FORM(field, "wire-name")`. GET and HEAD routes that return a
+non-200 success status declare it with `FORGE_HTTP_SUCCESS_STATUS(status)`.
 
 The same typed client call builds the HTTP request:
 

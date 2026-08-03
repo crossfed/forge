@@ -988,7 +988,8 @@ FORGE_HTTP_API(::forge::net::http::test_api::form_api,
                FORGE_HTTP_POST(submit, "/forms", ok, FORGE_HTTP_FORM(label, "label"), FORGE_HTTP_FORM(count, "count")))
 
 FORGE_HTTP_API(::forge::net::http::test_api::control_api, FORGE_HTTP_GET(bytes, "/controls/:id/bytes"),
-               FORGE_HTTP_GET(accepted, "/controls/:id/accepted"), FORGE_HTTP_HEAD(head, "/controls/:id"))
+               FORGE_HTTP_GET(accepted, "/controls/:id/accepted", FORGE_HTTP_SUCCESS_STATUS(accepted)),
+               FORGE_HTTP_HEAD(head, "/controls/:id", FORGE_HTTP_SUCCESS_STATUS(no_content)))
 
 FORGE_HTTP_API(::forge::net::http::test_api::alias_api, FORGE_HTTP_GET(current, "/aliases/:id/current"),
                FORGE_HTTP_GET(legacy, "/aliases/:id"))
@@ -1011,7 +1012,7 @@ FORGE_HTTP_API(::forge::net::http::test_api::json_stream_api,
 FORGE_HTTP_API(::forge::net::http::test_api::endpoint_api, FORGE_HTTP_GET(current, "/endpoint/:id"),
                FORGE_HTTP_GET(download, "/endpoint/:id/file", FORGE_HTTP_RESPONSE_FILE),
                FORGE_HTTP_GET(stream, "/endpoint/:id/stream", FORGE_HTTP_RESPONSE_STREAM),
-               FORGE_HTTP_GET(accepted, "/endpoint/:id/accepted"))
+               FORGE_HTTP_GET(accepted, "/endpoint/:id/accepted", FORGE_HTTP_SUCCESS_STATUS(accepted)))
 
 FORGE_HTTP_API(::forge::net::http::test_api::stream_buffered_api,
                FORGE_HTTP_PUT(write, "/stream-buffered/:id", ok, FORGE_HTTP_BODY_STREAM(body)))
@@ -2575,6 +2576,9 @@ BOOST_AUTO_TEST_CASE(http_api_openapi_describes_native_http_bodies) {
    const auto& response =
        control["paths"]["/controls/{id}/bytes"]["get"]["responses"]["200"]["content"]["*/*"]["schema"];
    BOOST_TEST(response["format"].as_string() == "binary");
+   BOOST_TEST(control["paths"]["/controls/{id}/accepted"]["get"]["responses"].get_object().contains("202"));
+   BOOST_TEST(!control["paths"]["/controls/{id}/accepted"]["get"]["responses"].get_object().contains("200"));
+   BOOST_TEST(control["paths"]["/controls/{id}"]["head"]["responses"].get_object().contains("204"));
 }
 
 BOOST_AUTO_TEST_CASE(http_api_macro_get_maps_route_and_query) {
@@ -3778,7 +3782,11 @@ BOOST_AUTO_TEST_CASE(http_api_native_responses_bypass_xml_codec_options) {
                    .response_body_codec(forge::api::http::body_codec::xml)
                    .build())
            .route<&control_api::accepted, control_request, forge::api::http::empty_response>(
-               forge::api::http::route_builder{method::get, "accepted", "/xml/native/:id/accepted", status::ok}
+               forge::api::http::route_builder{method::get, "accepted", "/xml/native/:id/accepted", status::accepted}
+                   .response_body_codec(forge::api::http::body_codec::xml)
+                   .build())
+           .route<&control_api::accepted, control_request, forge::api::http::empty_response>(
+               forge::api::http::route_builder{method::get, "mismatched", "/xml/native/:id/mismatched", status::ok}
                    .response_body_codec(forge::api::http::body_codec::xml)
                    .build())
            .route<&object_api::get_object, object_get_request, forge::net::http::file_response>(
@@ -3809,6 +3817,9 @@ BOOST_AUTO_TEST_CASE(http_api_native_responses_bypass_xml_codec_options) {
    const auto empty = forge::asio::blocking::run(runtime, client.async_get("/xml/native/abc/accepted"));
    BOOST_TEST(empty.result_int() == static_cast<unsigned>(status::accepted));
    BOOST_TEST(empty.body().empty());
+
+   const auto mismatched = forge::asio::blocking::run(runtime, client.async_get("/xml/native/abc/mismatched"));
+   BOOST_TEST(mismatched.result_int() == static_cast<unsigned>(status::internal_server_error));
 
    const auto file = forge::asio::blocking::run(runtime, client.async_get("/xml/native/cache/chunk.bin/file"));
    BOOST_TEST(file.result_int() == static_cast<unsigned>(status::ok));
@@ -3874,6 +3885,9 @@ BOOST_AUTO_TEST_CASE(typed_http_client_supports_native_bytes_and_empty_responses
    BOOST_TEST(bytes.status_code == status::ok);
    BOOST_TEST(bytes.content_type == "application/control");
    BOOST_TEST(text == "bytes:abc");
+
+   auto accepted = forge::asio::blocking::run(runtime, control->accepted(control_request{.id = "abc"}));
+   BOOST_TEST(accepted.status_code == status::accepted);
 
    auto head = forge::asio::blocking::run(runtime, control->head(control_request{.id = "abc"}));
    BOOST_TEST(head.status_code == status::no_content);
