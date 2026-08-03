@@ -2800,12 +2800,17 @@ BOOST_AUTO_TEST_CASE(http_api_query_template_preserves_wire_alias) {
 BOOST_AUTO_TEST_CASE(http_connection_cancellation_unblocks_serial_request_queue) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto started = std::make_shared<std::atomic<bool>>(false);
+   auto owner_canceled = std::make_shared<std::atomic<bool>>(false);
    auto router = forge::net::http::router{};
-   router.get("/wait", [started](route_context& context) -> boost::asio::awaitable<response> {
+   router.get("/wait", [started, owner_canceled](route_context& context) -> boost::asio::awaitable<response> {
       started->store(true);
       auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
       timer.expires_after(std::chrono::seconds{2});
-      co_await timer.async_wait(boost::asio::use_awaitable);
+      auto error = boost::system::error_code{};
+      co_await timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
+      if (error == boost::asio::error::operation_aborted) {
+         owner_canceled->store(true);
+      }
       co_return make_text_response(context.request, status::ok, "late");
    });
    router.get("/ready", [](route_context& context) -> boost::asio::awaitable<response> {
@@ -2830,6 +2835,11 @@ BOOST_AUTO_TEST_CASE(http_connection_cancellation_unblocks_serial_request_queue)
    cancellation.emit(boost::asio::cancellation_type::terminal);
    BOOST_REQUIRE(waiting.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
    BOOST_CHECK_THROW(static_cast<void>(waiting.get()), forge::asio::exceptions::canceled);
+   const auto cancel_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
+   while (!owner_canceled->load() && std::chrono::steady_clock::now() < cancel_deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds{1});
+   }
+   BOOST_REQUIRE(owner_canceled->load());
 
    const auto ready = forge::asio::blocking::run(
        runtime, connection.async_request(make_request(method::get, "/ready"),
@@ -2843,11 +2853,16 @@ BOOST_AUTO_TEST_CASE(http_connection_cancellation_unblocks_serial_request_queue)
 
 BOOST_AUTO_TEST_CASE(http_connection_timeout_is_reported_as_typed_exception) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto owner_canceled = std::make_shared<std::atomic<bool>>(false);
    auto router = forge::net::http::router{};
-   router.get("/slow", [](route_context& context) -> boost::asio::awaitable<response> {
+   router.get("/slow", [owner_canceled](route_context& context) -> boost::asio::awaitable<response> {
       auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
       timer.expires_after(std::chrono::milliseconds{100});
-      co_await timer.async_wait(boost::asio::use_awaitable);
+      auto error = boost::system::error_code{};
+      co_await timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
+      if (error == boost::asio::error::operation_aborted) {
+         owner_canceled->store(true);
+      }
       co_return make_text_response(context.request, status::ok, "late");
    });
    router.get("/ready", [](route_context& context) -> boost::asio::awaitable<response> {
@@ -2864,6 +2879,11 @@ BOOST_AUTO_TEST_CASE(http_connection_timeout_is_reported_as_typed_exception) {
                                                            request_options{.timeout = std::chrono::milliseconds{10}})),
                      forge::net::http::exceptions::gateway_timeout);
    BOOST_TEST(connection.metrics().timeouts >= 1U);
+   const auto cancel_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
+   while (!owner_canceled->load() && std::chrono::steady_clock::now() < cancel_deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds{1});
+   }
+   BOOST_REQUIRE(owner_canceled->load());
 
    const auto ready = forge::asio::blocking::run(
        runtime, connection.async_request(make_request(method::get, "/ready"),

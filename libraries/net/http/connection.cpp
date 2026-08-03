@@ -436,7 +436,6 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
 
       auto results = co_await resolve(deadline);
       auto stream = beast::tcp_stream{strand};
-      stream.expires_at(deadline);
       co_await stream.async_connect(results, use_awaitable);
       plain_stream = std::make_unique<beast::tcp_stream>(std::move(stream));
       if (plain_connected_once) {
@@ -459,10 +458,8 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
       }
       stream.set_verify_callback(asio::ssl::host_name_verification(endpoint.host));
 
-      expire_at(stream, deadline);
       co_await beast::get_lowest_layer(stream).async_connect(results, use_awaitable);
       require_deadline(deadline);
-      expire_at(stream, deadline);
       co_await stream.async_handshake(asio::ssl::stream_base::client, use_awaitable);
       tls_stream = std::make_unique<beast::ssl_stream<beast::tcp_stream>>(std::move(stream));
       if (tls_connected_once) {
@@ -478,7 +475,6 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
       ensure_host_header(request_value, endpoint);
       auto beast_request = to_beast_request(request_value);
       require_deadline(deadline);
-      expire_at(*plain_stream, deadline);
       co_await boost::beast::http::async_write(*plain_stream, beast_request, use_awaitable);
 
       buffer.consume(buffer.size());
@@ -507,7 +503,6 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
       ensure_host_header(request_value, endpoint);
       auto beast_request = to_beast_request(request_value);
       require_deadline(deadline);
-      expire_at(*tls_stream, deadline);
       co_await boost::beast::http::async_write(*tls_stream, beast_request, use_awaitable);
 
       buffer.consume(buffer.size());
@@ -898,14 +893,14 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
       if (plain_stream) {
          auto ignored = boost::system::error_code{};
          beast::get_lowest_layer(*plain_stream).socket().cancel(ignored);
-         beast::get_lowest_layer(*plain_stream).socket().shutdown(tcp::socket::shutdown_both, ignored);
+         beast::get_lowest_layer(*plain_stream).socket().set_option(asio::socket_base::linger{true, 0}, ignored);
          beast::get_lowest_layer(*plain_stream).socket().close(ignored);
          plain_connected = false;
       }
       if (tls_stream) {
          auto ignored = boost::system::error_code{};
          beast::get_lowest_layer(*tls_stream).socket().cancel(ignored);
-         beast::get_lowest_layer(*tls_stream).socket().shutdown(tcp::socket::shutdown_both, ignored);
+         beast::get_lowest_layer(*tls_stream).socket().set_option(asio::socket_base::linger{true, 0}, ignored);
          beast::get_lowest_layer(*tls_stream).socket().close(ignored);
          tls_connected = false;
       }
