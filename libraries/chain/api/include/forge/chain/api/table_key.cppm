@@ -19,5 +19,6 @@ export namespace forge::chain::api {
 
 void validate_table_index(protocol::table_index index);
 void validate_table_key(protocol::table_index_kind kind, std::span<const std::uint8_t> value);
+void validate_table_rows_request(const protocol::table_rows_request& request);
 
 } // namespace forge::chain::api

@@ -111,4 +111,19 @@ void validate_table_key(protocol::table_index_kind kind, std::span<const std::ui
    }
 }
 
+void validate_table_rows_request(const protocol::table_rows_request& request) {
+   validate_table_index(request.index);
+   if (request.lower_bound) {
+      validate_table_key(request.index.kind, *request.lower_bound);
+   }
+   if (request.upper_bound) {
+      validate_table_key(request.index.kind, *request.upper_bound);
+   }
+   if (request.lower_bound && request.upper_bound &&
+       std::lexicographical_compare(request.upper_bound->begin(), request.upper_bound->end(),
+                                    request.lower_bound->begin(), request.lower_bound->end())) {
+      invalid_key("table lower bound must not exceed its upper bound");
+   }
+}
+
 } // namespace forge::chain::api

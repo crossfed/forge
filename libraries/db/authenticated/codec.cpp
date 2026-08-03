@@ -264,6 +264,9 @@ std::size_t wire_size(const range_proof& value) {
 }
 
 std::size_t wire_size(const range_proof_node& value) {
+   if (value.valueless_by_exception()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_proof, "authenticated range proof node has no value");
+   }
    return std::visit(
        [](const auto& node) {
           using node_type = std::remove_cvref_t<decltype(node)>;

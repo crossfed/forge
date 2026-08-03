@@ -32,6 +32,7 @@ import forge.db.authenticated.standards;
 import forge.db.authenticated.store;
 import forge.db.authenticated.transaction;
 import forge.db.authenticated.types;
+import forge.db.core.driver;
 import forge.db.core.record;
 import forge.db.mdbx.driver;
 import forge.db.object.store;
@@ -98,6 +99,24 @@ forge::db::authenticated::store make_store(const std::shared_ptr<forge::db::mdbx
        },
    };
 }
+
+class throwing_driver final : public forge::db::core::driver {
+ public:
+   boost::asio::awaitable<void> async_flush(bool) override {
+      co_return;
+   }
+
+ private:
+   boost::asio::awaitable<std::unique_ptr<forge::db::core::session>> open_transaction() override {
+      throw std::runtime_error{"test authenticated transaction backend failure"};
+      co_return nullptr;
+   }
+
+   boost::asio::awaitable<std::unique_ptr<forge::db::core::session>> open_snapshot() override {
+      throw std::runtime_error{"test authenticated snapshot backend failure"};
+      co_return nullptr;
+   }
+};
 
 bool key_less(const forge::db::authenticated::bytes& left, const forge::db::authenticated::bytes& right) {
    return std::lexicographical_compare(left.begin(), left.end(), right.begin(), right.end());
@@ -197,6 +216,20 @@ forge::db::core::record_range prefix_range(std::byte prefix) {
 } // namespace
 
 BOOST_AUTO_TEST_SUITE(db_authenticated_test_suite)
+
+BOOST_AUTO_TEST_CASE(authenticated_backend_failures_are_typed) {
+   auto driver = std::make_shared<throwing_driver>();
+   auto authenticated = forge::db::authenticated::store{
+       driver,
+       {
+           .family = forge::db::core::family{"authenticated"},
+           .domain = "forge.test.authenticated.backend-failure.v1",
+       },
+   };
+   auto runtime = forge::asio::runtime{};
+   BOOST_CHECK_THROW(static_cast<void>(forge::asio::blocking::run(runtime, authenticated.latest())),
+                     forge::db::authenticated::exceptions::backend_failure);
+}
 
 BOOST_AUTO_TEST_CASE(authenticated_read_observer_failures_are_typed) {
    const auto root_path = make_test_root("forge_db_authenticated_observer_failure");

@@ -92,6 +92,55 @@ protocol::digest hash(std::string_view value) {
    return forge::crypto::digest::sha256::hash(std::string{value});
 }
 
+protocol::audit_class audit_class_for(std::string_view api, std::string_view method) {
+   using enum protocol::audit_class;
+   if (api == "forge.chain.api.info") {
+      return finality;
+   }
+   if (api == "forge.chain.api.block") {
+      if (method == "get_block" || method == "get_header") {
+         return finality;
+      }
+      if (method == "get_producers") {
+         return deterministic_composite;
+      }
+      return unsupported;
+   }
+   if (api == "forge.chain.api.state") {
+      if (method == "get_point") {
+         return state_point;
+      }
+      if (method == "get_range") {
+         return state_range;
+      }
+      if (method == "get_changes") {
+         return state_changes;
+      }
+      return deterministic_composite;
+   }
+   if (api == "forge.chain.api.transaction") {
+      if (method == "get_status" || method == "await_transaction") {
+         return transaction_inclusion;
+      }
+      return unsupported;
+   }
+   return none;
+}
+
+template <typename Interface> void append_capabilities(protocol::capabilities& result) {
+   const auto descriptor = Interface::describe();
+   for (const auto& method : descriptor.methods) {
+      result.methods.push_back(protocol::method_capability{
+          .api = descriptor.id.value,
+          .method = method.name,
+          .audit = audit_class_for(descriptor.id.value, method.name),
+          .enabled = true,
+          .http = true,
+          .p2p = true,
+      });
+   }
+}
+
 protocol::info_response make_info_response() {
    const auto chain = hash("chain-api-e2e-chain");
    const auto head = hash("chain-api-e2e-head");
@@ -163,20 +212,13 @@ protocol::info_response make_info_response() {
    response.block_net_limit = 1'800;
    response.total_cpu_weight = 77;
    response.total_net_weight = 88;
-   response.available = protocol::capabilities{
-       .methods =
-           {
-               protocol::method_capability{
-                   .api = "forge.chain.api.info",
-                   .method = "get",
-                   .audit = protocol::audit_class::deterministic_composite,
-                   .enabled = true,
-                   .http = true,
-                   .p2p = true,
-               },
-           },
-       .archive = true,
-   };
+   response.available.archive = true;
+   append_capabilities<chain_api::info>(response.available);
+   append_capabilities<chain_api::block>(response.available);
+   append_capabilities<chain_api::state>(response.available);
+   append_capabilities<chain_api::transaction>(response.available);
+   append_capabilities<chain_api::submission>(response.available);
+   append_capabilities<chain_api::admin>(response.available);
    response.limits = protocol::service_limits{
        .max_page_size = 256,
        .max_state_batch_size = 32,

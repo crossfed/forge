@@ -10,6 +10,7 @@ module;
 
 export module forge.chain.api.verified_client;
 
+export import forge.chain.api.limits;
 export import forge.chain.api.raw_client;
 
 export namespace forge::chain::api {
@@ -87,7 +88,7 @@ class projection_verifier {
 class verified_client {
  public:
    verified_client(raw_client client, std::shared_ptr<audit_verifier> verifier,
-                   std::shared_ptr<projection_verifier> projections = {});
+                   std::shared_ptr<projection_verifier> projections = {}, protocol::service_limits limits = {});
 
    boost::asio::awaitable<protocol::info_response> get_info();
    boost::asio::awaitable<protocol::info_response> get_info(protocol::anchored_request request);
@@ -145,6 +146,7 @@ class verified_client {
    raw_client client_;
    std::shared_ptr<audit_verifier> verifier_;
    std::shared_ptr<projection_verifier> projections_;
+   protocol::service_limits limits_;
 };
 
 } // namespace forge::chain::api

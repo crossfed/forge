@@ -131,7 +131,16 @@ std::optional<protocol::block_id> cached_finality_verifier::preferred_trust_anch
    if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::trust_required, "cached finality verifier is not initialized");
    }
-   return impl_->delegate->preferred_trust_anchor();
+   try {
+      return impl_->delegate->preferred_trust_anchor();
+   } catch (const forge::exceptions::base&) {
+      throw;
+   } catch (const std::exception& error) {
+      FORGE_THROW_EXCEPTION(exceptions::anchor_unavailable, "finality trust anchor provider failed",
+                            forge::exceptions::ctx("reason", error.what()));
+   } catch (...) {
+      FORGE_THROW_EXCEPTION(exceptions::anchor_unavailable, "finality trust anchor provider failed");
+   }
 }
 
 void cached_finality_verifier::verify(const protocol::state_anchor& anchor, const protocol::proof_blob& proof) {

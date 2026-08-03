@@ -1,15 +1,19 @@
 module;
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/error.hpp>
+#include <boost/system/system_error.hpp>
 #include <forge/exceptions/macros.hpp>
 
 #include <cstddef>
+#include <exception>
 #include <utility>
 #include <vector>
 
 module forge.chain.api.submission_client;
 
 import forge.chain.api.exceptions;
+import forge.asio.exceptions;
 
 namespace forge::chain::api {
 namespace {
@@ -28,15 +32,41 @@ void verify_acknowledgement(const protocol::transaction_submit_response& respons
    }
 }
 
+template <typename Response, typename Operation>
+boost::asio::awaitable<Response> invoke_service(const char* method, Operation&& operation) {
+   try {
+      co_return co_await std::forward<Operation>(operation)();
+   } catch (const forge::exceptions::base&) {
+      throw;
+   } catch (const boost::system::system_error& error) {
+      if (error.code() == boost::asio::error::operation_aborted) {
+         FORGE_THROW_EXCEPTION(forge::asio::exceptions::canceled, "chain API request was canceled",
+                               forge::exceptions::ctx("method", method));
+      }
+      FORGE_THROW_EXCEPTION(exceptions::unavailable, "chain API service failed",
+                            forge::exceptions::ctx("method", method), forge::exceptions::ctx("reason", error.what()));
+   } catch (const std::exception& error) {
+      FORGE_THROW_EXCEPTION(exceptions::unavailable, "chain API service failed",
+                            forge::exceptions::ctx("method", method), forge::exceptions::ctx("reason", error.what()));
+   } catch (...) {
+      FORGE_THROW_EXCEPTION(exceptions::unavailable, "chain API service failed",
+                            forge::exceptions::ctx("method", method));
+   }
+}
+
 } // namespace
 
-submission_client::submission_client(forge::api::core::handle<submission> service) : service_{std::move(service)} {}
+submission_client::submission_client(forge::api::core::handle<submission> service, protocol::service_limits limits)
+    : service_{std::move(service)}, limits_{limits} {}
 
 boost::asio::awaitable<protocol::transaction_submit_response>
 submission_client::submit(protocol::transaction_submit_request request) {
    auto& service = require_service(service_);
+   require_request_within_limits(request, limits_);
    const auto expected = request.transaction.id();
-   auto response = co_await service.submit(std::move(request));
+   auto response = co_await invoke_service<protocol::transaction_submit_response>(
+       "submission.submit", [&] { return service.submit(std::move(request)); });
+   require_response_within_limits(response, limits_);
    verify_acknowledgement(response, expected,
                           "chain API submit acknowledgement does not match the submitted transaction");
    co_return response;
@@ -45,13 +75,16 @@ submission_client::submit(protocol::transaction_submit_request request) {
 boost::asio::awaitable<std::vector<protocol::transaction_submit_response>>
 submission_client::submit_batch(std::vector<protocol::transaction_submit_request> requests) {
    auto& service = require_service(service_);
+   require_transaction_batch_within_limits(requests, limits_);
    auto expected = std::vector<protocol::transaction_id>{};
    expected.reserve(requests.size());
    for (const auto& request : requests) {
       expected.push_back(request.transaction.id());
    }
 
-   auto responses = co_await service.submit_batch(std::move(requests));
+   auto responses = co_await invoke_service<std::vector<protocol::transaction_submit_response>>(
+       "submission.submit_batch", [&] { return service.submit_batch(std::move(requests)); });
+   require_response_within_limits(responses, limits_);
    if (responses.size() != expected.size()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof,
                             "chain API submit acknowledgement count does not match the request");

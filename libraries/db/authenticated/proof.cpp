@@ -74,6 +74,9 @@ node_metadata combine(std::string_view domain, std::uint16_t height, std::uint64
 }
 
 node_metadata verify_sibling(std::string_view domain, const proof_sibling& sibling, const limits& settings) {
+   if (sibling.valueless_by_exception()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_proof, "authenticated point proof sibling has no value");
+   }
    return std::visit(
        [&](const auto& value) -> node_metadata {
           using value_type = std::remove_cvref_t<decltype(value)>;

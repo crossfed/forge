@@ -52,6 +52,11 @@ frames or HTTP bodies before decoding;
 service implementations use `forge.chain.api.limits` to enforce canonical raw
 request and response sizes at the typed boundary. Resource failures use
 `forge.chain.api::exceptions::resource_exhausted` across every transport.
+Capabilities and limits are operational claims made by the selected peer; they
+are not consensus state and are not authenticated by a state proof. Clients use
+them for feature negotiation only. `verified_client` and `submission_client`
+apply independently configured local limits before dispatch and after receipt,
+so a peer cannot weaken client resource policy by advertising larger values.
 
 `verified_client` verifies transport envelopes, chain identity, finality and
 generic authenticated point/range/change proofs itself. Verification returns
@@ -60,6 +65,10 @@ the authenticated source bytes, so typed composite reads can use a product
 This keeps DB schema knowledge out of Forge without exposing proof internals or
 trusting a server-side DTO conversion. Missing projection support fails closed with
 `audit_not_supported`; it never falls back to an envelope-only check.
+Public client, verifier and authenticated-store boundaries preserve existing
+Forge exceptions and translate implementation `std`/Boost failures into their
+own typed Forge error contracts. Asio operation cancellation remains a typed
+`forge::asio::exceptions::canceled` result rather than an availability error.
 
 ## Verified state synchronization
 

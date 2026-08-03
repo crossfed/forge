@@ -3,6 +3,7 @@ add_library(
    abi.cpp
    authenticated_audit_verifier.cpp
    finality.cpp
+   limits.cpp
    raw_client.cpp
    submission_client.cpp
    table_key.cpp
@@ -28,6 +29,7 @@ target_link_libraries(
 
 target_link_libraries(
    forge_chain_api PRIVATE
+      forge_asio
       forge_codec_hex
       forge_raw
 )

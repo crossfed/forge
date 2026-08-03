@@ -1154,6 +1154,8 @@ protocol::bytes abi_json_to_bin(const protocol::abi_def& abi, std::string_view t
    } catch (const std::exception& error) {
       fail(abi_error_code::invalid_json, "Unable to convert ABI JSON value: " + std::string{error.what()}, type, type,
            writer.tellp());
+   } catch (...) {
+      fail(abi_error_code::invalid_json, "Unable to convert ABI JSON value", type, type, writer.tellp());
    }
 }
 
@@ -1175,6 +1177,8 @@ forge::variant abi_bin_to_json(const protocol::abi_def& abi, std::string_view ty
    } catch (const std::exception& error) {
       fail(abi_error_code::invalid_binary, "Unable to convert ABI binary value: " + std::string{error.what()}, type,
            type, reader.tellp());
+   } catch (...) {
+      fail(abi_error_code::invalid_binary, "Unable to convert ABI binary value", type, type, reader.tellp());
    }
 }
 
@@ -1191,6 +1195,8 @@ forge::variant action_to_variant(const protocol::action& action, const abi_resol
    } catch (const std::exception& error) {
       fail(abi_error_code::invalid_abi, "Unable to resolve action ABI: " + std::string{error.what()}, "abi_def",
            action.account.to_string(), 0U);
+   } catch (...) {
+      fail(abi_error_code::invalid_abi, "Unable to resolve action ABI", "abi_def", action.account.to_string(), 0U);
    }
 
    if (abi) {

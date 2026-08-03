@@ -35,6 +35,8 @@ template <typename Function> void verify_finality_delegate(Function&& function) 
    } catch (const std::exception& error) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_finality, "finality verifier failed",
                             forge::exceptions::ctx("reason", error.what()));
+   } catch (...) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_finality, "finality verifier failed");
    }
 }
 
@@ -103,6 +105,8 @@ template <typename Function> decltype(auto) translate_state_error(Function&& fun
    } catch (const std::exception& error) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof, "chain API authenticated proof is invalid",
                             forge::exceptions::ctx("reason", error.what()));
+   } catch (...) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof, "chain API authenticated proof is invalid");
    }
 }
 
@@ -129,7 +133,16 @@ authenticated_audit_verifier::authenticated_audit_verifier(authenticated_audit_o
 }
 
 std::optional<protocol::block_id> authenticated_audit_verifier::preferred_finality_anchor() const {
-   return finality_->preferred_trust_anchor();
+   try {
+      return finality_->preferred_trust_anchor();
+   } catch (const forge::exceptions::base&) {
+      throw;
+   } catch (const std::exception& error) {
+      FORGE_THROW_EXCEPTION(exceptions::anchor_unavailable, "finality trust anchor provider failed",
+                            forge::exceptions::ctx("reason", error.what()));
+   } catch (...) {
+      FORGE_THROW_EXCEPTION(exceptions::anchor_unavailable, "finality trust anchor provider failed");
+   }
 }
 
 void authenticated_audit_verifier::verify_context(const protocol::response_context& context) {

@@ -1,7 +1,9 @@
 #include <boost/test/unit_test.hpp>
 #include <boost/asio/co_spawn.hpp>
+#include <boost/asio/error.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/use_future.hpp>
+#include <boost/system/system_error.hpp>
 
 #include <algorithm>
 #include <array>
@@ -33,6 +35,7 @@ import forge.api.core.connection;
 import forge.api.core.registry;
 import forge.api.http.mapping;
 import forge.api.http.openapi;
+import forge.asio.exceptions;
 import forge.chain.api.admin;
 import forge.chain.api.authenticated_audit_verifier;
 import forge.chain.api.block;
@@ -177,6 +180,15 @@ class state_service final : public forge::chain::api::state {
    boost::asio::awaitable<forge::chain::protocol::state_point_response>
    get_point(forge::chain::protocol::state_point_request request) override {
       last_point_request = std::move(request);
+      if (point_failure == failure::standard) {
+         throw std::runtime_error{"test state service failure"};
+      }
+      if (point_failure == failure::nonstandard) {
+         throw 7;
+      }
+      if (point_failure == failure::canceled) {
+         throw boost::system::system_error{boost::asio::error::operation_aborted};
+      }
       co_return point_response_;
    }
 
@@ -231,6 +243,8 @@ class state_service final : public forge::chain::api::state {
    }
 
    std::optional<forge::chain::protocol::state_point_request> last_point_request;
+   enum class failure : std::uint8_t { none, standard, nonstandard, canceled };
+   failure point_failure = failure::none;
 
  private:
    forge::chain::protocol::state_point_response point_response_;
@@ -280,6 +294,9 @@ class submission_service final : public forge::chain::api::submission {
 
    boost::asio::awaitable<forge::chain::protocol::transaction_submit_response>
    submit(forge::chain::protocol::transaction_submit_request) override {
+      if (throw_standard) {
+         throw std::runtime_error{"test submission service failure"};
+      }
       if (responses_.empty()) {
          co_return forge::chain::protocol::transaction_submit_response{};
       }
@@ -293,6 +310,9 @@ class submission_service final : public forge::chain::api::submission {
 
  private:
    std::vector<forge::chain::protocol::transaction_submit_response> responses_;
+
+ public:
+   bool throw_standard = false;
 };
 
 class deadline_remote_invoker final : public forge::api::core::remote_invoker {
@@ -319,6 +339,9 @@ class deadline_remote_invoker final : public forge::api::core::remote_invoker {
 class accepting_audit_verifier final : public forge::chain::api::audit_verifier {
  public:
    [[nodiscard]] std::optional<forge::chain::protocol::block_id> preferred_finality_anchor() const override {
+      if (throw_standard_preferred_anchor) {
+         throw std::runtime_error{"test preferred anchor failure"};
+      }
       return preferred_anchor;
    }
 
@@ -387,6 +410,7 @@ class accepting_audit_verifier final : public forge::chain::api::audit_verifier 
    bool throw_standard_context = false;
    bool throw_nonstandard_state_point = false;
    bool throw_standard_transaction = false;
+   bool throw_standard_preferred_anchor = false;
    std::optional<forge::chain::protocol::block_id> preferred_anchor;
 };
 
@@ -945,6 +969,41 @@ BOOST_AUTO_TEST_CASE(chain_api_limits_bound_canonical_request_and_response_bytes
    --limits.max_response_bytes;
    BOOST_CHECK_THROW(forge::chain::api::require_response_within_limits(response, limits),
                      forge::chain::api::exceptions::resource_exhausted);
+
+   limits = forge::chain::protocol::service_limits{};
+   auto table = forge::chain::protocol::table_rows_request{
+       .index = {.kind = forge::chain::protocol::table_index_kind::secondary_u128, .position = 1U},
+       .lower_bound = forge::chain::protocol::bytes(16U, 0U),
+       .upper_bound = forge::chain::protocol::bytes(16U, 1U),
+       .cursor = forge::chain::protocol::bytes{0xffU},
+   };
+   BOOST_CHECK_NO_THROW(forge::chain::api::require_request_within_limits(table, limits));
+   table.lower_bound = forge::chain::protocol::bytes(8U, 0U);
+   BOOST_CHECK_THROW(forge::chain::api::require_request_within_limits(table, limits),
+                     forge::chain::api::exceptions::invalid_request);
+
+   auto range = forge::chain::protocol::state_range_request{.limit = limits.max_page_size + 1U};
+   BOOST_CHECK_THROW(forge::chain::api::require_request_within_limits(range, limits),
+                     forge::chain::api::exceptions::resource_exhausted);
+
+   auto changes = forge::chain::protocol::state_changes_request{
+       .from_block = 10U,
+       .to_block = 9U,
+   };
+   BOOST_CHECK_THROW(forge::chain::api::require_request_within_limits(changes, limits),
+                     forge::chain::api::exceptions::invalid_request);
+
+   auto waiting = forge::chain::protocol::transaction_await_request{.timeout_ms = limits.max_await_ms + 1U};
+   BOOST_CHECK_THROW(forge::chain::api::require_request_within_limits(waiting, limits),
+                     forge::chain::api::exceptions::resource_exhausted);
+
+   response.audit = forge::chain::protocol::audit_bundle{
+       .finality = forge::chain::protocol::proof_blob{.scheme = "test.finality", .payload = {1U, 2U, 3U}},
+   };
+   limits.max_response_bytes = std::numeric_limits<std::uint32_t>::max();
+   limits.max_proof_bytes = static_cast<std::uint32_t>(forge::raw::pack_size(*response.audit) - 1U);
+   BOOST_CHECK_THROW(forge::chain::api::require_response_within_limits(response, limits),
+                     forge::chain::api::exceptions::resource_exhausted);
 }
 
 BOOST_AUTO_TEST_CASE(chain_openapi_covers_every_owner_contract_route_and_schema) {
@@ -1423,6 +1482,33 @@ BOOST_AUTO_TEST_CASE(verified_client_translates_extension_failures_to_typed_erro
    auto point_client = make_client(point_verifier);
    BOOST_CHECK_THROW(static_cast<void>(run(point_client.first.get_point({.key = {1U}, .anchor = anchor.block}))),
                      forge::chain::api::exceptions::invalid_state_proof);
+
+   auto anchor_verifier = std::make_shared<accepting_audit_verifier>();
+   anchor_verifier->throw_standard_preferred_anchor = true;
+   auto anchor_client = make_client(anchor_verifier);
+   BOOST_CHECK_THROW(static_cast<void>(run(anchor_client.first.get_point({.key = {1U}, .anchor = anchor.block}))),
+                     forge::chain::api::exceptions::anchor_unavailable);
+}
+
+BOOST_AUTO_TEST_CASE(verified_client_translates_service_failures_and_cancellation) {
+   auto services = forge::api::core::registry{};
+   auto service = std::make_shared<state_service>(forge::chain::protocol::state_point_response{});
+   services.install<forge::chain::api::state>(service);
+   auto client = forge::chain::api::verified_client{
+       forge::chain::api::raw_client{forge::chain::api::service_handles{
+           .state_queries = services.get<forge::chain::api::state>(forge::chain::api::state::ref()),
+       }},
+       std::make_shared<accepting_audit_verifier>(),
+   };
+
+   service->point_failure = state_service::failure::standard;
+   BOOST_CHECK_THROW(static_cast<void>(run(client.get_point({.key = {1U}}))),
+                     forge::chain::api::exceptions::unavailable);
+   service->point_failure = state_service::failure::nonstandard;
+   BOOST_CHECK_THROW(static_cast<void>(run(client.get_point({.key = {1U}}))),
+                     forge::chain::api::exceptions::unavailable);
+   service->point_failure = state_service::failure::canceled;
+   BOOST_CHECK_THROW(static_cast<void>(run(client.get_point({.key = {1U}}))), forge::asio::exceptions::canceled);
 }
 
 BOOST_AUTO_TEST_CASE(verified_info_rejects_payload_identity_inconsistent_with_audited_context) {
@@ -1638,6 +1724,26 @@ BOOST_AUTO_TEST_CASE(submission_client_binds_acknowledgements_to_local_transacti
 BOOST_AUTO_TEST_CASE(submission_client_fails_typed_without_a_transport) {
    auto client = forge::chain::api::submission_client{{}};
    BOOST_CHECK_THROW(static_cast<void>(run(client.submit({}))), forge::chain::api::exceptions::unavailable);
+}
+
+BOOST_AUTO_TEST_CASE(submission_client_enforces_local_limits_and_translates_service_failures) {
+   auto services = forge::api::core::registry{};
+   auto service =
+       std::make_shared<submission_service>(std::vector<forge::chain::protocol::transaction_submit_response>{});
+   services.install<forge::chain::api::submission>(service);
+   auto limits = forge::chain::protocol::service_limits{};
+   limits.max_transaction_batch_size = 1U;
+   auto client = forge::chain::api::submission_client{
+       services.get<forge::chain::api::submission>(forge::chain::api::submission::ref()), limits};
+
+   BOOST_CHECK_THROW(static_cast<void>(run(client.submit_batch({}))), forge::chain::api::exceptions::invalid_request);
+   BOOST_CHECK_THROW(static_cast<void>(run(client.submit_batch({{}, {}}))),
+                     forge::chain::api::exceptions::resource_exhausted);
+   service->throw_standard = true;
+   auto request = forge::chain::protocol::transaction_submit_request{};
+   request.transaction = forge::chain::protocol::packed_transaction{forge::chain::protocol::signed_transaction{}};
+   BOOST_CHECK_THROW(static_cast<void>(run(client.submit(std::move(request)))),
+                     forge::chain::api::exceptions::unavailable);
 }
 
 BOOST_AUTO_TEST_CASE(verified_transaction_status_rejects_an_unauthenticated_execution_trace) {

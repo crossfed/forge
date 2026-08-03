@@ -30,6 +30,8 @@ import forge.db.authenticated.hash;
 import forge.db.authenticated.types;
 import forge.db.core.record;
 
+#include "details/backend_call.hxx"
+
 namespace forge::db::authenticated::detail {
 
 namespace {
@@ -1238,21 +1240,23 @@ boost::asio::awaitable<garbage_result> collect_garbage(forge::db::core::transact
    }
 
    auto get = [&active, family](forge::db::core::record_key key) -> boost::asio::awaitable<std::optional<bytes>> {
-      co_return co_await active.get_for_update(family, std::move(key));
+      co_return co_await invoke_backend([&] { return active.get_for_update(family, std::move(key)); });
    };
    auto put = [&active, family](forge::db::core::record_key key, bytes value) -> boost::asio::awaitable<void> {
-      co_await active.put(family, std::move(key), std::move(value));
+      co_await invoke_backend([&] { return active.put(family, std::move(key), std::move(value)); });
    };
    auto erase = [&active, family](forge::db::core::record_key key) -> boost::asio::awaitable<void> {
-      co_await active.erase(family, std::move(key));
+      co_await invoke_backend([&] { return active.erase(family, std::move(key)); });
    };
 
    auto result = garbage_result{};
    auto processed = std::uint32_t{};
    while (processed < limit) {
-      auto page = co_await active.scan_page(
-          family, record_prefix_range(node_gc_record),
-          {.limit = std::min<std::uint32_t>(limit - processed, forge::db::core::max_page_limit)});
+      auto page = co_await invoke_backend([&] {
+         return active.scan_page(
+             family, record_prefix_range(node_gc_record),
+             {.limit = std::min<std::uint32_t>(limit - processed, forge::db::core::max_page_limit)});
+      });
       if (page.entries.empty()) {
          break;
       }
@@ -1298,9 +1302,11 @@ boost::asio::awaitable<garbage_result> collect_garbage(forge::db::core::transact
    }
 
    while (processed < limit) {
-      auto page = co_await active.scan_page(
-          family, record_prefix_range(value_gc_record),
-          {.limit = std::min<std::uint32_t>(limit - processed, forge::db::core::max_page_limit)});
+      auto page = co_await invoke_backend([&] {
+         return active.scan_page(
+             family, record_prefix_range(value_gc_record),
+             {.limit = std::min<std::uint32_t>(limit - processed, forge::db::core::max_page_limit)});
+      });
       if (page.entries.empty()) {
          break;
       }
@@ -1333,8 +1339,10 @@ boost::asio::awaitable<garbage_result> collect_garbage(forge::db::core::transact
       }
    }
 
-   const auto node_pending = co_await active.scan_page(family, record_prefix_range(node_gc_record), {.limit = 1});
-   const auto value_pending = co_await active.scan_page(family, record_prefix_range(value_gc_record), {.limit = 1});
+   const auto node_pending = co_await invoke_backend(
+       [&] { return active.scan_page(family, record_prefix_range(node_gc_record), {.limit = 1}); });
+   const auto value_pending = co_await invoke_backend(
+       [&] { return active.scan_page(family, record_prefix_range(value_gc_record), {.limit = 1}); });
    result.pending = !node_pending.entries.empty() || !value_pending.entries.empty();
    co_return result;
 }

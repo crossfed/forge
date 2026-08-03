@@ -26,6 +26,7 @@ import forge.db.authenticated.tree_engine;
 import forge.db.core.record;
 
 #include "details/store_impl.hxx"
+#include "details/backend_call.hxx"
 
 namespace forge::db::authenticated {
 
@@ -34,7 +35,8 @@ namespace {
 boost::asio::awaitable<std::optional<root>> read_root(forge::db::core::snapshot& active,
                                                       const forge::db::core::family& family,
                                                       const digest& namespace_hash, version_id_t version) {
-   const auto encoded = co_await active.get(family, detail::version_key(namespace_hash, version));
+   const auto encoded = co_await detail::invoke_backend(
+       [&] { return active.get(family, detail::version_key(namespace_hash, version)); });
    if (!encoded) {
       co_return std::nullopt;
    }
@@ -62,7 +64,7 @@ detail::get_record_fn snapshot_reader(const std::shared_ptr<forge::db::core::sna
             FORGE_THROW_EXCEPTION(exceptions::backend_failure, "authenticated read observer failed");
          }
       }
-      co_return co_await active->get(family, std::move(key));
+      co_return co_await detail::invoke_backend([&] { return active->get(family, std::move(key)); });
    };
 }
 
@@ -77,15 +79,17 @@ boost::asio::awaitable<std::optional<root>> store::earliest() const {
    if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_store, "authenticated store is not initialized");
    }
-   auto active = co_await impl_->driver->begin_read();
+   auto active = co_await detail::invoke_backend([&] { return impl_->driver->begin_read(); });
    const auto prefix = detail::version_prefix(impl_->namespace_hash);
-   const auto page = co_await active.scan_page(impl_->settings.family,
-                                               forge::db::core::record_range{
-                                                   .begin = prefix,
-                                                   .prefix = prefix,
-                                                   .has_end = false,
-                                               },
-                                               {.limit = 1U});
+   const auto page = co_await detail::invoke_backend([&] {
+      return active.scan_page(impl_->settings.family,
+                              forge::db::core::record_range{
+                                  .begin = prefix,
+                                  .prefix = prefix,
+                                  .has_end = false,
+                              },
+                              {.limit = 1U});
+   });
    if (page.entries.empty()) {
       co_return std::nullopt;
    }
@@ -102,8 +106,9 @@ boost::asio::awaitable<std::optional<root>> store::latest() const {
    if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_store, "authenticated store is not initialized");
    }
-   auto active = co_await impl_->driver->begin_read();
-   const auto encoded = co_await active.get(impl_->settings.family, detail::latest_key(impl_->namespace_hash));
+   auto active = co_await detail::invoke_backend([&] { return impl_->driver->begin_read(); });
+   const auto encoded = co_await detail::invoke_backend(
+       [&] { return active.get(impl_->settings.family, detail::latest_key(impl_->namespace_hash)); });
    co_return encoded ? std::optional<root>{detail::decode_root(*encoded)} : std::nullopt;
 }
 
@@ -111,7 +116,7 @@ boost::asio::awaitable<std::optional<root>> store::find_root(version_id_t versio
    if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_store, "authenticated store is not initialized");
    }
-   auto active = co_await impl_->driver->begin_read();
+   auto active = co_await detail::invoke_backend([&] { return impl_->driver->begin_read(); });
    co_return co_await read_root(active, impl_->settings.family, impl_->namespace_hash, version);
 }
 
@@ -119,7 +124,7 @@ boost::asio::awaitable<std::optional<bytes>> store::get(version_id_t version, st
    if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_store, "authenticated store is not initialized");
    }
-   auto owned = co_await impl_->driver->begin_read();
+   auto owned = co_await detail::invoke_backend([&] { return impl_->driver->begin_read(); });
    auto active = std::make_shared<forge::db::core::snapshot>(std::move(owned));
    const auto anchor = co_await read_root(*active, impl_->settings.family, impl_->namespace_hash, version);
    if (!anchor) {
@@ -141,7 +146,7 @@ boost::asio::awaitable<verified_range> store::scan_range(version_id_t version, r
    if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_store, "authenticated store is not initialized");
    }
-   auto owned = co_await impl_->driver->begin_read();
+   auto owned = co_await detail::invoke_backend([&] { return impl_->driver->begin_read(); });
    auto active = std::make_shared<forge::db::core::snapshot>(std::move(owned));
    const auto anchor = co_await read_root(*active, impl_->settings.family, impl_->namespace_hash, version);
    if (!anchor) {
@@ -168,7 +173,7 @@ boost::asio::awaitable<point_proof> store::prove(version_id_t version, std::span
    if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_store, "authenticated store is not initialized");
    }
-   auto owned = co_await impl_->driver->begin_read();
+   auto owned = co_await detail::invoke_backend([&] { return impl_->driver->begin_read(); });
    auto active = std::make_shared<forge::db::core::snapshot>(std::move(owned));
    const auto anchor = co_await read_root(*active, impl_->settings.family, impl_->namespace_hash, version);
    if (!anchor) {
@@ -190,7 +195,7 @@ boost::asio::awaitable<range_proof> store::prove_range(version_id_t version, ran
    if (!impl_) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_store, "authenticated store is not initialized");
    }
-   auto owned = co_await impl_->driver->begin_read();
+   auto owned = co_await detail::invoke_backend([&] { return impl_->driver->begin_read(); });
    auto active = std::make_shared<forge::db::core::snapshot>(std::move(owned));
    const auto anchor = co_await read_root(*active, impl_->settings.family, impl_->namespace_hash, version);
    if (!anchor) {
@@ -227,8 +232,8 @@ boost::asio::awaitable<prune_result> store::prune_through(forge::db::core::trans
       FORGE_THROW_EXCEPTION(exceptions::invalid_prune, "authenticated prune limits are invalid");
    }
 
-   const auto latest_encoded =
-       co_await active.get_for_update(impl_->settings.family, detail::latest_key(impl_->namespace_hash));
+   const auto latest_encoded = co_await detail::invoke_backend(
+       [&] { return active.get_for_update(impl_->settings.family, detail::latest_key(impl_->namespace_hash)); });
    if (!latest_encoded) {
       co_return prune_result{.complete = true};
    }
@@ -240,21 +245,23 @@ boost::asio::awaitable<prune_result> store::prune_through(forge::db::core::trans
    }
 
    const auto prefix = detail::version_prefix(impl_->namespace_hash);
-   const auto page = co_await active.scan_page(impl_->settings.family,
-                                               forge::db::core::record_range{
-                                                   .begin = prefix,
-                                                   .prefix = prefix,
-                                                   .has_end = false,
-                                               },
-                                               {.limit = options.max_versions + 1U});
+   const auto page = co_await detail::invoke_backend([&] {
+      return active.scan_page(impl_->settings.family,
+                              forge::db::core::record_range{
+                                  .begin = prefix,
+                                  .prefix = prefix,
+                                  .has_end = false,
+                              },
+                              {.limit = options.max_versions + 1U});
+   });
 
    auto get = [&active, family = impl_->settings.family](
                   forge::db::core::record_key key) -> boost::asio::awaitable<std::optional<bytes>> {
-      co_return co_await active.get_for_update(family, std::move(key));
+      co_return co_await detail::invoke_backend([&] { return active.get_for_update(family, std::move(key)); });
    };
    auto put = [&active, family = impl_->settings.family](forge::db::core::record_key key,
                                                          bytes value) -> boost::asio::awaitable<void> {
-      co_await active.put(family, std::move(key), std::move(value));
+      co_await detail::invoke_backend([&] { return active.put(family, std::move(key), std::move(value)); });
    };
 
    auto result = prune_result{};
@@ -280,13 +287,15 @@ boost::asio::awaitable<prune_result> store::prune_through(forge::db::core::trans
          FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated version record is inconsistent");
       }
       const auto guard_prefix = detail::retention_guard_prefix(impl_->namespace_hash, version);
-      const auto guards = co_await active.scan_page(impl_->settings.family,
-                                                    forge::db::core::record_range{
-                                                        .begin = guard_prefix,
-                                                        .prefix = guard_prefix,
-                                                        .has_end = false,
-                                                    },
-                                                    {.limit = 1});
+      const auto guards = co_await detail::invoke_backend([&] {
+         return active.scan_page(impl_->settings.family,
+                                 forge::db::core::record_range{
+                                     .begin = guard_prefix,
+                                     .prefix = guard_prefix,
+                                     .has_end = false,
+                                 },
+                                 {.limit = 1});
+      });
       if (!guards.entries.empty()) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_prune, "authenticated version is retained by a reversible revision",
                                forge::exceptions::ctx("version", version));
@@ -305,11 +314,12 @@ boost::asio::awaitable<prune_result> store::prune_through(forge::db::core::trans
       if (removed.change_count != 0) {
          co_await detail::release_root(get, put, removed.change_root);
       }
-      co_await active.erase(impl_->settings.family, candidate.key);
+      co_await detail::invoke_backend([&] { return active.erase(impl_->settings.family, candidate.key); });
       ++result.versions_pruned;
    }
 
-   const auto collected = co_await detail::collect_garbage(active, impl_->settings.family, options.max_garbage_records);
+   const auto collected = co_await detail::invoke_backend(
+       [&] { return detail::collect_garbage(active, impl_->settings.family, options.max_garbage_records); });
    result.nodes_collected = collected.nodes;
    result.values_collected = collected.values;
    result.complete = versions_complete && !collected.pending;
@@ -321,7 +331,8 @@ boost::asio::awaitable<transaction> store::join(forge::db::core::transaction& ac
       FORGE_THROW_EXCEPTION(exceptions::transaction_closed,
                             "authenticated transaction cannot join a closed store transaction");
    }
-   const auto encoded = co_await active.get(impl_->settings.family, detail::latest_key(impl_->namespace_hash));
+   const auto encoded = co_await detail::invoke_backend(
+       [&] { return active.get(impl_->settings.family, detail::latest_key(impl_->namespace_hash)); });
    auto base = encoded ? std::optional<root>{detail::decode_root(*encoded)} : std::nullopt;
    if (base && version <= base->version) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_version, "authenticated version must advance the current head",

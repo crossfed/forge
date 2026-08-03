@@ -25,6 +25,7 @@ import forge.db.core.record;
 
 #include "details/transaction_impl.hxx"
 #include "details/transaction_participant_impl.hxx"
+#include "details/backend_call.hxx"
 
 namespace forge::db::authenticated {
 
@@ -38,7 +39,7 @@ void ensure_active(const auto& value) {
 
 detail::get_record_fn transaction_reader(auto& value) {
    return [&value](forge::db::core::record_key key) -> boost::asio::awaitable<std::optional<bytes>> {
-      co_return co_await value.active->get(value.family, std::move(key));
+      co_return co_await detail::invoke_backend([&] { return value.active->get(value.family, std::move(key)); });
    };
 }
 
@@ -155,28 +156,28 @@ boost::asio::awaitable<staged_version> transaction::stage(std::span<const mutati
                             forge::exceptions::ctx("actual", computed.staged.commitment.state_root.str()));
    }
 
-   const auto current =
-       co_await impl_->active->get_for_update(impl_->family, detail::latest_key(impl_->namespace_hash));
+   const auto current = co_await detail::invoke_backend(
+       [&] { return impl_->active->get_for_update(impl_->family, detail::latest_key(impl_->namespace_hash)); });
    if (!same_root(impl_->base_root, current)) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_version, "authenticated state head changed while staging");
    }
    const auto version_key = detail::version_key(impl_->namespace_hash, impl_->candidate);
-   if (co_await impl_->active->get(impl_->family, version_key)) {
+   if (co_await detail::invoke_backend([&] { return impl_->active->get(impl_->family, version_key); })) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_version, "authenticated state version already exists",
                             forge::exceptions::ctx("version", impl_->candidate));
    }
 
    auto put = [active = impl_->active, family = impl_->family](forge::db::core::record_key key,
                                                                bytes value) -> boost::asio::awaitable<void> {
-      co_await active->put(family, std::move(key), std::move(value));
+      co_await detail::invoke_backend([&] { return active->put(family, std::move(key), std::move(value)); });
    };
    auto get = [active = impl_->active, family = impl_->family](
                   forge::db::core::record_key key) -> boost::asio::awaitable<std::optional<bytes>> {
-      co_return co_await active->get_for_update(family, std::move(key));
+      co_return co_await detail::invoke_backend([&] { return active->get_for_update(family, std::move(key)); });
    };
    auto erase = [active = impl_->active,
                  family = impl_->family](forge::db::core::record_key key) -> boost::asio::awaitable<void> {
-      co_await active->erase(family, std::move(key));
+      co_await detail::invoke_backend([&] { return active->erase(family, std::move(key)); });
    };
    co_await computed.state.persist(get, put, erase);
    co_await computed.changes.persist(get, put, erase);
@@ -188,8 +189,9 @@ boost::asio::awaitable<staged_version> transaction::stage(std::span<const mutati
    }
 
    const auto encoded = detail::encode_root(computed.staged.commitment);
-   co_await impl_->active->put(impl_->family, version_key, encoded);
-   co_await impl_->active->put(impl_->family, detail::latest_key(impl_->namespace_hash), encoded);
+   co_await detail::invoke_backend([&] { return impl_->active->put(impl_->family, version_key, encoded); });
+   co_await detail::invoke_backend(
+       [&] { return impl_->active->put(impl_->family, detail::latest_key(impl_->namespace_hash), encoded); });
 
    impl_->participant->set_staged(computed.staged);
    co_return computed.staged;
