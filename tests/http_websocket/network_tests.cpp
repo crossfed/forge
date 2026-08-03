@@ -1936,6 +1936,11 @@ response raw_http_exchange(std::uint16_t port, std::string request_text,
    return to_http_response(beast_response);
 }
 
+void abort_connection(beast::tcp_stream& stream) {
+   stream.socket().set_option(asio::socket_base::linger{true, 0});
+   stream.socket().close();
+}
+
 struct expect_continue_exchange_result {
    std::optional<response> interim;
    response final;
@@ -5178,6 +5183,48 @@ BOOST_AUTO_TEST_CASE(server_rejects_request_body_over_configured_limit) {
    forge::asio::blocking::run(runtime, server.async_stop());
 }
 
+BOOST_AUTO_TEST_CASE(http_server_half_close_preserves_response_and_closes_keep_alive) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto owner_canceled = std::make_shared<std::atomic_bool>(false);
+   auto server = forge::net::http::server{
+       runtime,
+       server_config{.read_timeout = std::chrono::seconds{2}, .idle_timeout = std::chrono::seconds{2}},
+       [owner_canceled](route_context& context) -> boost::asio::awaitable<response> {
+          auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+          timer.expires_after(std::chrono::milliseconds{50});
+          auto error = boost::system::error_code{};
+          co_await timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
+          if (error == boost::asio::error::operation_aborted) {
+             owner_canceled->store(true);
+          }
+          co_return make_text_response(context.request, status::ok, "finished");
+       },
+   };
+   forge::asio::blocking::run(runtime, server.async_start());
+
+   auto io_context = asio::io_context{};
+   auto stream = beast::tcp_stream{io_context};
+   stream.expires_after(std::chrono::seconds{2});
+   stream.connect(tcp::endpoint{asio::ip::make_address("127.0.0.1"), server.port()});
+   asio::write(stream.socket(), asio::buffer(std::string{"GET /work HTTP/1.1\r\n"
+                                                         "Host: 127.0.0.1\r\n"
+                                                         "Connection: keep-alive\r\n"
+                                                         "\r\n"}));
+
+   stream.socket().shutdown(tcp::socket::shutdown_send);
+   auto buffer = beast::flat_buffer{};
+   auto message = beast_http::response<beast_http::string_body>{};
+   beast_http::read(stream, buffer, message);
+   const auto response = to_http_response(message);
+
+   BOOST_TEST(response.result() == status::ok);
+   BOOST_TEST(response.body() == "finished");
+   BOOST_TEST(!response.keep_alive());
+   BOOST_TEST(!owner_canceled->load());
+
+   forge::asio::blocking::run(runtime, server.async_stop());
+}
+
 BOOST_AUTO_TEST_CASE(http_server_disconnect_cancels_owner_and_accepts_next_connection) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto owner_started = std::make_shared<std::atomic_bool>(false);
@@ -5217,9 +5264,7 @@ BOOST_AUTO_TEST_CASE(http_server_disconnect_cancels_owner_and_accepts_next_conne
    }
    BOOST_REQUIRE(owner_started->load());
 
-   auto ignored = boost::system::error_code{};
-   stream.socket().shutdown(tcp::socket::shutdown_both, ignored);
-   stream.socket().close(ignored);
+   abort_connection(stream);
 
    const auto cancel_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
    while (!owner_canceled->load() && std::chrono::steady_clock::now() < cancel_deadline) {
@@ -5284,9 +5329,7 @@ BOOST_AUTO_TEST_CASE(http_server_disconnect_cancels_stream_owner_and_accepts_nex
    }
    BOOST_REQUIRE(owner_started->load());
 
-   auto ignored = boost::system::error_code{};
-   stream.socket().shutdown(tcp::socket::shutdown_both, ignored);
-   stream.socket().close(ignored);
+   abort_connection(stream);
 
    const auto cancel_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
    while (!owner_canceled->load() && std::chrono::steady_clock::now() < cancel_deadline) {
@@ -5350,9 +5393,7 @@ BOOST_AUTO_TEST_CASE(http_server_disconnect_after_pipeline_still_cancels_owner) 
                                                          "Connection: close\r\n"
                                                          "\r\n"}));
 
-   auto ignored = boost::system::error_code{};
-   stream.socket().shutdown(tcp::socket::shutdown_both, ignored);
-   stream.socket().close(ignored);
+   abort_connection(stream);
 
    const auto cancel_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
    while (!owner_canceled->load() && std::chrono::steady_clock::now() < cancel_deadline) {
@@ -5418,9 +5459,7 @@ BOOST_AUTO_TEST_CASE(http_server_disconnect_cancels_streaming_response_body) {
    }
    BOOST_REQUIRE(body_started->load());
 
-   auto ignored = boost::system::error_code{};
-   stream.socket().shutdown(tcp::socket::shutdown_both, ignored);
-   stream.socket().close(ignored);
+   abort_connection(stream);
 
    const auto cancel_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{1};
    while (!body_canceled->load() && std::chrono::steady_clock::now() < cancel_deadline) {

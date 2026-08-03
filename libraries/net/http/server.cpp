@@ -221,6 +221,15 @@ class request_read_ownership {
       stop_monitor();
    }
 
+   void mark_peer_read_closed() {
+      peer_read_closed_ = true;
+      mark_connection_closed();
+   }
+
+   [[nodiscard]] bool peer_read_closed() const noexcept {
+      return peer_read_closed_;
+   }
+
    [[nodiscard]] bool body_read_requested() const noexcept {
       return body_read_requested_;
    }
@@ -256,6 +265,7 @@ class request_read_ownership {
    bool monitor_read_active_ = false;
    bool monitor_stopping_ = false;
    bool connection_closed_ = false;
+   bool peer_read_closed_ = false;
 };
 
 class body_read_scope {
@@ -534,7 +544,7 @@ class server_session : public std::enable_shared_from_this<server_session> {
             stream_.expires_after(config_.idle_timeout);
             auto keep_alive = co_await handle_owned_operation(
                 handle_and_write_stream(std::move(stream_request_value), body_source, request_body_marker,
-                                        request_value.version(), request_value.keep_alive()),
+                                        read_ownership, request_value.version(), request_value.keep_alive()),
                 read_ownership);
             if (!keep_alive.has_value()) {
                co_return;
@@ -563,12 +573,13 @@ class server_session : public std::enable_shared_from_this<server_session> {
          auto& buffered_context = *context_storage;
 
          stream_.expires_after(config_.idle_timeout);
-         auto response_value = co_await handle_owned_http(buffered_context);
+         read_ownership = std::make_shared<request_read_ownership>(stream_.get_executor());
+         auto response_value = co_await handle_owned_operation(handle_http(buffered_context), read_ownership);
          if (!response_value.has_value()) {
             co_return;
          }
          response_value->version(request_value.version());
-         response_value->keep_alive(request_value.keep_alive());
+         response_value->keep_alive(request_value.keep_alive() && !read_ownership->peer_read_closed());
 
          co_await write_response(*response_value);
          if (!response_value->keep_alive()) {
@@ -685,6 +696,9 @@ class server_session : public std::enable_shared_from_this<server_session> {
             if (state->read_ownership->body_read_requested()) {
                continue;
             }
+         } else if (read_error == asio::error::eof) {
+            state->read_ownership->mark_peer_read_closed();
+            co_return;
          } else if (!read_error && bytes != 0U) {
             continue;
          }
@@ -741,26 +755,22 @@ class server_session : public std::enable_shared_from_this<server_session> {
       }
    }
 
-   awaitable<std::optional<response>> handle_owned_http(route_context& context) {
-      auto read_ownership = std::make_shared<request_read_ownership>(stream_.get_executor());
-      co_return co_await handle_owned_operation(handle_http(context), std::move(read_ownership));
-   }
-
    awaitable<bool> handle_and_write_stream(stream_request request_value,
                                            const std::shared_ptr<beast_body_reader_source>& body_source,
-                                           const std::shared_ptr<int>& request_body_marker, unsigned version,
-                                           bool request_keep_alive) {
+                                           const std::shared_ptr<int>& request_body_marker,
+                                           const std::shared_ptr<request_read_ownership>& read_ownership,
+                                           unsigned version, bool request_keep_alive) {
       auto response_value = co_await router_->handle_stream(request_value);
       const auto request_body_deferred_to_response =
           detail::stream_server_access::response_body_uses_request(response_value, request_body_marker) &&
           !body_source->done();
       response_value.head.version(version);
-      response_value.head.keep_alive(request_keep_alive && body_source->done());
+      response_value.head.keep_alive(request_keep_alive && body_source->done() && !read_ownership->peer_read_closed());
       if (request_body_deferred_to_response) {
          co_await body_source->send_continue_if_needed();
       }
       co_await write_stream_response(response_value);
-      co_return response_value.head.keep_alive();
+      co_return response_value.head.keep_alive() && !read_ownership->peer_read_closed();
    }
 
    awaitable<void> write_response(response& response_value) {
