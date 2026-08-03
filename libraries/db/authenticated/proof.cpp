@@ -451,7 +451,7 @@ verified_range verify_range(std::string_view domain, const root& expected_anchor
             reject("authenticated reverse range proof omits a matching item");
          }
          result.more = true;
-         result.next_key = predecessor->leaf.key;
+         result.next_key = result.items.back().key;
       }
    } else {
       auto rank = lower_rank;

@@ -2222,6 +2222,36 @@ BOOST_AUTO_TEST_CASE(db_object_precommit_observer_writes_final_post_savepoint_tr
    }());
 }
 
+BOOST_AUTO_TEST_CASE(db_object_precommit_observers_compose_ordered_writes) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = co_await make_store(driver);
+      auto first = std::make_shared<recording_precommit_observer>();
+      auto second = std::make_shared<writing_precommit_observer>();
+      auto committed = std::make_shared<counting_observer>();
+      store.add_observer(committed);
+
+      auto tx = co_await store.begin_transaction();
+      second->write = [&tx]() -> boost::asio::awaitable<void> {
+         co_await tx.insert(make_account(43, "second-observer", 50, 4));
+      };
+      tx.add_precommit_observer(first);
+      tx.add_precommit_observer(second);
+      co_await tx.insert(make_account(42, "initial", 100, 3));
+      co_await tx.commit();
+
+      BOOST_REQUIRE(first->last.has_value());
+      BOOST_REQUIRE_EQUAL(first->last->mutations.size(), 1U);
+      BOOST_REQUIRE(second->last.has_value());
+      BOOST_REQUIRE_EQUAL(second->last->mutations.size(), 1U);
+      BOOST_CHECK_EQUAL(committed->mutation_count, 2U);
+      BOOST_CHECK_EQUAL((co_await store.get(account::id_t{42})).name, "initial");
+      BOOST_CHECK_EQUAL((co_await store.get(account::id_t{43})).name, "second-observer");
+      co_return;
+   }());
+}
+
 BOOST_AUTO_TEST_CASE(db_object_precommit_projection_rejects_later_core_hook_mutations) {
    auto runtime = forge::asio::runtime{};
    auto driver = std::make_shared<memory_driver>();

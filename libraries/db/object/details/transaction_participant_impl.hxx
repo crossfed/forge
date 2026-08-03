@@ -61,7 +61,7 @@ class transaction_participant_impl final : public forge::db::core::transaction_p
    transaction::allocation_seal_map allocation_seals_;
    std::vector<std::shared_ptr<observer>> observers_;
    std::vector<std::shared_ptr<precommit_observer>> precommit_observers_;
-   std::vector<change_set> observed_change_sets_;
+   std::optional<change_set> observed_change_set_;
    transaction::release_fn release_;
    change_set changes_;
    std::optional<savepoint_frame> pending_savepoint_;

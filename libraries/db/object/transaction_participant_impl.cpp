@@ -133,9 +133,7 @@ boost::asio::awaitable<void> transaction_participant_impl::release_savepoint(for
 }
 
 boost::asio::awaitable<void> transaction_participant_impl::prepare_commit(forge::db::core::participant_access&) {
-   const auto stale = std::ranges::any_of(
-       observed_change_sets_, [this](const change_set& observed) { return !same_changes(observed, changes_); });
-   if (stale) {
+   if (observed_change_set_ && !same_changes(*observed_change_set_, changes_)) {
       FORGE_THROW_EXCEPTION(exceptions::stale_precommit_projection,
                             "db object precommit projection changed after an observer accepted it");
    }
@@ -181,8 +179,8 @@ boost::asio::awaitable<void> transaction_participant_impl::run_precommit_observe
    const auto observers = precommit_observers_;
    for (const auto& hook : observers) {
       co_await hook->before_commit(changes_);
-      observed_change_sets_.push_back(changes_);
    }
+   observed_change_set_ = changes_;
 }
 
 void transaction_participant_impl::release_writer() noexcept {
@@ -195,7 +193,7 @@ void transaction_participant_impl::release_writer() noexcept {
 boost::asio::awaitable<void> transaction_participant_impl::after_rollback() {
    finalized_ = true;
    changes_.mutations.clear();
-   observed_change_sets_.clear();
+   observed_change_set_.reset();
    savepoints_.clear();
    pending_savepoint_.reset();
 
@@ -215,7 +213,7 @@ boost::asio::awaitable<void> transaction_participant_impl::after_rollback() {
 boost::asio::awaitable<void> transaction_participant_impl::after_commit() {
    finalized_ = true;
    auto committed_changes = std::move(changes_);
-   observed_change_sets_.clear();
+   observed_change_set_.reset();
    allocation_seals_.clear();
    savepoints_.clear();
    pending_savepoint_.reset();

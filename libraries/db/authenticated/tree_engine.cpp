@@ -799,13 +799,8 @@ boost::asio::awaitable<verified_range> tree_engine::scan_range(const root& ancho
    if (request.reverse) {
       std::ranges::reverse(result.items);
       if (result_begin > first) {
-         auto predecessor = std::vector<verified_range_item>{};
-         co_await emit_items(*root_hash_, 0U, result_begin - 1U, result_begin, false, predecessor, 0U);
-         if (predecessor.size() != 1U) {
-            FORGE_THROW_EXCEPTION(exceptions::corrupt_node, "authenticated reverse range scan omits its continuation");
-         }
          result.more = true;
-         result.next_key = std::move(predecessor.front().key);
+         result.next_key = result.items.back().key;
       }
    } else if (result_end < upper) {
       auto successor = std::vector<verified_range_item>{};

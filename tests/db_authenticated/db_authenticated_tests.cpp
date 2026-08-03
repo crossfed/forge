@@ -789,7 +789,7 @@ BOOST_AUTO_TEST_CASE(authenticated_versions_are_deterministic_and_restart_safe) 
       BOOST_TEST(reverse_page.items[0].rank > reverse_page.items[1].rank);
       BOOST_TEST(reverse_page.more);
       BOOST_REQUIRE(reverse_page.next_key.has_value());
-      BOOST_TEST(text(*reverse_page.next_key) == "beta");
+      BOOST_TEST(text(*reverse_page.next_key) == "delta");
 
       const auto scanned_reverse_page = co_await authenticated.scan_range(1, forge::db::authenticated::range_request{
                                                                                  .lower = bytes("b"),
@@ -801,7 +801,7 @@ BOOST_AUTO_TEST_CASE(authenticated_versions_are_deterministic_and_restart_safe) 
 
       const auto reverse_tail_proof = co_await authenticated.prove_range(1, forge::db::authenticated::range_request{
                                                                                 .lower = bytes("b"),
-                                                                                .upper = bytes("delta"),
+                                                                                .upper = reverse_page.next_key,
                                                                                 .limit = 2,
                                                                                 .reverse = true,
                                                                             });
@@ -822,7 +822,7 @@ BOOST_AUTO_TEST_CASE(authenticated_versions_are_deterministic_and_restart_safe) 
       BOOST_TEST(text(reverse_unbounded.items[1].key) == "delta");
       BOOST_TEST(reverse_unbounded.more);
       BOOST_REQUIRE(reverse_unbounded.next_key.has_value());
-      BOOST_TEST(text(*reverse_unbounded.next_key) == "beta");
+      BOOST_TEST(text(*reverse_unbounded.next_key) == "delta");
 
       const auto empty_reverse_proof = co_await authenticated.prove_range(
           1, forge::db::authenticated::range_request{
