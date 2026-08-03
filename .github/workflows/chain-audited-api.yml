@@ -85,6 +85,7 @@ jobs:
         with:
           ref: ${{ needs.gate.outputs.forge_commit }}
           persist-credentials: false
+          fetch-depth: 0
 
       - name: Install clang-format 22
         run: sudo apt-get update && sudo apt-get install -y clang-format-22
@@ -92,11 +93,33 @@ jobs:
       - name: Check Forge-owned sources
         shell: bash
         run: |
-          find libraries/api libraries/chain/api libraries/chain/protocol libraries/db/authenticated \
-            tests/chain_api tests/db_authenticated tests/package_chain_api_component \
-            -type f \( -name '*.cppm' -o -name '*.cpp' -o -name '*.hpp' -o -name '*.hxx' \) \
-            -print0 | xargs -0 clang-format-22 --dry-run --Werror
-          git diff --check
+          base_tag="$(git describe --tags --match 'v[0-9]*' --abbrev=0)"
+          clang_format="$(command -v clang-format-22 || command -v clang-format)"
+          git_clang_format="$(command -v git-clang-format-22 || command -v git-clang-format)"
+
+          sources=()
+          while IFS= read -r -d '' source; do
+            case "$source" in
+              *.cppm|*.cpp|*.hpp|*.hxx) sources+=("$source") ;;
+            esac
+          done < <(
+            git diff --name-only --diff-filter=ACMR -z "$base_tag"...HEAD -- \
+              libraries/api libraries/chain/api libraries/chain/protocol libraries/db/authenticated \
+              tests/chain_api tests/db_authenticated tests/package_chain_api_component
+          )
+
+          if (( ${#sources[@]} != 0 )); then
+            format_diff="$(
+              "$git_clang_format" --diff --quiet --binary "$clang_format" \
+                "$base_tag" -- "${sources[@]}"
+            )"
+            if [[ -n "$format_diff" ]]; then
+              printf '%s\n' "$format_diff"
+              exit 1
+            fi
+          fi
+
+          git diff --check "$base_tag"...HEAD
 
       - name: Validate pinned Spine revision
         shell: bash
