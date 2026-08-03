@@ -1644,7 +1644,8 @@ class stream_body_echo_api_impl final : public stream_body_echo_api {
    }
 
    boost::asio::awaitable<forge::net::http::streaming_response> independent(stream_body_echo_request request) override {
-      auto reply = response{status::ok, request.request().version()};
+      const auto result = request.id == "status-mismatch" ? status::accepted : status::ok;
+      auto reply = response{result, request.request().version()};
       reply.set(field::content_type, "application/octet-stream");
       co_return forge::net::http::streaming_response::from_body(std::move(reply), make_body_reader({"independent"}));
    }
@@ -2573,6 +2574,13 @@ BOOST_AUTO_TEST_CASE(http_api_openapi_describes_native_http_bodies) {
    BOOST_TEST(
        objects["paths"]["/objects/{collection}/{key}"]["get"]["responses"]["200"]["content"]["*/*"]["schema"]["format"]
            .as_string() == "binary");
+   const auto& file_responses = objects["paths"]["/objects/{collection}/{key}"]["get"]["responses"];
+   BOOST_TEST(file_responses.get_object().contains("206"));
+   BOOST_TEST(file_responses["206"]["content"]["*/*"]["schema"]["format"].as_string() == "binary");
+   BOOST_TEST(file_responses.get_object().contains("304"));
+   BOOST_TEST(!file_responses["304"].get_object().contains("content"));
+   BOOST_TEST(file_responses.get_object().contains("416"));
+   BOOST_TEST(!file_responses["416"].get_object().contains("content"));
    BOOST_TEST(
        !objects["paths"]["/objects/{collection}/{key}"]["head"]["responses"]["200"].get_object().contains("content"));
 
@@ -5387,6 +5395,17 @@ BOOST_AUTO_TEST_CASE(http_api_independent_stream_body_does_not_send_interim_cont
    BOOST_TEST(!exchange.interim.has_value());
    BOOST_TEST(exchange.final.result_int() == static_cast<unsigned>(status::ok));
    BOOST_TEST(exchange.final.body() == "independent");
+
+   auto connection = forge::net::http::connection{
+       runtime,
+       parse_base_url("http://127.0.0.1:" + std::to_string(server.port())),
+   };
+   auto mismatched_request = make_request(method::put, "/stream-body-independent/status-mismatch");
+   mismatched_request.set(field::content_type, "application/octet-stream");
+   mismatched_request.body() = "ignored";
+   mismatched_request.prepare_payload();
+   auto mismatched = forge::asio::blocking::run(runtime, connection.async_request(std::move(mismatched_request)));
+   BOOST_TEST(mismatched.result() == status::internal_server_error);
 
    forge::asio::blocking::run(runtime, server.async_stop());
 }

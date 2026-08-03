@@ -437,6 +437,17 @@ struct request_body_description {
    }
    auto responses = forge::mutable_variant_object{};
    responses.set(status_name(operation.mapping.success_status), forge::variant{std::move(response)});
+   if (operation.mapping.response_file) {
+      auto partial = forge::mutable_variant_object{}("description", "Partial file response");
+      if (operation.mapping.verb != forge::net::http::method::head) {
+         partial("content", media_schema(binary_schema(), "*/*"));
+      }
+      responses.set(status_name(forge::net::http::status::partial_content), forge::variant{std::move(partial)});
+      responses.set(status_name(forge::net::http::status::not_modified),
+                    forge::variant{forge::mutable_variant_object{}("description", "File not modified")});
+      responses.set(status_name(forge::net::http::status::range_not_satisfiable),
+                    forge::variant{forge::mutable_variant_object{}("description", "File range not satisfiable")});
+   }
    responses.set("default", forge::variant{forge::mutable_variant_object{}("description", "Forge API error")(
                                 "content", media_schema(error_response_schema(method),
                                                         content_type(operation.mapping.error_body_codec)))});

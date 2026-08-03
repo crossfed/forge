@@ -1458,6 +1458,9 @@ class binding_builder {
              stream_response::buffered(make_success_response(request_value, success_status, value, options, endpoint));
          endpoint_headers_merged = true;
       }
+      if constexpr (!std::is_same_v<std::remove_cvref_t<Response>, file_response>) {
+         require_route_success_status(success_status, output.head.result());
+      }
       if (!endpoint_headers_merged) {
          merge_endpoint_headers(output.head, endpoint);
       }
