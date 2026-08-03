@@ -68,6 +68,24 @@ BOOST_AUTO_TEST_CASE(variant_equality_covers_all_value_kinds) {
    BOOST_CHECK(forge::variant{forge::variants{forge::variant{1}}} != forge::variant{true});
 }
 
+BOOST_AUTO_TEST_CASE(variant_object_equality_is_independent_of_member_insertion_order) {
+   const auto left = forge::variant{forge::mutable_variant_object{}("first", 1)("second", "value")};
+   const auto reordered = forge::variant{forge::mutable_variant_object{}("second", "value")("first", 1)};
+   const auto different = forge::variant{forge::mutable_variant_object{}("second", "other")("first", 1)};
+   const auto duplicates =
+       forge::variant{forge::mutable_variant_object{}("same", forge::variant{1})("same", forge::variant{2})};
+   const auto reordered_duplicates =
+       forge::variant{forge::mutable_variant_object{}("same", forge::variant{2})("same", forge::variant{1})};
+   const auto mismatched_duplicates =
+       forge::variant{forge::mutable_variant_object{}("same", forge::variant{1})("other", forge::variant{2})};
+
+   BOOST_CHECK(left == reordered);
+   BOOST_CHECK(reordered == left);
+   BOOST_CHECK(left != different);
+   BOOST_CHECK(duplicates == reordered_duplicates);
+   BOOST_CHECK(duplicates != mismatched_duplicates);
+}
+
 BOOST_AUTO_TEST_CASE(variant_equality_rejects_structural_scalar_mismatches_without_conversion) {
    const auto object = forge::variant{forge::mutable_variant_object{}("value", 1)};
    const auto array = forge::variant{forge::variants{forge::variant{1}}};

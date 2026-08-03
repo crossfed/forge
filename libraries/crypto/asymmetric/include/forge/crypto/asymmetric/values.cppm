@@ -1,5 +1,6 @@
 module;
 
+#include <algorithm>
 #include <array>
 #include <compare>
 #include <concepts>
@@ -13,6 +14,19 @@ module;
 export module forge.crypto.asymmetric.values;
 
 import forge.raw.codec;
+
+namespace forge::crypto::asymmetric {
+
+template <std::size_t Size>
+[[nodiscard]] constexpr std::strong_ordering unsigned_byte_order(const std::array<char, Size>& left,
+                                                                 const std::array<char, Size>& right) noexcept {
+   return std::lexicographical_compare_three_way(
+       left.begin(), left.end(), right.begin(), right.end(), [](char left_byte, char right_byte) {
+          return static_cast<unsigned char>(left_byte) <=> static_cast<unsigned char>(right_byte);
+       });
+}
+
+} // namespace forge::crypto::asymmetric
 
 export namespace forge::crypto::asymmetric {
 
@@ -52,7 +66,9 @@ struct k1_public_key {
    }
 
    bool operator==(const k1_public_key&) const = default;
-   auto operator<=>(const k1_public_key&) const = default;
+   [[nodiscard]] constexpr std::strong_ordering operator<=>(const k1_public_key& other) const noexcept {
+      return unsigned_byte_order(data, other.data);
+   }
 };
 
 struct r1_public_key {
@@ -80,7 +96,9 @@ struct r1_public_key {
    }
 
    bool operator==(const r1_public_key&) const = default;
-   auto operator<=>(const r1_public_key&) const = default;
+   [[nodiscard]] constexpr std::strong_ordering operator<=>(const r1_public_key& other) const noexcept {
+      return unsigned_byte_order(data, other.data);
+   }
 };
 
 struct webauthn_public_key {
@@ -105,7 +123,15 @@ struct webauthn_public_key {
    }
 
    bool operator==(const webauthn_public_key&) const = default;
-   auto operator<=>(const webauthn_public_key&) const = default;
+   [[nodiscard]] constexpr std::strong_ordering operator<=>(const webauthn_public_key& other) const noexcept {
+      if (const auto order = unsigned_byte_order(key, other.key); order != 0) {
+         return order;
+      }
+      if (const auto order = user_presence <=> other.user_presence; order != 0) {
+         return order;
+      }
+      return rpid <=> other.rpid;
+   }
 };
 
 struct ed25519_public_key {
@@ -153,7 +179,9 @@ struct k1_signature {
    }
 
    bool operator==(const k1_signature&) const = default;
-   auto operator<=>(const k1_signature&) const = default;
+   [[nodiscard]] constexpr std::strong_ordering operator<=>(const k1_signature& other) const noexcept {
+      return unsigned_byte_order(data, other.data);
+   }
 };
 
 struct r1_signature {
@@ -169,7 +197,9 @@ struct r1_signature {
    }
 
    bool operator==(const r1_signature&) const = default;
-   auto operator<=>(const r1_signature&) const = default;
+   [[nodiscard]] constexpr std::strong_ordering operator<=>(const r1_signature& other) const noexcept {
+      return unsigned_byte_order(data, other.data);
+   }
 };
 
 struct webauthn_signature {
@@ -190,7 +220,15 @@ struct webauthn_signature {
    }
 
    bool operator==(const webauthn_signature&) const = default;
-   auto operator<=>(const webauthn_signature&) const = default;
+   [[nodiscard]] constexpr std::strong_ordering operator<=>(const webauthn_signature& other) const noexcept {
+      if (const auto order = unsigned_byte_order(compact_signature, other.compact_signature); order != 0) {
+         return order;
+      }
+      if (const auto order = auth_data <=> other.auth_data; order != 0) {
+         return order;
+      }
+      return client_json <=> other.client_json;
+   }
 };
 
 struct ed25519_signature {

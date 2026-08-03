@@ -780,7 +780,11 @@ bool operator==(const variant& a, const variant& b) {
          return false;
       const auto& left = a.get_object();
       const auto& right = b.get_object();
-      return left.size() == right.size() && std::equal(left.begin(), left.end(), right.begin());
+      return left.size() == right.size() && std::is_permutation(left.begin(), left.end(), right.begin(), right.end(),
+                                                                [](const auto& left_entry, const auto& right_entry) {
+                                                                   return left_entry.key() == right_entry.key() &&
+                                                                          left_entry.value() == right_entry.value();
+                                                                });
    }
    if (a.is_blob() || b.is_blob())
       return a.is_blob() && b.is_blob() && a.get_blob().data == b.get_blob().data;

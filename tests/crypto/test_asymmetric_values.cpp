@@ -64,4 +64,29 @@ BOOST_AUTO_TEST_CASE(canonical_values_order_by_algorithm_then_payload) {
    BOOST_CHECK(keys == (std::vector<public_key>{first, second, r1}));
 }
 
+BOOST_AUTO_TEST_CASE(canonical_ecc_payload_order_treats_char_storage_as_unsigned_bytes) {
+   using namespace forge::crypto::asymmetric;
+
+   auto lower_key = ecc_public_key{};
+   auto higher_key = ecc_public_key{};
+   lower_key.front() = static_cast<char>(0x7fU);
+   higher_key.front() = static_cast<char>(0x80U);
+
+   BOOST_CHECK((k1_public_key{lower_key} <=> k1_public_key{higher_key}) == std::strong_ordering::less);
+   BOOST_CHECK((r1_public_key{lower_key} <=> r1_public_key{higher_key}) == std::strong_ordering::less);
+   BOOST_CHECK((webauthn_public_key{lower_key, webauthn_public_key::user_presence_t::USER_PRESENCE_PRESENT, "rp"} <=>
+                webauthn_public_key{higher_key, webauthn_public_key::user_presence_t::USER_PRESENCE_PRESENT, "rp"}) ==
+               std::strong_ordering::less);
+
+   auto lower_signature = ecc_signature{};
+   auto higher_signature = ecc_signature{};
+   lower_signature.front() = static_cast<char>(0x7fU);
+   higher_signature.front() = static_cast<char>(0x80U);
+
+   BOOST_CHECK((k1_signature{lower_signature} <=> k1_signature{higher_signature}) == std::strong_ordering::less);
+   BOOST_CHECK((r1_signature{lower_signature} <=> r1_signature{higher_signature}) == std::strong_ordering::less);
+   BOOST_CHECK((webauthn_signature{lower_signature, {}, "client"} <=>
+                webauthn_signature{higher_signature, {}, "client"}) == std::strong_ordering::less);
+}
+
 BOOST_AUTO_TEST_SUITE_END()
