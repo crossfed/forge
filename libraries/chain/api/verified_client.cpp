@@ -270,6 +270,9 @@ void verified_client::verify_changes(const protocol::state_changes_request& requ
                                "chain API changes response contains a non-canonical block sequence");
       }
       for (const auto& result : batch.ranges) {
+         if (complete || stopped_within_range || batch.anchor.block_num != position.block) {
+            reject("chain API changes response contains unauthenticated trailing ranges");
+         }
          const auto& expected = original_range(position.range);
          if (result.range != expected) {
             FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof,
@@ -304,6 +307,10 @@ void verified_client::verify_changes(const protocol::state_changes_request& requ
             }
          }
       }
+   }
+
+   if (proof_index != expected_proofs) {
+      reject("chain API changes response leaves state proofs unauthenticated");
    }
 
    if (response.next) {

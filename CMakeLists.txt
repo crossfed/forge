@@ -827,6 +827,7 @@ if(FORGE_ENABLE_CONTRACT_TOOLING)
 endif()
 
 add_library(forge STATIC forge.cpp)
+add_library(Forge::forge ALIAS forge)
 
 target_include_directories(forge PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
 

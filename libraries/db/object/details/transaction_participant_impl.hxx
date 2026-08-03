@@ -33,6 +33,7 @@ class transaction_participant_impl final : public forge::db::core::transaction_p
                                                       forge::db::core::participant_access& access) override;
    boost::asio::awaitable<void> release_savepoint(forge::db::core::savepoint_id_t id,
                                                   forge::db::core::participant_access& access) override;
+   boost::asio::awaitable<void> prepare_commit(forge::db::core::participant_access& access) override;
 
    void remember_allocation(forge::db::ids::object_id type, std::uint64_t next_instance);
    void use_backend_writes(bool value) noexcept;
@@ -60,6 +61,7 @@ class transaction_participant_impl final : public forge::db::core::transaction_p
    transaction::allocation_seal_map allocation_seals_;
    std::vector<std::shared_ptr<observer>> observers_;
    std::vector<std::shared_ptr<precommit_observer>> precommit_observers_;
+   std::vector<change_set> observed_change_sets_;
    transaction::release_fn release_;
    change_set changes_;
    std::optional<savepoint_frame> pending_savepoint_;

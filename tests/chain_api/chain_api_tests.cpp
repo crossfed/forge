@@ -335,6 +335,11 @@ class accepting_audit_verifier final : public forge::chain::api::audit_verifier 
                                                                    std::uint32_t,
                                                                    const forge::chain::protocol::proof_blob&) override {
       ++state_change_verifications;
+      if (state_change_result) {
+         auto result = *state_change_result;
+         result.range = range;
+         return result;
+      }
       return forge::chain::protocol::state_change_range{.range = range};
    }
    void verify_ancestry(const forge::chain::protocol::state_anchor& finalized,
@@ -358,6 +363,7 @@ class accepting_audit_verifier final : public forge::chain::api::audit_verifier 
    std::size_t ancestry_verifications = 0;
    std::optional<forge::chain::protocol::bytes> point_value;
    forge::chain::protocol::state_range_response range_result;
+   std::optional<forge::chain::protocol::state_change_range> state_change_result;
    std::optional<forge::chain::protocol::state_anchor> ancestry_finalized;
    std::vector<forge::chain::protocol::state_anchor> ancestry_intermediate;
    std::optional<forge::chain::protocol::proof_blob> ancestry_proof;
@@ -1684,6 +1690,63 @@ BOOST_AUTO_TEST_CASE(verified_changes_cover_the_requested_interval_and_terminal_
    auto forged_terminal = make_response();
    forged_terminal.blocks.back().anchor.state_root._hash[0] = 99U;
    BOOST_CHECK_THROW(static_cast<void>(verify(std::move(forged_terminal))),
+                     forge::chain::api::exceptions::invalid_state_proof);
+}
+
+BOOST_AUTO_TEST_CASE(verified_changes_reject_unauthenticated_trailing_ranges_and_cross_block_batches) {
+   auto first = forge::chain::protocol::state_anchor{.block_num = 11U};
+   first.block._hash[0] = 11U;
+   auto finalized = forge::chain::protocol::state_anchor{.block_num = 12U};
+   finalized.block._hash[0] = 12U;
+
+   const auto request = forge::chain::protocol::state_changes_request{
+       .from_block = 10U,
+       .to_block = 12U,
+   };
+   const auto verify = [&](forge::chain::protocol::state_changes_response response,
+                           std::optional<forge::chain::protocol::bytes> next_key = std::nullopt) {
+      auto services = forge::api::core::registry{};
+      services.install<forge::chain::api::state>(std::make_shared<state_service>(std::move(response)));
+      auto verifier = std::make_shared<accepting_audit_verifier>();
+      if (next_key) {
+         verifier->state_change_result = forge::chain::protocol::state_change_range{.next_key = std::move(next_key)};
+      }
+      auto client = forge::chain::api::verified_client{
+          forge::chain::api::raw_client{forge::chain::api::service_handles{
+              .state_queries = services.get<forge::chain::api::state>(forge::chain::api::state::ref()),
+          }},
+          std::move(verifier),
+      };
+      return run(client.get_changes(request));
+   };
+   const auto make_audit = [] {
+      return forge::chain::protocol::audit_bundle{
+          .finality = forge::chain::protocol::proof_blob{.scheme = "test.finality"},
+          .ancestry = forge::chain::protocol::proof_blob{.scheme = "test.ancestry"},
+          .state =
+              {
+                  forge::chain::protocol::proof_blob{.scheme = "test.changes"},
+                  forge::chain::protocol::proof_blob{.scheme = "test.changes"},
+              },
+      };
+   };
+
+   auto trailing = forge::chain::protocol::state_changes_response{};
+   trailing.context.anchor = finalized;
+   trailing.blocks = {{.anchor = first, .ranges = {{.range = {}}, {.range = {}}}}};
+   trailing.next = forge::chain::protocol::state_changes_cursor{
+       .block = 11U,
+       .key = forge::chain::protocol::bytes{0x20U},
+   };
+   trailing.audit = make_audit();
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(trailing), forge::chain::protocol::bytes{0x20U})),
+                     forge::chain::api::exceptions::invalid_state_proof);
+
+   auto crossing = forge::chain::protocol::state_changes_response{};
+   crossing.context.anchor = finalized;
+   crossing.blocks = {{.anchor = first, .ranges = {{.range = {}}, {.range = {}}}}};
+   crossing.audit = make_audit();
+   BOOST_CHECK_THROW(static_cast<void>(verify(std::move(crossing))),
                      forge::chain::api::exceptions::invalid_state_proof);
 }
 

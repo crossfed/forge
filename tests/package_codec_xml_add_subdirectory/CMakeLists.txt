@@ -16,6 +16,13 @@ set(FORGE_ENABLE_VENDOR_TESTS OFF CACHE BOOL "" FORCE)
 
 add_subdirectory("${FORGE_SOURCE_DIR}" forge)
 
+if(NOT TARGET Forge::forge)
+   message(FATAL_ERROR "Forge build-tree package must expose Forge::forge")
+endif()
+get_target_property(forge_alias Forge::forge ALIASED_TARGET)
+if(NOT "${forge_alias}" STREQUAL "forge")
+   message(FATAL_ERROR "Forge::forge must alias the build-tree forge target")
+endif()
 if(NOT TARGET Forge::forge_raw)
    message(FATAL_ERROR "Forge build-tree package must expose Forge::forge_raw")
 endif()

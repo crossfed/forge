@@ -2222,6 +2222,31 @@ BOOST_AUTO_TEST_CASE(db_object_precommit_observer_writes_final_post_savepoint_tr
    }());
 }
 
+BOOST_AUTO_TEST_CASE(db_object_precommit_projection_rejects_later_core_hook_mutations) {
+   auto runtime = forge::asio::runtime{};
+   auto driver = std::make_shared<memory_driver>();
+   forge::asio::blocking::run(runtime, [&driver]() -> boost::asio::awaitable<void> {
+      auto store = co_await make_store(driver);
+      auto observer = std::make_shared<recording_precommit_observer>();
+
+      auto tx = co_await store.begin_transaction();
+      tx.add_precommit_observer(observer);
+      tx.db_transaction().before_commit(
+          [&tx]() -> boost::asio::awaitable<void> { co_await tx.insert(make_account(43, "late-core-hook", 50, 4)); });
+      co_await tx.insert(make_account(42, "projected", 100, 3));
+
+      BOOST_CHECK_THROW(co_await tx.commit(), forge::db::object::exceptions::stale_precommit_projection);
+      BOOST_REQUIRE(observer->last.has_value());
+      BOOST_REQUIRE_EQUAL(observer->last->mutations.size(), 1U);
+      BOOST_CHECK_EQUAL(observer->last->mutations.front().id.instance, 42U);
+      co_await tx.rollback();
+
+      BOOST_CHECK(!(co_await store.find(account::id_t{42})).has_value());
+      BOOST_CHECK(!(co_await store.find(account::id_t{43})).has_value());
+      co_return;
+   }());
+}
+
 BOOST_AUTO_TEST_CASE(db_object_precommit_observer_rejects_reentrant_registration) {
    auto runtime = forge::asio::runtime{};
    auto driver = std::make_shared<memory_driver>();

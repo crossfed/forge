@@ -33,6 +33,14 @@ std::string participant_name(const forge::db::core::family& family) {
    return result;
 }
 
+bool same_changes(const change_set& left, const change_set& right) {
+   return std::equal(left.mutations.begin(), left.mutations.end(), right.mutations.begin(), right.mutations.end(),
+                     [](const object_mutation& lhs, const object_mutation& rhs) {
+                        return lhs.kind == rhs.kind && lhs.id == rhs.id && lhs.before == rhs.before &&
+                               lhs.after == rhs.after;
+                     });
+}
+
 } // namespace
 
 transaction_participant_impl::transaction_participant_impl(forge::db::core::family family,
@@ -124,6 +132,16 @@ boost::asio::awaitable<void> transaction_participant_impl::release_savepoint(for
    co_return;
 }
 
+boost::asio::awaitable<void> transaction_participant_impl::prepare_commit(forge::db::core::participant_access&) {
+   const auto stale = std::ranges::any_of(
+       observed_change_sets_, [this](const change_set& observed) { return !same_changes(observed, changes_); });
+   if (stale) {
+      FORGE_THROW_EXCEPTION(exceptions::stale_precommit_projection,
+                            "db object precommit projection changed after an observer accepted it");
+   }
+   co_return;
+}
+
 void transaction_participant_impl::remember_allocation(forge::db::ids::object_id type, std::uint64_t next_instance) {
    type.instance = 0;
    auto& existing = allocation_seals_[type];
@@ -163,6 +181,7 @@ boost::asio::awaitable<void> transaction_participant_impl::run_precommit_observe
    const auto observers = precommit_observers_;
    for (const auto& hook : observers) {
       co_await hook->before_commit(changes_);
+      observed_change_sets_.push_back(changes_);
    }
 }
 
@@ -176,6 +195,7 @@ void transaction_participant_impl::release_writer() noexcept {
 boost::asio::awaitable<void> transaction_participant_impl::after_rollback() {
    finalized_ = true;
    changes_.mutations.clear();
+   observed_change_sets_.clear();
    savepoints_.clear();
    pending_savepoint_.reset();
 
@@ -195,6 +215,7 @@ boost::asio::awaitable<void> transaction_participant_impl::after_rollback() {
 boost::asio::awaitable<void> transaction_participant_impl::after_commit() {
    finalized_ = true;
    auto committed_changes = std::move(changes_);
+   observed_change_sets_.clear();
    allocation_seals_.clear();
    savepoints_.clear();
    pending_savepoint_.reset();
