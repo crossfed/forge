@@ -793,6 +793,7 @@ class server_session : public std::enable_shared_from_this<server_session> {
 
    awaitable<void> write_response(response& response_value) {
       auto beast_response = to_beast_response(response_value);
+      stream_.expires_after(config_.idle_timeout);
       auto [write_error, written] =
           co_await beast_http::async_write(stream_, beast_response, asio::as_tuple(use_awaitable));
       static_cast<void>(written);
@@ -817,6 +818,7 @@ class server_session : public std::enable_shared_from_this<server_session> {
 
       auto serializer = beast_http::response_serializer<beast_http::buffer_body>{message};
       serializer.split(true);
+      stream_.expires_after(config_.idle_timeout);
       auto [header_error, header_bytes] =
           co_await beast_http::async_write_header(stream_, serializer, asio::as_tuple(use_awaitable));
       static_cast<void>(header_bytes);
@@ -830,6 +832,7 @@ class server_session : public std::enable_shared_from_this<server_session> {
          body.size = chunk->bytes.size();
          body.more = true;
 
+         stream_.expires_after(config_.idle_timeout);
          auto [body_error, body_bytes] =
              co_await beast_http::async_write(stream_, serializer, asio::as_tuple(use_awaitable));
          static_cast<void>(body_bytes);
@@ -842,6 +845,7 @@ class server_session : public std::enable_shared_from_this<server_session> {
       body.data = nullptr;
       body.size = 0;
       body.more = false;
+      stream_.expires_after(config_.idle_timeout);
       auto [final_error, final_bytes] =
           co_await beast_http::async_write(stream_, serializer, asio::as_tuple(use_awaitable));
       static_cast<void>(final_bytes);

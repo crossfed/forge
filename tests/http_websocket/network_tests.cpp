@@ -5683,6 +5683,77 @@ BOOST_AUTO_TEST_CASE(http_server_full_request_buffer_applies_backpressure_withou
    forge::asio::blocking::run(runtime, server.async_stop());
 }
 
+BOOST_AUTO_TEST_CASE(http_server_resets_write_deadline_after_long_handler) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto server = forge::net::http::server{
+       runtime,
+       server_config{.read_timeout = std::chrono::seconds{2}, .idle_timeout = std::chrono::milliseconds{20}},
+       [](route_context& context) -> boost::asio::awaitable<response> {
+          auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+          timer.expires_after(std::chrono::milliseconds{75});
+          co_await timer.async_wait(boost::asio::use_awaitable);
+          co_return make_text_response(context.request, status::ok, "after-handler");
+       },
+   };
+   forge::asio::blocking::run(runtime, server.async_start());
+
+   auto connection =
+       forge::net::http::connection{runtime, parse_base_url("http://127.0.0.1:" + std::to_string(server.port()))};
+   const auto response = forge::asio::blocking::run(
+       runtime, connection.async_request(make_request(method::get, "/wait"),
+                                         request_options{.timeout = std::chrono::seconds{1}}));
+
+   BOOST_TEST(response.result() == status::ok);
+   BOOST_TEST(response.body() == "after-handler");
+
+   forge::asio::blocking::run(runtime, server.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(http_server_resets_write_deadline_for_stream_chunks) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto router = forge::net::http::router{};
+   router.get_stream("/wait", [](stream_request& request_value) -> boost::asio::awaitable<stream_response> {
+      auto handler_timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+      handler_timer.expires_after(std::chrono::milliseconds{75});
+      co_await handler_timer.async_wait(boost::asio::use_awaitable);
+
+      auto step = std::make_shared<unsigned>(0);
+      co_return stream_response{
+          .head = response{status::ok, request_value.context.request.version()},
+          .body = [step]() -> boost::asio::awaitable<std::optional<body_chunk>> {
+             auto timer = boost::asio::steady_timer{co_await boost::asio::this_coro::executor};
+             timer.expires_after(std::chrono::milliseconds{75});
+             co_await timer.async_wait(boost::asio::use_awaitable);
+             if ((*step)++ == 0U) {
+                co_return make_body_chunk("first-");
+             }
+             if (*step == 2U) {
+                co_return make_body_chunk("second");
+             }
+             co_return std::nullopt;
+          },
+      };
+   });
+
+   auto server = forge::net::http::server{
+       runtime,
+       server_config{.read_timeout = std::chrono::seconds{2}, .idle_timeout = std::chrono::milliseconds{20}},
+       std::move(router),
+   };
+   forge::asio::blocking::run(runtime, server.async_start());
+
+   auto connection =
+       forge::net::http::connection{runtime, parse_base_url("http://127.0.0.1:" + std::to_string(server.port()))};
+   const auto response = forge::asio::blocking::run(
+       runtime, connection.async_request(make_request(method::get, "/wait"),
+                                         request_options{.timeout = std::chrono::seconds{1}}));
+
+   BOOST_TEST(response.result() == status::ok);
+   BOOST_TEST(response.body() == "first-second");
+
+   forge::asio::blocking::run(runtime, server.async_stop());
+}
+
 BOOST_AUTO_TEST_CASE(server_keep_alive_gap_uses_idle_timeout) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto requests = std::make_shared<std::atomic<unsigned>>(0);
