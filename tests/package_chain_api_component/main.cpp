@@ -15,6 +15,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -79,6 +80,20 @@ namespace {
 namespace chain_api = forge::chain::api;
 namespace protocol = forge::chain::protocol;
 
+class accepting_finality final : public chain_api::finality_verifier {
+ public:
+   void verify(const protocol::state_anchor&, const protocol::proof_blob&) override {
+      ++calls;
+   }
+
+   void verify_ancestry(const protocol::state_anchor&, std::span<const protocol::state_anchor>,
+                        const protocol::proof_blob&) override {
+      ++calls;
+   }
+
+   std::size_t calls = 0;
+};
+
 constexpr auto chain_api_protocol = std::string_view{"/spine/chain/api/1"};
 constexpr auto chain_api_max_frame_size = std::uint32_t{64U * 1024U};
 
@@ -98,15 +113,9 @@ protocol::audit_class audit_class_for(std::string_view api, std::string_view met
       return finality;
    }
    if (api == "forge.chain.api.block") {
-      if (method == "get_block_state") {
-         return finality;
-      }
       return unsupported;
    }
    if (api == "forge.chain.api.state") {
-      if (method == "get_point") {
-         return state_point;
-      }
       return unsupported;
    }
    if (api == "forge.chain.api.transaction") {
@@ -134,6 +143,7 @@ protocol::service_limits package_limits() {
        .max_page_size = 256,
        .max_state_batch_size = 32,
        .max_transaction_batch_size = 16,
+       .max_container_elements = 1'024,
        .max_transaction_status_candidates = 512,
        .max_request_bytes = chain_api_max_frame_size,
        .max_response_bytes = chain_api_max_frame_size,
@@ -1012,6 +1022,40 @@ int main() {
    static_assert(std::is_same_v<decltype(protocol::table_rows_response{}.next), std::optional<protocol::bytes>>);
    static_assert(std::is_same_v<decltype(protocol::table_scope_request{}.cursor), std::optional<protocol::bytes>>);
    static_assert(std::is_same_v<decltype(protocol::table_scope_response{}.next), std::optional<protocol::bytes>>);
+
+   const auto finality_delegate = std::make_shared<accepting_finality>();
+   const auto finality = std::make_shared<chain_api::cached_finality_verifier>(finality_delegate, 4U);
+   const auto anchor = protocol::state_anchor{
+       .chain = hash("package-verifier-chain"),
+       .block = hash("package-verifier-anchor"),
+   };
+   finality->verify(anchor, {});
+   require(finality_delegate->calls == 1U, "installed cached finality verifier did not invoke its delegate");
+   const auto audit = std::make_shared<chain_api::authenticated_audit_verifier>(
+       chain_api::authenticated_audit_options{.chain = anchor.chain, .state_domain = "package-test"}, finality);
+   audit->verify_context(protocol::response_context{.chain = anchor.chain});
+   auto audit_anchor = anchor;
+   audit_anchor.block = hash("package-audit-anchor");
+   audit->verify_finality(audit_anchor, {});
+   require(finality_delegate->calls == 2U, "installed authenticated verifier did not invoke finality verification");
+   const auto projections = std::make_shared<chain_api::projection_verifier>();
+   auto projection_rejected = false;
+   try {
+      projections->verify(protocol::block_request{}, protocol::block_state_response{}, protocol::audit_bundle{},
+                          *audit);
+   } catch (const chain_api::exceptions::audit_not_supported&) {
+      projection_rejected = true;
+   }
+   require(projection_rejected, "installed default projection verifier did not fail closed");
+   auto verified = chain_api::verified_client{chain_api::raw_client{chain_api::service_handles{}}, audit, projections};
+   auto verifier_runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto verified_rejected = false;
+   try {
+      static_cast<void>(forge::asio::blocking::run(verifier_runtime, verified.get_info()));
+   } catch (const chain_api::exceptions::unavailable&) {
+      verified_rejected = true;
+   }
+   require(verified_rejected, "installed verified client did not reject a missing transport");
 
    auto request = protocol::state_point_request{};
    auto block = protocol::block_request{};

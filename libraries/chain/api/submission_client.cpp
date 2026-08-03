@@ -13,6 +13,7 @@ module;
 
 module forge.chain.api.submission_client;
 
+import forge.api.core.exceptions;
 import forge.chain.api.exceptions;
 import forge.asio.exceptions;
 
@@ -39,6 +40,12 @@ boost::asio::awaitable<Response> invoke_service(const char* method, Operation&& 
       co_return co_await std::forward<Operation>(operation)();
    } catch (const forge::asio::exceptions::canceled&) {
       throw;
+   } catch (const forge::api::core::exceptions::cancelled&) {
+      FORGE_THROW_EXCEPTION(forge::asio::exceptions::canceled, "chain API request was canceled",
+                            forge::exceptions::ctx("method", method));
+   } catch (const forge::api::core::exceptions::deadline_exceeded&) {
+      FORGE_THROW_EXCEPTION(exceptions::deadline_exceeded, "chain API request deadline expired",
+                            forge::exceptions::ctx("method", method));
    } catch (const forge::exceptions::base& error) {
       if (std::string_view{error.code().category().name()} == "forge.chain.api") {
          throw;

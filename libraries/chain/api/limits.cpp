@@ -14,6 +14,7 @@ module;
 module forge.chain.api.limits;
 
 import forge.chain.api.table_key;
+import forge.raw.exceptions;
 import forge.raw.raw;
 
 namespace forge::chain::api {
@@ -49,9 +50,30 @@ void require_items(std::size_t count, std::uint32_t requested, const protocol::s
    }
 }
 
-template <typename Value> Value unpack_request(const forge::api::core::bytes& payload) {
+forge::raw::unpack_limits allocation_limits(const forge::api::core::bytes& payload,
+                                            const protocol::service_limits& limits, std::uint32_t byte_limit,
+                                            std::uint32_t first_container_limit = forge::raw::max_array_elements,
+                                            std::optional<std::uint32_t> total_container_limit = std::nullopt) {
+   const auto total_limit = total_container_limit.value_or(limits.max_container_elements);
+   return forge::raw::unpack_limits{
+       .max_container_elements =
+           static_cast<std::uint32_t>(std::min<std::size_t>(limits.max_container_elements, payload.size())),
+       .max_total_container_elements = static_cast<std::uint32_t>(std::min<std::size_t>(total_limit, payload.size())),
+       .max_bytes = static_cast<std::uint32_t>(std::min<std::size_t>(byte_limit, payload.size())),
+       .first_container_elements = first_container_limit,
+   };
+}
+
+template <typename Value>
+Value unpack_request(const forge::api::core::bytes& payload, const protocol::service_limits& limits,
+                     std::uint32_t first_container_limit = forge::raw::max_array_elements,
+                     std::optional<std::uint32_t> total_container_limit = std::nullopt) {
    try {
-      return forge::raw::unpack_exact<Value>(payload);
+      return forge::raw::unpack_exact<Value>(payload, allocation_limits(payload, limits, limits.max_request_bytes,
+                                                                        first_container_limit, total_container_limit));
+   } catch (const forge::raw::exceptions::allocation_limit& error) {
+      FORGE_THROW_EXCEPTION(exceptions::resource_exhausted, "chain API request exceeds allocation limits",
+                            forge::exceptions::ctx("reason", error.what()));
    } catch (const std::exception& error) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_request, "chain API request payload is malformed",
                             forge::exceptions::ctx("reason", error.what()));
@@ -60,9 +82,15 @@ template <typename Value> Value unpack_request(const forge::api::core::bytes& pa
    }
 }
 
-template <typename Value> Value unpack_response(const forge::api::core::bytes& payload) {
+template <typename Value>
+Value unpack_response(const forge::api::core::bytes& payload, const protocol::service_limits& limits,
+                      std::uint32_t first_container_limit = forge::raw::max_array_elements) {
    try {
-      return forge::raw::unpack_exact<Value>(payload);
+      return forge::raw::unpack_exact<Value>(
+          payload, allocation_limits(payload, limits, limits.max_response_bytes, first_container_limit));
+   } catch (const forge::raw::exceptions::allocation_limit& error) {
+      FORGE_THROW_EXCEPTION(exceptions::resource_exhausted, "chain API response exceeds allocation limits",
+                            forge::exceptions::ctx("reason", error.what()));
    } catch (const std::exception& error) {
       FORGE_THROW_EXCEPTION(exceptions::unavailable, "chain API owner produced a malformed response payload",
                             forge::exceptions::ctx("reason", error.what()));
@@ -71,9 +99,14 @@ template <typename Value> Value unpack_response(const forge::api::core::bytes& p
    }
 }
 
-protocol::audited_response unpack_audited_prefix(const forge::api::core::bytes& payload) {
+protocol::audited_response unpack_audited_prefix(const forge::api::core::bytes& payload,
+                                                 const protocol::service_limits& limits) {
    try {
-      return forge::raw::unpack<protocol::audited_response>(payload);
+      return forge::raw::unpack<protocol::audited_response>(
+          payload, allocation_limits(payload, limits, limits.max_response_bytes));
+   } catch (const forge::raw::exceptions::allocation_limit& error) {
+      FORGE_THROW_EXCEPTION(exceptions::resource_exhausted, "chain API audit response exceeds allocation limits",
+                            forge::exceptions::ctx("reason", error.what()));
    } catch (const std::exception& error) {
       FORGE_THROW_EXCEPTION(exceptions::unavailable, "chain API owner produced a malformed audited response",
                             forge::exceptions::ctx("reason", error.what()));
@@ -93,55 +126,70 @@ std::optional<std::uint32_t> require_method_request(std::string_view api, std::s
 
    if (api == "forge.chain.api.block") {
       if (method == "get_canonical_range") {
-         const auto request = unpack_request<protocol::block_range_request>(payload);
+         const auto request = unpack_request<protocol::block_range_request>(payload, limits);
          require_request_within_limits(request, limits);
          return request.limit;
       }
       if (method == "get_activated_protocol_features") {
-         const auto request = unpack_request<protocol::protocol_features_request>(payload);
+         const auto request = unpack_request<protocol::protocol_features_request>(payload, limits);
          require_request_within_limits(request, limits);
          return request.limit;
       }
       if (method == "get_producers") {
-         const auto request = unpack_request<protocol::producers_request>(payload);
+         const auto request = unpack_request<protocol::producers_request>(payload, limits);
          require_request_within_limits(request, limits);
          return request.limit;
       }
    } else if (api == "forge.chain.api.state") {
       if (method == "get_range") {
-         const auto request = unpack_request<protocol::state_range_request>(payload);
+         const auto request = unpack_request<protocol::state_range_request>(payload, limits);
          require_request_within_limits(request, limits);
          return request.limit;
       }
       if (method == "get_changes") {
-         const auto request = unpack_request<protocol::state_changes_request>(payload);
+         const auto request =
+             unpack_request<protocol::state_changes_request>(payload, limits, limits.max_state_batch_size);
          require_request_within_limits(request, limits);
          return request.limit;
       }
       if (method == "get_table_rows") {
-         const auto request = unpack_request<protocol::table_rows_request>(payload);
+         const auto request = unpack_request<protocol::table_rows_request>(payload, limits);
          require_request_within_limits(request, limits);
          return request.limit;
       }
       if (method == "get_table_scope") {
-         const auto request = unpack_request<protocol::table_scope_request>(payload);
+         const auto request = unpack_request<protocol::table_scope_request>(payload, limits);
          require_request_within_limits(request, limits);
          return request.limit;
       }
       if (method == "get_scheduled_transactions") {
-         const auto request = unpack_request<protocol::scheduled_request>(payload);
+         const auto request = unpack_request<protocol::scheduled_request>(payload, limits);
          require_request_within_limits(request, limits);
          return request.limit;
       }
       if (method == "get_accounts_by_authorizers") {
-         const auto request = unpack_request<protocol::authorizers_request>(payload);
+         const auto request =
+             unpack_request<protocol::authorizers_request>(payload, limits, forge::raw::max_array_elements,
+                                                           std::optional<std::uint32_t>{limits.max_state_batch_size});
+         require_request_within_limits(request, limits);
+         return request.limit;
+      }
+   } else if (api == "forge.chain.api.admin") {
+      if (method == "account_ram_corrections") {
+         const auto request = unpack_request<protocol::ram_corrections_request>(payload, limits);
+         require_request_within_limits(request, limits);
+         return request.limit;
+      }
+      if (method == "unapplied_transactions") {
+         const auto request = unpack_request<protocol::unapplied_transactions_request>(payload, limits);
          require_request_within_limits(request, limits);
          return request.limit;
       }
    } else if (api == "forge.chain.api.transaction" && method == "await_transaction") {
-      require_request_within_limits(unpack_request<protocol::transaction_await_request>(payload), limits);
+      require_request_within_limits(unpack_request<protocol::transaction_await_request>(payload, limits), limits);
    } else if (api == "forge.chain.api.submission" && method == "submit_batch") {
-      const auto requests = unpack_request<std::vector<protocol::transaction_submit_request>>(payload);
+      const auto requests = unpack_request<std::vector<protocol::transaction_submit_request>>(
+          payload, limits, limits.max_transaction_batch_size);
       require_transaction_batch_within_limits(requests, limits);
       return static_cast<std::uint32_t>(requests.size());
    }
@@ -158,7 +206,7 @@ void require_method_response(std::string_view api, std::string_view method, bool
                             forge::exceptions::ctx("limit", limits.max_response_bytes));
    }
    if (audited_response) {
-      require_response_within_limits(unpack_audited_prefix(payload), limits);
+      require_response_within_limits(unpack_audited_prefix(payload, limits), limits);
    }
    if (!requested_items) {
       return;
@@ -166,38 +214,48 @@ void require_method_response(std::string_view api, std::string_view method, bool
 
    if (api == "forge.chain.api.block") {
       if (method == "get_canonical_range") {
-         require_items(unpack_response<protocol::block_range_response>(payload).blocks.size(), *requested_items, limits,
-                       "blocks");
+         require_items(unpack_response<protocol::block_range_response>(payload, limits).blocks.size(), *requested_items,
+                       limits, "blocks");
       } else if (method == "get_activated_protocol_features") {
-         require_items(unpack_response<protocol::protocol_features_response>(payload).features.size(), *requested_items,
-                       limits, "features");
+         require_items(unpack_response<protocol::protocol_features_response>(payload, limits).features.size(),
+                       *requested_items, limits, "features");
       } else if (method == "get_producers") {
-         require_items(unpack_response<protocol::producers_response>(payload).rows.size(), *requested_items, limits,
-                       "rows");
+         require_items(unpack_response<protocol::producers_response>(payload, limits).rows.size(), *requested_items,
+                       limits, "rows");
       }
    } else if (api == "forge.chain.api.state") {
       if (method == "get_range") {
-         require_items(unpack_response<protocol::state_range_response>(payload).rows.size(), *requested_items, limits,
-                       "rows");
+         require_items(unpack_response<protocol::state_range_response>(payload, limits).rows.size(), *requested_items,
+                       limits, "rows");
       } else if (method == "get_changes") {
-         require_items(unpack_response<protocol::state_changes_response>(payload).blocks.size(), *requested_items,
-                       limits, "blocks");
+         require_items(unpack_response<protocol::state_changes_response>(payload, limits).blocks.size(),
+                       *requested_items, limits, "blocks");
       } else if (method == "get_table_rows") {
-         require_items(unpack_response<protocol::table_rows_response>(payload).rows.size(), *requested_items, limits,
-                       "rows");
+         require_items(unpack_response<protocol::table_rows_response>(payload, limits).rows.size(), *requested_items,
+                       limits, "rows");
       } else if (method == "get_table_scope") {
-         require_items(unpack_response<protocol::table_scope_response>(payload).rows.size(), *requested_items, limits,
-                       "rows");
+         require_items(unpack_response<protocol::table_scope_response>(payload, limits).rows.size(), *requested_items,
+                       limits, "rows");
       } else if (method == "get_scheduled_transactions") {
-         require_items(unpack_response<protocol::scheduled_response>(payload).transactions.size(), *requested_items,
-                       limits, "transactions");
+         require_items(unpack_response<protocol::scheduled_response>(payload, limits).transactions.size(),
+                       *requested_items, limits, "transactions");
       } else if (method == "get_accounts_by_authorizers") {
-         require_items(unpack_response<protocol::authorizers_response>(payload).accounts.size(), *requested_items,
-                       limits, "accounts");
+         require_items(unpack_response<protocol::authorizers_response>(payload, limits).accounts.size(),
+                       *requested_items, limits, "accounts");
       }
    } else if (api == "forge.chain.api.submission" && method == "submit_batch") {
       require_transaction_batch_response_within_limits(
-          unpack_response<std::vector<protocol::transaction_submit_response>>(payload), *requested_items, limits);
+          unpack_response<std::vector<protocol::transaction_submit_response>>(payload, limits,
+                                                                              limits.max_transaction_batch_size),
+          *requested_items, limits);
+   } else if (api == "forge.chain.api.admin") {
+      if (method == "account_ram_corrections") {
+         require_items(unpack_response<protocol::ram_corrections_response>(payload, limits).rows.size(),
+                       *requested_items, limits, "rows");
+      } else if (method == "unapplied_transactions") {
+         require_items(unpack_response<protocol::unapplied_transactions_response>(payload, limits).transactions.size(),
+                       *requested_items, limits, "transactions");
+      }
    }
 }
 
@@ -294,6 +352,18 @@ void require_request_within_limits(const protocol::transaction_await_request& va
    }
 }
 
+void require_request_within_limits(const protocol::ram_corrections_request& value,
+                                   const protocol::service_limits& limits) {
+   require_packed_request(value, limits);
+   require_page(value.limit, limits.max_page_size, "limit", true);
+}
+
+void require_request_within_limits(const protocol::unapplied_transactions_request& value,
+                                   const protocol::service_limits& limits) {
+   require_packed_request(value, limits);
+   require_page(value.limit, limits.max_page_size, "limit", true);
+}
+
 void require_response_within_limits(const protocol::block_range_response& response,
                                     const protocol::block_range_request& request,
                                     const protocol::service_limits& limits) {
@@ -357,6 +427,20 @@ void require_response_within_limits(const protocol::authorizers_response& respon
    require_items(response.accounts.size(), request.limit, limits, "accounts");
 }
 
+void require_response_within_limits(const protocol::ram_corrections_response& response,
+                                    const protocol::ram_corrections_request& request,
+                                    const protocol::service_limits& limits) {
+   require_response_within_limits(response, limits);
+   require_items(response.rows.size(), request.limit, limits, "rows");
+}
+
+void require_response_within_limits(const protocol::unapplied_transactions_response& response,
+                                    const protocol::unapplied_transactions_request& request,
+                                    const protocol::service_limits& limits) {
+   require_response_within_limits(response, limits);
+   require_items(response.transactions.size(), request.limit, limits, "transactions");
+}
+
 void require_transaction_batch_within_limits(const std::vector<protocol::transaction_submit_request>& values,
                                              const protocol::service_limits& limits) {
    if (values.empty()) {
@@ -377,11 +461,16 @@ void require_transaction_batch_response_within_limits(
     const std::vector<protocol::transaction_submit_response>& responses, std::size_t request_count,
     const protocol::service_limits& limits) {
    require_response_within_limits(responses, limits);
-   if (responses.size() > request_count || responses.size() > limits.max_transaction_batch_size) {
+   if (responses.size() > limits.max_transaction_batch_size) {
       FORGE_THROW_EXCEPTION(
           exceptions::resource_exhausted, "chain API transaction response count exceeds the request limit",
           forge::exceptions::ctx("count", responses.size()), forge::exceptions::ctx("request_count", request_count),
           forge::exceptions::ctx("limit", limits.max_transaction_batch_size));
+   }
+   if (responses.size() != request_count) {
+      FORGE_THROW_EXCEPTION(
+          exceptions::unavailable, "chain API owner returned a transaction batch with mismatched cardinality",
+          forge::exceptions::ctx("count", responses.size()), forge::exceptions::ctx("request_count", request_count));
    }
 }
 

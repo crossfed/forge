@@ -32,6 +32,7 @@
 #include <forge/exceptions/macros.hpp>
 
 import forge.api.core.connection;
+import forge.api.core.exceptions;
 import forge.api.core.registry;
 import forge.api.http.mapping;
 import forge.api.http.openapi;
@@ -194,6 +195,12 @@ class state_service final : public forge::chain::api::state {
       if (point_failure == failure::timed_out) {
          throw boost::system::system_error{boost::asio::error::timed_out};
       }
+      if (point_failure == failure::api_canceled) {
+         FORGE_THROW_EXCEPTION(forge::api::core::exceptions::cancelled, "test API transport cancellation");
+      }
+      if (point_failure == failure::api_deadline) {
+         FORGE_THROW_EXCEPTION(forge::api::core::exceptions::deadline_exceeded, "test API transport deadline");
+      }
       if (point_failure == failure::foreign_forge) {
          FORGE_THROW_EXCEPTION(forge::asio::exceptions::internal, "test foreign Forge service failure");
       }
@@ -254,7 +261,17 @@ class state_service final : public forge::chain::api::state {
    }
 
    std::optional<forge::chain::protocol::state_point_request> last_point_request;
-   enum class failure : std::uint8_t { none, standard, nonstandard, canceled, timed_out, foreign_forge, chain_api };
+   enum class failure : std::uint8_t {
+      none,
+      standard,
+      nonstandard,
+      canceled,
+      timed_out,
+      api_canceled,
+      api_deadline,
+      foreign_forge,
+      chain_api
+   };
    failure point_failure = failure::none;
 
  private:
@@ -314,6 +331,12 @@ class submission_service final : public forge::chain::api::submission {
       if (throw_timed_out) {
          throw boost::system::system_error{boost::asio::error::timed_out};
       }
+      if (throw_api_canceled) {
+         FORGE_THROW_EXCEPTION(forge::api::core::exceptions::cancelled, "test API submission cancellation");
+      }
+      if (throw_api_deadline) {
+         FORGE_THROW_EXCEPTION(forge::api::core::exceptions::deadline_exceeded, "test API submission deadline");
+      }
       if (responses_.empty()) {
          co_return forge::chain::protocol::transaction_submit_response{};
       }
@@ -332,6 +355,8 @@ class submission_service final : public forge::chain::api::submission {
    bool throw_standard = false;
    bool throw_forge = false;
    bool throw_timed_out = false;
+   bool throw_api_canceled = false;
+   bool throw_api_deadline = false;
 };
 
 class deadline_remote_invoker final : public forge::api::core::remote_invoker {
@@ -1100,6 +1125,82 @@ BOOST_AUTO_TEST_CASE(chain_api_limited_descriptor_only_decodes_audited_response_
                      forge::chain::api::exceptions::unavailable);
 }
 
+BOOST_AUTO_TEST_CASE(chain_api_limited_descriptor_rejects_declared_collections_before_allocation) {
+   auto limits = forge::chain::protocol::service_limits{};
+   limits.max_page_size = 1'024U;
+   limits.max_transaction_batch_size = 2U;
+   limits.max_container_elements = 4'096U;
+   const auto descriptor = forge::chain::api::limited_descriptor<forge::chain::api::submission>(limits);
+   const auto* method = forge::api::core::find_method(descriptor, "submit_batch");
+   BOOST_REQUIRE(method != nullptr);
+
+   const auto over_transaction_limit = forge::api::core::bytes{0x03U};
+   BOOST_CHECK_THROW(method->request_validator(over_transaction_limit),
+                     forge::chain::api::exceptions::resource_exhausted);
+
+   const auto declared_million_items = forge::api::core::bytes{0x80U, 0x80U, 0x40U};
+   BOOST_CHECK_THROW(method->request_validator(declared_million_items),
+                     forge::chain::api::exceptions::resource_exhausted);
+}
+
+BOOST_AUTO_TEST_CASE(chain_api_limited_descriptor_bounds_admin_pages_and_response_cardinality) {
+   auto limits = forge::chain::protocol::service_limits{};
+   limits.max_page_size = 2U;
+   const auto descriptor = forge::chain::api::limited_descriptor<forge::chain::api::admin>(limits);
+   const auto* ram = forge::api::core::find_method(descriptor, "account_ram_corrections");
+   const auto* unapplied = forge::api::core::find_method(descriptor, "unapplied_transactions");
+   BOOST_REQUIRE(ram != nullptr);
+   BOOST_REQUIRE(unapplied != nullptr);
+
+   const auto oversized_ram = forge::raw::pack(forge::chain::protocol::ram_corrections_request{.limit = 3U});
+   BOOST_CHECK_THROW(ram->request_validator(oversized_ram), forge::chain::api::exceptions::resource_exhausted);
+   const auto ram_request = forge::raw::pack(forge::chain::protocol::ram_corrections_request{.limit = 1U});
+   const auto ram_response = forge::raw::pack(forge::chain::protocol::ram_corrections_response{
+       .rows = {forge::variant{}, forge::variant{}},
+   });
+   BOOST_CHECK_THROW(ram->response_validator(ram_request, ram_response),
+                     forge::chain::api::exceptions::resource_exhausted);
+
+   const auto oversized_unapplied =
+       forge::raw::pack(forge::chain::protocol::unapplied_transactions_request{.limit = 3U});
+   BOOST_CHECK_THROW(unapplied->request_validator(oversized_unapplied),
+                     forge::chain::api::exceptions::resource_exhausted);
+}
+
+BOOST_AUTO_TEST_CASE(chain_api_limited_descriptor_bounds_authorizer_inputs_before_complete_decode) {
+   auto limits = forge::chain::protocol::service_limits{};
+   limits.max_state_batch_size = 2U;
+   limits.max_container_elements = 4'096U;
+   const auto descriptor = forge::chain::api::limited_descriptor<forge::chain::api::state>(limits);
+   const auto* method = forge::api::core::find_method(descriptor, "get_accounts_by_authorizers");
+   BOOST_REQUIRE(method != nullptr);
+
+   const auto request = forge::chain::protocol::authorizers_request{
+       .accounts = {forge::chain::protocol::permission_level{}, forge::chain::protocol::permission_level{}},
+       .keys = {forge::chain::protocol::public_key{}},
+       .limit = 1U,
+   };
+   BOOST_CHECK_THROW(method->request_validator(forge::raw::pack(request)),
+                     forge::chain::api::exceptions::resource_exhausted);
+
+   limits.max_state_batch_size = 0U;
+   const auto zero_limit_descriptor = forge::chain::api::limited_descriptor<forge::chain::api::state>(limits);
+   const auto* zero_limit_method = forge::api::core::find_method(zero_limit_descriptor, "get_accounts_by_authorizers");
+   BOOST_REQUIRE(zero_limit_method != nullptr);
+   const auto nonempty_request = forge::chain::protocol::authorizers_request{
+       .accounts = {forge::chain::protocol::permission_level{}},
+       .limit = 1U,
+   };
+   BOOST_CHECK_THROW(zero_limit_method->request_validator(forge::raw::pack(nonempty_request)),
+                     forge::chain::api::exceptions::resource_exhausted);
+}
+
+BOOST_AUTO_TEST_CASE(chain_api_transaction_batch_response_requires_exact_cardinality) {
+   const auto limits = forge::chain::protocol::service_limits{};
+   BOOST_CHECK_THROW(forge::chain::api::require_transaction_batch_response_within_limits({}, 1U, limits),
+                     forge::chain::api::exceptions::unavailable);
+}
+
 BOOST_AUTO_TEST_CASE(chain_openapi_covers_every_owner_contract_route_and_schema) {
    const auto owners = std::array{
        owner_openapi_contract{"info", &owner_routes<forge::chain::api::info>, &owner_openapi<forge::chain::api::info>,
@@ -1645,6 +1746,11 @@ BOOST_AUTO_TEST_CASE(verified_client_translates_service_failures_and_cancellatio
    service->point_failure = state_service::failure::timed_out;
    BOOST_CHECK_THROW(static_cast<void>(run(client.get_point({.key = {1U}}))),
                      forge::chain::api::exceptions::deadline_exceeded);
+   service->point_failure = state_service::failure::api_canceled;
+   BOOST_CHECK_THROW(static_cast<void>(run(client.get_point({.key = {1U}}))), forge::asio::exceptions::canceled);
+   service->point_failure = state_service::failure::api_deadline;
+   BOOST_CHECK_THROW(static_cast<void>(run(client.get_point({.key = {1U}}))),
+                     forge::chain::api::exceptions::deadline_exceeded);
    service->point_failure = state_service::failure::foreign_forge;
    BOOST_CHECK_THROW(static_cast<void>(run(client.get_point({.key = {1U}}))),
                      forge::chain::api::exceptions::unavailable);
@@ -1859,7 +1965,7 @@ BOOST_AUTO_TEST_CASE(submission_client_binds_acknowledgements_to_local_transacti
    {
       auto client = make_client({forge::chain::protocol::transaction_submit_response{.id = first_id}});
       BOOST_CHECK_THROW(static_cast<void>(run(client.submit_batch({first, second}))),
-                        forge::chain::api::exceptions::invalid_transaction_proof);
+                        forge::chain::api::exceptions::unavailable);
    }
 }
 
@@ -1894,6 +2000,17 @@ BOOST_AUTO_TEST_CASE(submission_client_enforces_local_limits_and_translates_serv
                      forge::chain::api::exceptions::unavailable);
    service->throw_forge = false;
    service->throw_timed_out = true;
+   request = forge::chain::protocol::transaction_submit_request{};
+   request.transaction = forge::chain::protocol::packed_transaction{forge::chain::protocol::signed_transaction{}};
+   BOOST_CHECK_THROW(static_cast<void>(run(client.submit(std::move(request)))),
+                     forge::chain::api::exceptions::deadline_exceeded);
+   service->throw_timed_out = false;
+   service->throw_api_canceled = true;
+   request = forge::chain::protocol::transaction_submit_request{};
+   request.transaction = forge::chain::protocol::packed_transaction{forge::chain::protocol::signed_transaction{}};
+   BOOST_CHECK_THROW(static_cast<void>(run(client.submit(std::move(request)))), forge::asio::exceptions::canceled);
+   service->throw_api_canceled = false;
+   service->throw_api_deadline = true;
    request = forge::chain::protocol::transaction_submit_request{};
    request.transaction = forge::chain::protocol::packed_transaction{forge::chain::protocol::signed_transaction{}};
    BOOST_CHECK_THROW(static_cast<void>(run(client.submit(std::move(request)))),

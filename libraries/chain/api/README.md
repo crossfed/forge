@@ -46,9 +46,10 @@ network policy remain in downstream products.
 Each `method_capability` advertises its own HTTP and P2P publication state;
 the service never implies that every enabled method is available on every
 transport. `service_limits` separately advertises page, state-batch,
-transaction-batch, transaction-status scan, await deadline, request, response,
-proof and authenticated-state retention bounds. Transports reject oversized
-frames or HTTP bodies before decoding. Service owners install
+transaction-batch, decoded-container allocation, transaction-status scan,
+await deadline, request, response, proof and authenticated-state retention
+bounds. Transports reject oversized frames, declared containers and HTTP bodies
+before allocation or domain decoding. Service owners install
 `limited_descriptor<Interface>(limits)` with the implementation; API Core
 dispatch and the typed HTTP binding then enforce the same canonical request,
 response, proof and item-count limits before and after the implementation call.

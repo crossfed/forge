@@ -134,6 +134,7 @@ struct service_limits {
    std::uint32_t max_page_size = 1'024;
    std::uint32_t max_state_batch_size = 128;
    std::uint32_t max_transaction_batch_size = 128;
+   std::uint32_t max_container_elements = 4'096;
    std::uint32_t max_transaction_status_candidates = 4'096;
    std::uint32_t max_request_bytes = 16U << 20U;
    std::uint32_t max_response_bytes = 16U << 20U;
@@ -159,7 +160,7 @@ BOOST_DESCRIBE_STRUCT(audited_response, (), (context, audit))
 BOOST_DESCRIBE_STRUCT(method_capability, (), (api, method, audit, enabled, http, p2p))
 BOOST_DESCRIBE_STRUCT(capabilities, (), (methods, archive))
 BOOST_DESCRIBE_STRUCT(service_limits, (),
-                      (max_page_size, max_state_batch_size, max_transaction_batch_size,
+                      (max_page_size, max_state_batch_size, max_transaction_batch_size, max_container_elements,
                        max_transaction_status_candidates, max_request_bytes, max_response_bytes, max_proof_bytes,
                        max_await_ms, state_retention_blocks))
 

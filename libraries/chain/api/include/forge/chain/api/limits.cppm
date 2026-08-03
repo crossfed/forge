@@ -11,6 +11,7 @@ export module forge.chain.api.limits;
 
 export import forge.chain.api.exceptions;
 export import forge.api.core.descriptor;
+export import forge.chain.protocol.admin;
 export import forge.chain.protocol.audit;
 export import forge.chain.protocol.block_query;
 export import forge.chain.protocol.state_query;
@@ -68,6 +69,10 @@ void require_request_within_limits(const protocol::scheduled_request& value, con
 void require_request_within_limits(const protocol::authorizers_request& value, const protocol::service_limits& limits);
 void require_request_within_limits(const protocol::transaction_await_request& value,
                                    const protocol::service_limits& limits);
+void require_request_within_limits(const protocol::ram_corrections_request& value,
+                                   const protocol::service_limits& limits);
+void require_request_within_limits(const protocol::unapplied_transactions_request& value,
+                                   const protocol::service_limits& limits);
 
 void require_response_within_limits(const protocol::block_range_response& response,
                                     const protocol::block_range_request& request,
@@ -93,6 +98,12 @@ void require_response_within_limits(const protocol::scheduled_response& response
                                     const protocol::scheduled_request& request, const protocol::service_limits& limits);
 void require_response_within_limits(const protocol::authorizers_response& response,
                                     const protocol::authorizers_request& request,
+                                    const protocol::service_limits& limits);
+void require_response_within_limits(const protocol::ram_corrections_response& response,
+                                    const protocol::ram_corrections_request& request,
+                                    const protocol::service_limits& limits);
+void require_response_within_limits(const protocol::unapplied_transactions_response& response,
+                                    const protocol::unapplied_transactions_request& request,
                                     const protocol::service_limits& limits);
 
 void require_transaction_batch_within_limits(const std::vector<protocol::transaction_submit_request>& values,
