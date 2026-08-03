@@ -2,7 +2,7 @@
 
 > **Status:** accepted implementation direction, not shipped API.
 >
-> **Branch:** `forge-content-swarm-v1` from Forge `8.20.0` `dev`.
+> **Implementation branch:** `forge-api-live-streaming-v1`.
 >
 > This document defines the cross-library boundary and implementation order for
 > a neutral BitTorrent-like immutable-content distribution mechanism. Detailed
@@ -128,6 +128,12 @@ mandatory capability and limit handshake before the first request.
 `stream_window` carries receiver-driven per-call item and byte credit so one
 slow call cannot stall or exhaust a multiplexed API connection. Swarm does not
 introduce a second raw framing stack.
+
+Windows contain monotonic absolute `{max_items, max_bytes}` limits, not additive
+credits. A repeated or smaller limit grants nothing. One `stream_item` consumes
+one item and its encoded payload bytes; capacity is returned only after the
+application reads or discards that item. The session also enforces a negotiated
+aggregate buffered-byte limit across calls.
 
 Wire v2 is a clean replacement for the batch-shaped `/forge/api/1` protocol.
 P2P defaults to `/forge/api/2`; custom application protocol ids remain

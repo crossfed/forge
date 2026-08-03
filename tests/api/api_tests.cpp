@@ -249,47 +249,33 @@ class live_stream_api : public forge::api::core::contract<live_stream_api> {
  public:
    virtual ~live_stream_api() = default;
 
-   virtual boost::asio::awaitable<std::vector<protocol::chunk>>
-   batch(std::vector<protocol::read_chunk> requests) = 0;
-   virtual boost::asio::awaitable<void>
-   subscribe(forge::api::core::stream_writer<protocol::chunk> output) = 0;
+   virtual boost::asio::awaitable<std::vector<protocol::chunk>> batch(std::vector<protocol::read_chunk> requests) = 0;
+   virtual boost::asio::awaitable<void> subscribe(forge::api::core::stream_writer<protocol::chunk> output) = 0;
    virtual boost::asio::awaitable<protocol::chunk>
    upload(forge::api::core::stream_reader<protocol::read_chunk> input) = 0;
    virtual boost::asio::awaitable<void>
-   exchange(forge::api::core::duplex_stream<protocol::read_chunk,
-                                            protocol::chunk> stream) = 0;
+   exchange(forge::api::core::duplex_stream<protocol::read_chunk, protocol::chunk> stream) = 0;
    virtual boost::asio::awaitable<std::vector<protocol::chunk>>
    exchange(std::vector<protocol::read_chunk> requests) = 0;
 };
 
-inline constexpr auto live_exchange_stream_method =
-   static_cast<boost::asio::awaitable<void> (live_stream_api::*)(
-      forge::api::core::duplex_stream<protocol::read_chunk, protocol::chunk>)>(
-      &live_stream_api::exchange);
-inline constexpr auto live_exchange_vector_method =
-   static_cast<boost::asio::awaitable<std::vector<protocol::chunk>> (
-      live_stream_api::*)(std::vector<protocol::read_chunk>)>(
-      &live_stream_api::exchange);
+inline constexpr auto live_exchange_stream_method = static_cast<boost::asio::awaitable<void> (live_stream_api::*)(
+    forge::api::core::duplex_stream<protocol::read_chunk, protocol::chunk>)>(&live_stream_api::exchange);
+inline constexpr auto live_exchange_vector_method = static_cast<boost::asio::awaitable<std::vector<protocol::chunk>> (
+    live_stream_api::*)(std::vector<protocol::read_chunk>)>(&live_stream_api::exchange);
 
-FORGE_API(live_stream_api, FORGE_API_CONTRACT("live.stream", 1, 0),
-          FORGE_API_METHOD(batch), FORGE_API_METHOD(subscribe),
-          FORGE_API_METHOD(upload),
+FORGE_API(live_stream_api, FORGE_API_CONTRACT("live.stream", 1, 0), FORGE_API_METHOD(batch),
+          FORGE_API_METHOD(subscribe), FORGE_API_METHOD(upload),
           FORGE_API_METHOD_EXACT(exchange, ::live_exchange_stream_method))
 
 template <typename T>
-concept chunk_writable = requires(T& value, protocol::chunk item) {
-   value.async_write(std::move(item));
-};
+concept chunk_writable = requires(T& value, protocol::chunk item) { value.async_write(std::move(item)); };
 
 template <typename T>
-concept stream_closable = requires(T& value) {
-   value.async_close();
-};
+concept stream_closable = requires(T& value) { value.async_close(); };
 
-static_assert(forge::api::core::method_kind_v<&live_stream_api::batch> ==
-              forge::api::core::method_kind::unary);
-static_assert(forge::api::core::method_kind_v<live_exchange_vector_method> ==
-              forge::api::core::method_kind::unary);
+static_assert(forge::api::core::method_kind_v<&live_stream_api::batch> == forge::api::core::method_kind::unary);
+static_assert(forge::api::core::method_kind_v<live_exchange_vector_method> == forge::api::core::method_kind::unary);
 static_assert(forge::api::core::method_kind_v<&live_stream_api::subscribe> ==
               forge::api::core::method_kind::server_stream);
 static_assert(forge::api::core::method_kind_v<&live_stream_api::upload> ==
@@ -299,21 +285,17 @@ static_assert(forge::api::core::method_kind_v<live_exchange_stream_method> ==
 
 using chunk_writer = forge::api::core::stream_writer<protocol::chunk>;
 using chunk_reader = forge::api::core::stream_reader<protocol::chunk>;
-using chunk_duplex = forge::api::core::duplex_stream<protocol::read_chunk,
-                                                     protocol::chunk>;
+using chunk_duplex = forge::api::core::duplex_stream<protocol::read_chunk, protocol::chunk>;
 using server_call = forge::api::core::server_stream_call<protocol::chunk>;
-using client_call = forge::api::core::client_stream_call<protocol::read_chunk,
-                                                         protocol::chunk>;
-using bidirectional_call = forge::api::core::bidirectional_stream_call<
-   protocol::read_chunk, protocol::chunk>;
+using client_call = forge::api::core::client_stream_call<protocol::read_chunk, protocol::chunk>;
+using bidirectional_call = forge::api::core::bidirectional_stream_call<protocol::read_chunk, protocol::chunk>;
 
 static_assert(std::movable<chunk_writer> && !std::copy_constructible<chunk_writer>);
 static_assert(std::movable<chunk_reader> && !std::copy_constructible<chunk_reader>);
 static_assert(std::movable<chunk_duplex> && !std::copy_constructible<chunk_duplex>);
 static_assert(std::movable<server_call> && !std::copy_constructible<server_call>);
 static_assert(std::movable<client_call> && !std::copy_constructible<client_call>);
-static_assert(std::movable<bidirectional_call> &&
-              !std::copy_constructible<bidirectional_call>);
+static_assert(std::movable<bidirectional_call> && !std::copy_constructible<bidirectional_call>);
 static_assert(!chunk_writable<chunk_reader>);
 static_assert(!stream_closable<chunk_reader>);
 
@@ -384,15 +366,13 @@ enum class half_close_order {
 
 class live_stream_impl final : public live_stream_api {
  public:
-   explicit live_stream_impl(half_close_order order = half_close_order::client_first)
-       : order_{order} {}
+   explicit live_stream_impl(half_close_order order = half_close_order::client_first) : order_{order} {}
 
    explicit live_stream_impl(boost::asio::any_io_executor executor)
        : terminal_failure_gate_{std::make_shared<boost::asio::steady_timer>(
-            std::move(executor), boost::asio::steady_timer::time_point::max())} {}
+             std::move(executor), boost::asio::steady_timer::time_point::max())} {}
 
-   boost::asio::awaitable<std::vector<protocol::chunk>>
-   batch(std::vector<protocol::read_chunk> requests) override {
+   boost::asio::awaitable<std::vector<protocol::chunk>> batch(std::vector<protocol::read_chunk> requests) override {
       auto result = std::vector<protocol::chunk>{};
       result.reserve(requests.size());
       for (auto& request : requests) {
@@ -401,13 +381,11 @@ class live_stream_impl final : public live_stream_api {
       co_return result;
    }
 
-   boost::asio::awaitable<void>
-   subscribe(forge::api::core::stream_writer<protocol::chunk> output) override {
+   boost::asio::awaitable<void> subscribe(forge::api::core::stream_writer<protocol::chunk> output) override {
       if (terminal_failure_gate_) {
          co_await output.async_close();
          auto error = boost::system::error_code{};
-         co_await terminal_failure_gate_->async_wait(
-            boost::asio::redirect_error(boost::asio::use_awaitable, error));
+         co_await terminal_failure_gate_->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
          FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error,
                                "server stream failed after output half-close");
       }
@@ -436,8 +414,7 @@ class live_stream_impl final : public live_stream_api {
    }
 
    boost::asio::awaitable<void>
-   exchange(forge::api::core::duplex_stream<protocol::read_chunk,
-                                            protocol::chunk> stream) override {
+   exchange(forge::api::core::duplex_stream<protocol::read_chunk, protocol::chunk> stream) override {
       if (order_ == half_close_order::server_first) {
          co_await stream.async_write(protocol::chunk{.bytes = "ready"});
          co_await stream.async_close();
@@ -448,14 +425,12 @@ class live_stream_impl final : public live_stream_api {
       }
 
       while (auto item = co_await stream.async_read()) {
-         co_await stream.async_write(
-            protocol::chunk{.bytes = item->ref + ":ack"});
+         co_await stream.async_write(protocol::chunk{.bytes = item->ref + ":ack"});
       }
       co_await stream.async_close();
    }
 
-   boost::asio::awaitable<std::vector<protocol::chunk>>
-   exchange(std::vector<protocol::read_chunk> requests) override {
+   boost::asio::awaitable<std::vector<protocol::chunk>> exchange(std::vector<protocol::read_chunk> requests) override {
       co_return co_await batch(std::move(requests));
    }
 
@@ -528,9 +503,10 @@ BOOST_AUTO_TEST_CASE(error_payload_raw_roundtrip) {
 
 BOOST_AUTO_TEST_CASE(frame_raw_roundtrip) {
    const auto kinds = std::vector<forge::api::core::frame_kind>{
-       forge::api::core::frame_kind::request,     forge::api::core::frame_kind::response,
-       forge::api::core::frame_kind::error,       forge::api::core::frame_kind::cancel,
-       forge::api::core::frame_kind::stream_item, forge::api::core::frame_kind::stream_end,
+       forge::api::core::frame_kind::request,       forge::api::core::frame_kind::response,
+       forge::api::core::frame_kind::error,         forge::api::core::frame_kind::cancel,
+       forge::api::core::frame_kind::stream_item,   forge::api::core::frame_kind::stream_end,
+       forge::api::core::frame_kind::session_hello, forge::api::core::frame_kind::stream_window,
    };
 
    for (const auto kind : kinds) {
@@ -576,12 +552,24 @@ BOOST_AUTO_TEST_CASE(method_descriptor_infers_vector_dto_and_live_endpoint_kinds
    BOOST_CHECK(batch->kind == forge::api::core::method_kind::unary);
    BOOST_CHECK(subscribe->kind == forge::api::core::method_kind::server_stream);
    BOOST_CHECK(live_upload->kind == forge::api::core::method_kind::client_stream);
-   BOOST_CHECK(exchange->kind ==
-               forge::api::core::method_kind::bidirectional_stream);
-   BOOST_TEST((exchange->input_type ==
-               std::type_index{typeid(protocol::read_chunk)}));
-   BOOST_TEST((exchange->output_type ==
-               std::type_index{typeid(protocol::chunk)}));
+   BOOST_CHECK(exchange->kind == forge::api::core::method_kind::bidirectional_stream);
+   BOOST_TEST((exchange->input_type == std::type_index{typeid(protocol::read_chunk)}));
+   BOOST_TEST((exchange->output_type == std::type_index{typeid(protocol::chunk)}));
+   BOOST_TEST((subscribe->request_type == std::type_index{typeid(std::tuple<>)}));
+   BOOST_CHECK(static_cast<bool>(subscribe->request_decoder));
+   BOOST_CHECK(static_cast<bool>(subscribe->output_decoder));
+   BOOST_CHECK(!subscribe->input_decoder);
+   BOOST_CHECK(!subscribe->response_decoder);
+   BOOST_CHECK(static_cast<bool>(live_upload->input_decoder));
+   BOOST_CHECK(static_cast<bool>(live_upload->response_decoder));
+   BOOST_CHECK(static_cast<bool>(exchange->input_decoder));
+   BOOST_CHECK(static_cast<bool>(exchange->output_decoder));
+
+   const auto limits = forge::raw::unpack_limits{};
+   BOOST_CHECK_NO_THROW(subscribe->request_decoder({}, limits));
+   BOOST_CHECK_NO_THROW(subscribe->output_decoder(forge::raw::pack(protocol::chunk{.bytes = "item"}), limits));
+   BOOST_CHECK_NO_THROW(live_upload->input_decoder(forge::raw::pack(protocol::read_chunk{.ref = "input"}), limits));
+   BOOST_CHECK_NO_THROW(live_upload->response_decoder(forge::raw::pack(protocol::chunk{.bytes = "result"}), limits));
 }
 
 class recording_invoker final : public forge::api::core::remote_invoker {
@@ -838,9 +826,8 @@ BOOST_AUTO_TEST_CASE(local_handle_server_stream_delivers_items_incrementally) {
    auto runtime = forge::asio::runtime{};
    auto implementation = std::make_shared<live_stream_impl>();
    auto handle = forge::api::core::handle<live_stream_api>{implementation};
-   auto call = forge::asio::blocking::run(
-      runtime, handle.async_open<&live_stream_api::subscribe>(
-                  forge::api::core::call_options{.max_buffered_items = 1}));
+   auto call = forge::asio::blocking::run(runtime, handle.async_open<&live_stream_api::subscribe>(
+                                                       forge::api::core::call_options{.max_buffered_items = 1}));
 
    const auto first = forge::asio::blocking::run(runtime, call.async_read());
    const auto second = forge::asio::blocking::run(runtime, call.async_read());
@@ -859,13 +846,10 @@ BOOST_AUTO_TEST_CASE(local_handle_client_stream_delivers_input_before_half_close
    auto implementation = std::make_shared<live_stream_impl>();
    auto handle = forge::api::core::handle<live_stream_api>{implementation};
    auto call = forge::asio::blocking::run(
-      runtime, handle.async_open<&live_stream_api::upload>(
-                  forge::api::core::call_options{.max_buffered_items = 1}));
+       runtime, handle.async_open<&live_stream_api::upload>(forge::api::core::call_options{.max_buffered_items = 1}));
 
-   forge::asio::blocking::run(
-      runtime, call.async_write(protocol::read_chunk{.ref = "a"}));
-   forge::asio::blocking::run(
-      runtime, call.async_write(protocol::read_chunk{.ref = "b"}));
+   forge::asio::blocking::run(runtime, call.async_write(protocol::read_chunk{.ref = "a"}));
+   forge::asio::blocking::run(runtime, call.async_write(protocol::read_chunk{.ref = "b"}));
    BOOST_TEST(implementation->uploaded_items() >= 1U);
    forge::asio::blocking::run(runtime, call.async_close());
    const auto result = forge::asio::blocking::run(runtime, call.async_finish());
@@ -878,14 +862,11 @@ BOOST_AUTO_TEST_CASE(local_handle_bidirectional_stream_supports_client_first_hal
    auto runtime = forge::asio::runtime{};
    auto implementation = std::make_shared<live_stream_impl>();
    auto handle = forge::api::core::handle<live_stream_api>{implementation};
-   auto call = forge::asio::blocking::run(
-      runtime, handle.async_open<live_exchange_stream_method>());
+   auto call = forge::asio::blocking::run(runtime, handle.async_open<live_exchange_stream_method>());
 
-   forge::asio::blocking::run(
-      runtime, call.async_write(protocol::read_chunk{.ref = "a"}));
+   forge::asio::blocking::run(runtime, call.async_write(protocol::read_chunk{.ref = "a"}));
    const auto first = forge::asio::blocking::run(runtime, call.async_read());
-   forge::asio::blocking::run(
-      runtime, call.async_write(protocol::read_chunk{.ref = "b"}));
+   forge::asio::blocking::run(runtime, call.async_write(protocol::read_chunk{.ref = "b"}));
    forge::asio::blocking::run(runtime, call.async_close());
    const auto second = forge::asio::blocking::run(runtime, call.async_read());
    const auto end = forge::asio::blocking::run(runtime, call.async_read());
@@ -900,16 +881,13 @@ BOOST_AUTO_TEST_CASE(local_handle_bidirectional_stream_supports_client_first_hal
 
 BOOST_AUTO_TEST_CASE(local_handle_bidirectional_stream_supports_server_first_half_close) {
    auto runtime = forge::asio::runtime{};
-   auto implementation =
-      std::make_shared<live_stream_impl>(half_close_order::server_first);
+   auto implementation = std::make_shared<live_stream_impl>(half_close_order::server_first);
    auto handle = forge::api::core::handle<live_stream_api>{implementation};
-   auto call = forge::asio::blocking::run(
-      runtime, handle.async_open<live_exchange_stream_method>());
+   auto call = forge::asio::blocking::run(runtime, handle.async_open<live_exchange_stream_method>());
 
    const auto ready = forge::asio::blocking::run(runtime, call.async_read());
    const auto end = forge::asio::blocking::run(runtime, call.async_read());
-   forge::asio::blocking::run(
-      runtime, call.async_write(protocol::read_chunk{.ref = "after-close"}));
+   forge::asio::blocking::run(runtime, call.async_write(protocol::read_chunk{.ref = "after-close"}));
    forge::asio::blocking::run(runtime, call.async_close());
    forge::asio::blocking::run(runtime, call.async_finish());
 
@@ -921,18 +899,14 @@ BOOST_AUTO_TEST_CASE(local_handle_bidirectional_stream_supports_server_first_hal
 
 BOOST_AUTO_TEST_CASE(stream_eof_still_requires_async_finish_for_terminal_failure) {
    auto runtime = forge::asio::runtime{};
-   auto implementation =
-      std::make_shared<live_stream_impl>(runtime.context().get_executor());
+   auto implementation = std::make_shared<live_stream_impl>(runtime.context().get_executor());
    auto handle = forge::api::core::handle<live_stream_api>{implementation};
-   auto call = forge::asio::blocking::run(
-      runtime, handle.async_open<&live_stream_api::subscribe>());
+   auto call = forge::asio::blocking::run(runtime, handle.async_open<&live_stream_api::subscribe>());
 
    const auto end = forge::asio::blocking::run(runtime, call.async_read());
    BOOST_CHECK(!end.has_value());
 
-   boost::asio::post(runtime.context(), [implementation] {
-      implementation->release_terminal_failure();
-   });
+   boost::asio::post(runtime.context(), [implementation] { implementation->release_terminal_failure(); });
    BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, call.async_finish()),
                      forge::api::core::exceptions::protocol_error);
 }
@@ -942,15 +916,13 @@ BOOST_AUTO_TEST_CASE(stream_call_retains_implementation_after_handle_destruction
    auto implementation = std::make_shared<live_stream_impl>();
    auto weak_implementation = std::weak_ptr<live_stream_impl>{implementation};
    auto handle = forge::api::core::handle<live_stream_api>{implementation};
-   auto call = forge::asio::blocking::run(
-      runtime, handle.async_open<&live_stream_api::upload>());
+   auto call = forge::asio::blocking::run(runtime, handle.async_open<&live_stream_api::upload>());
 
    handle = {};
    implementation.reset();
    BOOST_CHECK(!weak_implementation.expired());
 
-   forge::asio::blocking::run(
-      runtime, call.async_write(protocol::read_chunk{.ref = "retained"}));
+   forge::asio::blocking::run(runtime, call.async_write(protocol::read_chunk{.ref = "retained"}));
    forge::asio::blocking::run(runtime, call.async_close());
    const auto result = forge::asio::blocking::run(runtime, call.async_finish());
    BOOST_TEST(result.bytes == "retained");
@@ -961,17 +933,13 @@ BOOST_AUTO_TEST_CASE(unfinished_call_destruction_cancels_only_that_call) {
    auto implementation = std::make_shared<live_stream_impl>();
    auto handle = forge::api::core::handle<live_stream_api>{implementation};
    auto abandoned = std::optional<client_call>{};
-   abandoned.emplace(forge::asio::blocking::run(
-      runtime, handle.async_open<&live_stream_api::upload>()));
-   auto survivor = forge::asio::blocking::run(
-      runtime, handle.async_open<&live_stream_api::upload>());
+   abandoned.emplace(forge::asio::blocking::run(runtime, handle.async_open<&live_stream_api::upload>()));
+   auto survivor = forge::asio::blocking::run(runtime, handle.async_open<&live_stream_api::upload>());
 
    abandoned.reset();
-   forge::asio::blocking::run(
-      runtime, survivor.async_write(protocol::read_chunk{.ref = "survivor"}));
+   forge::asio::blocking::run(runtime, survivor.async_write(protocol::read_chunk{.ref = "survivor"}));
    forge::asio::blocking::run(runtime, survivor.async_close());
-   const auto result =
-      forge::asio::blocking::run(runtime, survivor.async_finish());
+   const auto result = forge::asio::blocking::run(runtime, survivor.async_finish());
 
    BOOST_TEST(result.bytes == "survivor");
    BOOST_TEST(implementation->cancelled_uploads() == 1U);
@@ -982,93 +950,34 @@ BOOST_AUTO_TEST_CASE(call_options_report_typed_buffer_limit_failures) {
    auto implementation = std::make_shared<live_stream_impl>();
    auto handle = forge::api::core::handle<live_stream_api>{implementation};
 
-   BOOST_CHECK_THROW(
-      forge::asio::blocking::run(
-         runtime, handle.async_open<&live_stream_api::upload>(
-                     forge::api::core::call_options{.max_buffered_items = 0})),
-      forge::api::core::exceptions::protocol_error);
+   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, handle.async_open<&live_stream_api::upload>(
+                                                             forge::api::core::call_options{.max_buffered_items = 0})),
+                     forge::api::core::exceptions::protocol_error);
 
-   auto call = forge::asio::blocking::run(
-      runtime, handle.async_open<&live_stream_api::upload>(
-                  forge::api::core::call_options{
-                     .max_item_bytes = 1024,
-                     .max_buffered_items = 1,
-                     .max_buffered_bytes = 8,
-                  }));
+   auto call =
+       forge::asio::blocking::run(runtime, handle.async_open<&live_stream_api::upload>(forge::api::core::call_options{
+                                               .max_item_bytes = 1024,
+                                               .max_buffered_items = 1,
+                                               .max_buffered_bytes = 8,
+                                           }));
    BOOST_CHECK_THROW(
-      forge::asio::blocking::run(
-         runtime,
-         call.async_write(protocol::read_chunk{.ref = "larger-than-buffer"})),
-      forge::api::core::exceptions::resource_exhausted);
+       forge::asio::blocking::run(runtime, call.async_write(protocol::read_chunk{.ref = "larger-than-buffer"})),
+       forge::api::core::exceptions::resource_exhausted);
    call.cancel();
-   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, call.async_finish()),
-                     forge::api::core::exceptions::cancelled);
+   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, call.async_finish()), forge::api::core::exceptions::cancelled);
 }
 
 BOOST_AUTO_TEST_CASE(call_options_deadline_reports_typed_terminal_failure) {
    auto runtime = forge::asio::runtime{};
    auto implementation = std::make_shared<live_stream_impl>();
    auto handle = forge::api::core::handle<live_stream_api>{implementation};
-   auto call = forge::asio::blocking::run(
-      runtime, handle.async_open<&live_stream_api::upload>(
-                  forge::api::core::call_options{
-                     .deadline = std::chrono::steady_clock::now(),
-                  }));
+   auto call =
+       forge::asio::blocking::run(runtime, handle.async_open<&live_stream_api::upload>(forge::api::core::call_options{
+                                               .deadline = std::chrono::steady_clock::now(),
+                                           }));
 
    BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, call.async_finish()),
                      forge::api::core::exceptions::deadline_exceeded);
-}
-
-BOOST_AUTO_TEST_CASE(call_runtime_rejects_duplicate_unknown_and_post_terminal_frames) {
-   auto calls = forge::api::core::call_runtime{forge::api::core::call_runtime_options{.max_inflight = 1}};
-   const auto request = forge::api::core::frame{
-       .kind = forge::api::core::frame_kind::request,
-       .id = {.value = 99},
-       .api = {.id = {"cache"}, .major = 1, .min_revision = 8},
-       .method = "read",
-   };
-
-   calls.observe(request);
-   BOOST_TEST(calls.active_calls() == 1U);
-   BOOST_CHECK_THROW(calls.observe(request), forge::api::core::exceptions::protocol_error);
-
-   auto stream_item = request;
-   stream_item.kind = forge::api::core::frame_kind::stream_item;
-   calls.observe(stream_item);
-   BOOST_TEST(calls.active_calls() == 1U);
-
-   auto stream_end = request;
-   stream_end.kind = forge::api::core::frame_kind::stream_end;
-   calls.observe(stream_end);
-   BOOST_TEST(calls.active_calls() == 0U);
-   BOOST_CHECK_THROW(calls.observe(stream_item), forge::api::core::exceptions::protocol_error);
-
-   auto cancel_request = request;
-   cancel_request.id.value = 100;
-   calls.observe(cancel_request);
-   auto cancel = cancel_request;
-   cancel.kind = forge::api::core::frame_kind::cancel;
-   calls.observe(cancel);
-   BOOST_TEST(calls.active_calls() == 0U);
-}
-
-BOOST_AUTO_TEST_CASE(call_runtime_enforces_deadline_before_non_terminal_frames) {
-   auto calls = forge::api::core::call_runtime{
-       forge::api::core::call_runtime_options{.max_inflight = 1, .deadline = std::chrono::milliseconds{1}}};
-   const auto request = forge::api::core::frame{
-       .kind = forge::api::core::frame_kind::request,
-       .id = {.value = 101},
-       .api = {.id = {"cache"}, .major = 1, .min_revision = 8},
-       .method = "read",
-   };
-
-   calls.observe(request);
-   std::this_thread::sleep_for(std::chrono::milliseconds{3});
-
-   auto item = request;
-   item.kind = forge::api::core::frame_kind::stream_item;
-   BOOST_CHECK_THROW(calls.observe(item), forge::api::core::exceptions::deadline_exceeded);
-   BOOST_TEST(calls.active_calls() == 0U);
 }
 
 BOOST_AUTO_TEST_CASE(binding_plan_runs_interceptors_in_deterministic_order) {
@@ -1429,7 +1338,6 @@ BOOST_AUTO_TEST_CASE(registry_builtin_errors_set_semantic_status) {
    BOOST_CHECK(payload.status_code == forge::api::core::status::not_found);
    BOOST_TEST(payload.identity.code ==
               static_cast<std::uint32_t>(forge::api::core::exceptions::code::method_not_found));
-
 }
 
 class throwing_cache_impl final : public cache_api {

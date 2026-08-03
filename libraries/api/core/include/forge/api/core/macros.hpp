@@ -21,22 +21,22 @@
 
 #define FORGE_API_DETAIL_HAS_ARGS(...) BOOST_PP_NOT(BOOST_PP_CHECK_EMPTY(__VA_ARGS__))
 
-#define FORGE_API_METHOD(NAME, ...)                                                                                  \
+#define FORGE_API_METHOD(NAME, ...)                                                                                    \
    (NAME, void, void, 0, 0, "", 0, FORGE_API_DETAIL_HAS_ARGS(__VA_ARGS__), (__VA_ARGS__), 0, ())
-#define FORGE_API_METHOD_EXACT(NAME, POINTER, ...)                                                                   \
+#define FORGE_API_METHOD_EXACT(NAME, POINTER, ...)                                                                     \
    (NAME, void, void, 0, 0, "", 0, FORGE_API_DETAIL_HAS_ARGS(__VA_ARGS__), (__VA_ARGS__), 1, (POINTER))
-#define FORGE_API_METHOD_SINCE(NAME, REVISION, ...)                                                                  \
+#define FORGE_API_METHOD_SINCE(NAME, REVISION, ...)                                                                    \
    (NAME, void, void, REVISION, 0, "", 0, FORGE_API_DETAIL_HAS_ARGS(__VA_ARGS__), (__VA_ARGS__), 0, ())
-#define FORGE_API_METHOD_DEPRECATED(NAME, REASON, ...)                                                               \
+#define FORGE_API_METHOD_DEPRECATED(NAME, REASON, ...)                                                                 \
    (NAME, void, void, 0, 1, REASON, 0, FORGE_API_DETAIL_HAS_ARGS(__VA_ARGS__), (__VA_ARGS__), 0, ())
-#define FORGE_API_METHOD_DEPRECATED_SINCE(NAME, REVISION, REASON, ...)                                               \
+#define FORGE_API_METHOD_DEPRECATED_SINCE(NAME, REVISION, REASON, ...)                                                 \
    (NAME, void, void, REVISION, 1, REASON, 0, FORGE_API_DETAIL_HAS_ARGS(__VA_ARGS__), (__VA_ARGS__), 0, ())
 #define FORGE_API_METHOD_TYPED(NAME, REQUEST, RESPONSE) (NAME, REQUEST, RESPONSE, 0, 0, "", 1, 0, (), 0, ())
-#define FORGE_API_METHOD_TYPED_SINCE(NAME, REQUEST, RESPONSE, REVISION)                                              \
+#define FORGE_API_METHOD_TYPED_SINCE(NAME, REQUEST, RESPONSE, REVISION)                                                \
    (NAME, REQUEST, RESPONSE, REVISION, 0, "", 1, 0, (), 0, ())
-#define FORGE_API_METHOD_TYPED_DEPRECATED(NAME, REQUEST, RESPONSE, REASON)                                           \
+#define FORGE_API_METHOD_TYPED_DEPRECATED(NAME, REQUEST, RESPONSE, REASON)                                             \
    (NAME, REQUEST, RESPONSE, 0, 1, REASON, 1, 0, (), 0, ())
-#define FORGE_API_METHOD_TYPED_DEPRECATED_SINCE(NAME, REQUEST, RESPONSE, REVISION, REASON)                            \
+#define FORGE_API_METHOD_TYPED_DEPRECATED_SINCE(NAME, REQUEST, RESPONSE, REVISION, REASON)                             \
    (NAME, REQUEST, RESPONSE, REVISION, 1, REASON, 1, 0, (), 0, ())
 
 #if defined(__clang__)
@@ -65,10 +65,10 @@
 #define FORGE_API_DETAIL_METHOD_EXACT_POINTER(METHOD) BOOST_PP_TUPLE_ELEM(11, 10, METHOD)
 
 #define FORGE_API_DETAIL_METHOD_POINTER_DEDUCED(INTERFACE, METHOD) &INTERFACE::FORGE_API_DETAIL_METHOD_NAME(METHOD)
-#define FORGE_API_DETAIL_METHOD_POINTER_EXACT(INTERFACE, METHOD)                                                     \
+#define FORGE_API_DETAIL_METHOD_POINTER_EXACT(INTERFACE, METHOD)                                                       \
    BOOST_PP_REMOVE_PARENS(FORGE_API_DETAIL_METHOD_EXACT_POINTER(METHOD))
-#define FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)                                                          \
-   BOOST_PP_IF(FORGE_API_DETAIL_METHOD_EXACT(METHOD), FORGE_API_DETAIL_METHOD_POINTER_EXACT,                        \
+#define FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)                                                             \
+   BOOST_PP_IF(FORGE_API_DETAIL_METHOD_EXACT(METHOD), FORGE_API_DETAIL_METHOD_POINTER_EXACT,                           \
                FORGE_API_DETAIL_METHOD_POINTER_DEDUCED)(INTERFACE, METHOD)
 
 #define FORGE_API_DETAIL_ARG_NAMES_EMPTY_R(r, METHOD)                                                                  \
@@ -94,14 +94,14 @@
    BOOST_PP_IF(FORGE_API_DETAIL_METHOD_TYPED(METHOD), FORGE_API_DETAIL_DESCRIPTOR_METHOD_TYPED,                        \
                FORGE_API_DETAIL_DESCRIPTOR_METHOD_DEDUCED)(r, INTERFACE, METHOD)
 
-#define FORGE_API_DETAIL_DESCRIPTOR_METHOD_DEDUCED(r, INTERFACE, METHOD)                                             \
-   {                                                                                                               \
-      auto method = builder.template method<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>(                     \
-         BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)), FORGE_API_DETAIL_ARG_NAMES_R(r, METHOD));           \
-      method.since_revision(FORGE_API_DETAIL_METHOD_SINCE(METHOD));                                                  \
+#define FORGE_API_DETAIL_DESCRIPTOR_METHOD_DEDUCED(r, INTERFACE, METHOD)                                               \
+   {                                                                                                                   \
+      auto method = builder.template method<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>(                       \
+          BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)), FORGE_API_DETAIL_ARG_NAMES_R(r, METHOD));          \
+      method.since_revision(FORGE_API_DETAIL_METHOD_SINCE(METHOD));                                                    \
       BOOST_PP_IF(                                                                                                     \
           FORGE_API_DETAIL_METHOD_DEPRECATED(METHOD), method.deprecated(FORGE_API_DETAIL_METHOD_REASON(METHOD));, )    \
-      ::forge::api::core::customize_method_descriptor<INTERFACE, &INTERFACE::FORGE_API_DETAIL_METHOD_NAME(METHOD)>(    \
+      ::forge::api::core::customize_method_descriptor<INTERFACE, FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>(  \
           method);                                                                                                     \
    }
 #define FORGE_API_DETAIL_DESCRIPTOR_METHOD_TYPED(r, INTERFACE, METHOD)                                                 \
@@ -125,19 +125,21 @@
    BOOST_PP_IF(FORGE_API_DETAIL_METHOD_HAS_ARGS(METHOD), FORGE_API_DETAIL_PROXY_METHOD_POSITIONAL,                     \
                FORGE_API_DETAIL_PROXY_METHOD_ONE_REQUEST)(r, INTERFACE, METHOD)
 
-#define FORGE_API_DETAIL_PROXY_METHOD_ONE_REQUEST(r, INTERFACE, METHOD)                                              \
-   boost::asio::awaitable<::forge::api::core::method_response_t<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>> \
-   FORGE_API_DETAIL_METHOD_NAME(METHOD)(                                                                             \
-      ::forge::api::core::method_argument_t<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD), 0> request) override { \
-      co_return co_await ::forge::api::core::detail::proxy_method<                                                    \
-          INTERFACE, FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>(this->invoker_, this->selected_api_,         \
-          BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)), std::move(request));                              \
+#define FORGE_API_DETAIL_PROXY_METHOD_ONE_REQUEST(r, INTERFACE, METHOD)                                                \
+   boost::asio::awaitable<::forge::api::core::method_response_t<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>>   \
+   FORGE_API_DETAIL_METHOD_NAME(METHOD)(                                                                               \
+       ::forge::api::core::method_argument_t<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD), 0> request)           \
+       override {                                                                                                      \
+      co_return co_await ::forge::api::core::detail::proxy_method<INTERFACE,                                           \
+                                                                  FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>( \
+          this->invoker_, this->selected_api_,                                                                         \
+          BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)), std::move(request));                               \
    }
 
 #define FORGE_API_DETAIL_PROXY_ARG_DECL(r, DATA, INDEX, ARG)                                                           \
    BOOST_PP_COMMA_IF(INDEX)                                                                                            \
    ::forge::api::core::method_argument_t<                                                                              \
-       FORGE_API_DETAIL_METHOD_POINTER(BOOST_PP_TUPLE_ELEM(2, 0, DATA), BOOST_PP_TUPLE_ELEM(2, 1, DATA)), INDEX>      \
+       FORGE_API_DETAIL_METHOD_POINTER(BOOST_PP_TUPLE_ELEM(2, 0, DATA), BOOST_PP_TUPLE_ELEM(2, 1, DATA)), INDEX>       \
        ARG
 #define FORGE_API_DETAIL_PROXY_ARG_MOVE(r, DATA, INDEX, ARG) , std::move(ARG)
 #define FORGE_API_DETAIL_PROXY_ARG_DECLS_R(r, INTERFACE, METHOD)                                                       \
@@ -147,20 +149,22 @@
    BOOST_PP_SEQ_FOR_EACH_I_R(r, FORGE_API_DETAIL_PROXY_ARG_MOVE, _,                                                    \
                              BOOST_PP_TUPLE_TO_SEQ(FORGE_API_DETAIL_METHOD_ARGS(METHOD)))
 
-#define FORGE_API_DETAIL_PROXY_METHOD_POSITIONAL(r, INTERFACE, METHOD)                                               \
-   boost::asio::awaitable<::forge::api::core::method_response_t<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>> \
+#define FORGE_API_DETAIL_PROXY_METHOD_POSITIONAL(r, INTERFACE, METHOD)                                                 \
+   boost::asio::awaitable<::forge::api::core::method_response_t<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>>   \
    FORGE_API_DETAIL_METHOD_NAME(METHOD)(FORGE_API_DETAIL_PROXY_ARG_DECLS_R(r, INTERFACE, METHOD)) override {           \
-      co_return co_await ::forge::api::core::detail::proxy_method<                                                    \
-          INTERFACE, FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>(this->invoker_, this->selected_api_,         \
-          BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)) FORGE_API_DETAIL_PROXY_ARG_MOVES_R(r, METHOD));    \
+      co_return co_await ::forge::api::core::detail::proxy_method<INTERFACE,                                           \
+                                                                  FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>( \
+          this->invoker_, this->selected_api_,                                                                         \
+          BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)) FORGE_API_DETAIL_PROXY_ARG_MOVES_R(r, METHOD));     \
    }
 
 #define FORGE_API_DETAIL_PROXY_METHOD_TYPED(r, INTERFACE, METHOD)                                                      \
    boost::asio::awaitable<FORGE_API_DETAIL_METHOD_RESPONSE(METHOD)> FORGE_API_DETAIL_METHOD_NAME(METHOD)(              \
        FORGE_API_DETAIL_METHOD_REQUEST(METHOD) request) override {                                                     \
-      co_return co_await ::forge::api::core::detail::proxy_method<                                                   \
-          INTERFACE, FORGE_API_DETAIL_TYPED_METHOD_POINTER(INTERFACE, METHOD)>(this->invoker_, this->selected_api_,   \
-         BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)), std::move(request));                              \
+      co_return co_await ::forge::api::core::detail::proxy_method<INTERFACE, FORGE_API_DETAIL_TYPED_METHOD_POINTER(    \
+                                                                                 INTERFACE, METHOD)>(                  \
+          this->invoker_, this->selected_api_,                                                                         \
+          BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)), std::move(request));                               \
    }
 
 #define FORGE_API(INTERFACE, CONTRACT, ...)                                                                            \

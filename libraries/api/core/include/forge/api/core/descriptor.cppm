@@ -43,8 +43,7 @@ template <typename T> [[nodiscard]] bytes pack_body(const T& value) {
    return forge::raw::pack(value);
 }
 
-template <typename T>
-struct method_signature;
+template <typename T> struct method_signature;
 
 template <typename Class, typename Response, typename... Args>
 struct method_signature<boost::asio::awaitable<Response> (Class::*)(Args...)> {
@@ -55,48 +54,35 @@ struct method_signature<boost::asio::awaitable<Response> (Class::*)(Args...)> {
 
 template <typename Class, typename Response, typename... Args>
 struct method_signature<boost::asio::awaitable<Response> (Class::*)(Args...) const>
-   : method_signature<boost::asio::awaitable<Response> (Class::*)(Args...)> {};
+    : method_signature<boost::asio::awaitable<Response> (Class::*)(Args...)> {};
 
-template <typename Tuple>
-struct method_payload;
+template <typename Tuple> struct method_payload;
 
-template <>
-struct method_payload<std::tuple<>> {
+template <> struct method_payload<std::tuple<>> {
    using type = std::tuple<>;
 };
 
-template <typename T>
-struct method_payload<std::tuple<T>> {
+template <typename T> struct method_payload<std::tuple<T>> {
    using type = T;
 };
 
-template <typename First, typename Second, typename... Rest>
-struct method_payload<std::tuple<First, Second, Rest...>> {
+template <typename First, typename Second, typename... Rest> struct method_payload<std::tuple<First, Second, Rest...>> {
    using type = std::tuple<First, Second, Rest...>;
 };
 
-template <auto Method>
-using method_argument_tuple_t =
-   typename method_signature<decltype(Method)>::argument_tuple;
+template <auto Method> using method_argument_tuple_t = typename method_signature<decltype(Method)>::argument_tuple;
 
-template <auto Method>
-using method_response_t =
-   typename method_signature<decltype(Method)>::response_type;
+template <auto Method> using method_response_t = typename method_signature<decltype(Method)>::response_type;
 
-template <auto Method>
-using method_request_t =
-   typename method_payload<method_argument_tuple_t<Method>>::type;
+template <auto Method> using method_request_t = typename method_payload<method_argument_tuple_t<Method>>::type;
 
-template <auto Method>
-using method_class_t = typename method_signature<decltype(Method)>::class_type;
+template <auto Method> using method_class_t = typename method_signature<decltype(Method)>::class_type;
 
 template <auto Method, std::size_t Index>
-using method_argument_t =
-   std::tuple_element_t<Index, method_argument_tuple_t<Method>>;
+using method_argument_t = std::tuple_element_t<Index, method_argument_tuple_t<Method>>;
 
 template <auto Method>
-inline constexpr auto method_argument_count_v =
-   std::tuple_size_v<method_argument_tuple_t<Method>>;
+inline constexpr auto method_argument_count_v = std::tuple_size_v<method_argument_tuple_t<Method>>;
 
 namespace detail {
 
@@ -105,40 +91,39 @@ inline constexpr bool has_stream_endpoint_v = [] {
    if constexpr (method_argument_count_v<Method> == 0) {
       return false;
    } else {
-      return stream_endpoint_v<method_argument_t<
-         Method, method_argument_count_v<Method> - 1>>;
+      return stream_endpoint_v<method_argument_t<Method, method_argument_count_v<Method> - 1>>;
    }
 }();
 
-template <auto Method, std::size_t... Index>
-consteval bool any_stream_endpoint(std::index_sequence<Index...>) {
+template <auto Method, std::size_t... Index> consteval bool any_stream_endpoint(std::index_sequence<Index...>) {
    return (stream_endpoint_v<method_argument_t<Method, Index>> || ... || false);
 }
 
 template <auto Method>
-inline constexpr bool has_any_stream_endpoint_v = any_stream_endpoint<Method>(
-   std::make_index_sequence<method_argument_count_v<Method>>{});
+inline constexpr bool has_any_stream_endpoint_v =
+    any_stream_endpoint<Method>(std::make_index_sequence<method_argument_count_v<Method>>{});
 
 template <auto Method>
 inline constexpr std::size_t fixed_argument_count_v =
-   method_argument_count_v<Method> - (has_stream_endpoint_v<Method> ? 1U : 0U);
+    method_argument_count_v<Method> - (has_stream_endpoint_v<Method> ? 1U : 0U);
 
 template <auto Method, std::size_t... Index>
 [[nodiscard]] auto fixed_argument_tuple(std::index_sequence<Index...>)
-   -> std::tuple<std::remove_cvref_t<method_argument_t<Method, Index>>...>;
+    -> std::tuple<std::remove_cvref_t<method_argument_t<Method, Index>>...>;
 
 template <auto Method>
-using method_fixed_argument_tuple_t = decltype(
-   fixed_argument_tuple<Method>(
-      std::make_index_sequence<fixed_argument_count_v<Method>>{}));
+using method_fixed_argument_tuple_t =
+    decltype(fixed_argument_tuple<Method>(std::make_index_sequence<fixed_argument_count_v<Method>>{}));
+
+template <auto Method>
+using method_fixed_request_t = typename method_payload<method_fixed_argument_tuple_t<Method>>::type;
 
 template <auto Method>
 inline constexpr method_kind inferred_method_kind_v = [] {
    if constexpr (!has_stream_endpoint_v<Method>) {
       return method_kind::unary;
    } else {
-      using endpoint_type = std::remove_cvref_t<method_argument_t<
-         Method, method_argument_count_v<Method> - 1>>;
+      using endpoint_type = std::remove_cvref_t<method_argument_t<Method, method_argument_count_v<Method> - 1>>;
       if constexpr (stream_writer_traits<endpoint_type>::value) {
          return method_kind::server_stream;
       } else if constexpr (stream_reader_traits<endpoint_type>::value) {
@@ -149,18 +134,13 @@ inline constexpr method_kind inferred_method_kind_v = [] {
    }
 }();
 
-template <auto Method>
-void validate_method_signature() {
-   static_assert(!has_any_stream_endpoint_v<Method> ||
-                    has_stream_endpoint_v<Method>,
+template <auto Method> void validate_method_signature() {
+   static_assert(!has_any_stream_endpoint_v<Method> || has_stream_endpoint_v<Method>,
                  "API stream endpoint must be the final method argument");
    if constexpr (has_stream_endpoint_v<Method>) {
-      static_assert(
-         std::same_as<method_argument_t<
-                         Method, method_argument_count_v<Method> - 1>,
-                      std::remove_cvref_t<method_argument_t<
-                         Method, method_argument_count_v<Method> - 1>>>,
-         "API stream endpoint must be passed by value");
+      static_assert(std::same_as<method_argument_t<Method, method_argument_count_v<Method> - 1>,
+                                 std::remove_cvref_t<method_argument_t<Method, method_argument_count_v<Method> - 1>>>,
+                    "API stream endpoint must be passed by value");
       if constexpr (inferred_method_kind_v<Method> == method_kind::server_stream ||
                     inferred_method_kind_v<Method> == method_kind::bidirectional_stream) {
          static_assert(std::same_as<method_response_t<Method>, void>,
@@ -169,35 +149,26 @@ void validate_method_signature() {
    }
 }
 
-template <auto Method, typename Interface, typename Tuple,
-          std::size_t... Index>
-boost::asio::awaitable<method_response_t<Method>>
-invoke_fixed(Interface& implementation, Tuple arguments,
-             std::index_sequence<Index...>) {
+template <auto Method, typename Interface, typename Tuple, std::size_t... Index>
+boost::asio::awaitable<method_response_t<Method>> invoke_fixed(Interface& implementation, Tuple arguments,
+                                                               std::index_sequence<Index...>) {
    if constexpr (std::same_as<method_response_t<Method>, void>) {
-      co_await std::invoke(
-         Method, implementation, std::move(std::get<Index>(arguments))...);
+      co_await std::invoke(Method, implementation, std::move(std::get<Index>(arguments))...);
       co_return;
    } else {
-      co_return co_await std::invoke(
-         Method, implementation, std::move(std::get<Index>(arguments))...);
+      co_return co_await std::invoke(Method, implementation, std::move(std::get<Index>(arguments))...);
    }
 }
 
-template <auto Method, typename Interface, typename Tuple, typename Endpoint,
-          std::size_t... Index>
-boost::asio::awaitable<method_response_t<Method>>
-invoke_stream(Interface& implementation, Tuple arguments, Endpoint endpoint,
-              std::index_sequence<Index...>) {
+template <auto Method, typename Interface, typename Tuple, typename Endpoint, std::size_t... Index>
+boost::asio::awaitable<method_response_t<Method>> invoke_stream(Interface& implementation, Tuple arguments,
+                                                                Endpoint endpoint, std::index_sequence<Index...>) {
    if constexpr (std::same_as<method_response_t<Method>, void>) {
-      co_await std::invoke(Method, implementation,
-                           std::move(std::get<Index>(arguments))...,
-                           std::move(endpoint));
+      co_await std::invoke(Method, implementation, std::move(std::get<Index>(arguments))..., std::move(endpoint));
       co_return;
    } else {
-      co_return co_await std::invoke(
-         Method, implementation, std::move(std::get<Index>(arguments))...,
-         std::move(endpoint));
+      co_return co_await std::invoke(Method, implementation, std::move(std::get<Index>(arguments))...,
+                                     std::move(endpoint));
    }
 }
 
@@ -259,12 +230,10 @@ template <auto Method, std::size_t... Index>
 
 template <auto Method>
 [[nodiscard]] method_fixed_argument_tuple_t<Method> unpack_fixed_arguments(const bytes& payload) {
-   return unpack_fixed_arguments<Method>(payload,
-                                         std::make_index_sequence<detail::fixed_argument_count_v<Method>>{});
+   return unpack_fixed_arguments<Method>(payload, std::make_index_sequence<detail::fixed_argument_count_v<Method>>{});
 }
 
-template <auto Method>
-[[nodiscard]] bytes pack_terminal_result(const method_response_t<Method>& value) {
+template <auto Method> [[nodiscard]] bytes pack_terminal_result(const method_response_t<Method>& value) {
    return pack_body(value);
 }
 
@@ -280,8 +249,8 @@ boost::asio::awaitable<bytes> invoke_raw_stream(std::shared_ptr<void> implementa
             throw exceptions::protocol_error{"server stream requires an output endpoint"};
          }
          using endpoint_type = method_argument_t<Method, method_argument_count_v<Method> - 1>;
-         auto writer = writer_access::make<typename stream_writer_traits<
-            std::remove_cvref_t<endpoint_type>>::item_type>(output);
+         auto writer =
+             writer_access::make<typename stream_writer_traits<std::remove_cvref_t<endpoint_type>>::item_type>(output);
          co_await invoke_stream<Method>(*typed, std::move(arguments), std::move(writer),
                                         std::make_index_sequence<fixed_argument_count_v<Method>>{});
          output->close();
@@ -291,17 +260,15 @@ boost::asio::awaitable<bytes> invoke_raw_stream(std::shared_ptr<void> implementa
             throw exceptions::protocol_error{"client stream requires an input endpoint"};
          }
          using endpoint_type = method_argument_t<Method, method_argument_count_v<Method> - 1>;
-         auto reader = reader_access::make<typename stream_reader_traits<
-            std::remove_cvref_t<endpoint_type>>::item_type>(input);
+         auto reader =
+             reader_access::make<typename stream_reader_traits<std::remove_cvref_t<endpoint_type>>::item_type>(input);
          if constexpr (std::same_as<method_response_t<Method>, void>) {
-            co_await invoke_stream<Method>(
-               *typed, std::move(arguments), std::move(reader),
-               std::make_index_sequence<fixed_argument_count_v<Method>>{});
+            co_await invoke_stream<Method>(*typed, std::move(arguments), std::move(reader),
+                                           std::make_index_sequence<fixed_argument_count_v<Method>>{});
             co_return bytes{};
          } else {
-            auto result = co_await invoke_stream<Method>(
-               *typed, std::move(arguments), std::move(reader),
-               std::make_index_sequence<fixed_argument_count_v<Method>>{});
+            auto result = co_await invoke_stream<Method>(*typed, std::move(arguments), std::move(reader),
+                                                         std::make_index_sequence<fixed_argument_count_v<Method>>{});
             co_return pack_terminal_result<Method>(result);
          }
       } else {
@@ -311,10 +278,9 @@ boost::asio::awaitable<bytes> invoke_raw_stream(std::shared_ptr<void> implementa
          using endpoint_type = method_argument_t<Method, method_argument_count_v<Method> - 1>;
          auto stream = duplex_stream<typename duplex_stream_traits<endpoint_type>::input_type,
                                      typename duplex_stream_traits<endpoint_type>::output_type>{
-             reader_access::make<typename duplex_stream_traits<
-                std::remove_cvref_t<endpoint_type>>::input_type>(input),
-             writer_access::make<typename duplex_stream_traits<
-                std::remove_cvref_t<endpoint_type>>::output_type>(output)};
+             reader_access::make<typename duplex_stream_traits<std::remove_cvref_t<endpoint_type>>::input_type>(input),
+             writer_access::make<typename duplex_stream_traits<std::remove_cvref_t<endpoint_type>>::output_type>(
+                 output)};
          co_await invoke_stream<Method>(*typed, std::move(arguments), std::move(stream),
                                         std::make_index_sequence<fixed_argument_count_v<Method>>{});
          output->close();
@@ -334,9 +300,7 @@ boost::asio::awaitable<bytes> invoke_raw_stream(std::shared_ptr<void> implementa
 
 } // namespace detail
 
-template <auto Method>
-inline constexpr method_kind method_kind_v =
-   detail::inferred_method_kind_v<Method>;
+template <auto Method> inline constexpr method_kind method_kind_v = detail::inferred_method_kind_v<Method>;
 
 struct error_options {
    status status_code = status::internal;
@@ -353,9 +317,8 @@ struct error_descriptor {
    std::function<void(const error_payload&)> thrower;
 };
 
-using raw_stream_invoker =
-    std::function<boost::asio::awaitable<bytes>(std::shared_ptr<void>, bytes, std::shared_ptr<detail::stream_endpoint>,
-                                                std::shared_ptr<detail::stream_endpoint>)>;
+using raw_stream_invoker = std::function<boost::asio::awaitable<bytes>(
+    std::shared_ptr<void>, bytes, std::shared_ptr<detail::stream_endpoint>, std::shared_ptr<detail::stream_endpoint>)>;
 
 struct method_descriptor {
    std::string name;
@@ -376,6 +339,8 @@ struct method_descriptor {
    std::function<bytes(const void*)> response_encoder;
    std::function<void(const bytes&, forge::raw::unpack_limits)> request_decoder;
    std::function<void(const bytes&, forge::raw::unpack_limits)> response_decoder;
+   std::function<void(const bytes&, forge::raw::unpack_limits)> input_decoder;
+   std::function<void(const bytes&, forge::raw::unpack_limits)> output_decoder;
    std::function<void(const bytes&)> request_validator;
    std::function<void(const bytes&, const bytes&)> response_validator;
    std::function<boost::asio::awaitable<bytes>(std::shared_ptr<void>, bytes)> raw_invoker;
@@ -457,8 +422,7 @@ template <typename Interface, bool EnableRaw> class contract_builder {
 
  private:
    template <auto Method>
-   method_builder<Interface, EnableRaw> add_deduced_method(std::string name,
-                                                           std::vector<std::string> argument_names) {
+   method_builder<Interface, EnableRaw> add_deduced_method(std::string name, std::vector<std::string> argument_names) {
       detail::validate_method_signature<Method>();
       constexpr auto kind = method_kind_v<Method>;
       constexpr auto argument_count = method_argument_count_v<Method>;
@@ -482,7 +446,7 @@ template <typename Interface, bool EnableRaw> class contract_builder {
       auto value = method_descriptor{
           .name = std::move(name),
           .kind = kind,
-          .request_type = typeid(method_request_t<Method>),
+          .request_type = typeid(detail::method_fixed_request_t<Method>),
           .response_type = typeid(method_response_t<Method>),
           .fixed_arguments_type = typeid(detail::method_fixed_argument_tuple_t<Method>),
           .result_type = typeid(method_response_t<Method>),
@@ -491,35 +455,75 @@ template <typename Interface, bool EnableRaw> class contract_builder {
 
       if constexpr (kind == method_kind::server_stream) {
          using endpoint_type = method_argument_t<Method, argument_count - 1>;
-         value.output_type = typeid(typename stream_writer_traits<
-            std::remove_cvref_t<endpoint_type>>::item_type);
+         value.output_type = typeid(typename stream_writer_traits<std::remove_cvref_t<endpoint_type>>::item_type);
       } else if constexpr (kind == method_kind::client_stream) {
          using endpoint_type = method_argument_t<Method, argument_count - 1>;
-         value.input_type = typeid(typename stream_reader_traits<
-            std::remove_cvref_t<endpoint_type>>::item_type);
+         value.input_type = typeid(typename stream_reader_traits<std::remove_cvref_t<endpoint_type>>::item_type);
       } else if constexpr (kind == method_kind::bidirectional_stream) {
          using endpoint_type = method_argument_t<Method, argument_count - 1>;
-         value.input_type = typeid(typename duplex_stream_traits<
-            std::remove_cvref_t<endpoint_type>>::input_type);
-         value.output_type = typeid(typename duplex_stream_traits<
-            std::remove_cvref_t<endpoint_type>>::output_type);
+         value.input_type = typeid(typename duplex_stream_traits<std::remove_cvref_t<endpoint_type>>::input_type);
+         value.output_type = typeid(typename duplex_stream_traits<std::remove_cvref_t<endpoint_type>>::output_type);
       }
 
       if constexpr (EnableRaw) {
+         using wire_request = detail::method_fixed_request_t<Method>;
+         value.request_encoder = [](const void* request) {
+            return pack_body(*static_cast<const wire_request*>(request));
+         };
+         value.request_decoder = [](const bytes& payload, forge::raw::unpack_limits limits) {
+            static_cast<void>(forge::raw::unpack_exact<wire_request>(payload, limits));
+         };
+
+         if constexpr (!std::same_as<method_response_t<Method>, void>) {
+            using wire_response = method_response_t<Method>;
+            value.response_encoder = [](const void* response) {
+               return pack_body(*static_cast<const wire_response*>(response));
+            };
+            value.response_decoder = [](const bytes& payload, forge::raw::unpack_limits limits) {
+               static_cast<void>(forge::raw::unpack_exact<wire_response>(payload, limits));
+            };
+         }
+
+         if constexpr (kind == method_kind::client_stream) {
+            using input_item = typename stream_reader_traits<
+                std::remove_cvref_t<method_argument_t<Method, argument_count - 1>>>::item_type;
+            value.input_decoder = [](const bytes& payload, forge::raw::unpack_limits limits) {
+               static_cast<void>(forge::raw::unpack_exact<input_item>(payload, limits));
+            };
+         } else if constexpr (kind == method_kind::bidirectional_stream) {
+            using input_item = typename duplex_stream_traits<
+                std::remove_cvref_t<method_argument_t<Method, argument_count - 1>>>::input_type;
+            value.input_decoder = [](const bytes& payload, forge::raw::unpack_limits limits) {
+               static_cast<void>(forge::raw::unpack_exact<input_item>(payload, limits));
+            };
+         }
+
+         if constexpr (kind == method_kind::server_stream) {
+            using output_item = typename stream_writer_traits<
+                std::remove_cvref_t<method_argument_t<Method, argument_count - 1>>>::item_type;
+            value.output_decoder = [](const bytes& payload, forge::raw::unpack_limits limits) {
+               static_cast<void>(forge::raw::unpack_exact<output_item>(payload, limits));
+            };
+         } else if constexpr (kind == method_kind::bidirectional_stream) {
+            using output_item = typename duplex_stream_traits<
+                std::remove_cvref_t<method_argument_t<Method, argument_count - 1>>>::output_type;
+            value.output_decoder = [](const bytes& payload, forge::raw::unpack_limits limits) {
+               static_cast<void>(forge::raw::unpack_exact<output_item>(payload, limits));
+            };
+         }
+
          if constexpr (kind == method_kind::unary) {
             value.raw_invoker = [](std::shared_ptr<void> implementation,
                                    bytes payload) -> boost::asio::awaitable<bytes> {
                auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
                auto arguments = detail::unpack_fixed_arguments<Method>(payload);
                if constexpr (std::same_as<method_response_t<Method>, void>) {
-                  co_await detail::invoke_fixed<Method>(
-                     *typed, std::move(arguments),
-                     std::make_index_sequence<argument_count>{});
+                  co_await detail::invoke_fixed<Method>(*typed, std::move(arguments),
+                                                        std::make_index_sequence<argument_count>{});
                   co_return bytes{};
                } else {
-                  auto response = co_await detail::invoke_fixed<Method>(
-                     *typed, std::move(arguments),
-                     std::make_index_sequence<argument_count>{});
+                  auto response = co_await detail::invoke_fixed<Method>(*typed, std::move(arguments),
+                                                                        std::make_index_sequence<argument_count>{});
                   co_return pack_body(response);
                }
             };
@@ -544,6 +548,16 @@ template <typename Interface, bool EnableRaw> class contract_builder {
           .result_type = typeid(Response),
       };
       if constexpr (EnableRaw) {
+         value.request_encoder = [](const void* request) { return pack_body(*static_cast<const Request*>(request)); };
+         value.response_encoder = [](const void* response) {
+            return pack_body(*static_cast<const Response*>(response));
+         };
+         value.request_decoder = [](const bytes& payload, forge::raw::unpack_limits limits) {
+            static_cast<void>(forge::raw::unpack_exact<Request>(payload, limits));
+         };
+         value.response_decoder = [](const bytes& payload, forge::raw::unpack_limits limits) {
+            static_cast<void>(forge::raw::unpack_exact<Response>(payload, limits));
+         };
          value.raw_invoker = [](std::shared_ptr<void> implementation, bytes payload) -> boost::asio::awaitable<bytes> {
             auto typed = std::static_pointer_cast<Interface>(std::move(implementation));
             auto request = unpack_body<Request>(payload);
