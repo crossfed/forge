@@ -1216,6 +1216,14 @@ forge::variant action_to_variant(const protocol::action& action, const abi_resol
 
 forge::variant transaction_to_variant(const protocol::transaction& transaction, const abi_resolver& resolve,
                                       abi_serialization_limits limits) {
+   if (transaction.context_free_actions.size() > limits.max_container_elements) {
+      fail(abi_error_code::size_limit, "Transaction context-free actions exceed the element limit", "transaction",
+           "context_free_actions", 0U);
+   }
+   if (transaction.actions.size() > limits.max_container_elements) {
+      fail(abi_error_code::size_limit, "Transaction actions exceed the element limit", "transaction", "actions", 0U);
+   }
+
    auto context_free_actions = forge::variants{};
    context_free_actions.reserve(transaction.context_free_actions.size());
    for (const auto& action : transaction.context_free_actions) {

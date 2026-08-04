@@ -43,38 +43,34 @@ producer endpoints. Counts alone are not acceptance evidence.
 
 All 54 endpoint entries currently have `spine_acceptance.status=present`; no
 pending acceptance evidence remains. That declaration is not itself a passing
-gate. A pass requires a clean Spine Git checkout from the repository recorded in
-the manifest, and the checker reports the exact validated commit. Dirty
-worktrees are rejected because uncommitted acceptance evidence is not
-reproducible.
+gate. Product acceptance requires Spine CI to run every referenced case from a
+clean checkout against an exact released Forge tag. Dirty worktrees are not
+reproducible acceptance evidence.
 
-The full gate verifies that every referenced source file exists and contains
-each exact Boost.Test case:
+The checker can be run by Spine CI with both repositories to verify that every
+referenced source file exists and contains each exact Boost.Test case:
 
 ```sh
 python3 tests/chain_api/check_spring_api_manifest.py FORGE_ROOT SPINE_ROOT
 ```
 
 The pre-merge workflow is started manually by pushing a lightweight acceptance
-tag with both reviewed revisions and the performance mode:
+tag with the reviewed Forge revision and the performance mode:
 
 ```text
-ci/chain-audited-api/<forge-sha>/spine-<spine-sha>/<1m|10m>
+ci/chain-audited-api/<forge-sha>/<1m|10m>
 ```
 
 The workflow rejects a tag that does not point to its declared full Forge SHA,
-checks out both exact revisions, and passes the Spine root to the checker. This
-tag trigger works before the workflow has reached the default branch and leaves
-a content-addressed audit trail for the reviewed pair. Once the workflow is
-available on the default branch, `workflow_dispatch` remains available with the
-same full `spine_commit` and performance inputs. Omitting either revision is an
-error rather than a silent downstream skip.
+and leaves a content-addressed audit trail for the Forge acceptance run. Once
+the workflow is available on the default branch, `workflow_dispatch` remains
+available with the same performance input.
 
-Because Spine is a private sibling repository, Forge configures the
-`SPINE_READ_TOKEN` Actions secret with read-only contents access to
-`vbytemaster/spine`. The gate fails before checkout when this explicit
-cross-repository credential is absent; the repository-scoped `GITHUB_TOKEN`
-does not provide equivalent evidence access.
+Forge owns the transport-neutral API contracts, authenticated state, verifier,
+donor manifest, and package acceptance. Downstream product integration is not a
+Forge release dependency: Spine verifies the manifest mapping and end-to-end
+behavior in its own CI against an exact released Forge tag. Forge therefore
+does not require access credentials for the private Spine repository.
 
 Forge-local CTest uses the explicit manifest-only mode. It validates the
 manifest and Forge-local transaction-id fixture, reports Spine acceptance as

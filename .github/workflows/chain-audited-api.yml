@@ -12,10 +12,6 @@ on:
         required: true
         default: true
         type: boolean
-      spine_commit:
-        description: Full committed vbytemaster/spine SHA containing the Spine acceptance corpus
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -26,11 +22,10 @@ env:
 
 jobs:
   gate:
-    name: Validate reviewed Forge and Spine revisions
+    name: Validate reviewed Forge revision
     runs-on: ubuntu-26.04
     outputs:
       forge_commit: ${{ steps.revisions.outputs.forge_commit }}
-      spine_commit: ${{ steps.revisions.outputs.spine_commit }}
       run_10m: ${{ steps.revisions.outputs.run_10m }}
     steps:
       - id: revisions
@@ -41,13 +36,12 @@ jobs:
           EVENT_SHA: ${{ github.sha }}
           EVENT_REF: ${{ github.ref }}
           INPUT_RUN_10M: ${{ inputs.run_10m }}
-          INPUT_SPINE_COMMIT: ${{ inputs.spine_commit }}
         run: |
           set -euo pipefail
 
           forge_commit="$EVENT_SHA"
           if [[ "$EVENT_NAME" == "push" ]]; then
-            pattern='^refs/tags/ci/chain-audited-api/([0-9a-f]{40})/spine-([0-9a-f]{40})/(1m|10m)$'
+            pattern='^refs/tags/ci/chain-audited-api/([0-9a-f]{40})/(1m|10m)$'
             if [[ ! "$EVENT_REF" =~ $pattern ]]; then
               echo "invalid Chain Audited API acceptance tag: $EVENT_REF" >&2
               exit 1
@@ -56,15 +50,13 @@ jobs:
               echo "acceptance tag does not point to its declared Forge revision" >&2
               exit 1
             fi
-            spine_commit="${BASH_REMATCH[2]}"
-            [[ "${BASH_REMATCH[3]}" == "10m" ]] && run_10m=true || run_10m=false
+            [[ "${BASH_REMATCH[2]}" == "10m" ]] && run_10m=true || run_10m=false
           else
-            spine_commit="$INPUT_SPINE_COMMIT"
             run_10m="$INPUT_RUN_10M"
           fi
 
-          if [[ ! "$forge_commit" =~ ^[0-9a-f]{40}$ || ! "$spine_commit" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "Forge and Spine revisions must be full lowercase 40-character Git SHAs" >&2
+          if [[ ! "$forge_commit" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "Forge revision must be a full lowercase 40-character Git SHA" >&2
             exit 1
           fi
           if [[ "$run_10m" != "true" && "$run_10m" != "false" ]]; then
@@ -73,11 +65,10 @@ jobs:
           fi
 
           echo "forge_commit=$forge_commit" >> "$GITHUB_OUTPUT"
-          echo "spine_commit=$spine_commit" >> "$GITHUB_OUTPUT"
           echo "run_10m=$run_10m" >> "$GITHUB_OUTPUT"
 
   style:
-    name: ubuntu-26.04 / structure, format, and pinned Spine evidence
+    name: ubuntu-26.04 / structure and format
     needs: gate
     runs-on: ubuntu-26.04
     steps:
@@ -121,50 +112,6 @@ jobs:
           fi
 
           git diff --check "$base_tag"...HEAD
-
-      - name: Validate pinned Spine revision
-        shell: bash
-        env:
-          SPINE_COMMIT: ${{ needs.gate.outputs.spine_commit }}
-        run: |
-          if [[ ! "$SPINE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
-            echo "spine_commit must be a full lowercase 40-character Git SHA" >&2
-            exit 1
-          fi
-
-      - name: Require Spine repository access
-        shell: bash
-        env:
-          SPINE_READ_TOKEN: ${{ secrets.SPINE_READ_TOKEN }}
-        run: |
-          if [[ -z "$SPINE_READ_TOKEN" ]]; then
-            echo "SPINE_READ_TOKEN must grant read-only access to vbytemaster/spine" >&2
-            exit 1
-          fi
-
-      - name: Checkout pinned Spine acceptance corpus
-        uses: actions/checkout@v4
-        with:
-          repository: vbytemaster/spine
-          ref: ${{ needs.gate.outputs.spine_commit }}
-          path: spine-acceptance
-          token: ${{ secrets.SPINE_READ_TOKEN }}
-          persist-credentials: false
-          submodules: false
-
-      - name: Check Spring manifest against pinned Spine corpus
-        shell: bash
-        env:
-          SPINE_COMMIT: ${{ needs.gate.outputs.spine_commit }}
-        run: |
-          actual_spine_commit="$(git -C "$GITHUB_WORKSPACE/spine-acceptance" rev-parse HEAD)"
-          if [[ "$actual_spine_commit" != "$SPINE_COMMIT" ]]; then
-            echo "checked out Spine commit $actual_spine_commit, expected $SPINE_COMMIT" >&2
-            exit 1
-          fi
-          python3 tests/chain_api/check_spring_api_manifest.py \
-            . "$GITHUB_WORKSPACE/spine-acceptance"
-
   native:
     name: ${{ matrix.os }} / Release
     needs: gate

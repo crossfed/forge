@@ -181,6 +181,47 @@ BOOST_AUTO_TEST_CASE(chain_abi_translates_resolver_failures_to_typed_diagnostics
        });
 }
 
+BOOST_AUTO_TEST_CASE(chain_abi_rejects_oversized_context_free_actions_before_resolver) {
+   auto transaction = protocol::transaction{};
+   transaction.context_free_actions.resize(2U);
+
+   auto limits = chain_api::abi_serialization_limits{};
+   limits.max_container_elements = 1U;
+   auto resolver_calls = std::size_t{};
+   const auto resolver = [&resolver_calls](protocol::account_name) {
+      ++resolver_calls;
+      return std::optional<protocol::abi_def>{};
+   };
+
+   BOOST_CHECK_EXCEPTION(static_cast<void>(chain_api::transaction_to_variant(transaction, resolver, limits)),
+                         chain_api::abi_serialization_error, [](const auto& error) {
+                            return error.diagnostic().code == chain_api::abi_error_code::size_limit &&
+                                   error.diagnostic().path == "context_free_actions";
+                         });
+   BOOST_TEST(resolver_calls == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(chain_abi_rejects_oversized_actions_before_resolver) {
+   auto transaction = protocol::transaction{};
+   transaction.context_free_actions.resize(1U);
+   transaction.actions.resize(2U);
+
+   auto limits = chain_api::abi_serialization_limits{};
+   limits.max_container_elements = 1U;
+   auto resolver_calls = std::size_t{};
+   const auto resolver = [&resolver_calls](protocol::account_name) {
+      ++resolver_calls;
+      return std::optional<protocol::abi_def>{};
+   };
+
+   BOOST_CHECK_EXCEPTION(static_cast<void>(chain_api::transaction_to_variant(transaction, resolver, limits)),
+                         chain_api::abi_serialization_error, [](const auto& error) {
+                            return error.diagnostic().code == chain_api::abi_error_code::size_limit &&
+                                   error.diagnostic().path == "actions";
+                         });
+   BOOST_TEST(resolver_calls == 0U);
+}
+
 BOOST_AUTO_TEST_CASE(chain_abi_spring_binary_extension_goldens) {
    const auto abi = spring_shape_abi();
 

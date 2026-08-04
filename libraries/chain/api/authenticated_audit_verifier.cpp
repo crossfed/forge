@@ -178,6 +178,9 @@ authenticated_audit_verifier::verify_state_point(const protocol::state_anchor& a
       const auto key = db_bytes(request.key);
       const auto verified = forge::db::authenticated::verify_point(options_.state_domain, root(anchor), key, decoded,
                                                                    options_.proof_limits);
+      if (verified.exists && !verified.value) {
+         reject_state("chain API point proof omitted an existing value");
+      }
       return protocol_bytes(verified.value);
    });
 }

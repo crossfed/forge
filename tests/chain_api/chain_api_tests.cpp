@@ -2548,6 +2548,28 @@ BOOST_AUTO_TEST_CASE(authenticated_audit_verifier_accepts_real_point_membership_
    BOOST_TEST(!absent.has_value());
 }
 
+BOOST_AUTO_TEST_CASE(authenticated_audit_verifier_rejects_membership_without_value_bytes) {
+   const auto fixture = make_authenticated_point_fixture();
+   const auto anchor = authenticated_anchor(fixture.root);
+   auto verifier = forge::chain::api::authenticated_audit_verifier{
+       {
+           .chain = authenticated_chain(),
+           .state_domain = fixture.domain,
+           .proof_limits = {},
+       },
+       std::make_shared<recording_finality_verifier>(),
+   };
+
+   auto proof = authenticated_point_proof(fixture, "alpha");
+   BOOST_REQUIRE(proof.terminal.has_value());
+   proof.terminal->value.reset();
+
+   BOOST_CHECK_THROW(static_cast<void>(verifier.verify_state_point(
+                         anchor, forge::chain::protocol::state_point_request{.key = protocol_bytes("alpha")},
+                         authenticated_proof_blob("forge.db.authenticated.point", proof))),
+                     forge::chain::api::exceptions::invalid_state_proof);
+}
+
 BOOST_AUTO_TEST_CASE(authenticated_audit_verifier_rejects_wrong_scheme_version_limits_chain_and_root) {
    const auto fixture = make_authenticated_point_fixture();
    const auto anchor = authenticated_anchor(fixture.root);
