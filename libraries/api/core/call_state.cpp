@@ -7,24 +7,19 @@ module;
 #include <boost/asio/steady_timer.hpp>
 
 #include <chrono>
-#include <exception>
-#include <memory>
-#include <mutex>
-#include <optional>
-#include <vector>
-
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/cancellation_type.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/redirect_error.hpp>
-#include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/system/error_code.hpp>
 
 #include <exception>
 #include <memory>
+#include <mutex>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -100,11 +95,15 @@ void call_state::expire() noexcept {
 
 void call_state::cancel_with(std::exception_ptr error) noexcept {
    auto should_cancel = false;
+   auto waiter = std::shared_ptr<boost::asio::steady_timer>{};
+   auto deadline_timer = std::shared_ptr<boost::asio::steady_timer>{};
    {
       const auto lock = std::scoped_lock{mutex_};
-      if (!completed_ && !cancellation_requested_) {
-         cancellation_requested_ = true;
-         cancellation_error_ = error;
+      if (!completed_) {
+         completed_ = true;
+         error_ = error;
+         waiter = finish_waiter_;
+         deadline_timer = deadline_timer_;
          should_cancel = true;
       }
    }
@@ -120,6 +119,8 @@ void call_state::cancel_with(std::exception_ptr error) noexcept {
    boost::asio::dispatch(executor_, [self] {
       self->cancellation_.emit(boost::asio::cancellation_type::all);
    });
+   wake(deadline_timer);
+   wake(waiter);
 }
 
 void call_state::complete(std::exception_ptr error, call_result result) noexcept {
@@ -132,11 +133,7 @@ void call_state::complete(std::exception_ptr error, call_result result) noexcept
          return;
       }
       completed_ = true;
-      if (cancellation_requested_) {
-         error_ = cancellation_error_;
-      } else {
-         error_ = std::move(error);
-      }
+      error_ = std::move(error);
       result_ = std::move(result);
       terminal_error = error_;
       waiter = finish_waiter_;

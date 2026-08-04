@@ -38,14 +38,11 @@ class server_stream_call {
    server_stream_call& operator=(const server_stream_call&) = delete;
 
    boost::asio::awaitable<std::optional<Out>> async_read() {
-      co_return co_await output_.async_read();
+      return output_.async_read();
    }
 
    boost::asio::awaitable<void> async_finish() {
-      if (!operation_) {
-         throw exceptions::protocol_error{"invalid server stream call"};
-      }
-      static_cast<void>(co_await operation_->async_finish());
+      return async_finish_impl(operation_);
    }
 
    void cancel() noexcept {
@@ -55,6 +52,13 @@ class server_stream_call {
    }
 
  private:
+   static boost::asio::awaitable<void>
+   async_finish_impl(std::shared_ptr<detail::call_operation> operation) {
+      if (!operation) {
+         throw exceptions::protocol_error{"invalid server stream call"};
+      }
+      static_cast<void>(co_await operation->async_finish());
+   }
    server_stream_call(stream_reader<Out> output,
                       std::shared_ptr<detail::call_operation> operation)
        : output_{std::move(output)}, operation_{std::move(operation)} {}

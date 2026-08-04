@@ -2,9 +2,12 @@ module;
 
 #include <boost/asio/awaitable.hpp>
 
+#include <algorithm>
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <limits>
+#include <new>
 #include <span>
 #include <string>
 #include <string_view>
@@ -23,16 +26,29 @@ export import forge.exceptions;
 export import forge.raw.datastream;
 export import forge.raw.raw;
 
+import forge.raw.exceptions;
+
 export namespace forge::api::core {
 
-template <typename T> [[nodiscard]] T unpack_body(std::span<const std::uint8_t> body) {
-   auto out = T{};
-   forge::datastream<const std::uint8_t*> stream{body.data(), body.size()};
-   forge::raw::unpack(stream, out);
-   if (stream.remaining() != 0) {
-      throw exceptions::protocol_error{"API body has trailing bytes"};
+template <typename T>
+[[nodiscard]] T unpack_body(std::span<const std::uint8_t> body) {
+   const auto bounded = static_cast<std::uint32_t>(std::min<std::size_t>(
+      body.size(), std::numeric_limits<std::uint32_t>::max()));
+   try {
+      return forge::raw::unpack_exact<T>(
+         body, forge::raw::unpack_limits{
+                  .max_container_elements = bounded,
+                  .max_total_container_elements = bounded,
+                  .max_bytes = bounded,
+                  .first_container_elements = bounded,
+               });
+   } catch (const forge::raw::exceptions::allocation_limit&) {
+      throw exceptions::resource_exhausted{"API body exceeds decode limits"};
+   } catch (const std::bad_alloc&) {
+      throw exceptions::resource_exhausted{"API body allocation failed"};
+   } catch (const forge::raw::exceptions::codec_error&) {
+      throw exceptions::protocol_error{"API body is malformed"};
    }
-   return out;
 }
 
 template <typename T> [[nodiscard]] T unpack_body(const bytes& body) {
@@ -85,6 +101,22 @@ template <auto Method>
 inline constexpr auto method_argument_count_v = std::tuple_size_v<method_argument_tuple_t<Method>>;
 
 namespace detail {
+
+struct missing_proxy_argument final {};
+
+template <auto Method, std::size_t Index,
+          bool Present = (Index < method_argument_count_v<Method>)>
+struct method_argument_or {
+   using type = missing_proxy_argument;
+};
+
+template <auto Method, std::size_t Index>
+struct method_argument_or<Method, Index, true> {
+   using type = method_argument_t<Method, Index>;
+};
+
+template <auto Method, std::size_t Index>
+using method_argument_or_t = typename method_argument_or<Method, Index>::type;
 
 template <auto Method>
 inline constexpr bool has_stream_endpoint_v = [] {

@@ -17,6 +17,19 @@ import forge.raw.raw;
 namespace forge::api::core {
 namespace {
 
+void fail_stream_endpoints(
+   const std::shared_ptr<detail::stream_endpoint>& input,
+   const std::shared_ptr<detail::stream_endpoint>& output) noexcept {
+   const auto error = std::make_exception_ptr(
+      exceptions::protocol_error{"API stream dispatch failed"});
+   if (input) {
+      input->fail(error);
+   }
+   if (output) {
+      output->fail(error);
+   }
+}
+
 [[nodiscard]] frame make_response_base(const frame& request, frame_kind kind = frame_kind::response) {
    return frame{
        .kind = kind,
@@ -125,20 +138,24 @@ boost::asio::awaitable<frame> registry::dispatch(frame request) const {
 boost::asio::awaitable<frame> registry::dispatch_stream(frame request, std::shared_ptr<detail::stream_endpoint> input,
                                                         std::shared_ptr<detail::stream_endpoint> output) const {
    if (request.kind != frame_kind::request) {
+      fail_stream_endpoints(input, output);
       co_return make_protocol_error(request, "API stream dispatch requires a request frame", status::invalid_argument,
                                     exceptions::code::protocol_error);
    }
    const auto* entry = find(request.api);
    if (entry == nullptr) {
+      fail_stream_endpoints(input, output);
       co_return make_unavailable_response(request);
    }
    if (!supports(entry->descriptor.supported_surfaces, surface::remote)) {
+      fail_stream_endpoints(input, output);
       co_return make_local_only_response(request);
    }
 
    const auto* method = find_method(entry->descriptor, request.method);
    if (method == nullptr || method->since_revision > request.api.min_revision || method->kind == method_kind::unary ||
        !method->stream_invoker) {
+      fail_stream_endpoints(input, output);
       co_return make_method_not_found_response(request);
    }
 
@@ -148,6 +165,7 @@ boost::asio::awaitable<frame> registry::dispatch_stream(frame request, std::shar
                                  (method->kind == method_kind::client_stream && has_input && !has_output) ||
                                  (method->kind == method_kind::bidirectional_stream && has_input && has_output);
    if (!directions_match) {
+      fail_stream_endpoints(input, output);
       co_return make_protocol_error(request, "API stream endpoints do not match method direction",
                                     status::invalid_argument, exceptions::code::protocol_error);
    }
@@ -159,12 +177,13 @@ boost::asio::awaitable<frame> registry::dispatch_stream(frame request, std::shar
       }
       auto request_payload = method->response_validator ? request.payload : bytes{};
       response.payload = co_await method->stream_invoker(entry->implementation, std::move(request.payload),
-                                                         std::move(input), std::move(output));
+                                                         input, output);
       if (method->response_validator) {
          method->response_validator(request_payload, response.payload);
       }
       co_return response;
    } catch (...) {
+      fail_stream_endpoints(input, output);
       co_return project_failure(request, *method, std::current_exception());
    }
 }

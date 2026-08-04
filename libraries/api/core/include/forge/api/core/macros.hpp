@@ -9,6 +9,7 @@
 #include <boost/preprocessor/seq/for_each_i.hpp>
 #include <boost/preprocessor/stringize.hpp>
 #include <boost/preprocessor/tuple/elem.hpp>
+#include <boost/preprocessor/tuple/size.hpp>
 #include <boost/preprocessor/tuple/to_seq.hpp>
 #include <boost/preprocessor/variadic/to_seq.hpp>
 
@@ -127,13 +128,56 @@
 
 #define FORGE_API_DETAIL_PROXY_METHOD_ONE_REQUEST(r, INTERFACE, METHOD)                                                \
    boost::asio::awaitable<::forge::api::core::method_response_t<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>>   \
+   FORGE_API_DETAIL_METHOD_NAME(METHOD)() {                                                                            \
+      if constexpr (::forge::api::core::method_argument_count_v<                                                      \
+                        FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)> == 0) {                                    \
+         co_return co_await ::forge::api::core::detail::proxy_method<                                                 \
+             INTERFACE, FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>(                                          \
+             this->invoker_, this->selected_api_,                                                                     \
+             BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)));                                               \
+      } else {                                                                                                         \
+         throw ::forge::api::core::exceptions::protocol_error{"invalid generated API proxy overload"};              \
+      }                                                                                                                \
+   }                                                                                                                   \
+   boost::asio::awaitable<::forge::api::core::method_response_t<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>>   \
+   FORGE_API_DETAIL_METHOD_NAME(METHOD)() const {                                                                      \
+      if constexpr (::forge::api::core::method_argument_count_v<                                                      \
+                        FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)> == 0) {                                    \
+         co_return co_await ::forge::api::core::detail::proxy_method<                                                 \
+             INTERFACE, FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>(                                          \
+             this->invoker_, this->selected_api_,                                                                     \
+             BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)));                                               \
+      } else {                                                                                                         \
+         throw ::forge::api::core::exceptions::protocol_error{"invalid generated API proxy overload"};              \
+      }                                                                                                                \
+   }                                                                                                                   \
+   boost::asio::awaitable<::forge::api::core::method_response_t<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>>   \
    FORGE_API_DETAIL_METHOD_NAME(METHOD)(                                                                               \
-       ::forge::api::core::method_argument_t<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD), 0> request)           \
-       override {                                                                                                      \
-      co_return co_await ::forge::api::core::detail::proxy_method<INTERFACE,                                           \
-                                                                  FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>( \
-          this->invoker_, this->selected_api_,                                                                         \
-          BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)), std::move(request));                               \
+       ::forge::api::core::detail::method_argument_or_t<                                                              \
+          FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD), 0> request) {                                            \
+      if constexpr (::forge::api::core::method_argument_count_v<                                                      \
+                        FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)> == 1) {                                    \
+         co_return co_await ::forge::api::core::detail::proxy_method<                                                 \
+             INTERFACE, FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>(                                          \
+             this->invoker_, this->selected_api_,                                                                     \
+             BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)), std::move(request));                           \
+      } else {                                                                                                         \
+         throw ::forge::api::core::exceptions::protocol_error{"invalid generated API proxy overload"};              \
+      }                                                                                                                \
+   }                                                                                                                   \
+   boost::asio::awaitable<::forge::api::core::method_response_t<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>>   \
+   FORGE_API_DETAIL_METHOD_NAME(METHOD)(                                                                               \
+       ::forge::api::core::detail::method_argument_or_t<                                                              \
+          FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD), 0> request) const {                                      \
+      if constexpr (::forge::api::core::method_argument_count_v<                                                      \
+                        FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)> == 1) {                                    \
+         co_return co_await ::forge::api::core::detail::proxy_method<                                                 \
+             INTERFACE, FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>(                                          \
+             this->invoker_, this->selected_api_,                                                                     \
+             BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)), std::move(request));                           \
+      } else {                                                                                                         \
+         throw ::forge::api::core::exceptions::protocol_error{"invalid generated API proxy overload"};              \
+      }                                                                                                                \
    }
 
 #define FORGE_API_DETAIL_PROXY_ARG_DECL(r, DATA, INDEX, ARG)                                                           \
@@ -151,11 +195,62 @@
 
 #define FORGE_API_DETAIL_PROXY_METHOD_POSITIONAL(r, INTERFACE, METHOD)                                                 \
    boost::asio::awaitable<::forge::api::core::method_response_t<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>>   \
-   FORGE_API_DETAIL_METHOD_NAME(METHOD)(FORGE_API_DETAIL_PROXY_ARG_DECLS_R(r, INTERFACE, METHOD)) override {           \
-      co_return co_await ::forge::api::core::detail::proxy_method<INTERFACE,                                           \
-                                                                  FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>( \
-          this->invoker_, this->selected_api_,                                                                         \
-          BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD)) FORGE_API_DETAIL_PROXY_ARG_MOVES_R(r, METHOD));     \
+   FORGE_API_DETAIL_METHOD_NAME(METHOD)(FORGE_API_DETAIL_PROXY_ARG_DECLS_R(r, INTERFACE, METHOD)) {                    \
+      if constexpr (::forge::api::core::method_kind_v<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)> ==          \
+                    ::forge::api::core::method_kind::unary) {                                                         \
+         co_return co_await ::forge::api::core::detail::proxy_method<                                                 \
+             INTERFACE, FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>(                                          \
+             this->invoker_, this->selected_api_,                                                                     \
+             BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD))                                                 \
+                FORGE_API_DETAIL_PROXY_ARG_MOVES_R(r, METHOD));                                                       \
+      } else {                                                                                                         \
+         throw ::forge::api::core::exceptions::protocol_error{"invalid generated API proxy overload"};              \
+      }                                                                                                                \
+   }                                                                                                                   \
+   boost::asio::awaitable<::forge::api::core::method_response_t<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>>   \
+   FORGE_API_DETAIL_METHOD_NAME(METHOD)(FORGE_API_DETAIL_PROXY_ARG_DECLS_R(r, INTERFACE, METHOD)) const {              \
+      if constexpr (::forge::api::core::method_kind_v<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)> ==          \
+                    ::forge::api::core::method_kind::unary) {                                                         \
+         co_return co_await ::forge::api::core::detail::proxy_method<                                                 \
+             INTERFACE, FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>(                                          \
+             this->invoker_, this->selected_api_,                                                                     \
+             BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD))                                                 \
+                FORGE_API_DETAIL_PROXY_ARG_MOVES_R(r, METHOD));                                                       \
+      } else {                                                                                                         \
+         throw ::forge::api::core::exceptions::protocol_error{"invalid generated API proxy overload"};              \
+      }                                                                                                                \
+   }                                                                                                                   \
+   boost::asio::awaitable<::forge::api::core::method_response_t<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>>   \
+   FORGE_API_DETAIL_METHOD_NAME(METHOD)(FORGE_API_DETAIL_PROXY_ARG_DECLS_R(r, INTERFACE, METHOD),                     \
+       ::forge::api::core::detail::method_argument_or_t<                                                              \
+          FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD),                                                         \
+          BOOST_PP_TUPLE_SIZE(FORGE_API_DETAIL_METHOD_ARGS(METHOD))> forge_api_stream_endpoint) {                     \
+      if constexpr (::forge::api::core::method_kind_v<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)> !=          \
+                    ::forge::api::core::method_kind::unary) {                                                         \
+         co_return co_await ::forge::api::core::detail::proxy_method<                                                 \
+             INTERFACE, FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>(                                          \
+             this->invoker_, this->selected_api_,                                                                     \
+             BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD))                                                 \
+                FORGE_API_DETAIL_PROXY_ARG_MOVES_R(r, METHOD), std::move(forge_api_stream_endpoint));                 \
+      } else {                                                                                                         \
+         throw ::forge::api::core::exceptions::protocol_error{"invalid generated API proxy overload"};              \
+      }                                                                                                                \
+   }                                                                                                                   \
+   boost::asio::awaitable<::forge::api::core::method_response_t<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>>   \
+   FORGE_API_DETAIL_METHOD_NAME(METHOD)(FORGE_API_DETAIL_PROXY_ARG_DECLS_R(r, INTERFACE, METHOD),                     \
+       ::forge::api::core::detail::method_argument_or_t<                                                              \
+          FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD),                                                         \
+          BOOST_PP_TUPLE_SIZE(FORGE_API_DETAIL_METHOD_ARGS(METHOD))> forge_api_stream_endpoint) const {               \
+      if constexpr (::forge::api::core::method_kind_v<FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)> !=          \
+                    ::forge::api::core::method_kind::unary) {                                                         \
+         co_return co_await ::forge::api::core::detail::proxy_method<                                                 \
+             INTERFACE, FORGE_API_DETAIL_METHOD_POINTER(INTERFACE, METHOD)>(                                          \
+             this->invoker_, this->selected_api_,                                                                     \
+             BOOST_PP_STRINGIZE(FORGE_API_DETAIL_METHOD_NAME(METHOD))                                                 \
+                FORGE_API_DETAIL_PROXY_ARG_MOVES_R(r, METHOD), std::move(forge_api_stream_endpoint));                 \
+      } else {                                                                                                         \
+         throw ::forge::api::core::exceptions::protocol_error{"invalid generated API proxy overload"};              \
+      }                                                                                                                \
    }
 
 #define FORGE_API_DETAIL_PROXY_METHOD_TYPED(r, INTERFACE, METHOD)                                                      \

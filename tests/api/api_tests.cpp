@@ -212,6 +212,24 @@ FORGE_API(overloaded_api, FORGE_API_CONTRACT("overloaded", 1, 3),
           FORGE_API_METHOD_TYPED_DEPRECATED(sign_old, protocol::read_chunk, protocol::chunk, "use sign"),
           FORGE_API_METHOD_TYPED_DEPRECATED_SINCE(sign_old_since, protocol::read_chunk, protocol::chunk, 2, "use sign"))
 
+class const_exact_api
+    : public forge::api::core::contract<
+         const_exact_api, forge::api::core::surface::remote> {
+ public:
+   virtual ~const_exact_api() = default;
+
+   virtual boost::asio::awaitable<protocol::chunk>
+   read(protocol::read_chunk request) const = 0;
+};
+
+inline constexpr auto const_exact_read_method =
+   static_cast<boost::asio::awaitable<protocol::chunk> (
+      const_exact_api::*)(protocol::read_chunk) const>(
+         &const_exact_api::read);
+
+FORGE_API(const_exact_api, FORGE_API_CONTRACT("const.exact", 1, 0),
+          FORGE_API_METHOD_EXACT(read, ::const_exact_read_method))
+
 static_assert(forge::api::core::interface<cache_api>);
 static_assert(forge::api::core::local_interface<cache_api>);
 static_assert(forge::api::core::remote_interface<cache_api>);
@@ -226,6 +244,7 @@ static_assert(forge::api::core::interface<remote_only_api>);
 static_assert(!forge::api::core::local_interface<remote_only_api>);
 static_assert(forge::api::core::remote_interface<remote_only_api>);
 static_assert(forge::api::core::remote_interface<overloaded_api>);
+static_assert(forge::api::core::remote_interface<const_exact_api>);
 
 class positional_api : public forge::api::core::contract<positional_api, forge::api::core::surface::local |
                                                                              forge::api::core::surface::remote> {
@@ -245,27 +264,28 @@ static_assert(forge::api::core::interface<positional_api>);
 static_assert(forge::api::core::local_interface<positional_api>);
 static_assert(forge::api::core::remote_interface<positional_api>);
 
-class live_stream_api : public forge::api::core::contract<live_stream_api> {
+class live_stream_api
+    : public forge::api::core::contract<
+         live_stream_api,
+         forge::api::core::surface::local |
+            forge::api::core::surface::remote> {
  public:
    virtual ~live_stream_api() = default;
 
    virtual boost::asio::awaitable<std::vector<protocol::chunk>> batch(std::vector<protocol::read_chunk> requests) = 0;
    virtual boost::asio::awaitable<void> subscribe(forge::api::core::stream_writer<protocol::chunk> output) = 0;
+   virtual boost::asio::awaitable<void>
+   watch(std::string topic, forge::api::core::stream_writer<protocol::chunk> output) = 0;
    virtual boost::asio::awaitable<protocol::chunk>
    upload(forge::api::core::stream_reader<protocol::read_chunk> input) = 0;
    virtual boost::asio::awaitable<void>
    exchange(forge::api::core::duplex_stream<protocol::read_chunk, protocol::chunk> stream) = 0;
-   virtual boost::asio::awaitable<std::vector<protocol::chunk>>
-   exchange(std::vector<protocol::read_chunk> requests) = 0;
 };
 
 inline constexpr auto live_exchange_stream_method = static_cast<boost::asio::awaitable<void> (live_stream_api::*)(
     forge::api::core::duplex_stream<protocol::read_chunk, protocol::chunk>)>(&live_stream_api::exchange);
-inline constexpr auto live_exchange_vector_method = static_cast<boost::asio::awaitable<std::vector<protocol::chunk>> (
-    live_stream_api::*)(std::vector<protocol::read_chunk>)>(&live_stream_api::exchange);
-
 FORGE_API(live_stream_api, FORGE_API_CONTRACT("live.stream", 1, 0), FORGE_API_METHOD(batch),
-          FORGE_API_METHOD(subscribe), FORGE_API_METHOD(upload),
+          FORGE_API_METHOD(subscribe), FORGE_API_METHOD(watch, topic), FORGE_API_METHOD(upload),
           FORGE_API_METHOD_EXACT(exchange, ::live_exchange_stream_method))
 
 template <typename T>
@@ -275,7 +295,6 @@ template <typename T>
 concept stream_closable = requires(T& value) { value.async_close(); };
 
 static_assert(forge::api::core::method_kind_v<&live_stream_api::batch> == forge::api::core::method_kind::unary);
-static_assert(forge::api::core::method_kind_v<live_exchange_vector_method> == forge::api::core::method_kind::unary);
 static_assert(forge::api::core::method_kind_v<&live_stream_api::subscribe> ==
               forge::api::core::method_kind::server_stream);
 static_assert(forge::api::core::method_kind_v<&live_stream_api::upload> ==
@@ -395,6 +414,12 @@ class live_stream_impl final : public live_stream_api {
       co_await output.async_close();
    }
 
+   boost::asio::awaitable<void>
+   watch(std::string topic, forge::api::core::stream_writer<protocol::chunk> output) override {
+      co_await output.async_write(protocol::chunk{.bytes = std::move(topic)});
+      co_await output.async_close();
+   }
+
    boost::asio::awaitable<protocol::chunk>
    upload(forge::api::core::stream_reader<protocol::read_chunk> input) override {
       try {
@@ -428,10 +453,6 @@ class live_stream_impl final : public live_stream_api {
          co_await stream.async_write(protocol::chunk{.bytes = item->ref + ":ack"});
       }
       co_await stream.async_close();
-   }
-
-   boost::asio::awaitable<std::vector<protocol::chunk>> exchange(std::vector<protocol::read_chunk> requests) override {
-      co_return co_await batch(std::move(requests));
    }
 
    void release_terminal_failure() {
@@ -822,6 +843,15 @@ BOOST_AUTO_TEST_CASE(api_body_decode_rejects_trailing_bytes) {
                      forge::api::core::exceptions::protocol_error);
 }
 
+BOOST_AUTO_TEST_CASE(api_body_decode_rejects_declared_allocation_bombs) {
+   const auto body = forge::api::core::bytes{0xff, 0xff, 0xff, 0xff, 0x0f};
+
+   BOOST_CHECK_THROW(
+      static_cast<void>(
+         forge::api::core::unpack_body<protocol::read_chunk>(body)),
+      forge::api::core::exceptions::protocol_error);
+}
+
 BOOST_AUTO_TEST_CASE(local_handle_server_stream_delivers_items_incrementally) {
    auto runtime = forge::asio::runtime{};
    auto implementation = std::make_shared<live_stream_impl>();
@@ -956,7 +986,7 @@ BOOST_AUTO_TEST_CASE(call_options_report_typed_buffer_limit_failures) {
 
    auto call =
        forge::asio::blocking::run(runtime, handle.async_open<&live_stream_api::upload>(forge::api::core::call_options{
-                                               .max_item_bytes = 1024,
+                                               .max_item_bytes = 8,
                                                .max_buffered_items = 1,
                                                .max_buffered_bytes = 8,
                                            }));
@@ -1118,10 +1148,9 @@ BOOST_AUTO_TEST_CASE(api_dispatcher_strips_reserved_metadata_before_interceptors
        .payload = pack_api_payload(protocol::read_chunk{.ref = "metadata"}),
    };
 
-   const auto responses = forge::asio::blocking::run(runtime, dispatcher.dispatch(std::move(request)));
+   const auto response = forge::asio::blocking::run(runtime, dispatcher.dispatch(std::move(request)));
 
-   BOOST_REQUIRE_EQUAL(responses.size(), 1U);
-   BOOST_CHECK(responses.front().kind == forge::api::core::frame_kind::response);
+   BOOST_CHECK(response.kind == forge::api::core::frame_kind::response);
    BOOST_TEST(*observed_reserved == "missing");
    BOOST_TEST(*observed_public == "trace-1");
 }
@@ -1164,10 +1193,9 @@ BOOST_AUTO_TEST_CASE(api_dispatcher_injects_trusted_metadata_after_scrub) {
        .payload = pack_api_payload(protocol::read_chunk{.ref = "trusted"}),
    };
 
-   const auto responses = forge::asio::blocking::run(runtime, dispatcher.dispatch(std::move(request)));
+   const auto response = forge::asio::blocking::run(runtime, dispatcher.dispatch(std::move(request)));
 
-   BOOST_REQUIRE_EQUAL(responses.size(), 1U);
-   BOOST_CHECK(responses.front().kind == forge::api::core::frame_kind::response);
+   BOOST_CHECK(response.kind == forge::api::core::frame_kind::response);
    BOOST_TEST(*observed == "trusted");
 }
 

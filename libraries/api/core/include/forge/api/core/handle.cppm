@@ -66,8 +66,8 @@ class call_access {
       }
 
       const auto executor = co_await boost::asio::this_coro::executor;
-      auto arguments = std::tuple<std::remove_cvref_t<Args>...>{
-         std::forward<Args>(args)...};
+      using argument_tuple = detail::method_fixed_argument_tuple_t<Method>;
+      auto arguments = argument_tuple{std::forward<Args>(args)...};
 
       if constexpr (method_kind_v<Method> == method_kind::server_stream) {
          using call_type = typename method_call<Method>::type;

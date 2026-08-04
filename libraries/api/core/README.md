@@ -165,8 +165,9 @@ consumer_plugin::initialize(forge::app::plugin_context& context) {
 
 ## Message-Oriented Frame
 
-WebSocket, QUIC, P2P and TCP-like bindings use `forge::api::core::frame`. HTTP does not
-need to put this frame in the request body.
+WebSocket, QUIC, P2P and TCP-like bindings use `forge::api::core::frame`.
+Ordinary unary HTTP routes keep their native request/response mapping; live
+HTTP/1.1 stream bodies use a versioned length-delimited form of the same frame.
 
 ```cpp
 auto request = forge::api::core::frame{
@@ -238,10 +239,10 @@ on top of that stream primitive.
 
 This layer must not move into `forge_net_transport`: transport stays a low-level
 byte-stream/session contract and must not import the API contract layer.
-`forge.api.quic.binding` and `forge.api.p2p.binding` are thin adapters or policy wrappers over the
-API transport binding. WebSocket shares `forge::api::core::frame_dispatcher`, but not the
-stream transport binding, because it is message-oriented rather than a
-`transport::stream`. HTTP remains a separate binding because it is
+`forge.api.quic.binding` and `forge.api.p2p.binding` are thin adapters or policy
+wrappers over the API stream runtime. WebSocket preserves message boundaries by
+mapping exactly one binary WebSocket message to one transport frame, then uses
+the same wire-v2 session. HTTP remains a separate binding because it is
 request/response oriented rather than a long-lived bidirectional stream.
 
 The network/P2P implementation order is tracked only in

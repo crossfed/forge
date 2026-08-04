@@ -38,23 +38,15 @@ class client_stream_call {
    client_stream_call& operator=(const client_stream_call&) = delete;
 
    boost::asio::awaitable<void> async_write(In value) {
-      co_await input_.async_write(std::move(value));
+      return input_.async_write(std::move(value));
    }
 
    boost::asio::awaitable<void> async_close() {
-      co_await input_.async_close();
+      return input_.async_close();
    }
 
    boost::asio::awaitable<Result> async_finish() {
-      if (!operation_) {
-         throw exceptions::protocol_error{"invalid client stream call"};
-      }
-      auto result = co_await operation_->async_finish();
-      if constexpr (std::same_as<Result, void>) {
-         co_return;
-      } else {
-         co_return result.template take<Result>();
-      }
+      return async_finish_impl(operation_);
    }
 
    void cancel() noexcept {
@@ -64,6 +56,18 @@ class client_stream_call {
    }
 
  private:
+   static boost::asio::awaitable<Result>
+   async_finish_impl(std::shared_ptr<detail::call_operation> operation) {
+      if (!operation) {
+         throw exceptions::protocol_error{"invalid client stream call"};
+      }
+      auto result = co_await operation->async_finish();
+      if constexpr (std::same_as<Result, void>) {
+         co_return;
+      } else {
+         co_return result.template take<Result>();
+      }
+   }
    client_stream_call(stream_writer<In> input,
                       std::shared_ptr<detail::call_operation> operation)
        : input_{std::move(input)}, operation_{std::move(operation)} {}

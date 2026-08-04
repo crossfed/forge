@@ -6,6 +6,7 @@ module;
 
 #include <algorithm>
 #include <cstdint>
+#include <exception>
 #include <memory>
 #include <set>
 #include <string>
@@ -17,6 +18,19 @@ module forge.api.core.binding;
 
 namespace forge::api::core {
 namespace {
+
+void fail_stream_endpoints(
+   const std::shared_ptr<detail::stream_endpoint>& input,
+   const std::shared_ptr<detail::stream_endpoint>& output) noexcept {
+   const auto error = std::make_exception_ptr(
+      exceptions::protocol_error{"API stream binding failed"});
+   if (input) {
+      input->fail(error);
+   }
+   if (output) {
+      output->fail(error);
+   }
+}
 
 [[nodiscard]] call_context make_context(const frame& value) {
    return call_context{
@@ -210,19 +224,29 @@ binding_plan::dispatch_stream(
    frame request, std::shared_ptr<detail::stream_endpoint> input,
    std::shared_ptr<detail::stream_endpoint> output) const {
    if (local == nullptr) {
+      fail_stream_endpoints(input, output);
       FORGE_THROW_EXCEPTION(exceptions::incompatible_version,
                             "API binding plan has no local registry");
    }
    if (!exports_api(*this, request.api) ||
        method_hidden_by_export(*this, request.api, request.method)) {
+      fail_stream_endpoints(input, output);
       co_return make_api_not_exported_response(request);
    }
 
    co_await run_before_interceptors(*this, request);
-   auto response = co_await local->dispatch_stream(
-      std::move(request), std::move(input), std::move(output));
-   co_await run_terminal_interceptors(*this, response);
-   co_return response;
+   try {
+      auto response = co_await local->dispatch_stream(
+         std::move(request), input, output);
+      co_await run_terminal_interceptors(*this, response);
+      if (response.kind == frame_kind::error) {
+         fail_stream_endpoints(input, output);
+      }
+      co_return response;
+   } catch (...) {
+      fail_stream_endpoints(input, output);
+      throw;
+   }
 }
 
 binding_builder& binding_builder::serve(const registry& apis) {

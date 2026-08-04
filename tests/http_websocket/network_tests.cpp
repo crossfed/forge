@@ -77,6 +77,7 @@ import forge.net.http.stream;
 import forge.net.http.target;
 import forge.net.http.types;
 import forge.net.http.upload;
+import forge.net.transport.frame;
 import forge.codec.json;
 import forge.variant.value;
 import forge.raw.raw;
@@ -1162,14 +1163,28 @@ using test_api::xml_cache_api;
 }
 
 [[nodiscard]] std::string pack_websocket_api_frame(const forge::api::core::frame& frame) {
-   auto out = forge::api::core::bytes{};
-   forge::raw::pack(out, frame);
+   const auto payload = forge::raw::pack(frame);
+   const auto out = forge::net::transport::encode_frame(payload);
    return {out.begin(), out.end()};
 }
 
 [[nodiscard]] forge::api::core::frame unpack_websocket_api_frame(const std::string& value) {
    const auto bytes = forge::api::core::bytes{value.begin(), value.end()};
-   return forge::raw::unpack<forge::api::core::frame>(bytes);
+   const auto decoded = forge::net::transport::decode_frame(bytes);
+   if (decoded.status != forge::net::transport::frame_decode_status::complete ||
+       decoded.consumed != bytes.size()) {
+      throw std::runtime_error{"WebSocket API test message is not one complete transport frame"};
+   }
+   return forge::raw::unpack_exact<forge::api::core::frame>(decoded.payload);
+}
+
+[[nodiscard]] forge::api::core::frame websocket_api_hello() {
+   return forge::api::core::frame{
+      .kind = forge::api::core::frame_kind::session_hello,
+      .id = {},
+      .codec = {.value = "forge.raw"},
+      .payload = forge::raw::pack(forge::api::core::session_hello{}),
+   };
 }
 
 [[nodiscard]] bool has_internal_forge_header(const response& value) {
@@ -7734,6 +7749,55 @@ BOOST_AUTO_TEST_CASE(websocket_echo_shares_server_port) {
    server.stop();
 }
 
+BOOST_AUTO_TEST_CASE(websocket_close_drains_already_queued_writes) {
+   constexpr auto write_count = std::size_t{16};
+   auto runtime = forge::asio::runtime{
+      forge::asio::runtime_options{.worker_threads = 1}};
+   auto router = forge::net::http::router{};
+   router.websocket("/ws", [](forge::net::websocket::connection::ptr connection) {
+      connection->on_message(
+         [](forge::net::websocket::connection&, std::string)
+            -> boost::asio::awaitable<void> { co_return; });
+   });
+
+   auto server = forge::net::http::server{
+      runtime, server_config{}, std::move(router)};
+   server.start();
+
+   auto client = forge::net::websocket::client{
+      runtime,
+      parse_base_url("http://127.0.0.1:" +
+                     std::to_string(wait_for_port(server)))};
+   auto connection = client.connect("/ws");
+   auto writes = std::vector<std::future<void>>{};
+   writes.reserve(write_count);
+   for (auto index = std::size_t{}; index < write_count; ++index) {
+      writes.push_back(boost::asio::co_spawn(
+         runtime.context(),
+         connection->send(std::string(256 * 1024, static_cast<char>('a' + index))),
+         boost::asio::use_future));
+   }
+   auto closed = boost::asio::co_spawn(
+      runtime.context(), connection->close(), boost::asio::use_future);
+
+   for (auto& write : writes) {
+      BOOST_REQUIRE(write.wait_for(std::chrono::seconds{5}) ==
+                    std::future_status::ready);
+      BOOST_CHECK_NO_THROW(write.get());
+   }
+   BOOST_REQUIRE(closed.wait_for(std::chrono::seconds{5}) ==
+                 std::future_status::ready);
+   BOOST_CHECK_NO_THROW(closed.get());
+
+   const auto metrics = connection->metrics();
+   BOOST_TEST(metrics.sent_messages == write_count);
+   BOOST_TEST(metrics.failed_writes == 0U);
+   BOOST_TEST(metrics.close_count == 1U);
+   BOOST_TEST(metrics.queued_writes == 0U);
+
+   server.stop();
+}
+
 BOOST_AUTO_TEST_CASE(websocket_api_adapter_strips_reserved_metadata) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
 
@@ -7802,15 +7866,27 @@ BOOST_AUTO_TEST_CASE(websocket_api_adapter_strips_reserved_metadata) {
        .payload = pack_api_payload(api_read_chunk{}),
    };
 
-   forge::asio::blocking::run(runtime, connection->send(pack_websocket_api_frame(request)));
+   forge::asio::blocking::run(
+      runtime, connection->send_binary(pack_websocket_api_frame(websocket_api_hello())));
 
    {
       auto lock = std::unique_lock{response_mutex};
-      BOOST_CHECK(response_cv.wait_for(lock, std::chrono::seconds{2}, [&response_ready] { return response_ready; }));
+      BOOST_REQUIRE(response_cv.wait_for(lock, std::chrono::seconds{5}, [&response_ready] { return response_ready; }));
+      BOOST_TEST(static_cast<int>(unpack_websocket_api_frame(response).kind) ==
+                 static_cast<int>(forge::api::core::frame_kind::session_hello));
+      response.clear();
+      response_ready = false;
+   }
+
+   forge::asio::blocking::run(runtime, connection->send_binary(pack_websocket_api_frame(request)));
+
+   {
+      auto lock = std::unique_lock{response_mutex};
+      BOOST_REQUIRE(response_cv.wait_for(lock, std::chrono::seconds{5}, [&response_ready] { return response_ready; }));
    }
 
    const auto frame = unpack_websocket_api_frame(response);
-   BOOST_CHECK(frame.kind == forge::api::core::frame_kind::response);
+   BOOST_CHECK(static_cast<int>(frame.kind) == static_cast<int>(forge::api::core::frame_kind::response));
    BOOST_TEST(*observed_peer == "missing");
    BOOST_TEST(*observed_public == "trace-2");
 
@@ -7862,19 +7938,97 @@ BOOST_AUTO_TEST_CASE(websocket_api_adapter_dispatches_positional_method) {
        .payload = pack_api_payload(std::make_tuple(std::string{"left"}, std::string{"right"})),
    };
 
-   forge::asio::blocking::run(runtime, connection->send(pack_websocket_api_frame(request)));
+   forge::asio::blocking::run(
+      runtime, connection->send_binary(pack_websocket_api_frame(websocket_api_hello())));
 
    {
       auto lock = std::unique_lock{response_mutex};
-      BOOST_CHECK(response_cv.wait_for(lock, std::chrono::seconds{2}, [&response_ready] { return response_ready; }));
+      BOOST_REQUIRE(response_cv.wait_for(lock, std::chrono::seconds{5}, [&response_ready] { return response_ready; }));
+      BOOST_TEST(static_cast<int>(unpack_websocket_api_frame(response).kind) ==
+                 static_cast<int>(forge::api::core::frame_kind::session_hello));
+      response.clear();
+      response_ready = false;
+   }
+
+   forge::asio::blocking::run(runtime, connection->send_binary(pack_websocket_api_frame(request)));
+
+   {
+      auto lock = std::unique_lock{response_mutex};
+      BOOST_REQUIRE(response_cv.wait_for(lock, std::chrono::seconds{5}, [&response_ready] { return response_ready; }));
    }
 
    const auto frame = unpack_websocket_api_frame(response);
-   BOOST_CHECK(frame.kind == forge::api::core::frame_kind::response);
+   BOOST_CHECK(static_cast<int>(frame.kind) == static_cast<int>(forge::api::core::frame_kind::response));
    BOOST_TEST(forge::api::core::unpack_body<api_chunk>(frame.payload).bytes == "left:right:ws");
 
    forge::asio::blocking::run(runtime, connection->close());
    server.stop();
+}
+
+BOOST_AUTO_TEST_CASE(websocket_api_adapter_rejects_text_split_and_coalesced_frames) {
+   const auto expect_rejected = [](std::string payload, bool binary) {
+      auto runtime = forge::asio::runtime{
+         forge::asio::runtime_options{.worker_threads = 2}};
+      auto registry = forge::api::core::registry{};
+      auto binding = forge::api::websocket::api()
+                        .use(forge::api::core::binding()
+                                .serve(registry)
+                                .build())
+                        .build();
+      auto router = forge::net::http::router{};
+      router.websocket(
+         "/api", [&runtime, binding = std::move(binding)](
+                    forge::net::websocket::connection::ptr connection) mutable {
+            boost::asio::co_spawn(runtime.context(),
+                                  binding.accept(std::move(connection)),
+                                  boost::asio::detached);
+         });
+
+      auto server = forge::net::http::server{
+         runtime, server_config{}, std::move(router)};
+      server.start();
+      auto client = forge::net::websocket::client{
+         runtime,
+         parse_base_url("http://127.0.0.1:" +
+                        std::to_string(wait_for_port(server)))};
+      auto connection = client.connect("/api");
+      auto close_mutex = std::mutex{};
+      auto close_cv = std::condition_variable{};
+      auto closed = false;
+      connection->on_message(
+         [](forge::net::websocket::connection&, std::string)
+            -> boost::asio::awaitable<void> { co_return; });
+      connection->on_close([&](forge::net::websocket::connection&) {
+         {
+            const auto lock = std::scoped_lock{close_mutex};
+            closed = true;
+         }
+         close_cv.notify_all();
+      });
+
+      if (binary) {
+         forge::asio::blocking::run(runtime,
+                                    connection->send_binary(std::move(payload)));
+      } else {
+         forge::asio::blocking::run(runtime,
+                                    connection->send(std::move(payload)));
+      }
+      {
+         auto lock = std::unique_lock{close_mutex};
+         BOOST_REQUIRE(close_cv.wait_for(
+            lock, std::chrono::seconds{5}, [&closed] { return closed; }));
+      }
+      server.stop();
+   };
+
+   const auto hello = pack_websocket_api_frame(websocket_api_hello());
+   BOOST_TEST_CONTEXT("text message") { expect_rejected(hello, false); }
+   BOOST_TEST_CONTEXT("split frame") {
+      expect_rejected(hello.substr(0, hello.size() / 2), true);
+   }
+   BOOST_TEST_CONTEXT("coalesced frames") {
+      expect_rejected(hello + hello, true);
+   }
 }
 
 BOOST_AUTO_TEST_CASE(websocket_handler_exception_is_not_silently_swallowed) {

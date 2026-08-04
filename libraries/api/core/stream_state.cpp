@@ -116,9 +116,8 @@ boost::asio::awaitable<std::optional<bytes>> stream_state::async_read() {
             try {
                observer(stream_event::consumed, consumed_bytes);
             } catch (...) {
-               auto observer_error = std::current_exception();
-               fail(observer_error);
-               std::rethrow_exception(observer_error);
+               // Accounting observers are internal no-throw callbacks. A
+               // faulty observer must not make a delivered item disappear.
             }
          }
          co_return std::move(item);
@@ -231,7 +230,7 @@ void stream_state::fail(std::exception_ptr error) noexcept {
    auto dropped_bytes = std::size_t{0};
    {
       const auto lock = std::scoped_lock{mutex_};
-      if (error_) {
+      if (error_ || closed_) {
          return;
       }
       error_ = std::move(error);

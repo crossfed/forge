@@ -37,11 +37,9 @@ class call_state final : public call_operation, public std::enable_shared_from_t
    std::optional<std::chrono::steady_clock::time_point> deadline_;
    std::mutex mutex_;
    bool started_ = false;
-   bool cancellation_requested_ = false;
    bool completed_ = false;
    bool finish_pending_ = false;
    bool finish_consumed_ = false;
-   std::exception_ptr cancellation_error_;
    std::exception_ptr error_;
    call_result result_;
    std::shared_ptr<boost::asio::steady_timer> deadline_timer_;

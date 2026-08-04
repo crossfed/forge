@@ -43,23 +43,19 @@ class bidirectional_stream_call {
    operator=(const bidirectional_stream_call&) = delete;
 
    boost::asio::awaitable<void> async_write(In value) {
-      co_await input_.async_write(std::move(value));
+      return input_.async_write(std::move(value));
    }
 
    boost::asio::awaitable<std::optional<Out>> async_read() {
-      co_return co_await output_.async_read();
+      return output_.async_read();
    }
 
    boost::asio::awaitable<void> async_close() {
-      co_await input_.async_close();
+      return input_.async_close();
    }
 
    boost::asio::awaitable<void> async_finish() {
-      if (!operation_) {
-         throw exceptions::protocol_error{
-            "invalid bidirectional stream call"};
-      }
-      static_cast<void>(co_await operation_->async_finish());
+      return async_finish_impl(operation_);
    }
 
    void cancel() noexcept {
@@ -69,6 +65,14 @@ class bidirectional_stream_call {
    }
 
  private:
+   static boost::asio::awaitable<void>
+   async_finish_impl(std::shared_ptr<detail::call_operation> operation) {
+      if (!operation) {
+         throw exceptions::protocol_error{
+            "invalid bidirectional stream call"};
+      }
+      static_cast<void>(co_await operation->async_finish());
+   }
    bidirectional_stream_call(
       stream_writer<In> input, stream_reader<Out> output,
       std::shared_ptr<detail::call_operation> operation)

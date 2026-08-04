@@ -89,10 +89,16 @@ class stream_reader {
    }
 
    boost::asio::awaitable<std::optional<T>> async_read() {
-      if (!endpoint_) {
+      return async_read_impl(endpoint_);
+   }
+
+ private:
+   static boost::asio::awaitable<std::optional<T>>
+   async_read_impl(std::shared_ptr<detail::stream_endpoint> endpoint) {
+      if (!endpoint) {
          throw exceptions::protocol_error{"invalid API stream reader"};
       }
-      auto payload = co_await endpoint_->async_read();
+      auto payload = co_await endpoint->async_read();
       if (!payload) {
          co_return std::nullopt;
       }
@@ -107,8 +113,6 @@ class stream_reader {
       }
       co_return value;
    }
-
- private:
    explicit stream_reader(std::shared_ptr<detail::stream_endpoint> endpoint)
        : endpoint_{std::move(endpoint)} {}
 

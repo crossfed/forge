@@ -61,18 +61,30 @@ class stream_writer {
    }
 
    boost::asio::awaitable<void> async_write(T value) {
-      if (!endpoint_) {
-         throw exceptions::protocol_error{"invalid API stream writer"};
-      }
-      co_await endpoint_->async_write(forge::raw::pack(value));
+      return async_write_impl(endpoint_, std::move(value));
    }
 
    boost::asio::awaitable<void> async_close() {
-      close();
-      co_return;
+      return async_close_impl(endpoint_);
    }
 
  private:
+   static boost::asio::awaitable<void>
+   async_write_impl(std::shared_ptr<detail::stream_endpoint> endpoint, T value) {
+      if (!endpoint) {
+         throw exceptions::protocol_error{"invalid API stream writer"};
+      }
+      co_await endpoint->async_write(forge::raw::pack(value));
+   }
+
+   static boost::asio::awaitable<void>
+   async_close_impl(std::shared_ptr<detail::stream_endpoint> endpoint) {
+      if (!endpoint) {
+         throw exceptions::protocol_error{"invalid API stream writer"};
+      }
+      endpoint->close();
+      co_return;
+   }
    explicit stream_writer(std::shared_ptr<detail::stream_endpoint> endpoint)
        : endpoint_{std::move(endpoint)} {}
 
