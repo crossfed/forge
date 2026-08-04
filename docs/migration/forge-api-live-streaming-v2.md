@@ -49,7 +49,16 @@ protocol carried by the selected stream changes.
 
 - HTTP/1.1 server and client streams use versioned length-delimited API bodies.
 - HTTP/1.1 bidirectional methods are unsupported; use WebSocket, P2P or QUIC.
-- WebSocket peers must both use the v2 session handshake.
+- WebSocket peers must both use the v2 session handshake. Every WebSocket
+  message is binary and contains exactly one length-delimited Forge transport
+  frame. Text messages, a frame split across messages and multiple frames
+  coalesced into one message are protocol errors.
+- `api_binding::connect(socket)` now returns a live
+  `forge::api::websocket::connection`; retain it for the lifetime of calls and
+  obtain typed APIs from that connection. It no longer installs a callback and
+  returns `void`.
+- `api_binding::accept(socket)` now owns the server session loop and completes
+  only when that session closes. Spawn or await it as a long-lived connection
+  task instead of treating completion as handler installation.
 - Existing unary HTTP routes do not use the v2 stream session and retain their
   current request and response mapping.
-
