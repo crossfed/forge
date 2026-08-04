@@ -7845,6 +7845,25 @@ BOOST_AUTO_TEST_CASE(http_stream_response_retry_preserves_absolute_deadline_metr
    BOOST_CHECK_EQUAL(connection.metrics().timeouts, 1U);
 }
 
+BOOST_AUTO_TEST_CASE(http_stream_response_counts_deadline_before_retry_attempt) {
+   auto runtime = forge::asio::runtime{};
+   auto connection = forge::net::http::connection{runtime, parse_base_url("http://127.0.0.1:1")};
+
+   BOOST_CHECK_THROW(
+       forge::asio::blocking::run(
+           runtime, connection.async_stream_request(make_request(method::get, "/deadline"),
+                                                    request_options{.timeout = std::chrono::milliseconds{0},
+                                                                    .retry_idempotent = true,
+                                                                    .max_retries = 1,
+                                                                    .retry_backoff = std::chrono::milliseconds{0}})),
+       forge::net::http::exceptions::gateway_timeout);
+
+   BOOST_CHECK_EQUAL(connection.metrics().retry_attempts, 0U);
+   BOOST_CHECK_EQUAL(connection.metrics().reconnects, 0U);
+   BOOST_CHECK_EQUAL(connection.metrics().failed_requests, 1U);
+   BOOST_CHECK_EQUAL(connection.metrics().timeouts, 1U);
+}
+
 BOOST_AUTO_TEST_CASE(http_api_proxy_retries_get_after_stale_keep_alive) {
    auto runtime = forge::asio::runtime{};
    auto typed_server = stale_keep_alive_server{};

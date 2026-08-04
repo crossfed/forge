@@ -655,6 +655,9 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
       } catch (const boost::system::system_error& error) {
          record_system_error(error.code());
          throw;
+      } catch (const exceptions::gateway_timeout&) {
+         record_system_error(asio::error::timed_out);
+         throw;
       } catch (...) {
          record_failed();
          throw;
@@ -675,6 +678,9 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
          co_return result;
       } catch (const boost::system::system_error& error) {
          record_system_error(error.code());
+         throw;
+      } catch (const exceptions::gateway_timeout&) {
+         record_system_error(asio::error::timed_out);
          throw;
       } catch (...) {
          record_failed();
