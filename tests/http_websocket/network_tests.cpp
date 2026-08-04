@@ -7807,6 +7807,44 @@ BOOST_AUTO_TEST_CASE(connection_retries_only_idempotent_requests_after_remote_cl
    BOOST_CHECK_EQUAL(no_retry_connection.metrics().retry_attempts, 0U);
 }
 
+BOOST_AUTO_TEST_CASE(http_api_proxy_retries_file_response_after_remote_close) {
+   auto retry_server = flaky_server{true};
+   auto runtime = forge::asio::runtime{};
+   auto client =
+       forge::net::http::client{runtime, parse_base_url("http://127.0.0.1:" + std::to_string(retry_server.port()))};
+   auto object = forge::asio::blocking::run(runtime, forge::api::http::remote<object_api>(client));
+
+   auto file = forge::asio::blocking::run(
+       runtime, object->get_object(object_get_request{.collection = "cache", .key = "chunk.bin"}));
+   const auto body = forge::asio::blocking::run(runtime, file.body().async_read_all());
+
+   BOOST_TEST(file.status_code() == status::ok);
+   BOOST_TEST(body == "retry-ok");
+   BOOST_CHECK_EQUAL(client.metrics().retry_attempts, 1U);
+   BOOST_CHECK_EQUAL(client.metrics().reconnects, 1U);
+   BOOST_CHECK_EQUAL(client.metrics().completed_requests, 1U);
+}
+
+BOOST_AUTO_TEST_CASE(http_stream_response_retry_preserves_absolute_deadline_metrics) {
+   auto retry_server = flaky_server{false};
+   auto runtime = forge::asio::runtime{};
+   auto connection =
+       forge::net::http::connection{runtime, parse_base_url("http://127.0.0.1:" + std::to_string(retry_server.port()))};
+
+   BOOST_CHECK_THROW(
+       forge::asio::blocking::run(
+           runtime, connection.async_stream_request(make_request(method::get, "/deadline"),
+                                                    request_options{.timeout = std::chrono::milliseconds{500},
+                                                                    .retry_idempotent = true,
+                                                                    .max_retries = 1,
+                                                                    .retry_backoff = std::chrono::seconds{1}})),
+       forge::net::http::exceptions::gateway_timeout);
+
+   BOOST_CHECK_EQUAL(connection.metrics().retry_attempts, 1U);
+   BOOST_CHECK_EQUAL(connection.metrics().reconnects, 0U);
+   BOOST_CHECK_EQUAL(connection.metrics().timeouts, 1U);
+}
+
 BOOST_AUTO_TEST_CASE(http_api_proxy_retries_get_after_stale_keep_alive) {
    auto runtime = forge::asio::runtime{};
    auto typed_server = stale_keep_alive_server{};

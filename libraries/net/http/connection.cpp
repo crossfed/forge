@@ -682,6 +682,37 @@ struct connection::impl : std::enable_shared_from_this<connection::impl> {
       }
    }
 
+   awaitable<response_stream> retrying_stream_request(forge::net::http::request request_value,
+                                                      transport_deadline deadline, request_options options) {
+      const auto may_retry = options.retry_idempotent && is_idempotent(request_value.method());
+      auto attempt = std::uint32_t{0};
+
+      for (;;) {
+         try {
+            auto result = co_await stream_request(request_value, std::nullopt, deadline);
+            if (attempt > 0) {
+               record_reconnect();
+            }
+            co_return result;
+         } catch (const boost::system::system_error& error) {
+            if (!may_retry || attempt >= options.max_retries || !connection_reset_error(error.code())) {
+               throw;
+            }
+         }
+         ++attempt;
+         record_retry();
+         try {
+            co_await sleep_for(options.retry_backoff, deadline);
+         } catch (const exceptions::gateway_timeout&) {
+            record_system_error(asio::error::timed_out);
+            throw;
+         } catch (const boost::system::system_error& error) {
+            record_system_error(error.code());
+            throw;
+         }
+      }
+   }
+
    awaitable<void> process_request(std::shared_ptr<queued_request> operation) {
       try {
          const auto original = operation->request_value;
@@ -1130,7 +1161,7 @@ boost::asio::awaitable<response_stream> connection::async_stream_request(forge::
    auto implementation = impl_;
    const auto deadline = make_deadline(options.timeout);
    co_await asio::dispatch(implementation->strand, use_awaitable);
-   co_return co_await implementation->stream_request(std::move(request_value), std::nullopt, deadline);
+   co_return co_await implementation->retrying_stream_request(std::move(request_value), deadline, options);
 } catch (const forge::exceptions::base&) {
    throw;
 } catch (const boost::system::system_error& error) {
