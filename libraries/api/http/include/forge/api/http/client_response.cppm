@@ -88,49 +88,84 @@ namespace detail {
 
 inline constexpr auto request_timeout_grace = std::chrono::seconds{5};
 
-template <typename Request>
-[[nodiscard]] forge::net::http::request_options request_options_for(const route& route, const Request& value) {
+[[nodiscard]] inline forge::net::http::request_options default_request_options(const route& route) {
    const auto retry_idempotent = forge::net::http::is_idempotent(route.verb);
-   auto options = forge::net::http::request_options{
+   return forge::net::http::request_options{
        .retry_idempotent = retry_idempotent,
        .max_retries = retry_idempotent ? 1U : 0U,
    };
+}
+
+template <typename Value>
+void set_request_timeout(forge::net::http::request_options& options, const route& route, const Value& value) {
+   using value_type = std::remove_cvref_t<Value>;
+   if constexpr (!std::unsigned_integral<value_type>) {
+      FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error,
+                            "HTTP timeout field must be an unsigned integer",
+                            forge::exceptions::ctx("field", *route.timeout_field));
+   } else {
+      const auto timeout = static_cast<std::uint64_t>(value);
+      constexpr auto max_milliseconds = static_cast<std::uint64_t>((std::chrono::milliseconds::max)().count());
+      const auto grace = static_cast<std::uint64_t>(
+          std::chrono::duration_cast<std::chrono::milliseconds>(request_timeout_grace).count());
+      if (timeout > max_milliseconds - grace) {
+         FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error, "HTTP timeout field exceeds clock range",
+                               forge::exceptions::ctx("field", *route.timeout_field),
+                               forge::exceptions::ctx("value", timeout));
+      }
+      options.timeout = std::chrono::milliseconds{timeout + grace};
+   }
+}
+
+[[noreturn]] inline void throw_missing_timeout_field(const route& route) {
+   FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error, "HTTP timeout field is not declared",
+                         forge::exceptions::ctx("field", *route.timeout_field));
+}
+
+template <typename Request>
+[[nodiscard]] forge::net::http::request_options request_options_for(const route& route, const Request& value) {
+   auto options = default_request_options(route);
    if (!route.timeout_field) {
       return options;
    }
 
    auto found = false;
-   auto timeout = std::uint64_t{};
    if constexpr (forge::reflect::is_described_object_v<Request>) {
       forge::reflect::for_each_member<Request>([&](const char* name, auto member) {
          if (*route.timeout_field != name) {
             return;
          }
          found = true;
-         using field_type = std::remove_cvref_t<decltype(value.*member)>;
-         if constexpr (std::unsigned_integral<field_type>) {
-            timeout = static_cast<std::uint64_t>(value.*member);
-         } else {
-            FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error,
-                                  "HTTP timeout field must be an unsigned integer",
-                                  forge::exceptions::ctx("field", *route.timeout_field));
-         }
+         set_request_timeout(options, route, value.*member);
       });
    }
    if (!found) {
-      FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error, "HTTP timeout field is not declared",
-                            forge::exceptions::ctx("field", *route.timeout_field));
+      throw_missing_timeout_field(route);
+   }
+   return options;
+}
+
+template <typename Tuple>
+[[nodiscard]] forge::net::http::request_options
+request_options_for_arguments(const route& route, const Tuple& value, const std::vector<std::string>& argument_names) {
+   auto options = default_request_options(route);
+   if (!route.timeout_field) {
+      return options;
    }
 
-   constexpr auto max_milliseconds = static_cast<std::uint64_t>((std::chrono::milliseconds::max)().count());
-   const auto grace =
-       static_cast<std::uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(request_timeout_grace).count());
-   if (timeout > max_milliseconds - grace) {
-      FORGE_THROW_EXCEPTION(forge::api::core::exceptions::protocol_error, "HTTP timeout field exceeds clock range",
-                            forge::exceptions::ctx("field", *route.timeout_field),
-                            forge::exceptions::ctx("value", timeout));
+   auto found = false;
+   [&]<std::size_t... Index>(std::index_sequence<Index...>) {
+      (([&] {
+          if (Index < argument_names.size() && argument_names[Index] == *route.timeout_field) {
+             found = true;
+             set_request_timeout(options, route, std::get<Index>(value));
+          }
+       }()),
+       ...);
+   }(std::make_index_sequence<std::tuple_size_v<Tuple>>{});
+   if (!found) {
+      throw_missing_timeout_field(route);
    }
-   options.timeout = std::chrono::milliseconds{timeout + grace};
    return options;
 }
 
@@ -364,13 +399,14 @@ boost::asio::awaitable<Response> call_arguments(client& target, const forge::api
                                                 const route& route, Tuple value,
                                                 const std::vector<std::string>& argument_names) try {
    reject_http_positional_parameters(value);
+   const auto request_options = request_options_for_arguments(route, value, argument_names);
    auto request_parts = make_client_request(target, route, value, argument_names);
    auto request_body = bind_positional_request_body(request_parts.value, route, value, request_parts.consumed);
    if constexpr (detail::response_needs_stream_v<Response>) {
-      auto response_value =
-          request_body.has_value()
-              ? co_await target.async_stream_request(std::move(request_parts.value), std::move(*request_body))
-              : co_await target.async_stream_request(std::move(request_parts.value));
+      auto response_value = request_body.has_value()
+                                ? co_await target.async_stream_request(std::move(request_parts.value),
+                                                                       std::move(*request_body), request_options)
+                                : co_await target.async_stream_request(std::move(request_parts.value), request_options);
       if (response_value.head.result_int() < 200U || response_value.head.result_int() >= 300U) {
          response_value.head.body() = co_await read_bounded_error_body(response_value.body);
          auto error = decode_error_payload(response_value.head, route.error_body_codec);
@@ -382,10 +418,10 @@ boost::asio::awaitable<Response> call_arguments(client& target, const forge::api
          co_return streaming_response::from_body(std::move(response_value.head), std::move(response_value.body));
       }
    } else {
-      auto response_value =
-          request_body.has_value()
-              ? co_await target.async_streaming_request(std::move(request_parts.value), std::move(*request_body))
-              : co_await target.async_request(std::move(request_parts.value));
+      auto response_value = request_body.has_value()
+                                ? co_await target.async_streaming_request(std::move(request_parts.value),
+                                                                          std::move(*request_body), request_options)
+                                : co_await target.async_request(std::move(request_parts.value), request_options);
       if (response_value.result_int() < 200U || response_value.result_int() >= 300U) {
          auto error = decode_error_payload(response_value, route.error_body_codec);
          forge::api::core::raise_remote_error(error, forge::api::core::find_method(descriptor, route.method_name));
