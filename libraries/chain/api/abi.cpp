@@ -57,6 +57,17 @@ std::string format_diagnostic(const abi_diagnostic& diagnostic) {
    }};
 }
 
+[[nodiscard]] bool is_action_decode_resource_failure(abi_error_code code) noexcept {
+   switch (code) {
+   case abi_error_code::recursion_limit:
+   case abi_error_code::deadline_exceeded:
+   case abi_error_code::size_limit:
+      return true;
+   default:
+      return false;
+   }
+}
+
 class traversal_context {
  public:
    explicit traversal_context(abi_serialization_limits limits) : limits_{limits} {
@@ -1184,6 +1195,9 @@ forge::variant abi_bin_to_json(const protocol::abi_def& abi, std::string_view ty
 
 forge::variant action_to_variant(const protocol::action& action, const abi_resolver& resolve,
                                  abi_serialization_limits limits) {
+   if (action.data.size() > limits.max_binary_bytes) {
+      fail(abi_error_code::size_limit, "Action data exceeds the binary size limit", "action", "data", 0U);
+   }
    const auto hex_data = forge::codec::hex::encode(action.data);
    auto data = forge::variant{hex_data};
 
@@ -1204,7 +1218,10 @@ forge::variant action_to_variant(const protocol::action& action, const abi_resol
       if (definition != abi->actions.end() && !definition->type.empty()) {
          try {
             data = abi_bin_to_json(*abi, definition->type, action.data, limits);
-         } catch (const abi_serialization_error&) {
+         } catch (const abi_serialization_error& error) {
+            if (is_action_decode_resource_failure(error.diagnostic().code)) {
+               throw;
+            }
             data = forge::variant{hex_data};
          }
       }
