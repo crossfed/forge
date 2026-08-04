@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - ".github/workflows/contract-sdk.yml"
+      - ".github/scripts/install-glaze.sh"
       - "CMakeLists.txt"
       - "cmake/**"
       - "libraries/asio/**"
