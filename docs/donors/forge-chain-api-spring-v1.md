@@ -70,6 +70,12 @@ available on the default branch, `workflow_dispatch` remains available with the
 same full `spine_commit` and performance inputs. Omitting either revision is an
 error rather than a silent downstream skip.
 
+Because Spine is a private sibling repository, Forge configures the
+`SPINE_READ_TOKEN` Actions secret with read-only contents access to
+`vbytemaster/spine`. The gate fails before checkout when this explicit
+cross-repository credential is absent; the repository-scoped `GITHUB_TOKEN`
+does not provide equivalent evidence access.
+
 Forge-local CTest uses the explicit manifest-only mode. It validates the
 manifest and Forge-local transaction-id fixture, reports Spine acceptance as
 `NOT_RUN`, and exits with code 125 so CTest records the gate as skipped rather

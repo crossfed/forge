@@ -132,12 +132,23 @@ jobs:
             exit 1
           fi
 
+      - name: Require Spine repository access
+        shell: bash
+        env:
+          SPINE_READ_TOKEN: ${{ secrets.SPINE_READ_TOKEN }}
+        run: |
+          if [[ -z "$SPINE_READ_TOKEN" ]]; then
+            echo "SPINE_READ_TOKEN must grant read-only access to vbytemaster/spine" >&2
+            exit 1
+          fi
+
       - name: Checkout pinned Spine acceptance corpus
         uses: actions/checkout@v4
         with:
           repository: vbytemaster/spine
           ref: ${{ needs.gate.outputs.spine_commit }}
           path: spine-acceptance
+          token: ${{ secrets.SPINE_READ_TOKEN }}
           persist-credentials: false
           submodules: false
 
@@ -177,8 +188,9 @@ jobs:
             eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
             echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
           fi
-          brew install boost cmake glaze gmp libngtcp2 ninja openssl@3
-          echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+          brew install boost cmake gmp libngtcp2 ninja openssl@3
+          "$GITHUB_WORKSPACE/.github/scripts/install-glaze.sh" "$RUNNER_TEMP/forge-glaze"
+          echo "CMAKE_PREFIX_PATH=$RUNNER_TEMP/forge-glaze;$(brew --prefix);$(brew --prefix boost);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
           if [[ "$RUNNER_OS" == "Linux" ]]; then
             sudo apt-get update
             sudo apt-get install -y clang-22 clang-tools-22 libc++-22-dev libc++abi-22-dev
@@ -242,12 +254,13 @@ jobs:
             eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
             echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
           fi
-          brew install boost cmake glaze gmp libngtcp2 ninja openssl@3
+          brew install boost cmake gmp libngtcp2 ninja openssl@3
+          "$GITHUB_WORKSPACE/.github/scripts/install-glaze.sh" "$RUNNER_TEMP/forge-glaze"
           sudo apt-get update
           sudo apt-get install -y clang-22 clang-tools-22 libc++-22-dev libc++abi-22-dev
           echo "CC=/usr/bin/clang-22" >> "$GITHUB_ENV"
           echo "CXX=/usr/bin/clang++-22" >> "$GITHUB_ENV"
-          echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+          echo "CMAKE_PREFIX_PATH=$RUNNER_TEMP/forge-glaze;$(brew --prefix);$(brew --prefix boost);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
 
       - name: Configure
         shell: bash
@@ -313,8 +326,9 @@ jobs:
             eval "$(/home/linuxbrew/.linuxbrew/bin/brew shellenv)"
             echo "/home/linuxbrew/.linuxbrew/bin" >> "$GITHUB_PATH"
           fi
-          brew install boost cmake glaze gmp libngtcp2 ninja openssl@3
-          echo "CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);$(brew --prefix glaze);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
+          brew install boost cmake gmp libngtcp2 ninja openssl@3
+          "$GITHUB_WORKSPACE/.github/scripts/install-glaze.sh" "$RUNNER_TEMP/forge-glaze"
+          echo "CMAKE_PREFIX_PATH=$RUNNER_TEMP/forge-glaze;$(brew --prefix);$(brew --prefix boost);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
           if [[ "$RUNNER_OS" == "Linux" ]]; then
             sudo apt-get update
             sudo apt-get install -y clang-22 libc++-22-dev libc++abi-22-dev
