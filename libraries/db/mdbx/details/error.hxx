@@ -1,5 +1,7 @@
 #pragma once
 
+#include <string_view>
+
 namespace forge::db::mdbx::detail {
 
 [[nodiscard]] bool mdbx_success(int code) noexcept;
