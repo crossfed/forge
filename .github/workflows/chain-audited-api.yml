@@ -19,6 +19,7 @@ permissions:
 env:
   HOMEBREW_NO_AUTO_UPDATE: "1"
   HOMEBREW_NO_INSTALL_CLEANUP: "1"
+  FORGE_MACOS_DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer
 
 jobs:
   gate:
@@ -146,6 +147,13 @@ jobs:
             echo "CXXFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
             echo "LDFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
           else
+            if [[ ! -d "$FORGE_MACOS_DEVELOPER_DIR" ]]; then
+              echo "required Xcode is unavailable: $FORGE_MACOS_DEVELOPER_DIR" >&2
+              exit 1
+            fi
+            export DEVELOPER_DIR="$FORGE_MACOS_DEVELOPER_DIR"
+            echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
+            echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
             brew install llvm
             llvm_prefix="$(brew --prefix llvm)"
             echo "$llvm_prefix/bin" >> "$GITHUB_PATH"
@@ -156,6 +164,10 @@ jobs:
       - name: Configure
         shell: bash
         run: |
+          osx_options=()
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            osx_options+=("-DCMAKE_OSX_SYSROOT=$SDKROOT")
+          fi
           cmake -S . -B build/chain-audited-api -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER="$CC" \
@@ -164,7 +176,8 @@ jobs:
             -DFORGE_ENABLE_MODULES=ON \
             -DFORGE_ENABLE_ROCKSDB=OFF \
             -DFORGE_ENABLE_TUI=OFF \
-            -DBUILD_TESTING=ON
+            -DBUILD_TESTING=ON \
+            "${osx_options[@]}"
 
       - name: Build acceptance targets
         run: >-
@@ -284,6 +297,13 @@ jobs:
             echo "CXXFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
             echo "LDFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
           else
+            if [[ ! -d "$FORGE_MACOS_DEVELOPER_DIR" ]]; then
+              echo "required Xcode is unavailable: $FORGE_MACOS_DEVELOPER_DIR" >&2
+              exit 1
+            fi
+            export DEVELOPER_DIR="$FORGE_MACOS_DEVELOPER_DIR"
+            echo "DEVELOPER_DIR=$DEVELOPER_DIR" >> "$GITHUB_ENV"
+            echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"
             brew install llvm
             llvm_prefix="$(brew --prefix llvm)"
             echo "$llvm_prefix/bin" >> "$GITHUB_PATH"
@@ -294,6 +314,10 @@ jobs:
       - name: Configure benchmark
         shell: bash
         run: |
+          osx_options=()
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            osx_options+=("-DCMAKE_OSX_SYSROOT=$SDKROOT")
+          fi
           cmake -S . -B build/chain-audited-api-performance -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER="$CC" \
@@ -302,7 +326,8 @@ jobs:
             -DFORGE_ENABLE_MODULES=ON \
             -DFORGE_ENABLE_ROCKSDB=OFF \
             -DFORGE_ENABLE_TUI=OFF \
-            -DBUILD_TESTING=ON
+            -DBUILD_TESTING=ON \
+            "${osx_options[@]}"
           cmake --build build/chain-audited-api-performance --target benchmark_forge_db_authenticated -j 4
 
       - name: Run one-million-key baseline

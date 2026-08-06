@@ -384,6 +384,33 @@ def check_contract_sdk_workflow(root: Path, errors: list[str]) -> None:
       )
 
 
+def check_chain_audited_api_workflow(root: Path, errors: list[str]) -> None:
+   path = root / ".github" / "workflows" / "chain-audited-api.yml"
+   if not path.exists():
+      return
+
+   source = path.read_text(errors="ignore")
+   required_developer_dir = (
+      "FORGE_MACOS_DEVELOPER_DIR: /Applications/Xcode_26.3.app/Contents/Developer"
+   )
+   if required_developer_dir not in source:
+      errors.append(
+         f"{path.relative_to(root)}: macOS acceptance must pin the Xcode 26.3 developer directory"
+      )
+
+   sdkroot_export = 'echo "SDKROOT=$(xcrun --sdk macosx --show-sdk-path)" >> "$GITHUB_ENV"'
+   if source.count(sdkroot_export) != 2:
+      errors.append(
+         f"{path.relative_to(root)}: native and performance jobs must export the selected macOS SDKROOT"
+      )
+
+   osx_sysroot = 'osx_options+=("-DCMAKE_OSX_SYSROOT=$SDKROOT")'
+   if source.count(osx_sysroot) != 2:
+      errors.append(
+         f"{path.relative_to(root)}: native and performance configure steps must use the selected macOS SDKROOT"
+      )
+
+
 def check_contract_sdk_components(root: Path, errors: list[str]) -> None:
    path = root / "guest" / "CMakeLists.txt"
    if not path.exists():
@@ -905,6 +932,7 @@ def main() -> int:
    check_plugin_impl_ownership(root, errors)
    check_chain_savanna_boundaries(root, errors)
    check_chain_api_shape(root, errors)
+   check_chain_audited_api_workflow(root, errors)
    check_contract_sdk_workflow(root, errors)
    check_contract_sdk_components(root, errors)
    check_eosio_veneer(root, errors)
