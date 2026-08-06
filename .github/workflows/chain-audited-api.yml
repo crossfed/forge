@@ -141,11 +141,9 @@ jobs:
           echo "CMAKE_PREFIX_PATH=$RUNNER_TEMP/forge-glaze;$(brew --prefix);$(brew --prefix boost);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
           if [[ "$RUNNER_OS" == "Linux" ]]; then
             sudo apt-get update
-            sudo apt-get install -y clang-22 clang-tools-22 libc++-22-dev libc++abi-22-dev
+            sudo apt-get install -y clang-22 clang-tools-22
             echo "CC=/usr/bin/clang-22" >> "$GITHUB_ENV"
             echo "CXX=/usr/bin/clang++-22" >> "$GITHUB_ENV"
-            echo "CXXFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
-            echo "LDFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
           else
             if [[ ! -d "$FORGE_MACOS_DEVELOPER_DIR" ]]; then
               echo "required Xcode is unavailable: $FORGE_MACOS_DEVELOPER_DIR" >&2
@@ -217,7 +215,7 @@ jobs:
           brew install boost cmake gmp libngtcp2 ninja openssl@3
           "$GITHUB_WORKSPACE/.github/scripts/install-glaze.sh" "$RUNNER_TEMP/forge-glaze"
           sudo apt-get update
-          sudo apt-get install -y clang-22 clang-tools-22 libc++-22-dev libc++abi-22-dev
+          sudo apt-get install -y clang-22 clang-tools-22
           echo "CC=/usr/bin/clang-22" >> "$GITHUB_ENV"
           echo "CXX=/usr/bin/clang++-22" >> "$GITHUB_ENV"
           echo "CMAKE_PREFIX_PATH=$RUNNER_TEMP/forge-glaze;$(brew --prefix);$(brew --prefix boost);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
@@ -232,8 +230,8 @@ jobs:
             -DCMAKE_CXX_COMPILER="$CXX" \
             -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
             -DCMAKE_C_FLAGS="$sanitizer_flags" \
-            -DCMAKE_CXX_FLAGS="$sanitizer_flags -stdlib=libc++" \
-            -DCMAKE_EXE_LINKER_FLAGS="$sanitizer_flags -stdlib=libc++" \
+            -DCMAKE_CXX_FLAGS="$sanitizer_flags" \
+            -DCMAKE_EXE_LINKER_FLAGS="$sanitizer_flags" \
             -DFORGE_ENABLE_MODULES=ON \
             -DFORGE_ENABLE_ROCKSDB=OFF \
             -DFORGE_ENABLE_TUI=OFF \
@@ -291,11 +289,9 @@ jobs:
           echo "CMAKE_PREFIX_PATH=$RUNNER_TEMP/forge-glaze;$(brew --prefix);$(brew --prefix boost);$(brew --prefix libngtcp2);$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
           if [[ "$RUNNER_OS" == "Linux" ]]; then
             sudo apt-get update
-            sudo apt-get install -y clang-22 libc++-22-dev libc++abi-22-dev
+            sudo apt-get install -y clang-22
             echo "CC=/usr/bin/clang-22" >> "$GITHUB_ENV"
             echo "CXX=/usr/bin/clang++-22" >> "$GITHUB_ENV"
-            echo "CXXFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
-            echo "LDFLAGS=-stdlib=libc++" >> "$GITHUB_ENV"
           else
             if [[ ! -d "$FORGE_MACOS_DEVELOPER_DIR" ]]; then
               echo "required Xcode is unavailable: $FORGE_MACOS_DEVELOPER_DIR" >&2
