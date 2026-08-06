@@ -68,6 +68,15 @@ std::string format_diagnostic(const abi_diagnostic& diagnostic) {
    }
 }
 
+void require_action_within_limits(const protocol::action& action, const abi_serialization_limits& limits) {
+   if (action.authorization.size() > limits.max_container_elements) {
+      fail(abi_error_code::size_limit, "Action authorization exceeds the element limit", "action", "authorization", 0U);
+   }
+   if (action.data.size() > limits.max_binary_bytes) {
+      fail(abi_error_code::size_limit, "Action data exceeds the binary size limit", "action", "data", 0U);
+   }
+}
+
 class traversal_context {
  public:
    explicit traversal_context(abi_serialization_limits limits) : limits_{limits} {
@@ -1022,10 +1031,12 @@ class serializer {
 
    void encode_bytes(const forge::variant& value, binary_writer& writer, std::string_view path) const {
       try {
-         const auto bytes = forge::codec::hex::decode(value.as_string());
-         if (bytes.size() > context_.limits().max_string_bytes) {
+         const auto& text = value.get_string();
+         const auto decoded_size = text.size() / 2U + text.size() % 2U;
+         if (decoded_size > context_.limits().max_string_bytes) {
             fail(abi_error_code::size_limit, "ABI bytes value exceeds the byte limit", "bytes", path, writer.tellp());
          }
+         const auto bytes = forge::codec::hex::decode(text);
          pack_length(writer, bytes.size(), "bytes", path);
          writer.locate("bytes", path);
          if (!bytes.empty()) {
@@ -1195,9 +1206,7 @@ forge::variant abi_bin_to_json(const protocol::abi_def& abi, std::string_view ty
 
 forge::variant action_to_variant(const protocol::action& action, const abi_resolver& resolve,
                                  abi_serialization_limits limits) {
-   if (action.data.size() > limits.max_binary_bytes) {
-      fail(abi_error_code::size_limit, "Action data exceeds the binary size limit", "action", "data", 0U);
-   }
+   require_action_within_limits(action, limits);
    const auto hex_data = forge::codec::hex::encode(action.data);
    auto data = forge::variant{hex_data};
 
@@ -1239,6 +1248,12 @@ forge::variant transaction_to_variant(const protocol::transaction& transaction, 
    }
    if (transaction.actions.size() > limits.max_container_elements) {
       fail(abi_error_code::size_limit, "Transaction actions exceed the element limit", "transaction", "actions", 0U);
+   }
+   for (const auto& action : transaction.context_free_actions) {
+      require_action_within_limits(action, limits);
+   }
+   for (const auto& action : transaction.actions) {
+      require_action_within_limits(action, limits);
    }
 
    auto context_free_actions = forge::variants{};
