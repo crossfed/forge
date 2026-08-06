@@ -6,6 +6,7 @@ include(GNUInstallDirs)
 include(CheckCXXSourceCompiles)
 include(CMakePackageConfigHelpers)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(ForgeVendorCompilePolicy)
 
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
    include(CTest)
@@ -440,6 +441,14 @@ set_property(
       "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/bls12-381/include>"
       "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
+
+set(FORGE_VENDORED_IMPLEMENTATION_TARGETS secp256k1 bn256 bls12-381 softfloat)
+if(TARGET mdbx-internal)
+   list(APPEND FORGE_VENDORED_IMPLEMENTATION_TARGETS mdbx-internal)
+endif()
+foreach(_forge_vendor_target IN LISTS FORGE_VENDORED_IMPLEMENTATION_TARGETS)
+   forge_apply_vendored_implementation_policy(${_forge_vendor_target})
+endforeach()
 
 if(NOT FORGE_ENABLE_VENDOR_TESTS)
    file(

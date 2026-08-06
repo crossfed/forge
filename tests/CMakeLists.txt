@@ -68,6 +68,19 @@ add_test(
       -DFORGE_CONTRACT_TEST_ROOT=${CMAKE_BINARY_DIR}/tests/contract-developer-toolchain
       -P ${CMAKE_SOURCE_DIR}/guest/tests/tooling/check_developer_toolchain.cmake
 )
+add_test(
+   NAME test_forge_vendor_compile_policy
+   COMMAND
+      ${Python3_EXECUTABLE}
+      ${CMAKE_SOURCE_DIR}/tests/vendor_compile_policy/check_compile_policy.py
+      --cmake ${CMAKE_COMMAND}
+      --source ${CMAKE_SOURCE_DIR}/tests/vendor_compile_policy
+      --binary ${CMAKE_BINARY_DIR}/tests/vendor-compile-policy
+      --forge-source ${CMAKE_SOURCE_DIR}
+      --generator ${CMAKE_GENERATOR}
+      --c-compiler ${CMAKE_C_COMPILER}
+      --cxx-compiler ${CMAKE_CXX_COMPILER}
+)
 
 add_executable(
    test_forge
