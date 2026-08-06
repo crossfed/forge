@@ -68,6 +68,14 @@ wire_unpack_limits(std::size_t payload_size, std::uint32_t max_frame_size) {
       value, std::numeric_limits<std::uint32_t>::max()));
 }
 
+[[nodiscard]] std::uint32_t fair_inflight_limit(
+   const forge::api::core::session_limits& limits) {
+   const auto window_limited =
+      limits.max_buffered_bytes / limits.initial_window_bytes;
+   return static_cast<std::uint32_t>(std::min<std::uint64_t>(
+      limits.max_inflight_calls, window_limited));
+}
+
 [[nodiscard]] std::uint32_t negotiated_timeout(std::chrono::milliseconds value) {
    if (value.count() <= 0) {
       return 0;
@@ -180,7 +188,7 @@ void session::impl::validate_options() const {
 }
 
 forge::api::core::session_hello session::impl::local_hello() const {
-   return forge::api::core::session_hello{
+   auto result = forge::api::core::session_hello{
       .version = settings.version,
       .capabilities = settings.capabilities,
       .codec = settings.codec,
@@ -195,6 +203,13 @@ forge::api::core::session_hello session::impl::local_hello() const {
          .shutdown_grace_ms = negotiated_timeout(settings.disconnect_grace),
       },
    };
+   result.limits.max_item_bytes = std::min(
+      result.limits.max_item_bytes,
+      static_cast<std::uint32_t>(std::min<std::uint64_t>(
+         result.limits.initial_window_bytes,
+         std::numeric_limits<std::uint32_t>::max())));
+   result.limits.max_inflight_calls = fair_inflight_limit(result.limits);
+   return result;
 }
 
 void session::impl::initialize_on_strand(const strand_type& executor) {
@@ -285,11 +300,17 @@ void session::impl::negotiate_hello(
        negotiated_limits.max_buffered_bytes == 0 ||
        negotiated_limits.max_item_bytes > negotiated_limits.max_frame_bytes ||
        negotiated_limits.max_item_bytes >
+          negotiated_limits.initial_window_bytes ||
+       negotiated_limits.initial_window_bytes >
+          negotiated_limits.max_buffered_bytes ||
+       negotiated_limits.max_item_bytes >
           negotiated_limits.max_buffered_bytes) {
       FORGE_THROW_EXCEPTION(
          forge::api::core::exceptions::incompatible_version,
          "API stream peer advertised invalid session limits");
    }
+   negotiated_limits.max_inflight_calls =
+      fair_inflight_limit(negotiated_limits);
    peer_hello_received = true;
    touch_activity();
    wake_session();

@@ -278,7 +278,8 @@ boost::asio::awaitable<void> session::impl::handle_request(
                             "API stream request reuses a call_id",
                             forge::exceptions::ctx("call_id", value.id.value));
    }
-   if (calls.size() >= negotiated_limits.max_inflight_calls) {
+   if (calls.size() + draining_tombstones() >=
+       negotiated_limits.max_inflight_calls) {
       FORGE_THROW_EXCEPTION(
          forge::api::core::exceptions::resource_exhausted,
          "API stream max inflight calls exceeded");
@@ -538,10 +539,17 @@ void session::impl::handle_tombstone_frame(
             "API stream late end is duplicated or has the wrong direction");
       }
       tombstone.inbound->ended = true;
+      complete_tombstone(value.id.value);
       return;
    }
-   if (value.kind == forge::api::core::frame_kind::stream_window ||
-       value.kind == forge::api::core::frame_kind::cancel) {
+   if (value.kind == forge::api::core::frame_kind::cancel) {
+      if (tombstone.inbound && !tombstone.inbound->ended) {
+         tombstone.inbound->ended = true;
+         complete_tombstone(value.id.value);
+      }
+      return;
+   }
+   if (value.kind == forge::api::core::frame_kind::stream_window) {
       return;
    }
    FORGE_THROW_EXCEPTION(

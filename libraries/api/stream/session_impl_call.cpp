@@ -167,7 +167,7 @@ session::impl::reserve_local_call(
       FORGE_THROW_EXCEPTION(forge::api::core::exceptions::cancelled,
                             "API stream session is not accepting calls");
    }
-   if (calls.size() >= settings.max_inflight) {
+   if (calls.size() + draining_tombstones() >= settings.max_inflight) {
       FORGE_THROW_EXCEPTION(
          forge::api::core::exceptions::resource_exhausted,
          "API stream max inflight calls exceeded");
@@ -277,7 +277,8 @@ session::impl::async_call_on_strand(
             return !entry.second->done &&
                    entry.second->admission_order <= call->admission_order;
          });
-      if (admitted_before > negotiated_limits.max_inflight_calls) {
+      if (admitted_before + draining_tombstones() >
+          negotiated_limits.max_inflight_calls) {
          FORGE_THROW_EXCEPTION(
             forge::api::core::exceptions::resource_exhausted,
             "API stream peer negotiated a smaller inflight limit");
@@ -724,12 +725,36 @@ void session::impl::remember_tombstone(
    }
    const auto id = call->id.value;
    if (tombstones.emplace(id, std::move(state)).second) {
-      tombstone_order.push_back(id);
+      const auto& inserted = tombstones.at(id);
+      if (!inserted.inbound || inserted.inbound->ended) {
+         tombstone_order.push_back(id);
+      }
    }
    while (tombstone_order.size() > settings.max_tombstones) {
       tombstones.erase(tombstone_order.front());
       tombstone_order.pop_front();
    }
+}
+
+void session::impl::complete_tombstone(std::uint64_t id) {
+   const auto found = tombstones.find(id);
+   if (found == tombstones.end() || !found->second.inbound ||
+       !found->second.inbound->ended) {
+      return;
+   }
+   tombstone_order.push_back(id);
+   while (tombstone_order.size() > settings.max_tombstones) {
+      tombstones.erase(tombstone_order.front());
+      tombstone_order.pop_front();
+   }
+}
+
+std::size_t session::impl::draining_tombstones() const noexcept {
+   return std::count_if(tombstones.begin(), tombstones.end(),
+                        [](const auto& entry) {
+                           return entry.second.inbound &&
+                                  !entry.second.inbound->ended;
+                        });
 }
 
 void session::impl::install_inbound_observer(

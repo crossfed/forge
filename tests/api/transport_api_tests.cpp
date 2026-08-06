@@ -527,6 +527,30 @@ wait_until(Predicate predicate, std::chrono::milliseconds timeout) {
    }
 }
 
+using exchange_call =
+   forge::api::core::bidirectional_stream_call<item, item>;
+
+boost::asio::awaitable<void> produce_until_stopped(
+   const std::shared_ptr<exchange_call>& call,
+   const std::shared_ptr<std::atomic_bool>& stop) {
+   auto value = std::uint32_t{1};
+   while (!stop->load(std::memory_order_acquire)) {
+      co_await call->async_write(item{.value = value++});
+   }
+}
+
+boost::asio::awaitable<void> consume_until_closed(
+   const std::shared_ptr<exchange_call>& call,
+   const std::shared_ptr<std::atomic_bool>& stop,
+   const std::shared_ptr<std::atomic_bool>& observed) {
+   const auto first = co_await call->async_read();
+   BOOST_REQUIRE(first.has_value());
+   observed->store(true, std::memory_order_release);
+   stop->store(true, std::memory_order_release);
+   while (co_await call->async_read()) {
+   }
+}
+
 } // namespace
 
 BOOST_AUTO_TEST_SUITE(transport_api_tests)
@@ -562,6 +586,10 @@ BOOST_AUTO_TEST_CASE(session_rejects_incompatible_hello_before_request) {
    BOOST_TEST(static_cast<int>(unpack_api_frame(model->written(0)).kind) ==
               static_cast<int>(
                  forge::api::core::frame_kind::session_hello));
+   const auto local_hello = forge::raw::unpack_exact<
+      forge::api::core::session_hello>(
+      unpack_api_frame(model->written(0)).payload);
+   BOOST_TEST(local_hello.limits.max_inflight_calls == 16U);
 }
 
 BOOST_AUTO_TEST_CASE(session_rejects_application_data_before_hello) {
@@ -774,6 +802,106 @@ BOOST_AUTO_TEST_CASE(transport_session_runs_all_method_kinds_incrementally) {
       BOOST_TEST(
          static_cast<int>(unpack_api_frame(server_model->written(0)).kind) ==
          static_cast<int>(forge::api::core::frame_kind::session_hello));
+
+      co_await connection.async_close();
+      co_await wait_service(service);
+   };
+   forge::asio::blocking::run(runtime, scenario());
+}
+
+BOOST_AUTO_TEST_CASE(duplex_data_progresses_under_continuous_window_updates) {
+   auto runtime = forge::asio::runtime{};
+   auto scenario = []() -> boost::asio::awaitable<void> {
+      const auto executor = co_await boost::asio::this_coro::executor;
+      auto client_model = std::make_shared<fake_stream>();
+      auto server_model = std::make_shared<fake_stream>();
+      auto [client_stream, server_stream] =
+         make_stream_pair(client_model, server_model);
+
+      auto implementation = std::make_shared<live_impl>();
+      auto registry = forge::api::core::registry{};
+      registry.install<live_api>(live_api::describe(), implementation);
+      const auto options = forge::api::transport::options{
+         .max_item_size = sizeof(std::uint32_t),
+         .initial_window_items = 1,
+         .initial_window_bytes = sizeof(std::uint32_t),
+         .disconnect_grace = std::chrono::milliseconds{50},
+      };
+      auto service = start_service(
+         executor,
+         forge::api::transport::serve_stream(
+            std::move(server_stream),
+            forge::api::core::binding().serve(registry).build(), options));
+      auto connection = forge::api::transport::connection{
+         std::move(client_stream), options};
+      auto remote = co_await connection.get_remote_api<live_api>();
+      auto exchange = std::make_shared<exchange_call>(
+         co_await remote.async_open<&live_api::exchange>());
+
+      auto stop = std::make_shared<std::atomic_bool>(false);
+      auto observed = std::make_shared<std::atomic_bool>(false);
+      auto producer = start_service(
+         executor, produce_until_stopped(exchange, stop));
+      auto consumer = start_service(
+         executor, consume_until_closed(exchange, stop, observed));
+
+      co_await wait_until(
+         [observed] { return observed->load(std::memory_order_acquire); },
+         std::chrono::milliseconds{500});
+      co_await wait_service(producer);
+      co_await exchange->async_close();
+      co_await wait_service(consumer);
+      co_await exchange->async_finish();
+      co_await connection.async_close();
+      co_await wait_service(service);
+   };
+   forge::asio::blocking::run(runtime, scenario());
+}
+
+BOOST_AUTO_TEST_CASE(active_ingress_drains_are_not_evicted_as_tombstones) {
+   auto runtime = forge::asio::runtime{};
+   auto scenario = []() -> boost::asio::awaitable<void> {
+      const auto executor = co_await boost::asio::this_coro::executor;
+      auto client_model = std::make_shared<fake_stream>();
+      auto server_model = std::make_shared<fake_stream>();
+      auto [client_stream, server_stream] =
+         make_stream_pair(client_model, server_model);
+
+      auto implementation = std::make_shared<live_impl>();
+      implementation->return_upload_after_first.store(
+         true, std::memory_order_release);
+      auto registry = forge::api::core::registry{};
+      registry.install<live_api>(live_api::describe(), implementation);
+      const auto options = forge::api::transport::options{
+         .max_item_size = sizeof(std::uint32_t),
+         .initial_window_items = 16,
+         .initial_window_bytes = 64,
+         .disconnect_grace = std::chrono::milliseconds{50},
+         .max_tombstones = 1,
+      };
+      auto service = start_service(
+         executor,
+         forge::api::transport::serve_stream(
+            std::move(server_stream),
+            forge::api::core::binding().serve(registry).build(), options));
+      auto connection = forge::api::transport::connection{
+         std::move(client_stream), options};
+      auto remote = co_await connection.get_remote_api<live_api>();
+
+      auto calls = std::vector<forge::api::core::client_stream_call<item, total>>{};
+      for (auto index = 0; index < 4; ++index) {
+         calls.push_back(co_await remote.async_open<&live_api::upload>());
+      }
+      for (auto& call : calls) {
+         co_await call.async_write(item{.value = 1});
+         co_await call.async_write(item{.value = 2});
+         co_await call.async_write(item{.value = 3});
+         co_await call.async_close();
+      }
+      for (auto& call : calls) {
+         BOOST_TEST((co_await call.async_finish()).value == 1U);
+      }
+      BOOST_TEST((co_await remote->echo(item{.value = 9})).value == 9U);
 
       co_await connection.async_close();
       co_await wait_service(service);

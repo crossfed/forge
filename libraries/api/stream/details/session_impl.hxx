@@ -193,6 +193,8 @@ struct session::impl final : std::enable_shared_from_this<session::impl> {
    void discard_inbound(const std::shared_ptr<call_state>& call) noexcept;
    void finish_call(const std::shared_ptr<call_state>& call);
    void remember_tombstone(const std::shared_ptr<call_state>& call);
+   void complete_tombstone(std::uint64_t id);
+   [[nodiscard]] std::size_t draining_tombstones() const noexcept;
    void install_inbound_observer(const std::shared_ptr<call_state>& call);
    void on_inbound_event(std::uint64_t id,
                          forge::api::core::detail::stream_event event,
@@ -225,6 +227,7 @@ struct session::impl final : std::enable_shared_from_this<session::impl> {
    std::uint64_t next_admission_order = 1;
    std::uint64_t outbound_buffered_items = 0;
    std::uint64_t outbound_buffered_bytes = 0;
+   std::size_t control_burst = 0;
    std::exception_ptr failure;
    mutable std::mutex executor_mutex;
    std::optional<strand_type> strand;

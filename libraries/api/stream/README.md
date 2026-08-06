@@ -23,7 +23,8 @@ output directions; `stream_end` half-closes one direction, while one terminal
 smaller limits do not add credit. A received item consumes one item and its
 encoded payload bytes; capacity is advertised again only after application
 code consumes the item. Control frames bypass flow-controlled data, while data
-frames remain FIFO within a call and calls share the writer round-robin.
+frames remain FIFO within a call and calls share the writer round-robin. Control
+priority is bounded, so a sustained window-update stream cannot starve data.
 
 Default limits are 16 items and 1 MiB of byte credit per call, 1 MiB per item,
 16 MiB aggregate buffered bytes, 60 seconds idle timeout, no total call
@@ -31,10 +32,19 @@ deadline and 5 seconds disconnect grace. Protocol violations, deadlines and
 cancellation wake blocked reads, writes and credit waits without terminating
 unrelated calls.
 
+The advertised inflight limit is conservatively capped by aggregate bytes
+divided by the initial byte window. Every admitted inbound stream therefore
+receives one complete initial window; an idle stream cannot reserve all credit
+while another admitted stream remains at zero. The initial byte window also
+caps the negotiated maximum item size.
+
 `session` owns all detached reader/writer/handler coroutines through shared
-session and call state. A bounded tombstone set absorbs crossing late control
-frames after call completion. Destroying an unfinished typed call cancels only
-that call; callers still use `async_finish()` to observe the terminal result.
+session and call state. Completed tombstones are bounded. An ingress-drain
+tombstone remains live until the peer half-closes or cancels that direction and
+continues to consume an inflight slot, so credited crossing items cannot turn
+into an unknown-call session failure. Destroying an unfinished typed call
+cancels only that call; callers still use `async_finish()` to observe the
+terminal result.
 
 ## Boundaries
 

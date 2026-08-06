@@ -32,6 +32,11 @@ import forge.net.transport.buffer;
 #include "details/session_impl.hxx"
 
 namespace forge::api::stream {
+namespace {
+
+constexpr auto max_control_burst = std::size_t{8};
+
+} // namespace
 
 void session::impl::wake_writer() noexcept {
    if (writer_wake) {
@@ -105,9 +110,13 @@ session::impl::enqueue_call_frame(const std::shared_ptr<call_state>& call,
 
 std::optional<session::impl::queued_frame>
 session::impl::next_write_on_strand() {
-   if (!control_queue.empty()) {
+   if (!control_queue.empty() &&
+       (round_robin.empty() || control_burst < max_control_burst)) {
       auto next = std::move(control_queue.front());
       control_queue.pop_front();
+      if (control_burst < max_control_burst) {
+         ++control_burst;
+      }
       return next;
    }
 
@@ -129,6 +138,15 @@ session::impl::next_write_on_strand() {
       if (!call->write_queue.empty()) {
          call->rr_queued = true;
          round_robin.push_back(id);
+      }
+      control_burst = 0;
+      return next;
+   }
+   if (!control_queue.empty()) {
+      auto next = std::move(control_queue.front());
+      control_queue.pop_front();
+      if (control_burst < max_control_burst) {
+         ++control_burst;
       }
       return next;
    }
