@@ -43,6 +43,7 @@ def main() -> int:
          "-G",
          args.generator,
          "-DCMAKE_BUILD_TYPE=Debug",
+         "-DCMAKE_CONFIGURATION_TYPES=Debug",
          f"-DCMAKE_C_COMPILER={args.c_compiler}",
          f"-DCMAKE_CXX_COMPILER={args.cxx_compiler}",
          f"-DFORGE_SOURCE_DIR={args.forge_source}",
