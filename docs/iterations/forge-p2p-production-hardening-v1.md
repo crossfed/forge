@@ -81,14 +81,105 @@ integration tests use insecure test mode.
 
 Required outcome:
 
-- expose a product-neutral persistent peer-store configuration;
-- let the node own peer-store use and close it through its lifecycle, while the
-  plugin maps configured storage or injects a backend;
+- expose a product-neutral persistent peer-store configuration through an
+  ObjectDB-backed adapter rather than another backend-specific database surface;
+- let the node own peer-store use through its lifecycle, while the plugin maps a
+  configured named DB store or injects a backend;
 - reject invalid or unwritable storage before network admission opens;
 - retain learned peers, endpoint observations, DHT/provider records,
   Rendezvous registrations, relay reservations and backoff state across restart;
 - add a secure official-plugin startup/reopen test without
   `allow-insecure-test-mode`.
+
+#### Iteration 1: ObjectDB Peer Store Foundation
+
+The current RocksDB peer-store backend is an interim implementation, not the
+target production architecture. It directly links `forge_rocksdb`, owns a
+private binary codec and key-prefix layout, serializes synchronous database
+operations under one process-local mutex and performs whole-prefix scans for
+nearest DHT peers and Rendezvous discovery. The existing
+`dht::routing_table` is not connected to the node and also computes nearest
+peers by scanning and sorting every entry. Replacing the RocksDB calls with
+ObjectDB calls without correcting these operational paths is insufficient.
+
+The first implementation iteration therefore establishes the following
+boundary:
+
+```text
+forge::net::p2p::node
+  |-- bounded in-memory peer directory and Kademlia routing state
+  `-- peer_store persistence port
+        `-- ObjectDB-backed persistence adapter
+              `-- forge.db.core driver (MDBX or RocksDB)
+```
+
+`forge_net_p2p` continues to own peer-store domain records, validation, expiry,
+scoring and the in-memory backend used by focused tests. It must not depend on a
+concrete DB driver or on an official plugin. ObjectDB persistence belongs in a
+separate focused adapter boundary so in-memory and embedded consumers do not
+acquire an unconditional storage dependency. The exact target/component name is
+chosen in the implementation plan under the normal `create-library` rules.
+
+The ObjectDB adapter owns private P2P application models in a dedicated object
+family. It must not allocate IDs from the global DB Object system space and must
+not expose its model vocabulary as product API. Its persisted schema covers:
+
+- peer identity, verified Identify data, endpoints, capabilities and signed peer
+  records;
+- endpoint and peer success/failure observations, latency, score, reachability
+  and backoff state;
+- DHT provider records keyed by content key and provider, with expiry;
+- Rendezvous registrations indexed by namespace, sequence and peer, with
+  expiry;
+- relay reservation metadata and the small monotonic state required by durable
+  registration ordering.
+
+ObjectDB transactions must make read-modify-write updates and sequence/state
+changes atomic. Persisted models carry an explicit schema version and a defined
+upgrade or reset policy; adopting ObjectDB does not make migration automatic.
+DB Revision and BlobDB are not required for peer state.
+
+The durable store is not the DHT query engine. On startup the node loads a
+bounded, policy-selected set of valid records and hydrates its in-memory peer
+directory and a donor-consistent Kademlia bucket table. New observations update
+those operational indexes directly. Nearest-peer selection, scoring, bootstrap,
+AutoRelay and maintenance work use bounded in-memory indexes rather than a
+database scan. Startup hydration and expiry pruning are paged and bounded by
+configured limits; neither operation may materialize an unbounded peer store.
+
+The persistence contract must be asynchronous. An ObjectDB awaitable must never
+be hidden behind a blocking wait on an Asio runtime thread. Writes whose success
+is acknowledged to a remote peer, including accepted provider or Rendezvous
+registrations, are durably completed before the response. High-frequency
+observational updates may be coalesced only through a node-owned bounded queue
+with explicit backpressure, failure diagnostics and deterministic shutdown.
+
+For the official application path, `plugins.p2p.node` references a dedicated
+named Object layer supplied through `plugins.db.store`, registers the private
+models during `after_initialize` and injects the prepared persistence adapter
+before node startup. The node opens no listener until hydration succeeds.
+Programmatic `forge_net_p2p` consumers may inject an already prepared adapter
+without using either official plugin. The P2P plugin does not expose raw ObjectDB
+handles and does not reimplement DB driver configuration or lifecycle.
+
+Completion of this iteration requires:
+
+- removal of the direct `forge_rocksdb` dependency and
+  `peer_store::make_rocksdb_backend()` from `forge_net_p2p`;
+- removal of the hand-written RocksDB codec, key prefixes, sequence storage and
+  backend-specific exception translation;
+- retention of a deterministic in-memory backend for tests;
+- atomic ObjectDB commit/rollback and reopen coverage for every persisted model;
+- bounded startup hydration, expiry and pruning tests with a store larger
+  than the live routing-table capacity;
+- proof that nearest-peer and maintenance work do not scale linearly with total
+  persisted peer records;
+- secure official-plugin startup and reopen through the named DB Store path;
+- parity tests over both MDBX and RocksDB DB Core drivers where available.
+
+This iteration does not by itself complete secure production startup. Stable
+identity-source delivery remains the next required dependency and is handled by
+the separate identity finding below.
 
 ### P1: Production Resource Policy
 
@@ -343,20 +434,23 @@ API on an already known peer; it does not become peer or content discovery.
 
 ## 6. Implementation Order
 
-1. Make secure production startup possible with persistent peer-store and
-   identity-source ownership.
-2. Establish one explicit autonomous node lifecycle and move
+1. Replace the direct RocksDB peer store with the ObjectDB-backed persistence
+   boundary, bounded in-memory peer indexes and official named DB Store wiring
+   specified by Iteration 1.
+2. Add stable identity-source ownership and prove secure startup over the new
+   persistent peer store.
+3. Establish one explicit autonomous node lifecycle and move
    sequential/snapshot-based bootstrap maintenance into bounded node-owned
    orchestration.
-3. Expose production resource policy through node options and plugin mapping.
-4. Correct Identify and remote capability learning.
-5. Add one node-owned discovery/topology lifecycle for DHT, Rendezvous and Peer
+4. Expose production resource policy through node options and plugin mapping.
+5. Correct Identify and remote capability learning.
+6. Add one node-owned discovery/topology lifecycle for DHT, Rendezvous and Peer
    Exchange.
-6. Activate AutoNAT observations and prove AutoRelay/DCUtR through the official
+7. Activate AutoNAT observations and prove AutoRelay/DCUtR through the official
    plugin path.
-7. Add focused local discovery APIs needed by consumers, beginning with bounded
+8. Add focused local discovery APIs needed by consumers, beginning with bounded
    DHT provider publication/lookup for Content Swarm.
-8. Complete API admission/deadline policy, liveness diagnostics, maintenance
+9. Complete API admission/deadline policy, liveness diagnostics, maintenance
    scale gates and autonomous GossipSub mesh repair.
 
 Each block requires focused raw-node tests and an official-plugin integration
@@ -381,6 +475,12 @@ sufficient acceptance evidence.
   other within bounded time.
 - A restarted node restores valid peer/discovery state and safely expires stale
   records.
+- Peer persistence passes the same reopen and transaction fixtures over MDBX and
+  RocksDB, while `forge_net_p2p` has no direct dependency on either driver.
+- Nearest-peer selection uses bounded in-memory Kademlia state and does not scan
+  or sort the complete persisted peer set.
+- ObjectDB hydration and expiry processing remain bounded when durable peer
+  history exceeds live routing-table capacity.
 - DHT peer/provider lookup and Rendezvous discovery run through official plugin
   lifecycle and stop cleanly.
 - Peer Exchange discovers a non-bootstrap node without accepting non-routable or
@@ -404,5 +504,9 @@ sufficient acceptance evidence.
 - product authorization or chain/network membership;
 - content-provider key design, seeding policy or transfer scheduling;
 - replacing Forge API or `plugins.p2p.resolver`;
-- a second peer database outside `forge_net_p2p`;
+- a parallel peer-state database or model outside the canonical `peer_store`
+  boundary;
+- DB Revision, BlobDB or product content storage inside the peer store;
+- using ObjectDB queries as a substitute for an operational Kademlia routing
+  table;
 - unbounded background scanning, dialing, pinging or task creation.
