@@ -3,6 +3,9 @@
 namespace forge::net::p2p::detail {
 
 [[nodiscard]] constexpr bool peer_attributable_failure(exceptions::code kind, bool stopped) noexcept {
+   if (kind == exceptions::code::timeout) {
+      return true;
+   }
    if (stopped) {
       return false;
    }

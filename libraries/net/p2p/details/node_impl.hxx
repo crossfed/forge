@@ -139,11 +139,13 @@ struct node::impl : std::enable_shared_from_this<impl> {
    mutable connection_manager connections{connection_policy_for(options.limits)};
    std::map<protocol_id, node::protocol_handler> handlers;
    std::map<std::uint64_t, std::shared_ptr<session_state>> sessions;
+   std::map<std::uint64_t, operation_deadline::stop_token> protocol_open_deadlines;
    std::map<peer_id, relay_reservation_state> inbound_relay_reservations;
    std::map<peer_id, relay_reservation_state> outbound_relay_reservations;
    std::map<peer_id, std::uint64_t> pending_autonat_v2_nonces;
    std::uint64_t next_reservation_id = 1;
    std::uint64_t next_session_id = 1;
+   std::uint64_t next_protocol_open_deadline_id = 1;
    resource_manager resources{resource_limits_for(options.limits)};
    pubsub_state pubsub_value;
    relay_discovery_state relay_discovery_value;

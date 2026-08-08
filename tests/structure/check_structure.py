@@ -426,7 +426,7 @@ def check_chain_audited_api_workflow(root: Path, errors: list[str]) -> None:
    if (
       source.count(exact_glaze_config) != 3
       or source.count(resolved_glaze_dir) != 3
-      or source.count(explicit_glaze_dir) != 3
+      or source.count(explicit_glaze_dir) != 4
       or source.count(shared_dependency_prefixes) != 3
    ):
       errors.append(

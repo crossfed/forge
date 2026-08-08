@@ -298,6 +298,34 @@ jobs:
           UBSAN_OPTIONS: print_stacktrace=1:halt_on_error=1
         run: build/chain-audited-api-sanitizer/tests/forge_db_authenticated_fuzz -max_total_time=60
 
+      - name: Configure P2P ThreadSanitizer regression
+        shell: bash
+        run: |
+          sanitizer_flags="-fsanitize=thread -fno-omit-frame-pointer"
+          cmake -S . -B build/chain-audited-api-tsan -G Ninja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_C_COMPILER="$CC" \
+            -DCMAKE_CXX_COMPILER="$CXX" \
+            -DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH" \
+            -Dglaze_DIR="$FORGE_GLAZE_DIR" \
+            -DCMAKE_C_FLAGS="$sanitizer_flags" \
+            -DCMAKE_CXX_FLAGS="$sanitizer_flags" \
+            -DCMAKE_EXE_LINKER_FLAGS="$sanitizer_flags" \
+            -DFORGE_ENABLE_MODULES=ON \
+            -DFORGE_ENABLE_ROCKSDB=OFF \
+            -DFORGE_ENABLE_TUI=OFF \
+            -DBUILD_TESTING=ON
+
+      - name: Run P2P ThreadSanitizer regression
+        env:
+          TSAN_OPTIONS: halt_on_error=1:history_size=7
+        shell: bash
+        run: |
+          cmake --build build/chain-audited-api-tsan --target test_forge_quic_p2p -j 4
+          build/chain-audited-api-tsan/tests/test_forge_quic_p2p \
+            --run_test=p2p_session_teardown_handles_concurrent_track_release_and_start,p2p_operation_deadline_preserves_shutdown_winner_past_timeout,p2p_operation_deadline_preserves_timeout_winner_after_shutdown \
+            --log_level=message
+
   performance:
     name: ${{ matrix.os }} / authenticated DB baselines
     needs: gate

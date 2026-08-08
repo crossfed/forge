@@ -1851,19 +1851,46 @@ node::impl::open_protocol_on_direct_session(const peer_id& peer, const protocol_
                                             std::shared_ptr<node::impl::session_state> session,
                                             std::chrono::milliseconds timeout) {
    auto deadline = operation_deadline{runtime.context(), timeout};
+   auto deadline_id = std::uint64_t{};
+   {
+      auto lock = std::scoped_lock{mutex};
+      auto stopping = deadline.stopping();
+      if (stopped) {
+         static_cast<void>(stopping.request_stop());
+      } else {
+         deadline_id = next_protocol_open_deadline_id++;
+         protocol_open_deadlines.emplace(deadline_id, std::move(stopping));
+      }
+   }
+   auto release_deadline = [this, deadline_id](void*) noexcept {
+      if (deadline_id == 0) {
+         return;
+      }
+      auto lock = std::scoped_lock{mutex};
+      protocol_open_deadlines.erase(deadline_id);
+   };
+   auto deadline_guard = std::unique_ptr<void, decltype(release_deadline)>{this, std::move(release_deadline)};
+   if (deadline.stopped()) {
+      FORGE_THROW_EXCEPTION(exceptions::closed, "P2P protocol open stopped with its node");
+   }
    deadline.arm([session] { session->connection.cancel(); });
    record_path_attempt(path::kind::direct);
    try {
       auto selected =
           co_await protocol_negotiation::async_select(co_await session->connection.async_open_stream(), protocol);
-      if (!deadline.finish()) {
+      const auto completed = deadline.finish();
+      if (deadline.stopped()) {
+         FORGE_THROW_EXCEPTION(exceptions::closed, "P2P protocol open stopped with its node");
+      }
+      if (!completed) {
          throw_operation_timeout("P2P protocol open");
       }
       increment_opened_protocol();
       record_path_open(path::kind::direct);
       co_return selected;
    } catch (const forge::exceptions::base& error) {
-      if (!deadline.finish() || deadline.timed_out()) {
+      const auto completed = deadline.finish();
+      if (deadline.timed_out() || !completed) {
          session->closed = true;
          forget_session(session);
          if (session->direct_endpoint) {
@@ -1872,6 +1899,9 @@ node::impl::open_protocol_on_direct_session(const peer_id& peer, const protocol_
          }
          record_direct_failure(peer);
          throw_operation_timeout("P2P protocol open");
+      }
+      if (deadline.stopped()) {
+         FORGE_THROW_EXCEPTION(exceptions::closed, "P2P protocol open stopped with its node");
       }
       const auto kind = p2p_code(error);
       auto node_stopped = false;

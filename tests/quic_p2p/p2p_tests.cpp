@@ -5830,6 +5830,7 @@ BOOST_AUTO_TEST_CASE(p2p_gossipsub_peer_failure_attribution_excludes_local_runti
    BOOST_TEST(!detail::peer_attributable_failure(exceptions::code::canceled, false));
    BOOST_TEST(!detail::peer_attributable_failure(exceptions::code::internal, false));
    BOOST_TEST(!detail::peer_attributable_failure(exceptions::code::closed, true));
+   BOOST_TEST(detail::peer_attributable_failure(exceptions::code::timeout, true));
    BOOST_TEST(detail::peer_attributable_failure(exceptions::code::closed, false));
    BOOST_TEST(detail::peer_attributable_failure(exceptions::code::protocol_error, false));
 }

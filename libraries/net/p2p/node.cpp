@@ -1298,6 +1298,9 @@ void node::stop() {
       }
       operations.reserve(impl_->sessions.size() + 1);
       operations.push_back(impl_->direct_registry.teardown_operation());
+      for (const auto& [_, deadline] : impl_->protocol_open_deadlines) {
+         static_cast<void>(deadline.request_stop());
+      }
       for (auto& [_, session] : impl_->sessions) {
          operations.push_back(detail::session_teardown::operation{
              .close = [session]() -> boost::asio::awaitable<void> { co_await session->connection.async_close(); },
