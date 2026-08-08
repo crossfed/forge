@@ -2,6 +2,7 @@ module;
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <cstdint>
 #include <iterator>
 #include <optional>
@@ -10,6 +11,7 @@ module;
 #include <tuple>
 #include <typeinfo>
 #include <utility>
+#include <vector>
 
 module forge.api.http.openapi;
 
