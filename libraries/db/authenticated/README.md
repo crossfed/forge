@@ -151,8 +151,11 @@ build/release/tests/benchmark_forge_db_authenticated --keys 10000 --value-bytes 
 
 `--path` must not exist before the run and is preserved afterward. Omitting it
 uses and removes a temporary directory. The initial-batch timer covers MDBX
-transaction creation, authenticated staging and durable commit for every
-bounded chunk, but excludes client-side mutation construction. Profile defaults
+transaction creation, authenticated join/staging and durable commit for every
+bounded chunk. It accumulates DB elapsed time per chunk, excluding client-side
+mutation construction while never holding more than one chunk. The JSON reports
+construction and total load-wall time separately, and the benchmark rejects
+overlapping DB/construction intervals. Profile defaults
 use 32,768 keys per chunk for `1m` and 65,536 for `10m`, producing 31 and 153
 committed versions respectively. These profile-specific chunks bound both peak
 staging memory and retained persistent history; custom `--keys` runs retain the
@@ -165,14 +168,23 @@ workload with an explicit history policy. Point and range timings cover public
 proof generation, including snapshot acquisition; proofs omit values so value
 size does not make the fixed 256-item range exceed the proof byte limit.
 
+After all timed measurements, the benchmark reads every expected version record,
+checks its version/state/change metadata, reads its last committed state key,
+confirms that the next chunk's first key is still absent and scans the change
+root at the chunk boundary. The reported `retained_versions` count includes only
+versions that passed these checks; verification time and content-check count are
+reported separately and do not warm or otherwise affect the initial-batch or
+proof metrics.
+
 The executable writes one JSON document to stdout. It reports the committed
 state/change roots and sizes, initial-batch milliseconds and keys/second, 1,000
 point-proof milliseconds/proofs-per-second/average wire bytes, and 100 ranked
 range-proof milliseconds/proofs-per-second/average wire bytes/average nodes.
 The range limit is fixed at 256. Configuration output also records the workload,
 baseline, chunk source, planned version count, MDBX map ceiling and growth step.
-Storage output records actual committed/retained versions plus the closed MDBX
-directory's logical byte footprint and file count.
+Storage output records committed versions, actually verified retained versions,
+retention verification work, and the closed MDBX directory's logical byte
+footprint and file count.
 
 The hostile-input parser/verifier harness is opt-in and uses Clang libFuzzer,
 AddressSanitizer and UndefinedBehaviorSanitizer:

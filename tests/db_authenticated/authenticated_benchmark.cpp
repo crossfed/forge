@@ -8,6 +8,7 @@
 #include <iostream>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -37,10 +38,12 @@ using forge::test::db_authenticated::benchmark::baseline_name;
 using forge::test::db_authenticated::benchmark::baseline_profile;
 using forge::test::db_authenticated::benchmark::chunk_keys_source;
 using forge::test::db_authenticated::benchmark::committed_version_count;
+using forge::test::db_authenticated::benchmark::expected_retained_version;
 using forge::test::db_authenticated::benchmark::options;
 using forge::test::db_authenticated::benchmark::parse_options;
 using forge::test::db_authenticated::benchmark::usage;
 using forge::test::db_authenticated::benchmark::usage_error;
+using forge::test::db_authenticated::benchmark::validate_retained_root;
 
 constexpr auto point_proof_count = std::size_t{1'000};
 constexpr auto range_proof_count = std::size_t{100};
@@ -64,7 +67,12 @@ struct proof_measurement {
 struct benchmark_result {
    forge::db::authenticated::root root;
    std::size_t committed_versions = 0;
+   std::size_t verified_retained_versions = 0;
+   std::size_t retention_content_checks = 0;
    std::chrono::nanoseconds initial_batch{};
+   std::chrono::nanoseconds initial_load_wall{};
+   std::chrono::nanoseconds mutation_construction{};
+   std::chrono::nanoseconds retention_verification{};
    proof_measurement point_proofs;
    proof_measurement range_proofs;
 };
@@ -181,6 +189,58 @@ database_footprint measure_database_footprint(const std::filesystem::path& path)
    return result;
 }
 
+boost::asio::awaitable<forge::db::authenticated::root> commit_database_chunk(
+    const forge::db::authenticated::store& authenticated, const std::shared_ptr<forge::db::mdbx::driver>& driver,
+    forge::db::authenticated::version_id_t version, std::span<const forge::db::authenticated::mutation> mutations,
+    std::chrono::nanoseconds& database_elapsed) {
+   const auto started = clock_type::now();
+   auto db_transaction = co_await driver->begin_transaction();
+   auto authenticated_transaction = co_await authenticated.join(db_transaction, version);
+   const auto staged = co_await authenticated_transaction.stage(mutations);
+   co_await db_transaction.commit();
+   database_elapsed += clock_type::now() - started;
+   co_return staged.commitment;
+}
+
+boost::asio::awaitable<void> verify_retained_versions(const options& settings,
+                                                      const forge::db::authenticated::store& authenticated,
+                                                      benchmark_result& result) {
+   const auto started = clock_type::now();
+   const auto expected_versions = committed_version_count(settings.keys, settings.load_chunk_keys);
+   for (auto version = std::size_t{}; version < expected_versions; ++version) {
+      const auto expected = expected_retained_version(version, settings.keys, settings.load_chunk_keys);
+      const auto actual = co_await authenticated.find_root(expected.version);
+      validate_retained_root(actual, expected);
+
+      const auto last_key_index = expected.state_size - 1U;
+      const auto last_value = co_await authenticated.get(expected.version, make_key(last_key_index));
+      require(last_value && *last_value == make_value(last_key_index, settings.value_bytes),
+              "authenticated benchmark historical root does not contain its last committed key");
+      ++result.retention_content_checks;
+
+      if (expected.state_size < settings.keys) {
+         const auto next_value = co_await authenticated.get(expected.version, make_key(expected.state_size));
+         require(!next_value, "authenticated benchmark historical root contains a future key");
+         ++result.retention_content_checks;
+      }
+
+      const auto first_change_key = make_key(expected.state_size - expected.change_count);
+      const auto changes = co_await authenticated.scan_range(expected.version,
+                                                             {
+                                                                 .lower = first_change_key,
+                                                                 .limit = 1U,
+                                                                 .include_values = false,
+                                                             },
+                                                             forge::db::authenticated::proof_tree::changes);
+      require(changes.total_size == expected.change_count && changes.items.size() == 1U &&
+                  changes.items.front().key == first_change_key,
+              "authenticated benchmark historical change root is inconsistent");
+      ++result.retention_content_checks;
+      ++result.verified_retained_versions;
+   }
+   result.retention_verification = clock_type::now() - started;
+}
+
 boost::asio::awaitable<benchmark_result> run_benchmark(const options& settings,
                                                        const std::shared_ptr<forge::db::mdbx::driver>& driver) {
    auto authenticated = forge::db::authenticated::store{
@@ -192,23 +252,23 @@ boost::asio::awaitable<benchmark_result> run_benchmark(const options& settings,
    };
    auto result = benchmark_result{};
 
-   const auto initial_started = clock_type::now();
+   const auto initial_load_started = clock_type::now();
    auto first = std::size_t{};
    auto version = forge::db::authenticated::version_id_t{};
    while (first < settings.keys) {
       const auto count = std::min(settings.load_chunk_keys, settings.keys - first);
+      const auto mutation_construction_started = clock_type::now();
       const auto mutations = make_mutations(settings, first, count);
-      auto db_transaction = co_await driver->begin_transaction();
-      auto authenticated_transaction = co_await authenticated.join(db_transaction, version);
-      const auto staged = co_await authenticated_transaction.stage(mutations);
-      co_await db_transaction.commit();
-      result.root = staged.commitment;
+      result.mutation_construction += clock_type::now() - mutation_construction_started;
+      result.root = co_await commit_database_chunk(authenticated, driver, version, mutations, result.initial_batch);
       first += count;
       ++version;
       ++result.committed_versions;
    }
-   result.initial_batch = clock_type::now() - initial_started;
+   result.initial_load_wall = clock_type::now() - initial_load_started;
    const auto planned_versions = committed_version_count(settings.keys, settings.load_chunk_keys);
+   require(result.initial_batch + result.mutation_construction <= result.initial_load_wall,
+           "initial batch DB and mutation construction timers overlap");
    require(result.root.state_size == settings.keys, "chunked load did not commit every key");
    require(result.committed_versions == planned_versions, "initial load committed an unexpected number of versions");
    require(result.root.version + 1U == result.committed_versions,
@@ -240,6 +300,10 @@ boost::asio::awaitable<benchmark_result> run_benchmark(const options& settings,
       result.range_proofs.wire_bytes += forge::db::authenticated::wire_size(proof);
       result.range_proofs.nodes += proof.nodes.size();
    }
+
+   co_await verify_retained_versions(settings, authenticated, result);
+   require(result.verified_retained_versions == planned_versions,
+           "initial load did not retain every committed version");
 
    co_return result;
 }
@@ -310,6 +374,7 @@ bool print_result(const options& settings, const std::filesystem::path& path, co
              << "  \"benchmark\": \"forge_db_authenticated\",\n"
              << "  \"config\": {\n"
              << "    \"workload\": \"initial_bulk_state\",\n"
+             << "    \"measurement_scope\": \"transaction_join_stage_durable_commit\",\n"
              << "    \"baseline\": \"" << baseline_name(settings.baseline) << "\",\n"
              << "    \"machine_label\": \"" << json_escape(settings.machine_label) << "\",\n"
              << "    \"keys\": " << settings.keys << ",\n"
@@ -334,14 +399,19 @@ bool print_result(const options& settings, const std::filesystem::path& path, co
              << "  },\n"
              << "  \"storage\": {\n"
              << "    \"committed_versions\": " << result.committed_versions << ",\n"
-             << "    \"retained_versions\": " << result.committed_versions << ",\n"
+             << "    \"retained_versions\": " << result.verified_retained_versions << ",\n"
+             << "    \"retention_content_checks\": " << result.retention_content_checks << ",\n"
+             << "    \"retention_verification_elapsed_ms\": " << milliseconds(result.retention_verification) << ",\n"
              << "    \"database_logical_bytes\": " << footprint.logical_bytes << ",\n"
              << "    \"database_file_count\": " << footprint.files << "\n"
              << "  },\n"
              << "  \"metrics\": {\n"
              << "    \"initial_batch\": {\n"
              << "      \"elapsed_ms\": " << milliseconds(result.initial_batch) << ",\n"
-             << "      \"keys_per_second\": " << initial_batch_rate << "\n"
+             << "      \"keys_per_second\": " << initial_batch_rate << ",\n"
+             << "      \"load_wall_elapsed_ms\": " << milliseconds(result.initial_load_wall) << ",\n"
+             << "      \"excluded_mutation_construction_elapsed_ms\": " << milliseconds(result.mutation_construction)
+             << "\n"
              << "    },\n"
              << "    \"point_proofs\": {\n"
              << "      \"elapsed_ms\": " << milliseconds(result.point_proofs.elapsed) << ",\n"

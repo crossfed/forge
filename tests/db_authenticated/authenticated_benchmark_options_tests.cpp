@@ -1,11 +1,24 @@
 #include <boost/test/unit_test.hpp>
 
 #include <array>
+#include <cstdint>
+#include <optional>
+#include <stdexcept>
 #include <string_view>
 
 #include "authenticated_benchmark_options.hpp"
 
 namespace benchmark = forge::test::db_authenticated::benchmark;
+
+namespace {
+
+struct test_root {
+   std::uint64_t version = 0;
+   std::uint64_t state_size = 0;
+   std::uint64_t change_count = 0;
+};
+
+} // namespace
 
 BOOST_AUTO_TEST_CASE(authenticated_benchmark_profile_defaults_bound_committed_versions) {
    constexpr auto one_million_arguments = std::array{std::string_view{"--baseline"}, std::string_view{"1m"}};
@@ -50,4 +63,43 @@ BOOST_AUTO_TEST_CASE(authenticated_benchmark_custom_profile_keeps_bounded_defaul
    BOOST_TEST(settings.load_chunk_keys == 4'096U);
    BOOST_TEST(benchmark::chunk_keys_source(settings) == "custom_default");
    BOOST_TEST(benchmark::committed_version_count(settings.keys, settings.load_chunk_keys) == 3U);
+}
+
+BOOST_AUTO_TEST_CASE(authenticated_benchmark_retained_version_expectations_cover_scaled_tail) {
+   const auto one_million_tail = benchmark::expected_retained_version(30U, 1'000'000U, 32'768U);
+   BOOST_TEST(one_million_tail.version == 30U);
+   BOOST_TEST(one_million_tail.state_size == 1'000'000U);
+   BOOST_TEST(one_million_tail.change_count == 16'960U);
+
+   const auto ten_million_tail = benchmark::expected_retained_version(152U, 10'000'000U, 65'536U);
+   BOOST_TEST(ten_million_tail.version == 152U);
+   BOOST_TEST(ten_million_tail.state_size == 10'000'000U);
+   BOOST_TEST(ten_million_tail.change_count == 38'528U);
+}
+
+BOOST_AUTO_TEST_CASE(authenticated_benchmark_retained_root_validation_rejects_loss_and_mismatch) {
+   const auto expected = benchmark::expected_retained_version(1U, 10U, 4U);
+   const auto valid = std::optional{test_root{.version = 1U, .state_size = 8U, .change_count = 4U}};
+   BOOST_CHECK_NO_THROW(benchmark::validate_retained_root(valid, expected));
+   BOOST_CHECK_THROW(benchmark::validate_retained_root(std::optional<test_root>{}, expected), std::runtime_error);
+   BOOST_CHECK_THROW(benchmark::validate_retained_root(
+                         std::optional{test_root{.version = 0U, .state_size = 8U, .change_count = 4U}}, expected),
+                     std::runtime_error);
+   BOOST_CHECK_THROW(benchmark::validate_retained_root(
+                         std::optional{test_root{.version = 1U, .state_size = 7U, .change_count = 4U}}, expected),
+                     std::runtime_error);
+   BOOST_CHECK_THROW(benchmark::validate_retained_root(
+                         std::optional{test_root{.version = 1U, .state_size = 8U, .change_count = 3U}}, expected),
+                     std::runtime_error);
+}
+
+BOOST_AUTO_TEST_CASE(authenticated_benchmark_rejects_conflicting_or_invalid_cli_options) {
+   constexpr auto conflicting = std::array{std::string_view{"--baseline=1m"}, std::string_view{"--keys=10"}};
+   BOOST_CHECK_THROW(benchmark::parse_options(conflicting), std::invalid_argument);
+
+   constexpr auto zero_chunk = std::array{std::string_view{"--chunk-keys=0"}};
+   BOOST_CHECK_THROW(benchmark::parse_options(zero_chunk), std::invalid_argument);
+
+   constexpr auto unknown = std::array{std::string_view{"--unexpected"}};
+   BOOST_CHECK_THROW(benchmark::parse_options(unknown), std::invalid_argument);
 }

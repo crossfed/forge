@@ -434,6 +434,20 @@ if(FORGE_HAS_MDBX)
       forge_db_authenticated
       forge_db_mdbx
    )
+   add_test(
+      NAME test_forge_db_authenticated_benchmark_cli
+      COMMAND
+         ${Python3_EXECUTABLE}
+         ${CMAKE_CURRENT_SOURCE_DIR}/db_authenticated/check_authenticated_benchmark.py
+         $<TARGET_FILE:benchmark_forge_db_authenticated>
+      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+   )
+   set_tests_properties(
+      test_forge_db_authenticated_benchmark_cli
+      PROPERTIES
+         LABELS "db_authenticated;benchmark;smoke"
+         TIMEOUT 60
+   )
 
    option(
       FORGE_DB_AUTHENTICATED_ENABLE_1M_PERFORMANCE_TEST

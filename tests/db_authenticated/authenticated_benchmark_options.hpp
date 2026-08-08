@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
@@ -33,6 +34,12 @@ struct options {
    baseline_profile baseline = baseline_profile::custom;
    bool load_chunk_keys_overridden = false;
    bool help = false;
+};
+
+struct retained_version_expectation {
+   std::uint64_t version = 0;
+   std::uint64_t state_size = 0;
+   std::uint64_t change_count = 0;
 };
 
 inline constexpr auto usage =
@@ -81,7 +88,41 @@ inline constexpr std::size_t default_chunk_keys(baseline_profile baseline) {
 }
 
 inline constexpr std::size_t committed_version_count(std::size_t keys, std::size_t chunk_keys) {
+   if (chunk_keys == 0U) {
+      throw std::invalid_argument{"authenticated benchmark chunk size must be positive"};
+   }
    return keys / chunk_keys + (keys % chunk_keys == 0U ? 0U : 1U);
+}
+
+inline constexpr retained_version_expectation expected_retained_version(std::size_t version, std::size_t keys,
+                                                                        std::size_t chunk_keys) {
+   const auto versions = committed_version_count(keys, chunk_keys);
+   if (version >= versions) {
+      throw std::out_of_range{"authenticated benchmark version is outside the committed range"};
+   }
+   const auto first = version * chunk_keys;
+   const auto count = std::min(chunk_keys, keys - first);
+   return {
+       .version = static_cast<std::uint64_t>(version),
+       .state_size = static_cast<std::uint64_t>(first + count),
+       .change_count = static_cast<std::uint64_t>(count),
+   };
+}
+
+template <typename Root>
+void validate_retained_root(const std::optional<Root>& actual, const retained_version_expectation& expected) {
+   if (!actual) {
+      throw std::runtime_error{"authenticated benchmark historical version is missing"};
+   }
+   if (actual->version != expected.version) {
+      throw std::runtime_error{"authenticated benchmark historical root has the wrong version"};
+   }
+   if (actual->state_size != expected.state_size) {
+      throw std::runtime_error{"authenticated benchmark historical root has the wrong state size"};
+   }
+   if (actual->change_count != expected.change_count) {
+      throw std::runtime_error{"authenticated benchmark historical root has the wrong change count"};
+   }
 }
 
 inline std::string_view baseline_name(baseline_profile baseline) {
