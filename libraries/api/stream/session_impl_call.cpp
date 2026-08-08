@@ -296,15 +296,7 @@ session::impl::async_call_on_strand(
       install_inbound_observer(call);
       start_inbound_pump(call);
       replenish_inbound_credit();
-      if (call->outbound) {
-         boost::asio::co_spawn(
-            *strand,
-            [self = shared_from_this(), call]()
-               -> boost::asio::awaitable<void> {
-               co_await self->pump_outbound(call);
-            },
-            boost::asio::detached);
-      }
+      start_outbound_pump(call);
       co_await wait_for_terminal(call);
    } catch (...) {
       if (!call->done) {
@@ -328,8 +320,7 @@ session::impl::async_call_on_strand(
 
 boost::asio::awaitable<void> session::impl::wait_for_terminal(
    const std::shared_ptr<call_state>& call) {
-   while (!call->done ||
-          (call->inbound && !call->inbound->pump_done)) {
+   while (calls.contains(call->id.value)) {
       call->wake.expires_at(timer::time_point::max());
       auto error = boost::system::error_code{};
       co_await call->wake.async_wait(
@@ -392,8 +383,16 @@ boost::asio::awaitable<void> session::impl::wait_for_outbound_capacity(
 
 boost::asio::awaitable<void> session::impl::pump_outbound(
    const std::shared_ptr<call_state>& call) {
+   const auto drains_after_terminal = [&] {
+      return call->local_origin && call->terminal &&
+             call->terminal->kind ==
+                forge::api::core::frame_kind::response;
+   };
    try {
-      while (!call->done && call->outbound && !call->outbound->ended) {
+      while (call->outbound && !call->outbound->ended) {
+         if (call->done && !drains_after_terminal()) {
+            break;
+         }
          auto item = std::optional<forge::api::core::bytes>{};
          try {
             item = co_await call->outbound->endpoint->async_read();
@@ -417,8 +416,11 @@ boost::asio::awaitable<void> session::impl::pump_outbound(
                   .payload = forge::raw::pack(forge::api::core::stream_end{
                      .direction = flow.direction,
                   }),
-               });
+            });
             break;
+         }
+         if (drains_after_terminal()) {
+            continue;
          }
          if (item->size() > negotiated_limits.max_item_bytes) {
             FORGE_THROW_EXCEPTION(
@@ -437,8 +439,18 @@ boost::asio::awaitable<void> session::impl::pump_outbound(
                                       negotiated_limits.max_item_bytes));
             }
          }
-         co_await wait_for_credit(call, item->size());
-         co_await wait_for_outbound_capacity(call, item->size());
+         try {
+            co_await wait_for_credit(call, item->size());
+            co_await wait_for_outbound_capacity(call, item->size());
+         } catch (...) {
+            if (drains_after_terminal()) {
+               continue;
+            }
+            throw;
+         }
+         if (drains_after_terminal()) {
+            continue;
+         }
          auto& flow = *call->outbound;
          if (flow.transferred_items ==
                 std::numeric_limits<std::uint64_t>::max() ||
@@ -474,17 +486,55 @@ boost::asio::awaitable<void> session::impl::pump_outbound(
    finish_call(call);
 }
 
-void session::impl::start_inbound_pump(
+void session::impl::start_outbound_pump(
    const std::shared_ptr<call_state>& call) {
-   if (!call->inbound || call->inbound->pump_done) {
+   if (!call->outbound || call->outbound->pump_started ||
+       call->outbound->pump_done) {
       return;
    }
-   boost::asio::co_spawn(
-      *strand,
-      [self = shared_from_this(), call]() -> boost::asio::awaitable<void> {
-         co_await self->pump_inbound(call);
-      },
-      boost::asio::detached);
+   call->outbound->pump_started = true;
+   try {
+      boost::asio::co_spawn(
+         *strand,
+         [self = shared_from_this(), call]()
+            -> boost::asio::awaitable<void> {
+            co_await self->pump_outbound(call);
+         },
+         boost::asio::detached);
+   } catch (...) {
+      call->outbound->pump_started = false;
+      throw;
+   }
+}
+
+void session::impl::start_inbound_pump(
+   const std::shared_ptr<call_state>& call) {
+   if (!call->inbound || call->inbound->pump_started ||
+       call->inbound->pump_done) {
+      return;
+   }
+   call->inbound->pump_started = true;
+   try {
+      boost::asio::co_spawn(
+         *strand,
+         [self = shared_from_this(), call]() -> boost::asio::awaitable<void> {
+            co_await self->pump_inbound(call);
+         },
+         boost::asio::detached);
+   } catch (...) {
+      call->inbound->pump_started = false;
+      throw;
+   }
+}
+
+void session::impl::finish_unstarted_pumps(
+   const std::shared_ptr<call_state>& call) noexcept {
+   if (call->inbound && !call->inbound->pump_started) {
+      call->inbound->pump_done = true;
+   }
+   if (call->outbound && !call->outbound->pump_started) {
+      call->outbound->pump_done = true;
+   }
 }
 
 boost::asio::awaitable<void> session::impl::pump_inbound(
@@ -618,6 +668,7 @@ void session::impl::cancel_call(
    if (call->handler_running) {
       call->handler_cancel.emit(boost::asio::cancellation_type::total);
    }
+   finish_unstarted_pumps(call);
    if (call->inbound && call->inbound->endpoint) {
       call->inbound->pending_items.clear();
       call->inbound->buffered_items = 0;
@@ -699,6 +750,7 @@ void session::impl::finish_call(
       return;
    }
    remember_tombstone(call);
+   wake_call(call);
    calls.erase(found);
    replenish_inbound_credit();
    wake_session();

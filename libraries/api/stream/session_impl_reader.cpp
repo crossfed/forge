@@ -218,9 +218,18 @@ boost::asio::awaitable<void> session::impl::handle_inbound_frame(
          handle_stream_item(call, std::move(value));
          co_return;
       }
+      if (value.kind == forge::api::core::frame_kind::stream_end &&
+          call->inbound && call->inbound->discarding &&
+          !call->inbound->ended) {
+         handle_stream_end(call, value);
+         co_return;
+      }
+      if (value.kind == forge::api::core::frame_kind::cancel) {
+         handle_cancel(call);
+         co_return;
+      }
       if (value.kind == forge::api::core::frame_kind::stream_window ||
-          value.kind == forge::api::core::frame_kind::stream_end ||
-          value.kind == forge::api::core::frame_kind::cancel) {
+          value.kind == forge::api::core::frame_kind::stream_end) {
          co_return;
       }
       FORGE_THROW_EXCEPTION(
@@ -335,15 +344,7 @@ boost::asio::awaitable<void> session::impl::handle_request(
       },
       boost::asio::bind_cancellation_slot(call->handler_cancel.slot(),
                                           boost::asio::detached));
-   if (call->outbound) {
-      boost::asio::co_spawn(
-         *strand,
-         [self = shared_from_this(), call]()
-            -> boost::asio::awaitable<void> {
-            co_await self->pump_outbound(call);
-         },
-         boost::asio::detached);
-   }
+   start_outbound_pump(call);
    co_return;
 }
 
@@ -480,15 +481,22 @@ void session::impl::handle_terminal(
    call->terminal.emplace(std::move(value));
    call->done = true;
    call->deadline.cancel();
-   if (call->terminal->kind == forge::api::core::frame_kind::error &&
-       call->inbound && call->inbound->endpoint) {
-      call->inbound->pending_items.clear();
-      call->inbound->buffered_items = 0;
-      call->inbound->buffered_bytes = 0;
-      call->inbound->ended = true;
-      call->inbound->endpoint->fail(std::make_exception_ptr(
+   if (call->terminal->kind == forge::api::core::frame_kind::error) {
+      auto error = std::make_exception_ptr(
          forge::api::core::exceptions::cancelled{
-            "API stream call failed remotely"}));
+            "API stream call failed remotely"});
+      if (call->inbound && call->inbound->endpoint) {
+         call->inbound->pending_items.clear();
+         call->inbound->buffered_items = 0;
+         call->inbound->buffered_bytes = 0;
+         call->inbound->ended = true;
+         call->inbound->endpoint->fail(error);
+      }
+      if (call->outbound && call->outbound->endpoint) {
+         call->outbound->endpoint->fail(error);
+      }
+   } else if (call->outbound && call->outbound->endpoint) {
+      call->outbound->endpoint->close();
    }
    finish_call(call);
    wake_call(call);
@@ -496,6 +504,15 @@ void session::impl::handle_terminal(
 
 void session::impl::handle_cancel(
    const std::shared_ptr<call_state>& call) {
+   if (call->done) {
+      if (call->inbound && call->inbound->discarding &&
+          !call->inbound->ended) {
+         call->inbound->ended = true;
+         wake_call(call);
+         finish_call(call);
+      }
+      return;
+   }
    cancel_call(
       call,
       std::make_exception_ptr(forge::api::core::exceptions::cancelled{

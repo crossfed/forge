@@ -34,6 +34,7 @@ struct session::impl final : std::enable_shared_from_this<session::impl> {
       std::deque<std::vector<std::uint8_t>> pending_items;
       bool ended = false;
       bool discarding = false;
+      bool pump_started = false;
       bool pump_done = false;
    };
 
@@ -175,9 +176,11 @@ struct session::impl final : std::enable_shared_from_this<session::impl> {
       const std::shared_ptr<call_state>& call);
    boost::asio::awaitable<void> pump_outbound(
       const std::shared_ptr<call_state>& call);
+   void start_outbound_pump(const std::shared_ptr<call_state>& call);
    boost::asio::awaitable<void> pump_inbound(
       const std::shared_ptr<call_state>& call);
    void start_inbound_pump(const std::shared_ptr<call_state>& call);
+   void finish_unstarted_pumps(const std::shared_ptr<call_state>& call) noexcept;
    boost::asio::awaitable<void> wait_for_credit(
       const std::shared_ptr<call_state>& call, std::size_t item_bytes);
    boost::asio::awaitable<void> wait_for_outbound_capacity(
