@@ -411,6 +411,41 @@ def check_chain_audited_api_workflow(root: Path, errors: list[str]) -> None:
       )
 
 
+def check_mdbx_module_boundary(root: Path, errors: list[str]) -> None:
+   component = root / "libraries" / "db" / "mdbx"
+   if not component.exists():
+      return
+
+   legacy_header = component / "details" / "error.hxx"
+   if legacy_header.exists():
+      errors.append(
+         f"{legacy_header.relative_to(root)}: MDBX error declarations must use a private module partition"
+      )
+
+   partition = component / "include" / "forge" / "db" / "mdbx" / "error.cppm"
+   if not partition.exists():
+      errors.append(f"{partition.relative_to(root)}: MDBX error module partition is missing")
+      return
+
+   source = partition.read_text(errors="ignore")
+   declaration = "export module forge.db.mdbx.driver:error;"
+   if declaration not in source:
+      errors.append(f"{partition.relative_to(root)}: expected private partition {declaration}")
+   include_position = source.find("#include <string_view>")
+   declaration_position = source.find(declaration)
+   if include_position < 0 or declaration_position < 0 or include_position > declaration_position:
+      errors.append(
+         f"{partition.relative_to(root)}: string_view must be included in the global module fragment"
+      )
+
+   for implementation in sorted(component.glob("*.cpp")):
+      implementation_source = implementation.read_text(errors="ignore")
+      if "require_mdbx_success(" in implementation_source and "import :error;" not in implementation_source:
+         errors.append(
+            f"{implementation.relative_to(root)}: MDBX error helpers must come from the private module partition"
+         )
+
+
 def check_contract_sdk_components(root: Path, errors: list[str]) -> None:
    path = root / "guest" / "CMakeLists.txt"
    if not path.exists():
@@ -859,6 +894,7 @@ def check_modules(root: Path, files: list[Path], errors: list[str]) -> None:
       seen_includes: dict[tuple[str, tuple[tuple[int, int], ...]], int] = {}
       conditional_stack: list[list[int]] = []
       next_conditional = 0
+      named_module_declared = False
 
       for line_number, line in enumerate(source_lines, 1):
          if CONDITIONAL_START.match(line):
@@ -872,6 +908,9 @@ def check_modules(root: Path, files: list[Path], errors: list[str]) -> None:
          declaration = MODULE_DECLARATION.match(line)
          if declaration:
             declarations[declaration.group(1)].append((relative, line_number))
+
+         if MODULE_UNIT.match(line):
+            named_module_declared = True
 
          imported = MODULE_IMPORT.match(line)
          if imported:
@@ -892,6 +931,10 @@ def check_modules(root: Path, files: list[Path], errors: list[str]) -> None:
 
          included = INCLUDE.match(line)
          if included:
+            if path.suffix == ".cppm" and named_module_declared and included.group(1).startswith("<"):
+               errors.append(
+                  f"{relative}:{line_number}: system header include must stay in the global module fragment"
+               )
             context = tuple((block, branch) for block, branch in conditional_stack)
             key = (included.group(1), context)
             if key in seen_includes:
@@ -933,6 +976,7 @@ def main() -> int:
    check_chain_savanna_boundaries(root, errors)
    check_chain_api_shape(root, errors)
    check_chain_audited_api_workflow(root, errors)
+   check_mdbx_module_boundary(root, errors)
    check_contract_sdk_workflow(root, errors)
    check_contract_sdk_components(root, errors)
    check_eosio_veneer(root, errors)
