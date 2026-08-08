@@ -13,6 +13,7 @@ module;
 #include <boost/asio/use_future.hpp>
 
 #include <atomic>
+#include <barrier>
 #include <chrono>
 #include <future>
 #include <memory>
@@ -96,6 +97,23 @@ BOOST_AUTO_TEST_CASE(p2p_session_teardown_waits_for_tracked_background_operation
    tracked.release();
    BOOST_REQUIRE(stopped.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
    stopped.get();
+}
+
+BOOST_AUTO_TEST_CASE(p2p_session_teardown_handles_concurrent_track_release_and_start) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   for (auto iteration = 0U; iteration < 1'000U; ++iteration) {
+      auto teardown = detail::session_teardown{runtime.context().get_executor()};
+      auto tracked = teardown.track();
+      auto start = std::barrier{2};
+      auto releaser = std::thread{[&] {
+         start.arrive_and_wait();
+         tracked.release();
+      }};
+      start.arrive_and_wait();
+      teardown.start({});
+      releaser.join();
+      forge::asio::blocking::run(runtime, teardown.wait());
+   }
 }
 
 BOOST_AUTO_TEST_CASE(p2p_direct_transport_teardown_continues_after_profile_failure) {

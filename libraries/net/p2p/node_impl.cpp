@@ -1873,19 +1873,21 @@ node::impl::open_protocol_on_direct_session(const peer_id& peer, const protocol_
          record_direct_failure(peer);
          throw_operation_timeout("P2P protocol open");
       }
-      const auto p2p_kind = exceptions::code_of(error);
-      if (p2p_kind == exceptions::code::unsupported_protocol || p2p_kind == exceptions::code::protocol_error ||
-          p2p_kind == exceptions::code::codec_error) {
-         throw;
-      }
       const auto kind = p2p_code(error);
       auto node_stopped = false;
       {
          auto lock = std::scoped_lock{mutex};
          node_stopped = stopped;
       }
-      if (kind == exceptions::code::canceled || (kind == exceptions::code::closed && node_stopped) ||
-          kind == exceptions::code::backpressure_rejected) {
+      if (node_stopped) {
+         FORGE_THROW_EXCEPTION(exceptions::closed, "P2P protocol open stopped with its node");
+      }
+      const auto p2p_kind = exceptions::code_of(error);
+      if (p2p_kind == exceptions::code::unsupported_protocol || p2p_kind == exceptions::code::protocol_error ||
+          p2p_kind == exceptions::code::codec_error) {
+         throw;
+      }
+      if (kind == exceptions::code::canceled || kind == exceptions::code::backpressure_rejected) {
          FORGE_THROW_CODE(kind, error.what());
       }
       session->closed = true;

@@ -3,6 +3,9 @@
 namespace forge::net::p2p::detail {
 
 [[nodiscard]] constexpr bool peer_attributable_failure(exceptions::code kind, bool stopped) noexcept {
+   if (stopped) {
+      return false;
+   }
    switch (kind) {
    case exceptions::code::invalid_options:
    case exceptions::code::invalid_identity:
@@ -11,8 +14,6 @@ namespace forge::net::p2p::detail {
    case exceptions::code::canceled:
    case exceptions::code::internal:
       return false;
-   case exceptions::code::closed:
-      return !stopped;
    default:
       return true;
    }

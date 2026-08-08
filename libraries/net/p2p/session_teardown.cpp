@@ -157,6 +157,8 @@ session_teardown::ticket session_teardown::track() noexcept {
 }
 
 void session_teardown::start(std::vector<operation> operations) noexcept {
+   auto operation_count = std::size_t{};
+   auto complete_immediately = false;
    {
       const auto lock = std::scoped_lock{state_->mutex};
       if (state_->started) {
@@ -165,14 +167,15 @@ void session_teardown::start(std::vector<operation> operations) noexcept {
       state_->started = true;
       state_->operations = std::move(operations);
       state_->pending = state_->operations.size() + state_->tracked;
+      operation_count = state_->operations.size();
+      complete_immediately = state_->pending == 0;
    }
 
-   if (state_->pending == 0) {
+   if (complete_immediately) {
       state_->complete();
       return;
    }
 
-   const auto operation_count = state_->operations.size();
    for (auto index = std::size_t{0}; index < operation_count; ++index) {
       auto state = state_;
       try {
