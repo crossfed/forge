@@ -185,12 +185,13 @@ jobs:
           test_forge_db_authenticated
           test_forge_http_websocket
           test_forge_package_chain_api_component
+          test_forge_package_db_mdbx_component
           -j 4
 
       - name: Run acceptance
         run: >-
           ctest --test-dir build/chain-audited-api
-          -R '^(test_forge_chain_protocol_query|test_forge_chain_api|test_forge_db_authenticated|test_forge_http_websocket|test_forge_package_chain_api_component)$'
+          -R '^(test_forge_structure|test_forge_vendor_compile_policy|test_forge_chain_protocol_query|test_forge_chain_api|test_forge_db_authenticated|test_forge_http_websocket|test_forge_package_chain_api_component|test_forge_package_db_mdbx_component|test_forge_package_glaze_dir_only)$'
           --output-on-failure -j 1
 
   sanitizer:

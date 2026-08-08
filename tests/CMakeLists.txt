@@ -882,15 +882,50 @@ else()
 endif()
 
 set(FORGE_PACKAGE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/forge-package-install")
-set(FORGE_PACKAGE_CONSUMER_PREFIX_PATH "${FORGE_PACKAGE_INSTALL_PREFIX}")
-list(APPEND FORGE_PACKAGE_CONSUMER_PREFIX_PATH ${CMAKE_PREFIX_PATH})
+set(FORGE_PACKAGE_DIR "${FORGE_PACKAGE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/cmake/Forge")
+set(FORGE_PACKAGE_CONSUMER_PREFIX_PATH ${CMAKE_PREFIX_PATH})
 list(REMOVE_DUPLICATES FORGE_PACKAGE_CONSUMER_PREFIX_PATH)
 set(FORGE_PACKAGE_CONSUMER_CACHE "${CMAKE_BINARY_DIR}/tests/ForgePackageConsumerCache.cmake")
+string(
+   CONCAT FORGE_PACKAGE_CONSUMER_CACHE_CONTENT
+   "set(Forge_DIR [==[${FORGE_PACKAGE_DIR}]==] CACHE PATH \"Exact Forge test package\" FORCE)\n"
+   "set(CMAKE_PREFIX_PATH [==[${FORGE_PACKAGE_CONSUMER_PREFIX_PATH}]==] CACHE STRING \"Package dependency prefixes\" FORCE)\n"
+   "set(glaze_DIR [==[${glaze_DIR}]==] CACHE PATH \"Exact Glaze package\" FORCE)\n"
+   "set(FORGE_EXPECTED_PACKAGE_DIR [==[${FORGE_PACKAGE_DIR}]==] CACHE PATH \"Expected Forge test package\" FORCE)\n"
+   "set(FORGE_EXPECTED_GLAZE_DIR [==[${glaze_DIR}]==] CACHE PATH \"Expected Glaze package\" FORCE)\n"
+)
 file(
    GENERATE
    OUTPUT "${FORGE_PACKAGE_CONSUMER_CACHE}"
-   CONTENT
-      "set(CMAKE_PREFIX_PATH [==[${FORGE_PACKAGE_CONSUMER_PREFIX_PATH}]==] CACHE STRING \"Package consumer prefixes\" FORCE)\n"
+   CONTENT "${FORGE_PACKAGE_CONSUMER_CACHE_CONTENT}"
+)
+
+set(FORGE_PACKAGE_GLAZE_DIR_ONLY_PREFIX_PATH)
+foreach(_forge_dependency_prefix IN LISTS CMAKE_PREFIX_PATH)
+   cmake_path(
+      IS_PREFIX _forge_dependency_prefix "${glaze_DIR}"
+      NORMALIZE _forge_dependency_prefix_contains_glaze
+   )
+   if(NOT _forge_dependency_prefix_contains_glaze)
+      list(APPEND FORGE_PACKAGE_GLAZE_DIR_ONLY_PREFIX_PATH "${_forge_dependency_prefix}")
+   endif()
+endforeach()
+set(
+   FORGE_PACKAGE_GLAZE_DIR_ONLY_CACHE
+   "${CMAKE_BINARY_DIR}/tests/ForgePackageGlazeDirOnlyCache.cmake"
+)
+string(
+   CONCAT FORGE_PACKAGE_GLAZE_DIR_ONLY_CACHE_CONTENT
+   "set(Forge_DIR [==[${FORGE_PACKAGE_DIR}]==] CACHE PATH \"Exact Forge test package\" FORCE)\n"
+   "set(CMAKE_PREFIX_PATH [==[${FORGE_PACKAGE_GLAZE_DIR_ONLY_PREFIX_PATH}]==] CACHE STRING \"Non-Glaze dependency prefixes\" FORCE)\n"
+   "set(glaze_DIR [==[${glaze_DIR}]==] CACHE PATH \"Only Glaze package hint\" FORCE)\n"
+   "set(FORGE_EXPECTED_PACKAGE_DIR [==[${FORGE_PACKAGE_DIR}]==] CACHE PATH \"Expected Forge test package\" FORCE)\n"
+   "set(FORGE_EXPECTED_GLAZE_DIR [==[${glaze_DIR}]==] CACHE PATH \"Expected Glaze package\" FORCE)\n"
+)
+file(
+   GENERATE
+   OUTPUT "${FORGE_PACKAGE_GLAZE_DIR_ONLY_CACHE}"
+   CONTENT "${FORGE_PACKAGE_GLAZE_DIR_ONLY_CACHE_CONTENT}"
 )
 set(
    FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS
@@ -898,6 +933,24 @@ set(
    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
    -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
    -DCMAKE_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}
+)
+
+add_test(
+   NAME test_forge_package_glaze_dir_only
+   COMMAND
+      ${CMAKE_COMMAND}
+      --fresh
+      -S ${CMAKE_CURRENT_SOURCE_DIR}/package_codec_json_component
+      -B ${CMAKE_BINARY_DIR}/forge-package-codec-json-glaze-dir-only
+      -G ${CMAKE_GENERATOR}
+      -C${FORGE_PACKAGE_GLAZE_DIR_ONLY_CACHE}
+      -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+      -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+      -DCMAKE_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}
+)
+set_tests_properties(
+   test_forge_package_glaze_dir_only
+   PROPERTIES DEPENDS test_forge_package_install
 )
 
 add_custom_target(

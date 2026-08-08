@@ -410,6 +410,30 @@ def check_chain_audited_api_workflow(root: Path, errors: list[str]) -> None:
          f"{path.relative_to(root)}: native and performance configure steps must use the selected macOS SDKROOT"
       )
 
+   try:
+      native_acceptance = source.split("      - name: Build acceptance targets\n", 1)[1].split(
+         "      - name: Run acceptance\n", 1
+      )
+      build_acceptance = native_acceptance[0]
+      run_acceptance = native_acceptance[1].split("\n  sanitizer:\n", 1)[0]
+   except IndexError:
+      errors.append(f"{path.relative_to(root)}: cannot locate native acceptance steps")
+      return
+
+   for required_target in ("test_forge_package_chain_api_component", "test_forge_package_db_mdbx_component"):
+      if required_target not in build_acceptance:
+         errors.append(f"{path.relative_to(root)}: acceptance build is missing {required_target}")
+
+   for required_test in (
+      "test_forge_structure",
+      "test_forge_vendor_compile_policy",
+      "test_forge_package_chain_api_component",
+      "test_forge_package_db_mdbx_component",
+      "test_forge_package_glaze_dir_only",
+   ):
+      if required_test not in run_acceptance:
+         errors.append(f"{path.relative_to(root)}: acceptance test run is missing {required_test}")
+
 
 def check_mdbx_module_boundary(root: Path, errors: list[str]) -> None:
    component = root / "libraries" / "db" / "mdbx"
