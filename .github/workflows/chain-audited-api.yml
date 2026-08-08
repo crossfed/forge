@@ -371,16 +371,20 @@ jobs:
         shell: bash
         run: |
           mkdir -p build/chain-audited-api-performance/results
+          # 50K/32,768 scaled logical footprint was 192 MiB; 8 GiB is 2.1x its 1M projection.
           build/chain-audited-api-performance/tests/benchmark_forge_db_authenticated \
-            --baseline 1m --machine-label "${{ matrix.os }}-Release" \
+            --baseline 1m --mdbx-upper-bytes 8589934592 \
+            --machine-label "${{ matrix.os }}-Release" \
             | tee build/chain-audited-api-performance/results/authenticated-1m.json
 
       - name: Run ten-million-key baseline
         if: needs.gate.outputs.run_10m == 'true'
         shell: bash
         run: |
+          # 100K/65,536 scaled logical footprint was 384 MiB; 64 GiB is 1.7x its 10M projection.
           build/chain-audited-api-performance/tests/benchmark_forge_db_authenticated \
-            --baseline 10m --machine-label "${{ matrix.os }}-Release" \
+            --baseline 10m --mdbx-upper-bytes 68719476736 \
+            --machine-label "${{ matrix.os }}-Release" \
             | tee build/chain-audited-api-performance/results/authenticated-10m.json
 
       - uses: actions/upload-artifact@v4

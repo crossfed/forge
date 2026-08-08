@@ -18,6 +18,7 @@ inline constexpr auto custom_chunk_keys = std::size_t{4'096};
 // Scaled runs select power-of-two chunks that cap profile history at 31/153 durable versions.
 inline constexpr auto one_million_chunk_keys = std::size_t{32'768};
 inline constexpr auto ten_million_chunk_keys = std::size_t{65'536};
+inline constexpr auto default_mdbx_upper_bytes = std::uint64_t{1} << 40U;
 
 enum class baseline_profile {
    custom,
@@ -29,6 +30,7 @@ struct options {
    std::size_t keys = 10'000;
    std::size_t value_bytes = 32;
    std::size_t load_chunk_keys = custom_chunk_keys;
+   std::uint64_t mdbx_upper_bytes = default_mdbx_upper_bytes;
    std::filesystem::path path;
    std::string machine_label = "unspecified";
    baseline_profile baseline = baseline_profile::custom;
@@ -44,7 +46,7 @@ struct retained_version_expectation {
 
 inline constexpr auto usage =
     std::string_view{"usage: benchmark_forge_db_authenticated [--baseline 1m|10m | --keys N] [--value-bytes N] "
-                     "[--chunk-keys N] [--machine-label LABEL] [--path PATH]"};
+                     "[--chunk-keys N] [--mdbx-upper-bytes N] [--machine-label LABEL] [--path PATH]"};
 
 [[noreturn]] inline void usage_error(std::string_view message) {
    throw std::invalid_argument{std::string{message} + '\n' + std::string{usage}};
@@ -149,6 +151,7 @@ inline options parse_options(std::span<const std::string_view> arguments) {
    auto has_baseline = false;
    auto has_explicit_keys = false;
    auto has_explicit_chunk_keys = false;
+   auto has_explicit_mdbx_upper_bytes = false;
    for (auto index = std::size_t{}; index < arguments.size(); ++index) {
       const auto argument = arguments[index];
       if (argument == "--help") {
@@ -202,6 +205,18 @@ inline options parse_options(std::span<const std::string_view> arguments) {
          result.load_chunk_keys = static_cast<std::size_t>(parsed);
          result.load_chunk_keys_overridden = true;
          has_explicit_chunk_keys = true;
+         continue;
+      }
+      if (const auto value = option_value(index, arguments, "--mdbx-upper-bytes")) {
+         if (has_explicit_mdbx_upper_bytes) {
+            usage_error("--mdbx-upper-bytes may only be specified once");
+         }
+         const auto parsed = parse_unsigned("--mdbx-upper-bytes", *value);
+         if (parsed == 0U) {
+            usage_error("--mdbx-upper-bytes must be positive");
+         }
+         result.mdbx_upper_bytes = parsed;
+         has_explicit_mdbx_upper_bytes = true;
          continue;
       }
       if (const auto value = option_value(index, arguments, "--machine-label")) {

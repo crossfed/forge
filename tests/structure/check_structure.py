@@ -433,6 +433,15 @@ def check_chain_audited_api_workflow(root: Path, errors: list[str]) -> None:
          f"{path.relative_to(root)}: every configure lane must isolate Glaze and preserve shared dependency prefixes"
       )
 
+   for baseline, upper_bytes in (("1m", "8589934592"), ("10m", "68719476736")):
+      invocation = re.compile(
+         rf"--baseline {baseline}\s+--mdbx-upper-bytes {upper_bytes}\s+\\\s+--machine-label"
+      )
+      if invocation.search(source) is None:
+         errors.append(
+            f"{path.relative_to(root)}: {baseline} performance baseline must use its measured MDBX upper size"
+         )
+
    try:
       native_acceptance = source.split("      - name: Build acceptance targets\n", 1)[1].split(
          "      - name: Run acceptance\n", 1

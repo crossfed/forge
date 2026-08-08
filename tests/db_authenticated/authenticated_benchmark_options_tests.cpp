@@ -25,6 +25,7 @@ BOOST_AUTO_TEST_CASE(authenticated_benchmark_profile_defaults_bound_committed_ve
    const auto one_million = benchmark::parse_options(one_million_arguments);
    BOOST_TEST(one_million.keys == 1'000'000U);
    BOOST_TEST(one_million.load_chunk_keys == 32'768U);
+   BOOST_TEST(one_million.mdbx_upper_bytes == benchmark::default_mdbx_upper_bytes);
    BOOST_TEST(!one_million.load_chunk_keys_overridden);
    BOOST_TEST(benchmark::chunk_keys_source(one_million) == "profile_default");
    BOOST_TEST(benchmark::committed_version_count(one_million.keys, one_million.load_chunk_keys) == 31U);
@@ -33,9 +34,26 @@ BOOST_AUTO_TEST_CASE(authenticated_benchmark_profile_defaults_bound_committed_ve
    const auto ten_million = benchmark::parse_options(ten_million_arguments);
    BOOST_TEST(ten_million.keys == 10'000'000U);
    BOOST_TEST(ten_million.load_chunk_keys == 65'536U);
+   BOOST_TEST(ten_million.mdbx_upper_bytes == benchmark::default_mdbx_upper_bytes);
    BOOST_TEST(!ten_million.load_chunk_keys_overridden);
    BOOST_TEST(benchmark::chunk_keys_source(ten_million) == "profile_default");
    BOOST_TEST(benchmark::committed_version_count(ten_million.keys, ten_million.load_chunk_keys) == 153U);
+}
+
+BOOST_AUTO_TEST_CASE(authenticated_benchmark_mdbx_upper_override_preserves_profile_defaults) {
+   constexpr auto one_million_arguments =
+       std::array{std::string_view{"--baseline=1m"}, std::string_view{"--mdbx-upper-bytes=8589934592"}};
+   const auto one_million = benchmark::parse_options(one_million_arguments);
+   BOOST_TEST(one_million.mdbx_upper_bytes == 8'589'934'592ULL);
+   BOOST_TEST(one_million.keys == 1'000'000U);
+   BOOST_TEST(one_million.load_chunk_keys == 32'768U);
+
+   constexpr auto ten_million_arguments =
+       std::array{std::string_view{"--mdbx-upper-bytes=68719476736"}, std::string_view{"--baseline=10m"}};
+   const auto ten_million = benchmark::parse_options(ten_million_arguments);
+   BOOST_TEST(ten_million.mdbx_upper_bytes == 68'719'476'736ULL);
+   BOOST_TEST(ten_million.keys == 10'000'000U);
+   BOOST_TEST(ten_million.load_chunk_keys == 65'536U);
 }
 
 BOOST_AUTO_TEST_CASE(authenticated_benchmark_chunk_override_is_order_independent) {
@@ -99,6 +117,9 @@ BOOST_AUTO_TEST_CASE(authenticated_benchmark_rejects_conflicting_or_invalid_cli_
 
    constexpr auto zero_chunk = std::array{std::string_view{"--chunk-keys=0"}};
    BOOST_CHECK_THROW(benchmark::parse_options(zero_chunk), std::invalid_argument);
+
+   constexpr auto zero_mdbx_upper = std::array{std::string_view{"--mdbx-upper-bytes=0"}};
+   BOOST_CHECK_THROW(benchmark::parse_options(zero_mdbx_upper), std::invalid_argument);
 
    constexpr auto unknown = std::array{std::string_view{"--unexpected"}};
    BOOST_CHECK_THROW(benchmark::parse_options(unknown), std::invalid_argument);

@@ -22,6 +22,8 @@ completed = subprocess.run(
         "7",
         "--value-bytes",
         "8",
+        "--mdbx-upper-bytes",
+        "134217728",
         "--machine-label",
         label,
     ],
@@ -38,6 +40,7 @@ require(
     "unexpected timing scope",
 )
 require(payload["config"]["machine_label"] == label, "machine label was not JSON escaped")
+require(payload["config"]["mdbx_upper_bytes"] == 134217728, "MDBX upper-size override was not applied")
 require(payload["config"]["planned_committed_versions"] == 3, "wrong planned version count")
 require(payload["root"]["version"] == 2, "wrong final root version")
 require(payload["root"]["state_size"] == 17, "wrong final state size")
@@ -55,7 +58,12 @@ require(
 )
 require(not pathlib.Path(payload["config"]["path"]).exists(), "temporary benchmark directory was not removed")
 
-for arguments in (["--chunk-keys=0"], ["--baseline=1m", "--keys=17"], ["--unexpected"]):
+for arguments in (
+    ["--chunk-keys=0"],
+    ["--mdbx-upper-bytes=0"],
+    ["--baseline=1m", "--keys=17"],
+    ["--unexpected"],
+):
     rejected = subprocess.run([str(benchmark), *arguments], capture_output=True, text=True, check=False)
     require(rejected.returncode == 1, f"invalid CLI was not rejected: {arguments}")
     require(not rejected.stdout, f"invalid CLI emitted JSON: {arguments}")

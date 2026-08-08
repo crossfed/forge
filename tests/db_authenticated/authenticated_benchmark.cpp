@@ -50,7 +50,6 @@ constexpr auto range_proof_count = std::size_t{100};
 constexpr auto range_proof_limit = std::uint32_t{256};
 constexpr auto mebibyte = std::uint64_t{1} << 20U;
 constexpr auto gibibyte = std::uint64_t{1} << 30U;
-constexpr auto tebibyte = std::uint64_t{1} << 40U;
 
 struct provisional_gate_thresholds {
    double initial_batch_min_keys_per_second = 0.0;
@@ -384,7 +383,7 @@ bool print_result(const options& settings, const std::filesystem::path& path, co
              << "    \"planned_committed_versions\": "
              << committed_version_count(settings.keys, settings.load_chunk_keys) << ",\n"
              << "    \"path\": \"" << json_escape(path.string()) << "\",\n"
-             << "    \"mdbx_upper_bytes\": " << tebibyte << ",\n"
+             << "    \"mdbx_upper_bytes\": " << settings.mdbx_upper_bytes << ",\n"
              << "    \"mdbx_growth_bytes\": " << mdbx_growth_step(settings.keys) << ",\n"
              << "    \"point_proof_count\": " << point_proof_count << ",\n"
              << "    \"range_proof_count\": " << range_proof_count << ",\n"
@@ -493,7 +492,7 @@ int main(int argc, char** argv) try {
               .families = {"authenticated"},
               .map =
                   {
-                      .upper_size = tebibyte,
+                      .upper_size = settings.mdbx_upper_bytes,
                       .growth_step = mdbx_growth_step(settings.keys),
                   },
           },
