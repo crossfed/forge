@@ -9,18 +9,37 @@ if(_forge_generator_is_multi_config)
 else()
    file(WRITE "${CMAKE_BINARY_DIR}/generator-is-multi-config.txt" "false\n")
 endif()
+file(
+   WRITE "${CMAKE_BINARY_DIR}/compiler-frontends.txt"
+   "C=${CMAKE_C_COMPILER_FRONTEND_VARIANT}\nCXX=${CMAKE_CXX_COMPILER_FRONTEND_VARIANT}\n"
+)
 
-if(MSVC)
-   set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} /Od")
-   set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /Od")
-   add_compile_options("$<$<CONFIG:Debug>:/fsanitize=address>")
-else()
-   set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O0")
-   set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0")
-   add_compile_options("$<$<CONFIG:Debug>:-fsanitize=address,undefined>")
-endif()
+foreach(_forge_test_language C CXX)
+   if(CMAKE_${_forge_test_language}_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
+      set(CMAKE_${_forge_test_language}_FLAGS_DEBUG "${CMAKE_${_forge_test_language}_FLAGS_DEBUG} -O0")
+      add_compile_options(
+         "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:${_forge_test_language}>>:-fsanitize=address,undefined>"
+      )
+   elseif(CMAKE_${_forge_test_language}_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+      set(CMAKE_${_forge_test_language}_FLAGS_DEBUG "${CMAKE_${_forge_test_language}_FLAGS_DEBUG} /Od")
+      add_compile_options(
+         "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:${_forge_test_language}>>:/fsanitize=address>"
+      )
+   else()
+      message(
+         FATAL_ERROR
+         "Unsupported ${_forge_test_language} compiler frontend in vendor policy fixture: ${CMAKE_${_forge_test_language}_COMPILER_FRONTEND_VARIANT}"
+      )
+   endif()
+endforeach()
 
 include("${FORGE_SOURCE_DIR}/cmake/ForgeVendorCompilePolicy.cmake")
+
+_forge_vendor_debug_optimization_flag(C GNU _forge_test_gnu_optimization)
+_forge_vendor_debug_optimization_flag(CXX MSVC _forge_test_msvc_optimization)
+if(NOT _forge_test_gnu_optimization STREQUAL "-O2" OR NOT _forge_test_msvc_optimization STREQUAL "/O2")
+   message(FATAL_ERROR "Vendored Debug optimization frontend mapping is invalid")
+endif()
 
 add_library(vendor_c STATIC vendor_c.c)
 add_library(vendor_cxx STATIC vendor_cxx.cpp)

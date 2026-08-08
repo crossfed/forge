@@ -2,6 +2,17 @@ include_guard(GLOBAL)
 
 include(CheckCompilerFlag)
 
+function(_forge_vendor_debug_optimization_flag language frontend output)
+   if(frontend STREQUAL "GNU")
+      set(_forge_vendor_optimization_flag "-O2")
+   elseif(frontend STREQUAL "MSVC")
+      set(_forge_vendor_optimization_flag "/O2")
+   else()
+      message(FATAL_ERROR "Unsupported ${language} compiler frontend for vendored Debug optimization: ${frontend}")
+   endif()
+   set(${output} "${_forge_vendor_optimization_flag}" PARENT_SCOPE)
+endfunction()
+
 function(forge_apply_vendored_implementation_policy target)
    cmake_parse_arguments(PARSE_ARGV 1 ARG "" "" "DISABLED_SANITIZERS")
    if(ARG_UNPARSED_ARGUMENTS OR ARG_KEYWORDS_MISSING_VALUES)
@@ -17,14 +28,25 @@ function(forge_apply_vendored_implementation_policy target)
       message(FATAL_ERROR "Vendored implementation policy requires a compiled target: ${target}")
    endif()
 
+   set(_forge_vendor_debug_optimization_options)
+   foreach(_forge_vendor_language C CXX)
+      if(NOT CMAKE_${_forge_vendor_language}_COMPILER_LOADED)
+         continue()
+      endif()
+      _forge_vendor_debug_optimization_flag(
+         "${_forge_vendor_language}"
+         "${CMAKE_${_forge_vendor_language}_COMPILER_FRONTEND_VARIANT}"
+         _forge_vendor_optimization_flag
+      )
+      list(
+         APPEND _forge_vendor_debug_optimization_options
+         "$<$<AND:$<CONFIG:Debug>,$<COMPILE_LANGUAGE:${_forge_vendor_language}>>:${_forge_vendor_optimization_flag}>"
+      )
+   endforeach()
+
    # Target options follow parent configuration flags, so the final selector
    # optimizes vendor code without changing Forge Debug or sanitizer settings.
-   target_compile_options(
-      ${target}
-      PRIVATE
-         "$<$<AND:$<CONFIG:Debug>,$<OR:$<COMPILE_LANG_AND_ID:C,AppleClang,Clang,GNU>,$<COMPILE_LANG_AND_ID:CXX,AppleClang,Clang,GNU>>>:-O2>"
-         "$<$<AND:$<CONFIG:Debug>,$<OR:$<COMPILE_LANG_AND_ID:C,MSVC>,$<COMPILE_LANG_AND_ID:CXX,MSVC>>>:/O2>"
-   )
+   target_compile_options(${target} PRIVATE ${_forge_vendor_debug_optimization_options})
 
    list(REMOVE_DUPLICATES ARG_DISABLED_SANITIZERS)
    foreach(_forge_vendor_disabled_sanitizer IN LISTS ARG_DISABLED_SANITIZERS)

@@ -24,6 +24,20 @@ def sanitizer_flags(arguments: list[str]) -> list[str]:
    return [argument for argument in arguments if "sanitize=" in argument]
 
 
+def compiler_frontends(binary: pathlib.Path) -> dict[str, str]:
+   entries = (binary / "compiler-frontends.txt").read_text().splitlines()
+   frontends = dict(entry.split("=", 1) for entry in entries)
+   if set(frontends) != {"C", "CXX"} or any(value not in {"GNU", "MSVC"} for value in frontends.values()):
+      raise RuntimeError(f"unsupported compiler frontend metadata: {frontends!r}")
+   return frontends
+
+
+def frontend_expectations(frontend: str) -> tuple[str, str, str, str | None]:
+   if frontend == "MSVC":
+      return "/O2", "/Od", "/fsanitize=address", None
+   return "-O2", "-O0", "-fsanitize=address,undefined", "-fno-sanitize=alignment"
+
+
 def main() -> int:
    parser = argparse.ArgumentParser()
    parser.add_argument("--cmake", required=True)
@@ -66,13 +80,11 @@ def main() -> int:
 
    database = json.loads((binary / "compile_commands.json").read_text())
    by_name = {pathlib.Path(str(entry["file"])).name: command_arguments(entry) for entry in database}
-   msvc_style = "/Od" in by_name["forge_owned.cpp"]
-   expected_optimized = "/O2" if msvc_style else "-O2"
-   expected_debug = "/Od" if msvc_style else "-O0"
-   expected_sanitizer = "/fsanitize=address" if msvc_style else "-fsanitize=address,undefined"
-   expected_suppression = None if msvc_style else "-fno-sanitize=alignment"
+   frontends = compiler_frontends(binary)
 
    for source in ("vendor_c.c", "vendor_cxx.cpp"):
+      language = "C" if pathlib.Path(source).suffix == ".c" else "CXX"
+      expected_optimized, expected_debug, expected_sanitizer, _ = frontend_expectations(frontends[language])
       flags = optimization_flags(by_name[source])
       if not flags or flags[-1] != expected_optimized:
          raise RuntimeError(f"{source}: effective optimization is {flags!r}, expected final {expected_optimized}")
@@ -84,6 +96,10 @@ def main() -> int:
          raise RuntimeError(f"{source}: unexpected sanitizer suppression")
 
    for source in ("vendor_alignment.c", "vendor_alignment.cpp"):
+      language = "C" if pathlib.Path(source).suffix == ".c" else "CXX"
+      expected_optimized, expected_debug, expected_sanitizer, expected_suppression = frontend_expectations(
+         frontends[language]
+      )
       flags = optimization_flags(by_name[source])
       if not flags or flags[-1] != expected_optimized:
          raise RuntimeError(f"{source}: effective optimization is {flags!r}, expected final {expected_optimized}")
@@ -100,6 +116,7 @@ def main() -> int:
             f"{source}: sanitizer flags are {sanitizers!r}, expected final {expected_sanitizer!r}, {expected_suppression!r}"
          )
 
+   _, expected_debug, expected_sanitizer, _ = frontend_expectations(frontends["CXX"])
    owned_flags = optimization_flags(by_name["forge_owned.cpp"])
    if not owned_flags or owned_flags[-1] != expected_debug:
       raise RuntimeError(f"forge_owned.cpp: Debug optimization changed unexpectedly: {owned_flags!r}")
