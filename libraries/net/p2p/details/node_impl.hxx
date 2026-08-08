@@ -60,6 +60,12 @@ struct node::impl : std::enable_shared_from_this<impl> {
    };
 
    struct pubsub_state {
+      struct outbound_generation {
+         std::uint64_t session_id = 0;
+         std::shared_ptr<forge::asio::gate> write_gate;
+         std::shared_ptr<forge::net::p2p::stream> stream;
+      };
+
       struct validation {
          enum class status : std::uint8_t {
             claimed,
@@ -100,8 +106,9 @@ struct node::impl : std::enable_shared_from_this<impl> {
       std::map<std::string, validation> validations;
       std::string retry_cursor;
       std::map<peer_id, pubsub::score> scores;
-      std::map<peer_id, std::shared_ptr<forge::net::p2p::stream>> outbound_streams;
-      std::map<peer_id, std::shared_ptr<forge::asio::gate>> outbound_write_gates;
+      std::map<peer_id, outbound_generation> outbound;
+      std::map<peer_id, std::shared_ptr<forge::asio::gate>> connection_gates;
+      std::map<peer_id, std::size_t> outbound_bytes;
       std::map<peer_id, std::size_t> active_validations_by_peer;
       std::size_t active_validations = 0;
       std::uint64_t next_validation_generation = 1;
@@ -143,8 +150,13 @@ struct node::impl : std::enable_shared_from_this<impl> {
    std::size_t active_ping_streams = 0;
    bool stopped = false;
 
-   void invalidate_pubsub_outbound_locked(const peer_id& peer);
+   void invalidate_pubsub_outbound_locked(const peer_id& peer,
+                                          std::optional<std::uint64_t> owner_session_id = std::nullopt);
    void clear_pubsub_outbound_locked();
+
+   void reserve_pubsub_outbound_bytes(const peer_id& peer, std::size_t bytes);
+
+   void release_pubsub_outbound_bytes(const peer_id& peer, std::size_t bytes) noexcept;
 
    [[nodiscard]] std::vector<forge::net::p2p::endpoint> local_endpoints_for_control() const;
    [[nodiscard]] std::vector<forge::net::p2p::endpoint> local_endpoints_for_control_locked() const;
@@ -250,8 +262,6 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    void increment_pubsub_control();
 
-   void increment_pubsub_backpressure();
-
    [[nodiscard]] std::vector<std::uint8_t> next_pubsub_seqno();
 
    [[nodiscard]] pubsub::snapshot pubsub_snapshot() const;
@@ -262,6 +272,8 @@ struct node::impl : std::enable_shared_from_this<impl> {
                                                              std::optional<peer_id> except = std::nullopt) const;
 
    boost::asio::awaitable<void> send_pubsub_rpc(const peer_id& peer, const pubsub::rpc& value);
+
+   boost::asio::awaitable<std::shared_ptr<session_state>> ensure_pubsub_direct_session(const peer_id& peer);
 
    boost::asio::awaitable<void> announce_pubsub_subscriptions(const peer_id& peer);
 

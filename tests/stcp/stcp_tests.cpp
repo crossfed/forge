@@ -508,6 +508,41 @@ boost::asio::awaitable<void> stcp_cancel_wakes_same_direction_read_waiter(tls_ma
    co_await listener.async_close();
 }
 
+boost::asio::awaitable<void> stcp_peer_eof_terminalizes_both_io_directions(tls_material material) {
+   auto executor = co_await boost::asio::this_coro::executor;
+   auto listener = forge::net::stcp::listener{executor, loopback(0), server_options(material)};
+   auto accept = spawn_result<forge::net::stcp::connection>(executor, listener.async_accept_connection());
+   auto connector = forge::net::stcp::connector{executor, client_options(material)};
+   auto client = co_await connector.async_connect_connection(listener.local_endpoint());
+   auto server = co_await take_result(accept);
+   auto client_stream = std::move(client).into_transport_stream();
+   auto server_stream = std::move(server).into_transport_stream();
+
+   auto first = spawn_result<bytes>(executor, client_stream.stream.async_read());
+   co_await boost::asio::post(executor, boost::asio::use_awaitable);
+   co_await boost::asio::post(executor, boost::asio::use_awaitable);
+   auto queued = spawn_result<bytes>(executor, client_stream.stream.async_read());
+   co_await boost::asio::post(executor, boost::asio::use_awaitable);
+   co_await boost::asio::post(executor, boost::asio::use_awaitable);
+
+   co_await server_stream.stream.async_close();
+   for (const auto& read : {first, queued}) {
+      try {
+         static_cast<void>(co_await take_result(read));
+         BOOST_FAIL("stcp read should close after peer EOF");
+      } catch (const forge::net::stcp::exceptions::closed&) {
+      }
+   }
+   const auto after_eof = text_bytes("after EOF");
+   try {
+      co_await client_stream.stream.async_write(after_eof);
+      BOOST_FAIL("stcp write gate should close after peer EOF");
+   } catch (const forge::net::stcp::exceptions::closed&) {
+   }
+   BOOST_TEST(!client_stream.stream.valid());
+   co_await listener.async_close();
+}
+
 boost::asio::awaitable<void> stcp_upgrade_roundtrip() {
    const auto material = make_tls_material();
    auto executor = co_await boost::asio::this_coro::executor;
@@ -789,6 +824,12 @@ BOOST_AUTO_TEST_CASE(stcp_cancel_wakes_queued_same_direction_read) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    BOOST_CHECK(forge::asio::blocking::run_for(
        runtime, stcp_cancel_wakes_same_direction_read_waiter(make_tls_material()), std::chrono::seconds{5}));
+}
+
+BOOST_AUTO_TEST_CASE(stcp_peer_eof_wakes_queued_read_and_closes_opposite_direction) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   BOOST_CHECK(forge::asio::blocking::run_for(
+       runtime, stcp_peer_eof_terminalizes_both_io_directions(make_tls_material()), std::chrono::seconds{5}));
 }
 
 BOOST_AUTO_TEST_CASE(stcp_rejects_wrong_hostname_and_fingerprint) {

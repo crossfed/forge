@@ -191,14 +191,17 @@ jobs:
           test_forge_chain_api
           test_forge_db_authenticated
           test_forge_http_websocket
+          test_forge_stcp
+          test_forge_quic_p2p
           test_forge_package_chain_api_component
           test_forge_package_db_mdbx_component
+          test_forge_package_net_stcp_component
           -j 4
 
       - name: Run acceptance
         run: >-
           ctest --test-dir build/chain-audited-api
-          -R '^(test_forge_structure|test_forge_vendor_compile_policy|test_forge_vendor_compile_policy_multi_config|test_forge_chain_protocol_query|test_forge_chain_api|test_forge_db_authenticated|test_forge_http_websocket|test_forge_package_chain_api_component|test_forge_package_db_mdbx_component|test_forge_package_explicit_glaze_dir)$'
+          -R '^(test_forge_structure|test_forge_vendor_compile_policy|test_forge_vendor_compile_policy_multi_config|test_forge_chain_protocol_query|test_forge_chain_api|test_forge_db_authenticated|test_forge_http_websocket|test_forge_stcp|test_forge_quic_p2p|test_forge_package_chain_api_component|test_forge_package_db_mdbx_component|test_forge_package_net_stcp_component|test_forge_package_explicit_glaze_dir)$'
           --output-on-failure -j 1
 
       - name: Run authenticated benchmark CLI regression

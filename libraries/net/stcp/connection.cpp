@@ -449,6 +449,24 @@ struct io_gates {
    std::atomic<io_stop_reason> reason{io_stop_reason::none};
 };
 
+[[noreturn]] void terminalize_io_error(native_stream& stream, io_gates& gates, const boost::system::error_code& error) {
+   if (gates.stopped()) {
+      cancel_stream(stream);
+      gates.throw_stopped();
+   }
+   gates.stop(error == boost::asio::error::operation_aborted ? io_stop_reason::canceled : io_stop_reason::closed);
+   cancel_stream(stream);
+   throw_read_write_error(error);
+}
+
+[[noreturn]] void terminalize_closed(native_stream* stream, io_gates& gates, std::string_view message) {
+   gates.stop(io_stop_reason::closed);
+   if (stream) {
+      cancel_stream(*stream);
+   }
+   FORGE_THROW_EXCEPTION(exceptions::closed, std::string{message});
+}
+
 boost::asio::awaitable<void> async_handshake(std::shared_ptr<native_stream> stream,
                                              asio::ssl::stream_base::handshake_type type,
                                              std::optional<std::chrono::milliseconds> timeout) {
@@ -509,15 +527,12 @@ class stream_model final : public transport::detail::stream_concept {
                 gates->throw_stopped();
              }
              if (!stream || !stream->lowest_layer().is_open()) {
-                FORGE_THROW_EXCEPTION(exceptions::closed, "invalid stcp stream");
+                terminalize_closed(stream.get(), *gates, "invalid stcp stream");
              }
              auto error = boost::system::error_code{};
              co_await asio::async_write(*stream, asio::buffer(bytes), asio::redirect_error(asio::use_awaitable, error));
              if (error) {
-                if (gates->stopped()) {
-                   gates->throw_stopped();
-                }
-                throw_read_write_error(error);
+                terminalize_io_error(*stream, *gates, error);
              }
           },
           asio::use_awaitable);
@@ -536,16 +551,13 @@ class stream_model final : public transport::detail::stream_concept {
                 gates->throw_stopped();
              }
              if (!stream || !stream->lowest_layer().is_open()) {
-                FORGE_THROW_EXCEPTION(exceptions::closed, "invalid stcp stream");
+                terminalize_closed(stream.get(), *gates, "invalid stcp stream");
              }
              auto error = boost::system::error_code{};
              const auto size = co_await stream->async_read_some(asio::buffer(writable),
                                                                 asio::redirect_error(asio::use_awaitable, error));
              if (error) {
-                if (gates->stopped()) {
-                   gates->throw_stopped();
-                }
-                throw_read_write_error(error);
+                terminalize_io_error(*stream, *gates, error);
              }
              co_return size;
           },
@@ -567,16 +579,13 @@ class stream_model final : public transport::detail::stream_concept {
                 gates->throw_stopped();
              }
              if (!stream || !stream->lowest_layer().is_open()) {
-                FORGE_THROW_EXCEPTION(exceptions::closed, "invalid stcp stream");
+                terminalize_closed(stream.get(), *gates, "invalid stcp stream");
              }
              auto error = boost::system::error_code{};
              const auto size = co_await stream->async_read_some(asio::buffer(writable),
                                                                 asio::redirect_error(asio::use_awaitable, error));
              if (error) {
-                if (gates->stopped()) {
-                   gates->throw_stopped();
-                }
-                throw_read_write_error(error);
+                terminalize_io_error(*stream, *gates, error);
              }
              co_return size;
           },
@@ -669,16 +678,13 @@ struct connection::impl final {
                 current_gates->throw_stopped();
              }
              if (!current || !current->lowest_layer().is_open()) {
-                FORGE_THROW_EXCEPTION(exceptions::closed, "invalid stcp connection");
+                terminalize_closed(current.get(), *current_gates, "invalid stcp connection");
              }
              auto error = boost::system::error_code{};
              co_await asio::async_write(*current, asio::buffer(bytes),
                                         asio::redirect_error(asio::use_awaitable, error));
              if (error) {
-                if (current_gates->stopped()) {
-                   current_gates->throw_stopped();
-                }
-                throw_read_write_error(error);
+                terminalize_io_error(*current, *current_gates, error);
              }
           },
           asio::use_awaitable);
@@ -696,16 +702,13 @@ struct connection::impl final {
                 current_gates->throw_stopped();
              }
              if (!current || !current->lowest_layer().is_open()) {
-                FORGE_THROW_EXCEPTION(exceptions::closed, "invalid stcp connection");
+                terminalize_closed(current.get(), *current_gates, "invalid stcp connection");
              }
              auto error = boost::system::error_code{};
              const auto size = co_await current->async_read_some(asio::buffer(bytes),
                                                                  asio::redirect_error(asio::use_awaitable, error));
              if (error) {
-                if (current_gates->stopped()) {
-                   current_gates->throw_stopped();
-                }
-                throw_read_write_error(error);
+                terminalize_io_error(*current, *current_gates, error);
              }
              co_return size;
           },
@@ -725,16 +728,13 @@ struct connection::impl final {
                 current_gates->throw_stopped();
              }
              if (!current || !current->lowest_layer().is_open()) {
-                FORGE_THROW_EXCEPTION(exceptions::closed, "invalid stcp connection");
+                terminalize_closed(current.get(), *current_gates, "invalid stcp connection");
              }
              auto error = boost::system::error_code{};
              const auto size = co_await current->async_read_some(asio::buffer(writable),
                                                                  asio::redirect_error(asio::use_awaitable, error));
              if (error) {
-                if (current_gates->stopped()) {
-                   current_gates->throw_stopped();
-                }
-                throw_read_write_error(error);
+                terminalize_io_error(*current, *current_gates, error);
              }
              co_return size;
           },

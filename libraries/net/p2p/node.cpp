@@ -1118,16 +1118,27 @@ boost::asio::awaitable<pubsub::message> node::async_publish(pubsub::topic subjec
 
    auto attempted = std::size_t{};
    auto sent = std::size_t{};
+   auto terminal_kind = std::optional<exceptions::code>{};
+   auto terminal_message = std::string{};
    for (const auto& peer : self->pubsub_candidate_peers(value.subject.value)) {
       ++attempted;
       try {
          co_await self->send_pubsub_rpc(peer, pubsub::rpc{.messages = std::vector<pubsub::message>{value}});
          ++sent;
-      } catch (const forge::exceptions::base&) {
+      } catch (const forge::exceptions::base& error) {
+         const auto kind = p2p_code(error);
+         if (!terminal_kind && (kind == exceptions::code::closed || kind == exceptions::code::canceled ||
+                                kind == exceptions::code::timeout || kind == exceptions::code::backpressure_rejected)) {
+            terminal_kind = kind;
+            terminal_message = error.what();
+         }
          self->store.mark_failure(peer);
       }
    }
    if (attempted > 0 && sent == 0) {
+      if (terminal_kind) {
+         FORGE_THROW_CODE(*terminal_kind, terminal_message);
+      }
       FORGE_THROW_EXCEPTION(exceptions::protocol_error, "GossipSub publish could not reach any candidate peer");
    }
    co_return value;
