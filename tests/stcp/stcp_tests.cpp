@@ -35,6 +35,8 @@
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 
+#include "../../libraries/net/stcp/details/handshake_deadline.hxx"
+
 import forge.asio.blocking;
 import forge.asio.runtime;
 import forge.crypto.pki.x509;
@@ -376,41 +378,22 @@ boost::asio::awaitable<void> stcp_direct_roundtrip() {
    co_await listener.async_close();
 }
 
-boost::asio::awaitable<void> stcp_successful_handshake_survives_late_timeout_handler(tls_material material) {
-   constexpr auto handshake_timeout = std::chrono::seconds{1};
+boost::asio::awaitable<void> stcp_stalled_peer_returns_typed_handshake_timeout(tls_material material) {
    auto executor = co_await boost::asio::this_coro::executor;
    auto listener = forge::net::tcp::listener{executor, loopback(0)};
    auto accept = spawn_result<forge::net::tcp::connection>(executor, listener.async_accept_connection());
    auto connector = forge::net::tcp::connector{executor};
    auto client_tcp = co_await connector.async_connect_connection(listener.local_endpoint());
    auto server_tcp = co_await take_result(accept);
-
-   auto server_upgrade = spawn_result<forge::net::stcp::connection>(
-       executor, forge::net::stcp::async_upgrade_server(std::move(server_tcp), server_options(material)));
-   const auto deadline = std::chrono::steady_clock::now() + handshake_timeout;
-   auto client = co_await forge::net::stcp::async_upgrade_client(std::move(client_tcp), client_options(material),
-                                                                 handshake_timeout);
-   auto server = co_await take_result(server_upgrade);
-
-   auto after_deadline = boost::asio::steady_timer{executor};
-   after_deadline.expires_at(deadline + std::chrono::milliseconds{100});
-   co_await after_deadline.async_wait(boost::asio::use_awaitable);
-   co_await boost::asio::post(executor, boost::asio::use_awaitable);
-   co_await boost::asio::post(executor, boost::asio::use_awaitable);
-
-   BOOST_TEST(client.valid());
-   const auto request = text_bytes("after handshake deadline");
-   co_await client.async_write(request);
-   const auto received_request = co_await server.async_read();
-   BOOST_TEST(received_request == request, boost::test_tools::per_element());
-
-   const auto response = text_bytes("still open");
-   co_await server.async_write(response);
-   const auto received_response = co_await client.async_read();
-   BOOST_TEST(received_response == response, boost::test_tools::per_element());
-
-   co_await client.async_close();
-   co_await server.async_close();
+   try {
+      static_cast<void>(co_await forge::net::stcp::async_upgrade_client(std::move(client_tcp), client_options(material),
+                                                                        std::chrono::milliseconds{25}));
+      BOOST_FAIL("stalled TCP peer should time out during TLS handshake");
+   } catch (const forge::exceptions::base& error) {
+      BOOST_REQUIRE(forge::net::stcp::exceptions::code_of(error).has_value());
+      BOOST_CHECK(*forge::net::stcp::exceptions::code_of(error) == forge::net::stcp::exceptions::code::timeout);
+   }
+   co_await server_tcp.async_close();
    co_await listener.async_close();
 }
 
@@ -844,10 +827,25 @@ BOOST_AUTO_TEST_CASE(stcp_upgrades_existing_tcp_connection) {
    forge::asio::blocking::run(runtime, stcp_upgrade_roundtrip());
 }
 
-BOOST_AUTO_TEST_CASE(stcp_successful_handshake_cannot_be_canceled_by_late_timeout_handler) {
+BOOST_AUTO_TEST_CASE(stcp_handshake_deadline_has_one_deterministic_terminal_state) {
+   using forge::net::stcp::detail::handshake_deadline_state;
+   using forge::net::stcp::detail::handshake_terminal_state;
+
+   auto completed = handshake_deadline_state{};
+   BOOST_TEST(completed.try_complete());
+   BOOST_TEST(!completed.try_timeout());
+   BOOST_CHECK(completed.current() == handshake_terminal_state::completed);
+
+   auto timed_out = handshake_deadline_state{};
+   BOOST_TEST(timed_out.try_timeout());
+   BOOST_TEST(!timed_out.try_complete());
+   BOOST_CHECK(timed_out.current() == handshake_terminal_state::timed_out);
+}
+
+BOOST_AUTO_TEST_CASE(stcp_stalled_peer_reports_typed_handshake_timeout) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    BOOST_CHECK(forge::asio::blocking::run_for(
-       runtime, stcp_successful_handshake_survives_late_timeout_handler(make_tls_material()), std::chrono::seconds{5}));
+       runtime, stcp_stalled_peer_returns_typed_handshake_timeout(make_tls_material()), std::chrono::seconds{2}));
 }
 
 BOOST_AUTO_TEST_CASE(stcp_serializes_full_duplex_ssl_operations_on_multi_worker_runtime) {

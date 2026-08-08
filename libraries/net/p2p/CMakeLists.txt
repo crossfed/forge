@@ -42,6 +42,9 @@ add_library(
    details/peer_exchange_codec.hxx
    peer_exchange_learning.cpp
    details/peer_exchange_learning.hxx
+   pubsub_outbound_budget.cpp
+   details/pubsub_outbound_budget.hxx
+   details/pubsub_failure.hxx
    relay_discovery.cpp
    details/relay_discovery.hxx
    relay_transport.cpp

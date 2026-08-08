@@ -77,22 +77,6 @@ namespace forge::net::p2p {
 
 namespace {
 
-[[nodiscard]] bool peer_attributable_publish_failure(exceptions::code kind, bool stopped) noexcept {
-   switch (kind) {
-   case exceptions::code::invalid_options:
-   case exceptions::code::invalid_identity:
-   case exceptions::code::duplicate_protocol:
-   case exceptions::code::backpressure_rejected:
-   case exceptions::code::canceled:
-   case exceptions::code::internal:
-      return false;
-   case exceptions::code::closed:
-      return !stopped;
-   default:
-      return true;
-   }
-}
-
 [[nodiscard]] bool supports(const peer_store::record& record, std::uint64_t capability) noexcept {
    return record.capabilities.has(capability);
 }
@@ -1063,15 +1047,7 @@ boost::asio::awaitable<pubsub::subscription> node::async_subscribe(pubsub::topic
          co_await self->send_pubsub_rpc(peer,
                                         pubsub::rpc{.subscriptions = std::vector<pubsub::subscription>{subscription}});
       } catch (const forge::exceptions::base& error) {
-         const auto kind = p2p_code(error);
-         auto stopped = false;
-         {
-            auto lock = std::scoped_lock{self->mutex};
-            stopped = self->stopped;
-         }
-         if (peer_attributable_publish_failure(kind, stopped)) {
-            self->store.mark_failure(peer);
-         }
+         self->record_pubsub_send_failure(peer, error);
       }
    }
    co_return subscription;
@@ -1094,15 +1070,7 @@ boost::asio::awaitable<void> node::async_unsubscribe(pubsub::topic subject) {
          co_await self->send_pubsub_rpc(peer,
                                         pubsub::rpc{.subscriptions = std::vector<pubsub::subscription>{subscription}});
       } catch (const forge::exceptions::base& error) {
-         const auto kind = p2p_code(error);
-         auto stopped = false;
-         {
-            auto lock = std::scoped_lock{self->mutex};
-            stopped = self->stopped;
-         }
-         if (peer_attributable_publish_failure(kind, stopped)) {
-            self->store.mark_failure(peer);
-         }
+         self->record_pubsub_send_failure(peer, error);
       }
    }
    co_return;
@@ -1165,14 +1133,7 @@ boost::asio::awaitable<pubsub::message> node::async_publish(pubsub::topic subjec
             terminal_kind = kind;
             terminal_message = error.what();
          }
-         auto stopped = false;
-         {
-            auto lock = std::scoped_lock{self->mutex};
-            stopped = self->stopped;
-         }
-         if (peer_attributable_publish_failure(kind, stopped)) {
-            self->store.mark_failure(peer);
-         }
+         self->record_pubsub_send_failure(peer, error);
       }
    }
    if (attempted > 0 && sent == 0) {

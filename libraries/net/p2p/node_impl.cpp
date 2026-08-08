@@ -74,6 +74,7 @@ import forge.net.yamux.session;
 #include "details/node_impl.hxx"
 #include "details/peer_exchange_learning.hxx"
 #include "details/protocol_capabilities.hxx"
+#include "details/pubsub_failure.hxx"
 #include "details/relay_accounting.hxx"
 #include "details/session_lifecycle.hxx"
 
@@ -96,8 +97,7 @@ void node::impl::clear_pubsub_outbound_locked() {
    }
    pubsub_value.outbound.clear();
    pubsub_value.connection_gates.close();
-   pubsub_value.outbound_bytes.clear();
-   pubsub_value.outbound_bytes_total = 0;
+   pubsub_value.outbound_budget.clear();
 }
 
 void node::impl::reserve_pubsub_outbound_bytes(const peer_id& peer, std::size_t bytes) {
@@ -106,29 +106,16 @@ void node::impl::reserve_pubsub_outbound_bytes(const peer_id& peer, std::size_t 
       FORGE_THROW_EXCEPTION(exceptions::closed, "cannot publish GossipSub RPC after node shutdown");
    }
    const auto limit = options.limits.pubsub.limits.max_outbound_queue_bytes;
-   auto& reserved = pubsub_value.outbound_bytes[peer];
-   if (bytes > limit || reserved > limit - bytes || pubsub_value.outbound_bytes_total > limit - bytes) {
+   if (!pubsub_value.outbound_budget.reserve(peer, bytes, limit)) {
       ++metrics_value.backpressure_rejections;
       ++metrics_value.protocol_rejections;
       FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "GossipSub outbound queue byte limit reached");
    }
-   reserved += bytes;
-   pubsub_value.outbound_bytes_total += bytes;
 }
 
 void node::impl::release_pubsub_outbound_bytes(const peer_id& peer, std::size_t bytes) noexcept {
    auto lock = std::scoped_lock{mutex};
-   const auto found = pubsub_value.outbound_bytes.find(peer);
-   if (found == pubsub_value.outbound_bytes.end()) {
-      return;
-   }
-   const auto released = std::min(found->second, bytes);
-   pubsub_value.outbound_bytes_total -= std::min(pubsub_value.outbound_bytes_total, released);
-   if (found->second <= bytes) {
-      pubsub_value.outbound_bytes.erase(found);
-      return;
-   }
-   found->second -= bytes;
+   pubsub_value.outbound_budget.release(peer, bytes);
 }
 
 [[nodiscard]] exceptions::code map_transport_error(forge::net::transport::exceptions::code kind) noexcept {
@@ -569,6 +556,10 @@ void node::impl::forget_session(const std::shared_ptr<node::impl::session_state>
 
 [[nodiscard]] std::shared_ptr<node::impl::session_state> node::impl::session_for(const peer_id& peer) const {
    auto lock = std::scoped_lock{mutex};
+   return session_for_locked(peer);
+}
+
+[[nodiscard]] std::shared_ptr<node::impl::session_state> node::impl::session_for_locked(const peer_id& peer) const {
    auto selected = std::shared_ptr<session_state>{};
    for (const auto& [_, session] : sessions) {
       if (session->info.remote_peer == peer && !session->closed) {
@@ -1134,16 +1125,23 @@ std::vector<peer_id> node::impl::pubsub_candidate_peers(const std::string& topic
 
 boost::asio::awaitable<std::shared_ptr<node::impl::session_state>>
 node::impl::ensure_pubsub_direct_session(const peer_id& peer) {
-   if (auto existing = session_for(peer)) {
-      co_return existing;
-   }
    auto participant = detail::connection_singleflight_registry::lease{};
+   auto start = std::optional<detail::connection_singleflight_registry::operation>{};
+   auto existing = std::shared_ptr<session_state>{};
    {
       auto lock = std::scoped_lock{mutex};
       if (stopped) {
          FORGE_THROW_EXCEPTION(exceptions::closed, "cannot connect GossipSub peer after node shutdown");
       }
-      participant = pubsub_value.connection_gates.join(peer, runtime.context().get_executor());
+      existing = session_for_locked(peer);
+      if (!existing) {
+         auto joined = pubsub_value.connection_gates.join(peer, runtime.context().get_executor());
+         participant = std::move(joined.participant);
+         start = std::move(joined.start);
+      }
+   }
+   if (existing) {
+      co_return existing;
    }
    auto release_participant = [this, &participant](void*) noexcept {
       auto lock = std::scoped_lock{mutex};
@@ -1151,21 +1149,27 @@ node::impl::ensure_pubsub_direct_session(const peer_id& peer) {
    };
    auto participant_guard = std::unique_ptr<void, decltype(release_participant)>{this, std::move(release_participant)};
 
-   if (participant.leader()) {
-      try {
-         auto connected = co_await ensure_direct_session(peer, options.limits.discovery.query_timeout);
-         {
-            auto lock = std::scoped_lock{mutex};
-            pubsub_value.connection_gates.succeed(participant);
-         }
-         co_return connected;
-      } catch (const forge::exceptions::base& error) {
-         {
-            auto lock = std::scoped_lock{mutex};
-            pubsub_value.connection_gates.fail(participant, p2p_code(error), error.what());
-         }
-         throw;
-      }
+   if (start) {
+      auto self = shared_from_this();
+      boost::asio::co_spawn(
+          runtime.context(),
+          [self, peer, active = std::move(*start)]() mutable -> boost::asio::awaitable<void> {
+             try {
+                static_cast<void>(
+                    co_await self->ensure_direct_session(peer, self->options.limits.discovery.query_timeout));
+                auto lock = std::scoped_lock{self->mutex};
+                self->pubsub_value.connection_gates.succeed(active);
+             } catch (const forge::exceptions::base& error) {
+                auto lock = std::scoped_lock{self->mutex};
+                self->pubsub_value.connection_gates.fail(active, p2p_code(error), error.what());
+             } catch (...) {
+                auto lock = std::scoped_lock{self->mutex};
+                self->pubsub_value.connection_gates.fail(active, exceptions::code::internal,
+                                                         "GossipSub peer connection failed internally");
+             }
+             co_return;
+          },
+          boost::asio::detached);
    }
 
    auto result = detail::connection_singleflight_registry::outcome{};
@@ -1291,6 +1295,19 @@ boost::asio::awaitable<void> node::impl::send_pubsub_rpc(const peer_id& peer, co
    reservation.reset();
 }
 
+void node::impl::record_pubsub_send_failure(const peer_id& peer, const forge::exceptions::base& error) {
+   const auto kind = p2p_code(error);
+   auto node_stopped = false;
+   {
+      auto lock = std::scoped_lock{mutex};
+      node_stopped = stopped;
+   }
+   if (!detail::peer_attributable_pubsub_failure(kind, node_stopped)) {
+      return;
+   }
+   store.mark_failure(peer);
+}
+
 boost::asio::awaitable<void> node::impl::announce_pubsub_subscriptions(const peer_id& peer) {
    if (!options.capabilities.has(capabilities::pubsub)) {
       co_return;
@@ -1301,8 +1318,8 @@ boost::asio::awaitable<void> node::impl::announce_pubsub_subscriptions(const pee
    }
    try {
       co_await send_pubsub_rpc(peer, pubsub::rpc{.subscriptions = std::move(subscriptions)});
-   } catch (const forge::exceptions::base&) {
-      store.mark_failure(peer);
+   } catch (const forge::exceptions::base& error) {
+      record_pubsub_send_failure(peer, error);
    }
 }
 
@@ -1686,22 +1703,22 @@ boost::asio::awaitable<void> node::impl::pubsub_heartbeat_once() {
    for (const auto& [peer, items] : grafts) {
       try {
          co_await send_pubsub_rpc(peer, pubsub::rpc{.control_value = pubsub::control{.grafts = items}});
-      } catch (const forge::exceptions::base&) {
-         store.mark_failure(peer);
+      } catch (const forge::exceptions::base& error) {
+         record_pubsub_send_failure(peer, error);
       }
    }
    for (const auto& [peer, items] : prunes) {
       try {
          co_await send_pubsub_rpc(peer, pubsub::rpc{.control_value = pubsub::control{.prunes = items}});
-      } catch (const forge::exceptions::base&) {
-         store.mark_failure(peer);
+      } catch (const forge::exceptions::base& error) {
+         record_pubsub_send_failure(peer, error);
       }
    }
    for (const auto& [peer, items] : gossip) {
       try {
          co_await send_pubsub_rpc(peer, pubsub::rpc{.control_value = pubsub::control{.have = items}});
-      } catch (const forge::exceptions::base&) {
-         store.mark_failure(peer);
+      } catch (const forge::exceptions::base& error) {
+         record_pubsub_send_failure(peer, error);
       }
    }
    for (const auto& [peer, message_ids] : retries) {
@@ -1709,8 +1726,8 @@ boost::asio::awaitable<void> node::impl::pubsub_heartbeat_once() {
          co_await send_pubsub_rpc(peer, pubsub::rpc{.control_value = pubsub::control{
                                                         .want = std::vector<pubsub::control::iwant>{
                                                             pubsub::control::iwant{.message_ids = message_ids}}}});
-      } catch (const forge::exceptions::base&) {
-         store.mark_failure(peer);
+      } catch (const forge::exceptions::base& error) {
+         record_pubsub_send_failure(peer, error);
       }
    }
 }

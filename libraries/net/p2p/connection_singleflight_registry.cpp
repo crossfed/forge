@@ -24,12 +24,8 @@ import forge.net.p2p.identity;
 namespace forge::net::p2p::detail {
 
 connection_singleflight_registry::lease::lease(peer_id peer, std::shared_ptr<entry> owner,
-                                               std::shared_ptr<completion_channel> completion, bool leader)
-    : peer_(std::move(peer)), owner_(std::move(owner)), completion_(std::move(completion)), leader_(leader) {}
-
-bool connection_singleflight_registry::lease::leader() const noexcept {
-   return leader_;
-}
+                                               std::shared_ptr<completion_channel> completion)
+    : peer_(std::move(peer)), owner_(std::move(owner)), completion_(std::move(completion)) {}
 
 boost::asio::awaitable<connection_singleflight_registry::outcome> connection_singleflight_registry::lease::wait() {
    if (!completion_) {
@@ -41,12 +37,16 @@ boost::asio::awaitable<connection_singleflight_registry::outcome> connection_sin
    co_return co_await completion_->async_receive(boost::asio::use_awaitable);
 }
 
-connection_singleflight_registry::lease connection_singleflight_registry::join(const peer_id& peer,
-                                                                               boost::asio::any_io_executor executor) {
+connection_singleflight_registry::operation::operation(peer_id peer, std::shared_ptr<entry> owner)
+    : peer_(std::move(peer)), owner_(std::move(owner)) {}
+
+connection_singleflight_registry::joined connection_singleflight_registry::join(const peer_id& peer,
+                                                                                boost::asio::any_io_executor executor) {
    auto& current = entries_[peer];
-   const auto leader = !current;
+   auto start = std::optional<operation>{};
    if (!current) {
       current = std::make_shared<entry>();
+      start.emplace(operation{peer, current});
    }
    auto completion = std::make_shared<lease::completion_channel>(std::move(executor), 1);
    ++current->participants;
@@ -54,7 +54,10 @@ connection_singleflight_registry::lease connection_singleflight_registry::join(c
    if (current->completed) {
       static_cast<void>(completion->try_send(boost::system::error_code{}, current->result));
    }
-   return lease{peer, current, std::move(completion), leader};
+   return joined{
+       .participant = lease{peer, current, std::move(completion)},
+       .start = std::move(start),
+   };
 }
 
 void connection_singleflight_registry::complete(entry& owner, outcome result) noexcept {
@@ -70,16 +73,30 @@ void connection_singleflight_registry::complete(entry& owner, outcome result) no
    }
 }
 
-void connection_singleflight_registry::succeed(lease& participant) noexcept {
-   if (participant.owner_) {
-      complete(*participant.owner_, outcome{.succeeded = true});
+void connection_singleflight_registry::erase_if_unused(const peer_id& peer,
+                                                       const std::shared_ptr<entry>& owner) noexcept {
+   const auto found = entries_.find(peer);
+   if (!owner->operation_active && owner->participants == 0 && found != entries_.end() && found->second == owner) {
+      entries_.erase(found);
    }
 }
 
-void connection_singleflight_registry::fail(lease& participant, exceptions::code error, std::string message) noexcept {
-   if (participant.owner_) {
-      complete(*participant.owner_, outcome{.error = error, .message = std::move(message)});
+void connection_singleflight_registry::finish(operation& active, outcome result) noexcept {
+   if (!active.owner_) {
+      return;
    }
+   auto owner = std::move(active.owner_);
+   complete(*owner, std::move(result));
+   owner->operation_active = false;
+   erase_if_unused(active.peer_, owner);
+}
+
+void connection_singleflight_registry::succeed(operation& active) noexcept {
+   finish(active, outcome{.succeeded = true});
+}
+
+void connection_singleflight_registry::fail(operation& active, exceptions::code error, std::string message) noexcept {
+   finish(active, outcome{.error = error, .message = std::move(message)});
 }
 
 void connection_singleflight_registry::leave(lease& participant) noexcept {
@@ -91,10 +108,7 @@ void connection_singleflight_registry::leave(lease& participant) noexcept {
    if (owner->participants != 0) {
       --owner->participants;
    }
-   const auto found = entries_.find(participant.peer_);
-   if (owner->participants == 0 && found != entries_.end() && found->second == owner) {
-      entries_.erase(found);
-   }
+   erase_if_unused(participant.peer_, owner);
 }
 
 void connection_singleflight_registry::close() noexcept {
@@ -103,6 +117,7 @@ void connection_singleflight_registry::close() noexcept {
                            .error = exceptions::code::closed,
                            .message = "P2P node stopped during connection singleflight",
                        });
+      value->operation_active = false;
    }
    entries_.clear();
 }

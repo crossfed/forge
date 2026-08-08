@@ -2,6 +2,7 @@ add_library(
    forge_net_stcp STATIC
    connection.cpp
    connector.cpp
+   details/handshake_deadline.hxx
    listener.cpp
 )
 forge_target_modules_at(forge_net_stcp net/stcp)

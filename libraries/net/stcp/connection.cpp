@@ -34,6 +34,8 @@ module;
 #include <openssl/x509.h>
 #include <openssl/x509v3.h>
 
+#include "details/handshake_deadline.hxx"
+
 module forge.net.stcp.connection;
 
 import forge.asio.gate;
@@ -75,6 +77,10 @@ using x509_ptr = std::unique_ptr<X509, x509_deleter>;
    }
    FORGE_THROW_EXCEPTION(exceptions::handshake_failed, std::move(message),
                          forge::exceptions::ctx("reason", error.message()));
+}
+
+[[noreturn]] void throw_handshake_timeout(std::string message) {
+   FORGE_THROW_EXCEPTION(exceptions::timeout, std::move(message));
 }
 
 [[noreturn]] void throw_verification_failed(std::string message) {
@@ -411,12 +417,6 @@ void cancel_stream(native_stream& stream) noexcept {
    stream.lowest_layer().close(ignored);
 }
 
-enum class handshake_terminal_state : std::uint8_t {
-   pending,
-   completed,
-   timed_out,
-};
-
 enum class io_stop_reason : std::uint8_t {
    none,
    closed,
@@ -483,19 +483,17 @@ boost::asio::awaitable<void> async_handshake(std::shared_ptr<native_stream> stre
        strand,
        [stream = std::move(stream), type, timeout]() -> asio::awaitable<void> {
           auto timer = std::shared_ptr<asio::steady_timer>{};
-          auto terminal = std::shared_ptr<std::atomic<handshake_terminal_state>>{};
+          auto terminal = std::shared_ptr<detail::handshake_deadline_state>{};
           if (timeout) {
              validate_handshake_timeout(*timeout);
              timer = std::make_shared<asio::steady_timer>(co_await asio::this_coro::executor);
-             terminal = std::make_shared<std::atomic<handshake_terminal_state>>(handshake_terminal_state::pending);
+             terminal = std::make_shared<detail::handshake_deadline_state>();
              timer->expires_after(*timeout);
              timer->async_wait([stream, terminal](const boost::system::error_code& error) {
                 if (error) {
                    return;
                 }
-                auto expected = handshake_terminal_state::pending;
-                if (!terminal->compare_exchange_strong(expected, handshake_terminal_state::timed_out,
-                                                       std::memory_order_acq_rel)) {
+                if (!terminal->try_timeout()) {
                    return;
                 }
                 cancel_stream(*stream);
@@ -505,15 +503,11 @@ boost::asio::awaitable<void> async_handshake(std::shared_ptr<native_stream> stre
           auto error = boost::system::error_code{};
           co_await stream->async_handshake(type, asio::redirect_error(asio::use_awaitable, error));
           if (timer) {
-             auto expected = handshake_terminal_state::pending;
-             const auto completed = terminal->compare_exchange_strong(expected, handshake_terminal_state::completed,
-                                                                      std::memory_order_acq_rel);
+             const auto completed = terminal->try_complete();
              timer->cancel();
              if (!completed) {
-                const auto timeout_error = boost::system::error_code{boost::asio::error::operation_aborted};
-                throw_handshake_failed(type == asio::ssl::stream_base::client ? "stcp client handshake timed out"
-                                                                              : "stcp server handshake timed out",
-                                       timeout_error);
+                throw_handshake_timeout(type == asio::ssl::stream_base::client ? "stcp client handshake timed out"
+                                                                               : "stcp server handshake timed out");
              }
           }
           if (error) {

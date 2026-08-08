@@ -8,6 +8,7 @@
 #include "operation_deadline.hxx"
 #include "path_selector.hxx"
 #include "peer_exchange_codec.hxx"
+#include "pubsub_outbound_budget.hxx"
 #include "relay_discovery.hxx"
 #include "relay_transport.hxx"
 #include "session_teardown.hxx"
@@ -109,8 +110,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
       std::map<peer_id, pubsub::score> scores;
       std::map<peer_id, outbound_generation> outbound;
       detail::connection_singleflight_registry connection_gates;
-      std::map<peer_id, std::size_t> outbound_bytes;
-      std::size_t outbound_bytes_total = 0;
+      detail::pubsub_outbound_budget outbound_budget;
       std::map<peer_id, std::size_t> active_validations_by_peer;
       std::size_t active_validations = 0;
       std::uint64_t next_validation_generation = 1;
@@ -176,6 +176,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
    void forget_session(const std::shared_ptr<session_state>& session);
 
    [[nodiscard]] std::shared_ptr<session_state> session_for(const peer_id& peer) const;
+   [[nodiscard]] std::shared_ptr<session_state> session_for_locked(const peer_id& peer) const;
 
    [[nodiscard]] std::optional<node::protocol_handler> handler_for(const protocol_id& protocol) const;
 
@@ -271,6 +272,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
                                                              std::optional<peer_id> except = std::nullopt) const;
 
    boost::asio::awaitable<void> send_pubsub_rpc(const peer_id& peer, const pubsub::rpc& value);
+   void record_pubsub_send_failure(const peer_id& peer, const forge::exceptions::base& error);
 
    boost::asio::awaitable<std::shared_ptr<session_state>> ensure_pubsub_direct_session(const peer_id& peer);
 

@@ -95,6 +95,8 @@ import forge.multiformats.multiaddr;
 #include "../../libraries/net/p2p/details/relay_accounting.hxx"
 #include "../../libraries/net/p2p/details/connection_singleflight_registry.hxx"
 #include "../../libraries/net/p2p/details/peer_exchange_learning.hxx"
+#include "../../libraries/net/p2p/details/pubsub_outbound_budget.hxx"
+#include "../../libraries/net/p2p/details/pubsub_failure.hxx"
 
 namespace forge::net::p2p {
 namespace {
@@ -4517,24 +4519,24 @@ BOOST_AUTO_TEST_CASE(p2p_gossipsub_connection_singleflight_reclaims_transient_pe
    constexpr auto peer_count = std::size_t{200};
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    auto registry = detail::connection_singleflight_registry{};
-   auto leaders = std::vector<detail::connection_singleflight_registry::lease>{};
+   auto starters = std::vector<detail::connection_singleflight_registry::lease>{};
    auto waiters = std::vector<detail::connection_singleflight_registry::lease>{};
-   leaders.reserve(peer_count);
+   starters.reserve(peer_count);
    waiters.reserve(peer_count);
 
    for (auto index = std::size_t{}; index < peer_count; ++index) {
-      auto leader = registry.join(peer(static_cast<std::uint8_t>(index + 1U)), runtime.context().get_executor());
+      auto starter = registry.join(peer(static_cast<std::uint8_t>(index + 1U)), runtime.context().get_executor());
       auto waiter = registry.join(peer(static_cast<std::uint8_t>(index + 1U)), runtime.context().get_executor());
-      BOOST_TEST(leader.leader());
-      BOOST_TEST(!waiter.leader());
-      registry.succeed(leader);
-      leaders.push_back(std::move(leader));
-      waiters.push_back(std::move(waiter));
+      BOOST_REQUIRE(starter.start.has_value());
+      BOOST_TEST(!waiter.start.has_value());
+      registry.succeed(*starter.start);
+      starters.push_back(std::move(starter.participant));
+      waiters.push_back(std::move(waiter.participant));
    }
    BOOST_TEST(registry.size() == peer_count);
 
-   for (auto& leader : leaders) {
-      registry.leave(leader);
+   for (auto& starter : starters) {
+      registry.leave(starter);
    }
    BOOST_TEST(registry.size() == peer_count);
 
@@ -4550,16 +4552,16 @@ BOOST_AUTO_TEST_CASE(p2p_gossipsub_connection_singleflight_shares_one_typed_fail
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto registry = detail::connection_singleflight_registry{};
    const auto remote = peer(217);
-   auto leader = registry.join(remote, runtime.context().get_executor());
+   auto starter = registry.join(remote, runtime.context().get_executor());
    auto first_waiter = registry.join(remote, runtime.context().get_executor());
    auto second_waiter = registry.join(remote, runtime.context().get_executor());
-   BOOST_TEST(leader.leader());
-   BOOST_TEST(!first_waiter.leader());
-   BOOST_TEST(!second_waiter.leader());
+   BOOST_REQUIRE(starter.start.has_value());
+   BOOST_TEST(!first_waiter.start.has_value());
+   BOOST_TEST(!second_waiter.start.has_value());
 
-   registry.fail(leader, exceptions::code::timeout, "shared connection timeout");
-   const auto first = forge::asio::blocking::run(runtime, first_waiter.wait());
-   const auto second = forge::asio::blocking::run(runtime, second_waiter.wait());
+   registry.fail(*starter.start, exceptions::code::timeout, "shared connection timeout");
+   const auto first = forge::asio::blocking::run(runtime, first_waiter.participant.wait());
+   const auto second = forge::asio::blocking::run(runtime, second_waiter.participant.wait());
    BOOST_TEST(!first.succeeded);
    BOOST_TEST(!second.succeeded);
    BOOST_REQUIRE(first.error.has_value());
@@ -4569,9 +4571,27 @@ BOOST_AUTO_TEST_CASE(p2p_gossipsub_connection_singleflight_shares_one_typed_fail
    BOOST_TEST(first.message == "shared connection timeout");
    BOOST_TEST(second.message == first.message);
 
-   registry.leave(leader);
-   registry.leave(first_waiter);
-   registry.leave(second_waiter);
+   registry.leave(starter.participant);
+   registry.leave(first_waiter.participant);
+   registry.leave(second_waiter.participant);
+   BOOST_TEST(registry.size() == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_gossipsub_connection_singleflight_survives_starter_cancellation) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto registry = detail::connection_singleflight_registry{};
+   const auto remote = peer(216);
+   auto starter = registry.join(remote, runtime.context().get_executor());
+   auto waiter = registry.join(remote, runtime.context().get_executor());
+   BOOST_REQUIRE(starter.start.has_value());
+   BOOST_TEST(!waiter.start.has_value());
+
+   registry.leave(starter.participant);
+   BOOST_TEST(registry.size() == 1U);
+   registry.succeed(*starter.start);
+   const auto result = forge::asio::blocking::run(runtime, waiter.participant.wait());
+   BOOST_TEST(result.succeeded);
+   registry.leave(waiter.participant);
    BOOST_TEST(registry.size() == 0U);
 }
 
@@ -5745,6 +5765,33 @@ BOOST_AUTO_TEST_CASE(p2p_gossipsub_outbound_byte_limit_is_global_across_peers) {
    forge::asio::blocking::run(runtime, publisher.async_stop());
    BOOST_REQUIRE(first.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
    BOOST_CHECK_THROW(static_cast<void>(first.get()), forge::exceptions::base);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_gossipsub_rejected_outbound_reservations_do_not_retain_peer_entries) {
+   auto budget = detail::pubsub_outbound_budget{};
+   constexpr auto limit = std::size_t{128};
+   constexpr auto reservation = std::size_t{96};
+   const auto active = peer(250);
+   BOOST_REQUIRE(budget.reserve(active, reservation, limit));
+
+   for (auto seed = std::uint16_t{1}; seed <= 200; ++seed) {
+      BOOST_TEST(!budget.reserve(peer(static_cast<std::uint8_t>(seed)), reservation, limit));
+   }
+   BOOST_TEST(budget.peers() == 1U);
+   BOOST_TEST(budget.total() == reservation);
+
+   budget.release(active, reservation);
+   BOOST_TEST(budget.peers() == 0U);
+   BOOST_TEST(budget.total() == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_gossipsub_peer_failure_attribution_excludes_local_runtime_failures) {
+   BOOST_TEST(!detail::peer_attributable_pubsub_failure(exceptions::code::backpressure_rejected, false));
+   BOOST_TEST(!detail::peer_attributable_pubsub_failure(exceptions::code::canceled, false));
+   BOOST_TEST(!detail::peer_attributable_pubsub_failure(exceptions::code::internal, false));
+   BOOST_TEST(!detail::peer_attributable_pubsub_failure(exceptions::code::closed, true));
+   BOOST_TEST(detail::peer_attributable_pubsub_failure(exceptions::code::closed, false));
+   BOOST_TEST(detail::peer_attributable_pubsub_failure(exceptions::code::protocol_error, false));
 }
 
 BOOST_AUTO_TEST_CASE(p2p_gossipsub_validation_queue_limit_retries_excess_without_penalizing_peer) {
