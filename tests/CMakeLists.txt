@@ -391,6 +391,7 @@ if(FORGE_HAS_MDBX)
    add_executable(
       test_forge_db_authenticated
       unit/main.cpp
+      db_authenticated/authenticated_benchmark_options_tests.cpp
       db_authenticated/authenticated_crash_tests.cpp
       db_authenticated/db_authenticated_tests.cpp
       db_authenticated/ranked_range_proof_adversarial_tests.cpp

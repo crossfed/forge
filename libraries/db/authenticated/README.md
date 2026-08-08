@@ -138,9 +138,9 @@ values:
 ```sh
 cmake --build build/release --target benchmark_forge_db_authenticated -j4
 build/release/tests/benchmark_forge_db_authenticated \
-   --keys 1000000 --value-bytes 32 --chunk-keys 4096 --path /tmp/forge-authenticated-1m
+   --baseline 1m --path /tmp/forge-authenticated-1m
 build/release/tests/benchmark_forge_db_authenticated \
-   --keys 10000000 --value-bytes 32 --chunk-keys 4096 --path /tmp/forge-authenticated-10m
+   --baseline 10m --path /tmp/forge-authenticated-10m
 ```
 
 A short disposable smoke invocation is:
@@ -152,19 +152,27 @@ build/release/tests/benchmark_forge_db_authenticated --keys 10000 --value-bytes 
 `--path` must not exist before the run and is preserved afterward. Omitting it
 uses and removes a temporary directory. The initial-batch timer covers MDBX
 transaction creation, authenticated staging and durable commit for every
-bounded chunk, but excludes client-side mutation construction. The default
-chunk contains 4,096 ordered keys, preventing the benchmark itself from holding
-the complete mutation set and staged tree in memory. Point and range timings
-cover public proof generation, including snapshot acquisition; proofs omit
-values so value size does not make the fixed 256-item range exceed the proof
-byte limit.
+bounded chunk, but excludes client-side mutation construction. Profile defaults
+use 32,768 keys per chunk for `1m` and 65,536 for `10m`, producing 31 and 153
+committed versions respectively. These profile-specific chunks bound both peak
+staging memory and retained persistent history; custom `--keys` runs retain the
+4,096-key default, and `--chunk-keys` always overrides the selected default.
+
+The `initial_batch` metric represents construction of a production-scale
+initial state through bounded durable commits. It does not model long-history
+retention, block-by-block churn or pruning throughput; those require a separate
+workload with an explicit history policy. Point and range timings cover public
+proof generation, including snapshot acquisition; proofs omit values so value
+size does not make the fixed 256-item range exceed the proof byte limit.
 
 The executable writes one JSON document to stdout. It reports the committed
 state/change roots and sizes, initial-batch milliseconds and keys/second, 1,000
 point-proof milliseconds/proofs-per-second/average wire bytes, and 100 ranked
 range-proof milliseconds/proofs-per-second/average wire bytes/average nodes.
-The range limit is fixed at 256. Configuration output also records the MDBX map
-ceiling and growth step used by the run.
+The range limit is fixed at 256. Configuration output also records the workload,
+baseline, chunk source, planned version count, MDBX map ceiling and growth step.
+Storage output records actual committed/retained versions plus the closed MDBX
+directory's logical byte footprint and file count.
 
 The hostile-input parser/verifier harness is opt-in and uses Clang libFuzzer,
 AddressSanitizer and UndefinedBehaviorSanitizer:
