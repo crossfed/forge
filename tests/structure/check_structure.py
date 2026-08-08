@@ -410,6 +410,29 @@ def check_chain_audited_api_workflow(root: Path, errors: list[str]) -> None:
          f"{path.relative_to(root)}: native and performance configure steps must use the selected macOS SDKROOT"
       )
 
+   isolated_glaze_prefix = 'CMAKE_PREFIX_PATH=$RUNNER_TEMP/forge-glaze;'
+   if isolated_glaze_prefix in source:
+      errors.append(
+         f"{path.relative_to(root)}: isolated Glaze prefix must not enter CMAKE_PREFIX_PATH"
+      )
+
+   exact_glaze_config = 'glaze_config="$RUNNER_TEMP/forge-glaze/share/glaze/glazeConfig.cmake"'
+   resolved_glaze_dir = 'echo "FORGE_GLAZE_DIR=$(cd "$(dirname "$glaze_config")" && pwd -P)"'
+   explicit_glaze_dir = '-Dglaze_DIR="$FORGE_GLAZE_DIR"'
+   shared_dependency_prefixes = (
+      'CMAKE_PREFIX_PATH=$(brew --prefix);$(brew --prefix boost);'
+      '$(brew --prefix libngtcp2);$(brew --prefix openssl@3)'
+   )
+   if (
+      source.count(exact_glaze_config) != 3
+      or source.count(resolved_glaze_dir) != 3
+      or source.count(explicit_glaze_dir) != 3
+      or source.count(shared_dependency_prefixes) != 3
+   ):
+      errors.append(
+         f"{path.relative_to(root)}: every configure lane must isolate Glaze and preserve shared dependency prefixes"
+      )
+
    try:
       native_acceptance = source.split("      - name: Build acceptance targets\n", 1)[1].split(
          "      - name: Run acceptance\n", 1
