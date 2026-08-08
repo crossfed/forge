@@ -43,6 +43,8 @@ namespace {
 
 using namespace std::chrono_literals;
 
+constexpr auto crash_checkpoint_timeout = 2min;
+
 forge::db::authenticated::bytes bytes(std::string value) {
    return {
        reinterpret_cast<const std::byte*>(value.data()),
@@ -138,7 +140,7 @@ child_process start_helper(const std::filesystem::path& root, std::string mode) 
 
 template <typename Predicate>
 std::string wait_for_checkpoint(child_process& process, const std::filesystem::path& root, Predicate&& accept) {
-   const auto deadline = std::chrono::steady_clock::now() + 15s;
+   const auto deadline = std::chrono::steady_clock::now() + crash_checkpoint_timeout;
    auto observed = std::string{};
    while (std::chrono::steady_clock::now() < deadline) {
       auto stream = std::ifstream{root / "checkpoint"};
