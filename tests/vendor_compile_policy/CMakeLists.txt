@@ -3,6 +3,13 @@ cmake_minimum_required(VERSION 3.31)
 project(forge_vendor_compile_policy_test LANGUAGES C CXX)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+get_property(_forge_generator_is_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(_forge_generator_is_multi_config)
+   file(WRITE "${CMAKE_BINARY_DIR}/generator-is-multi-config.txt" "true\n")
+else()
+   file(WRITE "${CMAKE_BINARY_DIR}/generator-is-multi-config.txt" "false\n")
+endif()
+
 if(MSVC)
    set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} /Od")
    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /Od")

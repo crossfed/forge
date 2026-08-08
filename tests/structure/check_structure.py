@@ -427,9 +427,10 @@ def check_chain_audited_api_workflow(root: Path, errors: list[str]) -> None:
    for required_test in (
       "test_forge_structure",
       "test_forge_vendor_compile_policy",
+      "test_forge_vendor_compile_policy_multi_config",
       "test_forge_package_chain_api_component",
       "test_forge_package_db_mdbx_component",
-      "test_forge_package_glaze_dir_only",
+      "test_forge_package_explicit_glaze_dir",
    ):
       if required_test not in run_acceptance:
          errors.append(f"{path.relative_to(root)}: acceptance test run is missing {required_test}")

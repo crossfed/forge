@@ -27,12 +27,16 @@ def main() -> int:
    parser.add_argument("--binary", required=True)
    parser.add_argument("--forge-source", required=True)
    parser.add_argument("--generator", required=True)
+   parser.add_argument("--multi-config", action="store_true")
    parser.add_argument("--c-compiler", required=True)
    parser.add_argument("--cxx-compiler", required=True)
    args = parser.parse_args()
 
    binary = pathlib.Path(args.binary)
    shutil.rmtree(binary, ignore_errors=True)
+   configuration_option = (
+      "-DCMAKE_CONFIGURATION_TYPES=Debug" if args.multi_config else "-DCMAKE_BUILD_TYPE=Debug"
+   )
    subprocess.run(
       [
          args.cmake,
@@ -42,14 +46,19 @@ def main() -> int:
          str(binary),
          "-G",
          args.generator,
-         "-DCMAKE_BUILD_TYPE=Debug",
-         "-DCMAKE_CONFIGURATION_TYPES=Debug",
+         configuration_option,
          f"-DCMAKE_C_COMPILER={args.c_compiler}",
          f"-DCMAKE_CXX_COMPILER={args.cxx_compiler}",
          f"-DFORGE_SOURCE_DIR={args.forge_source}",
       ],
       check=True,
    )
+
+   actual_multi_config = (binary / "generator-is-multi-config.txt").read_text().strip() == "true"
+   if actual_multi_config != args.multi_config:
+      raise RuntimeError(
+         f"generator {args.generator!r}: multi-config={actual_multi_config}, expected {args.multi_config}"
+      )
 
    database = json.loads((binary / "compile_commands.json").read_text())
    by_name = {pathlib.Path(str(entry["file"])).name: command_arguments(entry) for entry in database}
