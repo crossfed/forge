@@ -1204,7 +1204,12 @@ boost::asio::awaitable<forge::net::p2p::stream> node::async_open_protocol_stream
          const auto kind = p2p_code(error);
          last_kind = kind;
          last_message = error.what();
-         if (kind == exceptions::code::closed || kind == exceptions::code::canceled ||
+         auto node_stopped = false;
+         if (kind == exceptions::code::closed) {
+            auto lock = std::scoped_lock{self->mutex};
+            node_stopped = self->stopped;
+         }
+         if ((kind == exceptions::code::closed && node_stopped) || kind == exceptions::code::canceled ||
              kind == exceptions::code::unsupported_protocol || kind == exceptions::code::protocol_error ||
              kind == exceptions::code::codec_error) {
             throw;

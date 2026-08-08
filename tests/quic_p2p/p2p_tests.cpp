@@ -3574,6 +3574,9 @@ BOOST_AUTO_TEST_CASE(p2p_relay_fallback_refreshes_candidate_without_explicit_rel
 
    const auto relay_endpoint = listen(relay_node, runtime);
    (void)listen(target, runtime);
+   const auto closed_direct_endpoint = start_stalling_tcp_peer(runtime, std::chrono::milliseconds{10});
+   source.peers().learn_endpoint(target.local_peer(), closed_direct_endpoint,
+                                 capability_set{.bits = capabilities::direct_quic});
    source.peers().learn_endpoint(
        relay_node.local_peer(), relay_endpoint,
        capability_set{.bits = capabilities::direct_quic | capabilities::relay | capabilities::relay_reservation});
