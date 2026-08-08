@@ -2,7 +2,7 @@
 
 namespace forge::net::p2p::detail {
 
-[[nodiscard]] constexpr bool peer_attributable_pubsub_failure(exceptions::code kind, bool stopped) noexcept {
+[[nodiscard]] constexpr bool peer_attributable_failure(exceptions::code kind, bool stopped) noexcept {
    switch (kind) {
    case exceptions::code::invalid_options:
    case exceptions::code::invalid_identity:

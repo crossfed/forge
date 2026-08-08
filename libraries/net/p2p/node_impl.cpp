@@ -74,7 +74,7 @@ import forge.net.yamux.session;
 #include "details/node_impl.hxx"
 #include "details/peer_exchange_learning.hxx"
 #include "details/protocol_capabilities.hxx"
-#include "details/pubsub_failure.hxx"
+#include "details/peer_failure.hxx"
 #include "details/relay_accounting.hxx"
 #include "details/session_lifecycle.hxx"
 
@@ -1127,6 +1127,7 @@ boost::asio::awaitable<std::shared_ptr<node::impl::session_state>>
 node::impl::ensure_pubsub_direct_session(const peer_id& peer) {
    auto participant = detail::connection_singleflight_registry::lease{};
    auto start = std::optional<detail::connection_singleflight_registry::operation>{};
+   auto tracked = detail::session_teardown::ticket{};
    auto existing = std::shared_ptr<session_state>{};
    {
       auto lock = std::scoped_lock{mutex};
@@ -1138,6 +1139,9 @@ node::impl::ensure_pubsub_direct_session(const peer_id& peer) {
          auto joined = pubsub_value.connection_gates.join(peer, runtime.context().get_executor());
          participant = std::move(joined.participant);
          start = std::move(joined.start);
+         if (start) {
+            tracked = teardown.track();
+         }
       }
    }
    if (existing) {
@@ -1151,25 +1155,33 @@ node::impl::ensure_pubsub_direct_session(const peer_id& peer) {
 
    if (start) {
       auto self = shared_from_this();
-      boost::asio::co_spawn(
-          runtime.context(),
-          [self, peer, active = std::move(*start)]() mutable -> boost::asio::awaitable<void> {
-             try {
-                static_cast<void>(
-                    co_await self->ensure_direct_session(peer, self->options.limits.discovery.query_timeout));
-                auto lock = std::scoped_lock{self->mutex};
-                self->pubsub_value.connection_gates.succeed(active);
-             } catch (const forge::exceptions::base& error) {
-                auto lock = std::scoped_lock{self->mutex};
-                self->pubsub_value.connection_gates.fail(active, p2p_code(error), error.what());
-             } catch (...) {
-                auto lock = std::scoped_lock{self->mutex};
-                self->pubsub_value.connection_gates.fail(active, exceptions::code::internal,
-                                                         "GossipSub peer connection failed internally");
-             }
-             co_return;
-          },
-          boost::asio::detached);
+      auto active = std::make_shared<detail::connection_singleflight_registry::operation>(std::move(*start));
+      try {
+         boost::asio::co_spawn(
+             runtime.context(),
+             [self, peer, active, tracked = std::move(tracked)]() mutable -> boost::asio::awaitable<void> {
+                static_cast<void>(tracked);
+                try {
+                   static_cast<void>(
+                       co_await self->ensure_direct_session(peer, self->options.limits.discovery.query_timeout));
+                   auto lock = std::scoped_lock{self->mutex};
+                   self->pubsub_value.connection_gates.succeed(*active);
+                } catch (const forge::exceptions::base& error) {
+                   auto lock = std::scoped_lock{self->mutex};
+                   self->pubsub_value.connection_gates.fail(*active, p2p_code(error), error.what());
+                } catch (...) {
+                   auto lock = std::scoped_lock{self->mutex};
+                   self->pubsub_value.connection_gates.fail(*active, exceptions::code::internal,
+                                                            "GossipSub peer connection failed internally");
+                }
+                co_return;
+             },
+             boost::asio::detached);
+      } catch (...) {
+         auto lock = std::scoped_lock{mutex};
+         pubsub_value.connection_gates.fail(*active, exceptions::code::internal,
+                                            "GossipSub peer connection could not be started");
+      }
    }
 
    auto result = detail::connection_singleflight_registry::outcome{};
@@ -1302,7 +1314,7 @@ void node::impl::record_pubsub_send_failure(const peer_id& peer, const forge::ex
       auto lock = std::scoped_lock{mutex};
       node_stopped = stopped;
    }
-   if (!detail::peer_attributable_pubsub_failure(kind, node_stopped)) {
+   if (!detail::peer_attributable_failure(kind, node_stopped)) {
       return;
    }
    store.mark_failure(peer);
@@ -1812,8 +1824,17 @@ node::impl::ensure_direct_session(const peer_id& peer, std::chrono::milliseconds
          co_return co_await connect_direct(
              endpoint, node::connect_options{.expected_peer = peer, .allow_relay = false, .timeout = per_attempt});
       } catch (const forge::exceptions::base& error) {
-         last_kind = p2p_code(error);
+         const auto kind = p2p_code(error);
+         last_kind = kind;
          last_message = error.what();
+         auto node_stopped = false;
+         {
+            auto lock = std::scoped_lock{mutex};
+            node_stopped = stopped;
+         }
+         if (!detail::peer_attributable_failure(kind, node_stopped)) {
+            FORGE_THROW_CODE(kind, error.what());
+         }
          store.mark_endpoint_failure(peer, endpoint, path::kind::direct,
                                      endpoint_backoff_until(peer, endpoint, path::kind::direct));
          record_direct_failure(peer);
@@ -1857,14 +1878,26 @@ node::impl::open_protocol_on_direct_session(const peer_id& peer, const protocol_
           p2p_kind == exceptions::code::codec_error) {
          throw;
       }
+      const auto kind = p2p_code(error);
+      auto node_stopped = false;
+      {
+         auto lock = std::scoped_lock{mutex};
+         node_stopped = stopped;
+      }
+      if (kind == exceptions::code::canceled || (kind == exceptions::code::closed && node_stopped) ||
+          kind == exceptions::code::backpressure_rejected) {
+         FORGE_THROW_CODE(kind, error.what());
+      }
       session->closed = true;
       forget_session(session);
-      if (session->direct_endpoint) {
+      if (detail::peer_attributable_failure(kind, node_stopped) && session->direct_endpoint) {
          store.mark_endpoint_failure(peer, *session->direct_endpoint, path::kind::direct,
                                      endpoint_backoff_until(peer, *session->direct_endpoint, path::kind::direct));
       }
-      record_direct_failure(peer);
-      FORGE_THROW_CODE(p2p_code(error), error.what());
+      if (detail::peer_attributable_failure(kind, node_stopped)) {
+         record_direct_failure(peer);
+      }
+      FORGE_THROW_CODE(kind, error.what());
    }
 }
 

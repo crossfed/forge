@@ -96,7 +96,7 @@ import forge.multiformats.multiaddr;
 #include "../../libraries/net/p2p/details/connection_singleflight_registry.hxx"
 #include "../../libraries/net/p2p/details/peer_exchange_learning.hxx"
 #include "../../libraries/net/p2p/details/pubsub_outbound_budget.hxx"
-#include "../../libraries/net/p2p/details/pubsub_failure.hxx"
+#include "../../libraries/net/p2p/details/peer_failure.hxx"
 
 namespace forge::net::p2p {
 namespace {
@@ -5720,6 +5720,18 @@ BOOST_AUTO_TEST_CASE(p2p_gossipsub_outbound_byte_limit_counts_blocked_active_pub
    forge::asio::blocking::run(runtime, publisher.async_stop());
    BOOST_REQUIRE(first.wait_for(std::chrono::seconds{1}) == std::future_status::ready);
    BOOST_CHECK_THROW(static_cast<void>(first.get()), forge::exceptions::base);
+   const auto metrics_after_stop = publisher.metrics();
+   const auto peer_after_stop = publisher.peers().find(stalled_peer);
+   BOOST_REQUIRE(peer_after_stop.has_value());
+   BOOST_REQUIRE(!peer_after_stop->endpoints.empty());
+   const auto endpoint_failures_after_stop = peer_after_stop->endpoints.front().failures;
+   wait_on_runtime(runtime, std::chrono::milliseconds{100}, "post-stop GossipSub dial drain");
+   const auto peer_after_drain = publisher.peers().find(stalled_peer);
+   BOOST_REQUIRE(peer_after_drain.has_value());
+   BOOST_REQUIRE(!peer_after_drain->endpoints.empty());
+   BOOST_TEST(peer_after_drain->failures == failures_before);
+   BOOST_TEST(peer_after_drain->endpoints.front().failures == endpoint_failures_after_stop);
+   BOOST_TEST(publisher.metrics().direct_failures == metrics_after_stop.direct_failures);
 }
 
 BOOST_AUTO_TEST_CASE(p2p_gossipsub_outbound_byte_limit_is_global_across_peers) {
@@ -5786,12 +5798,12 @@ BOOST_AUTO_TEST_CASE(p2p_gossipsub_rejected_outbound_reservations_do_not_retain_
 }
 
 BOOST_AUTO_TEST_CASE(p2p_gossipsub_peer_failure_attribution_excludes_local_runtime_failures) {
-   BOOST_TEST(!detail::peer_attributable_pubsub_failure(exceptions::code::backpressure_rejected, false));
-   BOOST_TEST(!detail::peer_attributable_pubsub_failure(exceptions::code::canceled, false));
-   BOOST_TEST(!detail::peer_attributable_pubsub_failure(exceptions::code::internal, false));
-   BOOST_TEST(!detail::peer_attributable_pubsub_failure(exceptions::code::closed, true));
-   BOOST_TEST(detail::peer_attributable_pubsub_failure(exceptions::code::closed, false));
-   BOOST_TEST(detail::peer_attributable_pubsub_failure(exceptions::code::protocol_error, false));
+   BOOST_TEST(!detail::peer_attributable_failure(exceptions::code::backpressure_rejected, false));
+   BOOST_TEST(!detail::peer_attributable_failure(exceptions::code::canceled, false));
+   BOOST_TEST(!detail::peer_attributable_failure(exceptions::code::internal, false));
+   BOOST_TEST(!detail::peer_attributable_failure(exceptions::code::closed, true));
+   BOOST_TEST(detail::peer_attributable_failure(exceptions::code::closed, false));
+   BOOST_TEST(detail::peer_attributable_failure(exceptions::code::protocol_error, false));
 }
 
 BOOST_AUTO_TEST_CASE(p2p_gossipsub_validation_queue_limit_retries_excess_without_penalizing_peer) {

@@ -81,6 +81,23 @@ BOOST_AUTO_TEST_CASE(p2p_session_teardown_waits_for_started_transport_cleanup) {
    BOOST_TEST(cancel_called.load(std::memory_order_acquire) == 0U);
 }
 
+BOOST_AUTO_TEST_CASE(p2p_session_teardown_waits_for_tracked_background_operation) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto teardown = detail::session_teardown{runtime.context().get_executor()};
+   auto tracked = teardown.track();
+   BOOST_REQUIRE(tracked.active());
+
+   teardown.start({});
+   auto stopped = boost::asio::co_spawn(runtime.context(), teardown.wait(), boost::asio::use_future);
+   const auto waits_for_background_operation =
+       stopped.wait_for(std::chrono::milliseconds{50}) == std::future_status::timeout;
+   BOOST_TEST(waits_for_background_operation);
+
+   tracked.release();
+   BOOST_REQUIRE(stopped.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+   stopped.get();
+}
+
 BOOST_AUTO_TEST_CASE(p2p_direct_transport_teardown_continues_after_profile_failure) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    const auto options = node::options{};
