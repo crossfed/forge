@@ -35,6 +35,7 @@ module;
 
 module forge.net.p2p.node;
 
+import forge.asio.gate;
 import forge.crypto.symmetric.chacha20_poly1305;
 import forge.crypto.pki.der;
 import forge.crypto.asymmetric.ed25519;
@@ -1084,6 +1085,12 @@ boost::asio::awaitable<pubsub::message> node::async_publish(pubsub::topic subjec
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "GossipSub publish requires topic");
    }
    auto self = impl_;
+   {
+      auto lock = std::scoped_lock{self->mutex};
+      if (self->stopped) {
+         FORGE_THROW_EXCEPTION(exceptions::closed, "cannot publish GossipSub message after node shutdown");
+      }
+   }
    if (data.size() > self->options.limits.pubsub.limits.max_data_size) {
       FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "GossipSub publish exceeds max data size");
    }
@@ -1294,7 +1301,7 @@ void node::stop() {
       impl_->sessions.clear();
       impl_->inbound_relay_reservations.clear();
       impl_->outbound_relay_reservations.clear();
-      impl_->pubsub_value.outbound_streams.clear();
+      impl_->clear_pubsub_outbound_locked();
       impl_->pubsub_value.active_validations_by_peer.clear();
       impl_->pubsub_value.active_validations = 0;
       impl_->metrics_value.active_sessions = 0;

@@ -4322,6 +4322,139 @@ BOOST_AUTO_TEST_CASE(p2p_gossipsub_nodes_deliver_signed_publish_over_negotiated_
    forge::asio::blocking::run(runtime, subscriber.async_stop());
 }
 
+BOOST_AUTO_TEST_CASE(p2p_gossipsub_serializes_concurrent_publishes_on_cached_tls_stream) {
+   constexpr auto publish_count = std::size_t{24};
+   constexpr auto payload_size = std::size_t{64 * 1024};
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 8}};
+   const auto publisher_identity = make_test_identity();
+   const auto subscriber_identity = make_test_identity();
+   const auto pubsub_capabilities = capability_set{.bits = capabilities::direct_quic | capabilities::pubsub};
+   auto publisher = node{runtime, options_for(publisher_identity, pubsub_capabilities)};
+   auto subscriber = node{runtime, options_for(subscriber_identity, pubsub_capabilities)};
+   const auto subscriber_endpoint = listen_tcp(subscriber, runtime);
+   publisher.peers().learn_endpoint(subscriber.local_peer(), subscriber_endpoint,
+                                    capability_set{.bits = capabilities::direct_quic | capabilities::pubsub});
+
+   struct delivery_state {
+      std::mutex mutex;
+      std::condition_variable ready;
+      std::set<std::uint8_t> values;
+   };
+   auto delivered = std::make_shared<delivery_state>();
+   const auto subject = pubsub::topic{.value = "forge.pubsub.concurrent"};
+   forge::asio::blocking::run(
+       runtime,
+       subscriber.async_subscribe(
+           subject, [delivered](pubsub::event event) mutable -> boost::asio::awaitable<pubsub::validation_result> {
+              if (!event.value.data.empty()) {
+                 const auto value = event.value.data.front();
+                 {
+                    auto lock = std::scoped_lock{delivered->mutex};
+                    delivered->values.insert(value);
+                 }
+                 delivered->ready.notify_all();
+              }
+              co_return pubsub::validation_result::accept;
+           }));
+   forge::asio::blocking::run(
+       runtime,
+       publisher.async_connect(subscriber_endpoint, node::connect_options{.expected_peer = subscriber.local_peer()}));
+   const auto subscription_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{5};
+   while (publisher.pubsub_snapshot().peers == 0U) {
+      BOOST_REQUIRE(std::chrono::steady_clock::now() < subscription_deadline);
+      wait_on_runtime(runtime, std::chrono::milliseconds{1}, "GossipSub subscription announcement");
+   }
+
+   // Establish the cached TLS stream before publications race for it.
+   forge::asio::blocking::run(runtime, publisher.async_publish(subject, std::vector<std::uint8_t>(payload_size, 0U)));
+   {
+      auto lock = std::unique_lock{delivered->mutex};
+      BOOST_REQUIRE(
+          delivered->ready.wait_for(lock, std::chrono::seconds{5}, [&] { return delivered->values.contains(0U); }));
+      delivered->values.clear();
+   }
+
+   auto publishes = std::vector<std::future<pubsub::message>>{};
+   publishes.reserve(publish_count);
+   for (auto index = std::size_t{}; index < publish_count; ++index) {
+      auto payload = std::vector<std::uint8_t>(payload_size, static_cast<std::uint8_t>(index + 1U));
+      publishes.push_back(boost::asio::co_spawn(runtime.context(), publisher.async_publish(subject, std::move(payload)),
+                                                boost::asio::use_future));
+   }
+   for (auto& publish : publishes) {
+      BOOST_REQUIRE_MESSAGE(publish.wait_for(std::chrono::seconds{10}) == std::future_status::ready,
+                            "concurrent GossipSub publish did not finish");
+      try {
+         static_cast<void>(publish.get());
+      } catch (const forge::exceptions::base& error) {
+         const auto publisher_metrics = publisher.metrics();
+         const auto subscriber_metrics = subscriber.metrics();
+         BOOST_FAIL("concurrent GossipSub publish failed: "
+                    << error.what() << "; publisher sessions=" << publisher_metrics.active_sessions << " closed="
+                    << publisher_metrics.sessions_closed << " pruned=" << publisher_metrics.sessions_pruned
+                    << " connection_rejections=" << publisher_metrics.connection_rejections << " direct_failures="
+                    << publisher_metrics.direct_failures << " invalid=" << publisher_metrics.pubsub_invalid_messages
+                    << " protocol_rejections=" << publisher_metrics.protocol_rejections
+                    << " handshakes_failed=" << publisher_metrics.handshakes_failed << "; subscriber sessions="
+                    << subscriber_metrics.active_sessions << " closed=" << subscriber_metrics.sessions_closed
+                    << " invalid=" << subscriber_metrics.pubsub_invalid_messages
+                    << " protocol_rejections=" << subscriber_metrics.protocol_rejections);
+      }
+   }
+   {
+      auto lock = std::unique_lock{delivered->mutex};
+      BOOST_REQUIRE(delivered->ready.wait_for(lock, std::chrono::seconds{10},
+                                              [&] { return delivered->values.size() == publish_count; }));
+   }
+   BOOST_TEST(publisher.metrics().active_sessions == 1U);
+   BOOST_TEST(subscriber.metrics().active_sessions == 1U);
+   BOOST_TEST(publisher.metrics().pubsub_invalid_messages == 0U);
+   BOOST_TEST(subscriber.metrics().pubsub_invalid_messages == 0U);
+
+   forge::asio::blocking::run(runtime, publisher.async_stop());
+   forge::asio::blocking::run(runtime, subscriber.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_gossipsub_rejects_publish_after_cached_stream_shutdown) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   const auto publisher_identity = make_test_identity();
+   const auto subscriber_identity = make_test_identity();
+   const auto pubsub_capabilities = capability_set{.bits = capabilities::direct_quic | capabilities::pubsub};
+   auto publisher = node{runtime, options_for(publisher_identity, pubsub_capabilities)};
+   auto subscriber = node{runtime, options_for(subscriber_identity, pubsub_capabilities)};
+   const auto subscriber_endpoint = listen_tcp(subscriber, runtime);
+   publisher.peers().learn_endpoint(subscriber.local_peer(), subscriber_endpoint, pubsub_capabilities);
+
+   const auto subject = pubsub::topic{.value = "forge.pubsub.shutdown"};
+   auto delivered = std::make_shared<std::promise<void>>();
+   auto delivery = delivered->get_future();
+   forge::asio::blocking::run(
+       runtime, subscriber.async_subscribe(
+                    subject, [delivered](pubsub::event) mutable -> boost::asio::awaitable<pubsub::validation_result> {
+                       delivered->set_value();
+                       co_return pubsub::validation_result::accept;
+                    }));
+   forge::asio::blocking::run(
+       runtime,
+       publisher.async_connect(subscriber_endpoint, node::connect_options{.expected_peer = subscriber.local_peer()}));
+   forge::asio::blocking::run(runtime, publisher.async_publish(subject, std::vector<std::uint8_t>{0x42U}));
+   BOOST_REQUIRE(delivery.wait_for(std::chrono::seconds{5}) == std::future_status::ready);
+
+   forge::asio::blocking::run(runtime, publisher.async_stop());
+   BOOST_TEST(publisher.metrics().stopped);
+   try {
+      static_cast<void>(
+          forge::asio::blocking::run(runtime, publisher.async_publish(subject, std::vector<std::uint8_t>{0x43U})));
+      BOOST_FAIL("GossipSub publish should reject after clean shutdown");
+   } catch (const forge::exceptions::base& error) {
+      BOOST_REQUIRE(forge::net::p2p::exceptions::code_of(error).has_value());
+      BOOST_TEST(static_cast<int>(*forge::net::p2p::exceptions::code_of(error)) ==
+                 static_cast<int>(exceptions::code::closed));
+   }
+
+   forge::asio::blocking::run(runtime, subscriber.async_stop());
+}
+
 BOOST_AUTO_TEST_CASE(p2p_gossipsub_separates_immediate_source_from_signed_author) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
    const auto author_identity = make_test_certificate_identity("pubsub-signed-author");

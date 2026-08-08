@@ -101,6 +101,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
       std::string retry_cursor;
       std::map<peer_id, pubsub::score> scores;
       std::map<peer_id, std::shared_ptr<forge::net::p2p::stream>> outbound_streams;
+      std::map<peer_id, std::shared_ptr<forge::asio::gate>> outbound_write_gates;
       std::map<peer_id, std::size_t> active_validations_by_peer;
       std::size_t active_validations = 0;
       std::uint64_t next_validation_generation = 1;
@@ -141,6 +142,9 @@ struct node::impl : std::enable_shared_from_this<impl> {
    node::metrics_snapshot metrics_value;
    std::size_t active_ping_streams = 0;
    bool stopped = false;
+
+   void invalidate_pubsub_outbound_locked(const peer_id& peer);
+   void clear_pubsub_outbound_locked();
 
    [[nodiscard]] std::vector<forge::net::p2p::endpoint> local_endpoints_for_control() const;
    [[nodiscard]] std::vector<forge::net::p2p::endpoint> local_endpoints_for_control_locked() const;
@@ -293,6 +297,10 @@ struct node::impl : std::enable_shared_from_this<impl> {
        const peer_id& peer, std::chrono::milliseconds timeout = node::connect_options{}.timeout,
        std::size_t max_direct_endpoints = node::connect_options{}.max_direct_endpoints,
        std::chrono::milliseconds direct_attempt_timeout = node::connect_options{}.direct_attempt_timeout);
+
+   boost::asio::awaitable<forge::net::p2p::stream>
+   open_protocol_on_direct_session(const peer_id& peer, const protocol_id& protocol,
+                                   std::shared_ptr<session_state> session, std::chrono::milliseconds timeout);
 
    boost::asio::awaitable<forge::net::p2p::stream>
    open_protocol_direct(const peer_id& peer, const protocol_id& protocol, std::chrono::milliseconds timeout,

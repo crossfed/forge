@@ -16,4 +16,6 @@ target_link_libraries(
       forge_crypto_pki
       Boost::asio
       OpenSSL::SSL
+   PRIVATE
+      forge_asio
 )
