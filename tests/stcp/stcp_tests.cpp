@@ -53,8 +53,7 @@ namespace {
 
 using bytes = std::vector<std::uint8_t>;
 
-template <typename T>
-struct spawned_result {
+template <typename T> struct spawned_result {
    explicit spawned_result(boost::asio::any_io_executor executor)
        : strand(boost::asio::make_strand(std::move(executor))),
          timer(strand, (std::chrono::steady_clock::time_point::max)()) {}
@@ -68,7 +67,7 @@ struct spawned_result {
 
 template <typename T>
 [[nodiscard]] std::shared_ptr<spawned_result<T>> spawn_result(boost::asio::any_io_executor executor,
-                                                             boost::asio::awaitable<T> operation) {
+                                                              boost::asio::awaitable<T> operation) {
    auto state = std::make_shared<spawned_result<T>>(executor);
    boost::asio::co_spawn(
        state->strand,
@@ -86,8 +85,7 @@ template <typename T>
    return state;
 }
 
-template <typename T>
-boost::asio::awaitable<T> take_result(std::shared_ptr<spawned_result<T>> state) {
+template <typename T> boost::asio::awaitable<T> take_result(std::shared_ptr<spawned_result<T>> state) {
    co_return co_await boost::asio::co_spawn(
        state->strand,
        [state = std::move(state)]() -> boost::asio::awaitable<T> {
@@ -176,9 +174,9 @@ using bio_ptr = std::unique_ptr<BIO, bio_deleter>;
 
 [[nodiscard]] forge::net::transport::endpoint loopback(std::uint16_t port) {
    return forge::net::transport::endpoint{.host_type = forge::net::transport::endpoint::host_kind::ip4,
-                                   .protocol = forge::net::transport::endpoint::protocol_kind::tcp,
-                                   .host = "127.0.0.1",
-                                   .port = port};
+                                          .protocol = forge::net::transport::endpoint::protocol_kind::tcp,
+                                          .host = "127.0.0.1",
+                                          .port = port};
 }
 
 [[nodiscard]] evp_pkey_ptr make_key() {
@@ -204,8 +202,7 @@ void add_extension(X509* certificate, X509* issuer, int nid, std::string_view va
 }
 
 [[nodiscard]] x509_ptr make_certificate(EVP_PKEY* subject_key, std::string_view common_name, std::uint32_t serial,
-                                        X509* issuer, EVP_PKEY* issuer_key, bool ca,
-                                        std::string_view san = {}) {
+                                        X509* issuer, EVP_PKEY* issuer_key, bool ca, std::string_view san = {}) {
    auto certificate = x509_ptr{X509_new()};
    BOOST_REQUIRE(certificate != nullptr);
    X509_set_version(certificate.get(), 2);
@@ -260,8 +257,8 @@ void add_extension(X509* certificate, X509* issuer, int nid, std::string_view va
    auto client_key = make_key();
 
    auto ca_certificate = make_certificate(ca_key.get(), "forge test ca", 1, nullptr, nullptr, true);
-   auto server_certificate = make_certificate(server_key.get(), "localhost", 2, ca_certificate.get(), ca_key.get(), false,
-                                             "DNS:localhost,IP:127.0.0.1");
+   auto server_certificate = make_certificate(server_key.get(), "localhost", 2, ca_certificate.get(), ca_key.get(),
+                                              false, "DNS:localhost,IP:127.0.0.1");
    auto client_certificate =
        make_certificate(client_key.get(), "forge test client", 3, ca_certificate.get(), ca_key.get(), false);
 
@@ -283,7 +280,8 @@ void add_extension(X509* certificate, X509* issuer, int nid, std::string_view va
    return out;
 }
 
-[[nodiscard]] forge::net::stcp::client_options client_options(const tls_material& material, bool with_certificate = false) {
+[[nodiscard]] forge::net::stcp::client_options client_options(const tls_material& material,
+                                                              bool with_certificate = false) {
    auto out = forge::net::stcp::client_options{};
    out.security.trusted_ca_pem = material.ca.certificate;
    out.server_name = "localhost";
@@ -309,7 +307,7 @@ int capture_sni_callback(SSL* ssl, int*, void* arg) {
 }
 
 boost::asio::awaitable<raw_tls_observation> accept_raw_tls_once(forge::net::tcp::listener& listener,
-                                                               const tls_material& material) {
+                                                                const tls_material& material) {
    namespace asio = boost::asio;
    auto observation = raw_tls_observation{};
    auto tcp = co_await listener.async_accept_connection();
@@ -363,17 +361,56 @@ boost::asio::awaitable<void> stcp_direct_roundtrip() {
    co_await client_stream.stream.async_write(forge::net::transport::chunk{chunk_payload});
    auto received_chunk = co_await server_stream.stream.async_read_chunk();
    const auto received_chunk_bytes = received_chunk.to_vector();
-   BOOST_CHECK_EQUAL_COLLECTIONS(
-       received_chunk_bytes.begin(), received_chunk_bytes.end(), chunk_payload.begin(), chunk_payload.end());
+   BOOST_CHECK_EQUAL_COLLECTIONS(received_chunk_bytes.begin(), received_chunk_bytes.end(), chunk_payload.begin(),
+                                 chunk_payload.end());
 
    const auto framed = text_bytes("tls framed chunk");
    co_await client_stream.stream.async_write_frame(forge::net::transport::chunk{framed});
    auto received_frame = co_await server_stream.stream.async_read_frame_chunk();
    const auto received_frame_bytes = received_frame.to_vector();
-   BOOST_CHECK_EQUAL_COLLECTIONS(received_frame_bytes.begin(), received_frame_bytes.end(), framed.begin(), framed.end());
+   BOOST_CHECK_EQUAL_COLLECTIONS(received_frame_bytes.begin(), received_frame_bytes.end(), framed.begin(),
+                                 framed.end());
 
    co_await client_stream.stream.async_close();
    co_await server_stream.stream.async_close();
+   co_await listener.async_close();
+}
+
+boost::asio::awaitable<void> stcp_successful_handshake_survives_late_timeout_handler(tls_material material) {
+   constexpr auto handshake_timeout = std::chrono::seconds{1};
+   auto executor = co_await boost::asio::this_coro::executor;
+   auto listener = forge::net::tcp::listener{executor, loopback(0)};
+   auto accept = spawn_result<forge::net::tcp::connection>(executor, listener.async_accept_connection());
+   auto connector = forge::net::tcp::connector{executor};
+   auto client_tcp = co_await connector.async_connect_connection(listener.local_endpoint());
+   auto server_tcp = co_await take_result(accept);
+
+   auto server_upgrade = spawn_result<forge::net::stcp::connection>(
+       executor, forge::net::stcp::async_upgrade_server(std::move(server_tcp), server_options(material)));
+   const auto deadline = std::chrono::steady_clock::now() + handshake_timeout;
+   auto client = co_await forge::net::stcp::async_upgrade_client(std::move(client_tcp), client_options(material),
+                                                                 handshake_timeout);
+   auto server = co_await take_result(server_upgrade);
+
+   auto after_deadline = boost::asio::steady_timer{executor};
+   after_deadline.expires_at(deadline + std::chrono::milliseconds{100});
+   co_await after_deadline.async_wait(boost::asio::use_awaitable);
+   co_await boost::asio::post(executor, boost::asio::use_awaitable);
+   co_await boost::asio::post(executor, boost::asio::use_awaitable);
+
+   BOOST_TEST(client.valid());
+   const auto request = text_bytes("after handshake deadline");
+   co_await client.async_write(request);
+   const auto received_request = co_await server.async_read();
+   BOOST_TEST(received_request == request, boost::test_tools::per_element());
+
+   const auto response = text_bytes("still open");
+   co_await server.async_write(response);
+   const auto received_response = co_await client.async_read();
+   BOOST_TEST(received_response == response, boost::test_tools::per_element());
+
+   co_await client.async_close();
+   co_await server.async_close();
    co_await listener.async_close();
 }
 
@@ -557,9 +594,8 @@ boost::asio::awaitable<void> stcp_upgrade_roundtrip() {
    auto received_prelude = co_await server_tcp.async_read();
    BOOST_CHECK_EQUAL_COLLECTIONS(received_prelude.begin(), received_prelude.end(), prelude.begin(), prelude.end());
 
-   auto server_upgrade =
-       spawn_result<forge::net::stcp::connection>(executor,
-                                           forge::net::stcp::async_upgrade_server(std::move(server_tcp), server_options(material)));
+   auto server_upgrade = spawn_result<forge::net::stcp::connection>(
+       executor, forge::net::stcp::async_upgrade_server(std::move(server_tcp), server_options(material)));
    auto client = co_await forge::net::stcp::async_upgrade_client(std::move(client_tcp), client_options(material));
    auto server = co_await take_result(server_upgrade);
 
@@ -779,9 +815,9 @@ boost::asio::awaitable<void> stcp_rejects_tls12_peer() {
    auto accept = spawn_result<forge::net::stcp::connection>(executor, listener.async_accept_connection());
 
    auto socket = boost::asio::ip::tcp::socket{executor};
-   co_await socket.async_connect(boost::asio::ip::tcp::endpoint{boost::asio::ip::make_address("127.0.0.1"),
-                                                                 listener.local_endpoint().port},
-                                 boost::asio::use_awaitable);
+   co_await socket.async_connect(
+       boost::asio::ip::tcp::endpoint{boost::asio::ip::make_address("127.0.0.1"), listener.local_endpoint().port},
+       boost::asio::use_awaitable);
    auto context = asio::ssl::context{asio::ssl::context::tls_client};
    SSL_CTX_set_max_proto_version(context.native_handle(), TLS1_2_VERSION);
    context.set_verify_mode(asio::ssl::verify_none);
@@ -806,6 +842,12 @@ BOOST_AUTO_TEST_CASE(stcp_loopback_roundtrip_and_transport_stream) {
 BOOST_AUTO_TEST_CASE(stcp_upgrades_existing_tcp_connection) {
    auto runtime = forge::asio::runtime{};
    forge::asio::blocking::run(runtime, stcp_upgrade_roundtrip());
+}
+
+BOOST_AUTO_TEST_CASE(stcp_successful_handshake_cannot_be_canceled_by_late_timeout_handler) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   BOOST_CHECK(forge::asio::blocking::run_for(
+       runtime, stcp_successful_handshake_survives_late_timeout_handler(make_tls_material()), std::chrono::seconds{5}));
 }
 
 BOOST_AUTO_TEST_CASE(stcp_serializes_full_duplex_ssl_operations_on_multi_worker_runtime) {
@@ -859,7 +901,8 @@ BOOST_AUTO_TEST_CASE(stcp_alpn_selects_client_preferred_supported_protocol) {
 
 BOOST_AUTO_TEST_CASE(stcp_cancel_unblocks_pending_read) {
    auto runtime = forge::asio::runtime{};
-   BOOST_CHECK(forge::asio::blocking::run_for(runtime, stcp_connection_cancel_unblocks_pending_read(), std::chrono::seconds{2}));
+   BOOST_CHECK(forge::asio::blocking::run_for(runtime, stcp_connection_cancel_unblocks_pending_read(),
+                                              std::chrono::seconds{2}));
 }
 
 BOOST_AUTO_TEST_CASE(stcp_requires_tls13_by_default) {

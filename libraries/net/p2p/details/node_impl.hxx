@@ -1,6 +1,7 @@
 #pragma once
 
 #include "connection_manager.hxx"
+#include "connection_singleflight_registry.hxx"
 #include "direct_transport.hxx"
 #include "host_addresses.hxx"
 #include "libp2p_identity_material.hxx"
@@ -43,7 +44,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
       std::optional<forge::net::p2p::endpoint> direct_endpoint;
       std::optional<forge::net::p2p::endpoint> remote_endpoint;
       connection_manager::direction direction = connection_manager::direction::outbound;
-      bool closed = false;
+      std::atomic_bool closed = false;
    };
 
    struct relay_reservation_state {
@@ -107,8 +108,9 @@ struct node::impl : std::enable_shared_from_this<impl> {
       std::string retry_cursor;
       std::map<peer_id, pubsub::score> scores;
       std::map<peer_id, outbound_generation> outbound;
-      std::map<peer_id, std::shared_ptr<forge::asio::gate>> connection_gates;
+      detail::connection_singleflight_registry connection_gates;
       std::map<peer_id, std::size_t> outbound_bytes;
+      std::size_t outbound_bytes_total = 0;
       std::map<peer_id, std::size_t> active_validations_by_peer;
       std::size_t active_validations = 0;
       std::uint64_t next_validation_generation = 1;
@@ -160,9 +162,6 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    [[nodiscard]] std::vector<forge::net::p2p::endpoint> local_endpoints_for_control() const;
    [[nodiscard]] std::vector<forge::net::p2p::endpoint> local_endpoints_for_control_locked() const;
-
-   void learn_from_message(const peer_exchange_message& message,
-                           std::optional<forge::net::p2p::endpoint> remote_endpoint = std::nullopt);
 
    [[nodiscard]] identify::document local_identify_document() const;
 

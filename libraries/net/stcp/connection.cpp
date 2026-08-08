@@ -71,10 +71,10 @@ using x509_ptr = std::unique_ptr<X509, x509_deleter>;
 [[noreturn]] void throw_handshake_failed(std::string message, const boost::system::error_code& error) {
    if (error == boost::asio::error::operation_aborted) {
       FORGE_THROW_EXCEPTION(exceptions::canceled, "stcp handshake canceled",
-                          forge::exceptions::ctx("reason", error.message()));
+                            forge::exceptions::ctx("reason", error.message()));
    }
    FORGE_THROW_EXCEPTION(exceptions::handshake_failed, std::move(message),
-                       forge::exceptions::ctx("reason", error.message()));
+                         forge::exceptions::ctx("reason", error.message()));
 }
 
 [[noreturn]] void throw_verification_failed(std::string message) {
@@ -84,11 +84,12 @@ using x509_ptr = std::unique_ptr<X509, x509_deleter>;
 [[noreturn]] void throw_read_write_error(const boost::system::error_code& error) {
    if (error == boost::asio::error::operation_aborted) {
       FORGE_THROW_EXCEPTION(exceptions::canceled, "stcp connection operation canceled",
-                          forge::exceptions::ctx("reason", error.message()));
+                            forge::exceptions::ctx("reason", error.message()));
    }
    if (error == boost::asio::error::eof || error == boost::asio::error::connection_reset ||
        error == boost::asio::error::broken_pipe || error == boost::asio::ssl::error::stream_truncated) {
-      FORGE_THROW_EXCEPTION(exceptions::closed, "stcp connection closed", forge::exceptions::ctx("reason", error.message()));
+      FORGE_THROW_EXCEPTION(exceptions::closed, "stcp connection closed",
+                            forge::exceptions::ctx("reason", error.message()));
    }
    throw_io_error("stcp connection I/O failed", error);
 }
@@ -170,17 +171,18 @@ void load_identity(asio::ssl::context& context, std::string_view certificate_pem
       context.use_private_key(asio::buffer(private_key_pem.data(), private_key_pem.size()), asio::ssl::context::pem);
    } catch (const boost::system::system_error& error) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "failed to load stcp certificate or private key",
-                          forge::exceptions::ctx("reason", error.code().message()));
+                            forge::exceptions::ctx("reason", error.code().message()));
    }
 }
 
 void load_trust(asio::ssl::context& context, const security_options& security) {
    if (!security.trusted_ca_pem.empty()) {
       try {
-         context.add_certificate_authority(asio::buffer(security.trusted_ca_pem.data(), security.trusted_ca_pem.size()));
+         context.add_certificate_authority(
+             asio::buffer(security.trusted_ca_pem.data(), security.trusted_ca_pem.size()));
       } catch (const boost::system::system_error& error) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_options, "failed to load stcp trusted CA",
-                             forge::exceptions::ctx("reason", error.code().message()));
+                               forge::exceptions::ctx("reason", error.code().message()));
       }
       return;
    }
@@ -189,7 +191,7 @@ void load_trust(asio::ssl::context& context, const security_options& security) {
       context.set_default_verify_paths(error);
       if (error) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_options, "failed to load default TLS verify paths",
-                             forge::exceptions::ctx("reason", error.message()));
+                               forge::exceptions::ctx("reason", error.message()));
       }
    }
 }
@@ -291,8 +293,7 @@ void load_trust(asio::ssl::context& context, const security_options& security) {
          continue;
       }
       auto next = peer_certificate_from_x509(certificate);
-      const auto duplicate_leaf =
-          !out.certificates.empty() && same_der(out.certificates.front().der, next.der);
+      const auto duplicate_leaf = !out.certificates.empty() && same_der(out.certificates.front().der, next.der);
       if (!duplicate_leaf) {
          out.certificates.push_back(std::move(next));
       }
@@ -316,7 +317,7 @@ void verify_host_name(const peer_certificate& certificate, std::string_view host
                                  : X509_check_ip_asc(parsed.get(), std::string{host}.c_str(), 0);
    if (ok != 1) {
       FORGE_THROW_EXCEPTION(exceptions::verification_failed, "stcp peer certificate host mismatch",
-                          forge::exceptions::ctx("host", std::string{host}));
+                            forge::exceptions::ctx("host", std::string{host}));
    }
 }
 
@@ -337,7 +338,7 @@ void verify_peer(native_stream& stream, const security_options& security, std::s
       const auto expected = normalize_fingerprint(*security.expected_sha256_fingerprint);
       if (actual != expected) {
          FORGE_THROW_EXCEPTION(exceptions::verification_failed, "stcp peer certificate fingerprint mismatch",
-                             forge::exceptions::ctx("actual", actual));
+                               forge::exceptions::ctx("actual", actual));
       }
    }
    if (security.verifier && !security.verifier(chain)) {
@@ -374,7 +375,8 @@ void configure_client_stream(native_stream& stream, const client_options& option
       }
    }
    const auto alpn = encode_alpn(options.alpn_protocols);
-   if (!alpn.empty() && SSL_set_alpn_protos(stream.native_handle(), alpn.data(), static_cast<unsigned>(alpn.size())) != 0) {
+   if (!alpn.empty() &&
+       SSL_set_alpn_protos(stream.native_handle(), alpn.data(), static_cast<unsigned>(alpn.size())) != 0) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "failed to configure stcp ALPN");
    }
 }
@@ -408,6 +410,12 @@ void cancel_stream(native_stream& stream) noexcept {
    stream.lowest_layer().shutdown(asio_tcp::socket::shutdown_both, ignored);
    stream.lowest_layer().close(ignored);
 }
+
+enum class handshake_terminal_state : std::uint8_t {
+   pending,
+   completed,
+   timed_out,
+};
 
 enum class io_stop_reason : std::uint8_t {
    none,
@@ -475,21 +483,38 @@ boost::asio::awaitable<void> async_handshake(std::shared_ptr<native_stream> stre
        strand,
        [stream = std::move(stream), type, timeout]() -> asio::awaitable<void> {
           auto timer = std::shared_ptr<asio::steady_timer>{};
+          auto terminal = std::shared_ptr<std::atomic<handshake_terminal_state>>{};
           if (timeout) {
              validate_handshake_timeout(*timeout);
              timer = std::make_shared<asio::steady_timer>(co_await asio::this_coro::executor);
+             terminal = std::make_shared<std::atomic<handshake_terminal_state>>(handshake_terminal_state::pending);
              timer->expires_after(*timeout);
-             timer->async_wait([stream](const boost::system::error_code& error) {
-                if (!error) {
-                   cancel_stream(*stream);
+             timer->async_wait([stream, terminal](const boost::system::error_code& error) {
+                if (error) {
+                   return;
                 }
+                auto expected = handshake_terminal_state::pending;
+                if (!terminal->compare_exchange_strong(expected, handshake_terminal_state::timed_out,
+                                                       std::memory_order_acq_rel)) {
+                   return;
+                }
+                cancel_stream(*stream);
              });
           }
 
           auto error = boost::system::error_code{};
           co_await stream->async_handshake(type, asio::redirect_error(asio::use_awaitable, error));
           if (timer) {
+             auto expected = handshake_terminal_state::pending;
+             const auto completed = terminal->compare_exchange_strong(expected, handshake_terminal_state::completed,
+                                                                      std::memory_order_acq_rel);
              timer->cancel();
+             if (!completed) {
+                const auto timeout_error = boost::system::error_code{boost::asio::error::operation_aborted};
+                throw_handshake_failed(type == asio::ssl::stream_base::client ? "stcp client handshake timed out"
+                                                                              : "stcp server handshake timed out",
+                                       timeout_error);
+             }
           }
           if (error) {
              throw_handshake_failed(type == asio::ssl::stream_base::client ? "stcp client handshake failed"
@@ -912,7 +937,7 @@ boost::asio::awaitable<connection> async_upgrade_client(tcp::connection source, 
       const auto verify_result = SSL_get_verify_result(stream->native_handle());
       if (options.security.verify_peer && verify_result != X509_V_OK) {
          FORGE_THROW_EXCEPTION(exceptions::verification_failed, "stcp server certificate verification failed",
-                             forge::exceptions::ctx("reason", X509_verify_cert_error_string(verify_result)));
+                               forge::exceptions::ctx("reason", X509_verify_cert_error_string(verify_result)));
       }
       throw;
    }

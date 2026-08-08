@@ -26,12 +26,14 @@ module;
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
+#include <boost/asio/experimental/concurrent_channel.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/post.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
+#include <boost/system/system_error.hpp>
 
 module forge.net.p2p.node;
 
@@ -70,6 +72,7 @@ import forge.net.yamux.exceptions;
 import forge.net.yamux.session;
 
 #include "details/node_impl.hxx"
+#include "details/peer_exchange_learning.hxx"
 #include "details/protocol_capabilities.hxx"
 #include "details/relay_accounting.hxx"
 #include "details/session_lifecycle.hxx"
@@ -91,12 +94,10 @@ void node::impl::clear_pubsub_outbound_locked() {
    for (const auto& [_, generation] : pubsub_value.outbound) {
       generation.write_gate->close();
    }
-   for (const auto& [_, gate] : pubsub_value.connection_gates) {
-      gate->close();
-   }
    pubsub_value.outbound.clear();
-   pubsub_value.connection_gates.clear();
+   pubsub_value.connection_gates.close();
    pubsub_value.outbound_bytes.clear();
+   pubsub_value.outbound_bytes_total = 0;
 }
 
 void node::impl::reserve_pubsub_outbound_bytes(const peer_id& peer, std::size_t bytes) {
@@ -106,12 +107,13 @@ void node::impl::reserve_pubsub_outbound_bytes(const peer_id& peer, std::size_t 
    }
    const auto limit = options.limits.pubsub.limits.max_outbound_queue_bytes;
    auto& reserved = pubsub_value.outbound_bytes[peer];
-   if (bytes > limit || reserved > limit - bytes) {
+   if (bytes > limit || reserved > limit - bytes || pubsub_value.outbound_bytes_total > limit - bytes) {
       ++metrics_value.backpressure_rejections;
       ++metrics_value.protocol_rejections;
       FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "GossipSub outbound queue byte limit reached");
    }
    reserved += bytes;
+   pubsub_value.outbound_bytes_total += bytes;
 }
 
 void node::impl::release_pubsub_outbound_bytes(const peer_id& peer, std::size_t bytes) noexcept {
@@ -120,6 +122,8 @@ void node::impl::release_pubsub_outbound_bytes(const peer_id& peer, std::size_t 
    if (found == pubsub_value.outbound_bytes.end()) {
       return;
    }
+   const auto released = std::min(found->second, bytes);
+   pubsub_value.outbound_bytes_total -= std::min(pubsub_value.outbound_bytes_total, released);
    if (found->second <= bytes) {
       pubsub_value.outbound_bytes.erase(found);
       return;
@@ -431,31 +435,6 @@ std::vector<forge::net::p2p::endpoint> node::impl::local_endpoints_for_control()
 
 std::vector<forge::net::p2p::endpoint> node::impl::local_endpoints_for_control_locked() const {
    return host_addresses::merge_advertised(options.advertised_endpoints, direct_registry.local_endpoints(), local);
-}
-
-void node::impl::learn_from_message(const peer_exchange_message& message,
-                                    std::optional<forge::net::p2p::endpoint> remote_endpoint) {
-   if (valid_peer_id(message.peer)) {
-      store.upsert(peer_store::record{
-          .peer = message.peer,
-          .capabilities = message.capabilities,
-      });
-   }
-   for (const auto& endpoint : message.endpoints) {
-      if (valid_peer_id(endpoint.peer)) {
-         const auto from_sender = endpoint.peer.to_bytes() == message.peer.to_bytes();
-         auto context = host_addresses::learning_context{
-             .source =
-                 from_sender ? host_addresses::source_kind::authenticated : host_addresses::source_kind::third_party,
-         };
-         if (from_sender) {
-            context.remote_endpoint = remote_endpoint;
-         }
-         if (auto learned = host_addresses::learned(endpoint.endpoint, endpoint.peer, context)) {
-            store.learn_endpoint(endpoint.peer, *learned, endpoint.capabilities);
-         }
-      }
-   }
 }
 
 [[nodiscard]] identify::document node::impl::local_identify_document() const {
@@ -1158,30 +1137,54 @@ node::impl::ensure_pubsub_direct_session(const peer_id& peer) {
    if (auto existing = session_for(peer)) {
       co_return existing;
    }
-   auto connection_gate = std::shared_ptr<forge::asio::gate>{};
+   auto participant = detail::connection_singleflight_registry::lease{};
    {
       auto lock = std::scoped_lock{mutex};
       if (stopped) {
          FORGE_THROW_EXCEPTION(exceptions::closed, "cannot connect GossipSub peer after node shutdown");
       }
-      auto& current = pubsub_value.connection_gates[peer];
-      if (!current || current->closed()) {
-         current = std::make_shared<forge::asio::gate>();
+      participant = pubsub_value.connection_gates.join(peer, runtime.context().get_executor());
+   }
+   auto release_participant = [this, &participant](void*) noexcept {
+      auto lock = std::scoped_lock{mutex};
+      pubsub_value.connection_gates.leave(participant);
+   };
+   auto participant_guard = std::unique_ptr<void, decltype(release_participant)>{this, std::move(release_participant)};
+
+   if (participant.leader()) {
+      try {
+         auto connected = co_await ensure_direct_session(peer, options.limits.discovery.query_timeout);
+         {
+            auto lock = std::scoped_lock{mutex};
+            pubsub_value.connection_gates.succeed(participant);
+         }
+         co_return connected;
+      } catch (const forge::exceptions::base& error) {
+         {
+            auto lock = std::scoped_lock{mutex};
+            pubsub_value.connection_gates.fail(participant, p2p_code(error), error.what());
+         }
+         throw;
       }
-      connection_gate = current;
    }
-   auto connection_ticket = forge::asio::gate::ticket{};
+
+   auto result = detail::connection_singleflight_registry::outcome{};
    try {
-      connection_ticket = co_await connection_gate->acquire();
-   } catch (const forge::asio::exceptions::canceled&) {
-      FORGE_THROW_EXCEPTION(exceptions::canceled, "GossipSub peer connection canceled while waiting");
-   } catch (const forge::asio::exceptions::rejected&) {
-      FORGE_THROW_EXCEPTION(exceptions::closed, "GossipSub peer connection closed while waiting");
+      result = co_await participant.wait();
+   } catch (const boost::system::system_error& error) {
+      if (error.code() == boost::asio::error::operation_aborted) {
+         FORGE_THROW_EXCEPTION(exceptions::canceled, "GossipSub peer connection canceled while waiting");
+      }
+      FORGE_THROW_EXCEPTION(exceptions::internal, "GossipSub peer connection wait failed",
+                            forge::exceptions::ctx("reason", error.code().message()));
    }
-   if (auto existing = session_for(peer)) {
-      co_return existing;
+   if (!result.succeeded) {
+      FORGE_THROW_CODE(result.error.value_or(exceptions::code::internal), std::move(result.message));
    }
-   co_return co_await ensure_direct_session(peer, options.limits.discovery.query_timeout);
+   if (auto connected = session_for(peer)) {
+      co_return connected;
+   }
+   FORGE_THROW_EXCEPTION(exceptions::closed, "GossipSub direct session closed after connection singleflight");
 }
 
 boost::asio::awaitable<void> node::impl::send_pubsub_rpc(const peer_id& peer, const pubsub::rpc& value) {
@@ -1738,14 +1741,15 @@ node::impl::connect_direct(forge::net::p2p::endpoint endpoint, node::connect_opt
       store.mark_endpoint_success(
           result.peer, endpoint_copy, path::kind::direct,
           std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started));
-      auto session = std::make_shared<session_state>(session_state{
-          .info = node::session_info{.remote_peer = result.peer,
-                                     .capabilities = options.capabilities,
-                                     .path = path::kind::direct},
-          .connection = std::move(result.session),
-          .direct_endpoint = endpoint_copy,
-          .remote_endpoint = result.remote_endpoint,
-      });
+      auto session = std::make_shared<session_state>();
+      session->info = node::session_info{
+          .remote_peer = result.peer,
+          .capabilities = options.capabilities,
+          .path = path::kind::direct,
+      };
+      session->connection = std::move(result.session);
+      session->direct_endpoint = endpoint_copy;
+      session->remote_endpoint = result.remote_endpoint;
       auto pruned = remember_session(session, connection_manager::direction::outbound);
       for (auto& stale : pruned) {
          stale->connection.cancel();
@@ -2158,7 +2162,8 @@ boost::asio::awaitable<void> node::impl::request_peer_exchange(const peer_id& pe
       if (response.kind != peer_exchange_message::type::peer_exchange_response) {
          FORGE_THROW_EXCEPTION(exceptions::protocol_error, "P2P peer exchange expected response");
       }
-      learn_from_message(response, session->remote_endpoint);
+      detail::learn_authenticated_peer_exchange_response(store, response, session->info.remote_peer,
+                                                         session->remote_endpoint);
       increment_peer_exchange();
       co_await stream.async_close();
    } catch (const forge::exceptions::base& error) {
@@ -2255,14 +2260,15 @@ boost::asio::awaitable<void> node::impl::handle_inbound_connection(direct::conne
          }
       }
       auto remote = connection.peer;
-      auto session = std::make_shared<session_state>(session_state{
-          .info = node::session_info{.remote_peer = remote,
-                                     .capabilities = options.capabilities,
-                                     .path = path::kind::direct},
-          .connection = std::move(connection.session),
-          .direct_endpoint = connection.local_endpoint,
-          .remote_endpoint = connection.remote_endpoint,
-      });
+      auto session = std::make_shared<session_state>();
+      session->info = node::session_info{
+          .remote_peer = remote,
+          .capabilities = options.capabilities,
+          .path = path::kind::direct,
+      };
+      session->connection = std::move(connection.session);
+      session->direct_endpoint = connection.local_endpoint;
+      session->remote_endpoint = connection.remote_endpoint;
       auto pruned = remember_session(session, connection_manager::direction::inbound);
       for (auto& stale : pruned) {
          stale->connection.cancel();
