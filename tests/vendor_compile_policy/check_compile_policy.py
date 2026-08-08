@@ -20,6 +20,10 @@ def optimization_flags(arguments: list[str]) -> list[str]:
    return [argument for argument in arguments if argument in exact]
 
 
+def sanitizer_flags(arguments: list[str]) -> list[str]:
+   return [argument for argument in arguments if "sanitize=" in argument]
+
+
 def main() -> int:
    parser = argparse.ArgumentParser()
    parser.add_argument("--cmake", required=True)
@@ -65,7 +69,8 @@ def main() -> int:
    msvc_style = "/Od" in by_name["forge_owned.cpp"]
    expected_optimized = "/O2" if msvc_style else "-O2"
    expected_debug = "/Od" if msvc_style else "-O0"
-   expected_sanitizer = "/fsanitize=address" if msvc_style else "-fsanitize=undefined"
+   expected_sanitizer = "/fsanitize=address" if msvc_style else "-fsanitize=address,undefined"
+   expected_suppression = None if msvc_style else "-fno-sanitize=alignment"
 
    for source in ("vendor_c.c", "vendor_cxx.cpp"):
       flags = optimization_flags(by_name[source])
@@ -75,14 +80,38 @@ def main() -> int:
          raise RuntimeError(f"{source}: fixture did not exercise parent Debug optimization: {flags!r}")
       if expected_sanitizer not in by_name[source]:
          raise RuntimeError(f"{source}: sanitizer option was not preserved")
+      if any(flag.startswith("-fno-sanitize=") for flag in sanitizer_flags(by_name[source])):
+         raise RuntimeError(f"{source}: unexpected sanitizer suppression")
+
+   for source in ("vendor_alignment.c", "vendor_alignment.cpp"):
+      flags = optimization_flags(by_name[source])
+      if not flags or flags[-1] != expected_optimized:
+         raise RuntimeError(f"{source}: effective optimization is {flags!r}, expected final {expected_optimized}")
+      if expected_debug not in flags:
+         raise RuntimeError(f"{source}: fixture did not exercise parent Debug optimization: {flags!r}")
+      sanitizers = sanitizer_flags(by_name[source])
+      if expected_sanitizer not in sanitizers:
+         raise RuntimeError(f"{source}: parent sanitizer option was not preserved: {sanitizers!r}")
+      if expected_suppression is None:
+         if any(flag.startswith("-fno-sanitize=") for flag in sanitizers):
+            raise RuntimeError(f"{source}: MSVC-style compilation unexpectedly disables a sanitizer")
+      elif sanitizers[-2:] != [expected_sanitizer, expected_suppression]:
+         raise RuntimeError(
+            f"{source}: sanitizer flags are {sanitizers!r}, expected final {expected_sanitizer!r}, {expected_suppression!r}"
+         )
 
    owned_flags = optimization_flags(by_name["forge_owned.cpp"])
    if not owned_flags or owned_flags[-1] != expected_debug:
       raise RuntimeError(f"forge_owned.cpp: Debug optimization changed unexpectedly: {owned_flags!r}")
    if expected_sanitizer not in by_name["forge_owned.cpp"]:
       raise RuntimeError("forge_owned.cpp: sanitizer fixture option is missing")
+   if any(flag.startswith("-fno-sanitize=") for flag in sanitizer_flags(by_name["forge_owned.cpp"])):
+      raise RuntimeError("forge_owned.cpp: sanitizer coverage was weakened")
 
-   print("vendored C/C++ sources end with optimized Debug flags; Forge-owned Debug and sanitizer flags are preserved")
+   print(
+      "vendored C/C++ sources preserve parent sanitizers; selected vendor sources disable only alignment; "
+      "Forge-owned sanitizer coverage is preserved"
+   )
    return 0
 
 

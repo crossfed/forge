@@ -443,12 +443,12 @@ set_property(
 )
 
 set(FORGE_VENDORED_IMPLEMENTATION_TARGETS secp256k1 bn256 bls12-381 softfloat)
-if(TARGET mdbx-internal)
-   list(APPEND FORGE_VENDORED_IMPLEMENTATION_TARGETS mdbx-internal)
-endif()
 foreach(_forge_vendor_target IN LISTS FORGE_VENDORED_IMPLEMENTATION_TARGETS)
    forge_apply_vendored_implementation_policy(${_forge_vendor_target})
 endforeach()
+if(TARGET mdbx-internal)
+   forge_apply_vendored_implementation_policy(mdbx-internal DISABLED_SANITIZERS alignment)
+endif()
 
 if(NOT FORGE_ENABLE_VENDOR_TESTS)
    file(

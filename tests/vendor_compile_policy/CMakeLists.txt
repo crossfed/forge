@@ -17,14 +17,16 @@ if(MSVC)
 else()
    set(CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG} -O0")
    set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -O0")
-   add_compile_options("$<$<CONFIG:Debug>:-fsanitize=undefined>")
+   add_compile_options("$<$<CONFIG:Debug>:-fsanitize=address,undefined>")
 endif()
 
 include("${FORGE_SOURCE_DIR}/cmake/ForgeVendorCompilePolicy.cmake")
 
 add_library(vendor_c STATIC vendor_c.c)
 add_library(vendor_cxx STATIC vendor_cxx.cpp)
+add_library(vendor_alignment STATIC vendor_alignment.c vendor_alignment.cpp)
 add_library(forge_owned STATIC forge_owned.cpp)
 
 forge_apply_vendored_implementation_policy(vendor_c)
 forge_apply_vendored_implementation_policy(vendor_cxx)
+forge_apply_vendored_implementation_policy(vendor_alignment DISABLED_SANITIZERS alignment)

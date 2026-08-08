@@ -1,6 +1,13 @@
 include_guard(GLOBAL)
 
+include(CheckCompilerFlag)
+
 function(forge_apply_vendored_implementation_policy target)
+   cmake_parse_arguments(PARSE_ARGV 1 ARG "" "" "DISABLED_SANITIZERS")
+   if(ARG_UNPARSED_ARGUMENTS OR ARG_KEYWORDS_MISSING_VALUES)
+      message(FATAL_ERROR "Invalid vendored implementation policy arguments for ${target}")
+   endif()
+
    if(NOT TARGET ${target})
       message(FATAL_ERROR "Unknown vendored implementation target: ${target}")
    endif()
@@ -18,5 +25,49 @@ function(forge_apply_vendored_implementation_policy target)
          "$<$<AND:$<CONFIG:Debug>,$<OR:$<COMPILE_LANG_AND_ID:C,AppleClang,Clang,GNU>,$<COMPILE_LANG_AND_ID:CXX,AppleClang,Clang,GNU>>>:-O2>"
          "$<$<AND:$<CONFIG:Debug>,$<OR:$<COMPILE_LANG_AND_ID:C,MSVC>,$<COMPILE_LANG_AND_ID:CXX,MSVC>>>:/O2>"
    )
+
+   list(REMOVE_DUPLICATES ARG_DISABLED_SANITIZERS)
+   foreach(_forge_vendor_disabled_sanitizer IN LISTS ARG_DISABLED_SANITIZERS)
+      if(NOT _forge_vendor_disabled_sanitizer STREQUAL "alignment")
+         message(FATAL_ERROR "Unsupported vendored sanitizer suppression: ${_forge_vendor_disabled_sanitizer}")
+      endif()
+
+      foreach(_forge_vendor_language C CXX)
+         if(NOT CMAKE_${_forge_vendor_language}_COMPILER_LOADED)
+            continue()
+         endif()
+
+         if(CMAKE_${_forge_vendor_language}_COMPILER_FRONTEND_VARIANT STREQUAL "GNU")
+            set(_forge_vendor_flag "-fno-sanitize=alignment")
+            set(_forge_vendor_flag_check "FORGE_${_forge_vendor_language}_HAS_FNO_SANITIZE_ALIGNMENT")
+            check_compiler_flag(${_forge_vendor_language} "${_forge_vendor_flag}" ${_forge_vendor_flag_check})
+            if(NOT ${_forge_vendor_flag_check})
+               message(
+                  FATAL_ERROR
+                  "${CMAKE_${_forge_vendor_language}_COMPILER_ID} ${_forge_vendor_language} compiler does not support ${_forge_vendor_flag}"
+               )
+            endif()
+            target_compile_options(
+               ${target}
+               PRIVATE "$<$<COMPILE_LANGUAGE:${_forge_vendor_language}>:${_forge_vendor_flag}>"
+            )
+         elseif(CMAKE_${_forge_vendor_language}_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+            message(
+               STATUS
+               "Vendored alignment sanitizer suppression is not applicable to the MSVC-style ${_forge_vendor_language} frontend"
+            )
+         else()
+            message(
+               FATAL_ERROR
+               "Unsupported ${_forge_vendor_language} compiler frontend for vendored alignment sanitizer suppression: ${CMAKE_${_forge_vendor_language}_COMPILER_FRONTEND_VARIANT}"
+            )
+         endif()
+      endforeach()
+   endforeach()
+
    set_property(TARGET ${target} PROPERTY FORGE_VENDORED_IMPLEMENTATION_POLICY ON)
+   set_property(
+      TARGET ${target}
+      PROPERTY FORGE_VENDORED_IMPLEMENTATION_DISABLED_SANITIZERS "${ARG_DISABLED_SANITIZERS}"
+   )
 endfunction()
