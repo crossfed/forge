@@ -1747,6 +1747,7 @@ boost::asio::awaitable<void> node::impl::pubsub_heartbeat_once() {
 boost::asio::awaitable<std::shared_ptr<node::impl::session_state>>
 node::impl::connect_direct(forge::net::p2p::endpoint endpoint, node::connect_options connect_options_value) {
    validate_operation_timeout(connect_options_value.timeout, "P2P connect timeout");
+   const auto deadline_at = std::chrono::steady_clock::now() + connect_options_value.timeout;
    auto endpoint_copy = endpoint;
    {
       auto lock = std::scoped_lock{mutex};
@@ -1787,9 +1788,16 @@ node::impl::connect_direct(forge::net::p2p::endpoint endpoint, node::connect_opt
       co_await announce_pubsub_subscriptions(result.peer);
       co_return session;
    } catch (const forge::exceptions::base& error) {
-      if (pending) {
+      auto stopped_before_deadline = false;
+      {
          auto lock = std::scoped_lock{mutex};
-         resources.release_pending_session(resource_manager::session_direction::outbound);
+         if (pending) {
+            resources.release_pending_session(resource_manager::session_direction::outbound);
+         }
+         stopped_before_deadline = stop_requested_at && *stop_requested_at < deadline_at;
+      }
+      if (p2p_code(error) == exceptions::code::timeout && stopped_before_deadline) {
+         FORGE_THROW_EXCEPTION(exceptions::closed, "P2P direct connect stopped with its node");
       }
       FORGE_THROW_CODE(p2p_code(error), error.what());
    }

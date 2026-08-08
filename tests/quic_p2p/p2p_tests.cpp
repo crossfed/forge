@@ -6269,6 +6269,96 @@ BOOST_AUTO_TEST_CASE(p2p_cached_protocol_open_timeout_penalizes_peer) {
    forge::asio::blocking::run(server_runtime, server.async_stop());
 }
 
+BOOST_AUTO_TEST_CASE(p2p_stop_before_direct_path_deadline_does_not_penalize_peer) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto client = node{runtime, options_for(peer(211))};
+   auto accepted = std::make_shared<std::promise<void>>();
+   auto accepted_future = accepted->get_future();
+   const auto stalled_endpoint = start_stalling_tcp_peer(runtime, std::chrono::seconds{2}, accepted);
+   const auto stalled_peer = peer(212);
+   client.peers().learn_endpoint(stalled_peer, stalled_endpoint, capability_set{.bits = capabilities::direct_quic});
+   const auto before = client.peers().find(stalled_peer);
+   BOOST_REQUIRE(before.has_value());
+   BOOST_REQUIRE(!before->endpoints.empty());
+   const auto peer_failures_before = before->failures;
+   const auto endpoint_failures_before = before->endpoints.front().failures;
+   const auto endpoint_backoff_before = before->endpoints.front().backoff_until;
+   const auto direct_failures_before = client.metrics().direct_failures;
+
+   auto opened = boost::asio::co_spawn(
+       runtime.context(),
+       client.async_open_protocol_stream(stalled_peer, builtins::echo,
+                                         node::open_options{.allow_relay = false,
+                                                            .timeout = std::chrono::milliseconds{150},
+                                                            .direct_attempt_timeout = std::chrono::milliseconds{150},
+                                                            .max_direct_endpoints = 1}),
+       boost::asio::use_future);
+   wait_for_server(accepted_future, std::chrono::seconds{2}, "direct path shutdown admission");
+   auto release_runtime = block_runtime(runtime, "direct path shutdown barrier");
+   client.stop();
+   std::this_thread::sleep_for(std::chrono::milliseconds{250});
+   release_runtime->set_value();
+
+   BOOST_REQUIRE(opened.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+   try {
+      static_cast<void>(opened.get());
+      BOOST_FAIL("expected direct path shutdown");
+   } catch (const forge::exceptions::base& error) {
+      BOOST_REQUIRE(exceptions::code_of(error).has_value());
+      const auto code = *exceptions::code_of(error);
+      BOOST_CHECK_MESSAGE(code == exceptions::code::canceled || code == exceptions::code::closed,
+                          "unexpected shutdown code " << static_cast<int>(code));
+   }
+   forge::asio::blocking::run(runtime, client.async_stop());
+
+   const auto after = client.peers().find(stalled_peer);
+   BOOST_REQUIRE(after.has_value());
+   BOOST_REQUIRE(!after->endpoints.empty());
+   BOOST_TEST(after->failures == peer_failures_before);
+   BOOST_TEST(after->endpoints.front().failures == endpoint_failures_before);
+   const auto backoff_unchanged = after->endpoints.front().backoff_until == endpoint_backoff_before;
+   BOOST_TEST(backoff_unchanged);
+   BOOST_TEST(client.metrics().direct_failures == direct_failures_before);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_direct_path_timeout_before_stop_penalizes_peer) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto client = node{runtime, options_for(peer(213))};
+   const auto stalled_endpoint = start_stalling_tcp_peer(runtime);
+   const auto stalled_peer = peer(214);
+   client.peers().learn_endpoint(stalled_peer, stalled_endpoint, capability_set{.bits = capabilities::direct_quic});
+   const auto before = client.peers().find(stalled_peer);
+   BOOST_REQUIRE(before.has_value());
+   BOOST_REQUIRE(!before->endpoints.empty());
+   const auto peer_failures_before = before->failures;
+   const auto endpoint_failures_before = before->endpoints.front().failures;
+   const auto direct_failures_before = client.metrics().direct_failures;
+
+   try {
+      static_cast<void>(forge::asio::blocking::run(
+          runtime,
+          client.async_open_protocol_stream(stalled_peer, builtins::echo,
+                                            node::open_options{.allow_relay = false,
+                                                               .timeout = std::chrono::milliseconds{100},
+                                                               .direct_attempt_timeout = std::chrono::milliseconds{100},
+                                                               .max_direct_endpoints = 1})));
+      BOOST_FAIL("expected direct path timeout");
+   } catch (const forge::exceptions::base& error) {
+      BOOST_REQUIRE(exceptions::code_of(error).has_value());
+      BOOST_TEST(static_cast<int>(*exceptions::code_of(error)) == static_cast<int>(exceptions::code::timeout));
+   }
+   client.stop();
+
+   const auto after = client.peers().find(stalled_peer);
+   BOOST_REQUIRE(after.has_value());
+   BOOST_REQUIRE(!after->endpoints.empty());
+   BOOST_TEST(after->failures > peer_failures_before);
+   BOOST_TEST(after->endpoints.front().failures > endpoint_failures_before);
+   BOOST_TEST(after->endpoints.front().backoff_until > std::chrono::system_clock::now());
+   BOOST_TEST(client.metrics().direct_failures > direct_failures_before);
+   forge::asio::blocking::run(runtime, client.async_stop());
+}
+
 BOOST_AUTO_TEST_CASE(p2p_path_manager_tries_next_direct_endpoint_after_attempt_timeout) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto server = node{runtime, options_for(peer(64))};

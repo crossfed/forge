@@ -152,6 +152,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
    discovery_state discovery_value;
    node::metrics_snapshot metrics_value;
    std::size_t active_ping_streams = 0;
+   std::optional<std::chrono::steady_clock::time_point> stop_requested_at;
    bool stopped = false;
 
    void invalidate_pubsub_outbound_locked(const peer_id& peer,

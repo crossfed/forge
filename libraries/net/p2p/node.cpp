@@ -1201,10 +1201,12 @@ boost::asio::awaitable<forge::net::p2p::stream> node::async_open_protocol_stream
          co_return co_await self->open_protocol_direct(
              peer, protocol, effective.timeout, effective.max_direct_endpoints, effective.direct_attempt_timeout);
       } catch (const forge::exceptions::base& error) {
-         last_kind = p2p_code(error);
+         const auto kind = p2p_code(error);
+         last_kind = kind;
          last_message = error.what();
-         if (p2p_code(error) == exceptions::code::unsupported_protocol ||
-             p2p_code(error) == exceptions::code::protocol_error || p2p_code(error) == exceptions::code::codec_error) {
+         if (kind == exceptions::code::closed || kind == exceptions::code::canceled ||
+             kind == exceptions::code::unsupported_protocol || kind == exceptions::code::protocol_error ||
+             kind == exceptions::code::codec_error) {
             throw;
          }
          try {
@@ -1307,6 +1309,7 @@ void node::stop() {
              .cancel = [session] { session->connection.cancel(); },
          });
       }
+      impl_->stop_requested_at = std::chrono::steady_clock::now();
       impl_->stopped = true;
       impl_->direct_registry.stop();
       for (auto& [_, session] : impl_->sessions) {
