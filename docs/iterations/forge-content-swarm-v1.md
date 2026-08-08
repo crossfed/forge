@@ -172,6 +172,14 @@ They are not exposed through the safe local `plugins.p2p.node` API. Add a
 focused provider-discovery slice that exposes only typed provide and provider
 lookup operations with bounded results, cancellation and deadlines.
 
+The source audit also found broader official-plugin integration gaps around
+secure persistent startup, Identify, Peer Exchange, DHT/Rendezvous lifecycle,
+topology maintenance, AutoNAT and relay candidate discovery. They are tracked as
+the prerequisite production backlog in
+[`forge-p2p-production-hardening-v1.md`](forge-p2p-production-hardening-v1.md).
+Swarm must not treat the presence of low-level protocol tests as proof that this
+host lifecycle is delivered.
+
 The resolver plugin keeps its existing responsibility: it resolves and opens a
 typed API on an already known peer. It does not become content discovery.
 
@@ -517,8 +525,10 @@ allowing reads and writes to progress independently.
 
 1. Replace vector streaming with live Forge API streams.
 2. Add binding capability validation and full P2P/QUIC/WebSocket coverage.
-3. Expose focused DHT provider discovery from `plugins.p2p.node`.
-4. Prove `find provider -> resolver -> typed duplex API` in integration tests.
+3. Complete the P0/P1 production node, discovery, topology and reachability
+   gates from `forge-p2p-production-hardening-v1.md`.
+4. Expose focused DHT provider discovery from `plugins.p2p.node`.
+5. Prove `find provider -> resolver -> typed duplex API` in integration tests.
 
 This block is complete before Swarm defines its public peer contract.
 
