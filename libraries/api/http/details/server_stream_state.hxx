@@ -23,6 +23,7 @@ class server_stream_state final : public std::enable_shared_from_this<server_str
    [[nodiscard]] forge::api::core::frame internal_error() const;
 
    boost::asio::any_io_executor executor_;
+   boost::asio::cancellation_signal cancellation_;
    forge::api::core::binding_plan plan_;
    forge::api::core::frame request_;
    forge::api::core::detail::local_stream_pair stream_;
@@ -32,6 +33,7 @@ class server_stream_state final : public std::enable_shared_from_this<server_str
    std::shared_ptr<boost::asio::steady_timer> terminal_ready_;
    bool stream_end_sent_ = false;
    bool terminal_sent_ = false;
+   std::atomic_bool cancelled_ = false;
 };
 
 } // namespace forge::api::http::detail

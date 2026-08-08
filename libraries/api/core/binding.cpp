@@ -234,8 +234,8 @@ binding_plan::dispatch_stream(
       co_return make_api_not_exported_response(request);
    }
 
-   co_await run_before_interceptors(*this, request);
    try {
+      co_await run_before_interceptors(*this, request);
       auto response = co_await local->dispatch_stream(
          std::move(request), input, output);
       co_await run_terminal_interceptors(*this, response);

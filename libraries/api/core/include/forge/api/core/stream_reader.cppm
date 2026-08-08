@@ -42,6 +42,9 @@ class stream_endpoint {
       std::function<void(stream_event, std::size_t)> observer) {
       static_cast<void>(observer);
    }
+   virtual void set_failure_observer(std::function<void()> observer) {
+      static_cast<void>(observer);
+   }
 };
 
 struct local_stream_pair {

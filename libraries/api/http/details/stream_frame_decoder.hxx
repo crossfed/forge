@@ -8,6 +8,7 @@ class stream_frame_decoder {
                                  std::uint32_t max_frame_bytes);
 
    boost::asio::awaitable<std::optional<forge::api::core::frame>> async_read();
+   void cancel() noexcept;
 
    [[nodiscard]] static forge::net::http::body_chunk
    encode(const forge::api::core::frame& value, std::uint32_t max_frame_bytes);

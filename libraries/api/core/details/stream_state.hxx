@@ -28,6 +28,7 @@ class stream_state final : public stream_endpoint {
    void fail(std::exception_ptr error) noexcept override;
    void set_observer(
       std::function<void(stream_event, std::size_t)> observer) override;
+   void set_failure_observer(std::function<void()> observer) override;
 
  private:
    using waiter = std::shared_ptr<boost::asio::steady_timer>;
@@ -45,6 +46,9 @@ class stream_state final : public stream_endpoint {
    bool closed_ = false;
    std::exception_ptr error_;
    std::function<void(stream_event, std::size_t)> observer_;
+   std::function<void()> failure_observer_;
+   bool failure_observer_requested_ = false;
+   bool failure_observer_notified_ = false;
    waiter read_waiter_;
    waiter write_waiter_;
 };

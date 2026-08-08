@@ -107,6 +107,10 @@ stream_frame_decoder::async_read() {
    }
 }
 
+void stream_frame_decoder::cancel() noexcept {
+   body_.cancel();
+}
+
 forge::net::http::body_chunk
 stream_frame_decoder::encode(const forge::api::core::frame& value,
                              std::uint32_t max_frame_bytes) {

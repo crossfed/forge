@@ -5579,6 +5579,60 @@ BOOST_AUTO_TEST_CASE(http_server_disconnect_cancels_streaming_response_body) {
    forge::asio::blocking::run(runtime, server.async_stop());
 }
 
+BOOST_AUTO_TEST_CASE(http_response_body_cancel_reports_canceled) {
+   auto runtime = forge::asio::runtime{
+      forge::asio::runtime_options{.worker_threads = 2}};
+   auto body_started = std::make_shared<std::atomic_bool>(false);
+   auto router = forge::net::http::router{};
+   router.get_stream(
+      "/stream",
+      [body_started](stream_request& request_value)
+         -> boost::asio::awaitable<stream_response> {
+         auto reply = response{status::ok,
+                               request_value.context.request.version()};
+         co_return stream_response{
+            .head = std::move(reply),
+            .body = [body_started]()
+               -> boost::asio::awaitable<std::optional<body_chunk>> {
+               body_started->store(true, std::memory_order_release);
+               auto timer = boost::asio::steady_timer{
+                  co_await boost::asio::this_coro::executor};
+               timer.expires_after(std::chrono::seconds{2});
+               co_await timer.async_wait(boost::asio::use_awaitable);
+               co_return std::nullopt;
+            },
+         };
+      });
+
+   auto server = forge::net::http::server{
+      runtime, server_config{}, std::move(router)};
+   server.start();
+   auto connection = forge::net::http::connection{
+      runtime, parse_base_url(
+                  "http://127.0.0.1:" + std::to_string(server.port()))};
+   auto response_value = forge::asio::blocking::run(
+      runtime, connection.async_stream_request(
+                  make_request(method::get, "/stream")));
+   auto pending = boost::asio::co_spawn(
+      runtime.context(), response_value.body.async_read(),
+      boost::asio::use_future);
+
+   const auto started = std::chrono::steady_clock::now() +
+                        std::chrono::seconds{2};
+   while (!body_started->load(std::memory_order_acquire) &&
+          std::chrono::steady_clock::now() < started) {
+      std::this_thread::sleep_for(std::chrono::milliseconds{1});
+   }
+   BOOST_REQUIRE(body_started->load(std::memory_order_acquire));
+
+   response_value.body.cancel();
+   BOOST_REQUIRE(pending.wait_for(std::chrono::seconds{2}) ==
+                 std::future_status::ready);
+   BOOST_CHECK_THROW(static_cast<void>(pending.get()),
+                     forge::asio::exceptions::canceled);
+   server.stop();
+}
+
 BOOST_AUTO_TEST_CASE(http_server_owner_disconnect_watch_preserves_pipelined_keep_alive) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto owner_canceled = std::make_shared<std::atomic_bool>(false);

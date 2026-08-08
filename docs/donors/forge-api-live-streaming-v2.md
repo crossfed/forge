@@ -55,4 +55,3 @@ Primary references:
 - HTTP/1.1 maps server streams to chunked responses and client streams to
   streamed request bodies. Its native body backpressure replaces wire window
   frames; bidirectional methods are rejected before I/O.
-

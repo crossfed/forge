@@ -113,9 +113,16 @@ void body_stream_endpoint::close() noexcept {
 }
 
 void body_stream_endpoint::fail(std::exception_ptr error) noexcept {
-   const auto lock = std::scoped_lock{mutex_};
-   if (!failure_) {
-      failure_ = std::move(error);
+   auto cancel_body = false;
+   {
+      const auto lock = std::scoped_lock{mutex_};
+      if (!failure_) {
+         failure_ = std::move(error);
+         cancel_body = true;
+      }
+   }
+   if (cancel_body) {
+      decoder_.cancel();
    }
 }
 

@@ -2,14 +2,20 @@ module;
 
 #include <boost/asio/any_io_executor.hpp>
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/cancellation_signal.hpp>
+#include <boost/asio/cancellation_state.hpp>
+#include <boost/asio/cancellation_type.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
 #include <boost/asio/dispatch.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <boost/system/error_code.hpp>
 
+#include <atomic>
 #include <cstdint>
 #include <exception>
 #include <memory>
@@ -53,14 +59,26 @@ void server_stream_state::start() {
    boost::asio::co_spawn(
       executor_, [self = shared_from_this()]() -> boost::asio::awaitable<void> {
          co_await self->run();
-      }, boost::asio::detached);
+      },
+      boost::asio::bind_cancellation_slot(cancellation_.slot(),
+                                           boost::asio::detached));
 }
 
 void server_stream_state::cancel() noexcept {
+   if (cancelled_.exchange(true, std::memory_order_acq_rel)) {
+      return;
+   }
    const auto error = std::make_exception_ptr(
       forge::api::core::exceptions::cancelled{"HTTP API response stream was abandoned"});
    stream_.reader->fail(error);
    stream_.writer->fail(error);
+   try {
+      boost::asio::dispatch(executor_, [self = shared_from_this()] {
+         self->cancellation_.emit(boost::asio::cancellation_type::all);
+      });
+   } catch (...) {
+      // Stream endpoint failure still releases all bounded queues.
+   }
 }
 
 boost::asio::awaitable<std::optional<forge::net::http::body_chunk>>
@@ -126,6 +144,12 @@ server_stream_state::wait_terminal() {
       auto error = boost::system::error_code{};
       co_await terminal_ready_->async_wait(
          boost::asio::redirect_error(boost::asio::use_awaitable, error));
+      const auto cancellation =
+         co_await boost::asio::this_coro::cancellation_state;
+      if (cancellation.cancelled() != boost::asio::cancellation_type::none) {
+         throw forge::api::core::exceptions::cancelled{
+            "HTTP API response stream was cancelled"};
+      }
    }
 }
 

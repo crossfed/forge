@@ -227,20 +227,40 @@ void stream_state::fail(std::exception_ptr error) noexcept {
    auto reader = waiter{};
    auto writer = waiter{};
    auto observer = std::function<void(stream_event, std::size_t)>{};
+   auto failure_observer = std::function<void()>{};
    auto dropped_bytes = std::size_t{0};
+   auto stream_closed = false;
    {
       const auto lock = std::scoped_lock{mutex_};
-      if (error_ || closed_) {
+      if (error_) {
          return;
       }
-      error_ = std::move(error);
-      closed_ = true;
-      dropped_bytes = buffered_bytes_;
-      queue_.clear();
-      buffered_bytes_ = 0;
-      observer = observer_;
-      reader = read_waiter_;
-      writer = write_waiter_;
+      failure_observer_requested_ = true;
+      if (failure_observer_ && !failure_observer_notified_) {
+         failure_observer_notified_ = true;
+         failure_observer = failure_observer_;
+      }
+      stream_closed = closed_;
+      if (!stream_closed) {
+         error_ = std::move(error);
+         closed_ = true;
+         dropped_bytes = buffered_bytes_;
+         queue_.clear();
+         buffered_bytes_ = 0;
+         observer = observer_;
+         reader = read_waiter_;
+         writer = write_waiter_;
+      }
+   }
+   if (stream_closed) {
+      if (failure_observer) {
+         try {
+            failure_observer();
+         } catch (...) {
+            // Failure paths must remain noexcept.
+         }
+      }
+      return;
    }
    wake(reader);
    wake(writer);
@@ -251,12 +271,35 @@ void stream_state::fail(std::exception_ptr error) noexcept {
          // Failure paths must remain noexcept.
       }
    }
+   if (failure_observer) {
+      try {
+         failure_observer();
+      } catch (...) {
+         // Failure paths must remain noexcept.
+      }
+   }
 }
 
 void stream_state::set_observer(
    std::function<void(stream_event, std::size_t)> observer) {
    const auto lock = std::scoped_lock{mutex_};
    observer_ = std::move(observer);
+}
+
+void stream_state::set_failure_observer(std::function<void()> observer) {
+   auto notify = std::function<void()>{};
+   {
+      const auto lock = std::scoped_lock{mutex_};
+      failure_observer_ = std::move(observer);
+      if (failure_observer_requested_ && failure_observer_ &&
+          !failure_observer_notified_) {
+         failure_observer_notified_ = true;
+         notify = failure_observer_;
+      }
+   }
+   if (notify) {
+      notify();
+   }
 }
 
 } // namespace forge::api::core::detail

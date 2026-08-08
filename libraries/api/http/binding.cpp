@@ -3,6 +3,7 @@ module;
 #include <forge/exceptions/macros.hpp>
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/steady_timer.hpp>
 #include <boost/asio/this_coro.hpp>
 
@@ -10,6 +11,7 @@ module;
 #include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <functional>
 #include <memory>
 #include <string>
@@ -233,6 +235,14 @@ invoke_live_http_stream(
          std::move(response.body), forge::api::core::stream_direction::output,
          method->output_decoder, stream_limits.max_frame_bytes,
          stream_limits.max_item_bytes, true);
+      output->set_failure_observer(
+         [weak = std::weak_ptr<body_stream_endpoint>{inbound}] {
+            if (auto locked = weak.lock()) {
+               locked->fail(std::make_exception_ptr(
+                  forge::api::core::exceptions::cancelled{
+                     "HTTP API response stream was cancelled"}));
+            }
+         });
       while (auto item = co_await inbound->async_read()) {
          co_await output->async_write(std::move(*item));
       }
