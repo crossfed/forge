@@ -1,17 +1,37 @@
 {
-  "allowed_statuses": [
-    "ported",
+  "allowed_mapping_states": [
+    "mapped",
     "not_applicable",
     "unsupported"
   ],
+  "status_scope": "donor_case_coverage_only",
+  "execution_scope": "registered_optional_tests_not_current_results",
+  "production_inventory": "p2p_feature_inventory.json",
+  "donor_revisions": {
+    "libp2p-specs": "6b6203ee6f62938ce67efdb33498173f475851c0",
+    "multiaddr": "8f9c2eeff8a50276660c0d93fe5939540ee52110",
+    "go-multiaddr": "7fae00adf671d9d4b931e591f2357a261567fee5",
+    "rust-multiaddr": "33f1de2cb2c4a265b3d2dae3fe522d7bcf61ae11",
+    "go-libp2p": "9cfe2cc00be5b20a0be737f002c99f81b92255c5",
+    "rust-libp2p": "22fb4c784fc55ad8b15d05fdc9f98d663107d4cb",
+    "go-libp2p-kad-dht": "d40b14b5b2cc713f78173f411b8eec4c1827552f",
+    "go-libp2p-pubsub": "0ed6f6fdad7eb820486892336bed3081f8fa7f25"
+  },
   "cases": [
     {
       "id": "multiaddr.text_binary_roundtrip",
       "protocol": "Multiaddr",
       "source": "donors/libp2p-specs/addressing/README.md and donors/multiaddr/protocols.csv",
       "donor": "donors/multiaddr/test/multiaddr.feature Simple string form/Simple packed form; donors/go-multiaddr/multiaddr_test.go valid roundtrip cases; donors/rust-multiaddr/tests/lib.rs valid multiaddr cases",
-      "status": "ported",
-      "supported": true,
+      "donor_file": [
+        "donors/libp2p-specs/addressing/README.md",
+        "donors/multiaddr/protocols.csv",
+        "donors/multiaddr/test/multiaddr.feature",
+        "donors/go-multiaddr/multiaddr_test.go",
+        "donors/rust-multiaddr/tests/lib.rs"
+      ],
+      "donor_case": ["text roundtrip", "binary roundtrip", "protocol code table"],
+      "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_multiformats multiaddr_matches_donor_tcp_and_quic_binary_vectors",
         "test_forge_multiformats multiaddr_roundtrips_dns_wss_peer_and_relay_circuit"
@@ -23,8 +43,12 @@
       "protocol": "Multiaddr",
       "source": "donors/libp2p-specs/addressing/README.md Composing multiaddrs",
       "donor": "donors/go-multiaddr/multiaddr_test.go TestEncapsulate/TestDecapsulate/TestDecapsulateComment",
-      "status": "ported",
-      "supported": true,
+      "donor_file": [
+        "donors/libp2p-specs/addressing/README.md",
+        "donors/go-multiaddr/multiaddr_test.go"
+      ],
+      "donor_case": ["TestEncapsulate", "TestDecapsulate", "TestDecapsulateComment"],
+      "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_multiformats multiaddr_encapsulates_and_decapsulates_like_libp2p"
       ],
@@ -35,15 +59,21 @@
       "protocol": "Multiaddr/P2P Endpoint",
       "source": "donors/libp2p-specs/addressing/README.md Transport multiaddrs and p2p-circuit Relay Addresses",
       "donor": "donors/libp2p-specs/quic/README.md QUIC multiaddress examples; donors/go-libp2p/libp2p_test.go listen address expectations",
-      "status": "ported",
-      "supported": true,
+      "donor_file": [
+        "donors/libp2p-specs/addressing/README.md",
+        "donors/libp2p-specs/quic/README.md",
+        "donors/go-libp2p/libp2p_test.go"
+      ],
+      "donor_case": ["transport address", "peer identity suffix", "relay circuit address"],
+      "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_quic_p2p p2p_endpoint_parses_libp2p_quic_address_format",
         "test_forge_quic_p2p p2p_endpoint_uses_multiaddr_for_tcp_wss_and_relay_views",
-        "test_forge_quic_p2p p2p_websocket_multiaddr_is_parseable_but_not_dialable"
+        "test_forge_quic_p2p p2p_websocket_multiaddr_is_parseable_but_not_dialable",
+        "test_forge_libp2p_interop identify"
       ],
       "forge_live_scenario": [
-        "test_forge_libp2p_interop identify scenarios record advertised addresses"
+        {"profile": "quic_base", "scenario": "identify"}
       ],
       "known_gap": "`/ws` and `/wss` have parse/store coverage only; no dial/listen live scenario is claimed."
     },
@@ -52,14 +82,19 @@
       "protocol": "AutoNAT v2",
       "source": "donors/libp2p-specs/autonat/autonat-v2.md",
       "donor": "go-libp2p/p2p/protocol/autonatv2/autonat_test.go TestClientRequest/TestClientDataRequest",
-      "status": "ported",
-      "supported": true,
+      "donor_file": [
+        "donors/libp2p-specs/autonat/autonat-v2.md",
+        "donors/go-libp2p/p2p/protocol/autonatv2/autonat_test.go"
+      ],
+      "donor_case": ["TestClientRequest", "TestClientDataRequest", "nonce validation"],
+      "mapping_state": "mapped",
       "forge_tests": [
-        "p2p_libp2p_autonat_v2_codec_covers_nonce_data_and_statuses",
-        "p2p_autonat_v2_probe_public_and_persists_observation"
+        "test_forge_quic_p2p p2p_libp2p_autonat_v2_codec_covers_nonce_data_and_statuses",
+        "test_forge_quic_p2p p2p_autonat_v2_probe_public_and_persists_observation",
+        "test_forge_libp2p_interop autonatv2"
       ],
       "forge_live_scenario": [
-        "test_forge_libp2p_interop AutoNAT v2 FORGE <-> Go/Rust"
+        {"profile": "quic_base", "scenario": "autonatv2"}
       ]
     },
     {
@@ -67,30 +102,45 @@
       "protocol": "AutoNAT v2",
       "source": "donors/libp2p-specs/autonat/autonat-v2.md",
       "donor": "go-libp2p/p2p/protocol/autonatv2/autonat_test.go TestClientServerError",
-      "status": "ported",
-      "supported": true,
+      "donor_file": [
+        "donors/libp2p-specs/autonat/autonat-v2.md",
+        "donors/go-libp2p/p2p/protocol/autonatv2/autonat_test.go"
+      ],
+      "donor_case": ["TestClientServerError", "oversized data rejection"],
+      "mapping_state": "mapped",
       "forge_tests": [
-        "p2p_libp2p_autonat_v2_rejects_oversized_data_response_and_unknown_status"
+        "test_forge_quic_p2p p2p_libp2p_autonat_v2_rejects_oversized_data_response_and_unknown_status"
       ],
       "known_gap": "Negative malformed and oversized AutoNAT v2 behavior is component-only; live fixtures exercise valid exchanges."
     },
     {
       "id": "relayv2.reserve_connect_status",
       "protocol": "Circuit Relay v2",
-      "source": "donors/libp2p-specs/relay/circuit-v2.md",
-      "donor": "go-libp2p/p2p/host/relaysvc/relay_test.go and rust-libp2p builder relay phase",
-      "status": "ported",
-      "supported": true,
+      "source": "donors/libp2p-specs/relay/circuit-v2.md and docs/donors/fcl-p2p-reachability-relay-v1.md",
+      "donor": "go-libp2p Circuit Relay v2 protocol tests and rust-libp2p relay protocol tests",
+      "donor_file": [
+        "donors/libp2p-specs/relay/circuit-v2.md",
+        "donors/go-libp2p/p2p/protocol/circuitv2/relay/relay_test.go",
+        "donors/go-libp2p/p2p/protocol/circuitv2/relay/relay_priv_test.go",
+        "donors/rust-libp2p/protocols/relay/tests/lib.rs"
+      ],
+      "donor_case": [
+        "RESERVE request and response",
+        "CONNECT and STOP status",
+        "reservation limits and expiration",
+        "relayed stream forwarding"
+      ],
+      "mapping_state": "mapped",
       "forge_tests": [
-        "p2p_libp2p_relay_wire_roundtrips_statuses_limits_and_voucher",
-        "p2p_relay_reservation_persists_candidate",
-        "p2p_relay_connect_requires_target_reservation",
-        "p2p_relay_stop_connect_passes_frames_after_target_reservation",
-        "p2p_relay_transport_opens_arbitrary_registered_protocol"
+        "test_forge_quic_p2p p2p_libp2p_relay_wire_roundtrips_statuses_limits_and_voucher",
+        "test_forge_quic_p2p p2p_relay_reservation_persists_candidate",
+        "test_forge_quic_p2p p2p_relay_connect_requires_target_reservation",
+        "test_forge_quic_p2p p2p_relay_stop_connect_passes_frames_after_target_reservation",
+        "test_forge_quic_p2p p2p_relay_transport_opens_arbitrary_registered_protocol",
+        "test_forge_libp2p_interop relay_reserve"
       ],
       "forge_live_scenario": [
-        "test_forge_libp2p_interop relay reservation FORGE <-> Go/Rust",
-        "test_forge_libp2p_interop relayed stream FORGE <-> Go/Rust"
+        {"profile": "quic_base", "scenario": "relay_reserve"}
       ]
     },
     {
@@ -98,12 +148,16 @@
       "protocol": "Circuit Relay v2",
       "source": "donors/libp2p-specs/RFC/0002-signed-envelopes.md",
       "donor": "go-libp2p circuit relay voucher validation",
-      "status": "ported",
-      "supported": true,
+      "donor_file": [
+        "donors/libp2p-specs/RFC/0002-signed-envelopes.md",
+        "donors/go-libp2p/p2p/protocol/circuitv2/relay/relay_priv_test.go"
+      ],
+      "donor_case": ["signed envelope domain", "relay reservation voucher validation"],
+      "mapping_state": "mapped",
       "forge_tests": [
-        "p2p_signed_envelope_seals_and_verifies_domain_payload_and_signer",
-        "p2p_relay_voucher_uses_signed_envelope_and_rejects_stale_or_wrong_signer",
-        "p2p_libp2p_relay_wire_roundtrips_statuses_limits_and_voucher"
+        "test_forge_quic_p2p p2p_signed_envelope_seals_and_verifies_domain_payload_and_signer",
+        "test_forge_quic_p2p p2p_relay_voucher_uses_signed_envelope_and_rejects_stale_or_wrong_signer",
+        "test_forge_quic_p2p p2p_libp2p_relay_wire_roundtrips_statuses_limits_and_voucher"
       ],
       "known_gap": "Voucher signature failure cases are component-only; live relay fixtures exercise valid vouchers and reservations."
     },
@@ -112,15 +166,19 @@
       "protocol": "AutoRelay",
       "source": "donors/libp2p-specs/relay/circuit-v2.md",
       "donor": "go-libp2p p2p/host/autorelay relay_finder and rust-libp2p relay priv_client reservation lifecycle",
-      "status": "ported",
-      "supported": true,
+      "donor_file": [
+        "donors/go-libp2p/p2p/host/autorelay/relay_finder.go",
+        "donors/rust-libp2p/protocols/relay/src/priv_client.rs"
+      ],
+      "donor_case": ["candidate discovery", "reservation renewal", "candidate backoff"],
+      "mapping_state": "mapped",
       "forge_tests": [
-        "p2p_autorelay_refresh_reserves_peer_store_candidate",
-        "p2p_autorelay_refresh_backs_off_failed_candidate_and_tries_next",
-        "p2p_autorelay_refresh_accepts_dht_and_rendezvous_sourced_candidates",
-        "p2p_autorelay_refresh_respects_candidate_and_target_limits",
-        "p2p_relay_fallback_refreshes_candidate_without_explicit_relay_peer",
-        "p2p_discovery_refresh_learns_dht_and_rendezvous_relay_candidates_for_autorelay"
+        "test_forge_quic_p2p p2p_autorelay_refresh_reserves_peer_store_candidate",
+        "test_forge_quic_p2p p2p_autorelay_refresh_backs_off_failed_candidate_and_tries_next",
+        "test_forge_quic_p2p p2p_autorelay_refresh_accepts_dht_and_rendezvous_sourced_candidates",
+        "test_forge_quic_p2p p2p_autorelay_refresh_respects_candidate_and_target_limits",
+        "test_forge_quic_p2p p2p_relay_fallback_refreshes_candidate_without_explicit_relay_peer",
+        "test_forge_quic_p2p p2p_discovery_refresh_learns_dht_and_rendezvous_relay_candidates_for_autorelay"
       ],
       "known_gap": "Live fixtures cover relay reservation and use; autonomous relay candidate discovery policy is component-only because fixtures do not expose every discovery source."
     },
@@ -129,21 +187,19 @@
       "protocol": "DCUtR",
       "source": "donors/libp2p-specs/relay/DCUtR.md",
       "donor": "go-libp2p/p2p/protocol/holepunch/holepunch_test.go",
-      "status": "ported",
-      "supported": true,
+      "donor_file": [
+        "donors/libp2p-specs/relay/DCUtR.md",
+        "donors/go-libp2p/p2p/protocol/holepunch/holepunch_test.go"
+      ],
+      "donor_case": ["CONNECT", "SYNC", "simultaneous direct dial"],
+      "mapping_state": "mapped",
       "forge_tests": [
-        "p2p_libp2p_dcutr_codec_matches_spec_shape",
-        "p2p_dcutr_attempt_tracks_rtt_retry_and_inflight_state",
-        "test_forge_libp2p_interop forge_source_go_relay_go_destination_dcutr",
-        "test_forge_libp2p_interop forge_source_rust_relay_rust_destination_dcutr",
-        "test_forge_libp2p_interop go_source_forge_relay_forge_destination_dcutr",
-        "test_forge_libp2p_interop rust_source_forge_relay_forge_destination_dcutr"
+        "test_forge_quic_p2p p2p_libp2p_dcutr_codec_matches_spec_shape",
+        "test_forge_quic_p2p p2p_dcutr_attempt_tracks_rtt_retry_and_inflight_state",
+        "test_forge_libp2p_interop dcutr_relay_topology"
       ],
       "forge_live_scenario": [
-        "forge_source_go_relay_go_destination_dcutr",
-        "forge_source_rust_relay_rust_destination_dcutr",
-        "go_source_forge_relay_forge_destination_dcutr",
-        "rust_source_forge_relay_forge_destination_dcutr"
+        {"profile": "quic_topology", "scenario": "dcutr_relay_topology"}
       ]
     },
     {
@@ -151,11 +207,12 @@
       "protocol": "Resource Manager",
       "source": "go-libp2p resource-manager wrapping tests",
       "donor": "go-libp2p circuit dial with wrapped resource manager",
-      "status": "ported",
-      "supported": true,
+      "donor_file": ["donors/go-libp2p/p2p/test/resource-manager/rcmgr_test.go"],
+      "donor_case": ["peer scope", "protocol scope", "dial scope"],
+      "mapping_state": "mapped",
       "forge_tests": [
-        "p2p_resource_manager_enforces_peer_protocol_dial_and_reservation_scopes",
-        "p2p_relay_policy_options_are_behavioral"
+        "test_forge_quic_p2p p2p_resource_manager_enforces_peer_protocol_dial_and_reservation_scopes",
+        "test_forge_quic_p2p p2p_relay_policy_options_are_behavioral"
       ],
       "known_gap": "Resource-manager scope failures are component-only; live interop remains the protocol compatibility gate."
     },
@@ -164,29 +221,34 @@
       "protocol": "Connection Manager",
       "source": "go-libp2p connmgr/resource-manager/swarm dial backoff and rust-libp2p connection-limits",
       "donor": "go-libp2p low/high watermark pruning, protected peers, resource scopes, endpoint dial backoff and rust-libp2p swarm connection events",
-      "status": "ported",
-      "supported": true,
+      "donor_file": [
+        "donors/go-libp2p/p2p/net/connmgr/connmgr_test.go",
+        "donors/rust-libp2p/swarm/src/connection/pool.rs"
+      ],
+      "donor_case": ["watermark pruning", "protected peer", "connection limit"],
+      "mapping_state": "mapped",
       "forge_tests": [
-        "p2p_resource_manager_enforces_connection_session_scopes",
-        "p2p_node_peer_protection_api_is_tagged_and_additive",
-        "p2p_connection_manager_prunes_unprotected_sessions_and_keeps_protected_peer",
-        "p2p_connection_manager_rejects_when_all_sessions_are_protected",
-        "p2p_connection_manager_enforces_outbound_session_limit",
-        "p2p_connection_manager_allows_bounded_parallel_sessions_per_peer",
-        "p2p_connection_manager_enforces_sessions_per_peer_limit",
-        "p2p_connection_manager_rejects_pending_outbound_limit_without_killing_first_attempt",
-        "p2p_path_manager_tries_next_direct_endpoint_after_attempt_timeout",
-        "p2p_abusive_peer_crossing_malformed_threshold_closes_only_offender_session"
+        "test_forge_quic_p2p p2p_resource_manager_enforces_connection_session_scopes",
+        "test_forge_quic_p2p p2p_node_peer_protection_api_is_tagged_and_additive",
+        "test_forge_quic_p2p p2p_connection_manager_prunes_unprotected_sessions_and_keeps_protected_peer",
+        "test_forge_quic_p2p p2p_connection_manager_rejects_when_all_sessions_are_protected",
+        "test_forge_quic_p2p p2p_connection_manager_enforces_outbound_session_limit",
+        "test_forge_quic_p2p p2p_connection_manager_allows_bounded_parallel_sessions_per_peer",
+        "test_forge_quic_p2p p2p_connection_manager_enforces_sessions_per_peer_limit",
+        "test_forge_quic_p2p p2p_connection_manager_rejects_pending_outbound_limit_without_killing_first_attempt",
+        "test_forge_quic_p2p p2p_path_manager_tries_next_direct_endpoint_after_attempt_timeout",
+        "test_forge_quic_p2p p2p_abusive_peer_crossing_malformed_threshold_closes_only_offender_session"
       ],
       "known_gap": "Live donor fixtures do not expose all pruning/protection knobs; component tests cover host policy and live interop remains the compatibility gate."
     },
     {
       "id": "plugin.p2p.resolver.metadata",
       "protocol": "FORGE P2P API Resolver",
-      "source": "docs/donors/forge-p2p-resolver-v1.md",
+      "source": "docs/donors/fcl-p2p-resolver-v1.md",
       "donor": "libp2p Identify protocol-listing, Kubo CoreAPI facade pattern, Boxo service separation and rust-libp2p behaviour composition",
-      "status": "ported",
-      "supported": true,
+      "donor_file": ["docs/donors/fcl-p2p-resolver-v1.md"],
+      "donor_case": ["metadata publication", "remote resolution", "facade separation"],
+      "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_plugins p2p_api_resolver_plugin_config_is_described_from_public_schema",
         "test_forge_plugins p2p_api_resolver_publishes_metadata_and_delegates_route_mounting",
@@ -198,10 +260,11 @@
     {
       "id": "plugin.p2p_diagnostics_snapshot",
       "protocol": "FORGE P2P Diagnostics",
-      "source": "docs/donors/forge-p2p-node-plugin-delivery-automation.md",
+      "source": "docs/donors/fcl-p2p-node-plugin-delivery-automation.md",
       "donor": "Kubo CoreAPI/service facade split, Go libp2p peerstore/connmgr/resource-manager visibility and rust-libp2p swarm state projection patterns",
-      "status": "ported",
-      "supported": true,
+      "donor_file": ["docs/donors/fcl-p2p-node-plugin-delivery-automation.md"],
+      "donor_case": ["read-only diagnostics facade", "bounded snapshot", "plugin lifecycle"],
+      "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_quic_p2p p2p_diagnostics_snapshot_reports_live_network_state_without_mutation",
         "test_forge_quic_p2p p2p_diagnostics_snapshot_caps_are_deterministic",
@@ -214,10 +277,14 @@
     {
       "id": "plugin.p2p_pubsub_facade",
       "protocol": "FORGE P2P PubSub Plugin",
-      "source": "docs/donors/forge-p2p-node-plugin-delivery-automation.md and docs/donors/forge-p2p-gossipsub-v1.md",
+      "source": "docs/donors/fcl-p2p-node-plugin-delivery-automation.md and docs/donors/fcl-p2p-gossipsub-v1.md",
       "donor": "Go libp2p Topic/Subscription/RegisterTopicValidator, rust-libp2p Behaviour/Event validation and Kubo CoreAPI facade split",
-      "status": "ported",
-      "supported": true,
+      "donor_file": [
+        "docs/donors/fcl-p2p-node-plugin-delivery-automation.md",
+        "docs/donors/fcl-p2p-gossipsub-v1.md"
+      ],
+      "donor_case": ["topic facade", "subscription ownership", "validator boundary"],
+      "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_plugins p2p_pubsub_plugin_config_is_described_from_public_schema",
         "test_forge_plugins p2p_pubsub_api_rejects_facade_calls_before_initialize",
@@ -232,14 +299,25 @@
       "protocol": "Interop",
       "source": "go-libp2p and rust-libp2p live fixtures",
       "donor": "live fixtures launched by tests/libp2p_interop/runner.py",
-      "status": "ported",
-      "supported": true,
+      "donor_file": [
+        "donors/go-libp2p/p2p/protocol/ping/ping_test.go",
+        "donors/go-libp2p/p2p/protocol/identify/id_test.go",
+        "donors/rust-libp2p/protocols/ping/tests/ping.rs",
+        "donors/rust-libp2p/protocols/identify/tests/smoke.rs"
+      ],
+      "donor_case": ["Ping", "Identify", "AutoNAT v2", "Relay reserve"],
+      "mapping_state": "mapped",
       "forge_tests": [
-        "test_forge_libp2p_interop"
+        "test_forge_libp2p_interop ping",
+        "test_forge_libp2p_interop identify",
+        "test_forge_libp2p_interop autonatv2",
+        "test_forge_libp2p_interop relay_reserve"
       ],
       "forge_live_scenario": [
-        "FORGE <-> Go Ping, Identify, AutoNAT v2 and Relay",
-        "FORGE <-> Rust Ping, Identify, AutoNAT v2 and Relay"
+        {"profile": "quic_base", "scenario": "ping"},
+        {"profile": "quic_base", "scenario": "identify"},
+        {"profile": "quic_base", "scenario": "autonatv2"},
+        {"profile": "quic_base", "scenario": "relay_reserve"}
       ]
     },
     {
@@ -265,24 +343,16 @@
         "Ping over TCP",
         "Identify over TCP"
       ],
-      "status": "ported",
-      "supported": true,
+      "mapping_state": "mapped",
       "forge_tests": [
-        "test_forge_libp2p_interop tcp ping/identify/echo FORGE <-> Go/Rust"
+        "test_forge_libp2p_interop ping",
+        "test_forge_libp2p_interop identify",
+        "test_forge_libp2p_interop echo"
       ],
       "forge_live_scenario": [
-        "forge->go tcp ping",
-        "go->forge tcp ping",
-        "forge->rust tcp ping",
-        "rust->forge tcp ping",
-        "forge->go tcp identify",
-        "go->forge tcp identify",
-        "forge->rust tcp identify",
-        "rust->forge tcp identify",
-        "forge->go tcp echo",
-        "go->forge tcp echo",
-        "forge->rust tcp echo",
-        "rust->forge tcp echo"
+        {"profile": "tcp_noise", "scenario": "ping"},
+        {"profile": "tcp_noise", "scenario": "identify"},
+        {"profile": "tcp_noise", "scenario": "echo"}
       ],
       "known_gap": "`/ws` and `/wss` have parse/store coverage only; no dial/listen live scenario is claimed."
     },
@@ -313,8 +383,7 @@
         "Ping over TCP TLS",
         "Identify over TCP TLS"
       ],
-      "status": "ported",
-      "supported": true,
+      "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_stcp stcp_controls_sni_explicitly",
         "test_forge_stcp stcp_verifier_receives_full_certificate_chain",
@@ -325,21 +394,14 @@
         "test_forge_quic_p2p p2p_certificate_without_libp2p_extension_is_rejected",
         "test_forge_quic_p2p p2p_direct_quic_rejects_missing_certificate_identity_without_expected_peer",
         "test_forge_quic_p2p p2p_direct_quic_rejects_missing_certificate_identity_with_endpoint_peer",
-        "test_forge_libp2p_interop tcp-tls ping/identify/echo FORGE <-> Go/Rust"
+        "test_forge_libp2p_interop ping",
+        "test_forge_libp2p_interop identify",
+        "test_forge_libp2p_interop echo"
       ],
       "forge_live_scenario": [
-        "forge->go tcp-tls ping",
-        "go->forge tcp-tls ping",
-        "forge->rust tcp-tls ping",
-        "rust->forge tcp-tls ping",
-        "forge->go tcp-tls identify",
-        "go->forge tcp-tls identify",
-        "forge->rust tcp-tls identify",
-        "rust->forge tcp-tls identify",
-        "forge->go tcp-tls echo",
-        "go->forge tcp-tls echo",
-        "forge->rust tcp-tls echo",
-        "rust->forge tcp-tls echo"
+        {"profile": "tcp_tls", "scenario": "ping"},
+        {"profile": "tcp_tls", "scenario": "identify"},
+        {"profile": "tcp_tls", "scenario": "echo"}
       ],
       "known_gap": "`/ws` and `/wss` have parse/store coverage only; no dial/listen live scenario is claimed."
     },
@@ -362,20 +424,22 @@
         "relay path composed above direct transport",
         "network address plus peer identity"
       ],
-      "status": "ported",
-      "supported": true,
+      "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_quic_p2p p2p_node_listens_on_quic_and_tcp_and_identify_advertises_both",
         "test_forge_quic_p2p p2p_duplicate_direct_listen_rejects_typed",
         "test_forge_quic_p2p p2p_peer_exchange_preserves_multiple_direct_endpoints_without_duplicates",
         "test_forge_quic_p2p p2p_identify_push_rejects_mismatched_endpoint_peer_suffix",
         "test_forge_quic_p2p p2p_stop_closes_all_direct_listeners",
-        "test_forge_quic_p2p p2p_websocket_multiaddr_is_parseable_but_not_dialable"
+        "test_forge_quic_p2p p2p_websocket_multiaddr_is_parseable_but_not_dialable",
+        "test_forge_libp2p_interop identify",
+        "test_forge_libp2p_interop ping",
+        "test_forge_libp2p_interop relay_reserve"
       ],
       "forge_live_scenario": [
-        "test_forge_libp2p_interop identify scenarios record advertised addresses",
-        "test_forge_libp2p_interop tcp/tcp-tls scenarios prove advertised TCP is dialable",
-        "test_forge_libp2p_interop relay scenarios keep relay path separate from direct"
+        {"profile": "quic_base", "scenario": "identify"},
+        {"profile": "quic_base", "scenario": "ping"},
+        {"profile": "quic_base", "scenario": "relay_reserve"}
       ],
       "known_gap": "`/ws` and `/wss` have parse/store coverage only; no dial/listen live scenario is claimed."
     },
@@ -384,21 +448,19 @@
       "protocol": "DCUtR",
       "source": "donors/libp2p-specs/relay/DCUtR.md",
       "donor": "go-libp2p/rust-libp2p relayed connection hole-punching tests",
-      "status": "ported",
-      "supported": true,
+      "donor_file": [
+        "donors/libp2p-specs/relay/DCUtR.md",
+        "donors/go-libp2p/p2p/protocol/holepunch/holepunch_test.go",
+        "donors/rust-libp2p/protocols/dcutr/src/handler/relayed.rs"
+      ],
+      "donor_case": ["mixed relay topology", "CONNECT", "SYNC", "direct upgrade"],
+      "mapping_state": "mapped",
       "forge_tests": [
-        "test_forge_libp2p_interop",
-        "forge_interop_fixture topology dcutr_relay_topology",
-        "mixed FORGE source -> go-libp2p relay -> go-libp2p destination DCUtR topology",
-        "mixed FORGE source -> rust-libp2p relay -> rust-libp2p destination DCUtR topology",
-        "mixed go-libp2p source -> FORGE relay -> FORGE destination DCUtR topology",
-        "mixed rust-libp2p source -> FORGE relay -> FORGE destination DCUtR topology"
+        "test_forge_libp2p_interop dcutr_relay_topology",
+        "forge_interop_fixture dcutr_relay_topology"
       ],
       "forge_live_scenario": [
-        "forge_source_go_relay_go_destination_dcutr",
-        "forge_source_rust_relay_rust_destination_dcutr",
-        "go_source_forge_relay_forge_destination_dcutr",
-        "rust_source_forge_relay_forge_destination_dcutr"
+        {"profile": "quic_topology", "scenario": "dcutr_relay_topology"}
       ]
     },
     {
@@ -406,37 +468,51 @@
       "protocol": "Kademlia DHT",
       "source": "donors/libp2p-specs/kad-dht/README.md",
       "donor": "rust-libp2p/protocols/kad tests and Kademlia routing table behavior",
-      "status": "ported",
-      "supported": true,
-      "forge_tests": [
-        "p2p_dht_routing_table_uses_sha256_xor_distance_and_bounds_results"
+      "donor_file": [
+        "donors/libp2p-specs/kad-dht/README.md",
+        "donors/rust-libp2p/protocols/kad/src/kbucket.rs"
       ],
-      "known_gap": "Routing-table distance ordering is component-only; live DHT lookup proof is tracked by interop.live_dht_peer_provider_lookup."
+      "donor_case": ["XOR distance", "closest peers", "bucket capacity"],
+      "mapping_state": "mapped",
+      "forge_tests": [
+        "test_forge_quic_p2p p2p_dht_routing_table_uses_sha256_xor_distance_and_bounds_results"
+      ],
+      "known_gap": "Routing-table distance ordering is component-only; the current live peer lookup fixture can resolve an already connected peer without DHT negotiation."
     },
     {
       "id": "dht.message_codec_and_provider_records",
       "protocol": "Kademlia DHT",
       "source": "donors/libp2p-specs/kad-dht/README.md",
       "donor": "rust-libp2p/protocols/kad/src/generated/dht.proto and provider lookup tests",
-      "status": "ported",
-      "supported": true,
-      "forge_tests": [
-        "p2p_dht_codec_roundtrips_libp2p_message_shape_and_rejects_malformed",
-        "p2p_dht_node_finds_peer_and_provider_over_negotiated_stream",
-        "p2p_peer_store_rocksdb_persists_discovery_dht_and_rendezvous_state"
+      "donor_file": [
+        "donors/libp2p-specs/kad-dht/README.md",
+        "donors/go-libp2p-kad-dht/pb/protocol_messenger.go",
+        "donors/rust-libp2p/protocols/kad/src/behaviour.rs"
       ],
-      "known_gap": "Codec and persistence negative cases are component-only; live DHT lookup proof is tracked by interop.live_dht_peer_provider_lookup."
+      "donor_case": ["message codec", "provider record", "malformed message rejection"],
+      "mapping_state": "mapped",
+      "forge_tests": [
+        "test_forge_quic_p2p p2p_dht_codec_roundtrips_libp2p_message_shape_and_rejects_malformed",
+        "test_forge_quic_p2p p2p_dht_node_finds_peer_and_provider_over_negotiated_stream",
+        "test_forge_quic_p2p p2p_peer_store_rocksdb_persists_discovery_dht_and_rendezvous_state"
+      ],
+      "known_gap": "Codec and persistence negative cases are component-only; only provider publication/discovery is credited as current live DHT evidence."
     },
     {
       "id": "dht.iterative_lookup_and_provider_publication",
       "protocol": "Kademlia DHT",
       "source": "donors/libp2p-specs/kad-dht/README.md",
       "donor": "go-libp2p-kad-dht query/provider behaviour and rust-libp2p kad query pool acceptance criteria",
-      "status": "ported",
-      "supported": true,
+      "donor_file": [
+        "donors/go-libp2p-kad-dht/query.go",
+        "donors/go-libp2p-kad-dht/query_test.go",
+        "donors/rust-libp2p/protocols/kad/src/behaviour.rs"
+      ],
+      "donor_case": ["iterative query", "provider publication", "closest-peer convergence"],
+      "mapping_state": "mapped",
       "forge_tests": [
-        "p2p_dht_iterative_lookup_walks_many_peer_topology",
-        "p2p_dht_iterative_provider_lookup_and_provide_reach_closest_peers"
+        "test_forge_quic_p2p p2p_dht_iterative_lookup_walks_many_peer_topology",
+        "test_forge_quic_p2p p2p_dht_iterative_provider_lookup_and_provide_reach_closest_peers"
       ],
       "known_gap": "Live many-peer DHT topology artifacts remain limited by current fixture support"
     },
@@ -445,12 +521,17 @@
       "protocol": "Rendezvous",
       "source": "donors/libp2p-specs/rendezvous/README.md",
       "donor": "rust-libp2p/protocols/rendezvous/src/generated/rpc.proto and rendezvous behaviour tests",
-      "status": "ported",
-      "supported": true,
+      "donor_file": [
+        "donors/libp2p-specs/rendezvous/README.md",
+        "donors/rust-libp2p/protocols/rendezvous/src/generated/rpc.proto",
+        "donors/rust-libp2p/protocols/rendezvous/tests/rendezvous.rs"
+      ],
+      "donor_case": ["Register", "Discover", "TTL", "cookie"],
+      "mapping_state": "mapped",
       "forge_tests": [
-        "p2p_rendezvous_codec_roundtrips_register_discover_cookie_and_status",
-        "p2p_rendezvous_node_registers_and_discovers_over_negotiated_stream",
-        "p2p_peer_store_rocksdb_persists_discovery_dht_and_rendezvous_state"
+        "test_forge_quic_p2p p2p_rendezvous_codec_roundtrips_register_discover_cookie_and_status",
+        "test_forge_quic_p2p p2p_rendezvous_node_registers_and_discovers_over_negotiated_stream",
+        "test_forge_quic_p2p p2p_peer_store_rocksdb_persists_discovery_dht_and_rendezvous_state"
       ],
       "known_gap": "Component-level protocol and persistence proof; live Rust register/discover proof is tracked by interop.live_rendezvous_register_discover."
     },
@@ -459,16 +540,21 @@
       "protocol": "Rendezvous",
       "source": "donors/libp2p-specs/rendezvous/README.md",
       "donor": "rust-libp2p rendezvous refresh, signed PeerRecord and cookie continuation behaviour",
-      "status": "ported",
-      "supported": true,
+      "donor_file": [
+        "donors/libp2p-specs/rendezvous/README.md",
+        "donors/rust-libp2p/protocols/rendezvous/src/client.rs",
+        "donors/rust-libp2p/protocols/rendezvous/src/server.rs"
+      ],
+      "donor_case": ["registration refresh", "cookie continuation", "signed peer record"],
+      "mapping_state": "mapped",
       "forge_tests": [
-        "p2p_rendezvous_refresh_replaces_registration_and_cookie_discovers_new_records",
-        "p2p_discovery_refresh_learns_dht_and_rendezvous_relay_candidates_for_autorelay"
+        "test_forge_quic_p2p p2p_rendezvous_refresh_replaces_registration_and_cookie_discovers_new_records",
+        "test_forge_quic_p2p p2p_discovery_refresh_learns_dht_and_rendezvous_relay_candidates_for_autorelay"
       ],
       "known_gap": "Go rendezvous remains a wire-level future scenario because no official go-libp2p rendezvous behaviour donor is present"
     },
     {
-      "id": "interop.live_dht_peer_provider_lookup",
+      "id": "interop.live_dht_provider_lookup",
       "protocol": "Kademlia DHT",
       "source": "donors/libp2p-specs/kad-dht/README.md",
       "donor": "go-libp2p-kad-dht FindPeer/Provide/FindProviders and rust-libp2p kad::Behaviour live fixtures",
@@ -485,22 +571,15 @@
         "start_providing",
         "get_providers"
       ],
-      "status": "ported",
-      "supported": true,
+      "mapping_state": "mapped",
       "forge_tests": [
-        "test_forge_libp2p_interop dht_find_peer FORGE <-> Go/Rust",
-        "test_forge_libp2p_interop dht_provide_find_provider FORGE <-> Go/Rust"
+        "test_forge_libp2p_interop dht_find_peer",
+        "test_forge_libp2p_interop dht_provide_find_provider"
       ],
       "forge_live_scenario": [
-        "forge->go dht_find_peer",
-        "go->forge dht_find_peer",
-        "forge->rust dht_find_peer",
-        "rust->forge dht_find_peer",
-        "forge->go dht_provide_find_provider",
-        "go->forge dht_provide_find_provider",
-        "forge->rust dht_provide_find_provider",
-        "rust->forge dht_provide_find_provider"
-      ]
+        {"profile": "quic_dht", "scenario": "dht_provide_find_provider"}
+      ],
+      "known_gap": "dht_find_peer currently connects directly to the searched peer, so local peer-store lookup can satisfy it without an outbound DHT exchange; it is not credited as live FindPeer evidence."
     },
     {
       "id": "interop.live_rendezvous_register_discover",
@@ -519,14 +598,12 @@
         "TTL",
         "cookie continuation"
       ],
-      "status": "ported",
-      "supported": true,
+      "mapping_state": "mapped",
       "forge_tests": [
-        "test_forge_libp2p_interop rendezvous_register_discover FORGE <-> Rust"
+        "test_forge_libp2p_interop rendezvous_register_discover"
       ],
       "forge_live_scenario": [
-        "forge->rust rendezvous_register_discover",
-        "rust->forge rendezvous_register_discover"
+        {"profile": "quic_rendezvous", "scenario": "rendezvous_register_discover"}
       ],
       "known_gap": "Go rendezvous remains a wire-level future scenario because no official go-libp2p rendezvous behaviour donor is present"
     },
@@ -545,18 +622,11 @@
         "GossipSubID_v10",
         "ConfigBuilder::protocol_id_prefix"
       ],
-      "status": "ported",
-      "supported": true,
+      "mapping_state": "mapped",
       "forge_tests": [
-        "p2p_libp2p_reachability_relay_protocol_ids_are_exact",
-        "test_forge_libp2p_interop gossipsub_publish FORGE <-> Go/Rust"
+        "test_forge_quic_p2p p2p_libp2p_reachability_relay_protocol_ids_are_exact"
       ],
-      "forge_live_scenario": [
-        "forge->go gossipsub_publish",
-        "go->forge gossipsub_publish",
-        "forge->rust gossipsub_publish",
-        "rust->forge gossipsub_publish"
-      ]
+      "known_gap": "Live fixtures negotiate GossipSub v1.1 first. GossipSub v1.0 has exact protocol-id coverage only until a fixture forces the v1.0 fallback."
     },
     {
       "id": "gossipsub.rpc_codec_control_and_limits",
@@ -573,10 +643,9 @@
         "IHAVE/IWANT/GRAFT/PRUNE",
         "oversized/malformed rejection"
       ],
-      "status": "ported",
-      "supported": true,
+      "mapping_state": "mapped",
       "forge_tests": [
-        "p2p_gossipsub_codec_roundtrips_v11_rpc_and_rejects_malformed"
+        "test_forge_quic_p2p p2p_gossipsub_codec_roundtrips_v11_rpc_and_rejects_malformed"
       ],
       "known_gap": "RPC codec, malformed control and resource-limit failures are component-only; live publish delivery is tracked by gossipsub.live_publish_delivery."
     },
@@ -595,11 +664,10 @@
         "signature excludes signature/key fields",
         "message id source plus seqno"
       ],
-      "status": "ported",
-      "supported": true,
+      "mapping_state": "mapped",
       "forge_tests": [
-        "p2p_gossipsub_codec_roundtrips_v11_rpc_and_rejects_malformed",
-        "p2p_gossipsub_signing_rejects_tampered_payload"
+        "test_forge_quic_p2p p2p_gossipsub_codec_roundtrips_v11_rpc_and_rejects_malformed",
+        "test_forge_quic_p2p p2p_gossipsub_signing_rejects_tampered_payload"
       ],
       "known_gap": "Tampered-message signature rejection is component-only; live valid signed delivery is tracked by gossipsub.live_publish_delivery."
     },
@@ -621,20 +689,15 @@
         "mesh forwarding",
         "message cache duplicate suppression"
       ],
-      "status": "ported",
-      "supported": true,
+      "mapping_state": "mapped",
       "forge_tests": [
-        "p2p_gossipsub_nodes_deliver_signed_publish_over_negotiated_stream",
-        "p2p_gossipsub_forwards_between_subscribed_peers",
-        "p2p_gossipsub_ten_node_mesh_delivers_multiple_publishes_once",
-        "test_forge_libp2p_interop gossipsub_publish FORGE <-> Go/Rust"
+        "test_forge_quic_p2p p2p_gossipsub_nodes_deliver_signed_publish_over_negotiated_stream",
+        "test_forge_quic_p2p p2p_gossipsub_forwards_between_subscribed_peers",
+        "test_forge_quic_p2p p2p_gossipsub_ten_node_mesh_delivers_multiple_publishes_once",
+        "test_forge_libp2p_interop gossipsub_publish"
       ],
       "forge_live_scenario": [
-        "forge->go gossipsub_publish",
-        "go->forge gossipsub_publish",
-        "forge->rust gossipsub_publish",
-        "rust->forge gossipsub_publish",
-        "mixed 4 FORGE + 3 Go + 3 Rust gossipsub_mixed_mesh_stress"
+        {"profile": "quic_pubsub", "scenario": "gossipsub_publish"}
       ]
     },
     {
@@ -661,17 +724,16 @@
         "GRAFT/PRUNE backoff",
         "heartbeat mesh maintenance"
       ],
-      "status": "ported",
-      "supported": true,
+      "mapping_state": "mapped",
       "forge_tests": [
-        "p2p_gossipsub_control_spam_is_penalized_without_stopping_node",
-        "p2p_gossipsub_outbound_byte_limit_rejects_publish_without_stopping_node",
-        "p2p_gossipsub_validation_queue_limit_drops_excess_and_shutdown_is_clean",
-        "p2p_gossipsub_ten_node_mesh_delivers_multiple_publishes_once",
+        "test_forge_quic_p2p p2p_gossipsub_control_spam_is_penalized_without_stopping_node",
+        "test_forge_quic_p2p p2p_gossipsub_outbound_byte_limit_rejects_publish_without_stopping_node",
+        "test_forge_quic_p2p p2p_gossipsub_validation_queue_limit_retries_excess_without_penalizing_peer",
+        "test_forge_quic_p2p p2p_gossipsub_ten_node_mesh_delivers_multiple_publishes_once",
         "test_forge_libp2p_interop gossipsub_mixed_mesh_stress"
       ],
       "forge_live_scenario": [
-        "mixed 4 FORGE + 3 Go + 3 Rust gossipsub_mixed_mesh_stress"
+        {"profile": "mixed_pubsub", "scenario": "gossipsub_mixed_mesh_stress"}
       ],
       "known_gap": "Live fixtures cover mixed mesh delivery; resource-abuse and scoring edge cases remain component-only because donor fixtures do not expose every queue/score knob."
     }

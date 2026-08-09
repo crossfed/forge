@@ -11,13 +11,22 @@ from pathlib import Path
 from typing import Optional
 
 
-SCENARIOS = ("ping", "identify", "autonatv2", "relay_reserve", "unknown_protocol")
-TCP_DIRECT_SCENARIOS = ("ping", "identify", "echo")
-DHT_SCENARIOS = ("dht_find_peer", "dht_provide_find_provider")
-RENDEZVOUS_SCENARIOS = ("rendezvous_register_discover",)
-PUBSUB_SCENARIOS = ("gossipsub_publish",)
-PUBSUB_STRESS_SCENARIO = "gossipsub_mixed_mesh_stress"
-TOPOLOGY_SCENARIOS = ("relay_echo_topology", "dcutr_relay_topology")
+LIVE_SCENARIO_PROFILES = {
+    "quic_base": ("ping", "identify", "autonatv2", "relay_reserve", "unknown_protocol"),
+    "tcp_noise": ("ping", "identify", "echo"),
+    "tcp_tls": ("ping", "identify", "echo"),
+    "quic_dht": ("dht_find_peer", "dht_provide_find_provider"),
+    "quic_rendezvous": ("rendezvous_register_discover",),
+    "quic_pubsub": ("gossipsub_publish",),
+    "mixed_pubsub": ("gossipsub_mixed_mesh_stress",),
+    "quic_topology": ("relay_echo_topology", "dcutr_relay_topology"),
+}
+SCENARIOS = LIVE_SCENARIO_PROFILES["quic_base"]
+DHT_SCENARIOS = LIVE_SCENARIO_PROFILES["quic_dht"]
+RENDEZVOUS_SCENARIOS = LIVE_SCENARIO_PROFILES["quic_rendezvous"]
+PUBSUB_SCENARIOS = LIVE_SCENARIO_PROFILES["quic_pubsub"]
+PUBSUB_STRESS_SCENARIO = LIVE_SCENARIO_PROFILES["mixed_pubsub"][0]
+TOPOLOGY_SCENARIOS = LIVE_SCENARIO_PROFILES["quic_topology"]
 DIAL_TIMEOUT_SECONDS = 90
 NATIVE_TOPOLOGIES = (
     ("forge", "go", "go"),
@@ -600,23 +609,16 @@ def main() -> int:
                 except Exception as error:
                     failures.append(f"{dialer}->{listener} {scenario}: {error}")
     for dialer, listener in (("forge", "go"), ("go", "forge"), ("forge", "rust"), ("rust", "forge")):
-        for scenario in TCP_DIRECT_SCENARIOS:
-            try:
-                artifacts.append(
-                    run_pair_with_transport(
-                        binaries[dialer], dialer, binaries[listener], listener, scenario, root, "tcp"
+        for transport, profile in (("tcp", "tcp_noise"), ("tcp-tls", "tcp_tls")):
+            for scenario in LIVE_SCENARIO_PROFILES[profile]:
+                try:
+                    artifacts.append(
+                        run_pair_with_transport(
+                            binaries[dialer], dialer, binaries[listener], listener, scenario, root, transport
+                        )
                     )
-                )
-            except Exception as error:
-                failures.append(f"{dialer}->{listener} tcp {scenario}: {error}")
-            try:
-                artifacts.append(
-                    run_pair_with_transport(
-                        binaries[dialer], dialer, binaries[listener], listener, scenario, root, "tcp-tls"
-                    )
-                )
-            except Exception as error:
-                failures.append(f"{dialer}->{listener} tcp-tls {scenario}: {error}")
+                except Exception as error:
+                    failures.append(f"{dialer}->{listener} {transport} {scenario}: {error}")
     try:
         artifacts.append(run_pubsub_mixed_mesh_stress(binaries, root))
     except Exception as error:

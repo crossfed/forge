@@ -5,6 +5,37 @@ sessions, protocol stream negotiation, peer exchange, relay reservations,
 reachability probes, hole punching, path scoring, discovery protocol machinery
 and GossipSub/pubsub.
 
+## Current Support State
+
+This library contains substantial libp2p-compatible protocol substrate, but it
+is not yet a complete autonomous production host. Direct QUIC and TCP/Yamux,
+secure peer authentication, session admission and connection management are on
+the normal node path. GossipSub has bounded connected-peer mechanics and live
+interop fixtures, but its overall support state remains `partial` until scoring
+and autonomous topology are complete.
+
+The following surfaces are not production claims yet:
+
+- Kademlia, Rendezvous, Peer Exchange, Ping sampling and AutoNAT are explicit or
+  inbound operations without complete node-owned maintenance;
+- Kademlia routing currently uses persistent peer history instead of a bounded
+  node-owned k-bucket table;
+- standard Kademlia value operations do not have a value store or validation
+  policy;
+- AutoRelay and DCUtR mechanics lack the complete verified discovery and
+  reachability feed;
+- GossipSub scoring and autonomous topology remain incomplete;
+- generic stream, dial and queued-byte resource scopes are not connected to all
+  production paths.
+
+The machine-readable support inventory is
+[`p2p_feature_inventory.json`](../../../tests/libp2p_interop/p2p_feature_inventory.json).
+It is the source inventory for the production-hardening program, not a record
+of currently executed optional interop tests or a release-readiness verdict. A
+`mapped` donor case names a compatibility fixture with declared Forge
+coverage; it does not prove normal lifecycle activation or a passing current
+donor run.
+
 ## When To Use
 
 - Nodes need to connect by peer identity, not just host/port.
@@ -37,7 +68,9 @@ and GossipSub/pubsub.
 Target: `forge_net_p2p`.
 
 Dependencies: `forge_api_core`, `forge_asio`, `forge_net_transport`, `forge_net_tcp`, `forge_net_quic`,
-`forge_net_yamux`, `forge_multiformats`, Boost.Asio and RocksDB.
+`forge_net_yamux`, `forge_multiformats`, Boost.Asio and, temporarily, RocksDB.
+The direct RocksDB peer-store backend is an interim implementation scheduled
+for replacement by an async persistence port and an ObjectDB adapter.
 
 Foundation compatibility modules below P2P live in `forge_multiformats`:
 `forge.multiformats.varint`, `forge.multiformats.multicodec`,
@@ -152,10 +185,13 @@ compatibility convenience for older single-listen consumers.
 
 ### Peer Store Backends
 
-Production nodes require a persistent peer store. If `node::options` does not
-provide `peer_store_backend`, `peer_store_path` opens the default RocksDB
-backend. The in-memory backend is only for explicit tests and local insecure
-experiments.
+The current low-level node requires a persistent peer store outside explicit
+insecure tests. If `node::options` does not provide `peer_store_backend`,
+`peer_store_path` opens the interim RocksDB backend. The official P2P plugin
+does not yet provide this production dependency, and the backend performs
+synchronous storage work and broad scans. Do not interpret its presence as the
+completed production persistence design. The in-memory backend is only for
+explicit tests and local insecure experiments.
 
 ```cpp
 auto node = forge::net::p2p::node{runtime, {
