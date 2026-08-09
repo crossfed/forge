@@ -1,0 +1,921 @@
+{
+  "schema_version": 1,
+  "claim_scope": "source_structure_and_declared_evidence_only",
+  "allowed_states": [
+    "live",
+    "manual-only",
+    "partial",
+    "stub",
+    "orphan",
+    "unverified"
+  ],
+  "owners": {
+    "net.p2p.node": {
+      "kind": "library",
+      "path": "libraries/net/p2p",
+      "target": "forge_net_p2p",
+      "component": "net_p2p",
+      "module_prefix": "forge.net.p2p",
+      "module_root": "net/p2p"
+    },
+    "plugin.p2p.node": {
+      "kind": "plugin",
+      "path": "plugins/p2p/node",
+      "target": "forge_plugins_p2p_node",
+      "component": "plugins_p2p_node",
+      "module_prefix": "forge.plugins.p2p.node",
+      "module_root": "plugins/p2p/node"
+    },
+    "plugin.p2p.resolver": {
+      "kind": "plugin",
+      "path": "plugins/p2p/resolver",
+      "target": "forge_plugins_p2p_resolver",
+      "component": "plugins_p2p_resolver",
+      "module_prefix": "forge.plugins.p2p.resolver",
+      "module_root": "plugins/p2p/resolver"
+    },
+    "plugin.p2p.pubsub": {
+      "kind": "plugin",
+      "path": "plugins/p2p/pubsub",
+      "target": "forge_plugins_p2p_pubsub",
+      "component": "plugins_p2p_pubsub",
+      "module_prefix": "forge.plugins.p2p.pubsub",
+      "module_root": "plugins/p2p/pubsub"
+    },
+    "plugin.p2p.diagnostics": {
+      "kind": "plugin",
+      "path": "plugins/p2p/diagnostics",
+      "target": "forge_plugins_p2p_diagnostics",
+      "component": "plugins_p2p_diagnostics",
+      "module_prefix": "forge.plugins.p2p.diagnostics",
+      "module_root": "plugins/p2p/diagnostics"
+    },
+    "application": {
+      "kind": "external"
+    },
+    "none": {
+      "kind": "none"
+    }
+  },
+  "public_surface_snapshots": {
+    "net.p2p.node": {
+      "owner": "net.p2p.node",
+      "module_count": 21,
+      "modules": [
+        "forge.net.p2p.dht",
+        "forge.net.p2p.diagnostics",
+        "forge.net.p2p.discovery",
+        "forge.net.p2p.endpoint",
+        "forge.net.p2p.envelope",
+        "forge.net.p2p.exceptions",
+        "forge.net.p2p.hole_punch",
+        "forge.net.p2p.identify",
+        "forge.net.p2p.identity",
+        "forge.net.p2p.message",
+        "forge.net.p2p.negotiation",
+        "forge.net.p2p.node",
+        "forge.net.p2p.peer_store",
+        "forge.net.p2p.protocol",
+        "forge.net.p2p.pubsub",
+        "forge.net.p2p.reachability",
+        "forge.net.p2p.relay",
+        "forge.net.p2p.rendezvous",
+        "forge.net.p2p.resource_manager",
+        "forge.net.p2p.scoring",
+        "forge.net.p2p.stream"
+      ],
+      "headers": [],
+      "module_features": {
+        "forge.net.p2p.dht": ["protocol.kademlia", "state.kademlia_routing_table"],
+        "forge.net.p2p.diagnostics": ["resource.sessions", "resource.streams", "resource.dials", "resource.queued_bytes", "topology.connection_manager"],
+        "forge.net.p2p.discovery": ["protocol.peer_exchange", "protocol.kademlia", "protocol.rendezvous", "protocol.relay", "lifecycle.discovery"],
+        "forge.net.p2p.endpoint": ["transport.direct_quic", "transport.tcp_yamux"],
+        "forge.net.p2p.envelope": ["identity.secure_transport_authentication", "protocol.relay"],
+        "forge.net.p2p.exceptions": ["transport.direct_quic", "transport.tcp_yamux", "protocol.multistream_select", "identity.secure_transport_authentication", "protocol.echo", "protocol.ping", "protocol.identify", "protocol.peer_exchange", "protocol.autonat", "protocol.relay", "protocol.dcutr", "state.hole_punch_attempt", "protocol.kademlia", "protocol.rendezvous", "protocol.gossipsub", "state.peer_store", "state.kademlia_routing_table", "lifecycle.discovery", "resource.sessions", "resource.streams", "resource.dials", "resource.queued_bytes", "topology.connection_manager"],
+        "forge.net.p2p.hole_punch": ["protocol.dcutr", "state.hole_punch_attempt"],
+        "forge.net.p2p.identify": ["protocol.identify"],
+        "forge.net.p2p.identity": ["identity.secure_transport_authentication"],
+        "forge.net.p2p.message": ["protocol.peer_exchange"],
+        "forge.net.p2p.negotiation": ["protocol.multistream_select"],
+        "forge.net.p2p.node": ["transport.direct_quic", "transport.tcp_yamux", "protocol.multistream_select", "identity.secure_transport_authentication", "protocol.echo", "protocol.ping", "protocol.identify", "protocol.peer_exchange", "protocol.autonat", "protocol.relay", "protocol.dcutr", "state.hole_punch_attempt", "protocol.kademlia", "protocol.rendezvous", "protocol.gossipsub", "state.peer_store", "state.kademlia_routing_table", "lifecycle.discovery", "resource.sessions", "resource.streams", "resource.dials", "resource.queued_bytes", "topology.connection_manager"],
+        "forge.net.p2p.peer_store": ["state.peer_store"],
+        "forge.net.p2p.protocol": ["protocol.echo", "protocol.ping", "protocol.identify", "protocol.peer_exchange", "protocol.autonat", "protocol.relay", "protocol.dcutr", "protocol.kademlia", "protocol.rendezvous", "protocol.gossipsub"],
+        "forge.net.p2p.pubsub": ["protocol.gossipsub"],
+        "forge.net.p2p.reachability": ["protocol.autonat"],
+        "forge.net.p2p.relay": ["protocol.relay"],
+        "forge.net.p2p.rendezvous": ["protocol.rendezvous"],
+        "forge.net.p2p.resource_manager": ["resource.sessions", "resource.streams", "resource.dials", "resource.queued_bytes"],
+        "forge.net.p2p.scoring": ["topology.connection_manager", "state.peer_store"],
+        "forge.net.p2p.stream": ["resource.streams", "resource.queued_bytes"]
+      },
+      "header_features": {},
+      "sha256": "a60b3f3d1c34ca04868e6c0c1c6244cede381a80b08ff53e313ba3dc9884ebf4",
+      "feature_ids": [
+        "transport.direct_quic",
+        "transport.tcp_yamux",
+        "protocol.multistream_select",
+        "identity.secure_transport_authentication",
+        "protocol.echo",
+        "protocol.ping",
+        "protocol.identify",
+        "protocol.peer_exchange",
+        "protocol.autonat",
+        "protocol.relay",
+        "protocol.dcutr",
+        "state.hole_punch_attempt",
+        "protocol.kademlia",
+        "protocol.rendezvous",
+        "protocol.gossipsub",
+        "state.peer_store",
+        "state.kademlia_routing_table",
+        "lifecycle.discovery",
+        "resource.sessions",
+        "resource.streams",
+        "resource.dials",
+        "resource.queued_bytes",
+        "topology.connection_manager"
+      ]
+    },
+    "plugin.p2p.node": {
+      "owner": "plugin.p2p.node",
+      "module_count": 4,
+      "modules": [
+        "forge.plugins.p2p.node.api",
+        "forge.plugins.p2p.node.exceptions",
+        "forge.plugins.p2p.node.plugin",
+        "forge.plugins.p2p.node.types"
+      ],
+      "headers": [],
+      "module_features": {
+        "forge.plugins.p2p.node.api": ["plugin.node"],
+        "forge.plugins.p2p.node.exceptions": ["plugin.node", "lifecycle.bootstrap"],
+        "forge.plugins.p2p.node.plugin": ["plugin.node", "lifecycle.bootstrap"],
+        "forge.plugins.p2p.node.types": ["plugin.node", "lifecycle.bootstrap"]
+      },
+      "header_features": {},
+      "sha256": "c45df66f4c4b095745bf8347891a7a03e44e3dd19d80d909f57199dfcf48e04f",
+      "feature_ids": ["lifecycle.bootstrap", "plugin.node"]
+    },
+    "plugin.p2p.resolver": {
+      "owner": "plugin.p2p.resolver",
+      "module_count": 4,
+      "modules": [
+        "forge.plugins.p2p.resolver.api",
+        "forge.plugins.p2p.resolver.exceptions",
+        "forge.plugins.p2p.resolver.plugin",
+        "forge.plugins.p2p.resolver.types"
+      ],
+      "headers": [],
+      "module_features": {
+        "forge.plugins.p2p.resolver.api": ["plugin.resolver"],
+        "forge.plugins.p2p.resolver.exceptions": ["plugin.resolver"],
+        "forge.plugins.p2p.resolver.plugin": ["plugin.resolver"],
+        "forge.plugins.p2p.resolver.types": ["plugin.resolver"]
+      },
+      "header_features": {},
+      "sha256": "faec0b83e2ac80480bbcb31363d724c427d59e09f75812f270f6f8d0ac8e59ce",
+      "feature_ids": ["plugin.resolver"]
+    },
+    "plugin.p2p.pubsub": {
+      "owner": "plugin.p2p.pubsub",
+      "module_count": 4,
+      "modules": [
+        "forge.plugins.p2p.pubsub.api",
+        "forge.plugins.p2p.pubsub.exceptions",
+        "forge.plugins.p2p.pubsub.plugin",
+        "forge.plugins.p2p.pubsub.types"
+      ],
+      "headers": [],
+      "module_features": {
+        "forge.plugins.p2p.pubsub.api": ["plugin.pubsub"],
+        "forge.plugins.p2p.pubsub.exceptions": ["plugin.pubsub"],
+        "forge.plugins.p2p.pubsub.plugin": ["plugin.pubsub"],
+        "forge.plugins.p2p.pubsub.types": ["plugin.pubsub"]
+      },
+      "header_features": {},
+      "sha256": "3a2691286c41a3781d99ed89e7184d5561c11c7d02a2954411962837cae78fe1",
+      "feature_ids": ["plugin.pubsub"]
+    },
+    "plugin.p2p.diagnostics": {
+      "owner": "plugin.p2p.diagnostics",
+      "module_count": 4,
+      "modules": [
+        "forge.plugins.p2p.diagnostics.api",
+        "forge.plugins.p2p.diagnostics.exceptions",
+        "forge.plugins.p2p.diagnostics.plugin",
+        "forge.plugins.p2p.diagnostics.types"
+      ],
+      "headers": [],
+      "module_features": {
+        "forge.plugins.p2p.diagnostics.api": ["plugin.diagnostics"],
+        "forge.plugins.p2p.diagnostics.exceptions": ["plugin.diagnostics"],
+        "forge.plugins.p2p.diagnostics.plugin": ["plugin.diagnostics"],
+        "forge.plugins.p2p.diagnostics.types": ["plugin.diagnostics"]
+      },
+      "header_features": {},
+      "sha256": "003937279e6c1660d27a9bf6d402bba070adb308e10d42c6dbea6a7b53444542",
+      "feature_ids": ["plugin.diagnostics"]
+    }
+  },
+  "features": [
+    {
+      "id": "transport.direct_quic",
+      "state": "unverified",
+      "owner": "net.p2p.node",
+      "normal_activation": "node_lifecycle",
+      "configuration": "node direct transport options and official plugin listen endpoints",
+      "resource_ownership": "node sessions, transport queues and connection manager",
+      "persistence": "peer endpoints are recorded by peer_store",
+      "maintenance": "node session and connection-manager lifecycle",
+      "diagnostics": "node diagnostics sessions, paths and resource snapshots",
+      "intended_disposition": "preserve",
+      "builtin_protocols": [],
+      "capabilities": ["direct_quic"],
+      "evidence": {
+        "layers": ["codec", "state_machine", "raw_node", "official_plugin", "donor_interop"],
+        "source_paths": [
+          "libraries/net/p2p/direct_transport_quic.cpp",
+          "plugins/p2p/node/plugin.cpp"
+        ],
+        "tests": [
+          "test_forge_quic_p2p",
+          "test_forge_plugins"
+        ],
+        "donor_sources": ["docs/donors/fcl-p2p-multi-transport-host-v1.md"],
+        "donor_cases": ["p2p.host_multi_transport_orchestration"]
+      }
+    },
+    {
+      "id": "transport.tcp_yamux",
+      "state": "unverified",
+      "owner": "net.p2p.node",
+      "normal_activation": "node_lifecycle",
+      "configuration": "node direct transport options and TCP listen endpoints",
+      "resource_ownership": "node sessions, STCP, Noise and Yamux lifetimes",
+      "persistence": "peer endpoints are recorded by peer_store",
+      "maintenance": "node session and connection-manager lifecycle",
+      "diagnostics": "node diagnostics sessions and selected paths",
+      "intended_disposition": "preserve",
+      "builtin_protocols": [],
+      "capabilities": [],
+      "negotiated_protocol_ids": ["/tls/1.0.0", "/noise", "/yamux/1.0.0"],
+      "evidence": {
+        "layers": ["codec", "state_machine", "raw_node", "official_plugin", "donor_interop"],
+        "source_paths": [
+          "libraries/net/p2p/direct_transport_tcp.cpp",
+          "plugins/p2p/node/plugin.cpp"
+        ],
+        "tests": [
+          "test_forge_stcp",
+          "test_forge_yamux",
+          "test_forge_plugins"
+        ],
+        "donor_sources": [
+          "docs/donors/fcl-p2p-tcp-noise-yamux-v1.md",
+          "docs/donors/fcl-p2p-tcp-tls-yamux-v1.md"
+        ],
+        "donor_cases": [
+          "transport.tcp_noise_yamux_direct",
+          "transport.tcp_tls_yamux_direct"
+        ]
+      }
+    },
+    {
+      "id": "protocol.multistream_select",
+      "state": "unverified",
+      "owner": "net.p2p.node",
+      "normal_activation": "every_negotiated_protocol_stream",
+      "configuration": "bounded protocol count and frame size",
+      "resource_ownership": "one stream negotiation before protocol dispatch",
+      "persistence": "none",
+      "maintenance": "none",
+      "diagnostics": "negotiation failures are reported as typed protocol errors",
+      "intended_disposition": "preserve",
+      "builtin_protocols": [],
+      "capabilities": [],
+      "negotiated_protocol_ids": ["/multistream/1.0.0"],
+      "evidence": {
+        "layers": ["codec", "state_machine", "raw_node", "official_plugin", "donor_interop"],
+        "source_paths": [
+          "libraries/net/p2p/negotiation.cpp",
+          "libraries/net/p2p/include/forge/net/p2p/negotiation.cppm",
+          "plugins/p2p/node/plugin.cpp"
+        ],
+        "tests": ["test_forge_quic_p2p", "test_forge_plugins"],
+        "donor_sources": ["docs/donors/fcl-p2p-node-plugin-delivery-automation.md"],
+        "donor_cases": ["p2p.host_multi_transport_orchestration"]
+      }
+    },
+    {
+      "id": "identity.secure_transport_authentication",
+      "state": "unverified",
+      "owner": "net.p2p.node",
+      "normal_activation": "session_handshake",
+      "configuration": "programmatic identity options; official plugin currently accepts inline PEM",
+      "resource_ownership": "transport handshake and session admission",
+      "persistence": "authenticated peer identity is recorded by peer_store",
+      "maintenance": "per-session handshake only",
+      "diagnostics": "authenticated peer IDs in session diagnostics",
+      "intended_disposition": "preserve_and_secure_configuration",
+      "builtin_protocols": [],
+      "capabilities": [],
+      "evidence": {
+        "layers": ["codec", "state_machine", "raw_node", "donor_interop"],
+        "source_paths": [
+          "libraries/net/p2p/identity.cpp",
+          "libraries/net/p2p/node.cpp",
+          "plugins/p2p/node/plugin.cpp"
+        ],
+        "tests": [
+          "test_forge_stcp",
+          "test_forge_quic_p2p"
+        ],
+        "donor_sources": ["docs/donors/fcl-p2p-libp2p-foundation-v1.md"],
+        "donor_cases": ["interop.live_ping_identify_autonat_relay"]
+      }
+    },
+    {
+      "id": "protocol.echo",
+      "state": "manual-only",
+      "owner": "application",
+      "normal_activation": "explicit_caller",
+      "configuration": "registered protocol handler",
+      "resource_ownership": "one negotiated protocol stream",
+      "persistence": "none",
+      "maintenance": "none",
+      "diagnostics": "ordinary protocol/session diagnostics",
+      "intended_disposition": "keep_manual_test_protocol",
+      "builtin_protocols": ["echo"],
+      "capabilities": [],
+      "evidence": {
+        "layers": ["codec", "raw_node"],
+        "source_paths": ["libraries/net/p2p/node.cpp"],
+        "tests": ["test_forge_quic_p2p"],
+        "donor_sources": ["docs/donors/fcl-p2p-libp2p-foundation-v1.md"],
+        "donor_cases": []
+      }
+    },
+    {
+      "id": "protocol.ping",
+      "state": "manual-only",
+      "owner": "net.p2p.node",
+      "normal_activation": "inbound_or_explicit_caller",
+      "configuration": "built-in responder; no active liveness policy",
+      "resource_ownership": "one protocol stream and caller deadline",
+      "persistence": "explicit RTT observations may update peer_store",
+      "maintenance": "none",
+      "diagnostics": "no maintained liveness view",
+      "intended_disposition": "integrate_optional_liveness_policy",
+      "builtin_protocols": ["ping"],
+      "capabilities": [],
+      "evidence": {
+        "layers": ["codec", "raw_node", "donor_interop"],
+        "source_paths": ["libraries/net/p2p/node_impl.cpp"],
+        "tests": ["test_forge_quic_p2p", "test_forge_libp2p_interop"],
+        "donor_sources": ["docs/donors/fcl-p2p-libp2p-foundation-v1.md"],
+        "donor_cases": ["interop.live_ping_identify_autonat_relay"]
+      }
+    },
+    {
+      "id": "protocol.identify",
+      "state": "partial",
+      "owner": "net.p2p.node",
+      "normal_activation": "inbound_only",
+      "configuration": "built-in handlers; no outbound session lifecycle",
+      "resource_ownership": "one protocol stream",
+      "persistence": "accepted Identify facts update peer_store",
+      "maintenance": "Identify and Identify Push are not scheduled by node lifecycle",
+      "diagnostics": "session capabilities can precede verified remote Identify",
+      "intended_disposition": "integrate_session_lifecycle",
+      "builtin_protocols": ["identify", "identify_push"],
+      "capabilities": [],
+      "evidence": {
+        "layers": ["codec", "raw_node", "donor_interop"],
+        "source_paths": [
+          "libraries/net/p2p/node_impl.cpp",
+          "libraries/net/p2p/identify.cpp"
+        ],
+        "tests": ["test_forge_quic_p2p", "test_forge_libp2p_interop"],
+        "donor_sources": ["docs/donors/fcl-p2p-multi-transport-host-v1.md"],
+        "donor_cases": ["interop.live_ping_identify_autonat_relay"]
+      }
+    },
+    {
+      "id": "protocol.peer_exchange",
+      "state": "manual-only",
+      "owner": "net.p2p.node",
+      "normal_activation": "inbound_or_explicit_caller",
+      "configuration": "capability bit only; no refresh policy",
+      "resource_ownership": "bounded request and response stream",
+      "persistence": "accepted peers update peer_store",
+      "maintenance": "none",
+      "diagnostics": "no scheduled exchange state",
+      "intended_disposition": "integrate_topology_maintenance",
+      "builtin_protocols": ["peer_exchange"],
+      "capabilities": ["peer_exchange"],
+      "evidence": {
+        "layers": ["codec", "state_machine", "raw_node"],
+        "source_paths": ["libraries/net/p2p/node_impl.cpp"],
+        "tests": ["test_forge_quic_p2p"],
+        "donor_sources": ["docs/donors/fcl-p2p-node-plugin-delivery-automation.md"],
+        "donor_cases": ["p2p.host_multi_transport_orchestration"]
+      }
+    },
+    {
+      "id": "protocol.autonat",
+      "state": "partial",
+      "owner": "net.p2p.node",
+      "normal_activation": "inbound_or_explicit_caller",
+      "configuration": "protocol IDs are advertised without an effective capability or observer policy",
+      "resource_ownership": "bounded probe streams and dial-back state",
+      "persistence": "individual observations can update peer_store",
+      "maintenance": "no node-owned multi-observer reachability loop",
+      "diagnostics": "no effective maintained reachability state",
+      "intended_disposition": "integrate_reachability_lifecycle",
+      "builtin_protocols": [
+        "autonat_v1",
+        "autonat_v2_dial_request",
+        "autonat_v2_dial_back"
+      ],
+      "capabilities": ["autonat"],
+      "evidence": {
+        "layers": ["codec", "state_machine", "raw_node", "donor_interop"],
+        "source_paths": [
+          "libraries/net/p2p/node_impl.cpp",
+          "libraries/net/p2p/reachability.cpp"
+        ],
+        "tests": ["test_forge_quic_p2p", "test_forge_libp2p_interop"],
+        "donor_sources": ["docs/donors/fcl-p2p-reachability-relay-v1.md"],
+        "donor_cases": [
+          "autonatv2.dial_request_response_nonce",
+          "autonatv2.malformed_and_oversized",
+          "interop.live_ping_identify_autonat_relay"
+        ]
+      }
+    },
+    {
+      "id": "protocol.relay",
+      "state": "partial",
+      "owner": "net.p2p.node",
+      "normal_activation": "node_lifecycle_with_incomplete_candidates",
+      "configuration": "low-level options and partial official plugin policy; some IDs are advertised without an effective role gate",
+      "resource_ownership": "relay reservations, streams, bytes and path manager",
+      "persistence": "reservation observations are process-local or peer_store records",
+      "maintenance": "AutoRelay loop runs but candidate supply lacks complete discovery",
+      "diagnostics": "relay reservations and path metrics",
+      "intended_disposition": "complete_candidate_and_lifetime_ownership",
+      "builtin_protocols": ["relay_hop", "relay_stop"],
+      "capabilities": ["relay", "relay_reservation"],
+      "evidence": {
+        "layers": ["codec", "state_machine", "raw_node", "donor_interop"],
+        "source_paths": [
+          "libraries/net/p2p/relay.cpp",
+          "libraries/net/p2p/node_impl.cpp"
+        ],
+        "tests": ["test_forge_quic_p2p", "test_forge_libp2p_interop"],
+        "donor_sources": ["docs/donors/fcl-p2p-reachability-relay-v1.md"],
+        "donor_cases": [
+          "relayv2.reserve_connect_status",
+          "relayv2.signed_envelope",
+          "autorelay.discovery_reservation_lifecycle",
+          "interop.live_ping_identify_autonat_relay"
+        ]
+      }
+    },
+    {
+      "id": "protocol.dcutr",
+      "state": "partial",
+      "owner": "net.p2p.node",
+      "normal_activation": "relay_path_only",
+      "configuration": "path policy; no explicit per-peer attempt owner",
+      "resource_ownership": "relay session, synchronization stream and direct dial",
+      "persistence": "none",
+      "maintenance": "retry mechanics exist but helper ownership is split",
+      "diagnostics": "path attempt metrics without one canonical state object",
+      "intended_disposition": "unify_private_attempt_state",
+      "builtin_protocols": ["dcutr"],
+      "capabilities": ["hole_punching"],
+      "evidence": {
+        "layers": ["codec", "state_machine", "raw_node", "donor_interop"],
+        "source_paths": [
+          "libraries/net/p2p/hole_punch.cpp",
+          "libraries/net/p2p/node_impl.cpp"
+        ],
+        "tests": ["test_forge_quic_p2p", "test_forge_libp2p_interop"],
+        "donor_sources": ["docs/donors/fcl-p2p-reachability-relay-v1.md"],
+        "donor_cases": [
+          "dcutr.connect_sync_attempt",
+          "interop.live_dcutr_relay_topology"
+        ]
+      }
+    },
+    {
+      "id": "state.hole_punch_attempt",
+      "state": "orphan",
+      "owner": "none",
+      "normal_activation": "test_only",
+      "configuration": "public helper constructed directly by component tests",
+      "resource_ownership": "process-local counters and attempted endpoint list",
+      "persistence": "none",
+      "maintenance": "none",
+      "diagnostics": "result projection only",
+      "intended_disposition": "replace_with_node_owned_private_attempt_state",
+      "builtin_protocols": [],
+      "capabilities": [],
+      "public_components": ["hole_punch::attempt"],
+      "evidence": {
+        "layers": ["state_machine"],
+        "source_paths": [
+          "libraries/net/p2p/hole_punch.cpp",
+          "libraries/net/p2p/include/forge/net/p2p/hole_punch.cppm"
+        ],
+        "tests": ["test_forge_quic_p2p"],
+        "donor_sources": ["docs/donors/fcl-p2p-reachability-relay-v1.md"],
+        "donor_cases": ["dcutr.connect_sync_attempt"]
+      }
+    },
+    {
+      "id": "protocol.kademlia",
+      "state": "stub",
+      "owner": "net.p2p.node",
+      "normal_activation": "inbound_or_explicit_caller",
+      "configuration": "capability bit; no complete role/profile configuration",
+      "resource_ownership": "bounded iterative queries but no operational routing owner",
+      "persistence": "peer/provider history uses peer_store; values are not stored",
+      "maintenance": "no routing refresh or provider registration lifetime",
+      "diagnostics": "query metrics do not prove a maintained DHT",
+      "intended_disposition": "replace_stub_with_full_standard_profile",
+      "builtin_protocols": ["kad_dht"],
+      "capabilities": ["dht"],
+      "evidence": {
+        "layers": ["codec", "state_machine", "raw_node", "donor_interop"],
+        "source_paths": [
+          "libraries/net/p2p/node_impl.cpp",
+          "libraries/net/p2p/dht.cpp"
+        ],
+        "tests": ["test_forge_quic_p2p", "test_forge_libp2p_interop"],
+        "donor_sources": ["docs/donors/fcl-p2p-dht-rendezvous-v1.md"],
+        "donor_cases": [
+          "dht.message_codec_and_provider_records",
+          "dht.iterative_lookup_and_provider_publication",
+          "interop.live_dht_provider_lookup"
+        ]
+      }
+    },
+    {
+      "id": "protocol.rendezvous",
+      "state": "manual-only",
+      "owner": "net.p2p.node",
+      "normal_activation": "inbound_or_explicit_caller",
+      "configuration": "capability bit; no official role configuration",
+      "resource_ownership": "bounded requests and response pages",
+      "persistence": "registrations use peer_store",
+      "maintenance": "no registration renewal or discovery refresh loop",
+      "diagnostics": "one-shot discovery metrics only",
+      "intended_disposition": "integrate_topology_maintenance",
+      "builtin_protocols": ["rendezvous"],
+      "capabilities": ["rendezvous"],
+      "evidence": {
+        "layers": ["codec", "state_machine", "raw_node", "donor_interop"],
+        "source_paths": [
+          "libraries/net/p2p/node_impl.cpp",
+          "libraries/net/p2p/rendezvous.cpp"
+        ],
+        "tests": ["test_forge_quic_p2p", "test_forge_libp2p_interop"],
+        "donor_sources": ["docs/donors/fcl-p2p-dht-rendezvous-v1.md"],
+        "donor_cases": [
+          "rendezvous.register_discover_ttl_cookie",
+          "rendezvous.refresh_cookie_and_discovery_feed",
+          "interop.live_rendezvous_register_discover"
+        ]
+      }
+    },
+    {
+      "id": "protocol.gossipsub",
+      "state": "partial",
+      "owner": "net.p2p.node",
+      "normal_activation": "node_lifecycle_over_connected_peers",
+      "configuration": "low-level node options and pubsub plugin facade",
+      "resource_ownership": "bounded message history, validation, mesh and heartbeat",
+      "persistence": "none by protocol design",
+      "maintenance": "heartbeat runs; topology and scoring are incomplete",
+      "diagnostics": "pubsub metrics and plugin source snapshots",
+      "intended_disposition": "complete_scoring_and_topology",
+      "builtin_protocols": ["meshsub_v11", "meshsub_v10"],
+      "capabilities": ["pubsub"],
+      "evidence": {
+        "layers": ["codec", "state_machine", "raw_node", "official_plugin", "donor_interop"],
+        "source_paths": [
+          "libraries/net/p2p/pubsub.cpp",
+          "plugins/p2p/pubsub/plugin.cpp"
+        ],
+        "tests": ["test_forge_quic_p2p", "test_forge_plugins", "test_forge_libp2p_interop"],
+        "donor_sources": ["docs/donors/fcl-p2p-gossipsub-v1.md"],
+        "donor_cases": [
+          "gossipsub.protocol_ids_v11_v10",
+          "gossipsub.rpc_codec_control_and_limits",
+          "gossipsub.message_signing_and_id",
+          "gossipsub.live_publish_delivery",
+          "gossipsub.mesh_hardening_and_resource_bounds",
+          "plugin.p2p_pubsub_facade"
+        ]
+      }
+    },
+    {
+      "id": "state.peer_store",
+      "state": "partial",
+      "owner": "net.p2p.node",
+      "normal_activation": "node_construction",
+      "configuration": "programmatic backend or RocksDB path; official plugin does not provide production persistence",
+      "resource_ownership": "process-local mutex and backend lifetime",
+      "persistence": "private synchronous RocksDB codec or in-memory test backend",
+      "maintenance": "expiry and closest-peer operations can scan durable history",
+      "diagnostics": "no queue, backpressure or degraded persistence state",
+      "intended_disposition": "replace_with_async_objectdb_port",
+      "builtin_protocols": [],
+      "capabilities": [],
+      "public_components": ["peer_store::backend"],
+      "evidence": {
+        "layers": ["state_machine", "raw_node", "restart_scale"],
+        "source_paths": [
+          "libraries/net/p2p/peer_store.cpp",
+          "libraries/net/p2p/include/forge/net/p2p/peer_store.cppm"
+        ],
+        "tests": ["test_forge_quic_p2p"],
+        "donor_sources": ["docs/donors/fcl-p2p-dht-rendezvous-v1.md"],
+        "donor_cases": ["dht.message_codec_and_provider_records"]
+      }
+    },
+    {
+      "id": "state.kademlia_routing_table",
+      "state": "orphan",
+      "owner": "none",
+      "normal_activation": "test_only",
+      "configuration": "constructible public helper only",
+      "resource_ownership": "flat process-local map",
+      "persistence": "none",
+      "maintenance": "none; failure observations do not evict or replace",
+      "diagnostics": "snapshot only",
+      "intended_disposition": "replace_and_make_node_owned",
+      "builtin_protocols": [],
+      "capabilities": [],
+      "public_components": ["dht::routing_table"],
+      "evidence": {
+        "layers": ["state_machine"],
+        "source_paths": [
+          "libraries/net/p2p/dht.cpp",
+          "libraries/net/p2p/include/forge/net/p2p/dht.cppm"
+        ],
+        "tests": ["test_forge_quic_p2p"],
+        "donor_sources": ["docs/donors/fcl-p2p-dht-rendezvous-v1.md"],
+        "donor_cases": ["dht.routing_table_xor_distance"]
+      }
+    },
+    {
+      "id": "lifecycle.bootstrap",
+      "state": "partial",
+      "owner": "plugin.p2p.node",
+      "normal_activation": "plugin_lifecycle_only",
+      "configuration": "official plugin bootstrap endpoint list",
+      "resource_ownership": "plugin scheduler task and protected sessions",
+      "persistence": "learned endpoints flow through peer_store",
+      "maintenance": "sequential startup and plugin-owned retry loop",
+      "diagnostics": "control loop scans diagnostics snapshots",
+      "intended_disposition": "move_into_node_lifecycle",
+      "builtin_protocols": [],
+      "capabilities": [],
+      "evidence": {
+        "layers": ["state_machine", "official_plugin"],
+        "source_paths": [
+          "plugins/p2p/node/plugin.cpp",
+          "plugins/p2p/node/plugin_impl.cpp"
+        ],
+        "tests": ["test_forge_plugins"],
+        "donor_sources": ["docs/donors/fcl-p2p-node-plugin-delivery-automation.md"],
+        "donor_cases": ["p2p.host_multi_transport_orchestration"]
+      }
+    },
+    {
+      "id": "lifecycle.discovery",
+      "state": "manual-only",
+      "owner": "net.p2p.node",
+      "normal_activation": "explicit_caller",
+      "configuration": "no autonomous role or refresh policy",
+      "resource_ownership": "one-shot DHT and Rendezvous query state",
+      "persistence": "results update peer_store",
+      "maintenance": "none",
+      "diagnostics": "one-shot discovery metrics",
+      "intended_disposition": "replace_with_node_topology_service",
+      "builtin_protocols": [],
+      "capabilities": [],
+      "evidence": {
+        "layers": ["state_machine", "raw_node"],
+        "source_paths": ["libraries/net/p2p/node.cpp"],
+        "tests": ["test_forge_quic_p2p"],
+        "donor_sources": ["docs/donors/fcl-p2p-dht-rendezvous-v1.md"],
+        "donor_cases": ["rendezvous.refresh_cookie_and_discovery_feed"]
+      }
+    },
+    {
+      "id": "resource.sessions",
+      "state": "unverified",
+      "owner": "net.p2p.node",
+      "normal_activation": "session_admission",
+      "configuration": "node resource and connection-manager limits",
+      "resource_ownership": "move-only pending and established session reservations",
+      "persistence": "none",
+      "maintenance": "connection-manager pruning",
+      "diagnostics": "resource and connection-manager snapshots",
+      "intended_disposition": "preserve_and_scale_test",
+      "builtin_protocols": [],
+      "capabilities": [],
+      "evidence": {
+        "layers": ["state_machine", "raw_node", "official_plugin", "adversarial"],
+        "source_paths": [
+          "libraries/net/p2p/resource_manager.cpp",
+          "libraries/net/p2p/node.cpp",
+          "plugins/p2p/node/plugin.cpp"
+        ],
+        "tests": ["test_forge_quic_p2p", "test_forge_plugins"],
+        "donor_sources": ["docs/donors/fcl-p2p-connection-manager-v1.md"],
+        "donor_cases": ["connection_manager.host_session_policy"]
+      }
+    },
+    {
+      "id": "resource.streams",
+      "state": "orphan",
+      "owner": "none",
+      "normal_activation": "test_only",
+      "configuration": "resource_manager limits exist",
+      "resource_ownership": "manual acquire and release methods",
+      "persistence": "none",
+      "maintenance": "none",
+      "diagnostics": "isolated counters",
+      "intended_disposition": "integrate_raii_on_all_stream_paths",
+      "builtin_protocols": [],
+      "capabilities": [],
+      "evidence": {
+        "layers": ["state_machine"],
+        "source_paths": ["libraries/net/p2p/resource_manager.cpp"],
+        "tests": ["test_forge_quic_p2p"],
+        "donor_sources": ["docs/donors/fcl-p2p-connection-manager-v1.md"],
+        "donor_cases": ["resource.peer_protocol_dial_scopes"]
+      }
+    },
+    {
+      "id": "resource.dials",
+      "state": "orphan",
+      "owner": "none",
+      "normal_activation": "test_only",
+      "configuration": "resource_manager dial limits exist",
+      "resource_ownership": "manual counter without production release path",
+      "persistence": "none",
+      "maintenance": "none",
+      "diagnostics": "isolated counter",
+      "intended_disposition": "replace_with_owned_dial_reservation",
+      "builtin_protocols": [],
+      "capabilities": [],
+      "evidence": {
+        "layers": ["state_machine"],
+        "source_paths": ["libraries/net/p2p/resource_manager.cpp"],
+        "tests": ["test_forge_quic_p2p"],
+        "donor_sources": ["docs/donors/fcl-p2p-connection-manager-v1.md"],
+        "donor_cases": ["resource.peer_protocol_dial_scopes"]
+      }
+    },
+    {
+      "id": "resource.queued_bytes",
+      "state": "orphan",
+      "owner": "none",
+      "normal_activation": "never",
+      "configuration": "generic queued-byte limit is accepted and validated",
+      "resource_ownership": "no generic buffer consumes the reservation",
+      "persistence": "none",
+      "maintenance": "none",
+      "diagnostics": "configured value can appear effective although unused",
+      "intended_disposition": "connect_to_buffers_or_remove_claim",
+      "builtin_protocols": [],
+      "capabilities": [],
+      "evidence": {
+        "layers": ["state_machine"],
+        "source_paths": ["libraries/net/p2p/resource_manager.cpp"],
+        "tests": ["test_forge_quic_p2p"],
+        "donor_sources": ["docs/donors/fcl-p2p-connection-manager-v1.md"],
+        "donor_cases": ["resource.peer_protocol_dial_scopes"]
+      }
+    },
+    {
+      "id": "topology.connection_manager",
+      "state": "unverified",
+      "owner": "net.p2p.node",
+      "normal_activation": "node_lifecycle",
+      "configuration": "connection watermarks and protected peers",
+      "resource_ownership": "session admission, protection and pruning",
+      "persistence": "peer health observations use peer_store",
+      "maintenance": "node-owned pruning",
+      "diagnostics": "connection-manager snapshot",
+      "intended_disposition": "preserve_and_scale_test",
+      "builtin_protocols": [],
+      "capabilities": [],
+      "evidence": {
+        "layers": ["state_machine", "raw_node", "official_plugin", "adversarial"],
+        "source_paths": [
+          "libraries/net/p2p/connection_manager.cpp",
+          "libraries/net/p2p/node.cpp",
+          "plugins/p2p/node/plugin.cpp"
+        ],
+        "tests": ["test_forge_quic_p2p", "test_forge_plugins"],
+        "donor_sources": ["docs/donors/fcl-p2p-connection-manager-v1.md"],
+        "donor_cases": ["connection_manager.host_session_policy"]
+      }
+    },
+    {
+      "id": "plugin.node",
+      "state": "partial",
+      "owner": "plugin.p2p.node",
+      "normal_activation": "plugin_lifecycle",
+      "configuration": "listen, bootstrap, relay/path and API fields; no durable store or discovery roles",
+      "resource_ownership": "shared node plus duplicated bootstrap maintenance",
+      "persistence": "does not provide a production peer-store backend",
+      "maintenance": "plugin owns bootstrap loop that belongs to node",
+      "diagnostics": "exports node snapshots but lacks effective topology mode",
+      "intended_disposition": "reduce_to_configuration_and_dependency_adapter",
+      "builtin_protocols": [],
+      "capabilities": [],
+      "evidence": {
+        "layers": ["state_machine", "official_plugin"],
+        "source_paths": [
+          "plugins/p2p/node/plugin.cpp",
+          "plugins/p2p/node/plugin_impl.cpp"
+        ],
+        "tests": ["test_forge_plugins"],
+        "donor_sources": ["docs/donors/fcl-p2p-node-plugin-delivery-automation.md"],
+        "donor_cases": ["p2p.host_multi_transport_orchestration"]
+      }
+    },
+    {
+      "id": "plugin.resolver",
+      "state": "manual-only",
+      "owner": "plugin.p2p.resolver",
+      "normal_activation": "explicit_api_publication_and_query",
+      "configuration": "resolver plugin over known P2P peers",
+      "resource_ownership": "Forge API calls over node protocol streams",
+      "persistence": "none",
+      "maintenance": "none; resolver does not discover peers",
+      "diagnostics": "API errors and node diagnostics",
+      "intended_disposition": "preserve_application_metadata_role",
+      "builtin_protocols": [],
+      "capabilities": [],
+      "negotiated_protocol_ids": ["/forge/api/resolver/2"],
+      "evidence": {
+        "layers": ["state_machine", "official_plugin"],
+        "source_paths": ["plugins/p2p/resolver/plugin.cpp"],
+        "tests": ["test_forge_plugins"],
+        "donor_sources": ["docs/donors/fcl-p2p-resolver-v1.md"],
+        "donor_cases": ["plugin.p2p.resolver.metadata"]
+      }
+    },
+    {
+      "id": "plugin.pubsub",
+      "state": "partial",
+      "owner": "plugin.p2p.pubsub",
+      "normal_activation": "plugin_lifecycle",
+      "configuration": "topic subscriptions over the shared node",
+      "resource_ownership": "node-owned GossipSub state",
+      "persistence": "none by protocol design",
+      "maintenance": "node heartbeat; topology remains bootstrap-centric",
+      "diagnostics": "pubsub source API",
+      "intended_disposition": "preserve_facade_and_complete_core",
+      "builtin_protocols": [],
+      "capabilities": [],
+      "evidence": {
+        "layers": ["state_machine", "raw_node", "official_plugin", "donor_interop"],
+        "source_paths": ["plugins/p2p/pubsub/plugin.cpp"],
+        "tests": ["test_forge_plugins", "test_forge_libp2p_interop"],
+        "donor_sources": ["docs/donors/fcl-p2p-gossipsub-v1.md"],
+        "donor_cases": ["plugin.p2p_pubsub_facade", "gossipsub.live_publish_delivery"]
+      }
+    },
+    {
+      "id": "plugin.diagnostics",
+      "state": "partial",
+      "owner": "plugin.p2p.diagnostics",
+      "normal_activation": "plugin_lifecycle",
+      "configuration": "shared node diagnostics source",
+      "resource_ownership": "read-only bounded snapshot projection",
+      "persistence": "none",
+      "maintenance": "none",
+      "diagnostics": "existing snapshot omits several inactive lifecycle and degradation causes",
+      "intended_disposition": "expand_read_only_effective_state",
+      "builtin_protocols": [],
+      "capabilities": [],
+      "evidence": {
+        "layers": ["state_machine", "official_plugin"],
+        "source_paths": ["plugins/p2p/diagnostics/plugin.cpp"],
+        "tests": ["test_forge_plugins"],
+        "donor_sources": ["docs/donors/fcl-p2p-node-plugin-delivery-automation.md"],
+        "donor_cases": ["plugin.p2p_diagnostics_snapshot"]
+      }
+    }
+  ]
+}

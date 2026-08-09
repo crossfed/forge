@@ -856,7 +856,30 @@ add_test(
    NAME test_forge_libp2p_donor_matrix
    COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop/check_donor_matrix.py
+      ${CMAKE_SOURCE_DIR}
       ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop/donor_cases.json
+      ${FORGE_LIBP2P_DONORS_ROOT}
+)
+
+set(FORGE_P2P_INVENTORY_CHECK ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop/check_p2p_feature_inventory.py)
+add_custom_target(
+   test_forge_p2p_inventory
+   COMMAND ${Python3_EXECUTABLE}
+      ${FORGE_P2P_INVENTORY_CHECK}
+      ${CMAKE_SOURCE_DIR}
+      ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop/p2p_feature_inventory.json
+      ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop/donor_cases.json
+   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+   VERBATIM
+)
+add_test(
+   NAME test_forge_p2p_inventory
+   COMMAND ${Python3_EXECUTABLE}
+      ${FORGE_P2P_INVENTORY_CHECK}
+      ${CMAKE_SOURCE_DIR}
+      ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop/p2p_feature_inventory.json
+      ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop/donor_cases.json
+   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
 add_executable(
