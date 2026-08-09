@@ -120,6 +120,37 @@ void validate_peer_record(const peer_store::record& value, const peer_store::opt
    }
 }
 
+void validate_provider_record(const peer_store::provider_record& value, const peer_store::options& options) {
+   if (value.provider.endpoints.size() > options.max_endpoints_per_peer) {
+      FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected,
+                            "P2P provider record exceeds endpoint limit");
+   }
+
+   auto bytes = std::size_t{};
+   const auto add = [&](std::size_t size) { add_peer_record_bytes(bytes, size, options.max_peer_record_bytes); };
+   add(value.key.bytes.size());
+   add(value.provider.id.value.size());
+   for (const auto& endpoint : value.provider.endpoints) {
+      add(endpoint.to_string().size());
+   }
+}
+
+void validate_rendezvous_record(const rendezvous::registration& value, const peer_store::options& options) {
+   if (value.endpoints.size() > options.max_endpoints_per_peer) {
+      FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected,
+                            "P2P Rendezvous record exceeds endpoint limit");
+   }
+
+   auto bytes = std::size_t{};
+   const auto add = [&](std::size_t size) { add_peer_record_bytes(bytes, size, options.max_peer_record_bytes); };
+   add(value.namespace_name.size());
+   add(value.peer.value.size());
+   add(value.signed_peer_record.size());
+   for (const auto& endpoint : value.endpoints) {
+      add(endpoint.to_string().size());
+   }
+}
+
 void mutate_endpoint(peer_store::record& record, const forge::net::p2p::endpoint& endpoint, path::kind kind,
                      const std::function<void(peer_store::endpoint_record&)>& mutation) {
    auto iterator = std::ranges::find_if(record.endpoints,
@@ -490,7 +521,18 @@ void peer_store::impl::mark_persistence_failure_locked(std::string message) {
    last_failure_ = std::move(message);
 }
 
-void peer_store::impl::mark_persistence_healthy_locked() {
+void peer_store::impl::mark_durability_uncertain_locked(std::string message) {
+   durability_uncertain_ = true;
+   mark_persistence_failure_locked(std::move(message));
+}
+
+void peer_store::impl::mark_persistence_healthy_locked(bool durability_confirmed) {
+   if (durability_confirmed) {
+      durability_uncertain_ = false;
+   }
+   if (durability_uncertain_) {
+      return;
+   }
    degraded_ = false;
    last_failure_.clear();
 }
@@ -571,9 +613,9 @@ boost::asio::awaitable<void> peer_store::impl::apply_pending_locked_gate(bool fl
          auto lock = std::scoped_lock{mutex_};
          complete_peer_mutations_locked(mutations);
          if (result.durability_confirmed) {
-            mark_persistence_healthy_locked();
+            mark_persistence_healthy_locked(batch.durable);
          } else {
-            mark_persistence_failure_locked(durability_failure_message(result));
+            mark_durability_uncertain_locked(durability_failure_message(result));
          }
       }
       if (!result.durability_confirmed) {
@@ -587,12 +629,18 @@ boost::asio::awaitable<void> peer_store::impl::apply_pending_locked_gate(bool fl
    try {
       co_await persistence_->async_flush();
    } catch (...) {
-      auto lock = std::scoped_lock{mutex_};
-      mark_persistence_failure_locked(current_failure_message());
-      throw;
+      auto result = peer_store::apply_result{
+          .durability_confirmed = false,
+          .durability_failure = current_failure_message(),
+      };
+      {
+         auto lock = std::scoped_lock{mutex_};
+         mark_durability_uncertain_locked(durability_failure_message(result));
+      }
+      throw_durability_uncertain(result);
    }
    auto lock = std::scoped_lock{mutex_};
-   mark_persistence_healthy_locked();
+   mark_persistence_healthy_locked(true);
 }
 
 peer_store::impl::persistence_admission peer_store::impl::admit_persistence_operation() {
@@ -681,6 +729,7 @@ void peer_store::impl::release_close_admission() noexcept {
 boost::asio::awaitable<void> peer_store::impl::async_upsert_provider(peer_store::provider_record value) {
    auto admission = admit_persistence_operation();
    auto ticket = co_await persistence_gate_.acquire();
+   validate_provider_record(value, options_);
    const auto key = provider_key{value.key.bytes, value.provider.id};
    {
       auto lock = std::scoped_lock{mutex_};
@@ -714,9 +763,9 @@ boost::asio::awaitable<void> peer_store::impl::async_upsert_provider(peer_store:
                                         stored->second.provider.id);
       }
       if (result.durability_confirmed) {
-         mark_persistence_healthy_locked();
+         mark_persistence_healthy_locked(true);
       } else {
-         mark_persistence_failure_locked(durability_failure_message(result));
+         mark_durability_uncertain_locked(durability_failure_message(result));
       }
    }
    if (!result.durability_confirmed) {
@@ -727,6 +776,7 @@ boost::asio::awaitable<void> peer_store::impl::async_upsert_provider(peer_store:
 boost::asio::awaitable<void> peer_store::impl::async_upsert_rendezvous(rendezvous::registration value) {
    auto admission = admit_persistence_operation();
    auto ticket = co_await persistence_gate_.acquire();
+   validate_rendezvous_record(value, options_);
    const auto key = rendezvous_map_key{value.namespace_name, value.peer};
    {
       auto lock = std::scoped_lock{mutex_};
@@ -756,9 +806,9 @@ boost::asio::awaitable<void> peer_store::impl::async_upsert_rendezvous(rendezvou
       auto lock = std::scoped_lock{mutex_};
       store_rendezvous_operational(std::move(value));
       if (result.durability_confirmed) {
-         mark_persistence_healthy_locked();
+         mark_persistence_healthy_locked(true);
       } else {
-         mark_persistence_failure_locked(durability_failure_message(result));
+         mark_durability_uncertain_locked(durability_failure_message(result));
       }
    }
    if (!result.durability_confirmed) {
@@ -769,6 +819,7 @@ boost::asio::awaitable<void> peer_store::impl::async_upsert_rendezvous(rendezvou
 boost::asio::awaitable<void> peer_store::impl::async_remove_rendezvous(peer_id peer, std::string namespace_name) {
    auto admission = admit_persistence_operation();
    auto ticket = co_await persistence_gate_.acquire();
+   validate_rendezvous_record(rendezvous::registration{.namespace_name = namespace_name, .peer = peer}, options_);
 
    auto batch = peer_store::mutation_batch{};
    batch.rendezvous_removals.push_back(peer_store::rendezvous_key{.namespace_name = namespace_name, .peer = peer});
@@ -786,9 +837,9 @@ boost::asio::awaitable<void> peer_store::impl::async_remove_rendezvous(peer_id p
       auto lock = std::scoped_lock{mutex_};
       erase_rendezvous_operational({std::move(namespace_name), std::move(peer)});
       if (result.durability_confirmed) {
-         mark_persistence_healthy_locked();
+         mark_persistence_healthy_locked(true);
       } else {
-         mark_persistence_failure_locked(durability_failure_message(result));
+         mark_durability_uncertain_locked(durability_failure_message(result));
       }
    }
    if (!result.durability_confirmed) {
@@ -799,6 +850,12 @@ boost::asio::awaitable<void> peer_store::impl::async_remove_rendezvous(peer_id p
 void peer_store::impl::hydrate_page_locked(peer_store::hydration_page page) {
    for (const auto& value : page.peers) {
       validate_peer_record(value, options_);
+   }
+   for (const auto& value : page.providers) {
+      validate_provider_record(value, options_);
+   }
+   for (const auto& value : page.rendezvous_registrations) {
+      validate_rendezvous_record(value, options_);
    }
    rendezvous_sequence_ = std::max(rendezvous_sequence_, page.rendezvous_sequence_high_watermark);
    auto removals = std::map<peer_id, peer_mutation>{};
@@ -985,6 +1042,22 @@ boost::asio::awaitable<void> peer_store::impl::async_close() {
 
    try {
       co_await persistence_->async_flush();
+   } catch (...) {
+      auto result = peer_store::apply_result{
+          .durability_confirmed = false,
+          .durability_failure = current_failure_message(),
+      };
+      {
+         auto lock = std::scoped_lock{mutex_};
+         mark_durability_uncertain_locked(durability_failure_message(result));
+      }
+      throw_durability_uncertain(result);
+   }
+   {
+      auto lock = std::scoped_lock{mutex_};
+      mark_persistence_healthy_locked(true);
+   }
+   try {
       co_await persistence_->async_close();
    } catch (...) {
       auto lock = std::scoped_lock{mutex_};
@@ -993,7 +1066,7 @@ boost::asio::awaitable<void> peer_store::impl::async_close() {
    }
 
    auto lock = std::scoped_lock{mutex_};
-   mark_persistence_healthy_locked();
+   mark_persistence_healthy_locked(true);
    closing_ = false;
    closed_ = true;
 }

@@ -66,6 +66,7 @@ namespace {
    case tcp_kind::closed:
       return exceptions::code::closed;
    case tcp_kind::connect_failed:
+      return exceptions::code::peer_not_found;
    case tcp_kind::listen_failed:
    case tcp_kind::accept_failed:
    case tcp_kind::io_error:

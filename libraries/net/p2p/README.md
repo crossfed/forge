@@ -196,7 +196,9 @@ durable store contains older records that were not hydrated.
 The operational directory remains bounded and performs indexed point/candidate
 queries without scanning durable history. Per-peer endpoint, protocol, relay and
 total variable-byte limits prevent one remote peer from bypassing the global
-peer and persistence-queue bounds.
+peer and persistence-queue bounds. The endpoint and total variable-byte limits
+also apply to each provider and Rendezvous record, including records returned
+during hydration, before any operational state is changed.
 
 The official P2P plugin supplies the production ObjectDB adapter. Direct users
 may implement the persistence port over their own lifecycle owner. The memory
@@ -208,6 +210,8 @@ failed commit from a commit whose subsequent durable flush could not be
 confirmed. The latter is applied to operational state, marks the store degraded
 and raises typed `durability_uncertain`; callers must not blindly retry the
 logical operation as though it were known not to have committed.
+The degraded state remains sticky across non-durable maintenance and is cleared
+only by a later confirmed durable apply or explicit flush.
 
 ```cpp
 auto node = forge::net::p2p::node{runtime, {

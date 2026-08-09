@@ -114,12 +114,14 @@ inline void merge_provider(std::vector<dht::peer>& providers, const dht::peer& v
 struct batch_response {
    dht::peer peer;
    std::optional<dht::message> response;
+   std::exception_ptr local_error;
    bool failed = false;
 };
 
-template <typename Query>
+template <typename Query, typename Postprocess, typename IsPeerFailure>
 boost::asio::awaitable<std::vector<batch_response>>
-query_batch_on_strand(std::vector<dht::peer> batch, Query& query,
+query_batch_on_strand(std::vector<dht::peer> batch, Query& query, Postprocess& postprocess,
+                      IsPeerFailure& is_peer_failure,
                       boost::asio::strand<boost::asio::any_io_executor> strand) {
    namespace asio = boost::asio;
 
@@ -142,15 +144,34 @@ query_batch_on_strand(std::vector<dht::peer> batch, Query& query,
       const auto peer = shared->items[index].peer;
       asio::co_spawn(
           strand,
-          [shared, index, peer, &query]() mutable -> asio::awaitable<void> {
+          [shared, index, peer, &query, &postprocess, &is_peer_failure]() mutable -> asio::awaitable<void> {
              auto response = std::optional<dht::message>{};
+             auto local_error = std::exception_ptr{};
              auto failed = false;
              try {
                 response = co_await query(peer);
-             } catch (const forge::exceptions::base&) {
-                failed = true;
+             } catch (const forge::exceptions::base& error) {
+                try {
+                   failed = is_peer_failure(peer, error);
+                   if (!failed) {
+                      local_error = std::current_exception();
+                   }
+                } catch (...) {
+                   local_error = std::current_exception();
+                }
+             } catch (...) {
+                local_error = std::current_exception();
+             }
+             if (response && !failed && !local_error) {
+                try {
+                   co_await postprocess(peer, *response);
+                } catch (...) {
+                   response.reset();
+                   local_error = std::current_exception();
+                }
              }
              shared->items[index].response = std::move(response);
+             shared->items[index].local_error = std::move(local_error);
              shared->items[index].failed = failed;
              --shared->remaining;
              shared->timer.cancel(); // on_strand
@@ -168,20 +189,24 @@ query_batch_on_strand(std::vector<dht::peer> batch, Query& query,
    }
 }
 
-template <typename Query>
-boost::asio::awaitable<std::vector<batch_response>> query_batch(std::vector<dht::peer> batch, Query& query) {
+template <typename Query, typename Postprocess, typename IsPeerFailure>
+boost::asio::awaitable<std::vector<batch_response>> query_batch(std::vector<dht::peer> batch, Query& query,
+                                                                Postprocess& postprocess,
+                                                                IsPeerFailure& is_peer_failure) {
    namespace asio = boost::asio;
    auto executor = asio::any_io_executor{co_await asio::this_coro::executor};
    auto strand = asio::make_strand(executor);
    co_return co_await asio::co_spawn(
        strand,
-       [batch = std::move(batch), &query, strand]() mutable -> asio::awaitable<std::vector<batch_response>> {
-          co_return co_await query_batch_on_strand(std::move(batch), query, strand);
+       [batch = std::move(batch), &query, &postprocess, &is_peer_failure,
+        strand]() mutable -> asio::awaitable<std::vector<batch_response>> {
+          co_return co_await query_batch_on_strand(std::move(batch), query, postprocess, is_peer_failure, strand);
        },
        asio::use_awaitable);
 }
 
-template <typename Query> boost::asio::awaitable<result> run(request value, Query&& query) {
+template <typename Query, typename Postprocess, typename IsPeerFailure>
+boost::asio::awaitable<result> run(request value, Query query, Postprocess postprocess, IsPeerFailure is_peer_failure) {
    auto known = std::map<peer_id, dht::peer>{};
    for (const auto& peer : value.seeds) {
       merge_known(known, peer);
@@ -204,7 +229,12 @@ template <typename Query> boost::asio::awaitable<result> run(request value, Quer
       for (const auto& peer : batch) {
          queried.insert(peer.id);
       }
-      auto responses = co_await query_batch(std::move(batch), query);
+      auto responses = co_await query_batch(std::move(batch), query, postprocess, is_peer_failure);
+      for (const auto& item : responses) {
+         if (item.local_error) {
+            std::rethrow_exception(item.local_error);
+         }
+      }
       for (const auto& item : responses) {
          if (item.failed || !item.response) {
             failed.insert(item.peer.id);
@@ -243,6 +273,12 @@ template <typename Query> boost::asio::awaitable<result> run(request value, Quer
    out.queried.assign(queried.begin(), queried.end());
    out.failed.assign(failed.begin(), failed.end());
    co_return out;
+}
+
+template <typename Query, typename IsPeerFailure>
+boost::asio::awaitable<result> run(request value, Query query, IsPeerFailure is_peer_failure) {
+   auto postprocess = [](const dht::peer&, dht::message&) -> boost::asio::awaitable<void> { co_return; };
+   co_return co_await run(std::move(value), std::move(query), std::move(postprocess), std::move(is_peer_failure));
 }
 
 } // namespace forge::net::p2p::dht_query

@@ -110,6 +110,10 @@ Expiry pruning reports exact removed identities rather than category counts,
 and durable mutation outcomes distinguish commit failure from a committed
 mutation whose sync acknowledgement is uncertain. This keeps operational state
 aligned with the database while surfacing the uncertainty as a typed failure.
+That diagnostic remains degraded until a later durable apply or explicit flush
+confirms durability; ordinary pruning cannot clear it. Provider and Rendezvous
+records use the same per-peer endpoint and total variable-byte bounds as the
+peer directory, both for live writes and hydration.
 
 Remove the private RocksDB codec and direct `forge_rocksdb` dependency. Keep a
 deterministic in-memory implementation for unit and programmatic test paths.

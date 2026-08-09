@@ -78,7 +78,8 @@ struct peer_store::impl {
    void complete_peer_mutations_locked(const std::map<peer_id, peer_mutation>& values);
    void ensure_open_locked() const;
    void mark_persistence_failure_locked(std::string message);
-   void mark_persistence_healthy_locked();
+   void mark_durability_uncertain_locked(std::string message);
+   void mark_persistence_healthy_locked(bool durability_confirmed = false);
    [[nodiscard]] std::pair<peer_store::mutation_batch, std::map<peer_id, peer_mutation>> take_pending_batch_locked();
    [[nodiscard]] std::size_t queued_unique_count_locked() const;
    [[nodiscard]] peer_store::record record_for_mutation_locked(const peer_id& peer) const;
@@ -115,6 +116,7 @@ struct peer_store::impl {
    std::map<const void*, std::function<void()>> persistence_admission_drainers_;
    std::size_t close_waiters_ = 0;
    bool degraded_ = false;
+   bool durability_uncertain_ = false;
    bool closing_ = false;
    bool closed_ = false;
    std::string last_failure_;
