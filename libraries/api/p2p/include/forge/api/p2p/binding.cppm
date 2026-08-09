@@ -148,6 +148,11 @@ class api_builder {
       return *this;
    }
 
+   api_builder& session_options(forge::api::stream::options value) {
+      options_ = std::move(value);
+      return *this;
+   }
+
    api_builder& max_inflight_per_peer(std::size_t value) {
       options_.max_inflight = value;
       return *this;

@@ -666,7 +666,7 @@ void session::impl::cancel_call(
                        : cancelled_call_error(call->id.value);
    call->deadline.cancel();
    if (call->handler_running) {
-      call->handler_cancel.emit(boost::asio::cancellation_type::total);
+      call->handler_cancel.emit(boost::asio::cancellation_type::all);
    }
    finish_unstarted_pumps(call);
    if (call->inbound && call->inbound->endpoint) {

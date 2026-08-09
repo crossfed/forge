@@ -272,6 +272,7 @@ forge::api::transport::options plugin::impl::api_options_for(const remote_option
       }
       out.max_frame_size = *value.max_frame_size;
    }
+   out.max_item_size = std::min(out.max_item_size, out.max_frame_size);
    return out;
 }
 

@@ -544,7 +544,7 @@ void session::impl::fail_session(std::exception_ptr error) noexcept {
       call->done = true;
       if (call->handler_running) {
          try {
-            call->handler_cancel.emit(boost::asio::cancellation_type::total);
+            call->handler_cancel.emit(boost::asio::cancellation_type::all);
          } catch (...) {
             // Session failure remains authoritative during cancellation.
          }

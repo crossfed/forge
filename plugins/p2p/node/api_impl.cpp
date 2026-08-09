@@ -62,13 +62,11 @@ void plugin::api_impl::publish_api(forge::api::core::binding_plan plan, forge::n
 
 void plugin::api_impl::publish_api(forge::api::core::binding_plan plan, forge::net::p2p::protocol_id protocol,
                                    forge::api::transport::options options) {
+   options.max_item_size = std::min(options.max_item_size, options.max_frame_size);
    auto binding = forge::api::p2p::api()
                      .use(std::move(plan))
                      .protocol_id(protocol)
-                     .codec(options.codec)
-                     .max_inflight_per_peer(options.max_inflight)
-                     .deadline(options.deadline)
-                     .max_frame_size(options.max_frame_size)
+                     .session_options(std::move(options))
                      .build();
    impl_->add_route(binding.protocol(), binding.handler());
 }
