@@ -80,6 +80,46 @@ void normalize_for_storage(peer_store::record& value) {
    refresh_record_score(value, kind, value.successes > 0);
 }
 
+void add_peer_record_bytes(std::size_t& total, std::size_t size, std::size_t maximum) {
+   if (size > maximum - total) {
+      FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P peer record exceeds byte limit");
+   }
+   total += size;
+}
+
+void validate_peer_record(const peer_store::record& value, const peer_store::options& options) {
+   if (value.endpoints.size() > options.max_endpoints_per_peer ||
+       value.protocols.size() > options.max_protocols_per_peer ||
+       value.relay_reservations.size() > options.max_relay_reservations_per_peer) {
+      FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P peer record exceeds collection limit");
+   }
+
+   auto bytes = std::size_t{};
+   const auto add = [&](std::size_t size) { add_peer_record_bytes(bytes, size, options.max_peer_record_bytes); };
+   add(value.protocol_version.size());
+   add(value.agent_version.size());
+   add(value.public_key.size());
+   add(value.signed_peer_record.size());
+   for (const auto& protocol : value.protocols) {
+      add(protocol.value.size());
+   }
+   for (const auto& endpoint : value.endpoints) {
+      add(endpoint.endpoint.to_string().size());
+   }
+   if (value.observed_endpoint) {
+      add(value.observed_endpoint->to_string().size());
+   }
+   for (const auto& relay : value.relay_reservations) {
+      if (relay.endpoints.size() > options.max_relay_endpoints_per_reservation) {
+         FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P peer relay reservation exceeds endpoint limit");
+      }
+      add(relay.voucher.size());
+      for (const auto& endpoint : relay.endpoints) {
+         add(endpoint.to_string().size());
+      }
+   }
+}
+
 void mutate_endpoint(peer_store::record& record, const forge::net::p2p::endpoint& endpoint, path::kind kind,
                      const std::function<void(peer_store::endpoint_record&)>& mutation) {
    auto iterator = std::ranges::find_if(record.endpoints,
@@ -108,7 +148,9 @@ void mutate_endpoint(peer_store::record& record, const forge::net::p2p::endpoint
 peer_store::impl::impl(peer_store::options options_value)
     : options_(std::move(options_value)), persistence_(options_.persistence) {
    if (options_.max_peers == 0 || options_.max_providers == 0 || options_.max_rendezvous == 0 ||
-       options_.max_pending == 0 || options_.hydration_page_limit == 0 || options_.prune_page_limit == 0 ||
+       options_.max_pending == 0 || options_.max_endpoints_per_peer == 0 || options_.max_protocols_per_peer == 0 ||
+       options_.max_relay_reservations_per_peer == 0 || options_.max_relay_endpoints_per_reservation == 0 ||
+       options_.max_peer_record_bytes == 0 || options_.hydration_page_limit == 0 || options_.prune_page_limit == 0 ||
        options_.max_persistence_waiters == 0) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "peer store limits must be positive");
    }
@@ -306,6 +348,7 @@ void peer_store::impl::commit_peer_mutation(peer_store::record value) {
 }
 
 void peer_store::impl::commit_peer_mutation_locked(peer_store::record value) {
+   validate_peer_record(value, options_);
    auto evicted = std::optional<peer_id>{};
    if (!records_.contains(value.peer) && records_.size() == options_.max_peers) {
       const auto candidate = score_key{-value.score, value.peer};
@@ -703,6 +746,9 @@ boost::asio::awaitable<void> peer_store::impl::async_remove_rendezvous(peer_id p
 }
 
 void peer_store::impl::hydrate_page_locked(peer_store::hydration_page page) {
+   for (const auto& value : page.peers) {
+      validate_peer_record(value, options_);
+   }
    rendezvous_sequence_ = std::max(rendezvous_sequence_, page.rendezvous_sequence_high_watermark);
    auto removals = std::map<peer_id, peer_mutation>{};
    auto removal_peers = std::vector<peer_id>{};
@@ -782,9 +828,13 @@ boost::asio::awaitable<void> peer_store::impl::async_hydrate() {
          }
 
          const auto next_cursor = page.cursor;
-         {
+         try {
             auto lock = std::scoped_lock{mutex_};
             hydrate_page_locked(std::move(page));
+         } catch (...) {
+            auto lock = std::scoped_lock{mutex_};
+            mark_persistence_failure_locked(current_failure_message());
+            throw;
          }
          remaining -= page_size;
          if (!next_cursor) {

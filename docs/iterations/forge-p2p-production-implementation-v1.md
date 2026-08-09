@@ -126,7 +126,8 @@ Replace the flat routing table with node-owned k-buckets:
 
 - configured `k` and deterministic XOR-distance ordering;
 - bounded replacement lists;
-- verified server admission after Identify or successful DHT exchange;
+- Identify and hydrated records remain candidates until a successful validated
+  DHT exchange admits the peer as a server;
 - failure-driven replacement and eviction;
 - bounded closest-peer and diagnostic snapshots;
 - startup candidates revalidated before admission.

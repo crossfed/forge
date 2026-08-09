@@ -47,10 +47,12 @@ register/discover against rust-libp2p.
 | DHT protocol id | Ported | `p2p_libp2p_reachability_relay_protocol_ids_are_exact` |
 | DHT codec and malformed rejection | Ported | `p2p_dht_codec_roundtrips_libp2p_message_shape_and_rejects_malformed` |
 | DHT k-bucket bounds, replacement and XOR ordering | Ported | `p2p_dht_k_bucket_bounds_active_and_replacement_capacity`, `p2p_dht_k_bucket_closest_is_sha256_xor_ordered_and_deterministic` |
+| DHT candidate admission and failure eviction | Ported | `p2p_identify_dht_advertisement_remains_candidate_without_valid_exchange`, `p2p_dht_query_seeds_prioritize_active_and_evict_failed_replacements` |
+| DHT exact and failed-target lookup semantics | Ported | `p2p_dht_find_node_returns_exact_peer_store_and_self_before_active_closest`, `p2p_dht_query_failed_target_seed_is_not_complete_or_closest` |
 | DHT node handler over negotiated stream | Ported | `p2p_dht_node_finds_peer_and_provider_over_negotiated_stream` |
 | DHT iterative many-peer lookup | Ported | `p2p_dht_iterative_lookup_walks_many_peer_topology` |
 | DHT iterative provider lookup and provide | Ported | `p2p_dht_iterative_provider_lookup_and_provide_reach_closest_peers` |
-| DHT bounded async persistence | Ported | `p2p_peer_store_memory_persistence_hydrates_bounded_pages`, `p2p_peer_store_bounds_pending_queue_and_recovers_after_flush` |
+| DHT bounded async persistence | Ported | `p2p_peer_store_memory_persistence_hydrates_bounded_pages`, `p2p_peer_store_bounds_pending_queue_and_recovers_after_flush`, `p2p_peer_store_bounds_variable_peer_record_state` |
 | DHT ObjectDB reopen through official plugin | Ported | `p2p_node_plugin_production_lifecycle_reopens_persisted_peer_state`, conditional MDBX/RocksDB reopen cases |
 | DHT live peer lookup fixture | Limited | `test_forge_libp2p_interop dht_find_peer`; direct-peer setup is not credited as outbound iterative lookup proof |
 | DHT live provider lookup | Ported | `test_forge_libp2p_interop dht_provide_find_provider` against go-libp2p/rust-libp2p |

@@ -403,8 +403,7 @@ node::impl::impl(forge::asio::runtime& runtime_value, node::options options_valu
       local(options.explicit_peer_id ? *options.explicit_peer_id
                                      : make_peer_id_from_certificate_pem(options.certificate_pem)),
       identity(make_libp2p_identity_material(options)), direct_registry(runtime_value, options, identity),
-      teardown(runtime_value.context().get_executor()),
-      store(options.peer_state), routing(local, options.limits.dht) {}
+      teardown(runtime_value.context().get_executor()), store(options.peer_state), routing(local, options.limits.dht) {}
 
 std::vector<forge::net::p2p::endpoint> node::impl::local_endpoints_for_control() const {
    auto lock = std::scoped_lock{mutex};
@@ -462,7 +461,7 @@ void node::impl::learn_from_identify(const peer_id& peer, const identify::docume
    const auto advertises_dht = capabilities_for(document.protocols).has(capabilities::dht);
    store.upsert(std::move(record));
    if (advertises_dht) {
-      routing.upsert(std::move(routing_peer), dht::routing_admission::verified_server);
+      routing.upsert(std::move(routing_peer), dht::routing_admission::candidate);
    }
 }
 
@@ -1975,9 +1974,9 @@ boost::asio::awaitable<dht::message> node::impl::exchange_dht(const peer_id& pee
                                                               std::chrono::milliseconds timeout) {
    const auto started = std::chrono::steady_clock::now();
    auto stream = co_await open_protocol_direct(peer, builtins::kad_dht, timeout);
-   co_return co_await detail::async_exchange_dht(
-       std::move(stream), std::move(request), options.limits.dht, runtime.context(),
-       remaining_timeout(started, timeout, "P2P DHT exchange"));
+   co_return co_await detail::async_exchange_dht(std::move(stream), std::move(request), options.limits.dht,
+                                                 runtime.context(),
+                                                 remaining_timeout(started, timeout, "P2P DHT exchange"));
 }
 
 boost::asio::awaitable<void> node::impl::send_dht(const peer_id& peer, dht::message request,
@@ -3047,8 +3046,9 @@ boost::asio::awaitable<void> node::impl::handle_dht(std::shared_ptr<node::impl::
    deadline.arm([&stream] { stream.cancel(); });
    try {
       auto buffer = std::vector<std::uint8_t>{};
-      auto request = dht::codec::decode(
-          co_await async_read_length_delimited(stream, buffer, options.limits.dht.max_message_size), options.limits.dht);
+      auto request =
+          dht::codec::decode(co_await async_read_length_delimited(stream, buffer, options.limits.dht.max_message_size),
+                             options.limits.dht);
       increment_dht_query();
       detail::validate_dht_request(request, session->info.remote_peer);
 
@@ -3057,7 +3057,58 @@ boost::asio::awaitable<void> node::impl::handle_dht(std::shared_ptr<node::impl::
           .key_value = request.key_value,
       };
       if (request.type == dht::message_type::find_node) {
-         response.closer_peers = routing.closest(request.key_value.bytes, options.limits.dht.replication);
+         auto closest = routing.closest(request.key_value.bytes, options.limits.dht.replication);
+         response.closer_peers.reserve(options.limits.dht.replication);
+         const auto append_unique = [&](dht::peer value) {
+            const auto current = std::ranges::find_if(response.closer_peers,
+                                                      [&](const auto& candidate) { return candidate.id == value.id; });
+            if (current != response.closer_peers.end()) {
+               for (auto& endpoint : value.endpoints) {
+                  const auto known = std::ranges::any_of(current->endpoints, [&](const auto& candidate) {
+                     return candidate.to_string() == endpoint.to_string();
+                  });
+                  if (!known) {
+                     current->endpoints.push_back(std::move(endpoint));
+                  }
+               }
+               return;
+            }
+            if (response.closer_peers.size() >= options.limits.dht.replication) {
+               return;
+            }
+            response.closer_peers.push_back(std::move(value));
+         };
+         try {
+            const auto requested = peer_id::from_bytes(request.key_value.bytes);
+            if (requested == local) {
+               append_unique(dht::peer{
+                   .id = local,
+                   .endpoints = local_endpoints_for_control(),
+                   .connection = dht::connection_type::connected,
+               });
+            } else {
+               const auto active =
+                   std::ranges::find_if(closest, [&](const auto& candidate) { return candidate.id == requested; });
+               if (active != closest.end()) {
+                  append_unique(*active);
+               }
+               if (const auto record = store.find(requested)) {
+                  auto exact = dht::peer{.id = requested, .connection = dht::connection_type::can_connect};
+                  exact.endpoints.reserve(record->endpoints.size());
+                  for (const auto& item : record->endpoints) {
+                     auto endpoint = item.endpoint;
+                     endpoint.peer = requested;
+                     exact.endpoints.push_back(std::move(endpoint));
+                  }
+                  append_unique(std::move(exact));
+               }
+            }
+         } catch (const forge::exceptions::base&) {
+            // Arbitrary non-Peer-ID keys remain ordinary closest-node queries.
+         }
+         for (auto& peer : closest) {
+            append_unique(std::move(peer));
+         }
       } else if (request.type == dht::message_type::get_providers) {
          const auto providers = store.find_providers(request.key_value, options.limits.dht.max_provider_peers);
          response.provider_peers.reserve(providers.size());
@@ -3177,8 +3228,7 @@ boost::asio::awaitable<void> node::impl::handle_rendezvous(std::shared_ptr<node:
    }
 
    if (request.type == rendezvous::message_type::unregister_peer && request.unregister_value) {
-      co_await store.async_remove_rendezvous(session->info.remote_peer,
-                                             request.unregister_value->namespace_name);
+      co_await store.async_remove_rendezvous(session->info.remote_peer, request.unregister_value->namespace_name);
       co_await stream.async_close();
       co_return;
    }

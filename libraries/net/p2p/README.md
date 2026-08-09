@@ -18,9 +18,10 @@ The following surfaces are not production claims yet:
 
 - Kademlia, Rendezvous, Peer Exchange, Ping sampling and AutoNAT are explicit or
   inbound operations without complete node-owned maintenance;
-- Kademlia now has bounded node-owned k-buckets, verified server admission and
-  failure eviction, but autonomous refresh and the standard value profile are
-  still Stage 3/4 work;
+- Kademlia now has bounded node-owned k-buckets, DHT-exchange-verified server
+  admission and failure eviction; Identify and hydrated records remain
+  candidates until a valid DHT response, while autonomous refresh and the
+  standard value profile are still Stage 3/4 work;
 - standard Kademlia value operations do not have a value store or validation
   policy;
 - AutoRelay and DCUtR mechanics lack the complete verified discovery and
@@ -190,7 +191,9 @@ The low-level node requires `peer_store::persistence` outside explicit insecure
 tests. The backend-neutral asynchronous contract provides paged hydration,
 atomic mutation batches, bounded expiry pruning, flush and deterministic close.
 The operational directory remains bounded and performs indexed point/candidate
-queries without scanning durable history.
+queries without scanning durable history. Per-peer endpoint, protocol, relay and
+total variable-byte limits prevent one remote peer from bypassing the global
+peer and persistence-queue bounds.
 
 The official P2P plugin supplies the production ObjectDB adapter. Direct users
 may implement the persistence port over their own lifecycle owner. The memory

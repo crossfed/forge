@@ -282,22 +282,38 @@ diagnostics_relays(std::span<const peer_store::relay_record> records, std::size_
 
 boost::asio::awaitable<std::optional<identify::document>>
 identify_peer(auto self, const peer_id& peer, discovery::source source, std::chrono::milliseconds timeout) {
+   const auto started = std::chrono::steady_clock::now();
    try {
       auto stream = co_await self->open_protocol_direct(peer, builtins::identify, timeout);
-      auto buffer = std::vector<std::uint8_t>{};
-      auto payload = unwrap_length_delimited(
-          co_await async_read_length_delimited(stream, buffer, self->options.limits.max_peer_exchange_message_size),
-          self->options.limits.max_peer_exchange_message_size);
-      auto document = identify::decode(payload);
-      self->learn_from_identify(peer, document);
-      auto record = self->store.find(peer).value_or(peer_store::record{.peer = peer});
-      record.discovered_by = source;
-      record.discovered_at = std::chrono::system_clock::now();
-      record.discovery_expires_at = record.discovered_at + self->options.limits.discovery.refresh_interval;
-      record.capabilities.bits |= capabilities_for(document.protocols).bits;
-      self->store.upsert(std::move(record));
-      co_await stream.async_close();
-      co_return document;
+      auto deadline =
+          operation_deadline{self->runtime.context(), remaining_timeout(started, timeout, "P2P Identify probe")};
+      deadline.arm([&stream] { stream.cancel(); });
+      try {
+         auto buffer = std::vector<std::uint8_t>{};
+         auto payload = unwrap_length_delimited(
+             co_await async_read_length_delimited(stream, buffer, self->options.limits.max_peer_exchange_message_size),
+             self->options.limits.max_peer_exchange_message_size);
+         auto document = identify::decode(payload);
+         self->learn_from_identify(peer, document);
+         auto record = self->store.find(peer).value_or(peer_store::record{.peer = peer});
+         record.discovered_by = source;
+         record.discovered_at = std::chrono::system_clock::now();
+         record.discovery_expires_at = record.discovered_at + self->options.limits.discovery.refresh_interval;
+         record.capabilities.bits |= capabilities_for(document.protocols).bits;
+         self->store.upsert(std::move(record));
+         co_await stream.async_close();
+         if (!deadline.finish()) {
+            throw_operation_timeout("P2P Identify probe");
+         }
+         co_return document;
+      } catch (...) {
+         const auto completed = deadline.finish();
+         stream.cancel();
+         if (deadline.timed_out() || !completed) {
+            throw_operation_timeout("P2P Identify probe");
+         }
+         throw;
+      }
    } catch (const forge::exceptions::base&) {
       self->store.mark_failure(peer);
       self->routing.mark_failure(peer);
@@ -660,17 +676,20 @@ boost::asio::awaitable<std::vector<discovery::result>> node::async_refresh_disco
 
    const auto now = std::chrono::system_clock::now();
    const auto expires_at = now + self->options.limits.discovery.refresh_interval;
+   const auto query_started = std::chrono::steady_clock::now();
+   const auto query_timeout = self->options.limits.discovery.query_timeout;
    auto out = std::vector<discovery::result>{};
    out.reserve(self->options.limits.discovery.max_results);
 
    if (self->options.limits.discovery.dht_enabled) {
-      for (const auto& record : self->store.candidates(
-               capabilities::dht, self->options.limits.discovery.max_parallel_queries)) {
+      for (const auto& record :
+           self->store.candidates(capabilities::dht, self->options.limits.discovery.max_parallel_queries)) {
          if (record.peer != self->local && queryable(record)) {
             (void)co_await identify_peer(self, record.peer, record.discovered_by,
-                                         self->options.limits.discovery.query_timeout);
+                                         remaining_timeout(query_started, query_timeout, "P2P discovery refresh"));
          }
       }
+      (void)remaining_timeout(query_started, query_timeout, "P2P discovery refresh");
       auto seeds = self->routing.query_seeds(make_dht_key(self->local).bytes,
                                              self->options.limits.discovery.max_parallel_queries);
       if (!seeds.empty()) {
@@ -681,13 +700,15 @@ boost::asio::awaitable<std::vector<discovery::result>> node::async_refresh_disco
                  .options = self->options.limits.dht,
                  .seeds = std::move(seeds),
              },
-             [self, target](const dht::peer& candidate) -> boost::asio::awaitable<dht::message> {
-                auto response = co_await self->exchange_dht(candidate.id,
-                                                            dht::message{
-                                                                .type = dht::message_type::find_node,
-                                                                .key_value = target,
-                                                            },
-                                                            self->options.limits.discovery.query_timeout);
+             [self, target, query_started,
+              query_timeout](const dht::peer& candidate) -> boost::asio::awaitable<dht::message> {
+                auto response = co_await self->exchange_dht(
+                    candidate.id,
+                    dht::message{
+                        .type = dht::message_type::find_node,
+                        .key_value = target,
+                    },
+                    remaining_timeout(query_started, query_timeout, "P2P discovery refresh"));
                 self->routing.upsert(candidate, dht::routing_admission::verified_server);
                 const auto context = third_party_discovery_context();
                 for (auto& closer : response.closer_peers) {
@@ -704,25 +725,27 @@ boost::asio::awaitable<std::vector<discovery::result>> node::async_refresh_disco
          for (const auto& failed : lookup.failed) {
             mark_dht_failure(self, failed);
          }
+         (void)remaining_timeout(query_started, query_timeout, "P2P discovery refresh");
          for (const auto& peer : lookup.query.closest_peers) {
             if (peer.id == self->local || out.size() >= self->options.limits.discovery.max_results) {
                continue;
             }
             (void)co_await identify_peer(self, peer.id, discovery::source::dht,
-                                         self->options.limits.discovery.query_timeout);
+                                         remaining_timeout(query_started, query_timeout, "P2P discovery refresh"));
             if (const auto record = self->store.find(peer.id)) {
                append_result(out, *record, discovery::source::dht, expires_at,
                              self->options.limits.discovery.max_results);
             }
          }
+         (void)remaining_timeout(query_started, query_timeout, "P2P discovery refresh");
       }
    }
 
    if (self->options.limits.discovery.rendezvous_enabled) {
-      const auto rendezvous_candidates = self->store.candidates(
-          capabilities::rendezvous, self->options.limits.discovery.max_parallel_queries);
+      const auto rendezvous_candidates =
+          self->store.candidates(capabilities::rendezvous, self->options.limits.discovery.max_parallel_queries);
       for (const auto& record : discovery_records(rendezvous_candidates, capabilities::rendezvous,
-                                                   self->options.limits.discovery.max_parallel_queries)) {
+                                                  self->options.limits.discovery.max_parallel_queries)) {
          if (record.peer == self->local) {
             continue;
          }
@@ -807,14 +830,6 @@ boost::asio::awaitable<void> node::async_cancel_relay(peer_id relay_peer) {
 boost::asio::awaitable<dht::query_result> node::async_find_peer(peer_id peer) {
    auto self = impl_;
    auto target = make_dht_key(peer);
-   auto result = dht::query_result{.target = target};
-   for (const auto& candidate : self->routing.closest(target.bytes, self->options.limits.dht.replication)) {
-      if (candidate.id == peer) {
-         result.closest_peers.push_back(candidate);
-         result.complete = true;
-         co_return result;
-      }
-   }
    auto lookup = co_await dht_query::run(
        dht_query::request{
            .target = target,
@@ -844,6 +859,31 @@ boost::asio::awaitable<dht::query_result> node::async_find_peer(peer_id peer) {
        });
    for (const auto& failed : lookup.failed) {
       mark_dht_failure(self, failed);
+   }
+   if (lookup.query.complete) {
+      if (const auto record = self->store.find(peer)) {
+         auto exact = dht_peer_from_record(*record);
+         if (has_usable_endpoint(exact)) {
+            const auto current = std::ranges::find_if(lookup.query.closest_peers,
+                                                      [&](const auto& candidate) { return candidate.id == peer; });
+            if (current != lookup.query.closest_peers.end()) {
+               for (auto& endpoint : current->endpoints) {
+                  const auto known = std::ranges::any_of(exact.endpoints, [&](const auto& candidate) {
+                     return candidate.to_string() == endpoint.to_string();
+                  });
+                  if (!known) {
+                     exact.endpoints.push_back(std::move(endpoint));
+                  }
+               }
+               *current = std::move(exact);
+            } else {
+               lookup.query.closest_peers.insert(lookup.query.closest_peers.begin(), std::move(exact));
+               if (lookup.query.closest_peers.size() > self->options.limits.dht.replication) {
+                  lookup.query.closest_peers.pop_back();
+               }
+            }
+         }
+      }
    }
    co_return lookup.query;
 }

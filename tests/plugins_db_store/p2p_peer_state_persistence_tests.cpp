@@ -462,6 +462,11 @@ BOOST_AUTO_TEST_CASE(p2p_peer_state_rocksdb_preserves_eviction_provider_and_sequ
    check_object_peer_state_persistence([&] { return document_for("rocksdb", path); });
 }
 
+BOOST_AUTO_TEST_CASE(p2p_plugin_rocksdb_maintenance_prunes_expired_peer_state) {
+   auto root = root_guard{};
+   check_plugin_maintenance_prunes_expired_peer("rocksdb", root.root / "rocksdb-maintenance");
+}
+
 BOOST_AUTO_TEST_CASE(p2p_peer_state_rocksdb_prune_rotates_bounded_categories) {
    auto root = root_guard{};
    check_object_peer_state_prune_rotates_categories("rocksdb", root.root / "rocksdb-prune-rotation");
@@ -470,6 +475,11 @@ BOOST_AUTO_TEST_CASE(p2p_peer_state_rocksdb_prune_rotates_bounded_categories) {
 BOOST_AUTO_TEST_CASE(p2p_peer_state_rocksdb_durable_operations_flush_before_acknowledgement) {
    auto root = root_guard{};
    check_object_peer_state_durable_acknowledgement("rocksdb", root.root / "rocksdb-durable-ack");
+}
+
+BOOST_AUTO_TEST_CASE(p2p_plugin_rocksdb_startup_failure_rolls_back_open_peer_state) {
+   auto root = root_guard{};
+   check_plugin_startup_rolls_back_open_peer_state("rocksdb", root.root / "rocksdb-startup-rollback");
 }
 #endif
 

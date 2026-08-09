@@ -140,6 +140,11 @@ class peer_store {
       std::size_t max_providers = 16'384;
       std::size_t max_rendezvous = 16'384;
       std::size_t max_pending = 4'096;
+      std::size_t max_endpoints_per_peer = 64;
+      std::size_t max_protocols_per_peer = 128;
+      std::size_t max_relay_reservations_per_peer = 64;
+      std::size_t max_relay_endpoints_per_reservation = 16;
+      std::size_t max_peer_record_bytes = 1024 * 1024;
       std::size_t hydration_page_limit = 256;
       std::size_t prune_page_limit = 256;
       std::size_t max_persistence_waiters = 256;
@@ -182,8 +187,7 @@ class peer_store {
    [[nodiscard]] std::optional<record> find(const peer_id& peer) const;
    [[nodiscard]] std::vector<record> snapshot(std::size_t limit) const;
    [[nodiscard]] std::vector<record> candidates(std::uint64_t capability, std::size_t limit) const;
-   [[nodiscard]] std::vector<provider_record> find_providers(const dht::key& key,
-                                                             std::size_t limit) const;
+   [[nodiscard]] std::vector<provider_record> find_providers(const dht::key& key, std::size_t limit) const;
    [[nodiscard]] std::vector<rendezvous::registration>
    discover_rendezvous(std::string_view namespace_name, std::uint64_t after_sequence, std::size_t limit) const;
    [[nodiscard]] persistence_status persistence_state() const;
@@ -199,8 +203,8 @@ class peer_store::persistence {
 
    virtual boost::asio::awaitable<hydration_page> async_hydrate(hydration_request request) = 0;
    virtual boost::asio::awaitable<void> async_apply(mutation_batch batch) = 0;
-   virtual boost::asio::awaitable<prune_result>
-   async_prune_expired(std::chrono::system_clock::time_point now, std::size_t limit) = 0;
+   virtual boost::asio::awaitable<prune_result> async_prune_expired(std::chrono::system_clock::time_point now,
+                                                                    std::size_t limit) = 0;
    virtual boost::asio::awaitable<void> async_flush() = 0;
    virtual boost::asio::awaitable<void> async_close() = 0;
 };

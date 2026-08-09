@@ -44,6 +44,9 @@ template <typename Bucket, typename Entry> void insert_replacement(Bucket& bucke
           value.admission == dht::routing_admission::candidate) {
          return;
       }
+      if (value.admission == dht::routing_admission::candidate) {
+         value.failures = current->failures;
+      }
       *current = std::move(value);
    } else {
       bucket.replacements.push_back(std::move(value));
@@ -115,12 +118,18 @@ void dht::routing_table::impl::upsert(dht::peer value, dht::routing_admission ad
 void dht::routing_table::impl::mark_failure(const peer_id& peer) {
    auto lock = std::scoped_lock{mutex};
    auto& bucket = buckets[bucket_for(peer)];
-   const auto current = find_entry(bucket.active, peer);
-   if (current == bucket.active.end() || ++current->failures < options.failure_threshold) {
+   if (const auto current = find_entry(bucket.active, peer); current != bucket.active.end()) {
+      if (++current->failures < options.failure_threshold) {
+         return;
+      }
+      bucket.active.erase(current);
+      promote_replacement(bucket);
       return;
    }
-   bucket.active.erase(current);
-   promote_replacement(bucket);
+   const auto replacement = find_entry(bucket.replacements, peer);
+   if (replacement != bucket.replacements.end() && ++replacement->failures >= options.failure_threshold) {
+      bucket.replacements.erase(replacement);
+   }
 }
 
 std::vector<dht::peer> dht::routing_table::impl::closest(std::span<const std::uint8_t> target,
@@ -148,26 +157,38 @@ std::vector<dht::peer> dht::routing_table::impl::closest(std::span<const std::ui
 
 std::vector<dht::peer> dht::routing_table::impl::query_seeds(std::span<const std::uint8_t> target,
                                                              std::size_t limit) const {
-   auto entries = std::vector<std::pair<dht::distance, dht::peer>>{};
+   auto active = std::vector<std::pair<dht::distance, dht::peer>>{};
+   auto fallback = std::vector<std::pair<dht::distance, dht::peer>>{};
    {
       auto lock = std::scoped_lock{mutex};
       for (const auto& bucket : buckets) {
          for (const auto& value : bucket.active) {
-            entries.emplace_back(distance_between(value.value.id.to_bytes(), target), value.value);
+            active.emplace_back(distance_between(value.value.id.to_bytes(), target), value.value);
          }
          for (const auto& value : bucket.replacements) {
-            entries.emplace_back(distance_between(value.value.id.to_bytes(), target), value.value);
+            fallback.emplace_back(distance_between(value.value.id.to_bytes(), target), value.value);
          }
       }
    }
-   std::ranges::sort(entries, [](const auto& left, const auto& right) {
+   const auto by_distance = [](const auto& left, const auto& right) {
       return left.first != right.first ? left.first < right.first : left.second.id < right.second.id;
-   });
-   const auto count = std::min({limit, options.replication, entries.size()});
+   };
+   std::ranges::sort(active, by_distance);
+   std::ranges::sort(fallback, by_distance);
+   const auto count = std::min({limit, options.replication, active.size() + fallback.size()});
    auto out = std::vector<dht::peer>{};
    out.reserve(count);
-   for (auto index = std::size_t{}; index < count; ++index) {
-      out.push_back(std::move(entries[index].second));
+   for (auto& entry : active) {
+      if (out.size() >= count) {
+         break;
+      }
+      out.push_back(std::move(entry.second));
+   }
+   for (auto& entry : fallback) {
+      if (out.size() >= count) {
+         break;
+      }
+      out.push_back(std::move(entry.second));
    }
    return out;
 }

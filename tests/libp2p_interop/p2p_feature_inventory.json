@@ -109,7 +109,7 @@
         "forge.net.p2p.stream": ["resource.streams", "resource.queued_bytes"]
       },
       "header_features": {},
-      "sha256": "13405d10eee483e476a40d0751a64786d0f01fc4b24e244a0f504f8dee21a8d8",
+      "sha256": "a8e98eb189cc6df7a721af046408177cdef09cc43dfea54e94064cf4c2bc323b",
       "feature_ids": [
         "transport.direct_quic",
         "transport.tcp_yamux",
@@ -639,9 +639,15 @@
         "layers": ["state_machine", "raw_node", "restart_scale"],
         "source_paths": [
           "libraries/net/p2p/peer_store.cpp",
-          "libraries/net/p2p/include/forge/net/p2p/peer_store.cppm"
+          "libraries/net/p2p/peer_store_impl.cpp",
+          "libraries/net/p2p/memory_peer_store_persistence.cpp",
+          "libraries/net/p2p/details/peer_store_impl.hxx",
+          "libraries/net/p2p/include/forge/net/p2p/peer_store.cppm",
+          "plugins/p2p/node/object_peer_state_adapter.cpp",
+          "plugins/p2p/node/details/object_peer_state_adapter.hxx",
+          "plugins/p2p/node/details/peer_state_schema.hxx"
         ],
-        "tests": ["test_forge_quic_p2p"],
+        "tests": ["test_forge_quic_p2p", "test_forge_plugins_db_store"],
         "donor_sources": ["docs/donors/fcl-p2p-dht-rendezvous-v1.md"],
         "donor_cases": ["dht.message_codec_and_provider_records"]
       }
@@ -654,7 +660,7 @@
       "configuration": "DHT replication, replacement-cache and failure-threshold limits",
       "resource_ownership": "node-owned bounded XOR-distance k-buckets and replacement lists",
       "persistence": "none",
-      "maintenance": "verified Identify or successful DHT admission plus failure eviction; autonomous refresh remains Stage 3",
+      "maintenance": "Identify and hydration add candidates; validated DHT exchanges admit servers; failures evict active and replacement entries; autonomous refresh remains Stage 3",
       "diagnostics": "bounded active, replacement, candidate and non-empty bucket counts",
       "intended_disposition": "integrate_refresh_and_topology_maintenance",
       "builtin_protocols": [],
@@ -664,7 +670,13 @@
         "layers": ["state_machine"],
         "source_paths": [
           "libraries/net/p2p/dht.cpp",
-          "libraries/net/p2p/include/forge/net/p2p/dht.cppm"
+          "libraries/net/p2p/dht_routing_table_impl.cpp",
+          "libraries/net/p2p/dht_exchange.cpp",
+          "libraries/net/p2p/details/dht_routing_table_impl.hxx",
+          "libraries/net/p2p/details/dht_exchange.hxx",
+          "libraries/net/p2p/include/forge/net/p2p/dht.cppm",
+          "libraries/net/p2p/node.cpp",
+          "libraries/net/p2p/node_impl.cpp"
         ],
         "tests": ["test_forge_quic_p2p"],
         "donor_sources": ["docs/donors/fcl-p2p-dht-rendezvous-v1.md"],
@@ -688,9 +700,12 @@
         "layers": ["state_machine", "official_plugin"],
         "source_paths": [
           "plugins/p2p/node/plugin.cpp",
-          "plugins/p2p/node/plugin_impl.cpp"
+          "plugins/p2p/node/plugin_impl.cpp",
+          "plugins/p2p/node/object_peer_state_adapter.cpp",
+          "plugins/p2p/node/details/object_peer_state_adapter.hxx",
+          "plugins/p2p/node/details/peer_state_schema.hxx"
         ],
-        "tests": ["test_forge_plugins"],
+        "tests": ["test_forge_plugins", "test_forge_plugins_db_store"],
         "donor_sources": ["docs/donors/fcl-p2p-node-plugin-delivery-automation.md"],
         "donor_cases": ["p2p.host_multi_transport_orchestration"]
       }

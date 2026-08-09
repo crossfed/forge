@@ -25,9 +25,8 @@ inline void merge_peer(dht::peer& target, const dht::peer& source) {
    }
    target.connection = source.connection;
    for (const auto& endpoint : source.endpoints) {
-      const auto exists = std::ranges::any_of(target.endpoints, [&](const auto& current) {
-         return current.to_string() == endpoint.to_string();
-      });
+      const auto exists = std::ranges::any_of(
+          target.endpoints, [&](const auto& current) { return current.to_string() == endpoint.to_string(); });
       if (!exists) {
          target.endpoints.push_back(endpoint);
       }
@@ -46,9 +45,7 @@ inline void merge_provider(std::vector<dht::peer>& providers, const dht::peer& v
    if (!valid_peer_id(value.id)) {
       return;
    }
-   const auto found = std::ranges::find_if(providers, [&](const auto& current) {
-      return current.id == value.id;
-   });
+   const auto found = std::ranges::find_if(providers, [&](const auto& current) { return current.id == value.id; });
    if (found == providers.end()) {
       providers.push_back(value);
       return;
@@ -76,8 +73,7 @@ inline void merge_provider(std::vector<dht::peer>& providers, const dht::peer& v
 
 [[nodiscard]] inline std::vector<dht::peer> next_batch(const std::map<peer_id, dht::peer>& known,
                                                        const std::set<peer_id>& queried,
-                                                       const std::set<peer_id>& failed,
-                                                       const dht::key& target,
+                                                       const std::set<peer_id>& failed, const dht::key& target,
                                                        std::size_t alpha) {
    auto out = std::vector<dht::peer>{};
    if (alpha == 0) {
@@ -165,8 +161,7 @@ boost::asio::awaitable<std::vector<batch_response>> query_batch(std::vector<dht:
        asio::use_awaitable);
 }
 
-template <typename Query>
-boost::asio::awaitable<result> run(request value, Query&& query) {
+template <typename Query> boost::asio::awaitable<result> run(request value, Query&& query) {
    auto known = std::map<peer_id, dht::peer>{};
    for (const auto& peer : value.seeds) {
       merge_known(known, peer);
@@ -195,6 +190,9 @@ boost::asio::awaitable<result> run(request value, Query&& query) {
             failed.insert(item.peer.id);
             continue;
          }
+         if (value.target_peer && item.peer.id == *value.target_peer) {
+            out.query.complete = true;
+         }
          for (const auto& closer : item.response->closer_peers) {
             merge_known(known, closer);
             if (value.target_peer && closer.id == *value.target_peer) {
@@ -211,14 +209,14 @@ boost::asio::awaitable<result> run(request value, Query&& query) {
       }
    }
 
+   for (const auto& peer : failed) {
+      known.erase(peer);
+   }
    auto closest = sorted_peers(known, value.target);
    if (closest.size() > value.options.replication) {
       closest.resize(value.options.replication);
    }
    out.query.closest_peers = std::move(closest);
-   if (value.target_peer && known.contains(*value.target_peer)) {
-      out.query.complete = true;
-   }
    out.queried.assign(queried.begin(), queried.end());
    out.failed.assign(failed.begin(), failed.end());
    co_return out;
