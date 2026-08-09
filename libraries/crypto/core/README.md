@@ -8,6 +8,8 @@ libraries. Package component: `crypto_core`. Public namespace:
 
 - `forge.crypto.core.types`: owned byte containers.
 - `forge.crypto.core.secret_bytes`: move-only secret storage with secure erase.
+- `forge.crypto.core.secret_string`: copyable secret text with explicit scrubbed
+  copy/move assignment and destruction.
 - `forge.crypto.core.random`: cryptographically secure random bytes.
 
 ```cpp

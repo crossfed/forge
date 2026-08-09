@@ -216,6 +216,9 @@ boost::asio::awaitable<result> run(request value, Query&& query) {
       closest.resize(value.options.replication);
    }
    out.query.closest_peers = std::move(closest);
+   if (value.target_peer && known.contains(*value.target_peer)) {
+      out.query.complete = true;
+   }
    out.queried.assign(queried.begin(), queried.end());
    out.failed.assign(failed.begin(), failed.end());
    co_return out;

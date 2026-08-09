@@ -136,6 +136,7 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    mutable std::mutex mutex;
    peer_store store;
+   dht::routing_table routing;
    mutable connection_manager connections{connection_policy_for(options.limits)};
    std::map<protocol_id, node::protocol_handler> handlers;
    std::map<std::uint64_t, std::shared_ptr<session_state>> sessions;
@@ -322,6 +323,11 @@ struct node::impl : std::enable_shared_from_this<impl> {
    open_protocol_direct(const peer_id& peer, const protocol_id& protocol, std::chrono::milliseconds timeout,
                         std::size_t max_direct_endpoints = node::open_options{}.max_direct_endpoints,
                         std::chrono::milliseconds direct_attempt_timeout = node::open_options{}.direct_attempt_timeout);
+
+   boost::asio::awaitable<dht::message> exchange_dht(const peer_id& peer, dht::message request,
+                                                     std::chrono::milliseconds timeout);
+   boost::asio::awaitable<void> send_dht(const peer_id& peer, dht::message request,
+                                         std::chrono::milliseconds timeout);
 
    boost::asio::awaitable<relay::reservation::info>
    request_relay_reservation(const peer_id& relay_peer, relay::reservation::options reservation_options,

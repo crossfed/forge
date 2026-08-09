@@ -40,6 +40,7 @@ import forge.net.p2p.hole_punch;
 import forge.net.p2p.identify;
 import forge.net.p2p.identity;
 import forge.net.p2p.node;
+import forge.net.p2p.peer_store;
 import forge.net.p2p.protocol;
 import forge.net.p2p.pubsub;
 import forge.net.p2p.reachability;
@@ -351,6 +352,7 @@ const libp2p_identity& local_identity() {
 }
 
 forge::net::p2p::node::options node_options(const std::filesystem::path& store_path, const libp2p_identity& identity) {
+   (void)store_path;
    auto out = forge::net::p2p::node::options{
        .certificate_pem = identity.certificate_pem,
        .private_key_pem = identity.private_key_pem,
@@ -365,7 +367,9 @@ forge::net::p2p::node::options node_options(const std::filesystem::path& store_p
                                                         forge::net::p2p::capabilities::rendezvous |
                                                         forge::net::p2p::capabilities::pubsub},
        .public_key = identity.public_key,
-       .peer_store_path = store_path,
+       .peer_state = forge::net::p2p::peer_store::options{
+           .persistence = forge::net::p2p::peer_store::make_memory_persistence(),
+       },
        .allow_insecure_test_mode = true,
    };
    out.limits.dht.operating_mode = forge::net::p2p::dht::mode::server;

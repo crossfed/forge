@@ -7,6 +7,8 @@ add_library(
    envelope.cpp
    identify.cpp
    dht.cpp
+   dht_routing_table_impl.cpp
+   details/dht_routing_table_impl.hxx
    rendezvous.cpp
    pubsub.cpp
    scoring.cpp
@@ -19,6 +21,10 @@ add_library(
    stream.cpp
    negotiation.cpp
    peer_store.cpp
+   peer_store_impl.cpp
+   details/peer_store_impl.hxx
+   memory_peer_store_persistence.cpp
+   details/memory_peer_store_persistence.hxx
    direct_transport.cpp
    details/direct_transport.hxx
    host_addresses.cpp
@@ -32,6 +38,8 @@ add_library(
    details/libp2p_identity_material.hxx
    node_impl.cpp
    details/node_impl.hxx
+   dht_exchange.cpp
+   details/dht_exchange.hxx
    connection_singleflight_registry.cpp
    details/connection_singleflight_registry.hxx
    operation_deadline.cpp
@@ -62,7 +70,6 @@ add_library(
 forge_target_modules_at(forge_net_p2p net/p2p)
 
 target_include_directories(forge_net_p2p PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
-target_compile_definitions(forge_net_p2p PRIVATE FORGE_HAS_ROCKSDB=$<BOOL:${FORGE_HAS_ROCKSDB}>)
 
 target_link_libraries(
    forge_net_p2p PUBLIC
@@ -83,10 +90,3 @@ target_link_libraries(
       forge_net_yamux
       Boost::asio
 )
-
-if(FORGE_HAS_ROCKSDB)
-   target_link_libraries(
-      forge_net_p2p PRIVATE
-         forge_rocksdb
-   )
-endif()

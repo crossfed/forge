@@ -44,8 +44,12 @@
 #include <unordered_map>
 
 import forge.crypto.core.random;
+import forge.crypto.core.secret_string;
 import forge.codec.hex;
 import forge.crypto.digest.sha256;
+
+#include "details/engine_client_options.hxx"
+#include "details/engine_server_options.hxx"
 
 namespace forge::net::quic::detail {
 namespace {

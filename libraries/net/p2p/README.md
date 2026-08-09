@@ -18,8 +18,9 @@ The following surfaces are not production claims yet:
 
 - Kademlia, Rendezvous, Peer Exchange, Ping sampling and AutoNAT are explicit or
   inbound operations without complete node-owned maintenance;
-- Kademlia routing currently uses persistent peer history instead of a bounded
-  node-owned k-bucket table;
+- Kademlia now has bounded node-owned k-buckets, verified server admission and
+  failure eviction, but autonomous refresh and the standard value profile are
+  still Stage 3/4 work;
 - standard Kademlia value operations do not have a value store or validation
   policy;
 - AutoRelay and DCUtR mechanics lack the complete verified discovery and
@@ -67,10 +68,10 @@ donor run.
 
 Target: `forge_net_p2p`.
 
-Dependencies: `forge_api_core`, `forge_asio`, `forge_net_transport`, `forge_net_tcp`, `forge_net_quic`,
-`forge_net_yamux`, `forge_multiformats`, Boost.Asio and, temporarily, RocksDB.
-The direct RocksDB peer-store backend is an interim implementation scheduled
-for replacement by an async persistence port and an ObjectDB adapter.
+Dependencies: `forge_api_core`, `forge_asio`, `forge_net_transport`,
+`forge_net_tcp`, `forge_net_quic`, `forge_net_yamux`, `forge_multiformats` and
+Boost.Asio. The library has no database dependency; durable state is supplied
+through the asynchronous `peer_store::persistence` port.
 
 Foundation compatibility modules below P2P live in `forge_multiformats`:
 `forge.multiformats.varint`, `forge.multiformats.multicodec`,
@@ -141,7 +142,7 @@ boost::asio::awaitable<void> start_node(forge::asio::runtime& runtime) {
    auto options = forge::net::p2p::node::options{
       .certificate_pem = certificate_pem,
       .private_key_pem = private_key_pem,
-      .peer_store_path = "/var/lib/forge/p2p/peer-store",
+      .peer_state = {.persistence = persistence},
    };
 
    auto peer = forge::net::p2p::make_peer_id_from_certificate_pem(certificate_pem);
@@ -183,25 +184,28 @@ must use the same private direct profile boundary.
 includes `/p2p/<local-peer>`. `local_endpoint()` remains a first-endpoint
 compatibility convenience for older single-listen consumers.
 
-### Peer Store Backends
+### Peer State Persistence
 
-The current low-level node requires a persistent peer store outside explicit
-insecure tests. If `node::options` does not provide `peer_store_backend`,
-`peer_store_path` opens the interim RocksDB backend. The official P2P plugin
-does not yet provide this production dependency, and the backend performs
-synchronous storage work and broad scans. Do not interpret its presence as the
-completed production persistence design. The in-memory backend is only for
-explicit tests and local insecure experiments.
+The low-level node requires `peer_store::persistence` outside explicit insecure
+tests. The backend-neutral asynchronous contract provides paged hydration,
+atomic mutation batches, bounded expiry pruning, flush and deterministic close.
+The operational directory remains bounded and performs indexed point/candidate
+queries without scanning durable history.
+
+The official P2P plugin supplies the production ObjectDB adapter. Direct users
+may implement the persistence port over their own lifecycle owner. The memory
+implementation is deterministic but intended only for tests and explicit local
+experiments.
 
 ```cpp
 auto node = forge::net::p2p::node{runtime, {
    .certificate_pem = certificate_pem,
    .private_key_pem = private_key_pem,
-   .peer_store_path = "/var/lib/forge/p2p/peer-store",
+   .peer_state = {.persistence = persistence},
 }};
 
 auto test_store = forge::net::p2p::peer_store{
-   {.backend = forge::net::p2p::peer_store::make_memory_backend()}};
+   {.persistence = forge::net::p2p::peer_store::make_memory_persistence()}};
 ```
 
 ### Register A Protocol
@@ -316,7 +320,7 @@ started by `stop()`, including STCP/Yamux read-loop cleanup.
 Production options require mTLS identity with a signed libp2p certificate
 extension. `allow_insecure_test_mode` exists for tests and explicit local
 experiments only; in that mode the node may use the in-memory peer store when no
-path/backend is provided. Peer mismatch, TLS verification failure, missing
+persistence is provided. Peer mismatch, TLS verification failure, missing
 identity extension and invalid envelopes are correctness failures.
 
 The node parses its configured identity key once during construction and reuses

@@ -11,9 +11,12 @@ module;
 
 module forge.net.quic.listener;
 
+import forge.crypto.core.secret_string;
 import forge.net.quic.exceptions;
 import forge.net.quic.runtime;
 import forge.net.quic.security;
+
+#include "details/engine_server_options.hxx"
 
 namespace forge::net::quic {
 namespace {

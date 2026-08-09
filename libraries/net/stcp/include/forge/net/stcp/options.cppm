@@ -9,6 +9,8 @@ module;
 
 export module forge.net.stcp.options;
 
+import forge.crypto.core.secret_string;
+
 export namespace forge::net::stcp {
 
 struct peer_certificate {
@@ -39,7 +41,7 @@ enum class sni_policy : std::uint8_t {
 struct client_options {
    security_options security;
    std::string certificate_pem;
-   std::string private_key_pem;
+   forge::crypto::core::secret_string private_key_pem;
    std::string server_name;
    sni_policy sni = sni_policy::endpoint_host;
    std::vector<std::string> alpn_protocols;
@@ -50,7 +52,7 @@ struct client_options {
 struct server_options {
    security_options security{.verify_peer = false};
    std::string certificate_pem;
-   std::string private_key_pem;
+   forge::crypto::core::secret_string private_key_pem;
    std::vector<std::string> alpn_protocols;
    std::size_t read_chunk_size = 64 * 1024;
    bool tls13_only = true;

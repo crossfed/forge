@@ -297,63 +297,6 @@ dht::message dht::codec::decode(std::span<const std::uint8_t> bytes, const dht::
    return out;
 }
 
-struct dht::routing_table::impl {
-   peer_id local;
-   dht::options options;
-   std::map<peer_id, dht::peer> peers;
-   std::map<peer_id, std::uint64_t> failures;
-};
-
-dht::routing_table::routing_table(peer_id local_peer, dht::options options_value)
-    : impl_(std::make_unique<impl>(impl{.local = std::move(local_peer), .options = std::move(options_value)})) {
-   validate_options(impl_->options);
-}
-
-dht::routing_table::~routing_table() = default;
-dht::routing_table::routing_table(routing_table&&) noexcept = default;
-dht::routing_table& dht::routing_table::operator=(routing_table&&) noexcept = default;
-
-void dht::routing_table::upsert(peer value) {
-   if (!valid_peer_id(value.id) || value.id == impl_->local) {
-      return;
-   }
-   impl_->peers[value.id] = std::move(value);
-}
-
-void dht::routing_table::mark_failure(const peer_id& peer) {
-   ++impl_->failures[peer];
-}
-
-std::vector<dht::peer> dht::routing_table::closest(std::span<const std::uint8_t> target, std::size_t limit) const {
-   auto entries = std::vector<std::pair<dht::distance, dht::peer>>{};
-   entries.reserve(impl_->peers.size());
-   for (const auto& [id, peer] : impl_->peers) {
-      entries.push_back({distance_between(id.to_bytes(), target), peer});
-   }
-   std::ranges::sort(entries, [](const auto& left, const auto& right) {
-      if (left.first != right.first) {
-         return left.first < right.first;
-      }
-      return left.second.id < right.second.id;
-   });
-   const auto count = std::min({limit, impl_->options.replication, entries.size()});
-   auto out = std::vector<dht::peer>{};
-   out.reserve(count);
-   for (auto i = std::size_t{}; i < count; ++i) {
-      out.push_back(std::move(entries[i].second));
-   }
-   return out;
-}
-
-std::vector<dht::peer> dht::routing_table::snapshot() const {
-   auto out = std::vector<dht::peer>{};
-   out.reserve(impl_->peers.size());
-   for (const auto& [_, peer] : impl_->peers) {
-      out.push_back(peer);
-   }
-   return out;
-}
-
 dht::key make_dht_key(std::span<const std::uint8_t> value) {
    return dht::key{.bytes = std::vector<std::uint8_t>{value.begin(), value.end()}};
 }

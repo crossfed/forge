@@ -3,7 +3,6 @@ module;
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -15,6 +14,7 @@ module;
 export module forge.net.p2p.node;
 
 import forge.asio.runtime;
+import forge.crypto.core.secret_string;
 import forge.net.p2p.dht;
 import forge.net.p2p.discovery;
 import forge.net.p2p.diagnostics;
@@ -63,7 +63,7 @@ class node {
 
    struct options {
       std::string certificate_pem;
-      std::string private_key_pem;
+      forge::crypto::core::secret_string private_key_pem;
       std::optional<peer_id> explicit_peer_id;
       capability_set capabilities{.bits = capabilities::direct_quic | capabilities::peer_exchange};
       limits limits{};
@@ -74,8 +74,7 @@ class node {
       std::vector<std::uint8_t> public_key;
       std::string protocol_version = "/forge/1.0.0";
       std::string agent_version = "forge/1.0.0";
-      std::shared_ptr<peer_store::backend> peer_store_backend;
-      std::optional<std::filesystem::path> peer_store_path;
+      peer_store::options peer_state;
       bool allow_insecure_test_mode = false;
    };
 
@@ -136,6 +135,7 @@ class node {
    diagnostics(forge::net::p2p::diagnostics::options options = {}) const;
    [[nodiscard]] peer_store& peers() noexcept;
    [[nodiscard]] const peer_store& peers() const noexcept;
+   [[nodiscard]] dht::routing_status routing_status() const;
 
    void protect_peer(peer_id peer, std::string tag = "manual");
    [[nodiscard]] bool unprotect_peer(peer_id peer, std::string tag = "manual");
@@ -143,6 +143,7 @@ class node {
 
    void register_protocol_handler(protocol_id protocol, protocol_handler handler);
    boost::asio::awaitable<void> async_listen(forge::net::p2p::endpoint endpoint);
+   boost::asio::awaitable<void> async_hydrate_peer_state();
    boost::asio::awaitable<session_info> async_connect(forge::net::p2p::endpoint endpoint);
    boost::asio::awaitable<session_info> async_connect(forge::net::p2p::endpoint endpoint, connect_options options);
    boost::asio::awaitable<void> async_request_peer_exchange(peer_id peer);

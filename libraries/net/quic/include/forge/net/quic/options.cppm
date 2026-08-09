@@ -9,6 +9,7 @@ module;
 
 export module forge.net.quic.options;
 
+import forge.crypto.core.secret_string;
 import forge.net.quic.security;
 
 export namespace forge::net::quic {
@@ -30,7 +31,7 @@ struct client_options {
    transport_limits limits{};
    security_options security{};
    std::string certificate_pem;
-   std::string private_key_pem;
+   forge::crypto::core::secret_string private_key_pem;
    std::function<bool(std::string_view)> test_failpoint;
 };
 
@@ -41,7 +42,7 @@ struct server_options {
    transport_limits limits{};
    security_options security{.verify_peer = false};
    std::string certificate_pem;
-   std::string private_key_pem;
+   forge::crypto::core::secret_string private_key_pem;
 };
 
 void validate(const client_options& options);

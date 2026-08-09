@@ -7,6 +7,10 @@ add_library(
    framed_stream.cpp
    runtime.cpp
    quic_engine.cpp
+   details/quic_engine.hxx
+   details/engine_client_options.hxx
+   details/engine_server_options.hxx
+   details/wrapper_handles.hxx
    stream.cpp
    connection.cpp
    transport.cpp
