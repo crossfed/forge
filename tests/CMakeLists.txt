@@ -810,6 +810,7 @@ add_test(NAME test_forge_http_websocket COMMAND test_forge_http_websocket WORKIN
 add_executable(
    test_forge_quic_p2p
    unit/main.cpp
+   quic_p2p/libp2p_identity_fixture.cpp
    quic_p2p/quic_tests.cpp
    quic_p2p/p2p_tests.cpp
    quic_p2p/session_teardown_tests.cpp
@@ -885,6 +886,7 @@ add_test(
 add_executable(
    test_forge_plugins
    unit/main.cpp
+   quic_p2p/libp2p_identity_fixture.cpp
    plugins/plugins_tests.cpp
    plugins/log_otlp_tests.cpp
 )
@@ -894,9 +896,18 @@ add_test(NAME test_forge_plugins COMMAND test_forge_plugins WORKING_DIRECTORY ${
 add_executable(
    test_forge_plugins_db_store
    unit/main.cpp
+   quic_p2p/libp2p_identity_fixture.cpp
    plugins_db_store/db_store_tests.cpp
+   plugins_db_store/p2p_peer_state_persistence_tests.cpp
 )
-target_link_libraries(test_forge_plugins_db_store forge_plugins_db_store Boost::included_unit_test_framework)
+target_link_libraries(
+   test_forge_plugins_db_store
+   forge_plugins_db_store
+   forge_plugins_crypto_secrets
+   forge_plugins_p2p_node
+   Boost::included_unit_test_framework
+)
+target_include_directories(test_forge_plugins_db_store PRIVATE ${PROJECT_SOURCE_DIR}/plugins/p2p/node)
 target_compile_definitions(test_forge_plugins_db_store PRIVATE FORGE_HAS_ROCKSDB=$<BOOL:${FORGE_HAS_ROCKSDB}>)
 target_compile_definitions(test_forge_plugins_db_store PRIVATE FORGE_HAS_MDBX=$<BOOL:${FORGE_HAS_MDBX}>)
 if(FORGE_HAS_ROCKSDB)

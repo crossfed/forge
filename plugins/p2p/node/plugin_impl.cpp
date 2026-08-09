@@ -32,11 +32,14 @@ import forge.net.p2p.diagnostics;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.identity;
 import forge.net.p2p.node;
+import forge.net.p2p.peer_store;
 import forge.net.p2p.protocol;
 import forge.net.p2p.pubsub;
 import forge.net.p2p.scoring;
 import forge.plugins.p2p.node.exceptions;
 import forge.plugins.p2p.node.types;
+import forge.plugins.crypto.secrets.api;
+import forge.plugins.db.store.api;
 
 #include "details/plugin_impl.hxx"
 #include "details/config.hxx"
@@ -151,16 +154,13 @@ boost::asio::awaitable<void> plugin::impl::refresh_bootstrap() {
    }
 }
 
-void plugin::impl::start_bootstrap_maintenance() {
-   if (bootstrap.empty()) {
-      return;
-   }
+void plugin::impl::start_maintenance() {
    if (!scheduler) {
       FORGE_THROW_EXCEPTION(exceptions::plugin_not_initialized, "P2P node plugin scheduler is not initialized");
    }
    auto self = shared_from_this();
-   auto maintenance = scheduler->submit(forge::asio::task::awaitable{
-       .name = "p2p-bootstrap-maintenance",
+   auto task = scheduler->submit(forge::asio::task::awaitable{
+       .name = "p2p-peer-maintenance",
        .work = [self = std::move(self)](forge::asio::task::context& context) -> boost::asio::awaitable<void> {
           auto executor = co_await boost::asio::this_coro::executor;
           auto lane = boost::asio::make_strand(executor);
@@ -170,6 +170,11 @@ void plugin::impl::start_bootstrap_maintenance() {
                  auto executor = co_await boost::asio::this_coro::executor;
                  while (!context.cancel_requested() && !self->stopping.load(std::memory_order_acquire)) {
                     co_await self->refresh_bootstrap();
+                    try {
+                       static_cast<void>(co_await self->require_node().peers().async_prune_expired());
+                    } catch (...) {
+                       forge::exceptions::capture_and_log("P2P peer persistence maintenance failed");
+                    }
                     if (context.cancel_requested() || self->stopping.load(std::memory_order_acquire)) {
                        co_return;
                     }
@@ -189,32 +194,32 @@ void plugin::impl::start_bootstrap_maintenance() {
        },
    });
 
-   auto lock = std::scoped_lock{bootstrap_maintenance_mutex};
-   bootstrap_maintenance = std::move(maintenance);
+   auto lock = std::scoped_lock{maintenance_mutex};
+   maintenance = std::move(task);
    if (stopping.load(std::memory_order_acquire)) {
-      bootstrap_maintenance.cancel();
+      maintenance.cancel();
    }
 }
 
-void plugin::impl::request_bootstrap_stop() noexcept {
+void plugin::impl::request_maintenance_stop() noexcept {
    stopping.store(true, std::memory_order_release);
-   auto lock = std::scoped_lock{bootstrap_maintenance_mutex};
-   if (bootstrap_maintenance.valid()) {
-      bootstrap_maintenance.cancel();
+   auto lock = std::scoped_lock{maintenance_mutex};
+   if (maintenance.valid()) {
+      maintenance.cancel();
    }
 }
 
-boost::asio::awaitable<void> plugin::impl::stop_bootstrap_maintenance() {
-   auto maintenance = forge::asio::task::handle{};
+boost::asio::awaitable<void> plugin::impl::stop_maintenance() {
+   auto task = forge::asio::task::handle{};
    {
-      auto lock = std::scoped_lock{bootstrap_maintenance_mutex};
-      if (!bootstrap_maintenance.valid()) {
+      auto lock = std::scoped_lock{maintenance_mutex};
+      if (!maintenance.valid()) {
          co_return;
       }
-      maintenance = std::move(bootstrap_maintenance);
+      task = std::move(maintenance);
    }
    try {
-      co_await maintenance.wait();
+      co_await task.wait();
    } catch (const forge::asio::exceptions::canceled&) {
    }
 }

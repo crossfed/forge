@@ -92,6 +92,13 @@ feature is activated or production-ready.
 
 ## 5. Stage 2: Peer-State Foundation
 
+> **Implementation status:** the Stage 2 foundation is implemented by
+> `forge-p2p-peer-state-v1`. Async persistence, bounded operational state,
+> k-bucket admission, the private ObjectDB adapter and secret-backed official
+> plugin startup are covered by focused memory, P2P and DB Store suites. This
+> status does not promote Kademlia or the node to `live`: autonomous refresh,
+> complete Identify ownership and standard value operations remain Stage 3/4.
+
 ### 5.1 Async persistence boundary
 
 Replace the synchronous peer-store backend with an asynchronous persistence
@@ -161,6 +168,12 @@ mode is an explicit test path only.
 - no listener opens before secrets, schema and hydration succeed;
 - closest-peer operations do not scan ObjectDB;
 - the old RocksDB backend API and handwritten codec are absent.
+
+Current focused evidence includes
+`p2p_peer_store_memory_persistence_hydrates_bounded_pages`,
+`p2p_dht_k_bucket_bounds_active_and_replacement_capacity`,
+`p2p_dht_iterative_lookup_walks_many_peer_topology` and
+`p2p_node_plugin_production_lifecycle_reopens_persisted_peer_state`.
 
 ## 6. Stage 3: Node Lifecycle, Identify And Resource Ownership
 

@@ -26,6 +26,8 @@
 #include <utility>
 #include <vector>
 
+#include "../quic_p2p/libp2p_identity_fixture.hxx"
+
 import forge.api.core.binding;
 import forge.api.core.registry;
 import forge.app.application_builder;
@@ -63,10 +65,21 @@ import forge.db.revision.exceptions;
 import forge.db.revision.store;
 import forge.db.revision.transaction;
 import forge.db.revision.types;
+import forge.net.p2p.diagnostics;
+import forge.net.p2p.endpoint;
+import forge.net.p2p.identity;
+import forge.plugins.crypto.secrets.api;
+import forge.plugins.crypto.secrets.exceptions;
+import forge.plugins.crypto.secrets.plugin;
+import forge.plugins.crypto.secrets.types;
 import forge.plugins.db.store.api;
 import forge.plugins.db.store.exceptions;
 import forge.plugins.db.store.plugin;
 import forge.plugins.db.store.types;
+import forge.plugins.p2p.node.api;
+import forge.plugins.p2p.node.exceptions;
+import forge.plugins.p2p.node.plugin;
+import forge.plugins.p2p.node.types;
 import forge.raw.raw;
 
 #if FORGE_HAS_ROCKSDB
@@ -80,6 +93,8 @@ import forge.db.mdbx.driver;
 
 namespace {
 
+namespace crypto_secrets = forge::plugins::crypto::secrets;
+namespace p2p_node = forge::plugins::p2p::node;
 namespace store_plugin = forge::plugins::db::store;
 
 struct by_id;
@@ -388,7 +403,8 @@ class memory_driver final : public forge::db::core::driver {
 
 class installer_plugin final : public forge::app::plugin {
  public:
-   explicit installer_plugin(std::shared_ptr<memory_driver> driver) : driver_{std::move(driver)} {}
+   explicit installer_plugin(std::shared_ptr<memory_driver> driver, std::string store_name = "accounts")
+       : driver_{std::move(driver)}, store_name_{std::move(store_name)} {}
 
    [[nodiscard]] forge::app::plugin_id id() const override {
       return forge::app::plugin_id{.value = "test.plugins.db.store.installer"};
@@ -400,7 +416,7 @@ class installer_plugin final : public forge::app::plugin {
 
    boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
       auto api = context.apis().get<store_plugin::api>(store_plugin::api::ref());
-      co_await api->add_store("accounts", driver_);
+      co_await api->add_store(store_name_, driver_);
    }
 
    boost::asio::awaitable<void> startup() override {
@@ -413,13 +429,17 @@ class installer_plugin final : public forge::app::plugin {
 
  private:
    std::shared_ptr<memory_driver> driver_;
+   std::string store_name_;
 };
 
-[[nodiscard]] forge::app::plugin_descriptor installer_descriptor(std::shared_ptr<memory_driver> driver) {
+[[nodiscard]] forge::app::plugin_descriptor installer_descriptor(std::shared_ptr<memory_driver> driver,
+                                                                 std::string store_name = "accounts") {
    return forge::app::plugin_descriptor{
        .id = forge::app::plugin_id{.value = "test.plugins.db.store.installer"},
        .dependencies = {forge::app::plugin_id{.value = "forge.plugins.db.store"}},
-       .factory = [driver = std::move(driver)] { return std::make_unique<installer_plugin>(driver); },
+       .factory = [driver = std::move(driver),
+                   store_name =
+                       std::move(store_name)] { return std::make_unique<installer_plugin>(driver, store_name); },
    };
 }
 
@@ -460,6 +480,77 @@ class installer_plugin final : public forge::app::plugin {
        reinterpret_cast<const std::byte*>(value.data()),
        reinterpret_cast<const std::byte*>(value.data() + value.size()),
    };
+}
+
+constexpr auto p2p_peer_store_name = std::string_view{"p2p-peer-state"};
+constexpr auto p2p_certificate_secret_id = std::string_view{"p2p/test-certificate"};
+constexpr auto p2p_private_key_secret_id = std::string_view{"p2p/test-private-key"};
+
+[[nodiscard]] forge::config::core::value p2p_secret(std::string id, std::string_view material, std::string purpose) {
+   auto source = forge::config::core::value::object_type{};
+   source.emplace("type", forge::config::core::value{"value"});
+   source.emplace("encoding", forge::config::core::value{"raw"});
+   source.emplace("value", forge::config::core::value{std::string{material}});
+
+   auto secret = forge::config::core::value::object_type{};
+   secret.emplace("id", forge::config::core::value{std::move(id)});
+   secret.emplace("kind", forge::config::core::value{"bytes"});
+   secret.emplace("source", forge::config::core::value{std::move(source)});
+   secret.emplace("purposes", forge::config::core::value::array_type{
+                                  forge::config::core::value{std::move(purpose)},
+                              });
+   secret.emplace("operations", forge::config::core::value::array_type{
+                                    forge::config::core::value{"get_bytes"},
+                                });
+   secret.emplace("allow-raw-export", forge::config::core::value{true});
+   return forge::config::core::value{std::move(secret)};
+}
+
+[[nodiscard]] forge::config::core::document
+p2p_production_config(const forge::tests::p2p::identity_fixture& identity,
+                      std::string peer_store = std::string{p2p_peer_store_name}, bool include_private_key = true) {
+   auto secrets = forge::config::core::value::array_type{};
+   secrets.push_back(
+       p2p_secret(std::string{p2p_certificate_secret_id}, identity.certificate_pem, "p2p.identity.certificate"));
+   if (include_private_key) {
+      secrets.push_back(
+          p2p_secret(std::string{p2p_private_key_secret_id}, identity.private_key_pem, "p2p.identity.private-key"));
+   }
+
+   auto document = forge::config::core::document{};
+   document.set("plugins.crypto.secrets.secrets", std::move(secrets));
+   document.set("plugins.p2p.node.listen", forge::config::core::value::array_type{
+                                               forge::config::core::value{"/ip4/127.0.0.1/udp/0/quic-v1"},
+                                           });
+   document.set("plugins.p2p.node.peer-store.store", std::move(peer_store));
+   document.set("plugins.p2p.node.identity.certificate-secret", std::string{p2p_certificate_secret_id});
+   document.set("plugins.p2p.node.identity.private-key-secret", std::string{p2p_private_key_secret_id});
+   return document;
+}
+
+void set_p2p_bootstrap(forge::config::core::document& document, const std::optional<std::string>& bootstrap) {
+   if (bootstrap) {
+      document.set("plugins.p2p.node.bootstrap", forge::config::core::value::array_type{
+                                                     forge::config::core::value{*bootstrap},
+                                                 });
+   }
+}
+
+[[nodiscard]] std::unique_ptr<forge::app::application_shell> make_p2p_app(std::shared_ptr<memory_driver> driver,
+                                                                          forge::config::core::document document) {
+   auto builder = forge::app::application_builder{};
+   builder.name("p2p-node-db-store-lifecycle-test")
+       .runtime(forge::asio::runtime_options{.worker_threads = 1, .thread_name = "p2p-node-db-store-test"})
+       .plugin(store_plugin::descriptor())
+       .plugin(crypto_secrets::descriptor())
+       .plugin(p2p_node::descriptor());
+   if (driver) {
+      builder.plugin(installer_descriptor(std::move(driver), std::string{p2p_peer_store_name}));
+   }
+
+   auto app = std::move(builder).build();
+   app->configure(document);
+   return app;
 }
 
 [[nodiscard]] forge::db::core::record_key header_record_key() {
@@ -613,6 +704,72 @@ struct root_guard {
    }
 };
 
+void check_p2p_started(forge::app::application_shell& app) {
+   auto p2p = app.apis().get<p2p_node::api>(p2p_node::api::ref());
+   const auto info = p2p->network_info();
+   BOOST_TEST(info.started);
+   BOOST_REQUIRE_EQUAL(info.local_endpoints.size(), 1U);
+   BOOST_TEST(info.local_endpoints.front().is_direct_quic());
+   BOOST_TEST(info.local_endpoints.front().transport.host == "127.0.0.1");
+   BOOST_TEST(info.local_endpoints.front().transport.port != 0U);
+   BOOST_REQUIRE(info.local_endpoints.front().peer.has_value());
+}
+
+void check_p2p_identity_secret_purposes(forge::app::application_shell& app) {
+   auto secrets = app.apis().get<crypto_secrets::api>(crypto_secrets::api::ref());
+   const auto status = forge::asio::blocking::run(app.runtime(), secrets->status({}));
+   BOOST_REQUIRE_EQUAL(status.configured_secrets, 2U);
+
+   const auto certificate = std::find_if(status.secrets.begin(), status.secrets.end(),
+                                         [](const auto& secret) { return secret.id == p2p_certificate_secret_id; });
+   BOOST_REQUIRE(certificate != status.secrets.end());
+   BOOST_REQUIRE_EQUAL(certificate->purposes.size(), 1U);
+   BOOST_TEST(certificate->purposes.front() == "p2p.identity.certificate");
+
+   const auto private_key = std::find_if(status.secrets.begin(), status.secrets.end(),
+                                         [](const auto& secret) { return secret.id == p2p_private_key_secret_id; });
+   BOOST_REQUIRE(private_key != status.secrets.end());
+   BOOST_REQUIRE_EQUAL(private_key->purposes.size(), 1U);
+   BOOST_TEST(private_key->purposes.front() == "p2p.identity.private-key");
+}
+
+void check_p2p_peer_visible(forge::app::application_shell& app, const forge::net::p2p::peer_id& expected) {
+   auto diagnostics = app.apis().get<p2p_node::diagnostics_source>(p2p_node::diagnostics_source::ref());
+   const auto snapshot = diagnostics->snapshot();
+   BOOST_TEST(std::ranges::any_of(snapshot.peers, [&](const auto& peer) { return peer.peer == expected; }));
+}
+
+template <typename AppFactory> void check_p2p_private_peer_state_reopens(AppFactory&& make_client) {
+   const auto server_identity = forge::tests::p2p::make_identity_fixture("p2p-peer-state-server");
+   const auto client_identity = forge::tests::p2p::make_identity_fixture("p2p-peer-state-client");
+   auto server = make_p2p_app(std::make_shared<memory_driver>(), p2p_production_config(server_identity));
+   forge::asio::blocking::run(server->runtime(), server->startup());
+   auto server_p2p = server->apis().get<p2p_node::api>(p2p_node::api::ref());
+   const auto server_endpoint = server_p2p->local_endpoint();
+   BOOST_REQUIRE(server_endpoint.has_value());
+   BOOST_REQUIRE(server_endpoint->peer.has_value());
+   const auto server_peer = *server_endpoint->peer;
+
+   {
+      auto client = make_client(client_identity, std::optional<std::string>{server_endpoint->to_string()});
+      forge::asio::blocking::run(client->runtime(), client->startup());
+      check_p2p_started(*client);
+      check_p2p_identity_secret_purposes(*client);
+      check_p2p_peer_visible(*client, server_peer);
+      forge::asio::blocking::run(client->runtime(), client->shutdown());
+   }
+
+   forge::asio::blocking::run(server->runtime(), server->shutdown());
+
+   {
+      auto reopened = make_client(client_identity, std::nullopt);
+      forge::asio::blocking::run(reopened->runtime(), reopened->startup());
+      check_p2p_started(*reopened);
+      check_p2p_peer_visible(*reopened, server_peer);
+      forge::asio::blocking::run(reopened->runtime(), reopened->shutdown());
+   }
+}
+
 } // namespace
 
 FORGE_DB_OBJECT(account_object)
@@ -650,6 +807,55 @@ BOOST_AUTO_TEST_CASE(store_plugin_descriptor_api_and_config_are_nested) {
    BOOST_TEST(api_descriptor.version.major == 2U);
    BOOST_TEST(api_descriptor.version.revision == 0U);
    BOOST_TEST(api_descriptor.methods.empty());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_node_plugin_descriptor_keeps_production_dependencies_and_api_major) {
+   const auto descriptor = p2p_node::descriptor();
+   BOOST_TEST(descriptor.id.value == "forge.plugins.p2p.node");
+   BOOST_REQUIRE_EQUAL(descriptor.dependencies.size(), 2U);
+   BOOST_TEST(descriptor.dependencies[0].value == "forge.plugins.db.store");
+   BOOST_TEST(descriptor.dependencies[1].value == "forge.plugins.crypto.secrets");
+
+   const auto plugin = descriptor.factory();
+   BOOST_REQUIRE(plugin != nullptr);
+   BOOST_TEST(plugin->version() == "2.0.0");
+
+   const auto api_descriptor = p2p_node::api::describe();
+   BOOST_TEST(api_descriptor.id.value == "forge.plugins.p2p.node");
+   BOOST_TEST(api_descriptor.version.major == 1U);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_node_plugin_production_lifecycle_reopens_persisted_peer_state) {
+   auto driver = std::make_shared<memory_driver>();
+   check_p2p_private_peer_state_reopens(
+       [driver](const forge::tests::p2p::identity_fixture& identity, const std::optional<std::string>& bootstrap) {
+          auto document = p2p_production_config(identity);
+          set_p2p_bootstrap(document, bootstrap);
+          return make_p2p_app(driver, std::move(document));
+       });
+}
+
+BOOST_AUTO_TEST_CASE(p2p_node_plugin_rejects_unknown_named_peer_store_before_listening) {
+   const auto identity = forge::tests::p2p::make_identity_fixture("p2p-unknown-store");
+   auto app = make_p2p_app(std::make_shared<memory_driver>(), p2p_production_config(identity, "missing-peer-store"));
+
+   BOOST_CHECK_THROW(forge::asio::blocking::run(app->runtime(), app->startup()),
+                     store_plugin::exceptions::unknown_store);
+
+   auto p2p = app->apis().get<p2p_node::api>(p2p_node::api::ref());
+   BOOST_CHECK_THROW((void)p2p->local_endpoint(), p2p_node::exceptions::plugin_not_initialized);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_node_plugin_rejects_missing_identity_secret_before_listening) {
+   const auto identity = forge::tests::p2p::make_identity_fixture("p2p-missing-secret");
+   auto app = make_p2p_app(std::make_shared<memory_driver>(),
+                           p2p_production_config(identity, std::string{p2p_peer_store_name}, false));
+
+   BOOST_CHECK_THROW(forge::asio::blocking::run(app->runtime(), app->startup()),
+                     crypto_secrets::exceptions::secret_not_found);
+
+   auto p2p = app->apis().get<p2p_node::api>(p2p_node::api::ref());
+   BOOST_CHECK_THROW((void)p2p->local_endpoint(), p2p_node::exceptions::plugin_not_initialized);
 }
 
 BOOST_AUTO_TEST_CASE(store_plugin_rejects_invalid_programmatic_setup) {
@@ -1964,6 +2170,22 @@ BOOST_AUTO_TEST_CASE(store_plugin_unknown_store_fails_typed) {
 }
 
 #if FORGE_HAS_MDBX
+BOOST_AUTO_TEST_CASE(p2p_node_plugin_mdbx_private_peer_state_persists_across_reopen) {
+   auto root = root_guard{};
+   const auto path = root.root / "p2p-peer-state-mdbx";
+
+   check_p2p_private_peer_state_reopens(
+       [&](const forge::tests::p2p::identity_fixture& identity, const std::optional<std::string>& bootstrap) {
+          auto document = p2p_production_config(identity);
+          set_p2p_bootstrap(document, bootstrap);
+          document.set("plugins.db.store.stores",
+                       forge::config::core::value::array_type{
+                           configured_mdbx_store(std::string{p2p_peer_store_name}, path, false, false),
+                       });
+          return make_p2p_app({}, std::move(document));
+       });
+}
+
 BOOST_AUTO_TEST_CASE(store_plugin_configured_mdbx_exposes_extra_family_through_driver) {
    auto root = root_guard{};
    auto document = forge::config::core::document{};
@@ -2188,6 +2410,21 @@ BOOST_AUTO_TEST_CASE(store_plugin_configured_mdbx_snapshot_defers_physical_close
 #endif
 
 #if FORGE_HAS_ROCKSDB
+BOOST_AUTO_TEST_CASE(p2p_node_plugin_rocksdb_private_peer_state_persists_across_reopen) {
+   auto root = root_guard{};
+   const auto path = root.root / "p2p-peer-state-rocksdb";
+
+   check_p2p_private_peer_state_reopens(
+       [&](const forge::tests::p2p::identity_fixture& identity, const std::optional<std::string>& bootstrap) {
+          auto document = p2p_production_config(identity);
+          set_p2p_bootstrap(document, bootstrap);
+          document.set("plugins.db.store.stores", forge::config::core::value::array_type{
+                                                      configured_store(std::string{p2p_peer_store_name}, path),
+                                                  });
+          return make_p2p_app({}, std::move(document));
+       });
+}
+
 BOOST_AUTO_TEST_CASE(store_plugin_configured_rocksdb_store_persists_across_reopen) {
    auto root = root_guard{};
    const auto db_path = root.root / "objectdb";

@@ -6,6 +6,9 @@ add_library(
       pubsub_source.cpp
       config.cpp
       plugin_impl.cpp
+      object_peer_state_adapter.cpp
+      details/object_peer_state_adapter.hxx
+      details/peer_state_schema.hxx
 )
 forge_target_modules_at(forge_plugins_p2p_node plugins/p2p/node)
 
@@ -29,4 +32,6 @@ target_link_libraries(
       forge_asio
       forge_exceptions
       Boost::asio
+      forge_plugins_db_store
+      forge_plugins_crypto_secrets
 )

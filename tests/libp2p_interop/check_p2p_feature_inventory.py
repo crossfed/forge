@@ -583,6 +583,18 @@ def main() -> int:
         )
     }
 
+    plugin_impl_source = (root / "plugins/p2p/node/plugin_impl.cpp").read_text()
+    maintenance_match = re.search(
+        r"void plugin::impl::start_maintenance\(\)\s*\{(?P<body>.*?)"
+        r"\n\}\n\nvoid plugin::impl::request_maintenance_stop",
+        plugin_impl_source,
+        re.DOTALL,
+    )
+    if maintenance_match is None:
+        errors.append("plugin.p2p.node: maintenance ownership is not structurally discoverable")
+    elif "async_flush" in maintenance_match.group("body"):
+        errors.append("plugin.p2p.node: maintenance must not periodically flush all peer state")
+
     for kind, declared, coverage in (
         ("built-in protocol", declared_builtins, builtin_coverage),
         ("capability", declared_capabilities, capability_coverage),
