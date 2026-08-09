@@ -1,9 +1,11 @@
 # Forge P2P Production Hardening v1
 
-> **Status:** accepted priority direction, implementation pending.
+> **Status:** accepted release-blocking direction, implementation pending.
 >
 > This document records the production integration gaps found while preparing
-> Forge Content Swarm. It does not change the public API by itself.
+> Forge Content Swarm. Completing this program is the primary Forge network
+> objective before Content Swarm implementation resumes. This document does not
+> change the public API by itself.
 
 ## 1. Audit Standard
 
@@ -24,6 +26,68 @@ The low-level implementations remain valuable and should be reused. The gap is
 primarily incomplete node autonomy and official-plugin wiring, not a request to
 introduce a second P2P stack.
 
+### 1.1 Production Definition
+
+`forge_net_p2p` is production-ready only when all of the following are true:
+
+- every advertised libp2p protocol follows the applicable active libp2p
+  specification and has explicit donor traceability;
+- protocol codecs, state machines, operational indexes and maintenance tasks
+  are connected through one `node` lifecycle rather than being independently
+  callable demonstrations;
+- the implementation reuses the appropriate Forge runtime, transport,
+  cryptography, configuration, diagnostics and DB components instead of
+  introducing protocol-local substitutes;
+- all network-controlled work has bounded memory, concurrency, queueing,
+  deadlines, retry and shutdown behavior;
+- the official plugin configures and exposes the same node behavior without
+  reimplementing network mechanics;
+- raw-node, official-plugin, restart, scale, adversarial and live donor
+  interoperability tests prove the production path;
+- no public class, method, option, capability, metric or protocol handler is a
+  stub, an isolated test fixture or a partially implemented compatibility
+  claim.
+
+Protocol compatibility alone is insufficient. A codec that exchanges valid
+bytes while the node omits routing, maintenance, admission or state transitions
+is not a delivered protocol.
+
+### 1.2 Implementation-State Vocabulary
+
+Every public P2P surface and internal production component must be classified
+using one of these states during the hardening work:
+
+| State | Meaning | Allowed in production |
+|---|---|---|
+| `live` | Connected to normal node lifecycle with bounded operation, diagnostics and integration coverage. | Yes. |
+| `manual-only` | Correct operation exists, but only an explicit caller or test activates it. | Only when the API is intentionally manual application intent. |
+| `partial` | Some required state, policy, maintenance or security behavior is absent. | No. |
+| `stub` | Wire/API surface accepts an operation without implementing its contract. | No. |
+| `orphan` | Component is implemented and tested in isolation but production code never uses it. | No. |
+| `unverified` | Implementation exists, but donor parity or lifecycle evidence is incomplete. | No. |
+
+Before the production release, every `manual-only`, `partial`, `stub`, `orphan`
+and `unverified` item must be completed, deliberately narrowed and rejected as
+unsupported, or deleted. Keeping a misleading surface because isolated tests
+are green is forbidden.
+
+### 1.3 Evidence Standard
+
+Acceptance evidence is layered and cumulative:
+
+1. Codec fixtures prove exact wire compatibility and malformed-input handling.
+2. State-machine tests prove transitions, cancellation and resource release.
+3. Raw-node integration proves the component is connected to normal lifecycle.
+4. Official-plugin integration proves configuration and dependency wiring.
+5. Restart and scale tests prove persistence and bounded operational cost.
+6. Adversarial tests prove admission, scoring, timeout and memory behavior.
+7. Go and Rust libp2p interoperability proves enabled protocol behavior rather
+   than only successful negotiation.
+
+A donor manifest entry cannot be marked `ported` from codec or isolated unit
+coverage alone. It must identify the corresponding production call path and
+the highest completed evidence layer.
+
 ## 2. Current Reliable Baseline
 
 The following paths are connected through the official plugin today, subject to
@@ -32,12 +96,16 @@ the production-startup gap below:
 - direct QUIC and TCP/Yamux sessions to configured or already known peers;
 - bounded bootstrap reconnect and bootstrap-session protection;
 - inbound application protocol routing and Forge API over a known `peer_id`;
-- session, stream and resource admission limits;
+- session admission and the currently connected relay resource limits;
 - diagnostics over the shared node;
 - GossipSub publish/subscribe over peers that are already connected.
 
 This is a static/bootstrap-centric topology. It is not yet an autonomous
 libp2p mesh.
+
+Generic stream and dial limit methods exist in `resource_manager`, but are not
+connected to node stream opening or dialing. They are therefore not part of the
+reliable baseline yet.
 
 ## 3. Node Autonomy Principle
 
@@ -69,7 +137,84 @@ mechanics for the caller-controlled registration lifetime. The caller must be
 able to withdraw or release that registration when content is no longer
 available. Products continue to own authorization and network membership.
 
-## 4. Priority Findings
+## 4. Complete Current-State Matrix
+
+The following matrix separates working protocol substrate from operational
+production behavior. It is the baseline backlog for this hardening program.
+
+| Area | Current state | Confirmed problem | Required disposition |
+|---|---|---|---|
+| Identity, multistream negotiation and secure peer authentication | `live` substrate | Authentication is not followed by automatic Identify, so protocol/address truth is incomplete. | Preserve substrate; integrate Identify lifecycle. |
+| Direct QUIC and TCP/Yamux sessions | `live` | Production topology still depends primarily on configured or already known peers. | Preserve and cover through autonomous topology tests. |
+| Persistent peer store | `partial` | Direct RocksDB dependency, private codec/layout, process-local serialization and whole-store operational scans. Official plugin supplies no production store. | Replace with ObjectDB adapter and bounded operational indexes. |
+| `dht::routing_table` | `orphan` and incomplete | Node never owns it. The class stores a flat map, scans and sorts all peers, and failure counts do not drive replacement or eviction. | Replace its internals with donor-consistent bounded Kademlia routing state and make node the owner. |
+| Kademlia peer lookup | `manual-only`, `partial` | Iterative query exists, but seeds and server responses scan persistent peer history instead of an operational routing table; no autonomous refresh. | Integrate routing table, server-role admission, bootstrap and bucket refresh. |
+| DHT provider records | `manual-only`, `partial` | One-shot provide/find works, but registrations have no owned lifetime, withdrawal or TTL republish loop. | Add registration handle, renewal, withdrawal and bounded persistence. |
+| DHT value records | `stub` | `PUT_VALUE` echoes the supplied record without storage or validation; `GET_VALUE` returns only closer peers. Public node API does not expose a complete value-store contract. | Implement validated record storage/selection completely or reject/remove value operations and advertise provider-routing-only scope. |
+| Identify | `manual-only`, `partial` | Inbound handlers work, but ordinary session establishment does not initiate Identify. New sessions initially copy local capabilities as if they were remote capabilities. | Identify every new session, verify and persist remote facts, emit Identify Push on local changes. |
+| Peer Exchange | `manual-only` | Inbound response and explicit request work, but node never schedules outbound exchange. | Integrate bounded exchange into topology maintenance. |
+| Rendezvous | `manual-only`, `partial` | Registration and discovery work only when explicitly called; there is no renewal/discovery lifecycle. | Add role configuration, registration lifetime and refresh loop. |
+| AutoNAT | `manual-only`, `partial` | Handler and explicit probe exist, but node does not maintain reachability observations. | Add bounded multi-observer policy and effective reachability state. |
+| Relay and AutoRelay | `partial` | Relay mechanics and AutoRelay loop are live, but candidate supply is starved by missing Identify/discovery lifecycle. | Feed verified topology into existing reservation management. |
+| DCUtR hole punching | `partial` | Operational DCUtR code exists separately from the public `hole_punch::attempt` state object, which is only unit-tested. Per-peer attempt ownership is not represented by that helper. | Establish one private per-peer attempt state machine; integrate it or delete the orphan class. |
+| Ping | `manual-only` | Responder and explicit RTT query work; no optional liveness policy updates health/backoff state. | Add bounded configurable sampling or document responder-only mode explicitly. |
+| Connection manager | `live`, needs scale proof | Session admission, protection and pruning are connected. | Preserve; test under topology churn and shared resource policy. |
+| Resource manager sessions and relay scopes | `live` | Connected paths enforce limits. | Preserve and expose validated effective limits. |
+| Resource manager stream scopes | `orphan` | `try_acquire_stream` and release methods are tested but unused by node stream paths. | Integrate RAII stream reservations on every inbound/outbound stream path. |
+| Resource manager dial scopes | `orphan` and incomplete | `try_acquire_dial` is tested but unused, and its current counter contract has no production release path. | Redesign as owned dial reservation and integrate before dialing. |
+| Generic resource queued-byte limit | `orphan` | Configured and validated, but generic resource accounting does not consume it; only transport/relay-specific queues do. | Connect byte reservations to stream buffers or remove the misleading generic limit. |
+| GossipSub delivery, validation and heartbeat | `live` core | Message propagation and heartbeat operate over connected peers. | Preserve while completing topology and scoring. |
+| GossipSub peer scoring | `partial` | Invalid and duplicate counters change scores, delivered score input is unused, and mesh admission/pruning selects by container order instead of score. | Implement donor-consistent thresholds, decay, mesh selection, opportunistic grafting and score retention. |
+| Discovery refresh facade | `manual-only` | `async_refresh_discovery()` combines one-shot DHT/Rendezvous work, but no node lifecycle invokes it. | Replace one-shot orchestration with managed topology services while retaining explicit diagnostics/admin triggers where useful. |
+| Bootstrap maintenance | `partial`, wrong owner | Official plugin performs sequential startup and its own retry loop. | Move bounded bootstrap lifecycle into node. |
+| Official `plugins.p2p.node` | `partial` | Does not configure DHT/Rendezvous/AutoNAT roles or persistent storage and duplicates bootstrap maintenance. | Reduce to configuration/dependency adapter over complete node lifecycle. |
+| Diagnostics | `partial` | Snapshots exist, but control loops use projections and missing protocol lifecycle leaves health ambiguous. | Keep diagnostics read-only and expose effective mode, state, limits and degradation causes. |
+
+### 4.1 Routing Table And Peer Store Are Different Components
+
+The Kademlia routing table is mandatory whenever DHT client or server mode is
+enabled. It is the bounded, continuously maintained operational view used to
+seed iterative queries and answer closest-peer requests. The peer store is a
+durable historical repository of identities, addresses, observations and
+protocol metadata. It must not be queried as the routing algorithm.
+
+The production routing table must provide:
+
+- donor-consistent XOR-prefix or k-bucket organization with configured `k`;
+- explicit admission of identified and successfully queried DHT server peers;
+- bounded capacity, replacement and liveness/failure policy;
+- efficient closest-peer lookup without materializing all known peers;
+- bucket refresh timestamps and random-target generation;
+- safe updates from successful outbound queries and accepted inbound DHT peers;
+- a bounded snapshot for diagnostics, not a mutable public control surface.
+
+Startup may hydrate candidates from the persistent peer store, but admission is
+revalidated and capped by routing-table policy. Runtime routing changes update
+the in-memory table first and persist durable observations through the bounded
+persistence path.
+
+### 4.2 False-Positive Test Coverage
+
+The present suite contains tests that prove isolated classes or wire messages
+while leaving the production feature inactive. Confirmed examples include
+`dht::routing_table`, `hole_punch::attempt`, resource-manager stream/dial
+methods, manual discovery calls and DHT value-record codec paths.
+
+The hardening program must add a feature-to-lifecycle inventory gate. For every
+advertised protocol or capability it records:
+
+- owner and normal activation point;
+- configuration and disable behavior;
+- resource reservations and release path;
+- persistence and restart behavior, if stateful;
+- maintenance task and shutdown owner;
+- diagnostics and metrics;
+- raw-node, plugin and donor-interoperability tests.
+
+An isolated public component with no production owner is a defect, not future
+proofing. It must be integrated, made private to a real owner, or removed.
+
+## 5. Priority Findings
 
 ### P0: Production Node Startup And Persistence
 
@@ -181,13 +326,62 @@ This iteration does not by itself complete secure production startup. Stable
 identity-source delivery remains the next required dependency and is handled by
 the separate identity finding below.
 
+### P0: Operational Kademlia Routing State
+
+The current DHT query and server paths call
+`peer_store::closest_routing_peers()`. The RocksDB backend scans and decodes all
+persisted peer records and then sorts them by XOR distance. The disconnected
+`dht::routing_table` performs the same full materialization over a flat map and
+does not apply its failure observations to admission, replacement or eviction.
+
+This violates the purpose of a Kademlia routing table and makes query cost
+depend on durable peer history rather than configured live routing capacity.
+
+Required outcome:
+
+- make one node-owned donor-consistent routing table the source for query seeds
+  and closest-peer responses;
+- organize entries by XOR-prefix distance with bounded buckets and replacement
+  candidates;
+- admit only authenticated, identified peers that advertise and prove the
+  appropriate DHT server role;
+- update liveness from successful queries, failed dials and closed sessions;
+- run startup and periodic bucket refresh, including lookup near the local ID;
+- persist observations through the peer-store boundary without making DB
+  queries part of the routing hot path;
+- prove bounded memory and sublinear closest-peer work when durable history is
+  much larger than live routing capacity.
+
+The existing flat implementation may be replaced rather than preserved for
+source compatibility. A misleading public routing-table abstraction is not a
+compatibility requirement while the P2P contract is being hardened.
+
+### P0: Protocol Claim Integrity
+
+Forge decodes DHT `PUT_VALUE` and `GET_VALUE`, but the server does not implement
+a value-record store. `PUT_VALUE` echoes the received record and `GET_VALUE`
+returns closer peers without a value. This can appear interoperable at the
+codec level while violating application expectations.
+
+Required outcome:
+
+- decide explicitly whether Forge DHT v1 owns generic value records or only
+  peer and provider routing;
+- if supported, add validator/selector policy, bounded durable storage,
+  expiry, conflict handling and live Go/Rust interoperability;
+- if unsupported, reject the operations deterministically, remove unsupported
+  public vocabulary where possible and never advertise value-store support;
+- prohibit protocol handlers that return nominal success without completing
+  the operation's state contract.
+
 ### P1: Production Resource Policy
 
 The low-level node has bounded defaults for sessions, streams, protocols,
 pending dials, malformed messages, relay traffic, transport queues and discovery
-messages. The official plugin currently exposes only a small subset of those
-limits, so an operator cannot tune the shared node for the deployment workload
-or reduce limits for an exposed edge node.
+messages. However, generic stream and dial reservation methods are only tested
+in isolation and are not called from node stream/dial paths. The generic queued
+byte limit is not consumed by generic resource accounting. The official plugin
+also exposes only a small subset of the limits.
 
 Required outcome:
 
@@ -199,6 +393,12 @@ Required outcome:
 - expose discovery concurrency, result, timeout and refresh limits without
   duplicating protocol-specific configuration records;
 - expose API stream item, buffered-byte, idle, shutdown and inflight limits;
+- replace manual counter pairs with move-only reservations whose destruction
+  closes every success, cancellation and exception path;
+- acquire stream reservations for every inbound and outbound protocol stream;
+- acquire and release dial reservations around every direct and relay dial;
+- connect generic byte accounting to the buffers it claims to limit, or remove
+  that limit and rely on explicitly owned transport/protocol queues;
 - validate cross-field invariants before constructing the node;
 - report the effective limits in diagnostics so deployment configuration can be
   audited;
@@ -410,12 +610,19 @@ topology maintenance are completed.
 
 Required outcome:
 
-- do not rewrite GossipSub;
+- retain the working wire, validation, cache and heartbeat paths rather than
+  replacing them with a second implementation;
 - allow the shared topology manager to supply identified compatible peers;
+- complete donor-consistent scoring inputs, decay and retention;
+- apply score thresholds to message admission, gossip, publishing, GRAFT and
+  PRUNE behavior;
+- select mesh survivors and opportunistic graft candidates by score and
+  outbound diversity instead of deterministic container order;
 - verify mesh repair after bootstrap loss and discovered-peer replacement;
+- add Sybil, invalid-message, duplicate-spam and low-score recovery tests;
 - keep PubSub delivery explicitly non-durable and non-exactly-once.
 
-## 5. Ownership Boundaries
+## 6. Ownership Boundaries
 
 `forge_net_p2p` owns protocol codecs, peer store, Identify, Ping, AutoNAT, DHT,
 Rendezvous, Relay, DCUtR, GossipSub, scoring, resource-manager mechanics and the
@@ -432,32 +639,118 @@ Product plugins own authorization, network/realm membership, application
 protocols and business routing. `plugins.p2p.resolver` continues to open a typed
 API on an already known peer; it does not become peer or content discovery.
 
-## 6. Implementation Order
+## 7. Donor And Forge Reuse Discipline
 
-1. Replace the direct RocksDB peer store with the ObjectDB-backed persistence
-   boundary, bounded in-memory peer indexes and official named DB Store wiring
-   specified by Iteration 1.
-2. Add stable identity-source ownership and prove secure startup over the new
-   persistent peer store.
-3. Establish one explicit autonomous node lifecycle and move
-   sequential/snapshot-based bootstrap maintenance into bounded node-owned
-   orchestration.
-4. Expose production resource policy through node options and plugin mapping.
-5. Correct Identify and remote capability learning.
-6. Add one node-owned discovery/topology lifecycle for DHT, Rendezvous and Peer
-   Exchange.
-7. Activate AutoNAT observations and prove AutoRelay/DCUtR through the official
-   plugin path.
-8. Add focused local discovery APIs needed by consumers, beginning with bounded
-   DHT provider publication/lookup for Content Swarm.
-9. Complete API admission/deadline policy, liveness diagnostics, maintenance
-   scale gates and autonomous GossipSub mesh repair.
+Each implementation block starts with a focused donor note that names the exact
+specification and Go/Rust source paths reviewed, accepted behavior, intentional
+Forge differences and tests carrying each invariant.
 
-Each block requires focused raw-node tests and an official-plugin integration
-test proving that the adapter selects the same behavior. Neither layer alone is
-sufficient acceptance evidence.
+Minimum donor baselines are:
 
-## 7. Production Acceptance Gates
+- `libp2p/specs` for protocol state and wire requirements;
+- `go-libp2p-kad-dht` and Rust libp2p Kademlia for routing-table admission,
+  refresh, query and provider-record behavior;
+- Go/Rust Identify services for session-time Identify and Push propagation;
+- Go libp2p resource manager for scoped resource ownership and denial paths;
+- Go libp2p GossipSub for score calculation, thresholds, mesh diversity and
+  adversarial behavior;
+- Go/Rust implementations of Rendezvous, AutoNAT, Circuit Relay v2 and DCUtR
+  for lifecycle and interoperability.
+
+Forge keeps its own C++23 implementation and public API. Donor code is not a
+runtime dependency, but its externally observable invariants are not optional.
+Intentional deviations require rationale and an interoperability test.
+
+Before creating any new helper, the implementation must inspect existing Forge
+Asio scheduling, gates, cancellation, transport sessions, crypto identity,
+configuration, diagnostics, ObjectDB and plugin lifecycle components. P2P-local
+thread pools, ad-hoc detached task ownership, duplicate backpressure queues,
+parallel storage abstractions and custom secret loaders are forbidden when the
+corresponding Forge facility exists.
+
+## 8. Implementation Program
+
+### Phase 0: Support-Claim Freeze And Inventory
+
+- freeze new P2P and Swarm features;
+- classify every public P2P type, method, option, capability and protocol using
+  the state vocabulary in this document;
+- correct READMEs, diagnostics and donor manifests that imply stronger support
+  than the production path provides;
+- add structural inventory coverage that rejects unowned protocol handlers,
+  capabilities and public implementation components;
+- decide the supported DHT value-record scope before further DHT work.
+
+### Phase 1: Peer State Foundation
+
+- replace direct RocksDB ownership with the ObjectDB persistence adapter;
+- introduce bounded in-memory peer directory and routing candidates;
+- make hydration, expiry, persistence queues and shutdown bounded;
+- add secure identity-source delivery and production plugin startup.
+
+### Phase 2: Host Lifecycle And Resource Ownership
+
+- establish one node-owned start, maintenance, stop and join lifecycle;
+- move bootstrap maintenance out of the plugin;
+- integrate Identify and Identify Push at session boundaries;
+- integrate session, dial, stream and byte reservations with RAII-style
+  ownership;
+- expose and diagnose effective resource policy.
+
+### Phase 3: Production Kademlia
+
+- replace the flat orphan routing table with bounded donor-consistent routing
+  state;
+- integrate client/server roles, admission, query seeds and server responses;
+- add bucket bootstrap, refresh, failure and replacement behavior;
+- add provider registration lifetime, republish, withdrawal and expiry;
+- implement or explicitly remove generic value-record support.
+
+### Phase 4: Unified Topology Discovery
+
+- make DHT, Rendezvous and Peer Exchange feed one scored topology manager;
+- maintain peer low/target/high watermarks with bounded dialing;
+- expire stale observations and preserve protected peers;
+- prove discovery beyond bootstrap through raw node and official plugin.
+
+### Phase 5: Reachability And Path Management
+
+- integrate multi-observer AutoNAT and effective reachability state;
+- feed verified relay candidates into AutoRelay;
+- unify DCUtR attempt ownership and remove the orphan attempt implementation;
+- prove direct, relayed, renewal, fallback and hole-punched paths.
+
+### Phase 6: GossipSub Hardening
+
+- complete scoring, thresholds, decay, outbound diversity and opportunistic
+  grafting;
+- integrate discovered topology without coupling GossipSub to a storage or
+  discovery backend;
+- pass adversarial and topology-repair suites.
+
+### Phase 7: Official Plugin And Operational Surface
+
+- expose complete validated production configuration without duplicating node
+  records;
+- remove all plugin-owned network maintenance;
+- expose narrow typed contributions and read-only diagnostics;
+- prove configuration, restart and shutdown parity with programmatic nodes.
+
+### Phase 8: Production Proof And Release Gate
+
+- run scale, churn, cancellation, malformed-input and resource-exhaustion
+  suites;
+- run live Go and Rust interoperability for every enabled protocol;
+- demonstrate zero `stub`, `orphan`, unintended `manual-only`, `partial` or
+  `unverified` inventory entries;
+- update support documentation only from passed evidence;
+- declare `forge_net_p2p` production-ready before resuming Content Swarm.
+
+The earlier high-level order is therefore replaced by these dependency-ordered
+phases. Each phase should be delivered as one or more focused PRs; a phase is
+complete only after its exact-head review and evidence gates pass.
+
+## 9. Production Acceptance Gates
 
 - A secure node starts with real identity material and persistent peer storage.
 - Identity material can be supplied without embedding private PEM directly in a
@@ -479,10 +772,16 @@ sufficient acceptance evidence.
   RocksDB, while `forge_net_p2p` has no direct dependency on either driver.
 - Nearest-peer selection uses bounded in-memory Kademlia state and does not scan
   or sort the complete persisted peer set.
+- Routing-table capacity, bucket refresh, replacement and failure behavior are
+  donor-traced and remain bounded under hostile peer churn.
 - ObjectDB hydration and expiry processing remain bounded when durable peer
   history exceeds live routing-table capacity.
 - DHT peer/provider lookup and Rendezvous discovery run through official plugin
   lifecycle and stop cleanly.
+- DHT provider records renew while owned, disappear after withdrawal/expiry and
+  survive restart without stale indefinite advertisement.
+- DHT `PUT_VALUE`/`GET_VALUE` are either fully implemented with validation and
+  persistence or deterministically unsupported; echo stubs are absent.
 - Peer Exchange discovers a non-bootstrap node without accepting non-routable or
   identity-mismatched endpoints.
 - Remote session capabilities match the peer's actual advertised protocols.
@@ -491,15 +790,69 @@ sufficient acceptance evidence.
 - Loss of bootstrap, relay or a discovered peer repairs topology without an
   unbounded retry/task/memory increase.
 - GossipSub continues delivery after bootstrap loss when other mesh peers remain.
+- GossipSub mesh admission, pruning and recovery use the configured score and
+  outbound-diversity policy rather than peer container ordering.
 - Long-lived API streams remain supported, while abandoned calls release
   inflight capacity under negotiated idle/deadline policy.
+- Every accepted session, dial and stream owns a matching resource reservation
+  that is released on success, cancellation, failure and shutdown.
 - Peer-store membership alone never grants product authorization.
 - Bootstrap and discovery maintenance do not construct full diagnostics
   snapshots or perform unbounded work per tick.
 - Diagnostics identify disabled, idle, degraded and healthy discovery states.
 - Live Go/Rust libp2p interoperability remains green for every enabled protocol.
+- The implementation inventory contains no `stub`, `orphan`, unintended
+  `manual-only`, `partial` or `unverified` production surface.
 
-## 8. Non-Goals
+## 10. Content Swarm Entry Gate
+
+Content Swarm remains a documented follow-up and must not be implemented on top
+of the current P2P lifecycle. Swarm work may resume only after:
+
+- phases 0 through 8 are complete;
+- `forge_net_p2p` and `plugins.p2p.node` satisfy every production acceptance
+  gate above;
+- provider publication has an owned registration lifetime and automatic
+  renewal/withdrawal;
+- a node can discover non-bootstrap providers and open an application protocol
+  through the official plugin without product-owned discovery loops;
+- resource, cancellation and shutdown tests prove that content-sized workloads
+  cannot bypass P2P admission.
+
+Swarm then owns content manifests, piece exchange and seeding intent. It reuses
+the completed P2P provider discovery and Forge API streaming rather than
+compensating for incomplete node mechanics.
+
+## 11. Current Audit Anchors
+
+These source anchors record the implementation evidence behind the current
+matrix. They are not permanent API references and must be refreshed as each
+phase lands:
+
+- [`dht.cpp`](../../libraries/net/p2p/dht.cpp) contains the disconnected flat
+  `dht::routing_table` and full-sort closest lookup;
+- [`peer_store.cpp`](../../libraries/net/p2p/peer_store.cpp) contains the
+  RocksDB full-prefix scan used for closest routing peers;
+- [`node.cpp`](../../libraries/net/p2p/node.cpp) contains one-shot discovery,
+  provider, Ping and reachability calls and starts only selected maintenance;
+- [`node_impl.cpp`](../../libraries/net/p2p/node_impl.cpp) contains session
+  establishment, DHT handlers, GossipSub heartbeat/scoring, AutoRelay and DCUtR;
+- [`resource_manager.cpp`](../../libraries/net/p2p/resource_manager.cpp) and
+  [`resource_manager.cppm`](../../libraries/net/p2p/include/forge/net/p2p/resource_manager.cppm)
+  contain the isolated generic stream/dial counters;
+- [`hole_punch.cppm`](../../libraries/net/p2p/include/forge/net/p2p/hole_punch.cppm)
+  contains the orphan public attempt state;
+- [`plugin.cpp`](../../plugins/p2p/node/plugin.cpp) contains plugin-owned
+  bootstrap startup and maintenance activation;
+- [`config.cpp`](../../plugins/p2p/node/config.cpp) shows the currently mapped
+  node capabilities and the missing production discovery-role configuration;
+- [`p2p_tests.cpp`](../../tests/quic_p2p/p2p_tests.cpp) contains both valuable
+  protocol fixtures and isolated tests that must be supplemented by lifecycle
+  evidence;
+- [`donor_cases.json`](../../tests/libp2p_interop/donor_cases.json) is the donor
+  support manifest whose claims must be recalibrated to the evidence standard.
+
+## 12. Non-Goals
 
 - product authorization or chain/network membership;
 - content-provider key design, seeding policy or transfer scheduling;

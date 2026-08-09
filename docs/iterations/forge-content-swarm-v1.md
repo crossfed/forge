@@ -1,12 +1,16 @@
 # Forge Content Swarm v1
 
-> **Status:** accepted implementation direction, not shipped API.
+> **Status:** accepted implementation direction, blocked by Forge P2P
+> production hardening, not shipped API.
 >
 > **Implementation branch:** `forge-api-live-streaming-v1`.
 >
 > This document defines the cross-library boundary and implementation order for
 > a neutral BitTorrent-like immutable-content distribution mechanism. Detailed
 > public signatures are finalized in the focused PR that owns each component.
+> Content Swarm implementation does not resume until
+> [`forge-p2p-production-hardening-v1.md`](forge-p2p-production-hardening-v1.md)
+> reaches its production acceptance gate.
 
 ## 1. Goal
 
@@ -525,8 +529,9 @@ allowing reads and writes to progress independently.
 
 1. Replace vector streaming with live Forge API streams.
 2. Add binding capability validation and full P2P/QUIC/WebSocket coverage.
-3. Complete the P0/P1 production node, discovery, topology and reachability
-   gates from `forge-p2p-production-hardening-v1.md`.
+3. Complete every production phase and acceptance gate in
+   `forge-p2p-production-hardening-v1.md`; P0/P1 completion alone is
+   insufficient to resume Swarm implementation.
 4. Expose focused DHT provider discovery from `plugins.p2p.node`.
 5. Prove `find provider -> resolver -> typed duplex API` in integration tests.
 
