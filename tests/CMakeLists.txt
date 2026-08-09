@@ -68,6 +68,40 @@ add_test(
       -DFORGE_CONTRACT_TEST_ROOT=${CMAKE_BINARY_DIR}/tests/contract-developer-toolchain
       -P ${CMAKE_SOURCE_DIR}/guest/tests/tooling/check_developer_toolchain.cmake
 )
+get_property(_forge_test_generator_is_multi_config GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+set(_forge_vendor_compile_policy_configuration_options)
+if(_forge_test_generator_is_multi_config)
+   list(APPEND _forge_vendor_compile_policy_configuration_options --multi-config)
+endif()
+
+add_test(
+   NAME test_forge_vendor_compile_policy
+   COMMAND
+      ${Python3_EXECUTABLE}
+      ${CMAKE_SOURCE_DIR}/tests/vendor_compile_policy/check_compile_policy.py
+      --cmake ${CMAKE_COMMAND}
+      --source ${CMAKE_SOURCE_DIR}/tests/vendor_compile_policy
+      --binary ${CMAKE_BINARY_DIR}/tests/vendor-compile-policy
+      --forge-source ${CMAKE_SOURCE_DIR}
+      --generator ${CMAKE_GENERATOR}
+      ${_forge_vendor_compile_policy_configuration_options}
+      --c-compiler ${CMAKE_C_COMPILER}
+      --cxx-compiler ${CMAKE_CXX_COMPILER}
+)
+add_test(
+   NAME test_forge_vendor_compile_policy_multi_config
+   COMMAND
+      ${Python3_EXECUTABLE}
+      ${CMAKE_SOURCE_DIR}/tests/vendor_compile_policy/check_compile_policy.py
+      --cmake ${CMAKE_COMMAND}
+      --source ${CMAKE_SOURCE_DIR}/tests/vendor_compile_policy
+      --binary ${CMAKE_BINARY_DIR}/tests/vendor-compile-policy-multi-config
+      --forge-source ${CMAKE_SOURCE_DIR}
+      --generator "Ninja Multi-Config"
+      --multi-config
+      --c-compiler ${CMAKE_C_COMPILER}
+      --cxx-compiler ${CMAKE_CXX_COMPILER}
+)
 
 add_executable(
    test_forge
@@ -357,6 +391,7 @@ if(FORGE_HAS_MDBX)
    add_executable(
       test_forge_db_authenticated
       unit/main.cpp
+      db_authenticated/authenticated_benchmark_options_tests.cpp
       db_authenticated/authenticated_crash_tests.cpp
       db_authenticated/db_authenticated_tests.cpp
       db_authenticated/ranked_range_proof_adversarial_tests.cpp
@@ -398,6 +433,20 @@ if(FORGE_HAS_MDBX)
       forge_asio
       forge_db_authenticated
       forge_db_mdbx
+   )
+   add_test(
+      NAME test_forge_db_authenticated_benchmark_cli
+      COMMAND
+         ${Python3_EXECUTABLE}
+         ${CMAKE_CURRENT_SOURCE_DIR}/db_authenticated/check_authenticated_benchmark.py
+         $<TARGET_FILE:benchmark_forge_db_authenticated>
+      WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+   )
+   set_tests_properties(
+      test_forge_db_authenticated_benchmark_cli
+      PROPERTIES
+         LABELS "db_authenticated;benchmark;smoke"
+         TIMEOUT 60
    )
 
    option(
@@ -870,12 +919,68 @@ else()
 endif()
 
 set(FORGE_PACKAGE_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/forge-package-install")
+set(FORGE_PACKAGE_DIR "${FORGE_PACKAGE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/cmake/Forge")
+set(FORGE_PACKAGE_CONSUMER_PREFIX_PATH ${CMAKE_PREFIX_PATH})
+list(REMOVE_DUPLICATES FORGE_PACKAGE_CONSUMER_PREFIX_PATH)
+set(FORGE_PACKAGE_CONSUMER_CACHE "${CMAKE_BINARY_DIR}/tests/ForgePackageConsumerCache.cmake")
+string(
+   CONCAT FORGE_PACKAGE_CONSUMER_CACHE_CONTENT
+   "set(Forge_DIR [==[${FORGE_PACKAGE_DIR}]==] CACHE PATH \"Exact Forge test package\" FORCE)\n"
+   "set(CMAKE_PREFIX_PATH [==[${FORGE_PACKAGE_CONSUMER_PREFIX_PATH}]==] CACHE STRING \"Package dependency prefixes\" FORCE)\n"
+   "set(glaze_DIR [==[${glaze_DIR}]==] CACHE PATH \"Exact Glaze package\" FORCE)\n"
+   "set(FORGE_EXPECTED_PACKAGE_DIR [==[${FORGE_PACKAGE_DIR}]==] CACHE PATH \"Expected Forge test package\" FORCE)\n"
+   "set(FORGE_EXPECTED_GLAZE_DIR [==[${glaze_DIR}]==] CACHE PATH \"Expected Glaze package\" FORCE)\n"
+)
+file(
+   GENERATE
+   OUTPUT "${FORGE_PACKAGE_CONSUMER_CACHE}"
+   CONTENT "${FORGE_PACKAGE_CONSUMER_CACHE_CONTENT}"
+)
+
+set(FORGE_PACKAGE_EXPLICIT_GLAZE_DIR_PREFIX_PATH ${CMAKE_PREFIX_PATH})
+list(REMOVE_DUPLICATES FORGE_PACKAGE_EXPLICIT_GLAZE_DIR_PREFIX_PATH)
+set(
+   FORGE_PACKAGE_EXPLICIT_GLAZE_DIR_CACHE
+   "${CMAKE_BINARY_DIR}/tests/ForgePackageExplicitGlazeDirCache.cmake"
+)
+string(
+   CONCAT FORGE_PACKAGE_EXPLICIT_GLAZE_DIR_CACHE_CONTENT
+   "set(Forge_DIR [==[${FORGE_PACKAGE_DIR}]==] CACHE PATH \"Exact Forge test package\" FORCE)\n"
+   "set(CMAKE_PREFIX_PATH [==[${FORGE_PACKAGE_EXPLICIT_GLAZE_DIR_PREFIX_PATH}]==] CACHE STRING \"Shared dependency prefixes\" FORCE)\n"
+   "set(glaze_DIR [==[${glaze_DIR}]==] CACHE PATH \"Explicit Glaze package hint\" FORCE)\n"
+   "set(FORGE_EXPECTED_PREFIX_PATH [==[${FORGE_PACKAGE_CONSUMER_PREFIX_PATH}]==] CACHE STRING \"Expected shared dependency prefixes\" FORCE)\n"
+   "set(FORGE_EXPECTED_PACKAGE_DIR [==[${FORGE_PACKAGE_DIR}]==] CACHE PATH \"Expected Forge test package\" FORCE)\n"
+   "set(FORGE_EXPECTED_GLAZE_DIR [==[${glaze_DIR}]==] CACHE PATH \"Expected Glaze package\" FORCE)\n"
+)
+file(
+   GENERATE
+   OUTPUT "${FORGE_PACKAGE_EXPLICIT_GLAZE_DIR_CACHE}"
+   CONTENT "${FORGE_PACKAGE_EXPLICIT_GLAZE_DIR_CACHE_CONTENT}"
+)
 set(
    FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS
-   -DCMAKE_PREFIX_PATH=${FORGE_PACKAGE_INSTALL_PREFIX}
+   -C${FORGE_PACKAGE_CONSUMER_CACHE}
    -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
    -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
    -DCMAKE_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}
+)
+
+add_test(
+   NAME test_forge_package_explicit_glaze_dir
+   COMMAND
+      ${CMAKE_COMMAND}
+      --fresh
+      -S ${CMAKE_CURRENT_SOURCE_DIR}/package_codec_json_component
+      -B ${CMAKE_BINARY_DIR}/forge-package-codec-json-explicit-glaze-dir
+      -G ${CMAKE_GENERATOR}
+      -C${FORGE_PACKAGE_EXPLICIT_GLAZE_DIR_CACHE}
+      -DCMAKE_CXX_COMPILER=${CMAKE_CXX_COMPILER}
+      -DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}
+      -DCMAKE_OSX_SYSROOT=${CMAKE_OSX_SYSROOT}
+)
+set_tests_properties(
+   test_forge_package_explicit_glaze_dir
+   PROPERTIES DEPENDS test_forge_package_install
 )
 
 add_custom_target(

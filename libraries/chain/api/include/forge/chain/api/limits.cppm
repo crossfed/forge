@@ -67,6 +67,10 @@ void require_request_within_limits(const protocol::table_rows_request& value, co
 void require_request_within_limits(const protocol::table_scope_request& value, const protocol::service_limits& limits);
 void require_request_within_limits(const protocol::scheduled_request& value, const protocol::service_limits& limits);
 void require_request_within_limits(const protocol::authorizers_request& value, const protocol::service_limits& limits);
+void require_request_within_limits(const protocol::transaction_submit_request& value,
+                                   const protocol::service_limits& limits);
+void require_request_within_limits(const protocol::transaction_submit_batch_request& value,
+                                   const protocol::service_limits& limits);
 void require_request_within_limits(const protocol::transaction_await_request& value,
                                    const protocol::service_limits& limits);
 void require_request_within_limits(const protocol::ram_corrections_request& value,
@@ -106,8 +110,6 @@ void require_response_within_limits(const protocol::unapplied_transactions_respo
                                     const protocol::unapplied_transactions_request& request,
                                     const protocol::service_limits& limits);
 
-void require_transaction_batch_within_limits(const std::vector<protocol::transaction_submit_request>& values,
-                                             const protocol::service_limits& limits);
 void require_transaction_batch_response_within_limits(
     const std::vector<protocol::transaction_submit_response>& responses, std::size_t request_count,
     const protocol::service_limits& limits);

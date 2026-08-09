@@ -181,6 +181,199 @@ BOOST_AUTO_TEST_CASE(chain_abi_translates_resolver_failures_to_typed_diagnostics
        });
 }
 
+BOOST_AUTO_TEST_CASE(chain_abi_rejects_oversized_action_authorization_before_resolver) {
+   auto action = protocol::action{};
+   action.authorization.resize(2U);
+   action.data = {0x00, 0x01};
+
+   auto limits = chain_api::abi_serialization_limits{};
+   limits.max_container_elements = 1U;
+   limits.max_binary_bytes = 1U;
+   auto resolver_calls = std::size_t{};
+   const auto resolver = [&resolver_calls](protocol::account_name) {
+      ++resolver_calls;
+      return std::optional<protocol::abi_def>{};
+   };
+
+   BOOST_CHECK_EXCEPTION(static_cast<void>(chain_api::action_to_variant(action, resolver, limits)),
+                         chain_api::abi_serialization_error, [](const auto& error) {
+                            return error.diagnostic().code == chain_api::abi_error_code::size_limit &&
+                                   error.diagnostic().type == "action" && error.diagnostic().path == "authorization";
+                         });
+   BOOST_TEST(resolver_calls == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(chain_abi_transaction_preflights_each_action_authorization_before_resolver) {
+   for (const auto context_free : {true, false}) {
+      auto action = protocol::action{};
+      action.authorization.resize(3U);
+      auto transaction = protocol::transaction{};
+      if (context_free) {
+         transaction.context_free_actions.emplace_back();
+         transaction.context_free_actions.push_back(std::move(action));
+      } else {
+         transaction.actions.emplace_back();
+         transaction.actions.push_back(std::move(action));
+      }
+
+      auto limits = chain_api::abi_serialization_limits{};
+      limits.max_container_elements = 2U;
+      auto resolver_calls = std::size_t{};
+      const auto resolver = [&resolver_calls](protocol::account_name) {
+         ++resolver_calls;
+         return std::optional<protocol::abi_def>{};
+      };
+
+      const auto* context = context_free ? "context-free action" : "ordinary action";
+      BOOST_TEST_CONTEXT(context) {
+         BOOST_CHECK_EXCEPTION(static_cast<void>(chain_api::transaction_to_variant(transaction, resolver, limits)),
+                               chain_api::abi_serialization_error, [](const auto& error) {
+                                  return error.diagnostic().code == chain_api::abi_error_code::size_limit &&
+                                         error.diagnostic().type == "action" &&
+                                         error.diagnostic().path == "authorization";
+                               });
+         BOOST_TEST(resolver_calls == 0U);
+      }
+   }
+}
+
+BOOST_AUTO_TEST_CASE(chain_abi_rejects_oversized_action_data_before_no_abi_fallback) {
+   auto action = protocol::action{};
+   action.data = {0x00, 0x01};
+
+   auto limits = chain_api::abi_serialization_limits{};
+   limits.max_binary_bytes = 1U;
+   auto resolver_calls = std::size_t{};
+   const auto resolver = [&resolver_calls](protocol::account_name) {
+      ++resolver_calls;
+      return std::optional<protocol::abi_def>{};
+   };
+
+   BOOST_CHECK_EXCEPTION(static_cast<void>(chain_api::action_to_variant(action, resolver, limits)),
+                         chain_api::abi_serialization_error, [](const auto& error) {
+                            return error.diagnostic().code == chain_api::abi_error_code::size_limit &&
+                                   error.diagnostic().type == "action" && error.diagnostic().path == "data";
+                         });
+   BOOST_TEST(resolver_calls == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(chain_abi_transaction_rejects_oversized_action_data_before_matching_resolver) {
+   auto abi = empty_abi();
+   abi.actions = {
+       protocol::action_def{.name = protocol::action_name{"payload"}, .type = "bytes"},
+   };
+
+   auto action = protocol::action{};
+   action.account = protocol::account_name{"tester"};
+   action.name = protocol::action_name{"payload"};
+   action.data = {0x00, 0x01};
+   auto transaction = protocol::transaction{};
+   transaction.actions.push_back(action);
+
+   auto limits = chain_api::abi_serialization_limits{};
+   limits.max_binary_bytes = 1U;
+   auto resolver_calls = std::size_t{};
+   const auto resolver = [&abi, &resolver_calls](protocol::account_name account) -> std::optional<protocol::abi_def> {
+      ++resolver_calls;
+      return account == protocol::account_name{"tester"} ? std::optional{abi} : std::nullopt;
+   };
+
+   BOOST_CHECK_EXCEPTION(static_cast<void>(chain_api::transaction_to_variant(transaction, resolver, limits)),
+                         chain_api::abi_serialization_error, [](const auto& error) {
+                            return error.diagnostic().code == chain_api::abi_error_code::size_limit &&
+                                   error.diagnostic().type == "action" && error.diagnostic().path == "data";
+                         });
+   BOOST_TEST(resolver_calls == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(chain_abi_does_not_fallback_on_matching_abi_size_limit) {
+   auto abi = empty_abi();
+   abi.actions = {
+       protocol::action_def{.name = protocol::action_name{"payload"}, .type = "bytes"},
+   };
+
+   auto action = protocol::action{};
+   action.account = protocol::account_name{"tester"};
+   action.name = protocol::action_name{"payload"};
+   action.data = {0x02, 0xaa, 0xbb};
+
+   auto limits = chain_api::abi_serialization_limits{};
+   limits.max_binary_bytes = action.data.size();
+   limits.max_string_bytes = 1U;
+   auto resolver_calls = std::size_t{};
+   const auto resolver = [&abi, &resolver_calls](protocol::account_name account) -> std::optional<protocol::abi_def> {
+      ++resolver_calls;
+      return account == protocol::account_name{"tester"} ? std::optional{abi} : std::nullopt;
+   };
+
+   BOOST_CHECK_EXCEPTION(static_cast<void>(chain_api::action_to_variant(action, resolver, limits)),
+                         chain_api::abi_serialization_error, [](const auto& error) {
+                            return error.diagnostic().code == chain_api::abi_error_code::size_limit &&
+                                   error.diagnostic().type == "bytes" && error.diagnostic().path == "bytes";
+                         });
+   BOOST_TEST(resolver_calls == 1U);
+}
+
+BOOST_AUTO_TEST_CASE(chain_abi_preserves_hex_fallback_for_matching_abi_decode_incompatibility) {
+   auto abi = empty_abi();
+   abi.actions = {
+       protocol::action_def{.name = protocol::action_name{"payload"}, .type = "uint32"},
+   };
+
+   auto action = protocol::action{};
+   action.account = protocol::account_name{"tester"};
+   action.name = protocol::action_name{"payload"};
+   action.data = {0x07};
+   const auto resolver = [&abi](protocol::account_name account) -> std::optional<protocol::abi_def> {
+      return account == protocol::account_name{"tester"} ? std::optional{abi} : std::nullopt;
+   };
+
+   const auto rendered = chain_api::action_to_variant(action, resolver);
+   BOOST_TEST(rendered["data"].as_string() == "07");
+   BOOST_TEST(rendered["hex_data"].as_string() == "07");
+}
+
+BOOST_AUTO_TEST_CASE(chain_abi_rejects_oversized_context_free_actions_before_resolver) {
+   auto transaction = protocol::transaction{};
+   transaction.context_free_actions.resize(2U);
+
+   auto limits = chain_api::abi_serialization_limits{};
+   limits.max_container_elements = 1U;
+   auto resolver_calls = std::size_t{};
+   const auto resolver = [&resolver_calls](protocol::account_name) {
+      ++resolver_calls;
+      return std::optional<protocol::abi_def>{};
+   };
+
+   BOOST_CHECK_EXCEPTION(static_cast<void>(chain_api::transaction_to_variant(transaction, resolver, limits)),
+                         chain_api::abi_serialization_error, [](const auto& error) {
+                            return error.diagnostic().code == chain_api::abi_error_code::size_limit &&
+                                   error.diagnostic().path == "context_free_actions";
+                         });
+   BOOST_TEST(resolver_calls == 0U);
+}
+
+BOOST_AUTO_TEST_CASE(chain_abi_rejects_oversized_actions_before_resolver) {
+   auto transaction = protocol::transaction{};
+   transaction.context_free_actions.resize(1U);
+   transaction.actions.resize(2U);
+
+   auto limits = chain_api::abi_serialization_limits{};
+   limits.max_container_elements = 1U;
+   auto resolver_calls = std::size_t{};
+   const auto resolver = [&resolver_calls](protocol::account_name) {
+      ++resolver_calls;
+      return std::optional<protocol::abi_def>{};
+   };
+
+   BOOST_CHECK_EXCEPTION(static_cast<void>(chain_api::transaction_to_variant(transaction, resolver, limits)),
+                         chain_api::abi_serialization_error, [](const auto& error) {
+                            return error.diagnostic().code == chain_api::abi_error_code::size_limit &&
+                                   error.diagnostic().path == "actions";
+                         });
+   BOOST_TEST(resolver_calls == 0U);
+}
+
 BOOST_AUTO_TEST_CASE(chain_abi_spring_binary_extension_goldens) {
    const auto abi = spring_shape_abi();
 
@@ -376,6 +569,21 @@ BOOST_AUTO_TEST_CASE(chain_abi_enforces_recursion_deadline_and_size_limits) {
                             return error.diagnostic().code == chain_api::abi_error_code::size_limit &&
                                    error.diagnostic().offset == 5U;
                          });
+}
+
+BOOST_AUTO_TEST_CASE(chain_abi_rejects_oversized_json_bytes_before_hex_decode) {
+   auto limits = chain_api::abi_serialization_limits{};
+   limits.max_string_bytes = 1U;
+
+   BOOST_TEST(chain_api::abi_json_to_bin(empty_abi(), "bytes", forge::variant{"ff"}, limits) ==
+              protocol::bytes({0x01, 0xff}));
+   BOOST_CHECK_EXCEPTION(
+       static_cast<void>(chain_api::abi_json_to_bin(empty_abi(), "bytes", forge::variant{"zzzz"}, limits)),
+       chain_api::abi_serialization_error, [](const auto& error) {
+          return error.diagnostic().code == chain_api::abi_error_code::size_limit &&
+                 error.diagnostic().type == "bytes" && error.diagnostic().path == "bytes" &&
+                 error.diagnostic().offset == 0U;
+       });
 }
 
 BOOST_AUTO_TEST_CASE(chain_abi_rejects_invalid_definition_shapes) {

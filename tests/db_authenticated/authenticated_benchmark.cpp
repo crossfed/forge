@@ -1,22 +1,22 @@
 #include <boost/asio/awaitable.hpp>
 
-#include <charconv>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <cstdlib>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
-#include <limits>
 #include <memory>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
 #include <utility>
 #include <vector>
+
+#include "authenticated_benchmark_options.hpp"
 
 import forge.asio.affine;
 import forge.asio.blocking;
@@ -28,38 +28,33 @@ import forge.db.authenticated.types;
 import forge.db.core.driver;
 import forge.db.core.record;
 import forge.db.mdbx.driver;
+import forge.exceptions;
 
 namespace {
 
 using clock_type = std::chrono::steady_clock;
 using forge::db::authenticated::bytes;
+using forge::test::db_authenticated::benchmark::baseline_name;
+using forge::test::db_authenticated::benchmark::baseline_profile;
+using forge::test::db_authenticated::benchmark::chunk_keys_source;
+using forge::test::db_authenticated::benchmark::committed_version_count;
+using forge::test::db_authenticated::benchmark::expected_retained_version;
+using forge::test::db_authenticated::benchmark::options;
+using forge::test::db_authenticated::benchmark::parse_options;
+using forge::test::db_authenticated::benchmark::usage;
+using forge::test::db_authenticated::benchmark::usage_error;
+using forge::test::db_authenticated::benchmark::validate_retained_root;
 
 constexpr auto point_proof_count = std::size_t{1'000};
 constexpr auto range_proof_count = std::size_t{100};
 constexpr auto range_proof_limit = std::uint32_t{256};
 constexpr auto mebibyte = std::uint64_t{1} << 20U;
 constexpr auto gibibyte = std::uint64_t{1} << 30U;
-constexpr auto tebibyte = std::uint64_t{1} << 40U;
-
-enum class baseline_profile {
-   custom,
-   one_million,
-   ten_million,
-};
 
 struct provisional_gate_thresholds {
    double initial_batch_min_keys_per_second = 0.0;
    double point_proofs_min_per_second = 0.0;
    double range_proofs_min_per_second = 0.0;
-};
-
-struct options {
-   std::size_t keys = 10'000;
-   std::size_t value_bytes = 32;
-   std::size_t load_chunk_keys = 4'096;
-   std::filesystem::path path;
-   std::string machine_label = "unspecified";
-   baseline_profile baseline = baseline_profile::custom;
 };
 
 struct proof_measurement {
@@ -70,9 +65,20 @@ struct proof_measurement {
 
 struct benchmark_result {
    forge::db::authenticated::root root;
+   std::size_t committed_versions = 0;
+   std::size_t verified_retained_versions = 0;
+   std::size_t retention_content_checks = 0;
    std::chrono::nanoseconds initial_batch{};
+   std::chrono::nanoseconds initial_load_wall{};
+   std::chrono::nanoseconds mutation_construction{};
+   std::chrono::nanoseconds retention_verification{};
    proof_measurement point_proofs;
    proof_measurement range_proofs;
+};
+
+struct database_footprint {
+   std::uintmax_t logical_bytes = 0;
+   std::size_t files = 0;
 };
 
 class temporary_path_guard {
@@ -93,126 +99,6 @@ class temporary_path_guard {
    std::filesystem::path path_;
    bool enabled_ = false;
 };
-
-[[noreturn]] void usage_error(std::string_view message) {
-   throw std::invalid_argument{std::string{message} + "\nusage: benchmark_forge_db_authenticated "
-                                                      "[--baseline 1m|10m | --keys N] [--value-bytes N] "
-                                                      "[--chunk-keys N] [--machine-label LABEL] [--path PATH]"};
-}
-
-std::uint64_t parse_unsigned(std::string_view option, std::string_view value) {
-   auto result = std::uint64_t{};
-   const auto [end, error] = std::from_chars(value.data(), value.data() + value.size(), result);
-   if (error != std::errc{} || end != value.data() + value.size()) {
-      usage_error(std::string{option} + " expects an unsigned integer");
-   }
-   return result;
-}
-
-std::optional<std::string_view> option_value(int& index, int argc, char** argv, std::string_view option) {
-   const auto argument = std::string_view{argv[index]};
-   if (argument == option) {
-      if (++index >= argc) {
-         usage_error(std::string{option} + " requires a value");
-      }
-      return std::string_view{argv[index]};
-   }
-   const auto prefix = std::string{option} + '=';
-   if (argument.starts_with(prefix)) {
-      return argument.substr(prefix.size());
-   }
-   return {};
-}
-
-options parse_options(int argc, char** argv) {
-   auto result = options{};
-   auto has_baseline = false;
-   auto has_explicit_keys = false;
-   for (auto index = 1; index < argc; ++index) {
-      const auto argument = std::string_view{argv[index]};
-      if (argument == "--help") {
-         std::cout << "usage: benchmark_forge_db_authenticated "
-                      "[--baseline 1m|10m | --keys N] [--value-bytes N] "
-                      "[--chunk-keys N] [--machine-label LABEL] [--path PATH]\n";
-         std::exit(0);
-      }
-      if (const auto value = option_value(index, argc, argv, "--baseline")) {
-         if (has_baseline) {
-            usage_error("--baseline may only be specified once");
-         }
-         if (*value == "1m") {
-            result.baseline = baseline_profile::one_million;
-            result.keys = 1'000'000;
-         } else if (*value == "10m") {
-            result.baseline = baseline_profile::ten_million;
-            result.keys = 10'000'000;
-         } else {
-            usage_error("--baseline expects 1m or 10m");
-         }
-         has_baseline = true;
-         continue;
-      }
-      if (const auto value = option_value(index, argc, argv, "--keys")) {
-         if (has_explicit_keys) {
-            usage_error("--keys may only be specified once");
-         }
-         const auto parsed = parse_unsigned("--keys", *value);
-         if (parsed == 0U || parsed > std::numeric_limits<std::size_t>::max()) {
-            usage_error("--keys is outside the supported size_t range");
-         }
-         result.keys = static_cast<std::size_t>(parsed);
-         has_explicit_keys = true;
-         continue;
-      }
-      if (const auto value = option_value(index, argc, argv, "--value-bytes")) {
-         const auto parsed = parse_unsigned("--value-bytes", *value);
-         if (parsed > forge::db::authenticated::limits{}.max_value_bytes) {
-            usage_error("--value-bytes exceeds the authenticated-store limit");
-         }
-         result.value_bytes = static_cast<std::size_t>(parsed);
-         continue;
-      }
-      if (const auto value = option_value(index, argc, argv, "--chunk-keys")) {
-         const auto parsed = parse_unsigned("--chunk-keys", *value);
-         if (parsed == 0U || parsed > std::numeric_limits<std::size_t>::max()) {
-            usage_error("--chunk-keys is outside the supported size_t range");
-         }
-         result.load_chunk_keys = static_cast<std::size_t>(parsed);
-         continue;
-      }
-      if (const auto value = option_value(index, argc, argv, "--machine-label")) {
-         if (value->empty()) {
-            usage_error("--machine-label requires a non-empty value");
-         }
-         result.machine_label = *value;
-         continue;
-      }
-      if (const auto value = option_value(index, argc, argv, "--path")) {
-         if (value->empty()) {
-            usage_error("--path requires a non-empty value");
-         }
-         result.path = std::filesystem::path{*value};
-         continue;
-      }
-      usage_error(std::string{"unknown option: "} + std::string{argument});
-   }
-   if (has_baseline && has_explicit_keys) {
-      usage_error("--baseline and --keys are mutually exclusive");
-   }
-   return result;
-}
-
-std::string_view baseline_name(baseline_profile baseline) {
-   switch (baseline) {
-   case baseline_profile::custom:
-      return "custom";
-   case baseline_profile::one_million:
-      return "1m";
-   case baseline_profile::ten_million:
-      return "10m";
-   }
-   throw std::logic_error{"unknown authenticated benchmark baseline"};
-}
 
 std::optional<provisional_gate_thresholds> provisional_thresholds(baseline_profile baseline) {
    switch (baseline) {
@@ -287,8 +173,71 @@ std::uint64_t mdbx_growth_step(std::size_t keys) {
 
 void require(bool condition, std::string_view message) {
    if (!condition) {
-      throw std::runtime_error{std::string{message}};
+      throw forge::exceptions::context_error{std::string{message}};
    }
+}
+
+database_footprint measure_database_footprint(const std::filesystem::path& path) {
+   auto result = database_footprint{};
+   for (const auto& entry : std::filesystem::recursive_directory_iterator{path}) {
+      if (entry.is_regular_file()) {
+         result.logical_bytes += entry.file_size();
+         ++result.files;
+      }
+   }
+   return result;
+}
+
+boost::asio::awaitable<forge::db::authenticated::root> commit_database_chunk(
+    const forge::db::authenticated::store& authenticated, const std::shared_ptr<forge::db::mdbx::driver>& driver,
+    forge::db::authenticated::version_id_t version, std::span<const forge::db::authenticated::mutation> mutations,
+    std::chrono::nanoseconds& database_elapsed) {
+   const auto started = clock_type::now();
+   auto db_transaction = co_await driver->begin_transaction();
+   auto authenticated_transaction = co_await authenticated.join(db_transaction, version);
+   const auto staged = co_await authenticated_transaction.stage(mutations);
+   co_await db_transaction.commit();
+   database_elapsed += clock_type::now() - started;
+   co_return staged.commitment;
+}
+
+boost::asio::awaitable<void> verify_retained_versions(const options& settings,
+                                                      const forge::db::authenticated::store& authenticated,
+                                                      benchmark_result& result) {
+   const auto started = clock_type::now();
+   const auto expected_versions = committed_version_count(settings.keys, settings.load_chunk_keys);
+   for (auto version = std::size_t{}; version < expected_versions; ++version) {
+      const auto expected = expected_retained_version(version, settings.keys, settings.load_chunk_keys);
+      const auto actual = co_await authenticated.find_root(expected.version);
+      validate_retained_root(actual, expected);
+
+      const auto last_key_index = expected.state_size - 1U;
+      const auto last_value = co_await authenticated.get(expected.version, make_key(last_key_index));
+      require(last_value && *last_value == make_value(last_key_index, settings.value_bytes),
+              "authenticated benchmark historical root does not contain its last committed key");
+      ++result.retention_content_checks;
+
+      if (expected.state_size < settings.keys) {
+         const auto next_value = co_await authenticated.get(expected.version, make_key(expected.state_size));
+         require(!next_value, "authenticated benchmark historical root contains a future key");
+         ++result.retention_content_checks;
+      }
+
+      const auto first_change_key = make_key(expected.state_size - expected.change_count);
+      const auto changes = co_await authenticated.scan_range(expected.version,
+                                                             {
+                                                                 .lower = first_change_key,
+                                                                 .limit = 1U,
+                                                                 .include_values = false,
+                                                             },
+                                                             forge::db::authenticated::proof_tree::changes);
+      require(changes.total_size == expected.change_count && changes.items.size() == 1U &&
+                  changes.items.front().key == first_change_key,
+              "authenticated benchmark historical change root is inconsistent");
+      ++result.retention_content_checks;
+      ++result.verified_retained_versions;
+   }
+   result.retention_verification = clock_type::now() - started;
 }
 
 boost::asio::awaitable<benchmark_result> run_benchmark(const options& settings,
@@ -302,22 +251,27 @@ boost::asio::awaitable<benchmark_result> run_benchmark(const options& settings,
    };
    auto result = benchmark_result{};
 
-   const auto initial_started = clock_type::now();
+   const auto initial_load_started = clock_type::now();
    auto first = std::size_t{};
    auto version = forge::db::authenticated::version_id_t{};
    while (first < settings.keys) {
       const auto count = std::min(settings.load_chunk_keys, settings.keys - first);
+      const auto mutation_construction_started = clock_type::now();
       const auto mutations = make_mutations(settings, first, count);
-      auto db_transaction = co_await driver->begin_transaction();
-      auto authenticated_transaction = co_await authenticated.join(db_transaction, version);
-      const auto staged = co_await authenticated_transaction.stage(mutations);
-      co_await db_transaction.commit();
-      result.root = staged.commitment;
+      result.mutation_construction += clock_type::now() - mutation_construction_started;
+      result.root = co_await commit_database_chunk(authenticated, driver, version, mutations, result.initial_batch);
       first += count;
       ++version;
+      ++result.committed_versions;
    }
-   result.initial_batch = clock_type::now() - initial_started;
+   result.initial_load_wall = clock_type::now() - initial_load_started;
+   const auto planned_versions = committed_version_count(settings.keys, settings.load_chunk_keys);
+   require(result.initial_batch + result.mutation_construction <= result.initial_load_wall,
+           "initial batch DB and mutation construction timers overlap");
    require(result.root.state_size == settings.keys, "chunked load did not commit every key");
+   require(result.committed_versions == planned_versions, "initial load committed an unexpected number of versions");
+   require(result.root.version + 1U == result.committed_versions,
+           "initial load root version does not match the committed version count");
 
    for (auto sample = std::size_t{}; sample < point_proof_count; ++sample) {
       const auto key = make_key(sample_position(sample, point_proof_count, settings.keys));
@@ -345,6 +299,10 @@ boost::asio::awaitable<benchmark_result> run_benchmark(const options& settings,
       result.range_proofs.wire_bytes += forge::db::authenticated::wire_size(proof);
       result.range_proofs.nodes += proof.nodes.size();
    }
+
+   co_await verify_retained_versions(settings, authenticated, result);
+   require(result.verified_retained_versions == planned_versions,
+           "initial load did not retain every committed version");
 
    co_return result;
 }
@@ -399,7 +357,8 @@ std::string json_escape(std::string_view value) {
    return result;
 }
 
-bool print_result(const options& settings, const std::filesystem::path& path, const benchmark_result& result) {
+bool print_result(const options& settings, const std::filesystem::path& path, const benchmark_result& result,
+                  const database_footprint& footprint) {
    const auto initial_batch_rate = operations_per_second(settings.keys, result.initial_batch);
    const auto point_proof_rate = operations_per_second(point_proof_count, result.point_proofs.elapsed);
    const auto range_proof_rate = operations_per_second(range_proof_count, result.range_proofs.elapsed);
@@ -410,16 +369,21 @@ bool print_result(const options& settings, const std::filesystem::path& path, co
    const auto gate_passed = initial_batch_passed && point_proofs_passed && range_proofs_passed;
 
    std::cout << std::fixed << std::setprecision(3) << "{\n"
-             << "  \"format\": \"forge.db.authenticated.benchmark.v2\",\n"
+             << "  \"format\": \"forge.db.authenticated.benchmark.v3\",\n"
              << "  \"benchmark\": \"forge_db_authenticated\",\n"
              << "  \"config\": {\n"
+             << "    \"workload\": \"initial_bulk_state\",\n"
+             << "    \"measurement_scope\": \"transaction_join_stage_durable_commit\",\n"
              << "    \"baseline\": \"" << baseline_name(settings.baseline) << "\",\n"
              << "    \"machine_label\": \"" << json_escape(settings.machine_label) << "\",\n"
              << "    \"keys\": " << settings.keys << ",\n"
              << "    \"value_bytes\": " << settings.value_bytes << ",\n"
              << "    \"load_chunk_keys\": " << settings.load_chunk_keys << ",\n"
+             << "    \"load_chunk_keys_source\": \"" << chunk_keys_source(settings) << "\",\n"
+             << "    \"planned_committed_versions\": "
+             << committed_version_count(settings.keys, settings.load_chunk_keys) << ",\n"
              << "    \"path\": \"" << json_escape(path.string()) << "\",\n"
-             << "    \"mdbx_upper_bytes\": " << tebibyte << ",\n"
+             << "    \"mdbx_upper_bytes\": " << settings.mdbx_upper_bytes << ",\n"
              << "    \"mdbx_growth_bytes\": " << mdbx_growth_step(settings.keys) << ",\n"
              << "    \"point_proof_count\": " << point_proof_count << ",\n"
              << "    \"range_proof_count\": " << range_proof_count << ",\n"
@@ -432,10 +396,21 @@ bool print_result(const options& settings, const std::filesystem::path& path, co
              << "    \"change_root\": \"" << result.root.change_root.str() << "\",\n"
              << "    \"change_count\": " << result.root.change_count << "\n"
              << "  },\n"
+             << "  \"storage\": {\n"
+             << "    \"committed_versions\": " << result.committed_versions << ",\n"
+             << "    \"retained_versions\": " << result.verified_retained_versions << ",\n"
+             << "    \"retention_content_checks\": " << result.retention_content_checks << ",\n"
+             << "    \"retention_verification_elapsed_ms\": " << milliseconds(result.retention_verification) << ",\n"
+             << "    \"database_logical_bytes\": " << footprint.logical_bytes << ",\n"
+             << "    \"database_file_count\": " << footprint.files << "\n"
+             << "  },\n"
              << "  \"metrics\": {\n"
              << "    \"initial_batch\": {\n"
              << "      \"elapsed_ms\": " << milliseconds(result.initial_batch) << ",\n"
-             << "      \"keys_per_second\": " << initial_batch_rate << "\n"
+             << "      \"keys_per_second\": " << initial_batch_rate << ",\n"
+             << "      \"load_wall_elapsed_ms\": " << milliseconds(result.initial_load_wall) << ",\n"
+             << "      \"excluded_mutation_construction_elapsed_ms\": " << milliseconds(result.mutation_construction)
+             << "\n"
              << "    },\n"
              << "    \"point_proofs\": {\n"
              << "      \"elapsed_ms\": " << milliseconds(result.point_proofs.elapsed) << ",\n"
@@ -480,7 +455,19 @@ bool print_result(const options& settings, const std::filesystem::path& path, co
 } // namespace
 
 int main(int argc, char** argv) try {
-   const auto settings = parse_options(argc, argv);
+   auto arguments = std::vector<std::string_view>{};
+   arguments.reserve(static_cast<std::size_t>(argc > 0 ? argc - 1 : 0));
+   for (auto index = 1; index < argc; ++index) {
+      arguments.emplace_back(argv[index]);
+   }
+   const auto settings = parse_options(arguments);
+   if (settings.help) {
+      std::cout << usage << '\n';
+      return 0;
+   }
+   if (settings.value_bytes > forge::db::authenticated::limits{}.max_value_bytes) {
+      usage_error("--value-bytes exceeds the authenticated-store limit");
+   }
    const auto temporary_path = settings.path.empty();
    const auto path =
        temporary_path
@@ -505,7 +492,7 @@ int main(int argc, char** argv) try {
               .families = {"authenticated"},
               .map =
                   {
-                      .upper_size = tebibyte,
+                      .upper_size = settings.mdbx_upper_bytes,
                       .growth_step = mdbx_growth_step(settings.keys),
                   },
           },
@@ -516,7 +503,8 @@ int main(int argc, char** argv) try {
       co_await lane.shutdown();
    }());
 
-   const auto gate_passed = print_result(settings, path, result);
+   const auto footprint = measure_database_footprint(path);
+   const auto gate_passed = print_result(settings, path, result, footprint);
    return gate_passed ? 0 : 2;
 } catch (const std::exception& error) {
    std::cerr << "benchmark failed: " << error.what() << '\n';

@@ -1,11 +1,12 @@
 cmake_minimum_required(VERSION 3.31)
 
-project(forge VERSION 8.20.0 LANGUAGES C CXX ASM)
+project(forge VERSION 8.21.0 LANGUAGES C CXX ASM)
 
 include(GNUInstallDirs)
 include(CheckCXXSourceCompiles)
 include(CMakePackageConfigHelpers)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+include(ForgeVendorCompilePolicy)
 
 if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
    include(CTest)
@@ -440,6 +441,14 @@ set_property(
       "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/vendor/bls12-381/include>"
       "$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>"
 )
+
+set(FORGE_VENDORED_IMPLEMENTATION_TARGETS secp256k1 bn256 bls12-381 softfloat)
+foreach(_forge_vendor_target IN LISTS FORGE_VENDORED_IMPLEMENTATION_TARGETS)
+   forge_apply_vendored_implementation_policy(${_forge_vendor_target})
+endforeach()
+if(TARGET mdbx-internal)
+   forge_apply_vendored_implementation_policy(mdbx-internal DISABLED_SANITIZERS alignment)
+endif()
 
 if(NOT FORGE_ENABLE_VENDOR_TESTS)
    file(

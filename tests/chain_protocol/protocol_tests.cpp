@@ -19,6 +19,7 @@ import forge.crypto.asymmetric;
 import forge.crypto.asymmetric.secp256k1;
 import forge.crypto.digest.sha256;
 import forge.compression.exceptions;
+import forge.codec.json;
 import forge.raw.raw;
 import forge.raw.exceptions;
 import forge.variant.described;
@@ -564,6 +565,7 @@ BOOST_AUTO_TEST_CASE(time_and_extended_asset_match_cdt_wire_layout) {
    const auto parsed = protocol::time_point::from_iso_string("2000-01-01T00:00:00");
    BOOST_TEST(parsed.time_since_epoch().count() == 946'684'800'000'000LL);
    BOOST_TEST(parsed.to_string() == "2000-01-01T00:00:00");
+   BOOST_TEST(protocol::time_point_sec::from_iso_string("2000-01-01T00:00:00").to_string() == "2000-01-01T00:00:00");
    BOOST_TEST(protocol::block_timestamp{parsed}.slot == 0U);
    const auto half_second = protocol::block_timestamp{1U};
    BOOST_TEST(half_second.to_string() == "2000-01-01T00:00:00.500");
@@ -582,6 +584,36 @@ BOOST_AUTO_TEST_CASE(time_and_extended_asset_match_cdt_wire_layout) {
    BOOST_CHECK_EXCEPTION((void)protocol::block_timestamp{std::numeric_limits<std::uint32_t>::max()}.next(),
                          std::invalid_argument,
                          [](const auto& error) { return has_message(error, "block timestamp overflow"); });
+}
+
+BOOST_AUTO_TEST_CASE(time_point_host_json_preserves_fractional_microseconds) {
+   const auto whole_second = protocol::time_point{protocol::microseconds{946'684'800'000'000LL}};
+   const auto whole_second_encoded = forge::codec::json::write(whole_second);
+   BOOST_REQUIRE(whole_second_encoded.ok());
+   BOOST_TEST(whole_second_encoded.text == R"("2000-01-01T00:00:00")");
+
+   const auto point = protocol::time_point{protocol::microseconds{946'684'800'123'456LL}};
+   const auto encoded = forge::codec::json::write(point);
+   BOOST_REQUIRE(encoded.ok());
+   BOOST_TEST(encoded.text == "\"2000-01-01T00:00:00.123456\"");
+
+   const auto decoded = forge::codec::json::read<protocol::time_point>(encoded.text);
+   BOOST_REQUIRE(decoded.ok());
+   BOOST_TEST(decoded.value.time_since_epoch().count() == point.time_since_epoch().count());
+
+   const auto milliseconds = forge::codec::json::read<protocol::time_point>("\"2000-01-01T00:00:00.5\"");
+   BOOST_REQUIRE(milliseconds.ok());
+   BOOST_TEST(milliseconds.value.time_since_epoch().count() == 946'684'800'500'000LL);
+   BOOST_TEST(milliseconds.value.to_string() == "2000-01-01T00:00:00.500");
+
+   const auto single_microsecond = forge::codec::json::read<protocol::time_point>("\"2000-01-01T00:00:00.000001\"");
+   BOOST_REQUIRE(single_microsecond.ok());
+   BOOST_TEST(single_microsecond.value.time_since_epoch().count() == 946'684'800'000'001LL);
+
+   for (const auto* malformed :
+        {"\"2000-01-01T00:00:00.\"", "\"2000-01-01T00:00:00.1234567\"", "\"2000-01-01T00:00:00.12x\""}) {
+      BOOST_TEST(!forge::codec::json::read<protocol::time_point>(malformed).ok());
+   }
 }
 
 BOOST_AUTO_TEST_CASE(action_transaction_and_signed_transaction_match_spring_fixtures) {

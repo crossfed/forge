@@ -28,6 +28,7 @@
 
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/cancellation_state.hpp>
 #include <boost/asio/cancellation_signal.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
@@ -730,6 +731,13 @@ class mixed_proxy_api : public http_contract<mixed_proxy_api> {
    virtual boost::asio::awaitable<forge::net::http::file_response> download(mixed_download_request request) = 0;
 };
 
+class positional_timeout_api : public http_contract<positional_timeout_api> {
+ public:
+   virtual ~positional_timeout_api() = default;
+
+   virtual boost::asio::awaitable<control_response> read(std::string key, std::uint64_t timeout_ms) = 0;
+};
+
 } // namespace test_api
 } // namespace forge::net::http
 
@@ -889,6 +897,9 @@ FORGE_API(::forge::net::http::test_api::mixed_proxy_api, FORGE_API_CONTRACT("mix
           FORGE_API_METHOD_TYPED(download, ::forge::net::http::test_api::mixed_download_request,
                                  ::forge::net::http::file_response))
 
+FORGE_API(::forge::net::http::test_api::positional_timeout_api, FORGE_API_CONTRACT("positional-timeout", 1, 0),
+          FORGE_API_METHOD(read, key, timeout_ms))
+
 template <> struct forge::schema::rules<::forge::net::http::test_api::search_request> {
    [[nodiscard]] static forge::schema::object_schema<::forge::net::http::test_api::search_request> define() {
       auto schema = forge::schema::object<::forge::net::http::test_api::search_request>();
@@ -1040,6 +1051,9 @@ FORGE_HTTP_API(::forge::net::http::test_api::stream_body_echo_api,
 FORGE_HTTP_API(::forge::net::http::test_api::mixed_proxy_api, FORGE_HTTP_GET(read, "/mixed/:collection/:key"),
                FORGE_HTTP_GET(download, "/mixed/:collection/:key/file", FORGE_HTTP_RESPONSE_FILE))
 
+FORGE_HTTP_API(::forge::net::http::test_api::positional_timeout_api,
+               FORGE_HTTP_GET(read, "/positional-timeout/:key?timeout_ms={timeout_ms}", FORGE_HTTP_TIMEOUT(timeout_ms)))
+
 namespace forge::api::core {
 
 template <> struct api_traits<::forge::net::http::test_api::api_cache> {
@@ -1145,6 +1159,7 @@ using test_api::positional_scalar_body_api;
 using test_api::positional_single_query_api;
 using test_api::positional_stream_api;
 using test_api::positional_streaming_body_api;
+using test_api::positional_timeout_api;
 using test_api::search_api;
 using test_api::search_request;
 using test_api::search_response;
@@ -2173,6 +2188,64 @@ class flaky_server {
    }
 
    bool respond_to_retry_ = false;
+   asio::io_context io_context_;
+   tcp::acceptor acceptor_;
+   std::thread worker_;
+   std::uint16_t port_ = 0;
+};
+
+class stale_keep_alive_server {
+ public:
+   stale_keep_alive_server() : acceptor_(io_context_) {
+      acceptor_.open(tcp::v4());
+      acceptor_.set_option(asio::socket_base::reuse_address(true));
+      acceptor_.bind(tcp::endpoint{asio::ip::make_address("127.0.0.1"), 0});
+      acceptor_.listen(asio::socket_base::max_listen_connections);
+      port_ = acceptor_.local_endpoint().port();
+      worker_ = std::thread([this] { run(); });
+   }
+
+   ~stale_keep_alive_server() {
+      auto ignored = boost::system::error_code{};
+      acceptor_.close(ignored);
+      io_context_.stop();
+      if (worker_.joinable()) {
+         worker_.join();
+      }
+   }
+
+   [[nodiscard]] std::uint16_t port() const noexcept {
+      return port_;
+   }
+
+ private:
+   void serve_once(std::string body, bool keep_alive) {
+      auto socket = tcp::socket{io_context_};
+      acceptor_.accept(socket);
+      auto stream = beast::tcp_stream{std::move(socket)};
+      auto buffer = beast::flat_buffer{};
+      auto request = beast_http::request<beast_http::string_body>{};
+      beast_http::read(stream, buffer, request);
+
+      auto response = beast_http::response<beast_http::string_body>{beast_http::status::ok, request.version()};
+      response.set(beast_http::field::content_type, "application/json");
+      response.body() = std::move(body);
+      response.keep_alive(keep_alive);
+      response.prepare_payload();
+      beast_http::write(stream, response);
+
+      auto ignored = boost::system::error_code{};
+      stream.socket().close(ignored);
+   }
+
+   void run() {
+      try {
+         serve_once(R"({"value":"first"})", true);
+         serve_once(R"({"value":"second"})", false);
+      } catch (...) {
+      }
+   }
+
    asio::io_context io_context_;
    tcp::acceptor acceptor_;
    std::thread worker_;
@@ -5920,22 +5993,23 @@ BOOST_AUTO_TEST_CASE(server_async_stop_cancels_active_keep_alive_sessions) {
 }
 
 BOOST_AUTO_TEST_CASE(server_stop_waits_for_executor_work_before_returning) {
-   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
-   auto mutex = std::mutex{};
-   auto ready = std::condition_variable{};
-   auto release = std::condition_variable{};
-   auto handler_started = false;
-   auto handler_released = false;
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto handler_started = std::promise<void>{};
+   auto handler_started_future = handler_started.get_future();
+   auto blocker =
+       std::make_shared<asio::steady_timer>(runtime.context(), (std::chrono::steady_clock::time_point::max)());
+   auto handler_invocations = std::atomic_uint{0};
 
    auto server = forge::net::http::server{
        runtime,
        server_config{.read_timeout = std::chrono::seconds{5}, .idle_timeout = std::chrono::seconds{5}},
        [&](route_context& context) -> boost::asio::awaitable<response> {
-          {
-             auto lock = std::unique_lock{mutex};
-             handler_started = true;
-             ready.notify_all();
-             release.wait(lock, [&] { return handler_released; });
+          handler_invocations.fetch_add(1, std::memory_order_relaxed);
+          if (context.request.target() == "/blocked") {
+             handler_started.set_value();
+             co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
+             auto ignored = boost::system::error_code{};
+             co_await blocker->async_wait(asio::redirect_error(asio::use_awaitable, ignored));
           }
           co_return make_text_response(context.request, status::ok, "released");
        },
@@ -5950,28 +6024,55 @@ BOOST_AUTO_TEST_CASE(server_stop_waits_for_executor_work_before_returning) {
                                                          "Host: 127.0.0.1\r\n"
                                                          "Connection: keep-alive\r\n"
                                                          "\r\n"}));
+   BOOST_REQUIRE(handler_started_future.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
 
-   {
-      auto lock = std::unique_lock{mutex};
-      BOOST_REQUIRE(ready.wait_for(lock, std::chrono::seconds{2}, [&] { return handler_started; }));
-   }
+   auto idle_stream = beast::tcp_stream{io_context};
+   idle_stream.expires_after(std::chrono::seconds{2});
+   idle_stream.connect(tcp::endpoint{asio::ip::make_address("127.0.0.1"), server.port()});
+   asio::write(idle_stream.socket(), asio::buffer(std::string{"GET /ready HTTP/1.1\r\n"
+                                                              "Host: 127.0.0.1\r\n"
+                                                              "Connection: keep-alive\r\n"
+                                                              "\r\n"}));
+   auto idle_buffer = beast::flat_buffer{};
+   auto idle_response = beast_http::response<beast_http::string_body>{};
+   beast_http::read(idle_stream, idle_buffer, idle_response);
+   BOOST_TEST(idle_response.result() == beast_http::status::ok);
 
-   auto stop_returned = std::atomic_bool{false};
+   auto stop_started = std::promise<void>{};
+   auto stop_started_future = stop_started.get_future();
+   auto stop_returned = std::promise<void>{};
+   auto stop_returned_future = stop_returned.get_future();
    auto stop_thread = std::thread{[&] {
+      stop_started.set_value();
       server.stop();
-      stop_returned.store(true);
+      stop_returned.set_value();
    }};
 
-   std::this_thread::sleep_for(std::chrono::milliseconds{100});
-   BOOST_TEST(!stop_returned.load());
+   stop_started_future.wait();
+   BOOST_TEST(
+       static_cast<bool>(stop_returned_future.wait_for(std::chrono::milliseconds{100}) == std::future_status::timeout));
 
-   {
-      const auto lock = std::scoped_lock{mutex};
-      handler_released = true;
-   }
-   release.notify_all();
+   auto second_stop_returned = std::promise<void>{};
+   auto second_stop_returned_future = second_stop_returned.get_future();
+   auto second_stop_thread = std::thread{[&] {
+      server.stop();
+      second_stop_returned.set_value();
+   }};
+   BOOST_TEST(static_cast<bool>(second_stop_returned_future.wait_for(std::chrono::milliseconds{100}) ==
+                                std::future_status::timeout));
+
+   auto idle_read_error = boost::system::error_code{};
+   auto after_stop = beast_http::response<beast_http::string_body>{};
+   idle_stream.expires_after(std::chrono::seconds{2});
+   beast_http::read(idle_stream, idle_buffer, after_stop, idle_read_error);
+   BOOST_TEST(idle_read_error != boost::system::error_code{});
+
+   asio::post(blocker->get_executor(), [blocker] { blocker->cancel(); });
+   BOOST_TEST(static_cast<bool>(stop_returned_future.wait_for(std::chrono::seconds{2}) == std::future_status::ready));
+   BOOST_TEST(
+       static_cast<bool>(second_stop_returned_future.wait_for(std::chrono::seconds{2}) == std::future_status::ready));
    stop_thread.join();
-   BOOST_TEST(stop_returned.load());
+   second_stop_thread.join();
 
    auto buffer = beast::flat_buffer{};
    auto response_value = beast_http::response<beast_http::string_body>{};
@@ -5989,6 +6090,7 @@ BOOST_AUTO_TEST_CASE(server_stop_waits_for_executor_work_before_returning) {
       beast_http::read(stream, buffer, after_stop, read_error);
    }
    BOOST_TEST(read_error != boost::system::error_code{});
+   BOOST_TEST(handler_invocations.load(std::memory_order_relaxed) == 2U);
 }
 
 BOOST_AUTO_TEST_CASE(server_stop_without_start_returns_without_executor_state_race) {
@@ -6003,6 +6105,57 @@ BOOST_AUTO_TEST_CASE(server_stop_without_start_returns_without_executor_state_ra
 
    server.stop();
    server.stop();
+}
+
+BOOST_AUTO_TEST_CASE(server_stop_drains_accept_loop_before_returning) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   auto stop_returned = std::atomic_bool{false};
+   auto late_handlers = std::atomic_uint{0};
+   auto server = forge::net::http::server{
+       runtime,
+       server_config{.read_timeout = std::chrono::seconds{2}, .idle_timeout = std::chrono::seconds{2}},
+       [&](route_context& context) -> boost::asio::awaitable<response> {
+          if (stop_returned.load(std::memory_order_acquire)) {
+             late_handlers.fetch_add(1, std::memory_order_relaxed);
+          }
+          co_return make_text_response(context.request, status::ok, "accepted");
+       },
+   };
+   forge::asio::blocking::run(runtime, server.async_start());
+   const auto port = server.port();
+
+   auto release = std::promise<void>{};
+   auto ready = release.get_future().share();
+   auto clients = std::vector<std::thread>{};
+   clients.reserve(16U);
+   for (auto index = 0U; index < 16U; ++index) {
+      clients.emplace_back([ready, port] {
+         ready.wait();
+         try {
+            auto io_context = asio::io_context{};
+            auto stream = beast::tcp_stream{io_context};
+            stream.expires_after(std::chrono::milliseconds{500});
+            stream.connect(tcp::endpoint{asio::ip::make_address("127.0.0.1"), port});
+            asio::write(stream.socket(), asio::buffer(std::string{"GET /race HTTP/1.1\r\n"
+                                                                  "Host: 127.0.0.1\r\n"
+                                                                  "Connection: close\r\n"
+                                                                  "\r\n"}));
+            auto buffer = beast::flat_buffer{};
+            auto response_value = beast_http::response<beast_http::string_body>{};
+            beast_http::read(stream, buffer, response_value);
+         } catch (const boost::system::system_error&) {
+         }
+      });
+   }
+
+   release.set_value();
+   server.stop();
+   stop_returned.store(true, std::memory_order_release);
+   for (auto& client : clients) {
+      client.join();
+   }
+
+   BOOST_TEST(late_handlers.load(std::memory_order_relaxed) == 0U);
 }
 
 BOOST_AUTO_TEST_CASE(server_stop_called_from_runtime_worker_does_not_deadlock) {
@@ -7721,6 +7874,100 @@ BOOST_AUTO_TEST_CASE(connection_retries_only_idempotent_requests_after_remote_cl
                                                                       .retry_backoff = std::chrono::milliseconds{1}})),
        std::exception);
    BOOST_CHECK_EQUAL(no_retry_connection.metrics().retry_attempts, 0U);
+}
+
+BOOST_AUTO_TEST_CASE(http_api_proxy_retries_file_response_after_remote_close) {
+   auto retry_server = flaky_server{true};
+   auto runtime = forge::asio::runtime{};
+   auto client =
+       forge::net::http::client{runtime, parse_base_url("http://127.0.0.1:" + std::to_string(retry_server.port()))};
+   auto object = forge::asio::blocking::run(runtime, forge::api::http::remote<object_api>(client));
+
+   auto file = forge::asio::blocking::run(
+       runtime, object->get_object(object_get_request{.collection = "cache", .key = "chunk.bin"}));
+   const auto body = forge::asio::blocking::run(runtime, file.body().async_read_all());
+
+   BOOST_TEST(file.status_code() == status::ok);
+   BOOST_TEST(body == "retry-ok");
+   BOOST_CHECK_EQUAL(client.metrics().retry_attempts, 1U);
+   BOOST_CHECK_EQUAL(client.metrics().reconnects, 1U);
+   BOOST_CHECK_EQUAL(client.metrics().completed_requests, 1U);
+}
+
+BOOST_AUTO_TEST_CASE(http_stream_response_retry_preserves_absolute_deadline_metrics) {
+   auto retry_server = flaky_server{false};
+   auto runtime = forge::asio::runtime{};
+   auto connection =
+       forge::net::http::connection{runtime, parse_base_url("http://127.0.0.1:" + std::to_string(retry_server.port()))};
+
+   BOOST_CHECK_THROW(
+       forge::asio::blocking::run(
+           runtime, connection.async_stream_request(make_request(method::get, "/deadline"),
+                                                    request_options{.timeout = std::chrono::milliseconds{500},
+                                                                    .retry_idempotent = true,
+                                                                    .max_retries = 1,
+                                                                    .retry_backoff = std::chrono::seconds{1}})),
+       forge::net::http::exceptions::gateway_timeout);
+
+   BOOST_CHECK_EQUAL(connection.metrics().retry_attempts, 1U);
+   BOOST_CHECK_EQUAL(connection.metrics().reconnects, 0U);
+   BOOST_CHECK_EQUAL(connection.metrics().timeouts, 1U);
+}
+
+BOOST_AUTO_TEST_CASE(http_stream_response_counts_deadline_before_retry_attempt) {
+   auto runtime = forge::asio::runtime{};
+   auto connection = forge::net::http::connection{runtime, parse_base_url("http://127.0.0.1:1")};
+
+   BOOST_CHECK_THROW(
+       forge::asio::blocking::run(
+           runtime, connection.async_stream_request(make_request(method::get, "/deadline"),
+                                                    request_options{.timeout = std::chrono::milliseconds{0},
+                                                                    .retry_idempotent = true,
+                                                                    .max_retries = 1,
+                                                                    .retry_backoff = std::chrono::milliseconds{0}})),
+       forge::net::http::exceptions::gateway_timeout);
+
+   BOOST_CHECK_EQUAL(connection.metrics().retry_attempts, 0U);
+   BOOST_CHECK_EQUAL(connection.metrics().reconnects, 0U);
+   BOOST_CHECK_EQUAL(connection.metrics().failed_requests, 1U);
+   BOOST_CHECK_EQUAL(connection.metrics().timeouts, 1U);
+}
+
+BOOST_AUTO_TEST_CASE(http_api_proxy_retries_get_after_stale_keep_alive) {
+   auto runtime = forge::asio::runtime{};
+   auto typed_server = stale_keep_alive_server{};
+   auto typed_client =
+       forge::net::http::client{runtime, parse_base_url("http://127.0.0.1:" + std::to_string(typed_server.port()))};
+   auto search = forge::asio::blocking::run(runtime, forge::api::http::remote<search_api>(typed_client));
+
+   const auto first = forge::asio::blocking::run(runtime, search->search(search_request{.term = "first", .limit = 1}));
+   const auto second =
+       forge::asio::blocking::run(runtime, search->search(search_request{.term = "second", .limit = 1}));
+
+   BOOST_TEST(first.value == "first");
+   BOOST_TEST(second.value == "second");
+
+   auto positional_server = stale_keep_alive_server{};
+   auto positional_client = forge::net::http::client{
+       runtime, parse_base_url("http://127.0.0.1:" + std::to_string(positional_server.port()))};
+   auto positional = forge::asio::blocking::run(runtime, forge::api::http::remote<mixed_proxy_api>(positional_client));
+
+   const auto positional_first = forge::asio::blocking::run(runtime, positional->read("first", "one"));
+   const auto positional_second = forge::asio::blocking::run(runtime, positional->read("second", "two"));
+
+   BOOST_TEST(positional_first.value == "first");
+   BOOST_TEST(positional_second.value == "second");
+
+   auto timeout_server = stale_keep_alive_server{};
+   auto timeout_client =
+       forge::net::http::client{runtime, parse_base_url("http://127.0.0.1:" + std::to_string(timeout_server.port()))};
+   auto timeout = forge::asio::blocking::run(runtime, forge::api::http::remote<positional_timeout_api>(timeout_client));
+
+   const auto timeout_first = forge::asio::blocking::run(runtime, timeout->read("first", 1'000U));
+   const auto timeout_second = forge::asio::blocking::run(runtime, timeout->read("second", 1'000U));
+
+   BOOST_TEST(timeout_first.value == "first");
+   BOOST_TEST(timeout_second.value == "second");
 }
 
 BOOST_AUTO_TEST_CASE(connection_serializes_concurrent_requests) {

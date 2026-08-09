@@ -37,6 +37,13 @@ struct transaction_submit_request {
    bool return_failure_trace = true;
    bool retry = false;
    std::optional<std::uint16_t> retry_blocks;
+   std::uint64_t timeout_ms = 30'000;
+};
+
+struct transaction_submit_batch_request {
+   std::vector<transaction_submit_request> transactions;
+   // Total budget; owners cap each item deadline by the remaining batch time.
+   std::uint64_t timeout_ms = 30'000;
 };
 
 struct transaction_submit_response {
@@ -107,7 +114,9 @@ struct transaction_read_only_response : audited_response {
 
 BOOST_DESCRIBE_ENUM(transaction_lifecycle, accepted, included, finalized, forked_out, rejected, expired, unknown)
 BOOST_DESCRIBE_ENUM(transaction_execution_status, executed, rejected)
-BOOST_DESCRIBE_STRUCT(transaction_submit_request, (), (transaction, return_failure_trace, retry, retry_blocks))
+BOOST_DESCRIBE_STRUCT(transaction_submit_request, (),
+                      (transaction, return_failure_trace, retry, retry_blocks, timeout_ms))
+BOOST_DESCRIBE_STRUCT(transaction_submit_batch_request, (), (transactions, timeout_ms))
 BOOST_DESCRIBE_STRUCT(transaction_submit_response, (), (id, state, trace))
 BOOST_DESCRIBE_STRUCT(transaction_status_request, (), (id, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(transaction_status_response, (audited_response),

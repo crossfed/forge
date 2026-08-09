@@ -33,6 +33,7 @@ import forge.db.mdbx.driver;
 import forge.db.object.store;
 import forge.db.revision.store;
 import forge.db.revision.types;
+import forge.exceptions;
 
 #ifndef FORGE_DB_AUTHENTICATED_CRASH_HELPER
 #define FORGE_DB_AUTHENTICATED_CRASH_HELPER ""
@@ -41,6 +42,8 @@ import forge.db.revision.types;
 namespace {
 
 using namespace std::chrono_literals;
+
+constexpr auto crash_checkpoint_timeout = 2min;
 
 forge::db::authenticated::bytes bytes(std::string value) {
    return {
@@ -137,7 +140,7 @@ child_process start_helper(const std::filesystem::path& root, std::string mode) 
 
 template <typename Predicate>
 std::string wait_for_checkpoint(child_process& process, const std::filesystem::path& root, Predicate&& accept) {
-   const auto deadline = std::chrono::steady_clock::now() + 15s;
+   const auto deadline = std::chrono::steady_clock::now() + crash_checkpoint_timeout;
    auto observed = std::string{};
    while (std::chrono::steady_clock::now() < deadline) {
       auto stream = std::ifstream{root / "checkpoint"};
@@ -163,19 +166,59 @@ struct recovery_state {
    std::uint64_t revision = 0;
 };
 
+class post_crash_lock_recovery_policy {
+ public:
+   post_crash_lock_recovery_policy(std::chrono::steady_clock::time_point started,
+                                   std::chrono::steady_clock::duration timeout)
+       : deadline_{started + timeout} {}
+
+   [[nodiscard]] bool should_retry(const forge::db::mdbx::exceptions::environment_busy& error,
+                                   std::chrono::steady_clock::time_point now) const noexcept {
+      if (now >= deadline_) {
+         return false;
+      }
+      for (const auto& field : error.context()) {
+         if (field.key == "native-code" && field.value == std::to_string(EAGAIN)) {
+            return true;
+         }
+      }
+      return false;
+   }
+
+ private:
+   std::chrono::steady_clock::time_point deadline_;
+};
+
+boost::asio::awaitable<std::shared_ptr<forge::db::mdbx::driver>>
+open_after_reaped_crash(const std::filesystem::path& root, forge::asio::affine::executor executor) {
+   const auto recovery = post_crash_lock_recovery_policy{std::chrono::steady_clock::now(), 1s};
+   for (;;) {
+      try {
+         co_return co_await forge::db::mdbx::driver::open(
+             {
+                 .path = (root / "store").string(),
+                 .families = {"authenticated", "objectdb"},
+                 .durability_mode = forge::db::mdbx::durability::durable_sync,
+                 .create_if_missing = false,
+                 .create_missing_families = false,
+             },
+             executor);
+      } catch (const forge::db::mdbx::exceptions::environment_busy& error) {
+         // MDBX documents that POSIX DXB lock acquisition can briefly collide
+         // with file-lock recovery after a process dies.
+         if (!recovery.should_retry(error, std::chrono::steady_clock::now())) {
+            throw;
+         }
+         std::this_thread::sleep_for(5ms);
+      }
+   }
+}
+
 void verify_reopen(const std::filesystem::path& root, std::initializer_list<recovery_state> allowed) {
    auto runtime = forge::asio::runtime{};
    auto lane = forge::asio::affine::lane{};
    forge::asio::blocking::run(runtime, [&]() -> boost::asio::awaitable<void> {
-      auto driver = co_await forge::db::mdbx::driver::open(
-          {
-              .path = (root / "store").string(),
-              .families = {"authenticated", "objectdb"},
-              .durability_mode = forge::db::mdbx::durability::durable_sync,
-              .create_if_missing = false,
-              .create_missing_families = false,
-          },
-          lane.get_executor());
+      auto driver = co_await open_after_reaped_crash(root, lane.get_executor());
       auto objects = co_await forge::db::object::store::open(driver);
       static_cast<void>(co_await forge::db::revision::store::open(driver, objects));
       auto authenticated = forge::db::authenticated::store{
@@ -242,6 +285,19 @@ void run_commit_race_case() {
 } // namespace
 
 BOOST_AUTO_TEST_SUITE(db_authenticated_crash_test_suite)
+
+BOOST_AUTO_TEST_CASE(post_crash_reopen_retries_only_native_eagain_before_deadline) {
+   const auto started = std::chrono::steady_clock::time_point{};
+   const auto policy = post_crash_lock_recovery_policy{started, 25ms};
+   const auto transient = forge::db::mdbx::exceptions::environment_busy{
+       "transient test lock", {forge::exceptions::ctx("native-code", EAGAIN)}};
+   const auto other_busy = forge::db::mdbx::exceptions::environment_busy{
+       "non-transient test lock", {forge::exceptions::ctx("native-code", EBUSY)}};
+
+   BOOST_TEST(policy.should_retry(transient, started));
+   BOOST_TEST(!policy.should_retry(other_busy, started));
+   BOOST_TEST(!policy.should_retry(transient, started + 25ms));
+}
 
 BOOST_AUTO_TEST_CASE(staged_authenticated_state_and_revision_are_absent_after_process_crash) {
    run_case("forge_db_authenticated_crash_staged", "staged", 0, "initial", 1);

@@ -21,7 +21,7 @@ class submission_client {
 
    boost::asio::awaitable<protocol::transaction_submit_response> submit(protocol::transaction_submit_request request);
    boost::asio::awaitable<std::vector<protocol::transaction_submit_response>>
-   submit_batch(std::vector<protocol::transaction_submit_request> requests);
+   submit_batch(protocol::transaction_submit_batch_request request);
 
  private:
    forge::api::core::handle<submission> service_;

@@ -215,8 +215,10 @@ protocol::info_response make_info_response() {
    response.server_full_version_string = "forge-chain-api-e2e+transport";
    response.head = head;
    response.head_num = 42;
+   response.head_time = protocol::time_point{protocol::microseconds{1'700'000'000'123'456LL}};
    response.finalized = finalized;
    response.finalized_num = 40;
+   response.finalized_time = protocol::time_point{protocol::microseconds{1'699'999'999'654'321LL}};
    response.best_candidate = hash("chain-api-e2e-candidate");
    response.best_candidate_num = 43;
    response.earliest_available_block_num = 7;
@@ -460,18 +462,26 @@ class submission_implementation final : public chain_api::submission {
  public:
    boost::asio::awaitable<protocol::transaction_submit_response>
    submit(protocol::transaction_submit_request request) override {
+      calls.fetch_add(1U, std::memory_order_relaxed);
+      last_submit_timeout_ms.store(request.timeout_ms, std::memory_order_relaxed);
       co_return protocol::transaction_submit_response{.id = request.transaction.id()};
    }
 
    boost::asio::awaitable<std::vector<protocol::transaction_submit_response>>
-   submit_batch(std::vector<protocol::transaction_submit_request> requests) override {
+   submit_batch(protocol::transaction_submit_batch_request request) override {
+      calls.fetch_add(1U, std::memory_order_relaxed);
+      last_batch_timeout_ms.store(request.timeout_ms, std::memory_order_relaxed);
       auto responses = std::vector<protocol::transaction_submit_response>{};
-      responses.reserve(requests.size());
-      for (const auto& request : requests) {
-         responses.push_back(protocol::transaction_submit_response{.id = request.transaction.id()});
+      responses.reserve(request.transactions.size());
+      for (const auto& transaction : request.transactions) {
+         responses.push_back(protocol::transaction_submit_response{.id = transaction.transaction.id()});
       }
       co_return responses;
    }
+
+   std::atomic<std::uint32_t> calls{0};
+   std::atomic<std::uint64_t> last_submit_timeout_ms{0};
+   std::atomic<std::uint64_t> last_batch_timeout_ms{0};
 };
 
 void wait_until(std::function<bool()> predicate, std::string_view failure) {
@@ -685,6 +695,8 @@ http_responses run_http_e2e(const chain_api_services& services) {
          };
          auto limits_remote =
              forge::asio::blocking::run(runtime, forge::api::http::remote<chain_api::transaction>(limits_client));
+         auto submission_limits_remote =
+             forge::asio::blocking::run(runtime, forge::api::http::remote<chain_api::submission>(limits_client));
          const auto started_before = services.transactions->await_started.load(std::memory_order_acquire);
          auto rejected = false;
          try {
@@ -696,6 +708,42 @@ http_responses run_http_e2e(const chain_api_services& services) {
          require(rejected, "HTTP owner boundary accepted an oversized await deadline");
          require(services.transactions->await_started.load(std::memory_order_acquire) == started_before,
                  "HTTP oversized await deadline reached the owner");
+
+         const auto submission_calls_before = services.submissions->calls.load(std::memory_order_acquire);
+         auto submit_rejected = false;
+         try {
+            static_cast<void>(forge::asio::blocking::run(
+                runtime, submission_limits_remote->submit(protocol::transaction_submit_request{
+                             .timeout_ms = package_limits().max_await_ms + 1U,
+                         })));
+         } catch (const forge::chain::api::exceptions::resource_exhausted&) {
+            submit_rejected = true;
+         }
+         require(submit_rejected, "HTTP owner boundary accepted an oversized submit deadline");
+
+         auto zero_submit_rejected = false;
+         try {
+            static_cast<void>(forge::asio::blocking::run(
+                runtime, submission_limits_remote->submit(protocol::transaction_submit_request{.timeout_ms = 0U})));
+         } catch (const forge::chain::api::exceptions::invalid_request&) {
+            zero_submit_rejected = true;
+         }
+         require(zero_submit_rejected, "HTTP owner boundary accepted a zero submit deadline");
+
+         auto bounded_item = protocol::transaction_submit_request{.timeout_ms = 2'000U};
+         auto bounded_transaction = protocol::signed_transaction{};
+         bounded_transaction.expiration = protocol::time_point_sec{1U};
+         bounded_item.transaction = protocol::packed_transaction{std::move(bounded_transaction)};
+         const auto bounded_batch = forge::asio::blocking::run(
+             runtime, submission_limits_remote->submit_batch(protocol::transaction_submit_batch_request{
+                          .transactions = {std::move(bounded_item)},
+                          .timeout_ms = 1'000U,
+                      }));
+         require(bounded_batch.size() == 1U, "HTTP batch deadline cap changed response cardinality");
+         require(services.submissions->calls.load(std::memory_order_acquire) == submission_calls_before + 1U,
+                 "HTTP batch deadline cap did not reach the owner");
+         require(services.submissions->last_batch_timeout_ms.load(std::memory_order_relaxed) == 1'000U,
+                 "HTTP batch deadline cap was not propagated to the owner");
       }
       auto client = forge::net::http::client{
           runtime,
@@ -706,6 +754,8 @@ http_responses run_http_e2e(const chain_api_services& services) {
       auto state_remote = forge::asio::blocking::run(runtime, forge::api::http::remote<chain_api::state>(client));
       auto transaction_remote =
           forge::asio::blocking::run(runtime, forge::api::http::remote<chain_api::transaction>(client));
+      auto submission_remote =
+          forge::asio::blocking::run(runtime, forge::api::http::remote<chain_api::submission>(client));
       auto admin_remote = forge::asio::blocking::run(runtime, forge::api::http::remote<chain_api::admin>(client));
       responses.information = forge::asio::blocking::run(
           runtime, info_remote->get(protocol::anchored_request{.audit = protocol::audit_mode::required}));
@@ -723,6 +773,32 @@ http_responses run_http_e2e(const chain_api_services& services) {
                    }));
       responses.administration =
           forge::asio::blocking::run(runtime, admin_remote->producer_status(protocol::admin_query{}));
+
+      auto submission = chain_api::submission_client{std::move(submission_remote)};
+      auto submitted = protocol::transaction_submit_request{.timeout_ms = 1'234U};
+      submitted.transaction = protocol::packed_transaction{protocol::signed_transaction{}};
+      const auto submitted_id = submitted.transaction.id();
+      require(forge::asio::blocking::run(runtime, submission.submit(std::move(submitted))).id == submitted_id,
+              "HTTP submission acknowledgement did not bind the submitted transaction");
+      require(services.submissions->last_submit_timeout_ms.load(std::memory_order_relaxed) == 1'234U,
+              "HTTP submission did not propagate its deadline");
+
+      auto first_batch_item = protocol::transaction_submit_request{.timeout_ms = 1'000U};
+      auto first_batch_transaction = protocol::signed_transaction{};
+      first_batch_transaction.expiration = protocol::time_point_sec{1U};
+      first_batch_item.transaction = protocol::packed_transaction{std::move(first_batch_transaction)};
+      auto second_batch_item = protocol::transaction_submit_request{.timeout_ms = 2'000U};
+      auto second_batch_transaction = protocol::signed_transaction{};
+      second_batch_transaction.expiration = protocol::time_point_sec{2U};
+      second_batch_item.transaction = protocol::packed_transaction{std::move(second_batch_transaction)};
+      const auto batch_responses = forge::asio::blocking::run(
+          runtime, submission.submit_batch(protocol::transaction_submit_batch_request{
+                       .transactions = {std::move(first_batch_item), std::move(second_batch_item)},
+                       .timeout_ms = 2'500U,
+                   }));
+      require(batch_responses.size() == 2U, "HTTP batch submission changed response cardinality");
+      require(services.submissions->last_batch_timeout_ms.load(std::memory_order_relaxed) == 2'500U,
+              "HTTP batch submission did not propagate its total deadline");
       require_long_poll_transport(runtime, transaction_remote, services.transactions, "HTTP", true);
       const auto calls_before_oversized = services.state->calls.load(std::memory_order_relaxed);
       try {
@@ -1107,6 +1183,9 @@ int main() {
    const auto p2p_response = run_p2p_e2e(services);
 
    require(http_response.information == expected_info, "HTTP info API changed chain audit DTO semantics");
+   require(http_response.information.head_time == expected_info.head_time, "HTTP info API lost head time microseconds");
+   require(http_response.information.finalized_time == expected_info.finalized_time,
+           "HTTP info API lost finalized time microseconds");
    require(http_response.block == expected_block, "HTTP block API changed typed DTO semantics");
    require(http_response.state == expected_state, "HTTP state API changed chain audit DTO semantics");
    require(http_response.transaction == expected_transaction, "HTTP transaction API changed typed DTO semantics");
