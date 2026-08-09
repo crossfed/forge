@@ -3235,6 +3235,21 @@ boost::asio::awaitable<void> node::impl::handle_rendezvous(std::shared_ptr<node:
 
    if (request.type == rendezvous::message_type::discover && request.discover_value) {
       const auto after = rendezvous::codec::read_cookie(request.discover_value->cookie);
+      const auto cookie_namespace = rendezvous::codec::read_cookie_namespace(request.discover_value->cookie);
+      if (!request.discover_value->cookie.empty() && cookie_namespace != request.discover_value->namespace_name) {
+         co_await stream.async_write(rendezvous::codec::encode(
+             rendezvous::message{
+                 .type = rendezvous::message_type::discover_response,
+                 .discover_response_value =
+                     rendezvous::discover_response{
+                         .status_value = rendezvous::status::invalid_cookie,
+                         .status_text = "rendezvous cookie belongs to a different namespace",
+                     },
+             },
+             options.limits.rendezvous));
+         co_await stream.async_close();
+         co_return;
+      }
       const auto limit = request.discover_value->limit == 0
                              ? options.limits.rendezvous.max_discover_limit
                              : std::min(request.discover_value->limit, options.limits.rendezvous.max_discover_limit);

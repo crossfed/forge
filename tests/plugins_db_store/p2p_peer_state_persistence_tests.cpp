@@ -3,6 +3,7 @@ module;
 #include <boost/asio/awaitable.hpp>
 #include <boost/test/unit_test.hpp>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -166,6 +167,9 @@ class tracking_store_api final : public store_plugin::api {
       ++flush_calls;
       last_store = std::move(name);
       last_sync = sync;
+      if (fail_flush) {
+         throw std::runtime_error{"injected DB Store flush failure"};
+      }
       co_await delegate_->flush(last_store, sync);
    }
 
@@ -180,6 +184,7 @@ class tracking_store_api final : public store_plugin::api {
    std::size_t flush_calls = 0;
    std::string last_store;
    bool last_sync = false;
+   bool fail_flush = false;
 
  private:
    store_plugin::api* delegate_;
@@ -353,13 +358,51 @@ void check_object_peer_state_prune_rotates_categories(std::string driver, const 
    const auto second = forge::asio::blocking::run(app->runtime(), state.async_prune_expired());
    const auto third = forge::asio::blocking::run(app->runtime(), state.async_prune_expired());
 
-   BOOST_TEST(first.peers == 1U);
-   BOOST_TEST(second.providers == 1U);
-   BOOST_TEST(third.rendezvous_registrations == 1U);
+   BOOST_TEST(first.peers.size() == 1U);
+   BOOST_TEST(second.providers.size() == 1U);
+   BOOST_TEST(third.rendezvous_registrations.size() == 1U);
    BOOST_TEST(!third.may_have_more);
    BOOST_TEST(state.snapshot(1).empty());
    BOOST_TEST(state.find_providers(key, 1).empty());
    BOOST_TEST(state.discover_rendezvous("forge.prune.rotation", 0, 1).empty());
+
+   forge::asio::blocking::run(app->runtime(), state.async_close());
+   forge::asio::blocking::run(app->runtime(), app->shutdown());
+}
+
+void check_object_peer_state_prune_reports_exact_unhydrated_identity(std::string driver,
+                                                                     const std::filesystem::path& path) {
+   auto app = make_app(document_for(std::move(driver), path));
+   auto persistence = open_peer_persistence(*app);
+   auto first = p2p::make_peer_id_from_certificate_pem(
+       forge::tests::p2p::make_identity_fixture("p2p-prune-exact-first").certificate_pem);
+   auto second = p2p::make_peer_id_from_certificate_pem(
+       forge::tests::p2p::make_identity_fixture("p2p-prune-exact-second").certificate_pem);
+   if (second.value < first.value) {
+      std::swap(first, second);
+   }
+   const auto now = std::chrono::system_clock::now();
+   auto batch = p2p::peer_store::mutation_batch{};
+   batch.peer_upserts = {
+       p2p::peer_store::record{.peer = first, .discovery_expires_at = now - std::chrono::seconds{1}},
+       p2p::peer_store::record{.peer = second, .discovery_expires_at = now - std::chrono::seconds{2}},
+   };
+   (void)forge::asio::blocking::run(app->runtime(), persistence->async_apply(std::move(batch)));
+
+   auto state = p2p::peer_store{p2p::peer_store::options{
+       .persistence = persistence,
+       .max_peers = 1,
+       .prune_page_limit = 1,
+   }};
+   forge::asio::blocking::run(app->runtime(), state.async_hydrate());
+   BOOST_REQUIRE(state.find(first).has_value());
+   BOOST_TEST(!state.find(second).has_value());
+
+   const auto result = forge::asio::blocking::run(app->runtime(), state.async_prune_expired(now));
+   BOOST_REQUIRE_EQUAL(result.peers.size(), 1U);
+   BOOST_TEST(result.peers.front().value == second.value);
+   BOOST_TEST(state.find(first).has_value());
+   BOOST_TEST(!state.find(second).has_value());
 
    forge::asio::blocking::run(app->runtime(), state.async_close());
    forge::asio::blocking::run(app->runtime(), app->shutdown());
@@ -390,17 +433,26 @@ void check_object_peer_state_durable_acknowledgement(std::string driver, const s
    BOOST_TEST(tracking.last_store == peer_store_name);
    BOOST_TEST(tracking.last_sync);
 
-   forge::asio::blocking::run(app->runtime(), state.async_upsert_rendezvous(p2p::rendezvous::registration{
-                                                  .namespace_name = "forge.durable",
-                                                  .peer = registration,
-                                                  .ttl = std::chrono::hours{1},
-                                                  .expires_at = expires_at,
-                                              }));
+   tracking.fail_flush = true;
+   BOOST_CHECK_THROW(
+       (forge::asio::blocking::run(app->runtime(), state.async_upsert_rendezvous(p2p::rendezvous::registration{
+                                                       .namespace_name = "forge.durable",
+                                                       .peer = registration,
+                                                       .ttl = std::chrono::hours{1},
+                                                       .expires_at = expires_at,
+                                                   }))),
+       p2p::exceptions::durability_uncertain);
    BOOST_TEST(tracking.flush_calls == 2U);
    BOOST_TEST(tracking.last_sync);
+   BOOST_TEST(state.discover_rendezvous("forge.durable", 0, 1).size() == 1U);
+   BOOST_TEST(state.persistence_state().degraded);
+
+   tracking.fail_flush = false;
+   forge::asio::blocking::run(app->runtime(), state.async_flush());
+   BOOST_TEST(!state.persistence_state().degraded);
 
    (void)forge::asio::blocking::run(app->runtime(), state.async_prune_expired());
-   BOOST_TEST(tracking.flush_calls == 2U);
+   BOOST_TEST(tracking.flush_calls == 3U);
    forge::asio::blocking::run(app->runtime(), state.async_close());
    forge::asio::blocking::run(app->runtime(), app->shutdown());
 }
@@ -444,6 +496,11 @@ BOOST_AUTO_TEST_CASE(p2p_peer_state_mdbx_prune_rotates_bounded_categories) {
    check_object_peer_state_prune_rotates_categories("mdbx", root.root / "mdbx-prune-rotation");
 }
 
+BOOST_AUTO_TEST_CASE(p2p_peer_state_mdbx_prune_preserves_hydrated_identity_when_unhydrated_row_expires_first) {
+   auto root = root_guard{};
+   check_object_peer_state_prune_reports_exact_unhydrated_identity("mdbx", root.root / "mdbx-prune-exact");
+}
+
 BOOST_AUTO_TEST_CASE(p2p_peer_state_mdbx_durable_operations_flush_before_acknowledgement) {
    auto root = root_guard{};
    check_object_peer_state_durable_acknowledgement("mdbx", root.root / "mdbx-durable-ack");
@@ -470,6 +527,11 @@ BOOST_AUTO_TEST_CASE(p2p_plugin_rocksdb_maintenance_prunes_expired_peer_state) {
 BOOST_AUTO_TEST_CASE(p2p_peer_state_rocksdb_prune_rotates_bounded_categories) {
    auto root = root_guard{};
    check_object_peer_state_prune_rotates_categories("rocksdb", root.root / "rocksdb-prune-rotation");
+}
+
+BOOST_AUTO_TEST_CASE(p2p_peer_state_rocksdb_prune_preserves_hydrated_identity_when_unhydrated_row_expires_first) {
+   auto root = root_guard{};
+   check_object_peer_state_prune_reports_exact_unhydrated_identity("rocksdb", root.root / "rocksdb-prune-exact");
 }
 
 BOOST_AUTO_TEST_CASE(p2p_peer_state_rocksdb_durable_operations_flush_before_acknowledgement) {

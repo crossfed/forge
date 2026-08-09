@@ -76,7 +76,9 @@ void validate_dht_request(const dht::message& request, const peer_id& remote) {
 }
 
 void validate_dht_response(const dht::message& request, const dht::message& response) {
-   if (response.type != request.type || response.key_value != request.key_value) {
+   // rust-libp2p omits the request key in responses, while go-libp2p echoes it.
+   if (response.type != request.type ||
+       (!response.key_value.bytes.empty() && response.key_value != request.key_value)) {
       FORGE_THROW_EXCEPTION(exceptions::protocol_error, "DHT response does not match its request");
    }
    if (response.record_value) {

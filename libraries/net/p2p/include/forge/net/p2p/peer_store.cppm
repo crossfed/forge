@@ -118,10 +118,15 @@ class peer_store {
       std::optional<std::vector<std::byte>> cursor;
    };
 
+   struct apply_result {
+      bool durability_confirmed = true;
+      std::string durability_failure;
+   };
+
    struct prune_result {
-      std::size_t peers = 0;
-      std::size_t providers = 0;
-      std::size_t rendezvous_registrations = 0;
+      std::vector<peer_id> peers;
+      std::vector<provider_record> providers;
+      std::vector<rendezvous::registration> rendezvous_registrations;
       bool may_have_more = false;
    };
 
@@ -202,7 +207,9 @@ class peer_store::persistence {
    virtual ~persistence();
 
    virtual boost::asio::awaitable<hydration_page> async_hydrate(hydration_request request) = 0;
-   virtual boost::asio::awaitable<void> async_apply(mutation_batch batch) = 0;
+   // A false durability confirmation means the mutation committed, but the
+   // requested durable flush failed. Throwing means no commit is known.
+   virtual boost::asio::awaitable<apply_result> async_apply(mutation_batch batch) = 0;
    virtual boost::asio::awaitable<prune_result> async_prune_expired(std::chrono::system_clock::time_point now,
                                                                     std::size_t limit) = 0;
    virtual boost::asio::awaitable<void> async_flush() = 0;

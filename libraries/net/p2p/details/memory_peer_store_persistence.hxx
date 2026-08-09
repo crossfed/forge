@@ -15,7 +15,7 @@ namespace forge::net::p2p {
 class memory_peer_store_persistence final : public peer_store::persistence {
  public:
    boost::asio::awaitable<peer_store::hydration_page> async_hydrate(peer_store::hydration_request request) override;
-   boost::asio::awaitable<void> async_apply(peer_store::mutation_batch batch) override;
+   boost::asio::awaitable<peer_store::apply_result> async_apply(peer_store::mutation_batch batch) override;
    boost::asio::awaitable<peer_store::prune_result> async_prune_expired(std::chrono::system_clock::time_point now,
                                                                         std::size_t limit) override;
    boost::asio::awaitable<void> async_flush() override;

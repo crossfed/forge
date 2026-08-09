@@ -210,6 +210,7 @@ void plugin::request_stop() noexcept {
 boost::asio::awaitable<void> plugin::shutdown() {
    request_stop();
    auto failure = std::exception_ptr{};
+   auto peer_state_closed = !impl_->node && !impl_->peer_state;
    try {
       co_await impl_->stop_maintenance();
    } catch (...) {
@@ -218,6 +219,7 @@ boost::asio::awaitable<void> plugin::shutdown() {
    if (impl_->node) {
       try {
          co_await impl_->node->async_stop();
+         peer_state_closed = true;
       } catch (...) {
          if (!failure) {
             failure = std::current_exception();
@@ -226,22 +228,23 @@ boost::asio::awaitable<void> plugin::shutdown() {
    } else if (impl_->peer_state) {
       try {
          co_await impl_->peer_state->async_close();
+         peer_state_closed = true;
       } catch (...) {
          if (!failure) {
             failure = std::current_exception();
          }
       }
    }
-   if (impl_->node) {
+   if (peer_state_closed) {
       impl_->node.reset();
+      impl_->peer_state.reset();
+      impl_->options.peer_state.persistence.reset();
+      impl_->peer_state_store.reset();
+      clear_text(impl_->options.certificate_pem);
+      impl_->options.private_key_pem.clear();
+      impl_->stores = nullptr;
+      impl_->secrets = nullptr;
    }
-   impl_->peer_state.reset();
-   impl_->options.peer_state.persistence.reset();
-   impl_->peer_state_store.reset();
-   clear_text(impl_->options.certificate_pem);
-   impl_->options.private_key_pem.clear();
-   impl_->stores = nullptr;
-   impl_->secrets = nullptr;
    impl_->started = false;
    if (failure) {
       std::rethrow_exception(failure);

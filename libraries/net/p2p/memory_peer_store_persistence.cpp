@@ -142,7 +142,8 @@ memory_peer_store_persistence::async_hydrate(peer_store::hydration_request reque
    co_return page;
 }
 
-boost::asio::awaitable<void> memory_peer_store_persistence::async_apply(peer_store::mutation_batch batch) {
+boost::asio::awaitable<peer_store::apply_result>
+memory_peer_store_persistence::async_apply(peer_store::mutation_batch batch) {
    auto lock = std::scoped_lock{mutex_};
    ensure_open_locked();
 
@@ -220,7 +221,7 @@ boost::asio::awaitable<void> memory_peer_store_persistence::async_apply(peer_sto
    rendezvous_by_cursor_.swap(rendezvous_by_cursor);
    rendezvous_by_expiry_.swap(rendezvous_by_expiry);
    rendezvous_sequence_high_watermark_ = high_watermark;
-   co_return;
+   co_return peer_store::apply_result{};
 }
 
 boost::asio::awaitable<peer_store::prune_result>
@@ -240,7 +241,7 @@ memory_peer_store_persistence::async_prune_expired(std::chrono::system_clock::ti
       if (peers_.erase(peer) == 0) {
          continue;
       }
-      ++result.peers;
+      result.peers.push_back(peer);
       ++removed;
    }
    while (removed < limit && !providers_by_expiry_.empty() && std::get<0>(*providers_by_expiry_.begin()) <= now) {
@@ -251,9 +252,9 @@ memory_peer_store_persistence::async_prune_expired(std::chrono::system_clock::ti
       if (current == providers_.end()) {
          continue;
       }
+      result.providers.push_back(current->second);
       providers_by_cursor_.erase(provider_token(current->second));
       providers_.erase(current);
-      ++result.providers;
       ++removed;
    }
    while (removed < limit && !rendezvous_by_expiry_.empty() && rendezvous_by_expiry_.begin()->first <= now) {
@@ -263,9 +264,9 @@ memory_peer_store_persistence::async_prune_expired(std::chrono::system_clock::ti
       if (current == rendezvous_.end()) {
          continue;
       }
+      result.rendezvous_registrations.push_back(current->second);
       rendezvous_by_cursor_.erase(rendezvous_token(current->second));
       rendezvous_.erase(current);
-      ++result.rendezvous_registrations;
       ++removed;
    }
    result.may_have_more = (!peers_by_expiry_.empty() && peers_by_expiry_.begin()->first <= now) ||

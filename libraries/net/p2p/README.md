@@ -190,6 +190,9 @@ compatibility convenience for older single-listen consumers.
 The low-level node requires `peer_store::persistence` outside explicit insecure
 tests. The backend-neutral asynchronous contract provides paged hydration,
 atomic mutation batches, bounded expiry pruning, flush and deterministic close.
+Prune returns the exact peer, provider and Rendezvous identities removed, so
+the bounded operational directory applies the same deletion set even when the
+durable store contains older records that were not hydrated.
 The operational directory remains bounded and performs indexed point/candidate
 queries without scanning durable history. Per-peer endpoint, protocol, relay and
 total variable-byte limits prevent one remote peer from bypassing the global
@@ -199,6 +202,12 @@ The official P2P plugin supplies the production ObjectDB adapter. Direct users
 may implement the persistence port over their own lifecycle owner. The memory
 implementation is deterministic but intended only for tests and explicit local
 experiments.
+
+For a mutation requesting durable acknowledgement, persistence distinguishes a
+failed commit from a commit whose subsequent durable flush could not be
+confirmed. The latter is applied to operational state, marks the store degraded
+and raises typed `durability_uncertain`; callers must not blindly retry the
+logical operation as though it were known not to have committed.
 
 ```cpp
 auto node = forge::net::p2p::node{runtime, {

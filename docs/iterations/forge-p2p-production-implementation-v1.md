@@ -106,6 +106,11 @@ port owned by `forge_net_p2p`. The port supports paged hydration, atomic
 batches, bounded expiry pruning, flush and deterministic close. It exposes P2P
 domain records, not a database driver API.
 
+Expiry pruning reports exact removed identities rather than category counts,
+and durable mutation outcomes distinguish commit failure from a committed
+mutation whose sync acknowledgement is uncertain. This keeps operational state
+aligned with the database while surfacing the uncertainty as a typed failure.
+
 Remove the private RocksDB codec and direct `forge_rocksdb` dependency. Keep a
 deterministic in-memory implementation for unit and programmatic test paths.
 

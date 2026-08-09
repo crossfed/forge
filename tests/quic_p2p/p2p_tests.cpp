@@ -1013,7 +1013,7 @@ class tracking_peer_store_persistence final : public peer_store::persistence {
       co_return co_await delegate->async_hydrate(std::move(request));
    }
 
-   boost::asio::awaitable<void> async_apply(peer_store::mutation_batch batch) override {
+   boost::asio::awaitable<peer_store::apply_result> async_apply(peer_store::mutation_batch batch) override {
       ++apply_attempts;
       if (fail_apply) {
          throw std::runtime_error{"injected peer apply failure"};
@@ -1040,7 +1040,7 @@ class tracking_peer_store_persistence final : public peer_store::persistence {
       for (const auto& value : batch.rendezvous_upserts) {
          rendezvous_high_watermark = std::max(rendezvous_high_watermark, value.sequence);
       }
-      co_await delegate->async_apply(std::move(batch));
+      auto result = co_await delegate->async_apply(std::move(batch));
       applied_peer_upserts += peer_upserts;
       applied_peer_removals += peer_removals;
       applied_provider_upserts += provider_upserts;
@@ -1048,6 +1048,11 @@ class tracking_peer_store_persistence final : public peer_store::persistence {
       applied_rendezvous_removals += rendezvous_removals;
       applied_rendezvous_high_watermark = std::max(applied_rendezvous_high_watermark, rendezvous_high_watermark);
       durable_apply_attempts += durable ? 1U : 0U;
+      if (durable && uncertain_durable_apply) {
+         result.durability_confirmed = false;
+         result.durability_failure = "injected uncertain durable acknowledgement";
+      }
+      co_return result;
    }
 
    boost::asio::awaitable<peer_store::prune_result> async_prune_expired(std::chrono::system_clock::time_point now,
@@ -1158,6 +1163,7 @@ class tracking_peer_store_persistence final : public peer_store::persistence {
    std::size_t close_attempts = 0;
    bool fail_hydrate = false;
    bool fail_apply = false;
+   bool uncertain_durable_apply = false;
    bool fail_prune = false;
    bool fail_flush = false;
    bool fail_close = false;
@@ -2449,6 +2455,18 @@ BOOST_AUTO_TEST_CASE(p2p_dht_exchange_rejects_mismatched_response_before_admissi
    BOOST_TEST(backend->closed);
 }
 
+BOOST_AUTO_TEST_CASE(p2p_dht_exchange_accepts_omitted_or_echoed_response_key) {
+   const auto request = dht::message{
+       .type = dht::message_type::find_node,
+       .key_value = make_dht_key(std::vector<std::uint8_t>{'r', 'e', 'q', 'u', 'e', 's', 't'}),
+   };
+
+   BOOST_CHECK_NO_THROW(detail::validate_dht_response(
+       request, dht::message{.type = dht::message_type::find_node}));
+   BOOST_CHECK_NO_THROW(detail::validate_dht_response(
+       request, dht::message{.type = dht::message_type::find_node, .key_value = request.key_value}));
+}
+
 BOOST_AUTO_TEST_CASE(p2p_dht_exchange_times_out_while_waiting_for_response) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    const auto options = dht::options{};
@@ -2708,6 +2726,48 @@ BOOST_AUTO_TEST_CASE(p2p_dht_query_failed_target_seed_is_not_complete_or_closest
    BOOST_TEST(result.query.closest_peers.empty());
    BOOST_REQUIRE_EQUAL(result.failed.size(), 1U);
    BOOST_TEST(result.failed.front().to_string() == target.to_string());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_dht_query_stops_after_closest_nonfailed_k_peers_are_queried) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   const auto target = make_dht_key(peer(29));
+   auto candidates = std::vector<dht::peer>{};
+   for (const auto value : {30U, 31U, 32U}) {
+      const auto id = peer(static_cast<std::uint8_t>(value));
+      auto candidate_endpoint = make_dns_tcp_endpoint(static_cast<std::uint16_t>(4'000U + value),
+                                                       "query-convergence.example.com");
+      candidate_endpoint.peer = id;
+      candidates.push_back(dht::peer{
+          .id = id,
+          .endpoints = std::vector<endpoint>{std::move(candidate_endpoint)},
+          .connection = dht::connection_type::can_connect,
+      });
+   }
+   std::ranges::sort(candidates, [&](const auto& left, const auto& right) {
+      const auto left_distance = distance_between(left.id.to_bytes(), target.bytes);
+      const auto right_distance = distance_between(right.id.to_bytes(), target.bytes);
+      return left_distance != right_distance ? left_distance < right_distance : left.id < right.id;
+   });
+   auto queried = std::vector<peer_id>{};
+
+   const auto result = forge::asio::blocking::run(
+       runtime, dht_query::run(
+                    dht_query::request{
+                        .target = target,
+                        .options = dht::options{.replication = 2, .alpha = 1},
+                        .seeds = candidates,
+                    },
+                    [&queried](const dht::peer& candidate) -> boost::asio::awaitable<dht::message> {
+                       queried.push_back(candidate.id);
+                       co_return dht::message{.type = dht::message_type::find_node};
+                    }));
+
+   BOOST_REQUIRE_EQUAL(queried.size(), 2U);
+   BOOST_TEST(queried[0].to_string() == candidates[0].id.to_string());
+   BOOST_TEST(queried[1].to_string() == candidates[1].id.to_string());
+   BOOST_REQUIRE_EQUAL(result.query.closest_peers.size(), 2U);
+   BOOST_TEST(result.query.closest_peers[0].id.to_string() == candidates[0].id.to_string());
+   BOOST_TEST(result.query.closest_peers[1].id.to_string() == candidates[1].id.to_string());
 }
 
 BOOST_AUTO_TEST_CASE(p2p_rendezvous_codec_roundtrips_register_discover_cookie_and_status) {
@@ -4927,6 +4987,59 @@ BOOST_AUTO_TEST_CASE(p2p_rendezvous_node_registers_and_discovers_over_negotiated
    BOOST_TEST(server.metrics().rendezvous_registrations >= 1U);
    BOOST_TEST(server.metrics().rendezvous_discovers >= 1U);
 
+   const auto invalid_cookie = forge::asio::blocking::run(
+       runtime, client.async_rendezvous_discover(server.local_peer(), rendezvous::discover_request{
+                                                                          .namespace_name = "forge.discovery",
+                                                                          .limit = 10,
+                                                                          .cookie = rendezvous::codec::make_cookie(
+                                                                              1, "forge.other"),
+                                                                      }));
+   BOOST_TEST(static_cast<int>(invalid_cookie.status_value) ==
+              static_cast<int>(rendezvous::status::invalid_cookie));
+   BOOST_TEST(invalid_cookie.registrations.empty());
+
+   forge::asio::blocking::run(runtime, client.async_stop());
+   forge::asio::blocking::run(runtime, server.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_rendezvous_request_uses_one_deadline_after_protocol_negotiation) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   auto persistence = std::make_shared<tracking_peer_store_persistence>();
+   persistence->block_apply = true;
+   auto server_options =
+       options_for(peer(124), capability_set{.bits = capabilities::direct_quic | capabilities::rendezvous});
+   server_options.peer_state.persistence = persistence;
+   server_options.limits.rendezvous.operating_role = rendezvous::role::server;
+   server_options.limits.rendezvous.require_signed_peer_record = false;
+   auto client_options =
+       options_for(peer(125), capability_set{.bits = capabilities::direct_quic | capabilities::rendezvous});
+   client_options.limits.discovery.query_timeout = std::chrono::milliseconds{75};
+   client_options.limits.rendezvous.require_signed_peer_record = false;
+   auto server = node{runtime, std::move(server_options)};
+   auto client = node{runtime, std::move(client_options)};
+   const auto server_endpoint = listen(server, runtime);
+   client.peers().learn_endpoint(server.local_peer(), server_endpoint,
+                                 capability_set{.bits = capabilities::direct_quic | capabilities::rendezvous});
+
+   const auto started = std::chrono::steady_clock::now();
+   try {
+      (void)forge::asio::blocking::run(
+          runtime, client.async_rendezvous_register(server.local_peer(), rendezvous::register_request{
+                                                                             .namespace_name = "forge.timeout",
+                                                                             .ttl = std::chrono::seconds{7'200},
+                                                                         }));
+      BOOST_FAIL("expected Rendezvous response timeout");
+   } catch (const forge::exceptions::base& error) {
+      BOOST_REQUIRE(exceptions::code_of(error).has_value());
+      BOOST_TEST(static_cast<int>(*exceptions::code_of(error)) == static_cast<int>(exceptions::code::timeout));
+   }
+   const auto elapsed =
+       std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
+   BOOST_TEST(elapsed.count() < 225);
+   BOOST_TEST(persistence->wait_until_apply_blocked());
+
+   persistence->release_apply();
+   persistence->block_apply = false;
    forge::asio::blocking::run(runtime, client.async_stop());
    forge::asio::blocking::run(runtime, server.async_stop());
 }
@@ -7507,12 +7620,14 @@ BOOST_AUTO_TEST_CASE(p2p_peer_store_memory_persistence_applies_flushes_and_prune
    const auto first = forge::asio::blocking::run(runtime, store.async_prune_expired(now));
    const auto second = forge::asio::blocking::run(runtime, store.async_prune_expired(now));
    const auto third = forge::asio::blocking::run(runtime, store.async_prune_expired(now));
-   BOOST_TEST(first.peers == 2U);
+   BOOST_TEST(first.peers.size() == 2U);
    BOOST_TEST(first.may_have_more);
-   BOOST_TEST(second.providers == 1U);
-   BOOST_TEST(second.rendezvous_registrations == 1U);
+   BOOST_TEST(second.providers.size() == 1U);
+   BOOST_TEST(second.rendezvous_registrations.size() == 1U);
    BOOST_TEST(!second.may_have_more);
-   BOOST_TEST(third.peers + third.providers + third.rendezvous_registrations == 0U);
+   BOOST_TEST(third.peers.empty());
+   BOOST_TEST(third.providers.empty());
+   BOOST_TEST(third.rendezvous_registrations.empty());
    BOOST_TEST(!third.may_have_more);
    BOOST_TEST(std::ranges::all_of(persistence->prune_limits, [](auto limit) { return limit == 2U; }));
    BOOST_REQUIRE_EQUAL(store.snapshot(10).size(), 1U);
@@ -7684,7 +7799,8 @@ BOOST_AUTO_TEST_CASE(p2p_peer_store_prune_preserves_newer_synchronous_peer_mutat
    });
    persistence->release_prune();
    const auto result = pruning.get();
-   BOOST_TEST(result.peers == 1U);
+   BOOST_REQUIRE_EQUAL(result.peers.size(), 1U);
+   BOOST_TEST(result.peers.front().value == id.value);
 
    const auto current = store.find(id);
    BOOST_REQUIRE(current.has_value());
@@ -7731,6 +7847,35 @@ BOOST_AUTO_TEST_CASE(p2p_peer_store_reports_persistence_failures_and_retries_pen
    persistence->fail_flush = false;
    BOOST_TEST(store.persistence_state().failure_count == 4U);
    forge::asio::blocking::run(runtime, store.async_close());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_peer_store_applies_committed_state_when_durable_acknowledgement_is_uncertain) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto persistence = std::make_shared<tracking_peer_store_persistence>();
+   persistence->uncertain_durable_apply = true;
+   auto store = peer_store{peer_store::options{.persistence = persistence}};
+   const auto key = make_dht_key(std::vector<std::uint8_t>{'u', 'n', 'c', 'e', 'r', 't', 'a', 'i', 'n'});
+   const auto provider = peer(188);
+
+   BOOST_CHECK_THROW((forge::asio::blocking::run(
+                         runtime, store.async_upsert_provider(peer_store::provider_record{
+                                      .key = key,
+                                      .provider = dht::peer{.id = provider},
+                                      .expires_at = std::chrono::system_clock::now() + std::chrono::hours{1},
+                                  }))),
+                     exceptions::durability_uncertain);
+   const auto status = store.persistence_state();
+   BOOST_TEST(status.degraded);
+   BOOST_TEST(status.last_failure.find("uncertain durable acknowledgement") != std::string::npos);
+   const auto operational = store.find_providers(key, 1);
+   BOOST_REQUIRE_EQUAL(operational.size(), 1U);
+   BOOST_TEST(operational.front().provider.id.value == provider.value);
+
+   auto reopened = peer_store{peer_store::options{.persistence = persistence->delegate}};
+   forge::asio::blocking::run(runtime, reopened.async_hydrate());
+   const auto durable = reopened.find_providers(key, 1);
+   BOOST_REQUIRE_EQUAL(durable.size(), 1U);
+   BOOST_TEST(durable.front().provider.id.value == provider.value);
 }
 
 BOOST_AUTO_TEST_CASE(p2p_peer_store_enforces_provider_and_rendezvous_backpressure) {

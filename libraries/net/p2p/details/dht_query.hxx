@@ -91,6 +91,26 @@ inline void merge_provider(std::vector<dht::peer>& providers, const dht::peer& v
    return out;
 }
 
+[[nodiscard]] inline bool closest_peers_queried(const std::map<peer_id, dht::peer>& known,
+                                                const std::set<peer_id>& queried,
+                                                const std::set<peer_id>& failed, const dht::key& target,
+                                                std::size_t replication) {
+   auto considered = std::size_t{};
+   for (const auto& peer : sorted_peers(known, target)) {
+      if (!has_endpoint(peer) || failed.contains(peer.id)) {
+         continue;
+      }
+      if (considered >= replication) {
+         break;
+      }
+      ++considered;
+      if (!queried.contains(peer.id)) {
+         return false;
+      }
+   }
+   return considered > 0;
+}
+
 struct batch_response {
    dht::peer peer;
    std::optional<dht::message> response;
@@ -205,6 +225,9 @@ template <typename Query> boost::asio::awaitable<result> run(request value, Quer
       }
 
       if (out.query.complete || !out.query.provider_peers.empty()) {
+         break;
+      }
+      if (closest_peers_queried(known, queried, failed, value.target, value.options.replication)) {
          break;
       }
    }

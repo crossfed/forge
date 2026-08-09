@@ -67,6 +67,9 @@ isolated codec and interop fixtures do not promote this plugin to production.
 `request_stop()` synchronously closes admission and listeners and initiates
 session disconnect. `shutdown()` then awaits transport teardown, peer-state
 flush/close and bootstrap maintenance before releasing DB and Secrets handles.
+If peer-state close fails, the stopped node and its persistence ownership are
+retained so a subsequent `shutdown()` can retry deterministic close; the plugin
+never drops a persistence backend that still reports pending close work.
 An empty active session set is not treated as proof that STCP/Yamux cleanup has
 completed.
 

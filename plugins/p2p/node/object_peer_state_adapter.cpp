@@ -12,6 +12,7 @@ module;
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <exception>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -51,6 +52,16 @@ namespace {
 
 namespace p2p = forge::net::p2p;
 using schema = forge::plugins::p2p::node::detail::peer_state_schema;
+
+[[nodiscard]] std::string current_exception_message() {
+   try {
+      throw;
+   } catch (const std::exception& error) {
+      return error.what();
+   } catch (...) {
+      return "unknown persistence failure";
+   }
+}
 
 [[noreturn]] void malformed(std::string_view message) {
    FORGE_THROW_EXCEPTION(p2p::exceptions::codec_error, "malformed ObjectDB peer state",
@@ -595,7 +606,8 @@ object_peer_state_adapter::async_hydrate(p2p::peer_store::hydration_request requ
    co_return out;
 }
 
-boost::asio::awaitable<void> object_peer_state_adapter::async_apply(p2p::peer_store::mutation_batch batch) {
+boost::asio::awaitable<p2p::peer_store::apply_result>
+object_peer_state_adapter::async_apply(p2p::peer_store::mutation_batch batch) {
    ensure_open();
    auto transaction = co_await store_.begin_transaction();
    auto objects = co_await store_.objects().join(transaction);
@@ -647,8 +659,16 @@ boost::asio::awaitable<void> object_peer_state_adapter::async_apply(p2p::peer_st
    }
    co_await transaction.commit();
    if (batch.durable) {
-      co_await db_->flush(store_.name(), true);
+      try {
+         co_await db_->flush(store_.name(), true);
+      } catch (...) {
+         co_return p2p::peer_store::apply_result{
+             .durability_confirmed = false,
+             .durability_failure = current_exception_message(),
+         };
+      }
    }
+   co_return p2p::peer_store::apply_result{};
 }
 
 boost::asio::awaitable<p2p::peer_store::prune_result>
@@ -672,9 +692,9 @@ object_peer_state_adapter::async_prune_expired(std::chrono::system_clock::time_p
       case 0: {
          auto rows = co_await expired_rows<schema::peer_object, schema::by_peer_expiry>(objects, 1, now_ns, remaining);
          for (const auto& row : rows) {
+            result.peers.push_back(parse_peer(row.peer));
             co_await objects.erase(row.id);
          }
-         result.peers = rows.size();
          remaining -= static_cast<std::uint32_t>(rows.size());
          break;
       }
@@ -682,9 +702,9 @@ object_peer_state_adapter::async_prune_expired(std::chrono::system_clock::time_p
          auto rows =
              co_await expired_rows<schema::provider_object, schema::by_provider_expiry>(objects, 1, now_ns, remaining);
          for (const auto& row : rows) {
+            result.providers.push_back(from_provider_row(row));
             co_await objects.erase(row.id);
          }
-         result.providers = rows.size();
          remaining -= static_cast<std::uint32_t>(rows.size());
          break;
       }
@@ -692,9 +712,9 @@ object_peer_state_adapter::async_prune_expired(std::chrono::system_clock::time_p
          auto rows = co_await expired_rows<schema::rendezvous_object, schema::by_rendezvous_expiry>(objects, 0, now_ns,
                                                                                                     remaining);
          for (const auto& row : rows) {
+            result.rendezvous_registrations.push_back(from_rendezvous_row(row));
             co_await objects.erase(row.id);
          }
-         result.rendezvous_registrations = rows.size();
          remaining -= static_cast<std::uint32_t>(rows.size());
          break;
       }

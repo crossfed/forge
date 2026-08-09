@@ -10,7 +10,8 @@ class object_peer_state_adapter final : public forge::net::p2p::peer_store::pers
 
    boost::asio::awaitable<forge::net::p2p::peer_store::hydration_page>
    async_hydrate(forge::net::p2p::peer_store::hydration_request request) override;
-   boost::asio::awaitable<void> async_apply(forge::net::p2p::peer_store::mutation_batch batch) override;
+   boost::asio::awaitable<forge::net::p2p::peer_store::apply_result>
+   async_apply(forge::net::p2p::peer_store::mutation_batch batch) override;
    boost::asio::awaitable<forge::net::p2p::peer_store::prune_result>
    async_prune_expired(std::chrono::system_clock::time_point now, std::size_t limit) override;
    boost::asio::awaitable<void> async_flush() override;

@@ -143,6 +143,16 @@ void mutate_endpoint(peer_store::record& record, const forge::net::p2p::endpoint
    }
 }
 
+[[nodiscard]] std::string durability_failure_message(const peer_store::apply_result& result) {
+   return result.durability_failure.empty() ? "persistence commit completed without durable acknowledgement"
+                                             : result.durability_failure;
+}
+
+[[noreturn]] void throw_durability_uncertain(const peer_store::apply_result& result) {
+   FORGE_THROW_EXCEPTION(exceptions::durability_uncertain, "peer state durability could not be confirmed",
+                         forge::exceptions::ctx("reason", durability_failure_message(result)));
+}
+
 } // namespace
 
 peer_store::impl::impl(peer_store::options options_value)
@@ -548,17 +558,27 @@ boost::asio::awaitable<void> peer_store::impl::apply_pending_locked_gate(bool fl
    }
 
    if (!mutations.empty()) {
+      auto result = peer_store::apply_result{};
       try {
-         co_await persistence_->async_apply(batch);
+         result = co_await persistence_->async_apply(batch);
       } catch (...) {
          auto lock = std::scoped_lock{mutex_};
          requeue_peer_mutations_locked(mutations);
          mark_persistence_failure_locked(current_failure_message());
          throw;
       }
-      auto lock = std::scoped_lock{mutex_};
-      complete_peer_mutations_locked(mutations);
-      mark_persistence_healthy_locked();
+      {
+         auto lock = std::scoped_lock{mutex_};
+         complete_peer_mutations_locked(mutations);
+         if (result.durability_confirmed) {
+            mark_persistence_healthy_locked();
+         } else {
+            mark_persistence_failure_locked(durability_failure_message(result));
+         }
+      }
+      if (!result.durability_confirmed) {
+         throw_durability_uncertain(result);
+      }
    }
 
    if (!flush_backend) {
@@ -672,25 +692,36 @@ boost::asio::awaitable<void> peer_store::impl::async_upsert_provider(peer_store:
    auto batch = peer_store::mutation_batch{};
    batch.provider_upserts.push_back(value);
    batch.durable = true;
+   auto result = peer_store::apply_result{};
    try {
-      co_await persistence_->async_apply(std::move(batch));
+      result = co_await persistence_->async_apply(std::move(batch));
    } catch (...) {
       auto lock = std::scoped_lock{mutex_};
       mark_persistence_failure_locked(current_failure_message());
       throw;
    }
 
-   auto lock = std::scoped_lock{mutex_};
-   const auto current = providers_.find(key);
-   if (current != providers_.end()) {
-      provider_expiry_index_.erase(
-          {current->second.expires_at, current->second.key.bytes, current->second.provider.id});
+   {
+      auto lock = std::scoped_lock{mutex_};
+      const auto current = providers_.find(key);
+      if (current != providers_.end()) {
+         provider_expiry_index_.erase(
+             {current->second.expires_at, current->second.key.bytes, current->second.provider.id});
+      }
+      auto [stored, _] = providers_.insert_or_assign(key, std::move(value));
+      if (stored->second.expires_at != std::chrono::system_clock::time_point{}) {
+         provider_expiry_index_.emplace(stored->second.expires_at, stored->second.key.bytes,
+                                        stored->second.provider.id);
+      }
+      if (result.durability_confirmed) {
+         mark_persistence_healthy_locked();
+      } else {
+         mark_persistence_failure_locked(durability_failure_message(result));
+      }
    }
-   auto [stored, _] = providers_.insert_or_assign(key, std::move(value));
-   if (stored->second.expires_at != std::chrono::system_clock::time_point{}) {
-      provider_expiry_index_.emplace(stored->second.expires_at, stored->second.key.bytes, stored->second.provider.id);
+   if (!result.durability_confirmed) {
+      throw_durability_uncertain(result);
    }
-   mark_persistence_healthy_locked();
 }
 
 boost::asio::awaitable<void> peer_store::impl::async_upsert_rendezvous(rendezvous::registration value) {
@@ -712,17 +743,27 @@ boost::asio::awaitable<void> peer_store::impl::async_upsert_rendezvous(rendezvou
    batch.rendezvous_upserts.push_back(value);
    batch.rendezvous_sequence_high_watermark = value.sequence;
    batch.durable = true;
+   auto result = peer_store::apply_result{};
    try {
-      co_await persistence_->async_apply(std::move(batch));
+      result = co_await persistence_->async_apply(std::move(batch));
    } catch (...) {
       auto lock = std::scoped_lock{mutex_};
       mark_persistence_failure_locked(current_failure_message());
       throw;
    }
 
-   auto lock = std::scoped_lock{mutex_};
-   store_rendezvous_operational(std::move(value));
-   mark_persistence_healthy_locked();
+   {
+      auto lock = std::scoped_lock{mutex_};
+      store_rendezvous_operational(std::move(value));
+      if (result.durability_confirmed) {
+         mark_persistence_healthy_locked();
+      } else {
+         mark_persistence_failure_locked(durability_failure_message(result));
+      }
+   }
+   if (!result.durability_confirmed) {
+      throw_durability_uncertain(result);
+   }
 }
 
 boost::asio::awaitable<void> peer_store::impl::async_remove_rendezvous(peer_id peer, std::string namespace_name) {
@@ -732,17 +773,27 @@ boost::asio::awaitable<void> peer_store::impl::async_remove_rendezvous(peer_id p
    auto batch = peer_store::mutation_batch{};
    batch.rendezvous_removals.push_back(peer_store::rendezvous_key{.namespace_name = namespace_name, .peer = peer});
    batch.durable = true;
+   auto result = peer_store::apply_result{};
    try {
-      co_await persistence_->async_apply(std::move(batch));
+      result = co_await persistence_->async_apply(std::move(batch));
    } catch (...) {
       auto lock = std::scoped_lock{mutex_};
       mark_persistence_failure_locked(current_failure_message());
       throw;
    }
 
-   auto lock = std::scoped_lock{mutex_};
-   erase_rendezvous_operational({std::move(namespace_name), std::move(peer)});
-   mark_persistence_healthy_locked();
+   {
+      auto lock = std::scoped_lock{mutex_};
+      erase_rendezvous_operational({std::move(namespace_name), std::move(peer)});
+      if (result.durability_confirmed) {
+         mark_persistence_healthy_locked();
+      } else {
+         mark_persistence_failure_locked(durability_failure_message(result));
+      }
+   }
+   if (!result.durability_confirmed) {
+      throw_durability_uncertain(result);
+   }
 }
 
 void peer_store::impl::hydrate_page_locked(peer_store::hydration_page page) {
@@ -852,32 +903,25 @@ boost::asio::awaitable<void> peer_store::impl::async_hydrate() {
    mark_persistence_healthy_locked();
 }
 
-void peer_store::impl::prune_operational_locked(std::chrono::system_clock::time_point now,
+void peer_store::impl::prune_operational_locked(std::chrono::system_clock::time_point,
                                                 const peer_store::prune_result& result) {
-   auto remaining = result.peers;
-   auto peer_expiry = peer_expiry_index_.begin();
-   while (remaining > 0 && peer_expiry != peer_expiry_index_.end() && peer_expiry->first <= now) {
-      const auto peer = peer_expiry->second;
-      ++peer_expiry;
+   for (const auto& peer : result.peers) {
       if (pending_peer_mutations_.contains(peer) || in_flight_peer_mutations_.contains(peer)) {
-         --remaining;
          continue;
       }
       erase_peer_operational(peer);
-      --remaining;
    }
-   remaining = result.providers;
-   while (remaining > 0 && !provider_expiry_index_.empty() && std::get<0>(*provider_expiry_index_.begin()) <= now) {
-      const auto [_, key, peer] = *provider_expiry_index_.begin();
-      provider_expiry_index_.erase(provider_expiry_index_.begin());
-      providers_.erase(provider_key{key, peer});
-      --remaining;
+   for (const auto& value : result.providers) {
+      const auto key = provider_key{value.key.bytes, value.provider.id};
+      if (const auto current = providers_.find(key); current != providers_.end()) {
+         provider_expiry_index_.erase(
+             {current->second.expires_at, current->second.key.bytes, current->second.provider.id});
+         providers_.erase(current);
+      }
    }
-   remaining = result.rendezvous_registrations;
-   while (remaining > 0 && !rendezvous_expiry_index_.empty() && rendezvous_expiry_index_.begin()->first <= now) {
-      const auto key = rendezvous_expiry_index_.begin()->second;
+   for (const auto& value : result.rendezvous_registrations) {
+      const auto key = rendezvous_map_key{value.namespace_name, value.peer};
       erase_rendezvous_operational(key);
-      --remaining;
    }
 }
 
