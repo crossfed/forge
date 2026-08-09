@@ -3,6 +3,22 @@
 `forge::plugins::p2p::node` owns one shared `forge_net_p2p` node and exposes typed
 contribution APIs for protocol handlers and API-over-P2P publication.
 
+## Current Support State
+
+This plugin is currently a bootstrap/static-topology adapter, not the completed
+production P2P host. It starts direct transports, publishes application APIs,
+maintains configured bootstrap sessions and exposes diagnostics/pubsub sources.
+It does not yet provide durable peer state, secret-backed identity loading,
+Kademlia/Rendezvous roles, autonomous discovery or node-owned bootstrap
+maintenance.
+
+Insecure test mode is therefore the path used by current plugin fixtures. The
+production-hardening roadmap requires ObjectDB peer state and Crypto Secrets
+identity material before listeners open. Current support classifications live
+in
+[`p2p_feature_inventory.json`](../../../tests/libp2p_interop/p2p_feature_inventory.json);
+isolated codec and interop fixtures do not promote this plugin to production.
+
 ## When To Use
 
 - A Forge application needs one shared P2P node managed by `forge_app`.
@@ -35,7 +51,7 @@ contribution APIs for protocol handlers and API-over-P2P publication.
   - `forge.plugins.p2p.node.types`
   - `forge.plugins.p2p.node.exceptions`
 
-## What It Provides
+## What It Provides Today
 
 - Starts and stops a shared P2P node through the `forge_app` lifecycle.
 - Maps config into listen/bootstrap/advertised endpoints and relay/path policy.
@@ -85,8 +101,11 @@ plugins:
             max-candidates: 4
 ```
 
-`allow-insecure-test-mode` is for local tests only. Deployed applications should
-provide real identity material or an explicitly configured peer identity.
+`allow-insecure-test-mode` is for local tests only. Inline PEM is the current
+configuration surface, but it is not the target production secret-delivery
+contract. The hardening implementation replaces it with references to
+`plugins.crypto.secrets` while preserving programmatic low-level identity
+construction.
 
 ## Dependencies
 
