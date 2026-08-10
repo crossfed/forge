@@ -2,6 +2,7 @@ add_library(
    forge_crypto_core STATIC
    random.cpp
    secret_bytes.cpp
+   secret_string.cpp
 )
 forge_target_modules_at(forge_crypto_core crypto/core)
 

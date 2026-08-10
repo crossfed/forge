@@ -461,7 +461,8 @@ class shell_config_plugin final : public forge::app::plugin {
 
 class shell_dependency_plugin final : public forge::app::plugin {
  public:
-   shell_dependency_plugin(std::string id, lifecycle_log& log) : id_{std::move(id)}, log_{&log} {}
+   shell_dependency_plugin(std::string id, lifecycle_log& log, bool fail_shutdown_once = false)
+       : id_{std::move(id)}, log_{&log}, fail_shutdown_once_{fail_shutdown_once} {}
 
    forge::app::plugin_id id() const override {
       return forge::app::plugin_id{.value = id_};
@@ -488,12 +489,17 @@ class shell_dependency_plugin final : public forge::app::plugin {
 
    boost::asio::awaitable<void> shutdown() override {
       log_->entries.push_back("shutdown:" + id_);
+      if (fail_shutdown_once_) {
+         fail_shutdown_once_ = false;
+         throw std::runtime_error{"dependent shutdown failed"};
+      }
       co_return;
    }
 
  private:
    std::string id_;
    lifecycle_log* log_ = nullptr;
+   bool fail_shutdown_once_ = false;
 };
 
 class scheduler_cleanup_plugin final : public forge::app::plugin {
@@ -782,6 +788,31 @@ class shell_order_application final : public forge::app::application_shell {
          .dependencies = {forge::app::plugin_id{.value = "store"}},
          .factory = [this] {
             return std::make_unique<shell_dependency_plugin>("api", *log_);
+         },
+      });
+   }
+
+ private:
+   lifecycle_log* log_ = nullptr;
+};
+
+class shell_shutdown_retry_application final : public forge::app::application_shell {
+ public:
+   explicit shell_shutdown_retry_application(lifecycle_log& log) : log_{&log} {}
+
+ protected:
+   void on_register_plugins(forge::app::plugin_registry& registry) override {
+      registry.register_plugin(forge::app::plugin_descriptor{
+         .id = forge::app::plugin_id{.value = "store"},
+         .factory = [this] {
+            return std::make_unique<shell_dependency_plugin>("store", *log_);
+         },
+      });
+      registry.register_plugin(forge::app::plugin_descriptor{
+         .id = forge::app::plugin_id{.value = "api"},
+         .dependencies = {forge::app::plugin_id{.value = "store"}},
+         .factory = [this] {
+            return std::make_unique<shell_dependency_plugin>("api", *log_, true);
          },
       });
    }
@@ -1325,6 +1356,54 @@ BOOST_AUTO_TEST_CASE(application_shell_preserves_dependency_order_and_reverse_sh
       "after_initialize:api",
       "startup:store",
       "startup:api",
+      "shutdown:api",
+      "shutdown:store",
+   };
+   BOOST_TEST(log.entries == expected, boost::test_tools::per_element());
+}
+
+BOOST_AUTO_TEST_CASE(application_shell_retries_failed_dependent_shutdown_before_dependencies) {
+   auto log = lifecycle_log{};
+   auto app = shell_shutdown_retry_application{log};
+
+   forge::asio::blocking::run(app.runtime(), app.startup());
+   BOOST_CHECK_EXCEPTION(
+      forge::asio::blocking::run(app.runtime(), app.shutdown()),
+      std::runtime_error,
+      [](const std::runtime_error& error) {
+         return std::string{error.what()} == "dependent shutdown failed";
+      });
+
+   BOOST_TEST(static_cast<int>(app.state()) == static_cast<int>(forge::app::application_state::started));
+   BOOST_CHECK(!app.scheduler().snapshot().stopped);
+   const auto first_attempt = std::vector<std::string>{
+      "initialize:store",
+      "initialize:api",
+      "after_initialize:store",
+      "after_initialize:api",
+      "startup:store",
+      "startup:api",
+      "shutdown:api",
+   };
+   BOOST_TEST(log.entries == first_attempt, boost::test_tools::per_element());
+
+   const auto failed_snapshot = app.diagnostics().snapshot(app.events());
+   BOOST_TEST(static_cast<int>(failed_snapshot.state) == static_cast<int>(forge::app::lifecycle_state::failed));
+   BOOST_TEST(failed_snapshot.last_transition == "shutdown");
+   BOOST_TEST(failed_snapshot.last_error == "dependent shutdown failed");
+
+   forge::asio::blocking::run(app.runtime(), app.shutdown());
+
+   BOOST_TEST(static_cast<int>(app.state()) == static_cast<int>(forge::app::application_state::stopped));
+   BOOST_CHECK(app.scheduler().snapshot().stopped);
+   const auto expected = std::vector<std::string>{
+      "initialize:store",
+      "initialize:api",
+      "after_initialize:store",
+      "after_initialize:api",
+      "startup:store",
+      "startup:api",
+      "shutdown:api",
       "shutdown:api",
       "shutdown:store",
    };

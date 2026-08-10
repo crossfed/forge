@@ -13,6 +13,7 @@ Documents below explain cross-library architecture decisions.
 
 | Document | Purpose |
 | --- | --- |
+| [releases/8.22.0.md](releases/8.22.0.md) | Forge 8.22.0 P2P production hardening, CLI, local transactions and encrypted keystore. |
 | [releases/8.21.0.md](releases/8.21.0.md) | Forge 8.21.0 verified Chain API, Experimental authenticated state and HTTP deadline fixes. |
 | [releases/8.20.0.md](releases/8.20.0.md) | Forge 8.20.0 native guest Contract SDK projects and manifest schema v3 migration. |
 | [releases/8.19.0.md](releases/8.19.0.md) | Forge 8.19.0 exact typed JSON and complete Chain Protocol host serialization. |
@@ -47,11 +48,15 @@ Documents below explain cross-library architecture decisions.
 | [donors/forge-contract-dual-target-graph-v1.md](donors/forge-contract-dual-target-graph-v1.md) | Bazel, Cargo, CDT and CMake donor boundaries for immutable dual-target contract-library descriptors. |
 | [iterations/forge-chain-remote-state-v1.md](iterations/forge-chain-remote-state-v1.md) | Accepted direction for transport-neutral typed contract-state reads and chain transaction submission over Forge API. |
 | [donors/forge-chain-remote-state-v1.md](donors/forge-chain-remote-state-v1.md) | Spring/CDT donor boundaries for guest tables, remote state reads and transaction submission. |
+| [iterations/forge-content-swarm-v1.md](iterations/forge-content-swarm-v1.md) | Accepted direction for live Forge API streaming, P2P provider discovery, file-backed immutable swarm mechanics and the product boundary for user-facing swarm daemons. |
+| [donors/forge-api-live-streaming-v2.md](donors/forge-api-live-streaming-v2.md) | gRPC, HTTP/2 and QUIC donor mechanics for bounded live API streams and directional flow control. |
+| [migration/forge-api-live-streaming-v2.md](migration/forge-api-live-streaming-v2.md) | Mechanical migration from vector streaming and Forge API wire v1 to live streaming wire v2. |
 | [iterations/forge-net-family-restructure-v1.md](iterations/forge-net-family-restructure-v1.md) | Future direction for grouping network libraries under `forge::net::*`. |
 | [network/quic-p2p.md](network/quic-p2p.md) | QUIC transport, P2P peer identity, protocol streams and failure model. |
 | [tui/notcurses-component-library.md](tui/notcurses-component-library.md) | TUI value models, deterministic rendering, navigation and Notcurses boundary. |
 | [codecs/json-yaml-glaze.md](codecs/json-yaml-glaze.md) | JSON/YAML API shape, Glaze backend isolation and diagnostics. |
 | [config/schema-config-program-options.md](config/schema-config-program-options.md) | Schema, config documents, env/CLI adapters, merge order and redaction. |
+| [iterations/forge-cli-client-foundation-v1.md](iterations/forge-cli-client-foundation-v1.md) | CLI11-backed hierarchical command foundation for one-shot clients. |
 | [iterations/fcl-secret-provider-v1.md](iterations/fcl-secret-provider-v1.md) | Local secret provider plugin: source loading, redaction, purpose-gated crypto operations and donor baseline. |
 | [donors/forge-crypto-signer-binary-v1.md](donors/forge-crypto-signer-binary-v1.md) | BitShares/Graphene donor evidence for typed binary signer results. |
 | [forge_concept_ru.md](forge_concept_ru.md) | Original Russian concept and long-form design motivation. |

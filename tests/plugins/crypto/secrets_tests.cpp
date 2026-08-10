@@ -24,6 +24,7 @@ import forge.codec.base64;
 import forge.crypto.symmetric.kdf;
 import forge.crypto.core.secret_bytes;
 import forge.crypto.core.types;
+import forge.crypto.keystore.encrypted_file;
 import forge.config.env;
 import forge.plugins.crypto.secrets.api;
 import forge.plugins.crypto.secrets.exceptions;
@@ -35,6 +36,7 @@ import forge.schema.value_kind;
 #include "details/require_complete_file_read.hxx"
 
 namespace crypto_secrets = forge::plugins::crypto::secrets;
+namespace keystore = forge::crypto::keystore;
 
 namespace {
 
@@ -121,12 +123,6 @@ void write_secret_file(const std::filesystem::path& path, const forge::crypto::c
    out.write(reinterpret_cast<const char*>(value.data()), static_cast<std::streamsize>(value.size()));
 }
 
-void overwrite_u64_le(forge::crypto::core::bytes& value, std::size_t offset, std::uint64_t replacement) {
-   for (auto i = 0U; i < 8U; ++i) {
-      value[offset + i] = static_cast<std::uint8_t>((replacement >> (i * 8U)) & 0xffU);
-   }
-}
-
 [[nodiscard]] forge::api::core::handle<crypto_secrets::api>
 configured_api(forge::asio::runtime& runtime, crypto_secrets::plugin& plugin,
                const forge::config::core::document& document) {
@@ -142,15 +138,13 @@ configured_api(forge::asio::runtime& runtime, crypto_secrets::plugin& plugin,
    return forge::crypto::core::bytes{value.begin(), value.end()};
 }
 
-[[nodiscard]] crypto_secrets::encrypted_file_decrypt_limits
-default_decrypt_limits(std::uint64_t max_plaintext_bytes = crypto_secrets::default_max_plaintext_bytes) {
-   return crypto_secrets::encrypted_file_decrypt_limits{
-       .max_plaintext_bytes = max_plaintext_bytes,
-       .max_scrypt_n = crypto_secrets::default_encrypted_file_max_scrypt_n,
-       .max_scrypt_r = crypto_secrets::default_encrypted_file_max_scrypt_r,
-       .max_scrypt_p = crypto_secrets::default_encrypted_file_max_scrypt_p,
-       .max_scrypt_memory_bytes = crypto_secrets::default_encrypted_file_max_scrypt_memory_bytes,
-   };
+[[nodiscard]] forge::crypto::core::bytes encrypted_container(forge::crypto::core::bytes plaintext,
+                                                             std::string_view password) {
+   return keystore::encrypt_file({
+       .plaintext = forge::crypto::core::secret_bytes{std::move(plaintext)},
+       .password = forge::crypto::core::secret_string{std::string{password}},
+       .encryption = {.scrypt_n = 1024, .scrypt_max_memory_bytes = 8ULL * 1024ULL * 1024ULL},
+   });
 }
 
 [[nodiscard]] std::string write_temp_file(std::string name, std::string_view value) {
@@ -494,17 +488,16 @@ BOOST_AUTO_TEST_CASE(crypto_secrets_decrypt_aes_gcm_rejects_oversized_aad_before
    auto runtime = forge::asio::runtime{};
    auto api = configured_api(runtime, plugin, document);
 
-   BOOST_CHECK_THROW(
-       forge::asio::blocking::run(runtime, api->decrypt_aes_gcm(crypto_secrets::aead_decrypt_request{
-                                               .secret_id = "data-key",
-                                               .purpose = "payload.decrypt",
-                                               .nonce = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
-                                               .tag = std::vector<std::uint8_t>(
-                                                  forge::crypto::symmetric::aes::aes_gcm_tag_size, 0),
-                                               .ciphertext = bytes("ciphertext"),
-                                               .aad = bytes("oversized-aad"),
-                                           })),
-       crypto_secrets::exceptions::size_limit_exceeded);
+   BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, api->decrypt_aes_gcm(crypto_secrets::aead_decrypt_request{
+                                                             .secret_id = "data-key",
+                                                             .purpose = "payload.decrypt",
+                                                             .nonce = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
+                                                             .tag = std::vector<std::uint8_t>(
+                                                                 forge::crypto::symmetric::aes::aes_gcm_tag_size, 0),
+                                                             .ciphertext = bytes("ciphertext"),
+                                                             .aad = bytes("oversized-aad"),
+                                                         })),
+                     crypto_secrets::exceptions::size_limit_exceeded);
 }
 FORGE_LOG_AND_RETHROW();
 
@@ -519,14 +512,14 @@ BOOST_AUTO_TEST_CASE(crypto_secrets_decrypt_aes_gcm_rejects_oversized_plaintext_
    auto api = configured_api(runtime, plugin, document);
 
    BOOST_CHECK_THROW(
-       forge::asio::blocking::run(runtime, api->decrypt_aes_gcm(crypto_secrets::aead_decrypt_request{
-                                               .secret_id = "data-key",
-                                               .purpose = "payload.decrypt",
-                                               .nonce = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
-                                               .tag = std::vector<std::uint8_t>(
-                                                  forge::crypto::symmetric::aes::aes_gcm_tag_size, 0),
-                                               .ciphertext = forge::crypto::core::bytes(33U, std::uint8_t{0}),
-                                           })),
+       forge::asio::blocking::run(
+           runtime, api->decrypt_aes_gcm(crypto_secrets::aead_decrypt_request{
+                        .secret_id = "data-key",
+                        .purpose = "payload.decrypt",
+                        .nonce = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
+                        .tag = std::vector<std::uint8_t>(forge::crypto::symmetric::aes::aes_gcm_tag_size, 0),
+                        .ciphertext = forge::crypto::core::bytes(33U, std::uint8_t{0}),
+                    })),
        crypto_secrets::exceptions::size_limit_exceeded);
 }
 FORGE_LOG_AND_RETHROW();
@@ -563,14 +556,7 @@ FORGE_LOG_AND_RETHROW();
 
 BOOST_AUTO_TEST_CASE(crypto_secrets_encrypted_file_roundtrips_and_rejects_wrong_passphrase) try {
    const auto path = std::filesystem::temp_directory_path() / "forge-crypto-secrets-encrypted-source.bin";
-   const auto container = crypto_secrets::encrypt_secret_file(crypto_secrets::encrypted_file_encrypt_request{
-       .plaintext = bytes("encrypted-secret"),
-       .passphrase = "correct horse battery staple",
-       .salt = bytes("0123456789abcdef"),
-       .nonce = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
-       .scrypt_n = 1024,
-       .scrypt_max_memory_bytes = 8ULL * 1024ULL * 1024ULL,
-   });
+   const auto container = encrypted_container(bytes("encrypted-secret"), "correct horse battery staple");
    write_secret_file(path, container);
 
    auto plugin = crypto_secrets::plugin{};
@@ -596,103 +582,9 @@ BOOST_AUTO_TEST_CASE(crypto_secrets_encrypted_file_roundtrips_and_rejects_wrong_
 }
 FORGE_LOG_AND_RETHROW();
 
-BOOST_AUTO_TEST_CASE(crypto_secrets_decrypt_secret_file_maps_malformed_container_to_invalid_secret) try {
-   auto container = crypto_secrets::encrypt_secret_file(crypto_secrets::encrypted_file_encrypt_request{
-       .plaintext = bytes("encrypted-secret"),
-       .passphrase = "correct horse battery staple",
-       .salt = bytes("0123456789abcdef"),
-       .nonce = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
-       .scrypt_n = 1024,
-       .scrypt_max_memory_bytes = 8ULL * 1024ULL * 1024ULL,
-   });
-
-   BOOST_CHECK_THROW((void)crypto_secrets::decrypt_secret_file(bytes("bad"), "passphrase", default_decrypt_limits()),
-                     crypto_secrets::exceptions::invalid_secret);
-
-   auto truncated_header = container;
-   truncated_header.resize(9U);
-   BOOST_CHECK_THROW((void)crypto_secrets::decrypt_secret_file(truncated_header, "correct horse battery staple",
-                                                               default_decrypt_limits()),
-                     crypto_secrets::exceptions::invalid_secret);
-
-   auto truncated_body = container;
-   truncated_body.pop_back();
-   BOOST_CHECK_THROW((void)crypto_secrets::decrypt_secret_file(truncated_body, "correct horse battery staple",
-                                                               default_decrypt_limits()),
-                     crypto_secrets::exceptions::invalid_secret);
-
-   auto trailing_bytes = container;
-   trailing_bytes.push_back(0xffU);
-   BOOST_CHECK_THROW((void)crypto_secrets::decrypt_secret_file(trailing_bytes, "correct horse battery staple",
-                                                               default_decrypt_limits()),
-                     crypto_secrets::exceptions::invalid_secret);
-}
-FORGE_LOG_AND_RETHROW();
-
-BOOST_AUTO_TEST_CASE(crypto_secrets_decrypt_secret_file_maps_kdf_failures_to_invalid_secret) try {
-   auto container = crypto_secrets::encrypt_secret_file(crypto_secrets::encrypted_file_encrypt_request{
-       .plaintext = bytes("encrypted-secret"),
-       .passphrase = "correct horse battery staple",
-       .salt = bytes("0123456789abcdef"),
-       .nonce = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
-       .scrypt_n = 1024,
-       .scrypt_max_memory_bytes = 8ULL * 1024ULL * 1024ULL,
-   });
-   overwrite_u64_le(container, 8U, 3U);
-
-   BOOST_CHECK_THROW(
-       (void)crypto_secrets::decrypt_secret_file(container, "correct horse battery staple", default_decrypt_limits()),
-       crypto_secrets::exceptions::invalid_secret);
-}
-FORGE_LOG_AND_RETHROW();
-
-BOOST_AUTO_TEST_CASE(crypto_secrets_decrypt_secret_file_maps_crypto_failures_to_invalid_secret) try {
-   auto container = crypto_secrets::encrypt_secret_file(crypto_secrets::encrypted_file_encrypt_request{
-       .plaintext = bytes("encrypted-secret"),
-       .passphrase = "correct horse battery staple",
-       .salt = bytes("0123456789abcdef"),
-       .nonce = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
-       .scrypt_n = 1024,
-       .scrypt_max_memory_bytes = 8ULL * 1024ULL * 1024ULL,
-   });
-
-   BOOST_CHECK_THROW((void)crypto_secrets::decrypt_secret_file(
-                         container, "wrong passphrase",
-                         crypto_secrets::encrypted_file_decrypt_limits{
-                             .max_plaintext_bytes = crypto_secrets::default_max_plaintext_bytes,
-                             .max_scrypt_n = crypto_secrets::default_encrypted_file_max_scrypt_n,
-                             .max_scrypt_r = crypto_secrets::default_encrypted_file_max_scrypt_r,
-                             .max_scrypt_p = crypto_secrets::default_encrypted_file_max_scrypt_p,
-                             .max_scrypt_memory_bytes = crypto_secrets::default_encrypted_file_max_scrypt_memory_bytes,
-                         }),
-                     crypto_secrets::exceptions::invalid_secret);
-
-   const auto tag_offset = 8U + (7U * 8U) + bytes("0123456789abcdef").size() + 12U;
-   container[tag_offset] ^= 0xffU;
-
-   BOOST_CHECK_THROW((void)crypto_secrets::decrypt_secret_file(
-                         container, "correct horse battery staple",
-                         crypto_secrets::encrypted_file_decrypt_limits{
-                             .max_plaintext_bytes = crypto_secrets::default_max_plaintext_bytes,
-                             .max_scrypt_n = crypto_secrets::default_encrypted_file_max_scrypt_n,
-                             .max_scrypt_r = crypto_secrets::default_encrypted_file_max_scrypt_r,
-                             .max_scrypt_p = crypto_secrets::default_encrypted_file_max_scrypt_p,
-                             .max_scrypt_memory_bytes = crypto_secrets::default_encrypted_file_max_scrypt_memory_bytes,
-                         }),
-                     crypto_secrets::exceptions::invalid_secret);
-}
-FORGE_LOG_AND_RETHROW();
-
 BOOST_AUTO_TEST_CASE(crypto_secrets_encrypted_file_plaintext_limit_is_size_limit_exceeded) try {
    const auto path = std::filesystem::temp_directory_path() / "forge-crypto-secrets-encrypted-source-too-large.bin";
-   const auto container = crypto_secrets::encrypt_secret_file(crypto_secrets::encrypted_file_encrypt_request{
-       .plaintext = bytes("encrypted-secret"),
-       .passphrase = "correct horse battery staple",
-       .salt = bytes("0123456789abcdef"),
-       .nonce = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
-       .scrypt_n = 1024,
-       .scrypt_max_memory_bytes = 8ULL * 1024ULL * 1024ULL,
-   });
+   const auto container = encrypted_container(bytes("encrypted-secret"), "correct horse battery staple");
    write_secret_file(path, container);
 
    auto document =
@@ -712,14 +604,7 @@ BOOST_AUTO_TEST_CASE(crypto_secrets_encrypted_file_default_ciphertext_limit_allo
    const auto path = std::filesystem::temp_directory_path() / "forge-crypto-secrets-encrypted-source-default-limit.bin";
    const auto passphrase = std::string{"correct horse battery staple"};
    const auto plaintext = forge::crypto::core::bytes(crypto_secrets::default_max_plaintext_bytes, std::uint8_t{'x'});
-   const auto container = crypto_secrets::encrypt_secret_file(crypto_secrets::encrypted_file_encrypt_request{
-       .plaintext = plaintext,
-       .passphrase = passphrase,
-       .salt = bytes("0123456789abcdef"),
-       .nonce = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
-       .scrypt_n = 1024,
-       .scrypt_max_memory_bytes = 8ULL * 1024ULL * 1024ULL,
-   });
+   const auto container = encrypted_container(plaintext, passphrase);
    BOOST_TEST(container.size() > crypto_secrets::default_max_plaintext_bytes);
    BOOST_TEST(container.size() <= crypto_secrets::default_max_ciphertext_bytes);
    write_secret_file(path, container);
@@ -743,14 +628,7 @@ BOOST_AUTO_TEST_CASE(crypto_secrets_encrypted_file_missing_passphrase_file_is_in
    const auto missing_passphrase =
        std::filesystem::temp_directory_path() / "forge-crypto-secrets-missing-passphrase-file.txt";
    std::filesystem::remove(missing_passphrase);
-   const auto container = crypto_secrets::encrypt_secret_file(crypto_secrets::encrypted_file_encrypt_request{
-       .plaintext = bytes("encrypted-secret"),
-       .passphrase = "correct horse battery staple",
-       .salt = bytes("0123456789abcdef"),
-       .nonce = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
-       .scrypt_n = 1024,
-       .scrypt_max_memory_bytes = 8ULL * 1024ULL * 1024ULL,
-   });
+   const auto container = encrypted_container(bytes("encrypted-secret"), "correct horse battery staple");
    write_secret_file(path, container);
 
    auto plugin = crypto_secrets::plugin{};
@@ -766,40 +644,9 @@ BOOST_AUTO_TEST_CASE(crypto_secrets_encrypted_file_missing_passphrase_file_is_in
 }
 FORGE_LOG_AND_RETHROW();
 
-BOOST_AUTO_TEST_CASE(crypto_secrets_encrypted_file_rejects_scrypt_params_above_limits_before_kdf) try {
-   auto container = crypto_secrets::encrypt_secret_file(crypto_secrets::encrypted_file_encrypt_request{
-       .plaintext = bytes("encrypted-secret"),
-       .passphrase = "correct horse battery staple",
-       .salt = bytes("0123456789abcdef"),
-       .nonce = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
-       .scrypt_n = 1024,
-       .scrypt_max_memory_bytes = 8ULL * 1024ULL * 1024ULL,
-   });
-   overwrite_u64_le(container, 8U, 2048U);
-
-   BOOST_CHECK_THROW((void)crypto_secrets::decrypt_secret_file(
-                         container, "correct horse battery staple",
-                         crypto_secrets::encrypted_file_decrypt_limits{
-                             .max_plaintext_bytes = crypto_secrets::default_max_plaintext_bytes,
-                             .max_scrypt_n = 1024,
-                             .max_scrypt_r = crypto_secrets::default_encrypted_file_max_scrypt_r,
-                             .max_scrypt_p = crypto_secrets::default_encrypted_file_max_scrypt_p,
-                             .max_scrypt_memory_bytes = crypto_secrets::default_encrypted_file_max_scrypt_memory_bytes,
-                         }),
-                     crypto_secrets::exceptions::invalid_secret);
-}
-FORGE_LOG_AND_RETHROW();
-
 BOOST_AUTO_TEST_CASE(crypto_secrets_config_rejects_encrypted_file_scrypt_params_above_configured_ceilings) try {
    const auto path = std::filesystem::temp_directory_path() / "forge-crypto-secrets-encrypted-source-high-scrypt.bin";
-   const auto container = crypto_secrets::encrypt_secret_file(crypto_secrets::encrypted_file_encrypt_request{
-       .plaintext = bytes("encrypted-secret"),
-       .passphrase = "correct horse battery staple",
-       .salt = bytes("0123456789abcdef"),
-       .nonce = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
-       .scrypt_n = 1024,
-       .scrypt_max_memory_bytes = 8ULL * 1024ULL * 1024ULL,
-   });
+   const auto container = encrypted_container(bytes("encrypted-secret"), "correct horse battery staple");
    write_secret_file(path, container);
 
    auto document =

@@ -25,6 +25,7 @@ struct request {
 
 void backoff_candidate(peer_store& store, const peer_id& peer, std::chrono::system_clock::time_point until);
 
-void prune_expired_reservations(peer_store& store, std::chrono::system_clock::time_point now);
+void prune_expired_reservations(peer_store& store, std::chrono::system_clock::time_point now,
+                                std::size_t limit);
 
 } // namespace forge::net::p2p::relay_discovery

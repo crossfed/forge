@@ -41,8 +41,9 @@ struct config {
    std::vector<std::string> bootstrap;
    std::vector<std::string> advertised_endpoints;
    std::string peer_id;
-   std::string certificate_pem;
-   std::string private_key_pem;
+   std::string peer_store;
+   std::string certificate_secret;
+   std::string private_key_secret;
    std::string api_codec = "forge.raw";
    std::uint64_t api_deadline_ms = 0;
    std::uint64_t api_max_frame_size = 16 * 1024 * 1024;
@@ -74,7 +75,8 @@ struct remote_options {
 };
 
 BOOST_DESCRIBE_STRUCT(config, (),
-                      (listen, bootstrap, advertised_endpoints, peer_id, certificate_pem, private_key_pem, api_codec,
+                      (listen, bootstrap, advertised_endpoints, peer_id, peer_store, certificate_secret,
+                       private_key_secret, api_codec,
                        api_deadline_ms, api_max_frame_size, max_inflight_per_peer, max_sessions,
                        max_protocol_handlers, allow_insecure_test_mode, path_policy, relay_trust, relay_client_enabled,
                        relay_server_enabled, relay_public_allowed, relay_reservation_ttl_ms, relay_max_candidates))
@@ -94,8 +96,11 @@ export template <> struct forge::schema::rules<forge::plugins::p2p::node::config
          .default_value(std::vector<std::string>{})
          .description("Endpoints advertised to peers as libp2p multiaddr text");
       schema.field<&forge::plugins::p2p::node::config::peer_id>("peer-id").default_value("");
-      schema.field<&forge::plugins::p2p::node::config::certificate_pem>("certificate-pem").default_value("");
-      schema.field<&forge::plugins::p2p::node::config::private_key_pem>("private-key-pem").default_value("").secret();
+      schema.field<&forge::plugins::p2p::node::config::peer_store>("peer-store.store").default_value("");
+      schema.field<&forge::plugins::p2p::node::config::certificate_secret>("identity.certificate-secret")
+         .default_value("");
+      schema.field<&forge::plugins::p2p::node::config::private_key_secret>("identity.private-key-secret")
+         .default_value("");
       schema.field<&forge::plugins::p2p::node::config::api_codec>("api-codec").default_value("forge.raw");
       schema.field<&forge::plugins::p2p::node::config::api_deadline_ms>("api.deadline-ms")
          .default_value(std::uint64_t{0})

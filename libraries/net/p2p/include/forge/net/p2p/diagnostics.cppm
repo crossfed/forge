@@ -156,6 +156,15 @@ struct diagnostics {
       std::vector<peer_id> protected_peers;
    };
 
+   struct persistence_state {
+      std::size_t pending_peer_mutations = 0;
+      std::uint64_t failure_count = 0;
+      bool degraded = false;
+      bool closing = false;
+      bool closed = false;
+      std::string last_failure;
+   };
+
    struct snapshot {
       network_state network;
       metrics_snapshot metrics;
@@ -164,6 +173,7 @@ struct diagnostics {
       connection_state connections;
       std::vector<peer> peers;
       std::vector<session> sessions;
+      persistence_state persistence;
    };
 };
 
@@ -199,5 +209,7 @@ BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::session, (),
                       (id, remote_peer, capabilities, path, relay_peer, direct_endpoint, remote_endpoint, direction,
                        age, idle, closed, protected_peer))
 BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::connection_state, (), (active_sessions, protected_peers))
+BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::persistence_state, (),
+                      (pending_peer_mutations, failure_count, degraded, closing, closed, last_failure))
 BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::snapshot, (),
-                      (network, metrics, resources, pubsub, connections, peers, sessions))
+                      (network, metrics, resources, pubsub, connections, peers, sessions, persistence))

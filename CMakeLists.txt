@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.31)
 
-project(forge VERSION 8.21.0 LANGUAGES C CXX ASM)
+project(forge VERSION 8.22.0 LANGUAGES C CXX ASM)
 
 include(GNUInstallDirs)
 include(CheckCXXSourceCompiles)
@@ -87,7 +87,7 @@ find_package(Threads REQUIRED)
 
 set(_forge_boost_components headers date_time iostreams)
 if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
-   list(APPEND _forge_boost_components url program_options)
+   list(APPEND _forge_boost_components charconv url program_options)
 endif()
 find_package(Boost 1.90 REQUIRED CONFIG COMPONENTS ${_forge_boost_components})
 find_package(ZLIB REQUIRED)
@@ -244,6 +244,7 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/compression/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/chain/core/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/chain/protocol/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/chain/transaction/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/vm/wasm/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/ids/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/db/core/include"
@@ -277,12 +278,15 @@ set(
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/digest/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/symmetric/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/asymmetric/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/signer/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/keystore/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/pki/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/math/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/bls/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/crypto/bn256/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/multiformats/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/asio/include"
+   "${CMAKE_CURRENT_SOURCE_DIR}/libraries/cli/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/http/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/websocket/include"
    "${CMAKE_CURRENT_SOURCE_DIR}/libraries/net/transport/include"
@@ -593,6 +597,7 @@ set(
    forge_compression
    forge_chain_core
    forge_chain_protocol
+   forge_chain_transaction
    forge_chain_quorum
    forge_chain_fork
    forge_chain_savanna
@@ -611,6 +616,8 @@ set(
    forge_crypto_symmetric
    forge_crypto_asymmetric_values
    forge_crypto_asymmetric
+   forge_crypto_signer
+   forge_crypto_keystore
    forge_crypto_pki
    forge_crypto_math
    forge_crypto_bls_values
@@ -639,6 +646,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       add_subdirectory(libraries/db/mdbx)
    endif()
    add_subdirectory(libraries/net)
+   add_subdirectory(libraries/cli)
    add_subdirectory(libraries/app)
    add_subdirectory(plugins)
    if(FORGE_ENABLE_TUI AND FORGE_TUI_NOTCURSES_TARGET)
@@ -673,6 +681,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       forge_net_yamux
       forge_net_quic
       forge_net_p2p
+      forge_cli
       forge_app
       forge_plugins_crypto_signer
       forge_plugins_crypto_secrets
@@ -743,6 +752,7 @@ set(
    compression
    chain_core
    chain_protocol
+   chain_transaction
    chain_quorum
    chain_fork
    chain_savanna
@@ -760,6 +770,8 @@ set(
    crypto_symmetric
    crypto_asymmetric_values
    crypto_asymmetric
+   crypto_signer
+   crypto_keystore
    crypto_pki
    crypto_math
    crypto_bls_values
@@ -797,6 +809,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       net_websocket
       net_quic
       net_p2p
+      cli
       plugins_crypto_signer
       plugins_crypto_secrets
       plugins_p2p_node
@@ -887,6 +900,7 @@ set(
    libraries/compression/include/forge
    libraries/chain/core/include/forge
    libraries/chain/protocol/include/forge
+   libraries/chain/transaction/include/forge
    libraries/vm/wasm/include/forge
    libraries/db/core/include/forge
    libraries/db/object/include/forge
@@ -900,6 +914,8 @@ set(
    libraries/crypto/digest/include/forge
    libraries/crypto/symmetric/include/forge
    libraries/crypto/asymmetric/include/forge
+   libraries/crypto/signer/include/forge
+   libraries/crypto/keystore/include/forge
    libraries/crypto/pki/include/forge
    libraries/crypto/math/include/forge
    libraries/crypto/bls/include/forge
@@ -935,6 +951,7 @@ if(NOT FORGE_CONTRACT_SDK_HOST_PROFILE)
       libraries/net/quic/include/forge
       libraries/net/stcp/include/forge
       libraries/net/p2p/include/forge
+      libraries/cli/include/forge
       libraries/app/include/forge
       plugins/crypto/signer/include/forge
       plugins/crypto/secrets/include/forge
@@ -1042,6 +1059,13 @@ if(TARGET mdbx-internal)
       EXCLUDE_FROM_ALL
    )
 endif()
+
+install(
+   FILES "${CMAKE_CURRENT_SOURCE_DIR}/vendor/CLI11/LICENSE"
+   DESTINATION "${CMAKE_INSTALL_DATADIR}/doc/Forge/CLI11"
+   COMPONENT dev
+   EXCLUDE_FROM_ALL
+)
 
 install(
    EXPORT ForgeTargets

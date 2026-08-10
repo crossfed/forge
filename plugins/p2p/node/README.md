@@ -3,6 +3,21 @@
 `forge::plugins::p2p::node` owns one shared `forge_net_p2p` node and exposes typed
 contribution APIs for protocol handlers and API-over-P2P publication.
 
+## Current Support State
+
+The plugin now provides the Stage 2 production foundation: identity material is
+loaded through Crypto Secrets, peer/provider/Rendezvous state is persisted in a
+dedicated DB Store Object layer, hydration completes before listeners open and
+the low-level node owns bounded Kademlia routing state. It remains a
+bootstrap/static-topology adapter until Stage 3 moves bootstrap and topology
+maintenance into the node and completes Identify lifecycle ownership.
+
+Insecure memory mode remains an explicit local-test path only. Current support
+classifications live
+in
+[`p2p_feature_inventory.json`](../../../tests/libp2p_interop/p2p_feature_inventory.json);
+isolated codec and interop fixtures do not promote this plugin to production.
+
 ## When To Use
 
 - A Forge application needs one shared P2P node managed by `forge_app`.
@@ -35,9 +50,13 @@ contribution APIs for protocol handlers and API-over-P2P publication.
   - `forge.plugins.p2p.node.types`
   - `forge.plugins.p2p.node.exceptions`
 
-## What It Provides
+## What It Provides Today
 
 - Starts and stops a shared P2P node through the `forge_app` lifecycle.
+- Registers and validates the private peer-state ObjectDB schema during
+  `after_initialize()`.
+- Loads certificate/private-key secrets, opens ObjectDB persistence and performs
+  bounded hydration before opening any listener.
 - Maps config into listen/bootstrap/advertised endpoints and relay/path policy.
 - Maintains configured bootstrap sessions with bounded reconnect backoff and
   protects them from connection-manager pruning.
@@ -46,9 +65,13 @@ contribution APIs for protocol handlers and API-over-P2P publication.
 - Provides internal source APIs used by focused diagnostics and pubsub plugins.
 
 `request_stop()` synchronously closes admission and listeners and initiates
-session disconnect. `shutdown()` then awaits both the already-started transport
-teardown and bootstrap maintenance before releasing the node. An empty active
-session set is not treated as proof that STCP/Yamux cleanup has completed.
+session disconnect. `shutdown()` then awaits transport teardown, peer-state
+flush/close and bootstrap maintenance before releasing DB and Secrets handles.
+If peer-state close fails, the stopped node and its persistence ownership are
+retained so a subsequent `shutdown()` can retry deterministic close; the plugin
+never drops a persistence backend that still reports pending close work.
+An empty active session set is not treated as proof that STCP/Yamux cleanup has
+completed.
 
 The plugin does not implement product routing policy or durable application
 queues. Core libp2p-style mechanics belong to `forge_net_p2p`; this plugin composes
@@ -64,8 +87,11 @@ plugins:
          bootstrap: ["/dns4/bootstrap.example/udp/9443/quic-v1"]
          advertised-endpoints: ["/dns4/node.example/udp/9443/quic-v1"]
          peer-id: ""
-         certificate-pem: ""
-         private-key-pem: ""
+         peer-store:
+            store: "p2p-peer-state"
+         identity:
+            certificate-secret: "p2p/node-certificate"
+            private-key-secret: "p2p/node-private-key"
          api-codec: forge.raw
          api:
             deadline-ms: 5000
@@ -85,8 +111,20 @@ plugins:
             max-candidates: 4
 ```
 
-`allow-insecure-test-mode` is for local tests only. Deployed applications should
-provide real identity material or an explicitly configured peer identity.
+The named DB Store must provide an Object layer dedicated to P2P peer state.
+One authoritative schema marker versions the complete private row family, so
+startup validates the format without scanning durable history. A missing marker
+in nonempty storage or a version mismatch fails startup; the v1 recovery path is
+to remove the peer cache and hydrate it again from configured bootstrap peers.
+Secret policies must allow
+`p2p.identity.certificate` and `p2p.identity.private-key` respectively.
+`allow-insecure-test-mode` is for local tests only. Programmatic low-level node
+construction may still provide identity material directly.
+
+Plugin 2.0 removes inline certificate and private-key PEM configuration. Migrate
+each value into Crypto Secrets and replace it with `certificate-secret` or
+`private-key-secret`. This is an intentional plugin configuration break; the
+low-level `forge_net_p2p` identity options remain source-compatible.
 
 ## Dependencies
 
@@ -96,6 +134,8 @@ provide real identity material or an explicitly configured peer identity.
 - `forge_api_transport`
 - `forge_config_core`
 - `forge_schema`
+- `forge_plugins_db_store`
+- `forge_plugins_crypto_secrets`
 
 ## Examples
 
@@ -124,6 +164,8 @@ class catalog_p2p_plugin final : public forge::app::plugin {
 ```
 
 ```cpp
+registry.register_plugin(forge::plugins::db::store::descriptor());
+registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 registry.register_plugin(forge::plugins::p2p::node::descriptor());
 ```
 
@@ -134,6 +176,9 @@ registry.register_plugin(forge::plugins::p2p::node::descriptor());
 - Peer identity, protocol negotiation and session mechanics stay in
   `forge_net_p2p`; application plugins use typed contribution APIs.
 - Insecure test mode and generated identity material are local-test-only.
+- Durable peer history supplies startup candidates, not trusted live routes;
+  Kademlia server admission still requires verified Identify or a successful
+  DHT exchange.
 
 ## Common Mistakes
 

@@ -25,7 +25,7 @@
 #include <utility>
 #include <vector>
 
-#include "p2p_identity.hpp"
+#include "secrets_fixture.hxx"
 
 import forge.api.core.binding;
 import forge.api.core.exceptions;
@@ -71,6 +71,8 @@ import forge.net.http.server;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.identity;
 import forge.net.p2p.protocol;
+import forge.plugins.crypto.secrets.api;
+import forge.plugins.crypto.secrets.types;
 import forge.plugins.p2p.node.api;
 import forge.plugins.p2p.node.plugin;
 import forge.plugins.p2p.resolver.api;
@@ -81,6 +83,96 @@ namespace {
 
 namespace chain_api = forge::chain::api;
 namespace protocol = forge::chain::protocol;
+namespace crypto_secrets = forge::plugins::crypto::secrets;
+
+class p2p_dependency : public forge::app::plugin {
+ public:
+   explicit p2p_dependency(std::string id) : id_{std::move(id)} {}
+
+   [[nodiscard]] forge::app::plugin_id id() const override {
+      return forge::app::plugin_id{.value = id_};
+   }
+
+   [[nodiscard]] std::string version() const override {
+      return "test";
+   }
+
+   boost::asio::awaitable<void> initialize(forge::app::plugin_context&) override {
+      co_return;
+   }
+
+   boost::asio::awaitable<void> startup() override {
+      co_return;
+   }
+
+   boost::asio::awaitable<void> shutdown() override {
+      co_return;
+   }
+
+ private:
+   std::string id_;
+};
+
+class p2p_secrets_api final : public crypto_secrets::api {
+ public:
+   boost::asio::awaitable<crypto_secrets::snapshot> status(crypto_secrets::query) override {
+      co_return crypto_secrets::snapshot{.configured_secrets = 2};
+   }
+
+   boost::asio::awaitable<crypto_secrets::get_result> get_bytes(crypto_secrets::get_request request) override {
+      const auto* material = request.secret_id == "p2p/test-certificate"   ? &chain_api_test::certificate
+                             : request.secret_id == "p2p/test-private-key" ? &chain_api_test::private_key
+                                                                           : nullptr;
+      if (material == nullptr) {
+         throw std::runtime_error{"unknown P2P package-test secret"};
+      }
+      auto bytes = decltype(crypto_secrets::get_result{}.bytes){};
+      bytes.reserve(material->size());
+      for (const auto value : *material) {
+         bytes.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(value)));
+      }
+      co_return crypto_secrets::get_result{.secret_id = std::move(request.secret_id), .bytes = std::move(bytes)};
+   }
+
+   boost::asio::awaitable<crypto_secrets::derive_result> derive_hkdf_sha256(crypto_secrets::derive_request) override {
+      throw std::logic_error{"P2P package-test secrets do not implement derivation"};
+      co_return crypto_secrets::derive_result{};
+   }
+
+   boost::asio::awaitable<crypto_secrets::aead_encrypt_result>
+   encrypt_aes_gcm(crypto_secrets::aead_encrypt_request) override {
+      throw std::logic_error{"P2P package-test secrets do not implement encryption"};
+      co_return crypto_secrets::aead_encrypt_result{};
+   }
+
+   boost::asio::awaitable<crypto_secrets::aead_decrypt_result>
+   decrypt_aes_gcm(crypto_secrets::aead_decrypt_request) override {
+      throw std::logic_error{"P2P package-test secrets do not implement decryption"};
+      co_return crypto_secrets::aead_decrypt_result{};
+   }
+};
+
+class p2p_secrets_plugin final : public p2p_dependency {
+ public:
+   p2p_secrets_plugin() : p2p_dependency{"forge.plugins.crypto.secrets"} {}
+
+   boost::asio::awaitable<void> provide(forge::api::core::provider& provider) override {
+      provider.install<crypto_secrets::api>(std::make_shared<p2p_secrets_api>());
+      co_return;
+   }
+};
+
+void register_p2p_stack(forge::app::plugin_registry& registry) {
+   registry.register_plugin(forge::app::plugin_descriptor{
+       .id = forge::app::plugin_id{.value = "forge.plugins.db.store"},
+       .factory = [] { return std::make_unique<p2p_dependency>("forge.plugins.db.store"); },
+   });
+   registry.register_plugin(forge::app::plugin_descriptor{
+       .id = forge::app::plugin_id{.value = "forge.plugins.crypto.secrets"},
+       .factory = [] { return std::make_unique<p2p_secrets_plugin>(); },
+   });
+   registry.register_plugin(forge::plugins::p2p::node::descriptor());
+}
 
 class accepting_finality final : public chain_api::finality_verifier {
  public:
@@ -867,7 +959,7 @@ class p2p_server_application final : public forge::app::application_shell {
 
  protected:
    void on_register_plugins(forge::app::plugin_registry& registry) override {
-      registry.register_plugin(forge::plugins::p2p::node::descriptor());
+      register_p2p_stack(registry);
       registry.register_plugin(forge::plugins::p2p::resolver::descriptor());
       registry.register_plugin(forge::app::plugin_descriptor{
           .id = forge::app::plugin_id{.value = "chain-api-publisher"},
@@ -899,7 +991,7 @@ class p2p_server_application final : public forge::app::application_shell {
 class p2p_client_application final : public forge::app::application_shell {
  protected:
    void on_register_plugins(forge::app::plugin_registry& registry) override {
-      registry.register_plugin(forge::plugins::p2p::node::descriptor());
+      register_p2p_stack(registry);
       registry.register_plugin(forge::plugins::p2p::resolver::descriptor());
    }
 };
@@ -912,8 +1004,8 @@ forge::net::p2p::peer_id test_peer(std::uint8_t seed) {
 forge::config::core::document p2p_config(const forge::net::p2p::peer_id& peer) {
    auto config = forge::config::core::document{};
    config.set("plugins.p2p.node.allow-insecure-test-mode", true);
-   config.set("plugins.p2p.node.certificate-pem", std::string{chain_api_test::certificate});
-   config.set("plugins.p2p.node.private-key-pem", std::string{chain_api_test::private_key});
+   config.set("plugins.p2p.node.identity.certificate-secret", "p2p/test-certificate");
+   config.set("plugins.p2p.node.identity.private-key-secret", "p2p/test-private-key");
    config.set("plugins.p2p.node.peer-id", peer.to_string());
    return config;
 }

@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 
 import forge.crypto.symmetric.aes;
 import forge.crypto.symmetric.kdf;
@@ -38,14 +39,24 @@ BOOST_AUTO_TEST_CASE(random_bytes_and_key_have_requested_sizes) try {
 }
 FORGE_LOG_AND_RETHROW();
 
+BOOST_AUTO_TEST_CASE(aes_key_move_clears_source_material) try {
+   auto source = forge::crypto::symmetric::aes::generate_aes256_key();
+   const auto expected = source.bytes;
+   auto destination = std::move(source);
+
+   BOOST_CHECK_EQUAL_COLLECTIONS(destination.bytes.begin(), destination.bytes.end(), expected.begin(), expected.end());
+   BOOST_CHECK(std::ranges::all_of(source.bytes, [](std::uint8_t value) { return value == 0U; }));
+}
+FORGE_LOG_AND_RETHROW();
+
 BOOST_AUTO_TEST_CASE(hkdf_sha256_derives_requested_material) try {
-   const auto material = forge::crypto::symmetric::kdf::derive_hkdf_sha256(
-      forge::crypto::symmetric::kdf::hkdf_sha256_request{
-       .secret = {'s', 'e', 'c', 'r', 'e', 't'},
-       .salt = {'s', 'a', 'l', 't'},
-       .info = {'i', 'n', 'f', 'o'},
-       .output_size = 48,
-   });
+   const auto material =
+       forge::crypto::symmetric::kdf::derive_hkdf_sha256(forge::crypto::symmetric::kdf::hkdf_sha256_request{
+           .secret = {'s', 'e', 'c', 'r', 'e', 't'},
+           .salt = {'s', 'a', 'l', 't'},
+           .info = {'i', 'n', 'f', 'o'},
+           .output_size = 48,
+       });
 
    BOOST_CHECK_EQUAL(material.size(), 48U);
 }
@@ -55,38 +66,53 @@ BOOST_AUTO_TEST_CASE(hkdf_sha256_accepts_secret_span_without_owning_copy) try {
    auto secret = forge::crypto::core::secret_bytes{forge::crypto::core::bytes{'s', 'e', 'c', 'r', 'e', 't'}};
    const auto salt = forge::crypto::core::bytes{'s', 'a', 'l', 't'};
    const auto info = forge::crypto::core::bytes{'i', 'n', 'f', 'o'};
-   const auto owned = forge::crypto::symmetric::kdf::derive_hkdf_sha256(
-      forge::crypto::symmetric::kdf::hkdf_sha256_request{
-       .secret = {'s', 'e', 'c', 'r', 'e', 't'},
-       .salt = salt,
-       .info = info,
-       .output_size = 48,
-   });
-   const auto from_span = forge::crypto::symmetric::kdf::derive_hkdf_sha256(
-      forge::crypto::symmetric::kdf::hkdf_sha256_span_request{
-       .secret = secret.span(),
-       .salt = salt,
-       .info = info,
-       .output_size = 48,
-   });
+   const auto owned =
+       forge::crypto::symmetric::kdf::derive_hkdf_sha256(forge::crypto::symmetric::kdf::hkdf_sha256_request{
+           .secret = {'s', 'e', 'c', 'r', 'e', 't'},
+           .salt = salt,
+           .info = info,
+           .output_size = 48,
+       });
+   const auto from_span =
+       forge::crypto::symmetric::kdf::derive_hkdf_sha256(forge::crypto::symmetric::kdf::hkdf_sha256_span_request{
+           .secret = secret.span(),
+           .salt = salt,
+           .info = info,
+           .output_size = 48,
+       });
 
    BOOST_CHECK_EQUAL_COLLECTIONS(from_span.begin(), from_span.end(), owned.begin(), owned.end());
 }
 FORGE_LOG_AND_RETHROW();
 
 BOOST_AUTO_TEST_CASE(scrypt_derives_requested_material) try {
-   const auto material = forge::crypto::symmetric::kdf::derive_scrypt(
-      forge::crypto::symmetric::kdf::scrypt_request{
+   const auto salt = forge::crypto::core::bytes{'s', 'a', 'l', 't'};
+   const auto material = forge::crypto::symmetric::kdf::derive_scrypt(forge::crypto::symmetric::kdf::scrypt_request{
        .password = "correct horse battery staple",
-       .salt = {'s', 'a', 'l', 't'},
+       .salt = salt,
        .n = 1024,
        .r = 8,
        .p = 1,
        .max_memory_bytes = 8ULL * 1024ULL * 1024ULL,
        .output_size = 32,
    });
+   auto password = forge::crypto::core::secret_bytes{
+       forge::crypto::core::bytes{'c', 'o', 'r', 'r', 'e', 'c', 't', ' ', 'h', 'o', 'r', 's', 'e', ' ',
+                                  'b', 'a', 't', 't', 'e', 'r', 'y', ' ', 's', 't', 'a', 'p', 'l', 'e'},
+   };
+   const auto from_span =
+       forge::crypto::symmetric::kdf::derive_scrypt(forge::crypto::symmetric::kdf::scrypt_span_request{
+           .password = password.span(),
+           .salt = salt,
+           .n = 1024,
+           .r = 8,
+           .p = 1,
+           .max_memory_bytes = 8ULL * 1024ULL * 1024ULL,
+           .output_size = 32,
+       });
 
    BOOST_CHECK_EQUAL(material.size(), 32U);
+   BOOST_CHECK_EQUAL_COLLECTIONS(from_span.begin(), from_span.end(), material.begin(), material.end());
 }
 FORGE_LOG_AND_RETHROW();
 
@@ -115,23 +141,25 @@ BOOST_AUTO_TEST_CASE(aes256_gcm_roundtrips_with_aad) try {
    auto key = forge::crypto::symmetric::aes::aes256_key{};
    std::fill(key.bytes.begin(), key.bytes.end(), std::uint8_t{0x42});
 
-   auto encrypted = forge::crypto::symmetric::aes::encrypt_aes256_gcm(forge::crypto::symmetric::aes::aes256_gcm_encrypt_request{
-       .key = key,
-       .nonce = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
-       .plaintext = {'p', 'a', 'y', 'l', 'o', 'a', 'd'},
-       .aad = {'m', 'e', 't', 'a'},
-   });
+   auto encrypted =
+       forge::crypto::symmetric::aes::encrypt_aes256_gcm(forge::crypto::symmetric::aes::aes256_gcm_encrypt_request{
+           .key = key,
+           .nonce = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
+           .plaintext = {'p', 'a', 'y', 'l', 'o', 'a', 'd'},
+           .aad = {'m', 'e', 't', 'a'},
+       });
 
    BOOST_CHECK_EQUAL(encrypted.nonce.size(), forge::crypto::symmetric::aes::aes_gcm_nonce_size);
    BOOST_CHECK_EQUAL(encrypted.tag.size(), forge::crypto::symmetric::aes::aes_gcm_tag_size);
    const auto expected = forge::crypto::core::bytes{'p', 'a', 'y', 'l', 'o', 'a', 'd'};
    BOOST_CHECK(encrypted.ciphertext != expected);
 
-   const auto plaintext = forge::crypto::symmetric::aes::decrypt_aes256_gcm(forge::crypto::symmetric::aes::aes256_gcm_decrypt_request{
-       .key = key,
-       .encrypted = encrypted,
-       .aad = {'m', 'e', 't', 'a'},
-   });
+   const auto plaintext =
+       forge::crypto::symmetric::aes::decrypt_aes256_gcm(forge::crypto::symmetric::aes::aes256_gcm_decrypt_request{
+           .key = key,
+           .encrypted = encrypted,
+           .aad = {'m', 'e', 't', 'a'},
+       });
 
    BOOST_CHECK_EQUAL_COLLECTIONS(plaintext.begin(), plaintext.end(), expected.begin(), expected.end());
 }
@@ -139,12 +167,13 @@ FORGE_LOG_AND_RETHROW();
 
 BOOST_AUTO_TEST_CASE(aes256_gcm_rejects_bad_tag) try {
    const auto key = forge::crypto::symmetric::aes::generate_aes256_key();
-   auto encrypted = forge::crypto::symmetric::aes::encrypt_aes256_gcm(forge::crypto::symmetric::aes::aes256_gcm_encrypt_request{
-       .key = key,
-       .nonce = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
-       .plaintext = {'p', 'a', 'y', 'l', 'o', 'a', 'd'},
-       .aad = {'m', 'e', 't', 'a'},
-   });
+   auto encrypted =
+       forge::crypto::symmetric::aes::encrypt_aes256_gcm(forge::crypto::symmetric::aes::aes256_gcm_encrypt_request{
+           .key = key,
+           .nonce = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
+           .plaintext = {'p', 'a', 'y', 'l', 'o', 'a', 'd'},
+           .aad = {'m', 'e', 't', 'a'},
+       });
 
    encrypted.tag.front() ^= std::uint8_t{0x01};
 
@@ -158,8 +187,8 @@ BOOST_AUTO_TEST_CASE(aes256_gcm_rejects_bad_tag) try {
 
    BOOST_CHECK_EXCEPTION(decrypt_with_bad_tag(), forge::crypto::symmetric::aes::exceptions::authentication_failed,
                          [](const forge::crypto::symmetric::aes::exceptions::authentication_failed& error) {
-      return error.code().category().name() == std::string_view{"forge.crypto.symmetric.aes"};
-   });
+                            return error.code().category().name() == std::string_view{"forge.crypto.symmetric.aes"};
+                         });
 }
 FORGE_LOG_AND_RETHROW();
 
@@ -170,15 +199,16 @@ BOOST_AUTO_TEST_CASE(aes256_gcm_streaming_encoder_matches_one_shot_chunks) try {
    const auto plaintext = forge::crypto::core::bytes{'s', 't', 'r', 'e', 'a', 'm', 'i', 'n', 'g'};
 
    auto streaming_ciphertext = forge::crypto::core::bytes{};
-   auto encoder = forge::crypto::symmetric::aes::aes256_gcm_encoder{forge::crypto::symmetric::aes::aes256_gcm_encoder_options{
-       .key = key,
-       .nonce = nonce,
-       .aad = aad,
-       .ciphertext_sink =
-           [&](std::span<const std::uint8_t> chunk) {
-              streaming_ciphertext.insert(streaming_ciphertext.end(), chunk.begin(), chunk.end());
-           },
-   }};
+   auto encoder =
+       forge::crypto::symmetric::aes::aes256_gcm_encoder{forge::crypto::symmetric::aes::aes256_gcm_encoder_options{
+           .key = key,
+           .nonce = nonce,
+           .aad = aad,
+           .ciphertext_sink =
+               [&](std::span<const std::uint8_t> chunk) {
+                  streaming_ciphertext.insert(streaming_ciphertext.end(), chunk.begin(), chunk.end());
+               },
+       }};
 
    encoder.write(std::span<const std::uint8_t>{plaintext.data(), 3});
    encoder.write(std::span<const std::uint8_t>{plaintext.data() + 3, plaintext.size() - 3});
@@ -205,15 +235,16 @@ BOOST_AUTO_TEST_CASE(aes256_gcm_streaming_encoder_accepts_raw_pack) try {
    const auto value = encrypted_record{.id = 42, .name = "packed"};
 
    auto streaming_ciphertext = forge::crypto::core::bytes{};
-   auto encoder = forge::crypto::symmetric::aes::aes256_gcm_encoder{forge::crypto::symmetric::aes::aes256_gcm_encoder_options{
-       .key = key,
-       .nonce = nonce,
-       .aad = aad,
-       .ciphertext_sink =
-           [&](std::span<const std::uint8_t> chunk) {
-              streaming_ciphertext.insert(streaming_ciphertext.end(), chunk.begin(), chunk.end());
-           },
-   }};
+   auto encoder =
+       forge::crypto::symmetric::aes::aes256_gcm_encoder{forge::crypto::symmetric::aes::aes256_gcm_encoder_options{
+           .key = key,
+           .nonce = nonce,
+           .aad = aad,
+           .ciphertext_sink =
+               [&](std::span<const std::uint8_t> chunk) {
+                  streaming_ciphertext.insert(streaming_ciphertext.end(), chunk.begin(), chunk.end());
+               },
+       }};
 
    forge::raw::pack(encoder, value);
    const auto streaming_auth = encoder.finalize();
@@ -245,16 +276,17 @@ BOOST_AUTO_TEST_CASE(aes256_gcm_streaming_decoder_emits_provisional_plaintext_un
    });
 
    auto provisional = forge::crypto::core::bytes{};
-   auto decoder = forge::crypto::symmetric::aes::aes256_gcm_decoder{forge::crypto::symmetric::aes::aes256_gcm_decoder_options{
-       .key = key,
-       .nonce = encrypted.nonce,
-       .tag = encrypted.tag,
-       .aad = aad,
-       .plaintext_sink =
-           [&](std::span<const std::uint8_t> chunk) {
-              provisional.insert(provisional.end(), chunk.begin(), chunk.end());
-           },
-   }};
+   auto decoder =
+       forge::crypto::symmetric::aes::aes256_gcm_decoder{forge::crypto::symmetric::aes::aes256_gcm_decoder_options{
+           .key = key,
+           .nonce = encrypted.nonce,
+           .tag = encrypted.tag,
+           .aad = aad,
+           .plaintext_sink =
+               [&](std::span<const std::uint8_t> chunk) {
+                  provisional.insert(provisional.end(), chunk.begin(), chunk.end());
+               },
+       }};
 
    decoder.write(std::span<const std::uint8_t>{encrypted.ciphertext.data(), 4});
    BOOST_CHECK(!provisional.empty());
@@ -269,20 +301,22 @@ BOOST_AUTO_TEST_CASE(aes256_cbc_roundtrips_compatibility_payload) try {
    auto key = forge::crypto::symmetric::aes::aes256_key{};
    std::fill(key.bytes.begin(), key.bytes.end(), std::uint8_t{0x24});
 
-   auto encrypted = forge::crypto::symmetric::aes::encrypt_aes256_cbc(forge::crypto::symmetric::aes::aes256_cbc_encrypt_request{
-       .key = key,
-       .iv = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
-       .plaintext = {'c', 'o', 'm', 'p', 'a', 't'},
-   });
+   auto encrypted =
+       forge::crypto::symmetric::aes::encrypt_aes256_cbc(forge::crypto::symmetric::aes::aes256_cbc_encrypt_request{
+           .key = key,
+           .iv = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
+           .plaintext = {'c', 'o', 'm', 'p', 'a', 't'},
+       });
 
    BOOST_CHECK_EQUAL(encrypted.iv.size(), forge::crypto::symmetric::aes::aes_cbc_iv_size);
    const auto expected = forge::crypto::core::bytes{'c', 'o', 'm', 'p', 'a', 't'};
    BOOST_CHECK(encrypted.ciphertext != expected);
 
-   const auto plaintext = forge::crypto::symmetric::aes::decrypt_aes256_cbc(forge::crypto::symmetric::aes::aes256_cbc_decrypt_request{
-       .key = key,
-       .encrypted = encrypted,
-   });
+   const auto plaintext =
+       forge::crypto::symmetric::aes::decrypt_aes256_cbc(forge::crypto::symmetric::aes::aes256_cbc_decrypt_request{
+           .key = key,
+           .encrypted = encrypted,
+       });
 
    BOOST_CHECK_EQUAL_COLLECTIONS(plaintext.begin(), plaintext.end(), expected.begin(), expected.end());
 }

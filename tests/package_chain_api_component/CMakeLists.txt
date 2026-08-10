@@ -19,6 +19,7 @@ find_package(
       crypto_digest
       net_http
       net_p2p
+      plugins_crypto_secrets
       plugins_p2p_node
       plugins_p2p_resolver
 )
@@ -37,6 +38,7 @@ target_link_libraries(
       Forge::forge_crypto_digest
       Forge::forge_net_http
       Forge::forge_net_p2p
+      Forge::forge_plugins_crypto_secrets
       Forge::forge_plugins_p2p_node
       Forge::forge_plugins_p2p_resolver
 )

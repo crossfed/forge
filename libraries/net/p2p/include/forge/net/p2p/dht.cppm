@@ -49,6 +49,8 @@ struct dht {
       std::size_t max_record_size = 1024 * 1024;
       std::size_t max_closer_peers = 20;
       std::size_t max_provider_peers = 20;
+      std::size_t replacement_cache_size = 20;
+      std::size_t failure_threshold = 3;
       std::chrono::milliseconds query_timeout{10'000};
       std::chrono::milliseconds refresh_interval{600'000};
       std::chrono::seconds provider_record_ttl{172'800};
@@ -99,6 +101,18 @@ struct dht {
       bool complete = false;
    };
 
+   enum class routing_admission : std::uint8_t {
+      candidate,
+      verified_server,
+   };
+
+   struct routing_status {
+      std::size_t active = 0;
+      std::size_t replacements = 0;
+      std::size_t candidates = 0;
+      std::size_t nonempty_buckets = 0;
+   };
+
    class routing_table;
 
    struct codec {
@@ -120,10 +134,12 @@ class dht::routing_table {
    routing_table(routing_table&&) noexcept;
    routing_table& operator=(routing_table&&) noexcept;
 
-   void upsert(peer value);
+   void upsert(peer value, routing_admission admission = routing_admission::verified_server);
    void mark_failure(const peer_id& peer);
    [[nodiscard]] std::vector<peer> closest(std::span<const std::uint8_t> target, std::size_t limit) const;
+   [[nodiscard]] std::vector<peer> query_seeds(std::span<const std::uint8_t> target, std::size_t limit) const;
    [[nodiscard]] std::vector<peer> snapshot() const;
+   [[nodiscard]] routing_status status() const;
 
  private:
    struct impl;

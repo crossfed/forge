@@ -39,6 +39,8 @@
 #include <variant>
 #include <vector>
 
+#include "../quic_p2p/libp2p_identity_fixture.hxx"
+
 import forge.api.core.exceptions;
 import forge.api.core.types;
 import forge.api.core.descriptor;
@@ -122,6 +124,8 @@ import forge.plugins.crypto.signer.exceptions;
 import forge.plugins.crypto.signer.api;
 import forge.plugins.crypto.signer.bls_api;
 import forge.plugins.crypto.signer.plugin;
+import forge.plugins.crypto.secrets.types;
+import forge.plugins.crypto.secrets.api;
 import forge.plugins.p2p.diagnostics.types;
 import forge.plugins.p2p.diagnostics.exceptions;
 import forge.plugins.p2p.diagnostics.api;
@@ -318,62 +322,12 @@ using plugin_test_contract::http_stream_api;
 using plugin_test_contract::http_empty_api;
 
 namespace crypto_signer = forge::plugins::crypto::signer;
+namespace crypto_secrets = forge::plugins::crypto::secrets;
 namespace http_server = forge::plugins::http::server;
 
 struct plugin_log {
    std::vector<std::string> entries;
 };
-
-std::string_view test_certificate() {
-   return "-----BEGIN CERTIFICATE-----\n"
-          "MIICpDCCAYwCCQCJjaEDxrQqBzANBgkqhkiG9w0BAQsFADAUMRIwEAYDVQQDDAkx\n"
-          "MjcuMC4wLjEwHhcNMjYwNDI5MDgwMTMzWhcNMjYwNDMwMDgwMTMzWjAUMRIwEAYD\n"
-          "VQQDDAkxMjcuMC4wLjEwggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQDy\n"
-          "sbPH/R4QUz725sY376knXjSDCA+O5+Udwqfl4qaXHTAooWfplVY/WFRCnnMV6+TX\n"
-          "gl9tHkNpKmI92s4O/LuJ5xnCCPX8k5i70gSnaGpClYSx+0gix8QgddDDsbLbIU/+\n"
-          "x7MRWXfKYd/ArGNelPMadlvmcoEhumVUAwjYSV26GhNAmUacJlho3ltyujYSGFOS\n"
-          "lI/lDqIjZxo7jbAGMMpiyu1omQ5nxjTm+bfOTcksBRMQP8mDz0vYXHXirA+xDfuv\n"
-          "M+mTj6eO4UQ42w+iVLqhSPEhfLURmR4NULtPmq9hT7d1wS/Ys9q4Hj/j+kcXRCXj\n"
-          "nPOZzBinLRTDnE59HbDZAgMBAAEwDQYJKoZIhvcNAQELBQADggEBAHSOUQTEDgjC\n"
-          "uwza9ayfThJTs43j+TziWHLlowqCiHt/ipRNFEW7L0ibTnbMdQBFGfaLkTAhc5Rd\n"
-          "6O6x+9o76pgEYxEg0rDkgNXmprNmS+nL7Are+iiF6R+X8dts3MQgtONPApAXE96P\n"
-          "/n5K4GDQTd3WCI37hkmJA6rmwziFDTlwqtKWts39g8PqAbXac27rVR/iD0gWdOws\n"
-          "qiaoGj/0WW9qcgjYGdCc0/CbbnyiWbi48VVf0yyfm7wgcz90byaKIQchHdb/qjyU\n"
-          "wy7nfU5TJ5MKQ5yeqPTWmPYZZp9TKa5VD6wZD/IH7jH3GdJ/fSyroVLZktVnmxJa\n"
-          "dmG/9wwivwQ=\n"
-          "-----END CERTIFICATE-----\n";
-}
-
-std::string_view test_private_key() {
-   return "-----BEGIN PRIVATE KEY-----\n"
-          "MIIEvwIBADANBgkqhkiG9w0BAQEFAASCBKkwggSlAgEAAoIBAQDysbPH/R4QUz72\n"
-          "5sY376knXjSDCA+O5+Udwqfl4qaXHTAooWfplVY/WFRCnnMV6+TXgl9tHkNpKmI9\n"
-          "2s4O/LuJ5xnCCPX8k5i70gSnaGpClYSx+0gix8QgddDDsbLbIU/+x7MRWXfKYd/A\n"
-          "rGNelPMadlvmcoEhumVUAwjYSV26GhNAmUacJlho3ltyujYSGFOSlI/lDqIjZxo7\n"
-          "jbAGMMpiyu1omQ5nxjTm+bfOTcksBRMQP8mDz0vYXHXirA+xDfuvM+mTj6eO4UQ4\n"
-          "2w+iVLqhSPEhfLURmR4NULtPmq9hT7d1wS/Ys9q4Hj/j+kcXRCXjnPOZzBinLRTD\n"
-          "nE59HbDZAgMBAAECggEBAIWVjHhy+V5RA+JRCh/12ayirNLG2BF30OP9pf7iL4IT\n"
-          "/dMPbKvkmDGLw+1bW8tgKXj5+N6N/trfCm4zhqI3OF7ihooH9qYM88/F/OvMjFiU\n"
-          "BhMVVhJW1LxtPPjKUcFN58M8VnMhRM9v6gIaoSOJZvpU1abVtgBDocyJUxAB6gYp\n"
-          "i7MzoRwHGsL5mW/luE5H92/S8NNwLWBDA7DIGfrTZ6POf92h5I5W3CuTcqR5FICz\n"
-          "3pfU3i443yZmsmkc9duH2gZ9cb9j4pRtNLbbsGmRVrBlgnkVFk8JWbikc8MpLeKO\n"
-          "VKP7A2NvxJIrc7oFYrf4hbw8P70YL7S9B3W3yBPPzJECgYEA+Y3nG8CtvVTE/Keo\n"
-          "qb5Rljlnj9DEffrylLyYUYfSSNR4Olc2WCPBiz0rPCDdO0VGeXAwqLf2VP7IEyAx\n"
-          "kvrnqhzHWMhiLv+k4tIVyKCwpuofN0JsoUCi7CwRf+H2Pg+t6ewLV116THKsd41H\n"
-          "IRElWyEvZsmbbhlLrsxUtfFZWnUCgYEA+PZwXUn+cb8kRmfG959gMawTtcfvnBUX\n"
-          "sIn7LQl/ZWUIiLMWCaS3FbqkiGjaEYo6om1invYNJNA9zp/ECauSDp58NICCL0ie\n"
-          "L7z26sEa6Ocg2VdR4ezpN3cM6dyAKfTFGb9V6qjyqNIPCE4eey6ZJ+CU/mpEfSDu\n"
-          "+RGMzfdDCFUCgYEA5FRUn0zk6jU0YyMXq+9pgLSXL7vI/Kdt6m7AQuCto1tbga2o\n"
-          "GG7mt/pIo6RCJufUemoO62AeL1hKQU2UbjHJYxkfv/jf9LaM68dijQWRe7b8xres\n"
-          "4sFcEBCmFkbt4YzBCCWjntT1gBrv+Ba4fOXOMxoi374Yy1yzpYRpAWuI4L0CgYAn\n"
-          "u1SlXrivuHx2i/tR62pzou2mVhkkRK16LBsczeY57UzWXBZJRbM+UYIOjwU2RWQk\n"
-          "JebWTZg9ZspmXlLv5CS0FpDl5BhiqWktXy/cuSKtRq2UYf4cWy3A/0vdSqZdi8Wk\n"
-          "3Uc94uaPEK77eVQd/orMtWexzo3NlmLs9uMMv8g/3QKBgQCbik0UoJkkqNRMmWG8\n"
-          "dKQzj58eRI8fmKdJlWNfj2QMspd2vXMbsWYgAbFbU1QcVs1n8PxNydM+cfy77w8q\n"
-          "NWMlYP7rUFQ3ekYWqrRlshZdJ/h24PALd1nPCvhc4C9dvn+zW3BLVez1lBuFO8n8\n"
-          "0YkgmTgW7Ieibqnf4DqYp//nkw==\n"
-          "-----END PRIVATE KEY-----\n";
-}
 
 [[nodiscard]] forge::net::p2p::peer_id test_peer(std::uint8_t seed) {
    return forge::net::p2p::make_peer_id(
@@ -383,12 +337,109 @@ std::string_view test_private_key() {
 [[nodiscard]] forge::config::core::document test_p2p_config(std::optional<forge::net::p2p::peer_id> peer = std::nullopt) {
    auto document = forge::config::core::document{};
    document.set("plugins.p2p.node.allow-insecure-test-mode", true);
-   document.set("plugins.p2p.node.certificate-pem", std::string{test_certificate()});
-   document.set("plugins.p2p.node.private-key-pem", std::string{test_private_key()});
-   if (peer.has_value()) {
+   document.set("plugins.p2p.node.identity.certificate-secret", "p2p/test-certificate");
+   document.set("plugins.p2p.node.identity.private-key-secret", "p2p/test-private-key");
+   if (peer) {
       document.set("plugins.p2p.node.peer-id", peer->to_string());
    }
    return document;
+}
+
+class p2p_test_dependency_plugin : public forge::app::plugin {
+ public:
+   explicit p2p_test_dependency_plugin(std::string id) : id_{std::move(id)} {}
+
+   [[nodiscard]] forge::app::plugin_id id() const override {
+      return forge::app::plugin_id{.value = id_};
+   }
+
+   [[nodiscard]] std::string version() const override {
+      return "test";
+   }
+
+   boost::asio::awaitable<void> initialize(forge::app::plugin_context&) override {
+      co_return;
+   }
+
+   boost::asio::awaitable<void> startup() override {
+      co_return;
+   }
+
+   boost::asio::awaitable<void> shutdown() override {
+      co_return;
+   }
+
+ private:
+   std::string id_;
+};
+
+class p2p_test_secrets_api final : public crypto_secrets::api {
+ public:
+   boost::asio::awaitable<crypto_secrets::snapshot> status(crypto_secrets::query) override {
+      co_return crypto_secrets::snapshot{.configured_secrets = 2};
+   }
+
+   boost::asio::awaitable<crypto_secrets::get_result> get_bytes(crypto_secrets::get_request request) override {
+      const auto& identity = fixture();
+      const auto* material = request.secret_id == "p2p/test-certificate"
+                                ? &identity.certificate_pem
+                                : request.secret_id == "p2p/test-private-key" ? &identity.private_key_pem : nullptr;
+      if (material == nullptr) {
+         throw std::runtime_error{"unknown P2P test secret"};
+      }
+      auto bytes = decltype(crypto_secrets::get_result{}.bytes){};
+      bytes.reserve(material->size());
+      for (const auto value : *material) {
+         bytes.push_back(static_cast<std::uint8_t>(static_cast<unsigned char>(value)));
+      }
+      co_return crypto_secrets::get_result{.secret_id = std::move(request.secret_id), .bytes = std::move(bytes)};
+   }
+
+   boost::asio::awaitable<crypto_secrets::derive_result>
+   derive_hkdf_sha256(crypto_secrets::derive_request) override {
+      throw std::logic_error{"P2P test secrets do not implement derivation"};
+      co_return crypto_secrets::derive_result{};
+   }
+
+   boost::asio::awaitable<crypto_secrets::aead_encrypt_result>
+   encrypt_aes_gcm(crypto_secrets::aead_encrypt_request) override {
+      throw std::logic_error{"P2P test secrets do not implement encryption"};
+      co_return crypto_secrets::aead_encrypt_result{};
+   }
+
+   boost::asio::awaitable<crypto_secrets::aead_decrypt_result>
+   decrypt_aes_gcm(crypto_secrets::aead_decrypt_request) override {
+      throw std::logic_error{"P2P test secrets do not implement decryption"};
+      co_return crypto_secrets::aead_decrypt_result{};
+   }
+
+ private:
+   [[nodiscard]] static const forge::tests::p2p::identity_fixture& fixture() {
+      static const auto value = forge::tests::p2p::make_identity_fixture("p2p-plugin-suite");
+      return value;
+   }
+};
+
+class p2p_test_secrets_plugin final : public p2p_test_dependency_plugin {
+ public:
+   p2p_test_secrets_plugin() : p2p_test_dependency_plugin{"forge.plugins.crypto.secrets"} {}
+
+   boost::asio::awaitable<void> provide(forge::api::core::provider& provider) override {
+      provider.install<crypto_secrets::api>(std::make_shared<p2p_test_secrets_api>());
+      co_return;
+   }
+};
+
+void register_p2p_stack(forge::app::plugin_registry& registry) {
+   registry.register_plugin(forge::app::plugin_descriptor{
+       .id = forge::app::plugin_id{.value = "forge.plugins.db.store"},
+       .factory = [] { return std::make_unique<p2p_test_dependency_plugin>("forge.plugins.db.store"); },
+   });
+   registry.register_plugin(forge::app::plugin_descriptor{
+       .id = forge::app::plugin_id{.value = "forge.plugins.crypto.secrets"},
+       .factory = [] { return std::make_unique<p2p_test_secrets_plugin>(); },
+   });
+   registry.register_plugin(forge::plugins::p2p::node::descriptor());
 }
 
 class node_test_api_impl final : public node_test_api {
@@ -1272,7 +1323,7 @@ class resolver_protocol_conflict_plugin final : public forge::app::plugin {
       auto p2p = context.apis().get<forge::plugins::p2p::node::api>(
          {.id = {"forge.plugins.p2p.node"}, .major = 1, .min_revision = 0});
       p2p->publish_protocol(
-         forge::net::p2p::protocol_id{.value = "/forge/api/resolver/1"},
+         forge::net::p2p::protocol_id{.value = "/forge/api/resolver/2"},
          [](forge::net::p2p::node::incoming_protocol_stream) -> boost::asio::awaitable<void> {
             co_return;
          });
@@ -1306,7 +1357,7 @@ class scripted_resolver_plugin final : public forge::app::plugin {
                      .export_api<scripted_resolver_api>(
                         {.id = {"forge.plugins.p2p.resolver.protocol"}, .major = 1, .min_revision = 0})
                      .build();
-      p2p->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/forge/api/resolver/1"});
+      p2p->publish_api(std::move(plan), forge::net::p2p::protocol_id{.value = "/forge/api/resolver/2"});
       co_return;
    }
 
@@ -1325,7 +1376,7 @@ class p2p_plugin_application final : public forge::app::application_shell {
 
    protected:
    void on_register_plugins(forge::app::plugin_registry& registry) override {
-      registry.register_plugin(forge::plugins::p2p::node::descriptor());
+      register_p2p_stack(registry);
       registry.register_plugin(forge::app::plugin_descriptor{
          .id = forge::app::plugin_id{.value = "route-publisher"},
          .dependencies = {forge::app::plugin_id{.value = "forge.plugins.p2p.node"}},
@@ -1349,7 +1400,7 @@ class p2p_plugin_application final : public forge::app::application_shell {
 class duplicate_p2p_plugin_application final : public forge::app::application_shell {
    protected:
    void on_register_plugins(forge::app::plugin_registry& registry) override {
-      registry.register_plugin(forge::plugins::p2p::node::descriptor());
+      register_p2p_stack(registry);
       registry.register_plugin(forge::app::plugin_descriptor{
          .id = forge::app::plugin_id{.value = "duplicate-route"},
          .dependencies = {forge::app::plugin_id{.value = "forge.plugins.p2p.node"}},
@@ -1366,7 +1417,7 @@ class p2p_only_application final : public forge::app::application_shell {
 
  protected:
    void on_register_plugins(forge::app::plugin_registry& registry) override {
-      registry.register_plugin(forge::plugins::p2p::node::descriptor());
+      register_p2p_stack(registry);
    }
 };
 
@@ -1376,15 +1427,15 @@ class diagnostics_application final : public forge::app::application_shell {
 
  protected:
    void on_register_plugins(forge::app::plugin_registry& registry) override {
-      registry.register_plugin(forge::plugins::p2p::node::descriptor());
+      register_p2p_stack(registry);
       registry.register_plugin(forge::plugins::p2p::diagnostics::descriptor());
    }
 };
 
 class pubsub_application final : public forge::app::application_shell {
- protected:
+   protected:
    void on_register_plugins(forge::app::plugin_registry& registry) override {
-      registry.register_plugin(forge::plugins::p2p::node::descriptor());
+      register_p2p_stack(registry);
       registry.register_plugin(forge::plugins::p2p::pubsub::descriptor());
    }
 };
@@ -1416,7 +1467,7 @@ class resolver_plugin_application final : public forge::app::application_shell {
 
  protected:
    void on_register_plugins(forge::app::plugin_registry& registry) override {
-      registry.register_plugin(forge::plugins::p2p::node::descriptor());
+      register_p2p_stack(registry);
       registry.register_plugin(forge::plugins::p2p::resolver::descriptor());
       registry.register_plugin(forge::app::plugin_descriptor{
          .id = forge::app::plugin_id{.value = "resolver-route-publisher"},
@@ -1439,17 +1490,17 @@ class resolver_plugin_application final : public forge::app::application_shell {
 };
 
 class resolver_only_application final : public forge::app::application_shell {
- protected:
+   protected:
    void on_register_plugins(forge::app::plugin_registry& registry) override {
-      registry.register_plugin(forge::plugins::p2p::node::descriptor());
+      register_p2p_stack(registry);
       registry.register_plugin(forge::plugins::p2p::resolver::descriptor());
    }
 };
 
 class duplicate_resolver_plugin_application final : public forge::app::application_shell {
- protected:
+   protected:
    void on_register_plugins(forge::app::plugin_registry& registry) override {
-      registry.register_plugin(forge::plugins::p2p::node::descriptor());
+      register_p2p_stack(registry);
       registry.register_plugin(forge::plugins::p2p::resolver::descriptor());
       registry.register_plugin(forge::app::plugin_descriptor{
          .id = forge::app::plugin_id{.value = "duplicate-resolver-route"},
@@ -1469,9 +1520,9 @@ class duplicate_resolver_plugin_application final : public forge::app::applicati
 };
 
 class resolver_custom_transport_application final : public forge::app::application_shell {
- protected:
+   protected:
    void on_register_plugins(forge::app::plugin_registry& registry) override {
-      registry.register_plugin(forge::plugins::p2p::node::descriptor());
+      register_p2p_stack(registry);
       registry.register_plugin(forge::plugins::p2p::resolver::descriptor());
       registry.register_plugin(forge::app::plugin_descriptor{
          .id = forge::app::plugin_id{.value = "resolver-custom-transport-route"},
@@ -1496,7 +1547,7 @@ class receipt_resolver_application final : public forge::app::application_shell 
 
  protected:
    void on_register_plugins(forge::app::plugin_registry& registry) override {
-      registry.register_plugin(forge::plugins::p2p::node::descriptor());
+      register_p2p_stack(registry);
       registry.register_plugin(forge::plugins::p2p::resolver::descriptor());
       registry.register_plugin(forge::app::plugin_descriptor{
          .id = forge::app::plugin_id{.value = "receipt-route-publisher"},
@@ -1518,9 +1569,9 @@ class receipt_resolver_application final : public forge::app::application_shell 
 };
 
 class resolver_protocol_conflict_application final : public forge::app::application_shell {
- protected:
+   protected:
    void on_register_plugins(forge::app::plugin_registry& registry) override {
-      registry.register_plugin(forge::plugins::p2p::node::descriptor());
+      register_p2p_stack(registry);
       registry.register_plugin(forge::app::plugin_descriptor{
          .id = forge::app::plugin_id{.value = "resolver-protocol-conflict"},
          .dependencies = {forge::app::plugin_id{.value = "forge.plugins.p2p.node"}},
@@ -1538,7 +1589,7 @@ class scripted_resolver_application final : public forge::app::application_shell
 
  protected:
    void on_register_plugins(forge::app::plugin_registry& registry) override {
-      registry.register_plugin(forge::plugins::p2p::node::descriptor());
+      register_p2p_stack(registry);
       registry.register_plugin(forge::app::plugin_descriptor{
          .id = forge::app::plugin_id{.value = "scripted-resolver"},
          .dependencies = {forge::app::plugin_id{.value = "forge.plugins.p2p.node"}},
@@ -2714,8 +2765,19 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_config_is_described_from_public_schema) {
    BOOST_TEST(static_cast<int>(bootstrap.kind) == static_cast<int>(forge::schema::value_kind::string_list));
    BOOST_TEST(bootstrap.has_default);
 
-   const auto& private_key = require_field(*descriptor, "private-key-pem");
-   BOOST_TEST(private_key.secret);
+   const auto& peer_store = require_field(*descriptor, "peer-store.store");
+   BOOST_TEST(peer_store.has_default);
+   BOOST_TEST(std::get<std::string>(peer_store.default_value.storage).empty());
+
+   const auto& certificate_secret = require_field(*descriptor, "identity.certificate-secret");
+   BOOST_TEST(certificate_secret.has_default);
+   BOOST_TEST(std::get<std::string>(certificate_secret.default_value.storage).empty());
+
+   const auto& private_key_secret = require_field(*descriptor, "identity.private-key-secret");
+   BOOST_TEST(private_key_secret.has_default);
+   BOOST_TEST(std::get<std::string>(private_key_secret.default_value.storage).empty());
+   BOOST_TEST(!has_field(*descriptor, "certificate-pem"));
+   BOOST_TEST(!has_field(*descriptor, "private-key-pem"));
 
    const auto& max_inflight = require_field(*descriptor, "max-inflight-per-peer");
    BOOST_TEST(max_inflight.has_default);
@@ -2823,13 +2885,14 @@ BOOST_AUTO_TEST_CASE(p2p_node_plugin_listens_from_config_and_exposes_local_endpo
 }
 
 BOOST_AUTO_TEST_CASE(p2p_node_plugin_without_peer_id_does_not_inject_test_peer) {
-   auto config = test_p2p_config();
+   auto config = forge::config::core::document{};
+   config.set("plugins.p2p.node.allow-insecure-test-mode", true);
    config.set("plugins.p2p.node.listen", forge::config::core::value::array_type{forge::config::core::value{"/ip4/127.0.0.1/tcp/0"}});
 
    auto app = p2p_only_application{};
    app.configure(config);
    BOOST_CHECK_THROW(forge::asio::blocking::run(app.runtime(), app.startup()),
-                     forge::net::p2p::exceptions::invalid_identity);
+                     forge::net::p2p::exceptions::invalid_options);
 }
 
 BOOST_AUTO_TEST_CASE(p2p_node_plugin_opens_remote_api_over_p2p_stream) {
@@ -3831,7 +3894,7 @@ BOOST_AUTO_TEST_CASE(p2p_api_resolver_plugin_config_is_described_from_public_sch
 
    const auto& protocol = require_field(*descriptor, "protocol-id");
    BOOST_TEST(protocol.has_default);
-   BOOST_TEST(std::get<std::string>(protocol.default_value.storage) == "/forge/api/resolver/1");
+   BOOST_TEST(std::get<std::string>(protocol.default_value.storage) == "/forge/api/resolver/2");
 
    const auto& cache_ttl = require_field(*descriptor, "cache-ttl-ms");
    BOOST_TEST(cache_ttl.has_default);

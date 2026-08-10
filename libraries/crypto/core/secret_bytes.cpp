@@ -4,23 +4,30 @@ module;
 #include <cstdint>
 #include <openssl/crypto.h>
 #include <span>
+#include <string>
 #include <utility>
 
 module forge.crypto.core.secret_bytes;
 
 namespace forge::crypto::core {
 
-namespace {
-
-void wipe(bytes& value) noexcept {
+void secure_erase(std::span<std::uint8_t> value) noexcept {
    if (!value.empty()) {
       OPENSSL_cleanse(value.data(), value.size());
    }
+}
+
+void secure_erase(bytes& value) noexcept {
+   secure_erase(std::span<std::uint8_t>{value.data(), value.size()});
    value.clear();
    value.shrink_to_fit();
 }
 
-} // namespace
+void secure_erase(std::string& value) noexcept {
+   secure_erase(std::span<std::uint8_t>{reinterpret_cast<std::uint8_t*>(value.data()), value.size()});
+   value.clear();
+   value.shrink_to_fit();
+}
 
 secret_bytes::secret_bytes(bytes value) : value_{std::move(value)} {}
 
@@ -65,7 +72,7 @@ void secret_bytes::assign(bytes value) {
 }
 
 void secret_bytes::clear() noexcept {
-   wipe(value_);
+   secure_erase(value_);
 }
 
-} // namespace forge::crypto
+} // namespace forge::crypto::core

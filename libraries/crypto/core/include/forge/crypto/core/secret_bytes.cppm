@@ -3,6 +3,7 @@ module;
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <string>
 #include <vector>
 
 export module forge.crypto.core.secret_bytes;
@@ -10,6 +11,10 @@ export module forge.crypto.core.secret_bytes;
 import forge.crypto.core.types;
 
 export namespace forge::crypto::core {
+
+void secure_erase(bytes& value) noexcept;
+void secure_erase(std::string& value) noexcept;
+void secure_erase(std::span<std::uint8_t> value) noexcept;
 
 class secret_bytes {
  public:
@@ -36,4 +41,4 @@ class secret_bytes {
    bytes value_;
 };
 
-} // namespace forge::crypto
+} // namespace forge::crypto::core

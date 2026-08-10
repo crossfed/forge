@@ -21,11 +21,14 @@ import forge.net.p2p.diagnostics;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.identity;
 import forge.net.p2p.node;
+import forge.net.p2p.peer_store;
 import forge.net.p2p.protocol;
 import forge.net.p2p.pubsub;
 import forge.net.p2p.scoring;
 import forge.plugins.p2p.node.api;
 import forge.plugins.p2p.node.types;
+import forge.plugins.crypto.secrets.api;
+import forge.plugins.db.store.api;
 
 #include "details/plugin_impl.hxx"
 #include "details/diagnostics_source.hxx"

@@ -1,12 +1,12 @@
 add_subdirectory(crypto/signer)
 add_subdirectory(crypto/secrets)
+add_subdirectory(db/store)
 add_subdirectory(p2p/node)
 add_subdirectory(p2p/resolver)
 add_subdirectory(p2p/diagnostics)
 add_subdirectory(p2p/pubsub)
 add_subdirectory(http/server)
 add_subdirectory(log/otlp)
-add_subdirectory(db/store)
 
 add_library(forge_plugins INTERFACE)
 

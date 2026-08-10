@@ -6,9 +6,10 @@ transactions and blocks. It builds on `forge_chain_core` without adding
 controller, execution or node runtime behavior.
 
 The flat `forge.chain.protocol.audit`, `info`, `block_query`, `state_query`,
-`transaction_query` and `admin` modules own the transport-neutral chain wire
-contract. API classes, clients and transport bindings remain in
-`forge_chain_api`; wire DTOs never live beside those runtime interfaces.
+`transaction_query` and `admin` modules own the
+transport-neutral chain wire contract. API classes, clients and transport
+bindings remain in `forge_chain_api`; wire DTOs never live beside those runtime
+interfaces.
 Table-scope pagination carries opaque authenticated keys as `bytes` in
 `table_scope_request::cursor` and `table_scope_response::next`; callers must
 not parse or reconstruct them from contract scope names.
@@ -43,8 +44,8 @@ Package component: `chain_protocol`. Public namespace:
 - `forge.chain.protocol.abi`: ABI records and optional tail-field decoding.
 - `forge.chain.protocol.system`: canonical system action payloads.
 - `forge.chain.protocol.audit`, `info`, `block_query`, `state_query`,
-  `transaction_query`, `admin`: common audit envelopes and endpoint wire
-  records for the transport-neutral Chain API.
+  `transaction_query`, `admin`: common audit envelopes and
+  endpoint wire records for the transport-neutral Chain API.
 
 The target publicly links `forge_chain_core`, `forge_compression`, `forge_raw`,
 `forge_variant`, `forge_crypto_asymmetric_values`, `forge_crypto_asymmetric`

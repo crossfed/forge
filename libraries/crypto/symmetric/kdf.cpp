@@ -13,8 +13,25 @@ module;
 
 module forge.crypto.symmetric.kdf;
 
+import forge.crypto.core.secret_bytes;
+
 namespace forge::crypto::symmetric::kdf {
 namespace {
+
+struct bytes_wiper {
+   core::bytes* value;
+   bool active = true;
+
+   ~bytes_wiper() {
+      if (active) {
+         core::secure_erase(*value);
+      }
+   }
+
+   void release() noexcept {
+      active = false;
+   }
+};
 
 void require_output_size(std::size_t size) {
    if (size == 0 || size > 255U * 32U) {
@@ -41,9 +58,8 @@ int checked_int_size(std::size_t size, const char* label) {
 }
 
 [[nodiscard]] core::bytes derive_hkdf_sha256_with_salt(std::span<const std::uint8_t> secret,
-                                                 std::span<const std::uint8_t> salt,
-                                                 std::span<const std::uint8_t> info,
-                                                 std::size_t output_size) {
+                                                       std::span<const std::uint8_t> salt,
+                                                       std::span<const std::uint8_t> info, std::size_t output_size) {
    const auto prk = hmac_sha256(salt, secret);
 
    auto out = core::bytes{};
@@ -68,10 +84,10 @@ int checked_int_size(std::size_t size, const char* label) {
 
 core::bytes derive_hkdf_sha256(const hkdf_sha256_request& request) {
    return derive_hkdf_sha256(hkdf_sha256_span_request{
-      .secret = request.secret,
-      .salt = request.salt,
-      .info = request.info,
-      .output_size = request.output_size,
+       .secret = request.secret,
+       .salt = request.salt,
+       .info = request.info,
+       .output_size = request.output_size,
    });
 }
 
@@ -89,6 +105,19 @@ core::bytes derive_hkdf_sha256(const hkdf_sha256_span_request& request) {
 }
 
 core::bytes derive_scrypt(const scrypt_request& request) {
+   return derive_scrypt(scrypt_span_request{
+       .password = std::span<const std::uint8_t>{reinterpret_cast<const std::uint8_t*>(request.password.data()),
+                                                 request.password.size()},
+       .salt = request.salt,
+       .n = request.n,
+       .r = request.r,
+       .p = request.p,
+       .max_memory_bytes = request.max_memory_bytes,
+       .output_size = request.output_size,
+   });
+}
+
+core::bytes derive_scrypt(const scrypt_span_request& request) {
    if (request.password.empty() || request.salt.empty()) {
       FORGE_THROW_EXCEPTION(kdf::exceptions::invalid_options, "scrypt requires password and salt");
    }
@@ -98,11 +127,14 @@ core::bytes derive_scrypt(const scrypt_request& request) {
    }
 
    auto out = core::bytes(request.output_size);
-   if (EVP_PBE_scrypt(request.password.data(), request.password.size(), request.salt.data(), request.salt.size(),
-                      request.n, request.r, request.p, request.max_memory_bytes, out.data(), out.size()) != 1) {
+   auto wipe_out = bytes_wiper{&out};
+   if (EVP_PBE_scrypt(reinterpret_cast<const char*>(request.password.data()), request.password.size(),
+                      request.salt.data(), request.salt.size(), request.n, request.r, request.p,
+                      request.max_memory_bytes, out.data(), out.size()) != 1) {
       FORGE_THROW_EXCEPTION(kdf::exceptions::backend_error, "OpenSSL scrypt failed");
    }
+   wipe_out.release();
    return out;
 }
 
-} // namespace forge::crypto
+} // namespace forge::crypto::symmetric::kdf

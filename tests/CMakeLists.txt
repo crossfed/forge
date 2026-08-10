@@ -245,6 +245,25 @@ add_test(
 )
 
 add_executable(
+   test_forge_chain_transaction
+   unit/main.cpp
+   chain_transaction/transaction_tests.cpp
+)
+target_link_libraries(
+   test_forge_chain_transaction
+   forge_asio
+   forge_chain_transaction
+   forge_codec_hex
+   forge_raw
+   Boost::included_unit_test_framework
+)
+add_test(
+   NAME test_forge_chain_transaction
+   COMMAND test_forge_chain_transaction
+   WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+add_executable(
    test_forge_chain_api
    unit/main.cpp
    chain_api/abi_tests.cpp
@@ -627,6 +646,15 @@ target_link_libraries(
 )
 add_test(NAME test_forge_crypto_asymmetric COMMAND test_forge_crypto_asymmetric WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
+add_executable(test_forge_crypto_keystore unit/main.cpp crypto/test_keystore.cpp)
+target_link_libraries(
+   test_forge_crypto_keystore
+   forge_asio
+   forge_crypto_keystore
+   Boost::included_unit_test_framework
+)
+add_test(NAME test_forge_crypto_keystore COMMAND test_forge_crypto_keystore WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
 add_executable(test_forge_crypto_pki unit/main.cpp crypto/test_pki.cpp)
 target_link_libraries(test_forge_crypto_pki forge_crypto_pki Boost::included_unit_test_framework)
 add_test(NAME test_forge_crypto_pki COMMAND test_forge_crypto_pki WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
@@ -678,6 +706,32 @@ add_executable(
 )
 target_link_libraries(test_forge_asio forge_asio Boost::included_unit_test_framework)
 add_test(NAME test_forge_asio COMMAND test_forge_asio WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
+add_executable(
+   test_forge_cli
+   unit/main.cpp
+   cli/cli_tests.cpp
+)
+target_link_libraries(test_forge_cli forge_cli forge_codec_json Boost::included_unit_test_framework)
+add_test(NAME test_forge_cli COMMAND test_forge_cli WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+add_test(
+   NAME test_forge_cli_boundary
+   COMMAND
+      ${Python3_EXECUTABLE}
+      ${CMAKE_CURRENT_SOURCE_DIR}/cli/check_cli_boundary.py
+      ${CMAKE_SOURCE_DIR}
+   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+)
+option(FORGE_CLI_ENABLE_FUZZ_TESTS "Build the Forge CLI argv libFuzzer target" OFF)
+if(FORGE_CLI_ENABLE_FUZZ_TESTS)
+   if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+      message(FATAL_ERROR "FORGE_CLI_ENABLE_FUZZ_TESTS requires Clang libFuzzer")
+   endif()
+   add_executable(forge_cli_fuzz cli/fuzz_driver.cpp)
+   target_link_libraries(forge_cli_fuzz PRIVATE forge_cli)
+   target_compile_options(forge_cli_fuzz PRIVATE -fsanitize=fuzzer,address -fno-omit-frame-pointer)
+   target_link_options(forge_cli_fuzz PRIVATE -fsanitize=fuzzer,address)
+endif()
 
 add_executable(
    test_forge_transport
@@ -801,6 +855,7 @@ add_test(NAME test_forge_api_transport COMMAND test_forge_api_transport WORKING_
 add_executable(
    test_forge_http_websocket
    unit/main.cpp
+   http_websocket/api_live_stream_tests.cpp
    http_websocket/network_tests.cpp
 )
 target_link_libraries(test_forge_http_websocket forge Boost::included_unit_test_framework)
@@ -809,6 +864,7 @@ add_test(NAME test_forge_http_websocket COMMAND test_forge_http_websocket WORKIN
 add_executable(
    test_forge_quic_p2p
    unit/main.cpp
+   quic_p2p/libp2p_identity_fixture.cpp
    quic_p2p/quic_tests.cpp
    quic_p2p/p2p_tests.cpp
    quic_p2p/session_teardown_tests.cpp
@@ -855,12 +911,36 @@ add_test(
    NAME test_forge_libp2p_donor_matrix
    COMMAND ${Python3_EXECUTABLE}
       ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop/check_donor_matrix.py
+      ${CMAKE_SOURCE_DIR}
       ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop/donor_cases.json
+      ${FORGE_LIBP2P_DONORS_ROOT}
+)
+
+set(FORGE_P2P_INVENTORY_CHECK ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop/check_p2p_feature_inventory.py)
+add_custom_target(
+   test_forge_p2p_inventory
+   COMMAND ${Python3_EXECUTABLE}
+      ${FORGE_P2P_INVENTORY_CHECK}
+      ${CMAKE_SOURCE_DIR}
+      ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop/p2p_feature_inventory.json
+      ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop/donor_cases.json
+   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+   VERBATIM
+)
+add_test(
+   NAME test_forge_p2p_inventory
+   COMMAND ${Python3_EXECUTABLE}
+      ${FORGE_P2P_INVENTORY_CHECK}
+      ${CMAKE_SOURCE_DIR}
+      ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop/p2p_feature_inventory.json
+      ${CMAKE_CURRENT_SOURCE_DIR}/libp2p_interop/donor_cases.json
+   WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
 )
 
 add_executable(
    test_forge_plugins
    unit/main.cpp
+   quic_p2p/libp2p_identity_fixture.cpp
    plugins/plugins_tests.cpp
    plugins/log_otlp_tests.cpp
 )
@@ -870,9 +950,18 @@ add_test(NAME test_forge_plugins COMMAND test_forge_plugins WORKING_DIRECTORY ${
 add_executable(
    test_forge_plugins_db_store
    unit/main.cpp
+   quic_p2p/libp2p_identity_fixture.cpp
    plugins_db_store/db_store_tests.cpp
+   plugins_db_store/p2p_peer_state_persistence_tests.cpp
 )
-target_link_libraries(test_forge_plugins_db_store forge_plugins_db_store Boost::included_unit_test_framework)
+target_link_libraries(
+   test_forge_plugins_db_store
+   forge_plugins_db_store
+   forge_plugins_crypto_secrets
+   forge_plugins_p2p_node
+   Boost::included_unit_test_framework
+)
+target_include_directories(test_forge_plugins_db_store PRIVATE ${PROJECT_SOURCE_DIR}/plugins/p2p/node)
 target_compile_definitions(test_forge_plugins_db_store PRIVATE FORGE_HAS_ROCKSDB=$<BOOL:${FORGE_HAS_ROCKSDB}>)
 target_compile_definitions(test_forge_plugins_db_store PRIVATE FORGE_HAS_MDBX=$<BOOL:${FORGE_HAS_MDBX}>)
 if(FORGE_HAS_ROCKSDB)
@@ -1028,6 +1117,22 @@ add_custom_target(
          -DCMAKE_DISABLE_FIND_PACKAGE_glaze=ON
          -DCMAKE_DISABLE_FIND_PACKAGE_Notcurses=ON
       --test-command forge_package_asio_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_cli_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_cli_component
+      ${CMAKE_BINARY_DIR}/forge-package-cli-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options
+         ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_Ngtcp2=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_glaze=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_Notcurses=ON
+      --test-command forge_package_cli_component
    DEPENDS test_forge_package_install
 )
 add_custom_target(
@@ -1306,6 +1411,28 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
+   test_forge_package_crypto_signer_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_signer_component
+      ${CMAKE_BINARY_DIR}/forge-package-crypto-signer-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_crypto_signer_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_crypto_keystore_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_keystore_component
+      ${CMAKE_BINARY_DIR}/forge-package-crypto-keystore-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_crypto_keystore_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
    test_forge_package_crypto_asymmetric_values_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
@@ -1415,6 +1542,17 @@ add_custom_target(
       --build-generator ${CMAKE_GENERATOR}
       --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
       --test-command forge_package_chain_protocol_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
+   test_forge_package_chain_transaction_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_chain_transaction_component
+      ${CMAKE_BINARY_DIR}/forge-package-chain-transaction-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_chain_transaction_component
    DEPENDS test_forge_package_install
 )
 add_custom_target(
@@ -1838,6 +1976,22 @@ add_test(
 )
 set_tests_properties(test_forge_package_asio_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
+   NAME test_forge_package_cli_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_cli_component
+      ${CMAKE_BINARY_DIR}/forge-package-cli-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options
+         ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+         -DCMAKE_DISABLE_FIND_PACKAGE_OpenSSL=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_Ngtcp2=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_glaze=ON
+         -DCMAKE_DISABLE_FIND_PACKAGE_Notcurses=ON
+      --test-command forge_package_cli_component
+)
+set_tests_properties(test_forge_package_cli_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
    NAME test_forge_package_config_core_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
@@ -2113,6 +2267,28 @@ add_test(
 )
 set_tests_properties(test_forge_package_crypto_symmetric_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
+   NAME test_forge_package_crypto_signer_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_signer_component
+      ${CMAKE_BINARY_DIR}/forge-package-crypto-signer-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_crypto_signer_component
+)
+set_tests_properties(test_forge_package_crypto_signer_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_crypto_keystore_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_crypto_keystore_component
+      ${CMAKE_BINARY_DIR}/forge-package-crypto-keystore-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_crypto_keystore_component
+)
+set_tests_properties(test_forge_package_crypto_keystore_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
    NAME test_forge_package_crypto_asymmetric_values_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
@@ -2224,6 +2400,17 @@ add_test(
       --test-command forge_package_chain_protocol_component
 )
 set_tests_properties(test_forge_package_chain_protocol_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_chain_transaction_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_chain_transaction_component
+      ${CMAKE_BINARY_DIR}/forge-package-chain-transaction-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_chain_transaction_component
+)
+set_tests_properties(test_forge_package_chain_transaction_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_chain_api_component
    COMMAND

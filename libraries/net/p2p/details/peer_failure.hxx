@@ -2,7 +2,7 @@
 
 namespace forge::net::p2p::detail {
 
-[[nodiscard]] constexpr bool peer_attributable_failure(exceptions::code kind, bool stopped) noexcept {
+[[nodiscard]] constexpr bool remote_peer_attributable_failure(exceptions::code kind, bool stopped) noexcept {
    if (kind == exceptions::code::timeout) {
       return true;
    }
@@ -16,6 +16,8 @@ namespace forge::net::p2p::detail {
    case exceptions::code::backpressure_rejected:
    case exceptions::code::canceled:
    case exceptions::code::internal:
+   case exceptions::code::sequence_exhausted:
+   case exceptions::code::durability_uncertain:
       return false;
    default:
       return true;

@@ -78,8 +78,9 @@ void backoff_candidate(peer_store& store, const peer_id& peer, std::chrono::syst
    store.upsert(std::move(record));
 }
 
-void prune_expired_reservations(peer_store& store, std::chrono::system_clock::time_point now) {
-   for (auto record : store.snapshot()) {
+void prune_expired_reservations(peer_store& store, std::chrono::system_clock::time_point now,
+                                std::size_t limit) {
+   for (auto record : store.snapshot(limit)) {
       const auto before = record.relay_reservations.size();
       std::erase_if(record.relay_reservations, [&](const peer_store::relay_record& value) {
          return value.expires_at != std::chrono::system_clock::time_point{} && value.expires_at <= now;

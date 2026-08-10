@@ -72,6 +72,7 @@ import forge.net.yamux.exceptions;
 import forge.net.yamux.session;
 
 #include "details/node_impl.hxx"
+#include "details/dht_exchange.hxx"
 #include "details/peer_exchange_learning.hxx"
 #include "details/protocol_capabilities.hxx"
 #include "details/peer_failure.hxx"
@@ -315,18 +316,17 @@ void validate(const node::options& options) {
    if (options.explicit_peer_id && !valid_peer_id(*options.explicit_peer_id)) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "invalid explicit P2P peer id");
    }
+   if (!options.allow_insecure_test_mode && options.explicit_peer_id && !options.certificate_pem.empty() &&
+       *options.explicit_peer_id != make_peer_id_from_certificate_pem(options.certificate_pem)) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_identity,
+                            "explicit P2P peer id does not match the configured certificate");
+   }
    if (options.allow_insecure_test_mode && options.certificate_pem.empty() && !options.explicit_peer_id) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options,
                             "insecure P2P test node without certificate requires explicit peer id");
    }
-   if (options.peer_store_backend && options.peer_store_path) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P peer store backend and path are mutually exclusive");
-   }
-   if (!options.allow_insecure_test_mode && !options.peer_store_backend && !options.peer_store_path) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "production P2P node requires persistent peer store path");
-   }
-   if (options.peer_store_path && options.peer_store_path->empty()) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "P2P peer store path must not be empty");
+   if (!options.allow_insecure_test_mode && !options.peer_state.persistence) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "production P2P node requires peer persistence");
    }
    if (options.limits.max_sessions == 0 || options.limits.max_pending_inbound_sessions == 0 ||
        options.limits.max_pending_outbound_sessions == 0 || options.limits.max_inbound_sessions == 0 ||
@@ -351,6 +351,7 @@ void validate(const node::options& options) {
        options.limits.discovery.query_timeout.count() <= 0 || options.limits.discovery.refresh_interval.count() <= 0 ||
        options.limits.discovery.max_parallel_queries == 0 || options.limits.discovery.max_results == 0 ||
        options.limits.dht.replication == 0 || options.limits.dht.alpha == 0 ||
+       options.limits.dht.replacement_cache_size == 0 || options.limits.dht.failure_threshold == 0 ||
        options.limits.dht.max_message_size == 0 || options.limits.dht.max_record_size == 0 ||
        options.limits.dht.max_closer_peers == 0 || options.limits.dht.max_provider_peers == 0 ||
        options.limits.dht.query_timeout.count() <= 0 || options.limits.dht.refresh_interval.count() <= 0 ||
@@ -397,23 +398,12 @@ void validate(const node::options& options) {
    }
 }
 
-[[nodiscard]] std::shared_ptr<peer_store::backend> make_peer_store_backend(const node::options& options) {
-   if (options.peer_store_backend) {
-      return options.peer_store_backend;
-   }
-   if (options.peer_store_path) {
-      return peer_store::make_rocksdb_backend(peer_store::rocksdb_options{.path = *options.peer_store_path});
-   }
-   return peer_store::make_memory_backend();
-}
-
 node::impl::impl(forge::asio::runtime& runtime_value, node::options options_value)
     : runtime(runtime_value), options(std::move(options_value)),
       local(options.explicit_peer_id ? *options.explicit_peer_id
                                      : make_peer_id_from_certificate_pem(options.certificate_pem)),
       identity(make_libp2p_identity_material(options)), direct_registry(runtime_value, options, identity),
-      teardown(runtime_value.context().get_executor()),
-      store(peer_store::options{.backend = make_peer_store_backend(options)}) {}
+      teardown(runtime_value.context().get_executor()), store(options.peer_state), routing(local, options.limits.dht) {}
 
 std::vector<forge::net::p2p::endpoint> node::impl::local_endpoints_for_control() const {
    auto lock = std::scoped_lock{mutex};
@@ -463,7 +453,16 @@ void node::impl::learn_from_identify(const peer_id& peer, const identify::docume
          });
       }
    }
+   auto routing_peer = dht::peer{.id = peer, .connection = dht::connection_type::can_connect};
+   routing_peer.endpoints.reserve(record.endpoints.size());
+   for (const auto& endpoint : record.endpoints) {
+      routing_peer.endpoints.push_back(endpoint.endpoint);
+   }
+   const auto advertises_dht = capabilities_for(document.protocols).has(capabilities::dht);
    store.upsert(std::move(record));
+   if (advertises_dht) {
+      routing.upsert(std::move(routing_peer), dht::routing_admission::candidate);
+   }
 }
 
 std::vector<std::shared_ptr<node::impl::session_state>>
@@ -932,6 +931,10 @@ void node::impl::record_hole_punch_result(hole_punch::status status) {
 
 void node::impl::record_direct_failure(const peer_id& peer) {
    store.mark_failure(peer);
+   increment_direct_failure();
+}
+
+void node::impl::increment_direct_failure() {
    auto lock = std::scoped_lock{mutex};
    ++metrics_value.direct_failures;
 }
@@ -1111,7 +1114,7 @@ std::vector<peer_id> node::impl::pubsub_candidate_peers(const std::string& topic
          }
       }
    }
-   for (const auto& record : store.snapshot()) {
+   for (const auto& record : store.candidates(capabilities::pubsub, options.peer_state.max_peers)) {
       const auto supports_pubsub = record.capabilities.has(capabilities::pubsub) ||
                                    std::ranges::any_of(record.protocols, [](const protocol_id& protocol) {
                                       return protocol == builtins::meshsub_v11 || protocol == builtins::meshsub_v10;
@@ -1314,10 +1317,11 @@ void node::impl::record_pubsub_send_failure(const peer_id& peer, const forge::ex
       auto lock = std::scoped_lock{mutex};
       node_stopped = stopped;
    }
-   if (!detail::peer_attributable_failure(kind, node_stopped)) {
+   if (!detail::remote_peer_attributable_failure(kind, node_stopped)) {
       return;
    }
    store.mark_failure(peer);
+   routing.mark_failure(peer);
 }
 
 boost::asio::awaitable<void> node::impl::announce_pubsub_subscriptions(const peer_id& peer) {
@@ -1840,12 +1844,12 @@ node::impl::ensure_direct_session(const peer_id& peer, std::chrono::milliseconds
             auto lock = std::scoped_lock{mutex};
             node_stopped = stopped;
          }
-         if (!detail::peer_attributable_failure(kind, node_stopped)) {
+         if (!detail::remote_peer_attributable_failure(kind, node_stopped)) {
             FORGE_THROW_CODE(kind, error.what());
          }
          store.mark_endpoint_failure(peer, endpoint, path::kind::direct,
                                      endpoint_backoff_until(peer, endpoint, path::kind::direct));
-         record_direct_failure(peer);
+         increment_direct_failure();
       }
    }
    if (last_kind) {
@@ -1904,8 +1908,10 @@ node::impl::open_protocol_on_direct_session(const peer_id& peer, const protocol_
          if (session->direct_endpoint) {
             store.mark_endpoint_failure(peer, *session->direct_endpoint, path::kind::direct,
                                         endpoint_backoff_until(peer, *session->direct_endpoint, path::kind::direct));
+            increment_direct_failure();
+         } else {
+            record_direct_failure(peer);
          }
-         record_direct_failure(peer);
          throw_operation_timeout("P2P protocol open");
       }
       if (deadline.stopped()) {
@@ -1930,12 +1936,14 @@ node::impl::open_protocol_on_direct_session(const peer_id& peer, const protocol_
       }
       session->closed = true;
       forget_session(session);
-      if (detail::peer_attributable_failure(kind, node_stopped) && session->direct_endpoint) {
-         store.mark_endpoint_failure(peer, *session->direct_endpoint, path::kind::direct,
-                                     endpoint_backoff_until(peer, *session->direct_endpoint, path::kind::direct));
-      }
-      if (detail::peer_attributable_failure(kind, node_stopped)) {
-         record_direct_failure(peer);
+      if (detail::remote_peer_attributable_failure(kind, node_stopped)) {
+         if (session->direct_endpoint) {
+            store.mark_endpoint_failure(peer, *session->direct_endpoint, path::kind::direct,
+                                        endpoint_backoff_until(peer, *session->direct_endpoint, path::kind::direct));
+            increment_direct_failure();
+         } else {
+            record_direct_failure(peer);
+         }
       }
       FORGE_THROW_CODE(kind, error.what());
    }
@@ -1967,6 +1975,23 @@ node::impl::open_protocol_direct(const peer_id& peer, const protocol_id& protoco
       FORGE_THROW_CODE(*last_kind, last_message);
    }
    FORGE_THROW_EXCEPTION(exceptions::peer_not_found, "P2P direct path attempts were exhausted");
+}
+
+boost::asio::awaitable<dht::message> node::impl::exchange_dht(const peer_id& peer, dht::message request,
+                                                              std::chrono::milliseconds timeout) {
+   const auto started = std::chrono::steady_clock::now();
+   auto stream = co_await open_protocol_direct(peer, builtins::kad_dht, timeout);
+   co_return co_await detail::async_exchange_dht(std::move(stream), std::move(request), options.limits.dht,
+                                                 runtime.context(),
+                                                 remaining_timeout(started, timeout, "P2P DHT exchange"));
+}
+
+boost::asio::awaitable<void> node::impl::send_dht(const peer_id& peer, dht::message request,
+                                                  std::chrono::milliseconds timeout) {
+   const auto started = std::chrono::steady_clock::now();
+   auto stream = co_await open_protocol_direct(peer, builtins::kad_dht, timeout);
+   co_await detail::async_send_dht(std::move(stream), std::move(request), options.limits.dht, runtime.context(),
+                                   remaining_timeout(started, timeout, "P2P DHT send"));
 }
 
 boost::asio::awaitable<relay::reservation::info>
@@ -2078,7 +2103,7 @@ node::impl::refresh_relay_candidates(std::optional<peer_id> target, std::chrono:
    }
 
    const auto system_now = std::chrono::system_clock::now();
-   relay_discovery::prune_expired_reservations(store, system_now);
+   relay_discovery::prune_expired_reservations(store, system_now, options.peer_state.max_peers);
 
    const auto target_reservations = options.relay_policy.target_reservations;
    auto fresh_count = fresh_outbound_relay_candidates(target_reservations, options.relay_policy.refresh_margin).size();
@@ -2086,7 +2111,8 @@ node::impl::refresh_relay_candidates(std::optional<peer_id> target, std::chrono:
       co_return std::vector<relay::reservation::info>{};
    }
 
-   const auto snapshot = store.snapshot();
+   const auto snapshot = store.candidates(capabilities::relay | capabilities::relay_reservation,
+                                          options.relay_policy.max_candidates_per_refresh);
    auto candidates =
        relay_discovery::select_candidates(snapshot, relay_discovery::request{
                                                         .local = local,
@@ -3023,65 +3049,114 @@ boost::asio::awaitable<void> node::impl::handle_dht(std::shared_ptr<node::impl::
    if (!options.capabilities.has(capabilities::dht) || options.limits.dht.operating_mode != dht::mode::server) {
       FORGE_THROW_EXCEPTION(exceptions::unsupported_protocol, "DHT server mode is disabled");
    }
-   auto buffer = std::vector<std::uint8_t>{};
-   auto request = dht::codec::decode(
-       co_await async_read_length_delimited(stream, buffer, options.limits.dht.max_message_size), options.limits.dht);
-   increment_dht_query();
-   for (auto peer : request.closer_peers) {
-      peer = sanitize_discovered_peer_for_session(std::move(peer), session);
-      if (has_usable_endpoint(peer)) {
-         store.upsert_routing_peer(peer, discovery::source::dht,
-                                   std::chrono::system_clock::now() + options.limits.dht.refresh_interval);
-      }
-   }
-   for (auto peer : request.provider_peers) {
-      peer = sanitize_discovered_peer_for_session(std::move(peer), session);
-      if (has_usable_endpoint(peer)) {
-         store.upsert_routing_peer(peer, discovery::source::dht,
-                                   std::chrono::system_clock::now() + options.limits.dht.refresh_interval);
-      }
-   }
+   auto deadline = operation_deadline{runtime.context(), options.limits.dht.query_timeout};
+   deadline.arm([&stream] { stream.cancel(); });
+   try {
+      auto buffer = std::vector<std::uint8_t>{};
+      auto request =
+          dht::codec::decode(co_await async_read_length_delimited(stream, buffer, options.limits.dht.max_message_size),
+                             options.limits.dht);
+      increment_dht_query();
+      detail::validate_dht_request(request, session->info.remote_peer);
 
-   auto response = dht::message{
-       .type = request.type,
-       .key_value = request.key_value,
-   };
-   if (request.type == dht::message_type::find_node) {
-      response.closer_peers = store.closest_routing_peers(request.key_value, options.limits.dht.replication);
-   } else if (request.type == dht::message_type::get_providers) {
-      const auto providers = store.find_providers(request.key_value);
-      response.provider_peers.reserve(providers.size());
-      for (const auto& provider : providers) {
-         response.provider_peers.push_back(provider.provider);
-      }
-      response.closer_peers = store.closest_routing_peers(request.key_value, options.limits.dht.replication);
-   } else if (request.type == dht::message_type::add_provider) {
-      for (const auto& provider : request.provider_peers) {
-         if (provider.id != session->info.remote_peer) {
-            continue;
+      auto response = dht::message{
+          .type = request.type,
+          .key_value = request.key_value,
+      };
+      if (request.type == dht::message_type::find_node) {
+         auto closest = routing.closest(request.key_value.bytes, options.limits.dht.replication);
+         response.closer_peers.reserve(options.limits.dht.replication);
+         const auto append_unique = [&](dht::peer value) {
+            const auto current = std::ranges::find_if(response.closer_peers,
+                                                      [&](const auto& candidate) { return candidate.id == value.id; });
+            if (current != response.closer_peers.end()) {
+               for (auto& endpoint : value.endpoints) {
+                  const auto known = std::ranges::any_of(current->endpoints, [&](const auto& candidate) {
+                     return candidate.to_string() == endpoint.to_string();
+                  });
+                  if (!known) {
+                     current->endpoints.push_back(std::move(endpoint));
+                  }
+               }
+               return;
+            }
+            if (response.closer_peers.size() >= options.limits.dht.replication) {
+               return;
+            }
+            response.closer_peers.push_back(std::move(value));
+         };
+         try {
+            const auto requested = peer_id::from_bytes(request.key_value.bytes);
+            if (requested == local) {
+               append_unique(dht::peer{
+                   .id = local,
+                   .endpoints = local_endpoints_for_control(),
+                   .connection = dht::connection_type::connected,
+               });
+            } else {
+               const auto active =
+                   std::ranges::find_if(closest, [&](const auto& candidate) { return candidate.id == requested; });
+               if (active != closest.end()) {
+                  append_unique(*active);
+               }
+               if (const auto record = store.find(requested)) {
+                  auto exact = dht::peer{.id = requested, .connection = dht::connection_type::can_connect};
+                  exact.endpoints.reserve(record->endpoints.size());
+                  for (const auto& item : record->endpoints) {
+                     auto endpoint = item.endpoint;
+                     endpoint.peer = requested;
+                     exact.endpoints.push_back(std::move(endpoint));
+                  }
+                  append_unique(std::move(exact));
+               }
+            }
+         } catch (const forge::exceptions::base&) {
+            // Arbitrary non-Peer-ID keys remain ordinary closest-node queries.
          }
-         auto sanitized = sanitize_discovered_peer_for_session(provider, session);
-         if (!has_usable_endpoint(sanitized)) {
-            continue;
+         for (auto& peer : closest) {
+            append_unique(std::move(peer));
          }
-         store.upsert_provider(peer_store::provider_record{
-             .key = request.key_value,
-             .provider = std::move(sanitized),
-             .discovered_by = discovery::source::dht,
-             .expires_at = std::chrono::system_clock::now() + options.limits.dht.provider_record_ttl,
-         });
+      } else if (request.type == dht::message_type::get_providers) {
+         const auto providers = store.find_providers(request.key_value, options.limits.dht.max_provider_peers);
+         response.provider_peers.reserve(providers.size());
+         for (const auto& provider : providers) {
+            response.provider_peers.push_back(provider.provider);
+         }
+         response.closer_peers = routing.closest(request.key_value.bytes, options.limits.dht.replication);
+      } else if (request.type == dht::message_type::add_provider) {
+         for (const auto& provider : request.provider_peers) {
+            auto sanitized = sanitize_discovered_peer_for_session(provider, session);
+            if (!has_usable_endpoint(sanitized)) {
+               continue;
+            }
+            co_await store.async_upsert_provider(peer_store::provider_record{
+                .key = request.key_value,
+                .provider = std::move(sanitized),
+                .discovered_by = discovery::source::dht,
+                .expires_at = std::chrono::system_clock::now() + options.limits.dht.provider_record_ttl,
+            });
+         }
+         increment_dht_response();
+         co_await stream.async_close();
+         if (!deadline.finish()) {
+            throw_operation_timeout("P2P inbound DHT exchange");
+         }
+         co_return;
       }
       increment_dht_response();
+      co_await stream.async_write(dht::codec::encode(response, options.limits.dht));
       co_await stream.async_close();
-      co_return;
-   } else if (request.type == dht::message_type::put_value && request.record_value) {
-      response.record_value = request.record_value;
-   } else if (request.type == dht::message_type::get_value) {
-      response.closer_peers = store.closest_routing_peers(request.key_value, options.limits.dht.replication);
+      if (!deadline.finish()) {
+         throw_operation_timeout("P2P inbound DHT exchange");
+      }
+   } catch (...) {
+      const auto completed = deadline.finish();
+      stream.cancel();
+      if (deadline.timed_out() || !completed) {
+         throw_operation_timeout("P2P inbound DHT exchange");
+      }
+      throw;
    }
-   increment_dht_response();
-   co_await stream.async_write(dht::codec::encode(response, options.limits.dht));
-   co_await stream.async_close();
 }
 
 boost::asio::awaitable<void> node::impl::handle_rendezvous(std::shared_ptr<node::impl::session_state> session,
@@ -3143,9 +3218,18 @@ boost::asio::awaitable<void> node::impl::handle_rendezvous(std::shared_ptr<node:
                response.status_value = rendezvous::status::not_authorized;
                response.status_text = "rendezvous registration endpoints are not routable from source";
             } else {
-               store.upsert_rendezvous(std::move(*sanitized));
-               response.ttl = ttl;
-               increment_rendezvous_registration();
+               try {
+                  co_await store.async_register_rendezvous(
+                      std::move(*sanitized), options.limits.rendezvous.max_registrations_per_peer);
+                  response.ttl = ttl;
+                  increment_rendezvous_registration();
+               } catch (const forge::exceptions::base& error) {
+                  if (exceptions::code_of(error) != exceptions::code::backpressure_rejected) {
+                     throw;
+                  }
+                  response.status_value = rendezvous::status::unavailable;
+                  response.status_text = "rendezvous registration capacity reached";
+               }
             }
          }
       }
@@ -3160,13 +3244,28 @@ boost::asio::awaitable<void> node::impl::handle_rendezvous(std::shared_ptr<node:
    }
 
    if (request.type == rendezvous::message_type::unregister_peer && request.unregister_value) {
-      store.remove_rendezvous(session->info.remote_peer, request.unregister_value->namespace_name);
+      co_await store.async_remove_rendezvous(session->info.remote_peer, request.unregister_value->namespace_name);
       co_await stream.async_close();
       co_return;
    }
 
    if (request.type == rendezvous::message_type::discover && request.discover_value) {
       const auto after = rendezvous::codec::read_cookie(request.discover_value->cookie);
+      const auto cookie_namespace = rendezvous::codec::read_cookie_namespace(request.discover_value->cookie);
+      if (!request.discover_value->cookie.empty() && cookie_namespace != request.discover_value->namespace_name) {
+         co_await stream.async_write(rendezvous::codec::encode(
+             rendezvous::message{
+                 .type = rendezvous::message_type::discover_response,
+                 .discover_response_value =
+                     rendezvous::discover_response{
+                         .status_value = rendezvous::status::invalid_cookie,
+                         .status_text = "rendezvous cookie belongs to a different namespace",
+                     },
+             },
+             options.limits.rendezvous));
+         co_await stream.async_close();
+         co_return;
+      }
       const auto limit = request.discover_value->limit == 0
                              ? options.limits.rendezvous.max_discover_limit
                              : std::min(request.discover_value->limit, options.limits.rendezvous.max_discover_limit);
@@ -3631,7 +3730,7 @@ boost::asio::awaitable<void> node::impl::handle_peer_exchange(forge::net::p2p::s
          break;
       }
    }
-   const auto snapshot = store.snapshot();
+   const auto snapshot = store.snapshot(options.limits.max_peer_exchange_records);
    for (const auto& record : snapshot) {
       for (const auto& endpoint : record.endpoints) {
          if (endpoints.size() >= options.limits.max_peer_exchange_records) {
