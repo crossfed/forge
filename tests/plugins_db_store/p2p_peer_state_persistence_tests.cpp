@@ -1,7 +1,9 @@
 module;
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/describe.hpp>
 #include <boost/test/unit_test.hpp>
+#include <forge/db/object/macros.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -9,6 +11,7 @@ module;
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <ranges>
 #include <string>
 #include <string_view>
@@ -27,6 +30,9 @@ import forge.asio.runtime;
 import forge.config.core.document;
 import forge.config.core.value;
 import forge.db.core.driver;
+import forge.db.object.index;
+import forge.db.object.object;
+import forge.db.object.transaction;
 import forge.net.p2p.dht;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.identity;
@@ -37,6 +43,7 @@ import forge.plugins.db.store.api;
 import forge.plugins.db.store.plugin;
 
 #include "details/object_peer_state_adapter.hxx"
+#include "details/peer_state_schema.hxx"
 
 namespace {
 
@@ -44,6 +51,7 @@ namespace p2p = forge::net::p2p;
 namespace p2p_node = forge::plugins::p2p::node;
 namespace secrets_plugin = forge::plugins::crypto::secrets;
 namespace store_plugin = forge::plugins::db::store;
+using peer_state_schema = forge::plugins::p2p::node::detail::peer_state_schema;
 
 constexpr auto peer_store_name = std::string_view{"p2p-peer-state"};
 
@@ -198,7 +206,7 @@ class tracking_store_api final : public store_plugin::api {
       p2p_node::object_peer_state_adapter::register_schema(handle);
    }
    return forge::asio::blocking::run(
-       app.runtime(), p2p_node::object_peer_state_adapter::async_open(stores.operator->(), std::move(handle)));
+       app.runtime(), p2p_node::object_peer_state_adapter::async_open(stores.operator->(), std::move(handle), {}));
 }
 
 [[nodiscard]] p2p::peer_store open_peer_state(forge::app::application_shell& app) {
@@ -415,7 +423,7 @@ void check_object_peer_state_durable_acknowledgement(std::string driver, const s
    p2p_node::object_peer_state_adapter::register_schema(handle);
    auto tracking = tracking_store_api{stores.operator->()};
    auto persistence = forge::asio::blocking::run(
-       app->runtime(), p2p_node::object_peer_state_adapter::async_open(&tracking, std::move(handle)));
+       app->runtime(), p2p_node::object_peer_state_adapter::async_open(&tracking, std::move(handle), {}));
    auto state = p2p::peer_store{p2p::peer_store::options{.persistence = persistence}};
    const auto provider = p2p::make_peer_id_from_certificate_pem(
        forge::tests::p2p::make_identity_fixture("p2p-durable-provider").certificate_pem);
@@ -454,6 +462,40 @@ void check_object_peer_state_durable_acknowledgement(std::string driver, const s
    (void)forge::asio::blocking::run(app->runtime(), state.async_prune_expired());
    BOOST_TEST(tracking.flush_calls == 3U);
    forge::asio::blocking::run(app->runtime(), state.async_close());
+   forge::asio::blocking::run(app->runtime(), app->shutdown());
+}
+
+void check_object_peer_state_rejects_oversized_hydration(std::string driver, const std::filesystem::path& path) {
+   auto app = make_app(document_for(std::move(driver), path));
+   auto stores = app->apis().get<store_plugin::api>(store_plugin::api::ref());
+   auto handle = forge::asio::blocking::run(app->runtime(), stores->store(std::string{peer_store_name}));
+   p2p_node::object_peer_state_adapter::register_schema(handle);
+   auto limits = p2p::peer_store::options{.max_protocols_per_peer = 1};
+   auto persistence = forge::asio::blocking::run(
+       app->runtime(), p2p_node::object_peer_state_adapter::async_open(stores.operator->(), handle, limits));
+   const auto invalid_peer = p2p::make_peer_id_from_certificate_pem(
+       forge::tests::p2p::make_identity_fixture("p2p-oversized-hydration").certificate_pem);
+
+   auto insert_invalid = [&]() -> boost::asio::awaitable<void> {
+      auto transaction = co_await handle.begin_transaction();
+      auto objects = co_await handle.objects().join(transaction);
+      co_await objects.create<peer_state_schema::peer_row>([&](peer_state_schema::peer_row& row) {
+         row.peer = invalid_peer.value;
+         row.protocols = {"/forge/test/1", "/forge/test/2"};
+         row.hydration_priority = std::uint64_t{1} << 63U;
+      });
+      co_await transaction.commit();
+   };
+   forge::asio::blocking::run(app->runtime(), insert_invalid());
+
+   BOOST_CHECK_THROW(
+       (forge::asio::blocking::run(app->runtime(), persistence->async_hydrate(p2p::peer_store::hydration_request{
+                                                       .kind = p2p::peer_store::hydration_kind::peers,
+                                                       .limit = 256,
+                                                   }))),
+       p2p::exceptions::codec_error);
+
+   forge::asio::blocking::run(app->runtime(), persistence->async_close());
    forge::asio::blocking::run(app->runtime(), app->shutdown());
 }
 
@@ -510,6 +552,11 @@ BOOST_AUTO_TEST_CASE(p2p_plugin_mdbx_startup_failure_rolls_back_open_peer_state)
    auto root = root_guard{};
    check_plugin_startup_rolls_back_open_peer_state("mdbx", root.root / "mdbx-startup-rollback");
 }
+
+BOOST_AUTO_TEST_CASE(p2p_peer_state_mdbx_rejects_oversized_hydration_rows) {
+   auto root = root_guard{};
+   check_object_peer_state_rejects_oversized_hydration("mdbx", root.root / "mdbx-oversized-hydration");
+}
 #endif
 
 #if FORGE_HAS_ROCKSDB
@@ -542,6 +589,11 @@ BOOST_AUTO_TEST_CASE(p2p_peer_state_rocksdb_durable_operations_flush_before_ackn
 BOOST_AUTO_TEST_CASE(p2p_plugin_rocksdb_startup_failure_rolls_back_open_peer_state) {
    auto root = root_guard{};
    check_plugin_startup_rolls_back_open_peer_state("rocksdb", root.root / "rocksdb-startup-rollback");
+}
+
+BOOST_AUTO_TEST_CASE(p2p_peer_state_rocksdb_rejects_oversized_hydration_rows) {
+   auto root = root_guard{};
+   check_object_peer_state_rejects_oversized_hydration("rocksdb", root.root / "rocksdb-oversized-hydration");
 }
 #endif
 

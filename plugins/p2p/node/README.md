@@ -121,6 +121,11 @@ Secret policies must allow
 `allow-insecure-test-mode` is for local tests only. Programmatic low-level node
 construction may still provide identity material directly.
 
+Plugin 2.0 removes inline certificate and private-key PEM configuration. Migrate
+each value into Crypto Secrets and replace it with `certificate-secret` or
+`private-key-secret`. This is an intentional plugin configuration break; the
+low-level `forge_net_p2p` identity options remain source-compatible.
+
 ## Dependencies
 
 - `forge_app`

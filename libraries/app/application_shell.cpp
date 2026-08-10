@@ -356,16 +356,23 @@ boost::asio::awaitable<void> application_shell::initialize() {
       failure = std::current_exception();
    }
    if (failure) {
+      auto cleanup_succeeded = true;
       if (impl_->plugin_runtime &&
           impl_->plugin_runtime->state() != application_state::stopped) {
          impl_->plugin_runtime->request_stop();
-         co_await impl_->plugin_runtime->shutdown();
+         try {
+            co_await impl_->plugin_runtime->shutdown();
+         } catch (...) {
+            cleanup_succeeded = false;
+         }
       }
-      impl_->state = application_state::stopped;
       impl_->diagnostics.set_application_state(lifecycle_state::failed, "initialize", failure_message);
       publish_application_event(impl_->events, event_severity::error, impl_->options.name, "failed",
                                 failure_message);
-      co_await impl_->stop_execution();
+      if (cleanup_succeeded) {
+         impl_->state = application_state::stopped;
+         co_await impl_->stop_execution();
+      }
       std::rethrow_exception(failure);
    }
 }
@@ -397,7 +404,10 @@ boost::asio::awaitable<void> application_shell::startup() {
       failure = std::current_exception();
    }
    if (failure) {
-      co_await shutdown();
+      try {
+         co_await shutdown();
+      } catch (...) {
+      }
       try {
          std::rethrow_exception(failure);
       } catch (...) {
@@ -416,7 +426,14 @@ boost::asio::awaitable<void> application_shell::shutdown() {
    publish_application_event(impl_->events, event_severity::info, impl_->options.name, "stopping");
    if (impl_->plugin_runtime) {
       impl_->plugin_runtime->request_stop();
-      co_await impl_->plugin_runtime->shutdown();
+      try {
+         co_await impl_->plugin_runtime->shutdown();
+      } catch (...) {
+         const auto message = current_exception_message();
+         impl_->diagnostics.set_application_state(lifecycle_state::failed, "shutdown", message);
+         publish_application_event(impl_->events, event_severity::error, impl_->options.name, "failed", message);
+         throw;
+      }
    }
    impl_->state = application_state::stopped;
    impl_->diagnostics.set_application_state(lifecycle_state::stopped, "shutdown");

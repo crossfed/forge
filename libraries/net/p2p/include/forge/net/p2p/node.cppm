@@ -14,7 +14,6 @@ module;
 export module forge.net.p2p.node;
 
 import forge.asio.runtime;
-import forge.crypto.core.secret_string;
 import forge.net.p2p.dht;
 import forge.net.p2p.discovery;
 import forge.net.p2p.diagnostics;
@@ -63,7 +62,7 @@ class node {
 
    struct options {
       std::string certificate_pem;
-      forge::crypto::core::secret_string private_key_pem;
+      std::string private_key_pem;
       std::optional<peer_id> explicit_peer_id;
       capability_set capabilities{.bits = capabilities::direct_quic | capabilities::peer_exchange};
       limits limits{};

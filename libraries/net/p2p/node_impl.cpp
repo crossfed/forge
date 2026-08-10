@@ -931,7 +931,6 @@ void node::impl::record_hole_punch_result(hole_punch::status status) {
 
 void node::impl::record_direct_failure(const peer_id& peer) {
    store.mark_failure(peer);
-   routing.mark_failure(peer);
    auto lock = std::scoped_lock{mutex};
    ++metrics_value.direct_failures;
 }
@@ -1314,7 +1313,7 @@ void node::impl::record_pubsub_send_failure(const peer_id& peer, const forge::ex
       auto lock = std::scoped_lock{mutex};
       node_stopped = stopped;
    }
-   if (!detail::peer_attributable_failure(kind, node_stopped)) {
+   if (!detail::remote_peer_attributable_failure(kind, node_stopped)) {
       return;
    }
    store.mark_failure(peer);
@@ -1841,7 +1840,7 @@ node::impl::ensure_direct_session(const peer_id& peer, std::chrono::milliseconds
             auto lock = std::scoped_lock{mutex};
             node_stopped = stopped;
          }
-         if (!detail::peer_attributable_failure(kind, node_stopped)) {
+         if (!detail::remote_peer_attributable_failure(kind, node_stopped)) {
             FORGE_THROW_CODE(kind, error.what());
          }
          store.mark_endpoint_failure(peer, endpoint, path::kind::direct,
@@ -1931,11 +1930,11 @@ node::impl::open_protocol_on_direct_session(const peer_id& peer, const protocol_
       }
       session->closed = true;
       forget_session(session);
-      if (detail::peer_attributable_failure(kind, node_stopped) && session->direct_endpoint) {
+      if (detail::remote_peer_attributable_failure(kind, node_stopped) && session->direct_endpoint) {
          store.mark_endpoint_failure(peer, *session->direct_endpoint, path::kind::direct,
                                      endpoint_backoff_until(peer, *session->direct_endpoint, path::kind::direct));
       }
-      if (detail::peer_attributable_failure(kind, node_stopped)) {
+      if (detail::remote_peer_attributable_failure(kind, node_stopped)) {
          record_direct_failure(peer);
       }
       FORGE_THROW_CODE(kind, error.what());

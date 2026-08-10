@@ -87,7 +87,7 @@
       "headers": [],
       "module_features": {
         "forge.net.p2p.dht": ["protocol.kademlia", "state.kademlia_routing_table"],
-        "forge.net.p2p.diagnostics": ["resource.sessions", "resource.streams", "resource.dials", "resource.queued_bytes", "topology.connection_manager"],
+        "forge.net.p2p.diagnostics": ["state.peer_store", "resource.sessions", "resource.streams", "resource.dials", "resource.queued_bytes", "topology.connection_manager"],
         "forge.net.p2p.discovery": ["protocol.peer_exchange", "protocol.kademlia", "protocol.rendezvous", "protocol.relay", "lifecycle.discovery"],
         "forge.net.p2p.endpoint": ["transport.direct_quic", "transport.tcp_yamux"],
         "forge.net.p2p.envelope": ["identity.secure_transport_authentication", "protocol.relay"],
@@ -109,7 +109,7 @@
         "forge.net.p2p.stream": ["resource.streams", "resource.queued_bytes"]
       },
       "header_features": {},
-      "sha256": "814207f054df9bee9e2ae4bd2430ab514c624c44aa4392267aa497d449a553da",
+      "sha256": "7daf60a156f5324e5b3679d86f5c7101af5dd6d840187b31f6383c66ed3d4189",
       "feature_ids": [
         "transport.direct_quic",
         "transport.tcp_yamux",

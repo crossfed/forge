@@ -92,9 +92,8 @@ inline void merge_provider(std::vector<dht::peer>& providers, const dht::peer& v
 }
 
 [[nodiscard]] inline bool closest_peers_queried(const std::map<peer_id, dht::peer>& known,
-                                                const std::set<peer_id>& queried,
-                                                const std::set<peer_id>& failed, const dht::key& target,
-                                                std::size_t replication) {
+                                                const std::set<peer_id>& queried, const std::set<peer_id>& failed,
+                                                const dht::key& target, std::size_t replication) {
    auto considered = std::size_t{};
    for (const auto& peer : sorted_peers(known, target)) {
       if (!has_endpoint(peer) || failed.contains(peer.id)) {
@@ -118,10 +117,9 @@ struct batch_response {
    bool failed = false;
 };
 
-template <typename Query, typename Postprocess, typename IsPeerFailure>
+template <typename Query, typename IsPeerFailure>
 boost::asio::awaitable<std::vector<batch_response>>
-query_batch_on_strand(std::vector<dht::peer> batch, Query& query, Postprocess& postprocess,
-                      IsPeerFailure& is_peer_failure,
+query_batch_on_strand(std::vector<dht::peer> batch, Query& query, IsPeerFailure& is_peer_failure,
                       boost::asio::strand<boost::asio::any_io_executor> strand) {
    namespace asio = boost::asio;
 
@@ -144,7 +142,7 @@ query_batch_on_strand(std::vector<dht::peer> batch, Query& query, Postprocess& p
       const auto peer = shared->items[index].peer;
       asio::co_spawn(
           strand,
-          [shared, index, peer, &query, &postprocess, &is_peer_failure]() mutable -> asio::awaitable<void> {
+          [shared, index, peer, &query, &is_peer_failure]() mutable -> asio::awaitable<void> {
              auto response = std::optional<dht::message>{};
              auto local_error = std::exception_ptr{};
              auto failed = false;
@@ -161,14 +159,6 @@ query_batch_on_strand(std::vector<dht::peer> batch, Query& query, Postprocess& p
                 }
              } catch (...) {
                 local_error = std::current_exception();
-             }
-             if (response && !failed && !local_error) {
-                try {
-                   co_await postprocess(peer, *response);
-                } catch (...) {
-                   response.reset();
-                   local_error = std::current_exception();
-                }
              }
              shared->items[index].response = std::move(response);
              shared->items[index].local_error = std::move(local_error);
@@ -189,18 +179,17 @@ query_batch_on_strand(std::vector<dht::peer> batch, Query& query, Postprocess& p
    }
 }
 
-template <typename Query, typename Postprocess, typename IsPeerFailure>
+template <typename Query, typename IsPeerFailure>
 boost::asio::awaitable<std::vector<batch_response>> query_batch(std::vector<dht::peer> batch, Query& query,
-                                                                Postprocess& postprocess,
                                                                 IsPeerFailure& is_peer_failure) {
    namespace asio = boost::asio;
    auto executor = asio::any_io_executor{co_await asio::this_coro::executor};
    auto strand = asio::make_strand(executor);
    co_return co_await asio::co_spawn(
        strand,
-       [batch = std::move(batch), &query, &postprocess, &is_peer_failure,
+       [batch = std::move(batch), &query, &is_peer_failure,
         strand]() mutable -> asio::awaitable<std::vector<batch_response>> {
-          co_return co_await query_batch_on_strand(std::move(batch), query, postprocess, is_peer_failure, strand);
+          co_return co_await query_batch_on_strand(std::move(batch), query, is_peer_failure, strand);
        },
        asio::use_awaitable);
 }
@@ -229,10 +218,15 @@ boost::asio::awaitable<result> run(request value, Query query, Postprocess postp
       for (const auto& peer : batch) {
          queried.insert(peer.id);
       }
-      auto responses = co_await query_batch(std::move(batch), query, postprocess, is_peer_failure);
+      auto responses = co_await query_batch(std::move(batch), query, is_peer_failure);
       for (const auto& item : responses) {
          if (item.local_error) {
             std::rethrow_exception(item.local_error);
+         }
+      }
+      for (auto& item : responses) {
+         if (item.response && !item.failed) {
+            co_await postprocess(item.peer, *item.response);
          }
       }
       for (const auto& item : responses) {

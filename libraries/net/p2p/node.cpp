@@ -134,13 +134,13 @@ void mark_dht_failure(const auto& self, const peer_id& peer) {
    self->routing.mark_failure(peer);
 }
 
-[[nodiscard]] bool dht_peer_attributable_failure(const auto& self, const forge::exceptions::base& error) {
+[[nodiscard]] bool remote_peer_attributable_failure(const auto& self, const forge::exceptions::base& error) {
    auto stopped = false;
    {
       auto lock = std::scoped_lock{self->mutex};
       stopped = self->stopped;
    }
-   return detail::peer_attributable_failure(p2p_code(error), stopped);
+   return detail::remote_peer_attributable_failure(p2p_code(error), stopped);
 }
 
 [[nodiscard]] host_addresses::learning_context third_party_discovery_context() {
@@ -460,6 +460,9 @@ node::metrics_snapshot node::metrics() const {
 }
 
 forge::net::p2p::diagnostics::snapshot node::diagnostics(forge::net::p2p::diagnostics::options options) const {
+   const auto persistence = impl_->store.persistence_state();
+   const auto records = options.max_peers > 0 ? impl_->store.snapshot(options.max_peers)
+                                              : std::vector<peer_store::record>{};
    auto lock = std::scoped_lock{impl_->mutex};
    auto out = forge::net::p2p::diagnostics::snapshot{};
    out.network = forge::net::p2p::diagnostics::network_state{
@@ -478,6 +481,14 @@ forge::net::p2p::diagnostics::snapshot node::diagnostics(forge::net::p2p::diagno
    out.connections = forge::net::p2p::diagnostics::connection_state{
        .active_sessions = connection_snapshot.active_sessions,
        .protected_peers = std::move(connection_snapshot.protected_peers),
+   };
+   out.persistence = forge::net::p2p::diagnostics::persistence_state{
+       .pending_peer_mutations = persistence.pending_peer_mutations,
+       .failure_count = persistence.failure_count,
+       .degraded = persistence.degraded,
+       .closing = persistence.closing,
+       .closed = persistence.closed,
+       .last_failure = persistence.last_failure,
    };
 
    const auto now = std::chrono::steady_clock::now();
@@ -504,8 +515,7 @@ forge::net::p2p::diagnostics::snapshot node::diagnostics(forge::net::p2p::diagno
       });
    }
 
-   if (options.max_peers > 0) {
-      const auto records = impl_->store.snapshot(options.max_peers);
+   if (!records.empty()) {
       out.peers.reserve(std::min(options.max_peers, records.size()));
       for (const auto& record : records) {
          if (out.peers.size() >= options.max_peers) {
@@ -723,18 +733,20 @@ boost::asio::awaitable<std::vector<discovery::result>> node::async_refresh_disco
    out.reserve(self->options.limits.discovery.max_results);
 
    if (self->options.limits.discovery.dht_enabled) {
-      for (const auto& record :
-           self->store.candidates(capabilities::dht, self->options.limits.discovery.max_parallel_queries)) {
-         if (record.peer != self->local && queryable(record)) {
-            (void)co_await identify_peer(self, record.peer, record.discovered_by,
-                                         remaining_timeout(query_started, query_timeout, "P2P discovery refresh"));
+      const auto target = make_dht_key(self->local);
+      auto seeds = self->routing.query_seeds(target.bytes, self->options.limits.discovery.max_parallel_queries);
+      if (seeds.empty()) {
+         for (const auto& record :
+              self->store.candidates(capabilities::dht, self->options.limits.discovery.max_parallel_queries)) {
+            if (record.peer != self->local && queryable(record)) {
+               (void)co_await identify_peer(self, record.peer, record.discovered_by,
+                                            remaining_timeout(query_started, query_timeout, "P2P discovery refresh"));
+            }
          }
+         (void)remaining_timeout(query_started, query_timeout, "P2P discovery refresh");
+         seeds = self->routing.query_seeds(target.bytes, self->options.limits.discovery.max_parallel_queries);
       }
-      (void)remaining_timeout(query_started, query_timeout, "P2P discovery refresh");
-      auto seeds = self->routing.query_seeds(make_dht_key(self->local).bytes,
-                                             self->options.limits.discovery.max_parallel_queries);
       if (!seeds.empty()) {
-         const auto target = make_dht_key(self->local);
          auto lookup = co_await dht_query::run(
              dht_query::request{
                  .target = target,
@@ -766,7 +778,7 @@ boost::asio::awaitable<std::vector<discovery::result>> node::async_refresh_disco
                 co_return;
              },
              [self](const dht::peer&, const forge::exceptions::base& error) {
-                return dht_peer_attributable_failure(self, error);
+                return remote_peer_attributable_failure(self, error);
              });
          for (const auto& failed : lookup.failed) {
             mark_dht_failure(self, failed);
@@ -807,8 +819,10 @@ boost::asio::awaitable<std::vector<discovery::result>> node::async_refresh_disco
                                                                .signed_peer_record = std::move(*signed_record),
                                                                .ttl = self->options.limits.rendezvous.default_ttl,
                                                            });
-               } catch (const forge::exceptions::base&) {
-                  self->store.mark_failure(record.peer);
+               } catch (const forge::exceptions::base& error) {
+                  if (remote_peer_attributable_failure(self, error)) {
+                     self->store.mark_failure(record.peer);
+                  }
                }
             }
 
@@ -850,8 +864,10 @@ boost::asio::awaitable<std::vector<discovery::result>> node::async_refresh_disco
                                    self->options.limits.discovery.max_results);
                   }
                }
-            } catch (const forge::exceptions::base&) {
-               self->store.mark_failure(record.peer);
+            } catch (const forge::exceptions::base& error) {
+               if (remote_peer_attributable_failure(self, error)) {
+                  self->store.mark_failure(record.peer);
+               }
             }
          }
       }
@@ -911,7 +927,7 @@ boost::asio::awaitable<dht::query_result> node::async_find_peer(peer_id peer) {
           co_return;
        },
        [self](const dht::peer&, const forge::exceptions::base& error) {
-          return dht_peer_attributable_failure(self, error);
+          return remote_peer_attributable_failure(self, error);
        });
    for (const auto& failed : lookup.failed) {
       mark_dht_failure(self, failed);
@@ -988,7 +1004,7 @@ boost::asio::awaitable<void> node::async_provide(dht::key key) {
           co_return;
        },
        [self](const dht::peer&, const forge::exceptions::base& error) {
-          return dht_peer_attributable_failure(self, error);
+          return remote_peer_attributable_failure(self, error);
        });
    for (const auto& failed : lookup.failed) {
       mark_dht_failure(self, failed);
@@ -1072,12 +1088,11 @@ boost::asio::awaitable<std::vector<dht::peer>> node::async_find_providers(dht::k
           co_return;
        },
        [self](const dht::peer&, const forge::exceptions::base& error) {
-          return dht_peer_attributable_failure(self, error);
+          return remote_peer_attributable_failure(self, error);
        });
    for (const auto& failed : lookup.failed) {
       mark_dht_failure(self, failed);
    }
-   (void)remaining_timeout(query_started, query_timeout, "P2P DHT provider lookup");
    co_return lookup.query.provider_peers;
 }
 
@@ -1295,7 +1310,6 @@ boost::asio::awaitable<forge::net::p2p::stream> node::async_open_protocol_stream
    const auto started = std::chrono::steady_clock::now();
    auto last_kind = std::optional<exceptions::code>{};
    auto last_message = std::string{};
-   auto direct_attempt_failed = false;
    if (self->options.path_policy.allow_direct) {
       try {
          co_return co_await self->open_protocol_direct(
@@ -1304,7 +1318,6 @@ boost::asio::awaitable<forge::net::p2p::stream> node::async_open_protocol_stream
          const auto kind = p2p_code(error);
          last_kind = kind;
          last_message = error.what();
-         direct_attempt_failed = true;
          auto node_stopped = false;
          if (kind == exceptions::code::closed) {
             auto lock = std::scoped_lock{self->mutex};
@@ -1374,9 +1387,6 @@ boost::asio::awaitable<forge::net::p2p::stream> node::async_open_protocol_stream
 
    if (relay_candidates.empty()) {
       FORGE_THROW_EXCEPTION(exceptions::relay_not_available, "P2P path manager found no reserved relay candidate");
-   }
-   if (direct_attempt_failed) {
-      self->record_direct_failure(peer);
    }
    for (const auto& relay_peer : relay_candidates) {
       const auto remaining = remaining_timeout(started, effective.timeout, "P2P protocol open");

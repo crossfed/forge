@@ -212,6 +212,17 @@ and raises typed `durability_uncertain`; callers must not blindly retry the
 logical operation as though it were known not to have committed.
 The degraded state remains sticky across non-durable maintenance and is cleared
 only by a later confirmed durable apply or explicit flush.
+`node::diagnostics()` exposes the queue depth, sticky degraded state, failure
+count and last persistence failure so operators do not have to infer durable
+health from a transient call error.
+
+Production ObjectDB hydration validates one raw row at a time through one shared
+snapshot. Per-record limits are checked before conversion into operational peer
+state, so a malformed durable row cannot force an unbounded hydration page into
+memory. DHT deadlines bound the remote wire exchanges. Once a provider or
+Rendezvous record has been accepted for durable acknowledgement, its persistence
+step remains owned and awaited by the caller instead of being abandoned after a
+possibly committed transaction.
 
 ```cpp
 auto node = forge::net::p2p::node{runtime, {

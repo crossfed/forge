@@ -116,6 +116,7 @@ boost::asio::awaitable<void> application_runtime::initialize() {
    auto failed_plugin_version = std::string{};
    auto failed_plugin_message = std::string{};
    auto failure = std::exception_ptr{};
+   auto failure_message = std::string{};
    try {
       for (auto& value : plugins_) {
          const auto id = value->id();
@@ -165,21 +166,32 @@ boost::asio::awaitable<void> application_runtime::initialize() {
       }
       state_ = application_state::initialized;
    } catch (...) {
+      failure_message = exception_message();
       if (diagnostics_) {
-         diagnostics_->set_application_state(lifecycle_state::failed, "initialize", exception_message());
+         diagnostics_->set_application_state(lifecycle_state::failed, "initialize", failure_message);
       }
       failure = std::current_exception();
    }
 
    if (failure) {
       request_stop();
-      co_await shutdown();
+      auto cleanup_succeeded = true;
+      try {
+         co_await shutdown();
+      } catch (...) {
+         cleanup_succeeded = false;
+      }
       if (diagnostics_ && has_after_initialize_failure) {
          diagnostics_->set_plugin_state(std::move(failed_plugin_id), std::move(failed_plugin_version),
                                         lifecycle_state::failed, "after_initialize",
                                         std::move(failed_plugin_message));
       }
-      state_ = application_state::stopped;
+      if (diagnostics_) {
+         diagnostics_->set_application_state(lifecycle_state::failed, "initialize", std::move(failure_message));
+      }
+      if (cleanup_succeeded) {
+         state_ = application_state::stopped;
+      }
       std::rethrow_exception(failure);
    }
 }
@@ -200,6 +212,7 @@ boost::asio::awaitable<void> application_runtime::startup() {
    auto failed_plugin_version = std::string{};
    auto failed_plugin_message = std::string{};
    auto failure = std::exception_ptr{};
+   auto failure_message = std::string{};
    try {
       for (auto& value : plugins_) {
          const auto id = value->id();
@@ -232,49 +245,64 @@ boost::asio::awaitable<void> application_runtime::startup() {
       }
       state_ = application_state::started;
    } catch (...) {
+      failure_message = exception_message();
       if (diagnostics_) {
-         diagnostics_->set_application_state(lifecycle_state::failed, "startup", exception_message());
+         diagnostics_->set_application_state(lifecycle_state::failed, "startup", failure_message);
       }
       failure = std::current_exception();
    }
 
    if (failure) {
-      co_await shutdown();
+      try {
+         co_await shutdown();
+      } catch (...) {
+      }
       if (diagnostics_ && has_startup_failure) {
          diagnostics_->set_plugin_state(std::move(failed_plugin_id), std::move(failed_plugin_version),
                                         lifecycle_state::failed, "startup", std::move(failed_plugin_message));
+      }
+      if (diagnostics_) {
+         diagnostics_->set_application_state(lifecycle_state::failed, "startup", std::move(failure_message));
       }
       std::rethrow_exception(failure);
    }
 }
 
 boost::asio::awaitable<void> application_runtime::shutdown() {
-   for (auto index = initialized_count_; index > 0; --index) {
-      auto& value = plugins_[index - 1];
+   const auto had_initialized_plugins = initialized_count_ > 0;
+   while (initialized_count_ > 0) {
+      auto& value = plugins_[initialized_count_ - 1];
+      const auto id = value->id();
+      const auto version = value->version();
       try {
-         const auto id = value->id();
-         const auto version = value->version();
          if (diagnostics_) {
             diagnostics_->set_plugin_state(id.value, version, lifecycle_state::stopping, "shutdown");
          }
          publish_lifecycle_event(context_, event_severity::info, id, "stopping");
          context_->signals().plugin_stopping(plugin_signal{.plugin = id.value});
          co_await value->shutdown();
-         if (diagnostics_) {
-            diagnostics_->set_plugin_state(id.value, version, lifecycle_state::stopped, "shutdown");
-         }
-         context_->signals().plugin_stopped(plugin_signal{.plugin = id.value});
-         publish_lifecycle_event(context_, event_severity::info, id, "stopped");
       } catch (...) {
+         const auto failure = std::current_exception();
+         const auto message = exception_message();
          if (diagnostics_) {
-            diagnostics_->set_plugin_state(value->id().value, value->version(), lifecycle_state::failed, "shutdown",
-                                           exception_message());
+            diagnostics_->set_plugin_state(id.value, version, lifecycle_state::failed, "shutdown", message);
+            diagnostics_->set_application_state(lifecycle_state::failed, "shutdown", message);
          }
+         publish_lifecycle_event(context_, event_severity::error, id, "failed", message);
+         std::rethrow_exception(failure);
       }
+
+      if (started_count_ == initialized_count_) {
+         --started_count_;
+      }
+      --initialized_count_;
+      if (diagnostics_) {
+         diagnostics_->set_plugin_state(id.value, version, lifecycle_state::stopped, "shutdown");
+      }
+      context_->signals().plugin_stopped(plugin_signal{.plugin = id.value});
+      publish_lifecycle_event(context_, event_severity::info, id, "stopped");
    }
-   started_count_ = 0;
-   initialized_count_ = 0;
-   if (state_ != application_state::created) {
+   if (had_initialized_plugins || state_ != application_state::created) {
       state_ = application_state::stopped;
    }
 }

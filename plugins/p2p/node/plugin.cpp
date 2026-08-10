@@ -168,7 +168,7 @@ boost::asio::awaitable<void> plugin::startup() {
          } catch (...) {
             clear_bytes(private_key.bytes);
             clear_text(impl_->options.certificate_pem);
-            impl_->options.private_key_pem.clear();
+            clear_text(impl_->options.private_key_pem);
             throw;
          }
       } catch (...) {
@@ -177,12 +177,13 @@ boost::asio::awaitable<void> plugin::startup() {
       }
    }
    if (impl_->peer_state_store) {
-      impl_->peer_state = co_await object_peer_state_adapter::async_open(impl_->stores, *impl_->peer_state_store);
+      impl_->peer_state = co_await object_peer_state_adapter::async_open(impl_->stores, *impl_->peer_state_store,
+                                                                         impl_->options.peer_state);
       impl_->options.peer_state.persistence = impl_->peer_state;
    }
 
    auto& node = impl_->ensure_node();
-   impl_->options.private_key_pem.clear();
+   clear_text(impl_->options.private_key_pem);
    for (auto& route : impl_->routes) {
       node.register_protocol_handler(route.first, route.second);
    }
@@ -241,7 +242,7 @@ boost::asio::awaitable<void> plugin::shutdown() {
       impl_->options.peer_state.persistence.reset();
       impl_->peer_state_store.reset();
       clear_text(impl_->options.certificate_pem);
-      impl_->options.private_key_pem.clear();
+      clear_text(impl_->options.private_key_pem);
       impl_->stores = nullptr;
       impl_->secrets = nullptr;
    }

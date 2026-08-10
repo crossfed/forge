@@ -83,6 +83,75 @@ void require_format(std::uint32_t format_version, std::string_view model) {
    }
 }
 
+void add_bounded_size(std::size_t& total, std::size_t value, std::size_t limit, std::string_view message) {
+   require_row(total <= limit && value <= limit - total, message);
+   total += value;
+}
+
+void validate_peer_row_bounds(const schema::peer_row& value, const p2p::peer_store::options& limits) {
+   require_row(value.protocols.size() <= limits.max_protocols_per_peer, "peer protocol count exceeds configured limit");
+   require_row(value.endpoints.size() <= limits.max_endpoints_per_peer, "peer endpoint count exceeds configured limit");
+   require_row(value.relay_reservations.size() <= limits.max_relay_reservations_per_peer,
+               "peer relay reservation count exceeds configured limit");
+   auto bytes = std::size_t{};
+   const auto add = [&](std::size_t size) {
+      add_bounded_size(bytes, size, limits.max_peer_record_bytes, "peer row exceeds configured byte limit");
+   };
+   add(value.peer.size());
+   add(value.protocol_version.size());
+   add(value.agent_version.size());
+   add(value.public_key.size());
+   add(value.signed_peer_record.size());
+   if (value.observed_endpoint) {
+      add(value.observed_endpoint->size());
+   }
+   for (const auto& protocol : value.protocols) {
+      add(protocol.size());
+   }
+   for (const auto& endpoint : value.endpoints) {
+      add(endpoint.endpoint.size());
+      if (endpoint.relay_peer) {
+         add(endpoint.relay_peer->size());
+      }
+   }
+   for (const auto& relay : value.relay_reservations) {
+      require_row(relay.endpoints.size() <= limits.max_relay_endpoints_per_reservation,
+                  "relay endpoint count exceeds configured limit");
+      add(relay.relay.size());
+      add(relay.voucher.size());
+      for (const auto& endpoint : relay.endpoints) {
+         add(endpoint.size());
+      }
+   }
+}
+
+void validate_provider_row_bounds(const schema::provider_row& value, const p2p::peer_store::options& limits) {
+   require_row(value.endpoints.size() <= limits.max_endpoints_per_peer,
+               "provider endpoint count exceeds configured limit");
+   auto bytes = std::size_t{};
+   add_bounded_size(bytes, value.key.size(), limits.max_peer_record_bytes,
+                    "provider row exceeds configured byte limit");
+   add_bounded_size(bytes, value.peer.size(), limits.max_peer_record_bytes,
+                    "provider row exceeds configured byte limit");
+   for (const auto& endpoint : value.endpoints) {
+      add_bounded_size(bytes, endpoint.size(), limits.max_peer_record_bytes,
+                       "provider row exceeds configured byte limit");
+   }
+}
+
+void validate_rendezvous_row_bounds(const schema::rendezvous_row& value, const p2p::peer_store::options& limits) {
+   require_row(value.endpoints.size() <= limits.max_endpoints_per_peer,
+               "Rendezvous endpoint count exceeds configured limit");
+   auto bytes = std::size_t{};
+   for (const auto size : {value.namespace_name.size(), value.peer.size(), value.signed_peer_record.size()}) {
+      add_bounded_size(bytes, size, limits.max_peer_record_bytes, "Rendezvous row exceeds configured byte limit");
+   }
+   for (const auto& endpoint : value.endpoints) {
+      add_bounded_size(bytes, endpoint.size(), limits.max_peer_record_bytes,
+                       "Rendezvous row exceeds configured byte limit");
+   }
+}
+
 [[nodiscard]] std::string binary_text(const std::vector<std::uint8_t>& value) {
    if (value.empty()) {
       return {};
@@ -513,8 +582,9 @@ boost::asio::awaitable<bool> has_application_rows(forge::db::object::transaction
 } // namespace
 
 object_peer_state_adapter::object_peer_state_adapter(forge::plugins::db::store::api* db,
-                                                     forge::plugins::db::store::store_handle store)
-    : db_{db}, store_{std::move(store)} {}
+                                                     forge::plugins::db::store::store_handle store,
+                                                     p2p::peer_store::options limits)
+    : db_{db}, store_{std::move(store)}, limits_{std::move(limits)} {}
 
 void object_peer_state_adapter::register_schema(const forge::plugins::db::store::store_handle& store) {
    auto objects = store.objects();
@@ -525,8 +595,8 @@ void object_peer_state_adapter::register_schema(const forge::plugins::db::store:
 }
 
 boost::asio::awaitable<std::shared_ptr<object_peer_state_adapter>>
-object_peer_state_adapter::async_open(forge::plugins::db::store::api* db,
-                                      forge::plugins::db::store::store_handle store) {
+object_peer_state_adapter::async_open(forge::plugins::db::store::api* db, forge::plugins::db::store::store_handle store,
+                                      p2p::peer_store::options limits) {
    if (!db || !store) {
       FORGE_THROW_EXCEPTION(p2p::exceptions::invalid_options, "ObjectDB peer state requires a named DB Store handle");
    }
@@ -548,7 +618,8 @@ object_peer_state_adapter::async_open(forge::plugins::db::store::api* db,
    }
    co_await transaction.commit();
 
-   co_return std::shared_ptr<object_peer_state_adapter>{new object_peer_state_adapter{db, std::move(store)}};
+   co_return std::shared_ptr<object_peer_state_adapter>{
+       new object_peer_state_adapter{db, std::move(store), std::move(limits)}};
 }
 
 void object_peer_state_adapter::ensure_open() const {
@@ -570,36 +641,66 @@ object_peer_state_adapter::async_hydrate(p2p::peer_store::hydration_request requ
 
    switch (request.kind) {
    case p2p::peer_store::hydration_kind::peers: {
-      auto page = co_await objects.index<schema::peer_object, schema::by_peer_hydration>()
-                      .lower_bound(std::numeric_limits<std::uint64_t>::max())
-                      .page(page_request);
-      out.peers.reserve(page.items.size());
-      for (const auto& row : page.items) {
-         out.peers.push_back(from_peer_row(row));
+      out.peers.reserve(request.limit);
+      auto next = page_request.after;
+      while (out.peers.size() < request.limit) {
+         auto page = co_await objects.index<schema::peer_object, schema::by_peer_hydration>()
+                         .lower_bound(std::numeric_limits<std::uint64_t>::max())
+                         .page({.after = next, .limit = 1});
+         if (page.items.empty()) {
+            out.cursor.reset();
+            break;
+         }
+         validate_peer_row_bounds(page.items.front(), limits_);
+         out.peers.push_back(from_peer_row(page.items.front()));
+         set_cursor(out, page.next);
+         if (!page.next) {
+            break;
+         }
+         next = page.next;
       }
-      set_cursor(out, page.next);
       break;
    }
    case p2p::peer_store::hydration_kind::providers: {
-      auto page = co_await objects.index<schema::provider_object, schema::by_provider_hydration>()
-                      .lower_bound(std::numeric_limits<std::int64_t>::max())
-                      .page(page_request);
-      out.providers.reserve(page.items.size());
-      for (const auto& row : page.items) {
-         out.providers.push_back(from_provider_row(row));
+      out.providers.reserve(request.limit);
+      auto next = page_request.after;
+      while (out.providers.size() < request.limit) {
+         auto page = co_await objects.index<schema::provider_object, schema::by_provider_hydration>()
+                         .lower_bound(std::numeric_limits<std::int64_t>::max())
+                         .page({.after = next, .limit = 1});
+         if (page.items.empty()) {
+            out.cursor.reset();
+            break;
+         }
+         validate_provider_row_bounds(page.items.front(), limits_);
+         out.providers.push_back(from_provider_row(page.items.front()));
+         set_cursor(out, page.next);
+         if (!page.next) {
+            break;
+         }
+         next = page.next;
       }
-      set_cursor(out, page.next);
       break;
    }
    case p2p::peer_store::hydration_kind::rendezvous: {
-      auto page = co_await objects.index<schema::rendezvous_object, schema::by_rendezvous_sequence>()
-                      .lower_bound(std::numeric_limits<std::uint64_t>::max())
-                      .page(page_request);
-      out.rendezvous_registrations.reserve(page.items.size());
-      for (const auto& row : page.items) {
-         out.rendezvous_registrations.push_back(from_rendezvous_row(row));
+      out.rendezvous_registrations.reserve(request.limit);
+      auto next = page_request.after;
+      while (out.rendezvous_registrations.size() < request.limit) {
+         auto page = co_await objects.index<schema::rendezvous_object, schema::by_rendezvous_sequence>()
+                         .lower_bound(std::numeric_limits<std::uint64_t>::max())
+                         .page({.after = next, .limit = 1});
+         if (page.items.empty()) {
+            out.cursor.reset();
+            break;
+         }
+         validate_rendezvous_row_bounds(page.items.front(), limits_);
+         out.rendezvous_registrations.push_back(from_rendezvous_row(page.items.front()));
+         set_cursor(out, page.next);
+         if (!page.next) {
+            break;
+         }
+         next = page.next;
       }
-      set_cursor(out, page.next);
       break;
    }
    }
