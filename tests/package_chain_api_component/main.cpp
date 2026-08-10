@@ -1199,8 +1199,6 @@ void require_audit_semantics(const protocol::audited_response& response) {
 
 } // namespace
 
-bool history_api_package_coverage();
-
 int main() {
    static_assert(std::is_abstract_v<forge::chain::api::info>);
    static_assert(std::is_abstract_v<forge::chain::api::block>);
@@ -1208,7 +1206,6 @@ int main() {
    static_assert(std::is_abstract_v<forge::chain::api::transaction>);
    static_assert(std::is_abstract_v<forge::chain::api::submission>);
    static_assert(std::is_abstract_v<forge::chain::api::admin>);
-   require(history_api_package_coverage(), "installed history API contract is incomplete");
    static_assert(!std::is_abstract_v<forge::chain::api::submission_client>);
    static_assert(std::derived_from<forge::chain::api::authenticated_audit_verifier, forge::chain::api::audit_verifier>);
    static_assert(std::is_abstract_v<forge::chain::api::finality_verifier>);

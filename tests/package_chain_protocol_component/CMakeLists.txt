@@ -11,7 +11,6 @@ find_package(Forge CONFIG REQUIRED COMPONENTS chain_protocol codec_json)
 add_executable(
    forge_package_chain_protocol_component
    main.cpp
-   history.cpp
    producer_schedule.cpp
    transaction_reexport.cpp
 )

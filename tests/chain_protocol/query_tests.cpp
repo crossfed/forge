@@ -2,18 +2,13 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <utility>
 
-import forge.chain.protocol.history_query;
 import forge.chain.protocol.state_query;
 import forge.chain.protocol.transaction_query;
 import forge.codec.json;
 import forge.crypto.digest.sha256;
 import forge.raw.exceptions;
 import forge.raw.raw;
-import forge.variant.described;
-import forge.variant.static_variant;
-import forge.variant.value;
 
 namespace protocol = forge::chain::protocol;
 
@@ -166,75 +161,4 @@ BOOST_AUTO_TEST_CASE(transaction_trace_is_one_typed_protocol_record_across_api_s
    auto read_only = protocol::transaction_read_only_response{.id = trace.id, .trace = trace};
    BOOST_CHECK(submitted.trace == status.trace);
    BOOST_CHECK(read_only.trace == *submitted.trace);
-}
-
-BOOST_AUTO_TEST_CASE(history_query_records_roundtrip_through_variant_and_canonical_raw) {
-   const auto require_roundtrip = []<typename T>(const T& value) {
-      const auto canonical = forge::raw::pack(value);
-      const auto raw_decoded = forge::raw::unpack_exact<T>(canonical);
-      BOOST_CHECK(forge::raw::pack(raw_decoded) == canonical);
-
-      auto encoded = forge::variant{};
-      forge::to_variant(value, encoded);
-      auto variant_decoded = T{};
-      forge::from_variant(encoded, variant_decoded);
-      BOOST_CHECK(forge::raw::pack(variant_decoded) == canonical);
-   };
-
-   auto transaction_id = protocol::transaction_id{};
-   transaction_id._hash[0] = 0x21U;
-   auto anchor = protocol::block_id{};
-   anchor._hash[0] = 0x31U;
-   auto finality_from = protocol::block_id{};
-   finality_from._hash[0] = 0x41U;
-   const auto transaction_request = protocol::transaction_history_request{
-       .id = transaction_id,
-       .anchor = anchor,
-       .finality_from = finality_from,
-       .audit = protocol::audit_mode::required,
-   };
-   require_roundtrip(transaction_request);
-
-   auto signed_transaction = protocol::signed_transaction{};
-   signed_transaction.expiration = protocol::time_point_sec{17U};
-   auto lookup = protocol::transaction_lookup_response{};
-   lookup.transaction = protocol::packed_transaction{std::move(signed_transaction)};
-   lookup.id = lookup.transaction.id();
-   lookup.state = protocol::transaction_lifecycle::included;
-   require_roundtrip(lookup);
-
-   const auto location = protocol::history_location{
-       .block = anchor,
-       .block_num = 49U,
-       .canonical = true,
-   };
-   auto transaction_trace = protocol::transaction_trace_response{};
-   transaction_trace.location = location;
-   transaction_trace.trace.id = transaction_id;
-   require_roundtrip(transaction_trace);
-
-   auto block_traces = protocol::block_traces_response{};
-   block_traces.location = location;
-   block_traces.traces = {protocol::transaction_trace{.id = transaction_id}};
-   require_roundtrip(block_traces);
-
-   const auto account_request = protocol::account_actions_request{
-       .account = protocol::account_name{"alice"},
-       .cursor = protocol::bytes{0x00U, 0x7fU, 0xffU},
-       .limit = 25U,
-       .reverse = true,
-       .anchor = anchor,
-       .finality_from = finality_from,
-       .audit = protocol::audit_mode::required,
-   };
-   require_roundtrip(account_request);
-
-   auto account_response = protocol::account_actions_response{};
-   account_response.actions = {{
-       .transaction = transaction_id,
-       .location = location,
-       .trace = protocol::action_trace{},
-   }};
-   account_response.next = protocol::bytes{0x11U, 0x22U};
-   require_roundtrip(account_response);
 }

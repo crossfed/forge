@@ -6,7 +6,7 @@ transactions and blocks. It builds on `forge_chain_core` without adding
 controller, execution or node runtime behavior.
 
 The flat `forge.chain.protocol.audit`, `info`, `block_query`, `state_query`,
-`transaction_query`, `history_query` and `admin` modules own the
+`transaction_query` and `admin` modules own the
 transport-neutral chain wire contract. API classes, clients and transport
 bindings remain in `forge_chain_api`; wire DTOs never live beside those runtime
 interfaces.
@@ -39,14 +39,12 @@ Package component: `chain_protocol`. Public namespace:
   compression, IDs and signing digests. It re-exports the action module.
 - `forge.chain.protocol.transaction_trace`: typed transaction and action
   execution traces shared by runtimes, block metadata and Chain API clients.
-- `forge.chain.protocol.history_query`: transaction lookup, transaction and
-  block trace, and account-action history request/response records.
 - `forge.chain.protocol.block`: block headers, receipts, signed blocks, block
   IDs and transaction receipt Merkle roots.
 - `forge.chain.protocol.abi`: ABI records and optional tail-field decoding.
 - `forge.chain.protocol.system`: canonical system action payloads.
 - `forge.chain.protocol.audit`, `info`, `block_query`, `state_query`,
-  `transaction_query`, `history_query`, `admin`: common audit envelopes and
+  `transaction_query`, `admin`: common audit envelopes and
   endpoint wire records for the transport-neutral Chain API.
 
 The target publicly links `forge_chain_core`, `forge_compression`, `forge_raw`,

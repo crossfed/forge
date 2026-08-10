@@ -43,7 +43,6 @@ import forge.chain.api.authenticated_audit_verifier;
 import forge.chain.api.block;
 import forge.chain.api.exceptions;
 import forge.chain.api.finality;
-import forge.chain.api.history;
 import forge.chain.api.info;
 import forge.chain.api.limits;
 import forge.chain.api.raw_client;
@@ -317,42 +316,6 @@ class transaction_service final : public forge::chain::api::transaction {
    forge::chain::protocol::transaction_status_response response_;
 };
 
-class history_service final : public forge::chain::api::history {
- public:
-   boost::asio::awaitable<forge::chain::protocol::transaction_lookup_response>
-   get_transaction(forge::chain::protocol::transaction_history_request request) override {
-      last_transaction_request = std::move(request);
-      co_return transaction_response;
-   }
-
-   boost::asio::awaitable<forge::chain::protocol::transaction_trace_response>
-   get_transaction_trace(forge::chain::protocol::transaction_history_request request) override {
-      last_trace_request = std::move(request);
-      co_return trace_response;
-   }
-
-   boost::asio::awaitable<forge::chain::protocol::block_traces_response>
-   get_block_traces(forge::chain::protocol::block_request request) override {
-      last_block_request = std::move(request);
-      co_return block_response;
-   }
-
-   boost::asio::awaitable<forge::chain::protocol::account_actions_response>
-   get_account_actions(forge::chain::protocol::account_actions_request request) override {
-      last_account_request = std::move(request);
-      co_return account_response;
-   }
-
-   forge::chain::protocol::transaction_lookup_response transaction_response;
-   forge::chain::protocol::transaction_trace_response trace_response;
-   forge::chain::protocol::block_traces_response block_response;
-   forge::chain::protocol::account_actions_response account_response;
-   std::optional<forge::chain::protocol::transaction_history_request> last_transaction_request;
-   std::optional<forge::chain::protocol::transaction_history_request> last_trace_request;
-   std::optional<forge::chain::protocol::block_request> last_block_request;
-   std::optional<forge::chain::protocol::account_actions_request> last_account_request;
-};
-
 class submission_service final : public forge::chain::api::submission {
  public:
    explicit submission_service(std::vector<forge::chain::protocol::transaction_submit_response> responses)
@@ -540,30 +503,6 @@ class throwing_account_projection_verifier final : public forge::chain::api::pro
    }
 
    bool nonstandard = false;
-};
-
-class accepting_history_projection_verifier final : public forge::chain::api::projection_verifier {
- public:
-   void verify(const forge::chain::protocol::transaction_history_request&,
-               const forge::chain::protocol::transaction_trace_response&, const forge::chain::protocol::audit_bundle&,
-               forge::chain::api::audit_verifier&) override {
-      ++transaction_trace_verifications;
-   }
-
-   void verify(const forge::chain::protocol::block_request&, const forge::chain::protocol::block_traces_response&,
-               const forge::chain::protocol::audit_bundle&, forge::chain::api::audit_verifier&) override {
-      ++block_trace_verifications;
-   }
-
-   void verify(const forge::chain::protocol::account_actions_request&,
-               const forge::chain::protocol::account_actions_response&, const forge::chain::protocol::audit_bundle&,
-               forge::chain::api::audit_verifier&) override {
-      ++account_action_verifications;
-   }
-
-   std::size_t transaction_trace_verifications = 0;
-   std::size_t block_trace_verifications = 0;
-   std::size_t account_action_verifications = 0;
 };
 
 class recording_finality_verifier final : public forge::chain::api::finality_verifier {
@@ -1048,7 +987,6 @@ BOOST_AUTO_TEST_CASE(chain_http_uses_resource_verbs) {
    const auto info = forge::api::http::traits<forge::chain::api::info>::routes();
    const auto blocks = forge::api::http::traits<forge::chain::api::block>::routes();
    const auto state = forge::api::http::traits<forge::chain::api::state>::routes();
-   const auto history = forge::api::http::traits<forge::chain::api::history>::routes();
    const auto transactions = forge::api::http::traits<forge::chain::api::transaction>::routes();
    const auto submissions = forge::api::http::traits<forge::chain::api::submission>::routes();
    const auto admin = forge::api::http::traits<forge::chain::api::admin>::routes();
@@ -1062,8 +1000,6 @@ BOOST_AUTO_TEST_CASE(chain_http_uses_resource_verbs) {
                   {"get_account", "get_code", "get_table_rows", "get_table_scope", "get_currency_balance",
                    "get_currency_stats", "get_scheduled_transactions"});
    require_routes(state, method::post, {"get_point", "get_range", "get_changes", "get_accounts_by_authorizers"});
-   require_routes(history, method::get,
-                  {"get_transaction", "get_transaction_trace", "get_block_traces", "get_account_actions"});
    require_routes(transactions, method::get, {"get_status", "await_transaction"});
    require_routes(transactions, method::post,
                   {"get_required_keys", "compute_transaction", "send_read_only_transaction"});
@@ -1079,36 +1015,7 @@ BOOST_AUTO_TEST_CASE(chain_http_uses_resource_verbs) {
    require_audited_get_finality_anchor(info);
    require_audited_get_finality_anchor(blocks);
    require_audited_get_finality_anchor(state);
-   require_audited_get_finality_anchor(history);
    require_audited_get_finality_anchor(transactions);
-}
-
-BOOST_AUTO_TEST_CASE(chain_history_descriptor_and_routes_are_canonical) {
-   const auto descriptor = forge::chain::api::history::describe();
-   BOOST_TEST(descriptor.id.value == "forge.chain.api.history");
-   BOOST_TEST(descriptor.version.major == 1U);
-   BOOST_TEST(descriptor.version.revision == 0U);
-   BOOST_REQUIRE_EQUAL(descriptor.methods.size(), 4U);
-
-   const auto routes = forge::api::http::traits<forge::chain::api::history>::routes();
-   BOOST_REQUIRE_EQUAL(routes.size(), 4U);
-   const auto expected = std::array{
-       std::pair{"get_transaction", "/v1/chain/history/transactions/{id}"},
-       std::pair{"get_transaction_trace", "/v1/chain/history/transactions/{id}/trace"},
-       std::pair{"get_block_traces", "/v1/chain/history/blocks/traces"},
-       std::pair{"get_account_actions", "/v1/chain/history/accounts/{account}/actions"},
-   };
-   const auto not_found = forge::api::core::exception_identity<forge::chain::api::exceptions::not_found>();
-   for (const auto& [name, path] : expected) {
-      const auto* method_descriptor = forge::api::core::find_method(descriptor, name);
-      BOOST_REQUIRE(method_descriptor != nullptr);
-      BOOST_CHECK(std::ranges::find(method_descriptor->errors, not_found,
-                                    &forge::api::core::error_descriptor::identity) != method_descriptor->errors.end());
-      const auto& mapping = find_route(routes, name);
-      BOOST_TEST(mapping.verb == method::get);
-      BOOST_TEST(openapi_path(mapping) == path);
-      BOOST_TEST(static_cast<int>(mapping.cache) == static_cast<int>(cache_policy::no_store));
-   }
 }
 
 BOOST_AUTO_TEST_CASE(chain_api_limits_bound_canonical_request_and_response_bytes) {
@@ -1195,35 +1102,6 @@ BOOST_AUTO_TEST_CASE(chain_api_limits_bound_canonical_request_and_response_bytes
    limits.max_response_bytes = std::numeric_limits<std::uint32_t>::max();
    limits.max_proof_bytes = static_cast<std::uint32_t>(forge::raw::pack_size(*response.audit) - 1U);
    BOOST_CHECK_THROW(forge::chain::api::require_response_within_limits(response, limits),
-                     forge::chain::api::exceptions::resource_exhausted);
-}
-
-BOOST_AUTO_TEST_CASE(chain_history_limits_bound_requested_and_actual_action_counts) {
-   auto limits = forge::chain::protocol::service_limits{};
-   limits.max_page_size = 2U;
-
-   BOOST_CHECK_THROW(forge::chain::api::require_request_within_limits(
-                         forge::chain::protocol::account_actions_request{.limit = 0U}, limits),
-                     forge::chain::api::exceptions::invalid_request);
-   BOOST_CHECK_THROW(forge::chain::api::require_request_within_limits(
-                         forge::chain::protocol::account_actions_request{.limit = 3U}, limits),
-                     forge::chain::api::exceptions::resource_exhausted);
-
-   const auto request = forge::chain::protocol::account_actions_request{
-       .account = forge::chain::protocol::account_name{"alice"},
-       .limit = 1U,
-   };
-   auto response = forge::chain::protocol::account_actions_response{};
-   response.actions = {forge::chain::protocol::account_action_record{},
-                       forge::chain::protocol::account_action_record{}};
-   BOOST_CHECK_THROW(forge::chain::api::require_response_within_limits(response, request, limits),
-                     forge::chain::api::exceptions::resource_exhausted);
-
-   const auto descriptor = forge::chain::api::limited_descriptor<forge::chain::api::history>(limits);
-   const auto* method = forge::api::core::find_method(descriptor, "get_account_actions");
-   BOOST_REQUIRE(method != nullptr);
-   BOOST_CHECK_NO_THROW(method->request_validator(forge::raw::pack(request)));
-   BOOST_CHECK_THROW(method->response_validator(forge::raw::pack(request), forge::raw::pack(response)),
                      forge::chain::api::exceptions::resource_exhausted);
 }
 
@@ -1412,9 +1290,6 @@ BOOST_AUTO_TEST_CASE(chain_openapi_covers_every_owner_contract_route_and_schema)
                               &owner_openapi<forge::chain::api::block>, &owner_descriptor<forge::chain::api::block>},
        owner_openapi_contract{"state", &owner_routes<forge::chain::api::state>,
                               &owner_openapi<forge::chain::api::state>, &owner_descriptor<forge::chain::api::state>},
-       owner_openapi_contract{"history", &owner_routes<forge::chain::api::history>,
-                              &owner_openapi<forge::chain::api::history>,
-                              &owner_descriptor<forge::chain::api::history>},
        owner_openapi_contract{"transaction", &owner_routes<forge::chain::api::transaction>,
                               &owner_openapi<forge::chain::api::transaction>,
                               &owner_descriptor<forge::chain::api::transaction>},
@@ -1746,21 +1621,6 @@ BOOST_AUTO_TEST_CASE(chain_table_scope_openapi_exposes_json_bytes_cursor_and_nex
    BOOST_TEST(!properties.contains("more"));
    BOOST_TEST(!properties.contains("next_key"));
    BOOST_TEST(properties["next"]["anyOf"][std::size_t{0}]["type"].as_string() == "array");
-}
-
-BOOST_AUTO_TEST_CASE(chain_raw_client_exposes_the_history_service_handle) {
-   auto registry = forge::api::core::registry{};
-   auto service = std::make_shared<history_service>();
-   registry.install<forge::chain::api::history>(service);
-   auto client = forge::chain::api::raw_client{forge::chain::api::service_handles{
-       .history_queries = registry.get<forge::chain::api::history>(forge::chain::api::history::ref()),
-   }};
-
-   BOOST_CHECK(&client.history() == service.get());
-   const auto account = forge::chain::protocol::account_name{"alice"};
-   static_cast<void>(run(client.history().get_account_actions({.account = account, .limit = 1U})));
-   BOOST_REQUIRE(service->last_account_request.has_value());
-   BOOST_CHECK(service->last_account_request->account == account);
 }
 
 BOOST_AUTO_TEST_CASE(verified_block_response_is_bound_to_the_requested_identity) {
@@ -2198,63 +2058,6 @@ BOOST_AUTO_TEST_CASE(verified_transaction_status_delegates_the_inclusion_proof) 
    BOOST_TEST(verifier->transaction_verifications == 1U);
 }
 
-BOOST_AUTO_TEST_CASE(verified_history_transaction_lookup_binds_the_returned_packed_transaction) {
-   auto signed_transaction = forge::chain::protocol::signed_transaction{};
-   signed_transaction.expiration = forge::chain::protocol::time_point_sec{1U};
-   auto packed = forge::chain::protocol::packed_transaction{std::move(signed_transaction)};
-   const auto id = packed.id();
-
-   auto service = std::make_shared<history_service>();
-   service->transaction_response.id = id;
-   service->transaction_response.state = forge::chain::protocol::transaction_lifecycle::finalized;
-   service->transaction_response.transaction = packed;
-   service->transaction_response.receipt = forge::chain::protocol::transaction_receipt{
-       .trx = packed,
-   };
-   service->transaction_response.context.anchor = forge::chain::protocol::state_anchor{};
-   service->transaction_response.audit = forge::chain::protocol::audit_bundle{
-       .finality = forge::chain::protocol::proof_blob{.scheme = "test.finality"},
-       .transaction = forge::chain::protocol::transaction_inclusion_proof{},
-   };
-
-   auto registry = forge::api::core::registry{};
-   registry.install<forge::chain::api::history>(service);
-   auto verifier = std::make_shared<accepting_audit_verifier>();
-   auto client = forge::chain::api::verified_client{
-       forge::chain::api::raw_client{forge::chain::api::service_handles{
-           .history_queries = registry.get<forge::chain::api::history>(forge::chain::api::history::ref()),
-       }},
-       verifier,
-   };
-
-   const auto response = run(client.get_transaction({.id = id}));
-   BOOST_TEST(response.transaction.id() == id);
-   BOOST_TEST(verifier->transaction_verifications == 1U);
-
-   auto forged_transaction = forge::chain::protocol::signed_transaction{};
-   forged_transaction.expiration = forge::chain::protocol::time_point_sec{2U};
-   const auto forged = forge::chain::protocol::packed_transaction{std::move(forged_transaction)};
-   service->transaction_response.id = forged.id();
-   service->transaction_response.transaction = forged;
-   BOOST_CHECK_THROW(static_cast<void>(run(client.get_transaction({.id = id}))),
-                     forge::chain::api::exceptions::invalid_transaction_proof);
-
-   service->transaction_response.id = id;
-   BOOST_CHECK_THROW(static_cast<void>(run(client.get_transaction({.id = id}))),
-                     forge::chain::api::exceptions::invalid_transaction_proof);
-
-   service->transaction_response.transaction = packed;
-   service->transaction_response.receipt->trx = packed;
-   service->transaction_response.transaction.signatures.push_back(forge::crypto::asymmetric::k1_signature{});
-   BOOST_CHECK_THROW(static_cast<void>(run(client.get_transaction({.id = id}))),
-                     forge::chain::api::exceptions::invalid_transaction_proof);
-
-   service->transaction_response.transaction = packed;
-   service->transaction_response.transaction.packed_context_free_data.push_back(0x01U);
-   BOOST_CHECK_THROW(static_cast<void>(run(client.get_transaction({.id = id}))),
-                     forge::chain::api::exceptions::invalid_transaction_proof);
-}
-
 BOOST_AUTO_TEST_CASE(submission_client_binds_acknowledgements_to_local_transaction_ids) {
    auto first = forge::chain::protocol::transaction_submit_request{};
    auto first_transaction = forge::chain::protocol::signed_transaction{};
@@ -2496,85 +2299,6 @@ BOOST_AUTO_TEST_CASE(verified_composite_response_translates_projection_failures_
 
    BOOST_CHECK_THROW(verify(false), forge::chain::api::exceptions::invalid_state_proof);
    BOOST_CHECK_THROW(verify(true), forge::chain::api::exceptions::invalid_state_proof);
-}
-
-BOOST_AUTO_TEST_CASE(verified_history_projections_fail_closed_and_accept_an_explicit_verifier) {
-   const auto anchor = make_finality_anchor();
-   const auto context = forge::chain::protocol::response_context{
-       .chain = anchor.chain,
-       .head = anchor.block,
-       .finalized = anchor.block,
-       .anchor = anchor,
-   };
-   const auto audit = forge::chain::protocol::audit_bundle{
-       .finality = forge::chain::protocol::proof_blob{.scheme = "test.finality"},
-   };
-   auto transaction_id = forge::chain::protocol::transaction_id{};
-   transaction_id._hash[0] = 17U;
-
-   auto service = std::make_shared<history_service>();
-   service->trace_response.context = context;
-   service->trace_response.audit = audit;
-   service->trace_response.location = {
-       .block = anchor.block,
-       .block_num = anchor.block_num,
-       .canonical = true,
-   };
-   service->trace_response.trace.id = transaction_id;
-   service->block_response.context = context;
-   service->block_response.audit = audit;
-   service->block_response.location = service->trace_response.location;
-   service->account_response.context = context;
-   service->account_response.audit = audit;
-   service->account_response.actions = {{
-       .transaction = transaction_id,
-       .location = service->trace_response.location,
-       .trace = forge::chain::protocol::action_trace{},
-   }};
-
-   auto registry = forge::api::core::registry{};
-   registry.install<forge::chain::api::history>(service);
-   const auto handles = forge::chain::api::service_handles{
-       .history_queries = registry.get<forge::chain::api::history>(forge::chain::api::history::ref()),
-   };
-   const auto transaction_request = forge::chain::protocol::transaction_history_request{
-       .id = transaction_id,
-       .anchor = anchor.block,
-   };
-   const auto block_request = forge::chain::protocol::block_request{
-       .id = anchor.block,
-       .num = anchor.block_num,
-   };
-   const auto account_request = forge::chain::protocol::account_actions_request{
-       .account = forge::chain::protocol::account_name{"alice"},
-       .limit = 1U,
-       .anchor = anchor.block,
-   };
-
-   auto closed = forge::chain::api::verified_client{
-       forge::chain::api::raw_client{handles},
-       std::make_shared<accepting_audit_verifier>(),
-       std::make_shared<forge::chain::api::projection_verifier>(),
-   };
-   BOOST_CHECK_THROW(static_cast<void>(run(closed.get_transaction_trace(transaction_request))),
-                     forge::chain::api::exceptions::audit_not_supported);
-   BOOST_CHECK_THROW(static_cast<void>(run(closed.get_block_traces(block_request))),
-                     forge::chain::api::exceptions::audit_not_supported);
-   BOOST_CHECK_THROW(static_cast<void>(run(closed.get_account_actions(account_request))),
-                     forge::chain::api::exceptions::audit_not_supported);
-
-   auto projections = std::make_shared<accepting_history_projection_verifier>();
-   auto accepting = forge::chain::api::verified_client{
-       forge::chain::api::raw_client{handles},
-       std::make_shared<accepting_audit_verifier>(),
-       projections,
-   };
-   BOOST_TEST(run(accepting.get_transaction_trace(transaction_request)).trace.id == transaction_id);
-   BOOST_TEST(run(accepting.get_block_traces(block_request)).location.block == anchor.block);
-   BOOST_TEST(run(accepting.get_account_actions(account_request)).actions.size() == 1U);
-   BOOST_TEST(projections->transaction_trace_verifications == 1U);
-   BOOST_TEST(projections->block_trace_verifications == 1U);
-   BOOST_TEST(projections->account_action_verifications == 1U);
 }
 
 BOOST_AUTO_TEST_CASE(verified_client_fails_closed_for_methods_without_content_witnesses) {
