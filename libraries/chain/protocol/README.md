@@ -139,9 +139,8 @@ construction.
 ## Tests
 
 `test_forge_chain_protocol` covers raw and variant fixtures, fixed keys, names
-and assets, transactions, history-query records, compression, signatures, ABI
-compatibility, block IDs, transaction receipt roots and Spring-compatible
-Savanna action receipts.
+and assets, transactions, compression, signatures, ABI compatibility, block
+IDs, transaction receipt roots and Spring-compatible Savanna action receipts.
 `test_forge_package_chain_protocol_component` verifies the installed
-`chain_protocol` component, history-query raw/variant roundtrips, protocol
-imports and the transitive core digest dependency.
+`chain_protocol` component, protocol imports and the transitive core digest
+dependency.
