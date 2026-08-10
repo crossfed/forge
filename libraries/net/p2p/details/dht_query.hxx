@@ -118,8 +118,15 @@ struct batch_response {
 };
 
 template <typename Query, typename IsPeerFailure>
+struct query_callables {
+   Query query;
+   IsPeerFailure is_peer_failure;
+};
+
+template <typename Query, typename IsPeerFailure>
 boost::asio::awaitable<std::vector<batch_response>>
-query_batch_on_strand(std::vector<dht::peer> batch, Query& query, IsPeerFailure& is_peer_failure,
+query_batch_on_strand(std::vector<dht::peer> batch,
+                      std::shared_ptr<query_callables<Query, IsPeerFailure>> callables,
                       boost::asio::strand<boost::asio::any_io_executor> strand) {
    namespace asio = boost::asio;
 
@@ -142,15 +149,15 @@ query_batch_on_strand(std::vector<dht::peer> batch, Query& query, IsPeerFailure&
       const auto peer = shared->items[index].peer;
       asio::co_spawn(
           strand,
-          [shared, index, peer, &query, &is_peer_failure]() mutable -> asio::awaitable<void> {
+          [shared, callables, index, peer]() mutable -> asio::awaitable<void> {
              auto response = std::optional<dht::message>{};
              auto local_error = std::exception_ptr{};
              auto failed = false;
              try {
-                response = co_await query(peer);
+                response = co_await callables->query(peer);
              } catch (const forge::exceptions::base& error) {
                 try {
-                   failed = is_peer_failure(peer, error);
+                   failed = callables->is_peer_failure(peer, error);
                    if (!failed) {
                       local_error = std::current_exception();
                    }
@@ -180,16 +187,16 @@ query_batch_on_strand(std::vector<dht::peer> batch, Query& query, IsPeerFailure&
 }
 
 template <typename Query, typename IsPeerFailure>
-boost::asio::awaitable<std::vector<batch_response>> query_batch(std::vector<dht::peer> batch, Query& query,
-                                                                IsPeerFailure& is_peer_failure) {
+boost::asio::awaitable<std::vector<batch_response>>
+query_batch(std::vector<dht::peer> batch, std::shared_ptr<query_callables<Query, IsPeerFailure>> callables) {
    namespace asio = boost::asio;
    auto executor = asio::any_io_executor{co_await asio::this_coro::executor};
    auto strand = asio::make_strand(executor);
    co_return co_await asio::co_spawn(
        strand,
-       [batch = std::move(batch), &query, &is_peer_failure,
+       [batch = std::move(batch), callables,
         strand]() mutable -> asio::awaitable<std::vector<batch_response>> {
-          co_return co_await query_batch_on_strand(std::move(batch), query, is_peer_failure, strand);
+          co_return co_await query_batch_on_strand(std::move(batch), std::move(callables), strand);
        },
        asio::use_awaitable);
 }
@@ -208,6 +215,8 @@ boost::asio::awaitable<result> run(request value, Query query, Postprocess postp
    const auto max_seen =
        std::max({value.options.replication, value.options.max_closer_peers, value.options.max_provider_peers, alpha}) *
        8U;
+   auto callables = std::make_shared<query_callables<Query, IsPeerFailure>>(std::move(query),
+                                                                           std::move(is_peer_failure));
 
    while (queried.size() + failed.size() < max_seen) {
       const auto batch = next_batch(known, queried, failed, value.target, alpha);
@@ -218,7 +227,7 @@ boost::asio::awaitable<result> run(request value, Query query, Postprocess postp
       for (const auto& peer : batch) {
          queried.insert(peer.id);
       }
-      auto responses = co_await query_batch(std::move(batch), query, is_peer_failure);
+      auto responses = co_await query_batch(std::move(batch), callables);
       for (const auto& item : responses) {
          if (item.local_error) {
             std::rethrow_exception(item.local_error);

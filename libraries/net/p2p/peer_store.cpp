@@ -78,6 +78,12 @@ boost::asio::awaitable<void> peer_store::async_upsert_rendezvous(rendezvous::reg
    co_await impl_->async_upsert_rendezvous(std::move(value));
 }
 
+boost::asio::awaitable<void>
+peer_store::async_register_rendezvous(rendezvous::registration value,
+                                      std::size_t max_registrations_per_peer) {
+   co_await impl_->async_register_rendezvous(std::move(value), max_registrations_per_peer);
+}
+
 boost::asio::awaitable<void> peer_store::async_remove_rendezvous(peer_id peer, std::string namespace_name) {
    co_await impl_->async_remove_rendezvous(std::move(peer), std::move(namespace_name));
 }

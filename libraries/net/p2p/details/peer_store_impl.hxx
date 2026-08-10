@@ -42,6 +42,8 @@ struct peer_store::impl {
 
    boost::asio::awaitable<void> async_upsert_provider(peer_store::provider_record value);
    boost::asio::awaitable<void> async_upsert_rendezvous(rendezvous::registration value);
+   boost::asio::awaitable<void>
+   async_register_rendezvous(rendezvous::registration value, std::size_t max_registrations_per_peer);
    boost::asio::awaitable<void> async_remove_rendezvous(peer_id peer, std::string namespace_name);
    boost::asio::awaitable<void> async_hydrate();
    boost::asio::awaitable<peer_store::prune_result> async_prune_expired(std::chrono::system_clock::time_point now);
@@ -86,6 +88,9 @@ struct peer_store::impl {
    void hydrate_page_locked(peer_store::hydration_page page);
    void store_rendezvous_operational(rendezvous::registration value);
    void erase_rendezvous_operational(const rendezvous_map_key& key);
+   boost::asio::awaitable<void>
+   async_store_rendezvous(rendezvous::registration value,
+                          std::optional<std::size_t> max_registrations_per_peer);
    void prune_operational_locked(std::chrono::system_clock::time_point now, const peer_store::prune_result& result);
    boost::asio::awaitable<void> apply_pending_locked_gate(bool flush_backend);
    boost::asio::awaitable<void> wait_for_persistence_admissions();
@@ -105,6 +110,7 @@ struct peer_store::impl {
    std::map<provider_key, peer_store::provider_record> providers_;
    std::set<provider_expiry_key> provider_expiry_index_;
    std::map<rendezvous_map_key, rendezvous::registration> rendezvous_;
+   std::map<peer_id, std::size_t> rendezvous_per_peer_;
    std::map<rendezvous_sequence_key, rendezvous_map_key> rendezvous_by_sequence_;
    std::map<rendezvous_global_sequence_key, rendezvous_map_key> rendezvous_by_global_sequence_;
    std::set<rendezvous_expiry_key> rendezvous_expiry_index_;

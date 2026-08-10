@@ -223,6 +223,10 @@ memory. DHT deadlines bound the remote wire exchanges. Once a provider or
 Rendezvous record has been accepted for durable acknowledgement, its persistence
 step remains owned and awaited by the caller instead of being abandoned after a
 possibly committed transaction.
+Rendezvous servers use `async_register_rendezvous()` so the configured per-peer
+registration limit is checked under the persistence gate before a durable write.
+Client discovery materializes the wire TTL into a local absolute expiry before
+the accepted registration enters operational or durable peer state.
 
 ```cpp
 auto node = forge::net::p2p::node{runtime, {

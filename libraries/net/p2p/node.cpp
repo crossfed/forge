@@ -294,8 +294,10 @@ diagnostics_relays(std::span<const peer_store::relay_record> records, std::size_
 boost::asio::awaitable<std::optional<identify::document>>
 identify_peer(auto self, const peer_id& peer, discovery::source source, std::chrono::milliseconds timeout) {
    const auto started = std::chrono::steady_clock::now();
+   auto stream_opened = false;
    try {
       auto stream = co_await self->open_protocol_direct(peer, builtins::identify, timeout);
+      stream_opened = true;
       auto deadline =
           operation_deadline{self->runtime.context(), remaining_timeout(started, timeout, "P2P Identify probe")};
       deadline.arm([&stream] { stream.cancel(); });
@@ -325,8 +327,13 @@ identify_peer(auto self, const peer_id& peer, discovery::source source, std::chr
          }
          throw;
       }
-   } catch (const forge::exceptions::base&) {
-      self->store.mark_failure(peer);
+   } catch (const forge::exceptions::base& error) {
+      if (!remote_peer_attributable_failure(self, error)) {
+         throw;
+      }
+      if (stream_opened) {
+         self->store.mark_failure(peer);
+      }
       self->routing.mark_failure(peer);
       co_return std::nullopt;
    }
@@ -1024,7 +1031,10 @@ boost::asio::awaitable<void> node::async_provide(dht::key key) {
                                      .provider_peers = std::vector<dht::peer>{provider},
                                  },
                                  remaining);
-      } catch (const forge::exceptions::base&) {
+      } catch (const forge::exceptions::base& error) {
+         if (!remote_peer_attributable_failure(self, error)) {
+            throw;
+         }
          mark_dht_failure(self, candidate.id);
          (void)remaining_timeout(query_started, query_timeout, "P2P DHT provide");
       }
@@ -1127,7 +1137,9 @@ node::async_rendezvous_discover(peer_id rendezvous_peer, rendezvous::discover_re
    }
    auto sanitized_registrations = std::vector<rendezvous::registration>{};
    const auto context = third_party_discovery_context();
+   const auto received_at = std::chrono::system_clock::now();
    for (auto& registration : response.discover_response_value->registrations) {
+      registration.expires_at = received_at + registration.ttl;
       auto sanitized = sanitize_discovered_registration(std::move(registration), context);
       if (!sanitized) {
          continue;

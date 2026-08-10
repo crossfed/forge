@@ -2777,6 +2777,54 @@ BOOST_AUTO_TEST_CASE(p2p_dht_query_stops_after_closest_nonfailed_k_peers_are_que
    BOOST_TEST(result.query.closest_peers[1].id.to_string() == candidates[1].id.to_string());
 }
 
+BOOST_AUTO_TEST_CASE(p2p_dht_query_detached_children_retain_callables_after_parent_cancellation) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto blocker = std::make_shared<boost::asio::steady_timer>(runtime.context(), std::chrono::hours{1});
+   auto callable_lifetime = std::make_shared<int>(42);
+   auto weak_lifetime = std::weak_ptr<int>{callable_lifetime};
+   auto entered = std::promise<void>{};
+   auto entered_future = entered.get_future();
+   auto cancellation = boost::asio::cancellation_signal{};
+   auto endpoint_value = make_dns_tcp_endpoint(4'042, "query-lifetime.example.com");
+   endpoint_value.peer = peer(42);
+
+   auto result = boost::asio::co_spawn(
+       runtime.context(),
+       dht_query::run(
+           dht_query::request{
+               .target = make_dht_key(peer(43)),
+               .options = dht::options{.replication = 1, .alpha = 1},
+               .seeds = std::vector<dht::peer>{dht::peer{
+                   .id = peer(42),
+                   .endpoints = std::vector<endpoint>{std::move(endpoint_value)},
+                   .connection = dht::connection_type::can_connect,
+               }},
+           },
+           [blocker, owner = callable_lifetime, &entered](const dht::peer&) -> boost::asio::awaitable<dht::message> {
+              entered.set_value();
+              auto error = boost::system::error_code{};
+              co_await blocker->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
+              co_return dht::message{.type = dht::message_type::find_node};
+           },
+           [](const dht::peer&, const forge::exceptions::base&) {
+              return true;
+           }),
+       boost::asio::bind_cancellation_slot(cancellation.slot(), boost::asio::use_future));
+   callable_lifetime.reset();
+   BOOST_REQUIRE(entered_future.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+
+   cancellation.emit(boost::asio::cancellation_type::terminal);
+   BOOST_REQUIRE(result.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+   BOOST_CHECK_THROW(static_cast<void>(result.get()), boost::system::system_error);
+   BOOST_TEST(!weak_lifetime.expired());
+
+   blocker->cancel();
+   for (auto attempt = 0; attempt < 200 && !weak_lifetime.expired(); ++attempt) {
+      std::this_thread::sleep_for(std::chrono::milliseconds{5});
+   }
+   BOOST_TEST(weak_lifetime.expired());
+}
+
 BOOST_AUTO_TEST_CASE(p2p_rendezvous_codec_roundtrips_register_discover_cookie_and_status) {
    const auto opts = rendezvous::options{};
    const auto identity = make_test_identity();
@@ -3167,6 +3215,21 @@ BOOST_AUTO_TEST_CASE(p2p_node_peer_protection_api_is_tagged_and_additive) {
    BOOST_TEST(!value.is_peer_protected(protected_peer));
 
    forge::asio::blocking::run(runtime, value.async_stop());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_diagnostics_snapshot_preserves_positional_aggregate_compatibility) {
+   auto value = diagnostics::snapshot{
+       diagnostics::network_state{},
+       diagnostics::metrics_snapshot{},
+       resource_manager::snapshot{},
+       pubsub::snapshot{},
+       diagnostics::connection_state{},
+       std::vector<diagnostics::peer>{},
+       std::vector<diagnostics::session>{},
+   };
+
+   BOOST_TEST(!value.persistence.degraded);
+   BOOST_TEST(value.persistence.pending_peer_mutations == 0U);
 }
 
 BOOST_AUTO_TEST_CASE(p2p_diagnostics_snapshot_reports_live_network_state_without_mutation) {
@@ -5173,6 +5236,58 @@ BOOST_AUTO_TEST_CASE(p2p_rendezvous_node_registers_and_discovers_over_negotiated
    forge::asio::blocking::run(runtime, server.async_stop());
 }
 
+BOOST_AUTO_TEST_CASE(p2p_rendezvous_server_enforces_per_peer_registration_capacity) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto server_options =
+       options_for(peer(224), capability_set{.bits = capabilities::direct_quic | capabilities::rendezvous});
+   server_options.limits.rendezvous.operating_role = rendezvous::role::server;
+   server_options.limits.rendezvous.max_registrations_per_peer = 1;
+   const auto first_identity = make_test_certificate_identity("rendezvous-capacity-first");
+   const auto second_identity = make_test_certificate_identity("rendezvous-capacity-second");
+   auto first_options =
+       options_for(first_identity, capability_set{.bits = capabilities::direct_quic | capabilities::rendezvous});
+   auto second_options =
+       options_for(second_identity, capability_set{.bits = capabilities::direct_quic | capabilities::rendezvous});
+   auto server = node{runtime, std::move(server_options)};
+   auto first = node{runtime, std::move(first_options)};
+   auto second = node{runtime, std::move(second_options)};
+   const auto server_endpoint = listen(server, runtime);
+   first.peers().learn_endpoint(server.local_peer(), server_endpoint,
+                                capability_set{.bits = capabilities::direct_quic | capabilities::rendezvous});
+   second.peers().learn_endpoint(server.local_peer(), server_endpoint,
+                                 capability_set{.bits = capabilities::direct_quic | capabilities::rendezvous});
+   auto first_endpoint = make_dns_tcp_endpoint(4'225, "rendezvous-capacity-first.example.com");
+   first_endpoint.peer = first.local_peer();
+   auto second_endpoint = make_dns_tcp_endpoint(4'226, "rendezvous-capacity-second.example.com");
+   second_endpoint.peer = second.local_peer();
+   const auto first_record = make_signed_rendezvous_peer_record(
+       first_identity, std::vector<endpoint>{std::move(first_endpoint)}, 1);
+   const auto second_record = make_signed_rendezvous_peer_record(
+       second_identity, std::vector<endpoint>{std::move(second_endpoint)}, 1);
+
+   const auto register_namespace = [&](node& client, std::string namespace_name,
+                                       const std::vector<std::uint8_t>& signed_peer_record) {
+      return forge::asio::blocking::run(
+          runtime, client.async_rendezvous_register(server.local_peer(), rendezvous::register_request{
+                                                                             .namespace_name = std::move(namespace_name),
+                                                                             .signed_peer_record = signed_peer_record,
+                                                                             .ttl = std::chrono::seconds{7'200},
+                                                                         }));
+   };
+   BOOST_TEST(static_cast<int>(register_namespace(first, "forge.first", first_record).status_value) ==
+              static_cast<int>(rendezvous::status::ok));
+   BOOST_TEST(static_cast<int>(register_namespace(first, "forge.first", first_record).status_value) ==
+              static_cast<int>(rendezvous::status::ok));
+   BOOST_TEST(static_cast<int>(register_namespace(first, "forge.second", first_record).status_value) ==
+              static_cast<int>(rendezvous::status::unavailable));
+   BOOST_TEST(static_cast<int>(register_namespace(second, "forge.second", second_record).status_value) ==
+              static_cast<int>(rendezvous::status::ok));
+
+   forge::asio::blocking::run(runtime, second.async_stop());
+   forge::asio::blocking::run(runtime, first.async_stop());
+   forge::asio::blocking::run(runtime, server.async_stop());
+}
+
 BOOST_AUTO_TEST_CASE(p2p_rendezvous_request_uses_one_deadline_after_protocol_negotiation) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
    auto persistence = std::make_shared<tracking_peer_store_persistence>();
@@ -5301,12 +5416,22 @@ BOOST_AUTO_TEST_CASE(p2p_rendezvous_refresh_replaces_registration_and_cookie_dis
                                                                       }));
    BOOST_TEST(static_cast<int>(first.status_value) == static_cast<int>(rendezvous::status::ok));
 
+   const auto first_discovery_started = std::chrono::system_clock::now();
    const auto after_first = forge::asio::blocking::run(
        runtime, client.async_rendezvous_discover(server.local_peer(), rendezvous::discover_request{
                                                                           .namespace_name = "forge.discovery",
                                                                           .limit = 10,
                                                                       }));
    BOOST_REQUIRE_EQUAL(after_first.registrations.size(), 1U);
+   BOOST_TEST(after_first.registrations.front().expires_at >=
+              first_discovery_started + std::chrono::seconds{7'200});
+   BOOST_TEST(after_first.registrations.front().expires_at <=
+              std::chrono::system_clock::now() + std::chrono::seconds{7'200});
+   const auto cached_after_first = client.peers().discover_rendezvous("forge.discovery", 0, 10);
+   BOOST_REQUIRE_EQUAL(cached_after_first.size(), 1U);
+   BOOST_TEST(cached_after_first.front().expires_at == after_first.registrations.front().expires_at);
+   static_cast<void>(forge::asio::blocking::run(runtime, client.peers().async_prune_expired()));
+   BOOST_REQUIRE_EQUAL(client.peers().discover_rendezvous("forge.discovery", 0, 10).size(), 1U);
    const auto cookie = after_first.cookie;
 
    auto second = forge::asio::blocking::run(
@@ -7276,11 +7401,11 @@ BOOST_AUTO_TEST_CASE(p2p_cached_protocol_timeout_penalizes_peer_without_advancin
       return current.endpoint.to_string() == server_endpoint.to_string();
    });
    BOOST_REQUIRE(endpoint_after != after->endpoints.end());
-   BOOST_TEST(after->failures > peer_failures_before);
-   BOOST_TEST(endpoint_after->failures > endpoint_failures_before);
+   BOOST_TEST(after->failures == peer_failures_before + 1U);
+   BOOST_TEST(endpoint_after->failures == endpoint_failures_before + 1U);
    const auto backoff_applied = endpoint_after->backoff_until > std::chrono::system_clock::now();
    BOOST_TEST(backoff_applied);
-   BOOST_TEST(client.metrics().direct_failures > direct_failures_before);
+   BOOST_TEST(client.metrics().direct_failures == direct_failures_before + 1U);
    BOOST_TEST(client.routing_status().active == routing_before.active);
 
    release_server->set_value();
@@ -8266,6 +8391,39 @@ BOOST_AUTO_TEST_CASE(p2p_peer_store_enforces_provider_and_rendezvous_backpressur
                                            .expires_at = expires_at,
                                        }));
    BOOST_REQUIRE_EQUAL(store.discover_rendezvous("forge.capacity", 0, 10).size(), 1U);
+   forge::asio::blocking::run(runtime, store.async_close());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_peer_store_enforces_rendezvous_capacity_per_peer_before_persistence) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto persistence = std::make_shared<tracking_peer_store_persistence>();
+   auto store = peer_store{peer_store::options{.persistence = persistence}};
+   const auto expires_at = std::chrono::system_clock::now() + std::chrono::hours{1};
+   const auto first_peer = peer(227);
+   const auto second_peer = peer(228);
+   const auto registration = [&](std::string namespace_name, peer_id id) {
+      return rendezvous::registration{
+          .namespace_name = std::move(namespace_name),
+          .peer = std::move(id),
+          .ttl = std::chrono::hours{1},
+          .expires_at = expires_at,
+      };
+   };
+
+   forge::asio::blocking::run(runtime, store.async_register_rendezvous(registration("forge.first", first_peer), 1));
+   forge::asio::blocking::run(runtime, store.async_register_rendezvous(registration("forge.first", first_peer), 1));
+   const auto applied_before_rejection = persistence->applied_rendezvous_upserts;
+   BOOST_CHECK_THROW(
+       (forge::asio::blocking::run(
+           runtime, store.async_register_rendezvous(registration("forge.second", first_peer), 1))),
+       exceptions::backpressure_rejected);
+   BOOST_TEST(persistence->applied_rendezvous_upserts == applied_before_rejection);
+   forge::asio::blocking::run(runtime,
+                              store.async_register_rendezvous(registration("forge.second", second_peer), 1));
+   forge::asio::blocking::run(runtime, store.async_remove_rendezvous(first_peer, "forge.first"));
+   forge::asio::blocking::run(runtime,
+                              store.async_register_rendezvous(registration("forge.second", first_peer), 1));
+   BOOST_REQUIRE_EQUAL(store.discover_rendezvous("forge.second", 0, 10).size(), 2U);
    forge::asio::blocking::run(runtime, store.async_close());
 }
 

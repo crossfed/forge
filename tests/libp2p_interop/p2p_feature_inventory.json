@@ -109,7 +109,7 @@
         "forge.net.p2p.stream": ["resource.streams", "resource.queued_bytes"]
       },
       "header_features": {},
-      "sha256": "7daf60a156f5324e5b3679d86f5c7101af5dd6d840187b31f6383c66ed3d4189",
+      "sha256": "0a61ec301fe988351f2293ad5f104f69be98d90e9da3e5bd00a2ca6bc0487cdb",
       "feature_ids": [
         "transport.direct_quic",
         "transport.tcp_yamux",

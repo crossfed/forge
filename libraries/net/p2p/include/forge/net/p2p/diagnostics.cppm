@@ -171,9 +171,9 @@ struct diagnostics {
       resource_manager::snapshot resources;
       pubsub::snapshot pubsub;
       connection_state connections;
-      persistence_state persistence;
       std::vector<peer> peers;
       std::vector<session> sessions;
+      persistence_state persistence;
    };
 };
 
@@ -212,4 +212,4 @@ BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::connection_state, (), (activ
 BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::persistence_state, (),
                       (pending_peer_mutations, failure_count, degraded, closing, closed, last_failure))
 BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::snapshot, (),
-                      (network, metrics, resources, pubsub, connections, persistence, peers, sessions))
+                      (network, metrics, resources, pubsub, connections, peers, sessions, persistence))

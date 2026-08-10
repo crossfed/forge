@@ -241,6 +241,8 @@ struct node::impl : std::enable_shared_from_this<impl> {
 
    void record_direct_failure(const peer_id& peer);
 
+   void increment_direct_failure();
+
    [[nodiscard]] std::chrono::system_clock::time_point
    endpoint_backoff_until(const peer_id& peer, const forge::net::p2p::endpoint& endpoint, path::kind kind) const;
 

@@ -558,6 +558,8 @@ boost::asio::awaitable<bool> has_expired_rows(forge::db::object::transaction& ob
 void set_cursor(p2p::peer_store::hydration_page& out, const std::optional<forge::db::core::cursor>& next) {
    if (next) {
       out.cursor = next->boundary.bytes();
+   } else {
+      out.cursor.reset();
    }
 }
 

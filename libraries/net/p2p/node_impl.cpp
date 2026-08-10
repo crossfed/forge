@@ -931,6 +931,10 @@ void node::impl::record_hole_punch_result(hole_punch::status status) {
 
 void node::impl::record_direct_failure(const peer_id& peer) {
    store.mark_failure(peer);
+   increment_direct_failure();
+}
+
+void node::impl::increment_direct_failure() {
    auto lock = std::scoped_lock{mutex};
    ++metrics_value.direct_failures;
 }
@@ -1845,7 +1849,7 @@ node::impl::ensure_direct_session(const peer_id& peer, std::chrono::milliseconds
          }
          store.mark_endpoint_failure(peer, endpoint, path::kind::direct,
                                      endpoint_backoff_until(peer, endpoint, path::kind::direct));
-         record_direct_failure(peer);
+         increment_direct_failure();
       }
    }
    if (last_kind) {
@@ -1904,8 +1908,10 @@ node::impl::open_protocol_on_direct_session(const peer_id& peer, const protocol_
          if (session->direct_endpoint) {
             store.mark_endpoint_failure(peer, *session->direct_endpoint, path::kind::direct,
                                         endpoint_backoff_until(peer, *session->direct_endpoint, path::kind::direct));
+            increment_direct_failure();
+         } else {
+            record_direct_failure(peer);
          }
-         record_direct_failure(peer);
          throw_operation_timeout("P2P protocol open");
       }
       if (deadline.stopped()) {
@@ -1930,12 +1936,14 @@ node::impl::open_protocol_on_direct_session(const peer_id& peer, const protocol_
       }
       session->closed = true;
       forget_session(session);
-      if (detail::remote_peer_attributable_failure(kind, node_stopped) && session->direct_endpoint) {
-         store.mark_endpoint_failure(peer, *session->direct_endpoint, path::kind::direct,
-                                     endpoint_backoff_until(peer, *session->direct_endpoint, path::kind::direct));
-      }
       if (detail::remote_peer_attributable_failure(kind, node_stopped)) {
-         record_direct_failure(peer);
+         if (session->direct_endpoint) {
+            store.mark_endpoint_failure(peer, *session->direct_endpoint, path::kind::direct,
+                                        endpoint_backoff_until(peer, *session->direct_endpoint, path::kind::direct));
+            increment_direct_failure();
+         } else {
+            record_direct_failure(peer);
+         }
       }
       FORGE_THROW_CODE(kind, error.what());
    }
@@ -3210,9 +3218,18 @@ boost::asio::awaitable<void> node::impl::handle_rendezvous(std::shared_ptr<node:
                response.status_value = rendezvous::status::not_authorized;
                response.status_text = "rendezvous registration endpoints are not routable from source";
             } else {
-               co_await store.async_upsert_rendezvous(std::move(*sanitized));
-               response.ttl = ttl;
-               increment_rendezvous_registration();
+               try {
+                  co_await store.async_register_rendezvous(
+                      std::move(*sanitized), options.limits.rendezvous.max_registrations_per_peer);
+                  response.ttl = ttl;
+                  increment_rendezvous_registration();
+               } catch (const forge::exceptions::base& error) {
+                  if (exceptions::code_of(error) != exceptions::code::backpressure_rejected) {
+                     throw;
+                  }
+                  response.status_value = rendezvous::status::unavailable;
+                  response.status_text = "rendezvous registration capacity reached";
+               }
             }
          }
       }

@@ -499,6 +499,31 @@ void check_object_peer_state_rejects_oversized_hydration(std::string driver, con
    forge::asio::blocking::run(app->runtime(), app->shutdown());
 }
 
+void check_object_peer_state_clears_terminal_hydration_cursor(std::string driver,
+                                                              const std::filesystem::path& path) {
+   auto app = make_app(document_for(std::move(driver), path));
+   auto persistence = open_peer_persistence(*app);
+   auto state = p2p::peer_store{p2p::peer_store::options{.persistence = persistence}};
+   const auto first = p2p::make_peer_id_from_certificate_pem(
+       forge::tests::p2p::make_identity_fixture("p2p-terminal-cursor-first").certificate_pem);
+   const auto second = p2p::make_peer_id_from_certificate_pem(
+       forge::tests::p2p::make_identity_fixture("p2p-terminal-cursor-second").certificate_pem);
+   state.upsert(p2p::peer_store::record{.peer = first, .protocol_version = "/forge/cursor/first/1"});
+   state.upsert(p2p::peer_store::record{.peer = second, .protocol_version = "/forge/cursor/second/1"});
+   forge::asio::blocking::run(app->runtime(), state.async_flush());
+
+   const auto page =
+       forge::asio::blocking::run(app->runtime(), persistence->async_hydrate(p2p::peer_store::hydration_request{
+                                                     .kind = p2p::peer_store::hydration_kind::peers,
+                                                     .limit = 256,
+                                                 }));
+   BOOST_REQUIRE_EQUAL(page.peers.size(), 2U);
+   BOOST_TEST(!page.cursor.has_value());
+
+   forge::asio::blocking::run(app->runtime(), state.async_close());
+   forge::asio::blocking::run(app->runtime(), app->shutdown());
+}
+
 void check_plugin_startup_rolls_back_open_peer_state(std::string driver, const std::filesystem::path& path) {
    const auto identity = forge::tests::p2p::make_identity_fixture("p2p-startup-rollback");
    const auto foreign = forge::tests::p2p::make_identity_fixture("p2p-startup-rollback-foreign");
@@ -557,6 +582,11 @@ BOOST_AUTO_TEST_CASE(p2p_peer_state_mdbx_rejects_oversized_hydration_rows) {
    auto root = root_guard{};
    check_object_peer_state_rejects_oversized_hydration("mdbx", root.root / "mdbx-oversized-hydration");
 }
+
+BOOST_AUTO_TEST_CASE(p2p_peer_state_mdbx_clears_terminal_hydration_cursor) {
+   auto root = root_guard{};
+   check_object_peer_state_clears_terminal_hydration_cursor("mdbx", root.root / "mdbx-terminal-cursor");
+}
 #endif
 
 #if FORGE_HAS_ROCKSDB
@@ -594,6 +624,11 @@ BOOST_AUTO_TEST_CASE(p2p_plugin_rocksdb_startup_failure_rolls_back_open_peer_sta
 BOOST_AUTO_TEST_CASE(p2p_peer_state_rocksdb_rejects_oversized_hydration_rows) {
    auto root = root_guard{};
    check_object_peer_state_rejects_oversized_hydration("rocksdb", root.root / "rocksdb-oversized-hydration");
+}
+
+BOOST_AUTO_TEST_CASE(p2p_peer_state_rocksdb_clears_terminal_hydration_cursor) {
+   auto root = root_guard{};
+   check_object_peer_state_clears_terminal_hydration_cursor("rocksdb", root.root / "rocksdb-terminal-cursor");
 }
 #endif
 

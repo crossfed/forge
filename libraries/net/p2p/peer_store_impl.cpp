@@ -576,6 +576,7 @@ void peer_store::impl::store_rendezvous_operational(rendezvous::registration val
    rendezvous_by_sequence_.emplace(rendezvous_sequence_key{value.namespace_name, value.sequence, value.peer}, key);
    rendezvous_by_global_sequence_.emplace(rendezvous_global_sequence_key{value.sequence, key}, key);
    rendezvous_expiry_index_.emplace(value.expires_at, key);
+   ++rendezvous_per_peer_[value.peer];
    rendezvous_.emplace(key, std::move(value));
 }
 
@@ -588,6 +589,10 @@ void peer_store::impl::erase_rendezvous_operational(const rendezvous_map_key& ke
        rendezvous_sequence_key{current->second.namespace_name, current->second.sequence, current->second.peer});
    rendezvous_by_global_sequence_.erase(rendezvous_global_sequence_key{current->second.sequence, key});
    rendezvous_expiry_index_.erase({current->second.expires_at, key});
+   const auto count = rendezvous_per_peer_.find(current->second.peer);
+   if (count != rendezvous_per_peer_.end() && --count->second == 0) {
+      rendezvous_per_peer_.erase(count);
+   }
    rendezvous_.erase(current);
 }
 
@@ -774,6 +779,22 @@ boost::asio::awaitable<void> peer_store::impl::async_upsert_provider(peer_store:
 }
 
 boost::asio::awaitable<void> peer_store::impl::async_upsert_rendezvous(rendezvous::registration value) {
+   co_await async_store_rendezvous(std::move(value), std::nullopt);
+}
+
+boost::asio::awaitable<void>
+peer_store::impl::async_register_rendezvous(rendezvous::registration value,
+                                            std::size_t max_registrations_per_peer) {
+   if (max_registrations_per_peer == 0) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options,
+                            "peer store Rendezvous per-peer capacity must be positive");
+   }
+   co_await async_store_rendezvous(std::move(value), max_registrations_per_peer);
+}
+
+boost::asio::awaitable<void>
+peer_store::impl::async_store_rendezvous(rendezvous::registration value,
+                                         std::optional<std::size_t> max_registrations_per_peer) {
    auto admission = admit_persistence_operation();
    auto ticket = co_await persistence_gate_.acquire();
    validate_rendezvous_record(value, options_);
@@ -782,6 +803,13 @@ boost::asio::awaitable<void> peer_store::impl::async_upsert_rendezvous(rendezvou
       auto lock = std::scoped_lock{mutex_};
       if (!rendezvous_.contains(key) && rendezvous_.size() >= options_.max_rendezvous) {
          FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "peer store Rendezvous capacity reached");
+      }
+      const auto existing = rendezvous_.contains(key);
+      const auto count = rendezvous_per_peer_.find(value.peer);
+      const auto registrations = count == rendezvous_per_peer_.end() ? 0U : count->second;
+      if (!existing && max_registrations_per_peer && registrations >= *max_registrations_per_peer) {
+         FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected,
+                               "peer store Rendezvous per-peer capacity reached");
       }
       if (rendezvous_sequence_ == std::numeric_limits<std::uint64_t>::max()) {
          FORGE_THROW_EXCEPTION(exceptions::sequence_exhausted, "peer store Rendezvous sequence is exhausted");

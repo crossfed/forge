@@ -182,6 +182,8 @@ class peer_store {
 
    boost::asio::awaitable<void> async_upsert_provider(provider_record value);
    boost::asio::awaitable<void> async_upsert_rendezvous(rendezvous::registration value);
+   boost::asio::awaitable<void>
+   async_register_rendezvous(rendezvous::registration value, std::size_t max_registrations_per_peer);
    boost::asio::awaitable<void> async_remove_rendezvous(peer_id peer, std::string namespace_name);
    boost::asio::awaitable<void> async_hydrate();
    boost::asio::awaitable<prune_result>
