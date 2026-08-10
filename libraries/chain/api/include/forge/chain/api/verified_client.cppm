@@ -83,6 +83,14 @@ class projection_verifier {
                        const protocol::audit_bundle& audit, audit_verifier& verifier);
    virtual void verify(const protocol::authorizers_request& request, const protocol::authorizers_response& response,
                        const protocol::audit_bundle& audit, audit_verifier& verifier);
+   virtual void verify(const protocol::transaction_history_request& request,
+                       const protocol::transaction_trace_response& response, const protocol::audit_bundle& audit,
+                       audit_verifier& verifier);
+   virtual void verify(const protocol::block_request& request, const protocol::block_traces_response& response,
+                       const protocol::audit_bundle& audit, audit_verifier& verifier);
+   virtual void verify(const protocol::account_actions_request& request,
+                       const protocol::account_actions_response& response, const protocol::audit_bundle& audit,
+                       audit_verifier& verifier);
 };
 
 class verified_client {
@@ -131,6 +139,14 @@ class verified_client {
    compute_transaction(protocol::transaction_read_only_request request);
    boost::asio::awaitable<protocol::transaction_read_only_response>
    send_read_only_transaction(protocol::transaction_read_only_request request);
+
+   boost::asio::awaitable<protocol::transaction_lookup_response>
+   get_transaction(protocol::transaction_history_request request);
+   boost::asio::awaitable<protocol::transaction_trace_response>
+   get_transaction_trace(protocol::transaction_history_request request);
+   boost::asio::awaitable<protocol::block_traces_response> get_block_traces(protocol::block_request request);
+   boost::asio::awaitable<protocol::account_actions_response>
+   get_account_actions(protocol::account_actions_request request);
 
  private:
    const protocol::audit_bundle& verify_envelope(const protocol::audited_response& response);

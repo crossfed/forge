@@ -28,6 +28,7 @@ enum class code : std::uint16_t {
    resource_exhausted = 12,
    conflict = 13,
    admission_rejected = 14,
+   not_found = 15,
 };
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(code, "forge.chain.api")
@@ -46,6 +47,7 @@ using unavailable = forge::exceptions::coded_exception<code, code::unavailable>;
 using resource_exhausted = forge::exceptions::coded_exception<code, code::resource_exhausted>;
 using conflict = forge::exceptions::coded_exception<code, code::conflict>;
 using admission_rejected = forge::exceptions::coded_exception<code, code::admission_rejected>;
+using not_found = forge::exceptions::coded_exception<code, code::not_found>;
 
 namespace descriptor {
 

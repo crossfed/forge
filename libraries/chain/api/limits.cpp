@@ -239,6 +239,10 @@ std::optional<std::uint32_t> require_method_request(std::string_view api, std::s
          require_request_within_limits(request, limits);
          return request.limit;
       }
+   } else if (api == "forge.chain.api.history" && method == "get_account_actions") {
+      const auto request = unpack_request<protocol::account_actions_request>(payload, limits);
+      require_request_within_limits(request, limits);
+      return request.limit;
    } else if (api == "forge.chain.api.admin") {
       if (method == "account_ram_corrections") {
          const auto request = unpack_request<protocol::ram_corrections_request>(payload, limits);
@@ -317,6 +321,9 @@ void require_method_response(std::string_view api, std::string_view method, bool
           unpack_response<std::vector<protocol::transaction_submit_response>>(payload, limits,
                                                                               limits.max_transaction_batch_size),
           *requested_items, limits);
+   } else if (api == "forge.chain.api.history" && method == "get_account_actions") {
+      require_items(unpack_response<protocol::account_actions_response>(payload, limits).actions.size(),
+                    *requested_items, limits, "actions");
    } else if (api == "forge.chain.api.admin") {
       if (method == "account_ram_corrections") {
          require_items(unpack_response<protocol::ram_corrections_response>(payload, limits).rows.size(),
@@ -347,6 +354,12 @@ void require_request_within_limits(const protocol::protocol_features_request& va
 void require_request_within_limits(const protocol::producers_request& value, const protocol::service_limits& limits) {
    require_packed_request(value, limits);
    require_page(value.limit, limits.max_page_size, "limit", true);
+}
+
+void require_request_within_limits(const protocol::account_actions_request& value,
+                                   const protocol::service_limits& limits) {
+   require_packed_request(value, limits);
+   require_page(value.limit, limits.max_page_size, "limit");
 }
 
 void require_request_within_limits(const protocol::state_range_request& value, const protocol::service_limits& limits) {
@@ -489,6 +502,13 @@ void require_response_within_limits(const protocol::producers_response& response
                                     const protocol::service_limits& limits) {
    require_response_within_limits(response, limits);
    require_items(response.rows.size(), request.limit, limits, "rows");
+}
+
+void require_response_within_limits(const protocol::account_actions_response& response,
+                                    const protocol::account_actions_request& request,
+                                    const protocol::service_limits& limits) {
+   require_response_within_limits(response, limits);
+   require_items(response.actions.size(), request.limit, limits, "actions");
 }
 
 void require_response_within_limits(const protocol::state_range_response& response,

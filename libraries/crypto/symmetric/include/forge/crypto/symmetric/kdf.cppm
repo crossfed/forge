@@ -55,8 +55,19 @@ struct scrypt_request {
    std::size_t output_size = default_derived_key_size;
 };
 
+struct scrypt_span_request {
+   std::span<const std::uint8_t> password;
+   std::span<const std::uint8_t> salt;
+   std::uint64_t n = 16'384;
+   std::uint64_t r = 8;
+   std::uint64_t p = 1;
+   std::uint64_t max_memory_bytes = 32ULL * 1024ULL * 1024ULL;
+   std::size_t output_size = default_derived_key_size;
+};
+
 [[nodiscard]] core::bytes derive_hkdf_sha256(const hkdf_sha256_request& request);
 [[nodiscard]] core::bytes derive_hkdf_sha256(const hkdf_sha256_span_request& request);
 [[nodiscard]] core::bytes derive_scrypt(const scrypt_request& request);
+[[nodiscard]] core::bytes derive_scrypt(const scrypt_span_request& request);
 
-} // namespace forge::crypto
+} // namespace forge::crypto::symmetric::kdf

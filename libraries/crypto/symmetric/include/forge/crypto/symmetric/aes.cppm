@@ -45,6 +45,14 @@ inline constexpr auto aes_gcm_tag_size = std::size_t{16};
 using aes_byte_sink = std::function<void(std::span<const std::uint8_t>)>;
 
 struct aes256_key {
+   aes256_key() = default;
+   ~aes256_key();
+
+   aes256_key(const aes256_key&) = default;
+   aes256_key& operator=(const aes256_key&) = default;
+   aes256_key(aes256_key&& other) noexcept;
+   aes256_key& operator=(aes256_key&& other) noexcept;
+
    std::array<std::uint8_t, aes256_key_size> bytes{};
 };
 
@@ -124,6 +132,7 @@ class aes256_gcm_encoder {
 
  private:
    struct impl;
+   static std::unique_ptr<impl> make_impl(aes256_gcm_encoder_options& options);
    std::unique_ptr<impl> _impl;
 };
 
@@ -145,6 +154,7 @@ class aes256_gcm_decoder {
 
  private:
    struct impl;
+   static std::unique_ptr<impl> make_impl(aes256_gcm_decoder_options& options);
    std::unique_ptr<impl> _impl;
 };
 
@@ -156,4 +166,4 @@ class aes256_gcm_decoder {
 
 [[nodiscard]] core::bytes decrypt_aes256_cbc(const aes256_cbc_decrypt_request& request);
 
-} // namespace forge::crypto
+} // namespace forge::crypto::symmetric::aes

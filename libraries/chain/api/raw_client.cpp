@@ -36,6 +36,10 @@ forge::chain::api::block& raw_client::blocks() const {
    return require(services_.blocks, "block");
 }
 
+forge::chain::api::history& raw_client::history() const {
+   return require(services_.history_queries, "history");
+}
+
 forge::chain::api::state& raw_client::state() const {
    return require(services_.state_queries, "state");
 }

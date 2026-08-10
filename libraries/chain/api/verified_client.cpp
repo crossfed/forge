@@ -14,6 +14,7 @@ module;
 #include <span>
 #include <string_view>
 #include <utility>
+#include <variant>
 #include <vector>
 
 module forge.chain.api.verified_client;
@@ -237,6 +238,22 @@ void projection_verifier::verify(const protocol::scheduled_request&, const proto
 void projection_verifier::verify(const protocol::authorizers_request&, const protocol::authorizers_response&,
                                  const protocol::audit_bundle&, audit_verifier&) {
    unsupported_projection("state.get_accounts_by_authorizers");
+}
+
+void projection_verifier::verify(const protocol::transaction_history_request&,
+                                 const protocol::transaction_trace_response&, const protocol::audit_bundle&,
+                                 audit_verifier&) {
+   unsupported_projection("history.get_transaction_trace");
+}
+
+void projection_verifier::verify(const protocol::block_request&, const protocol::block_traces_response&,
+                                 const protocol::audit_bundle&, audit_verifier&) {
+   unsupported_projection("history.get_block_traces");
+}
+
+void projection_verifier::verify(const protocol::account_actions_request&, const protocol::account_actions_response&,
+                                 const protocol::audit_bundle&, audit_verifier&) {
+   unsupported_projection("history.get_account_actions");
 }
 
 verified_client::verified_client(raw_client client, std::shared_ptr<audit_verifier> verifier,
@@ -791,6 +808,85 @@ verified_client::compute_transaction(protocol::transaction_read_only_request) {
 boost::asio::awaitable<protocol::transaction_read_only_response>
 verified_client::send_read_only_transaction(protocol::transaction_read_only_request) {
    return unsupported_audit<protocol::transaction_read_only_response>("transaction.send_read_only_transaction");
+}
+
+boost::asio::awaitable<protocol::transaction_lookup_response>
+verified_client::get_transaction(protocol::transaction_history_request request) {
+   require_audit(request, *verifier_);
+   const auto expected = request.id;
+   const auto requested_anchor = request.anchor;
+   auto response = co_await invoke_service<protocol::transaction_lookup_response>(
+       "history.get_transaction", request, limits_, [&] { return client_.history().get_transaction(request); });
+   verify_transaction_status(expected, response);
+   verify_requested_anchor(requested_anchor, response);
+   if (!response.receipt) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof,
+                            "chain API transaction lookup omits its finalized receipt");
+   }
+   const auto* included = std::get_if<protocol::packed_transaction>(&response.receipt->trx);
+   if (included == nullptr || included->packed_digest() != response.transaction.packed_digest()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof,
+                            "chain API transaction envelope does not match its finalized receipt");
+   }
+   const auto packed_id = invoke_verifier<exceptions::invalid_transaction_proof>(
+       "chain API packed transaction is malformed", [&] { return response.transaction.id(); });
+   if (packed_id != expected) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof,
+                            "chain API transaction bytes do not match the requested transaction id");
+   }
+   co_return response;
+}
+
+boost::asio::awaitable<protocol::transaction_trace_response>
+verified_client::get_transaction_trace(protocol::transaction_history_request request) {
+   auto& projections = require_projection(projections_, "history.get_transaction_trace");
+   require_audit(request, *verifier_);
+   const auto requested_anchor = request.anchor;
+   auto response = co_await invoke_service<protocol::transaction_trace_response>(
+       "history.get_transaction_trace", request, limits_,
+       [&] { return client_.history().get_transaction_trace(request); });
+   const auto& audit = verify_envelope(response);
+   verify_requested_anchor(requested_anchor, response);
+   if (response.trace.id != request.id) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_transaction_proof,
+                            "chain API transaction trace has the wrong transaction id");
+   }
+   verify_projection("history.get_transaction_trace",
+                     [&] { projections.verify(request, response, audit, *verifier_); });
+   co_return response;
+}
+
+boost::asio::awaitable<protocol::block_traces_response>
+verified_client::get_block_traces(protocol::block_request request) {
+   auto& projections = require_projection(projections_, "history.get_block_traces");
+   require_audit(request, *verifier_);
+   const auto requested_id = request.id;
+   const auto requested_num = request.num;
+   auto response = co_await invoke_service<protocol::block_traces_response>(
+       "history.get_block_traces", request, limits_, [&] { return client_.history().get_block_traces(request); });
+   const auto& audit = verify_envelope(response);
+   if ((requested_id && response.location.block != *requested_id) ||
+       (requested_num && response.location.block_num != *requested_num) || !response.location.canonical ||
+       response.location.block != response.context.anchor->block ||
+       response.location.block_num != response.context.anchor->block_num) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_finality,
+                            "chain API block traces do not match the requested finalized block");
+   }
+   verify_projection("history.get_block_traces", [&] { projections.verify(request, response, audit, *verifier_); });
+   co_return response;
+}
+
+boost::asio::awaitable<protocol::account_actions_response>
+verified_client::get_account_actions(protocol::account_actions_request request) {
+   auto& projections = require_projection(projections_, "history.get_account_actions");
+   require_audit(request, *verifier_);
+   const auto requested_anchor = request.anchor;
+   auto response = co_await invoke_service<protocol::account_actions_response>(
+       "history.get_account_actions", request, limits_, [&] { return client_.history().get_account_actions(request); });
+   const auto& audit = verify_envelope(response);
+   verify_requested_anchor(requested_anchor, response);
+   verify_projection("history.get_account_actions", [&] { projections.verify(request, response, audit, *verifier_); });
+   co_return response;
 }
 
 } // namespace forge::chain::api

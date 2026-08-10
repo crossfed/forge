@@ -3,7 +3,7 @@
 This file records source lineage and donor boundaries for FORGE. It is not a
 license by itself; see `LICENSE`, `NOTICE`, and `THIRD_PARTY_LICENSES`.
 
-Audit date: 2026-07-16.
+Audit date: 2026-08-10.
 
 ## Forge Contract SDK
 
@@ -146,7 +146,7 @@ this audit:
   datastream range-error plumbing.
 - current Glaze-backed `libraries/codec/json`
 - current Boost.Describe-based `libraries/reflect`
-- `libraries/asio`, `libraries/config/env`, `libraries/exceptions`,
+- `libraries/asio`, `libraries/cli`, `libraries/config/env`, `libraries/exceptions`,
   `libraries/net/http`, `libraries/schema`, `libraries/net/transport`,
   `libraries/net/websocket`
 - `libraries/net/quic`, `libraries/net/tcp`, `libraries/net/stcp`,
@@ -203,6 +203,10 @@ items include:
   `c8780aecc3dea7f4f2cb83e88bb4d33a622774bd`. Archive and per-file hashes,
   the exact imported file set, and the upstream mirror notice are recorded in
   `vendor/libmdbx/MANIFEST.md`. Forge does not export the MDBX C API.
+- `vendor/CLI11`: unmodified CLI11 `v2.6.2` header set, BSD-3-Clause. The tag
+  resolves to commit `37bb6edc5317e99af72ef48405e65d9ca5218861`; the archive hash and imported
+  file boundary are recorded in `vendor/CLI11/MANIFEST.md`. CLI11 is the
+  private parser backend for `forge_cli` and its C++ types are not exported.
 
 Submodules may contain their own third-party dependency notices, such as
 Catch2 under `vendor/bn256/third-party`. Those notices remain with the vendored

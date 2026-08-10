@@ -4,7 +4,6 @@ add_library(
       api_impl.cpp
       config.cpp
       plugin_impl.cpp
-      types.cpp
 )
 forge_target_modules_at(forge_plugins_crypto_secrets plugins/crypto/secrets)
 
@@ -28,5 +27,6 @@ target_link_libraries(
    PRIVATE
       forge_codec_base64
       forge_codec_hex
+      forge_crypto_keystore
       forge_crypto_symmetric
 )
