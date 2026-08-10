@@ -73,6 +73,22 @@ bool is_kebab_name(std::string_view value) {
    return true;
 }
 
+bool is_application_name(std::string_view value) {
+   if (value.empty() || value.front() == '-' || value.front() == '_' || value.back() == '-' || value.back() == '_') {
+      return false;
+   }
+   auto previous_separator = false;
+   for (const auto character : value) {
+      const auto separator = character == '-' || character == '_';
+      const auto valid = (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9') || separator;
+      if (!valid || (separator && previous_separator)) {
+         return false;
+      }
+      previous_separator = separator;
+   }
+   return true;
+}
+
 bool is_option_alias(std::string_view value) {
    if (value.size() == 2 && value[0] == '-' && value[1] != '-') {
       return std::isalnum(static_cast<unsigned char>(value[1])) != 0;
@@ -358,8 +374,8 @@ std::optional<std::string> validate_commands(const std::vector<command>& command
 }
 
 std::optional<std::string> descriptor_error(const application& app) {
-   if (!is_kebab_name(app.name)) {
-      return "application name must use lower-case kebab-case";
+   if (!is_application_name(app.name)) {
+      return "application name must use lower-case words separated by dashes or underscores";
    }
    if (app.require_command && app.commands.empty()) {
       return "application requires a command but defines none";

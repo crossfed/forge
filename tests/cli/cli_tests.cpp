@@ -357,6 +357,16 @@ BOOST_AUTO_TEST_CASE(cli_rejects_ambiguous_public_descriptors_before_backend_par
    BOOST_CHECK_THROW(static_cast<void>(forge::cli::parse(app, arguments)), forge::cli::exceptions::invalid_descriptor);
 }
 
+BOOST_AUTO_TEST_CASE(cli_accepts_lower_snake_case_executable_names) {
+   auto app = make_application(std::make_shared<dispatch_capture>());
+   app.name = "trx_generator";
+
+   const auto outcome = forge::cli::parse(app, std::vector<std::string_view>{"--help"});
+
+   BOOST_REQUIRE(std::holds_alternative<forge::cli::help_outcome>(outcome));
+   BOOST_TEST(std::get<forge::cli::help_outcome>(outcome).text.find("trx_generator") != std::string::npos);
+}
+
 BOOST_AUTO_TEST_CASE(cli_translates_invalid_argv_and_handler_standard_exceptions) {
    auto output = forge::cli::terminal{[](std::string_view) {}, [](std::string_view) {}};
    auto app = forge::cli::application{};
