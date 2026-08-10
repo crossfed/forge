@@ -6,6 +6,7 @@ module;
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <span>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -157,16 +158,27 @@ class datastream<std::vector<Byte, Allocator>,
        : storage_(std::move(storage)), allocation_limits_(allocation_limits),
          remaining_elements_(allocation_limits.total_elements) {}
 
+   explicit datastream(std::span<const Byte> input, raw::detail::allocation_limits allocation_limits = {})
+       : input_(input), read_only_(true), allocation_limits_(allocation_limits),
+         remaining_elements_(allocation_limits.total_elements) {}
+
    std::size_t read(char* destination, std::size_t size) {
       if (size > remaining()) {
-         raw::detail::raise_stream_range("read", storage_.size(), static_cast<std::int64_t>(size - remaining()));
+         raw::detail::raise_stream_range("read", length(), static_cast<std::int64_t>(size - remaining()));
       }
-      std::copy_n(storage_.begin() + static_cast<std::ptrdiff_t>(position_), size, destination);
+      if (read_only_) {
+         std::memcpy(destination, input_.data() + position_, size);
+      } else {
+         std::copy_n(storage_.begin() + static_cast<std::ptrdiff_t>(position_), size, destination);
+      }
       position_ += size;
       return size;
    }
 
    std::size_t write(const char* source, std::size_t size) {
+      if (read_only_) {
+         raw::detail::raise_stream_range("write", length(), static_cast<std::int64_t>(size));
+      }
       if (position_ > storage_.size() || size > storage_.max_size() - position_) {
          raw::detail::raise_stream_range("write", storage_.size(), static_cast<std::int64_t>(size));
       }
@@ -177,7 +189,7 @@ class datastream<std::vector<Byte, Allocator>,
    }
 
    bool seekp(std::size_t position) {
-      if (position > storage_.size()) {
+      if (position > length()) {
          return false;
       }
       position_ = position;
@@ -203,7 +215,7 @@ class datastream<std::vector<Byte, Allocator>,
    }
 
    std::size_t remaining() const {
-      return storage_.size() - position_;
+      return length() - position_;
    }
 
    [[nodiscard]] const raw::detail::allocation_limits& allocation_limits() const noexcept {
@@ -230,7 +242,13 @@ class datastream<std::vector<Byte, Allocator>,
    }
 
  private:
+   [[nodiscard]] std::size_t length() const noexcept {
+      return read_only_ ? input_.size() : storage_.size();
+   }
+
    storage_type storage_;
+   std::span<const Byte> input_;
+   bool read_only_ = false;
    std::size_t position_ = 0;
    raw::detail::allocation_limits allocation_limits_;
    std::size_t remaining_elements_;

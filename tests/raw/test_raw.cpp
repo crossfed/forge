@@ -174,6 +174,17 @@ forge::datastream<const std::uint8_t*>& operator>>(forge::datastream<const std::
 
 BOOST_AUTO_TEST_SUITE(raw_test_suite)
 
+BOOST_AUTO_TEST_CASE(vector_datastream_can_read_a_non_owning_input_span) {
+   auto input = std::vector<std::uint8_t>{0x11U, 0x22U};
+   auto stream = forge::datastream<std::vector<std::uint8_t>>{std::span<const std::uint8_t>{input}};
+   input.front() = 0x33U;
+
+   auto value = std::uint8_t{};
+   BOOST_REQUIRE(stream.get(value));
+   BOOST_TEST(value == 0x33U);
+   BOOST_TEST(stream.remaining() == 1U);
+}
+
 BOOST_AUTO_TEST_CASE(raw_string_golden_bytes) {
    const auto packed = forge::raw::pack(std::string("abc"));
    BOOST_CHECK_EQUAL(forge::codec::hex::encode(packed), "03616263");

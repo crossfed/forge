@@ -187,6 +187,22 @@ BOOST_AUTO_TEST_CASE(signing_rejects_duplicate_keys_before_provider_dispatch) {
    BOOST_TEST(signer.sign_calls() == 0U);
 }
 
+BOOST_AUTO_TEST_CASE(signing_rejects_duplicate_key_ids_before_provider_dispatch) {
+   auto signer = local_signer{};
+   auto runtime = forge::asio::runtime{};
+   auto value = chain_transaction::builder{context()}.add_action(spring_setabi_action()).build();
+   const auto info = signer.info();
+   const auto other_key = forge::crypto::asymmetric::private_key::generate().get_public_key();
+
+   BOOST_CHECK_THROW(
+       forge::asio::blocking::run(runtime, chain_transaction::sign(std::move(value),
+                                                                   {{.id = info.id, .public_key = info.public_key},
+                                                                    {.id = info.id, .public_key = other_key}},
+                                                                   signer)),
+       chain_transaction::exceptions::duplicate_signature);
+   BOOST_TEST(signer.sign_calls() == 0U);
+}
+
 BOOST_AUTO_TEST_CASE(signing_rejects_every_invalid_key_before_provider_dispatch) {
    auto signer = local_signer{};
    auto runtime = forge::asio::runtime{};

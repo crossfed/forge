@@ -16,11 +16,10 @@ namespace forge::raw::detail {
 
 datastream<std::vector<std::uint8_t>> make_input_stream(std::span<const std::uint8_t> input, unpack_limits limits) {
    return datastream<std::vector<std::uint8_t>>{
-       std::vector<std::uint8_t>{input.begin(), input.end()},
-       forge::raw::detail::allocation_limits{.elements = limits.max_container_elements,
-                                             .total_elements = limits.max_total_container_elements,
-                                             .bytes = limits.max_bytes,
-                                             .first_container_elements = limits.first_container_elements}};
+       input, forge::raw::detail::allocation_limits{.elements = limits.max_container_elements,
+                                                    .total_elements = limits.max_total_container_elements,
+                                                    .bytes = limits.max_bytes,
+                                                    .first_container_elements = limits.first_container_elements}};
 }
 
 [[noreturn]] void fail_codec(const char* message) {

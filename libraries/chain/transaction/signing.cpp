@@ -54,7 +54,7 @@ boost::asio::awaitable<prepared_transaction> sign(unsigned_transaction value, st
          FORGE_THROW_EXCEPTION(exceptions::invalid_options, "transaction signing key id must not be empty");
       }
       for (auto previous = std::size_t{}; previous < index; ++previous) {
-         if (keys[previous].public_key == key.public_key) {
+         if (keys[previous].id == key.id || keys[previous].public_key == key.public_key) {
             FORGE_THROW_EXCEPTION(exceptions::duplicate_signature, "transaction signing key is duplicated");
          }
       }
