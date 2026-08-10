@@ -13,6 +13,7 @@ Documents below explain cross-library architecture decisions.
 
 | Document | Purpose |
 | --- | --- |
+| [releases/8.22.0.md](releases/8.22.0.md) | Forge 8.22.0 P2P production hardening, CLI, local transactions and encrypted keystore. |
 | [releases/8.21.0.md](releases/8.21.0.md) | Forge 8.21.0 verified Chain API, Experimental authenticated state and HTTP deadline fixes. |
 | [releases/8.20.0.md](releases/8.20.0.md) | Forge 8.20.0 native guest Contract SDK projects and manifest schema v3 migration. |
 | [releases/8.19.0.md](releases/8.19.0.md) | Forge 8.19.0 exact typed JSON and complete Chain Protocol host serialization. |
