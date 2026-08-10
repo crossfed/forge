@@ -2777,31 +2777,44 @@ BOOST_AUTO_TEST_CASE(p2p_dht_query_stops_after_closest_nonfailed_k_peers_are_que
    BOOST_TEST(result.query.closest_peers[1].id.to_string() == candidates[1].id.to_string());
 }
 
-BOOST_AUTO_TEST_CASE(p2p_dht_query_detached_children_retain_callables_after_parent_cancellation) {
+BOOST_AUTO_TEST_CASE(p2p_dht_query_cancels_and_joins_children_with_parent) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    auto blocker = std::make_shared<boost::asio::steady_timer>(runtime.context(), std::chrono::hours{1});
    auto callable_lifetime = std::make_shared<int>(42);
    auto weak_lifetime = std::weak_ptr<int>{callable_lifetime};
    auto entered = std::promise<void>{};
    auto entered_future = entered.get_future();
+   auto entered_count = std::size_t{};
    auto cancellation = boost::asio::cancellation_signal{};
-   auto endpoint_value = make_dns_tcp_endpoint(4'042, "query-lifetime.example.com");
-   endpoint_value.peer = peer(42);
+   auto first_endpoint = make_dns_tcp_endpoint(4'042, "query-lifetime-a.example.com");
+   first_endpoint.peer = peer(42);
+   auto second_endpoint = make_dns_tcp_endpoint(4'043, "query-lifetime-b.example.com");
+   second_endpoint.peer = peer(44);
 
    auto result = boost::asio::co_spawn(
        runtime.context(),
        dht_query::run(
            dht_query::request{
                .target = make_dht_key(peer(43)),
-               .options = dht::options{.replication = 1, .alpha = 1},
-               .seeds = std::vector<dht::peer>{dht::peer{
-                   .id = peer(42),
-                   .endpoints = std::vector<endpoint>{std::move(endpoint_value)},
-                   .connection = dht::connection_type::can_connect,
-               }},
+               .options = dht::options{.replication = 2, .alpha = 2},
+               .seeds = std::vector<dht::peer>{
+                   dht::peer{
+                       .id = peer(42),
+                       .endpoints = std::vector<endpoint>{std::move(first_endpoint)},
+                       .connection = dht::connection_type::can_connect,
+                   },
+                   dht::peer{
+                       .id = peer(44),
+                       .endpoints = std::vector<endpoint>{std::move(second_endpoint)},
+                       .connection = dht::connection_type::can_connect,
+                   },
+               },
            },
-           [blocker, owner = callable_lifetime, &entered](const dht::peer&) -> boost::asio::awaitable<dht::message> {
-              entered.set_value();
+           [blocker, owner = callable_lifetime, &entered,
+            &entered_count](const dht::peer&) -> boost::asio::awaitable<dht::message> {
+              if (++entered_count == 2) {
+                 entered.set_value();
+              }
               auto error = boost::system::error_code{};
               co_await blocker->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
               co_return dht::message{.type = dht::message_type::find_node};
@@ -2816,12 +2829,6 @@ BOOST_AUTO_TEST_CASE(p2p_dht_query_detached_children_retain_callables_after_pare
    cancellation.emit(boost::asio::cancellation_type::terminal);
    BOOST_REQUIRE(result.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
    BOOST_CHECK_THROW(static_cast<void>(result.get()), boost::system::system_error);
-   BOOST_TEST(!weak_lifetime.expired());
-
-   blocker->cancel();
-   for (auto attempt = 0; attempt < 200 && !weak_lifetime.expired(); ++attempt) {
-      std::this_thread::sleep_for(std::chrono::milliseconds{5});
-   }
    BOOST_TEST(weak_lifetime.expired());
 }
 

@@ -134,6 +134,7 @@ query_batch_on_strand(std::vector<dht::peer> batch,
       explicit state(asio::strand<asio::any_io_executor> executor, std::vector<dht::peer> peers)
           : remaining(peers.size()), timer(std::move(executor)) {
          items.reserve(peers.size());
+         children_cancellation.reserve(peers.size());
          for (auto& peer : peers) {
             items.push_back(batch_response{.peer = std::move(peer)});
          }
@@ -142,11 +143,15 @@ query_batch_on_strand(std::vector<dht::peer> batch,
       std::vector<batch_response> items;
       std::size_t remaining;
       asio::steady_timer timer;
+      std::vector<std::unique_ptr<asio::cancellation_signal>> children_cancellation;
    };
 
    auto shared = std::make_shared<state>(strand, std::move(batch));
    for (auto index = std::size_t{}; index < shared->items.size(); ++index) {
       const auto peer = shared->items[index].peer;
+      auto child_cancellation = std::make_unique<asio::cancellation_signal>();
+      const auto child_cancellation_slot = child_cancellation->slot();
+      shared->children_cancellation.push_back(std::move(child_cancellation));
       asio::co_spawn(
           strand,
           [shared, callables, index, peer]() mutable -> asio::awaitable<void> {
@@ -173,16 +178,46 @@ query_batch_on_strand(std::vector<dht::peer> batch,
              --shared->remaining;
              shared->timer.cancel(); // on_strand
           },
-          asio::detached);
+          asio::bind_cancellation_slot(child_cancellation_slot, asio::detached));
    }
 
+   auto cancellation_failure = std::exception_ptr{};
+   const auto cancel_children = [&shared] {
+      for (const auto& cancellation : shared->children_cancellation) {
+         cancellation->emit(asio::cancellation_type::all);
+      }
+   };
    while (true) {
       if (shared->remaining == 0) {
+         if (cancellation_failure) {
+            std::rethrow_exception(cancellation_failure);
+         }
          co_return std::move(shared->items);
       }
       shared->timer.expires_after(std::chrono::minutes{10});
       auto error = boost::system::error_code{};
-      co_await shared->timer.async_wait(asio::redirect_error(asio::use_awaitable, error));
+      auto caught_cancellation = false;
+      try {
+         co_await shared->timer.async_wait(asio::redirect_error(asio::use_awaitable, error));
+      } catch (...) {
+         if (!cancellation_failure) {
+            cancellation_failure = std::current_exception();
+            cancel_children();
+            caught_cancellation = true;
+         }
+      }
+      if (caught_cancellation) {
+         co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
+      }
+      if (!cancellation_failure) {
+         const auto cancellation = co_await asio::this_coro::cancellation_state;
+         if (cancellation.cancelled() != asio::cancellation_type::none) {
+            cancellation_failure =
+                std::make_exception_ptr(boost::system::system_error{asio::error::operation_aborted});
+            cancel_children();
+            co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
+         }
+      }
    }
 }
 
