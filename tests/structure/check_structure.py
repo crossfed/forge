@@ -848,8 +848,10 @@ def check_crypto_family(root: Path, files: list[Path], errors: list[str]) -> Non
       "bn256",
       "core",
       "digest",
+      "keystore",
       "math",
       "pki",
+      "signer",
       "symmetric",
    }
    forbidden_modules = (

@@ -120,9 +120,9 @@ class p2p_secrets_api final : public crypto_secrets::api {
    }
 
    boost::asio::awaitable<crypto_secrets::get_result> get_bytes(crypto_secrets::get_request request) override {
-      const auto* material = request.secret_id == "p2p/test-certificate"
-                               ? &chain_api_test::certificate
-                               : request.secret_id == "p2p/test-private-key" ? &chain_api_test::private_key : nullptr;
+      const auto* material = request.secret_id == "p2p/test-certificate"   ? &chain_api_test::certificate
+                             : request.secret_id == "p2p/test-private-key" ? &chain_api_test::private_key
+                                                                           : nullptr;
       if (material == nullptr) {
          throw std::runtime_error{"unknown P2P package-test secret"};
       }
@@ -134,8 +134,7 @@ class p2p_secrets_api final : public crypto_secrets::api {
       co_return crypto_secrets::get_result{.secret_id = std::move(request.secret_id), .bytes = std::move(bytes)};
    }
 
-   boost::asio::awaitable<crypto_secrets::derive_result>
-   derive_hkdf_sha256(crypto_secrets::derive_request) override {
+   boost::asio::awaitable<crypto_secrets::derive_result> derive_hkdf_sha256(crypto_secrets::derive_request) override {
       throw std::logic_error{"P2P package-test secrets do not implement derivation"};
       co_return crypto_secrets::derive_result{};
    }

@@ -402,8 +402,8 @@ implementation-library namespaces. For plugin family/role decisions, follow
 ## Crypto
 
 - `forge::crypto` is an empty family root. Public symbols and dependencies live
-  in focused `core`, `digest`, `symmetric`, `asymmetric`, `pki`, `math`, `bls`
-  and `bn256` leaf libraries.
+  in focused `core`, `digest`, `symmetric`, `asymmetric`, `pki`, `math`, `bls`,
+  `bn256`, `signer` and `keystore` leaf libraries.
 - There is no Crypto aggregate target or package component. Consumers must link
   the smallest owning leaf target.
 - OpenSSL 3+ is the crypto backend baseline.
@@ -415,8 +415,12 @@ implementation-library namespaces. For plugin family/role decisions, follow
 - Base64, Base58 and hexadecimal encoding belong only to the dual-target
   `forge.codec` leaf libraries. Crypto, contract, multiformats and network code
   must consume those byte-native APIs instead of defining encoding algorithms.
-- Crypto leaf libraries stay synchronous and low-level. Do not import
+- Crypto primitive leaves stay synchronous and low-level. Do not import
   `forge_asio`, schedulers, threads or runtime policy into crypto primitives.
+- Custody/provider leaves such as `forge_crypto_signer` and
+  `forge_crypto_keystore` may expose `boost::asio::awaitable<T>` so hardware,
+  HSM/KMS and external providers do not require blocking wrappers. They must not
+  own executors, schedulers, threads, transports or application runtime policy.
 - WebAuthn parsing must stay private to `forge_crypto_asymmetric` and must not
   reintroduce a public or vendored JSON parser dependency.
 

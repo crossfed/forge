@@ -9,7 +9,6 @@ module;
 #include <fstream>
 #include <istream>
 #include <map>
-#include <source_location>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -21,7 +20,9 @@ import forge.config.core.component;
 import forge.config.core.decode;
 import forge.codec.base64;
 import forge.codec.hex;
+import forge.crypto.keystore.encrypted_file;
 import forge.crypto.core.secret_bytes;
+import forge.crypto.core.secret_string;
 import forge.crypto.core.types;
 import forge.exceptions;
 import forge.plugins.crypto.secrets.exceptions;
@@ -45,7 +46,8 @@ namespace {
    return forge::crypto::core::bytes{value.begin(), value.end()};
 }
 
-[[nodiscard]] forge::crypto::core::bytes decode_material(std::string value, encoding encoding_value, const std::string& id) {
+[[nodiscard]] forge::crypto::core::bytes decode_material(std::string value, encoding encoding_value,
+                                                         const std::string& id) {
    try {
       switch (encoding_value) {
       case encoding::raw:
@@ -76,7 +78,8 @@ namespace {
                          forge::exceptions::ctx("secret_id", id));
 }
 
-[[nodiscard]] forge::crypto::core::bytes read_file(const std::string& path, std::uint64_t max_bytes, const std::string& id) {
+[[nodiscard]] forge::crypto::core::bytes read_file(const std::string& path, std::uint64_t max_bytes,
+                                                   const std::string& id) {
    if (path.empty()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_source, "secret file path is empty",
                             forge::exceptions::ctx("secret_id", id));
@@ -101,22 +104,21 @@ namespace {
    return output;
 }
 
-[[nodiscard]] std::string read_passphrase(const secret_source& source, const std::string& id) {
+[[nodiscard]] forge::crypto::core::secret_string read_passphrase(const secret_source& source, const std::string& id) {
    if (!source.passphrase_value.empty()) {
-      return source.passphrase_value;
+      return forge::crypto::core::secret_string{source.passphrase_value};
    }
    if (!source.passphrase_file.empty()) {
       const auto value = read_file(source.passphrase_file, 64U * 1024U, id);
-      return trim_ascii(std::string{value.begin(), value.end()});
+      return forge::crypto::core::secret_string{trim_ascii(std::string{value.begin(), value.end()})};
    }
    FORGE_THROW_EXCEPTION(exceptions::invalid_source, "encrypted_file source requires passphrase",
                          forge::exceptions::ctx("secret_id", id));
 }
 
-[[nodiscard]] forge::crypto::core::secret_bytes load_secret_material(const secret_entry& entry,
-                                                               std::uint64_t max_plaintext_bytes,
-                                                               std::uint64_t max_ciphertext_bytes,
-                                                               encrypted_file_decrypt_limits decrypt_limits) {
+[[nodiscard]] forge::crypto::core::secret_bytes
+load_secret_material(const secret_entry& entry, std::uint64_t max_plaintext_bytes, std::uint64_t max_ciphertext_bytes,
+                     forge::crypto::keystore::decrypt_limits decrypt_limits) {
    auto material = forge::crypto::core::bytes{};
    switch (entry.source.type) {
    case source_type::value:
@@ -132,14 +134,12 @@ namespace {
       auto passphrase = read_passphrase(entry.source, entry.id);
       try {
          decrypt_limits.max_plaintext_bytes = max_plaintext_bytes;
-         material = decrypt_secret_file(container, passphrase, decrypt_limits);
-      } catch (const exceptions::size_limit_exceeded&) {
-         forge::exceptions::capture_and_rethrow("encrypted secret file source", std::source_location::current(),
-                                                forge::exceptions::ctx("secret_id", entry.id));
-      } catch (const exceptions::invalid_secret&) {
-         forge::exceptions::capture_and_rethrow("encrypted secret file source", std::source_location::current(),
-                                                forge::exceptions::ctx("secret_id", entry.id));
-      } catch (const std::exception&) {
+         material = forge::crypto::keystore::decrypt_file(container, passphrase, decrypt_limits).copy();
+      } catch (const forge::crypto::keystore::exceptions::size_limit_exceeded&) {
+         FORGE_THROW_EXCEPTION(exceptions::size_limit_exceeded,
+                               "encrypted secret file source exceeds configured plaintext limit",
+                               forge::exceptions::ctx("secret_id", entry.id));
+      } catch (const forge::crypto::keystore::exceptions::invalid_file&) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_secret, "encrypted secret file cannot be decrypted",
                                forge::exceptions::ctx("secret_id", entry.id));
       }
@@ -185,7 +185,7 @@ void apply_config(plugin::impl& state, forge::config::core::component_view view)
    require_aes_update_limit(decoded.default_max_aad_bytes, "default-max-aad-bytes");
 
    auto loaded = std::map<std::string, plugin::impl::loaded_secret>{};
-   const auto decrypt_limits = encrypted_file_decrypt_limits{
+   const auto decrypt_limits = forge::crypto::keystore::decrypt_limits{
        .max_plaintext_bytes = decoded.default_max_plaintext_bytes,
        .max_scrypt_n = decoded.encrypted_file_max_scrypt_n,
        .max_scrypt_r = decoded.encrypted_file_max_scrypt_r,

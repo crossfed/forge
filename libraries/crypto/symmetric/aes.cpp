@@ -15,11 +15,27 @@ module;
 module forge.crypto.symmetric.aes;
 
 import forge.crypto.core.random;
+import forge.crypto.core.secret_bytes;
 
 namespace forge::crypto::symmetric::aes {
 namespace {
 
 using ctx_ptr = std::unique_ptr<EVP_CIPHER_CTX, decltype(&EVP_CIPHER_CTX_free)>;
+
+struct bytes_wiper {
+   core::bytes* value;
+   bool active = true;
+
+   ~bytes_wiper() {
+      if (active) {
+         core::secure_erase(*value);
+      }
+   }
+
+   void release() noexcept {
+      active = false;
+   }
+};
 
 [[nodiscard]] ctx_ptr make_context() {
    auto context = ctx_ptr{EVP_CIPHER_CTX_new(), EVP_CIPHER_CTX_free};
@@ -48,13 +64,11 @@ void require_gcm_nonce(std::span<const std::uint8_t> nonce) {
 }
 
 void require_gcm_tag(std::span<const std::uint8_t> tag) {
-   require_size(tag.size(), aes_gcm_tag_size, "AES-256-GCM requires 16-byte tag",
-                aes::exceptions::code::invalid_tag);
+   require_size(tag.size(), aes_gcm_tag_size, "AES-256-GCM requires 16-byte tag", aes::exceptions::code::invalid_tag);
 }
 
 void require_cbc_iv(std::span<const std::uint8_t> iv) {
-   require_size(iv.size(), aes_cbc_iv_size, "AES-256-CBC requires 16-byte IV",
-                aes::exceptions::code::invalid_nonce);
+   require_size(iv.size(), aes_cbc_iv_size, "AES-256-CBC requires 16-byte IV", aes::exceptions::code::invalid_nonce);
 }
 
 void require_sink(const aes_byte_sink& sink) {
@@ -88,6 +102,23 @@ struct aes256_gcm_decoder::impl {
    bool finalized = false;
 };
 
+aes256_key::~aes256_key() {
+   core::secure_erase(std::span<std::uint8_t>{bytes});
+}
+
+aes256_key::aes256_key(aes256_key&& other) noexcept : bytes{other.bytes} {
+   core::secure_erase(std::span<std::uint8_t>{other.bytes});
+}
+
+aes256_key& aes256_key::operator=(aes256_key&& other) noexcept {
+   if (this != &other) {
+      core::secure_erase(std::span<std::uint8_t>{bytes});
+      bytes = other.bytes;
+      core::secure_erase(std::span<std::uint8_t>{other.bytes});
+   }
+   return *this;
+}
+
 aes256_key make_aes256_key(std::span<const std::uint8_t> input) {
    require_size(input.size(), aes256_key_size, "AES-256 key requires 32 bytes", aes::exceptions::code::invalid_key);
 
@@ -102,26 +133,31 @@ aes256_key generate_aes256_key() {
    return key;
 }
 
-aes256_gcm_encoder::aes256_gcm_encoder(aes256_gcm_encoder_options options) : _impl(std::make_unique<impl>()) {
+std::unique_ptr<aes256_gcm_encoder::impl> aes256_gcm_encoder::make_impl(aes256_gcm_encoder_options& options) {
    require_gcm_nonce(options.nonce);
    require_sink(options.ciphertext_sink);
 
-   _impl->nonce = std::move(options.nonce);
-   _impl->aad = std::move(options.aad);
-   _impl->sink = std::move(options.ciphertext_sink);
+   auto result = std::make_unique<impl>();
+   result->nonce = std::move(options.nonce);
+   result->aad = std::move(options.aad);
+   result->sink = std::move(options.ciphertext_sink);
 
    auto out_size = int{};
-   if (EVP_EncryptInit_ex(_impl->context.get(), EVP_aes_256_gcm(), nullptr, nullptr, nullptr) != 1 ||
-       EVP_CIPHER_CTX_ctrl(_impl->context.get(), EVP_CTRL_GCM_SET_IVLEN, static_cast<int>(_impl->nonce.size()),
+   if (EVP_EncryptInit_ex(result->context.get(), EVP_aes_256_gcm(), nullptr, nullptr, nullptr) != 1 ||
+       EVP_CIPHER_CTX_ctrl(result->context.get(), EVP_CTRL_GCM_SET_IVLEN, static_cast<int>(result->nonce.size()),
                            nullptr) != 1 ||
-       EVP_EncryptInit_ex(_impl->context.get(), nullptr, nullptr, options.key.bytes.data(), _impl->nonce.data()) != 1) {
+       EVP_EncryptInit_ex(result->context.get(), nullptr, nullptr, options.key.bytes.data(), result->nonce.data()) !=
+           1) {
       FORGE_THROW_EXCEPTION(aes::exceptions::backend_error, "failed to initialize AES-GCM encryption");
    }
-   if (!_impl->aad.empty() && EVP_EncryptUpdate(_impl->context.get(), nullptr, &out_size, _impl->aad.data(),
-                                                checked_update_size(_impl->aad.size(), "AES-GCM AAD")) != 1) {
+   if (!result->aad.empty() && EVP_EncryptUpdate(result->context.get(), nullptr, &out_size, result->aad.data(),
+                                                 checked_update_size(result->aad.size(), "AES-GCM AAD")) != 1) {
       FORGE_THROW_EXCEPTION(aes::exceptions::backend_error, "failed to apply AES-GCM AAD");
    }
+   return result;
 }
+
+aes256_gcm_encoder::aes256_gcm_encoder(aes256_gcm_encoder_options options) : _impl(make_impl(options)) {}
 
 aes256_gcm_encoder::~aes256_gcm_encoder() = default;
 aes256_gcm_encoder::aes256_gcm_encoder(aes256_gcm_encoder&&) noexcept = default;
@@ -172,28 +208,33 @@ aes256_gcm_authentication aes256_gcm_encoder::finalize() {
    };
 }
 
-aes256_gcm_decoder::aes256_gcm_decoder(aes256_gcm_decoder_options options) : _impl(std::make_unique<impl>()) {
+std::unique_ptr<aes256_gcm_decoder::impl> aes256_gcm_decoder::make_impl(aes256_gcm_decoder_options& options) {
    require_gcm_nonce(options.nonce);
    require_gcm_tag(options.tag);
    require_sink(options.plaintext_sink);
 
-   _impl->nonce = std::move(options.nonce);
-   _impl->tag = std::move(options.tag);
-   _impl->aad = std::move(options.aad);
-   _impl->sink = std::move(options.plaintext_sink);
+   auto result = std::make_unique<impl>();
+   result->nonce = std::move(options.nonce);
+   result->tag = std::move(options.tag);
+   result->aad = std::move(options.aad);
+   result->sink = std::move(options.plaintext_sink);
 
    auto out_size = int{};
-   if (EVP_DecryptInit_ex(_impl->context.get(), EVP_aes_256_gcm(), nullptr, nullptr, nullptr) != 1 ||
-       EVP_CIPHER_CTX_ctrl(_impl->context.get(), EVP_CTRL_GCM_SET_IVLEN, static_cast<int>(_impl->nonce.size()),
+   if (EVP_DecryptInit_ex(result->context.get(), EVP_aes_256_gcm(), nullptr, nullptr, nullptr) != 1 ||
+       EVP_CIPHER_CTX_ctrl(result->context.get(), EVP_CTRL_GCM_SET_IVLEN, static_cast<int>(result->nonce.size()),
                            nullptr) != 1 ||
-       EVP_DecryptInit_ex(_impl->context.get(), nullptr, nullptr, options.key.bytes.data(), _impl->nonce.data()) != 1) {
+       EVP_DecryptInit_ex(result->context.get(), nullptr, nullptr, options.key.bytes.data(), result->nonce.data()) !=
+           1) {
       FORGE_THROW_EXCEPTION(aes::exceptions::backend_error, "failed to initialize AES-GCM decryption");
    }
-   if (!_impl->aad.empty() && EVP_DecryptUpdate(_impl->context.get(), nullptr, &out_size, _impl->aad.data(),
-                                                checked_update_size(_impl->aad.size(), "AES-GCM AAD")) != 1) {
+   if (!result->aad.empty() && EVP_DecryptUpdate(result->context.get(), nullptr, &out_size, result->aad.data(),
+                                                 checked_update_size(result->aad.size(), "AES-GCM AAD")) != 1) {
       FORGE_THROW_EXCEPTION(aes::exceptions::backend_error, "failed to apply AES-GCM AAD");
    }
+   return result;
 }
+
+aes256_gcm_decoder::aes256_gcm_decoder(aes256_gcm_decoder_options options) : _impl(make_impl(options)) {}
 
 aes256_gcm_decoder::~aes256_gcm_decoder() = default;
 aes256_gcm_decoder::aes256_gcm_decoder(aes256_gcm_decoder&&) noexcept = default;
@@ -212,6 +253,7 @@ void aes256_gcm_decoder::write(std::span<const std::uint8_t> data) {
    }
 
    auto out = core::bytes(data.size());
+   auto wipe_out = bytes_wiper{&out};
    auto out_size = int{};
    if (EVP_DecryptUpdate(_impl->context.get(), out.data(), &out_size, data.data(),
                          checked_update_size(data.size(), "AES-GCM ciphertext")) != 1) {
@@ -227,6 +269,7 @@ void aes256_gcm_decoder::finalize() {
    _impl->finalized = true;
 
    auto out = core::bytes(aes_gcm_tag_size);
+   auto wipe_out = bytes_wiper{&out};
    auto out_size = int{};
    if (EVP_CIPHER_CTX_ctrl(_impl->context.get(), EVP_CTRL_GCM_SET_TAG, static_cast<int>(_impl->tag.size()),
                            _impl->tag.data()) != 1 ||
@@ -261,6 +304,7 @@ aes256_gcm_ciphertext encrypt_aes256_gcm(const aes256_gcm_encrypt_request& reque
 
 core::bytes decrypt_aes256_gcm(const aes256_gcm_decrypt_request& request) {
    auto plaintext = core::bytes{};
+   auto wipe_plaintext = bytes_wiper{&plaintext};
    plaintext.reserve(request.encrypted.ciphertext.size());
 
    auto decoder = aes256_gcm_decoder{aes256_gcm_decoder_options{
@@ -273,6 +317,7 @@ core::bytes decrypt_aes256_gcm(const aes256_gcm_decrypt_request& request) {
    }};
    decoder.write(request.encrypted.ciphertext);
    decoder.finalize();
+   wipe_plaintext.release();
    return plaintext;
 }
 
@@ -311,6 +356,7 @@ core::bytes decrypt_aes256_cbc(const aes256_cbc_decrypt_request& request) {
 
    auto context = make_context();
    auto out = core::bytes(request.encrypted.ciphertext.size());
+   auto wipe_out = bytes_wiper{&out};
    auto out_size = int{};
    auto total_size = int{};
 
@@ -329,7 +375,8 @@ core::bytes decrypt_aes256_cbc(const aes256_cbc_decrypt_request& request) {
    }
    total_size += out_size;
    out.resize(static_cast<std::size_t>(total_size));
+   wipe_out.release();
    return out;
 }
 
-} // namespace forge::crypto
+} // namespace forge::crypto::symmetric::aes

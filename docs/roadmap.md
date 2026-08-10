@@ -83,6 +83,9 @@ plugins, telemetry and compatibility layers должны быть пригодн
   and finality remain explicit chain semantics.
 - [Config](config/schema-config-program-options.md): schema rules, neutral
   config documents, env/CLI adapters and redaction.
+- [CLI Client Foundation v1](iterations/forge-cli-client-foundation-v1.md):
+  CLI11-backed nested commands with Forge-owned public types;
+  Boost.Program_options remains limited to config argv ingestion.
 - [Secret Provider](iterations/fcl-secret-provider-v1.md): neutral
   infrastructure plugin for local secret material, redacted source loading and
   purpose-gated AES-GCM/HKDF operations.

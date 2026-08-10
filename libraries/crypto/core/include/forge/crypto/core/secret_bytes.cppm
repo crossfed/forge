@@ -14,6 +14,7 @@ export namespace forge::crypto::core {
 
 void secure_erase(bytes& value) noexcept;
 void secure_erase(std::string& value) noexcept;
+void secure_erase(std::span<std::uint8_t> value) noexcept;
 
 class secret_bytes {
  public:
@@ -40,4 +41,4 @@ class secret_bytes {
    bytes value_;
 };
 
-} // namespace forge::crypto
+} // namespace forge::crypto::core

@@ -174,6 +174,36 @@ forge::datastream<const std::uint8_t*>& operator>>(forge::datastream<const std::
 
 BOOST_AUTO_TEST_SUITE(raw_test_suite)
 
+BOOST_AUTO_TEST_CASE(vector_datastream_can_read_a_non_owning_input_span) {
+   auto input = std::vector<std::uint8_t>{0x11U, 0x22U};
+   auto stream = forge::datastream<std::vector<std::uint8_t>>{std::span<const std::uint8_t>{input}};
+   input.front() = 0x33U;
+
+   auto value = std::uint8_t{};
+   BOOST_REQUIRE(stream.get(value));
+   BOOST_TEST(value == 0x33U);
+   BOOST_TEST(stream.remaining() == 1U);
+}
+
+BOOST_AUTO_TEST_CASE(vector_datastream_materializes_non_owning_input_for_legacy_storage_operations) {
+   auto input = std::vector<std::uint8_t>{0x11U, 0x22U};
+   auto stream = forge::datastream<std::vector<std::uint8_t>>{std::span<const std::uint8_t>{input}};
+
+   BOOST_REQUIRE(stream.seekp(1));
+   const auto replacement = char{0x33};
+   BOOST_REQUIRE_EQUAL(stream.write(&replacement, 1), 1U);
+   input.front() = 0x44U;
+
+   BOOST_CHECK_EQUAL(forge::codec::hex::encode(stream.storage()), "1133");
+}
+
+BOOST_AUTO_TEST_CASE(vector_datastream_accepts_zero_length_reads_from_an_empty_span) {
+   auto stream = forge::datastream<std::vector<std::uint8_t>>{std::span<const std::uint8_t>{}};
+
+   BOOST_CHECK_EQUAL(stream.read(nullptr, 0), 0U);
+   BOOST_TEST(stream.remaining() == 0U);
+}
+
 BOOST_AUTO_TEST_CASE(raw_string_golden_bytes) {
    const auto packed = forge::raw::pack(std::string("abc"));
    BOOST_CHECK_EQUAL(forge::codec::hex::encode(packed), "03616263");

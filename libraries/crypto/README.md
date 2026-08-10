@@ -12,6 +12,8 @@ package component or aggregate module.
 | [digest](digest/README.md) | `forge_crypto_digest` | `crypto_digest` | Hashes, HMAC and Raw pack hashing. |
 | [symmetric](symmetric/README.md) | `forge_crypto_symmetric` | `crypto_symmetric` | AES, ChaCha20-Poly1305, HKDF and scrypt. |
 | [asymmetric](asymmetric/README.md) | `forge_crypto_asymmetric_values`, `forge_crypto_asymmetric` | `crypto_asymmetric_values`, `crypto_asymmetric` | Binary key/signature values and host signing algorithms. |
+| [signer](signer/README.md) | `forge_crypto_signer` | `crypto_signer` | Product-neutral private-key provider interface. |
+| [keystore](keystore/README.md) | `forge_crypto_keystore` | `crypto_keystore` | Encrypted local-file signer provider and password input boundary. |
 | [pki](pki/README.md) | `forge_crypto_pki` | `crypto_pki` | DER, PEM and X.509 boundaries. |
 | [math](math/README.md) | `forge_crypto_math` | `crypto_math` | Big integers and modular arithmetic. |
 | [bls](bls/README.md) | `forge_crypto_bls` | `crypto_bls` | BLS values, signatures and contract primitives. |
@@ -56,10 +58,13 @@ signature encoding is an explicit boundary in `crypto_asymmetric`.
 ## Boundaries
 
 - Cryptographic primitives are synchronous and own no Asio runtime policy.
+- `signer` and `keystore` are custody/provider leaves rather than primitives;
+  their awaitable provider boundary permits HSM, KMS and hardware-backed
+  implementations without putting transport policy into asymmetric crypto.
 - OpenSSL remains the host backend where required; K1 compatibility keeps its
   dedicated implementation.
 - Raw and Variant byte layouts, algorithm enum values, signatures and keys are
   compatibility surfaces and are tested byte-for-byte.
 - `forge::crypto` owns no public declarations directly. Public symbols belong
-  to `core`, `digest`, `symmetric`, `asymmetric`, `pki`, `math`, `bls` or
-  `bn256`.
+  to `core`, `digest`, `symmetric`, `asymmetric`, `signer`, `keystore`, `pki`,
+  `math`, `bls` or `bn256`.
