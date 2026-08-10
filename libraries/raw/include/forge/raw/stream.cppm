@@ -166,6 +166,9 @@ class datastream<std::vector<Byte, Allocator>,
       if (size > remaining()) {
          raw::detail::raise_stream_range("read", length(), static_cast<std::int64_t>(size - remaining()));
       }
+      if (size == 0) {
+         return 0;
+      }
       if (read_only_) {
          std::memcpy(destination, input_.data() + position_, size);
       } else {
@@ -176,9 +179,7 @@ class datastream<std::vector<Byte, Allocator>,
    }
 
    std::size_t write(const char* source, std::size_t size) {
-      if (read_only_) {
-         raw::detail::raise_stream_range("write", length(), static_cast<std::int64_t>(size));
-      }
+      materialize();
       if (position_ > storage_.size() || size > storage_.max_size() - position_) {
          raw::detail::raise_stream_range("write", storage_.size(), static_cast<std::int64_t>(size));
       }
@@ -234,21 +235,32 @@ class datastream<std::vector<Byte, Allocator>,
    }
 
    storage_type& storage() {
+      materialize();
       return storage_;
    }
 
    const storage_type& storage() const {
+      materialize();
       return storage_;
    }
 
  private:
+   void materialize() const {
+      if (!read_only_) {
+         return;
+      }
+      storage_.assign(input_.begin(), input_.end());
+      input_ = {};
+      read_only_ = false;
+   }
+
    [[nodiscard]] std::size_t length() const noexcept {
       return read_only_ ? input_.size() : storage_.size();
    }
 
-   storage_type storage_;
-   std::span<const Byte> input_;
-   bool read_only_ = false;
+   mutable storage_type storage_;
+   mutable std::span<const Byte> input_;
+   mutable bool read_only_ = false;
    std::size_t position_ = 0;
    raw::detail::allocation_limits allocation_limits_;
    std::size_t remaining_elements_;
