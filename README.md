@@ -147,7 +147,8 @@ registry.register_plugin(forge::plugins::crypto::secrets::descriptor());
 | [raw](libraries/raw/README.md) | `forge_raw` | Byte-compatible binary serialization. | `forge_core`, `forge_reflect`, `forge_variant`, `forge_exceptions`. |
 | [compression](libraries/compression/README.md) | `forge_compression` | Bounded zlib compression/decompression helpers. | Boost.Iostreams, ZLIB, `forge_exceptions`. |
 | [chain/core](libraries/chain/core/README.md) | `forge_chain_core` | Fundamental chain digest and Merkle primitives. | `forge_crypto_digest`, `forge_exceptions`, `forge_raw`. |
-| [chain/protocol](libraries/chain/protocol/README.md) | `forge_chain_protocol` | Canonical protocol values, ordered keys, transactions, blocks, ABI and signing rules. | `forge_chain_core`, `forge_compression`, `forge_raw`, `forge_variant`, `forge_crypto_asymmetric_values`, `forge_crypto_digest`. |
+| [chain/savanna/values](libraries/chain/savanna/values/README.md) | `forge_chain_savanna_values` | Canonical guest-safe finalizer and finalizer-policy values. | `forge_crypto_bls`, `forge_raw`, `forge_variant`. |
+| [chain/protocol](libraries/chain/protocol/README.md) | `forge_chain_protocol` | Canonical protocol values, ordered keys, transactions, blocks, ABI and signing rules. | `forge_chain_core`, `forge_chain_savanna_values`, `forge_compression`, `forge_raw`, `forge_variant`, `forge_crypto_asymmetric_values`, `forge_crypto_digest`. |
 | [chain/api](libraries/chain/api/README.md) | `forge_chain_api` | Transport-neutral chain contracts, HTTP/P2P clients and verified audited reads. | `forge_api_core`, `forge_api_http`, `forge_chain_protocol`, `forge_db_authenticated`, `forge_net_http`. |
 | [vm/wasm](libraries/vm/wasm/README.md) | `forge_vm_wasm` | Native WebAssembly parser, validator, interpreter, host-function runtime and x86_64 JIT. | `forge_exceptions`, threads, internal SoftFloat. |
 | [contract/abi](libraries/contract/abi/README.md) | `forge_contract_abi` | Optional Clang AST based contract ABI and dispatcher generation. | Clang/LLVM privately, `forge_chain_protocol`, `forge_codec_json`. |
@@ -260,7 +261,7 @@ FORGE использует версию `MAJOR.MINOR.PATCH` вместе с яв
 описано в release notes вместе с migration path.
 
 Текущие изменения и переходы описаны в
-[Forge 8.23.0 release notes](docs/releases/8.23.0.md).
+[Forge 8.24.0 release notes](docs/releases/8.24.0.md).
 
 ## Совместимость
 

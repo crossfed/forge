@@ -36,6 +36,28 @@ file(CHMOD "${_runtime_dependency}" PERMISSIONS OWNER_READ GROUP_READ WORLD_READ
 forge_contract_sdk_prepare_runtime_dependency("${_runtime_dependency}")
 file(APPEND "${_runtime_dependency}" "-writable")
 
+set(
+   _resolved_dependencies
+   "/opt/homebrew/Cellar/llvm/22.1.8/lib/libLLVM.dylib"
+   "/opt/homebrew/Cellar/llvm/22.1.8/lib/libclang-cpp.dylib"
+)
+forge_contract_sdk_match_runtime_dependency(
+   _matched_dependency
+   "/opt/homebrew/opt/llvm/lib/libLLVM.dylib"
+   ${_resolved_dependencies}
+)
+if(NOT _matched_dependency STREQUAL "/opt/homebrew/Cellar/llvm/22.1.8/lib/libLLVM.dylib")
+   message(FATAL_ERROR "runtime dependency symlink path was not matched to its bundled library")
+endif()
+forge_contract_sdk_match_runtime_dependency(
+   _missing_dependency
+   "/opt/homebrew/opt/llvm/lib/libMissing.dylib"
+   ${_resolved_dependencies}
+)
+if(_missing_dependency)
+   message(FATAL_ERROR "unrelated runtime dependency matched a bundled library")
+endif()
+
 foreach(
    _dependency
    "libc++.so.1"

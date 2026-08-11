@@ -39,6 +39,29 @@ function(forge_contract_sdk_prepare_runtime_dependency path)
    )
 endfunction()
 
+function(forge_contract_sdk_match_runtime_dependency output linked_dependency)
+   set(_match)
+   foreach(_dependency IN LISTS ARGN)
+      if(linked_dependency STREQUAL _dependency)
+         set(_match "${_dependency}")
+         break()
+      endif()
+   endforeach()
+
+   if(NOT _match)
+      get_filename_component(_linked_name "${linked_dependency}" NAME)
+      foreach(_dependency IN LISTS ARGN)
+         get_filename_component(_dependency_name "${_dependency}" NAME)
+         if(_linked_name STREQUAL _dependency_name)
+            set(_match "${_dependency}")
+            break()
+         endif()
+      endforeach()
+   endif()
+
+   set(${output} "${_match}" PARENT_SCOPE)
+endfunction()
+
 function(forge_contract_sdk_runtime_dependency_filters output)
    set(
       _filters

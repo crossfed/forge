@@ -90,8 +90,19 @@ forge_contract_register_guest_component(
 forge_contract_register_guest_component(
    ID forge.crypto.bls_values
    TARGET forge_crypto_bls_values
+   PUBLIC_LIBRARIES forge.raw
    MODULES forge/crypto/bls/bls_values.cppm
    MODULE_NAMES forge.crypto.bls.values
+)
+
+forge_contract_register_guest_component(
+   ID forge.chain.savanna.values
+   TARGET forge_chain_savanna_values
+   PUBLIC_LIBRARIES
+      forge.raw
+      forge.crypto.bls_values
+   MODULES forge/chain/savanna/values.cppm
+   MODULE_NAMES forge.chain.savanna.values
 )
 
 forge_contract_register_guest_component(
@@ -103,6 +114,7 @@ forge_contract_register_guest_component(
       forge.crypto.digest
       forge.crypto.asymmetric
       forge.crypto.bls_values
+      forge.chain.savanna.values
    MODULES
       forge/chain/protocol/values.cppm
       forge/chain/protocol/time.cppm
@@ -126,7 +138,6 @@ forge_contract_register_guest_component(
       forge/chain/protocol/code_hash_result.cppm
       forge/chain/protocol/blockchain_parameters.cppm
       forge/chain/protocol/kv_parameters.cppm
-      forge/chain/protocol/finalizer_authority_value.cppm
       forge/chain/protocol/finalizer_authority.cppm
       forge/chain/protocol/finalizer_policy_value.cppm
       forge/chain/protocol/finalizer_policy.cppm
@@ -156,7 +167,6 @@ forge_contract_register_guest_component(
       forge.chain.protocol.code_hash_result
       forge.chain.protocol.blockchain_parameters
       forge.chain.protocol.kv_parameters
-      forge.chain.protocol.finalizer_authority:value
       forge.chain.protocol.finalizer_authority
       forge.chain.protocol.finalizer_policy:value
       forge.chain.protocol.finalizer_policy

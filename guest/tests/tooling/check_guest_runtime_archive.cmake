@@ -110,7 +110,10 @@ _require_text("${FORGE_CONTRACT_LIBRARIES_CMAKE}" "add_library(\"\${_target}_arc
 _require_text("${FORGE_CONTRACT_LIBRARIES_CMAKE}" "FORGE_CONTRACT_FOUNDATION_COMPONENT_IDS")
 _require_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "ID forge.contract.runtime")
 _require_text("${FORGE_CONTRACT_GUEST_COMPONENTS}" "ARCHIVE libforge_guest_contract.a")
-_reject_text("${FORGE_CONTRACT_LIBRARIES_CMAKE}" "INTERFACE_LINK_LIBRARIES")
+_require_text(
+   "${FORGE_CONTRACT_LIBRARIES_CMAKE}"
+   "These values are compared verbatim only. Forge never interprets them as"
+)
 _reject_text("${FORGE_CONTRACT_LIBRARIES_CMAKE}" "LINK_ONLY")
 _reject_text("${FORGE_CONTRACT_LIBRARIES_CMAKE}" "contract-graph.json")
 _reject_text("${FORGE_CONTRACT_BUILD_CMAKE}" "forge_guest_codec_base64_runtime")

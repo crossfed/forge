@@ -68,22 +68,18 @@ savanna::qc_signature make_qc_signature(
    BOOST_REQUIRE_EQUAL(keys.size(), indices.size());
    auto strong = savanna::vote_bitset{policy_size};
    auto weak = savanna::vote_bitset{policy_size};
-   auto signature = bls::aggregate_signature{};
+   auto signature = bls::signature_accumulator{};
    for (auto index = std::size_t{}; index < keys.size(); ++index) {
       const auto message =
           savanna::message_for_vote(candidate.finality_digest, kinds[index]);
-      signature.aggregate(keys[index].sign(message));
+      signature.add(keys[index].sign(message));
       (kinds[index] == savanna::vote_kind::strong ? strong : weak)
           .set(indices[index]);
    }
    return {
-       .strong_votes = strong.any()
-                           ? std::optional<savanna::vote_bitset>{std::move(strong)}
-                           : std::nullopt,
-       .weak_votes = weak.any()
-                         ? std::optional<savanna::vote_bitset>{std::move(weak)}
-                         : std::nullopt,
-       .signature = std::move(signature),
+       .strong_votes = strong.any() ? std::optional<savanna::vote_bitset>{std::move(strong)} : std::nullopt,
+       .weak_votes = weak.any() ? std::optional<savanna::vote_bitset>{std::move(weak)} : std::nullopt,
+       .signature = signature.finish(),
    };
 }
 

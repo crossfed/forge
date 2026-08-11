@@ -1,4 +1,5 @@
 add_subdirectory(core)
+add_subdirectory(savanna/values)
 add_subdirectory(protocol)
 add_subdirectory(transaction)
 add_subdirectory(quorum)
