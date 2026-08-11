@@ -4,6 +4,8 @@ add_library(
    events.cpp
    diagnostics.cpp
    signals.cpp
+   service_registry.cpp
+   connect_context.cpp
    plugin_context.cpp
    plugin.cpp
    plugin_registry.cpp

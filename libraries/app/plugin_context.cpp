@@ -19,10 +19,17 @@ forge::api::core::registry& default_api_registry() {
 } // namespace
 
 plugin_context::plugin_context(forge::asio::task::scheduler& scheduler, forge::api::core::registry& apis,
+                               service_view services, signal_bus& signals, event_bus& events,
+                               diagnostics_store* diagnostics, config_view config,
+                               forge::asio::compute::executor compute)
+    : scheduler_{&scheduler}, compute_{std::move(compute)}, apis_{&apis}, services_{services}, signals_{&signals},
+      events_{&events}, diagnostics_{diagnostics}, config_{std::move(config)} {}
+
+plugin_context::plugin_context(forge::asio::task::scheduler& scheduler, forge::api::core::registry& apis,
                                signal_bus& signals, event_bus& events, diagnostics_store* diagnostics,
                                config_view config, forge::asio::compute::executor compute)
-    : scheduler_{&scheduler}, compute_{std::move(compute)}, apis_{&apis}, signals_{&signals}, events_{&events},
-      diagnostics_{diagnostics}, config_{std::move(config)} {}
+    : plugin_context{scheduler, apis, service_view{}, signals, events, diagnostics, std::move(config),
+                     std::move(compute)} {}
 
 plugin_context::plugin_context(forge::asio::task::scheduler& scheduler, signal_bus& signals, event_bus& events,
                                diagnostics_store* diagnostics, config_view config,
@@ -47,6 +54,10 @@ forge::asio::compute::executor plugin_context::compute() const {
 
 forge::api::core::view plugin_context::apis() const noexcept {
    return forge::api::core::view{*apis_};
+}
+
+service_view plugin_context::services() const noexcept {
+   return services_;
 }
 
 signal_bus& plugin_context::signals() noexcept {

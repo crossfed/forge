@@ -22,6 +22,7 @@ import forge.config.core.component;
 import forge.config.core.decode;
 import forge.config.core.migration;
 import forge.app.application_shell;
+export import forge.app.connect_context;
 import forge.app.plugin_registry;
 
 export namespace forge::app {
@@ -160,6 +161,34 @@ class application_builder {
       return *this;
    }
 
+   template <typename Handler> application_builder& connect(Handler&& handler) {
+      using handler_type = std::decay_t<Handler>;
+      add_connect_callback(
+         [handler = handler_type{std::forward<Handler>(handler)}](
+            connect_context& context) mutable -> boost::asio::awaitable<void> {
+            if constexpr (std::is_invocable_v<handler_type&, connect_context&>) {
+               using result_type = std::invoke_result_t<handler_type&, connect_context&>;
+               if constexpr (std::same_as<std::remove_cvref_t<result_type>, boost::asio::awaitable<void>>) {
+                  co_await std::invoke(handler, context);
+               } else {
+                  std::invoke(handler, context);
+               }
+            } else if constexpr (std::is_invocable_v<handler_type&>) {
+               using result_type = std::invoke_result_t<handler_type&>;
+               if constexpr (std::same_as<std::remove_cvref_t<result_type>, boost::asio::awaitable<void>>) {
+                  co_await std::invoke(handler);
+               } else {
+                  std::invoke(handler);
+               }
+            } else {
+               static_assert(dependent_false<handler_type>,
+                             "connect handler must accept connect_context& or no arguments");
+            }
+            co_return;
+         });
+      return *this;
+   }
+
    application_builder& run_foreground(std::function<int(application_shell&)> handler);
 
    [[nodiscard]] std::unique_ptr<application_shell> build() &&;
@@ -167,6 +196,7 @@ class application_builder {
  private:
    using configure_callback = std::function<boost::asio::awaitable<void>(configure_context&)>;
    using provide_callback = std::function<boost::asio::awaitable<void>(application_context&)>;
+   using connect_callback = std::function<boost::asio::awaitable<void>(connect_context&)>;
    using after_initialize_callback =
       std::function<boost::asio::awaitable<void>(const application_context&)>;
 
@@ -176,6 +206,7 @@ class application_builder {
 
    void add_configure_callback(configure_callback callback);
    void add_provide_callback(provide_callback callback);
+   void add_connect_callback(connect_callback callback);
    void add_after_initialize_callback(after_initialize_callback callback);
 
    struct impl;

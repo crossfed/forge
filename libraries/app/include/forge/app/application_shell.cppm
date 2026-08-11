@@ -8,6 +8,9 @@ module;
 
 export module forge.app.application_shell;
 
+export import forge.app.connect_context;
+export import forge.app.service_registry;
+
 import forge.asio.runtime;
 import forge.asio.compute;
 import forge.asio.task;
@@ -44,7 +47,7 @@ struct application_shell_options {
 class application_context {
  public:
    application_context(forge::asio::runtime& runtime, forge::asio::task::scheduler& scheduler,
-                       forge::api::core::registry& apis, signal_bus& signals, event_bus& events,
+                       forge::api::core::registry& apis, service_view services, signal_bus& signals, event_bus& events,
                        diagnostics_store& diagnostics, forge::asio::compute::executor compute = {});
 
    [[nodiscard]] forge::asio::runtime& runtime() noexcept;
@@ -53,6 +56,9 @@ class application_context {
    [[nodiscard]] forge::asio::compute::executor compute() const;
    [[nodiscard]] forge::api::core::installer apis() noexcept;
    [[nodiscard]] forge::api::core::view api_view() const noexcept;
+   template <typename Service> [[nodiscard]] std::shared_ptr<Service> service() const {
+      return services_.get<Service>();
+   }
    [[nodiscard]] signal_bus& signals() noexcept;
    [[nodiscard]] event_bus& events() noexcept;
    [[nodiscard]] diagnostics_store& diagnostics() noexcept;
@@ -62,6 +68,7 @@ class application_context {
    forge::asio::task::scheduler* scheduler_ = nullptr;
    forge::asio::compute::executor compute_;
    forge::api::core::registry* apis_ = nullptr;
+   service_view services_;
    signal_bus* signals_ = nullptr;
    event_bus* events_ = nullptr;
    diagnostics_store* diagnostics_ = nullptr;
@@ -100,6 +107,7 @@ class application_shell : public application_base {
    [[nodiscard]] bool has_compute() const noexcept;
    [[nodiscard]] forge::asio::compute::executor compute() const;
    [[nodiscard]] forge::api::core::registry& apis() noexcept;
+   [[nodiscard]] service_view services() const noexcept;
    [[nodiscard]] signal_bus& signals() noexcept;
    [[nodiscard]] event_bus& events() noexcept;
    [[nodiscard]] diagnostics_store& diagnostics() noexcept;
@@ -109,6 +117,7 @@ class application_shell : public application_base {
    virtual boost::asio::awaitable<void> on_configure(configure_context& context);
    virtual void on_register_plugins(plugin_registry& registry);
    virtual boost::asio::awaitable<void> on_provide(application_context& context);
+   virtual boost::asio::awaitable<void> on_connect(connect_context& context);
    virtual boost::asio::awaitable<void> on_after_initialize(const application_context& context);
    virtual int on_run_foreground();
 
