@@ -18,6 +18,10 @@ enum class code : std::uint16_t {
    startup_failed = 6,
    shutdown_failed = 7,
    initialize_failed = 8,
+   invalid_service = 9,
+   service_missing = 10,
+   service_already_published = 11,
+   service_publication_closed = 12,
 };
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(code, "forge.app")
@@ -30,5 +34,9 @@ using api_version_mismatch = forge::exceptions::coded_exception<code, code::api_
 using startup_failed = forge::exceptions::coded_exception<code, code::startup_failed>;
 using shutdown_failed = forge::exceptions::coded_exception<code, code::shutdown_failed>;
 using initialize_failed = forge::exceptions::coded_exception<code, code::initialize_failed>;
+using invalid_service = forge::exceptions::coded_exception<code, code::invalid_service>;
+using service_missing = forge::exceptions::coded_exception<code, code::service_missing>;
+using service_already_published = forge::exceptions::coded_exception<code, code::service_already_published>;
+using service_publication_closed = forge::exceptions::coded_exception<code, code::service_publication_closed>;
 
 } // namespace forge::app::exceptions
