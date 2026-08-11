@@ -2,6 +2,7 @@
 
 #include <boost/test/unit_test.hpp>
 
+#include <algorithm>
 #include <array>
 #include <concepts>
 #include <deque>
@@ -95,6 +96,14 @@ protocol::bytes unhex(std::string_view value) {
       out.push_back(static_cast<std::uint8_t>(std::stoi(byte, nullptr, 16)));
    }
    return out;
+}
+
+forge::crypto::bls::public_key bls_key(std::string_view value) {
+   const auto bytes = unhex(value);
+   BOOST_REQUIRE_EQUAL(bytes.size(), forge::crypto::bls::public_key{}.size());
+   auto data = forge::crypto::bls::public_key::data_type{};
+   std::copy(bytes.begin(), bytes.end(), data.begin());
+   return forge::crypto::bls::public_key{data};
 }
 
 template <typename T> std::string pack_hex(const T& value) {
@@ -315,11 +324,18 @@ BOOST_AUTO_TEST_CASE(contract_wire_records_preserve_spring_raw_layout) {
    const auto authority = protocol::finalizer_authority{
        .description = "f",
        .weight = 3U,
-       .public_key = {char{0x01}, char{0x02}},
+       .public_key =
+           bls_key("f363f7a0cd6ed0812feb8bbd8b8bd2cef835f900e5e056f69f9d0ca7c4a4ec5af54f3d0c272a732f7f6749de553c58050bd"
+                   "5aaae3a2945b066d4f7f44643f4d7c7e8d64dab5da258ed6b7377d44a944f0fa10e978439b83f266522ea5083f80e"),
    };
-   BOOST_TEST(pack_hex(authority) == "01660300000000000000020102");
+   BOOST_TEST(
+       pack_hex(authority) ==
+       "0166030000000000000060f363f7a0cd6ed0812feb8bbd8b8bd2cef835f900e5e056f69f9d0ca7c4a4ec5af54f3d0c272a732f7f6749de5"
+       "53c58050bd5aaae3a2945b066d4f7f44643f4d7c7e8d64dab5da258ed6b7377d44a944f0fa10e978439b83f266522ea5083f80e");
    const auto policy = protocol::finalizer_policy{.threshold = 4U, .finalizers = {authority}};
-   BOOST_TEST(pack_hex(policy) == "04000000000000000101660300000000000000020102");
+   BOOST_TEST(pack_hex(policy) == "0400000000000000010166030000000000000060f363f7a0cd6ed0812feb8bbd8b8bd2cef835f900e5e0"
+                                  "56f69f9d0ca7c4a4ec5af54f3d0c272a732f7f6749de553c58050bd5aaae3a2945b066d4f7f44643f4d7"
+                                  "c7e8d64dab5da258ed6b7377d44a944f0fa10e978439b83f266522ea5083f80e");
 
    const auto call = protocol::call_data_header{.version = 0x01020304U, .func_name = 0x0102030405060708ULL};
    BOOST_TEST(pack_hex(call) == "040302010807060504030201");

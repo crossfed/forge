@@ -11,6 +11,9 @@ owns no public symbols.
 - [`forge_chain_protocol`](protocol/README.md) owns protocol values,
   fixed-size ordered keys, transactions, blocks, ABI, authorities and system
   payloads. Package component: `chain_protocol`.
+- [`forge_chain_savanna_values`](savanna/values/README.md) owns the canonical
+  guest-safe finalizer and finalizer-policy records. Package component:
+  `chain_savanna_values`.
 - [`forge_chain_quorum`](quorum/README.md) owns deterministic weighted-quorum
   evaluation. Package component: `chain_quorum`.
 - [`forge_chain_fork`](fork/README.md) owns a generic thread-safe fork graph and
@@ -20,8 +23,9 @@ owns no public symbols.
   bounded validation and finalizer safety.
   Package component: `chain_savanna`.
 
-The dependency direction is `forge_chain_protocol -> forge_chain_core`. Core
-never imports protocol.
+The dependency direction is
+`forge_chain_protocol -> forge_chain_savanna_values -> Forge BLS values` and
+`forge_chain_protocol -> forge_chain_core`. Core never imports protocol.
 
 Focused leaves may own neutral consensus mechanisms such as quorum evaluation,
 fork tracking and finality algorithms. Controller state, execution, state

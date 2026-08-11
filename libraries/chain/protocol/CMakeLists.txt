@@ -12,7 +12,6 @@ add_library(
    system.cpp
    producer_schedule.cpp
    producer_authority.cpp
-   finalizer_authority.cpp
    finalizer_policy.cpp
    state_query.cpp
 )
@@ -23,6 +22,7 @@ target_include_directories(forge_chain_protocol PUBLIC ${FORGE_PUBLIC_INCLUDE_DI
 target_link_libraries(
    forge_chain_protocol PUBLIC
       forge_chain_core
+      forge_chain_savanna_values
       forge_codec_hex
       forge_compression
       forge_raw

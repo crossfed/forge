@@ -28,9 +28,14 @@ Package component: `chain_protocol`. Public namespace:
   used by block headers and contract APIs.
 - `forge.chain.protocol.producer_authority`: weighted block-signing authorities
   and producer authority schedules.
-- `forge.chain.protocol.finalizer_authority`: finalizer identity, weight and
-  public-key bytes.
-- `forge.chain.protocol.finalizer_policy`: weighted finalizer policy records.
+- `forge.chain.protocol.finalizer_authority`: import-compatible alias that
+  preserves the public type name while forwarding ownership to the canonical
+  typed `forge.chain.savanna.values` finalizer record. Its `public_key` field
+  intentionally follows the approved pre-stable migration to the fixed BLS
+  value type.
+- `forge.chain.protocol.finalizer_policy`: generation-free Spring contract
+  payload that reuses the canonical finalizer record. It is distinct from the
+  generation-bearing operational Savanna policy.
 - `forge.chain.protocol.action`: actions and the Savanna action digest that
   commits to the return value.
 - `forge.chain.protocol.action_receipt`: canonical action receipts, witness
@@ -55,6 +60,9 @@ Authority, producer schedule, producer authority and finalizer policy modules
 share guest-safe value partitions with host wrappers. Host wrappers provide the
 same full Raw and Variant serialization contract; `block_signing_authority`
 uses the Spring/FC `[index, payload]` JSON representation.
+
+The `finalizer_authority` leaf remains as an import-compatible forwarding
+module only. It does not own a second type or serialization implementation.
 
 `forge::chain::protocol::digest` aliases `forge::chain::core::digest`. Protocol
 names such as `chain_id`, `block_id`, `transaction_id` and `checksum256` remain

@@ -21,6 +21,7 @@ target_link_libraries(
       Threads::Threads
       forge_chain_core
       forge_chain_quorum
+      forge_chain_savanna_values
       forge_crypto_bls
       forge_crypto_digest
       forge_exceptions
