@@ -81,7 +81,7 @@ template <std::size_t Size>
 [[nodiscard]] std::optional<bls12_381::g1> parse_public_point(const public_key& value) noexcept {
    try {
       auto point = bls12_381::g1::fromAffineBytesLE(value.serialize(), {.check_valid = true, .to_mont = true});
-      if (!point || point->isZero()) {
+      if (!point || point->isZero() || !point->inCorrectSubgroup()) {
          return std::nullopt;
       }
       return point;
@@ -94,7 +94,7 @@ template <typename Signature>
 [[nodiscard]] std::optional<bls12_381::g2> parse_signature_point(const Signature& value) noexcept {
    try {
       auto point = bls12_381::g2::fromAffineBytesLE(value.serialize(), {.check_valid = true, .to_mont = true});
-      if (!point || point->isZero()) {
+      if (!point || point->isZero() || !point->inCorrectSubgroup()) {
          return std::nullopt;
       }
       return point;
@@ -195,6 +195,9 @@ void signature_accumulator::add(const aggregate_signature& value) {
 aggregate_signature signature_accumulator::finish() const {
    if (!impl_ || !impl_->point) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_accumulator, "BLS signature accumulator is empty");
+   }
+   if (impl_->point->isZero()) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_accumulator, "BLS signature accumulator result is the identity");
    }
    const auto bytes = impl_->point->toAffineBytesLE(bls12_381::from_mont::yes);
    return aggregate_signature{std::span<const std::uint8_t, aggregate_signature::size_bytes>{bytes}};

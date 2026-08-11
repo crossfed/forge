@@ -6,10 +6,12 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
+import forge.codec.hex;
 import forge.codec.json;
 import forge.crypto.bls;
 import forge.crypto.digest.sha256;
@@ -52,6 +54,9 @@ concept has_to_string = requires(const Value& value) { value.to_string(); };
 template <typename Value>
 concept has_aggregate = requires(Value& value, const signature& item) { value.aggregate(item); };
 
+template <typename Value>
+concept has_rvalue_serialize = requires(Value&& value) { std::move(value).serialize(); };
+
 static_assert(sizeof(public_key) == public_key::size_bytes);
 static_assert(sizeof(signature) == signature::size_bytes);
 static_assert(sizeof(aggregate_signature) == aggregate_signature::size_bytes);
@@ -66,6 +71,9 @@ static_assert(!has_to_string<public_key>);
 static_assert(!has_to_string<signature>);
 static_assert(!has_to_string<aggregate_signature>);
 static_assert(!has_aggregate<aggregate_signature>);
+static_assert(!has_rvalue_serialize<public_key>);
+static_assert(!has_rvalue_serialize<signature>);
+static_assert(!has_rvalue_serialize<aggregate_signature>);
 static_assert(!std::is_constructible_v<proof_verified_public_key, public_key>);
 
 } // namespace
@@ -243,6 +251,56 @@ BOOST_AUTO_TEST_CASE(bls_malformed_values_are_non_throwing) try {
    BOOST_TEST(!verify(malformed_key, message_1, malformed_signature));
    BOOST_TEST(!verify_proof_of_possession(malformed_key, malformed_signature));
    BOOST_TEST(!verify_grouped({}, malformed_aggregate));
+}
+FORGE_LOG_AND_RETHROW();
+
+BOOST_AUTO_TEST_CASE(bls_rejects_points_outside_the_correct_subgroup) try {
+   constexpr auto key_hex =
+       "9eb987464f483a62537c33715426bd5fd50c7f5e85f51c634d85081974df95794fc79e95ee5aafa38578ad42f502b1124"
+       "ddf24f4172a370ce94e3cc81eaa698b9bf4762d4a31f01015b179eae0ee37aa6b07a8edc1246defae68c4f7139bb40d";
+   constexpr auto signature_hex =
+       "274bca7d08d71ed1ad63d37af4a90e47c9b15f54d29667fe6b4287b25902f68ba6df1eba4bdb439460efba65c7b8e103"
+       "c65fa1def3b431f2c0dbb3ff37d4a8cd6e778f1581f355e56ce1bb9acd8d04f13d4da481540e8c35a2b4319ab59b1418"
+       "a1535c7c6306445d855e7233c4c2fea99afc6423304847d728363c0a55c05207eb14d5d481b23967aacbe94ed055a11604"
+       "00d2d261972d340755130e5d8cd54fba4006433750957b240d2b51d882fafa043cc219bd846c84dc3c3c43f9a8e90b";
+
+   auto key_bytes = public_key::data_type{};
+   auto signature_bytes = signature::data_type{};
+   BOOST_REQUIRE_EQUAL(forge::codec::hex::decode(key_hex, key_bytes), key_bytes.size());
+   BOOST_REQUIRE_EQUAL(forge::codec::hex::decode(signature_hex, signature_bytes), signature_bytes.size());
+   const auto key = public_key{key_bytes};
+   const auto value = signature{signature_bytes};
+   const auto aggregate = aggregate_signature{signature_bytes};
+
+   BOOST_TEST(!valid(key));
+   BOOST_TEST(!valid(value));
+   BOOST_TEST(!valid(aggregate));
+   BOOST_TEST(!verify(key, message_1, value));
+   BOOST_CHECK_THROW((void)encoding::parse_public_key(encoding::format(key)), exceptions::parse_error);
+   BOOST_CHECK_THROW((void)encoding::parse_signature(encoding::format(value)), exceptions::parse_error);
+   BOOST_CHECK_THROW((void)encoding::parse_aggregate_signature(encoding::format(aggregate)), exceptions::parse_error);
+
+   auto accumulator = signature_accumulator{};
+   BOOST_CHECK_THROW(accumulator.add(value), exceptions::invalid_signature);
+   BOOST_CHECK_THROW(accumulator.add(aggregate), exceptions::invalid_signature);
+}
+FORGE_LOG_AND_RETHROW();
+
+BOOST_AUTO_TEST_CASE(bls_accumulator_rejects_identity_result) try {
+   constexpr auto inverse_hex =
+       "75814691ce0201c19cd7d5cafcf58c5d6451cdd7b9995d5173fce9561be16f47b15fcec7e73e0e194e5f1050b9791f14"
+       "3804f65d46b0b60ef08f1a7eadf680193aa133cec2ef4190f0d3ec69881be17f9198c0d05cae4cfa804752fccd017d0a"
+       "3d091bd24f3f485562964f1f83427c67a199e53463d07c70920f2f384478f3d3e096d88086b11b71832f949a57075412"
+       "413b3e3962dcce95b9b4a274eda6d7e05133a65e27d92809396b61e88b27bef6ee41a13d7940cf4acb6276a83882c808";
+   auto inverse_bytes = signature::data_type{};
+   BOOST_REQUIRE_EQUAL(forge::codec::hex::decode(inverse_hex, inverse_bytes), inverse_bytes.size());
+   const auto inverse = signature{inverse_bytes};
+   BOOST_REQUIRE(valid(inverse));
+
+   auto accumulator = signature_accumulator{};
+   accumulator.add(private_key{seed_1}.sign(message_1));
+   accumulator.add(inverse);
+   BOOST_CHECK_THROW((void)accumulator.finish(), exceptions::invalid_accumulator);
 }
 FORGE_LOG_AND_RETHROW();
 

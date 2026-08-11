@@ -43,9 +43,11 @@ class public_key {
       return size_bytes;
    }
 
-   [[nodiscard]] constexpr const data_type& serialize() const noexcept {
+   [[nodiscard]] constexpr const data_type& serialize() const& noexcept {
       return _bytes;
    }
+
+   [[nodiscard]] constexpr const data_type& serialize() const&& noexcept = delete;
 
    friend constexpr bool operator==(const public_key&, const public_key&) = default;
    friend constexpr auto operator<=>(const public_key&, const public_key&) = default;
@@ -80,9 +82,11 @@ class signature {
       return size_bytes;
    }
 
-   [[nodiscard]] constexpr const data_type& serialize() const noexcept {
+   [[nodiscard]] constexpr const data_type& serialize() const& noexcept {
       return _bytes;
    }
+
+   [[nodiscard]] constexpr const data_type& serialize() const&& noexcept = delete;
 
    friend constexpr bool operator==(const signature&, const signature&) = default;
    friend constexpr auto operator<=>(const signature&, const signature&) = default;
@@ -117,9 +121,11 @@ class aggregate_signature {
       return size_bytes;
    }
 
-   [[nodiscard]] constexpr const data_type& serialize() const noexcept {
+   [[nodiscard]] constexpr const data_type& serialize() const& noexcept {
       return _bytes;
    }
+
+   [[nodiscard]] constexpr const data_type& serialize() const&& noexcept = delete;
 
    friend constexpr bool operator==(const aggregate_signature&, const aggregate_signature&) = default;
    friend constexpr auto operator<=>(const aggregate_signature&, const aggregate_signature&) = default;

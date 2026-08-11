@@ -77,7 +77,7 @@ template <std::size_t Size>
 [[nodiscard]] bool valid_public_key(const public_key& value) noexcept {
    try {
       const auto point = bls12_381::g1::fromAffineBytesLE(value.serialize(), {.check_valid = true, .to_mont = true});
-      return point && !point->isZero();
+      return point && !point->isZero() && point->inCorrectSubgroup();
    } catch (...) {
       return false;
    }
@@ -86,7 +86,7 @@ template <std::size_t Size>
 template <typename Signature> [[nodiscard]] bool valid_signature(const Signature& value) noexcept {
    try {
       const auto point = bls12_381::g2::fromAffineBytesLE(value.serialize(), {.check_valid = true, .to_mont = true});
-      return point && !point->isZero();
+      return point && !point->isZero() && point->inCorrectSubgroup();
    } catch (...) {
       return false;
    }
