@@ -642,7 +642,6 @@ install(
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/code_hash_result.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/blockchain_parameters.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/kv_parameters.cppm"
-      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/finalizer_authority_value.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/finalizer_authority.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/finalizer_policy_value.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/finalizer_policy.cppm"

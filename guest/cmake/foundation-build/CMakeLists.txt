@@ -158,7 +158,6 @@ forge_guest_add_implementation_archive(
       "${_protocol}/include/forge/chain/protocol/code_hash_result.cppm"
       "${_protocol}/include/forge/chain/protocol/blockchain_parameters.cppm"
       "${_protocol}/include/forge/chain/protocol/kv_parameters.cppm"
-      "${_protocol}/include/forge/chain/protocol/finalizer_authority_value.cppm"
       "${_protocol}/include/forge/chain/protocol/finalizer_authority.cppm"
       "${_protocol}/include/forge/chain/protocol/finalizer_policy_value.cppm"
       "${_protocol}/include/forge/chain/protocol/finalizer_policy.cppm"

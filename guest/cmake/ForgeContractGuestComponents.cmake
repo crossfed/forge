@@ -138,7 +138,6 @@ forge_contract_register_guest_component(
       forge/chain/protocol/code_hash_result.cppm
       forge/chain/protocol/blockchain_parameters.cppm
       forge/chain/protocol/kv_parameters.cppm
-      forge/chain/protocol/finalizer_authority_value.cppm
       forge/chain/protocol/finalizer_authority.cppm
       forge/chain/protocol/finalizer_policy_value.cppm
       forge/chain/protocol/finalizer_policy.cppm
@@ -168,7 +167,6 @@ forge_contract_register_guest_component(
       forge.chain.protocol.code_hash_result
       forge.chain.protocol.blockchain_parameters
       forge.chain.protocol.kv_parameters
-      forge.chain.protocol.finalizer_authority:value
       forge.chain.protocol.finalizer_authority
       forge.chain.protocol.finalizer_policy:value
       forge.chain.protocol.finalizer_policy

@@ -75,9 +75,6 @@ def check_aggregates(root: Path, errors: list[str]) -> None:
    module_line = re.compile(rf"^\s*(?:export\s+)?module(?:\s+{MODULE_NAME})?\s*;\s*$", re.MULTILINE)
    import_line = re.compile(rf"^\s*(?:export\s+)?import\s+(?:{MODULE_NAME}|:[A-Za-z_]\w*)\s*;\s*$", re.MULTILINE)
    include_line = re.compile(r"^\s*#\s*include\s*[<\"][^>\"]+[>\"]\s*$", re.MULTILINE)
-   compatibility_imports = {
-      Path("libraries/chain/protocol/include/forge/chain/protocol/finalizer_authority.cppm"),
-   }
    for path in source_files(root, LAYOUT_ROOTS):
       if path.suffix != ".cppm":
          continue
@@ -85,7 +82,7 @@ def check_aggregates(root: Path, errors: list[str]) -> None:
       if import_line.search(source) is None:
          continue
       remainder = include_line.sub("", import_line.sub("", module_line.sub("", source))).strip()
-      if not remainder and path.relative_to(root) not in compatibility_imports:
+      if not remainder:
          errors.append(f"{path.relative_to(root)}: aggregate-only module is forbidden")
 
 
@@ -254,7 +251,7 @@ def check_bls_value_ownership(root: Path, files: list[Path], errors: list[str]) 
       if forbidden_aliases.search(source):
          errors.append(f"{path.relative_to(root)}: removed BLS value aliases are forbidden")
 
-   authority = root / "libraries/chain/protocol/include/forge/chain/protocol/finalizer_authority_value.cppm"
+   authority = root / "libraries/chain/protocol/include/forge/chain/protocol/finalizer_authority.cppm"
    if authority.exists() and re.search(r"\bstruct\s+finalizer_authority\b", authority.read_text(errors="ignore")):
       errors.append(f"{authority.relative_to(root)}: finalizer_authority must alias the canonical Savanna finalizer")
 

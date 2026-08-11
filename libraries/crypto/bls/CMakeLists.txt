@@ -16,7 +16,7 @@ add_library(
    bls.cpp
    bls_primitives.cpp
    bls_private_key.cpp
-   bls_serialization.cpp
+   serialization.cpp
 )
 set(FORGE_crypto_bls_DISABLED_MODULES bls_values)
 forge_target_modules_at(forge_crypto_bls crypto/bls)
