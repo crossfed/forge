@@ -49,6 +49,9 @@ class application_context {
    application_context(forge::asio::runtime& runtime, forge::asio::task::scheduler& scheduler,
                        forge::api::core::registry& apis, service_view services, signal_bus& signals, event_bus& events,
                        diagnostics_store& diagnostics, forge::asio::compute::executor compute = {});
+   application_context(forge::asio::runtime& runtime, forge::asio::task::scheduler& scheduler,
+                       forge::api::core::registry& apis, signal_bus& signals, event_bus& events,
+                       diagnostics_store& diagnostics, forge::asio::compute::executor compute = {});
 
    [[nodiscard]] forge::asio::runtime& runtime() noexcept;
    [[nodiscard]] forge::asio::task::scheduler& scheduler() noexcept;

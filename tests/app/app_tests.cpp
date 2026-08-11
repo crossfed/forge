@@ -2513,6 +2513,14 @@ BOOST_AUTO_TEST_CASE(application_builder_connects_services_between_plugin_initia
 }
 
 BOOST_AUTO_TEST_CASE(application_service_registry_reports_exact_typed_errors) {
+   static_assert(std::is_constructible_v<forge::app::application_context,
+                                         forge::asio::runtime&,
+                                         forge::asio::task::scheduler&,
+                                         forge::api::core::registry&,
+                                         forge::app::signal_bus&,
+                                         forge::app::event_bus&,
+                                         forge::app::diagnostics_store&>);
+
    auto apis = forge::api::core::registry{};
    auto services = forge::app::service_registry{};
    auto context = forge::app::connect_context{forge::api::core::view{apis}, services};
