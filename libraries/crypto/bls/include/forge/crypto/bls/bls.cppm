@@ -1,306 +1,107 @@
 module;
-#include <forge/exceptions/macros.hpp>
+
 #include <array>
-#include <bls12-381/bls12-381.hpp>
-#include <boost/describe.hpp>
 #include <cstdint>
-#include <iomanip>
-#include <ios>
+#include <memory>
 #include <optional>
-#include <ostream>
 #include <span>
 #include <string>
-#include <utility>
+#include <string_view>
 
 export module forge.crypto.bls;
 
-import forge.codec.base64;
-import forge.crypto.digest.ripemd160;
-import forge.exceptions;
-import forge.raw.datastream;
-import forge.raw.raw;
-import forge.raw.varint;
-import forge.reflect.reflect;
-import forge.variant.exceptions;
-import forge.variant.value;
-import forge.variant.conversion;
-import forge.variant.containers;
+export import forge.crypto.bls.exceptions;
+export import forge.crypto.bls.serialization;
+
 import forge.variant.chrono;
-import forge.variant.multiprecision;
-import forge.variant.format;
+import forge.variant.containers;
+import forge.variant.conversion;
 import forge.variant.described;
-
-namespace forge::crypto::bls::detail {
-
-template <typename DataType> struct checked_data {
-   std::uint32_t check = 0;
-   DataType data;
-
-   static auto calculate_checksum(const DataType& data) {
-      auto encoder = forge::crypto::digest::ripemd160::encoder();
-      raw::pack(encoder, data);
-      return encoder.result()._hash[0];
-   }
-
-   template <typename Stream> friend Stream& operator<<(Stream& s, const checked_data& value) {
-      forge::raw::pack(s, value.data);
-      forge::raw::pack(s, value.check);
-      return s;
-   }
-
-   template <typename Stream> friend Stream& operator>>(Stream& s, checked_data& value) {
-      forge::raw::unpack(s, value.data);
-      forge::raw::unpack(s, value.check);
-      return s;
-   }
-};
-
-template <typename Container> Container deserialize_base64url(const std::string& data_str) {
-   using wrapper = checked_data<Container>;
-   auto wrapped = wrapper{};
-
-   auto bin = forge::codec::base64::decode(data_str, {.characters = forge::codec::base64::alphabet::url,
-                                                      .pad = forge::codec::base64::padding_policy::allow});
-   forge::datastream<const std::uint8_t*> unpacker(bin.data(), bin.size());
-   forge::raw::unpack(unpacker, wrapped);
-   FORGE_ASSERT(!unpacker.remaining(), "decoded base64url length too long");
-   FORGE_ASSERT(wrapper::calculate_checksum(wrapped.data) == wrapped.check);
-
-   return wrapped.data;
-}
-
-template <typename Container> std::string serialize_base64url(const Container& data) {
-   using wrapper = checked_data<Container>;
-   auto wrapped = wrapper{};
-
-   wrapped.data = data;
-   wrapped.check = wrapper::calculate_checksum(wrapped.data);
-   auto packed = raw::pack(wrapped);
-   return forge::codec::base64::encode(
-       std::span<const std::uint8_t>{packed.data(), packed.size()},
-       {.characters = forge::codec::base64::alphabet::url, .pad = forge::codec::base64::padding::omit});
-}
-
-} // namespace forge::crypto::bls::detail
+import forge.variant.exceptions;
+import forge.variant.format;
+import forge.variant.multiprecision;
+import forge.variant.value;
 
 export namespace forge::crypto::bls {
 
-namespace config {
-const std::string public_key_prefix = "PUB_BLS_";
-const std::string private_key_prefix = "PVT_BLS_";
-const std::string signature_prefix = "SIG_BLS_";
-} // namespace config
+class private_key;
 
-class signature;
+namespace encoding {
 
-class public_key {
- public:
-   public_key() = default;
-   public_key(public_key&&) = default;
-   public_key(const public_key&) = default;
-   public_key& operator=(const public_key& rhs) = default;
-   public_key& operator=(public_key&& rhs) = default;
+[[nodiscard]] private_key parse_private_key(std::string_view text);
 
-   explicit public_key(std::span<const std::uint8_t, 96> affine_non_montgomery_le);
-   explicit public_key(const std::string& base64urlstr);
+[[nodiscard]] std::string format(const private_key& value);
 
-   [[nodiscard]] std::string to_string() const;
-
-   [[nodiscard]] const bls12_381::g1& jacobian_montgomery_le() const {
-      return _jacobian_montgomery_le;
-   }
-   [[nodiscard]] const std::array<std::uint8_t, 96>& affine_non_montgomery_le() const {
-      return _affine_non_montgomery_le;
-   }
-
-   [[nodiscard]] bool equal(const public_key& pkey) const {
-      return _jacobian_montgomery_le.equal(pkey._jacobian_montgomery_le);
-   }
-
-   auto operator<=>(const public_key& rhs) const {
-      return _affine_non_montgomery_le <=> rhs._affine_non_montgomery_le;
-   }
-   auto operator==(const public_key& rhs) const {
-      return _affine_non_montgomery_le == rhs._affine_non_montgomery_le;
-   }
-
-   template <typename T> friend T& operator<<(T& ds, const public_key& key) {
-      forge::raw::pack(ds, forge::unsigned_int(static_cast<std::uint32_t>(sizeof(key._affine_non_montgomery_le))));
-      ds.write(reinterpret_cast<const char*>(key._affine_non_montgomery_le.data()),
-               sizeof(key._affine_non_montgomery_le));
-      return ds;
-   }
-
-   friend std::ostream& operator<<(std::ostream& os, const public_key& key) {
-      os << "bls::public_key(0x" << std::hex;
-      for (auto c : key.affine_non_montgomery_le())
-         os << std::setfill('0') << std::setw(2) << static_cast<int>(c);
-      os << std::dec << ")";
-      return os;
-   }
-
-   template <typename T> friend T& operator>>(T& ds, public_key& key) {
-      forge::unsigned_int size;
-      forge::raw::unpack(ds, size);
-      FORGE_ASSERT(size.value == sizeof(key._affine_non_montgomery_le));
-      ds.read(reinterpret_cast<char*>(key._affine_non_montgomery_le.data()), sizeof(key._affine_non_montgomery_le));
-      key._jacobian_montgomery_le = from_affine_bytes_le(key._affine_non_montgomery_le);
-      return ds;
-   }
-
-   [[nodiscard]] static bls12_381::g1
-   from_affine_bytes_le(const std::array<std::uint8_t, 96>& affine_non_montgomery_le);
-
- private:
-   std::array<std::uint8_t, 96> _affine_non_montgomery_le{};
-   bls12_381::g1 _jacobian_montgomery_le;
-};
+} // namespace encoding
 
 class private_key {
  public:
    private_key() = default;
    private_key(private_key&&) = default;
    private_key(const private_key&) = default;
-   explicit private_key(std::span<const std::uint8_t> seed) {
-      _sk = bls12_381::secret_key(seed);
-   }
-   explicit private_key(const std::string& base64urlstr);
-
+   private_key& operator=(private_key&&) = default;
    private_key& operator=(const private_key&) = default;
 
-   [[nodiscard]] std::string to_string() const;
+   explicit private_key(std::span<const std::uint8_t> seed);
+
    [[nodiscard]] public_key get_public_key() const;
-   [[nodiscard]] signature sign(std::span<const std::uint8_t> msg) const;
+   [[nodiscard]] signature sign(std::span<const std::uint8_t> message) const;
    [[nodiscard]] signature proof_of_possession() const;
    [[nodiscard]] static private_key generate();
 
- private:
-   std::array<std::uint64_t, 4> _sk{};
-   BOOST_DESCRIBE_CLASS(private_key, (), (), (), (_sk))
-   friend bool operator==(const private_key& left, const private_key& right);
-};
-
-class signature {
- public:
-   signature() = default;
-   signature(signature&&) = default;
-   signature(const signature&) = default;
-   signature& operator=(const signature&) = default;
-   signature& operator=(signature&&) = default;
-
-   explicit signature(std::span<const std::uint8_t, 192> affine_non_montgomery_le);
-   explicit signature(const std::string& base64urlstr);
-
-   [[nodiscard]] std::string to_string() const;
-
-   [[nodiscard]] const bls12_381::g2& jacobian_montgomery_le() const {
-      return _jacobian_montgomery_le;
-   }
-   [[nodiscard]] const std::array<std::uint8_t, 192>& affine_non_montgomery_le() const {
-      return _affine_non_montgomery_le;
-   }
-
-   [[nodiscard]] bool equal(const signature& sig) const {
-      return _jacobian_montgomery_le.equal(sig._jacobian_montgomery_le);
-   }
-
-   auto operator<=>(const signature& rhs) const {
-      return _affine_non_montgomery_le <=> rhs._affine_non_montgomery_le;
-   }
-   auto operator==(const signature& rhs) const {
-      return _affine_non_montgomery_le == rhs._affine_non_montgomery_le;
-   }
-
-   template <typename T> friend T& operator<<(T& ds, const signature& sig) {
-      forge::raw::pack(ds, forge::unsigned_int(static_cast<std::uint32_t>(sizeof(sig._affine_non_montgomery_le))));
-      ds.write(reinterpret_cast<const char*>(sig._affine_non_montgomery_le.data()),
-               sizeof(sig._affine_non_montgomery_le));
-      return ds;
-   }
-
-   template <typename T> friend T& operator>>(T& ds, signature& sig) {
-      forge::unsigned_int size;
-      forge::raw::unpack(ds, size);
-      FORGE_ASSERT(size.value == sizeof(sig._affine_non_montgomery_le));
-      ds.read(reinterpret_cast<char*>(sig._affine_non_montgomery_le.data()), sizeof(sig._affine_non_montgomery_le));
-      sig._jacobian_montgomery_le = to_jacobian_montgomery_le(sig._affine_non_montgomery_le);
-      return ds;
-   }
-
-   [[nodiscard]] static bls12_381::g2
-   to_jacobian_montgomery_le(const std::array<std::uint8_t, 192>& affine_non_montgomery_le);
+   friend bool operator==(const private_key&, const private_key&) = default;
 
  private:
-   std::array<std::uint8_t, 192> _affine_non_montgomery_le{};
-   bls12_381::g2 _jacobian_montgomery_le;
+   std::array<std::uint64_t, 4> _secret{};
+
+   friend private_key encoding::parse_private_key(std::string_view);
+   friend std::string encoding::format(const private_key&);
 };
+
+struct aggregate_verification_group;
 
 class proof_verified_public_key {
  public:
-   proof_verified_public_key(const proof_verified_public_key&) = default;
-   proof_verified_public_key(proof_verified_public_key&&) = default;
-   proof_verified_public_key& operator=(const proof_verified_public_key&) = default;
-   proof_verified_public_key& operator=(proof_verified_public_key&&) = default;
+   proof_verified_public_key(const proof_verified_public_key& other);
+   proof_verified_public_key(proof_verified_public_key&& other) noexcept;
+   proof_verified_public_key& operator=(const proof_verified_public_key& other);
+   proof_verified_public_key& operator=(proof_verified_public_key&& other) noexcept;
+   ~proof_verified_public_key();
 
    [[nodiscard]] const public_key& get() const noexcept {
       return key_;
    }
 
  private:
-   explicit proof_verified_public_key(public_key key) : key_(std::move(key)) {}
+   struct impl;
+
+   proof_verified_public_key(public_key key, std::unique_ptr<impl> implementation);
 
    public_key key_;
+   std::unique_ptr<impl> impl_;
 
-   friend std::optional<proof_verified_public_key> verify_proof_of_possession(const public_key& key,
-                                                                              const signature& proof);
+   friend bool verify(const proof_verified_public_key&, std::span<const std::uint8_t>, const signature&) noexcept;
+   friend std::optional<proof_verified_public_key> verify_proof_of_possession(const public_key&,
+                                                                              const signature&) noexcept;
+   friend bool verify_grouped(std::span<const aggregate_verification_group>, const aggregate_signature&);
 };
 
-class aggregate_signature {
+class signature_accumulator {
  public:
-   aggregate_signature() = default;
-   aggregate_signature(aggregate_signature&&) = default;
-   aggregate_signature(const aggregate_signature&) = default;
-   aggregate_signature& operator=(const aggregate_signature&) = default;
-   aggregate_signature& operator=(aggregate_signature&&) = default;
+   signature_accumulator();
+   signature_accumulator(const signature_accumulator& other);
+   signature_accumulator(signature_accumulator&& other) noexcept;
+   signature_accumulator& operator=(const signature_accumulator& other);
+   signature_accumulator& operator=(signature_accumulator&& other) noexcept;
+   ~signature_accumulator();
 
-   explicit aggregate_signature(const std::string& base64urlstr);
-   explicit aggregate_signature(const signature& sig) : _jacobian_montgomery_le(sig.jacobian_montgomery_le()) {}
-
-   void aggregate(const signature& sig) {
-      _jacobian_montgomery_le.addAssign(sig.jacobian_montgomery_le());
-   }
-   void aggregate(const aggregate_signature& sig) {
-      _jacobian_montgomery_le.addAssign(sig.jacobian_montgomery_le());
-   }
-
-   [[nodiscard]] std::string to_string() const;
-   [[nodiscard]] const bls12_381::g2& jacobian_montgomery_le() const {
-      return _jacobian_montgomery_le;
-   }
-   [[nodiscard]] bool equal(const aggregate_signature& sig) const {
-      return _jacobian_montgomery_le.equal(sig._jacobian_montgomery_le);
-   }
-
-   template <typename T> friend T& operator<<(T& ds, const aggregate_signature& sig) {
-      std::array<std::uint8_t, 192> affine_non_montgomery_le =
-          sig._jacobian_montgomery_le.toAffineBytesLE(bls12_381::from_mont::yes);
-      forge::raw::pack(ds, forge::unsigned_int(static_cast<std::uint32_t>(sizeof(affine_non_montgomery_le))));
-      ds.write(reinterpret_cast<const char*>(affine_non_montgomery_le.data()), sizeof(affine_non_montgomery_le));
-      return ds;
-   }
-
-   template <typename T> friend T& operator>>(T& ds, aggregate_signature& sig) {
-      forge::unsigned_int size;
-      forge::raw::unpack(ds, size);
-      auto affine_non_montgomery_le = std::array<std::uint8_t, 192>{};
-      FORGE_ASSERT(size.value == sizeof(affine_non_montgomery_le));
-      ds.read(reinterpret_cast<char*>(affine_non_montgomery_le.data()), sizeof(affine_non_montgomery_le));
-      sig._jacobian_montgomery_le = signature::to_jacobian_montgomery_le(affine_non_montgomery_le);
-      return ds;
-   }
+   void add(const signature& value);
+   void add(const aggregate_signature& value);
+   [[nodiscard]] aggregate_signature finish() const;
 
  private:
-   bls12_381::g2 _jacobian_montgomery_le;
+   struct impl;
+   std::unique_ptr<impl> impl_;
 };
 
 struct aggregate_verification_group {
@@ -308,19 +109,20 @@ struct aggregate_verification_group {
    std::span<const std::uint8_t> message;
 };
 
-[[nodiscard]] bool verify(const public_key& pubkey, std::span<const std::uint8_t> message, const signature& sig);
-[[nodiscard]] std::optional<proof_verified_public_key> verify_proof_of_possession(const public_key& key,
-                                                                                  const signature& proof);
-[[nodiscard]] bool verify_grouped(std::span<const aggregate_verification_group> groups,
-                                  const aggregate_signature& signature);
+[[nodiscard]] bool valid(const public_key& value) noexcept;
+[[nodiscard]] bool valid(const signature& value) noexcept;
+[[nodiscard]] bool valid(const aggregate_signature& value) noexcept;
 
-void to_variant(const public_key& var, variant& vo);
-void from_variant(const variant& var, public_key& vo);
-void to_variant(const private_key& var, variant& vo);
-void from_variant(const variant& var, private_key& vo);
-void to_variant(const signature& var, variant& vo);
-void from_variant(const variant& var, signature& vo);
-void to_variant(const aggregate_signature& var, variant& vo);
-void from_variant(const variant& var, aggregate_signature& vo);
+[[nodiscard]] bool verify(const public_key& key, std::span<const std::uint8_t> message,
+                          const signature& value) noexcept;
+[[nodiscard]] bool verify(const proof_verified_public_key& key, std::span<const std::uint8_t> message,
+                          const signature& value) noexcept;
+[[nodiscard]] std::optional<proof_verified_public_key> verify_proof_of_possession(const public_key& key,
+                                                                                  const signature& proof) noexcept;
+[[nodiscard]] bool verify_grouped(std::span<const aggregate_verification_group> groups,
+                                  const aggregate_signature& value);
+
+void to_variant(const private_key& value, variant& output);
+void from_variant(const variant& value, private_key& output);
 
 } // namespace forge::crypto::bls

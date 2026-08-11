@@ -293,9 +293,10 @@ BOOST_AUTO_TEST_CASE(chain_savanna_verifies_strong_weak_and_pending_qcs) {
    auto strong_votes = savanna::vote_bitset{3U};
    strong_votes.set(0U);
    strong_votes.set(1U);
-   auto strong_signature = bls::aggregate_signature{};
-   strong_signature.aggregate(first.sign(digest.to_uint8_span()));
-   strong_signature.aggregate(second.sign(digest.to_uint8_span()));
+   auto strong_accumulator = bls::signature_accumulator{};
+   strong_accumulator.add(first.sign(digest.to_uint8_span()));
+   strong_accumulator.add(second.sign(digest.to_uint8_span()));
+   const auto strong_signature = strong_accumulator.finish();
    const auto strong = savanna::qc_signature{
        .strong_votes = strong_votes,
        .signature = strong_signature,
@@ -318,10 +319,11 @@ BOOST_AUTO_TEST_CASE(chain_savanna_verifies_strong_weak_and_pending_qcs) {
    weak_strong_votes.set(0U);
    auto weak_votes = savanna::vote_bitset{3U};
    weak_votes.set(1U);
-   auto weak_signature = bls::aggregate_signature{};
-   weak_signature.aggregate(first.sign(digest.to_uint8_span()));
+   auto weak_accumulator = bls::signature_accumulator{};
+   weak_accumulator.add(first.sign(digest.to_uint8_span()));
    const auto weak_bytes = weak_message(digest);
-   weak_signature.aggregate(second.sign(weak_bytes));
+   weak_accumulator.add(second.sign(weak_bytes));
+   const auto weak_signature = weak_accumulator.finish();
    const auto weak = savanna::qc_signature{
        .strong_votes = weak_strong_votes,
        .weak_votes = weak_votes,
@@ -368,7 +370,10 @@ BOOST_AUTO_TEST_CASE(chain_savanna_verifies_strong_weak_and_pending_qcs) {
    auto downgraded = strong;
    downgraded.weak_votes = savanna::vote_bitset{3U};
    downgraded.weak_votes->set(2U);
-   downgraded.signature.aggregate(third.sign(weak_bytes));
+   auto downgraded_accumulator = bls::signature_accumulator{};
+   downgraded_accumulator.add(downgraded.signature);
+   downgraded_accumulator.add(third.sign(weak_bytes));
+   downgraded.signature = downgraded_accumulator.finish();
    BOOST_CHECK_THROW(savanna::verify_signature(downgraded, verified_policy, digest), savanna::exceptions::invalid_qc);
 }
 

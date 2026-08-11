@@ -2218,7 +2218,8 @@ BOOST_AUTO_TEST_CASE(crypto_signer_config_is_redacted_and_local_only) {
    BOOST_TEST(*text == "<redacted>");
 
    const auto bls_key = forge::crypto::bls::private_key::generate();
-   auto bls_document = signer_config({}, {bls_key_entry("finalizer", bls_key.to_string(), {"chain.finality"})});
+   auto bls_document = signer_config(
+       {}, {bls_key_entry("finalizer", forge::crypto::bls::encoding::format(bls_key), {"chain.finality"})});
    const auto redacted_bls = forge::config::core::redact(bls_document, registry);
    const auto* bls_value = redacted_bls.try_get("plugins.crypto.signer.bls-keys");
    BOOST_REQUIRE(bls_value != nullptr);
@@ -2232,7 +2233,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_config_decodes_through_public_schema) {
    const auto bls_key = forge::crypto::bls::private_key::generate();
    const auto document = signer_config(
        {key_entry("provider", forge::crypto::asymmetric::encoding::forge().format(key), "forge", {"storage.receipt"})},
-       {bls_key_entry("finalizer", bls_key.to_string(), {"chain.finality"})});
+       {bls_key_entry("finalizer", forge::crypto::bls::encoding::format(bls_key), {"chain.finality"})});
 
    const auto decoded = forge::config::core::decode<crypto_signer::config>(document, "plugins.crypto.signer");
    BOOST_TEST(decoded.ok());
@@ -2316,7 +2317,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_structured_keys_are_not_cli_or_env_fields) {
    const auto bls_key = forge::crypto::bls::private_key::generate();
    const auto document = signer_config(
        {key_entry("provider", forge::crypto::asymmetric::encoding::forge().format(key), "forge", {"storage.receipt"})},
-       {bls_key_entry("finalizer", bls_key.to_string(), {"chain.finality"})});
+       {bls_key_entry("finalizer", forge::crypto::bls::encoding::format(bls_key), {"chain.finality"})});
 
    const auto written = forge::config::env::write_document(document, registry, {.prefix = "FORGE"});
    BOOST_TEST(written.ok());
@@ -2421,7 +2422,8 @@ BOOST_AUTO_TEST_CASE(crypto_signer_requires_explicit_non_empty_purposes) {
 
    const auto bls_key = forge::crypto::bls::private_key::generate();
    auto bls_empty = crypto_signer::plugin{};
-   auto bls_empty_document = signer_config({}, {bls_key_entry("finalizer", bls_key.to_string(), {})});
+   auto bls_empty_document =
+       signer_config({}, {bls_key_entry("finalizer", forge::crypto::bls::encoding::format(bls_key), {})});
    BOOST_CHECK_THROW(forge::asio::blocking::run(runtime, bls_empty.configure(forge::config::core::component_view{
                                                              bls_empty_document, "plugins.crypto.signer"})),
                      crypto_signer::exceptions::invalid_config);
@@ -2494,8 +2496,8 @@ BOOST_AUTO_TEST_CASE(crypto_signer_bls_api_describes_proof_and_signs_message) {
 
    const auto key = forge::crypto::bls::private_key::generate();
    auto plugin = crypto_signer::plugin{};
-   auto document =
-       signer_config({}, {bls_key_entry("finalizer", key.to_string(), {"chain.finality", "chain.finality.proof"})});
+   auto document = signer_config({}, {bls_key_entry("finalizer", forge::crypto::bls::encoding::format(key),
+                                                    {"chain.finality", "chain.finality.proof"})});
 
    auto runtime = forge::asio::runtime{};
    forge::asio::blocking::run(runtime,
@@ -2529,7 +2531,8 @@ BOOST_AUTO_TEST_CASE(crypto_signer_bls_api_describes_proof_and_signs_message) {
 BOOST_AUTO_TEST_CASE(crypto_signer_bls_api_enforces_key_and_purpose) {
    const auto key = forge::crypto::bls::private_key::generate();
    auto plugin = crypto_signer::plugin{};
-   auto document = signer_config({}, {bls_key_entry("finalizer", key.to_string(), {"chain.finality"})});
+   auto document =
+       signer_config({}, {bls_key_entry("finalizer", forge::crypto::bls::encoding::format(key), {"chain.finality"})});
 
    auto runtime = forge::asio::runtime{};
    forge::asio::blocking::run(runtime,
@@ -2556,7 +2559,7 @@ BOOST_AUTO_TEST_CASE(crypto_signer_apis_are_unavailable_after_stop) {
    auto document =
        signer_config({key_entry("producer", forge::crypto::asymmetric::encoding::forge().format(asymmetric_key),
                                 "forge", {"chain.block"})},
-                     {bls_key_entry("finalizer", bls_key.to_string(), {"chain.finality"})});
+                     {bls_key_entry("finalizer", forge::crypto::bls::encoding::format(bls_key), {"chain.finality"})});
 
    auto runtime = forge::asio::runtime{};
    forge::asio::blocking::run(runtime,

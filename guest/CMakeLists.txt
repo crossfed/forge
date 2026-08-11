@@ -615,6 +615,11 @@ install(
 )
 install(
    FILES
+      "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/savanna/values/include/forge/chain/savanna/values.cppm"
+   DESTINATION "${CMAKE_INSTALL_DATADIR}/forge-contract/modules/forge/chain/savanna"
+)
+install(
+   FILES
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/values.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/time.cppm"
       "${CMAKE_CURRENT_SOURCE_DIR}/../libraries/chain/protocol/include/forge/chain/protocol/types_value.cppm"

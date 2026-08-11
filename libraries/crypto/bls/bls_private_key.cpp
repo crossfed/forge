@@ -1,74 +1,66 @@
 module;
+
 #include <forge/exceptions/macros.hpp>
+
+#include <algorithm>
 #include <array>
 #include <bls12-381/bls12-381.hpp>
 #include <cstdint>
 #include <span>
-#include <string>
-#include <vector>
 
 module forge.crypto.bls;
 
-import forge.core.utility;
 import forge.crypto.core.random;
 import forge.exceptions;
 
 namespace forge::crypto::bls {
 
-using from_mont = bls12_381::from_mont;
+namespace {
+
+[[nodiscard]] bool valid_private_secret(const std::array<std::uint64_t, 4>& secret) noexcept {
+   if (std::all_of(secret.begin(), secret.end(), [](auto word) { return word == 0U; })) {
+      return false;
+   }
+   const auto encoded = bls12_381::sk_to_bytes(secret);
+   return bls12_381::sk_from_bytes(encoded) == secret;
+}
+
+void require_valid_private_secret(const std::array<std::uint64_t, 4>& secret) {
+   if (!valid_private_secret(secret)) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_private_key, "BLS private key is invalid");
+   }
+}
+
+} // namespace
+
+private_key::private_key(std::span<const std::uint8_t> seed) {
+   if (seed.size() < 32U) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_private_key, "BLS private key seed must contain at least 32 bytes");
+   }
+   _secret = bls12_381::secret_key(seed);
+   require_valid_private_secret(_secret);
+}
 
 public_key private_key::get_public_key() const {
-   bls12_381::g1 pk = bls12_381::public_key(_sk);
-   return public_key(pk.toAffineBytesLE(from_mont::yes));
+   require_valid_private_secret(_secret);
+   const auto bytes = bls12_381::public_key(_secret).toAffineBytesLE(bls12_381::from_mont::yes);
+   return public_key{std::span<const std::uint8_t, public_key::size_bytes>{bytes}};
 }
 
 signature private_key::proof_of_possession() const {
-   bls12_381::g2 proof = bls12_381::pop_prove(_sk);
-   return signature(proof.toAffineBytesLE(from_mont::yes));
+   require_valid_private_secret(_secret);
+   const auto bytes = bls12_381::pop_prove(_secret).toAffineBytesLE(bls12_381::from_mont::yes);
+   return signature{std::span<const std::uint8_t, signature::size_bytes>{bytes}};
 }
 
-signature private_key::sign(std::span<const uint8_t> message) const {
-   bls12_381::g2 sig = bls12_381::sign(_sk, message);
-   return signature(sig.toAffineBytesLE(from_mont::yes));
+signature private_key::sign(std::span<const std::uint8_t> message) const {
+   require_valid_private_secret(_secret);
+   const auto bytes = bls12_381::sign(_secret, message).toAffineBytesLE(bls12_381::from_mont::yes);
+   return signature{std::span<const std::uint8_t, signature::size_bytes>{bytes}};
 }
 
 private_key private_key::generate() {
-   auto v = forge::crypto::core::random_bytes(32);
-   return private_key(v);
-}
-
-static std::array<uint64_t, 4> priv_parse_base64url(const std::string& base64urlstr) {
-   FORGE_ASSERT(base64urlstr.starts_with(config::private_key_prefix), "BLS Private Key has invalid format : ${str}",
-                forge::exceptions::ctx("str", base64urlstr));
-
-   auto data_str = base64urlstr.substr(config::private_key_prefix.size());
-
-   std::array<uint64_t, 4> bytes = forge::crypto::bls::detail::deserialize_base64url<std::array<uint64_t, 4>>(data_str);
-
-   return bytes;
-}
-
-private_key::private_key(const std::string& base64urlstr) : _sk(priv_parse_base64url(base64urlstr)) {}
-
-std::string private_key::to_string() const {
-   std::string data_str = forge::crypto::bls::detail::serialize_base64url<std::array<uint64_t, 4>>(_sk);
-
-   return config::private_key_prefix + data_str;
-}
-
-bool operator==(const private_key& pk1, const private_key& pk2) {
-   return pk1._sk == pk2._sk;
-}
-
-} // namespace forge::crypto::bls
-
-namespace forge::crypto::bls {
-void to_variant(const private_key& var, variant& vo) {
-   vo = var.to_string();
-}
-
-void from_variant(const variant& var, private_key& vo) {
-   vo = private_key(var.as_string());
+   return private_key{forge::crypto::core::random_bytes(32U)};
 }
 
 } // namespace forge::crypto::bls

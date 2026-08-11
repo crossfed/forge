@@ -80,9 +80,11 @@ vote_result vote_accumulator::add(const finalizer_vote& vote) {
       return vote_result::wrong_block;
    }
 
+   auto verified_key = std::optional<forge::crypto::bls::proof_verified_public_key>{};
    {
       auto lock = std::lock_guard{impl_->mutex};
-      if (!impl_->known(vote.finalizer)) {
+      verified_key = impl_->verified(vote.finalizer);
+      if (!verified_key) {
          return vote_result::unknown_finalizer;
       }
       const auto existing = impl_->classify_existing(vote.finalizer, vote.kind);
@@ -92,7 +94,7 @@ vote_result vote_accumulator::add(const finalizer_vote& vote) {
    }
 
    const auto message = message_for_vote(impl_->candidate.finality_digest, vote.kind);
-   if (!forge::crypto::bls::verify(vote.finalizer, message, vote.signature)) {
+   if (!forge::crypto::bls::verify(*verified_key, message, vote.signature)) {
       return vote_result::invalid_signature;
    }
 

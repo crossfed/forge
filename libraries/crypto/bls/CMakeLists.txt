@@ -8,6 +8,7 @@ target_sources(
 )
 target_compile_features(forge_crypto_bls_values PUBLIC cxx_std_23)
 target_include_directories(forge_crypto_bls_values PUBLIC ${FORGE_PUBLIC_INCLUDE_DIRS})
+target_link_libraries(forge_crypto_bls_values PUBLIC forge_raw)
 forge_target_contract_guest_component(forge_crypto_bls_values ID forge.crypto.bls_values)
 
 add_library(
@@ -15,8 +16,7 @@ add_library(
    bls.cpp
    bls_primitives.cpp
    bls_private_key.cpp
-   bls_public_key.cpp
-   bls_signature.cpp
+   bls_serialization.cpp
 )
 set(FORGE_crypto_bls_DISABLED_MODULES bls_values)
 forge_target_modules_at(forge_crypto_bls crypto/bls)
@@ -38,8 +38,8 @@ target_link_libraries(
       forge_crypto_bls_values
       forge_exceptions
       forge_raw
-      forge_reflect
       forge_variant
+   PRIVATE
       bls12-381
       OpenSSL::Crypto
 )
