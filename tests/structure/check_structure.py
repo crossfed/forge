@@ -229,6 +229,39 @@ def check_chain_savanna_boundaries(root: Path, errors: list[str]) -> None:
             errors.append(f"{relative}: Savanna kernel must not depend on {owner} ({token})")
 
 
+def check_bls_value_ownership(root: Path, files: list[Path], errors: list[str]) -> None:
+   values = root / "libraries/crypto/bls/include/forge/crypto/bls/bls_values.cppm"
+   if values.exists():
+      source = values.read_text(errors="ignore")
+      if "bls12_381" in source or "bls12-381" in source:
+         errors.append(f"{values.relative_to(root)}: public BLS values must not expose the vendor backend")
+
+   public_bls = root / "libraries/crypto/bls/include/forge/crypto/bls"
+   for path in sorted(public_bls.glob("*.cppm")):
+      source = path.read_text(errors="ignore")
+      if "affine_non_montgomery_le" in source:
+         errors.append(f"{path.relative_to(root)}: public BLS API must use canonical value serialization")
+
+   forbidden_aliases = re.compile(
+      r"\busing\s+(?:public_key_value|signature_value)\b|"
+      r"\btypedef\b[^;]*\b(?:public_key_value|signature_value)\b"
+   )
+   for path in files:
+      source = path.read_text(errors="ignore")
+      if forbidden_aliases.search(source):
+         errors.append(f"{path.relative_to(root)}: removed BLS value aliases are forbidden")
+
+   authority = root / "libraries/chain/protocol/include/forge/chain/protocol/finalizer_authority.cppm"
+   if authority.exists() and re.search(r"\bstruct\s+finalizer_authority\b", authority.read_text(errors="ignore")):
+      errors.append(f"{authority.relative_to(root)}: finalizer_authority must alias the canonical Savanna finalizer")
+
+   for relative in ("libraries/chain/protocol", "libraries/chain/savanna"):
+      for path in source_files(root, (relative,)):
+         source = path.read_text(errors="ignore")
+         if re.search(r"std::vector\s*<\s*char\s*>\s+public_key", source):
+            errors.append(f"{path.relative_to(root)}: public BLS protocol fields must use the canonical value type")
+
+
 def check_chain_api_shape(root: Path, errors: list[str]) -> None:
    component = root / "libraries" / "chain" / "api"
    if not component.exists():
@@ -1033,6 +1066,7 @@ def main() -> int:
    check_vm_wasm_boundaries(root, errors)
    check_plugin_impl_ownership(root, errors)
    check_chain_savanna_boundaries(root, errors)
+   check_bls_value_ownership(root, files, errors)
    check_chain_api_shape(root, errors)
    check_chain_audited_api_workflow(root, errors)
    check_mdbx_module_boundary(root, errors)

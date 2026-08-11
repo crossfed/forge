@@ -6,6 +6,12 @@ quorum-certificate verification and construction, bounded validation
 commitments, finalizer safety decisions and deterministic fork ranking without
 owning a blockchain controller.
 
+The separate dual-target `forge.chain.savanna.values` leaf owns the canonical
+finalizer record and the generation-bearing operational finalizer policy. Chain
+Protocol reuses the finalizer record. Its separate generation-free
+`forge::chain::protocol::finalizer_policy` remains the Spring contract payload;
+the two policy types are intentionally not interchangeable.
+
 ## Package
 
 ```cmake

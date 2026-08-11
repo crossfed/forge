@@ -132,6 +132,19 @@ def verify_abi(data: bytes) -> None:
         raise RuntimeError("typed table did not use its persisted value directly")
     if any(item["name"] == "unusedaudit" for item in abi["tables"]):
         raise RuntimeError("unused imported typed row leaked into the contract ABI")
+    bls_action = next(item for item in abi["actions"] if item["name"] == "blswire")
+    if bls_action["type"] != "blswire":
+        raise RuntimeError("BLS value action did not preserve its generated payload")
+    bls_record = next(item for item in abi["structs"] if item["name"] == "blswire")
+    if bls_record["fields"] != [{"name": "value", "type": "finalizer"}]:
+        raise RuntimeError("BLS value action did not preserve its canonical finalizer")
+    finalizer = next(item for item in abi["structs"] if item["name"] == "finalizer")
+    if finalizer["fields"] != [
+        {"name": "description", "type": "string"},
+        {"name": "weight", "type": "uint64"},
+        {"name": "public_key", "type": "bytes"},
+    ]:
+        raise RuntimeError("BLS finalizer did not use the canonical bytes ABI")
 
 
 def verify_manifest(data: bytes) -> None:

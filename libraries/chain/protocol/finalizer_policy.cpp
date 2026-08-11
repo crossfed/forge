@@ -6,6 +6,7 @@ module;
 
 module forge.chain.protocol.finalizer_policy;
 
+import forge.crypto.bls.serialization;
 import forge.crypto.digest.sha256;
 import forge.raw.datastream;
 import forge.raw.raw;

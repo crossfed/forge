@@ -675,6 +675,7 @@ target_link_libraries(
    forge_codec_hex
    forge_codec_json
    forge_crypto_bls
+   bls12-381
    Boost::included_unit_test_framework
 )
 add_test(NAME test_forge_crypto_bls COMMAND test_forge_crypto_bls WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
@@ -1591,6 +1592,17 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
+   test_forge_package_chain_savanna_values_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_chain_savanna_values_component
+      ${CMAKE_BINARY_DIR}/forge-package-chain-savanna-values-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_chain_savanna_values_component
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
    test_forge_package_chain_savanna_component
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
@@ -2446,6 +2458,17 @@ add_test(
       --test-command forge_package_chain_fork_component
 )
 set_tests_properties(test_forge_package_chain_fork_component PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_chain_savanna_values_component
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_chain_savanna_values_component
+      ${CMAKE_BINARY_DIR}/forge-package-chain-savanna-values-component
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_chain_savanna_values_component
+)
+set_tests_properties(test_forge_package_chain_savanna_values_component PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_chain_savanna_component
    COMMAND ${CMAKE_CTEST_COMMAND}

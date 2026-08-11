@@ -705,6 +705,9 @@ class type_encoder {
           {"forge::crypto::digest::sha256", "checksum256"},
           {"forge::crypto::digest::sha512", "checksum512"},
           {"forge::crypto::digest::ripemd160", "checksum160"},
+          {"forge::crypto::bls::public_key", "bytes"},
+          {"forge::crypto::bls::signature", "bytes"},
+          {"forge::crypto::bls::aggregate_signature", "bytes"},
       };
       for (const auto& [cpp_name, abi_name] : known) {
          if (qualified == cpp_name) {

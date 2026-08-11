@@ -34,6 +34,13 @@ std::optional<std::size_t> vote_accumulator::impl::policy_votes::find(
                                     : std::optional<std::size_t>{iterator->second};
 }
 
+std::optional<forge::crypto::bls::proof_verified_public_key>
+vote_accumulator::impl::policy_votes::verified(const forge::crypto::bls::public_key& key) const {
+   const auto index = find(key);
+   return index ? std::optional<forge::crypto::bls::proof_verified_public_key>{policy.verified_keys()[*index]}
+                : std::nullopt;
+}
+
 std::optional<vote_kind>
 vote_accumulator::impl::policy_votes::vote_at(std::size_t index) const {
    if (strong_votes[index]) {
@@ -51,7 +58,7 @@ void vote_accumulator::impl::policy_votes::add(
    const auto weight = policy.get().finalizers[index].weight;
    if (kind == vote_kind::strong) {
       strong_votes.set(index);
-      strong_signature.aggregate(signature);
+      strong_signature.add(signature);
       strong_weight += weight;
 
       switch (state) {
@@ -78,7 +85,7 @@ void vote_accumulator::impl::policy_votes::add(
    }
 
    weak_votes.set(index);
-   weak_signature.aggregate(signature);
+   weak_signature.add(signature);
    weak_weight += weight;
 
    switch (state) {
@@ -111,7 +118,7 @@ vote_accumulator::impl::policy_votes::local() const {
    if (state == accumulator_state::strong) {
       return qc_signature{
           .strong_votes = strong_votes,
-          .signature = strong_signature,
+          .signature = strong_signature.finish(),
       };
    }
    if (state != accumulator_state::weak_achieved &&
@@ -119,14 +126,15 @@ vote_accumulator::impl::policy_votes::local() const {
       return std::nullopt;
    }
 
-   auto signature = strong_signature;
-   signature.aggregate(weak_signature);
+   auto signature = forge::crypto::bls::signature_accumulator{};
+   if (strong_votes.any()) {
+      signature.add(strong_signature.finish());
+   }
+   signature.add(weak_signature.finish());
    return qc_signature{
-       .strong_votes = strong_votes.any()
-                           ? std::optional<vote_bitset>{strong_votes}
-                           : std::nullopt,
+       .strong_votes = strong_votes.any() ? std::optional<vote_bitset>{strong_votes} : std::nullopt,
        .weak_votes = weak_votes,
-       .signature = std::move(signature),
+       .signature = signature.finish(),
    };
 }
 
@@ -171,10 +179,12 @@ vote_result vote_accumulator::impl::classify_existing(
    return *existing == kind ? vote_result::duplicate : vote_result::conflicting;
 }
 
-bool vote_accumulator::impl::known(
-    const forge::crypto::bls::public_key& finalizer) const {
-   return active.find(finalizer).has_value() ||
-          (pending && pending->find(finalizer).has_value());
+std::optional<forge::crypto::bls::proof_verified_public_key>
+vote_accumulator::impl::verified(const forge::crypto::bls::public_key& finalizer) const {
+   if (auto key = active.verified(finalizer)) {
+      return key;
+   }
+   return pending ? pending->verified(finalizer) : std::nullopt;
 }
 
 void vote_accumulator::impl::add_verified(const finalizer_vote& vote) {

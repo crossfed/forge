@@ -115,6 +115,22 @@ target_sources(
 forge_guest_configure_target(forge_guest_crypto_modules)
 target_link_libraries(forge_guest_crypto_modules PRIVATE forge_guest_raw_modules)
 
+set(_savanna_values "${FORGE_SOURCE_DIR}/libraries/chain/savanna/values")
+add_library(forge_guest_chain_savanna_values_modules OBJECT)
+target_sources(
+   forge_guest_chain_savanna_values_modules
+   PUBLIC
+      FILE_SET CXX_MODULES
+      BASE_DIRS "${_savanna_values}/include"
+      FILES "${_savanna_values}/include/forge/chain/savanna/values.cppm"
+)
+forge_guest_configure_target(forge_guest_chain_savanna_values_modules)
+target_link_libraries(
+   forge_guest_chain_savanna_values_modules PRIVATE
+      forge_guest_raw_modules
+      forge_guest_crypto_modules
+)
+
 set(_protocol "${FORGE_SOURCE_DIR}/libraries/chain/protocol")
 forge_guest_add_implementation_archive(
    forge_guest_chain_protocol
@@ -142,7 +158,6 @@ forge_guest_add_implementation_archive(
       "${_protocol}/include/forge/chain/protocol/code_hash_result.cppm"
       "${_protocol}/include/forge/chain/protocol/blockchain_parameters.cppm"
       "${_protocol}/include/forge/chain/protocol/kv_parameters.cppm"
-      "${_protocol}/include/forge/chain/protocol/finalizer_authority_value.cppm"
       "${_protocol}/include/forge/chain/protocol/finalizer_authority.cppm"
       "${_protocol}/include/forge/chain/protocol/finalizer_policy_value.cppm"
       "${_protocol}/include/forge/chain/protocol/finalizer_policy.cppm"
@@ -155,6 +170,7 @@ forge_guest_add_implementation_archive(
    DEPENDENCIES
       forge_guest_raw_modules
       forge_guest_crypto_modules
+      forge_guest_chain_savanna_values_modules
 )
 
 set(_contract "${FORGE_SOURCE_DIR}/guest/libraries/contract")
@@ -219,6 +235,7 @@ forge_guest_add_implementation_archive(
       forge_guest_codec_base58_modules
       forge_guest_codec_hex_modules
       forge_guest_crypto_modules
+      forge_guest_chain_savanna_values_modules
       forge_guest_chain_protocol_modules
 )
 

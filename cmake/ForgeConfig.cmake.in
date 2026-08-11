@@ -24,6 +24,7 @@ set(
    db_ids
    compression
    chain_core
+   chain_savanna_values
    chain_protocol
    chain_transaction
    chain_quorum
@@ -141,8 +142,14 @@ macro(_forge_add_component component)
          _forge_add_component(exceptions)
          _forge_add_component(raw)
          _forge_add_component(crypto_digest)
+      elseif("${component}" STREQUAL "chain_savanna_values")
+         _forge_add_component(crypto_bls)
+         _forge_add_component(crypto_digest)
+         _forge_add_component(raw)
+         _forge_add_component(variant)
       elseif("${component}" STREQUAL "chain_protocol")
          _forge_add_component(chain_core)
+         _forge_add_component(chain_savanna_values)
          _forge_add_component(compression)
          _forge_add_component(raw)
          _forge_add_component(variant)
@@ -159,6 +166,7 @@ macro(_forge_add_component component)
       elseif("${component}" STREQUAL "chain_savanna")
          _forge_add_component(chain_core)
          _forge_add_component(chain_quorum)
+         _forge_add_component(chain_savanna_values)
          _forge_add_component(crypto_bls)
          _forge_add_component(crypto_digest)
          _forge_add_component(raw)
@@ -382,6 +390,7 @@ macro(_forge_add_component component)
          _forge_add_component(exceptions)
          _forge_add_component(variant)
       elseif("${component}" STREQUAL "crypto_bls_values")
+         _forge_add_component(raw)
       elseif("${component}" STREQUAL "crypto_bls")
          _forge_add_component(codec_base64)
          _forge_add_component(core)

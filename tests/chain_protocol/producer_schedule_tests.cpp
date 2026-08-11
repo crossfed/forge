@@ -1,5 +1,6 @@
 #include <boost/test/unit_test.hpp>
 
+#include <algorithm>
 #include <concepts>
 #include <optional>
 #include <variant>
@@ -19,6 +20,21 @@ namespace protocol = forge::chain::protocol;
 
 static_assert(
     std::same_as<decltype(protocol::block_header::new_producers), std::optional<protocol::producer_schedule>>);
+static_assert(std::same_as<protocol::finalizer_authority, forge::chain::savanna::finalizer>);
+
+namespace {
+
+forge::crypto::bls::public_key finalizer_key() {
+   const auto bytes = forge::codec::hex::decode(
+       "f363f7a0cd6ed0812feb8bbd8b8bd2cef835f900e5e056f69f9d0ca7c4a4ec5af54f3d0c272a732f7f6749de553c58050bd5aaae3a2945b"
+       "066d4f7f44643f4d7c7e8d64dab5da258ed6b7377d44a944f0fa10e978439b83f266522ea5083f80e");
+   BOOST_REQUIRE_EQUAL(bytes.size(), forge::crypto::bls::public_key{}.size());
+   auto data = forge::crypto::bls::public_key::data_type{};
+   std::copy(bytes.begin(), bytes.end(), data.begin());
+   return forge::crypto::bls::public_key{data};
+}
+
+} // namespace
 
 BOOST_AUTO_TEST_SUITE(chain_protocol_producer_schedule_tests)
 
@@ -139,7 +155,7 @@ BOOST_AUTO_TEST_CASE(finalizer_policy_has_canonical_equality_and_variant_roundtr
        .finalizers = {protocol::finalizer_authority{
            .description = "f",
            .weight = 3U,
-           .public_key = {char{1}, char{2}},
+           .public_key = finalizer_key(),
        }},
    };
 
@@ -149,7 +165,10 @@ BOOST_AUTO_TEST_CASE(finalizer_policy_has_canonical_equality_and_variant_roundtr
    forge::from_variant(encoded, decoded);
 
    BOOST_CHECK(decoded == policy);
-   BOOST_TEST(forge::codec::hex::encode(forge::raw::pack(policy)) == "04000000000000000101660300000000000000020102");
+   BOOST_TEST(forge::codec::hex::encode(forge::raw::pack(policy)) ==
+              "0400000000000000010166030000000000000060f363f7a0cd6ed0812feb8bbd8b8bd2cef835f900e5e056f69f9d0ca7c4a4ec5a"
+              "f54f3d0c272a732f7f6749de553c58050bd5aaae3a2945b066d4f7f44643f4d7c7e8d64dab5da258ed6b7377d44a944f0fa10e97"
+              "8439b83f266522ea5083f80e");
 
    const auto malformed_key = forge::codec::json::read<protocol::finalizer_policy>(
        R"({"threshold":4,"finalizers":[{"description":"f","weight":3,"public_key":"0"}]})",

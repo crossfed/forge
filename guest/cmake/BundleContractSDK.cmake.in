@@ -79,14 +79,23 @@ if(APPLE)
    set(_binaries ${_executables} "${_plugin}" ${_bundled})
    foreach(_binary IN LISTS _binaries)
       execute_process(COMMAND "${_otool}" -L "${_binary}" OUTPUT_VARIABLE _linked COMMAND_ERROR_IS_FATAL ANY)
-      foreach(_dependency IN LISTS _dependencies)
-         string(FIND "${_linked}" "${_dependency}" _found)
-         if(NOT _found EQUAL -1)
-            get_filename_component(_name "${_dependency}" NAME)
-            execute_process(
-               COMMAND "${_install_name_tool}" -change "${_dependency}" "@rpath/${_name}" "${_binary}"
-               COMMAND_ERROR_IS_FATAL ANY
+      string(REPLACE "\n" ";" _linked_lines "${_linked}")
+      foreach(_linked_line IN LISTS _linked_lines)
+         string(STRIP "${_linked_line}" _linked_line)
+         if(_linked_line MATCHES "^(.+) \\(compatibility version")
+            set(_linked_dependency "${CMAKE_MATCH_1}")
+            forge_contract_sdk_match_runtime_dependency(
+               _dependency
+               "${_linked_dependency}"
+               ${_dependencies}
             )
+            if(_dependency AND NOT _linked_dependency MATCHES "^@rpath/")
+               get_filename_component(_name "${_dependency}" NAME)
+               execute_process(
+                  COMMAND "${_install_name_tool}" -change "${_linked_dependency}" "@rpath/${_name}" "${_binary}"
+                  COMMAND_ERROR_IS_FATAL ANY
+               )
+            endif()
          endif()
       endforeach()
    endforeach()

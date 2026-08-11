@@ -59,7 +59,7 @@ void apply_config(plugin::impl& state, forge::config::core::component_view view)
    auto loaded_bls = std::map<std::string, plugin::impl::loaded_bls_key>{};
    for (auto& key : config.bls_keys) {
       try {
-         auto private_key = forge::crypto::bls::private_key{key.private_key};
+         auto private_key = forge::crypto::bls::encoding::parse_private_key(key.private_key);
          loaded_bls.emplace(key.id, plugin::impl::loaded_bls_key{
                                         .key_id = key.id,
                                         .private_key = std::move(private_key),
