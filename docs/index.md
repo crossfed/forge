@@ -13,6 +13,7 @@ Documents below explain cross-library architecture decisions.
 
 | Document | Purpose |
 | --- | --- |
+| [releases/8.23.0.md](releases/8.23.0.md) | Forge 8.23.0 application-owned connect services and immutable runtime service lookup. |
 | [releases/8.22.0.md](releases/8.22.0.md) | Forge 8.22.0 P2P production hardening, CLI, local transactions and encrypted keystore. |
 | [releases/8.21.0.md](releases/8.21.0.md) | Forge 8.21.0 verified Chain API, Experimental authenticated state and HTTP deadline fixes. |
 | [releases/8.20.0.md](releases/8.20.0.md) | Forge 8.20.0 native guest Contract SDK projects and manifest schema v3 migration. |
@@ -32,6 +33,8 @@ Documents below explain cross-library architecture decisions.
 | [releases/8.3.0.md](releases/8.3.0.md) | Forge 8.3.0 changes, Preview API status and source migration notes. |
 | [roadmap.md](roadmap.md) | Post-1.0 direction, architecture gates and framework boundaries. |
 | [runtime/asio-app.md](runtime/asio-app.md) | Runtime ownership, bounded scheduler, plugin lifecycle and rollback. |
+| [iterations/forge-application-connect-services-v1.md](iterations/forge-application-connect-services-v1.md) | Accepted application connect phase and bounded publication of process-local runtime clients before plugin startup. |
+| [donors/forge-application-connect-services-v1.md](donors/forge-application-connect-services-v1.md) | Forge lifecycle, .NET Generic Host and gRPC Channel donor boundaries for connected application services. |
 | [runtime/compute-and-snapshots.md](runtime/compute-and-snapshots.md) | Separate CPU execution domain, snapshot readers with an ordered writer, and the boundary for future speculative execution. |
 | [web/http-websocket.md](web/http-websocket.md) | HTTP/WebSocket layering, routing, upgrade, retry and backpressure rules. |
 | [web/http-fastapi-style-parameters.md](web/http-fastapi-style-parameters.md) | FastAPI-style HTTP parameter binding for multi-argument FORGE API methods. |

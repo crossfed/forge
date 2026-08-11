@@ -22,6 +22,7 @@ import forge.config.core.component;
 import forge.config.core.decode;
 import forge.config.core.migration;
 import forge.app.application_shell;
+import forge.app.connect_context;
 import forge.app.plugin_registry;
 
 namespace forge::app {
@@ -33,6 +34,7 @@ struct builder_state {
    std::vector<forge::config::core::component_descriptor> config_descriptors;
    std::vector<std::function<boost::asio::awaitable<void>(configure_context&)>> configure_callbacks;
    std::vector<std::function<boost::asio::awaitable<void>(application_context&)>> provide_callbacks;
+   std::vector<std::function<boost::asio::awaitable<void>(connect_context&)>> connect_callbacks;
    std::vector<std::function<boost::asio::awaitable<void>(const application_context&)>>
       after_initialize_callbacks;
    std::function<int(application_shell&)> foreground;
@@ -69,6 +71,12 @@ class built_application final : public application_shell {
 
    boost::asio::awaitable<void> on_after_initialize(const application_context& context) override {
       for (auto& callback : state_.after_initialize_callbacks) {
+         co_await callback(context);
+      }
+   }
+
+   boost::asio::awaitable<void> on_connect(connect_context& context) override {
+      for (auto& callback : state_.connect_callbacks) {
          co_await callback(context);
       }
    }
@@ -157,6 +165,10 @@ void application_builder::add_configure_callback(configure_callback callback) {
 
 void application_builder::add_provide_callback(provide_callback callback) {
    impl_->state.provide_callbacks.push_back(std::move(callback));
+}
+
+void application_builder::add_connect_callback(connect_callback callback) {
+   impl_->state.connect_callbacks.push_back(std::move(callback));
 }
 
 void application_builder::add_after_initialize_callback(after_initialize_callback callback) {
