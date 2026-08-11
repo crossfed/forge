@@ -50,6 +50,16 @@ This is a pre-stable source and JSON break: BLS protocol values use canonical
 the old host value wrappers have no compatibility reader or aliases. Raw
 encoding remains unchanged.
 
+The source migration is mechanical:
+
+- construct text values with `encoding::parse_public_key`,
+  `encoding::parse_signature` or `encoding::parse_aggregate_signature`;
+- format values with `encoding::format` instead of `to_string()`;
+- replace mutable `aggregate_signature::aggregate(...)` calls with
+  `signature_accumulator::add(...)` followed by `finish()`;
+- use `public_key::serialize()` or `bytes()` when a fixed byte projection is
+  required.
+
 Text parsing throws typed `forge::crypto::bls::exceptions::parse_error`.
 Untrusted byte values should be passed to `valid`, `verify` or
 `verify_proof_of_possession`; malformed points return `false` or `std::nullopt`.

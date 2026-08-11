@@ -28,8 +28,11 @@ Package component: `chain_protocol`. Public namespace:
   used by block headers and contract APIs.
 - `forge.chain.protocol.producer_authority`: weighted block-signing authorities
   and producer authority schedules.
-- `forge.chain.protocol.finalizer_authority`: source-compatible alias to the
-  canonical typed `forge.chain.savanna.values` finalizer record.
+- `forge.chain.protocol.finalizer_authority`: import-compatible alias that
+  preserves the public type name while forwarding ownership to the canonical
+  typed `forge.chain.savanna.values` finalizer record. Its `public_key` field
+  intentionally follows the approved pre-stable migration to the fixed BLS
+  value type.
 - `forge.chain.protocol.finalizer_policy`: generation-free Spring contract
   payload that reuses the canonical finalizer record. It is distinct from the
   generation-bearing operational Savanna policy.
