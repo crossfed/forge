@@ -99,4 +99,3 @@ Proof belongs primarily in `test_forge_app`:
 - typed duplicate, missing and closed-registry failures;
 - rollback and destruction order;
 - static dependency check proving `forge_app` does not import Chain or P2P.
-
