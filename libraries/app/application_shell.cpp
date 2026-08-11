@@ -128,6 +128,12 @@ application_context::application_context(forge::asio::runtime& runtime, forge::a
     : runtime_{&runtime}, scheduler_{&scheduler}, compute_{std::move(compute)}, apis_{&apis}, services_{services},
       signals_{&signals}, events_{&events}, diagnostics_{&diagnostics} {}
 
+application_context::application_context(forge::asio::runtime& runtime, forge::asio::task::scheduler& scheduler,
+                                         forge::api::core::registry& apis, signal_bus& signals, event_bus& events,
+                                         diagnostics_store& diagnostics, forge::asio::compute::executor compute)
+    : application_context{runtime, scheduler, apis, service_view{}, signals, events, diagnostics,
+                          std::move(compute)} {}
+
 forge::asio::runtime& application_context::runtime() noexcept {
    return *runtime_;
 }
