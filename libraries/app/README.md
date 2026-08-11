@@ -18,6 +18,8 @@ for applications with substantial state or custom lifecycle hooks.
   merge before lifecycle starts.
 - You want deterministic startup, rollback, reverse shutdown and diagnostics.
 - You want typed APIs between plugins without coupling them through globals.
+- The application must connect a long-lived process-local client after plugin
+  initialization and expose it before plugin startup.
 - Plugins must publish config descriptors without knowing whether values came
   from source adapters such as YAML, JSON, `.env`, process env or CLI.
 
@@ -37,6 +39,10 @@ for applications with substantial state or custom lifecycle hooks.
 - `forge.app.application_shell` — production app shell and hook contexts.
 - `forge.app.application_builder` — convenience builder that creates an
   `application_shell`.
+- `forge.app.connect_context` — the bounded application composition phase for
+  consuming local APIs and publishing connected services.
+- `forge.app.service_registry` — exact-type one-shot service publication and
+  immutable `service_view` lookup.
 - `forge.app.daemon` — foreground daemon runner that loads YAML, explicit `.env`,
   process env and CLI, merges defaults and handles help/check/print/configure
   actions.
@@ -88,16 +94,23 @@ Derived applications only implement hooks:
 - `on_configure(configure_context&)`
 - `on_register_plugins(plugin_registry&)`
 - `on_provide(application_context&)`
+- `on_connect(connect_context&)`
 - `on_after_initialize(const application_context&)`
 - `on_run_foreground()`
 
 This is deliberately strict. The application controls composition, but FORGE controls
 the order: collect config, configure app and plugins, provide app APIs, let
 plugins provide APIs, initialize every plugin, run every plugin
-`after_initialize()`, run the application `on_after_initialize(...)`, startup
-plugins, request stop, shutdown in reverse order. The application callback
-receives a const context: it may consume installed APIs through `api_view()`,
-but it cannot install APIs after plugin initialization.
+`after_initialize()`, connect application services, run the application
+`on_after_initialize(...)`, startup plugins, request stop, shutdown in reverse
+order and finally destroy connected services. The application callback receives
+a const context: it may consume installed APIs through `api_view()` and services
+through `service<T>()`, but it cannot install APIs or publish services after
+plugin initialization.
+
+`service_view` is copyable and safe for concurrent lookup after the connect
+phase closes. It does not own the registry and must not outlive the
+`application_shell` that produced it.
 
 ## App And Plugin Config
 
@@ -296,9 +309,16 @@ builder.name("service")
          "service.configure",
          "worker slots: " + std::to_string(workers));
    })
+   .connect([](forge::app::connect_context& context)
+               -> boost::asio::awaitable<void> {
+      auto resolver = context.api<resolver_api>();
+      auto client = co_await make_client(*resolver);
+      context.publish(std::move(client));
+   })
    .after_initialize([](const forge::app::application_context& context) {
       // APIs are installed and every plugin has completed initialize().
       auto apis = context.api_view();
+      auto client = context.service<connected_client>();
    })
    .plugin(forge::app::plugin_descriptor{
       .id = forge::app::plugin_id{"http"},

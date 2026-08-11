@@ -1,7 +1,6 @@
 # Forge Application Connect Services v1
 
-Status: accepted architecture direction. The APIs in this document are not yet
-shipped from the starting revision of this branch.
+Status: implemented in `forge_app`.
 
 Related boundaries:
 
@@ -14,8 +13,8 @@ Related boundaries:
 
 `application_builder::provide` runs before plugins publish their local APIs.
 `after_initialize` runs late enough to consume those APIs, but deliberately
-receives a read-only application context. Consequently, an application cannot
-currently perform one asynchronous composition step that:
+receives a read-only application context. Before this iteration, an application
+could not perform one asynchronous composition step that:
 
 1. obtains an API exposed by an initialized plugin;
 2. connects a remote client;
@@ -79,20 +78,21 @@ class connect_context {
 
    template <typename Service>
    void publish(std::shared_ptr<Service> service);
+
+   template <typename Service>
+   std::shared_ptr<Service> service() const;
 };
 
 class service_view {
  public:
-   template <typename Service>
-   std::shared_ptr<Service> service() const;
+   template <typename Service> std::shared_ptr<Service> get() const;
 };
 
 template <typename Handler>
 application_builder& application_builder::connect(Handler&& handler);
 ```
 
-Final naming may use `get<Service>()` on `service_view` if that is more
-consistent with the existing API view. The semantic contract is fixed:
+The semantic contract is fixed:
 
 - lookup is by exact C++ type, without string keys;
 - one non-null service may be published for each exact type;
@@ -101,6 +101,8 @@ consistent with the existing API view. The semantic contract is fixed:
 - publication is process-local and never creates an API route;
 - publication closes when all connect callbacks complete;
 - the registry is immutable before plugin startup begins.
+- a `service_view` is a non-owning view of the application registry and must not
+  outlive its `application_shell`.
 
 This is not constructor injection, auto-wiring or a dependency graph. App does
 not construct arbitrary services, infer dependencies, create scopes or select
@@ -195,4 +197,3 @@ An integration fixture should construct a reconnecting client through a fake
 resolver API, publish it in three builder statements and consume it from a
 plugin startup method. Product-specific Chain behavior belongs to the owning
 Chain/P2P tests, not `test_forge_app`.
-

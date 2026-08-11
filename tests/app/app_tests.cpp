@@ -30,6 +30,8 @@ import forge.app.application;
 import forge.app.events;
 import forge.app.diagnostics;
 import forge.app.signals;
+import forge.app.service_registry;
+import forge.app.connect_context;
 import forge.app.plugin_context;
 import forge.app.plugin;
 import forge.app.plugin_registry;
@@ -60,6 +62,7 @@ import forge.schema.diagnostic;
 import forge.schema.value_kind;
 import forge.schema.object;
 import forge.schema.enums;
+import forge.schema.exceptions;
 
 namespace app_test_contract {
 
@@ -86,6 +89,24 @@ static_assert(!exposes_api_installer<const forge::app::application_context>);
 
 struct lifecycle_log {
    std::vector<std::string> entries;
+};
+
+struct connected_service {
+   connected_service() = default;
+   connected_service(int input, lifecycle_log* lifecycle = nullptr) : value{input}, log{lifecycle} {}
+
+   int value = 0;
+   lifecycle_log* log = nullptr;
+
+   ~connected_service() {
+      if (log != nullptr) {
+         log->entries.push_back("service.destroy");
+      }
+   }
+};
+
+struct auxiliary_service {
+   int value = 0;
 };
 
 class sample_api_impl final : public sample_api {
@@ -500,6 +521,54 @@ class shell_dependency_plugin final : public forge::app::plugin {
    std::string id_;
    lifecycle_log* log_ = nullptr;
    bool fail_shutdown_once_ = false;
+};
+
+class connected_service_plugin final : public forge::app::plugin {
+ public:
+   explicit connected_service_plugin(lifecycle_log& log) : log_{&log} {}
+
+   forge::app::plugin_id id() const override {
+      return forge::app::plugin_id{.value = "connected-service"};
+   }
+
+   std::string version() const override {
+      return "1";
+   }
+
+   boost::asio::awaitable<void> initialize(forge::app::plugin_context& context) override {
+      services_ = context.services();
+      initialized_ = true;
+      log_->entries.push_back("plugin.initialize");
+      co_return;
+   }
+
+   boost::asio::awaitable<void> after_initialize() override {
+      log_->entries.push_back("plugin.after_initialize");
+      co_return;
+   }
+
+   boost::asio::awaitable<void> startup() override {
+      const auto service = services_.get<connected_service>();
+      log_->entries.push_back("plugin.startup:" + std::to_string(service->value));
+      co_return;
+   }
+
+   void request_stop() noexcept override {
+      if (initialized_) {
+         log_->entries.push_back("plugin.request_stop");
+      }
+   }
+
+   boost::asio::awaitable<void> shutdown() override {
+      const auto service = services_.get<connected_service>();
+      log_->entries.push_back("plugin.shutdown:" + std::to_string(service->value));
+      co_return;
+   }
+
+ private:
+   lifecycle_log* log_ = nullptr;
+   forge::app::service_view services_;
+   bool initialized_ = false;
 };
 
 class scheduler_cleanup_plugin final : public forge::app::plugin {
@@ -1710,7 +1779,7 @@ BOOST_AUTO_TEST_CASE(application_shell_rejects_invalid_textual_plugin_selection_
    auto document = forge::config::core::document{};
    document.set("plugins.api.enabled", "definitely");
 
-   BOOST_CHECK_THROW(app.configure(document), std::invalid_argument);
+   BOOST_CHECK_THROW(app.configure(document), forge::schema::exceptions::invalid_value);
    BOOST_TEST(log.entries.empty());
 }
 
@@ -2131,7 +2200,7 @@ BOOST_AUTO_TEST_CASE(run_daemon_reports_invalid_action_flag_type_as_diagnostic) 
 
    BOOST_TEST(exit_code == 1);
    BOOST_TEST(errors.text().find("daemon.bootstrap") != std::string::npos);
-   BOOST_TEST(errors.text().find("check-config") != std::string::npos);
+   BOOST_TEST(errors.text().find("boolean has invalid syntax") != std::string::npos);
    BOOST_TEST(state.log.entries.empty());
 }
 
@@ -2351,6 +2420,158 @@ BOOST_AUTO_TEST_CASE(application_builder_creates_shell_and_applies_config_handle
       "after_initialize.sync",
       "after_initialize.async",
       "run",
+   };
+   BOOST_TEST(log.entries == expected, boost::test_tools::per_element());
+}
+
+BOOST_AUTO_TEST_CASE(application_builder_connects_services_between_plugin_initialize_and_startup) {
+   auto log = lifecycle_log{};
+   auto connect_count = 0;
+
+   auto builder = forge::app::application_builder{};
+   builder.name("connect-test")
+      .runtime(forge::asio::runtime_options{.worker_threads = 1, .thread_name = "connect-test"})
+      .provide([&](forge::app::application_context& context) {
+         context.apis().install<sample_api>(sample_api::describe(), std::make_shared<sample_api_impl>(40));
+         log.entries.push_back("app.provide");
+      })
+      .plugin(forge::app::plugin_descriptor{
+         .id = forge::app::plugin_id{.value = "connected-service"},
+         .factory = [&log] {
+            return std::make_unique<connected_service_plugin>(log);
+         },
+      })
+      .connect([&](forge::app::connect_context& context) -> boost::asio::awaitable<void> {
+         const auto api = context.api<sample_api>();
+         const auto value = co_await api->value(2);
+         context.publish(std::make_shared<connected_service>(value, &log));
+         ++connect_count;
+         log.entries.push_back("connect.async:" + std::to_string(value));
+      })
+      .connect([&](forge::app::connect_context& context) {
+         const auto service = context.service<connected_service>();
+         context.publish(std::make_shared<auxiliary_service>(auxiliary_service{.value = service->value + 1}));
+         log.entries.push_back("connect.sync:" + std::to_string(service->value));
+      })
+      .connect([&] {
+         log.entries.push_back("connect.no_context.sync");
+      })
+      .connect([&]() -> boost::asio::awaitable<void> {
+         log.entries.push_back("connect.no_context.async");
+         co_return;
+      })
+      .after_initialize([&](const forge::app::application_context& context) {
+         log.entries.push_back("app.after_initialize:" +
+                               std::to_string(context.service<auxiliary_service>()->value));
+      });
+
+   auto app = std::move(builder).build();
+   forge::asio::blocking::run(app->runtime(), app->initialize());
+   forge::asio::blocking::run(app->runtime(), app->initialize());
+   forge::asio::blocking::run(app->runtime(), app->startup());
+   forge::asio::blocking::run(app->runtime(), app->startup());
+
+   BOOST_TEST(connect_count == 1);
+   BOOST_TEST(app->services().get<connected_service>()->value == 42);
+   BOOST_TEST(app->services().get<auxiliary_service>()->value == 43);
+
+   const auto services = app->services();
+   auto read_failed = std::atomic_bool{false};
+   auto readers = std::vector<std::thread>{};
+   for (auto index = 0; index < 4; ++index) {
+      readers.emplace_back([&] {
+         for (auto iteration = 0; iteration < 1'000; ++iteration) {
+            if (services.get<connected_service>()->value != 42) {
+               read_failed.store(true, std::memory_order_relaxed);
+            }
+         }
+      });
+   }
+   for (auto& reader : readers) {
+      reader.join();
+   }
+   BOOST_TEST(!read_failed.load(std::memory_order_relaxed));
+
+   forge::asio::blocking::run(app->runtime(), app->shutdown());
+   forge::asio::blocking::run(app->runtime(), app->shutdown());
+
+   const auto expected = std::vector<std::string>{
+      "app.provide",
+      "plugin.initialize",
+      "plugin.after_initialize",
+      "connect.async:42",
+      "connect.sync:42",
+      "connect.no_context.sync",
+      "connect.no_context.async",
+      "app.after_initialize:43",
+      "plugin.startup:42",
+      "plugin.request_stop",
+      "plugin.shutdown:42",
+      "service.destroy",
+   };
+   BOOST_TEST(log.entries == expected, boost::test_tools::per_element());
+}
+
+BOOST_AUTO_TEST_CASE(application_service_registry_reports_exact_typed_errors) {
+   auto apis = forge::api::core::registry{};
+   auto services = forge::app::service_registry{};
+   auto context = forge::app::connect_context{forge::api::core::view{apis}, services};
+
+   BOOST_CHECK_THROW(static_cast<void>(context.service<connected_service>()),
+                     forge::app::exceptions::service_missing);
+   BOOST_CHECK_THROW(context.publish(std::shared_ptr<connected_service>{}),
+                     forge::app::exceptions::invalid_service);
+
+   context.publish(std::make_shared<connected_service>(7));
+   BOOST_TEST(context.service<connected_service>()->value == 7);
+   BOOST_CHECK_THROW(static_cast<void>(context.service<auxiliary_service>()),
+                     forge::app::exceptions::service_missing);
+   BOOST_CHECK_THROW(context.publish(std::make_shared<connected_service>()),
+                     forge::app::exceptions::service_already_published);
+
+   services.close();
+   BOOST_CHECK_THROW(context.publish(std::make_shared<auxiliary_service>()),
+                     forge::app::exceptions::service_publication_closed);
+   BOOST_CHECK_THROW(static_cast<void>(forge::app::service_view{}.get<connected_service>()),
+                     forge::app::exceptions::service_missing);
+}
+
+BOOST_AUTO_TEST_CASE(application_connect_failure_rolls_back_before_destroying_services) {
+   auto log = lifecycle_log{};
+   auto builder = forge::app::application_builder{};
+   builder.runtime(forge::asio::runtime_options{.worker_threads = 1, .thread_name = "connect-fail"})
+      .plugin(forge::app::plugin_descriptor{
+         .id = forge::app::plugin_id{.value = "connected-service"},
+         .factory = [&log] {
+            return std::make_unique<connected_service_plugin>(log);
+         },
+      })
+      .connect([&](forge::app::connect_context& context) {
+         context.publish(std::make_shared<connected_service>(9, &log));
+         log.entries.push_back("connect.publish");
+         throw forge::app::exceptions::config_failed{"connect failed"};
+      });
+
+   auto app = std::move(builder).build();
+   BOOST_CHECK_EXCEPTION(
+      forge::asio::blocking::run(app->runtime(), app->initialize()),
+      forge::app::exceptions::config_failed,
+      [](const auto& error) {
+         return error.message() == "connect failed";
+      });
+
+   BOOST_TEST(static_cast<int>(app->state()) == static_cast<int>(forge::app::application_state::stopped));
+   BOOST_CHECK_THROW(static_cast<void>(app->services().get<connected_service>()),
+                     forge::app::exceptions::service_missing);
+   BOOST_CHECK_THROW(forge::asio::blocking::run(app->runtime(), app->startup()), std::logic_error);
+
+   const auto expected = std::vector<std::string>{
+      "plugin.initialize",
+      "plugin.after_initialize",
+      "connect.publish",
+      "plugin.request_stop",
+      "plugin.shutdown:9",
+      "service.destroy",
    };
    BOOST_TEST(log.entries == expected, boost::test_tools::per_element());
 }

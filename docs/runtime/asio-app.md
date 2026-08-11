@@ -65,13 +65,17 @@ The lifecycle order is fixed:
 5. app hook provides APIs;
 6. plugins provide their declared local APIs;
 7. plugins initialize in dependency order;
-8. plugins start;
-9. `request_stop()` is issued synchronously;
-10. plugins shut down in reverse order.
-11. task scheduler admission stops and queued work is canceled;
-12. the optional compute pool drains while already-running scheduler continuations remain runnable;
-13. the task scheduler asynchronously drains;
-14. the Asio runtime stops.
+8. plugins complete `after_initialize()` in dependency order;
+9. the application connects and publishes process-local services;
+10. the application completes its read-only `after_initialize` hook;
+11. plugins start;
+12. `request_stop()` is issued synchronously;
+13. plugins shut down in reverse order;
+14. connected services are destroyed;
+15. task scheduler admission stops and queued work is canceled;
+16. the optional compute pool drains while already-running scheduler continuations remain runnable;
+17. the task scheduler asynchronously drains;
+18. the Asio runtime stops.
 
 All heavy lifecycle methods return `boost::asio::awaitable<void>`. `request_stop`
 is intentionally synchronous/noexcept: it signals intent, it does not perform
@@ -151,6 +155,11 @@ builder.name("service")
    .config<service_config>("service", [&](const service_config& config) {
       configure_service(config);
    })
+   .connect([](forge::app::connect_context& context)
+               -> boost::asio::awaitable<void> {
+      auto resolver = context.api<resolver_api>();
+      context.publish(co_await make_client(*resolver));
+   })
    .plugin(make_http_plugin_descriptor());
 
 std::unique_ptr<forge::app::application_shell> app = std::move(builder).build();
@@ -170,6 +179,8 @@ example tree.
 
 - Configure failures stop before any runtime side effects should begin.
 - Initialize/startup failures are recorded in diagnostics.
+- Connect failure closes publication, preserves the original typed exception
+  and shuts down initialized plugins before connected services are destroyed.
 - Already-started plugins are shut down where possible.
 - Shutdown must be idempotent enough for tests and process boundaries.
 

@@ -778,7 +778,7 @@ add_executable(
    unit/main.cpp
    app/app_tests.cpp
 )
-target_link_libraries(test_forge_app forge Boost::included_unit_test_framework)
+target_link_libraries(test_forge_app forge_app Boost::included_unit_test_framework)
 add_test(NAME test_forge_app COMMAND test_forge_app WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
