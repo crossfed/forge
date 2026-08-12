@@ -64,6 +64,34 @@ boost::asio::awaitable<std::string> current_thread_name() {
 
 } // namespace
 
+BOOST_AUTO_TEST_CASE(task_handle_completion_is_latched_before_wait_registration) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto scheduler = scheduler_type{runtime, scheduler_type::options{.max_blocking_tasks = 1, .max_pending_tasks = 4}};
+   auto handle = scheduler.submit(task{.priority = priority{1}, .name = "complete-before-wait", .work = [] {}});
+
+   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+   while (scheduler.snapshot().completed == 0U && std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds{1});
+   }
+   BOOST_REQUIRE_EQUAL(scheduler.snapshot().completed, 1U);
+   BOOST_CHECK_NO_THROW(wait_task(runtime, handle));
+}
+
+BOOST_AUTO_TEST_CASE(task_handle_failure_is_published_before_late_wait_registration) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto scheduler = scheduler_type{runtime, scheduler_type::options{.max_blocking_tasks = 1, .max_pending_tasks = 4}};
+   auto handle = scheduler.submit(task{.priority = priority{1},
+                                       .name = "failure-before-wait",
+                                       .work = [] { throw std::runtime_error{"late task failure"}; }});
+
+   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+   while (scheduler.snapshot().failed == 0U && std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds{1});
+   }
+   BOOST_REQUIRE_EQUAL(scheduler.snapshot().failed, 1U);
+   BOOST_CHECK_THROW(wait_task(runtime, handle), std::runtime_error);
+}
+
 BOOST_AUTO_TEST_CASE(runtime_applies_custom_worker_thread_name_when_observable) {
 #if defined(__APPLE__) || defined(__linux__)
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1, .thread_name = "forgetest"}};

@@ -129,7 +129,40 @@ BOOST_AUTO_TEST_CASE(p2p_operation_deadline_preserves_shutdown_winner_past_timeo
 
    BOOST_TEST(deadline.stopped());
    BOOST_TEST(!deadline.timed_out());
-   BOOST_TEST(!canceled.load(std::memory_order_acquire));
+   BOOST_TEST(canceled.load(std::memory_order_acquire));
+   BOOST_TEST(deadline.finish());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_operation_deadline_shutdown_cancels_armed_operation_once) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto deadline = operation_deadline{runtime.context(), std::chrono::seconds{1}};
+   auto canceled = std::atomic_size_t{0};
+   auto stopping = deadline.stopping();
+   deadline.arm([&] { canceled.fetch_add(1, std::memory_order_release); });
+
+   BOOST_REQUIRE(stopping.request_stop());
+   BOOST_TEST(!stopping.request_stop());
+   std::this_thread::sleep_for(std::chrono::milliseconds{25});
+
+   BOOST_TEST(deadline.stopped());
+   BOOST_TEST(!deadline.timed_out());
+   BOOST_TEST(canceled.load(std::memory_order_acquire) == 1U);
+   BOOST_TEST(deadline.finish());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_operation_deadline_latches_shutdown_before_operation_is_armed) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto deadline = operation_deadline{runtime.context(), std::chrono::seconds{1}};
+   auto canceled = std::atomic_size_t{0};
+   auto stopping = deadline.stopping();
+
+   BOOST_REQUIRE(stopping.request_stop());
+   deadline.arm([&] { canceled.fetch_add(1, std::memory_order_release); });
+   std::this_thread::sleep_for(std::chrono::milliseconds{25});
+
+   BOOST_TEST(deadline.stopped());
+   BOOST_TEST(!deadline.timed_out());
+   BOOST_TEST(canceled.load(std::memory_order_acquire) == 1U);
    BOOST_TEST(deadline.finish());
 }
 

@@ -1,5 +1,6 @@
 module;
 
+#include "details/async_waiter.hxx"
 #include "details/stop_state.hxx"
 
 #include <boost/asio/co_spawn.hpp>
@@ -74,47 +75,45 @@ std::exception_ptr make_error(exceptions::code code, std::string message) {
 
 struct handle::state {
    state(runtime& runtime_value, std::uint64_t task_id)
-       : runtime_ptr(&runtime_value),
-         completion_timer(runtime_value.context(), (std::chrono::steady_clock::time_point::max)()), id(task_id) {}
+       : completion_waiter(std::make_shared<detail::async_waiter>(runtime_value.context().get_executor())),
+         id(task_id) {}
 
-   runtime* runtime_ptr = nullptr;
-   boost::asio::steady_timer completion_timer;
+   std::shared_ptr<detail::async_waiter> completion_waiter;
    std::uint64_t id = 0;
    detail::stop_state stop_state;
    std::atomic_bool started = false;
+   std::atomic_bool completion_claimed = false;
    std::atomic_bool completed = false;
    mutable std::mutex completion_mutex;
    std::exception_ptr completion_error;
 
    void notify_waiters() noexcept {
-      if (runtime_ptr == nullptr) {
+      if (completion_waiter == nullptr) {
          return;
       }
-      boost::asio::post(runtime_ptr->context(), [weak = weak_self] {
-         if (auto self = weak.lock()) {
-            self->completion_timer.cancel();
-         }
-      });
+      completion_waiter->wake();
    }
 
    bool complete_value() noexcept {
       auto expected = false;
-      if (!completed.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+      if (!completion_claimed.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
          return false;
       }
+      completed.store(true, std::memory_order_release);
       notify_waiters();
       return true;
    }
 
    bool complete_exception(std::exception_ptr error) noexcept {
       auto expected = false;
-      if (!completed.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+      if (!completion_claimed.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
          return false;
       }
       {
          const auto lock = std::scoped_lock{completion_mutex};
          completion_error = std::move(error);
       }
+      completed.store(true, std::memory_order_release);
       notify_waiters();
       return true;
    }
@@ -123,8 +122,6 @@ struct handle::state {
       const auto lock = std::scoped_lock{completion_mutex};
       return completion_error;
    }
-
-   std::weak_ptr<state> weak_self;
 };
 
 handle::handle() = default;
@@ -183,9 +180,7 @@ boost::asio::awaitable<void> handle::wait_owned(std::shared_ptr<state> state) {
    }
 
    while (!state->completed.load(std::memory_order_acquire)) {
-      auto error = boost::system::error_code{};
-      co_await state->completion_timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
-      static_cast<void>(error);
+      static_cast<void>(co_await state->completion_waiter->wait());
    }
 
    if (auto error = state->error()) {
@@ -246,8 +241,6 @@ struct scheduler::impl : std::enable_shared_from_this<scheduler::impl> {
       }
 
       auto state = std::make_shared<handle::state>(runtime_ref, next_task_id.fetch_add(1, std::memory_order_relaxed));
-      state->weak_self = state;
-
       auto queued = queued_task{
           .state = state,
           .scheduled_priority = value.priority,
@@ -267,8 +260,6 @@ struct scheduler::impl : std::enable_shared_from_this<scheduler::impl> {
       }
 
       auto state = std::make_shared<handle::state>(runtime_ref, next_task_id.fetch_add(1, std::memory_order_relaxed));
-      state->weak_self = state;
-
       auto queued = queued_task{
           .state = state,
           .scheduled_priority = value.priority,
@@ -408,8 +399,7 @@ struct scheduler::impl : std::enable_shared_from_this<scheduler::impl> {
          throw exceptions::internal{"failed to arm task scheduler drain wait"};
       }
       auto error = boost::system::error_code{};
-      co_await waiter->timer.async_wait(
-         boost::asio::redirect_error(boost::asio::use_awaitable, error));
+      co_await waiter->timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
       static_cast<void>(error);
    }
 
