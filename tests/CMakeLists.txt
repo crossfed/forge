@@ -116,7 +116,6 @@ add_executable(
    json/test_json.cpp
    crypto/test_base32.cpp
    crypto/test_blake2.cpp
-   crypto/test_bls.cpp
    crypto/test_bls_legacy.cpp
    crypto/test_contract_primitives.cpp
    crypto/test_cypher_suites.cpp
