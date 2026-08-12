@@ -135,6 +135,7 @@ class dht::routing_table {
    routing_table& operator=(routing_table&&) noexcept;
 
    void upsert(peer value, routing_admission admission = routing_admission::verified_server);
+   void remove(const peer_id& peer);
    void mark_failure(const peer_id& peer);
    [[nodiscard]] std::vector<peer> closest(std::span<const std::uint8_t> target, std::size_t limit) const;
    [[nodiscard]] std::vector<peer> query_seeds(std::span<const std::uint8_t> target, std::size_t limit) const;

@@ -15,7 +15,6 @@ module;
 module forge.net.p2p.node;
 
 import forge.net.p2p.identity;
-import forge.net.p2p.resource_manager;
 
 #include "details/connection_manager.hxx"
 
@@ -54,26 +53,6 @@ bool connection_manager::is_protected(const peer_id& peer) const {
    return found != protected_.end() && !found->second.empty();
 }
 
-namespace {
-
-[[nodiscard]] resource_manager::session_direction resource_direction(connection_manager::direction value) noexcept {
-   return value == connection_manager::direction::inbound ? resource_manager::session_direction::inbound
-                                                          : resource_manager::session_direction::outbound;
-}
-
-[[nodiscard]] resource_manager::session_scope resource_scope(const connection_manager::session_record& record) {
-   return resource_manager::session_scope{
-       .peer = record.peer,
-       .direction = resource_direction(record.direction),
-   };
-}
-
-} // namespace
-
-void connection_manager::release_record(const session_record& record, resource_manager& resources) {
-   resources.release_session(resource_scope(record));
-}
-
 void connection_manager::erase_record(std::uint64_t id) {
    const auto found = sessions_.find(id);
    if (found == sessions_.end()) {
@@ -88,8 +67,7 @@ void connection_manager::erase_record(std::uint64_t id) {
    sessions_.erase(found);
 }
 
-bool connection_manager::prune_one(resource_manager& resources, std::vector<std::uint64_t>& pruned,
-                                   std::chrono::steady_clock::time_point now,
+bool connection_manager::prune_one(std::vector<std::uint64_t>& pruned, std::chrono::steady_clock::time_point now,
                                    std::optional<direction> required_direction) {
    auto victim = sessions_.end();
    for (auto it = sessions_.begin(); it != sessions_.end(); ++it) {
@@ -108,7 +86,6 @@ bool connection_manager::prune_one(resource_manager& resources, std::vector<std:
       return false;
    }
    const auto id = victim->first;
-   release_record(victim->second, resources);
    pruned.push_back(id);
    erase_record(id);
    return true;
@@ -129,7 +106,7 @@ std::size_t connection_manager::count_direction_sessions(direction value) const 
    return count;
 }
 
-connection_manager::admission connection_manager::remember(session_record record, resource_manager& resources,
+connection_manager::admission connection_manager::remember(session_record record,
                                                            std::chrono::steady_clock::time_point now) {
    if (record.peer.value.empty()) {
       return admission{.accepted = false, .reason = "P2P session peer id is empty"};
@@ -147,10 +124,9 @@ connection_manager::admission connection_manager::remember(session_record record
       record.last_used_at = record.opened_at;
    }
 
-   const auto& limits = resources.configured_limits();
    const auto direction_limit =
-       record.direction == direction::inbound ? limits.max_inbound_sessions : limits.max_outbound_sessions;
-   if (count_peer_sessions(record.peer) >= limits.max_sessions_per_peer) {
+       record.direction == direction::inbound ? policy_.max_inbound_sessions : policy_.max_outbound_sessions;
+   if (count_peer_sessions(record.peer) >= policy_.max_sessions_per_peer) {
       return admission{.accepted = false, .reason = "P2P session resource limit reached"};
    }
 
@@ -159,13 +135,13 @@ connection_manager::admission connection_manager::remember(session_record record
    const auto direction_saturated = count_direction_sessions(record.direction) >= direction_limit;
    const auto global_saturated = sessions_.size() >= policy_.max_sessions;
    if (direction_saturated) {
-      if (!may_prune || !prune_one(resources, result.pruned, now, record.direction)) {
+      if (!may_prune || !prune_one(result.pruned, now, record.direction)) {
          return admission{.accepted = false, .reason = "P2P session resource limit reached"};
       }
    }
 
    if (global_saturated) {
-      while (may_prune && sessions_.size() > policy_.low_watermark && prune_one(resources, result.pruned, now)) {
+      while (may_prune && sessions_.size() > policy_.low_watermark && prune_one(result.pruned, now)) {
       }
       if (!result.pruned.empty()) {
          last_prune_ = now;
@@ -178,11 +154,6 @@ connection_manager::admission connection_manager::remember(session_record record
       last_prune_ = now;
    }
 
-   if (!resources.try_acquire_session(resource_scope(record))) {
-      return admission{.accepted = false, .pruned = std::move(result.pruned),
-                       .reason = "P2P session resource limit reached"};
-   }
-
    const auto id = record.id;
    const auto peer = record.peer;
    sessions_.emplace(id, std::move(record));
@@ -191,21 +162,18 @@ connection_manager::admission connection_manager::remember(session_record record
    return result;
 }
 
-void connection_manager::forget(std::uint64_t id, resource_manager& resources) {
-   if (auto found = sessions_.find(id); found != sessions_.end()) {
-      release_record(found->second, resources);
-      erase_record(id);
-   }
+void connection_manager::forget(std::uint64_t id) {
+   erase_record(id);
 }
 
-void connection_manager::forget_peer(const peer_id& peer, resource_manager& resources) {
+void connection_manager::forget_peer(const peer_id& peer) {
    auto found = sessions_by_peer_.find(peer);
    if (found == sessions_by_peer_.end()) {
       return;
    }
    auto ids = std::vector<std::uint64_t>{found->second.begin(), found->second.end()};
    for (const auto id : ids) {
-      forget(id, resources);
+      forget(id);
    }
 }
 
@@ -215,10 +183,7 @@ void connection_manager::touch(std::uint64_t id, std::chrono::steady_clock::time
    }
 }
 
-void connection_manager::clear(resource_manager& resources) {
-   for (const auto& [_, record] : sessions_) {
-      release_record(record, resources);
-   }
+void connection_manager::clear() {
    sessions_.clear();
    sessions_by_peer_.clear();
 }
@@ -251,6 +216,9 @@ connection_manager::policy connection_policy_for(const node::limits& limits) {
    return connection_manager::policy{
        .max_sessions = limits.max_sessions,
        .low_watermark = limits.session_low_watermark,
+       .max_inbound_sessions = limits.max_inbound_sessions,
+       .max_outbound_sessions = limits.max_outbound_sessions,
+       .max_sessions_per_peer = limits.max_sessions_per_peer,
        .grace_period = limits.session_grace_period,
        .prune_silence = limits.session_prune_silence,
    };

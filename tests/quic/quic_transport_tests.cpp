@@ -14,9 +14,11 @@
 #include <boost/asio/awaitable.hpp>
 #include <boost/asio/co_spawn.hpp>
 #include <boost/asio/detached.hpp>
+#include <boost/asio/dispatch.hpp>
 #include <boost/asio/ip/udp.hpp>
 #include <boost/asio/redirect_error.hpp>
 #include <boost/asio/steady_timer.hpp>
+#include <boost/asio/strand.hpp>
 #include <boost/asio/this_coro.hpp>
 #include <boost/asio/use_awaitable.hpp>
 #include <openssl/asn1.h>
@@ -76,6 +78,8 @@ namespace {
 
 using bytes = std::vector<std::uint8_t>;
 using live_api = quic_live_types::live_api;
+std::atomic_size_t concurrent_payloads_read{0};
+std::atomic_size_t concurrent_fins_read{0};
 
 class live_impl final : public live_api {
  public:
@@ -91,8 +95,10 @@ class live_impl final : public live_api {
 template <typename T>
 struct spawned_result {
    explicit spawned_result(boost::asio::any_io_executor executor)
-       : timer(std::move(executor), (std::chrono::steady_clock::time_point::max)()) {}
+       : strand(boost::asio::make_strand(std::move(executor))),
+         timer(strand, (std::chrono::steady_clock::time_point::max)()) {}
 
+   boost::asio::strand<boost::asio::any_io_executor> strand;
    boost::asio::steady_timer timer;
    std::optional<T> value;
    std::exception_ptr error;
@@ -106,11 +112,18 @@ template <typename T>
    boost::asio::co_spawn(
        executor,
        [state, operation = std::move(operation)]() mutable -> boost::asio::awaitable<void> {
+          auto value = std::optional<T>{};
+          auto failure = std::exception_ptr{};
           try {
-             state->value.emplace(co_await std::move(operation));
+             value.emplace(co_await std::move(operation));
           } catch (...) {
-             state->error = std::current_exception();
+             failure = std::current_exception();
           }
+          co_await boost::asio::dispatch(state->strand, boost::asio::use_awaitable);
+          if (value) {
+             state->value.emplace(std::move(*value));
+          }
+          state->error = std::move(failure);
           state->done = true;
           state->timer.cancel();
        },
@@ -120,17 +133,22 @@ template <typename T>
 
 template <typename T>
 boost::asio::awaitable<T> take_result(std::shared_ptr<spawned_result<T>> state) {
-   auto error = boost::system::error_code{};
-   while (!state->done) {
-      co_await state->timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
-      if (error && error != boost::asio::error::operation_aborted) {
-         throw boost::system::system_error{error};
-      }
-   }
-   if (state->error) {
-      std::rethrow_exception(state->error);
-   }
-   co_return std::move(*state->value);
+   co_return co_await boost::asio::co_spawn(
+       state->strand,
+       [state = std::move(state)]() mutable -> boost::asio::awaitable<T> {
+          auto error = boost::system::error_code{};
+          while (!state->done) {
+             co_await state->timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
+             if (error && error != boost::asio::error::operation_aborted) {
+                throw boost::system::system_error{error};
+             }
+          }
+          if (state->error) {
+             std::rethrow_exception(state->error);
+          }
+          co_return std::move(*state->value);
+       },
+       boost::asio::use_awaitable);
 }
 
 struct pem_pair {
@@ -388,6 +406,136 @@ boost::asio::awaitable<void> session_loopback_roundtrip(forge::asio::runtime& ru
    co_await listener.async_close();
 }
 
+boost::asio::awaitable<bool> read_payload_and_fin(forge::net::transport::stream stream) {
+   auto payload = co_await stream.async_read();
+   if (payload != bytes{0x42}) {
+      co_return false;
+   }
+   concurrent_payloads_read.fetch_add(1, std::memory_order_relaxed);
+   try {
+      static_cast<void>(co_await stream.async_read());
+   } catch (const forge::exceptions::base& error) {
+      const auto closed = forge::net::transport::exceptions::is(error, forge::net::transport::exceptions::code::closed);
+      if (closed) {
+         concurrent_fins_read.fetch_add(1, std::memory_order_relaxed);
+      }
+      co_return closed;
+   }
+   co_return false;
+}
+
+boost::asio::awaitable<bool> write_payload_and_fin(forge::net::transport::stream stream) {
+   co_await stream.async_write(bytes{0x42});
+   co_await stream.async_close();
+   co_return true;
+}
+
+boost::asio::awaitable<bool> write_payload_and_fin(forge::net::transport::stream stream, bytes payload) {
+   co_await stream.async_write(payload);
+   co_await stream.async_close();
+   co_return true;
+}
+
+boost::asio::awaitable<bool> read_payload_and_fin(forge::net::transport::stream stream, const bytes& expected) {
+   auto payload = bytes{};
+   while (payload.size() < expected.size()) {
+      auto next = co_await stream.async_read();
+      payload.insert(payload.end(), next.begin(), next.end());
+   }
+   if (payload != expected) {
+      co_return false;
+   }
+   try {
+      static_cast<void>(co_await stream.async_read());
+   } catch (const forge::exceptions::base& error) {
+      co_return forge::net::transport::exceptions::is(error, forge::net::transport::exceptions::code::closed);
+   }
+   co_return false;
+}
+
+boost::asio::awaitable<void> concurrent_stream_fin_roundtrip(forge::asio::runtime& runtime) {
+   constexpr auto stream_count = std::size_t{128};
+   const auto material = make_tls_material();
+   auto listener = forge::net::quic::make_session_listener(runtime, loopback_quic(0), make_server_options(material));
+   auto connector = forge::net::quic::make_session_connector(runtime, make_client_options(material));
+   auto executor = co_await boost::asio::this_coro::executor;
+
+   auto accepted_session = spawn_result<forge::net::transport::session_connection>(executor, listener.async_accept());
+   auto client = co_await connector.async_connect(listener.local_endpoint());
+   auto server = co_await take_result(accepted_session);
+
+   auto accepts = std::vector<std::shared_ptr<spawned_result<forge::net::transport::stream>>>{};
+   auto writers = std::vector<std::shared_ptr<spawned_result<bool>>>{};
+   accepts.reserve(stream_count);
+   writers.reserve(stream_count);
+   for (auto index = std::size_t{}; index < stream_count; ++index) {
+      accepts.push_back(spawn_result<forge::net::transport::stream>(executor, client.session.async_accept_stream()));
+      auto outbound = co_await server.session.async_open_stream();
+      writers.push_back(spawn_result<bool>(executor, write_payload_and_fin(std::move(outbound))));
+   }
+
+   auto readers = std::vector<std::shared_ptr<spawned_result<bool>>>{};
+   readers.reserve(stream_count);
+   for (auto index = std::size_t{}; index < stream_count; ++index) {
+      auto inbound = co_await take_result(accepts[index]);
+      readers.push_back(spawn_result<bool>(executor, read_payload_and_fin(std::move(inbound))));
+   }
+   for (auto index = std::size_t{}; index < stream_count; ++index) {
+      BOOST_TEST(co_await take_result(writers[index]));
+      BOOST_TEST(co_await take_result(readers[index]));
+   }
+
+   co_await client.session.async_close();
+   co_await server.session.async_close();
+   co_await listener.async_close();
+}
+
+boost::asio::awaitable<void> multiple_session_fin_roundtrip(forge::asio::runtime& runtime) {
+   constexpr auto session_count = std::size_t{8};
+   const auto material = make_tls_material();
+   auto listener = forge::net::quic::make_session_listener(runtime, loopback_quic(0), make_server_options(material));
+   auto connector = forge::net::quic::make_session_connector(runtime, make_client_options(material));
+   auto executor = co_await boost::asio::this_coro::executor;
+   auto clients = std::vector<forge::net::transport::session_connection>{};
+   auto servers = std::vector<forge::net::transport::session_connection>{};
+   clients.reserve(session_count);
+   servers.reserve(session_count);
+
+   for (auto index = std::size_t{}; index < session_count; ++index) {
+      auto accepted = spawn_result<forge::net::transport::session_connection>(executor, listener.async_accept());
+      clients.push_back(co_await connector.async_connect(listener.local_endpoint()));
+      servers.push_back(co_await take_result(accepted));
+   }
+
+   const auto payload = bytes(1'252, 0x42);
+   for (auto index = std::size_t{}; index < session_count; ++index) {
+      auto client_accept =
+          spawn_result<forge::net::transport::stream>(executor, clients[index].session.async_accept_stream());
+      auto server_accept =
+          spawn_result<forge::net::transport::stream>(executor, servers[index].session.async_accept_stream());
+      auto client_outbound = co_await clients[index].session.async_open_stream();
+      auto server_outbound = co_await servers[index].session.async_open_stream();
+      auto client_write = spawn_result<bool>(executor, write_payload_and_fin(std::move(client_outbound), payload));
+      auto server_write = spawn_result<bool>(executor, write_payload_and_fin(std::move(server_outbound), payload));
+      auto client_read = spawn_result<bool>(
+          executor, read_payload_and_fin(co_await take_result(client_accept), payload));
+      auto server_read = spawn_result<bool>(
+          executor, read_payload_and_fin(co_await take_result(server_accept), payload));
+      BOOST_TEST(co_await take_result(client_write));
+      BOOST_TEST(co_await take_result(server_write));
+      BOOST_TEST(co_await take_result(client_read));
+      BOOST_TEST(co_await take_result(server_read));
+   }
+
+   for (auto& client : clients) {
+      co_await client.session.async_close();
+   }
+   for (auto& server : servers) {
+      co_await server.session.async_close();
+   }
+   co_await listener.async_close();
+}
+
 boost::asio::awaitable<void>
 session_accept_failure_is_transport_typed(forge::asio::runtime& runtime) {
    const auto material = make_tls_material();
@@ -617,6 +765,32 @@ boost::asio::awaitable<void> cancellation_unblocks_active_connector(forge::asio:
    blackhole.close(ignored);
 }
 
+boost::asio::awaitable<void> inbound_admission_rejects_before_accept(forge::asio::runtime& runtime) {
+   const auto material = make_tls_material();
+   auto admission_attempts = std::make_shared<std::atomic_size_t>();
+   auto server_options = make_server_options(material);
+   server_options.inbound_admission = [admission_attempts]() -> std::shared_ptr<void> {
+      admission_attempts->fetch_add(1, std::memory_order_relaxed);
+      return {};
+   };
+   auto listener = forge::net::quic::make_session_listener(runtime, loopback_quic(0), std::move(server_options));
+   auto client_options = make_client_options(material);
+   client_options.connect_timeout = std::chrono::milliseconds{100};
+   client_options.handshake_timeout = std::chrono::milliseconds{100};
+   auto connector = forge::net::quic::make_session_connector(runtime, std::move(client_options));
+
+   try {
+      (void)co_await connector.async_connect(listener.local_endpoint());
+      BOOST_FAIL("expected QUIC inbound admission rejection");
+   } catch (const forge::exceptions::base& error) {
+      const auto timed_out = has_quic_code(error, forge::net::quic::exceptions::code::connect_timeout) ||
+                             has_quic_code(error, forge::net::quic::exceptions::code::handshake_timeout);
+      BOOST_TEST(timed_out);
+   }
+   BOOST_TEST(admission_attempts->load(std::memory_order_relaxed) > 0U);
+   co_await listener.async_close();
+}
+
 } // namespace
 
 BOOST_AUTO_TEST_SUITE(forge_quic_transport_tests)
@@ -656,6 +830,22 @@ BOOST_AUTO_TEST_CASE(loopback_session_connector_listener_transfer_frames) {
    forge::asio::blocking::run(runtime, session_loopback_roundtrip(runtime));
 }
 
+BOOST_AUTO_TEST_CASE(concurrent_streams_deliver_fin_without_cross_stream_starvation) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   concurrent_payloads_read.store(0, std::memory_order_relaxed);
+   concurrent_fins_read.store(0, std::memory_order_relaxed);
+   const auto finished =
+       forge::asio::blocking::run_for(runtime, concurrent_stream_fin_roundtrip(runtime), std::chrono::seconds{10});
+   BOOST_TEST(finished);
+   BOOST_TEST(concurrent_payloads_read.load(std::memory_order_relaxed) == 128U);
+   BOOST_TEST(concurrent_fins_read.load(std::memory_order_relaxed) == 128U);
+}
+
+BOOST_AUTO_TEST_CASE(multiple_sessions_deliver_fin_independently) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 4}};
+   forge::asio::blocking::run(runtime, multiple_session_fin_roundtrip(runtime));
+}
+
 BOOST_AUTO_TEST_CASE(session_failures_are_normalized_to_transport_errors) {
    auto runtime = forge::asio::runtime{
       forge::asio::runtime_options{.worker_threads = 2}};
@@ -690,6 +880,11 @@ BOOST_AUTO_TEST_CASE(cancel_contract_rejects_and_unblocks) {
    forge::asio::blocking::run(runtime, cancellation_unblocks_listener_and_rejects_connector(runtime));
    BOOST_TEST(forge::asio::blocking::run_for(runtime, cancellation_unblocks_active_connector(runtime),
                                              std::chrono::seconds{2}));
+}
+
+BOOST_AUTO_TEST_CASE(inbound_admission_rejects_before_connection_is_published) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   forge::asio::blocking::run(runtime, inbound_admission_rejects_before_accept(runtime));
 }
 
 BOOST_AUTO_TEST_SUITE_END()

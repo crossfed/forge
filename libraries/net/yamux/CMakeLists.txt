@@ -11,4 +11,6 @@ target_link_libraries(
       forge_exceptions
       forge_net_transport
       Boost::asio
+   PRIVATE
+      forge_asio
 )

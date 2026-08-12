@@ -66,7 +66,9 @@ boost::asio::awaitable<void> serve_mux(forge::net::transport::stream base) {
 ## Boundaries
 
 - `cancel()` is abortive and propagates reset semantics where possible.
-- `async_close()` is graceful session shutdown.
+- `async_close()` is graceful session shutdown. It waits up to
+  `options::close_timeout` for the peer's half-close, then cancels the lower
+  transport so shutdown cannot wait forever for a peer that never sends FIN.
 - Reset streams are not valid for further read/write operations.
 - Lower transport failures are translated to typed Yamux boundary errors.
 

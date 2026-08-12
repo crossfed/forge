@@ -66,7 +66,7 @@ class quic_stream_concept final : public forge::net::transport::detail::stream_c
 
    boost::asio::awaitable<void> async_write_chunk(forge::net::transport::chunk bytes) override {
       try {
-         co_await value_.async_write(bytes.bytes());
+         co_await detail::stream_access::async_write_chunk(value_, std::move(bytes));
       } catch (const forge::exceptions::base& error) {
          raise_transport_failure(error);
       }

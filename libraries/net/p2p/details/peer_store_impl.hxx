@@ -29,6 +29,15 @@ struct peer_store::impl {
    explicit impl(peer_store::options options_value);
 
    void upsert(peer_store::record value);
+   [[nodiscard]] peer_store::record apply_identify(const peer_id& peer, peer_store::identify_update update);
+   [[nodiscard]] std::optional<peer_store::record> apply_discovery(const peer_id& peer,
+                                                                   peer_store::discovery_update update);
+   void apply_peer_exchange(const peer_id& peer, capability_set capabilities);
+   void upsert_relay_reservation(peer_store::relay_record value);
+   [[nodiscard]] bool mark_discovery_failure(const peer_id& peer,
+                                             std::chrono::system_clock::time_point backoff_until);
+   [[nodiscard]] std::size_t prune_expired_relay_reservations(
+      const peer_id& peer, std::chrono::system_clock::time_point now);
    void learn_endpoint(peer_id peer, forge::net::p2p::endpoint endpoint, capability_set capabilities);
    void mark_reachability(peer_id peer, reachability::state state, std::optional<forge::net::p2p::endpoint> observed);
    void mark_success(const peer_id& peer, path::kind kind, std::chrono::milliseconds latency);
@@ -42,8 +51,8 @@ struct peer_store::impl {
 
    boost::asio::awaitable<void> async_upsert_provider(peer_store::provider_record value);
    boost::asio::awaitable<void> async_upsert_rendezvous(rendezvous::registration value);
-   boost::asio::awaitable<void>
-   async_register_rendezvous(rendezvous::registration value, std::size_t max_registrations_per_peer);
+   boost::asio::awaitable<void> async_register_rendezvous(rendezvous::registration value,
+                                                          std::size_t max_registrations_per_peer);
    boost::asio::awaitable<void> async_remove_rendezvous(peer_id peer, std::string namespace_name);
    boost::asio::awaitable<void> async_hydrate();
    boost::asio::awaitable<peer_store::prune_result> async_prune_expired(std::chrono::system_clock::time_point now);
@@ -68,7 +77,8 @@ struct peer_store::impl {
    using provider_expiry_key = std::tuple<std::chrono::system_clock::time_point, std::vector<std::uint8_t>, peer_id>;
    using rendezvous_expiry_key = std::pair<std::chrono::system_clock::time_point, rendezvous_map_key>;
 
-   void mutate_peer(const peer_id& peer, const std::function<void(peer_store::record&)>& mutation);
+   [[nodiscard]] peer_store::record
+   mutate_peer(const peer_id& peer, const std::function<void(peer_store::record&)>& mutation);
    void commit_peer_mutation(peer_store::record value);
    void commit_peer_mutation_locked(peer_store::record value);
    [[nodiscard]] std::optional<peer_id> store_peer_operational(peer_store::record value);
@@ -88,9 +98,8 @@ struct peer_store::impl {
    void hydrate_page_locked(peer_store::hydration_page page);
    void store_rendezvous_operational(rendezvous::registration value);
    void erase_rendezvous_operational(const rendezvous_map_key& key);
-   boost::asio::awaitable<void>
-   async_store_rendezvous(rendezvous::registration value,
-                          std::optional<std::size_t> max_registrations_per_peer);
+   boost::asio::awaitable<void> async_store_rendezvous(rendezvous::registration value,
+                                                       std::optional<std::size_t> max_registrations_per_peer);
    void prune_operational_locked(std::chrono::system_clock::time_point now, const peer_store::prune_result& result);
    boost::asio::awaitable<void> apply_pending_locked_gate(bool flush_backend);
    boost::asio::awaitable<void> wait_for_persistence_admissions();

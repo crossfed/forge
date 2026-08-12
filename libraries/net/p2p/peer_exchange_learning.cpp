@@ -30,10 +30,7 @@ void learn_authenticated_peer_exchange_response(peer_store& store, const peer_ex
       FORGE_THROW_EXCEPTION(exceptions::peer_verification_failed,
                             "P2P peer exchange response identity does not match authenticated session");
    }
-   store.upsert(peer_store::record{
-       .peer = authenticated_peer,
-       .capabilities = message.capabilities,
-   });
+   store.apply_peer_exchange(authenticated_peer, message.capabilities);
    for (const auto& endpoint : message.endpoints) {
       if (!valid_peer_id(endpoint.peer)) {
          continue;

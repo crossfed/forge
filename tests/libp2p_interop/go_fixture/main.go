@@ -17,11 +17,13 @@ import (
 	libp2p "github.com/libp2p/go-libp2p"
 	kad "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/peerstore"
 	"github.com/libp2p/go-libp2p/core/protocol"
+	"github.com/libp2p/go-libp2p/p2p/host/eventbus"
 	"github.com/libp2p/go-libp2p/p2p/muxer/yamux"
 	relayclient "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/client"
 	relayv2 "github.com/libp2p/go-libp2p/p2p/protocol/circuitv2/relay"
@@ -593,6 +595,14 @@ func dial(opts options) error {
 		return err
 	}
 	defer h.Close()
+	var identifyEvents event.Subscription
+	if opts.scenario == "identify" {
+		identifyEvents, err = h.EventBus().Subscribe(new(event.EvtPeerIdentificationCompleted), eventbus.BufSize(4))
+		if err != nil {
+			return fmt.Errorf("subscribe to Identify completion: %w", err)
+		}
+		defer identifyEvents.Close()
+	}
 
 	addr, err := ma.NewMultiaddr(opts.addr)
 	if err != nil {
@@ -637,6 +647,19 @@ func dial(opts options) error {
 		size, err := openRequiredProtocol(ctx, h, info.ID, protocol.ID("/ipfs/id/1.0.0"))
 		if err != nil {
 			return err
+		}
+		identified := false
+		for !identified {
+			select {
+			case received := <-identifyEvents.Out():
+				event, ok := received.(event.EvtPeerIdentificationCompleted)
+				if ok && event.Peer == info.ID {
+					result["signed_peer_record"] = event.SignedPeerRecord != nil
+					identified = true
+				}
+			case <-ctx.Done():
+				return fmt.Errorf("Identify completion event timed out: %w", ctx.Err())
+			}
 		}
 		result["payload_bytes"] = size
 	case "echo":

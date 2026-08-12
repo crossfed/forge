@@ -1,4 +1,5 @@
 #include "details/quic_engine.hxx"
+#include "details/acknowledged_ranges.hxx"
 
 #include <boost/asio/bind_cancellation_slot.hpp>
 #include <boost/asio/cancellation_state.hpp>
@@ -26,6 +27,7 @@
 #include <algorithm>
 #include <atomic>
 #include <array>
+#include <cassert>
 #include <cctype>
 #include <chrono>
 #include <cstdlib>
@@ -62,6 +64,7 @@ constexpr auto max_udp_payload_size = std::size_t{1350};
 constexpr auto max_packets_per_drain = std::size_t{64};
 constexpr auto max_queued_datagram_bytes = std::size_t{16 * 1024 * 1024};
 constexpr auto stateless_reset_secret_size = std::size_t{32};
+constexpr auto retry_token_lifetime = 10 * NGTCP2_SECONDS;
 
 using timer_ptr = std::shared_ptr<asio::steady_timer>;
 using stateless_reset_secret = std::array<std::uint8_t, stateless_reset_secret_size>;
@@ -409,6 +412,14 @@ void wake(std::vector<std::weak_ptr<asio::steady_timer>>& waiters) noexcept {
    }
 }
 
+void remove_waiter(std::vector<std::weak_ptr<asio::steady_timer>>& waiters,
+                   const std::shared_ptr<asio::steady_timer>& target) noexcept {
+   std::erase_if(waiters, [&target](const auto& weak) {
+      const auto timer = weak.lock();
+      return !timer || timer == target;
+   });
+}
+
 [[nodiscard]] engine_endpoint from_udp_endpoint(const udp::endpoint& value) {
    return engine_endpoint{.host = value.address().to_string(), .port = value.port()};
 }
@@ -456,6 +467,7 @@ std::string engine_sha256_fingerprint(std::span<const std::uint8_t> data) {
 struct engine_stream::impl {
    struct pending_write {
       std::vector<std::uint8_t> data;
+      std::shared_ptr<void> lifetime;
       std::size_t submitted = 0;
       std::uint64_t base_offset = 0;
       bool base_offset_set = false;
@@ -465,6 +477,7 @@ struct engine_stream::impl {
 
    struct retained_write {
       std::vector<std::uint8_t> data;
+      std::shared_ptr<void> lifetime;
       std::uint64_t base_offset = 0;
       bool fin = false;
    };
@@ -477,10 +490,13 @@ struct engine_stream::impl {
    std::deque<std::vector<std::uint8_t>> inbound_ready;
    std::deque<pending_write> outbound;
    std::deque<retained_write> retained;
+   acknowledged_ranges acknowledged;
    std::uint64_t recv_next_offset = 0;
    std::uint64_t send_next_offset = 0;
    bool remote_read_closed = false;
+   bool remote_read_reset = false;
    bool local_write_closed = false;
+   bool fin_queued = false;
    bool reset = false;
    bool closed = false;
    std::vector<std::weak_ptr<asio::steady_timer>> read_waiters;
@@ -558,26 +574,37 @@ struct server_udp_socket : std::enable_shared_from_this<server_udp_socket> {
    }
 
    boost::asio::awaitable<std::pair<std::vector<std::uint8_t>, udp::endpoint>> async_receive() {
-      co_await asio::dispatch(strand, asio::use_awaitable);
-      if (stopped) {
-         throw boost::system::system_error{asio::error::operation_aborted};
-      }
-      auto packet = std::vector<std::uint8_t>(65'536);
-      auto from = udp::endpoint{};
-      const auto read = co_await socket.async_receive_from(asio::buffer(packet), from, asio::use_awaitable);
-      packet.resize(read);
-      co_return std::pair{std::move(packet), std::move(from)};
+      co_return co_await asio::co_spawn(
+          strand,
+          [self = shared_from_this()]() -> asio::awaitable<std::pair<std::vector<std::uint8_t>, udp::endpoint>> {
+             if (self->stopped) {
+                throw boost::system::system_error{asio::error::operation_aborted};
+             }
+             auto packet = std::vector<std::uint8_t>(65'536);
+             auto from = udp::endpoint{};
+             const auto read =
+                 co_await self->socket.async_receive_from(asio::buffer(packet), from, asio::use_awaitable);
+             packet.resize(read);
+             co_return std::pair{std::move(packet), std::move(from)};
+          },
+          asio::use_awaitable);
    }
 
    boost::asio::awaitable<boost::system::error_code> async_send(std::vector<std::uint8_t> packet,
                                                                 udp::endpoint destination) {
-      co_await asio::dispatch(strand, asio::use_awaitable);
-      if (stopped) {
-         co_return asio::error::operation_aborted;
-      }
-      auto ec = boost::system::error_code{};
-      co_await socket.async_send_to(asio::buffer(packet), destination, asio::redirect_error(asio::use_awaitable, ec));
-      co_return ec;
+      co_return co_await asio::co_spawn(
+          strand,
+          [self = shared_from_this(), packet = std::move(packet),
+           destination = std::move(destination)]() mutable -> asio::awaitable<boost::system::error_code> {
+             if (self->stopped) {
+                co_return asio::error::operation_aborted;
+             }
+             auto ec = boost::system::error_code{};
+             co_await self->socket.async_send_to(asio::buffer(packet), destination,
+                                                 asio::redirect_error(asio::use_awaitable, ec));
+             co_return ec;
+          },
+          asio::use_awaitable);
    }
 
    void stop() {
@@ -605,17 +632,18 @@ struct engine_connection::impl {
       udp::endpoint from;
    };
 
-   impl(asio::io_context& context_value, std::shared_ptr<udp::socket> socket_value, udp::endpoint remote_endpoint_value,
-        engine_transport_limits limits_value)
+   impl(asio::io_context& context_value, std::shared_ptr<udp::socket> socket_value, udp::endpoint local_endpoint_value,
+        udp::endpoint remote_endpoint_value, engine_transport_limits limits_value)
        : context(context_value), strand(asio::make_strand(context_value)), socket(std::move(socket_value)),
-         remote_endpoint(std::move(remote_endpoint_value)), limits(limits_value), handshake_timer(strand),
-         expiry_timer(strand) {}
+         local_endpoint_value(std::move(local_endpoint_value)), remote_endpoint(std::move(remote_endpoint_value)),
+         limits(limits_value), handshake_timer(strand), expiry_timer(strand) {}
 
    impl(asio::io_context& context_value, std::shared_ptr<server_udp_socket> server_socket_value,
-        udp::endpoint remote_endpoint_value, engine_transport_limits limits_value)
+        udp::endpoint local_endpoint_value, udp::endpoint remote_endpoint_value, engine_transport_limits limits_value)
        : context(context_value), strand(asio::make_strand(context_value)),
-         server_socket(std::move(server_socket_value)), remote_endpoint(std::move(remote_endpoint_value)),
-         limits(limits_value), handshake_timer(strand), expiry_timer(strand) {}
+         server_socket(std::move(server_socket_value)), local_endpoint_value(std::move(local_endpoint_value)),
+         remote_endpoint(std::move(remote_endpoint_value)), limits(limits_value), handshake_timer(strand),
+         expiry_timer(strand) {}
 
    ~impl() {
       if (conn != nullptr) {
@@ -633,6 +661,7 @@ struct engine_connection::impl {
    asio::strand<asio::io_context::executor_type> strand;
    std::shared_ptr<udp::socket> socket;
    std::shared_ptr<server_udp_socket> server_socket;
+   udp::endpoint local_endpoint_value;
    udp::endpoint remote_endpoint;
    engine_transport_limits limits;
    engine_connection_metrics_state metrics{};
@@ -645,11 +674,15 @@ struct engine_connection::impl {
    ssl_ctx_ptr ssl_ctx;
    ssl_ptr ssl;
    engine_security_options peer_security{};
+   std::optional<engine_peer_certificate> peer_certificate_value;
+   std::mutex inbound_admission_mutex;
+   std::shared_ptr<void> inbound_admission;
 
    std::unordered_map<std::int64_t, std::shared_ptr<engine_stream::impl>> streams;
    std::deque<std::shared_ptr<engine_stream::impl>> accepted_streams;
    std::vector<std::weak_ptr<asio::steady_timer>> handshake_waiters;
    std::vector<std::weak_ptr<asio::steady_timer>> accept_stream_waiters;
+   std::vector<std::weak_ptr<asio::steady_timer>> open_stream_waiters;
    std::vector<std::weak_ptr<asio::steady_timer>> background_waiters;
    std::function<void()> handshake_completed_hook;
    std::function<void(std::shared_ptr<impl>)> closed_hook;
@@ -676,17 +709,11 @@ struct engine_connection::impl {
    bool expiry_event_pending = false;
    bool server_side = false;
    bool listener_accept_notified = false;
+   bool report_accept_failure = true;
+   std::int64_t last_writable_stream_id = -1;
 
    [[nodiscard]] udp::endpoint local_endpoint() const {
-      if (server_socket) {
-         return server_socket->local_endpoint();
-      }
-      boost::system::error_code ec;
-      const auto local = socket->local_endpoint(ec);
-      if (ec) {
-         return udp::endpoint{remote_endpoint.protocol(), 0};
-      }
-      return local;
+      return local_endpoint_value;
    }
 
    [[nodiscard]] std::shared_ptr<engine_stream::impl> ensure_stream(std::int64_t stream_id) {
@@ -704,7 +731,8 @@ struct engine_connection::impl {
    }
 
    [[nodiscard]] static bool stream_is_active(const std::shared_ptr<engine_stream::impl>& stream) noexcept {
-      return stream && !stream->closed && !stream->reset && !(stream->local_write_closed && stream->remote_read_closed);
+      return stream && !stream->closed && !stream->reset &&
+             !(stream->local_write_closed && (stream->remote_read_closed || stream->remote_read_reset));
    }
 
    [[nodiscard]] std::size_t active_stream_count() const {
@@ -801,6 +829,7 @@ struct engine_connection::impl {
    }
 
    boost::asio::awaitable<void> wait_background_idle() {
+      assert(strand.running_in_this_thread());
       co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
       co_await asio::dispatch(strand, asio::use_awaitable);
       while (background_jobs.load(std::memory_order_acquire) != 0) {
@@ -851,6 +880,7 @@ struct engine_connection::impl {
    }
 
    void cancel_transport_io(bool close_socket) {
+      assert(strand.running_in_this_thread());
       boost::system::error_code ignored;
       if (close_socket && socket) {
          socket->cancel(ignored);
@@ -869,6 +899,7 @@ struct engine_connection::impl {
    }
 
    void fail_all() noexcept {
+      assert(strand.running_in_this_thread());
       canceled = true;
       closing = true;
       metrics.closed.store(true, std::memory_order_relaxed);
@@ -876,18 +907,29 @@ struct engine_connection::impl {
       cancel_transport_io(!server_side);
       wake(handshake_waiters);
       wake(accept_stream_waiters);
+      wake(open_stream_waiters);
       wake_and_clear_streams(true);
+      {
+         auto lock = std::scoped_lock{inbound_admission_mutex};
+         inbound_admission.reset();
+      }
       notify_closed_once();
    }
 
    void close_transport(bool cancel_socket) {
+      assert(strand.running_in_this_thread());
       closing = true;
       metrics.closed.store(true, std::memory_order_relaxed);
       clear_queued_work();
       cancel_transport_io(cancel_socket);
       wake(handshake_waiters);
       wake(accept_stream_waiters);
+      wake(open_stream_waiters);
       wake_and_clear_streams(false);
+      {
+         auto lock = std::scoped_lock{inbound_admission_mutex};
+         inbound_admission.reset();
+      }
       notify_closed_once();
    }
 
@@ -902,29 +944,35 @@ struct engine_connection::impl {
    }
 
    void verify_peer(const engine_security_options& security) {
-      if (!security.verify_peer) {
-         return;
-      }
-      if (server_side && SSL_get_peer_cert_chain(ssl.get()) == nullptr) {
+      assert(strand.running_in_this_thread());
+      peer_certificate_value.reset();
+      if (security.verify_peer && server_side && SSL_get_peer_cert_chain(ssl.get()) == nullptr) {
          throw_engine(engine_error_kind::peer_verification_failed, "QUIC peer did not present a certificate");
       }
       auto cert = x509_ptr{SSL_get1_peer_certificate(ssl.get())};
       if (!cert) {
-         throw_engine(engine_error_kind::peer_verification_failed, "QUIC peer did not present a certificate");
+         if (security.verify_peer) {
+            throw_engine(engine_error_kind::peer_verification_failed, "QUIC peer did not present a certificate");
+         }
+         return;
       }
       auto der = der_from_certificate(cert.get());
       auto peer = engine_peer_certificate{.der = std::move(der)};
       peer.sha256_fingerprint = engine_sha256_fingerprint(peer.der);
-      if (security.expected_sha256_fingerprint &&
-          peer.sha256_fingerprint != normalize_engine_sha256_fingerprint(*security.expected_sha256_fingerprint)) {
-         throw_engine(engine_error_kind::peer_verification_failed, "QUIC peer certificate fingerprint mismatch");
+      if (security.verify_peer) {
+         if (security.expected_sha256_fingerprint &&
+             peer.sha256_fingerprint != normalize_engine_sha256_fingerprint(*security.expected_sha256_fingerprint)) {
+            throw_engine(engine_error_kind::peer_verification_failed, "QUIC peer certificate fingerprint mismatch");
+         }
+         if (security.verifier && !security.verifier(peer)) {
+            throw_engine(engine_error_kind::peer_verification_failed, "QUIC peer verifier rejected certificate");
+         }
       }
-      if (security.verifier && !security.verifier(peer)) {
-         throw_engine(engine_error_kind::peer_verification_failed, "QUIC peer verifier rejected certificate");
-      }
+      peer_certificate_value = std::move(peer);
    }
 
    void complete_handshake() {
+      assert(strand.running_in_this_thread());
       if (handshake_done) {
          return;
       }
@@ -941,6 +989,7 @@ struct engine_connection::impl {
    }
 
    boost::asio::awaitable<void> wait_handshake(std::chrono::milliseconds timeout) {
+      assert(strand.running_in_this_thread());
       co_await asio::dispatch(strand, asio::use_awaitable);
       if (handshake_done) {
          co_return;
@@ -1070,10 +1119,15 @@ struct engine_connection::impl {
    }
 
    void schedule_expiry() {
+      assert(strand.running_in_this_thread());
       if (conn == nullptr || closing) {
          return;
       }
       const auto expiry = ngtcp2_conn_get_expiry(conn);
+      if (expiry == (std::numeric_limits<ngtcp2_tstamp>::max)()) {
+         expiry_timer.cancel();
+         return;
+      }
       const auto now = timestamp();
       const auto delay = expiry <= now ? std::chrono::nanoseconds{1} : std::chrono::nanoseconds{expiry - now};
       expiry_timer.expires_after(delay);
@@ -1118,6 +1172,7 @@ struct engine_connection::impl {
    }
 
    boost::asio::awaitable<void> handle_expiry_event() {
+      assert(strand.running_in_this_thread());
       co_await asio::dispatch(strand, asio::use_awaitable);
       if (conn == nullptr || closing) {
          co_return;
@@ -1128,6 +1183,10 @@ struct engine_connection::impl {
       }
       expiry_event_pending = false;
       const auto rv = ngtcp2_conn_handle_expiry(conn, timestamp());
+      if (rv == NGTCP2_ERR_IDLE_CLOSE) {
+         close_transport(!server_side);
+         co_return;
+      }
       if (rv != 0) {
          fail_all();
          co_return;
@@ -1135,13 +1194,31 @@ struct engine_connection::impl {
       co_await drain_send();
    }
 
-   [[nodiscard]] std::shared_ptr<engine_stream::impl> next_writable_stream() {
+   [[nodiscard]] std::vector<std::shared_ptr<engine_stream::impl>> writable_streams() {
+      auto out = std::vector<std::shared_ptr<engine_stream::impl>>{};
+      out.reserve(streams.size());
       for (auto& [_, stream] : streams) {
          if (!stream->outbound.empty() && !stream->local_write_closed && !stream->reset) {
-            return stream;
+            out.push_back(stream);
          }
       }
-      return {};
+      std::ranges::sort(out, {}, &engine_stream::impl::id);
+      const auto next = std::ranges::upper_bound(out, last_writable_stream_id, {}, &engine_stream::impl::id);
+      std::ranges::rotate(out, next);
+      return out;
+   }
+
+   void reject_unwritable_stream(const std::shared_ptr<engine_stream::impl>& stream, ngtcp2_ssize error) {
+      if (!stream) {
+         return;
+      }
+      release_queued_stream_writes(stream);
+      stream->local_write_closed = true;
+      if (error == NGTCP2_ERR_STREAM_NOT_FOUND) {
+         stream->closed = true;
+      }
+      wake(stream->write_waiters);
+      update_active_stream_metrics();
    }
 
    void mark_stream_data_submitted(std::shared_ptr<engine_stream::impl>& stream, ngtcp2_ssize data_len) {
@@ -1161,12 +1238,14 @@ struct engine_connection::impl {
    void complete_submitted_writes(std::shared_ptr<engine_stream::impl>& stream) {
       while (!stream->outbound.empty()) {
          auto& write = stream->outbound.front();
-         if (write.submitted < write.data.size() || (!write.fin && write.data.empty())) {
+         if (write.submitted < write.data.size() || (!write.fin && write.data.empty()) ||
+             (write.fin && write.data.empty() && !write.base_offset_set)) {
             break;
          }
          if (!write.data.empty()) {
             stream->retained.push_back(engine_stream::impl::retained_write{
                 .data = std::move(write.data),
+                .lifetime = std::move(write.lifetime),
                 .base_offset = write.base_offset,
                 .fin = write.fin,
             });
@@ -1182,6 +1261,7 @@ struct engine_connection::impl {
    }
 
    boost::asio::awaitable<void> drain_send() {
+      assert(strand.running_in_this_thread());
       co_await asio::dispatch(strand, asio::use_awaitable);
       if (closing || canceled || conn == nullptr) {
          co_return;
@@ -1210,6 +1290,8 @@ struct engine_connection::impl {
             auto nwrite = ngtcp2_ssize{0};
             auto selected = std::shared_ptr<engine_stream::impl>{};
             auto data_len = ngtcp2_ssize{0};
+            auto candidates = writable_streams();
+            auto candidate = candidates.begin();
 
             for (;;) {
                data_len = 0;
@@ -1217,8 +1299,9 @@ struct engine_connection::impl {
                auto stream_id = std::int64_t{-1};
                auto datav = ngtcp2_vec{};
                auto datavcnt = std::size_t{0};
-               selected = next_writable_stream();
+               selected = candidate == candidates.end() ? std::shared_ptr<engine_stream::impl>{} : *candidate++;
                if (selected) {
+                  last_writable_stream_id = selected->id;
                   auto& write = selected->outbound.front();
                   stream_id = selected->id;
                   const auto remaining = write.data.size() - write.submitted;
@@ -1233,6 +1316,13 @@ struct engine_connection::impl {
                nwrite = ngtcp2_conn_writev_stream(conn, &ps.path, &pi, packet.data(), packet.size(), &data_len, flags,
                                                   stream_id, datavcnt == 0 ? nullptr : &datav, datavcnt, packet_ts);
 
+               if (nwrite == NGTCP2_ERR_STREAM_DATA_BLOCKED) {
+                  continue;
+               }
+               if (nwrite == NGTCP2_ERR_STREAM_SHUT_WR || nwrite == NGTCP2_ERR_STREAM_NOT_FOUND) {
+                  reject_unwritable_stream(selected, nwrite);
+                  continue;
+               }
                if (nwrite != NGTCP2_ERR_WRITE_MORE) {
                   break;
                }
@@ -1241,10 +1331,6 @@ struct engine_connection::impl {
             }
 
             if (nwrite < 0) {
-               if (nwrite == NGTCP2_ERR_STREAM_DATA_BLOCKED || nwrite == NGTCP2_ERR_STREAM_SHUT_WR ||
-                   nwrite == NGTCP2_ERR_STREAM_NOT_FOUND) {
-                  break;
-               }
                fail_all();
                throw_engine(engine_error_kind::internal_error, std::string{"ngtcp2_conn_writev_stream failed: "} +
                                                                    ngtcp2_strerror(static_cast<int>(nwrite)));
@@ -1256,6 +1342,8 @@ struct engine_connection::impl {
                if (data_len == 0 && !selected->outbound.empty()) {
                   auto& write = selected->outbound.front();
                   if (write.fin) {
+                     write.base_offset = selected->send_next_offset;
+                     write.base_offset_set = true;
                      write.submitted = write.data.size();
                   }
                }
@@ -1284,6 +1372,7 @@ struct engine_connection::impl {
    }
 
    boost::asio::awaitable<void> handle_packet(std::vector<std::uint8_t> packet, udp::endpoint from) {
+      assert(strand.running_in_this_thread());
       co_await asio::dispatch(strand, asio::use_awaitable);
       if (closing || canceled) {
          co_return;
@@ -1304,6 +1393,7 @@ struct engine_connection::impl {
    }
 
    boost::asio::awaitable<void> process_queued_packets() {
+      assert(strand.running_in_this_thread());
       co_await asio::dispatch(strand, asio::use_awaitable);
       if (packet_processing_active || drain_active) {
          co_return;
@@ -1327,11 +1417,16 @@ struct engine_connection::impl {
             fail_all();
             co_return;
          }
-         if (rv != 0) {
+         if (rv == NGTCP2_ERR_RETRY || rv == NGTCP2_ERR_DROP_CONN) {
+            report_accept_failure = false;
             fail_all();
+            co_return;
+         }
+         if (rv != 0) {
             auto message = ngtcp2_read_error_message(conn, rv);
             message += "; packet_size=";
             message += std::to_string(queued.bytes.size());
+            fail_all();
             throw_engine(engine_error_kind::internal_error, std::move(message));
          }
          metrics.packets_received.fetch_add(1, std::memory_order_relaxed);
@@ -1487,20 +1582,29 @@ int acked_stream_data_offset_cb(ngtcp2_conn*, std::int64_t stream_id, std::uint6
       return 0;
    }
    auto& stream = it->second;
-   const auto ack_end = offset + datalen;
-   while (!stream->retained.empty()) {
-      auto& write = stream->retained.front();
-      const auto end = write.base_offset + write.data.size();
-      if (end > ack_end) {
-         break;
+   try {
+      stream->acknowledged.add(offset, datalen);
+      while (!stream->retained.empty()) {
+         auto& write = stream->retained.front();
+         if (!stream->acknowledged.covers(write.base_offset, write.data.size())) {
+            break;
+         }
+         const auto end = write.base_offset + write.data.size();
+         const auto queued_bytes = connection->metrics.queued_bytes.load(std::memory_order_relaxed);
+         if (queued_bytes >= write.data.size()) {
+            connection->metrics.queued_bytes.store(queued_bytes - write.data.size(), std::memory_order_relaxed);
+         } else {
+            connection->metrics.queued_bytes.store(0, std::memory_order_relaxed);
+         }
+         stream->retained.pop_front();
+         stream->acknowledged.discard_before(end);
       }
-      const auto queued_bytes = connection->metrics.queued_bytes.load(std::memory_order_relaxed);
-      if (queued_bytes >= write.data.size()) {
-         connection->metrics.queued_bytes.store(queued_bytes - write.data.size(), std::memory_order_relaxed);
-      } else {
-         connection->metrics.queued_bytes.store(0, std::memory_order_relaxed);
+      if (stream->retained.empty() && stream->outbound.empty()) {
+         stream->acknowledged.clear();
       }
-      stream->retained.pop_front();
+   } catch (...) {
+      connection->fail_all();
+      return NGTCP2_ERR_CALLBACK_FAILURE;
    }
    return 0;
 }
@@ -1508,31 +1612,35 @@ int acked_stream_data_offset_cb(ngtcp2_conn*, std::int64_t stream_id, std::uint6
 int stream_close_cb(ngtcp2_conn* conn, std::uint32_t, std::int64_t stream_id, std::uint64_t, void* user_data, void*) {
    auto* connection = static_cast<engine_connection::impl*>(user_data);
    if (auto it = connection->streams.find(stream_id); it != connection->streams.end()) {
-      it->second->closed = true;
+      auto stream = std::move(it->second);
+      connection->streams.erase(it);
+      connection->release_queued_stream_writes(stream);
+      stream->closed = true;
       if (ngtcp2_is_bidi_stream(stream_id) && ngtcp2_conn_is_local_stream(conn, stream_id) == 0) {
          ngtcp2_conn_extend_max_streams_bidi(conn, 1);
       }
-      wake(it->second->read_waiters);
-      wake(it->second->write_waiters);
+      wake(stream->read_waiters);
+      wake(stream->write_waiters);
       connection->update_active_stream_metrics();
    }
    return 0;
 }
 
-int stream_reset_cb(ngtcp2_conn* conn, std::int64_t stream_id, std::uint64_t, std::uint64_t, void* user_data, void*) {
+int stream_reset_cb(ngtcp2_conn*, std::int64_t stream_id, std::uint64_t, std::uint64_t, void* user_data, void*) {
    auto* connection = static_cast<engine_connection::impl*>(user_data);
    if (auto it = connection->streams.find(stream_id); it != connection->streams.end()) {
       auto& stream = it->second;
-      connection->release_queued_stream_writes(stream);
-      stream->reset = true;
-      if (ngtcp2_is_bidi_stream(stream_id) && ngtcp2_conn_is_local_stream(conn, stream_id) == 0) {
-         ngtcp2_conn_extend_max_streams_bidi(conn, 1);
-      }
+      stream->remote_read_reset = true;
       connection->metrics.streams_reset.fetch_add(1, std::memory_order_relaxed);
       wake(stream->read_waiters);
-      wake(stream->write_waiters);
       connection->update_active_stream_metrics();
    }
+   return 0;
+}
+
+int extend_max_local_streams_bidi_cb(ngtcp2_conn*, std::uint64_t, void* user_data) {
+   auto* connection = static_cast<engine_connection::impl*>(user_data);
+   wake(connection->open_stream_waiters);
    return 0;
 }
 
@@ -1549,6 +1657,7 @@ int stream_reset_cb(ngtcp2_conn* conn, std::int64_t stream_id, std::uint64_t, st
        .stream_open = stream_open_cb,
        .stream_close = stream_close_cb,
        .recv_retry = ngtcp2_crypto_recv_retry_cb,
+       .extend_max_local_streams_bidi = extend_max_local_streams_bidi_cb,
        .rand = rand_cb,
        .remove_connection_id = remove_connection_id_cb,
        .update_key = ngtcp2_crypto_update_key_cb,
@@ -1574,6 +1683,7 @@ int stream_reset_cb(ngtcp2_conn* conn, std::int64_t stream_id, std::uint64_t, st
        .acked_stream_data_offset = acked_stream_data_offset_cb,
        .stream_open = stream_open_cb,
        .stream_close = stream_close_cb,
+       .extend_max_local_streams_bidi = extend_max_local_streams_bidi_cb,
        .rand = rand_cb,
        .remove_connection_id = remove_connection_id_cb,
        .update_key = ngtcp2_crypto_update_key_cb,
@@ -1591,6 +1701,13 @@ void configure_settings(ngtcp2_settings& settings) {
    ngtcp2_settings_default(&settings);
    settings.initial_ts = timestamp();
    settings.cc_algo = NGTCP2_CC_ALGO_CUBIC;
+   settings.max_tx_udp_payload_size = max_udp_payload_size;
+}
+
+void validate_packet_buffer(ngtcp2_conn* connection) {
+   if (ngtcp2_conn_get_max_tx_udp_payload_size(connection) > max_udp_payload_size) {
+      throw_engine(engine_error_kind::internal_error, "QUIC packet buffer is smaller than ngtcp2 max TX UDP payload");
+   }
 }
 
 void configure_params(ngtcp2_transport_params& params, const engine_transport_limits& limits,
@@ -1740,6 +1857,16 @@ std::int64_t engine_stream::id() const noexcept {
 }
 
 boost::asio::awaitable<void> engine_stream::async_write(std::span<const std::uint8_t> bytes) {
+   co_await async_write(bytes, {});
+}
+
+boost::asio::awaitable<void> engine_stream::async_write(std::span<const std::uint8_t> bytes,
+                                                        std::shared_ptr<void> lifetime) {
+   co_await async_write(std::vector<std::uint8_t>{bytes.begin(), bytes.end()}, std::move(lifetime));
+}
+
+boost::asio::awaitable<void> engine_stream::async_write(std::vector<std::uint8_t> bytes,
+                                                        std::shared_ptr<void> lifetime) {
    if (!impl_) {
       throw_engine(engine_error_kind::stream_closed, "invalid QUIC stream");
    }
@@ -1747,31 +1874,43 @@ boost::asio::awaitable<void> engine_stream::async_write(std::span<const std::uin
    if (!connection) {
       throw_engine(engine_error_kind::connection_closed, "QUIC connection is closed");
    }
-   co_await asio::dispatch(connection->strand, asio::use_awaitable);
-   if (impl_->reset) {
-      throw_engine(engine_error_kind::stream_reset, "QUIC stream is reset");
-   }
-   if (impl_->local_write_closed || impl_->closed) {
-      throw_engine(engine_error_kind::stream_closed, "QUIC stream write side is closed");
-   }
-   if (connection->metrics.queued_bytes.load(std::memory_order_relaxed) + bytes.size() >
-       connection->limits.max_queued_bytes) {
-      connection->metrics.backpressure_rejections.fetch_add(1, std::memory_order_relaxed);
-      throw_engine(engine_error_kind::backpressure_rejected, "QUIC stream write queue exceeds max_queued_bytes");
-   }
-   impl_->outbound.push_back(engine_stream::impl::pending_write{
-       .data = std::vector<std::uint8_t>{bytes.begin(), bytes.end()},
-   });
-   connection->metrics.queued_bytes.fetch_add(bytes.size(), std::memory_order_relaxed);
-   connection->metrics.frames_sent.fetch_add(1, std::memory_order_relaxed);
-   connection->spawn_background([](const std::shared_ptr<engine_connection::impl>& value) -> asio::awaitable<void> {
-      try {
-         co_await value->drain_send();
-      } catch (const engine_failure&) {
-         value->fail_all();
-      }
-   });
-   co_await asio::post(connection->strand, asio::use_awaitable);
+   co_await asio::co_spawn(
+       connection->strand,
+       [connection, stream = impl_, owned = std::move(bytes),
+        lifetime = std::move(lifetime)]() mutable -> asio::awaitable<void> {
+          if (stream->reset) {
+             throw_engine(engine_error_kind::stream_reset, "QUIC stream is reset");
+          }
+          if (stream->local_write_closed || stream->closed) {
+             throw_engine(engine_error_kind::stream_closed, "QUIC stream write side is closed");
+          }
+          if (owned.empty()) {
+             co_return;
+          }
+          const auto queued = connection->metrics.queued_bytes.load(std::memory_order_relaxed);
+          if (owned.size() > connection->limits.max_queued_bytes ||
+              queued > connection->limits.max_queued_bytes - owned.size()) {
+             connection->metrics.backpressure_rejections.fetch_add(1, std::memory_order_relaxed);
+             throw_engine(engine_error_kind::backpressure_rejected, "QUIC stream write queue exceeds max_queued_bytes");
+          }
+          const auto size = owned.size();
+          stream->outbound.push_back(engine_stream::impl::pending_write{
+              .data = std::move(owned),
+              .lifetime = std::move(lifetime),
+          });
+          connection->metrics.queued_bytes.fetch_add(size, std::memory_order_relaxed);
+          connection->metrics.frames_sent.fetch_add(1, std::memory_order_relaxed);
+          connection->spawn_background(
+              [](const std::shared_ptr<engine_connection::impl>& value) -> asio::awaitable<void> {
+                 try {
+                    co_await value->drain_send();
+                 } catch (const engine_failure&) {
+                    value->fail_all();
+                 }
+              });
+          co_await asio::post(connection->strand, asio::use_awaitable);
+       },
+       asio::use_awaitable);
 }
 
 boost::asio::awaitable<std::vector<std::uint8_t>> engine_stream::async_read() {
@@ -1782,31 +1921,34 @@ boost::asio::awaitable<std::vector<std::uint8_t>> engine_stream::async_read() {
    if (!connection) {
       throw_engine(engine_error_kind::connection_closed, "QUIC connection is closed");
    }
-   co_await asio::dispatch(connection->strand, asio::use_awaitable);
-   while (impl_->inbound_ready.empty() && !impl_->remote_read_closed && !impl_->reset && !impl_->closed &&
-          !connection->closing && !connection->canceled) {
-      auto timer = std::make_shared<asio::steady_timer>(connection->strand);
-      timer->expires_after(std::chrono::minutes{10});
-      impl_->read_waiters.emplace_back(timer);
-      boost::system::error_code ec;
-      co_await timer->async_wait(asio::redirect_error(asio::use_awaitable, ec));
-      co_await asio::dispatch(connection->strand, asio::use_awaitable);
-   }
-   if (!impl_->inbound_ready.empty()) {
-      auto out = std::move(impl_->inbound_ready.front());
-      impl_->inbound_ready.pop_front();
-      co_return out;
-   }
-   if (impl_->reset) {
-      throw_engine(engine_error_kind::stream_reset, "QUIC stream was reset while reading");
-   }
-   if (connection->canceled) {
-      throw_engine(engine_error_kind::canceled, "QUIC connection was canceled while reading");
-   }
-   if (connection->closing) {
-      throw_engine(engine_error_kind::connection_closed, "QUIC connection closed while reading");
-   }
-   throw_engine(engine_error_kind::stream_closed, "QUIC stream read side is closed");
+   co_return co_await asio::co_spawn(
+       connection->strand,
+       [connection, stream = impl_]() -> asio::awaitable<std::vector<std::uint8_t>> {
+          while (stream->inbound_ready.empty() && !stream->remote_read_closed && !stream->remote_read_reset &&
+                 !stream->reset && !stream->closed && !connection->closing && !connection->canceled) {
+             auto timer = std::make_shared<asio::steady_timer>(connection->strand);
+             timer->expires_after(std::chrono::minutes{10});
+             stream->read_waiters.emplace_back(timer);
+             boost::system::error_code ec;
+             co_await timer->async_wait(asio::redirect_error(asio::use_awaitable, ec));
+          }
+          if (!stream->inbound_ready.empty()) {
+             auto out = std::move(stream->inbound_ready.front());
+             stream->inbound_ready.pop_front();
+             co_return out;
+          }
+          if (stream->reset || stream->remote_read_reset) {
+             throw_engine(engine_error_kind::stream_reset, "QUIC stream was reset while reading");
+          }
+          if (connection->canceled) {
+             throw_engine(engine_error_kind::canceled, "QUIC connection was canceled while reading");
+          }
+          if (connection->closing) {
+             throw_engine(engine_error_kind::connection_closed, "QUIC connection closed while reading");
+          }
+          throw_engine(engine_error_kind::stream_closed, "QUIC stream read side is closed");
+       },
+       asio::use_awaitable);
 }
 
 boost::asio::awaitable<void> engine_stream::async_close() {
@@ -1817,15 +1959,71 @@ boost::asio::awaitable<void> engine_stream::async_close() {
    if (!connection) {
       co_return;
    }
-   co_await asio::dispatch(connection->strand, asio::use_awaitable);
-   if (connection->closing || connection->canceled) {
-      co_return;
+   co_await asio::co_spawn(
+       connection->strand,
+       [connection, stream = impl_]() -> asio::awaitable<void> {
+          if (connection->closing || connection->canceled) {
+             co_return;
+          }
+          if (!stream->local_write_closed && !stream->reset && !stream->closed) {
+             if (!stream->fin_queued) {
+                stream->outbound.push_back(engine_stream::impl::pending_write{.fin = true});
+                stream->fin_queued = true;
+             }
+             co_await connection->drain_send();
+             while (!stream->local_write_closed && !stream->reset && !stream->closed && !connection->closing &&
+                    !connection->canceled) {
+                auto timer = std::make_shared<asio::steady_timer>(connection->strand);
+                timer->expires_after(std::chrono::minutes{10});
+                stream->write_waiters.emplace_back(timer);
+                auto ec = boost::system::error_code{};
+                co_await timer->async_wait(asio::redirect_error(asio::use_awaitable, ec));
+             }
+             connection->update_active_stream_metrics();
+          }
+       },
+       asio::use_awaitable);
+}
+
+void engine_stream::cancel_write() {
+   if (!impl_) {
+      return;
    }
-   if (!impl_->local_write_closed && !impl_->reset && !impl_->closed) {
-      impl_->outbound.push_back(engine_stream::impl::pending_write{.fin = true});
-      co_await connection->drain_send();
+   auto connection = impl_->connection.lock();
+   if (!connection) {
+      return;
+   }
+   auto stream = impl_;
+   asio::dispatch(connection->strand, [connection, stream] {
+      if (stream->local_write_closed || stream->reset || stream->closed) {
+         return;
+      }
+      auto shutdown_result = 0;
+      auto should_drain = false;
+      if (connection->conn != nullptr && !connection->closing && !connection->canceled) {
+         shutdown_result = ngtcp2_conn_shutdown_stream_write(connection->conn, 0, stream->id, 0);
+         should_drain = shutdown_result == 0;
+      }
+      connection->release_queued_stream_writes(stream);
+      stream->local_write_closed = true;
+      wake(stream->write_waiters);
+      connection->metrics.streams_reset.fetch_add(1, std::memory_order_relaxed);
       connection->update_active_stream_metrics();
-   }
+      if (shutdown_result != 0) {
+         connection->fail_all();
+         return;
+      }
+      if (!should_drain) {
+         return;
+      }
+      connection->spawn_background([](const std::shared_ptr<engine_connection::impl>& value) -> asio::awaitable<void> {
+         try {
+            co_await value->drain_send();
+         } catch (const engine_failure&) {
+            value->fail_all();
+         }
+      });
+   });
 }
 
 void engine_stream::cancel() {
@@ -1887,83 +2085,150 @@ engine_endpoint engine_connection::remote_endpoint() const {
 }
 
 std::optional<engine_peer_certificate> engine_connection::peer_certificate() const {
-   if (!impl_ || !impl_->ssl) {
-      return std::nullopt;
+   return impl_ ? impl_->peer_certificate_value : std::nullopt;
+}
+
+std::shared_ptr<void> engine_connection::take_inbound_admission() noexcept {
+   if (!impl_) {
+      return {};
    }
-   auto cert = x509_ptr{SSL_get1_peer_certificate(impl_->ssl.get())};
-   if (!cert) {
-      return std::nullopt;
-   }
-   auto der = der_from_certificate(cert.get());
-   auto peer = engine_peer_certificate{.der = std::move(der)};
-   peer.sha256_fingerprint = engine_sha256_fingerprint(peer.der);
-   return peer;
+   auto lock = std::scoped_lock{impl_->inbound_admission_mutex};
+   return std::move(impl_->inbound_admission);
 }
 
 boost::asio::awaitable<std::shared_ptr<engine_stream>> engine_connection::async_open_stream() {
    if (!impl_) {
       throw_engine(engine_error_kind::connection_closed, "invalid QUIC connection");
    }
-   co_await asio::dispatch(impl_->strand, asio::use_awaitable);
-   if (impl_->closing || impl_->canceled) {
-      throw_engine(engine_error_kind::connection_closed, "QUIC connection is closed");
-   }
-   if (impl_->active_stream_count() >= impl_->limits.max_streams_per_connection) {
-      impl_->metrics.backpressure_rejections.fetch_add(1, std::memory_order_relaxed);
-      throw_engine(engine_error_kind::backpressure_rejected, "QUIC max streams exceeded");
-   }
-   auto stream_id = std::int64_t{-1};
-   auto stream_impl = std::make_shared<engine_stream::impl>(-1);
-   stream_impl->connection = impl_;
-   const auto rv = ngtcp2_conn_open_bidi_stream(impl_->conn, &stream_id, stream_impl.get());
-   if (rv != 0) {
-      throw_engine(engine_error_kind::backpressure_rejected,
-                   std::string{"ngtcp2_conn_open_bidi_stream failed: "} + ngtcp2_strerror(rv));
-   }
-   stream_impl->id = stream_id;
-   impl_->streams.emplace(stream_id, stream_impl);
-   impl_->update_active_stream_metrics();
-   impl_->metrics.streams_opened.fetch_add(1, std::memory_order_relaxed);
-   co_await impl_->drain_send();
-   if (impl_->closing || impl_->canceled) {
-      throw_engine(engine_error_kind::connection_closed, "QUIC connection closed while opening stream");
-   }
-   co_return std::shared_ptr<engine_stream>{new engine_stream{std::move(stream_impl)}};
+   co_return co_await asio::co_spawn(
+       impl_->strand,
+       [connection = impl_]() -> asio::awaitable<std::shared_ptr<engine_stream>> {
+          auto cancellation = co_await asio::this_coro::cancellation_state;
+          if (connection->closing || connection->canceled) {
+             throw_engine(engine_error_kind::connection_closed, "QUIC connection is closed");
+          }
+          if (connection->active_stream_count() >= connection->limits.max_streams_per_connection) {
+             connection->metrics.backpressure_rejections.fetch_add(1, std::memory_order_relaxed);
+             throw_engine(engine_error_kind::backpressure_rejected, "QUIC max streams exceeded");
+          }
+          auto stream = std::make_shared<engine_stream::impl>(-1);
+          stream->connection = connection;
+          auto stream_id = std::int64_t{-1};
+          while (true) {
+             if (cancellation.cancelled() != asio::cancellation_type::none) {
+                connection->metrics.cancellations.fetch_add(1, std::memory_order_relaxed);
+                throw_engine(engine_error_kind::canceled, "QUIC stream open canceled");
+             }
+             const auto rv = ngtcp2_conn_open_bidi_stream(connection->conn, &stream_id, stream.get());
+             if (rv == 0) {
+                break;
+             }
+             if (rv != NGTCP2_ERR_STREAM_ID_BLOCKED) {
+                throw_engine(engine_error_kind::backpressure_rejected,
+                             std::string{"ngtcp2_conn_open_bidi_stream failed: "} + ngtcp2_strerror(rv));
+             }
+             auto timer = std::make_shared<asio::steady_timer>(connection->strand);
+             timer->expires_after(std::chrono::minutes{10});
+             std::erase_if(connection->open_stream_waiters, [](const auto& weak) { return weak.expired(); });
+             connection->open_stream_waiters.emplace_back(timer);
+             auto error = boost::system::error_code{};
+             co_await timer->async_wait(asio::redirect_error(asio::use_awaitable, error));
+             remove_waiter(connection->open_stream_waiters, timer);
+             if (cancellation.cancelled() != asio::cancellation_type::none) {
+                connection->metrics.cancellations.fetch_add(1, std::memory_order_relaxed);
+                throw_engine(engine_error_kind::canceled, "QUIC stream open canceled while waiting for credit");
+             }
+             if (connection->closing || connection->canceled) {
+                throw_engine(engine_error_kind::connection_closed,
+                             "QUIC connection closed while waiting for stream credit");
+             }
+          }
+
+          // Once ngtcp2 allocates the stream ID, completion owns that stream. Make
+          // cancellation completion-wins so no unreturned native stream can leak.
+          co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
+          stream->id = stream_id;
+          connection->streams.emplace(stream_id, stream);
+          connection->update_active_stream_metrics();
+          connection->metrics.streams_opened.fetch_add(1, std::memory_order_relaxed);
+          co_await connection->drain_send();
+          if (connection->closing || connection->canceled) {
+             throw_engine(engine_error_kind::connection_closed, "QUIC connection closed while opening stream");
+          }
+          co_return std::shared_ptr<engine_stream>{new engine_stream{std::move(stream)}};
+       },
+       asio::use_awaitable);
 }
 
 boost::asio::awaitable<std::shared_ptr<engine_stream>> engine_connection::async_accept_stream() {
    if (!impl_) {
       throw_engine(engine_error_kind::connection_closed, "invalid QUIC connection");
    }
-   co_await asio::dispatch(impl_->strand, asio::use_awaitable);
-   while (impl_->accepted_streams.empty() && !impl_->closing && !impl_->canceled) {
-      auto timer = std::make_shared<asio::steady_timer>(impl_->strand);
-      timer->expires_after(std::chrono::minutes{10});
-      impl_->accept_stream_waiters.emplace_back(timer);
-      boost::system::error_code ec;
-      co_await timer->async_wait(asio::redirect_error(asio::use_awaitable, ec));
-      co_await asio::dispatch(impl_->strand, asio::use_awaitable);
-   }
-   if (impl_->accepted_streams.empty()) {
-      throw_engine(engine_error_kind::connection_closed, "QUIC connection closed before accepting stream");
-   }
-   auto stream = std::move(impl_->accepted_streams.front());
-   impl_->accepted_streams.pop_front();
-   co_return std::shared_ptr<engine_stream>{new engine_stream{std::move(stream)}};
+   co_return co_await asio::co_spawn(
+       impl_->strand,
+       [connection = impl_]() -> asio::awaitable<std::shared_ptr<engine_stream>> {
+          while (connection->accepted_streams.empty() && !connection->closing && !connection->canceled) {
+             auto timer = std::make_shared<asio::steady_timer>(connection->strand);
+             timer->expires_after(std::chrono::minutes{10});
+             connection->accept_stream_waiters.emplace_back(timer);
+             boost::system::error_code ec;
+             co_await timer->async_wait(asio::redirect_error(asio::use_awaitable, ec));
+          }
+          if (connection->accepted_streams.empty()) {
+             throw_engine(engine_error_kind::connection_closed, "QUIC connection closed before accepting stream");
+          }
+          auto stream = std::move(connection->accepted_streams.front());
+          connection->accepted_streams.pop_front();
+          co_return std::shared_ptr<engine_stream>{new engine_stream{std::move(stream)}};
+       },
+       asio::use_awaitable);
 }
 
 boost::asio::awaitable<void> engine_connection::async_close() {
    if (!impl_) {
       co_return;
    }
-   co_await asio::dispatch(impl_->strand, asio::use_awaitable);
-   if (impl_->closing) {
-      co_await impl_->wait_background_idle();
-      co_return;
-   }
-   impl_->metrics.connections_closed.fetch_add(1, std::memory_order_relaxed);
-   impl_->close_transport(!impl_->server_side);
-   co_await impl_->wait_background_idle();
+   co_await asio::co_spawn(
+       impl_->strand,
+       [connection = impl_]() -> asio::awaitable<void> {
+          if (connection->closing) {
+             co_await connection->wait_background_idle();
+             co_return;
+          }
+          connection->metrics.connections_closed.fetch_add(1, std::memory_order_relaxed);
+          connection->closing = true;
+          if (connection->conn != nullptr) {
+             auto packet = std::array<std::uint8_t, max_udp_payload_size>{};
+             auto path = ngtcp2_path_storage{};
+             ngtcp2_path_storage_zero(&path);
+             auto packet_info = ngtcp2_pkt_info{};
+             auto close_error = ngtcp2_ccerr{};
+             ngtcp2_ccerr_default(&close_error);
+             ngtcp2_ccerr_set_application_error(&close_error, 0, nullptr, 0);
+             const auto written = ngtcp2_conn_write_connection_close(
+                connection->conn, &path.path, &packet_info, packet.data(), packet.size(), &close_error, timestamp());
+             if (written > 0) {
+                auto send_error = boost::system::error_code{};
+                const auto packet_size = static_cast<std::size_t>(written);
+                if (connection->server_socket) {
+                   send_error = co_await connection->server_socket->async_send(
+                      std::vector<std::uint8_t>{packet.begin(), packet.begin() + written}, connection->remote_endpoint);
+                   co_await asio::dispatch(connection->strand, asio::use_awaitable);
+                } else if (connection->socket) {
+                   co_await connection->socket->async_send_to(
+                      asio::buffer(packet.data(), packet_size), connection->remote_endpoint,
+                      asio::redirect_error(asio::use_awaitable, send_error));
+                }
+                if (!send_error) {
+                   connection->metrics.packets_sent.fetch_add(1, std::memory_order_relaxed);
+                   connection->metrics.bytes_sent.fetch_add(packet_size, std::memory_order_relaxed);
+                }
+             }
+          }
+          connection->close_transport(!connection->server_side);
+          co_await connection->wait_background_idle();
+       },
+       asio::use_awaitable);
 }
 
 void engine_connection::cancel() {
@@ -1973,7 +2238,6 @@ void engine_connection::cancel() {
    asio::post(impl_->strand, [impl = impl_] {
       impl->metrics.cancellations.fetch_add(1, std::memory_order_relaxed);
       impl->fail_all();
-      impl->cancel_transport_io(!impl->server_side);
    });
 }
 
@@ -2029,21 +2293,24 @@ struct engine_connector::impl {
             connection_value = connection.lock();
          }
          if (resolver_value) {
-            try {
-               resolver_value->cancel();
-            } catch (...) {
-               // Resolver cancellation is best-effort once the caller has canceled connect.
-            }
-         }
-         if (socket_value) {
-            auto ignored = boost::system::error_code{};
-            socket_value->cancel(ignored);
+            asio::post(resolver_value->get_executor(), [resolver_value] {
+               try {
+                  resolver_value->cancel();
+               } catch (...) {
+                  // Resolver cancellation is best-effort once the caller has canceled connect.
+               }
+            });
          }
          if (connection_value) {
             asio::post(connection_value->strand, [connection_value] {
                connection_value->metrics.cancellations.fetch_add(1, std::memory_order_relaxed);
                connection_value->fail_all();
-               connection_value->cancel_transport_io(true);
+            });
+         } else if (socket_value) {
+            asio::post(socket_value->get_executor(), [socket_value] {
+               auto ignored = boost::system::error_code{};
+               socket_value->cancel(ignored);
+               socket_value->close(ignored);
             });
          }
       }
@@ -2184,6 +2451,11 @@ engine_connector::async_connect(engine_endpoint remote, engine_client_options op
       finish_connect_or_throw();
       throw_engine(engine_error_kind::internal_error, "failed to bind QUIC UDP socket: " + ec.message());
    }
+   const auto local_endpoint = socket->local_endpoint(ec);
+   if (ec) {
+      finish_connect_or_throw();
+      throw_engine(engine_error_kind::internal_error, "failed to read QUIC UDP socket endpoint: " + ec.message());
+   }
    if (active_connect->canceled()) {
       connect_timer->cancel();
       throw_engine(engine_error_kind::canceled, "QUIC client connect canceled");
@@ -2193,8 +2465,8 @@ engine_connector::async_connect(engine_endpoint remote, engine_client_options op
       throw_engine(engine_error_kind::connect_timeout, "QUIC client connect timed out");
    }
 
-   auto connection_impl =
-       std::make_shared<engine_connection::impl>(impl_->context, socket, remote_endpoint.endpoint(), options.limits);
+   auto connection_impl = std::make_shared<engine_connection::impl>(impl_->context, socket, local_endpoint,
+                                                                    remote_endpoint.endpoint(), options.limits);
    connection_impl->self = connection_impl;
    connection_impl->metrics.connections_opened.store(1, std::memory_order_relaxed);
    connection_impl->metrics.handshakes_started.store(1, std::memory_order_relaxed);
@@ -2205,64 +2477,79 @@ engine_connector::async_connect(engine_endpoint remote, engine_client_options op
    }
    if (active_connect->canceled()) {
       connect_timer->cancel();
-      co_await asio::dispatch(connection_impl->strand, asio::use_awaitable);
-      connection_impl->fail_all();
-      connection_impl->cancel_transport_io(true);
+      co_await asio::co_spawn(
+          connection_impl->strand,
+          [connection_impl]() -> asio::awaitable<void> {
+             connection_impl->fail_all();
+             co_return;
+          },
+          asio::use_awaitable);
       throw_engine(engine_error_kind::canceled, "QUIC client connect canceled");
    }
    if (active_connect->timed_out()) {
       connect_timer->cancel();
-      co_await asio::dispatch(connection_impl->strand, asio::use_awaitable);
-      connection_impl->fail_all();
+      co_await asio::co_spawn(
+          connection_impl->strand,
+          [connection_impl]() -> asio::awaitable<void> {
+             connection_impl->fail_all();
+             co_return;
+          },
+          asio::use_awaitable);
       throw_engine(engine_error_kind::connect_timeout, "QUIC client connect timed out");
    }
 
    auto connect_error = std::exception_ptr{};
    auto handshake_limited_by_connect_deadline = false;
    try {
-      auto callbacks = client_callbacks();
-      auto settings = ngtcp2_settings{};
-      auto params = ngtcp2_transport_params{};
-      configure_settings(settings);
-      configure_params(params, options.limits, options.idle_timeout);
+      co_await asio::co_spawn(
+          connection_impl->strand,
+          [&]() -> asio::awaitable<void> {
+             auto callbacks = client_callbacks();
+             auto settings = ngtcp2_settings{};
+             auto params = ngtcp2_transport_params{};
+             configure_settings(settings);
+             configure_params(params, options.limits, options.idle_timeout);
 
-      const auto dcid = random_cid(NGTCP2_MIN_INITIAL_DCIDLEN);
-      const auto scid = random_cid(cid_length);
-      auto path = make_path(socket->local_endpoint(), remote_endpoint.endpoint());
-      const auto rv = ngtcp2_conn_client_new(&connection_impl->conn, &dcid, &scid, &path.path, NGTCP2_PROTO_VER_V1,
-                                             &callbacks, &settings, &params, nullptr, connection_impl.get());
-      if (rv != 0) {
-         throw_engine(engine_error_kind::internal_error,
-                      std::string{"ngtcp2_conn_client_new failed: "} + ngtcp2_strerror(rv));
-      }
-
-      configure_client_tls(*connection_impl, remote, options);
-      ngtcp2_conn_set_tls_native_handle(connection_impl->conn, connection_impl->ossl_ctx);
-      connection_impl->start_client_receive_loop();
-      connection_impl->spawn_background(
-          [](const std::shared_ptr<engine_connection::impl>& value) -> asio::awaitable<void> {
-             try {
-                co_await value->drain_send();
-             } catch (const engine_failure&) {
-                value->fail_all();
+             const auto dcid = random_cid(NGTCP2_MIN_INITIAL_DCIDLEN);
+             const auto scid = random_cid(cid_length);
+             auto path = make_path(socket->local_endpoint(), remote_endpoint.endpoint());
+             const auto rv =
+                 ngtcp2_conn_client_new(&connection_impl->conn, &dcid, &scid, &path.path, NGTCP2_PROTO_VER_V1,
+                                        &callbacks, &settings, &params, nullptr, connection_impl.get());
+             if (rv != 0) {
+                throw_engine(engine_error_kind::internal_error,
+                             std::string{"ngtcp2_conn_client_new failed: "} + ngtcp2_strerror(rv));
              }
-          });
-      const auto remaining_connect_timeout = remaining_timeout_budget(connect_started, options.connect_timeout);
-      if (remaining_connect_timeout.count() <= 0) {
-         throw_engine(engine_error_kind::connect_timeout, "QUIC client connect timed out");
-      }
-      handshake_limited_by_connect_deadline = remaining_connect_timeout < options.handshake_timeout;
-      co_await connection_impl->wait_handshake(std::min(options.handshake_timeout, remaining_connect_timeout));
-      if (active_connect->canceled()) {
-         throw_engine(engine_error_kind::canceled, "QUIC client connect canceled");
-      }
-      if (active_connect->timed_out()) {
-         throw_engine(engine_error_kind::connect_timeout, "QUIC client connect timed out");
-      }
-      connection_impl->verify_selected_alpn(options.alpn);
-      connection_impl->verify_peer(options.security);
+             validate_packet_buffer(connection_impl->conn);
+
+             configure_client_tls(*connection_impl, remote, options);
+             ngtcp2_conn_set_tls_native_handle(connection_impl->conn, connection_impl->ossl_ctx);
+             connection_impl->start_client_receive_loop();
+             connection_impl->spawn_background(
+                 [](const std::shared_ptr<engine_connection::impl>& value) -> asio::awaitable<void> {
+                    try {
+                       co_await value->drain_send();
+                    } catch (const engine_failure&) {
+                       value->fail_all();
+                    }
+                 });
+             const auto remaining_connect_timeout = remaining_timeout_budget(connect_started, options.connect_timeout);
+             if (remaining_connect_timeout.count() <= 0) {
+                throw_engine(engine_error_kind::connect_timeout, "QUIC client connect timed out");
+             }
+             handshake_limited_by_connect_deadline = remaining_connect_timeout < options.handshake_timeout;
+             co_await connection_impl->wait_handshake(std::min(options.handshake_timeout, remaining_connect_timeout));
+             if (active_connect->canceled()) {
+                throw_engine(engine_error_kind::canceled, "QUIC client connect canceled");
+             }
+             if (active_connect->timed_out()) {
+                throw_engine(engine_error_kind::connect_timeout, "QUIC client connect timed out");
+             }
+             connection_impl->verify_selected_alpn(options.alpn);
+             connection_impl->verify_peer(options.security);
+          },
+          asio::use_awaitable);
       finish_connect_or_throw();
-      connect_timer->cancel();
    } catch (const engine_failure& error) {
       if (active_connect->canceled()) {
          connect_error =
@@ -2280,9 +2567,13 @@ engine_connector::async_connect(engine_endpoint remote, engine_client_options op
    if (connect_error) {
       (void)active_connect->finish();
       connect_timer->cancel();
-      co_await asio::dispatch(connection_impl->strand, asio::use_awaitable);
-      connection_impl->fail_all();
-      connection_impl->cancel_transport_io(true);
+      co_await asio::co_spawn(
+          connection_impl->strand,
+          [connection_impl]() -> asio::awaitable<void> {
+             connection_impl->fail_all();
+             co_return;
+          },
+          asio::use_awaitable);
       std::rethrow_exception(connect_error);
    }
    co_return std::shared_ptr<engine_connection>{new engine_connection{std::move(connection_impl)}};
@@ -2306,6 +2597,7 @@ struct engine_listener::impl {
    engine_endpoint bind_endpoint;
    engine_server_options options;
    stateless_reset_secret reset_secret = random_stateless_reset_secret();
+   stateless_reset_secret retry_secret = random_stateless_reset_secret();
    std::mutex cid_mutex;
    std::unordered_map<std::string, std::shared_ptr<engine_connection::impl>> connections_by_cid;
    std::unordered_map<engine_connection::impl*, std::vector<std::string>> cids_by_connection;
@@ -2540,53 +2832,102 @@ struct engine_listener::impl {
       }
    }
 
-   void cleanup_connection(const std::shared_ptr<engine_connection::impl>& connection) {
+   [[nodiscard]] bool release_connection_slot(engine_connection::impl* connection) {
+      auto had_connection_ids = false;
+      auto lock = std::scoped_lock{cid_mutex};
+      auto it = cids_by_connection.find(connection);
+      if (it == cids_by_connection.end()) {
+         return false;
+      }
+      had_connection_ids = true;
+      for (const auto& key : it->second) {
+         auto cid = connections_by_cid.find(key);
+         if (cid != connections_by_cid.end() && cid->second.get() == connection) {
+            connections_by_cid.erase(cid);
+         }
+      }
+      cids_by_connection.erase(it);
+      return had_connection_ids;
+   }
+
+   void cleanup_connection(const std::shared_ptr<engine_connection::impl>& connection, bool had_connection_ids) {
       const auto has_accept_waiter = std::ranges::any_of(
           accept_waiters, [](const std::weak_ptr<asio::steady_timer>& waiter) { return !waiter.expired(); });
       const auto failed_before_accept =
-          has_accept_waiter && !connection->handshake_done && !connection->listener_accept_notified && !stopped;
-      auto had_connection_ids = false;
-      {
-         auto lock = std::scoped_lock{cid_mutex};
-         auto it = cids_by_connection.find(connection.get());
-         if (it != cids_by_connection.end()) {
-            had_connection_ids = true;
-            for (const auto& key : it->second) {
-               auto cid = connections_by_cid.find(key);
-               if (cid != connections_by_cid.end() && cid->second.get() == connection.get()) {
-                  connections_by_cid.erase(cid);
-               }
-            }
-            cids_by_connection.erase(it);
-         }
-      }
+          has_accept_waiter && connection->report_accept_failure && !connection->handshake_done &&
+          !connection->listener_accept_notified && !stopped;
       if (failed_before_accept && had_connection_ids) {
          const auto timed_out = connection->metrics.timeouts.load(std::memory_order_relaxed) > 0;
          pending_accept_error = timed_out ? engine_error_kind::handshake_timeout : engine_error_kind::connection_closed;
          pending_accept_failure_text = timed_out ? "QUIC server handshake timed out before accept"
                                                  : "QUIC server connection closed before accept";
+      }
+      if (had_connection_ids && pending_accept_error) {
          wake(accept_waiters);
       }
    }
 
    void start_handshake_deadline(const std::shared_ptr<engine_connection::impl>& connection) {
-      connection->handshake_timer.expires_after(options.handshake_timeout);
-      connection->spawn_background([](const std::shared_ptr<engine_connection::impl>& value) -> asio::awaitable<void> {
-         if (value->handshake_done || value->closing || value->canceled) {
-            co_return;
-         }
-         auto ec = boost::system::error_code{};
-         co_await value->handshake_timer.async_wait(asio::redirect_error(asio::use_awaitable, ec));
-         if (ec) {
-            co_return;
-         }
-         if (value->handshake_done || value->closing || value->canceled) {
-            co_return;
-         }
-         value->metrics.handshakes_failed.fetch_add(1, std::memory_order_relaxed);
-         value->metrics.timeouts.fetch_add(1, std::memory_order_relaxed);
-         value->fail_all();
-      });
+      const auto timeout = options.handshake_timeout;
+      connection->spawn_background(
+          [timeout](const std::shared_ptr<engine_connection::impl>& value) -> asio::awaitable<void> {
+             if (value->handshake_done || value->closing || value->canceled) {
+                co_return;
+             }
+             value->handshake_timer.expires_after(timeout);
+             auto ec = boost::system::error_code{};
+             co_await value->handshake_timer.async_wait(asio::redirect_error(asio::use_awaitable, ec));
+             if (ec) {
+                co_return;
+             }
+             if (value->handshake_done || value->closing || value->canceled) {
+                co_return;
+             }
+             value->metrics.handshakes_failed.fetch_add(1, std::memory_order_relaxed);
+             value->metrics.timeouts.fetch_add(1, std::memory_order_relaxed);
+             value->fail_all();
+          });
+   }
+
+   boost::asio::awaitable<void> send_retry(const ngtcp2_pkt_hd& header, const udp::endpoint& remote) {
+      auto path = make_path(server_socket->local_endpoint(), remote);
+      const auto retry_scid = random_cid(cid_length);
+      auto token = std::array<std::uint8_t, NGTCP2_CRYPTO_MAX_RETRY_TOKENLEN>{};
+      const auto token_length = ngtcp2_crypto_generate_retry_token(
+          token.data(), retry_secret.data(), retry_secret.size(), header.version, path.path.remote.addr,
+          path.path.remote.addrlen, &retry_scid, &header.dcid, timestamp());
+      if (token_length < 0) {
+         throw_engine(engine_error_kind::internal_error, "failed to generate QUIC Retry token");
+      }
+
+      auto packet = std::array<std::uint8_t, max_udp_payload_size>{};
+      const auto packet_length = ngtcp2_crypto_write_retry(
+          packet.data(), packet.size(), header.version, &header.scid, &retry_scid, &header.dcid, token.data(),
+          static_cast<std::size_t>(token_length));
+      if (packet_length < 0) {
+         throw_engine(engine_error_kind::internal_error, "failed to encode QUIC Retry packet");
+      }
+      const auto error = co_await server_socket->async_send(
+          std::vector<std::uint8_t>{packet.begin(), packet.begin() + packet_length}, remote);
+      if (error && error != asio::error::operation_aborted) {
+         throw_engine(engine_error_kind::internal_error, "failed to send QUIC Retry packet: " + error.message());
+      }
+   }
+
+   [[nodiscard]] std::optional<ngtcp2_cid> verify_retry(const ngtcp2_pkt_hd& header,
+                                                         const udp::endpoint& remote) const {
+      if (header.token == nullptr || header.tokenlen == 0) {
+         return std::nullopt;
+      }
+      auto path = make_path(server_socket->local_endpoint(), remote);
+      auto original_dcid = ngtcp2_cid{};
+      if (ngtcp2_crypto_verify_retry_token(&original_dcid, header.token, header.tokenlen, retry_secret.data(),
+                                           retry_secret.size(), header.version, path.path.remote.addr,
+                                           path.path.remote.addrlen, &header.dcid, retry_token_lifetime,
+                                           timestamp()) != 0) {
+         return std::nullopt;
+      }
+      return original_dcid;
    }
 
    boost::asio::awaitable<void> handle_packet(std::vector<std::uint8_t> packet, udp::endpoint from) {
@@ -2600,10 +2941,18 @@ struct engine_listener::impl {
       connection = find_connection_by_cid(key);
       if (!connection) {
          auto hd = ngtcp2_pkt_hd{};
-         if (ngtcp2_pkt_decode_hd_long(&hd, packet.data(), packet.size()) < 0) {
+         if (ngtcp2_pkt_decode_hd_long(&hd, packet.data(), packet.size()) < 0 || hd.type != NGTCP2_PKT_INITIAL) {
             co_return;
          }
-         connection = create_server_connection(hd, from);
+         if (hd.token == nullptr || hd.tokenlen == 0) {
+            co_await send_retry(hd, from);
+            co_return;
+         }
+         const auto original_dcid = verify_retry(hd, from);
+         if (!original_dcid) {
+            co_return;
+         }
+         connection = create_server_connection(hd, *original_dcid, from);
          register_connection_cid(connection, cid_key(hd.dcid.data, hd.dcid.datalen));
          auto local_cid = ngtcp2_cid{};
          ngtcp2_conn_get_scid(connection->conn, &local_cid);
@@ -2611,18 +2960,32 @@ struct engine_listener::impl {
          start_handshake_deadline(connection);
       }
       try {
-         co_await connection->handle_packet(std::move(packet), std::move(from));
+         co_await asio::co_spawn(connection->strand, connection->handle_packet(std::move(packet), std::move(from)),
+                                 asio::use_awaitable);
       } catch (const engine_failure&) {
          asio::post(connection->strand, [connection] { connection->fail_all(); });
       }
    }
 
-   [[nodiscard]] std::shared_ptr<engine_connection::impl> create_server_connection(const ngtcp2_pkt_hd& hd,
-                                                                                   const udp::endpoint& from) {
+   [[nodiscard]] std::shared_ptr<engine_connection::impl>
+   create_server_connection(const ngtcp2_pkt_hd& hd, const ngtcp2_cid& original_dcid, const udp::endpoint& from) {
       if (connection_count() >= options.limits.max_connections) {
          throw_engine(engine_error_kind::backpressure_rejected, "QUIC listener max connections exceeded");
       }
-      auto connection = std::make_shared<engine_connection::impl>(context, server_socket, from, options.limits);
+      auto admission = std::shared_ptr<void>{};
+      if (options.inbound_admission) {
+         try {
+            admission = options.inbound_admission();
+         } catch (...) {
+            throw_engine(engine_error_kind::backpressure_rejected, "QUIC inbound admission rejected");
+         }
+         if (!admission) {
+            throw_engine(engine_error_kind::backpressure_rejected, "QUIC inbound admission rejected");
+         }
+      }
+      auto connection = std::make_shared<engine_connection::impl>(context, server_socket, server_socket->local_endpoint(),
+                                                                  from, options.limits);
+      connection->inbound_admission = std::move(admission);
       connection->self = connection;
       connection->server_side = true;
       connection->reset_secret = reset_secret;
@@ -2634,8 +2997,9 @@ struct engine_listener::impl {
          if (!listener) {
             return;
          }
-         asio::post(listener->strand, [listener, closed_connection = std::move(closed_connection)] {
-            listener->cleanup_connection(closed_connection);
+         const auto had_connection_ids = listener->release_connection_slot(closed_connection.get());
+         asio::post(listener->strand, [listener, closed_connection = std::move(closed_connection), had_connection_ids] {
+            listener->cleanup_connection(closed_connection, had_connection_ids);
          });
       };
       connection->local_connection_id_issued_hook =
@@ -2680,8 +3044,10 @@ struct engine_listener::impl {
       auto params = ngtcp2_transport_params{};
       configure_settings(settings);
       configure_params(params, options.limits, options.idle_timeout);
-      params.original_dcid = hd.dcid;
+      params.original_dcid = original_dcid;
       params.original_dcid_present = 1;
+      params.retry_scid = hd.dcid;
+      params.retry_scid_present = 1;
       params.stateless_reset_token_present = 1;
 
       const auto scid = random_cid(cid_length);
@@ -2696,6 +3062,7 @@ struct engine_listener::impl {
          throw_engine(engine_error_kind::internal_error,
                       std::string{"ngtcp2_conn_server_new failed: "} + ngtcp2_strerror(rv));
       }
+      validate_packet_buffer(connection->conn);
       configure_server_tls(*connection, options);
       ngtcp2_conn_set_tls_native_handle(connection->conn, connection->ossl_ctx);
       return connection;
@@ -2733,38 +3100,42 @@ boost::asio::awaitable<std::shared_ptr<engine_connection>> engine_listener::asyn
       throw_engine(engine_error_kind::connection_closed, "invalid QUIC listener");
    }
    auto state = impl_;
-   co_await asio::dispatch(state->strand, asio::use_awaitable);
-   ++state->active_operations;
-   struct completion_guard {
-      std::shared_ptr<engine_listener::impl> value;
+   co_return co_await asio::co_spawn(
+       state->strand,
+       [state]() -> asio::awaitable<std::shared_ptr<engine_connection>> {
+          ++state->active_operations;
+          struct completion_guard {
+             std::shared_ptr<engine_listener::impl> value;
 
-      ~completion_guard() {
-         value->finish_operation();
-      }
-   } guard{state};
-   while (state->accepted.empty() && !state->stopped && !state->pending_accept_error) {
-      auto timer = std::make_shared<asio::steady_timer>(state->strand);
-      timer->expires_after(std::chrono::minutes{10});
-      state->accept_waiters.emplace_back(timer);
-      boost::system::error_code ec;
-      co_await timer->async_wait(asio::redirect_error(asio::use_awaitable, ec));
-      co_await asio::dispatch(state->strand, asio::use_awaitable);
-   }
-   if (state->accepted.empty() && state->pending_accept_error) {
-      const auto kind = *state->pending_accept_error;
-      auto message = std::move(state->pending_accept_failure_text);
-      state->pending_accept_error.reset();
-      state->pending_accept_failure_text.clear();
-      throw_engine(kind, message.empty() ? "QUIC listener accept failed" : message);
-   }
-   if (state->accepted.empty()) {
-      throw_engine(engine_error_kind::connection_closed, "QUIC listener stopped before accept");
-   }
-   state->pending_accept_error.reset();
-   state->pending_accept_failure_text.clear();
-   auto connection = std::move(state->accepted.front());
-   state->accepted.pop_front();
-   co_return connection;
+             ~completion_guard() {
+                value->finish_operation();
+             }
+          } guard{state};
+          while (state->accepted.empty() && !state->stopped &&
+                 (!state->pending_accept_error || state->connection_count() != 0)) {
+             auto timer = std::make_shared<asio::steady_timer>(state->strand);
+             timer->expires_after(std::chrono::minutes{10});
+             state->accept_waiters.emplace_back(timer);
+             boost::system::error_code ec;
+             co_await timer->async_wait(asio::redirect_error(asio::use_awaitable, ec));
+          }
+          if (state->accepted.empty() && state->pending_accept_error) {
+             const auto kind = *state->pending_accept_error;
+             auto message = std::move(state->pending_accept_failure_text);
+             state->pending_accept_error.reset();
+             state->pending_accept_failure_text.clear();
+             throw_engine(kind, message.empty() ? "QUIC listener accept failed" : message);
+          }
+          if (state->accepted.empty()) {
+             throw_engine(engine_error_kind::connection_closed, "QUIC listener stopped before accept");
+          }
+          state->pending_accept_error.reset();
+          state->pending_accept_failure_text.clear();
+          auto connection = std::move(state->accepted.front());
+          state->accepted.pop_front();
+          co_return connection;
+       },
+       asio::use_awaitable);
 }
 
 void engine_listener::stop() {
@@ -2780,8 +3151,10 @@ boost::asio::awaitable<void> engine_listener::async_stop() {
    }
    auto state = impl_;
    co_await asio::this_coro::reset_cancellation_state(asio::disable_cancellation{});
-   co_await asio::dispatch(state->strand, asio::use_awaitable);
-   const auto shutdown_action = state->begin_shutdown();
+   const auto shutdown_action = co_await asio::co_spawn(
+       state->strand,
+       [state]() -> asio::awaitable<engine_listener::impl::shutdown_action> { co_return state->begin_shutdown(); },
+       asio::use_awaitable);
    if (shutdown_action == engine_listener::impl::shutdown_action::done) {
       if (auto error = state->shutdown_failure()) {
          std::rethrow_exception(error);
@@ -2789,7 +3162,7 @@ boost::asio::awaitable<void> engine_listener::async_stop() {
       co_return;
    }
    if (shutdown_action == engine_listener::impl::shutdown_action::wait) {
-      co_await state->wait_shutdown_complete();
+      co_await asio::co_spawn(state->strand, state->wait_shutdown_complete(), asio::use_awaitable);
       if (auto error = state->shutdown_failure()) {
          std::rethrow_exception(error);
       }
@@ -2803,38 +3176,59 @@ boost::asio::awaitable<void> engine_listener::async_stop() {
    };
    auto connections = std::vector<std::shared_ptr<engine_connection::impl>>{};
    try {
-      connections = state->connections();
-      state->stop();
-      co_await state->wait_operations_idle();
-      for (auto& candidate : state->connections()) {
-         if (std::ranges::none_of(connections, [&](const auto& current) { return current.get() == candidate.get(); })) {
-            connections.push_back(std::move(candidate));
-         }
-      }
+      connections = co_await asio::co_spawn(
+          state->strand,
+          [state]() -> asio::awaitable<std::vector<std::shared_ptr<engine_connection::impl>>> {
+             auto connections = state->connections();
+             state->stop();
+             co_await state->wait_operations_idle();
+             for (auto& candidate : state->connections()) {
+                if (std::ranges::none_of(connections,
+                                         [&](const auto& current) { return current.get() == candidate.get(); })) {
+                   connections.push_back(std::move(candidate));
+                }
+             }
+             co_return connections;
+          },
+          asio::use_awaitable);
    } catch (...) {
       remember_shutdown_error();
    }
    for (const auto& connection : connections) {
       try {
-         co_await asio::dispatch(connection->strand, asio::use_awaitable);
-         connection->fail_all();
-         co_await connection->wait_background_idle();
-         co_await asio::dispatch(connection->strand, asio::use_awaitable);
-         connection->handshake_completed_hook = {};
-         connection->closed_hook = {};
-         connection->local_connection_id_issued_hook = {};
-         connection->local_connection_id_retired_hook = {};
+         co_await asio::co_spawn(
+             connection->strand,
+             [connection]() -> asio::awaitable<void> {
+                connection->fail_all();
+                co_await connection->wait_background_idle();
+                connection->handshake_completed_hook = {};
+                connection->closed_hook = {};
+                connection->local_connection_id_issued_hook = {};
+                connection->local_connection_id_retired_hook = {};
+             },
+             asio::use_awaitable);
       } catch (...) {
          remember_shutdown_error();
       }
    }
    try {
-      co_await asio::dispatch(state->strand, asio::use_awaitable);
-      state->clear_connection_registry();
+      co_await asio::co_spawn(
+          state->strand,
+          [state]() -> asio::awaitable<void> {
+             state->clear_connection_registry();
+             co_return;
+          },
+          asio::use_awaitable);
    } catch (...) {
       remember_shutdown_error();
    }
-   state->finish_shutdown(shutdown_error);
+   co_await asio::co_spawn(
+       state->strand,
+       [state, shutdown_error]() -> asio::awaitable<void> {
+          state->finish_shutdown(shutdown_error);
+          co_return;
+       },
+       asio::use_awaitable);
    if (shutdown_error) {
       std::rethrow_exception(shutdown_error);
    }

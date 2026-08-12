@@ -14,6 +14,8 @@ export module forge.net.p2p.diagnostics;
 import forge.net.p2p.discovery;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.identity;
+import forge.net.p2p.identify;
+import forge.net.p2p.lifecycle;
 import forge.net.p2p.protocol;
 import forge.net.p2p.pubsub;
 import forge.net.p2p.reachability;
@@ -149,11 +151,14 @@ struct diagnostics {
       std::chrono::milliseconds idle{0};
       bool closed = false;
       bool protected_peer = false;
+      identify::state identify_state = identify::state::unknown;
+      std::string identify_error;
    };
 
    struct connection_state {
       std::size_t active_sessions = 0;
       std::vector<peer_id> protected_peers;
+      std::size_t retained_identify_attempts = 0;
    };
 
    struct persistence_state {
@@ -174,6 +179,8 @@ struct diagnostics {
       std::vector<peer> peers;
       std::vector<session> sessions;
       persistence_state persistence;
+      lifecycle_status lifecycle;
+      resource_manager::limits effective_limits;
    };
 };
 
@@ -207,9 +214,11 @@ BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::peer, (),
                        protected_peer))
 BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::session, (),
                       (id, remote_peer, capabilities, path, relay_peer, direct_endpoint, remote_endpoint, direction,
-                       age, idle, closed, protected_peer))
-BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::connection_state, (), (active_sessions, protected_peers))
+                       age, idle, closed, protected_peer, identify_state, identify_error))
+BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::connection_state, (),
+                      (active_sessions, protected_peers, retained_identify_attempts))
 BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::persistence_state, (),
                       (pending_peer_mutations, failure_count, degraded, closing, closed, last_failure))
 BOOST_DESCRIBE_STRUCT(forge::net::p2p::diagnostics::snapshot, (),
-                      (network, metrics, resources, pubsub, connections, peers, sessions, persistence))
+                      (network, metrics, resources, pubsub, connections, peers, sessions, persistence, lifecycle,
+                       effective_limits))

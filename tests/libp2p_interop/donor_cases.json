@@ -1,9 +1,5 @@
 {
-  "allowed_mapping_states": [
-    "mapped",
-    "not_applicable",
-    "unsupported"
-  ],
+  "allowed_mapping_states": [ "mapped", "not_applicable", "unsupported" ],
   "status_scope": "donor_case_coverage_only",
   "execution_scope": "registered_optional_tests_not_current_results",
   "production_inventory": "p2p_feature_inventory.json",
@@ -22,49 +18,44 @@
       "id": "multiaddr.text_binary_roundtrip",
       "protocol": "Multiaddr",
       "source": "donors/libp2p-specs/addressing/README.md and donors/multiaddr/protocols.csv",
-      "donor": "donors/multiaddr/test/multiaddr.feature Simple string form/Simple packed form; donors/go-multiaddr/multiaddr_test.go valid roundtrip cases; donors/rust-multiaddr/tests/lib.rs valid multiaddr cases",
+      "donor":
+          "donors/multiaddr/test/multiaddr.feature Simple string form/Simple packed form; donors/go-multiaddr/multiaddr_test.go valid roundtrip cases; donors/rust-multiaddr/tests/lib.rs valid multiaddr cases",
       "donor_file": [
-        "donors/libp2p-specs/addressing/README.md",
-        "donors/multiaddr/protocols.csv",
-        "donors/multiaddr/test/multiaddr.feature",
-        "donors/go-multiaddr/multiaddr_test.go",
+        "donors/libp2p-specs/addressing/README.md", "donors/multiaddr/protocols.csv",
+        "donors/multiaddr/test/multiaddr.feature", "donors/go-multiaddr/multiaddr_test.go",
         "donors/rust-multiaddr/tests/lib.rs"
       ],
-      "donor_case": ["text roundtrip", "binary roundtrip", "protocol code table"],
+      "donor_case": [ "text roundtrip", "binary roundtrip", "protocol code table" ],
       "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_multiformats multiaddr_matches_donor_tcp_and_quic_binary_vectors",
         "test_forge_multiformats multiaddr_roundtrips_dns_wss_peer_and_relay_circuit"
       ],
-      "known_gap": "No standalone live fixture; exercised indirectly by live P2P address exchange and kept as multiformats component proof."
+      "known_gap":
+          "No standalone live fixture; exercised indirectly by live P2P address exchange and kept as multiformats component proof."
     },
     {
       "id": "multiaddr.encapsulation_decapsulation",
       "protocol": "Multiaddr",
       "source": "donors/libp2p-specs/addressing/README.md Composing multiaddrs",
       "donor": "donors/go-multiaddr/multiaddr_test.go TestEncapsulate/TestDecapsulate/TestDecapsulateComment",
-      "donor_file": [
-        "donors/libp2p-specs/addressing/README.md",
-        "donors/go-multiaddr/multiaddr_test.go"
-      ],
-      "donor_case": ["TestEncapsulate", "TestDecapsulate", "TestDecapsulateComment"],
+      "donor_file": [ "donors/libp2p-specs/addressing/README.md", "donors/go-multiaddr/multiaddr_test.go" ],
+      "donor_case": [ "TestEncapsulate", "TestDecapsulate", "TestDecapsulateComment" ],
       "mapping_state": "mapped",
-      "forge_tests": [
-        "test_forge_multiformats multiaddr_encapsulates_and_decapsulates_like_libp2p"
-      ],
+      "forge_tests": [ "test_forge_multiformats multiaddr_encapsulates_and_decapsulates_like_libp2p" ],
       "known_gap": "No standalone live fixture; encapsulation and decapsulation are component-level multiaddr behavior."
     },
     {
       "id": "multiaddr.p2p_endpoint_views",
       "protocol": "Multiaddr/P2P Endpoint",
       "source": "donors/libp2p-specs/addressing/README.md Transport multiaddrs and p2p-circuit Relay Addresses",
-      "donor": "donors/libp2p-specs/quic/README.md QUIC multiaddress examples; donors/go-libp2p/libp2p_test.go listen address expectations",
+      "donor":
+          "donors/libp2p-specs/quic/README.md QUIC multiaddress examples; donors/go-libp2p/libp2p_test.go listen address expectations",
       "donor_file": [
-        "donors/libp2p-specs/addressing/README.md",
-        "donors/libp2p-specs/quic/README.md",
+        "donors/libp2p-specs/addressing/README.md", "donors/libp2p-specs/quic/README.md",
         "donors/go-libp2p/libp2p_test.go"
       ],
-      "donor_case": ["transport address", "peer identity suffix", "relay circuit address"],
+      "donor_case": [ "transport address", "peer identity suffix", "relay circuit address" ],
       "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_quic_p2p p2p_endpoint_parses_libp2p_quic_address_format",
@@ -73,7 +64,10 @@
         "test_forge_libp2p_interop identify"
       ],
       "forge_live_scenario": [
-        {"profile": "quic_base", "scenario": "identify"}
+        {
+          "profile": "quic_base",
+          "scenario": "identify"
+        }
       ],
       "known_gap": "`/ws` and `/wss` have parse/store coverage only; no dial/listen live scenario is claimed."
     },
@@ -82,11 +76,9 @@
       "protocol": "AutoNAT v2",
       "source": "donors/libp2p-specs/autonat/autonat-v2.md",
       "donor": "go-libp2p/p2p/protocol/autonatv2/autonat_test.go TestClientRequest/TestClientDataRequest",
-      "donor_file": [
-        "donors/libp2p-specs/autonat/autonat-v2.md",
-        "donors/go-libp2p/p2p/protocol/autonatv2/autonat_test.go"
-      ],
-      "donor_case": ["TestClientRequest", "TestClientDataRequest", "nonce validation"],
+      "donor_file":
+          [ "donors/libp2p-specs/autonat/autonat-v2.md", "donors/go-libp2p/p2p/protocol/autonatv2/autonat_test.go" ],
+      "donor_case": [ "TestClientRequest", "TestClientDataRequest", "nonce validation" ],
       "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_quic_p2p p2p_libp2p_autonat_v2_codec_covers_nonce_data_and_statuses",
@@ -94,7 +86,10 @@
         "test_forge_libp2p_interop autonatv2"
       ],
       "forge_live_scenario": [
-        {"profile": "quic_base", "scenario": "autonatv2"}
+        {
+          "profile": "quic_base",
+          "scenario": "autonatv2"
+        }
       ]
     },
     {
@@ -102,16 +97,13 @@
       "protocol": "AutoNAT v2",
       "source": "donors/libp2p-specs/autonat/autonat-v2.md",
       "donor": "go-libp2p/p2p/protocol/autonatv2/autonat_test.go TestClientServerError",
-      "donor_file": [
-        "donors/libp2p-specs/autonat/autonat-v2.md",
-        "donors/go-libp2p/p2p/protocol/autonatv2/autonat_test.go"
-      ],
-      "donor_case": ["TestClientServerError", "oversized data rejection"],
+      "donor_file":
+          [ "donors/libp2p-specs/autonat/autonat-v2.md", "donors/go-libp2p/p2p/protocol/autonatv2/autonat_test.go" ],
+      "donor_case": [ "TestClientServerError", "oversized data rejection" ],
       "mapping_state": "mapped",
-      "forge_tests": [
-        "test_forge_quic_p2p p2p_libp2p_autonat_v2_rejects_oversized_data_response_and_unknown_status"
-      ],
-      "known_gap": "Negative malformed and oversized AutoNAT v2 behavior is component-only; live fixtures exercise valid exchanges."
+      "forge_tests": [ "test_forge_quic_p2p p2p_libp2p_autonat_v2_rejects_oversized_data_response_and_unknown_status" ],
+      "known_gap":
+          "Negative malformed and oversized AutoNAT v2 behavior is component-only; live fixtures exercise valid exchanges."
     },
     {
       "id": "relayv2.reserve_connect_status",
@@ -119,15 +111,12 @@
       "source": "donors/libp2p-specs/relay/circuit-v2.md and docs/donors/fcl-p2p-reachability-relay-v1.md",
       "donor": "go-libp2p Circuit Relay v2 protocol tests and rust-libp2p relay protocol tests",
       "donor_file": [
-        "donors/libp2p-specs/relay/circuit-v2.md",
-        "donors/go-libp2p/p2p/protocol/circuitv2/relay/relay_test.go",
+        "donors/libp2p-specs/relay/circuit-v2.md", "donors/go-libp2p/p2p/protocol/circuitv2/relay/relay_test.go",
         "donors/go-libp2p/p2p/protocol/circuitv2/relay/relay_priv_test.go",
         "donors/rust-libp2p/protocols/relay/tests/lib.rs"
       ],
       "donor_case": [
-        "RESERVE request and response",
-        "CONNECT and STOP status",
-        "reservation limits and expiration",
+        "RESERVE request and response", "CONNECT and STOP status", "reservation limits and expiration",
         "relayed stream forwarding"
       ],
       "mapping_state": "mapped",
@@ -140,7 +129,10 @@
         "test_forge_libp2p_interop relay_reserve"
       ],
       "forge_live_scenario": [
-        {"profile": "quic_base", "scenario": "relay_reserve"}
+        {
+          "profile": "quic_base",
+          "scenario": "relay_reserve"
+        }
       ]
     },
     {
@@ -152,14 +144,15 @@
         "donors/libp2p-specs/RFC/0002-signed-envelopes.md",
         "donors/go-libp2p/p2p/protocol/circuitv2/relay/relay_priv_test.go"
       ],
-      "donor_case": ["signed envelope domain", "relay reservation voucher validation"],
+      "donor_case": [ "signed envelope domain", "relay reservation voucher validation" ],
       "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_quic_p2p p2p_signed_envelope_seals_and_verifies_domain_payload_and_signer",
         "test_forge_quic_p2p p2p_relay_voucher_uses_signed_envelope_and_rejects_stale_or_wrong_signer",
         "test_forge_quic_p2p p2p_libp2p_relay_wire_roundtrips_statuses_limits_and_voucher"
       ],
-      "known_gap": "Voucher signature failure cases are component-only; live relay fixtures exercise valid vouchers and reservations."
+      "known_gap":
+          "Voucher signature failure cases are component-only; live relay fixtures exercise valid vouchers and reservations."
     },
     {
       "id": "autorelay.discovery_reservation_lifecycle",
@@ -167,10 +160,9 @@
       "source": "donors/libp2p-specs/relay/circuit-v2.md",
       "donor": "go-libp2p p2p/host/autorelay relay_finder and rust-libp2p relay priv_client reservation lifecycle",
       "donor_file": [
-        "donors/go-libp2p/p2p/host/autorelay/relay_finder.go",
-        "donors/rust-libp2p/protocols/relay/src/priv_client.rs"
+        "donors/go-libp2p/p2p/host/autorelay/relay_finder.go", "donors/rust-libp2p/protocols/relay/src/priv_client.rs"
       ],
-      "donor_case": ["candidate discovery", "reservation renewal", "candidate backoff"],
+      "donor_case": [ "candidate discovery", "reservation renewal", "candidate backoff" ],
       "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_quic_p2p p2p_autorelay_refresh_reserves_peer_store_candidate",
@@ -180,18 +172,17 @@
         "test_forge_quic_p2p p2p_relay_fallback_refreshes_candidate_without_explicit_relay_peer",
         "test_forge_quic_p2p p2p_discovery_refresh_learns_dht_and_rendezvous_relay_candidates_for_autorelay"
       ],
-      "known_gap": "Live fixtures cover relay reservation and use; autonomous relay candidate discovery policy is component-only because fixtures do not expose every discovery source."
+      "known_gap":
+          "Live fixtures cover relay reservation and use; autonomous relay candidate discovery policy is component-only because fixtures do not expose every discovery source."
     },
     {
       "id": "dcutr.connect_sync_attempt",
       "protocol": "DCUtR",
       "source": "donors/libp2p-specs/relay/DCUtR.md",
       "donor": "go-libp2p/p2p/protocol/holepunch/holepunch_test.go",
-      "donor_file": [
-        "donors/libp2p-specs/relay/DCUtR.md",
-        "donors/go-libp2p/p2p/protocol/holepunch/holepunch_test.go"
-      ],
-      "donor_case": ["CONNECT", "SYNC", "simultaneous direct dial"],
+      "donor_file":
+          [ "donors/libp2p-specs/relay/DCUtR.md", "donors/go-libp2p/p2p/protocol/holepunch/holepunch_test.go" ],
+      "donor_case": [ "CONNECT", "SYNC", "simultaneous direct dial" ],
       "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_quic_p2p p2p_libp2p_dcutr_codec_matches_spec_shape",
@@ -199,7 +190,10 @@
         "test_forge_libp2p_interop dcutr_relay_topology"
       ],
       "forge_live_scenario": [
-        {"profile": "quic_topology", "scenario": "dcutr_relay_topology"}
+        {
+          "profile": "quic_topology",
+          "scenario": "dcutr_relay_topology"
+        }
       ]
     },
     {
@@ -207,25 +201,25 @@
       "protocol": "Resource Manager",
       "source": "go-libp2p resource-manager wrapping tests",
       "donor": "go-libp2p circuit dial with wrapped resource manager",
-      "donor_file": ["donors/go-libp2p/p2p/test/resource-manager/rcmgr_test.go"],
-      "donor_case": ["peer scope", "protocol scope", "dial scope"],
+      "donor_file": [ "donors/go-libp2p/p2p/test/resource-manager/rcmgr_test.go" ],
+      "donor_case": [ "peer scope", "protocol scope", "dial scope" ],
       "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_quic_p2p p2p_resource_manager_enforces_peer_protocol_dial_and_reservation_scopes",
         "test_forge_quic_p2p p2p_relay_policy_options_are_behavioral"
       ],
-      "known_gap": "Resource-manager scope failures are component-only; live interop remains the protocol compatibility gate."
+      "known_gap":
+          "Resource-manager scope failures are component-only; live interop remains the protocol compatibility gate."
     },
     {
       "id": "connection_manager.host_session_policy",
       "protocol": "Connection Manager",
       "source": "go-libp2p connmgr/resource-manager/swarm dial backoff and rust-libp2p connection-limits",
-      "donor": "go-libp2p low/high watermark pruning, protected peers, resource scopes, endpoint dial backoff and rust-libp2p swarm connection events",
-      "donor_file": [
-        "donors/go-libp2p/p2p/net/connmgr/connmgr_test.go",
-        "donors/rust-libp2p/swarm/src/connection/pool.rs"
-      ],
-      "donor_case": ["watermark pruning", "protected peer", "connection limit"],
+      "donor":
+          "go-libp2p low/high watermark pruning, protected peers, resource scopes, endpoint dial backoff and rust-libp2p swarm connection events",
+      "donor_file":
+          [ "donors/go-libp2p/p2p/net/connmgr/connmgr_test.go", "donors/rust-libp2p/swarm/src/connection/pool.rs" ],
+      "donor_case": [ "watermark pruning", "protected peer", "connection limit" ],
       "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_quic_p2p p2p_resource_manager_enforces_connection_session_scopes",
@@ -239,15 +233,17 @@
         "test_forge_quic_p2p p2p_path_manager_tries_next_direct_endpoint_after_attempt_timeout",
         "test_forge_quic_p2p p2p_abusive_peer_crossing_malformed_threshold_closes_only_offender_session"
       ],
-      "known_gap": "Live donor fixtures do not expose all pruning/protection knobs; component tests cover host policy and live interop remains the compatibility gate."
+      "known_gap":
+          "Live donor fixtures do not expose all pruning/protection knobs; component tests cover host policy and live interop remains the compatibility gate."
     },
     {
       "id": "plugin.p2p.resolver.metadata",
       "protocol": "FORGE P2P API Resolver",
       "source": "docs/donors/fcl-p2p-resolver-v1.md",
-      "donor": "libp2p Identify protocol-listing, Kubo CoreAPI facade pattern, Boxo service separation and rust-libp2p behaviour composition",
-      "donor_file": ["docs/donors/fcl-p2p-resolver-v1.md"],
-      "donor_case": ["metadata publication", "remote resolution", "facade separation"],
+      "donor":
+          "libp2p Identify protocol-listing, Kubo CoreAPI facade pattern, Boxo service separation and rust-libp2p behaviour composition",
+      "donor_file": [ "docs/donors/fcl-p2p-resolver-v1.md" ],
+      "donor_case": [ "metadata publication", "remote resolution", "facade separation" ],
       "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_plugins p2p_api_resolver_plugin_config_is_described_from_public_schema",
@@ -255,15 +251,17 @@
         "test_forge_plugins p2p_api_resolver_resolves_remote_api_and_opens_typed_remote",
         "test_forge_plugins p2p_api_resolver_rejects_malformed_remote_metadata_without_caching_it"
       ],
-      "known_gap": "`/forge/api/resolver/2` is an FORGE-specific metadata protocol; no Go/Rust libp2p resolver interop claim is made."
+      "known_gap":
+          "`/forge/api/resolver/2` is an FORGE-specific metadata protocol; no Go/Rust libp2p resolver interop claim is made."
     },
     {
       "id": "plugin.p2p_diagnostics_snapshot",
       "protocol": "FORGE P2P Diagnostics",
       "source": "docs/donors/fcl-p2p-node-plugin-delivery-automation.md",
-      "donor": "Kubo CoreAPI/service facade split, Go libp2p peerstore/connmgr/resource-manager visibility and rust-libp2p swarm state projection patterns",
-      "donor_file": ["docs/donors/fcl-p2p-node-plugin-delivery-automation.md"],
-      "donor_case": ["read-only diagnostics facade", "bounded snapshot", "plugin lifecycle"],
+      "donor":
+          "Kubo CoreAPI/service facade split, Go libp2p peerstore/connmgr/resource-manager visibility and rust-libp2p swarm state projection patterns",
+      "donor_file": [ "docs/donors/fcl-p2p-node-plugin-delivery-automation.md" ],
+      "donor_case": [ "read-only diagnostics facade", "bounded snapshot", "plugin lifecycle" ],
       "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_quic_p2p p2p_diagnostics_snapshot_reports_live_network_state_without_mutation",
@@ -272,18 +270,17 @@
         "test_forge_plugins p2p_diagnostics_api_rejects_facade_calls_before_initialize",
         "test_forge_plugins p2p_diagnostics_plugin_reports_live_p2p_node_state"
       ],
-      "known_gap": "`forge::plugins::p2p::diagnostics` is an FORGE in-process operator/test API over local snapshots; no Go/Rust libp2p wire interop claim is made."
+      "known_gap":
+          "`forge::plugins::p2p::diagnostics` is an FORGE in-process operator/test API over local snapshots; no Go/Rust libp2p wire interop claim is made."
     },
     {
       "id": "plugin.p2p_pubsub_facade",
       "protocol": "FORGE P2P PubSub Plugin",
       "source": "docs/donors/fcl-p2p-node-plugin-delivery-automation.md and docs/donors/fcl-p2p-gossipsub-v1.md",
-      "donor": "Go libp2p Topic/Subscription/RegisterTopicValidator, rust-libp2p Behaviour/Event validation and Kubo CoreAPI facade split",
-      "donor_file": [
-        "docs/donors/fcl-p2p-node-plugin-delivery-automation.md",
-        "docs/donors/fcl-p2p-gossipsub-v1.md"
-      ],
-      "donor_case": ["topic facade", "subscription ownership", "validator boundary"],
+      "donor":
+          "Go libp2p Topic/Subscription/RegisterTopicValidator, rust-libp2p Behaviour/Event validation and Kubo CoreAPI facade split",
+      "donor_file": [ "docs/donors/fcl-p2p-node-plugin-delivery-automation.md", "docs/donors/fcl-p2p-gossipsub-v1.md" ],
+      "donor_case": [ "topic facade", "subscription ownership", "validator boundary" ],
       "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_plugins p2p_pubsub_plugin_config_is_described_from_public_schema",
@@ -292,7 +289,8 @@
         "test_forge_plugins p2p_pubsub_plugin_publishes_and_subscribes_raw_and_typed_messages",
         "test_forge_plugins p2p_pubsub_plugin_enforces_topic_policy_and_handler_bounds"
       ],
-      "known_gap": "`forge::plugins::p2p::pubsub` is an FORGE in-process plugin facade over core GossipSub; Go/Rust wire compatibility remains tracked by the core GossipSub live cases."
+      "known_gap":
+          "`forge::plugins::p2p::pubsub` is an FORGE in-process plugin facade over core GossipSub; Go/Rust wire compatibility remains tracked by the core GossipSub live cases."
     },
     {
       "id": "interop.live_ping_identify_autonat_relay",
@@ -300,24 +298,32 @@
       "source": "go-libp2p and rust-libp2p live fixtures",
       "donor": "live fixtures launched by tests/libp2p_interop/runner.py",
       "donor_file": [
-        "donors/go-libp2p/p2p/protocol/ping/ping_test.go",
-        "donors/go-libp2p/p2p/protocol/identify/id_test.go",
-        "donors/rust-libp2p/protocols/ping/tests/ping.rs",
-        "donors/rust-libp2p/protocols/identify/tests/smoke.rs"
+        "donors/go-libp2p/p2p/protocol/ping/ping_test.go", "donors/go-libp2p/p2p/protocol/identify/id_test.go",
+        "donors/rust-libp2p/protocols/ping/tests/ping.rs", "donors/rust-libp2p/protocols/identify/tests/smoke.rs"
       ],
-      "donor_case": ["Ping", "Identify", "AutoNAT v2", "Relay reserve"],
+      "donor_case": [ "Ping", "Identify", "AutoNAT v2", "Relay reserve" ],
       "mapping_state": "mapped",
       "forge_tests": [
-        "test_forge_libp2p_interop ping",
-        "test_forge_libp2p_interop identify",
-        "test_forge_libp2p_interop autonatv2",
+        "test_forge_libp2p_interop ping", "test_forge_libp2p_interop identify", "test_forge_libp2p_interop autonatv2",
         "test_forge_libp2p_interop relay_reserve"
       ],
       "forge_live_scenario": [
-        {"profile": "quic_base", "scenario": "ping"},
-        {"profile": "quic_base", "scenario": "identify"},
-        {"profile": "quic_base", "scenario": "autonatv2"},
-        {"profile": "quic_base", "scenario": "relay_reserve"}
+        {
+          "profile": "quic_base",
+          "scenario": "ping"
+        },
+        {
+          "profile": "quic_base",
+          "scenario": "identify"
+        },
+        {
+          "profile": "quic_base",
+          "scenario": "autonatv2"
+        },
+        {
+          "profile": "quic_base",
+          "scenario": "relay_reserve"
+        }
       ]
     },
     {
@@ -326,33 +332,32 @@
       "source": "donors/libp2p-specs/connections/README.md and libp2p TCP transport composition",
       "donor": "go-libp2p defaults/upgrader/TCP/noise/yamux and rust-libp2p builder TCP+Noise+Yamux examples",
       "donor_file": [
-        "donors/go-libp2p/defaults.go",
-        "donors/go-libp2p/p2p/net/upgrader/upgrader.go",
-        "donors/go-libp2p/p2p/transport/tcp/tcp.go",
-        "donors/go-libp2p/p2p/security/noise/handshake.go",
-        "donors/go-libp2p/p2p/test/negotiation/security_test.go",
-        "donors/go-libp2p/p2p/test/negotiation/muxer_test.go",
-        "donors/rust-libp2p/libp2p/src/builder.rs",
-        "donors/rust-libp2p/interop-tests/src/arch.rs",
+        "donors/go-libp2p/defaults.go", "donors/go-libp2p/p2p/net/upgrader/upgrader.go",
+        "donors/go-libp2p/p2p/transport/tcp/tcp.go", "donors/go-libp2p/p2p/security/noise/handshake.go",
+        "donors/go-libp2p/p2p/test/negotiation/security_test.go", "donors/go-libp2p/p2p/test/negotiation/muxer_test.go",
+        "donors/rust-libp2p/libp2p/src/builder.rs", "donors/rust-libp2p/interop-tests/src/arch.rs",
         "donors/rust-libp2p/examples/ping/src/main.rs"
       ],
       "donor_case": [
-        "TCP direct transport",
-        "Noise security negotiation",
-        "Yamux muxer negotiation",
-        "Ping over TCP",
+        "TCP direct transport", "Noise security negotiation", "Yamux muxer negotiation", "Ping over TCP",
         "Identify over TCP"
       ],
       "mapping_state": "mapped",
-      "forge_tests": [
-        "test_forge_libp2p_interop ping",
-        "test_forge_libp2p_interop identify",
-        "test_forge_libp2p_interop echo"
-      ],
+      "forge_tests":
+          [ "test_forge_libp2p_interop ping", "test_forge_libp2p_interop identify", "test_forge_libp2p_interop echo" ],
       "forge_live_scenario": [
-        {"profile": "tcp_noise", "scenario": "ping"},
-        {"profile": "tcp_noise", "scenario": "identify"},
-        {"profile": "tcp_noise", "scenario": "echo"}
+        {
+          "profile": "tcp_noise",
+          "scenario": "ping"
+        },
+        {
+          "profile": "tcp_noise",
+          "scenario": "identify"
+        },
+        {
+          "profile": "tcp_noise",
+          "scenario": "echo"
+        }
       ],
       "known_gap": "`/ws` and `/wss` have parse/store coverage only; no dial/listen live scenario is claimed."
     },
@@ -362,31 +367,20 @@
       "source": "donors/libp2p-specs/tls/tls.md and connections/inlined-muxer-negotiation.md",
       "donor": "go-libp2p p2p/security/tls, rust-libp2p transports/tls and builder TCP+TLS+Yamux examples",
       "donor_file": [
-        "donors/libp2p-specs/tls/tls.md",
-        "donors/libp2p-specs/connections/inlined-muxer-negotiation.md",
-        "donors/go-libp2p/p2p/security/tls/crypto.go",
-        "donors/go-libp2p/p2p/security/tls/transport.go",
-        "donors/go-libp2p/p2p/security/tls/transport_test.go",
-        "donors/rust-libp2p/transports/tls/src/certificate.rs",
-        "donors/rust-libp2p/transports/tls/src/verifier.rs",
-        "donors/rust-libp2p/transports/tls/src/upgrade.rs",
-        "donors/rust-libp2p/transports/tls/tests/smoke.rs",
-        "donors/rust-libp2p/libp2p/src/builder.rs"
+        "donors/libp2p-specs/tls/tls.md", "donors/libp2p-specs/connections/inlined-muxer-negotiation.md",
+        "donors/go-libp2p/p2p/security/tls/crypto.go", "donors/go-libp2p/p2p/security/tls/transport.go",
+        "donors/go-libp2p/p2p/security/tls/transport_test.go", "donors/rust-libp2p/transports/tls/src/certificate.rs",
+        "donors/rust-libp2p/transports/tls/src/verifier.rs", "donors/rust-libp2p/transports/tls/src/upgrade.rs",
+        "donors/rust-libp2p/transports/tls/tests/smoke.rs", "donors/rust-libp2p/libp2p/src/builder.rs"
       ],
       "donor_case": [
-        "TLS security negotiation",
-        "libp2p certificate extension verification",
-        "missing certificate identity extension rejection",
-        "Peer ID verification",
-        "ALPN Yamux negotiation",
-        "fallback post-TLS mux negotiation",
-        "Ping over TCP TLS",
-        "Identify over TCP TLS"
+        "TLS security negotiation", "libp2p certificate extension verification",
+        "missing certificate identity extension rejection", "Peer ID verification", "ALPN Yamux negotiation",
+        "fallback post-TLS mux negotiation", "Ping over TCP TLS", "Identify over TCP TLS"
       ],
       "mapping_state": "mapped",
       "forge_tests": [
-        "test_forge_stcp stcp_controls_sni_explicitly",
-        "test_forge_stcp stcp_verifier_receives_full_certificate_chain",
+        "test_forge_stcp stcp_controls_sni_explicitly", "test_forge_stcp stcp_verifier_receives_full_certificate_chain",
         "test_forge_stcp stcp_requires_tls13_by_default",
         "test_forge_stcp stcp_alpn_selects_client_preferred_supported_protocol",
         "test_forge_quic_p2p p2p_direct_tcp_nodes_prefer_tls_yamux_and_echo_frames",
@@ -394,14 +388,21 @@
         "test_forge_quic_p2p p2p_certificate_without_libp2p_extension_is_rejected",
         "test_forge_quic_p2p p2p_direct_quic_rejects_missing_certificate_identity_without_expected_peer",
         "test_forge_quic_p2p p2p_direct_quic_rejects_missing_certificate_identity_with_endpoint_peer",
-        "test_forge_libp2p_interop ping",
-        "test_forge_libp2p_interop identify",
-        "test_forge_libp2p_interop echo"
+        "test_forge_libp2p_interop ping", "test_forge_libp2p_interop identify", "test_forge_libp2p_interop echo"
       ],
       "forge_live_scenario": [
-        {"profile": "tcp_tls", "scenario": "ping"},
-        {"profile": "tcp_tls", "scenario": "identify"},
-        {"profile": "tcp_tls", "scenario": "echo"}
+        {
+          "profile": "tcp_tls",
+          "scenario": "ping"
+        },
+        {
+          "profile": "tcp_tls",
+          "scenario": "identify"
+        },
+        {
+          "profile": "tcp_tls",
+          "scenario": "echo"
+        }
       ],
       "known_gap": "`/ws` and `/wss` have parse/store coverage only; no dial/listen live scenario is claimed."
     },
@@ -409,19 +410,15 @@
       "id": "p2p.host_multi_transport_orchestration",
       "protocol": "P2P Host",
       "source": "donors/libp2p-specs/addressing/README.md",
-      "donor": "go-libp2p default/listen transport registration tests and rust-libp2p SwarmBuilder transport/relay composition",
+      "donor":
+          "go-libp2p default/listen transport registration tests and rust-libp2p SwarmBuilder transport/relay composition",
       "donor_file": [
-        "donors/go-libp2p/defaults.go",
-        "donors/go-libp2p/libp2p_test.go",
-        "donors/rust-libp2p/libp2p/src/builder.rs",
-        "donors/rust-libp2p/libp2p/src/builder/phase/relay.rs",
-        "donors/libp2p-specs/addressing/README.md"
+        "donors/go-libp2p/defaults.go", "donors/go-libp2p/libp2p_test.go", "donors/rust-libp2p/libp2p/src/builder.rs",
+        "donors/rust-libp2p/libp2p/src/builder/phase/relay.rs", "donors/libp2p-specs/addressing/README.md"
       ],
       "donor_case": [
-        "multiple listen transports",
-        "transport registration controls listen support",
-        "host-level transport composition",
-        "relay path composed above direct transport",
+        "multiple listen transports", "transport registration controls listen support",
+        "host-level transport composition", "relay path composed above direct transport",
         "network address plus peer identity"
       ],
       "mapping_state": "mapped",
@@ -432,14 +429,22 @@
         "test_forge_quic_p2p p2p_identify_push_rejects_mismatched_endpoint_peer_suffix",
         "test_forge_quic_p2p p2p_stop_closes_all_direct_listeners",
         "test_forge_quic_p2p p2p_websocket_multiaddr_is_parseable_but_not_dialable",
-        "test_forge_libp2p_interop identify",
-        "test_forge_libp2p_interop ping",
+        "test_forge_libp2p_interop identify", "test_forge_libp2p_interop ping",
         "test_forge_libp2p_interop relay_reserve"
       ],
       "forge_live_scenario": [
-        {"profile": "quic_base", "scenario": "identify"},
-        {"profile": "quic_base", "scenario": "ping"},
-        {"profile": "quic_base", "scenario": "relay_reserve"}
+        {
+          "profile": "quic_base",
+          "scenario": "identify"
+        },
+        {
+          "profile": "quic_base",
+          "scenario": "ping"
+        },
+        {
+          "profile": "quic_base",
+          "scenario": "relay_reserve"
+        }
       ],
       "known_gap": "`/ws` and `/wss` have parse/store coverage only; no dial/listen live scenario is claimed."
     },
@@ -449,18 +454,17 @@
       "source": "donors/libp2p-specs/relay/DCUtR.md",
       "donor": "go-libp2p/rust-libp2p relayed connection hole-punching tests",
       "donor_file": [
-        "donors/libp2p-specs/relay/DCUtR.md",
-        "donors/go-libp2p/p2p/protocol/holepunch/holepunch_test.go",
+        "donors/libp2p-specs/relay/DCUtR.md", "donors/go-libp2p/p2p/protocol/holepunch/holepunch_test.go",
         "donors/rust-libp2p/protocols/dcutr/src/handler/relayed.rs"
       ],
-      "donor_case": ["mixed relay topology", "CONNECT", "SYNC", "direct upgrade"],
+      "donor_case": [ "mixed relay topology", "CONNECT", "SYNC", "direct upgrade" ],
       "mapping_state": "mapped",
-      "forge_tests": [
-        "test_forge_libp2p_interop dcutr_relay_topology",
-        "forge_interop_fixture dcutr_relay_topology"
-      ],
+      "forge_tests": [ "test_forge_libp2p_interop dcutr_relay_topology", "forge_interop_fixture dcutr_relay_topology" ],
       "forge_live_scenario": [
-        {"profile": "quic_topology", "scenario": "dcutr_relay_topology"}
+        {
+          "profile": "quic_topology",
+          "scenario": "dcutr_relay_topology"
+        }
       ]
     },
     {
@@ -468,16 +472,15 @@
       "protocol": "Kademlia DHT",
       "source": "donors/libp2p-specs/kad-dht/README.md",
       "donor": "rust-libp2p/protocols/kad tests and Kademlia routing table behavior",
-      "donor_file": [
-        "donors/libp2p-specs/kad-dht/README.md",
-        "donors/rust-libp2p/protocols/kad/src/kbucket.rs"
-      ],
-      "donor_case": ["XOR distance", "closest peers", "bucket capacity"],
+      "donor_file": [ "donors/libp2p-specs/kad-dht/README.md", "donors/rust-libp2p/protocols/kad/src/kbucket.rs" ],
+      "donor_case": [ "XOR distance", "closest peers", "bucket capacity" ],
       "mapping_state": "mapped",
       "forge_tests": [
-        "test_forge_quic_p2p p2p_dht_routing_table_uses_sha256_xor_distance_and_bounds_results"
+        "test_forge_quic_p2p p2p_dht_k_bucket_bounds_active_and_replacement_capacity",
+        "test_forge_quic_p2p p2p_dht_k_bucket_closest_is_sha256_xor_ordered_and_deterministic"
       ],
-      "known_gap": "Routing-table distance ordering is component-only; the current live peer lookup fixture can resolve an already connected peer without DHT negotiation."
+      "known_gap":
+          "Routing-table distance ordering is component-only; the current live peer lookup fixture can resolve an already connected peer without DHT negotiation."
     },
     {
       "id": "dht.message_codec_and_provider_records",
@@ -485,18 +488,18 @@
       "source": "donors/libp2p-specs/kad-dht/README.md",
       "donor": "rust-libp2p/protocols/kad/src/generated/dht.proto and provider lookup tests",
       "donor_file": [
-        "donors/libp2p-specs/kad-dht/README.md",
-        "donors/go-libp2p-kad-dht/pb/protocol_messenger.go",
+        "donors/libp2p-specs/kad-dht/README.md", "donors/go-libp2p-kad-dht/pb/protocol_messenger.go",
         "donors/rust-libp2p/protocols/kad/src/behaviour.rs"
       ],
-      "donor_case": ["message codec", "provider record", "malformed message rejection"],
+      "donor_case": [ "message codec", "provider record", "malformed message rejection" ],
       "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_quic_p2p p2p_dht_codec_roundtrips_libp2p_message_shape_and_rejects_malformed",
         "test_forge_quic_p2p p2p_dht_node_finds_peer_and_provider_over_negotiated_stream",
-        "test_forge_quic_p2p p2p_peer_store_rocksdb_persists_discovery_dht_and_rendezvous_state"
+        "test_forge_plugins_db_store p2p_peer_state_rocksdb_preserves_eviction_provider_and_sequence_state"
       ],
-      "known_gap": "Codec and persistence negative cases are component-only; only provider publication/discovery is credited as current live DHT evidence."
+      "known_gap":
+          "Codec and persistence negative cases are component-only; only provider publication/discovery is credited as current live DHT evidence."
     },
     {
       "id": "dht.iterative_lookup_and_provider_publication",
@@ -504,11 +507,10 @@
       "source": "donors/libp2p-specs/kad-dht/README.md",
       "donor": "go-libp2p-kad-dht query/provider behaviour and rust-libp2p kad query pool acceptance criteria",
       "donor_file": [
-        "donors/go-libp2p-kad-dht/query.go",
-        "donors/go-libp2p-kad-dht/query_test.go",
+        "donors/go-libp2p-kad-dht/query.go", "donors/go-libp2p-kad-dht/query_test.go",
         "donors/rust-libp2p/protocols/kad/src/behaviour.rs"
       ],
-      "donor_case": ["iterative query", "provider publication", "closest-peer convergence"],
+      "donor_case": [ "iterative query", "provider publication", "closest-peer convergence" ],
       "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_quic_p2p p2p_dht_iterative_lookup_walks_many_peer_topology",
@@ -522,18 +524,18 @@
       "source": "donors/libp2p-specs/rendezvous/README.md",
       "donor": "rust-libp2p/protocols/rendezvous/src/generated/rpc.proto and rendezvous behaviour tests",
       "donor_file": [
-        "donors/libp2p-specs/rendezvous/README.md",
-        "donors/rust-libp2p/protocols/rendezvous/src/generated/rpc.proto",
+        "donors/libp2p-specs/rendezvous/README.md", "donors/rust-libp2p/protocols/rendezvous/src/generated/rpc.proto",
         "donors/rust-libp2p/protocols/rendezvous/tests/rendezvous.rs"
       ],
-      "donor_case": ["Register", "Discover", "TTL", "cookie"],
+      "donor_case": [ "Register", "Discover", "TTL", "cookie" ],
       "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_quic_p2p p2p_rendezvous_codec_roundtrips_register_discover_cookie_and_status",
         "test_forge_quic_p2p p2p_rendezvous_node_registers_and_discovers_over_negotiated_stream",
-        "test_forge_quic_p2p p2p_peer_store_rocksdb_persists_discovery_dht_and_rendezvous_state"
+        "test_forge_plugins_db_store p2p_peer_state_rocksdb_preserves_eviction_provider_and_sequence_state"
       ],
-      "known_gap": "Component-level protocol and persistence proof; live Rust register/discover proof is tracked by interop.live_rendezvous_register_discover."
+      "known_gap":
+          "Component-level protocol and persistence proof; live Rust register/discover proof is tracked by interop.live_rendezvous_register_discover."
     },
     {
       "id": "rendezvous.refresh_cookie_and_discovery_feed",
@@ -541,17 +543,17 @@
       "source": "donors/libp2p-specs/rendezvous/README.md",
       "donor": "rust-libp2p rendezvous refresh, signed PeerRecord and cookie continuation behaviour",
       "donor_file": [
-        "donors/libp2p-specs/rendezvous/README.md",
-        "donors/rust-libp2p/protocols/rendezvous/src/client.rs",
+        "donors/libp2p-specs/rendezvous/README.md", "donors/rust-libp2p/protocols/rendezvous/src/client.rs",
         "donors/rust-libp2p/protocols/rendezvous/src/server.rs"
       ],
-      "donor_case": ["registration refresh", "cookie continuation", "signed peer record"],
+      "donor_case": [ "registration refresh", "cookie continuation", "signed peer record" ],
       "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_quic_p2p p2p_rendezvous_refresh_replaces_registration_and_cookie_discovers_new_records",
         "test_forge_quic_p2p p2p_discovery_refresh_learns_dht_and_rendezvous_relay_candidates_for_autorelay"
       ],
-      "known_gap": "Go rendezvous remains a wire-level future scenario because no official go-libp2p rendezvous behaviour donor is present"
+      "known_gap":
+          "Go rendezvous remains a wire-level future scenario because no official go-libp2p rendezvous behaviour donor is present"
     },
     {
       "id": "interop.live_dht_provider_lookup",
@@ -559,74 +561,59 @@
       "source": "donors/libp2p-specs/kad-dht/README.md",
       "donor": "go-libp2p-kad-dht FindPeer/Provide/FindProviders and rust-libp2p kad::Behaviour live fixtures",
       "donor_file": [
-        "donors/go-libp2p-kad-dht/routing.go",
-        "donors/go-libp2p-kad-dht/pb/protocol_messenger.go",
+        "donors/go-libp2p-kad-dht/routing.go", "donors/go-libp2p-kad-dht/pb/protocol_messenger.go",
         "donors/rust-libp2p/protocols/kad/src/behaviour.rs"
       ],
-      "donor_case": [
-        "FindPeer",
-        "Provide",
-        "FindProviders",
-        "get_closest_peers",
-        "start_providing",
-        "get_providers"
-      ],
+      "donor_case": [ "FindPeer", "Provide", "FindProviders", "get_closest_peers", "start_providing", "get_providers" ],
       "mapping_state": "mapped",
-      "forge_tests": [
-        "test_forge_libp2p_interop dht_find_peer",
-        "test_forge_libp2p_interop dht_provide_find_provider"
-      ],
+      "forge_tests":
+          [ "test_forge_libp2p_interop dht_find_peer", "test_forge_libp2p_interop dht_provide_find_provider" ],
       "forge_live_scenario": [
-        {"profile": "quic_dht", "scenario": "dht_provide_find_provider"}
+        {
+          "profile": "quic_dht",
+          "scenario": "dht_provide_find_provider"
+        }
       ],
-      "known_gap": "dht_find_peer currently connects directly to the searched peer, so local peer-store lookup can satisfy it without an outbound DHT exchange; it is not credited as live FindPeer evidence."
+      "known_gap":
+          "dht_find_peer currently connects directly to the searched peer, so local peer-store lookup can satisfy it without an outbound DHT exchange; it is not credited as live FindPeer evidence."
     },
     {
       "id": "interop.live_rendezvous_register_discover",
       "protocol": "Rendezvous",
       "source": "donors/libp2p-specs/rendezvous/README.md",
-      "donor": "rust-libp2p rendezvous::server/client live fixtures; Go has no official rendezvous behaviour donor in this workspace",
+      "donor":
+          "rust-libp2p rendezvous::server/client live fixtures; Go has no official rendezvous behaviour donor in this workspace",
       "donor_file": [
-        "donors/rust-libp2p/protocols/rendezvous/src/client.rs",
-        "donors/rust-libp2p/protocols/rendezvous/src/codec.rs",
+        "donors/rust-libp2p/protocols/rendezvous/src/client.rs", "donors/rust-libp2p/protocols/rendezvous/src/codec.rs",
         "donors/rust-libp2p/protocols/rendezvous/tests/rendezvous.rs"
       ],
-      "donor_case": [
-        "Registered",
-        "Discovered",
-        "signed PeerRecord",
-        "TTL",
-        "cookie continuation"
-      ],
+      "donor_case": [ "Registered", "Discovered", "signed PeerRecord", "TTL", "cookie continuation" ],
       "mapping_state": "mapped",
-      "forge_tests": [
-        "test_forge_libp2p_interop rendezvous_register_discover"
-      ],
+      "forge_tests": [ "test_forge_libp2p_interop rendezvous_register_discover" ],
       "forge_live_scenario": [
-        {"profile": "quic_rendezvous", "scenario": "rendezvous_register_discover"}
+        {
+          "profile": "quic_rendezvous",
+          "scenario": "rendezvous_register_discover"
+        }
       ],
-      "known_gap": "Go rendezvous remains a wire-level future scenario because no official go-libp2p rendezvous behaviour donor is present"
+      "known_gap":
+          "Go rendezvous remains a wire-level future scenario because no official go-libp2p rendezvous behaviour donor is present"
     },
     {
       "id": "gossipsub.protocol_ids_v11_v10",
       "protocol": "GossipSub",
       "source": "donors/libp2p-specs/pubsub/gossipsub/gossipsub-v1.1.md",
-      "donor": "go-libp2p-pubsub/gossipsub.go protocol constants and rust-libp2p/protocols/gossipsub/src/config.rs Version",
+      "donor":
+          "go-libp2p-pubsub/gossipsub.go protocol constants and rust-libp2p/protocols/gossipsub/src/config.rs Version",
       "donor_file": [
-        "donors/go-libp2p-pubsub/gossipsub.go",
-        "donors/rust-libp2p/protocols/gossipsub/src/config.rs",
+        "donors/go-libp2p-pubsub/gossipsub.go", "donors/rust-libp2p/protocols/gossipsub/src/config.rs",
         "donors/rust-libp2p/protocols/gossipsub/src/protocol.rs"
       ],
-      "donor_case": [
-        "GossipSubID_v11",
-        "GossipSubID_v10",
-        "ConfigBuilder::protocol_id_prefix"
-      ],
+      "donor_case": [ "GossipSubID_v11", "GossipSubID_v10", "ConfigBuilder::protocol_id_prefix" ],
       "mapping_state": "mapped",
-      "forge_tests": [
-        "test_forge_quic_p2p p2p_libp2p_reachability_relay_protocol_ids_are_exact"
-      ],
-      "known_gap": "Live fixtures negotiate GossipSub v1.1 first. GossipSub v1.0 has exact protocol-id coverage only until a fixture forces the v1.0 fallback."
+      "forge_tests": [ "test_forge_quic_p2p p2p_libp2p_reachability_relay_protocol_ids_are_exact" ],
+      "known_gap":
+          "Live fixtures negotiate GossipSub v1.1 first. GossipSub v1.0 has exact protocol-id coverage only until a fixture forces the v1.0 fallback."
     },
     {
       "id": "gossipsub.rpc_codec_control_and_limits",
@@ -634,20 +621,14 @@
       "source": "donors/libp2p-specs/pubsub/gossipsub/gossipsub-v1.1.md",
       "donor": "go-libp2p-pubsub/pb/rpc.proto and rust-libp2p/protocols/gossipsub/src/rpc_proto.rs",
       "donor_file": [
-        "donors/go-libp2p-pubsub/pb/rpc.proto",
-        "donors/rust-libp2p/protocols/gossipsub/src/generated/gossipsub/pb.rs",
+        "donors/go-libp2p-pubsub/pb/rpc.proto", "donors/rust-libp2p/protocols/gossipsub/src/generated/gossipsub/pb.rs",
         "donors/rust-libp2p/protocols/gossipsub/src/types.rs"
       ],
-      "donor_case": [
-        "RPC subscriptions/publish/control",
-        "IHAVE/IWANT/GRAFT/PRUNE",
-        "oversized/malformed rejection"
-      ],
+      "donor_case": [ "RPC subscriptions/publish/control", "IHAVE/IWANT/GRAFT/PRUNE", "oversized/malformed rejection" ],
       "mapping_state": "mapped",
-      "forge_tests": [
-        "test_forge_quic_p2p p2p_gossipsub_codec_roundtrips_v11_rpc_and_rejects_malformed"
-      ],
-      "known_gap": "RPC codec, malformed control and resource-limit failures are component-only; live publish delivery is tracked by gossipsub.live_publish_delivery."
+      "forge_tests": [ "test_forge_quic_p2p p2p_gossipsub_codec_roundtrips_v11_rpc_and_rejects_malformed" ],
+      "known_gap":
+          "RPC codec, malformed control and resource-limit failures are component-only; live publish delivery is tracked by gossipsub.live_publish_delivery."
     },
     {
       "id": "gossipsub.message_signing_and_id",
@@ -655,21 +636,18 @@
       "source": "donors/libp2p-specs/pubsub/gossipsub/gossipsub-v1.1.md",
       "donor": "go-libp2p-pubsub/sign.go and rust-libp2p/protocols/gossipsub/src/protocol.rs",
       "donor_file": [
-        "donors/go-libp2p-pubsub/sign.go",
-        "donors/rust-libp2p/protocols/gossipsub/src/protocol.rs",
+        "donors/go-libp2p-pubsub/sign.go", "donors/rust-libp2p/protocols/gossipsub/src/protocol.rs",
         "donors/rust-libp2p/protocols/gossipsub/src/config.rs"
       ],
-      "donor_case": [
-        "libp2p-pubsub signing prefix",
-        "signature excludes signature/key fields",
-        "message id source plus seqno"
-      ],
+      "donor_case":
+          [ "libp2p-pubsub signing prefix", "signature excludes signature/key fields", "message id source plus seqno" ],
       "mapping_state": "mapped",
       "forge_tests": [
         "test_forge_quic_p2p p2p_gossipsub_codec_roundtrips_v11_rpc_and_rejects_malformed",
         "test_forge_quic_p2p p2p_gossipsub_signing_rejects_tampered_payload"
       ],
-      "known_gap": "Tampered-message signature rejection is component-only; live valid signed delivery is tracked by gossipsub.live_publish_delivery."
+      "known_gap":
+          "Tampered-message signature rejection is component-only; live valid signed delivery is tracked by gossipsub.live_publish_delivery."
     },
     {
       "id": "gossipsub.live_publish_delivery",
@@ -677,16 +655,11 @@
       "source": "donors/libp2p-specs/pubsub/gossipsub/gossipsub-v1.1.md",
       "donor": "go-libp2p-pubsub publish/subscribe tests and rust-libp2p gossipsub smoke tests",
       "donor_file": [
-        "donors/go-libp2p-pubsub/gossipsub_test.go",
-        "donors/go-libp2p-pubsub/sign_test.go",
-        "donors/go-libp2p-pubsub/mcache_test.go",
-        "donors/rust-libp2p/protocols/gossipsub/tests/smoke.rs"
+        "donors/go-libp2p-pubsub/gossipsub_test.go", "donors/go-libp2p-pubsub/sign_test.go",
+        "donors/go-libp2p-pubsub/mcache_test.go", "donors/rust-libp2p/protocols/gossipsub/tests/smoke.rs"
       ],
       "donor_case": [
-        "Subscribe",
-        "Publish",
-        "signed delivery to subscribed peer",
-        "mesh forwarding",
+        "Subscribe", "Publish", "signed delivery to subscribed peer", "mesh forwarding",
         "message cache duplicate suppression"
       ],
       "mapping_state": "mapped",
@@ -697,32 +670,30 @@
         "test_forge_libp2p_interop gossipsub_publish"
       ],
       "forge_live_scenario": [
-        {"profile": "quic_pubsub", "scenario": "gossipsub_publish"}
+        {
+          "profile": "quic_pubsub",
+          "scenario": "gossipsub_publish"
+        }
       ]
     },
     {
       "id": "gossipsub.mesh_hardening_and_resource_bounds",
       "protocol": "GossipSub",
       "source": "donors/libp2p-specs/pubsub/gossipsub/gossipsub-v1.1.md",
-      "donor": "go-libp2p-pubsub validation/spam/queue/backoff/score tests and rust-libp2p gossipsub cache/queue/score/backoff components",
+      "donor":
+          "go-libp2p-pubsub validation/spam/queue/backoff/score tests and rust-libp2p gossipsub cache/queue/score/backoff components",
       "donor_file": [
-        "donors/go-libp2p-pubsub/validation_test.go",
-        "donors/go-libp2p-pubsub/gossipsub_spam_test.go",
-        "donors/go-libp2p-pubsub/rpc_queue_test.go",
-        "donors/go-libp2p-pubsub/score_test.go",
-        "donors/go-libp2p-pubsub/backoff_test.go",
-        "donors/rust-libp2p/protocols/gossipsub/src/mcache.rs",
+        "donors/go-libp2p-pubsub/validation_test.go", "donors/go-libp2p-pubsub/gossipsub_spam_test.go",
+        "donors/go-libp2p-pubsub/rpc_queue_test.go", "donors/go-libp2p-pubsub/score_test.go",
+        "donors/go-libp2p-pubsub/backoff_test.go", "donors/rust-libp2p/protocols/gossipsub/src/mcache.rs",
         "donors/rust-libp2p/protocols/gossipsub/src/queue.rs",
         "donors/rust-libp2p/protocols/gossipsub/src/peer_score/tests.rs",
         "donors/rust-libp2p/protocols/gossipsub/src/backoff.rs",
         "donors/rust-libp2p/protocols/gossipsub/src/time_cache.rs"
       ],
       "donor_case": [
-        "slow validation remains bounded",
-        "RPC/control spam is penalized",
-        "outbound queue byte pressure rejects locally",
-        "GRAFT/PRUNE backoff",
-        "heartbeat mesh maintenance"
+        "slow validation remains bounded", "RPC/control spam is penalized",
+        "outbound queue byte pressure rejects locally", "GRAFT/PRUNE backoff", "heartbeat mesh maintenance"
       ],
       "mapping_state": "mapped",
       "forge_tests": [
@@ -733,9 +704,13 @@
         "test_forge_libp2p_interop gossipsub_mixed_mesh_stress"
       ],
       "forge_live_scenario": [
-        {"profile": "mixed_pubsub", "scenario": "gossipsub_mixed_mesh_stress"}
+        {
+          "profile": "mixed_pubsub",
+          "scenario": "gossipsub_mixed_mesh_stress"
+        }
       ],
-      "known_gap": "Live fixtures cover mixed mesh delivery; resource-abuse and scoring edge cases remain component-only because donor fixtures do not expose every queue/score knob."
+      "known_gap":
+          "Live fixtures cover mixed mesh delivery; resource-abuse and scoring edge cases remain component-only because donor fixtures do not expose every queue/score knob."
     }
   ]
 }

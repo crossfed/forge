@@ -33,8 +33,14 @@ enum class relay_trust_policy : std::uint8_t {
    public_allowed = 2,
 };
 
+enum class bootstrap_requirement : std::uint8_t {
+   allow_disconnected = 1,
+   require_connection = 2,
+};
+
 BOOST_DESCRIBE_ENUM(path_policy, direct_only, direct_preferred, relay_only)
 BOOST_DESCRIBE_ENUM(relay_trust_policy, known_only, public_allowed)
+BOOST_DESCRIBE_ENUM(bootstrap_requirement, allow_disconnected, require_connection)
 
 struct config {
    std::vector<std::string> listen;
@@ -58,6 +64,11 @@ struct config {
    bool relay_public_allowed = false;
    std::uint64_t relay_reservation_ttl_ms = 60'000;
    std::uint64_t relay_max_candidates = 4;
+   forge::plugins::p2p::node::bootstrap_requirement bootstrap_requirement =
+       forge::plugins::p2p::node::bootstrap_requirement::allow_disconnected;
+   std::uint64_t bootstrap_startup_budget_ms = 10'000;
+   std::uint64_t bootstrap_connect_timeout_ms = 2'000;
+   std::uint64_t bootstrap_max_parallel = 4;
 };
 
 struct info {
@@ -76,10 +87,11 @@ struct remote_options {
 
 BOOST_DESCRIBE_STRUCT(config, (),
                       (listen, bootstrap, advertised_endpoints, peer_id, peer_store, certificate_secret,
-                       private_key_secret, api_codec,
-                       api_deadline_ms, api_max_frame_size, max_inflight_per_peer, max_sessions,
-                       max_protocol_handlers, allow_insecure_test_mode, path_policy, relay_trust, relay_client_enabled,
-                       relay_server_enabled, relay_public_allowed, relay_reservation_ttl_ms, relay_max_candidates))
+                       private_key_secret, api_codec, api_deadline_ms, api_max_frame_size,
+                       max_inflight_per_peer, max_sessions, max_protocol_handlers, allow_insecure_test_mode,
+                       path_policy, relay_trust, relay_client_enabled, relay_server_enabled, relay_public_allowed,
+                       relay_reservation_ttl_ms, relay_max_candidates, bootstrap_requirement,
+                       bootstrap_startup_budget_ms, bootstrap_connect_timeout_ms, bootstrap_max_parallel))
 
 } // namespace forge::plugins::p2p::node
 
@@ -92,6 +104,18 @@ export template <> struct forge::schema::rules<forge::plugins::p2p::node::config
       schema.field<&forge::plugins::p2p::node::config::bootstrap>("bootstrap")
          .default_value(std::vector<std::string>{})
          .description("Bootstrap peer endpoints as libp2p multiaddr text");
+      schema.field<&forge::plugins::p2p::node::config::bootstrap_requirement>("bootstrap-requirement")
+          .default_value("allow-disconnected")
+          .description("Startup connectivity policy: allow-disconnected or require-connection");
+      schema.field<&forge::plugins::p2p::node::config::bootstrap_startup_budget_ms>("bootstrap-startup-budget-ms")
+          .default_value(std::uint64_t{10'000})
+          .range(1, 600'000);
+      schema.field<&forge::plugins::p2p::node::config::bootstrap_connect_timeout_ms>("bootstrap-connect-timeout-ms")
+          .default_value(std::uint64_t{2'000})
+          .range(1, 300'000);
+      schema.field<&forge::plugins::p2p::node::config::bootstrap_max_parallel>("bootstrap-max-parallel")
+          .default_value(std::uint64_t{4})
+          .range(1, 256);
       schema.field<&forge::plugins::p2p::node::config::advertised_endpoints>("advertised-endpoints")
          .default_value(std::vector<std::string>{})
          .description("Endpoints advertised to peers as libp2p multiaddr text");

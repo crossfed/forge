@@ -19,6 +19,9 @@ class connection_manager {
    struct policy {
       std::size_t max_sessions = 1024;
       std::size_t low_watermark = 1024;
+      std::size_t max_inbound_sessions = 1024;
+      std::size_t max_outbound_sessions = 1024;
+      std::size_t max_sessions_per_peer = 4;
       std::chrono::milliseconds grace_period{60'000};
       std::chrono::milliseconds prune_silence{10'000};
    };
@@ -49,22 +52,19 @@ class connection_manager {
    void protect(const peer_id& peer, std::string tag);
    [[nodiscard]] bool unprotect(const peer_id& peer, std::string_view tag);
    [[nodiscard]] bool is_protected(const peer_id& peer) const;
-   [[nodiscard]] admission remember(session_record record, resource_manager& resources,
-                                    std::chrono::steady_clock::time_point now);
-   void forget(std::uint64_t id, resource_manager& resources);
-   void forget_peer(const peer_id& peer, resource_manager& resources);
+   [[nodiscard]] admission remember(session_record record, std::chrono::steady_clock::time_point now);
+   void forget(std::uint64_t id);
+   void forget_peer(const peer_id& peer);
    void touch(std::uint64_t id, std::chrono::steady_clock::time_point now);
-   void clear(resource_manager& resources);
+   void clear();
    [[nodiscard]] snapshot current(std::size_t max_sessions) const;
    [[nodiscard]] std::size_t size() const noexcept;
 
  private:
-   [[nodiscard]] bool prune_one(resource_manager& resources, std::vector<std::uint64_t>& pruned,
-                                std::chrono::steady_clock::time_point now,
+   [[nodiscard]] bool prune_one(std::vector<std::uint64_t>& pruned, std::chrono::steady_clock::time_point now,
                                 std::optional<direction> required_direction = std::nullopt);
    [[nodiscard]] std::size_t count_peer_sessions(const peer_id& peer) const;
    [[nodiscard]] std::size_t count_direction_sessions(direction value) const;
-   void release_record(const session_record& record, resource_manager& resources);
    void erase_record(std::uint64_t id);
 
    policy policy_;

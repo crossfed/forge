@@ -1,0 +1,272 @@
+module;
+
+#include <forge/exceptions/macros.hpp>
+
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <deque>
+#include <functional>
+#include <limits>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <ranges>
+#include <set>
+#include <span>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <utility>
+#include <vector>
+
+#include <boost/asio/any_io_executor.hpp>
+#include <boost/asio/awaitable.hpp>
+#include <boost/asio/bind_cancellation_slot.hpp>
+#include <boost/asio/cancellation_signal.hpp>
+#include <boost/asio/cancellation_state.hpp>
+#include <boost/asio/cancellation_type.hpp>
+#include <boost/asio/co_spawn.hpp>
+#include <boost/asio/detached.hpp>
+#include <boost/asio/experimental/concurrent_channel.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/post.hpp>
+#include <boost/asio/redirect_error.hpp>
+#include <boost/asio/steady_timer.hpp>
+#include <boost/asio/strand.hpp>
+#include <boost/asio/this_coro.hpp>
+#include <boost/asio/use_awaitable.hpp>
+#include <boost/system/system_error.hpp>
+
+module forge.net.p2p.node;
+
+import forge.exceptions;
+import forge.asio.gate;
+import forge.crypto.asymmetric;
+import forge.net.p2p.dht;
+import forge.net.p2p.discovery;
+import forge.net.p2p.endpoint;
+import forge.net.p2p.exceptions;
+import forge.net.p2p.hole_punch;
+import forge.net.p2p.identify;
+import forge.net.p2p.identity;
+import forge.net.p2p.lifecycle;
+import forge.net.p2p.negotiation;
+import forge.net.p2p.peer_store;
+import forge.net.p2p.protocol;
+import forge.net.p2p.pubsub;
+import forge.net.p2p.reachability;
+import forge.net.p2p.relay;
+import forge.net.p2p.rendezvous;
+import forge.net.p2p.resource_manager;
+import forge.net.p2p.scoring;
+import forge.net.p2p.stream;
+import forge.net.transport.session;
+import forge.net.transport.stream;
+import forge.net.yamux.session;
+
+#include "details/node_impl.hxx"
+#include "details/peer_failure.hxx"
+#include "details/resource_stream.hxx"
+
+namespace forge::net::p2p {
+
+boost::asio::awaitable<forge::net::p2p::stream>
+node::impl::open_session_stream(const std::shared_ptr<session_state>& session, const protocol_id& protocol,
+                                bool relay) {
+   const auto relayed = relay || session->info.path == path::kind::relay;
+   auto reservation = relayed ? resources.reserve_relay_stream() : resources.reserve_stream();
+   if (!reservation) {
+      auto lock = std::scoped_lock{mutex};
+      ++metrics_value.backpressure_rejections;
+      ++metrics_value.protocol_rejections;
+      FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P stream limit reached");
+   }
+   auto raw = co_await session->connection.async_open_stream();
+   auto [guarded, resource] = detail::make_resource_stream(std::move(raw), resources, std::move(*reservation));
+   auto selected = forge::net::p2p::stream{};
+   try {
+      selected = co_await protocol_negotiation::async_select(std::move(guarded), protocol);
+   } catch (...) {
+      resource->cancel();
+      throw;
+   }
+   if (!resource->bind(resource_manager::scope{.peer = session->info.remote_peer, .protocol = protocol})) {
+      selected.cancel();
+      auto lock = std::scoped_lock{mutex};
+      ++metrics_value.backpressure_rejections;
+      ++metrics_value.protocol_rejections;
+      FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P scoped stream limit reached");
+   }
+   co_return selected;
+}
+
+boost::asio::awaitable<forge::net::p2p::stream>
+node::impl::open_yamux_stream(const peer_id& peer, const std::shared_ptr<forge::net::yamux::session>& yamux,
+                              const protocol_id& protocol, bool relay) {
+   auto reservation = relay ? resources.reserve_relay_stream() : resources.reserve_stream();
+   if (!reservation) {
+      FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P relayed stream limit reached");
+   }
+   auto raw = co_await yamux->async_open_stream();
+   auto [guarded, resource] = detail::make_resource_stream(std::move(raw), resources, std::move(*reservation));
+   auto selected = forge::net::p2p::stream{};
+   try {
+      selected = co_await protocol_negotiation::async_select(std::move(guarded), protocol);
+   } catch (...) {
+      resource->cancel();
+      throw;
+   }
+   if (!resource->bind(resource_manager::scope{.peer = peer, .protocol = protocol})) {
+      selected.cancel();
+      FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P scoped relayed stream limit reached");
+   }
+   co_return selected;
+}
+
+boost::asio::awaitable<node::impl::admitted_stream>
+node::impl::accept_resource_stream(const peer_id& peer, forge::net::transport::stream stream,
+                                   resource_manager::stream_reservation reservation) {
+   auto [guarded, resource] = detail::make_resource_stream(std::move(stream), resources, std::move(reservation));
+   auto negotiated = protocol_negotiation::negotiated_stream{};
+   try {
+      negotiated = co_await protocol_negotiation::async_accept(std::move(guarded), supported_protocols());
+   } catch (...) {
+      resource->cancel();
+      throw;
+   }
+   if (!resource->bind(resource_manager::scope{.peer = peer, .protocol = negotiated.protocol})) {
+      negotiated.stream.cancel();
+      FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P scoped inbound stream limit reached");
+   }
+   co_return admitted_stream{
+       .protocol = std::move(negotiated.protocol),
+       .stream = std::move(negotiated.stream),
+       .resource = std::move(resource),
+   };
+}
+
+boost::asio::awaitable<forge::net::p2p::stream>
+node::impl::open_protocol_on_direct_session(const peer_id& peer, const protocol_id& protocol,
+                                            std::shared_ptr<node::impl::session_state> session,
+                                            std::chrono::milliseconds timeout) {
+   auto deadline = operation_deadline{runtime.context(), timeout};
+   auto deadline_id = std::uint64_t{};
+   {
+      auto lock = std::scoped_lock{mutex};
+      auto stopping = deadline.stopping();
+      if (stopped) {
+         static_cast<void>(stopping.request_stop());
+      } else {
+         deadline_id = next_protocol_open_deadline_id++;
+         protocol_open_deadlines.emplace(deadline_id, std::move(stopping));
+      }
+   }
+   auto release_deadline = [this, deadline_id](void*) noexcept {
+      if (deadline_id == 0) {
+         return;
+      }
+      auto lock = std::scoped_lock{mutex};
+      protocol_open_deadlines.erase(deadline_id);
+   };
+   auto deadline_guard = std::unique_ptr<void, decltype(release_deadline)>{this, std::move(release_deadline)};
+   if (deadline.stopped()) {
+      FORGE_THROW_EXCEPTION(exceptions::closed, "P2P protocol open stopped with its node");
+   }
+   deadline.arm([session] { session->connection.cancel(); });
+   record_path_attempt(path::kind::direct);
+   try {
+      auto selected = co_await open_session_stream(session, protocol);
+      const auto completed = deadline.finish();
+      if (deadline.stopped()) {
+         FORGE_THROW_EXCEPTION(exceptions::closed, "P2P protocol open stopped with its node");
+      }
+      if (!completed) {
+         throw_operation_timeout("P2P protocol open");
+      }
+      increment_opened_protocol();
+      record_path_open(path::kind::direct);
+      co_return selected;
+   } catch (const forge::exceptions::base& error) {
+      const auto completed = deadline.finish();
+      if (deadline.timed_out() || !completed) {
+         session->closed = true;
+         forget_session(session);
+         if (session->direct_endpoint) {
+            store.mark_endpoint_failure(peer, *session->direct_endpoint, path::kind::direct,
+                                        endpoint_backoff_until(peer, *session->direct_endpoint, path::kind::direct));
+            increment_direct_failure();
+         } else {
+            record_direct_failure(peer);
+         }
+         throw_operation_timeout("P2P protocol open");
+      }
+      if (deadline.stopped()) {
+         FORGE_THROW_EXCEPTION(exceptions::closed, "P2P protocol open stopped with its node");
+      }
+      const auto kind = p2p_code(error);
+      auto node_stopped = false;
+      {
+         auto lock = std::scoped_lock{mutex};
+         node_stopped = stopped;
+      }
+      if (node_stopped) {
+         FORGE_THROW_EXCEPTION(exceptions::closed, "P2P protocol open stopped with its node");
+      }
+      const auto p2p_kind = exceptions::code_of(error);
+      if (p2p_kind == exceptions::code::unsupported_protocol || p2p_kind == exceptions::code::protocol_error ||
+          p2p_kind == exceptions::code::codec_error) {
+         throw;
+      }
+      if (kind == exceptions::code::canceled || kind == exceptions::code::backpressure_rejected) {
+         FORGE_THROW_CODE(kind, error.what());
+      }
+      session->closed = true;
+      forget_session(session);
+      if (detail::remote_peer_attributable_failure(kind, node_stopped)) {
+         if (session->direct_endpoint) {
+            store.mark_endpoint_failure(peer, *session->direct_endpoint, path::kind::direct,
+                                        endpoint_backoff_until(peer, *session->direct_endpoint, path::kind::direct));
+            increment_direct_failure();
+         } else {
+            record_direct_failure(peer);
+         }
+      }
+      FORGE_THROW_CODE(kind, error.what());
+   }
+}
+
+boost::asio::awaitable<forge::net::p2p::stream>
+node::impl::open_protocol_direct(const peer_id& peer, const protocol_id& protocol, std::chrono::milliseconds timeout,
+                                 std::size_t max_direct_endpoints, std::chrono::milliseconds direct_attempt_timeout) {
+   const auto started = std::chrono::steady_clock::now();
+   auto last_kind = std::optional<exceptions::code>{};
+   auto last_message = std::string{};
+   for (std::size_t attempt = 0; attempt < max_direct_endpoints; ++attempt) {
+      const auto remaining = remaining_timeout(started, timeout, "P2P protocol open");
+      auto session = co_await ensure_direct_session(peer, remaining, max_direct_endpoints, direct_attempt_timeout);
+      const auto open_timeout = attempt_timeout(remaining, direct_attempt_timeout, "P2P protocol open direct attempt");
+      try {
+         co_return co_await open_protocol_on_direct_session(peer, protocol, std::move(session), open_timeout);
+      } catch (const forge::exceptions::base& error) {
+         const auto p2p_kind = exceptions::code_of(error);
+         if (p2p_kind == exceptions::code::unsupported_protocol || p2p_kind == exceptions::code::protocol_error ||
+             p2p_kind == exceptions::code::codec_error) {
+            throw;
+         }
+         last_kind = p2p_code(error);
+         last_message = error.what();
+      }
+   }
+   if (last_kind) {
+      FORGE_THROW_CODE(*last_kind, last_message);
+   }
+   FORGE_THROW_EXCEPTION(exceptions::peer_not_found, "P2P direct path attempts were exhausted");
+}
+
+} // namespace forge::net::p2p

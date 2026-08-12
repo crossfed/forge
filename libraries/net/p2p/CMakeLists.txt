@@ -18,6 +18,10 @@ add_library(
    connection_manager.cpp
    details/connection_manager.hxx
    resource_manager.cpp
+   resource_manager_state.cpp
+   details/resource_manager_state.hxx
+   resource_stream.cpp
+   details/resource_stream.hxx
    stream.cpp
    negotiation.cpp
    peer_store.cpp
@@ -34,10 +38,27 @@ add_library(
    libp2p_tls.cpp
    details/libp2p_tls.hxx
    node.cpp
+   node_dht.cpp
+   node_relay.cpp
+   node_pubsub.cpp
+   node_lifecycle.cpp
    libp2p_identity_material.cpp
    details/libp2p_identity_material.hxx
    node_impl.cpp
+   node_impl_pubsub.cpp
+   node_impl_streams.cpp
+   node_impl_sessions.cpp
+   node_impl_relay.cpp
+   node_impl_dht.cpp
+   node_impl_identify.cpp
+   node_impl_lifecycle.cpp
    details/node_impl.hxx
+   bootstrap_service.cpp
+   details/bootstrap_service.hxx
+   lifecycle_tracker.cpp
+   details/lifecycle_tracker.hxx
+   identify_service.cpp
+   details/identify_service.hxx
    dht_exchange.cpp
    details/dht_exchange.hxx
    connection_singleflight_registry.cpp
@@ -57,10 +78,13 @@ add_library(
    details/relay_discovery.hxx
    relay_transport.cpp
    details/relay_transport.hxx
+   relay_pair.cpp
+   details/relay_pair.hxx
+   relay_budget.cpp
+   details/relay_budget.hxx
    details/dht_query.hxx
    details/protobuf.hxx
    details/protocol_capabilities.hxx
-   details/relay_accounting.hxx
    details/session_lifecycle.hxx
    session_teardown.cpp
    details/session_teardown.hxx

@@ -100,6 +100,44 @@ BOOST_AUTO_TEST_CASE(p2p_session_teardown_waits_for_tracked_background_operation
    stopped.get();
 }
 
+BOOST_AUTO_TEST_CASE(p2p_session_teardown_cancels_tracked_background_operation) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   auto teardown = detail::session_teardown{runtime.context().get_executor()};
+   auto blocked =
+       std::make_shared<boost::asio::steady_timer>(runtime.context(), boost::asio::steady_timer::time_point::max());
+   auto cancel_called = std::atomic_size_t{0};
+   auto operation_started = std::atomic_bool{false};
+   auto tracked = teardown.track([blocked, &cancel_called] {
+      cancel_called.fetch_add(1, std::memory_order_release);
+      blocked->cancel();
+   });
+   BOOST_REQUIRE(tracked.active());
+
+   auto operation = boost::asio::co_spawn(
+       runtime.context(),
+       [blocked, &operation_started, tracked = std::move(tracked)]() mutable -> boost::asio::awaitable<void> {
+          auto error = boost::system::error_code{};
+          operation_started.store(true, std::memory_order_release);
+          co_await blocked->async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
+          tracked.release();
+       },
+       boost::asio::use_future);
+
+   const auto operation_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+   while (!operation_started.load(std::memory_order_acquire)) {
+      BOOST_REQUIRE(std::chrono::steady_clock::now() < operation_deadline);
+      std::this_thread::sleep_for(std::chrono::milliseconds{1});
+   }
+   teardown.start({});
+   auto stopped = boost::asio::co_spawn(runtime.context(), teardown.wait(), boost::asio::use_future);
+
+   BOOST_REQUIRE(stopped.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+   stopped.get();
+   BOOST_REQUIRE(operation.wait_for(std::chrono::seconds{2}) == std::future_status::ready);
+   operation.get();
+   BOOST_TEST(cancel_called.load(std::memory_order_acquire) == 1U);
+}
+
 BOOST_AUTO_TEST_CASE(p2p_session_teardown_handles_concurrent_track_release_and_start) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    for (auto iteration = 0U; iteration < 1'000U; ++iteration) {
@@ -156,7 +194,7 @@ BOOST_AUTO_TEST_CASE(p2p_direct_transport_teardown_continues_after_profile_failu
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    const auto options = node::options{};
    const auto identity = make_libp2p_identity_material(options);
-   auto registry = direct::registry{runtime, options, identity};
+   auto registry = direct::registry{runtime, options, identity, resource_manager{options.limits.resources}};
    auto failed_stop = std::atomic_size_t{0};
    auto next_stop = std::atomic_size_t{0};
    auto failed_async_stop = std::atomic_size_t{0};

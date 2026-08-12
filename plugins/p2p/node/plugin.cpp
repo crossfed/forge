@@ -3,6 +3,7 @@ module;
 #include <forge/exceptions/macros.hpp>
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/scope/scope_exit.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -126,7 +127,6 @@ boost::asio::awaitable<void> plugin::provide(forge::api::core::provider& provide
 
 boost::asio::awaitable<void> plugin::initialize(forge::app::plugin_context& context) {
    impl_->runtime = &context.scheduler().runtime_context();
-   impl_->scheduler = &context.scheduler();
    if (!impl_->peer_store_name.empty()) {
       impl_->stores =
           context.apis()
@@ -139,7 +139,6 @@ boost::asio::awaitable<void> plugin::initialize(forge::app::plugin_context& cont
                                {.id = {"forge.plugins.crypto.secrets"}, .major = 1, .min_revision = 0})
                            .operator->();
    }
-   impl_->stopping.store(false, std::memory_order_release);
    co_return;
 }
 
@@ -156,6 +155,13 @@ boost::asio::awaitable<void> plugin::after_initialize() {
 }
 
 boost::asio::awaitable<void> plugin::startup() {
+   auto routes = impl_->begin_startup();
+   if (!routes) {
+      co_return;
+   }
+   auto private_key_cleanup = boost::scope::scope_exit{[this] {
+      clear_text(impl_->options.private_key_pem);
+   }};
    if (!impl_->certificate_secret.empty()) {
       auto certificate = co_await impl_->secrets->get_bytes(
           {.secret_id = impl_->certificate_secret, .purpose = "p2p.identity.certificate"});
@@ -182,26 +188,42 @@ boost::asio::awaitable<void> plugin::startup() {
       impl_->options.peer_state.persistence = impl_->peer_state;
    }
 
-   auto& node = impl_->ensure_node();
-   clear_text(impl_->options.private_key_pem);
-   for (auto& route : impl_->routes) {
-      node.register_protocol_handler(route.first, route.second);
+   if (impl_->stop_requested.load(std::memory_order_acquire)) {
+      co_return;
    }
-   co_await node.async_hydrate_peer_state();
-   for (const auto& endpoint : impl_->listen) {
-      co_await node.async_listen(endpoint);
+
+   auto node = impl_->ensure_node(*routes);
+   if (impl_->stop_requested.load(std::memory_order_acquire)) {
+      node->stop();
+      co_return;
    }
-   co_await impl_->refresh_bootstrap();
-   (void)co_await node.async_refresh_discovery();
-   impl_->started = true;
-   impl_->start_maintenance();
+   auto startup_failure = std::exception_ptr{};
+   try {
+      static_cast<void>(co_await node->async_start());
+   } catch (...) {
+      startup_failure = std::current_exception();
+   }
+   if (startup_failure) {
+      if (!impl_->stop_requested.load(std::memory_order_acquire)) {
+         std::rethrow_exception(startup_failure);
+      }
+      co_await node->async_stop();
+      co_return;
+   }
+   if (impl_->stop_requested.load(std::memory_order_acquire)) {
+      node->stop();
+      co_await node->async_stop();
+      co_return;
+   }
+   impl_->mark_started();
 }
 
 void plugin::request_stop() noexcept {
-   impl_->request_maintenance_stop();
-   if (impl_->node) {
+   impl_->stop_requested.store(true, std::memory_order_release);
+   impl_->phase.store(plugin::impl::lifecycle_phase::stopping, std::memory_order_release);
+   if (auto node = impl_->node_snapshot()) {
       try {
-         impl_->node->stop();
+         node->stop();
       } catch (...) {
          // shutdown() retries and reports a synchronous initiation failure.
       }
@@ -211,15 +233,11 @@ void plugin::request_stop() noexcept {
 boost::asio::awaitable<void> plugin::shutdown() {
    request_stop();
    auto failure = std::exception_ptr{};
-   auto peer_state_closed = !impl_->node && !impl_->peer_state;
-   try {
-      co_await impl_->stop_maintenance();
-   } catch (...) {
-      failure = std::current_exception();
-   }
-   if (impl_->node) {
+   auto node = impl_->node_snapshot();
+   auto peer_state_closed = !node && !impl_->peer_state;
+   if (node) {
       try {
-         co_await impl_->node->async_stop();
+         co_await node->async_stop();
          peer_state_closed = true;
       } catch (...) {
          if (!failure) {
@@ -237,7 +255,9 @@ boost::asio::awaitable<void> plugin::shutdown() {
       }
    }
    if (peer_state_closed) {
-      impl_->node.reset();
+      auto empty = std::shared_ptr<forge::net::p2p::node>{};
+      std::atomic_compare_exchange_strong_explicit(&impl_->node, &node, empty, std::memory_order_acq_rel,
+                                                   std::memory_order_acquire);
       impl_->peer_state.reset();
       impl_->options.peer_state.persistence.reset();
       impl_->peer_state_store.reset();
@@ -246,7 +266,9 @@ boost::asio::awaitable<void> plugin::shutdown() {
       impl_->stores = nullptr;
       impl_->secrets = nullptr;
    }
-   impl_->started = false;
+   if (peer_state_closed) {
+      impl_->mark_stopped();
+   }
    if (failure) {
       std::rethrow_exception(failure);
    }

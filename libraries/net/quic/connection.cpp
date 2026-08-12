@@ -188,4 +188,8 @@ connection detail::connection_access::make(detail::connection_handle handle) {
    return connection{std::move(handle)};
 }
 
+std::shared_ptr<void> detail::connection_access::take_inbound_admission(connection& value) noexcept {
+   return value.impl_ && value.impl_->engine ? value.impl_->engine->take_inbound_admission() : std::shared_ptr<void>{};
+}
+
 } // namespace forge::net::quic

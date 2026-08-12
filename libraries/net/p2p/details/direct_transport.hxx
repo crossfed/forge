@@ -23,6 +23,7 @@ struct connection {
    forge::net::transport::session session;
    std::optional<forge::net::p2p::endpoint> local_endpoint;
    std::optional<forge::net::p2p::endpoint> remote_endpoint;
+   std::optional<resource_manager::session_reservation> admission;
 };
 
 struct profile {
@@ -39,7 +40,8 @@ struct profile {
 
 class registry {
  public:
-   registry(forge::asio::runtime& runtime, const node::options& options, const libp2p_identity_material& identity);
+   registry(forge::asio::runtime& runtime, const node::options& options, const libp2p_identity_material& identity,
+            resource_manager resources);
    ~registry();
 
    registry(const registry&) = delete;
@@ -63,8 +65,9 @@ class registry {
    std::unique_ptr<state> state_;
 };
 
-void register_quic_profile(registry& value, forge::asio::runtime& runtime, const node::options& options);
+void register_quic_profile(registry& value, forge::asio::runtime& runtime, const node::options& options,
+                           resource_manager resources);
 void register_tcp_profile(registry& value, forge::asio::runtime& runtime, const node::options& options,
-                          const libp2p_identity_material& identity);
+                          const libp2p_identity_material& identity, resource_manager resources);
 
 } // namespace forge::net::p2p::direct

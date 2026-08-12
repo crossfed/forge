@@ -86,6 +86,21 @@ def check_aggregates(root: Path, errors: list[str]) -> None:
          errors.append(f"{path.relative_to(root)}: aggregate-only module is forbidden")
 
 
+def check_p2p_scoped_peer_mutations(root: Path, errors: list[str]) -> None:
+   path = root / "libraries/net/p2p/relay_discovery.cpp"
+   source = path.read_text(errors="ignore")
+   for forbidden in ("store.find(", "store.upsert("):
+      if forbidden in source:
+         errors.append(
+            f"{path.relative_to(root)}: relay maintenance must use scoped peer-store mutations, not {forbidden}"
+         )
+   for required in ("store.mark_discovery_failure(", "store.prune_expired_relay_reservations("):
+      if required not in source:
+         errors.append(
+            f"{path.relative_to(root)}: relay maintenance is missing scoped mutation {required}"
+         )
+
+
 def component_roots(root: Path) -> list[Path]:
    roots: list[Path] = []
    for top in LAYOUT_ROOTS:
@@ -1062,6 +1077,7 @@ def main() -> int:
 
    check_layout(root, errors)
    check_aggregates(root, errors)
+   check_p2p_scoped_peer_mutations(root, errors)
    check_pairing(root, errors)
    check_vm_wasm_boundaries(root, errors)
    check_plugin_impl_ownership(root, errors)

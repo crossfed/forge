@@ -443,6 +443,9 @@ def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: P
         addr = server.ready["listen_addrs"][0]
         peer_id = server.ready["peer_id"]
         result = run_dial(dialer_binary, dialer, scenario, peer_id, addr, work, transport=transport)
+        if scenario == "identify" and dialer == "go" and listener == "forge":
+            if result.get("signed_peer_record") is not True:
+                raise RuntimeError("Go libp2p did not receive Forge's signed Identify peer record")
         delivered = wait_json(listener_result, 20) if listener_result is not None else None
         if delivered is not None and delivered.get("status") != "ok":
             raise RuntimeError(f"{listener} listener reported {delivered}")

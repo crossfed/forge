@@ -132,6 +132,18 @@ void dht::routing_table::impl::mark_failure(const peer_id& peer) {
    }
 }
 
+void dht::routing_table::impl::remove(const peer_id& peer) {
+   auto lock = std::scoped_lock{mutex};
+   auto& bucket = buckets[bucket_for(peer)];
+   bucket.active.erase(std::remove_if(bucket.active.begin(), bucket.active.end(),
+                                      [&](const auto& current) { return current.value.id == peer; }),
+                       bucket.active.end());
+   bucket.replacements.erase(std::remove_if(bucket.replacements.begin(), bucket.replacements.end(),
+                                            [&](const auto& current) { return current.value.id == peer; }),
+                             bucket.replacements.end());
+   promote_replacement(bucket);
+}
+
 std::vector<dht::peer> dht::routing_table::impl::closest(std::span<const std::uint8_t> target,
                                                          std::size_t limit) const {
    auto entries = std::vector<std::pair<dht::distance, dht::peer>>{};
@@ -234,6 +246,10 @@ dht::routing_table& dht::routing_table::operator=(routing_table&&) noexcept = de
 
 void dht::routing_table::upsert(peer value, routing_admission admission) {
    impl_->upsert(std::move(value), admission);
+}
+
+void dht::routing_table::remove(const peer_id& peer) {
+   impl_->remove(peer);
 }
 
 void dht::routing_table::mark_failure(const peer_id& peer) {

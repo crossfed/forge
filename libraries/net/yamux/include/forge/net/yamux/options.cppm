@@ -1,5 +1,6 @@
 module;
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 
@@ -20,6 +21,7 @@ struct options {
    std::size_t max_pending_accepts = 256;
    std::size_t max_stream_buffer = 1024 * 1024;
    std::size_t max_session_buffer = 16 * 1024 * 1024;
+   std::chrono::milliseconds close_timeout{5'000};
 };
 
 } // namespace forge::net::yamux

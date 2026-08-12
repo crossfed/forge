@@ -131,4 +131,23 @@ stream detail::stream_access::make(detail::stream_handle handle) {
    return stream{std::move(handle)};
 }
 
+boost::asio::awaitable<void> detail::stream_access::async_write_chunk(stream& value,
+                                                                      forge::net::transport::chunk bytes) {
+   if (!value.impl_ || !value.impl_->engine) {
+      FORGE_THROW_EXCEPTION(exceptions::stream_closed, "invalid QUIC stream");
+   }
+   auto [owned, lifetime] = forge::net::transport::detail::chunk_access::consume(std::move(bytes));
+   try {
+      co_await value.impl_->engine->async_write(std::move(owned), std::move(lifetime));
+   } catch (const detail::engine_failure& error) {
+      raise_engine_failure(error);
+   }
+}
+
+void detail::stream_access::cancel_write(stream& value) {
+   if (value.impl_ && value.impl_->engine) {
+      value.impl_->engine->cancel_write();
+   }
+}
+
 } // namespace forge::net::quic

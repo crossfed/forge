@@ -40,7 +40,7 @@ plugin::diagnostics_source_adapter::diagnostics_source_adapter(std::shared_ptr<p
 
 forge::net::p2p::diagnostics::snapshot
 plugin::diagnostics_source_adapter::snapshot(forge::net::p2p::diagnostics::options options) const {
-   return impl_->require_node().diagnostics(options);
+   return impl_->require_node()->diagnostics(options);
 }
 
 } // namespace forge::plugins::p2p::node

@@ -4,6 +4,7 @@ module;
 #include <cstdint>
 #include <memory>
 #include <span>
+#include <utility>
 #include <vector>
 
 export module forge.net.transport.buffer;
@@ -26,6 +27,7 @@ struct buffer_pool_stats {
 
 namespace detail {
 struct buffer_pool_state;
+struct chunk_access;
 } // namespace detail
 
 class chunk {
@@ -49,14 +51,25 @@ class chunk {
 
  private:
    friend class chunk_builder;
+   friend struct detail::chunk_access;
 
    struct storage;
    explicit chunk(std::shared_ptr<storage> value, std::size_t offset, std::size_t size);
 
    std::shared_ptr<storage> storage_;
+   std::shared_ptr<void> lifetime_;
    std::size_t offset_ = 0;
    std::size_t size_ = 0;
 };
+
+namespace detail {
+
+struct chunk_access {
+   static void attach_lifetime(chunk& value, std::shared_ptr<void> lifetime);
+   [[nodiscard]] static std::pair<std::vector<std::uint8_t>, std::shared_ptr<void>> consume(chunk value);
+};
+
+} // namespace detail
 
 class chunk_builder {
  public:

@@ -27,6 +27,7 @@ import forge.asio.runtime;
 import forge.crypto.asymmetric;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.exceptions;
+import forge.net.p2p.resource_manager;
 import forge.net.p2p.stream;
 import forge.net.tcp.connection;
 import forge.net.tcp.connector;
@@ -109,8 +110,8 @@ class tcp_profile final {
 
  public:
    tcp_profile(forge::asio::runtime& runtime_value, const node::options& options_value,
-               const libp2p_identity_material& identity_value)
-       : runtime_(runtime_value), options_(options_value), identity_(identity_value) {}
+               const libp2p_identity_material& identity_value, resource_manager resources_value)
+       : runtime_(runtime_value), options_(options_value), identity_(identity_value), resources_(std::move(resources_value)) {}
 
    [[nodiscard]] bool supports(const forge::net::p2p::endpoint& endpoint) const noexcept {
       return endpoint.is_direct_tcp();
@@ -234,6 +235,11 @@ class tcp_profile final {
       }
       try {
          auto tcp = co_await found->second.value->async_accept_connection();
+         auto admission = resources_.reserve_session(resource_manager::session_direction::inbound);
+         if (!admission) {
+            tcp.cancel();
+            FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "P2P inbound session limit reached");
+         }
          const auto local_endpoint = p2p_endpoint_for(tcp.local_endpoint());
          const auto remote_endpoint = p2p_endpoint_for(tcp.remote_endpoint());
          auto cancel_current = std::make_shared<cancellation_latch>();
@@ -262,6 +268,7 @@ class tcp_profile final {
              .session = std::move(*upgraded.session).as_transport(),
              .local_endpoint = std::move(local_endpoint),
              .remote_endpoint = std::move(remote_endpoint),
+             .admission = std::move(admission),
          };
       } catch (const forge::exceptions::base& error) {
          rethrow_tcp_as_p2p(error);
@@ -289,6 +296,7 @@ class tcp_profile final {
    forge::asio::runtime& runtime_;
    const node::options& options_;
    const libp2p_identity_material& identity_;
+   resource_manager resources_;
    std::map<std::string, listener_entry> listeners_;
    std::mutex active_mutex_;
    std::vector<std::weak_ptr<cancellation_latch>> active_;
@@ -298,8 +306,8 @@ class tcp_profile final {
 } // namespace
 
 void register_tcp_profile(registry& value, forge::asio::runtime& runtime, const node::options& options,
-                          const libp2p_identity_material& identity) {
-   auto owned = std::make_shared<tcp_profile>(runtime, options, identity);
+                          const libp2p_identity_material& identity, resource_manager resources) {
+   auto owned = std::make_shared<tcp_profile>(runtime, options, identity, std::move(resources));
    value.add(profile{
        .supports = [owned](const forge::net::p2p::endpoint& endpoint) { return owned->supports(endpoint); },
        .listening = [owned] { return owned->listening(); },

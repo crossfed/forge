@@ -20,6 +20,7 @@ import forge.asio.runtime;
 import forge.net.p2p.endpoint;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.identity;
+import forge.net.p2p.resource_manager;
 import forge.multiformats.exceptions;
 import forge.multiformats.types;
 import forge.multiformats.varint;
@@ -167,8 +168,10 @@ class quic_profile final {
    };
 
  public:
-   quic_profile(forge::asio::runtime& runtime_value, const node::options& options_value)
-       : runtime_(runtime_value), options_(options_value), connector_(runtime_value) {}
+   quic_profile(forge::asio::runtime& runtime_value, const node::options& options_value,
+                resource_manager resources_value)
+       : runtime_(runtime_value), options_(options_value), resources_(std::move(resources_value)),
+         connector_(runtime_value) {}
 
    [[nodiscard]] bool supports(const forge::net::p2p::endpoint& endpoint) const noexcept {
       return endpoint.is_direct_quic();
@@ -259,6 +262,12 @@ class quic_profile final {
             FORGE_THROW_EXCEPTION(exceptions::closed, "P2P QUIC direct listener is not active");
          }
          auto quic = co_await found->second.value->async_accept();
+         auto admission_token = forge::net::quic::detail::connection_access::take_inbound_admission(quic);
+         auto admission = std::static_pointer_cast<resource_manager::session_reservation>(std::move(admission_token));
+         if (!admission || !admission->active()) {
+            quic.cancel();
+            FORGE_THROW_EXCEPTION(exceptions::internal, "P2P QUIC connection is missing inbound admission");
+         }
          const auto remote = verified_peer_id_for(quic, std::nullopt, options_.allow_insecure_test_mode);
          auto local_endpoint = p2p_endpoint_for(quic.local_endpoint());
          auto remote_endpoint = p2p_endpoint_for(quic.remote_endpoint());
@@ -267,6 +276,7 @@ class quic_profile final {
              .session = forge::net::quic::as_transport_session(std::move(quic)),
              .local_endpoint = std::move(local_endpoint),
              .remote_endpoint = std::move(remote_endpoint),
+             .admission = std::move(*admission),
          };
       } catch (const forge::exceptions::base& error) {
          rethrow_quic_as_p2p(error);
@@ -315,19 +325,28 @@ class quic_profile final {
           .security = peer_verifier(),
           .certificate_pem = options_.certificate_pem,
           .private_key_pem = options_.private_key_pem,
+          .inbound_admission = [resources = resources_]() mutable -> std::shared_ptr<void> {
+             auto admission = resources.reserve_session(resource_manager::session_direction::inbound);
+             if (!admission) {
+                return {};
+             }
+             return std::make_shared<resource_manager::session_reservation>(std::move(*admission));
+          },
       };
    }
 
    forge::asio::runtime& runtime_;
    const node::options& options_;
+   resource_manager resources_;
    forge::net::quic::connector connector_;
    std::map<std::string, listener_entry> listeners_;
 };
 
 } // namespace
 
-void register_quic_profile(registry& value, forge::asio::runtime& runtime, const node::options& options) {
-   auto owned = std::make_shared<quic_profile>(runtime, options);
+void register_quic_profile(registry& value, forge::asio::runtime& runtime, const node::options& options,
+                           resource_manager resources) {
+   auto owned = std::make_shared<quic_profile>(runtime, options, std::move(resources));
    value.add(profile{
        .supports = [owned](const forge::net::p2p::endpoint& endpoint) { return owned->supports(endpoint); },
        .listening = [owned] { return owned->listening(); },
