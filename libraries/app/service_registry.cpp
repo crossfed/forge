@@ -62,9 +62,12 @@ void service_registry::close() {
 }
 
 void service_registry::clear() {
-   auto lock = std::unique_lock{impl_->mutex};
-   impl_->publication_closed = true;
-   impl_->entries.clear();
+   auto retired = decltype(impl_->entries){};
+   {
+      auto lock = std::unique_lock{impl_->mutex};
+      impl_->publication_closed = true;
+      retired.swap(impl_->entries);
+   }
 }
 
 } // namespace forge::app

@@ -109,6 +109,19 @@ struct auxiliary_service {
    int value = 0;
 };
 
+struct reentrant_service {
+   reentrant_service(forge::app::service_view value, std::atomic_bool* signal)
+       : services{std::move(value)}, destroyed{signal} {}
+
+   forge::app::service_view services;
+   std::atomic_bool* destroyed = nullptr;
+
+   ~reentrant_service() {
+      static_cast<void>(services.try_get<auxiliary_service>());
+      destroyed->store(true, std::memory_order_release);
+   }
+};
+
 class sample_api_impl final : public sample_api {
  public:
    explicit sample_api_impl(int offset = 1) : offset_{offset} {}
@@ -2611,6 +2624,17 @@ BOOST_AUTO_TEST_CASE(application_service_registry_synchronizes_publication_reads
    BOOST_TEST(!view.try_get<connected_service>());
    BOOST_CHECK_THROW(services.publish(std::make_shared<auxiliary_service>()),
                      forge::app::exceptions::service_publication_closed);
+}
+
+BOOST_AUTO_TEST_CASE(application_service_registry_releases_services_after_unlocking) {
+   auto services = forge::app::service_registry{};
+   auto destroyed = std::atomic_bool{false};
+   services.publish(std::make_shared<auxiliary_service>());
+   services.publish(std::make_shared<reentrant_service>(services.view(), &destroyed));
+
+   services.clear();
+
+   BOOST_TEST(destroyed.load(std::memory_order_acquire));
 }
 
 BOOST_AUTO_TEST_CASE(application_connect_failure_rolls_back_before_destroying_services) {

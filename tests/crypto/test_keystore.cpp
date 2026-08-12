@@ -109,6 +109,28 @@ BOOST_AUTO_TEST_CASE(encrypted_file_rejects_invalid_shape_and_kdf_parameters_bef
 
    BOOST_CHECK_THROW((void)keystore::decrypt_file(container, password()), keystore::exceptions::invalid_file);
 
+   auto valid = keystore::encrypt_file({
+       .plaintext = forge::crypto::core::secret_bytes{forge::crypto::core::bytes{'x'}},
+       .password = password(),
+   });
+   BOOST_CHECK_THROW((void)keystore::decrypt_file(
+                         valid, password(),
+                         keystore::decrypt_limits{.max_scrypt_n = keystore::default_scrypt_n - 1U}),
+                     keystore::exceptions::invalid_file);
+   BOOST_CHECK_THROW((void)keystore::decrypt_file(
+                         valid, password(),
+                         keystore::decrypt_limits{.max_scrypt_r = keystore::default_scrypt_r - 1U}),
+                     keystore::exceptions::invalid_file);
+   BOOST_CHECK_THROW((void)keystore::decrypt_file(
+                         valid, password(),
+                         keystore::decrypt_limits{.max_scrypt_p = keystore::default_scrypt_p - 1U}),
+                     keystore::exceptions::invalid_file);
+   BOOST_CHECK_THROW(
+       (void)keystore::decrypt_file(
+           valid, password(),
+           keystore::decrypt_limits{.max_scrypt_memory_bytes = keystore::default_scrypt_memory_bytes - 1U}),
+       keystore::exceptions::invalid_file);
+
    auto invalid_n = keystore::encrypt_file({
        .plaintext = forge::crypto::core::secret_bytes{forge::crypto::core::bytes{'x'}},
        .password = password(),
