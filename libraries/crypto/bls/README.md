@@ -66,6 +66,27 @@ Untrusted byte values should be passed to `valid`, `verify` or
 The `verify(proof_verified_public_key, ...)` overload reuses the point retained
 by the proof capability and does not decode the public key again.
 
+## Subgroup Validation And Spring Compatibility
+
+The current IRTF CFRG
+[BLS signature draft](https://datatracker.ietf.org/doc/html/draft-irtf-cfrg-bls-signature)
+requires public-key validation and signature verification to reject the
+identity and points outside the correct prime-order subgroup. Forge applies
+that rule at admission: `valid(...)`, `verify(...)`, proof verification and
+aggregation decode with field/on-curve checks and immediately require
+`inCorrectSubgroup()` for both G1 public keys and G2 signatures. An on-curve
+point in the wrong subgroup is therefore rejected before pairing or retention
+as an operational key.
+
+Spring has the same final verification outcome but a later boundary. Its FC
+BLS value deserialization calls `fromAffineBytesLE(..., check_valid = true)`,
+which checks the field representation and curve equation but does not perform
+the subgroup test. Spring's signature verification then checks
+`isOnCurve()` and `inCorrectSubgroup()` for both the public key and signature
+before the pairing result is accepted. This is an admission-policy difference,
+not permission to weaken Forge validation and not a claim that Spring accepts
+wrong-subgroup signatures as valid.
+
 Use `signature_accumulator` to build an `aggregate_signature`. It validates
 every input and throws typed BLS exceptions for malformed signatures, empty
 results or moved-from use. The accumulator and `proof_verified_public_key`

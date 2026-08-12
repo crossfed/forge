@@ -22,6 +22,7 @@ enum class code : std::uint16_t {
    service_missing = 10,
    service_already_published = 11,
    service_publication_closed = 12,
+   service_registry_detached = 13,
 };
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(code, "forge.app")
@@ -38,5 +39,6 @@ using invalid_service = forge::exceptions::coded_exception<code, code::invalid_s
 using service_missing = forge::exceptions::coded_exception<code, code::service_missing>;
 using service_already_published = forge::exceptions::coded_exception<code, code::service_already_published>;
 using service_publication_closed = forge::exceptions::coded_exception<code, code::service_publication_closed>;
+using service_registry_detached = forge::exceptions::coded_exception<code, code::service_registry_detached>;
 
 } // namespace forge::app::exceptions

@@ -13,6 +13,8 @@ Documents below explain cross-library architecture decisions.
 
 | Document | Purpose |
 | --- | --- |
+| [releases/8.25.0.md](releases/8.25.0.md) | Forge 8.25.0 Raw ownership, synchronized application services and keystore hardening. |
+| [releases/8.24.0.md](releases/8.24.0.md) | Forge 8.24.0 dual-target BLS values and canonical Savanna finalizer records. |
 | [releases/8.23.0.md](releases/8.23.0.md) | Forge 8.23.0 application-owned connect services and immutable runtime service lookup. |
 | [releases/8.22.0.md](releases/8.22.0.md) | Forge 8.22.0 P2P production hardening, CLI, local transactions and encrypted keystore. |
 | [releases/8.21.0.md](releases/8.21.0.md) | Forge 8.21.0 verified Chain API, Experimental authenticated state and HTTP deadline fixes. |

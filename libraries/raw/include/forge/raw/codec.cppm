@@ -73,13 +73,23 @@ struct unpack_limits {
    std::uint32_t first_container_elements = max_array_elements;
 };
 
+} // namespace forge::raw
+
+namespace forge::raw::detail {
+
+datastream<std::vector<std::uint8_t>> make_input_stream(std::span<const std::uint8_t> input,
+                                                        unpack_limits limits = {});
+
+} // namespace forge::raw::detail
+
+export namespace forge::raw {
+
 static_assert(CHAR_BIT == 8, "Forge raw serialization requires 8-bit bytes");
 
 namespace detail {
 
 [[noreturn]] void fail_codec(const char* message);
 [[noreturn]] void fail_allocation(const char* message);
-datastream<std::vector<std::uint8_t>> make_input_stream(std::span<const std::uint8_t> input, unpack_limits limits = {});
 
 inline void require(bool condition, const char* message) {
    if (!condition) {
