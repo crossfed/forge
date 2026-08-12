@@ -239,13 +239,8 @@ class datastream<std::vector<Byte, Allocator>,
       return storage_;
    }
 
-   const storage_type& storage() const {
-      materialize();
-      return storage_;
-   }
-
  private:
-   void materialize() const {
+   void materialize() {
       if (!read_only_) {
          return;
       }
@@ -258,9 +253,9 @@ class datastream<std::vector<Byte, Allocator>,
       return read_only_ ? input_.size() : storage_.size();
    }
 
-   mutable storage_type storage_;
-   mutable std::span<const Byte> input_;
-   mutable bool read_only_ = false;
+   storage_type storage_;
+   std::span<const Byte> input_;
+   bool read_only_ = false;
    std::size_t position_ = 0;
    raw::detail::allocation_limits allocation_limits_;
    std::size_t remaining_elements_;

@@ -21,6 +21,7 @@ namespace forge::crypto::keystore {
 namespace {
 
 constexpr auto magic = std::array<std::uint8_t, 8>{'F', 'O', 'R', 'G', 'E', 'K', 'S', 1};
+constexpr auto salt_size = std::size_t{16};
 
 struct bytes_wiper {
    core::bytes* value;
@@ -121,7 +122,7 @@ core::bytes encrypt_file(encrypted_file_request request) {
    if (request.password.empty()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "encrypted key file requires a password");
    }
-   const auto salt = core::random_bytes(16U);
+   const auto salt = core::random_bytes(salt_size);
    const auto nonce = core::random_bytes(symmetric::aes::aes_gcm_nonce_size);
 
    const auto header = make_header(request.encryption, salt, nonce, request.plaintext.size());
@@ -156,16 +157,24 @@ core::secret_bytes decrypt_file(const core::bytes& container, const core::secret
    require_limit("r", encryption.scrypt_r, limits.max_scrypt_r);
    require_limit("p", encryption.scrypt_p, limits.max_scrypt_p);
    require_limit("memory", encryption.scrypt_max_memory_bytes, limits.max_scrypt_memory_bytes);
-   const auto salt_size = read_u64(container, offset);
-   const auto nonce_size = read_u64(container, offset);
+   validate(encryption);
+   const auto encoded_salt_size = read_u64(container, offset);
+   const auto encoded_nonce_size = read_u64(container, offset);
    const auto ciphertext_size = read_u64(container, offset);
    if (ciphertext_size > limits.max_plaintext_bytes) {
       FORGE_THROW_EXCEPTION(exceptions::size_limit_exceeded, "encrypted key file exceeds its plaintext limit",
                             forge::exceptions::ctx("size", ciphertext_size),
                             forge::exceptions::ctx("maximum", limits.max_plaintext_bytes));
    }
-   auto salt = read_bytes(container, offset, salt_size);
-   auto nonce = read_bytes(container, offset, nonce_size);
+   constexpr auto fixed_body_size = salt_size + symmetric::aes::aes_gcm_nonce_size +
+                                    symmetric::aes::aes_gcm_tag_size;
+   if (encoded_salt_size != salt_size || encoded_nonce_size != symmetric::aes::aes_gcm_nonce_size ||
+       ciphertext_size > static_cast<std::uint64_t>((std::numeric_limits<std::size_t>::max)() - fixed_body_size) ||
+       offset > container.size() || container.size() - offset != fixed_body_size + ciphertext_size) {
+      throw_invalid_file();
+   }
+   auto salt = read_bytes(container, offset, encoded_salt_size);
+   auto nonce = read_bytes(container, offset, encoded_nonce_size);
    auto tag = read_bytes(container, offset, symmetric::aes::aes_gcm_tag_size);
    auto ciphertext = read_bytes(container, offset, ciphertext_size);
    if (offset != container.size()) {

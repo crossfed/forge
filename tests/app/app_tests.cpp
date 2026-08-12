@@ -2525,12 +2525,14 @@ BOOST_AUTO_TEST_CASE(application_service_registry_reports_exact_typed_errors) {
    auto services = forge::app::service_registry{};
    auto context = forge::app::connect_context{forge::api::core::view{apis}, services};
 
+   BOOST_TEST(!context.try_service<connected_service>());
    BOOST_CHECK_THROW(static_cast<void>(context.service<connected_service>()),
                      forge::app::exceptions::service_missing);
    BOOST_CHECK_THROW(context.publish(std::shared_ptr<connected_service>{}),
                      forge::app::exceptions::invalid_service);
 
    context.publish(std::make_shared<connected_service>(7));
+   BOOST_TEST(context.try_service<connected_service>() == context.service<connected_service>());
    BOOST_TEST(context.service<connected_service>()->value == 7);
    BOOST_CHECK_THROW(static_cast<void>(context.service<auxiliary_service>()),
                      forge::app::exceptions::service_missing);
@@ -2540,8 +2542,75 @@ BOOST_AUTO_TEST_CASE(application_service_registry_reports_exact_typed_errors) {
    services.close();
    BOOST_CHECK_THROW(context.publish(std::make_shared<auxiliary_service>()),
                      forge::app::exceptions::service_publication_closed);
+   BOOST_TEST(!forge::app::service_view{}.try_get<connected_service>());
    BOOST_CHECK_THROW(static_cast<void>(forge::app::service_view{}.get<connected_service>()),
-                     forge::app::exceptions::service_missing);
+                     forge::app::exceptions::service_registry_detached);
+}
+
+BOOST_AUTO_TEST_CASE(application_service_registry_synchronizes_publication_reads_close_and_clear) {
+   auto services = forge::app::service_registry{};
+   const auto view = services.view();
+   auto start = std::atomic_bool{false};
+   auto published = std::atomic_bool{false};
+   auto failed = std::atomic_bool{false};
+   auto readers = std::vector<std::thread>{};
+
+   for (auto index = 0; index < 4; ++index) {
+      readers.emplace_back([&] {
+         while (!start.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+         }
+         while (!published.load(std::memory_order_acquire)) {
+            const auto current = view.try_get<connected_service>();
+            if (current && current->value != 42) {
+               failed.store(true, std::memory_order_relaxed);
+            }
+         }
+         for (auto iteration = 0; iteration < 1'000; ++iteration) {
+            const auto current = view.try_get<connected_service>();
+            if (!current || current->value != 42) {
+               failed.store(true, std::memory_order_relaxed);
+            }
+         }
+      });
+   }
+
+   start.store(true, std::memory_order_release);
+   services.publish(std::make_shared<connected_service>(42));
+   published.store(true, std::memory_order_release);
+   for (auto& reader : readers) {
+      reader.join();
+   }
+   BOOST_TEST(!failed.load(std::memory_order_relaxed));
+
+   start.store(false, std::memory_order_relaxed);
+   failed.store(false, std::memory_order_relaxed);
+   readers.clear();
+   for (auto index = 0; index < 4; ++index) {
+      readers.emplace_back([&] {
+         while (!start.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+         }
+         for (auto iteration = 0; iteration < 1'000; ++iteration) {
+            const auto current = view.try_get<connected_service>();
+            if (current && current->value != 42) {
+               failed.store(true, std::memory_order_relaxed);
+            }
+         }
+      });
+   }
+
+   start.store(true, std::memory_order_release);
+   services.close();
+   services.clear();
+   for (auto& reader : readers) {
+      reader.join();
+   }
+
+   BOOST_TEST(!failed.load(std::memory_order_relaxed));
+   BOOST_TEST(!view.try_get<connected_service>());
+   BOOST_CHECK_THROW(services.publish(std::make_shared<auxiliary_service>()),
+                     forge::app::exceptions::service_publication_closed);
 }
 
 BOOST_AUTO_TEST_CASE(application_connect_failure_rolls_back_before_destroying_services) {

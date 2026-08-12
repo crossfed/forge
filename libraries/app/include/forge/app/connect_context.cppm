@@ -35,6 +35,10 @@ class connect_context {
       return services_->view().get<Service>();
    }
 
+   template <typename Service> [[nodiscard]] std::shared_ptr<Service> try_service() const {
+      return services_->view().try_get<Service>();
+   }
+
  private:
    forge::api::core::view apis_;
    service_registry* services_ = nullptr;

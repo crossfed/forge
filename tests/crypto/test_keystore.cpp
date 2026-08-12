@@ -53,6 +53,13 @@ void write_private_file(const std::filesystem::path& path, const forge::crypto::
                                 std::filesystem::perm_options::replace);
 }
 
+void overwrite_u64(forge::crypto::core::bytes& bytes, std::size_t offset, std::uint64_t value) {
+   BOOST_REQUIRE(bytes.size() >= offset + 8U);
+   for (auto index = 0U; index < 8U; ++index) {
+      bytes[offset + index] = static_cast<std::uint8_t>((value >> (index * 8U)) & 0xffU);
+   }
+}
+
 } // namespace
 
 BOOST_AUTO_TEST_SUITE(crypto_keystore_tests)
@@ -93,7 +100,7 @@ BOOST_AUTO_TEST_CASE(encrypted_file_authenticates_header_ciphertext_and_password
                      keystore::exceptions::size_limit_exceeded);
 }
 
-BOOST_AUTO_TEST_CASE(encrypted_file_rejects_unbounded_kdf_before_derivation) {
+BOOST_AUTO_TEST_CASE(encrypted_file_rejects_invalid_shape_and_kdf_parameters_before_derivation) {
    auto container = keystore::encrypt_file({
        .plaintext = forge::crypto::core::secret_bytes{forge::crypto::core::bytes{'x'}},
        .password = password(),
@@ -106,8 +113,22 @@ BOOST_AUTO_TEST_CASE(encrypted_file_rejects_unbounded_kdf_before_derivation) {
        .plaintext = forge::crypto::core::secret_bytes{forge::crypto::core::bytes{'x'}},
        .password = password(),
    });
-   invalid_n[8U] = 3U;
+   overwrite_u64(invalid_n, 8U, 16'385U);
    BOOST_CHECK_THROW((void)keystore::decrypt_file(invalid_n, password()), keystore::exceptions::invalid_file);
+
+   auto invalid_salt = keystore::encrypt_file({
+       .plaintext = forge::crypto::core::secret_bytes{forge::crypto::core::bytes{'x'}},
+       .password = password(),
+   });
+   overwrite_u64(invalid_salt, 40U, 15U);
+   BOOST_CHECK_THROW((void)keystore::decrypt_file(invalid_salt, password()), keystore::exceptions::invalid_file);
+
+   auto invalid_nonce = keystore::encrypt_file({
+       .plaintext = forge::crypto::core::secret_bytes{forge::crypto::core::bytes{'x'}},
+       .password = password(),
+   });
+   overwrite_u64(invalid_nonce, 48U, 0U);
+   BOOST_CHECK_THROW((void)keystore::decrypt_file(invalid_nonce, password()), keystore::exceptions::invalid_file);
 }
 
 BOOST_AUTO_TEST_CASE(store_is_atomic_private_and_reopens_for_signing) {
