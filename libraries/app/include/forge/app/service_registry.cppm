@@ -18,6 +18,7 @@ class service_view {
  public:
    service_view() = default;
 
+   template <typename Service> [[nodiscard]] std::shared_ptr<Service> try_get() const;
    template <typename Service> [[nodiscard]] std::shared_ptr<Service> get() const;
 
  private:
@@ -46,24 +47,34 @@ class service_registry {
    }
 
    [[nodiscard]] service_view view() const noexcept;
-   void close() noexcept;
-   void clear() noexcept;
+   void close();
+   void clear();
 
  private:
    friend class service_view;
 
    void publish_erased(std::type_index type, std::shared_ptr<void> service);
+   [[nodiscard]] std::shared_ptr<void> try_get_erased(std::type_index type) const;
    [[nodiscard]] std::shared_ptr<void> get_erased(std::type_index type) const;
 
    struct impl;
    std::unique_ptr<impl> impl_;
 };
 
+template <typename Service> std::shared_ptr<Service> service_view::try_get() const {
+   static_assert(std::is_object_v<Service>, "service type must be an object type");
+   static_assert(std::same_as<Service, std::remove_cv_t<Service>>, "service lookup requires an unqualified type");
+   if (registry_ == nullptr) {
+      return {};
+   }
+   return std::static_pointer_cast<Service>(registry_->try_get_erased(typeid(Service)));
+}
+
 template <typename Service> std::shared_ptr<Service> service_view::get() const {
    static_assert(std::is_object_v<Service>, "service type must be an object type");
    static_assert(std::same_as<Service, std::remove_cv_t<Service>>, "service lookup requires an unqualified type");
    if (registry_ == nullptr) {
-      throw exceptions::service_missing{"required application service is not available"};
+      throw exceptions::service_registry_detached{"application service registry is not attached to this view"};
    }
    return std::static_pointer_cast<Service>(registry_->get_erased(typeid(Service)));
 }

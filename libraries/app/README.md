@@ -108,9 +108,15 @@ a const context: it may consume installed APIs through `api_view()` and services
 through `service<T>()`, but it cannot install APIs or publish services after
 plugin initialization.
 
-`service_view` is copyable and safe for concurrent lookup after the connect
-phase closes. It does not own the registry and must not outlive the
-`application_shell` that produced it.
+`service_view` is copyable. The registry synchronizes publication, lookup,
+close and clear, so an initialization task may read while `on_connect(...)`
+publishes. Use `get<T>()` or `connect_context::service<T>()` for required
+dependencies. Use `try_get<T>()` or `connect_context::try_service<T>()` for an
+optional dependency; they return an empty `shared_ptr` when the type is absent
+without using exceptions for control flow. Calling `get<T>()` on a detached,
+default-constructed view throws typed `exceptions::service_registry_detached`;
+`try_get<T>()` returns empty. A view does not own the registry and must not
+outlive the `application_shell` that produced it.
 
 ## App And Plugin Config
 

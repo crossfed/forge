@@ -174,6 +174,11 @@ forge::datastream<const std::uint8_t*>& operator>>(forge::datastream<const std::
 
 BOOST_AUTO_TEST_SUITE(raw_test_suite)
 
+template <typename Stream>
+concept exposes_const_storage = requires(const Stream& stream) { stream.storage(); };
+
+static_assert(!exposes_const_storage<forge::datastream<std::vector<std::uint8_t>>>);
+
 BOOST_AUTO_TEST_CASE(vector_datastream_can_read_a_non_owning_input_span) {
    auto input = std::vector<std::uint8_t>{0x11U, 0x22U};
    auto stream = forge::datastream<std::vector<std::uint8_t>>{std::span<const std::uint8_t>{input}};
