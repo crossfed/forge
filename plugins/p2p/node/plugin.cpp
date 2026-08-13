@@ -1,8 +1,10 @@
 module;
 
 #include <forge/exceptions/macros.hpp>
+#include <forge/db/object/macros.hpp>
 
 #include <boost/asio/awaitable.hpp>
+#include <boost/describe.hpp>
 #include <boost/scope/scope_exit.hpp>
 
 #include <algorithm>
@@ -42,6 +44,8 @@ import forge.config.core.component;
 import forge.config.core.decode;
 import forge.crypto.core.types;
 import forge.crypto.core.secret_bytes;
+import forge.db.object.index;
+import forge.db.object.object;
 import forge.exceptions;
 import forge.net.p2p.exceptions;
 import forge.net.p2p.identity;
@@ -51,6 +55,7 @@ import forge.net.p2p.identify;
 import forge.net.p2p.diagnostics;
 import forge.net.p2p.discovery;
 import forge.net.p2p.dht;
+import forge.net.p2p.dht.record_store;
 import forge.net.p2p.rendezvous;
 import forge.net.p2p.pubsub;
 import forge.net.p2p.reachability;
@@ -73,7 +78,9 @@ import forge.plugins.db.store.api;
 
 #include "details/config.hxx"
 #include "details/api_impl.hxx"
+#include "details/object_dht_record_store_adapter.hxx"
 #include "details/object_peer_state_adapter.hxx"
+#include "details/p2p_state_schema.hxx"
 #include "details/plugin_diagnostics_source_adapter.hxx"
 #include "details/plugin_impl.hxx"
 #include "details/plugin_pubsub_source_adapter.hxx"
@@ -105,7 +112,7 @@ forge::app::plugin_id plugin::id() const {
 }
 
 std::string plugin::version() const {
-   return "2.0.0";
+   return "3.0.0";
 }
 
 std::optional<forge::config::core::component_descriptor> plugin::describe_config() const {
@@ -151,7 +158,7 @@ boost::asio::awaitable<void> plugin::after_initialize() {
    }
    impl_->peer_state_store =
        std::make_shared<forge::plugins::db::store::store_handle>(co_await impl_->stores->store(impl_->peer_store_name));
-   object_peer_state_adapter::register_schema(*impl_->peer_state_store);
+   detail::p2p_state_schema::register_objects(*impl_->peer_state_store);
 }
 
 boost::asio::awaitable<void> plugin::startup() {
@@ -181,9 +188,50 @@ boost::asio::awaitable<void> plugin::startup() {
       }
    }
    if (impl_->peer_state_store) {
-      impl_->peer_state = co_await object_peer_state_adapter::async_open(impl_->stores, *impl_->peer_state_store,
-                                                                         impl_->options.peer_state);
+      impl_->peer_state = co_await object_peer_state_adapter::async_open(
+          impl_->stores, *impl_->peer_state_store, impl_->options.peer_state, impl_->reset_incompatible_peer_state);
       impl_->options.peer_state.persistence = impl_->peer_state;
+
+      auto open_failure = std::exception_ptr{};
+      try {
+         for (const auto& profile : impl_->options.dht_profiles) {
+            auto persistence = co_await object_dht_record_store_adapter::async_open(
+                impl_->stores, *impl_->peer_state_store, profile.protocol,
+                forge::net::p2p::dht::record_store::options{
+                    .max_providers_per_key = profile.limits.replication,
+                    .max_record_bytes = profile.limits.max_record_size,
+                });
+            impl_->options.dht_record_persistence.emplace(profile.protocol, persistence);
+            impl_->dht_state.emplace_back(profile.protocol, std::move(persistence));
+         }
+      } catch (...) {
+         open_failure = std::current_exception();
+      }
+      if (open_failure) {
+         auto cleanup_failure = std::exception_ptr{};
+         for (auto& [_, persistence] : impl_->dht_state) {
+            try {
+               co_await persistence->async_close();
+            } catch (...) {
+               if (!cleanup_failure) {
+                  cleanup_failure = std::current_exception();
+               }
+            }
+         }
+         impl_->dht_state.clear();
+         impl_->options.dht_record_persistence.clear();
+         try {
+            co_await impl_->peer_state->async_close();
+         } catch (...) {
+            if (!cleanup_failure) {
+               cleanup_failure = std::current_exception();
+            }
+         }
+         impl_->peer_state.reset();
+         impl_->options.peer_state.persistence.reset();
+         static_cast<void>(cleanup_failure);
+         std::rethrow_exception(open_failure);
+      }
    }
 
    if (impl_->stop_requested.load(std::memory_order_acquire)) {
@@ -232,7 +280,7 @@ boost::asio::awaitable<void> plugin::shutdown() {
    request_stop();
    auto failure = std::exception_ptr{};
    auto node = impl_->node_snapshot();
-   auto peer_state_closed = !node && !impl_->peer_state;
+   auto peer_state_closed = !node && !impl_->peer_state && impl_->dht_state.empty();
    if (node) {
       try {
          co_await node->async_stop();
@@ -242,13 +290,26 @@ boost::asio::awaitable<void> plugin::shutdown() {
             failure = std::current_exception();
          }
       }
-   } else if (impl_->peer_state) {
-      try {
-         co_await impl_->peer_state->async_close();
-         peer_state_closed = true;
-      } catch (...) {
-         if (!failure) {
-            failure = std::current_exception();
+   } else {
+      peer_state_closed = true;
+      for (auto& [_, persistence] : impl_->dht_state) {
+         try {
+            co_await persistence->async_close();
+         } catch (...) {
+            peer_state_closed = false;
+            if (!failure) {
+               failure = std::current_exception();
+            }
+         }
+      }
+      if (impl_->peer_state) {
+         try {
+            co_await impl_->peer_state->async_close();
+         } catch (...) {
+            peer_state_closed = false;
+            if (!failure) {
+               failure = std::current_exception();
+            }
          }
       }
    }
@@ -258,6 +319,8 @@ boost::asio::awaitable<void> plugin::shutdown() {
                                                    std::memory_order_acquire);
       impl_->peer_state.reset();
       impl_->options.peer_state.persistence.reset();
+      impl_->dht_state.clear();
+      impl_->options.dht_record_persistence.clear();
       impl_->peer_state_store.reset();
       clear_text(impl_->options.certificate_pem);
       clear_text(impl_->options.private_key_pem);

@@ -9,6 +9,7 @@ module;
 #include <exception>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -24,6 +25,8 @@ import forge.config.core.component;
 import forge.config.core.decode;
 import forge.exceptions;
 import forge.net.p2p.endpoint;
+import forge.net.p2p.dht;
+import forge.net.p2p.dht.record_store;
 import forge.net.p2p.identity;
 import forge.net.p2p.lifecycle;
 import forge.net.p2p.node;
@@ -71,6 +74,64 @@ namespace {
       };
    }
    FORGE_THROW_EXCEPTION(exceptions::invalid_config, "invalid P2P path policy");
+}
+
+[[nodiscard]] forge::net::p2p::dht::mode parse_dht_mode(dht_mode value) {
+   switch (value) {
+   case dht_mode::client:
+      return forge::net::p2p::dht::mode::client;
+   case dht_mode::server:
+      return forge::net::p2p::dht::mode::server;
+   }
+   FORGE_THROW_EXCEPTION(exceptions::invalid_config, "invalid P2P DHT mode");
+}
+
+[[nodiscard]] std::vector<forge::net::p2p::dht::profile>
+parse_dht_profiles(const std::vector<dht_profile_config>& configured) {
+   auto profiles = std::vector<forge::net::p2p::dht::profile>{};
+   auto protocols = std::set<forge::net::p2p::protocol_id>{};
+   profiles.reserve(configured.size());
+   for (const auto& item : configured) {
+      auto profile = forge::net::p2p::dht::profile{};
+      try {
+         const auto mode = parse_dht_mode(item.mode);
+         switch (item.kind) {
+         case dht_profile_kind::amino_v1:
+            if ((!item.protocol.empty() && item.protocol != forge::net::p2p::builtins::kad_dht.value) || !item.peers ||
+                !item.providers || !item.values) {
+               FORGE_THROW_EXCEPTION(exceptions::invalid_config, "Amino DHT protocol and capabilities are fixed");
+            }
+            profile = forge::net::p2p::amino_v1(mode);
+            break;
+         case dht_profile_kind::custom:
+            if (item.protocol.empty()) {
+               FORGE_THROW_EXCEPTION(exceptions::invalid_config, "custom DHT profile requires a protocol ID");
+            }
+            if (item.values) {
+               FORGE_THROW_EXCEPTION(exceptions::invalid_config,
+                                     "configured custom DHT values require a product-owned C++ validator and selector");
+            }
+            profile = forge::net::p2p::custom_dht_profile(forge::net::p2p::protocol_id{.value = item.protocol}, mode,
+                                                          forge::net::p2p::dht::profile_capabilities{
+                                                              .peers = item.peers,
+                                                              .providers = item.providers,
+                                                              .values = false,
+                                                          });
+            break;
+         }
+      } catch (const forge::plugins::p2p::node::exceptions::invalid_config&) {
+         throw;
+      } catch (const std::exception& error) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_config, "invalid P2P DHT profile",
+                               forge::exceptions::ctx("error", error.what()));
+      }
+      if (!protocols.insert(profile.protocol).second) {
+         FORGE_THROW_EXCEPTION(exceptions::invalid_config, "P2P DHT profile protocol IDs must be unique",
+                               forge::exceptions::ctx("protocol", profile.protocol.value));
+      }
+      profiles.push_back(std::move(profile));
+   }
+   return profiles;
 }
 
 } // namespace
@@ -136,6 +197,8 @@ void apply_config(plugin::impl& state, const config& config) {
    state.options.lifecycle.max_parallel_bootstrap = static_cast<std::size_t>(config.bootstrap_max_parallel);
    state.options.advertised_endpoints = parse_endpoint_list(config.advertised_endpoints);
    state.peer_store_name = config.peer_store;
+   state.reset_incompatible_peer_state = config.peer_store_schema_policy == cache_schema_policy::reset;
+   state.options.dht_profiles = parse_dht_profiles(config.dht_profiles);
    state.certificate_secret = config.certificate_secret;
    state.private_key_secret = config.private_key_secret;
    state.options.capabilities = forge::net::p2p::capability_set{

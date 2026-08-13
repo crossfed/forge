@@ -4,10 +4,9 @@ namespace forge::plugins::p2p::node {
 
 class object_peer_state_adapter final : public forge::net::p2p::peer_store::persistence {
  public:
-   static void register_schema(const forge::plugins::db::store::store_handle& store);
    [[nodiscard]] static boost::asio::awaitable<std::shared_ptr<object_peer_state_adapter>>
    async_open(forge::plugins::db::store::api* db, forge::plugins::db::store::store_handle store,
-              forge::net::p2p::peer_store::options limits);
+              forge::net::p2p::peer_store::options limits, bool reset_incompatible_cache = false);
 
    boost::asio::awaitable<forge::net::p2p::peer_store::hydration_page>
    async_hydrate(forge::net::p2p::peer_store::hydration_request request) override;

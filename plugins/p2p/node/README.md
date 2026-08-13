@@ -5,12 +5,14 @@ contribution APIs for protocol handlers and API-over-P2P publication.
 
 ## Current Support State
 
-The plugin now provides the Stage 3 production foundation: identity material is
-loaded through Crypto Secrets, peer/provider/Rendezvous state is persisted in a
-dedicated DB Store Object layer, hydration completes before listeners open and
-the low-level node owns bootstrap, automatic Identify/Identify Push, scoped
-network resources and bounded Kademlia routing state. It remains a configuration
-adapter; complete Kademlia records and autonomous topology remain Stage 4/5.
+The plugin now provides the Stage 4 persistence/configuration foundation:
+identity material is loaded through Crypto Secrets, peer/Rendezvous state and
+per-profile DHT values/providers are persisted through separate adapters in
+one dedicated DB Store Object layer, and hydration completes before listeners
+open. The low-level node owns bootstrap, automatic Identify/Identify Push,
+scoped network resources, multi-profile Kademlia routing, durable records and
+provider maintenance. The plugin remains a configuration adapter; autonomous
+topology and the remaining production-host work stay in Stage 5+.
 
 Insecure memory mode remains an explicit local-test path only. Current support
 classifications live
@@ -53,7 +55,7 @@ isolated codec and interop fixtures do not promote this plugin to production.
 ## What It Provides Today
 
 - Starts and stops a shared P2P node through the `forge_app` lifecycle.
-- Registers and validates the private peer-state ObjectDB schema during
+- Registers and validates the private P2P-state ObjectDB schema during
   `after_initialize()`.
 - Loads certificate/private-key secrets, opens ObjectDB persistence and performs
   bounded hydration before opening any listener.
@@ -121,10 +123,11 @@ authenticated peer and is recommended for production. Existing peer-less
 bootstrap endpoints remain supported; their peer is learned only after the
 authenticated connection succeeds.
 
-The named DB Store must provide an Object layer dedicated to P2P peer state.
+The named DB Store must provide an Object layer dedicated to P2P peer and DHT
+record state.
 One authoritative schema marker versions the complete private row family, so
 startup validates the format without scanning durable history. A missing marker
-in nonempty storage or a version mismatch fails startup; the v1 recovery path is
+in nonempty storage or a version mismatch fails startup; the v2 recovery path is
 to remove the peer cache and hydrate it again from configured bootstrap peers.
 Secret policies must allow
 `p2p.identity.certificate` and `p2p.identity.private-key` respectively.
@@ -135,6 +138,11 @@ Plugin 2.0 removes inline certificate and private-key PEM configuration. Migrate
 each value into Crypto Secrets and replace it with `certificate-secret` or
 `private-key-secret`. This is an intentional plugin configuration break; the
 low-level `forge_net_p2p` identity options remain source-compatible.
+
+Plugin 3.0 replaces the single DHT capability/configuration surface with
+explicit `dht.profiles` and adds `peer-store.schema-policy` for the recoverable
+private cache. The local plugin API contract remains `1.0`; only Preview
+configuration and low-level DHT source contracts change.
 
 ## Dependencies
 
