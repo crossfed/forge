@@ -1827,6 +1827,17 @@ add_custom_target(
    DEPENDS test_forge_package_install
 )
 add_custom_target(
+   test_forge_package_plugins_p2p_resolver
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_p2p_resolver
+      ${CMAKE_BINARY_DIR}/forge-package-plugins-p2p-resolver
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_plugins_p2p_resolver
+   DEPENDS test_forge_package_install
+)
+add_custom_target(
    test_forge_package_plugins_crypto_signer
    COMMAND ${CMAKE_CTEST_COMMAND}
       --build-and-test
@@ -2746,6 +2757,17 @@ add_test(
       --test-command forge_package_plugins_p2p_node
 )
 set_tests_properties(test_forge_package_plugins_p2p_node PROPERTIES DEPENDS test_forge_package_install)
+add_test(
+   NAME test_forge_package_plugins_p2p_resolver
+   COMMAND ${CMAKE_CTEST_COMMAND}
+      --build-and-test
+      ${CMAKE_CURRENT_SOURCE_DIR}/package_plugins_p2p_resolver
+      ${CMAKE_BINARY_DIR}/forge-package-plugins-p2p-resolver
+      --build-generator ${CMAKE_GENERATOR}
+      --build-options ${FORGE_PACKAGE_CONSUMER_BUILD_OPTIONS}
+      --test-command forge_package_plugins_p2p_resolver
+)
+set_tests_properties(test_forge_package_plugins_p2p_resolver PROPERTIES DEPENDS test_forge_package_install)
 add_test(
    NAME test_forge_package_plugins_crypto_signer
    COMMAND ${CMAKE_CTEST_COMMAND}

@@ -76,7 +76,6 @@ import forge.plugins.crypto.secrets.types;
 import forge.plugins.p2p.node.api;
 import forge.plugins.p2p.node.plugin;
 import forge.plugins.p2p.resolver.api;
-import forge.plugins.p2p.resolver.managed_api;
 import forge.plugins.p2p.resolver.plugin;
 import forge.plugins.p2p.resolver.types;
 
@@ -1240,8 +1239,6 @@ void require_audit_semantics(const protocol::audited_response& response, std::si
 } // namespace
 
 int main() {
-   require(forge::plugins::p2p::resolver::managed_api::describe().id.value == "forge.plugins.p2p.resolver.managed",
-           "installed resolver package does not export managed remote API");
    static_assert(std::is_abstract_v<forge::chain::api::info>);
    static_assert(std::is_abstract_v<forge::chain::api::block>);
    static_assert(std::is_abstract_v<forge::chain::api::state>);
