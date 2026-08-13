@@ -605,6 +605,15 @@ add_executable(test_forge_crypto_core unit/main.cpp crypto/test_core.cpp)
 target_link_libraries(test_forge_crypto_core forge_crypto_core Boost::included_unit_test_framework)
 add_test(NAME test_forge_crypto_core COMMAND test_forge_crypto_core WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
+add_executable(test_forge_crypto_signer unit/main.cpp crypto/test_signer.cpp)
+target_link_libraries(
+   test_forge_crypto_signer
+   forge_asio
+   forge_crypto_signer
+   Boost::included_unit_test_framework
+)
+add_test(NAME test_forge_crypto_signer COMMAND test_forge_crypto_signer WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
+
 add_executable(
    test_forge_crypto_digest
    unit/main.cpp

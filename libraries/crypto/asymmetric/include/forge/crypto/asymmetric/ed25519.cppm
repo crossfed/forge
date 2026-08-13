@@ -53,6 +53,11 @@ class private_key {
 
    private_key() = default;
    explicit private_key(const private_key_secret& value);
+   private_key(const private_key&) = default;
+   private_key(private_key&& other) noexcept;
+   private_key& operator=(const private_key& other);
+   private_key& operator=(private_key&& other) noexcept;
+   ~private_key();
 
    [[nodiscard]] static private_key generate();
    [[nodiscard]] static private_key regenerate(const private_key_secret& value);

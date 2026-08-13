@@ -55,6 +55,11 @@ class private_key {
 
    private_key() = default;
    explicit private_key(private_key_secret value);
+   private_key(const private_key&) = default;
+   private_key(private_key&& other) noexcept;
+   private_key& operator=(const private_key& other);
+   private_key& operator=(private_key&& other) noexcept;
+   ~private_key();
 
    [[nodiscard]] static private_key generate(std::uint32_t bits = 2048);
    [[nodiscard]] static private_key regenerate(private_key_secret value);

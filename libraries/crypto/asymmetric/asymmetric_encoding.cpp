@@ -9,6 +9,7 @@ module;
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -18,6 +19,7 @@ import forge.codec.base58;
 import forge.codec.hex;
 import forge.crypto.asymmetric.ed25519;
 import forge.crypto.asymmetric.p256;
+import forge.crypto.core.secret_bytes;
 import forge.crypto.digest.ripemd160;
 import forge.crypto.asymmetric.rsa;
 import forge.crypto.asymmetric.secp256k1;
@@ -37,14 +39,49 @@ import forge.variant.described;
 namespace forge::crypto::asymmetric {
 namespace {
 
+template <typename Value> void erase_bytes(Value& value) noexcept {
+   if constexpr (requires { value.data(); } && (requires { value.size(); } || requires { value.data_size(); })) {
+      using pointer_type = decltype(value.data());
+      using element_type = std::remove_cv_t<std::remove_pointer_t<pointer_type>>;
+      const auto element_count = [&] {
+         if constexpr (requires { value.size(); }) {
+            return value.size();
+         } else {
+            return value.data_size();
+         }
+      }();
+      forge::crypto::core::secure_erase(
+          std::span<std::uint8_t>{reinterpret_cast<std::uint8_t*>(value.data()), element_count * sizeof(element_type)});
+   }
+}
+
+template <typename Value> class erase_guard {
+ public:
+   erase_guard(Value& value, bool enabled = true) noexcept : value_{&value}, enabled_{enabled} {}
+
+   ~erase_guard() {
+      if (enabled_) {
+         erase_bytes(*value_);
+      }
+   }
+
+   erase_guard(const erase_guard&) = delete;
+   erase_guard& operator=(const erase_guard&) = delete;
+
+ private:
+   Value* value_;
+   bool enabled_;
+};
+
 template <typename Data> [[nodiscard]] std::vector<std::uint8_t> serialize_bytes(const Data& value) {
-   const auto serialized = [&]() {
+   auto serialized = [&]() {
       if constexpr (requires { value.get_secret(); }) {
          return value.get_secret();
       } else {
          return value.serialize();
       }
    }();
+   auto guard = erase_guard{serialized, requires { value.get_secret(); }};
    return raw::pack(serialized);
 }
 
@@ -53,11 +90,12 @@ template <typename Data> [[nodiscard]] Data make_value_from_bytes(const std::vec
 
    auto unpacker = forge::datastream<const std::uint8_t*>(bytes.data(), bytes.size());
    auto data = data_type{};
+   auto guard = erase_guard{data};
    forge::raw::unpack(unpacker, data);
    if (unpacker.remaining()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_key, "decoded key data length is invalid");
    }
-   return Data{data};
+   return Data{std::move(data)};
 }
 
 template <typename Data> [[nodiscard]] Data make_fixed_value_from_bytes(const std::vector<std::uint8_t>& bytes) {
@@ -68,17 +106,19 @@ template <typename Data> [[nodiscard]] Data make_fixed_value_from_bytes(const st
    return make_value_from_bytes<Data>(bytes);
 }
 
-template <typename Data> [[nodiscard]] Data make_fixed_data_from_bytes(const std::vector<std::uint8_t>& bytes) {
+template <typename Data, typename Factory>
+[[nodiscard]] auto with_fixed_data_from_bytes(const std::vector<std::uint8_t>& bytes, Factory&& factory) {
    if (bytes.size() != sizeof(Data)) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_key, "decoded key data length is invalid");
    }
    auto unpacker = forge::datastream<const std::uint8_t*>(bytes.data(), bytes.size());
    auto data = Data{};
+   auto guard = erase_guard{data};
    forge::raw::unpack(unpacker, data);
    if (unpacker.remaining()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_key, "decoded key data length is invalid");
    }
-   return data;
+   return std::forward<Factory>(factory)(data);
 }
 
 [[nodiscard]] std::string encode_payload(const std::vector<std::uint8_t>& payload, text_codec codec) {
@@ -214,12 +254,14 @@ void validate_profile(const text_encoding_profile& profile) {
    FORGE_THROW_EXCEPTION(exceptions::invalid_options, "encoding profile does not support this algorithm");
 }
 
-[[nodiscard]] std::vector<std::uint8_t> decode_rule_payload(const text_encoding_rule& rule, std::string_view text) {
+[[nodiscard]] std::vector<std::uint8_t> decode_rule_payload(const text_encoding_rule& rule, std::string_view text,
+                                                            bool sensitive = false) {
    if (!text.starts_with(rule.text_prefix)) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_key, "encoded key prefix is not supported by this profile");
    }
 
    auto payload = decode_payload(text.substr(rule.text_prefix.size()), rule.codec);
+   auto payload_guard = erase_guard{payload, sensitive};
    if (payload.size() < rule.binary_prefix.size() + rule.binary_suffix.size()) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_key, "encoded key payload is too short");
    }
@@ -228,6 +270,7 @@ void validate_profile(const text_encoding_profile& profile) {
    }
 
    auto payload_without_check = payload;
+   auto payload_without_check_guard = erase_guard{payload_without_check, sensitive};
    auto actual_checksum = std::uint32_t{};
    if (rule.checksum.scheme != checksum_scheme::none) {
       if (payload_without_check.size() < 4U) {
@@ -247,19 +290,24 @@ void validate_profile(const text_encoding_profile& profile) {
    auto raw_payload =
        std::vector<std::uint8_t>(payload_without_check.begin() + static_cast<std::ptrdiff_t>(rule.binary_prefix.size()),
                                  payload_without_check.end() - static_cast<std::ptrdiff_t>(rule.binary_suffix.size()));
+   auto raw_payload_guard = erase_guard{raw_payload, sensitive};
    if (rule.checksum.scheme != checksum_scheme::none) {
       const auto expected_checksum = calculate_rule_checksum(raw_payload, payload_without_check, rule.checksum);
       if (actual_checksum != expected_checksum) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_key, "encoded key checksum mismatch");
       }
    }
-   return raw_payload;
+   auto result = raw_payload;
+   return result;
 }
 
 template <typename Data>
 [[nodiscard]] std::string format_rule_payload(const text_encoding_rule& rule, const Data& value) {
+   constexpr auto sensitive = requires { value.get_secret(); };
    auto raw_payload = serialize_bytes(value);
+   auto raw_payload_guard = erase_guard{raw_payload, sensitive};
    auto encoded_payload = rule.binary_prefix;
+   auto encoded_payload_guard = erase_guard{encoded_payload, sensitive};
    encoded_payload.insert(encoded_payload.end(), raw_payload.begin(), raw_payload.end());
    encoded_payload.insert(encoded_payload.end(), rule.binary_suffix.begin(), rule.binary_suffix.end());
    if (rule.checksum.scheme != checksum_scheme::none) {
@@ -269,19 +317,23 @@ template <typename Data>
 }
 
 [[nodiscard]] private_key parse_private_rule(const text_encoding_rule& rule, std::string_view text) {
-   const auto payload = decode_rule_payload(rule, text);
+   auto payload = decode_rule_payload(rule, text, true);
+   auto payload_guard = erase_guard{payload};
    switch (rule.type) {
-   case algorithm::secp256k1:
-      return private_key{private_key::storage_type{
-          secp256k1::private_key::regenerate(make_fixed_data_from_bytes<secp256k1::private_key_secret>(payload))}};
-   case algorithm::p256:
-      return private_key{private_key::storage_type{
-          p256::private_key::regenerate(make_fixed_data_from_bytes<p256::private_key_secret>(payload))}};
+   case algorithm::secp256k1: {
+      return private_key{private_key::storage_type{with_fixed_data_from_bytes<secp256k1::private_key_secret>(
+          payload, [](const auto& secret) { return secp256k1::private_key::regenerate(secret); })}};
+   }
+   case algorithm::p256: {
+      return private_key{private_key::storage_type{with_fixed_data_from_bytes<p256::private_key_secret>(
+          payload, [](const auto& secret) { return p256::private_key::regenerate(secret); })}};
+   }
    case algorithm::webauthn:
       FORGE_THROW_EXCEPTION(exceptions::invalid_key, "WebAuthn does not define a private key encoding");
-   case algorithm::ed25519:
-      return private_key{private_key::storage_type{
-          ed25519::private_key::regenerate(make_fixed_data_from_bytes<ed25519::private_key_secret>(payload))}};
+   case algorithm::ed25519: {
+      return private_key{private_key::storage_type{with_fixed_data_from_bytes<ed25519::private_key_secret>(
+          payload, [](const auto& secret) { return ed25519::private_key::regenerate(secret); })}};
+   }
    case algorithm::rsa:
       return private_key{private_key::storage_type{make_value_from_bytes<rsa::private_key>(payload)}};
    }
