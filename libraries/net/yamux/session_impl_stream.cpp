@@ -32,6 +32,7 @@ import forge.asio.gate;
 import forge.asio.notification;
 
 #include "details/session_impl.hxx"
+#include "details/session_impl_stream_state.hxx"
 
 namespace forge::net::yamux {
 
@@ -251,15 +252,6 @@ void session::impl::reclaim_closed_streams_locked() {
       notify_stream_waiters_locked(it->second);
       it = streams_.erase(it);
    }
-}
-
-void session::impl::reset_stream(std::uint32_t id) {
-   auto lock = std::scoped_lock{mutex_};
-   const auto found = streams_.find(id);
-   if (found == streams_.end()) {
-      return;
-   }
-   reset_stream_locked(found->second);
 }
 
 void session::impl::cancel_stream(const std::shared_ptr<stream_state>& state) {

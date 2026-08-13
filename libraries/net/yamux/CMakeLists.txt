@@ -5,6 +5,7 @@ add_library(
    session_impl.cpp
    session_impl_protocol.cpp
    session_impl_stream.cpp
+   session_impl_stream_state.cpp
    session_impl_stream_model.cpp
    session_model.cpp
 )

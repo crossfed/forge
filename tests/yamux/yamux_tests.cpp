@@ -303,6 +303,7 @@ struct pipe_state {
 
    std::mutex mutex;
    boost::asio::steady_timer read_timer;
+   forge::asio::notification changed;
    std::deque<bytes> reads;
    std::deque<std::shared_ptr<pending_write>> pending_writes;
    std::deque<forge::net::transport::chunk> retained_writes;
@@ -311,14 +312,18 @@ struct pipe_state {
    bool retain_write_lifetimes = false;
    bool half_close_only = false;
    std::uint64_t writes = 0;
+   std::size_t close_calls = 0;
    std::size_t active_reads = 0;
 };
 
 class active_read {
  public:
    explicit active_read(std::shared_ptr<pipe_state> state) : state_(std::move(state)) {
-      auto lock = std::scoped_lock{state_->mutex};
-      ++state_->active_reads;
+      {
+         auto lock = std::scoped_lock{state_->mutex};
+         ++state_->active_reads;
+      }
+      state_->changed.notify();
    }
 
    active_read(const active_read&) = delete;
@@ -330,6 +335,7 @@ class active_read {
          --state_->active_reads;
       }
       state_->read_timer.cancel();
+      state_->changed.notify();
    }
 
  private:
@@ -368,6 +374,7 @@ class pipe_stream final : public forge::net::transport::detail::stream_concept {
          }
       }
       outbound_->read_timer.cancel();
+      outbound_->changed.notify();
       if (!pending) {
          co_return;
       }
@@ -437,6 +444,7 @@ class pipe_stream final : public forge::net::transport::detail::stream_concept {
       auto half_close_only = false;
       {
          auto lock = std::scoped_lock{inbound_->mutex, outbound_->mutex};
+         ++inbound_->close_calls;
          half_close_only = inbound_->half_close_only;
          if (!half_close_only) {
             inbound_->closed = true;
@@ -455,6 +463,8 @@ class pipe_stream final : public forge::net::transport::detail::stream_concept {
          outbound_->pending_writes.clear();
          outbound_->retained_writes.clear();
       }
+      inbound_->changed.notify();
+      outbound_->changed.notify();
       if (!half_close_only) {
          inbound_->read_timer.cancel();
       }
@@ -480,6 +490,8 @@ class pipe_stream final : public forge::net::transport::detail::stream_concept {
       }
       inbound_->read_timer.cancel();
       outbound_->read_timer.cancel();
+      inbound_->changed.notify();
+      outbound_->changed.notify();
    }
 
  private:
@@ -565,20 +577,21 @@ boost::asio::awaitable<void> release_pending_writes_after(std::shared_ptr<pipe_s
 }
 
 boost::asio::awaitable<void> wait_for_pending_writes(const std::shared_ptr<pipe_state>& state,
-                                                     std::size_t expected) {
-   auto error = boost::system::error_code{};
-   while (true) {
+                                                     std::size_t expected,
+                                                     std::chrono::milliseconds timeout = std::chrono::seconds{1}) {
+   const auto deadline = std::chrono::steady_clock::now() + timeout;
+   while (std::chrono::steady_clock::now() < deadline) {
+      const auto observed = state->changed.epoch();
       {
          auto lock = std::scoped_lock{state->mutex};
          if (state->pending_writes.size() >= expected) {
             co_return;
          }
       }
-      co_await state->read_timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
-      if (error && error != boost::asio::error::operation_aborted) {
-         throw boost::system::system_error{error};
-      }
+      (void)co_await state->changed.async_wait_until(observed, deadline);
    }
+   BOOST_FAIL("yamux pending writes did not reach expected count");
+   co_return;
 }
 
 [[nodiscard]] std::size_t active_reads(const std::shared_ptr<pipe_state>& state) {
@@ -586,15 +599,19 @@ boost::asio::awaitable<void> wait_for_pending_writes(const std::shared_ptr<pipe_
    return state->active_reads;
 }
 
-boost::asio::awaitable<void> wait_for_active_reads(const std::shared_ptr<pipe_state>& state, std::size_t expected) {
-   auto error = boost::system::error_code{};
-   while (active_reads(state) != expected) {
-      state->read_timer.expires_at((std::chrono::steady_clock::time_point::max)());
-      co_await state->read_timer.async_wait(boost::asio::redirect_error(boost::asio::use_awaitable, error));
-      if (error && error != boost::asio::error::operation_aborted) {
-         throw boost::system::system_error{error};
+boost::asio::awaitable<void> wait_for_active_reads(
+    const std::shared_ptr<pipe_state>& state, std::size_t expected,
+    std::chrono::milliseconds timeout = std::chrono::seconds{1}) {
+   const auto deadline = std::chrono::steady_clock::now() + timeout;
+   while (std::chrono::steady_clock::now() < deadline) {
+      const auto observed = state->changed.epoch();
+      if (active_reads(state) == expected) {
+         co_return;
       }
+      (void)co_await state->changed.async_wait_until(observed, deadline);
    }
+   BOOST_FAIL("yamux active reads did not reach expected count");
+   co_return;
 }
 
 boost::asio::awaitable<void> yamux_open_accept_and_early_data() {
@@ -2026,13 +2043,25 @@ boost::asio::awaitable<void> yamux_ignores_late_frames_for_reclaimed_streams() {
          BOOST_CHECK_THROW((void)co_await take_result_for(terminal, std::chrono::seconds{1}),
                            forge::net::yamux::exceptions::stream_reset);
       } else {
-         co_await pair.left.async_write(frame(frame_type::data, fin, 1, 0));
-         auto remote_fin = spawn_result<bytes>(executor, first.async_read());
-         BOOST_CHECK_THROW((void)co_await take_result_for(remote_fin, std::chrono::seconds{1}),
-                           forge::net::yamux::exceptions::closed);
+         const auto terminal_payload = bytes{0x33, 0x44};
+         co_await pair.left.async_write(
+             frame(frame_type::data, fin, 1, terminal_payload.size(), terminal_payload));
          co_await first.async_close();
          const auto local_fin = co_await read_transport_for_test(pair.left, "reclaimed stream FIN");
          BOOST_CHECK_EQUAL(flags_of(local_fin), fin);
+
+         co_await pair.left.async_write(frame(frame_type::data, rst, 1, 0));
+         co_await pair.left.async_write(frame(frame_type::window_update, rst, 1, 0));
+         auto preserved = co_await first.async_read();
+         BOOST_CHECK_EQUAL_COLLECTIONS(preserved.begin(), preserved.end(), terminal_payload.begin(),
+                                       terminal_payload.end());
+         const auto preserved_credit = co_await read_transport_for_test(pair.left, "terminal payload credit");
+         BOOST_CHECK_EQUAL(type_of(preserved_credit), frame_type::window_update);
+         BOOST_CHECK_EQUAL(stream_id_of(preserved_credit), 1U);
+         BOOST_CHECK_EQUAL(length_of(preserved_credit), terminal_payload.size());
+         auto remote_fin = spawn_result<bytes>(executor, first.async_read());
+         BOOST_CHECK_THROW((void)co_await take_result_for(remote_fin, std::chrono::seconds{1}),
+                           forge::net::yamux::exceptions::closed);
       }
 
       co_await pair.left.async_write(frame(frame_type::data, 0, 1, 1, bytes{0x44}));
@@ -2049,6 +2078,46 @@ boost::asio::awaitable<void> yamux_ignores_late_frames_for_reclaimed_streams() {
       co_await close_transport_for_test(pair.left);
       co_await right.async_close();
    }
+}
+
+boost::asio::awaitable<void> yamux_concurrent_close_owns_one_transport_close() {
+   auto executor = co_await boost::asio::this_coro::executor;
+   auto pair = make_stream_pair(executor);
+   auto right = forge::net::yamux::session{std::move(pair.right), forge::net::yamux::side::responder};
+   auto accept = spawn_result<forge::net::transport::stream>(executor, right.async_accept_stream());
+   co_await pair.left.async_write(frame(frame_type::window_update, syn, 1, 0));
+   auto inbound = co_await take_result_for(accept, std::chrono::seconds{1});
+   (void)co_await read_transport_for_test(pair.left, "yamux stream ACK before close");
+
+   hold_writes(pair.left_state, true);
+   auto writes_before_close = std::uint64_t{};
+   {
+      auto lock = std::scoped_lock{pair.left_state->mutex};
+      writes_before_close = pair.left_state->writes;
+   }
+
+   auto first = spawn_result<void>(executor, right.async_close());
+   auto second = spawn_result<void>(executor, right.async_close());
+   co_await wait_for_pending_writes(pair.left_state, 1);
+   inbound.cancel();
+   co_await boost::asio::post(executor, boost::asio::use_awaitable);
+   {
+      auto lock = std::scoped_lock{pair.left_state->mutex};
+      BOOST_REQUIRE_EQUAL(pair.left_state->pending_writes.size(), 1U);
+   }
+   release_next_write(pair.left_state);
+   co_await take_result_for(first, std::chrono::seconds{1});
+   co_await take_result_for(second, std::chrono::seconds{1});
+   {
+      auto lock = std::scoped_lock{pair.right_state->mutex};
+      BOOST_CHECK_EQUAL(pair.right_state->close_calls, 1U);
+   }
+   {
+      auto lock = std::scoped_lock{pair.left_state->mutex};
+      BOOST_CHECK_EQUAL(pair.left_state->writes, writes_before_close + 1U);
+      BOOST_CHECK(pair.left_state->pending_writes.empty());
+   }
+   co_await close_transport_for_test(pair.left);
 }
 
 boost::asio::awaitable<void> yamux_accepts_concurrent_remote_opens_out_of_order() {
@@ -2101,11 +2170,9 @@ boost::asio::awaitable<void> yamux_control_frames_are_handled() {
       auto right = forge::net::yamux::session{std::move(pair.right), forge::net::yamux::side::responder};
       auto accept = spawn_result<forge::net::transport::stream>(executor, right.async_accept_stream());
       co_await pair.left.async_write(frame(frame_type::go_away, 0, 0, 0));
-      BOOST_CHECK_THROW((void)co_await take_result(accept), forge::net::yamux::exceptions::closed);
-
-      auto settle = boost::asio::steady_timer{executor};
-      settle.expires_after(std::chrono::milliseconds{20});
-      co_await settle.async_wait(boost::asio::use_awaitable);
+      BOOST_CHECK_THROW((void)co_await take_result_for(accept, std::chrono::seconds{1}),
+                        forge::net::yamux::exceptions::closed);
+      co_await wait_for_active_reads(pair.right_state, 0);
       BOOST_CHECK_EQUAL(active_reads(pair.right_state), 0U);
 
       co_await right.async_close();
@@ -2138,6 +2205,11 @@ BOOST_AUTO_TEST_SUITE(yamux)
 BOOST_AUTO_TEST_CASE(yamux_supports_open_accept_and_early_data) {
    auto runtime = forge::asio::runtime{};
    forge::asio::blocking::run(runtime, yamux_open_accept_and_early_data());
+}
+
+BOOST_AUTO_TEST_CASE(yamux_concurrent_close_is_single_owner) {
+   auto runtime = forge::asio::runtime{};
+   forge::asio::blocking::run(runtime, yamux_concurrent_close_owns_one_transport_close());
 }
 
 BOOST_AUTO_TEST_CASE(yamux_close_drains_the_underlying_read_loop) {

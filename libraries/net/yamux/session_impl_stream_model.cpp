@@ -27,6 +27,7 @@ import forge.asio.gate;
 import forge.asio.notification;
 
 #include "details/session_impl.hxx"
+#include "details/session_impl_stream_state.hxx"
 #include "details/session_impl_stream_model.hxx"
 
 namespace forge::net::yamux {

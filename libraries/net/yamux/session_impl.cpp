@@ -35,6 +35,7 @@ import forge.asio.notification;
 import forge.net.transport.exceptions;
 
 #include "details/session_impl.hxx"
+#include "details/session_impl_stream_state.hxx"
 #include "details/session_impl_stream_model.hxx"
 
 namespace forge::net::yamux {
@@ -62,9 +63,14 @@ namespace {
    return {};
 }
 
-} // namespace
+void cancel_timer_noexcept(boost::asio::steady_timer& timer) noexcept {
+   try {
+      timer.cancel();
+   } catch (...) {
+   }
+}
 
-session::impl::stream_state::stream_state(std::uint32_t stream_id) : id(stream_id) {}
+} // namespace
 
 session::impl::impl(transport::stream stream, side session_side, options session_options)
     : stream_(std::move(stream)), side_(session_side), options_(session_options) {
@@ -141,38 +147,68 @@ boost::asio::awaitable<void> session::impl::ensure_started() {
 
 boost::asio::awaitable<void> session::impl::async_close() {
    co_await ensure_started();
-   auto executor = co_await boost::asio::this_coro::executor;
-   const auto deadline = std::chrono::steady_clock::now() + options_.close_timeout;
-   auto deadline_timer = std::make_shared<boost::asio::steady_timer>(executor, deadline);
-   auto weak = weak_from_this();
-   deadline_timer->async_wait([weak, deadline_timer](const boost::system::error_code& error) {
-      if (error) {
-         return;
-      }
-      if (auto self = weak.lock()) {
-         self->fail_session(exceptions::code::closed, "yamux close deadline expired");
-         self->stream_.cancel();
-      }
-   });
+   if (!start_close()) {
+      co_await wait_for_close();
+      co_return;
+   }
+   co_await boost::asio::this_coro::reset_cancellation_state(boost::asio::disable_cancellation{});
 
-   const auto should_send = mark_closing();
-   if (should_send) {
+   auto error = std::exception_ptr{};
+   auto deadline_timer = std::shared_ptr<boost::asio::steady_timer>{};
+   try {
+      auto executor = co_await boost::asio::this_coro::executor;
+      const auto deadline = std::chrono::steady_clock::now() + options_.close_timeout;
+      deadline_timer = std::make_shared<boost::asio::steady_timer>(executor, deadline);
+      auto weak = weak_from_this();
+      deadline_timer->async_wait([weak, deadline_timer](const boost::system::error_code& timer_error) {
+         if (timer_error) {
+            return;
+         }
+         if (auto self = weak.lock()) {
+            self->fail_session(exceptions::code::closed, "yamux close deadline expired");
+            self->stream_.cancel();
+         }
+      });
+
+      auto terminal_writer = forge::asio::gate::ticket{};
       try {
-         co_await write_frame(detail::frame_type::go_away, 0, 0, detail::go_away_normal, {}, true);
+         terminal_writer = co_await write_gate_.acquire();
+      } catch (const forge::asio::exceptions::rejected&) {
+         // A prior terminal transition closed the gate after all admitted writes drained.
+      }
+
+      if (terminal_writer.active()) {
+         try {
+            auto outbound = transport::chunk{
+                detail::encode_frame(detail::frame_type::go_away, 0, 0, detail::go_away_normal)};
+            co_await stream_.async_write(std::move(outbound));
+         } catch (...) {
+            // Closing is best-effort once the underlying byte stream has already failed.
+         }
+      }
+      try {
+         co_await stream_.async_close();
       } catch (...) {
-         // Closing is best-effort once the underlying byte stream has already failed.
+      }
+      fail_session(exceptions::code::closed, "yamux session closed");
+      if (!co_await wait_for_read_loop_until(deadline)) {
+         stream_.cancel();
+         co_await wait_for_read_loop();
+      }
+   } catch (...) {
+      error = std::current_exception();
+      try {
+         stream_.cancel();
+      } catch (...) {
       }
    }
-   try {
-      co_await stream_.async_close();
-   } catch (...) {
+   if (deadline_timer) {
+      cancel_timer_noexcept(*deadline_timer);
    }
-   fail_session(exceptions::code::closed, "yamux session closed");
-   if (!co_await wait_for_read_loop_until(deadline)) {
-      stream_.cancel();
-      co_await wait_for_read_loop();
+   finish_close(error);
+   if (error) {
+      std::rethrow_exception(error);
    }
-   deadline_timer->cancel();
 }
 
 void session::impl::cancel() {
@@ -189,14 +225,6 @@ std::shared_ptr<session::impl::stream_state> session::impl::make_stream_locked(s
    state->send_window = send_window;
    state->receive_window = options_.initial_window;
    return state;
-}
-
-std::shared_ptr<session::impl::stream_state> session::impl::get_stream_locked(std::uint32_t id) const {
-   const auto found = streams_.find(id);
-   if (found == streams_.end()) {
-      FORGE_THROW_EXCEPTION(exceptions::closed, "yamux stream does not exist");
-   }
-   return found->second;
 }
 
 void session::impl::require_stream_owned_locked(const std::shared_ptr<stream_state>& state) const {
@@ -232,14 +260,42 @@ void session::impl::rethrow_terminal_locked() const {
    }
 }
 
-bool session::impl::mark_closing() {
+bool session::impl::start_close() {
    auto lock = std::scoped_lock{mutex_};
-   if (closed_ || canceled_) {
+   if (close_started_) {
       return false;
    }
+   close_started_ = true;
    closed_ = true;
    wake_all_locked();
    return true;
+}
+
+boost::asio::awaitable<void> session::impl::wait_for_close() {
+   auto error = std::exception_ptr{};
+   while (true) {
+      const auto observed = close_notification_.epoch();
+      {
+         auto lock = std::scoped_lock{mutex_};
+         if (close_done_) {
+            error = close_error_;
+            break;
+         }
+      }
+      (void)co_await close_notification_.async_wait(observed);
+   }
+   if (error) {
+      std::rethrow_exception(error);
+   }
+}
+
+void session::impl::finish_close(std::exception_ptr error) noexcept {
+   {
+      auto lock = std::scoped_lock{mutex_};
+      close_error_ = std::move(error);
+      close_done_ = true;
+   }
+   close_notification_.notify();
 }
 
 void session::impl::fail_session(exceptions::code value, std::string message) {

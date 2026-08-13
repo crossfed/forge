@@ -5,23 +5,7 @@
 namespace forge::net::yamux {
 
 struct session::impl final : std::enable_shared_from_this<session::impl> {
-   struct stream_state {
-      explicit stream_state(std::uint32_t stream_id);
-
-      std::uint32_t id = 0;
-      std::uint32_t send_window = 0;
-      std::uint32_t receive_window = 0;
-      std::uint32_t pending_receive_credit = 0;
-      std::deque<detail::bytes> inbound;
-      std::size_t buffered = 0;
-      bool local_fin = false;
-      bool remote_fin = false;
-      bool reset = false;
-      bool accepted = false;
-      forge::asio::notification read_notification;
-      forge::asio::notification window_notification;
-      forge::asio::notification receive_credit_notification;
-   };
+   struct stream_state;
 
    class stream_model;
 
@@ -51,13 +35,14 @@ struct session::impl final : std::enable_shared_from_this<session::impl> {
                                                    std::uint32_t delta) const;
    [[nodiscard]] std::shared_ptr<stream_state> make_stream_locked(std::uint32_t id,
                                                                  std::uint32_t send_window);
-   [[nodiscard]] std::shared_ptr<stream_state> get_stream_locked(std::uint32_t id) const;
    void require_stream_owned_locked(const std::shared_ptr<stream_state>& state) const;
    [[nodiscard]] bool stream_valid(const std::shared_ptr<stream_state>& state) const noexcept;
    [[nodiscard]] transport::stream make_transport_stream(const std::shared_ptr<stream_state>& state);
 
    void rethrow_terminal_locked() const;
-   [[nodiscard]] bool mark_closing();
+   [[nodiscard]] bool start_close();
+   boost::asio::awaitable<void> wait_for_close();
+   void finish_close(std::exception_ptr error = {}) noexcept;
    void fail_session(exceptions::code value, std::string message);
    void wake_all_locked();
 
@@ -89,7 +74,6 @@ struct session::impl final : std::enable_shared_from_this<session::impl> {
 
    [[nodiscard]] bool is_reclaimable_stream_locked(const stream_state& state) const noexcept;
    void reclaim_closed_streams_locked();
-   void reset_stream(std::uint32_t id);
    void reset_stream_locked(const std::shared_ptr<stream_state>& state);
    void release_stream_buffers_locked(stream_state& state);
    static void notify_stream_waiters_locked(const std::shared_ptr<stream_state>& state);
@@ -102,6 +86,7 @@ struct session::impl final : std::enable_shared_from_this<session::impl> {
    std::optional<boost::asio::any_io_executor> executor_;
    forge::asio::notification accept_notification_;
    forge::asio::notification read_loop_notification_;
+   forge::asio::notification close_notification_;
    forge::asio::gate write_gate_;
    std::map<std::uint32_t, std::shared_ptr<stream_state>> streams_;
    std::deque<std::uint32_t> pending_accepts_;
@@ -109,6 +94,9 @@ struct session::impl final : std::enable_shared_from_this<session::impl> {
    std::optional<std::uint32_t> next_stream_id_;
    bool started_ = false;
    bool read_loop_done_ = false;
+   bool close_started_ = false;
+   bool close_done_ = false;
+   std::exception_ptr close_error_;
    bool closed_ = false;
    bool canceled_ = false;
    std::exception_ptr terminal_error_;

@@ -29,6 +29,7 @@ import forge.asio.notification;
 import forge.net.transport.exceptions;
 
 #include "details/session_impl.hxx"
+#include "details/session_impl_stream_state.hxx"
 
 namespace forge::net::yamux {
 namespace {
@@ -173,7 +174,11 @@ boost::asio::awaitable<void> session::impl::handle_data(const detail::frame_head
    }
 
    if ((header.flags & detail::rst) != 0U) {
-      reset_stream(header.stream_id);
+      auto lock = std::scoped_lock{mutex_};
+      if (const auto found = streams_.find(header.stream_id); found != streams_.end() &&
+          !found->second->reset && !(found->second->local_fin && found->second->remote_fin)) {
+         reset_stream_locked(found->second);
+      }
       co_return;
    }
 
@@ -270,7 +275,11 @@ boost::asio::awaitable<void> session::impl::handle_window_update(const detail::f
    }
 
    if ((header.flags & detail::rst) != 0U) {
-      reset_stream(header.stream_id);
+      auto lock = std::scoped_lock{mutex_};
+      if (const auto found = streams_.find(header.stream_id); found != streams_.end() &&
+          !found->second->reset && !(found->second->local_fin && found->second->remote_fin)) {
+         reset_stream_locked(found->second);
+      }
       co_return;
    }
 
