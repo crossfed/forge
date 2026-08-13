@@ -60,10 +60,11 @@ void require_request_within_limits(const protocol::block_range_request& value, c
 void require_request_within_limits(const protocol::protocol_features_request& value,
                                    const protocol::service_limits& limits);
 void require_request_within_limits(const protocol::producers_request& value, const protocol::service_limits& limits);
-void require_request_within_limits(const protocol::state_range_request& value, const protocol::service_limits& limits);
-void require_request_within_limits(const protocol::state_changes_request& value,
+void require_request_within_limits(const protocol::account_changes_request& value,
                                    const protocol::service_limits& limits);
 void require_request_within_limits(const protocol::table_rows_request& value, const protocol::service_limits& limits);
+void require_request_within_limits(const protocol::table_changes_request& value,
+                                   const protocol::service_limits& limits);
 void require_request_within_limits(const protocol::table_scope_request& value, const protocol::service_limits& limits);
 void require_request_within_limits(const protocol::scheduled_request& value, const protocol::service_limits& limits);
 void require_request_within_limits(const protocol::authorizers_request& value, const protocol::service_limits& limits);
@@ -86,14 +87,14 @@ void require_response_within_limits(const protocol::protocol_features_response& 
                                     const protocol::service_limits& limits);
 void require_response_within_limits(const protocol::producers_response& response,
                                     const protocol::producers_request& request, const protocol::service_limits& limits);
-void require_response_within_limits(const protocol::state_range_response& response,
-                                    const protocol::state_range_request& request,
-                                    const protocol::service_limits& limits);
-void require_response_within_limits(const protocol::state_changes_response& response,
-                                    const protocol::state_changes_request& request,
+void require_response_within_limits(const protocol::account_changes_response& response,
+                                    const protocol::account_changes_request& request,
                                     const protocol::service_limits& limits);
 void require_response_within_limits(const protocol::table_rows_response& response,
                                     const protocol::table_rows_request& request,
+                                    const protocol::service_limits& limits);
+void require_response_within_limits(const protocol::table_changes_response& response,
+                                    const protocol::table_changes_request& request,
                                     const protocol::service_limits& limits);
 void require_response_within_limits(const protocol::table_scope_response& response,
                                     const protocol::table_scope_request& request,

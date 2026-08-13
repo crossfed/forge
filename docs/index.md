@@ -13,6 +13,7 @@ Documents below explain cross-library architecture decisions.
 
 | Document | Purpose |
 | --- | --- |
+| [releases/8.26.0.md](releases/8.26.0.md) | Forge 8.26.0 typed table and account state synchronization. |
 | [releases/8.25.0.md](releases/8.25.0.md) | Forge 8.25.0 Raw ownership, synchronized application services and keystore hardening. |
 | [releases/8.24.0.md](releases/8.24.0.md) | Forge 8.24.0 dual-target BLS values and canonical Savanna finalizer records. |
 | [releases/8.23.0.md](releases/8.23.0.md) | Forge 8.23.0 application-owned connect services and immutable runtime service lookup. |

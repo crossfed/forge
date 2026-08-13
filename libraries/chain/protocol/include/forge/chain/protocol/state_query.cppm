@@ -2,6 +2,7 @@ module;
 
 #include <boost/describe.hpp>
 
+#include <compare>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -22,102 +23,6 @@ export import forge.variant.value;
 
 export namespace forge::chain::protocol {
 
-struct key_range {
-   std::optional<bytes> lower;
-   std::optional<bytes> upper;
-
-   bool operator==(const key_range&) const = default;
-};
-
-struct state_point_request {
-   bytes key;
-   std::optional<block_id> anchor;
-   std::optional<block_id> finality_from;
-   audit_mode audit = audit_mode::none;
-
-   bool operator==(const state_point_request&) const = default;
-};
-
-struct state_range_request {
-   key_range range;
-   std::optional<block_id> anchor;
-   std::uint32_t limit = 256;
-   bool reverse = false;
-   std::optional<block_id> finality_from;
-   audit_mode audit = audit_mode::none;
-
-   bool operator==(const state_range_request&) const = default;
-};
-
-struct state_range_item {
-   bytes key;
-   bytes value;
-
-   bool operator==(const state_range_item&) const = default;
-};
-
-struct state_point_response : audited_response {
-   std::optional<bytes> value;
-
-   bool operator==(const state_point_response&) const = default;
-};
-
-struct state_range_response : audited_response {
-   std::vector<state_range_item> rows;
-   std::optional<bytes> next_key;
-
-   bool operator==(const state_range_response&) const = default;
-};
-
-struct state_mutation {
-   bytes key;
-   std::optional<bytes> value;
-
-   bool operator==(const state_mutation&) const = default;
-};
-
-struct state_change_range {
-   key_range range;
-   std::vector<state_mutation> mutations;
-   std::optional<bytes> next_key;
-
-   bool operator==(const state_change_range&) const = default;
-};
-
-struct state_change_batch {
-   state_anchor anchor;
-   std::vector<state_change_range> ranges;
-
-   bool operator==(const state_change_batch&) const = default;
-};
-
-struct state_changes_cursor {
-   std::uint32_t block = 0;
-   std::uint32_t range = 0;
-   std::optional<bytes> key;
-
-   bool operator==(const state_changes_cursor&) const = default;
-};
-
-struct state_changes_request {
-   std::uint32_t from_block = 0;
-   std::uint32_t to_block = 0;
-   std::vector<key_range> ranges;
-   std::uint32_t limit = 256;
-   std::optional<state_changes_cursor> cursor;
-   std::optional<block_id> finality_from;
-   audit_mode audit = audit_mode::none;
-
-   bool operator==(const state_changes_request&) const = default;
-};
-
-struct state_changes_response : audited_response {
-   std::vector<state_change_batch> blocks;
-   std::optional<state_changes_cursor> next;
-
-   bool operator==(const state_changes_response&) const = default;
-};
-
 struct account_request {
    forge::chain::protocol::account_name account;
    std::optional<block_id> anchor;
@@ -135,10 +40,16 @@ struct account_permission {
    bool operator==(const account_permission&) const = default;
 };
 
-struct account_response : audited_response {
-   forge::chain::protocol::account_name account;
+struct account_state {
    forge::chain::protocol::block_timestamp creation_date;
    std::vector<account_permission> permissions;
+
+   bool operator==(const account_state&) const = default;
+};
+
+struct account_response : audited_response {
+   forge::chain::protocol::account_name account;
+   account_state state;
 
    bool operator==(const account_response&) const = default;
 };
@@ -213,6 +124,81 @@ struct table_rows_response : audited_response {
    std::optional<bytes> next;
 
    bool operator==(const table_rows_response&) const = default;
+};
+
+struct table_change_selector {
+   forge::chain::protocol::account_name code;
+   forge::chain::protocol::name scope;
+   forge::chain::protocol::name table;
+
+   constexpr auto operator<=>(const table_change_selector&) const = default;
+};
+
+struct table_mutation {
+   table_change_selector table;
+   std::uint64_t primary = 0;
+   std::optional<table_row> row;
+
+   bool operator==(const table_mutation&) const = default;
+};
+
+struct table_change_batch {
+   state_anchor anchor;
+   std::vector<table_mutation> mutations;
+
+   bool operator==(const table_change_batch&) const = default;
+};
+
+struct table_changes_request {
+   std::uint32_t from_block = 0;
+   std::uint32_t to_block = 0;
+   std::vector<table_change_selector> tables;
+   std::uint32_t limit = 256;
+   std::optional<bytes> cursor;
+   std::optional<block_id> finality_from;
+   audit_mode audit = audit_mode::none;
+
+   bool operator==(const table_changes_request&) const = default;
+};
+
+struct table_changes_response : audited_response {
+   std::vector<table_change_batch> blocks;
+   std::optional<bytes> next;
+
+   bool operator==(const table_changes_response&) const = default;
+};
+
+struct account_mutation {
+   forge::chain::protocol::account_name account;
+   std::optional<account_state> state;
+
+   bool operator==(const account_mutation&) const = default;
+};
+
+struct account_change_batch {
+   state_anchor anchor;
+   std::vector<account_mutation> mutations;
+
+   bool operator==(const account_change_batch&) const = default;
+};
+
+struct account_changes_request {
+   std::uint32_t from_block = 0;
+   std::uint32_t to_block = 0;
+   std::vector<forge::chain::protocol::account_name> accounts;
+   std::uint32_t limit = 256;
+   std::optional<bytes> cursor;
+   std::optional<block_id> finality_from;
+   audit_mode audit = audit_mode::none;
+
+   bool operator==(const account_changes_request&) const = default;
+};
+
+struct account_changes_response : audited_response {
+   std::vector<account_change_batch> blocks;
+   std::optional<bytes> next;
+
+   bool operator==(const account_changes_response&) const = default;
 };
 
 struct table_scope_request {
@@ -355,21 +341,10 @@ struct authorizers_response : audited_response {
    bool operator==(const authorizers_response&) const = default;
 };
 
-BOOST_DESCRIBE_STRUCT(key_range, (), (lower, upper))
-BOOST_DESCRIBE_STRUCT(state_point_request, (), (key, anchor, finality_from, audit))
-BOOST_DESCRIBE_STRUCT(state_range_request, (), (range, anchor, limit, reverse, finality_from, audit))
-BOOST_DESCRIBE_STRUCT(state_range_item, (), (key, value))
-BOOST_DESCRIBE_STRUCT(state_point_response, (audited_response), (value))
-BOOST_DESCRIBE_STRUCT(state_range_response, (audited_response), (rows, next_key))
-BOOST_DESCRIBE_STRUCT(state_mutation, (), (key, value))
-BOOST_DESCRIBE_STRUCT(state_change_range, (), (range, mutations, next_key))
-BOOST_DESCRIBE_STRUCT(state_change_batch, (), (anchor, ranges))
-BOOST_DESCRIBE_STRUCT(state_changes_cursor, (), (block, range, key))
-BOOST_DESCRIBE_STRUCT(state_changes_request, (), (from_block, to_block, ranges, limit, cursor, finality_from, audit))
-BOOST_DESCRIBE_STRUCT(state_changes_response, (audited_response), (blocks, next))
 BOOST_DESCRIBE_STRUCT(account_request, (), (account, anchor, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(account_permission, (), (name, parent, auth))
-BOOST_DESCRIBE_STRUCT(account_response, (audited_response), (account, creation_date, permissions))
+BOOST_DESCRIBE_STRUCT(account_state, (), (creation_date, permissions))
+BOOST_DESCRIBE_STRUCT(account_response, (audited_response), (account, state))
 BOOST_DESCRIBE_STRUCT(code_request, (),
                       (account, include_code, include_abi, known_abi_hash, anchor, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(code_response, (audited_response), (account, hash, abi_hash, wasm, raw_abi))
@@ -381,6 +356,16 @@ BOOST_DESCRIBE_STRUCT(table_rows_request, (),
                       (code, scope, table, index, lower_bound, upper_bound, cursor, limit, reverse, anchor,
                        finality_from, audit))
 BOOST_DESCRIBE_STRUCT(table_rows_response, (audited_response), (rows, next))
+BOOST_DESCRIBE_STRUCT(table_change_selector, (), (code, scope, table))
+BOOST_DESCRIBE_STRUCT(table_mutation, (), (table, primary, row))
+BOOST_DESCRIBE_STRUCT(table_change_batch, (), (anchor, mutations))
+BOOST_DESCRIBE_STRUCT(table_changes_request, (), (from_block, to_block, tables, limit, cursor, finality_from, audit))
+BOOST_DESCRIBE_STRUCT(table_changes_response, (audited_response), (blocks, next))
+BOOST_DESCRIBE_STRUCT(account_mutation, (), (account, state))
+BOOST_DESCRIBE_STRUCT(account_change_batch, (), (anchor, mutations))
+BOOST_DESCRIBE_STRUCT(account_changes_request, (),
+                      (from_block, to_block, accounts, limit, cursor, finality_from, audit))
+BOOST_DESCRIBE_STRUCT(account_changes_response, (audited_response), (blocks, next))
 BOOST_DESCRIBE_STRUCT(table_scope_request, (),
                       (code, table, lower_bound, upper_bound, limit, reverse, cursor, anchor, finality_from, audit))
 BOOST_DESCRIBE_STRUCT(table_scope_row, (), (code, scope, table, payer, count))

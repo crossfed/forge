@@ -82,14 +82,13 @@ forge::db::authenticated::root root(const protocol::state_anchor& value) {
    };
 }
 
-forge::db::authenticated::range_request range_request(const protocol::key_range& range, std::uint32_t limit,
-                                                      bool reverse = false) {
+forge::db::authenticated::range_request range_request(const authenticated_range_query& request) {
    return {
-       .lower = db_bytes(range.lower),
-       .upper = db_bytes(range.upper),
-       .limit = limit,
+       .lower = db_bytes(request.range.lower),
+       .upper = db_bytes(request.range.upper),
+       .limit = request.limit,
        .include_values = true,
-       .reverse = reverse,
+       .reverse = request.reverse,
    };
 }
 
@@ -169,15 +168,13 @@ void authenticated_audit_verifier::verify_ancestry(const protocol::state_anchor&
    verify_finality_delegate([&] { finality_->verify_ancestry(finalized, intermediate, proof); });
 }
 
-std::optional<protocol::bytes>
-authenticated_audit_verifier::verify_state_point(const protocol::state_anchor& anchor,
-                                                 const protocol::state_point_request& request,
-                                                 const protocol::proof_blob& proof) {
+std::optional<protocol::bytes> authenticated_audit_verifier::verify_state_point(const protocol::state_anchor& anchor,
+                                                                                const protocol::bytes& key,
+                                                                                const protocol::proof_blob& proof) {
    return translate_state_error([&] {
       const auto decoded = forge::db::authenticated::decode_point(payload(proof, point_scheme), options_.proof_limits);
-      const auto key = db_bytes(request.key);
-      const auto verified = forge::db::authenticated::verify_point(options_.state_domain, root(anchor), key, decoded,
-                                                                   options_.proof_limits);
+      const auto verified = forge::db::authenticated::verify_point(options_.state_domain, root(anchor), db_bytes(key),
+                                                                   decoded, options_.proof_limits);
       if (verified.exists && !verified.value) {
          reject_state("chain API point proof omitted an existing value");
       }
@@ -185,17 +182,16 @@ authenticated_audit_verifier::verify_state_point(const protocol::state_anchor& a
    });
 }
 
-protocol::state_range_response
-authenticated_audit_verifier::verify_state_range(const protocol::state_anchor& anchor,
-                                                 const protocol::state_range_request& request,
-                                                 const protocol::proof_blob& proof) {
+authenticated_state_range authenticated_audit_verifier::verify_state_range(const protocol::state_anchor& anchor,
+                                                                           const authenticated_range_query& request,
+                                                                           const protocol::proof_blob& proof) {
    return translate_state_error([&] {
       const auto decoded = forge::db::authenticated::decode_range(payload(proof, range_scheme), options_.proof_limits);
-      const auto expected = range_request(request.range, request.limit, request.reverse);
+      const auto expected = range_request(request);
       const auto verified = forge::db::authenticated::verify_range(options_.state_domain, root(anchor), expected,
                                                                    forge::db::authenticated::proof_tree::state, decoded,
                                                                    options_.proof_limits);
-      auto result = protocol::state_range_response{};
+      auto result = authenticated_state_range{};
       result.next_key = protocol_bytes(verified.next_key);
       result.rows.reserve(verified.items.size());
       for (const auto& item : verified.items) {
@@ -208,24 +204,24 @@ authenticated_audit_verifier::verify_state_range(const protocol::state_anchor& a
    });
 }
 
-protocol::state_change_range authenticated_audit_verifier::verify_state_changes(const protocol::state_anchor& anchor,
-                                                                                const protocol::key_range& range,
-                                                                                std::uint32_t limit,
-                                                                                const protocol::proof_blob& proof) {
+authenticated_change_range
+authenticated_audit_verifier::verify_state_changes(const protocol::state_anchor& anchor,
+                                                   const authenticated_range_query& request,
+                                                   const protocol::proof_blob& proof) {
    return translate_state_error([&] {
       const auto decoded =
           forge::db::authenticated::decode_range(payload(proof, changes_scheme), options_.proof_limits);
-      const auto expected = range_request(range, limit);
+      const auto expected = range_request(request);
       const auto verified = forge::db::authenticated::verify_range(options_.state_domain, root(anchor), expected,
                                                                    forge::db::authenticated::proof_tree::changes,
                                                                    decoded, options_.proof_limits);
-      auto result = protocol::state_change_range{.range = range, .next_key = protocol_bytes(verified.next_key)};
-      result.mutations.reserve(verified.items.size());
+      auto result = authenticated_change_range{.next_key = protocol_bytes(verified.next_key)};
+      result.changes.reserve(verified.items.size());
       for (const auto& item : verified.items) {
          if (!item.value) {
             reject_state("chain API change proof omitted a mutation value");
          }
-         result.mutations.push_back({
+         result.changes.push_back({
              .key = protocol_bytes(item.key),
              .value = protocol_bytes(forge::db::authenticated::decode_change_value(*item.value)),
          });

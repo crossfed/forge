@@ -9,6 +9,7 @@ module;
 #include <algorithm>
 #include <cstdint>
 #include <exception>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <span>
@@ -204,6 +205,11 @@ void projection_verifier::verify(const protocol::account_request&, const protoco
    unsupported_projection("state.get_account");
 }
 
+void projection_verifier::verify(const protocol::account_changes_request&, const protocol::account_changes_response&,
+                                 const protocol::audit_bundle&, audit_verifier&) {
+   unsupported_projection("state.get_account_changes");
+}
+
 void projection_verifier::verify(const protocol::code_request&, const protocol::code_response&,
                                  const protocol::audit_bundle&, audit_verifier&) {
    unsupported_projection("state.get_code");
@@ -212,6 +218,11 @@ void projection_verifier::verify(const protocol::code_request&, const protocol::
 void projection_verifier::verify(const protocol::table_rows_request&, const protocol::table_rows_response&,
                                  const protocol::audit_bundle&, audit_verifier&) {
    unsupported_projection("state.get_table_rows");
+}
+
+void projection_verifier::verify(const protocol::table_changes_request&, const protocol::table_changes_response&,
+                                 const protocol::audit_bundle&, audit_verifier&) {
+   unsupported_projection("state.get_table_changes");
 }
 
 void projection_verifier::verify(const protocol::table_scope_request&, const protocol::table_scope_response&,
@@ -271,164 +282,60 @@ void verified_client::verify_requested_anchor(const std::optional<protocol::bloc
    }
 }
 
-void verified_client::verify_point(const protocol::state_point_request& request,
-                                   const protocol::state_point_response& response) {
-   const auto& audit = verify_envelope(response);
-   verify_requested_anchor(request.anchor, response);
-   if (audit.state.size() != 1U) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof,
-                            "chain API point response requires exactly one state proof");
-   }
-   const auto verified = invoke_verifier<exceptions::invalid_state_proof>("chain API point verifier failed", [&] {
-      return verifier_->verify_state_point(*response.context.anchor, request, audit.state.front());
-   });
-   if (verified != response.value) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof,
-                            "chain API point value does not match its authenticated proof");
-   }
-}
-
-void verified_client::verify_range(const protocol::state_range_request& request,
-                                   const protocol::state_range_response& response) {
-   const auto& audit = verify_envelope(response);
-   verify_requested_anchor(request.anchor, response);
-   if (audit.state.size() != 1U) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof,
-                            "chain API range response requires exactly one state proof");
-   }
-   const auto verified = invoke_verifier<exceptions::invalid_state_proof>("chain API range verifier failed", [&] {
-      return verifier_->verify_state_range(*response.context.anchor, request, audit.state.front());
-   });
-   if (verified.rows != response.rows || verified.next_key != response.next_key) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof,
-                            "chain API range result does not match its authenticated proof");
-   }
-}
-
-void verified_client::verify_changes(const protocol::state_changes_request& request,
-                                     const protocol::state_changes_response& response) {
-   const auto& audit = verify_envelope(response);
+void verified_client::verify_change_batches(std::uint32_t from_block, std::uint32_t to_block, bool has_request_cursor,
+                                            const protocol::audited_response& response,
+                                            std::span<const protocol::state_anchor> anchors, bool has_next,
+                                            const protocol::audit_bundle& audit) {
    const auto reject = [](const char* message) { FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof, message); };
-   const auto range_count = request.ranges.empty() ? std::size_t{1} : request.ranges.size();
-   if (request.from_block > request.to_block || request.limit == 0U ||
-       response.context.anchor->block_num != request.to_block) {
-      reject("chain API changes request or finalized target anchor is invalid");
+   if (from_block > to_block || response.context.anchor->block_num != to_block) {
+      reject("chain API change feed does not match its finalized interval");
    }
-   if (request.from_block == request.to_block) {
-      if (request.cursor || !response.blocks.empty() || response.next || !audit.state.empty()) {
-         reject("chain API empty changes interval contains data or a cursor");
+   if (from_block == to_block) {
+      if (has_request_cursor || !anchors.empty() || has_next || !audit.state.empty() || audit.ancestry) {
+         reject("chain API empty change interval contains data, proofs, or a cursor");
       }
       return;
    }
-
-   auto position = request.cursor.value_or(protocol::state_changes_cursor{
-       .block = request.from_block + 1U,
-   });
-   if (position.block <= request.from_block || position.block > request.to_block || position.range >= range_count) {
-      reject("chain API changes cursor is outside the requested interval");
+   if (anchors.empty() || audit.state.empty()) {
+      reject("chain API change page omits its per-block batches or authenticated state proofs");
    }
-   const auto original_range = [&](std::size_t index) -> const protocol::key_range& {
-      static const auto unbounded = protocol::key_range{};
-      return request.ranges.empty() ? unbounded : request.ranges[index];
-   };
-   const auto key_less = [](const protocol::bytes& left, const protocol::bytes& right) {
-      return std::lexicographical_compare(left.begin(), left.end(), right.begin(), right.end());
-   };
-   const auto valid_cursor_key = [&](const protocol::key_range& range, const std::optional<protocol::bytes>& key) {
-      return !key ||
-             ((!range.lower || !key_less(*key, *range.lower)) && (!range.upper || key_less(*key, *range.upper)));
-   };
-   if (!valid_cursor_key(original_range(position.range), position.key)) {
-      reject("chain API changes cursor key is outside its requested range");
+   if (!has_request_cursor && anchors.front().block_num != from_block + 1U) {
+      reject("chain API first change page does not start after from_block");
    }
 
-   auto expected_proofs = std::size_t{};
-   for (const auto& batch : response.blocks) {
-      expected_proofs += batch.ranges.size();
-   }
-   if (audit.state.size() != expected_proofs) {
-      FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof,
-                            "chain API changes response requires one proof per block range");
-   }
    auto ancestry = std::vector<protocol::state_anchor>{};
-   ancestry.reserve(response.blocks.size());
-   for (const auto& batch : response.blocks) {
-      if (batch.anchor != *response.context.anchor) {
-         ancestry.push_back(batch.anchor);
+   ancestry.reserve(anchors.size());
+   auto expected_block = anchors.front().block_num;
+   for (const auto& anchor : anchors) {
+      if (anchor.chain != response.context.chain || anchor.block_num <= from_block || anchor.block_num > to_block ||
+          anchor.block_num != expected_block) {
+         reject("chain API change response contains a non-canonical block sequence");
       }
+      if (anchor.block_num == to_block) {
+         if (anchor != *response.context.anchor) {
+            reject("chain API target batch does not match the finalized response anchor");
+         }
+      } else {
+         ancestry.push_back(anchor);
+      }
+      ++expected_block;
    }
-   if (!ancestry.empty()) {
+
+   if (!has_next && anchors.back() != *response.context.anchor) {
+      reject("chain API final change page does not reach its finalized target anchor");
+   }
+   if (ancestry.empty()) {
+      if (audit.ancestry) {
+         reject("chain API change response contains an unrelated ancestry proof");
+      }
+   } else {
       if (!audit.ancestry) {
          FORGE_THROW_EXCEPTION(exceptions::invalid_finality,
-                               "chain API changes response omits its canonical ancestry proof");
+                               "chain API change response omits its canonical ancestry proof");
       }
       invoke_verifier<exceptions::invalid_finality>("chain API ancestry verifier failed", [&] {
          verifier_->verify_ancestry(*response.context.anchor, ancestry, *audit.ancestry);
       });
-   }
-   auto proof_index = std::size_t{};
-   auto stopped_within_range = false;
-   auto complete = false;
-   for (const auto& batch : response.blocks) {
-      if (complete || stopped_within_range || batch.anchor.chain != response.context.chain ||
-          batch.anchor.block_num != position.block || batch.ranges.empty()) {
-         FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof,
-                               "chain API changes response contains a non-canonical block sequence");
-      }
-      for (const auto& result : batch.ranges) {
-         if (complete || stopped_within_range || batch.anchor.block_num != position.block) {
-            reject("chain API changes response contains unauthenticated trailing ranges");
-         }
-         const auto& expected = original_range(position.range);
-         if (result.range != expected) {
-            FORGE_THROW_EXCEPTION(exceptions::invalid_state_proof,
-                                  "chain API changes response reordered its requested ranges");
-         }
-         auto proof_range = expected;
-         if (position.key) {
-            proof_range.lower = position.key;
-         }
-         const auto verified =
-             invoke_verifier<exceptions::invalid_state_proof>("chain API state change verifier failed", [&] {
-                return verifier_->verify_state_changes(batch.anchor, proof_range, request.limit,
-                                                       audit.state[proof_index++]);
-             });
-         if (verified.mutations != result.mutations || verified.next_key != result.next_key) {
-            reject("chain API change range does not match its authenticated proof");
-         }
-         if (result.next_key) {
-            if (!valid_cursor_key(expected, result.next_key) ||
-                (proof_range.lower && !key_less(*proof_range.lower, *result.next_key))) {
-               reject("chain API changes response has an invalid continuation key");
-            }
-            position.key = result.next_key;
-            stopped_within_range = true;
-            break;
-         }
-         position.key.reset();
-         ++position.range;
-         if (position.range == range_count) {
-            position.range = 0;
-            if (position.block == request.to_block) {
-               complete = true;
-            } else {
-               ++position.block;
-            }
-         }
-      }
-   }
-
-   if (proof_index != expected_proofs) {
-      reject("chain API changes response leaves state proofs unauthenticated");
-   }
-
-   if (response.next) {
-      if (response.blocks.empty() || complete || *response.next != position) {
-         reject("chain API changes response cursor does not match the verified continuation");
-      }
-   } else if (!complete || position.range != 0U || position.key || response.blocks.empty() ||
-              response.blocks.back().anchor != *response.context.anchor) {
-      reject("chain API changes response does not reach its finalized target anchor");
    }
 }
 
@@ -615,33 +522,6 @@ verified_client::get_finalizer_info(protocol::anchored_request request) {
    co_return response;
 }
 
-boost::asio::awaitable<protocol::state_point_response>
-verified_client::get_point(protocol::state_point_request request) {
-   require_audit(request, *verifier_);
-   auto response = co_await invoke_service<protocol::state_point_response>(
-       "state.get_point", request, limits_, [&] { return client_.state().get_point(request); });
-   verify_point(request, response);
-   co_return response;
-}
-
-boost::asio::awaitable<protocol::state_range_response>
-verified_client::get_range(protocol::state_range_request request) {
-   require_audit(request, *verifier_);
-   auto response = co_await invoke_service<protocol::state_range_response>(
-       "state.get_range", request, limits_, [&] { return client_.state().get_range(request); });
-   verify_range(request, response);
-   co_return response;
-}
-
-boost::asio::awaitable<protocol::state_changes_response>
-verified_client::get_changes(protocol::state_changes_request request) {
-   require_audit(request, *verifier_);
-   auto response = co_await invoke_service<protocol::state_changes_response>(
-       "state.get_changes", request, limits_, [&] { return client_.state().get_changes(request); });
-   verify_changes(request, response);
-   co_return response;
-}
-
 boost::asio::awaitable<protocol::account_response> verified_client::get_account(protocol::account_request request) {
    auto& projections = require_projection(projections_, "state.get_account");
    require_audit(request, *verifier_);
@@ -651,6 +531,22 @@ boost::asio::awaitable<protocol::account_response> verified_client::get_account(
    const auto& audit = verify_envelope(response);
    verify_requested_anchor(requested_anchor, response);
    verify_projection("state.get_account", [&] { projections.verify(request, response, audit, *verifier_); });
+   co_return response;
+}
+
+boost::asio::awaitable<protocol::account_changes_response>
+verified_client::get_account_changes(protocol::account_changes_request request) {
+   auto& projections = require_projection(projections_, "state.get_account_changes");
+   require_audit(request, *verifier_);
+   auto response = co_await invoke_service<protocol::account_changes_response>(
+       "state.get_account_changes", request, limits_, [&] { return client_.state().get_account_changes(request); });
+   const auto& audit = verify_envelope(response);
+   auto anchors = std::vector<protocol::state_anchor>{};
+   anchors.reserve(response.blocks.size());
+   std::ranges::transform(response.blocks, std::back_inserter(anchors), &protocol::account_change_batch::anchor);
+   verify_change_batches(request.from_block, request.to_block, request.cursor.has_value(), response, anchors,
+                         response.next.has_value(), audit);
+   verify_projection("state.get_account_changes", [&] { projections.verify(request, response, audit, *verifier_); });
    co_return response;
 }
 
@@ -676,6 +572,22 @@ verified_client::get_table_rows(protocol::table_rows_request request) {
    const auto& audit = verify_envelope(response);
    verify_requested_anchor(requested_anchor, response);
    verify_projection("state.get_table_rows", [&] { projections.verify(request, response, audit, *verifier_); });
+   co_return response;
+}
+
+boost::asio::awaitable<protocol::table_changes_response>
+verified_client::get_table_changes(protocol::table_changes_request request) {
+   auto& projections = require_projection(projections_, "state.get_table_changes");
+   require_audit(request, *verifier_);
+   auto response = co_await invoke_service<protocol::table_changes_response>(
+       "state.get_table_changes", request, limits_, [&] { return client_.state().get_table_changes(request); });
+   const auto& audit = verify_envelope(response);
+   auto anchors = std::vector<protocol::state_anchor>{};
+   anchors.reserve(response.blocks.size());
+   std::ranges::transform(response.blocks, std::back_inserter(anchors), &protocol::table_change_batch::anchor);
+   verify_change_batches(request.from_block, request.to_block, request.cursor.has_value(), response, anchors,
+                         response.next.has_value(), audit);
+   verify_projection("state.get_table_changes", [&] { projections.verify(request, response, audit, *verifier_); });
    co_return response;
 }
 

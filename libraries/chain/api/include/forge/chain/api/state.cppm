@@ -36,13 +36,13 @@ class state
  public:
    virtual ~state() = default;
 
-   virtual boost::asio::awaitable<protocol::state_point_response> get_point(protocol::state_point_request value) = 0;
-   virtual boost::asio::awaitable<protocol::state_range_response> get_range(protocol::state_range_request value) = 0;
-   virtual boost::asio::awaitable<protocol::state_changes_response>
-   get_changes(protocol::state_changes_request value) = 0;
    virtual boost::asio::awaitable<protocol::account_response> get_account(protocol::account_request value) = 0;
+   virtual boost::asio::awaitable<protocol::account_changes_response>
+   get_account_changes(protocol::account_changes_request value) = 0;
    virtual boost::asio::awaitable<protocol::code_response> get_code(protocol::code_request value) = 0;
    virtual boost::asio::awaitable<protocol::table_rows_response> get_table_rows(protocol::table_rows_request value) = 0;
+   virtual boost::asio::awaitable<protocol::table_changes_response>
+   get_table_changes(protocol::table_changes_request value) = 0;
    virtual boost::asio::awaitable<protocol::table_scope_response>
    get_table_scope(protocol::table_scope_request value) = 0;
    virtual boost::asio::awaitable<protocol::currency_balance_response>
@@ -68,19 +68,17 @@ template <> struct method_descriptor_customization<::forge::chain::api::state> {
 
 } // namespace forge::api::core
 
-FORGE_EXPORT_API(::forge::chain::api::state, FORGE_API_CONTRACT("forge.chain.api.state", 1, 0),
-                 FORGE_API_METHOD_TYPED(get_point, ::forge::chain::protocol::state_point_request,
-                                        ::forge::chain::protocol::state_point_response),
-                 FORGE_API_METHOD_TYPED(get_range, ::forge::chain::protocol::state_range_request,
-                                        ::forge::chain::protocol::state_range_response),
-                 FORGE_API_METHOD_TYPED(get_changes, ::forge::chain::protocol::state_changes_request,
-                                        ::forge::chain::protocol::state_changes_response),
+FORGE_EXPORT_API(::forge::chain::api::state, FORGE_API_CONTRACT("forge.chain.api.state", 2, 0),
                  FORGE_API_METHOD_TYPED(get_account, ::forge::chain::protocol::account_request,
                                         ::forge::chain::protocol::account_response),
+                 FORGE_API_METHOD_TYPED(get_account_changes, ::forge::chain::protocol::account_changes_request,
+                                        ::forge::chain::protocol::account_changes_response),
                  FORGE_API_METHOD_TYPED(get_code, ::forge::chain::protocol::code_request,
                                         ::forge::chain::protocol::code_response),
                  FORGE_API_METHOD_TYPED(get_table_rows, ::forge::chain::protocol::table_rows_request,
                                         ::forge::chain::protocol::table_rows_response),
+                 FORGE_API_METHOD_TYPED(get_table_changes, ::forge::chain::protocol::table_changes_request,
+                                        ::forge::chain::protocol::table_changes_response),
                  FORGE_API_METHOD_TYPED(get_table_scope, ::forge::chain::protocol::table_scope_request,
                                         ::forge::chain::protocol::table_scope_response),
                  FORGE_API_METHOD_TYPED(get_currency_balance, ::forge::chain::protocol::currency_balance_request,
@@ -93,12 +91,11 @@ FORGE_EXPORT_API(::forge::chain::api::state, FORGE_API_CONTRACT("forge.chain.api
                                         ::forge::chain::protocol::authorizers_response))
 
 FORGE_HTTP_API(
-    ::forge::chain::api::state, FORGE_HTTP_POST(get_point, "/v1/chain/state/point", ok, FORGE_HTTP_CACHE(no_store)),
-    FORGE_HTTP_POST(get_range, "/v1/chain/state/range", ok, FORGE_HTTP_CACHE(no_store)),
-    FORGE_HTTP_POST(get_changes, "/v1/chain/state/changes", ok, FORGE_HTTP_CACHE(no_store)),
+    ::forge::chain::api::state,
     FORGE_HTTP_GET(get_account,
                    "/v1/chain/state/accounts/{account}?anchor={anchor}&finality_from={finality_from}&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
+    FORGE_HTTP_POST(get_account_changes, "/v1/chain/state/account-changes", ok, FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_GET(get_code,
                    "/v1/chain/state/accounts/{account}/code?include_code={include_code}&include_abi={include_abi}"
                    "&known_abi_hash={known_abi_hash}&anchor={anchor}&finality_from={finality_from}&audit={audit}",
@@ -108,6 +105,7 @@ FORGE_HTTP_API(
                    "&upper_bound={upper_bound}&cursor={cursor}&limit={limit}&reverse={reverse}&anchor={anchor}"
                    "&finality_from={finality_from}&audit={audit}",
                    FORGE_HTTP_CACHE(no_store)),
+    FORGE_HTTP_POST(get_table_changes, "/v1/chain/state/table-changes", ok, FORGE_HTTP_CACHE(no_store)),
     FORGE_HTTP_GET(get_table_scope,
                    "/v1/chain/state/tables/{code}/scopes?table={table}&lower_bound={lower_bound}"
                    "&upper_bound={upper_bound}&limit={limit}&reverse={reverse}&cursor={cursor}&anchor={anchor}"
