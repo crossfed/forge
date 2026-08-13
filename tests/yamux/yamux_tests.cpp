@@ -2120,6 +2120,41 @@ boost::asio::awaitable<void> yamux_concurrent_close_owns_one_transport_close() {
    co_await close_transport_for_test(pair.left);
 }
 
+boost::asio::awaitable<void> yamux_close_waits_for_admitted_write_after_remote_go_away_scenario() {
+   auto executor = co_await boost::asio::this_coro::executor;
+   auto pair = make_stream_pair(executor);
+   auto right = forge::net::yamux::session{std::move(pair.right), forge::net::yamux::side::responder};
+   auto accept = spawn_result<forge::net::transport::stream>(executor, right.async_accept_stream());
+   co_await pair.left.async_write(frame(frame_type::window_update, syn, 1, 0));
+   auto inbound = co_await take_result_for(accept, std::chrono::seconds{1});
+   (void)co_await read_transport_for_test(pair.left, "yamux stream ACK before remote GO_AWAY");
+
+   hold_writes(pair.left_state, true);
+   auto write = spawn_result<void>(executor, inbound.async_write(bytes{0x41}));
+   co_await wait_for_pending_writes(pair.left_state, 1);
+   co_await pair.left.async_write(frame(frame_type::go_away, 0, 0, 0));
+   for (auto attempt = 0; attempt < 100 && right.valid(); ++attempt) {
+      co_await boost::asio::post(executor, boost::asio::use_awaitable);
+   }
+   BOOST_REQUIRE(!right.valid());
+
+   auto close = spawn_result<void>(executor, right.async_close());
+   co_await boost::asio::post(executor, boost::asio::use_awaitable);
+   {
+      auto lock = std::scoped_lock{pair.right_state->mutex};
+      BOOST_CHECK_EQUAL(pair.right_state->close_calls, 0U);
+   }
+
+   release_next_write(pair.left_state);
+   co_await take_result_for(write, std::chrono::seconds{1});
+   co_await take_result_for(close, std::chrono::seconds{1});
+   {
+      auto lock = std::scoped_lock{pair.right_state->mutex};
+      BOOST_CHECK_EQUAL(pair.right_state->close_calls, 1U);
+   }
+   co_await close_transport_for_test(pair.left);
+}
+
 boost::asio::awaitable<void> yamux_accepts_concurrent_remote_opens_out_of_order() {
    auto executor = co_await boost::asio::this_coro::executor;
    auto pair = make_stream_pair(executor);
@@ -2210,6 +2245,11 @@ BOOST_AUTO_TEST_CASE(yamux_supports_open_accept_and_early_data) {
 BOOST_AUTO_TEST_CASE(yamux_concurrent_close_is_single_owner) {
    auto runtime = forge::asio::runtime{};
    forge::asio::blocking::run(runtime, yamux_concurrent_close_owns_one_transport_close());
+}
+
+BOOST_AUTO_TEST_CASE(yamux_close_waits_for_admitted_write_after_remote_go_away) {
+   auto runtime = forge::asio::runtime{};
+   forge::asio::blocking::run(runtime, yamux_close_waits_for_admitted_write_after_remote_go_away_scenario());
 }
 
 BOOST_AUTO_TEST_CASE(yamux_close_drains_the_underlying_read_loop) {

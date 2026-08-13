@@ -43,6 +43,9 @@ struct session::impl final : std::enable_shared_from_this<session::impl> {
    [[nodiscard]] bool start_close();
    boost::asio::awaitable<void> wait_for_close();
    void finish_close(std::exception_ptr error = {}) noexcept;
+   boost::asio::awaitable<void> wait_for_transport_write();
+   void begin_transport_write();
+   void finish_transport_write() noexcept;
    void fail_session(exceptions::code value, std::string message);
    void wake_all_locked();
 
@@ -87,6 +90,7 @@ struct session::impl final : std::enable_shared_from_this<session::impl> {
    forge::asio::notification accept_notification_;
    forge::asio::notification read_loop_notification_;
    forge::asio::notification close_notification_;
+   forge::asio::notification transport_write_notification_;
    forge::asio::gate write_gate_;
    std::map<std::uint32_t, std::shared_ptr<stream_state>> streams_;
    std::deque<std::uint32_t> pending_accepts_;
@@ -96,6 +100,7 @@ struct session::impl final : std::enable_shared_from_this<session::impl> {
    bool read_loop_done_ = false;
    bool close_started_ = false;
    bool close_done_ = false;
+   bool transport_write_active_ = false;
    std::exception_ptr close_error_;
    bool closed_ = false;
    bool canceled_ = false;

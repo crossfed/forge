@@ -171,18 +171,26 @@ boost::asio::awaitable<void> session::impl::async_close() {
       });
 
       auto terminal_writer = forge::asio::gate::ticket{};
+      auto writer_gate_closed = false;
       try {
          terminal_writer = co_await write_gate_.acquire();
       } catch (const forge::asio::exceptions::rejected&) {
-         // A prior terminal transition closed the gate after all admitted writes drained.
+         writer_gate_closed = true;
+      }
+      if (writer_gate_closed) {
+         // A terminal transition rejects queued writers; an admitted lower write may still be draining.
+         co_await wait_for_transport_write();
       }
 
       if (terminal_writer.active()) {
          try {
             auto outbound = transport::chunk{
                 detail::encode_frame(detail::frame_type::go_away, 0, 0, detail::go_away_normal)};
+            begin_transport_write();
             co_await stream_.async_write(std::move(outbound));
+            finish_transport_write();
          } catch (...) {
+            finish_transport_write();
             // Closing is best-effort once the underlying byte stream has already failed.
          }
       }
@@ -298,6 +306,32 @@ void session::impl::finish_close(std::exception_ptr error) noexcept {
    close_notification_.notify();
 }
 
+boost::asio::awaitable<void> session::impl::wait_for_transport_write() {
+   while (true) {
+      const auto observed = transport_write_notification_.epoch();
+      {
+         auto lock = std::scoped_lock{mutex_};
+         if (!transport_write_active_) {
+            co_return;
+         }
+      }
+      (void)co_await transport_write_notification_.async_wait(observed);
+   }
+}
+
+void session::impl::begin_transport_write() {
+   auto lock = std::scoped_lock{mutex_};
+   transport_write_active_ = true;
+}
+
+void session::impl::finish_transport_write() noexcept {
+   {
+      auto lock = std::scoped_lock{mutex_};
+      transport_write_active_ = false;
+   }
+   transport_write_notification_.notify();
+}
+
 void session::impl::fail_session(exceptions::code value, std::string message) {
    auto first_transition = false;
    {
@@ -366,8 +400,11 @@ session::impl::write_prepared(std::function<std::optional<detail::bytes>()> prep
    try {
       auto outbound = transport::chunk{std::move(*encoded)};
       transport::detail::chunk_access::attach_lifetime(outbound, std::move(lifetime));
+      begin_transport_write();
       co_await stream_.async_write(std::move(outbound));
+      finish_transport_write();
    } catch (...) {
+      finish_transport_write();
       fail_session(exceptions::code::closed, "yamux underlying stream write failed");
       FORGE_THROW_EXCEPTION(exceptions::closed, "yamux underlying stream write failed");
    }
