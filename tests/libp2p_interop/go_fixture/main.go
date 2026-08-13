@@ -2,9 +2,12 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,9 +17,12 @@ import (
 	"time"
 
 	cid "github.com/ipfs/go-cid"
+	ds "github.com/ipfs/go-datastore"
+	dssync "github.com/ipfs/go-datastore/sync"
 	libp2p "github.com/libp2p/go-libp2p"
 	kad "github.com/libp2p/go-libp2p-kad-dht"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	recpb "github.com/libp2p/go-libp2p-record/pb"
 	"github.com/libp2p/go-libp2p/core/event"
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
@@ -34,8 +40,10 @@ import (
 	sectls "github.com/libp2p/go-libp2p/p2p/security/tls"
 	quic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
+	"github.com/multiformats/go-base32"
 	ma "github.com/multiformats/go-multiaddr"
 	mh "github.com/multiformats/go-multihash"
+	"google.golang.org/protobuf/proto"
 )
 
 const echoProtocol = protocol.ID("/forge/interop/relay-echo/1")
@@ -168,6 +176,7 @@ type fixtureHost struct {
 	host.Host
 	holePunch *holepunch.Service
 	kad       *kad.IpfsDHT
+	dhtStore  ds.Batching
 	pubsub    *pubsub.PubSub
 }
 
@@ -220,7 +229,9 @@ func newHost(transport string) (*fixtureHost, error) {
 		h.Close()
 		return nil, err
 	}
-	dht, err := kad.New(context.Background(), h, kad.Mode(kad.ModeServer), kad.DisableAutoRefresh())
+	dhtStore := dssync.MutexWrap(ds.NewMapDatastore())
+	dht, err := kad.New(context.Background(), h, kad.Mode(kad.ModeServer), kad.DisableAutoRefresh(),
+		kad.Datastore(dhtStore))
 	if err != nil {
 		h.Close()
 		return nil, err
@@ -250,7 +261,7 @@ func newHost(transport string) (*fixtureHost, error) {
 		h.Close()
 		return nil, err
 	}
-	return &fixtureHost{Host: h, holePunch: holePunchService, kad: dht, pubsub: pubsubRouter}, nil
+	return &fixtureHost{Host: h, holePunch: holePunchService, kad: dht, dhtStore: dhtStore, pubsub: pubsubRouter}, nil
 }
 
 func providerCID() (cid.Cid, error) {
@@ -259,6 +270,54 @@ func providerCID() (cid.Cid, error) {
 		return cid.Undef, err
 	}
 	return cid.NewCidV1(cid.Raw, hash), nil
+}
+
+func dhtValueFixture(scenario string) ([]byte, []byte, error) {
+	const identityMultihash = "00240801122079b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664"
+	keyPrefix := ""
+	valueHex := ""
+	switch scenario {
+	case "dht_pk_put_get":
+		keyPrefix = "2f706b2f"
+		valueHex = "0801122079b5562e8fe654f94078b112e8a98ba7901f853ae695bed7e0e3910bad049664"
+	case "dht_ipns_put_get":
+		keyPrefix = "2f69706e732f"
+		valueHex = "0a1f2f697066732f6261666b716163336a6f627868676964736e3572777734796b1240b7be19b36e1955d2e1ccddd889d25c" +
+			"4eaef61aa72763bc44db9696697be7587e35d2efb2a625e7ac19b05f8c348086114103ee042a5a4041683e39c4ac0c460118" +
+			"00221e323033302d30312d30325430333a30343a30352e3132333435363738395a28073080f092cbdd0842408904024a1b09" +
+			"b52636334f17b9098f648f9a00214e6c6c89bb954c01300b00f54d085ddcacbe42952f2f819d70a48ff453d13329bb775d66" +
+			"e5a4b6165c38a40a4a76a56354544c1b00000045d964b8006556616c7565581f2f697066732f6261666b716163336a6f6278" +
+			"68676964736e3572777734796b6853657175656e6365076856616c6964697479581e323033302d30312d30325430333a30343a" +
+			"30352e3132333435363738395a6c56616c69646974795479706500"
+	default:
+		return nil, nil, fmt.Errorf("unknown DHT value fixture %s", scenario)
+	}
+	key, err := hex.DecodeString(keyPrefix + identityMultihash)
+	if err != nil {
+		return nil, nil, err
+	}
+	value, err := hex.DecodeString(valueHex)
+	return key, value, err
+}
+
+func isDHTValueScenario(scenario string) bool {
+	return scenario == "dht_pk_put_get" || scenario == "dht_ipns_put_get"
+}
+
+func hasDHTValue(ctx context.Context, h *fixtureHost, key []byte, expected []byte) (bool, error) {
+	dsKey := ds.NewKey(base32.RawStdEncoding.EncodeToString(key))
+	encoded, err := h.dhtStore.Get(ctx, dsKey)
+	if errors.Is(err, ds.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	record := new(recpb.Record)
+	if err := proto.Unmarshal(encoded, record); err != nil {
+		return false, err
+	}
+	return bytes.Equal(record.GetKey(), key) && bytes.Equal(record.GetValue(), expected), nil
 }
 
 func addDHTPeer(h *fixtureHost, info *peer.AddrInfo) {
@@ -415,6 +474,13 @@ func listen(opts options) error {
 			return err
 		}
 	}
+	var expectedKey, expectedValue []byte
+	if isDHTValueScenario(opts.scenario) {
+		expectedKey, expectedValue, err = dhtValueFixture(opts.scenario)
+		if err != nil {
+			return err
+		}
+	}
 
 	out := make([]string, 0, len(h.Addrs()))
 	for _, addr := range h.Addrs() {
@@ -436,7 +502,26 @@ func listen(opts options) error {
 		return err
 	}
 	seeded := false
+	recordReported := false
 	for {
+		if !recordReported && isDHTValueScenario(opts.scenario) {
+			found, err := hasDHTValue(context.Background(), h, expectedKey, expectedValue)
+			if err != nil {
+				return err
+			}
+			if found {
+				if err := writeJSON(opts.resultFile, map[string]any{
+					"implementation":   "go",
+					"role":             "listener",
+					"scenario":         opts.scenario,
+					"status":           "ok",
+					"record_persisted": true,
+				}); err != nil {
+					return err
+				}
+				recordReported = true
+			}
+		}
 		if !seeded && opts.scenario == "gossipsub_mixed_mesh_stress" && opts.seedFile != "" {
 			if _, err := os.Stat(opts.seedFile); err == nil {
 				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -725,6 +810,22 @@ func dial(opts options) error {
 			return fmt.Errorf("dht FindProviders did not return local provider")
 		}
 		result["provider_count"] = count
+	case "dht_pk_put_get", "dht_ipns_put_get":
+		key, expected, err := dhtValueFixture(opts.scenario)
+		if err != nil {
+			return err
+		}
+		if err := h.kad.PutValue(ctx, string(key), expected); err != nil {
+			return fmt.Errorf("DHT PutValue failed: %w", err)
+		}
+		selected, err := h.kad.GetValue(ctx, string(key))
+		if err != nil {
+			return fmt.Errorf("DHT GetValue failed: %w", err)
+		}
+		if !bytes.Equal(selected, expected) {
+			return fmt.Errorf("DHT GetValue returned a different value")
+		}
+		result["value_bytes"] = len(selected)
 	case "gossipsub_publish", "gossipsub_mixed_mesh_stress":
 		if _, err := h.pubsub.Subscribe(pubsubTopic, pubsub.WithBufferSize(8)); err != nil {
 			return err

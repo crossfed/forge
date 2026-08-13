@@ -874,10 +874,21 @@ add_executable(
    test_forge_quic_p2p
    unit/main.cpp
    quic_p2p/libp2p_identity_fixture.cpp
+   quic_p2p/dht_record_store_fixture.cpp
+   quic_p2p/dht_record_store_tests.cpp
+   quic_p2p/dht_profile_tests.cpp
+   quic_p2p/dht_routing_refresh_tests.cpp
+   quic_p2p/ipns_tests.cpp
    quic_p2p/quic_tests.cpp
    quic_p2p/p2p_lifecycle_tests.cpp
    quic_p2p/p2p_tests.cpp
    quic_p2p/session_teardown_tests.cpp
+)
+target_sources(
+   test_forge_quic_p2p
+   PRIVATE
+      FILE_SET CXX_MODULES
+      FILES quic_p2p/dht_record_store_fixture.cppm
 )
 target_link_libraries(test_forge_quic_p2p forge Boost::included_unit_test_framework)
 target_compile_definitions(test_forge_quic_p2p PRIVATE FORGE_HAS_ROCKSDB=$<BOOL:${FORGE_HAS_ROCKSDB}>)

@@ -15,7 +15,12 @@ LIVE_SCENARIO_PROFILES = {
     "quic_base": ("ping", "identify", "autonatv2", "relay_reserve", "unknown_protocol"),
     "tcp_noise": ("ping", "identify", "echo"),
     "tcp_tls": ("ping", "identify", "echo"),
-    "quic_dht": ("dht_find_peer", "dht_provide_find_provider"),
+    "quic_dht": (
+        "dht_find_peer",
+        "dht_provide_find_provider",
+        "dht_pk_put_get",
+        "dht_ipns_put_get",
+    ),
     "quic_rendezvous": ("rendezvous_register_discover",),
     "quic_pubsub": ("gossipsub_publish",),
     "mixed_pubsub": ("gossipsub_mixed_mesh_stress",),
@@ -25,6 +30,7 @@ SCENARIOS = LIVE_SCENARIO_PROFILES["quic_base"]
 DHT_SCENARIOS = LIVE_SCENARIO_PROFILES["quic_dht"]
 RENDEZVOUS_SCENARIOS = LIVE_SCENARIO_PROFILES["quic_rendezvous"]
 PUBSUB_SCENARIOS = LIVE_SCENARIO_PROFILES["quic_pubsub"]
+DHT_VALUE_SCENARIOS = ("dht_pk_put_get", "dht_ipns_put_get")
 PUBSUB_STRESS_SCENARIO = LIVE_SCENARIO_PROFILES["mixed_pubsub"][0]
 TOPOLOGY_SCENARIOS = LIVE_SCENARIO_PROFILES["quic_topology"]
 DIAL_TIMEOUT_SECONDS = 90
@@ -437,7 +443,11 @@ def run_pair_with_transport(dialer_binary: Path, dialer: str, listener_binary: P
                             root: Path, transport: str) -> dict:
     work = root / f"{transport}-{dialer}-to-{listener}-{scenario}"
     work.mkdir(parents=True, exist_ok=True)
-    listener_result = work / f"{listener}-listen-{scenario}.json" if scenario in PUBSUB_SCENARIOS else None
+    listener_result = (
+        work / f"{listener}-listen-{scenario}.json"
+        if scenario in PUBSUB_SCENARIOS or scenario in DHT_VALUE_SCENARIOS
+        else None
+    )
     server = start_listener(listener_binary, listener, work, scenario, listener_result, transport=transport)
     try:
         addr = server.ready["listen_addrs"][0]
