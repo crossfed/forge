@@ -8,6 +8,7 @@ add_library(
    session_impl_stream_state.cpp
    session_impl_stream_model.cpp
    session_model.cpp
+   transport_write_tracker.cpp
 )
 forge_target_modules_at(forge_net_yamux net/yamux)
 
