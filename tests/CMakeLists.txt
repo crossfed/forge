@@ -968,6 +968,26 @@ target_link_libraries(test_forge_plugins forge Boost::included_unit_test_framewo
 add_test(NAME test_forge_plugins COMMAND test_forge_plugins WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
 
 add_executable(
+   test_forge_p2p_managed_remote
+   unit/main.cpp
+   quic_p2p/libp2p_identity_fixture.cpp
+   plugins/p2p_managed_remote_tests.cpp
+)
+target_link_libraries(
+   test_forge_p2p_managed_remote
+   forge_plugins_p2p_resolver
+   forge_plugins_p2p_node
+   forge_plugins_crypto_secrets
+   forge_asio
+   Boost::included_unit_test_framework
+)
+add_test(
+   NAME test_forge_p2p_managed_remote
+   COMMAND test_forge_p2p_managed_remote
+   WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+)
+
+add_executable(
    test_forge_plugins_db_store
    unit/main.cpp
    quic_p2p/libp2p_identity_fixture.cpp

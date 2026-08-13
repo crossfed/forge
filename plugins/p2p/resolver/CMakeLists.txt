@@ -4,6 +4,8 @@ add_library(
       config.cpp
       plugin_impl.cpp
       api_impl.cpp
+      managed_api_impl.cpp
+      managed_remote_invoker.cpp
       details/cache_record.hxx
 )
 forge_target_modules_at(forge_plugins_p2p_resolver plugins/p2p/resolver)
@@ -19,6 +21,7 @@ target_include_directories(
 target_link_libraries(
    forge_plugins_p2p_resolver PUBLIC
       forge_plugins_p2p_node
+      forge_asio
       forge_app
       forge_api_core
       forge_api_transport

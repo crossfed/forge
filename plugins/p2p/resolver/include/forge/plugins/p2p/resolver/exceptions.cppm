@@ -19,6 +19,9 @@ class exceptions {
       not_found = 4,
       incompatible_api = 5,
       protocol_error = 6,
+      invalid_remote = 7,
+      remote_unavailable = 8,
+      remote_stopped = 9,
    };
 
    using plugin_not_initialized = forge::exceptions::coded_exception<code, code::plugin_not_initialized>;
@@ -27,6 +30,9 @@ class exceptions {
    using not_found = forge::exceptions::coded_exception<code, code::not_found>;
    using incompatible_api = forge::exceptions::coded_exception<code, code::incompatible_api>;
    using protocol_error = forge::exceptions::coded_exception<code, code::protocol_error>;
+   using invalid_remote = forge::exceptions::coded_exception<code, code::invalid_remote>;
+   using remote_unavailable = forge::exceptions::coded_exception<code, code::remote_unavailable>;
+   using remote_stopped = forge::exceptions::coded_exception<code, code::remote_stopped>;
 };
 
 FORGE_DECLARE_EXCEPTION_CATEGORY(exceptions::code, "forge.plugins.p2p.resolver")
