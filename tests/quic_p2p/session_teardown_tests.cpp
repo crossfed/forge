@@ -37,6 +37,15 @@ import forge.net.transport.session;
 namespace forge::net::p2p {
 namespace {
 
+bool wait_for_count(const std::atomic_size_t& value, std::size_t expected,
+                    std::chrono::milliseconds timeout = std::chrono::seconds{2}) {
+   const auto deadline = std::chrono::steady_clock::now() + timeout;
+   while (value.load(std::memory_order_acquire) != expected && std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds{1});
+   }
+   return value.load(std::memory_order_acquire) == expected;
+}
+
 BOOST_AUTO_TEST_CASE(p2p_session_teardown_waits_for_started_transport_cleanup) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
    auto release =
@@ -158,17 +167,121 @@ BOOST_AUTO_TEST_CASE(p2p_session_teardown_handles_concurrent_track_release_and_s
 BOOST_AUTO_TEST_CASE(p2p_operation_deadline_preserves_shutdown_winner_past_timeout) {
    auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
    auto deadline = operation_deadline{runtime.context(), std::chrono::milliseconds{10}};
-   auto canceled = std::atomic_bool{false};
+   auto canceled = std::atomic_size_t{0};
    auto stopping = deadline.stopping();
 
    BOOST_REQUIRE(stopping.request_stop());
-   deadline.arm([&] { canceled.store(true, std::memory_order_release); });
+   deadline.arm([&] { canceled.fetch_add(1, std::memory_order_release); });
    std::this_thread::sleep_for(std::chrono::milliseconds{50});
 
    BOOST_TEST(deadline.stopped());
    BOOST_TEST(!deadline.timed_out());
-   BOOST_TEST(!canceled.load(std::memory_order_acquire));
+   BOOST_TEST(canceled.load(std::memory_order_acquire) == 1U);
    BOOST_TEST(deadline.finish());
+}
+
+BOOST_AUTO_TEST_CASE(p2p_operation_deadline_shutdown_cancels_armed_operation_once) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 1}};
+   auto deadline = operation_deadline{runtime.context(), std::chrono::seconds{1}};
+   auto canceled = std::atomic_size_t{0};
+   auto stopping = deadline.stopping();
+   deadline.arm([&] { canceled.fetch_add(1, std::memory_order_release); });
+
+   BOOST_REQUIRE(stopping.request_stop());
+   BOOST_TEST(!stopping.request_stop());
+   BOOST_TEST(canceled.load(std::memory_order_acquire) == 1U);
+   BOOST_TEST(deadline.stopped());
+   BOOST_TEST(!deadline.timed_out());
+   BOOST_TEST(deadline.finish());
+   BOOST_TEST(canceled.load(std::memory_order_acquire) == 1U);
+}
+
+BOOST_AUTO_TEST_CASE(p2p_operation_deadline_races_arm_and_stop_without_losing_cancel) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   for (auto iteration = 0U; iteration < 128U; ++iteration) {
+      auto deadline = operation_deadline{runtime.context(), std::chrono::seconds{1}};
+      auto canceled = std::atomic_size_t{0};
+      auto stopping = deadline.stopping();
+      auto start = std::barrier{3};
+      auto stop_won = std::atomic_bool{false};
+      auto arm = std::thread{[&] {
+         start.arrive_and_wait();
+         deadline.arm([&] { canceled.fetch_add(1, std::memory_order_release); });
+      }};
+      auto stop = std::thread{[&] {
+         start.arrive_and_wait();
+         stop_won.store(stopping.request_stop(), std::memory_order_release);
+      }};
+
+      start.arrive_and_wait();
+      arm.join();
+      stop.join();
+
+      BOOST_TEST(stop_won.load(std::memory_order_acquire));
+      BOOST_TEST(deadline.stopped());
+      BOOST_TEST(!deadline.timed_out());
+      BOOST_TEST(canceled.load(std::memory_order_acquire) == 1U);
+      BOOST_TEST(deadline.finish());
+   }
+}
+
+BOOST_AUTO_TEST_CASE(p2p_operation_deadline_races_finish_and_stop_with_one_terminal_winner) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   for (auto iteration = 0U; iteration < 128U; ++iteration) {
+      auto deadline = operation_deadline{runtime.context(), std::chrono::seconds{1}};
+      auto canceled = std::atomic_size_t{0};
+      auto stopping = deadline.stopping();
+      deadline.arm([&] { canceled.fetch_add(1, std::memory_order_release); });
+      auto start = std::barrier{3};
+      auto stop_won = std::atomic_bool{false};
+      auto finish_result = std::atomic_bool{false};
+      auto finish = std::thread{[&] {
+         start.arrive_and_wait();
+         finish_result.store(deadline.finish(), std::memory_order_release);
+      }};
+      auto stop = std::thread{[&] {
+         start.arrive_and_wait();
+         stop_won.store(stopping.request_stop(), std::memory_order_release);
+      }};
+
+      start.arrive_and_wait();
+      finish.join();
+      stop.join();
+
+      const auto stopped = deadline.stopped();
+      BOOST_TEST(finish_result.load(std::memory_order_acquire));
+      BOOST_TEST(stop_won.load(std::memory_order_acquire) == stopped);
+      BOOST_TEST(!deadline.timed_out());
+      BOOST_TEST(canceled.load(std::memory_order_acquire) == (stopped ? 1U : 0U));
+   }
+}
+
+BOOST_AUTO_TEST_CASE(p2p_operation_deadline_races_timeout_and_stop_with_one_cancel) {
+   auto runtime = forge::asio::runtime{forge::asio::runtime_options{.worker_threads = 2}};
+   for (auto iteration = 0U; iteration < 64U; ++iteration) {
+      auto deadline = operation_deadline{runtime.context(), std::chrono::milliseconds{1}};
+      auto canceled = std::atomic_size_t{0};
+      auto stopping = deadline.stopping();
+      deadline.arm([&] { canceled.fetch_add(1, std::memory_order_release); });
+      auto start = std::barrier{2};
+      auto stop_won = std::atomic_bool{false};
+      auto stop = std::thread{[&] {
+         start.arrive_and_wait();
+         std::this_thread::sleep_for(std::chrono::milliseconds{1});
+         stop_won.store(stopping.request_stop(), std::memory_order_release);
+      }};
+
+      start.arrive_and_wait();
+      stop.join();
+      BOOST_REQUIRE(wait_for_count(canceled, 1U));
+
+      const auto stopped = deadline.stopped();
+      const auto timed_out = deadline.timed_out();
+      BOOST_TEST(stopped != timed_out);
+      BOOST_TEST(stop_won.load(std::memory_order_acquire) == stopped);
+      BOOST_TEST(canceled.load(std::memory_order_acquire) == 1U);
+      BOOST_TEST(deadline.finish() == !timed_out);
+   }
 }
 
 BOOST_AUTO_TEST_CASE(p2p_operation_deadline_preserves_timeout_winner_after_shutdown) {

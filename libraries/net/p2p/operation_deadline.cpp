@@ -58,20 +58,22 @@ namespace forge::net::p2p {
 
 namespace asio = boost::asio;
 
-operation_deadline::stop_token::stop_token(std::shared_ptr<std::atomic<state_value>> state)
-    : state_{std::move(state)} {}
+operation_deadline::stop_token::stop_token(std::shared_ptr<shared_state> state) : state_{std::move(state)} {}
 
 [[nodiscard]] bool operation_deadline::stop_token::request_stop() const noexcept {
    if (!state_) {
       return false;
    }
    auto expected = state_value::pending;
-   return state_->compare_exchange_strong(expected, state_value::stopped, std::memory_order_acq_rel);
+   if (!state_->value.compare_exchange_strong(expected, state_value::stopped, std::memory_order_acq_rel)) {
+      return false;
+   }
+   operation_deadline::invoke_cancel(state_);
+   return true;
 }
 
 operation_deadline::operation_deadline(boost::asio::io_context& context, std::chrono::milliseconds timeout)
-    : timer_(std::make_shared<asio::steady_timer>(context)),
-      state_(std::make_shared<std::atomic<state_value>>(state_value::pending)) {
+    : timer_(std::make_shared<asio::steady_timer>(context)), state_(std::make_shared<shared_state>()) {
    validate_operation_timeout(timeout, "P2P operation timeout");
    timer_->expires_after(timeout);
 }
@@ -83,31 +85,54 @@ operation_deadline::~operation_deadline() {
 void operation_deadline::arm(std::function<void()> cancel) {
    auto timer = timer_;
    auto state = state_;
-   timer_->async_wait([timer, state, cancel = std::move(cancel)](boost::system::error_code ec) mutable {
+   {
+      auto lock = std::scoped_lock{state->mutex};
+      state->cancel = std::move(cancel);
+   }
+   if (state->value.load(std::memory_order_acquire) == state_value::stopped) {
+      invoke_cancel(state);
+   }
+   timer_->async_wait([timer, state](boost::system::error_code ec) {
       if (ec) {
          return;
       }
       auto expected = state_value::pending;
-      if (!state->compare_exchange_strong(expected, state_value::timed_out, std::memory_order_acq_rel)) {
+      if (!state->value.compare_exchange_strong(expected, state_value::timed_out, std::memory_order_acq_rel)) {
          return;
       }
-      cancel();
+      operation_deadline::invoke_cancel(state);
    });
+}
+
+void operation_deadline::invoke_cancel(const std::shared_ptr<shared_state>& state) noexcept {
+   auto cancel = std::function<void()>{};
+   {
+      auto lock = std::scoped_lock{state->mutex};
+      if (state->cancel_invoked || !state->cancel) {
+         return;
+      }
+      state->cancel_invoked = true;
+      cancel = std::move(state->cancel);
+   }
+   try {
+      cancel();
+   } catch (...) {
+   }
 }
 
 [[nodiscard]] bool operation_deadline::finish() noexcept {
    auto expected = state_value::pending;
-   if (state_->compare_exchange_strong(expected, state_value::completed, std::memory_order_acq_rel)) {
+   if (state_->value.compare_exchange_strong(expected, state_value::completed, std::memory_order_acq_rel)) {
       cancel();
       return true;
    }
    cancel();
-   return state_->load(std::memory_order_acquire) != state_value::timed_out;
+   return state_->value.load(std::memory_order_acquire) != state_value::timed_out;
 }
 
 void operation_deadline::cancel() noexcept {
    auto expected = state_value::pending;
-   (void)state_->compare_exchange_strong(expected, state_value::completed, std::memory_order_acq_rel);
+   (void)state_->value.compare_exchange_strong(expected, state_value::completed, std::memory_order_acq_rel);
    if (!timer_) {
       return;
    }
@@ -123,11 +148,11 @@ void operation_deadline::cancel() noexcept {
 }
 
 [[nodiscard]] bool operation_deadline::timed_out() const noexcept {
-   return state_->load(std::memory_order_acquire) == state_value::timed_out;
+   return state_->value.load(std::memory_order_acquire) == state_value::timed_out;
 }
 
 [[nodiscard]] bool operation_deadline::stopped() const noexcept {
-   return state_->load(std::memory_order_acquire) == state_value::stopped;
+   return state_->value.load(std::memory_order_acquire) == state_value::stopped;
 }
 
 } // namespace forge::net::p2p

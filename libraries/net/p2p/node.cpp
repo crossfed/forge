@@ -794,6 +794,7 @@ boost::asio::awaitable<void> node::async_stop() {
 void node::stop() {
    impl_->request_lifecycle_stop();
    auto operations = std::vector<detail::session_teardown::operation>{};
+   auto deadlines = std::vector<operation_deadline::stop_token>{};
    {
       auto lock = std::scoped_lock{impl_->mutex};
       if (impl_->stopped) {
@@ -801,9 +802,11 @@ void node::stop() {
       }
       operations.reserve(impl_->sessions.size() + 1);
       operations.push_back(impl_->direct_registry.teardown_operation());
-      for (const auto& [_, deadline] : impl_->protocol_open_deadlines) {
-         static_cast<void>(deadline.request_stop());
+      deadlines.reserve(impl_->protocol_open_deadlines.size());
+      for (auto& [_, deadline] : impl_->protocol_open_deadlines) {
+         deadlines.push_back(std::move(deadline));
       }
+      impl_->protocol_open_deadlines.clear();
       for (auto& [_, session] : impl_->sessions) {
          operations.push_back(detail::session_teardown::operation{
              .close = [session]() -> boost::asio::awaitable<void> { co_await session->connection.async_close(); },
@@ -826,6 +829,9 @@ void node::stop() {
       impl_->metrics_value.active_sessions = 0;
       impl_->metrics_value.active_relay_reservations = 0;
       impl_->metrics_value.stopped = true;
+   }
+   for (const auto& deadline : deadlines) {
+      static_cast<void>(deadline.request_stop());
    }
    impl_->teardown.start(std::move(operations));
 }

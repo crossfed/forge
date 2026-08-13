@@ -157,15 +157,19 @@ node::impl::open_protocol_on_direct_session(const peer_id& peer, const protocol_
                                             std::chrono::milliseconds timeout) {
    auto deadline = operation_deadline{runtime.context(), timeout};
    auto deadline_id = std::uint64_t{};
+   auto stopping = deadline.stopping();
+   auto stop_before_arm = false;
    {
       auto lock = std::scoped_lock{mutex};
-      auto stopping = deadline.stopping();
       if (stopped) {
-         static_cast<void>(stopping.request_stop());
+         stop_before_arm = true;
       } else {
          deadline_id = next_protocol_open_deadline_id++;
          protocol_open_deadlines.emplace(deadline_id, std::move(stopping));
       }
+   }
+   if (stop_before_arm) {
+      static_cast<void>(stopping.request_stop());
    }
    auto release_deadline = [this, deadline_id](void*) noexcept {
       if (deadline_id == 0) {

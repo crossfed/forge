@@ -9,6 +9,13 @@ class operation_deadline {
  private:
    enum class state_value : std::uint8_t { pending, completed, timed_out, stopped };
 
+   struct shared_state {
+      std::atomic<state_value> value{state_value::pending};
+      std::mutex mutex;
+      std::function<void()> cancel;
+      bool cancel_invoked = false;
+   };
+
  public:
    class stop_token {
     public:
@@ -18,9 +25,9 @@ class operation_deadline {
 
     private:
       friend class operation_deadline;
-      explicit stop_token(std::shared_ptr<std::atomic<state_value>> state);
+      explicit stop_token(std::shared_ptr<shared_state> state);
 
-      std::shared_ptr<std::atomic<state_value>> state_;
+      std::shared_ptr<shared_state> state_;
    };
 
    operation_deadline(boost::asio::io_context& context, std::chrono::milliseconds timeout);
@@ -36,8 +43,10 @@ class operation_deadline {
    [[nodiscard]] bool stopped() const noexcept;
 
  private:
+   static void invoke_cancel(const std::shared_ptr<shared_state>& state) noexcept;
+
    std::shared_ptr<boost::asio::steady_timer> timer_;
-   std::shared_ptr<std::atomic<state_value>> state_;
+   std::shared_ptr<shared_state> state_;
 };
 
 } // namespace forge::net::p2p
