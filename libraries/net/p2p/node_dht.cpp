@@ -148,7 +148,8 @@ boost::asio::awaitable<dht_query::result> run_lookup(const auto& self, const pro
            .target = target,
            .target_peer = std::move(target_peer),
            .options = state.profile.limits,
-           .seeds = state.routing.query_seeds(target.bytes, state.profile.limits.alpha),
+           // Kademlia starts from the local k-closest shortlist; alpha only bounds concurrent RPCs.
+           .seeds = state.routing.query_seeds(target.bytes, state.profile.limits.replication),
            .requested_provider_count = type == dht::message_type::get_providers ? query_options.requested_count : 0,
            .collect_value_responses = type == dht::message_type::get_value,
        },
@@ -208,15 +209,22 @@ boost::asio::awaitable<std::size_t> publish_provider(const auto& self, const pro
    }
    auto peers = std::vector<peer_id>{};
    peers.reserve(candidates.size());
+   auto unique = std::set<peer_id>{};
    for (auto& candidate : candidates) {
-      peers.push_back(std::move(candidate.id));
+      if (unique.insert(candidate.id).second) {
+         peers.push_back(std::move(candidate.id));
+      }
    }
+   if (peers.empty()) {
+      co_return 0;
+   }
+   const auto replication_target = peers.size();
    const auto fanout = co_await detail::dht_fanout::run(
        self->runtime.context(),
        detail::dht_fanout::request{
            .peers = std::move(peers),
            .concurrency = state.profile.limits.alpha,
-           .success_target = query_options.quorum,
+           .success_target = replication_target,
            .timeout = remaining_timeout(started, query_options.timeout, "P2P DHT provide"),
            .operation = "P2P DHT provide",
        },
@@ -325,9 +333,10 @@ void node::impl::initialize_dht_provider_registry() {
    });
 }
 
-boost::asio::awaitable<dht::query_result> node::async_find_peer(protocol_id protocol, peer_id peer,
+namespace {
+
+boost::asio::awaitable<dht::query_result> async_find_peer_owned(auto self, protocol_id protocol, peer_id peer,
                                                                 dht::query_options options) {
-   auto self = impl_;
    auto& state = self->dht_profile(protocol);
    if (!state.profile.capabilities.peers) {
       FORGE_THROW_EXCEPTION(exceptions::unsupported_protocol, "DHT profile does not enable peer routing");
@@ -351,9 +360,8 @@ boost::asio::awaitable<dht::query_result> node::async_find_peer(protocol_id prot
    co_return std::move(lookup.query);
 }
 
-boost::asio::awaitable<provider_registration> node::async_provide(protocol_id protocol, dht::key key,
+boost::asio::awaitable<provider_registration> async_provide_owned(auto self, protocol_id protocol, dht::key key,
                                                                   dht::query_options options) {
-   auto self = impl_;
    auto& state = self->dht_profile(protocol);
    if (!state.profile.capabilities.providers) {
       FORGE_THROW_EXCEPTION(exceptions::unsupported_protocol, "DHT profile does not enable providers");
@@ -377,9 +385,8 @@ boost::asio::awaitable<provider_registration> node::async_provide(protocol_id pr
        [registry, lease]() -> boost::asio::awaitable<void> { co_await registry->async_release(lease); });
 }
 
-boost::asio::awaitable<std::vector<dht::peer>> node::async_find_providers(protocol_id protocol, dht::key key,
+boost::asio::awaitable<std::vector<dht::peer>> async_find_providers_owned(auto self, protocol_id protocol, dht::key key,
                                                                           dht::query_options options) {
-   auto self = impl_;
    auto& state = self->dht_profile(protocol);
    if (!state.profile.capabilities.providers) {
       FORGE_THROW_EXCEPTION(exceptions::unsupported_protocol, "DHT profile does not enable providers");
@@ -394,26 +401,19 @@ boost::asio::awaitable<std::vector<dht::peer>> node::async_find_providers(protoc
    }
 
    auto lookup = co_await run_lookup(self, protocol, key, std::nullopt, dht::message_type::get_providers, options);
-   const auto now = std::chrono::system_clock::now();
    const auto context = third_party_discovery_context();
    for (auto provider : lookup.query.provider_peers) {
       provider = sanitize_discovered_peer(std::move(provider), context);
-      co_await state.records.async_upsert_provider(dht::record_store::provider_record{
-          .key = key,
-          .provider = provider.id,
-          .endpoints = provider.endpoints,
-          .provider_expires_at = now + state.profile.limits.provider_record_ttl,
-          .addresses_expires_at = provider.endpoints.empty() ? std::chrono::system_clock::time_point{}
-                                                             : now + state.profile.limits.provider_address_ttl,
-      });
+      // A third-party GET_PROVIDERS response is discovery evidence, not an
+      // authenticated provider announcement. Only inbound ADD_PROVIDER stores
+      // durable provider ownership.
       merge_provider(output, std::move(provider), options.requested_count);
    }
    co_return output;
 }
 
-boost::asio::awaitable<dht::value_put_result> node::async_put_value(protocol_id protocol, dht::record value,
+boost::asio::awaitable<dht::value_put_result> async_put_value_owned(auto self, protocol_id protocol, dht::record value,
                                                                     dht::query_options options) {
-   auto self = impl_;
    auto& state = self->dht_profile(protocol);
    if (!state.profile.capabilities.values) {
       FORGE_THROW_EXCEPTION(exceptions::unsupported_protocol, "DHT profile does not enable values");
@@ -471,9 +471,8 @@ boost::asio::awaitable<dht::value_put_result> node::async_put_value(protocol_id 
    co_return result;
 }
 
-boost::asio::awaitable<dht::value_get_result> node::async_get_value(protocol_id protocol, dht::key key,
+boost::asio::awaitable<dht::value_get_result> async_get_value_owned(auto self, protocol_id protocol, dht::key key,
                                                                     dht::query_options options) {
-   auto self = impl_;
    auto& state = self->dht_profile(protocol);
    if (!state.profile.capabilities.values) {
       FORGE_THROW_EXCEPTION(exceptions::unsupported_protocol, "DHT profile does not enable values");
@@ -563,6 +562,33 @@ boost::asio::awaitable<dht::value_get_result> node::async_get_value(protocol_id 
       }));
    }
    co_return result;
+}
+
+} // namespace
+
+boost::asio::awaitable<dht::query_result> node::async_find_peer(protocol_id protocol, peer_id peer,
+                                                                dht::query_options options) {
+   return async_find_peer_owned(impl_, std::move(protocol), std::move(peer), options);
+}
+
+boost::asio::awaitable<provider_registration> node::async_provide(protocol_id protocol, dht::key key,
+                                                                  dht::query_options options) {
+   return async_provide_owned(impl_, std::move(protocol), std::move(key), options);
+}
+
+boost::asio::awaitable<std::vector<dht::peer>> node::async_find_providers(protocol_id protocol, dht::key key,
+                                                                          dht::query_options options) {
+   return async_find_providers_owned(impl_, std::move(protocol), std::move(key), options);
+}
+
+boost::asio::awaitable<dht::value_put_result> node::async_put_value(protocol_id protocol, dht::record value,
+                                                                    dht::query_options options) {
+   return async_put_value_owned(impl_, std::move(protocol), std::move(value), options);
+}
+
+boost::asio::awaitable<dht::value_get_result> node::async_get_value(protocol_id protocol, dht::key key,
+                                                                    dht::query_options options) {
+   return async_get_value_owned(impl_, std::move(protocol), std::move(key), options);
 }
 
 ipns::record node::create_ipns_record(std::span<const std::uint8_t> value, std::uint64_t sequence, ipns::time_point eol,

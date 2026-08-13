@@ -820,6 +820,9 @@ boost::asio::awaitable<void> node::async_stop() {
    }
    co_await self->lifecycle.wait();
    co_await self->teardown.wait();
+   if (failure) {
+      std::rethrow_exception(failure);
+   }
    for (auto& [_, profile] : self->dht_profiles) {
       try {
          co_await profile->records.async_close();

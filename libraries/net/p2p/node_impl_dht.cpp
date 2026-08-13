@@ -283,16 +283,31 @@ boost::asio::awaitable<void> node::impl::handle_dht(std::shared_ptr<node::impl::
             break;
          case dht::message_type::add_provider: {
             const auto now = std::chrono::system_clock::now();
+            auto accepted = std::optional<dht::peer>{};
             for (auto provider : request.provider_peers) {
-               if (provider.id != session->info.remote_peer || provider.endpoints.empty()) {
+               if (provider.id != session->info.remote_peer) {
                   continue;
                }
                provider = sanitize_discovered_peer_for_session(std::move(provider), session);
-               const auto addresses_expire = provider.endpoints.empty() ? now : now + provider_address_ttl;
+               if (!accepted) {
+                  accepted = dht::peer{.id = provider.id};
+               }
+               for (auto& candidate : provider.endpoints) {
+                  const auto duplicate = std::ranges::any_of(accepted->endpoints, [&](const auto& current) {
+                     return current.to_string() == candidate.to_string();
+                  });
+                  if (!duplicate && accepted->endpoints.size() < profile.limits.max_peer_endpoints) {
+                     accepted->endpoints.push_back(std::move(candidate));
+                  }
+               }
+            }
+            if (accepted) {
+               const auto addresses_expire =
+                   accepted->endpoints.empty() ? std::chrono::system_clock::time_point{} : now + provider_address_ttl;
                co_await state.records.async_upsert_provider(dht::record_store::provider_record{
                    .key = request.key_value,
-                   .provider = provider.id,
-                   .endpoints = std::move(provider.endpoints),
+                   .provider = accepted->id,
+                   .endpoints = std::move(accepted->endpoints),
                    .provider_expires_at = now + profile.limits.provider_record_ttl,
                    .addresses_expires_at = addresses_expire,
                });
@@ -319,6 +334,11 @@ boost::asio::awaitable<void> node::impl::handle_dht(std::shared_ptr<node::impl::
          case dht::message_type::get_value:
             if (const auto value = state.records.find_value(request.key_value)) {
                response.record_value = value->record;
+               if (response.record_value->ttl > std::chrono::seconds::zero()) {
+                  const auto remaining = value->expires_at - std::chrono::system_clock::now();
+                  response.record_value->ttl =
+                      std::max(std::chrono::seconds{1}, std::chrono::duration_cast<std::chrono::seconds>(remaining));
+               }
             }
             append_closest();
             break;

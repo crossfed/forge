@@ -26,6 +26,9 @@ constexpr auto ipns_prefix = std::string_view{"/ipns/"};
 constexpr auto amino_message_limit = std::size_t{16 * 1024};
 // Amino does not carry this local resource bound on the wire; Forge fixes it per profile for deterministic admission.
 constexpr auto amino_max_query_peers = std::size_t{256};
+constexpr auto amino_max_closer_peers = std::size_t{21};
+constexpr auto amino_max_provider_peers = std::size_t{256};
+constexpr auto amino_max_peer_endpoints = std::size_t{64};
 
 [[noreturn]] void throw_invalid_profile(std::string message) {
    FORGE_THROW_EXCEPTION(exceptions::invalid_options, std::move(message));
@@ -114,8 +117,9 @@ dht::profile amino_v1(dht::mode operating_mode) {
    limits.max_outbound_message_size = amino_message_limit;
    limits.max_inbound_message_size = 4 * 1024 * 1024;
    limits.max_record_size = ipns::max_record_size;
-   limits.max_closer_peers = 20;
-   limits.max_provider_peers = 20;
+   limits.max_closer_peers = amino_max_closer_peers;
+   limits.max_provider_peers = amino_max_provider_peers;
+   limits.max_peer_endpoints = amino_max_peer_endpoints;
    limits.max_query_peers = amino_max_query_peers;
    limits.replacement_cache_size = 20;
    limits.provider_record_ttl = std::chrono::hours{48};
@@ -174,10 +178,12 @@ void validate(const dht::profile& profile) {
           profile.limits.replication != 20 || profile.limits.alpha != 10 ||
           profile.limits.max_outbound_message_size != amino_message_limit ||
           profile.limits.max_inbound_message_size != 4 * 1024 * 1024 ||
-          profile.limits.max_record_size != ipns::max_record_size || profile.limits.max_closer_peers != 20 ||
-          profile.limits.max_provider_peers != 20 || profile.limits.max_query_peers != amino_max_query_peers ||
-          profile.limits.replacement_cache_size != 20 || profile.limits.failure_threshold != 3 ||
-          profile.limits.query_timeout != std::chrono::seconds{10} ||
+          profile.limits.max_record_size != ipns::max_record_size ||
+          profile.limits.max_closer_peers != amino_max_closer_peers ||
+          profile.limits.max_provider_peers != amino_max_provider_peers ||
+          profile.limits.max_peer_endpoints != amino_max_peer_endpoints ||
+          profile.limits.max_query_peers != amino_max_query_peers || profile.limits.replacement_cache_size != 20 ||
+          profile.limits.failure_threshold != 3 || profile.limits.query_timeout != std::chrono::seconds{10} ||
           profile.limits.refresh_interval != std::chrono::minutes{10} ||
           profile.limits.provider_record_ttl != std::chrono::hours{48} ||
           profile.limits.provider_address_ttl != std::chrono::hours{24} ||
@@ -193,9 +199,9 @@ void validate(const dht::profile& profile) {
    if (profile.limits.replication == 0 || profile.limits.alpha == 0 ||
        profile.limits.alpha > profile.limits.replication || profile.limits.max_outbound_message_size == 0 ||
        profile.limits.max_inbound_message_size == 0 || profile.limits.max_record_size == 0 ||
-       profile.limits.max_provider_peers == 0 || profile.limits.max_query_peers == 0 ||
-       profile.limits.replacement_cache_size == 0 || profile.limits.failure_threshold == 0 ||
-       profile.limits.query_timeout <= std::chrono::milliseconds::zero() ||
+       profile.limits.max_provider_peers == 0 || profile.limits.max_peer_endpoints == 0 ||
+       profile.limits.max_query_peers == 0 || profile.limits.replacement_cache_size == 0 ||
+       profile.limits.failure_threshold == 0 || profile.limits.query_timeout <= std::chrono::milliseconds::zero() ||
        profile.limits.refresh_interval <= std::chrono::milliseconds::zero() ||
        profile.limits.provider_record_ttl <= std::chrono::seconds::zero() ||
        profile.limits.provider_address_ttl <= std::chrono::seconds::zero() ||

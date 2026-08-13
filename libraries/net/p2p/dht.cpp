@@ -44,9 +44,10 @@ constexpr auto amino_provider_key_limit = std::size_t{80};
 void validate_options(const dht::options& opts) {
    if (opts.replication == 0 || opts.alpha == 0 || opts.max_outbound_message_size == 0 ||
        opts.max_inbound_message_size == 0 || opts.max_record_size == 0 || opts.max_closer_peers == 0 ||
-       opts.max_provider_peers == 0 || opts.query_timeout.count() <= 0 || opts.refresh_interval.count() <= 0 ||
-       opts.provider_record_ttl.count() <= 0 || opts.provider_address_ttl.count() <= 0 ||
-       opts.provider_republish_interval.count() <= 0 || opts.provider_republish_interval >= opts.provider_record_ttl ||
+       opts.max_provider_peers == 0 || opts.max_peer_endpoints == 0 || opts.query_timeout.count() <= 0 ||
+       opts.refresh_interval.count() <= 0 || opts.provider_record_ttl.count() <= 0 ||
+       opts.provider_address_ttl.count() <= 0 || opts.provider_republish_interval.count() <= 0 ||
+       opts.provider_republish_interval >= opts.provider_record_ttl ||
        opts.provider_republish_interval >= opts.provider_address_ttl) {
       FORGE_THROW_EXCEPTION(exceptions::invalid_options, "invalid DHT options");
    }
@@ -202,6 +203,9 @@ void append_peer(std::vector<std::uint8_t>& out, std::uint32_t field, const dht:
    }
    auto encoded = std::vector<std::uint8_t>{};
    detail::append_bytes(encoded, 1, value.id.to_bytes());
+   if (value.endpoints.size() > opts.max_peer_endpoints) {
+      FORGE_THROW_EXCEPTION(exceptions::invalid_options, "DHT peer has too many endpoints");
+   }
    for (const auto& endpoint : value.endpoints) {
       detail::append_bytes(encoded, 2, endpoint_bytes(endpoint));
    }
@@ -235,6 +239,10 @@ void append_peer(std::vector<std::uint8_t>& out, std::uint32_t field, const dht:
       case 2:
          if (type != detail::wire_type::length_delimited) {
             FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT peer address must be bytes");
+         }
+         if (out.endpoints.size() >= opts.max_peer_endpoints) {
+            in.skip(type);
+            break;
          }
          {
             const auto address = in.bytes();
@@ -360,7 +368,8 @@ dht::message dht::codec::decode(std::span<const std::uint8_t> bytes, const dht::
             FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT closer peer must be bytes");
          }
          if (out.closer_peers.size() >= opts.max_closer_peers) {
-            FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT message has too many closer peers");
+            in.skip(type);
+            break;
          }
          {
             auto peer = decode_peer(in.bytes(), opts);
@@ -372,7 +381,8 @@ dht::message dht::codec::decode(std::span<const std::uint8_t> bytes, const dht::
             FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT provider peer must be bytes");
          }
          if (out.provider_peers.size() >= opts.max_provider_peers) {
-            FORGE_THROW_EXCEPTION(exceptions::codec_error, "DHT message has too many provider peers");
+            in.skip(type);
+            break;
          }
          {
             auto peer = decode_peer(in.bytes(), opts);

@@ -55,7 +55,8 @@ void merge_peer(dht::peer& target, const dht::peer& source) {
    }
 }
 
-void merge_known(std::map<peer_id, dht::peer>& known, const dht::peer& value, std::size_t limit) {
+void merge_known(std::map<peer_id, dht::peer>& known, const dht::peer& value, std::size_t limit,
+                 const dht::key& target) {
    if (!valid_peer_id(value.id)) {
       return;
    }
@@ -65,19 +66,34 @@ void merge_known(std::map<peer_id, dht::peer>& known, const dht::peer& value, st
       return;
    }
    if (known.size() >= limit) {
-      FORGE_THROW_EXCEPTION(exceptions::backpressure_rejected, "DHT query discovered-peer limit reached");
+      const auto ordered = [&](const dht::peer& left, const dht::peer& right) {
+         const auto left_distance = distance_between(left.id.to_bytes(), target.bytes);
+         const auto right_distance = distance_between(right.id.to_bytes(), target.bytes);
+         if (left_distance != right_distance) {
+            return left_distance < right_distance;
+         }
+         return left.id.to_string() < right.id.to_string();
+      };
+      const auto farthest = std::ranges::max_element(
+          known, [&](const auto& left, const auto& right) { return ordered(left.second, right.second); });
+      if (farthest == known.end() || !ordered(value, farthest->second)) {
+         return;
+      }
+      known.erase(farthest);
    }
    auto [inserted, _] = known.emplace(value.id, dht::peer{});
    merge_peer(inserted->second, value);
 }
 
-void merge_provider(std::vector<dht::peer>& providers, const dht::peer& value) {
+void merge_provider(std::vector<dht::peer>& providers, const dht::peer& value, std::size_t limit) {
    if (!valid_peer_id(value.id)) {
       return;
    }
    const auto found = std::ranges::find_if(providers, [&](const auto& current) { return current.id == value.id; });
    if (found == providers.end()) {
-      providers.push_back(value);
+      if (providers.size() < limit) {
+         providers.push_back(value);
+      }
       return;
    }
    merge_peer(*found, value);

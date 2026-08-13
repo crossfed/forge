@@ -36,6 +36,13 @@ go-libp2p and rust-libp2p, and Rendezvous register/discover against rust-libp2p.
   adapters for both; `forge_net_p2p` has no RocksDB or DB Store dependency.
 - DHT/rendezvous messages are full length-delimited libp2p protocol payloads;
   payload-only helpers are not public API.
+- Amino keeps the donor 16 KiB outbound bound while bounded inbound decoding
+  retains useful candidates and skips excess peers/endpoints. The Kademlia
+  shortlist begins with `k` local peers; `alpha` controls only concurrency.
+- Durable provider ownership is accepted only from an authenticated
+  `ADD_PROVIDER`. Third-party `GET_PROVIDERS` results remain untrusted discovery
+  evidence, and stored value responses expose remaining rather than original
+  TTL.
 - Live support claims require matching artifacts from
   `test_forge_libp2p_interop` and do not follow from codec tests alone.
 
@@ -51,6 +58,9 @@ go-libp2p and rust-libp2p, and Rendezvous register/discover against rust-libp2p.
 | DHT node handler over negotiated stream | Ported | `p2p_dht_node_finds_peer_and_provider_over_negotiated_stream` |
 | DHT iterative many-peer lookup | Ported | `p2p_dht_iterative_lookup_walks_many_peer_topology` |
 | DHT iterative provider lookup and provide | Ported | `p2p_dht_iterative_provider_lookup_and_provide_reach_closest_peers` |
+| DHT bounded donor materialization | Ported | `dht_amino_decoder_accepts_donor_peer_sets_beyond_outbound_k`, exact 16 KiB and peer/address bound fixtures |
+| DHT trusted provider ownership and full fanout | Ported | `p2p_dht_get_providers_does_not_persist_third_party_claim`, `p2p_dht_fanout_full_target_attempts_every_closest_peer`, `p2p_dht_provide_replicates_to_all_closest_peers_after_quorum` |
+| DHT remaining value TTL | Ported | `p2p_dht_get_value_reports_remaining_record_ttl` |
 | DHT bounded async persistence | Ported | `p2p_peer_store_memory_persistence_hydrates_bounded_pages`, `p2p_peer_store_bounds_pending_queue_and_recovers_after_flush`, `p2p_peer_store_bounds_variable_peer_record_state` |
 | DHT ObjectDB reopen through official plugin | Ported | `p2p_node_plugin_production_lifecycle_reopens_persisted_peer_state`, conditional MDBX/RocksDB reopen cases |
 | DHT live peer lookup fixture | Limited | `test_forge_libp2p_interop dht_find_peer`; direct-peer setup is not credited as outbound iterative lookup proof |

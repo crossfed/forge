@@ -241,6 +241,12 @@ When `/ipfs/kad/1.0.0` is enabled, Forge implements:
 - value put/get with application-selected validators and selectors, conflict
   handling, expiry and bounded persistence.
 
+The iterative shortlist starts with the local `k` closest peers; `alpha` only
+bounds concurrent RPCs. Provider quorum determines operation acceptance, not
+fanout width, so reaching quorum does not cancel publication to the remaining
+closest peers. Third-party provider results are never promoted to durable local
+ownership without an authenticated `ADD_PROVIDER` from that provider.
+
 `PUT_VALUE` performs bounds checking, validation, deterministic selection and a
 durable commit before returning the donor-compatible echo. A node without the
 complete Amino validator/store contract rejects the profile during

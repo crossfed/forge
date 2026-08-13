@@ -59,8 +59,9 @@ BOOST_AUTO_TEST_CASE(dht_amino_profile_is_fixed_and_complete) {
    BOOST_TEST(profile.limits.max_outbound_message_size == 16U * 1024U);
    BOOST_TEST(profile.limits.max_inbound_message_size == 4U * 1024U * 1024U);
    BOOST_TEST(profile.limits.max_record_size == 10U * 1024U);
-   BOOST_TEST(profile.limits.max_closer_peers == 20U);
-   BOOST_TEST(profile.limits.max_provider_peers == 20U);
+   BOOST_TEST(profile.limits.max_closer_peers == 21U);
+   BOOST_TEST(profile.limits.max_provider_peers == 256U);
+   BOOST_TEST(profile.limits.max_peer_endpoints == 64U);
    BOOST_TEST(profile.limits.replacement_cache_size == 20U);
    BOOST_TEST(profile.limits.failure_threshold == 3U);
    BOOST_TEST(profile.limits.query_timeout == std::chrono::seconds{10});
@@ -79,6 +80,26 @@ BOOST_AUTO_TEST_CASE(dht_amino_profile_is_fixed_and_complete) {
    changed = profile;
    changed.limits.refresh_interval = std::chrono::minutes{11};
    BOOST_CHECK_THROW(validate(changed), exceptions::invalid_options);
+}
+
+BOOST_AUTO_TEST_CASE(dht_amino_decoder_accepts_donor_peer_sets_beyond_outbound_k) {
+   const auto amino = amino_v1();
+   auto sender_limits = amino.limits;
+   sender_limits.max_outbound_message_size = 1024 * 1024;
+   auto message = dht::message{
+       .type = dht::message_type::get_providers,
+       .key_value = dht::key{.bytes = forge::multiformats::multihash::sha2_256(bytes("providers")).encode()},
+   };
+   for (auto value = std::uint8_t{1}; value <= 21; ++value) {
+      message.closer_peers.push_back(dht::peer{.id = test_peer(value)});
+   }
+   for (auto value = std::uint8_t{22}; value <= 46; ++value) {
+      message.provider_peers.push_back(dht::peer{.id = test_peer(value)});
+   }
+
+   const auto decoded = dht::codec::decode(dht::codec::encode(message, sender_limits), amino);
+   BOOST_TEST(decoded.closer_peers.size() == 21U);
+   BOOST_TEST(decoded.provider_peers.size() == 25U);
 }
 
 BOOST_AUTO_TEST_CASE(dht_custom_profile_keeps_protocol_limits_and_validators_isolated) {
@@ -253,7 +274,7 @@ BOOST_AUTO_TEST_CASE(dht_codec_checks_peer_count_and_peer_size_before_append) {
 
    BOOST_CHECK_THROW((dht::codec::encode(peers, strict)), exceptions::invalid_options);
    const auto encoded = dht::codec::encode(peers, loose);
-   BOOST_CHECK_THROW((dht::codec::decode(encoded, strict)), exceptions::codec_error);
+   BOOST_TEST(dht::codec::decode(encoded, strict).provider_peers.size() == 1U);
 
    auto oversized_peer = dht::message{
        .type = dht::message_type::find_node,

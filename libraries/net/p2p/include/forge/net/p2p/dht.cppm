@@ -49,6 +49,7 @@ struct options {
    std::size_t max_record_size = 1024 * 1024;
    std::size_t max_closer_peers = 20;
    std::size_t max_provider_peers = 20;
+   std::size_t max_peer_endpoints = 64;
    std::size_t max_query_peers = 256;
    std::size_t replacement_cache_size = 20;
    std::size_t failure_threshold = 3;

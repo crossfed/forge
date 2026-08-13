@@ -429,6 +429,7 @@ boost::asio::awaitable<void> dht_provider_registry::async_remove(const std::shar
 void dht_provider_registry::finish_entry(const std::shared_ptr<entry>& value, std::exception_ptr failure) noexcept {
    try {
       auto owners = std::vector<std::shared_ptr<owner_state>>{};
+      auto retain_for_drain = false;
       {
          const auto lock = std::scoped_lock{mutex_};
          const auto found = entries_.find(value->registration);
@@ -442,14 +443,19 @@ void dht_provider_registry::finish_entry(const std::shared_ptr<entry>& value, st
             }
          }
          value->stop_requested = true;
-         if (failure && !drain_failure_) {
-            drain_failure_ = failure;
+         value->removal_in_flight = false;
+         retain_for_drain = static_cast<bool>(failure) && sealed_;
+         value->removal_failed = retain_for_drain;
+         if (retain_for_drain) {
+            if (!drain_failure_) {
+               drain_failure_ = failure;
+            }
          }
       }
       for (const auto& owner : owners) {
          finish_owner(owner, failure);
       }
-      {
+      if (!retain_for_drain) {
          const auto lock = std::scoped_lock{mutex_};
          const auto found = entries_.find(value->registration);
          if (found != entries_.end() && found->second == value) {
@@ -502,6 +508,10 @@ boost::asio::awaitable<void> dht_provider_registry::async_run(std::shared_ptr<en
          {
             const auto lock = std::scoped_lock{mutex_};
             remove = sealed_ || value->stop_requested;
+            if (remove) {
+               value->removal_in_flight = true;
+               value->removal_failed = false;
+            }
             attempt_generation = endpoint_generation_;
             republish = !remove && (value->observed_endpoint_generation != endpoint_generation_ ||
                                     value->next_republish <= std::chrono::steady_clock::now());
@@ -603,15 +613,30 @@ boost::asio::awaitable<void> dht_provider_registry::async_drain() {
    auto observed = changed_->epoch();
    while (true) {
       auto failure = std::exception_ptr{};
+      auto retry = std::shared_ptr<entry>{};
       {
          const auto lock = std::scoped_lock{mutex_};
-         if (sealed_ && admissions_in_flight_ == 0 && entries_.empty()) {
-            failure = drain_failure_;
-            if (failure) {
-               std::rethrow_exception(failure);
+         if (drain_failure_) {
+            failure = std::exchange(drain_failure_, {});
+         } else if (sealed_ && admissions_in_flight_ == 0) {
+            const auto found = std::ranges::find_if(entries_, [](const auto& item) {
+               return item.second->removal_failed && !item.second->removal_in_flight;
+            });
+            if (found != entries_.end()) {
+               retry = found->second;
+               retry->removal_in_flight = true;
+               retry->removal_failed = false;
+            } else if (entries_.empty()) {
+               co_return;
             }
-            co_return;
          }
+      }
+      if (failure) {
+         std::rethrow_exception(failure);
+      }
+      if (retry) {
+         co_await async_remove(retry);
+         continue;
       }
       observed = co_await changed_->async_wait(observed);
    }

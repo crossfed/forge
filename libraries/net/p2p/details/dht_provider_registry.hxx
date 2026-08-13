@@ -92,6 +92,8 @@ class dht_provider_registry final : public std::enable_shared_from_this<dht_prov
       std::uint64_t observed_endpoint_generation = 0;
       std::uint32_t publish_failures = 0;
       bool stop_requested = false;
+      bool removal_in_flight = false;
+      bool removal_failed = false;
    };
 
    [[nodiscard]] std::shared_ptr<owner_state> add_owner_locked(const std::shared_ptr<entry>& value);
