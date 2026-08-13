@@ -1,5 +1,6 @@
 module;
 
+#include <cstdint>
 #include <vector>
 
 export module forge.chain.transaction.builder;
