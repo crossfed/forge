@@ -2,27 +2,26 @@
 
 ## Scope
 
-This note tracks the first production-shaped discovery slice now owned by
-`forge_net_p2p`.
-The implementation adds owner modules for Kademlia-compatible DHT and
-libp2p rendezvous, durable state through `peer_store`, node-level protocol
-handlers selected through multistream-select, and the F.2 discovery lifecycle
-hardening pass: iterative DHT lookup, provider publication to discovered
-closest peers, rendezvous refresh/cookie semantics and discovery-backed
-AutoRelay candidate learning.
+This note tracks the production-shaped discovery and durable-record slices now
+owned by `forge_net_p2p`. Kademlia uses independent routing and record state for
+the fixed Amino `/ipfs/kad/1.0.0` profile and product-owned custom profiles.
+Peer/address facts remain in `peer_store`; validated values and provider
+lifetimes belong to `dht::record_store`.
 
 Supported claims stay tied to evidence. The current slice has component proof
 for wire codecs, FCL-to-FCL negotiated streams, routing/provider state and
 rendezvous register/discover state, plus live donor interop artifacts for
-DHT peer/provider lookup against go-libp2p and rust-libp2p and Rendezvous
-register/discover against rust-libp2p.
+DHT peer/provider lookup plus `/pk` and `/ipns` value exchange against
+go-libp2p and rust-libp2p, and Rendezvous register/discover against rust-libp2p.
 
 ## Donor Sources
 
 | Area | Donor source | Accepted pattern | FCL target |
 |---|---|---|---|
 | Kademlia DHT | `donors/libp2p-specs/kad-dht/README.md` | XOR distance over `sha256(key)`, `k=20`, `alpha=10`, bounded query timeouts and closest-peer expansion | `forge.net.p2p.dht`, `dht::routing_table`, `dht_query`, `node::async_find_peer` |
-| DHT wire messages | `donors/rust-libp2p/protocols/kad/src/generated/dht.proto`, `donors/go-libp2p-kad-dht/pb/dht.proto`, `donors/go-libp2p-kad-dht/handlers.go` | Length-delimited Protocol Buffers message with `FIND_NODE`, `ADD_PROVIDER`, `GET_PROVIDERS`; `ADD_PROVIDER` is send-message and validates provider peer equals stream peer | `dht::codec`, `node::impl::handle_dht`, `node::async_provide` |
+| DHT wire messages | `donors/rust-libp2p/protocols/kad/src/generated/dht.proto`, `donors/go-libp2p-kad-dht/pb/dht.proto`, `donors/go-libp2p-kad-dht/handlers.go` | Six length-delimited Protocol Buffers RPCs; `ADD_PROVIDER` is one-way and `PUT_VALUE` echoes only after accepted durable commit | `dht::codec`, `node::impl::handle_dht` |
+| DHT value selection | `donors/go-libp2p-kad-dht/records.go`, `donors/rust-libp2p/protocols/kad/src/behaviour.rs` | Validate before storage, deterministic selection and quorum-bounded iterative lookup | `dht::record_store`, `node::async_put_value`, `node::async_get_value` |
+| IPNS | `donors/boxo/ipns/record.go`, `donors/boxo/ipns/validation.go`, `donors/boxo/ipns/pb/record.proto` | v1/v2 signature payloads, CBOR data, expiry, public-key binding and sequence/EOL selection | `forge.net.p2p.ipns`, Amino `/ipns` policy |
 | Rendezvous protocol | `donors/libp2p-specs/rendezvous/README.md` | `/rendezvous/1.0.0`, register/discover/unregister, TTL, namespace limits, cookie continuation | `forge.net.p2p.rendezvous`, `node::impl::handle_rendezvous` |
 | Rendezvous wire messages | `donors/rust-libp2p/protocols/rendezvous/src/generated/rpc.proto`, `donors/rust-libp2p/protocols/rendezvous/src/codec.rs` | Proto2 message types, status codes, signed PeerRecord and cookie format | `rendezvous::codec` |
 
@@ -32,9 +31,9 @@ register/discover against rust-libp2p.
   P2P plugin.
 - Public API stays owner-shaped: `dht::options`, `dht::query_result`,
   `rendezvous::options`, `rendezvous::registration`, `discovery::policy`.
-- `peer_store::persistence` is backend-neutral and asynchronous. The official
-  plugin owns its private ObjectDB adapter; `forge_net_p2p` has no RocksDB or
-  DB Store dependency.
+- `peer_store::persistence` and `dht::record_store::persistence` are
+  backend-neutral and asynchronous. The official plugin owns private ObjectDB
+  adapters for both; `forge_net_p2p` has no RocksDB or DB Store dependency.
 - DHT/rendezvous messages are full length-delimited libp2p protocol payloads;
   payload-only helpers are not public API.
 - Live support claims require matching artifacts from
@@ -56,6 +55,11 @@ register/discover against rust-libp2p.
 | DHT ObjectDB reopen through official plugin | Ported | `p2p_node_plugin_production_lifecycle_reopens_persisted_peer_state`, conditional MDBX/RocksDB reopen cases |
 | DHT live peer lookup fixture | Limited | `test_forge_libp2p_interop dht_find_peer`; direct-peer setup is not credited as outbound iterative lookup proof |
 | DHT live provider lookup | Ported | `test_forge_libp2p_interop dht_provide_find_provider` against go-libp2p/rust-libp2p |
+| DHT validated value store and bounded prune | Ported | `dht_record_store_tests`, MDBX/RocksDB reopen and expiry parity |
+| DHT autonomous routing refresh | Ported | `dht_routing_refresh_tests` with fake clock, coalescing, backoff and cancellation |
+| DHT owned provider lifetime | Ported | initial quorum, coalesced owners, republish snapshot, withdrawal and restart confirmation tests |
+| IPNS codec, validation and selection | Ported | hardcoded Boxo v1/v2 golden, tamper, expiry, key binding and deterministic selector tests |
+| DHT live `/pk` and `/ipns` values | Ported | bilateral Forge/Go/Rust `dht_pk_put_get` and `dht_ipns_put_get` scenarios |
 | Rendezvous protocol id | Ported | `p2p_libp2p_reachability_relay_protocol_ids_are_exact` |
 | Rendezvous codec, TTL, cookie and status | Ported | `p2p_rendezvous_codec_roundtrips_register_discover_cookie_and_status` |
 | Rendezvous node handler over negotiated stream | Ported | `p2p_rendezvous_node_registers_and_discovers_over_negotiated_stream` |
@@ -69,14 +73,10 @@ register/discover against rust-libp2p.
 - Live donor fixtures for repeated many-peer DHT/rendezvous refresh topologies
   are still limited. Forge component simulations cover the lifecycle; live matrix
   artifacts remain peer/provider lookup and Rust rendezvous register/discover.
-- Automatic long-running local provider republish and withdrawal ownership is
-  Stage 4 work. Explicit `async_provide(...)` proves the current caller-driven
-  path but is not a production lifetime claim.
-- Standard Kademlia value operations remain unsupported until validators,
-  selectors, conflicts, expiry and bounded persistence are implemented. Forge
-  does not advertise an echo-style value stub as support.
 - Go Rendezvous behaviour proof is not claimed because no official go-libp2p
   rendezvous behaviour donor is present in the workspace.
+- Full topology management remains Stage 5 work; completing Kademlia does not
+  promote the whole host or GossipSub to production readiness.
 
 These gaps are also tracked in `tests/libp2p_interop/donor_cases.json`.
 They must not be described as supported until matching donor-derived tests and
